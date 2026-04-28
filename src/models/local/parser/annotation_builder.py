@@ -1,20 +1,7 @@
 """
 标注构建模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取标注构建相关逻辑
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: remove-unused-annotation-fields
-修改内容: 移除摘要质量校验函数（不再使用）
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 移除对 ANNOTATION_CONFIG 的依赖，静态校验枚举统一改从 constants 读取
 """
 
 from __future__ import annotations
@@ -72,9 +59,6 @@ def _deduplicate_characters(characters: list[CharacterSnapshot]) -> list[Charact
     """
     角色去重：同一人物只保留一条记录
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: fix-duplicate-characters-in-chunk
     说明: 当同一人物出现多次时，按角色功能优先级选择保留哪条记录
 
     去重规则：
@@ -102,15 +86,6 @@ def _deduplicate_characters(characters: list[CharacterSnapshot]) -> list[Charact
 def _parse_characters(data: dict[str, Any]) -> list[CharacterSnapshot]:
     """
     解析角色快照列表
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取build_annotation中的字符处理逻辑
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: fix-duplicate-characters-in-chunk
-    修改内容: 添加去重逻辑，同一人物只保留一条记录
     """
     characters = []
     for c in data.get("characters", []):
@@ -145,9 +120,6 @@ def _parse_location_appearances(data: dict[str, Any]) -> list[LocationAppearance
     """
     解析地点出场信息列表
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
     说明: 从 Phase1 标注结果中提取地点信息
     """
     appearances = []
@@ -176,15 +148,7 @@ def _normalize_emotional_valence(valence: Any) -> str:
     """
     标准化情感倾向值
 
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取build_annotation中的情感倾向处理逻辑
     说明: 支持v1（三档）到v2（五档）的转换
-
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: upgrade-emotional-valence-to-five-level
-    修改内容: 升级为五档枚举，v2为五档，v1为旧三档（兼容历史数据）
     """
     if valence in _VALID_EMOTIONAL_VALENCES:
         return valence
@@ -195,10 +159,6 @@ def _normalize_emotional_valence(valence: Any) -> str:
 def _parse_event_type(event_type: Any) -> str:
     """
     解析事件类型
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取build_annotation中的事件类型处理逻辑
     """
     return event_type if event_type in _VALID_EVENT_TYPES else "铺垫"
 
@@ -209,14 +169,6 @@ def _parse_foreshadowing_type(
 ) -> ForeshadowingType | None:
     """
     解析伏笔类型
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取build_annotation中的伏笔类型处理逻辑
-
-    修改时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    修改内容: 伏笔类型合同改为中文正式枚举，build_annotation 与当前 Phase2 prompt 保持一致。
     """
     if has_foreshadowing and foreshadowing_type_raw in _VALID_FORESHADOWING_TYPES:
         return foreshadowing_type_raw
@@ -226,24 +178,6 @@ def _parse_foreshadowing_type(
 def build_annotation(data: dict[str, Any]) -> ChunkAnnotation:
     """
     构建标注结果
-
-    修改时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 重构build_annotation
-    修改内容:
-    - 提取各字段解析逻辑到独立函数
-    - 使用常量定义替代魔法字符串
-    - 简化主函数逻辑
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 relations、character_appearances、chunk_summary 字段处理
-
-    修改时间: 2026-03-30
-    修改者: TraeAI
-    任务: feature/chunk-summary-timeline-only
-    修改内容: 恢复 chunk_summary 字段处理，仅用于 Timeline 展示
     """
     has_foreshadowing = data.get("has_foreshadowing", False)
 

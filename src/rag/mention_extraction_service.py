@@ -1,9 +1,7 @@
 """
-Level3 mention extraction 编排服务。
+Level3 mention extraction 编排服务
 
-创建时间: 2026-04-24
-任务: llm-mention-rerank-chain
-说明: provider 只调用本服务；服务先尝试 LLM extractor，再回退规则 extractor，并统一做后处理过滤。
+provider 只调用本服务；服务先尝试 LLM extractor，再回退规则 extractor，并统一做后处理过滤
 """
 
 from __future__ import annotations
@@ -19,20 +17,16 @@ from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMen
 
 class PersonMentionExtractor(Protocol):
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: LLM mention extractor 的最小协议；具体供应商由外层注入，service 不暗猜模型来源。
+    LLM mention extractor 的最小协议；具体供应商由外层注入，service 不暗猜模型来源
     """
 
     async def extract_mentions(self, request: MentionExtractionRequest) -> list[PersonMention]:
-        """从 request.text 中抽取人物 mention。"""
+        """从 request.text 中抽取人物 mention"""
 
 
 class MentionExtractionService:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: 统一编排 LLM 主路径与规则 fallback，避免 workflow 层散落 mention extraction 逻辑。
+    统一编排 LLM 主路径与规则 fallback，避免 workflow 层散落 mention extraction 逻辑
     """
 
     def __init__(self, llm_extractor: PersonMentionExtractor | None = None) -> None:
@@ -45,14 +39,10 @@ class MentionExtractionService:
         prefer_llm: bool = True,
     ) -> list[PersonMention]:
         """
-        创建时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        说明: 优先执行 LLM 抽取；模型不可用或返回空结果时回退规则抽取，并显式记录回退原因。
+        优先执行 LLM 抽取；模型不可用或返回空结果时回退规则抽取，并显式记录回退原因
 
-        修改时间: 2026-04-25
-        任务: fix-level3-relation-query-expansion-contract
-        修改内容: 支持调用方显式关闭 LLM 主路径；relation 这类“允许受限扩展但不默认走 LLM”
-                  的 objective 可直接复用规则 extractor，而不必复制一套 service。
+        支持调用方显式关闭 LLM 主路径；relation 这类“允许受限扩展但不默认走 LLM”
+                  的 objective 可直接复用规则 extractor，而不必复制一套 service
         """
         if prefer_llm and self._llm_extractor is not None:
             try:
@@ -76,9 +66,7 @@ def normalize_person_mentions(
     fallback_source: str,
 ) -> list[PersonMention]:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: 对 LLM/规则 mention 做统一去重和护栏过滤，避免 hallucination、纯实名或过宽 mention 进入 query 层。
+    对 LLM/规则 mention 做统一去重和护栏过滤，避免 hallucination、纯实名或过宽 mention 进入 query 层
     """
     normalized: list[PersonMention] = []
     seen: set[tuple[str, str]] = set()
@@ -116,9 +104,7 @@ def normalize_person_mentions(
 
 def _is_unrelated_to_request(raw_text: str, sentence_text: str, source_text: str) -> bool:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: LLM 输出必须能在原文中找到 raw mention 或其句子，防止把外部猜测塞入 retrieval。
+    LLM 输出必须能在原文中找到 raw mention 或其句子，防止把外部猜测塞入 retrieval
     """
     if raw_text in source_text:
         return False
@@ -129,9 +115,7 @@ def _is_unrelated_to_request(raw_text: str, sentence_text: str, source_text: str
 
 def _is_too_broad(mention: PersonMention) -> bool:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: 缺少外貌/动作/位置/归一化特征的纯角色指代不进入主 query 池，降低噪声。
+    缺少外貌/动作/位置/归一化特征的纯角色指代不进入主 query 池，降低噪声
     """
     if mention.normalized_query_terms:
         return False
@@ -144,9 +128,7 @@ def _is_too_broad(mention: PersonMention) -> bool:
 
 def _normalize_query_terms(terms: tuple[str, ...]) -> tuple[str, ...]:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: LLM normalized_query_terms 进入 query builder 前先去空、去重，保持稳定顺序。
+    LLM normalized_query_terms 进入 query builder 前先去空、去重，保持稳定顺序
     """
     normalized: list[str] = []
     for term in terms:

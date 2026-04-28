@@ -1,9 +1,7 @@
 """
-项目级结构化输出适配层。
+项目级结构化输出适配层
 
-创建时间: 2026-04-24
-任务: structured-output-adapter-instructor-unification
-说明: 统一 json_schema / json_object 的调用、解析与响应元信息提取。
+说明: 统一 json_schema / json_object 的调用、解析与响应元信息提取
 """
 
 from __future__ import annotations
@@ -24,12 +22,7 @@ from src.models.structured_output.provider_capabilities import resolve_structure
 @dataclass(frozen=True)
 class StructuredOutputRequest[T: BaseModel]:
     """
-    单次结构化输出请求。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 让业务调用只描述 messages、response_model 和 call_type，
-              mode/provider 差异由适配层统一处理。
+    单次结构化输出请求
     """
 
     messages: list[dict[str, Any]]
@@ -45,11 +38,7 @@ class StructuredOutputRequest[T: BaseModel]:
 @dataclass(frozen=True)
 class StructuredOutputResult[T: BaseModel]:
     """
-    单次结构化输出结果。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 返回 parsed 与 raw_response，并保留审计/token 所需的响应文本和思考元信息。
+    单次结构化输出结果
     """
 
     parsed: T
@@ -62,11 +51,7 @@ class StructuredOutputResult[T: BaseModel]:
 
 class StructuredOutputError(ValueError):
     """
-    结构化输出调用或解析失败。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: parse 失败时仍把 raw_response 暴露给调用方补记 token 和审计错误响应。
+    结构化输出调用或解析失败
     """
 
     def __init__(
@@ -91,11 +76,7 @@ def build_response_format[T: BaseModel](
     mode: StructuredOutputMode,
 ) -> dict[str, Any] | None:
     """
-    构建 provider 原生 response_format。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 让 json_schema/json_object 的 request 组装集中在适配层，业务模块不再直接拼 response_format。
+    构建 provider 原生 response_format
     """
     if mode == JSON_SCHEMA_MODE:
         return client._build_json_schema(response_model)
@@ -109,11 +90,7 @@ async def call_structured_output[T: BaseModel](
     request: StructuredOutputRequest[T],
 ) -> StructuredOutputResult[T]:
     """
-    执行一次结构化模型调用。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 统一项目内 structured output transport 选择、Pydantic 校验与 raw response 元信息提取。
+    执行一次结构化模型调用
     """
     mode = resolve_structured_output_mode(client, request.call_type)
     if mode == JSON_OBJECT_MODE:
@@ -128,11 +105,7 @@ async def _call_openai_compatible[T: BaseModel](
     mode: StructuredOutputMode,
 ) -> StructuredOutputResult[T]:
     """
-    调用 OpenAI-compatible transport 并执行本地 Pydantic 校验。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 复用 BaseModelClient 的现有 transport，同时把 response_format 选择下沉到适配层。
+    调用 OpenAI-compatible transport 并执行本地 Pydantic 校验
     """
     raw_response_format = build_response_format(client, request.response_model, mode)
     raw_response: Any | None = None
@@ -179,11 +152,7 @@ def _parse_openai_compatible_response[T: BaseModel](
     mode: StructuredOutputMode,
 ) -> StructuredOutputResult[T]:
     """
-    解析 OpenAI-compatible raw response。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 统一处理 mock 直接返回 Pydantic 对象、provider 返回 ChatCompletion 两类路径。
+    解析 OpenAI-compatible raw response
     """
     if isinstance(raw_response, response_model):
         parsed = raw_response
@@ -222,11 +191,7 @@ def _parse_openai_compatible_response[T: BaseModel](
 
 def _extract_response_metadata(client: Any, response: Any) -> tuple[str, str | None, int | None]:
     """
-    从 raw response 中提取审计和 token 账本需要的元信息。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 让 RAG、annotation、disambiguation、diagnosis 共用同一套 response_text/thinking 读取逻辑。
+    从 raw response 中提取审计和 token 账本需要的元信息
     """
     response_text = ""
     thinking_content: str | None = None
@@ -247,11 +212,7 @@ def _extract_response_metadata(client: Any, response: Any) -> tuple[str, str | N
 
 def _dump_parsed_result(parsed: BaseModel) -> str:
     """
-    将 Pydantic 响应转换为稳定文本。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 兼容单测 mock 直接返回 Pydantic 对象的路径，保证审计仍有响应文本。
+    将 Pydantic 响应转换为稳定文本
     """
     try:
         return parsed.model_dump_json(ensure_ascii=False)
@@ -261,12 +222,7 @@ def _dump_parsed_result(parsed: BaseModel) -> str:
 
 def _validate_json_output_prompt_contract(messages: list[dict[str, Any]]) -> None:
     """
-    校验 JSON Output prompt 的最低合同。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: json_object 模式要求 prompt 显式包含 json 字样；
-              否则部分 provider 会直接拒绝或返回不可解析文本。
+    校验 JSON Output prompt 的最低合同
     """
     joined = "\n".join(str(message.get("content", "")) for message in messages)
     if "json" not in joined.lower():

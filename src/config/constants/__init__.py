@@ -1,11 +1,4 @@
-"""
-系统常量 - 不适合用户手动配置的内部常量
-
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: consolidate-codebase-architecture
-说明: 整合原 constants.py 和新增的文本归一化常量
-"""
+"""内部常量与文本归一化规则"""
 
 from __future__ import annotations
 

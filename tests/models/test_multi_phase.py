@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.models.local.annotation.multi_phase import (
     _emit_phase_event,
@@ -19,6 +20,34 @@ from src.rag.evidence_contracts import EvidenceRequest
 
 def _annotation_result() -> SimpleNamespace:
     return SimpleNamespace(characters=[SimpleNamespace(name="白芷")])
+
+
+class _PhaseScopedEmitterClient:
+    """
+    创建时间: 2026-04-28
+    任务: fix-annotation-stream-phase-scope
+    说明: 用最小可用 client 验证 multi_phase 在并行 phase 下会为流式 thinking/output
+    事件补齐显式的 sub_stage/chunk_id，而不是依赖共享 emitter 上下文。
+    """
+
+    def __init__(
+        self,
+        task_type: str = "annotation",
+        config: object | None = None,
+        client: object | None = None,
+        analysis_logger: object | None = None,
+        token_usage_callback: object | None = None,
+        novel_id: str | None = None,
+        session: object | None = None,
+    ) -> None:
+        self._task_type = task_type
+        self._config = config or SimpleNamespace(model="test-model")
+        self._client = client or object()
+        self._analysis_logger = analysis_logger
+        self._token_usage_callback = token_usage_callback
+        self._novel_id = novel_id
+        self._session = session
+        self._emitter = None
 
 
 @pytest.mark.asyncio
@@ -305,6 +334,131 @@ async def test_parallel_multi_phase_emits_expected_phase_sequence() -> None:
         ("start", "phase4", 75),
         ("complete", "phase3", 75),
         ("complete", "phase4", 100),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_multi_phase_stamps_llm_streams_with_explicit_phase_scope() -> None:
+    """
+    创建时间: 2026-04-28
+    任务: fix-annotation-stream-phase-scope
+    说明: phase1/phase2 并行时，thinking/output 不能再共用同一个 task 级 sub_stage 上下文；
+    每条流事件都必须显式带回自己的 phase 名称和 chunk_id。
+    """
+    emitted_events: list[StreamEvent] = []
+
+    async def _capture(event: StreamEvent) -> None:
+        emitted_events.append(event)
+
+    async def _fake_phase1(client, **_kwargs):
+        await client._emitter(StreamEvent(action="thinking", content="phase1-thinking"))
+        return _annotation_result()
+
+    async def _fake_phase2(client, **_kwargs):
+        await client._emitter(StreamEvent(action="thinking", content="phase2-thinking"))
+        return None
+
+    with (
+        patch("src.models.local.annotation.multi_phase._run_phase1", new=_fake_phase1),
+        patch("src.models.local.annotation.multi_phase._run_phase2", new=_fake_phase2),
+        patch(
+            "src.models.local.annotation.multi_phase._run_phase3_if_needed",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    dialogue_lengths=None,
+                    dialogue_speakers=None,
+                    dialogues=None,
+                    dialogue_tones=None,
+                    dialogue_identity_clues=None,
+                )
+            ),
+        ),
+        patch(
+            "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        client = _PhaseScopedEmitterClient()
+        client._emitter = _capture
+        await annotate_chunk_parallel(
+            client=client,
+            text="白芷看向侯飞白。",
+            chunk_id=12,
+            emitter=_capture,
+        )
+
+    thinking_events = [event for event in emitted_events if event.action == "thinking"]
+    assert [(event.sub_stage, event.chunk_id, event.content) for event in thinking_events] == [
+        ("phase1", 12, "phase1-thinking"),
+        ("phase2", 12, "phase2-thinking"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_serial_phase4_streams_keep_phase_scope_after_level3_progress() -> None:
+    """
+    创建时间: 2026-04-28
+    任务: fix-annotation-stream-phase-scope
+    说明: 真实故障是 Phase4 先发 start，再跑 Level3 证据准备把进度 sub_stage 改成 level3，
+    随后的 phase4 thinking/output 又没显式带 sub_stage，前端就会把它们错误归到 level3 组。
+    这里锁定：即便中间存在 level3 进度事件，phase4 自己的流式文本事件仍必须带回 phase4。
+    """
+    emitted_events: list[StreamEvent] = []
+
+    async def _capture(event: StreamEvent) -> None:
+        emitted_events.append(event)
+
+    async def _fake_phase4(client, **_kwargs):
+        await _capture(
+            StreamEvent(
+                action="progress",
+                stage="annotate",
+                sub_stage="level3",
+                chunk_id=12,
+                sub_percent=100,
+                message="[relation] Level3 证据准备完成",
+            )
+        )
+        await client._emitter(StreamEvent(action="thinking", content="phase4-thinking"))
+        await client._emitter(StreamEvent(action="output", content="phase4-output"))
+        return []
+
+    with (
+        patch(
+            "src.models.local.annotation.multi_phase._run_phase1",
+            new=AsyncMock(return_value=_annotation_result()),
+        ),
+        patch(
+            "src.models.local.annotation.multi_phase._run_phase2",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "src.models.local.annotation.multi_phase._run_phase3_if_needed",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    dialogue_lengths=None,
+                    dialogue_speakers=None,
+                    dialogues=None,
+                    dialogue_tones=None,
+                    dialogue_identity_clues=None,
+                )
+            ),
+        ),
+        patch("src.models.local.annotation.multi_phase.annotate_chunk_phase4", new=_fake_phase4),
+    ):
+        client = _PhaseScopedEmitterClient()
+        client._emitter = _capture
+        await annotate_chunk_serial(
+            client=client,
+            text="白芷看向侯飞白。",
+            chunk_id=12,
+            emitter=_capture,
+        )
+
+    text_events = [event for event in emitted_events if event.action in {"thinking", "output"}]
+    assert [(event.action, event.sub_stage, event.chunk_id, event.content) for event in text_events] == [
+        ("thinking", "phase4", 12, "phase4-thinking"),
+        ("output", "phase4", 12, "phase4-output"),
     ]
 
 

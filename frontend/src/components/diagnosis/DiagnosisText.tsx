@@ -10,7 +10,7 @@ export interface DiagnosisTextProps {
 
 /**
  * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：统一诊断报告页文本卡片的容器视觉，和仪表盘卡片维持同一套 accent 语言。
+ * 修改原因：统一诊断报告页文本卡片的容器视觉，和仪表盘卡片维持同一套 accent 语言
  */
 export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) {
   return (

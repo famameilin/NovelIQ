@@ -9,12 +9,7 @@
   - phrase 模式为默认模式
   - 复用现有基础设施: _count_non_overlapping_spans 已在 lexicon_metrics 中实现
 
-创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 清理向后兼容代码
-修改内容: 移除 exact 模式，phrase 为默认模式
 """
 
 from __future__ import annotations
@@ -29,7 +24,7 @@ def count_token_hits_enhanced(
     mode: str = "phrase",
 ) -> int:
     """
-    多模式词条命中计数。
+    多模式词条命中计数
 
     Args:
         text: 原始文本
@@ -60,7 +55,7 @@ def count_token_hits_enhanced(
 
 def _count_phrase_hits(text: str, tokens: Sequence[str], term_set: set[str]) -> int:
     """
-    短语级匹配: 同时支持子串匹配和 token 匹配。
+    短语级匹配: 同时支持子串匹配和 token 匹配
 
     策略:
       1. 长词优先匹配（避免短词吞掉长词的一部分）
@@ -75,13 +70,13 @@ def _count_phrase_hits(text: str, tokens: Sequence[str], term_set: set[str]) -> 
 
 def _count_fuzzy_hits(text: str, tokens: Sequence[str], term_set: set[str], max_edit_distance: int = 1) -> int:
     """
-    模糊匹配: 在短语匹配基础上增加编辑距离容错。
+    模糊匹配: 在短语匹配基础上增加编辑距离容错
 
-    对于每个未命中的 token，检查是否与某个词条的编辑距离 ≤ max_edit_distance。
-    仅对长度 ≥ 2 的 token/词条做模糊匹配（单字模糊无意义）。
+    对于每个未命中的 token，检查是否与某个词条的编辑距离 ≤ max_edit_distance
+    仅对长度 ≥ 2 的 token/词条做模糊匹配（单字模糊无意义）
 
     性能注意: 此模式比 phrase 慢约 3-5x，
-              仅建议用于 tension 相关指标等关键路径。
+              仅建议用于 tension 相关指标等关键路径
     """
     base_count = _count_phrase_hits(text, tokens, term_set)
 
@@ -105,9 +100,9 @@ def _count_fuzzy_hits(text: str, tokens: Sequence[str], term_set: set[str], max_
 
 def _edit_distance(s1: str, s2: str) -> int:
     """
-    计算 Levenshtein 编辑距离。
+    计算 Levenshtein 编辑距离
 
-    使用空间优化的 DP 实现（O(min(m,n)) 空间）。
+    使用空间优化的 DP 实现（O(min(m,n)) 空间）
     """
     if len(s1) < len(s2):
         return _edit_distance(s2, s1)

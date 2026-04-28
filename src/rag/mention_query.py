@@ -1,9 +1,7 @@
 """
-Level3 mention query 构造。
+Level3 mention query 构造
 
-创建时间: 2026-04-23
-任务: level3-mention-retrieval
-说明: 将描述性人物 mention 转换为可复用的向量检索 query 变体。
+将描述性人物 mention 转换为可复用的向量检索 query 变体
 """
 
 from __future__ import annotations
@@ -16,9 +14,7 @@ from src.rag.mention_extraction_types import PersonMention
 @dataclass(frozen=True, slots=True)
 class MentionEvidenceQuery:
     """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 单条 mention 检索 query，携带可写入 EvidenceItem.metadata 的来源信息。
+    单条 mention 检索 query，携带可写入 EvidenceItem.metadata 的来源信息
     """
 
     query_text: str
@@ -32,9 +28,7 @@ class MentionEvidenceQuery:
 
 def _as_string_list(value: object) -> list[str]:
     """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 统一读取 PersonMention.cues 中的字符串列表字段，避免下游使用下标或隐式类型假设。
+    统一读取 PersonMention.cues 中的字符串列表字段，避免下游使用下标或隐式类型假设
     """
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
@@ -47,17 +41,11 @@ def _as_string_list(value: object) -> list[str]:
 
 def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[MentionEvidenceQuery]:
     """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 为每个 mention 构造“原文片段”和“线索词组合”两类 query，初版保持保守且可回归。
+    为每个 mention 构造“原文片段”和“线索词组合”两类 query，初版保持保守且可回归
 
-    修改时间: 2026-04-23
-    任务: level3-mention-review-fix
-    修改说明: 跳过缺少外貌/动作/位置线索的纯指代角色词，避免生成“少女/女子”等过宽 query。
+    跳过缺少外貌/动作/位置线索的纯指代角色词，避免生成“少女/女子”等过宽 query
 
-    修改时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    修改说明: 支持 LLM normalized_query_terms 压缩 query，并给每条 query 标记 query_variant / mention_source。
+    支持 LLM normalized_query_terms 压缩 query，并给每条 query 标记 query_variant / mention_source
     """
     queries: list[MentionEvidenceQuery] = []
     seen_query_texts: set[str] = set()
@@ -104,9 +92,7 @@ def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[Mentio
 
 def _build_compressed_query(mention: PersonMention, matched_features: tuple[str, ...]) -> str | None:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    说明: 优先使用 LLM 提供的 normalized_query_terms；没有时只对超长 mention 用特征词压缩。
+    优先使用 LLM 提供的 normalized_query_terms；没有时只对超长 mention 用特征词压缩
     """
     if mention.normalized_query_terms:
         return " ".join(mention.normalized_query_terms)

@@ -1,20 +1,9 @@
 """
 聚合流程核心业务逻辑
 
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: refactor-cli-layer-functions
-说明: 从 src/cli/aggregate.py 提取的核心业务逻辑，用于 workflows 模块
+从 src/cli/aggregate.py 提取的核心业务逻辑，用于 workflows 模块
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository/StatsRepository 替换直接调用 operations 函数
 
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: 重构其他 workflow 为 async
-修改内容: run_aggregate 改为 async def，所有内部调用改为 await
 """
 
 from __future__ import annotations
@@ -63,15 +52,12 @@ TENSION_COMPOSITE_VERSION = "v2-weighted"
 - v1: 等权平均（已废弃）
 - v2: 加权平均，LLM 标注维度权重更高
 
-创建时间: 2026-04-06
-创建者: GLM-5
-任务: 词表与张力信号系统重构 - Task 7
 """
 
 
 def _compute_tension_composite(signals: list[dict]) -> list[float]:
     """
-    计算张力综合指数 (v2 - 加权平均模型).
+    计算张力综合指数 (v2 - 加权平均模型)
 
     相比 v1 的改进:
     - 使用语义加权替代等权平均，避免 sent_len_std 主导结果
@@ -88,18 +74,9 @@ def _compute_tension_composite(signals: list[dict]) -> list[float]:
 
     版本: v2-weighted
 
-    创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak
     修改自: _compute_tension_composite (v1 等权版本)
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 词表与张力信号系统重构 - Task 7
-    修改内容: 添加版本号常量 TENSION_COMPOSITE_VERSION
 
-    修改时间: 2026-04-07
-    修改者: GLM-5
-    任务: 张力曲线傅里叶平滑 - 配置抽离
-    修改内容: keep_ratio 从配置读取
     """
     if not signals:
         return []
@@ -133,10 +110,7 @@ def _log_aggregate_results(agg_result) -> None:
     """
     输出聚合结果日志
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 在 run_aggregate 中调用，负责输出聚合指标日志
+    在 run_aggregate 中调用，负责输出聚合指标日志
     """
     logger.info("\n=== Aggregate Metrics ===")
 
@@ -186,11 +160,8 @@ def _log_aggregate_results(agg_result) -> None:
 
 def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkRepository) -> dict[str, Any]:
     """
-    构建聚合质量门报告。
+    构建聚合质量门报告
 
-    修改时间: 2026-04-23
-    任务: P0-clean-row-index-access
-    修改内容: imagery 诊断读取具名变量，不再依赖 tuple 下标。
     """
     language_style = agg_result.language_style if isinstance(agg_result.language_style, dict) else {}
     traditional_culture = agg_result.traditional_culture if isinstance(agg_result.traditional_culture, dict) else {}
@@ -221,12 +192,8 @@ def _build_lexical_curve_quality_report(
     chunk_curves: list[tuple[int, float, float, float, float, float, float]],
 ) -> dict[str, Any]:
     """
-    构建词汇情绪曲线质量报告。
+    构建词汇情绪曲线质量报告
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: fix-emotion-curve-weighting
-    修改内容: 新增整体/后半段全零分块占比诊断，便于定位情绪曲线稀疏退化
     """
     if not chunk_curves:
         return {
@@ -329,23 +296,8 @@ async def run_aggregate(
     """
     执行聚合流程
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 聚合流程
 
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-cli-layer-functions
-    修改内容: 提取日志输出到 _log_aggregate_results 辅助函数
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
-    修改时间: 2026-04-25
-    修改者: Codex
-    任务: remove-unused-workflow-cache-hooks
-    修改内容: 删除未被主链实际消费的 cache_path 参数，避免继续暴露无效缓存接口。
 
     Args:
         run_id: 运行ID
@@ -370,23 +322,7 @@ async def run_aggregate(
     total_chunks = len(chunk_texts)
     logger.info(f"loaded {total_chunks} chunks from db")
 
-    # 使用 LexiconRegistry v2 加载词表（支持分层 + 去重 + 领域扩展）
-    # 修改时间: 2026-04-06
-    # 修改者: GLM-5
-    # 任务: 词表与张力信号系统重构 - Task 3
-    # 修改内容: 启用领域词表全量加载
-    # 修改时间: 2026-04-06
-    # 修改者: GLM-5
-    # 任务: P3 集成类型检测到主流程
-    # 修改内容: 添加自动类型检测，根据检测结果动态加载词表
-    # 修改时间: 2026-04-06
-    # 修改者: GLM-5
-    # 任务: 多类型加权混合词表方案
-    # 修改内容: 使用 detect_genre_weighted 替代 detect_genre，支持多类型加权混合
-    # 修改时间: 2026-04-06
-    # 修改者: GLM-5
-    # 任务: 清理向后兼容代码
-    # 修改内容: 使用 get_weighted_lexicon_set 获取加权词典
+    # 使用 LexiconRegistry v2 加载词表，支持分层、去重和领域扩展
     registry = LexiconRegistry()
     registry.load()
 

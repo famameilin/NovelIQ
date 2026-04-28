@@ -1,19 +1,4 @@
-/**
- * useAnalysisStatus - 分析任务状态 Hook
- *
- * 创建时间: 2026-04-04
- * 创建者: GLM-5
- * 任务: 分析任务状态轮询
- * 说明: 通过 SSE 实时更新分析任务状态
- *
- * 修改时间: 2026-04-09
- * 创建者: GLM-5
- * 任务: refactor/sse-unified-event-bus
- * 修改内容:
- * - 适配统一 SSE 事件格式（StreamEventData）
- * - LLM 输出从 StreamEventData 读取 content/chunk_id/sub_stage
- * - HTTP backfill 适配 StreamEventData 字段
- */
+/** 通过 SSE 和 HTTP backfill 同步分析任务状态 */
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSSEListener } from "./useEventSource";
@@ -30,8 +15,8 @@ import type { TaskStatusResponse } from "@/api/types";
 const SSE_URL = appConfig.apiBaseUrl;
 
 function buildBackfillProgress(status: TaskStatusResponse): StreamEventData {
-  // 中文注释：HTTP backfill 需要对 pending/running/cancelling 做统一归一化，
-  // 避免切换任务或刷新页面时沿用上一个任务留下来的旧进度面板状态。
+  // HTTP backfill 需要对 pending/running/cancelling 做统一归一化，
+  // 避免切换任务或刷新页面时沿用上一个任务留下来的旧进度面板状态
   const fallbackStage =
     status.stage ??
     (status.status === "pending"
@@ -70,14 +55,7 @@ function isMockEnabled(): boolean {
   );
 }
 
-/**
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 修复后台恢复后分析页卡死与白屏
- * 修改内容:
- * - 将同一 stream/action 的连续 LLM 输出合并进批量缓冲，避免后台恢复时逐 token 触发 store 更新。
- * - 让前台恢复只按“每流一次”回写，减少主线程渲染风暴。
- */
+/** 将同一流的连续输出合并进批量缓冲，减少后台恢复后的逐 token 刷新 */
 function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chunk_id" | "stream_id">): string {
   return [
     data.action,
@@ -148,14 +126,7 @@ export function useAnalysisStatus(
     [updateProgress],
   );
 
-  /**
-   * 修改时间: 2026-04-28
-   * 修改者: Codex
-   * 任务: 修复后台恢复后分析页卡死与白屏
-   * 修改内容:
-   * - 后台标签页恢复后，任务状态必须允许重新回填，不能继续依赖“初始化时那一次”HTTP 查询。
-   * - 终态回填也会同步更新 store，避免错过 task_complete/task_cancelled 事件后面板继续停在旧阶段。
-   */
+  /** 后台标签页恢复后，允许重新回填任务状态并同步终态 */
   const applyTaskStatusBackfill = useCallback(
     (status: TaskStatusResponse) => {
       if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
@@ -221,14 +192,7 @@ export function useAnalysisStatus(
     [setError, updateProgress],
   );
 
-  /**
-   * 修改时间: 2026-04-28
-   * 修改者: Codex
-   * 任务: 修复后台恢复后分析页卡死与白屏
-   * 修改内容:
-   * - 活跃任务状态同步收口成单独回调，供首次挂载、前台恢复、SSE 重连统一复用。
-   * - 失败时仍显式暴露错误，避免后台恢复后无声卡死。
-   */
+  /** 首次挂载、前台恢复和 SSE 重连都复用同一套活跃任务状态回填逻辑 */
   const syncTaskStatus = useCallback(() => {
     if (!novelId || !taskId) {
       return Promise.resolve();
@@ -239,20 +203,13 @@ export function useAnalysisStatus(
         applyTaskStatusBackfill(status);
       })
       .catch((error: unknown) => {
-        // 中文注释：HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误。
+        // HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误
         console.warn("Failed to backfill analysis task status", error);
         setError("任务状态同步失败，正在等待实时事件恢复");
       });
   }, [applyTaskStatusBackfill, novelId, setError, taskId]);
 
-  /**
-   * 修改时间: 2026-04-28
-   * 修改者: Codex
-   * 任务: 修复后台恢复后分析页卡死与白屏
-   * 修改内容:
-   * - LLM 输出先进入 ref 缓冲，按固定节奏批量刷入 Zustand。
-   * - 这样浏览器前台恢复后即便瞬时补发大量 SSE，也不会逐条触发重渲染。
-   */
+  /** LLM 输出先进入 ref 缓冲，再按固定节奏批量刷入 Zustand */
   const flushBufferedLLMOutputs = useCallback(() => {
     if (flushTimerRef.current !== null) {
       window.clearTimeout(flushTimerRef.current);

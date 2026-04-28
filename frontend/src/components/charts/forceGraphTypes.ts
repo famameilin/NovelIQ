@@ -1,6 +1,4 @@
-// 创建时间: 2026-04-23
-// 任务: P0-move-force-graph-runtime-types
-// 说明: ForceGraph 的 G6 运行时类型归属于图谱组件边界，避免污染后端 API contract 类型。
+// ForceGraph 的 G6 运行时类型归属于图谱组件边界，避免污染后端 API contract 类型
 
 import type {
   GraphData,

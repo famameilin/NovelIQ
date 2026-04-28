@@ -1,7 +1,5 @@
 """
-创建时间: 2026-04-23
-任务: annotation-projector-runtime-landing
-说明: Phase3 对话归属结果投影器，负责校验、归一化、长度派生与 storage-ready 快照。
+说明: Phase3 对话归属结果投影器，负责校验、归一化、长度派生与 storage-ready 快照
 """
 
 from __future__ import annotations
@@ -17,11 +15,7 @@ from src.models.local.schema import DialogueRecord, DialogueRecordSchema, Dialog
 @dataclass
 class DialogueLengthResult:
     """
-    Phase3 对话投影结果。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: 从 phase3.py 移到 projector，明确这是模型输出后的派生结果，不属于 LLM 调用逻辑。
+    Phase3 对话投影结果
     """
 
     speaker_lengths: dict[str, int] = field(default_factory=dict)
@@ -39,16 +33,7 @@ def normalize_dialogue_records(
     chunk_id: int | None,
 ) -> list[DialogueRecord]:
     """
-    校验 Phase3 raw records 并完成 speaker 别名归一化。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: 将 Phase3 batch 后处理从调用层移出，避免 extractor 同时承担投影职责。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-phase3-followup-review-findings
-    修改内容: 别名归一化后对 speaker 去重，避免同一 canonical 名称在长度统计和归属映射里被重复累计。
+    校验 Phase3 raw records 并完成 speaker 别名归一化
     """
     valid_records: list[DialogueRecord] = []
     candidate_indices = {c.index for c in candidates}
@@ -119,11 +104,7 @@ def project_dialogue_lengths(
     return_identity_clues: bool = False,
 ) -> DialogueLengthResult:
     """
-    将归一化后的 Phase3 records 投影为长度、归属和对话元数据。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: 把 dialogue length、tone 与 identity clue 的派生集中到 projector。
+    将归一化后的 Phase3 records 投影为长度、归属和对话元数据
     """
     speaker_lengths: dict[str, int] = {}
     canonical_attribution: dict[int, list[str]] = {}
@@ -177,11 +158,7 @@ def build_dialogue_snapshots(
     dialogue_identity_clues: dict[int, str | None] | None = None,
 ) -> tuple[list[DialogueSnapshot], list[int]]:
     """
-    将 Phase3 投影结果转换为可落库的 DialogueSnapshot 列表。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: storage 只编排 repository 写入，对话快照形状由 dialogue projector 统一产出。
+    将 Phase3 投影结果转换为可落库的 DialogueSnapshot 列表
     """
     if not dialogues:
         return [], []

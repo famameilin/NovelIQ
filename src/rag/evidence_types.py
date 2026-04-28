@@ -72,10 +72,8 @@ class EvidenceBundle:
         generation_meta: dict[str, Any] | None = None,
     ) -> EvidenceBundle:
         """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: evidence service 需要在 cache reuse 时保留同一份证据内容，
-              但用当前请求的 request_meta / generation_meta 重新打戳，避免不同 consumer 共用旧标签。
+        evidence service 需要在 cache reuse 时保留同一份证据内容，
+              但用当前请求的 request_meta / generation_meta 重新打戳，避免不同 consumer 共用旧标签
         """
 
         return EvidenceBundle(

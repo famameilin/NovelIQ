@@ -1,9 +1,6 @@
 """
 结果导出服务
 
-创建时间: 2026-03-28
-创建者: TraeAI
-任务: consolidate-codebase-architecture
 说明: 从 results.py 提取的结果导出逻辑，负责数据获取和组装
 """
 
@@ -63,23 +60,15 @@ def load_core_results(
     """
     加载核心结果数据：chunk_curves、缺失字段
 
-    创建时间: 2026-03-30
-    创建者: CodeBuddy
-    任务: db-schema-cleanup
     说明: 合并 emotion_curve + rhythm_curve 为 chunk_curves
 
     Returns:
         (chunk_curves, missing_fields)
-
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: split-raw-vs-display-chunk-curves
-    修改内容: 导出恢复为原始落库 chunk_curves；展示层融合曲线继续只由 /chunk-curves 路由消费
     """
     missing_fields: list[str] = []
 
-    # 中文注释：results export 是复盘/比对用 payload，这里必须返回数据库中持久化的
-    # chunk_curves 原值，不能复用展示层融合后的单曲线，否则字段名不变但语义会被静默替换。
+    # results export 是复盘/比对用 payload，这里必须返回数据库中持久化的
+    # chunk_curves 原值，不能复用展示层融合后的单曲线，否则字段名不变但语义会被静默替换
     chunk_curves = _fetch_raw_chunk_curves(run_id, stats_repo)
     if not chunk_curves:
         missing_fields.append("chunk_curves")
@@ -98,18 +87,6 @@ def load_character_bundle(
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    修改内容: diagnosis 缺失判断改为复用 annotation_repo fallback，避免导出 payload 已有 diagnosis
-              但 missing_fields 仍把它标成缺失。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改内容: 角色导出链路改为传递 `focus_characters`，保证导出结果与角色页
-              使用同一套焦点身份判定逻辑。
 
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
@@ -136,8 +113,8 @@ def load_character_bundle(
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
-    # 中文注释：export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
-    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉。
+    # export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
+    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉
     valid_character_names = valid_character_names | {
         entity.name for entity in export_graph_view.canonical_entities if entity.entity_type == "character"
     }
@@ -184,10 +161,10 @@ def load_graph_signal_bundle(
     graph_report: GraphAuthorityReport,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
-    加载 graph authority 输入信号。
+    加载 graph authority 输入信号
 
-    中文注释：graph_summary / graph_quality_report 在 export 里只是 graph-owned
-    input signals，不承担最终诊断或聚合结论语义。
+    graph_summary / graph_quality_report 在 export 里只是 graph-owned
+    input signals，不承担最终诊断或聚合结论语义
     """
     return serialize_graph_report_signals(graph_report)
 
@@ -200,10 +177,10 @@ def load_aggregate_metrics_bundle(
     chunk_repo: ChunkRepository,
 ) -> tuple[Any, Any, dict[str, Any]]:
     """
-    加载非 graph 的聚合结论。
+    加载非 graph 的聚合结论
 
-    中文注释：aggregate_metrics 与 /metrics/* 现在统一复用 MetricsService 的缓存入口，
-    避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()。
+    aggregate_metrics 与 /metrics/* 现在统一复用 MetricsService 的缓存入口，
+    避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()
     """
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
@@ -288,7 +265,7 @@ def _fetch_timeline_data(
     Contract note:
         Export intentionally reuses the same authority-backed timeline helper
         as the /timeline route so both surfaces stay aligned on character
-        lifecycles and character-character relation history.
+        lifecycles and character-character relation history
     """
     try:
         timeline_plan = build_timeline_plan(
@@ -340,8 +317,8 @@ def build_export_payload(
     """
     构建导出 payload
     """
-    # 中文注释：export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
-    # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去。
+    # export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
+    # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去
     validate_aggregate_metrics_contract(aggregate_metrics)
     return {
         "task_id": task_id,
@@ -379,12 +356,6 @@ def fetch_all_results_data(
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-diagnosis-followup-review-findings
-    修改原因: export 的 missing_fields 是集合语义；
-    diagnosis 等字段若被多段 bundle 链路重复判缺，不应在返回值里出现重复项。
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
@@ -452,8 +423,8 @@ def fetch_all_results_data(
     if not timeline_data:
         missing_fields.append("timeline")
 
-    # 中文注释：missing_fields 对外语义是“缺哪些字段”，不是“缺了几次”；
-    # 这里在最终返回前按插入顺序去重，避免 diagnosis 被重复追加。
+    # missing_fields 对外语义是“缺哪些字段”，不是“缺了几次”；
+    # 这里在最终返回前按插入顺序去重，避免 diagnosis 被重复追加
     missing_fields = list(dict.fromkeys(missing_fields))
 
     results_data = build_export_payload(

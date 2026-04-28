@@ -163,10 +163,7 @@ function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
 /**
  * 节点详情面板 - 展示选中节点的详细信息和关联节点
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: 创建 NodeDetailPanel 组件
- * 说明: 用于知识图谱页面展示选中节点的详细信息，包含右侧滑出动画
+ * 用于知识图谱页面展示选中节点的详细信息，包含右侧滑出动画
  */
 export function NodeDetailPanel({
   node,

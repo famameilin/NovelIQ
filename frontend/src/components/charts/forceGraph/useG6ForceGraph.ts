@@ -32,7 +32,7 @@ interface UseG6ForceGraphOptions {
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把 G6 实例初始化、事件绑定和销毁都封到独立 hook，减少 ForceGraph 组件的生命周期负担。
+// 把 G6 实例初始化、事件绑定和销毁都封到独立 hook，减少 ForceGraph 组件的生命周期负担
 export function useG6ForceGraph({
   containerRef,
   model,

@@ -41,10 +41,6 @@ _STATUS_MAP: dict[str, TaskStatus] = {
 def _map_status_to_task_status(status: str) -> TaskStatus:
     """
     将数据库状态字符串映射为TaskStatus枚举
-
-    创建时间: 2026-03-26
-    创建者: TraeAI
-    任务: 修复代码异味，提取重复的状态映射逻辑
     """
     return _STATUS_MAP.get(status, TaskStatus.PENDING)
 
@@ -52,15 +48,6 @@ def _map_status_to_task_status(status: str) -> TaskStatus:
 def _get_task_detail_from_db(task_id: str) -> dict[str, Any] | None:
     """
     从数据库获取任务详情
-
-    创建时间: 2026-03-26
-    创建者: TraeAI
-    任务: 修复代码异味，提取数据库查询逻辑
-
-    修改时间: 2026-04-09
-    修改者: GLM-5
-    任务: sse-architecture-review
-    修改内容: 返回完整 run 记录而非仅 TaskStatus，使 DB fallback 也能恢复 stage/progress
 
     当任务不在内存中时，从数据库查询状态
     返回: run 记录字典（含 status/progress/stage），不存在则返回 None
@@ -84,26 +71,7 @@ def _resolve_task_for_novel(
     task_id: str,
 ) -> dict[str, Any]:
     """
-    获取并校验任务是否属于指定小说（DB-only 查询）。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
-
-    修改时间: 2026-04-19
-    修改者: AI Assistant
-    任务: 统一任务状态查询为 DB-only
-    修改内容: 移除对内存 TaskManager 的优先查询，改为仅从 DB 查询任务是否属于指定小说。
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: fix-task-system-review-findings
-    修改内容: 仅将真实“任务不存在”映射为 404，数据库异常继续上抛为 5xx，避免把 DB 故障伪装成业务不存在。
-
-    修改时间: 2026-04-20
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 移除未使用的 task_manager 参数，函数内部仅调用 novel_service.get_task()。
+    获取并校验任务是否属于指定小说（DB-only 查询）
     """
     try:
         task = novel_service.get_task(task_id)
@@ -117,17 +85,7 @@ def _resolve_task_for_novel(
 
 def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
     """
-    构建单任务状态响应（DB-only 查询）。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
-
-    修改时间: 2026-04-19
-    修改者: AI Assistant
-    任务: 统一任务状态查询为 DB-only
-    修改内容: 移除对内存 TaskManager 的依赖,改为仅从 DB 查询状态。
-    说明: 保留 TaskManager 用于执行缓存(asyncio.Task、cancel_event),但不用于业务状态判断。
+    构建单任务状态响应（DB-only 查询）
     """
     run = _get_task_detail_from_db(task_id)
     if run is None:
@@ -155,12 +113,7 @@ def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
 
 def _raise_cancel_not_allowed(task_status: str) -> None:
     """
-    统一校验任务是否允许进入取消流程。
-
-    创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
-    任务: fix-task-system-db-driven-review-findings
-    修改内容: 把取消前置状态机判断收口到单点，避免竞态重查后漏掉终态保护。
+    统一校验任务是否允许进入取消流程
     """
     if task_status in ("completed", "cancelled", "cancelling"):
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
@@ -170,21 +123,7 @@ def _raise_cancel_not_allowed(task_status: str) -> None:
 
 def _persist_task_cancellation_request(task_id: str) -> str:
     """
-    将取消请求可靠写入数据库。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: fix-task-system-review-findings
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: 修复 cancel 持久化失败仍返回成功
-    修改内容: 将 cancel_requested/status=cancelling 的 DB 写入收口到统一入口，失败时直接报错而不是静默降级。
-
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: fix-task-system-db-driven-review-findings
-    修改内容: 改为原子状态迁移；若竞态赢家已把任务推进到终态，则返回最新状态而不是覆写回 cancelling。
+    将取消请求可靠写入数据库
     """
     session_factory = get_session_factory()
     try:
@@ -205,12 +144,7 @@ def _persist_task_cancellation_request(task_id: str) -> str:
 
 def _cancel_unclaimed_pending_task(task_id: str) -> bool:
     """
-    直接终结尚未被任何 worker 领取的 pending 任务。
-
-    创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
-    任务: fix-pending-task-pickup
-    修改内容: 对进程外取消 pending 的场景做原子收口，避免把任务送进不可恢复的 cancelling 死状态。
+    直接终结尚未被任何 worker 领取的 pending 任务
     """
     session_factory = get_session_factory()
     try:
@@ -230,28 +164,9 @@ def _cancel_unclaimed_pending_task(task_id: str) -> bool:
 
 async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
     """
-    删除任务前清理运行态缓存与后台协程。
+    删除任务前清理运行态缓存与后台协程
 
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: fix-review-findings
-    说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态。
-
-    修改时间: 2026-04-19
-    修改者: TraeAI
-    任务: task-6-task-manager-responsibility-shrink
-    修改内容: 补充 DB cancel_requested 写入逻辑（原在 TaskManager.cancel_task 中，现已移除）。
-
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: fix-task-system-db-driven-review-findings
-    修改内容: 删除前的运行态清理也改走原子取消入口，避免内存脏状态把 DB 终态误写回 cancelling。
-
-    修改时间: 2026-04-20
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 移除 task_info.status 业务状态判断（TaskInfo 已剥离 status），
-              直接尝试设置内存取消信号并写回 DB 取消标记，由 DB 状态机决定是否生效。
+    说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态
     """
     task_info = task_manager.get_task(task_id)
     if task_info is None:
@@ -260,8 +175,8 @@ async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMa
     # 设置内存取消信号
     task_manager.cancel_task(task_id)
 
-    # 中文注释：这里只是删除前的运行态清理，DB 真相必须仍然遵守同一套状态机护栏。
-    # 如果 DB 已经是 completed/failed/cancelled，原子取消操作会返回最新终态，不会破坏 DB 状态。
+    # 这里只是删除前的运行态清理，DB 真相必须仍然遵守同一套状态机护栏
+    # 如果 DB 已经是 completed/failed/cancelled，原子取消操作会返回最新终态，不会破坏 DB 状态
     session_factory = get_session_factory()
     try:
         with session_factory() as session:
@@ -300,11 +215,7 @@ async def create_and_start_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> CreateTaskResponse:
     """
-    创建并启动一个新的分析任务。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
+    创建并启动一个新的分析任务
     """
     analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.create_task_and_start(novel_id)
@@ -319,11 +230,7 @@ async def resume_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> ResumeTaskResponse:
     """
-    继续执行指定的 pending/failed 任务。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
+    继续执行指定的 pending/failed 任务
     """
     task_application_service = TaskApplicationService(novel_service, task_manager)
     resumed_task_id = await task_application_service.resume_task(novel_id, task_id)
@@ -346,21 +253,6 @@ async def start_reanalysis(
 async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:  # noqa: B008
     """
     获取小说的所有任务列表
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: postgresql-migration-cleanup
-    修改内容: 移除 db_path 字段，使用 run_id
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: API接口参数统一优化
-    修改内容: 移除 run_id 字段，统一使用 task_id
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: fix-task-system-review-findings
-    修改内容: 返回 created_at，避免前端任务面板显示错误时间。
     """
     tasks = novel_service.get_tasks_by_novel(novel_id)
     return TaskListResponse(
@@ -385,16 +277,7 @@ async def delete_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ):
     """
-    删除单个分析任务。
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 任务管理功能
-
-    修改时间: 2026-04-19
-    修改者: AI Assistant
-    任务: Task 8 - 统一任务删除逻辑
-    修改内容: 基于 DB 状态机的删除逻辑，运行中任务拒绝删除，需先取消。
+    删除单个分析任务
 
     删除顺序:
         1. DB 状态判断（任务是否存在、是否属于该小说、是否运行中）
@@ -414,11 +297,7 @@ async def get_task_status(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> StatusResponse:
     """
-    查询单个任务状态（推荐入口）。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
+    查询单个任务状态（推荐入口）
     """
     _resolve_task_for_novel(novel_service, novel_id, task_id)
     return _build_status_response(novel_id, task_id)
@@ -434,20 +313,7 @@ async def cancel_task(
     """
     取消正在运行的分析任务
 
-    创建时间: 2026-04-07
-    创建者: TraeAI
-    任务: implement-task-cancellation
     说明: 设置取消信号，任务将在当前阶段完成后停止
-
-    修改时间: 2026-04-07
-    修改者: TraeAI
-    任务: code-review-fix
-    修改内容: 任务不在内存时同步更新 run 表状态，确保数据一致性
-
-    修改时间: 2026-04-19
-    修改者: TraeAI
-    任务: task-5-db-driven-cancel
-    修改内容: DB 优先取消机制，先写入 DB cancel_requested，再设置内存 cancel_event
     """
     task_application_service = TaskApplicationService(novel_service, task_manager)
     return await task_application_service.cancel_task(novel_id, task_id)
@@ -461,18 +327,9 @@ async def batch_delete_tasks(
     task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
 ) -> BatchDeleteTasksResponse:
     """
-    批量删除指定的分析任务。
+    批量删除指定的分析任务
 
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 新增批量删除功能
-
-    修改时间: 2026-04-19
-    修改者: AI Assistant
-    任务: Task 8 - 统一任务删除逻辑
-    修改内容: 统一删除逻辑，基于 DB 状态机，运行中任务拒绝删除。
-
-    即使部分删除失败，也会继续处理其他任务。
+    即使部分删除失败，也会继续处理其他任务
     """
     deleted_ids: list[str] = []
     failed_ids: list[dict[str, str]] = []
@@ -523,33 +380,7 @@ async def get_analysis_status(
     """
     查询分析任务状态
 
-    创建时间: 2026-03-12
-    创建者: Claude
-    任务: 添加task_id参数支持
     说明: task_id非必须，但有多个task时必须提供
-
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 修复代码异味
-    修改内容:
-    - 移除函数内导入，使用模块顶部导入
-    - 提取状态映射逻辑为辅助函数
-    - 提取数据库查询逻辑为辅助函数
-
-    修改时间: 2026-04-07
-    修改者: TraeAI
-    任务: implement-task-cancellation
-    修改内容: 返回详细进度字段，使 HTTP 轮询与 WebSocket 行为一致
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: task-api-decouple
-    修改内容: 不再按任务数量猜状态，要求显式 task_id。
-
-    修改时间: 2026-04-20
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 移除未使用的 task_manager 依赖参数。
     """
     if not task_id:
         raise HTTPException(

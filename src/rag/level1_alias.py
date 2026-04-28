@@ -1,9 +1,7 @@
 """
-RAG Level1 alias 查询边界。
+RAG Level1 alias 查询边界
 
-创建时间: 2026-04-23
-任务: p1-rag-retriever-split
-说明: 单独承接别名缓存与查询职责，避免 retriever 同时维护多层证据细节。
+单独承接别名缓存与查询职责，避免 retriever 同时维护多层证据细节
 """
 
 from __future__ import annotations
@@ -18,11 +16,9 @@ if TYPE_CHECKING:
 
 class AliasLookup:
     """
-    Level1: 别名表精确匹配。
+    Level1: 别名表精确匹配
 
-    创建时间: 2026-04-23
-    任务: p1-rag-retriever-split
-    说明: 保留原有缓存行为，但将 Level1 边界从 provider 主类中拆出。
+    保留原有缓存行为，但将 Level1 边界从 provider 主类中拆出
     """
 
     def __init__(
@@ -43,16 +39,16 @@ class AliasLookup:
         return self._cache
 
     def invalidate_cache(self) -> None:
-        """清理别名缓存。"""
+        """清理别名缓存"""
         self._cache = None
 
     def query(self, alias: str) -> str | None:
-        """查询别名对应的 canonical。"""
+        """查询别名对应的 canonical"""
         canonical = self._ensure_cache().get(alias)
         if canonical:
             logger.debug("AliasLookup: '{}' -> '{}'", alias, canonical)
         return canonical
 
     def get_alias_map(self) -> dict[str, str]:
-        """返回当前缓存的完整别名映射只读副本。"""
+        """返回当前缓存的完整别名映射只读副本"""
         return dict(self._ensure_cache())

@@ -1,12 +1,7 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分protocols.py
-说明: 诊断数据协议接口
+诊断数据协议接口
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: 用语义 DTO 替代动态字典与裸结构返回值。
+用语义 DTO 替代动态字典与裸结构返回值
 """
 
 from __future__ import annotations
@@ -29,7 +24,7 @@ class DiagnosisRepositoryProtocol(Protocol):
     """
     诊断数据接口
 
-    管理小说诊断数据的存储和检索。
+    管理小说诊断数据的存储和检索
     """
 
     def get_diagnosis(self, novel_id: str) -> RepositoryRecord:

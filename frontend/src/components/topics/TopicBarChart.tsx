@@ -1,10 +1,7 @@
 /**
  * TopicBarChart - 主题权重柱状图组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-C 主题分布
- * 说明: 基于 ECharts 的横向柱状图，展示各主题权重排名，悬浮显示关键词
+ * 基于 ECharts 的横向柱状图，展示各主题权重排名，悬浮显示关键词
  */
 import { useMemo } from "react";
 import ReactEChartsCore from "echarts-for-react";

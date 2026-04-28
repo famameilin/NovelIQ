@@ -21,16 +21,8 @@ import type { Novel } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
 import { appConfig } from "@/config";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
-
 type SortKey = "title" | "updatedAt" | "fileSize";
 type SortOrder = "asc" | "desc";
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
 
 function generateThemeColor(seed: string | undefined): string {
   if (!seed) return "hsl(0, 65%, 55%)";
@@ -55,19 +47,11 @@ function mapNovelToCardData(novel: Novel): NovelCardData {
   };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Sort options                                                      */
-/* ------------------------------------------------------------------ */
-
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "updatedAt", label: "最近上传" },
   { value: "title", label: "书名" },
   { value: "fileSize", label: "文件大小" },
 ];
-
-/* ------------------------------------------------------------------ */
-/*  Component                                                         */
-/* ------------------------------------------------------------------ */
 
 export function HomePage() {
   const navigate = useNavigate();

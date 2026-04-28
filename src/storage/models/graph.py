@@ -1,5 +1,5 @@
 """
-图谱权威层 ORM 模型定义。
+图谱权威层 ORM 模型定义
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
 """
 消歧日志模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
 说明: 提取消歧日志相关逻辑
 """
 
@@ -31,15 +28,6 @@ def log_disambiguate_start(
 ) -> None:
     """
     统一记录消歧开始日志，区分云端/本地
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-    修改内容: 提取为独立模块函数
     """
     if is_cloud:
         logger.info(
@@ -71,15 +59,6 @@ def log_disambiguate_response(
 ) -> None:
     """
     统一处理消歧响应日志
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-    修改内容: 提取为独立模块函数
     """
     if is_cloud:
         logger.info(
@@ -105,30 +84,6 @@ def log_disambiguate_result(
 ) -> None:
     """
     统一记录消歧结果日志到 analysis_logger
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 重构本地消歧客户端集成 Instructor
-    修改内容: 适配 DisambiguateResponseModel，简化日志记录
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 添加 thinking_content 记录
-    修改内容: 从响应对象提取并记录 thinking_content
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-    修改内容: 提取为独立模块函数
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 将 alias_map 改为 canonical_decisions
     """
     if not analysis_logger:
         return

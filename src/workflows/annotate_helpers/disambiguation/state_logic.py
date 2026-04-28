@@ -1,10 +1,7 @@
 """
 状态决策和校验逻辑
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-module-split
-说明: 从 disambiguation.py 拆分，包含状态决策和校验相关函数
+从 disambiguation.py 拆分，包含状态决策和校验相关函数
 """
 
 from __future__ import annotations
@@ -49,9 +46,9 @@ DISAMBIG_STATE_RESOLVED: _DisambigStateLiteral = "resolved"
 DISAMBIG_STATE_REVIEW: _DisambigStateLiteral = "review"
 DISAMBIG_STATE_UNRESOLVED: _DisambigStateLiteral = "unresolved"
 
-# Only these evidence signals justify overriding a model's self-mapping decision.
+# Only these evidence signals justify overriding a model's self-mapping decision
 # naming_scene and stable_title_or_rank are excluded because "being mentioned in
-# the same context as X" does NOT imply "is an alias of X".
+# the same context as X" does NOT imply "is an alias of X"
 _OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
     {
         EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
@@ -61,7 +58,7 @@ _OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
 
 # protected 候选的硬门禁比普通候选更严格：
 # 只有明确身份揭示、命名场景、亲缘身份或独特身体标记这类强证据，
-# 才允许把“侍卫/丫鬟/某人”之类的受保护称呼合并到具体角色。
+# 才允许把“侍卫/丫鬟/某人”之类的受保护称呼合并到具体角色
 _PROTECTED_MERGE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
     {
         EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
@@ -108,7 +105,7 @@ def _disambig_confidence_rank(confidence: str) -> int:
     return _CONFIDENCE_RANK.get(confidence, 2)
 
 
-# Signals that count as "structured evidence" for the evidence gate.
+# Signals that count as "structured evidence" for the evidence gate
 _STRUCTURED_EVIDENCE_SIGNALS = frozenset(
     {
         EVIDENCE_SIGNAL_NAMING_SCENE,
@@ -121,13 +118,10 @@ _STRUCTURED_EVIDENCE_SIGNALS = frozenset(
 
 
 def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, tuple[str, ...]]:
-    """Build audit fields (evidence count, evidence types) from an evidence profile.
+    """Build audit fields (evidence count, evidence types) from an evidence profile
 
-    创建时间: 2026-04-02
-    创建者: CodeAI
-    任务: fix/decision-evidence-audit
-    说明: 为 NameReviewState 填充 decision_evidence_count 和 decision_evidence_types，
-          实现文档 §10.4 规划的证据门禁审计链条。
+    为 NameReviewState 填充 decision_evidence_count 和 decision_evidence_types，
+          实现文档 §10.4 规划的证据门禁审计链条
     """
     if profile is None:
         return 0, ()
@@ -144,10 +138,10 @@ def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, 
 
 
 def _count_structured_evidence(profile: EvidenceProfile | None) -> int:
-    """Count structured evidence items for a candidate.
+    """Count structured evidence items for a candidate
 
     Structured evidence = original sentences + strong signals
-    (excluding appearance_only which is not reliable).
+    (excluding appearance_only which is not reliable)
     """
     if profile is None:
         return 0
@@ -171,16 +165,13 @@ def _normalize_evidence_strength(strength: Any) -> Literal["weak", "mixed", "str
 @lru_cache(maxsize=1)
 def _load_protected_canonical_penalty_names() -> frozenset[str]:
     """
-    加载需要在 canonical 重选时降权的泛指/职位称呼。
+    加载需要在 canonical 重选时降权的泛指/职位称呼
 
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: reselect-disambig-cluster-canonical
-    说明: 这里复用候选过滤阶段的 protected 名单，避免 canonical 重选再次把
-          “侍卫/丫鬟/某人”这类泛称推成 cluster 的代表名。
+    这里复用候选过滤阶段的 protected 名单，避免 canonical 重选再次把
+          “侍卫/丫鬟/某人”这类泛称推成 cluster 的代表名
     """
-    # 中文注释：这里改成惰性 + 缓存加载，避免 import state_logic 时立刻触发
-    # CandidateFilter 初始化，把“canonical 重选需要的 protected 名单”收敛为按需依赖。
+    # 这里改成惰性 + 缓存加载，避免 import state_logic 时立刻触发
+    # CandidateFilter 初始化，把“canonical 重选需要的 protected 名单”收敛为按需依赖
     from .candidate_filter import CandidateFilter
 
     return CandidateFilter().protected
@@ -221,13 +212,10 @@ def _has_strong_merge_signal(profile: EvidenceProfile | None) -> bool:
 
 def _is_protected_candidate_context(context: str | None) -> bool:
     """
-    判断上下文是否来自 protected 候选。
+    判断上下文是否来自 protected 候选
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: enforce-protected-disambig-gate
-    说明: protected 分类不会单独进入响应 schema，因此这里复用 prompt 前缀把分类带到
-          证据门禁层，统一覆盖增量/最终、本地/云端消歧链路。
+    protected 分类不会单独进入响应 schema，因此这里复用 prompt 前缀把分类带到
+          证据门禁层，统一覆盖增量/最终、本地/云端消歧链路
     """
     if not context:
         return False
@@ -236,13 +224,10 @@ def _is_protected_candidate_context(context: str | None) -> bool:
 
 def _is_descriptor_like_name(name: str) -> bool:
     """
-    判断一个称呼是否更像外貌/泛指描述，而不是稳定 canonical。
+    判断一个称呼是否更像外貌/泛指描述，而不是稳定 canonical
 
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: reselect-disambig-cluster-canonical
-    说明: 配对完成后，canonical 选择不能再被“灰衣人/侍卫/某人”这类描述称呼卡死。
-          这里故意只做保守降权，不直接判死刑，真正的 tie-break 仍会结合证据与频次。
+    配对完成后，canonical 选择不能再被“灰衣人/侍卫/某人”这类描述称呼卡死
+          这里故意只做保守降权，不直接判死刑，真正的 tie-break 仍会结合证据与频次
     """
     stripped_name = name.strip()
     if not stripped_name:
@@ -254,13 +239,10 @@ def _is_descriptor_like_name(name: str) -> bool:
 
 def _canonical_signal_score(review: NameReviewState | None) -> int:
     """
-    计算单个名字作为 canonical 候选时的证据分。
+    计算单个名字作为 canonical 候选时的证据分
 
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: reselect-disambig-cluster-canonical
-    说明: 这里使用 review_status 里的审计字段，而不是依赖当前 alias 方向；
-          这样即便 earlier post-process 已经把方向翻错，终消歧阶段仍可重新纠正。
+    这里使用 review_status 里的审计字段，而不是依赖当前 alias 方向；
+          这样即便 earlier post-process 已经把方向翻错，终消歧阶段仍可重新纠正
     """
     if review is None:
         return 0
@@ -278,12 +260,9 @@ def _canonical_choice_key(
     name_counts: dict[str, int] | None,
 ) -> tuple[int, int, int, int, int, str]:
     """
-    生成 canonical 候选排序键。
+    生成 canonical 候选排序键
 
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: reselect-disambig-cluster-canonical
-    说明: canonical 选择明确拆成独立阶段后，优先级应是：
+    canonical 选择明确拆成独立阶段后，优先级应是：
           1. 避免描述称呼卡住 canonical
           2. 看程序化证据和证据强度
           3. 再把频次作为最后兜底，而不是直接改写 alias 语义
@@ -304,12 +283,9 @@ def _collect_alias_clusters(
     affected_names: set[str] | None = None,
 ) -> list[set[str]]:
     """
-    从 alias_merges 构建待重选的 cluster。
+    从 alias_merges 构建待重选的 cluster
 
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: reselect-disambig-cluster-canonical
-    说明: alias 配对与 canonical 选择必须解耦；这里先只关心“哪些名字已被判成同一人”。
+    alias 配对与 canonical 选择必须解耦；这里先只关心“哪些名字已被判成同一人”
     """
     adjacency: dict[str, set[str]] = {}
     for alias, canonical in alias_merges.items():
@@ -352,17 +328,14 @@ def reselect_cluster_canonicals(
     affected_names: set[str] | None = None,
 ) -> DisambiguationState:
     """
-    在 alias 配对完成后，独立重选每个 cluster 的 canonical。
+    在 alias 配对完成后，独立重选每个 cluster 的 canonical
 
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: reselect-disambig-cluster-canonical
-    说明: 旧逻辑会在写入前按频次直接翻转 canonical 方向，导致
-          “灰衣人 -> 白芷”这类已配对成功的结果被反写成“白芷 -> 灰衣人”。
+    旧逻辑会在写入前按频次直接翻转 canonical 方向，导致
+          “灰衣人 -> 白芷”这类已配对成功的结果被反写成“白芷 -> 灰衣人”
           现在改为：
           1. 先保留 alias 配对语义；
           2. 再按 cluster 维度独立重选 canonical；
-          3. 频次只做 tie-break，不再直接改写配对阶段的判断。
+          3. 频次只做 tie-break，不再直接改写配对阶段的判断
     """
     alias_merges_dict = state.get_alias_merges_dict()
     clusters = _collect_alias_clusters(alias_merges_dict, affected_names=affected_names)
@@ -376,8 +349,8 @@ def reselect_cluster_canonicals(
     rewired_clusters: list[tuple[list[str], str]] = []
 
     for cluster in clusters:
-        # 中文注释：这里不再信任“当前 alias 方向”本身，因为它可能已经被旧的频次翻转污染；
-        # 我们只把 cluster 当作“这些名字属于同一人”的集合，再重新挑代表名。
+        # 这里不再信任“当前 alias 方向”本身，因为它可能已经被旧的频次翻转污染；
+        # 我们只把 cluster 当作“这些名字属于同一人”的集合，再重新挑代表名
         selected_canonical = max(
             cluster,
             key=lambda candidate_name: _canonical_choice_key(
@@ -457,13 +430,10 @@ def apply_model_reselected_canonicals(
     clusters: list[set[str]],
 ) -> DisambiguationState:
     """
-    将模型输出的最终代表名重选结果应用到既有 alias cluster。
+    将模型输出的最终代表名重选结果应用到既有 alias cluster
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
-    说明: 这一步只允许“在已确认 cluster 内重选代表名”，不允许模型新增/删除成员、
-          拆组，或跨 cluster 指向。若输出不合法，直接抛错，避免静默污染最终图谱。
+    这一步只允许“在已确认 cluster 内重选代表名”，不允许模型新增/删除成员、
+          拆组，或跨 cluster 指向。若输出不合法，直接抛错，避免静默污染最终图谱
     """
     if not clusters:
         return state
@@ -477,8 +447,8 @@ def apply_model_reselected_canonicals(
     review_status = state.get_review_status_dict()
     cluster_lookup = {name: cluster for cluster in clusters for name in cluster}
 
-    # 中文注释：先把待重选 cluster 之外的 alias 保留下来，确保这次额外调用只影响
-    # 最终代表名选择，不会顺手改动无关 cluster 的既有合并结果。
+    # 先把待重选 cluster 之外的 alias 保留下来，确保这次额外调用只影响
+    # 最终代表名选择，不会顺手改动无关 cluster 的既有合并结果
     new_alias_merges = {
         alias: canonical for alias, canonical in alias_merges_dict.items() if alias not in expected_names
     }
@@ -563,13 +533,10 @@ def apply_model_reselected_canonicals(
 
 def _has_protected_merge_evidence(profile: EvidenceProfile | None) -> bool:
     """
-    判断受保护候选是否具备允许合并的强证据。
+    判断受保护候选是否具备允许合并的强证据
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: enforce-protected-disambig-gate
-    说明: “默认不合并”在后端必须是硬约束，只有明确身份揭示/命名/亲缘/唯一标记
-          这类强证据才能放行，避免模型凭共现或一般上下文把通用职位直接并错。
+    “默认不合并”在后端必须是硬约束，只有明确身份揭示/命名/亲缘/唯一标记
+          这类强证据才能放行，避免模型凭共现或一般上下文把通用职位直接并错
     """
     if profile is None:
         return False
@@ -614,24 +581,13 @@ def validate_confidence_with_evidence(
     """
     根据证据来源校验置信度
 
-    创建时间: 2026-03-26
-    创建者: TraeAI
-    任务: disambiguation-evidence-grading
-    说明: 实现证据分级约束规则
+    实现证据分级约束规则
 
     规则：
     1. 仅【前文摘要-弱证据】支持的判断，alias_confidence 最高为 medium
     2. 若 alias_map 指向已有角色，但证据唯一来源是弱证据，禁止合并
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 简化消歧响应模型
-    修改内容: 将 merge_target_map 改为 alias_map
 
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: enforce-protected-disambig-gate
-    修改内容: 将 protected 候选的“默认不合并”补成后端硬门禁，仅强证据允许合并
 
     Args:
         result: 消歧结果
@@ -694,10 +650,7 @@ def apply_disambiguation_decisions(
     """
     将模型决策应用到状态
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 将 canonical_decisions 分流到三层状态
+    将 canonical_decisions 分流到三层状态
 
     处理逻辑：
     1. A -> A 自映射：加入 discovered_names 和 known_canonical_names，不写入 alias_merges
@@ -724,7 +677,7 @@ def apply_disambiguation_decisions(
         evidence_profile = result.evidence_profiles.get(name)
         evidence_strength = _normalize_evidence_strength(evidence_profile.strength if evidence_profile else None)
 
-        # Protect existing non-self-map decisions from being overwritten by self-maps.
+        # Protect existing non-self-map decisions from being overwritten by self-maps
         old_review = new_review_status.get(name)
         if (
             old_review is not None
@@ -811,9 +764,9 @@ def apply_disambiguation_decisions(
                 )
 
     # Demotion mechanism: if a previously resolved name is now demoted to review,
-    # remove its alias_merge entry to prevent stale merges in the graph.
+    # remove its alias_merge entry to prevent stale merges in the graph
     # P1 fix: filter alias_merges INLINE during the demotion loop instead of
-    # rebuilding new_alias_merges after the loop (which obscured the data flow).
+    # rebuilding new_alias_merges after the loop (which obscured the data flow)
     old_review_dict = state.get_review_status_dict()
     demoted_aliases: set[str] = set()
     for name, review in new_review_status.items():
@@ -821,7 +774,7 @@ def apply_disambiguation_decisions(
         if old_review and old_review.status == DISAMBIG_STATE_RESOLVED and review.status != DISAMBIG_STATE_RESOLVED:
             logger.warning(f"Demoting resolved name '{name}' from '{old_review.status}' to '{review.status}'")
             demoted_aliases.add(name)
-    # Apply alias_filter in a separate pass to avoid modifying list during iteration.
+    # Apply alias_filter in a separate pass to avoid modifying list during iteration
     if demoted_aliases:
         new_alias_merges = [(a, c) for a, c in new_alias_merges if a not in demoted_aliases]
 

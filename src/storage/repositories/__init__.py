@@ -1,44 +1,4 @@
-"""
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: Repository 基类和 Protocol 接口定义
-说明: 导出所有 Repository 类和 Protocol 接口
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: 实现 RunRepository 类
-修改内容: 新增 RunRepository 导出
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: Repository 层重构 - 实现 EntityRepository
-修改内容: 添加 EntityRepository 导出
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: 实现 DiagnosisRepository 类
-修改内容: 新增 DiagnosisRepository 导出
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: 实现 AnnotationRepository 类
-修改内容: 新增 AnnotationRepository 导出
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: 实现 StatsRepository 类
-修改内容: 新增 StatsRepository 导出
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: refactor-routes-use-repository
-修改内容: 新增 ChunkRepository 导出
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - 拆分protocols.py
-修改内容: 更新导入路径
-"""
+"""导出仓库实现与协议接口"""
 
 from .annotation import AnnotationRepository
 from .base import BaseRepository, T

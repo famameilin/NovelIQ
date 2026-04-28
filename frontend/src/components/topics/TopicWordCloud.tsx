@@ -1,10 +1,7 @@
 /**
  * TopicWordCloud - 关键词词云组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-C 主题分布
- * 说明: 基于 ECharts wordcloud 的词云图，词大小映射权重，颜色映射所属主题
+ * 基于 ECharts wordcloud 的词云图，词大小映射权重，颜色映射所属主题
  */
 import { useMemo } from "react";
 import ReactEChartsCore from "echarts-for-react";

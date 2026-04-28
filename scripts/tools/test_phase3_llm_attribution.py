@@ -1,16 +1,8 @@
 """
 Phase3 对话归属测试 — 覆盖完整 消歧→phase3 链路
 
-创建时间: 2026-03-31
-创建者: CodeBuddy
-任务: fix/disambiguation-bugs
 说明: 从 disambig_checkpoint 读取 alias_map 和 known_canonical_names，
-      模拟实际 annotate 流程中 phase3 收到的输入，与数据库旧结果对比。
-
-      与旧版本区别:
-      - alias_map 从 disambig_checkpoint 读取（非 None）
-      - known_characters 从 disambig state 的 known_canonical_names 读取（非 chunk_characters）
-      - 可选运行增量消歧，验证 Fix 1/3 的效果
+      模拟实际 annotate 流程中 phase3 收到的输入，与数据库旧结果对比
 
 测试数据: 从数据库读取真实 chunk
 
@@ -283,7 +275,7 @@ def run_test() -> None:
 
             start_time = time.time()
             try:
-                # 关键修改：传入真实的 alias_map 和 known_characters
+                # 传入消歧状态中的 alias_map 和 known_characters，贴近实际 phase3 输入
                 result = compute_dialogue_lengths_with_llm(
                     client=client,
                     text=text,

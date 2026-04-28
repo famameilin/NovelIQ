@@ -8,11 +8,8 @@ type AnalysisNotCompleteStateProps = {
 };
 
 /**
- * 创建时间: 2026-04-27
- * 创建者: Codex
- * 任务: protagonist-focus-contract-review-fixes-round5
- * 说明: 结果子页面需要把 `AnalysisNotCompleteError` 渲染成明确的状态机提示，
- * 不能再混成通用“加载失败”；这里抽成共享卡片，保证多页文案和视觉保持一致。
+ * 结果子页面需要把 `AnalysisNotCompleteError` 渲染成明确的状态机提示，
+ * 不能再混成通用“加载失败”；这里抽成共享卡片，保证多页文案和视觉保持一致
  */
 export function AnalysisNotCompleteState({
   title = "分析尚未完成",

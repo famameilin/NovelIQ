@@ -21,7 +21,7 @@ import {
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
 const READABLE_TASK_STATUSES = new Set(["completed", "aggregated", "diagnosed"]);
 
-/** 检查任务是否已进入可读终态；未完成时模拟真实后端的 AnalysisNotCompleteError。 */
+/** 检查任务是否已进入可读终态；未完成时模拟真实后端的 AnalysisNotCompleteError */
 async function checkTaskReady(novelId: string, taskId: string): Promise<Response | null> {
   const tasks = taskDb.get(novelId) ?? [];
   const task = tasks.find((t) => t.task_id === taskId);

@@ -67,12 +67,8 @@ async def batch_delete_novels(
     """
     批量删除小说
 
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 新增批量删除功能
-
-    批量删除指定的小说及其相关数据。
-    即使部分删除失败，也会继续处理其他小说。
+    批量删除指定的小说及其相关数据
+    即使部分删除失败，也会继续处理其他小说
     """
     deleted_ids: list[str] = []
     failed_ids: list[dict[str, str]] = []

@@ -1,15 +1,8 @@
 """
 语言风格指标计算模块 (扩展)
 
-创建时间: 2026-03-13
-创建者: TraeAI
-任务: refactor-metrics-layer-functions
-说明: 从 style_metrics.py 提取扩展指标计算函数
+从 style_metrics.py 提取扩展指标计算函数
 
-修改时间: 2026-03-25
-修改者: TraeAI
-任务: fix-category-density-keys
-修改内容: 删除硬编码 SEMANTIC_CATEGORIES，改为从词表文件加载
 """
 
 from __future__ import annotations
@@ -329,10 +322,6 @@ def _load_semantic_categories() -> dict[str, list[str]]:
     """
     加载语义类别词表
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-category-density-keys
-    修改内容: 新增函数，从词表文件加载分类
     """
     from src.metrics.style_metrics import parse_semantic_category_lexicon
 
@@ -351,10 +340,6 @@ def compute_category_density(
     """
     计算语义类别密度
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-category-density-keys
-    修改内容: 从词表文件加载分类，使用英文键名
     """
     category_terms = _load_semantic_categories()
 

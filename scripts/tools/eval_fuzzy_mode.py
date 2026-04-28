@@ -1,11 +1,7 @@
 """
 Fuzzy 模式效果评估脚本
 
-对比 exact/phrase/fuzzy 三种模式在真实小说数据上的召回率。
-
-创建时间: 2026-04-06
-创建者: GLM-5
-任务: 词表与张力信号系统重构 - Task 9
+对比 exact/phrase/fuzzy 三种模式在真实小说数据上的召回率
 """
 
 from __future__ import annotations
@@ -27,7 +23,7 @@ def evaluate_fuzzy_mode(
     modes: list[str] | None = None,
 ) -> dict[str, int]:
     """
-    评估不同匹配模式在给定文本上的命中数。
+    评估不同匹配模式在给定文本上的命中数
 
     Args:
         text: 待评估文本
@@ -55,7 +51,7 @@ def evaluate_fuzzy_mode(
 
 def sample_battle_texts(novel_path: Path, sample_size: int = 10) -> list[str]:
     """
-    从小说中采样包含战斗术语的片段。
+    从小说中采样包含战斗术语的片段
 
     Args:
         novel_path: 小说文件路径
@@ -111,7 +107,7 @@ def sample_battle_texts(novel_path: Path, sample_size: int = 10) -> list[str]:
 
 def run_evaluation(novel_dir: Path, output_path: Path | None = None) -> dict:
     """
-    运行完整评估流程。
+    运行完整评估流程
 
     Args:
         novel_dir: 小说目录

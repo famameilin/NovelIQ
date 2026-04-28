@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分chunk_repository.py
-说明: 分块主题数据操作
+分块主题数据操作
 """
 
 from __future__ import annotations
@@ -49,7 +46,7 @@ def fetch_chunk_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
     获取聚合后的主题数据（每个主题的全局总权重）
 
     使用 SUM 而非 AVG，使热门主题（高出现频率 × 高概率）获得更高权重，
-    归一化后能体现各主题在全书中的相对重要程度差异。
+    归一化后能体现各主题在全书中的相对重要程度差异
 
     Args:
         session: SQLAlchemy Session 实例

@@ -1,9 +1,6 @@
 """
 伏笔解析模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取伏笔解析相关逻辑
 """
 
@@ -130,36 +127,21 @@ _SETUP_KIND_HOOK_MARKERS: dict[str, tuple[str, ...]] = {
 
 def _normalize_setup_summary_text(value: str) -> str:
     """
-    归一化 setup_summary 文本，用于 exact-match 去重。
-
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: setup 池 v1 只接受“标准化 summary 完全一致”的精确并线，
-    这里把空白和常见标点去掉，避免同一句 summary 因格式差异重复建 thread。
+    归一化 setup_summary 文本，用于 exact-match 去重
     """
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     """
-    判断文本是否命中任一关键短语。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: 将强伏笔语义过滤收口成显式 helper，避免 validate_foreshadowing_result 内散落硬编码判断。
+    判断文本是否命中任一关键短语
     """
     return any(marker in text for marker in markers)
 
 
 def _coerce_boolean_field(field_name: str, value: Any, default: bool = False) -> bool:
     """
-    严格归一化结构化输出里的布尔字段。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: Phase2 现在会在 `json_object` 模式下接收 provider 返回的原始 JSON；
-    某些 provider 会把 true/false 序列化成字符串，不能再直接用 `bool(...)`
-    否则 `"false"` 会被误判成 True。
+    严格归一化结构化输出里的布尔字段
     """
     if value is None:
         return default
@@ -188,11 +170,7 @@ def _coerce_boolean_field(field_name: str, value: Any, default: bool = False) ->
 
 def _extract_reason_sections(reason: str) -> tuple[str | None, str | None]:
     """
-    从 anchor_reason 中提取“具体钩子/未闭合原因”两段。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: Phase2 现在要求 anchor_reason 使用固定双段格式，先统一解析再做语义门槛校验。
+    从 anchor_reason 中提取“具体钩子/未闭合原因”两段
     """
     normalized = reason.strip()
     hook_index = normalized.find(_HOOK_LABEL)
@@ -209,12 +187,7 @@ def _extract_reason_sections(reason: str) -> tuple[str | None, str | None]:
 
 def _has_concrete_setup_signal(hook_text: str, unresolved_text: str) -> bool:
     """
-    判断理由里是否真的出现了强 setup 所需的具体信号。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: 把“异常物件/隐藏信息/承诺威胁”等有效信号单独收口，
-    避免仅凭“决定/判断尚未执行”这种日常动作误入强伏笔池。
+    判断理由里是否真的出现了强 setup 所需的具体信号
     """
     combined = f"{hook_text} {unresolved_text}"
     return _contains_any(hook_text, _ANOMALY_HOOK_MARKERS) or _contains_any(combined, _STRONG_SETUP_TARGET_MARKERS)
@@ -222,11 +195,7 @@ def _has_concrete_setup_signal(hook_text: str, unresolved_text: str) -> bool:
 
 def _has_setup_kind_consistent_signal(setup_kind: str, hook_text: str, unresolved_text: str) -> bool:
     """
-    判断 setup_kind 是否得到了文本理由里的具体信号支撑。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: setup_kind 只能作为“收紧语义范围”的提示，不能替代对 hook/unresolved 文本本身的校验。
+    判断 setup_kind 是否得到了文本理由里的具体信号支撑
     """
     if setup_kind == "其他":
         return _has_concrete_setup_signal(hook_text, unresolved_text)
@@ -236,19 +205,14 @@ def _has_setup_kind_consistent_signal(setup_kind: str, hook_text: str, unresolve
     if markers and _contains_any(combined, markers):
         return True
 
-    # 中文注释：模型就算挑了正式 setup_kind，也仍然要回到文本理由里确认
-    # “具体钩子到底是什么”；否则普通决定被误标成“明确承诺”时会直接绕过强伏笔 gate。
+    # 模型就算挑了正式 setup_kind，也仍然要回到文本理由里确认
+    # “具体钩子到底是什么”；否则普通决定被误标成“明确承诺”时会直接绕过强伏笔 gate
     return _has_concrete_setup_signal(hook_text, unresolved_text)
 
 
 def _is_generic_future_speculation(text: str) -> bool:
     """
-    判断文本是否只是泛化的未来推测。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: “后续可能如何”只有在同时点明具体未闭合对象时才可接受，
-    不能再把所有带 future wording 的解释一刀切拒掉。
+    判断文本是否只是泛化的未来推测
     """
     return _contains_any(text, _GENERIC_FUTURE_SPECULATION_MARKERS) and not _contains_any(
         text,
@@ -258,11 +222,7 @@ def _is_generic_future_speculation(text: str) -> bool:
 
 def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     """
-    判断 anchor_reason 是否满足强伏笔的最小语义门槛。
-
-    创建时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    新建原因: 将“高精度强伏笔”门槛沉淀为显式规则，优先拒绝主题句、命运定调和模糊未来推测。
+    判断 anchor_reason 是否满足强伏笔的最小语义门槛
     """
     hook_text, anchor_unresolved_text = _extract_reason_sections(result.anchor_reason)
     if hook_text is None or anchor_unresolved_text is None:
@@ -284,8 +244,8 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     if not _contains_any(unresolved_text, _UNRESOLVED_MARKERS):
         return False
 
-    # 中文注释：允许“后续可能揭示用途”这类带 future wording 的表述，
-    # 前提是它确实指向了具体的未闭合对象；纯“可能有影响/可能出事”仍然拒绝。
+    # 允许“后续可能揭示用途”这类带 future wording 的表述，
+    # 前提是它确实指向了具体的未闭合对象；纯“可能有影响/可能出事”仍然拒绝
     if _is_generic_future_speculation(hook_text):
         return False
 
@@ -302,31 +262,6 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
 def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     """
     解析伏笔分析结果
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    修改内容: 伏笔类型枚举改为当前中文合同，不再兼容历史 causal/thematic 残留。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 弱阳性结果在解析阶段直接降级为合法 negative，避免热路径把
-    `has_foreshadowing=true && is_strong_setup=false` 当成结构化异常反复重试。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 布尔字段改成严格归一化，避免 `json_object` 模式下 `"false"`
-    被 Python `bool(...)` 误判成真值。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 缺失 confidence 时默认降为 low，避免 provider 漏字段时被静默抬成 high 强伏笔。
     """
     raw_has_foreshadowing = _coerce_boolean_field(
         "has_foreshadowing",
@@ -340,9 +275,9 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     )
     degrade_to_negative = raw_has_foreshadowing and not raw_is_strong_setup
 
-    # 中文注释：弱阳性是当前 Phase2 最常见的脏输出之一。
+    # 弱阳性是当前 Phase2 最常见的脏输出之一
     # 这里先把它归一化成 negative，再交给 validator/projector 做后续筛除，
-    # 避免 schema 校验把“应丢弃的边缘样本”升级成整次 phase 失败。
+    # 避免 schema 校验把“应丢弃的边缘样本”升级成整次 phase 失败
     has_foreshadowing = raw_has_foreshadowing and not degrade_to_negative
     is_strong_setup = raw_is_strong_setup if has_foreshadowing else False
 
@@ -384,8 +319,8 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     linked_setup_id_raw = data.get("linked_setup_id")
     linked_setup_id = str(linked_setup_id_raw).strip() if has_foreshadowing and linked_setup_id_raw else None
 
-    # 中文注释：强伏笔池只接受显式 high。
-    # provider 如果漏掉 confidence，宁可降为 low 丢弃，也不能静默补成 high 放行。
+    # 强伏笔池只接受显式 high
+    # provider 如果漏掉 confidence，宁可降为 low 丢弃，也不能静默补成 high 放行
     confidence_raw = data.get("confidence", "low")
     confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "low"
     if degrade_to_negative:
@@ -411,24 +346,9 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
 
 def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) -> bool:
     """
-    硬校验：anchor_text 必须是原文的真实子串。
+    硬校验：anchor_text 必须是原文的真实子串
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    修改内容:
-    - `has_foreshadowing=false` 时也要拒绝夹带 strong setup 字段的脏 negative
-    - 只有 high 级 positive 才允许入强伏笔池
-    - positive 结果必须携带正式 foreshadowing_type
-    - positive 结果必须补齐结构化语义字段，减少仅凭 anchor_reason 猜意图
-    - positive 结果拒绝 payoff_likelihood=low，和 prompt 合同保持一致
-    - anchor_reason 必须同时给出“具体钩子/未闭合原因”
-    - 显式拦截主题句、命运定调、情绪气氛类模糊推断
-
-    返回 False 则丢弃该条记录，不入库。
+    返回 False 则丢弃该条记录，不入库
     """
     if not result.has_foreshadowing:
         if result.is_strong_setup:
@@ -489,8 +409,8 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
         if result.setup_status not in {"reinforced", "likely_paid_off"}:
             return False
 
-    # 中文注释：setup 池的 exact-match 去重要依赖标准化 summary；
-    # 如果归一化后为空，说明模型没有给出真正可池化的 thread 摘要。
+    # setup 池的 exact-match 去重要依赖标准化 summary；
+    # 如果归一化后为空，说明模型没有给出真正可池化的 thread 摘要
     if not _normalize_setup_summary_text(result.setup_summary):
         return False
 

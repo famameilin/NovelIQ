@@ -1,9 +1,6 @@
 """
 文本归一化常量
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: consolidate-codebase-architecture
 说明: 从 results_fetchers.py 提取的硬编码字符集常量
 """
 
