@@ -106,7 +106,10 @@ python -m src.api.main --port 8001
 | GET | `/api/novels/{novel_id}/metrics/emotion-stats?task_id={task_id}` | 获取情感统计指标 |
 | GET | `/api/novels/{novel_id}/metrics/character-stats?task_id={task_id}` | 获取人物统计指标 |
 | GET | `/api/novels/{novel_id}/metrics/style-stats?task_id={task_id}` | 获取风格统计指标 |
-| GET | `/api/novels/{novel_id}/metrics/culture-stats?task_id={task_id}` | 获取文化统计指标 |
+
+**当前版本说明：**
+- public `/metrics/*` 路由当前只有以上 4 个。
+- 文化相关聚合（`idiom_density` / `classical_sentence_ratio` / `imagery_density`）仍保留在内部 aggregate / 研究文档中，但当前版本不作为公开 `culture-stats` 路由暴露。
 
 ### 2.6 系统接口
 
@@ -279,7 +282,7 @@ python -m src.api.main --port 8001
 **完整性检查标准**：
 - `preprocess`：chunks表有数据
 - `annotate`：annotations数量 ≥ chunks数量
-- `aggregate`：emotion_curve数量 ≥ chunks数量 且 rhythm_curve数量 ≥ chunks数量
+- `aggregate`：chunk_curves数量 ≥ chunks数量
 - `topic_model`：chunk_topics表有数据
 - `diagnose`：cloud_analysis表有数据
 
@@ -935,11 +938,9 @@ GET /api/novels/10960c77/metrics/narrative-structure?task_id=a1b2c3d4
   "climax_spacing": 0.0,
   "middle_collapse_index": 1.76,
   "event_density": {
-    "高潮": 0.02,
     "冲突": 0.10,
     "转折": 0.29,
-    "铺垫": 0.33,
-    "日常": 0.26
+    "铺垫": 0.61
   },
   "cliffhanger_rate": 0.29,
   "climax_count": 3,
@@ -977,6 +978,7 @@ GET /api/novels/10960c77/metrics/emotion-stats?task_id=a1b2c3d4
   "pivot_moment_density": 0.38,
   "lexical_emotion_trend": "rising"
 }
+```
 
 **lexical_emotion_trend 可选值**（词表情感趋势）:
 - `rising`: 情感上升（后段平均值 - 前段平均值 > 0.002）
@@ -1011,10 +1013,10 @@ GET /api/novels/10960c77/metrics/character-stats?task_id=a1b2c3d4
   },
   "greimas_coverage": 0.73,
   "function_coverage_distribution": {
-    "protagonist": 0.47,
-    "antagonist": 0.08,
-    "helper": 0.09,
-    "mentor": 0.09
+    "主体": 0.47,
+    "反对者": 0.08,
+    "帮助者": 0.09,
+    "发送者": 0.09
   },
   "antagonist_strength_gap": 1.72,
   "relation_change_freq": 2.21
@@ -1046,8 +1048,10 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
     "恐惧": 0.14
   },
   "vocab_breadth": 0.94,
+  "avg_sent_len": 18.6,
   "avg_word_len": 8.64,
   "sent_len_std": 21.42,
+  "dialogue_ratio": 0.31,
   "function_word_vector": {
     "的": 0.035,
     "了": 0.028,
@@ -1077,34 +1081,14 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{novel_id}/metrics/culture-stats
+#### 文化指标说明（研究保留，当前未开放 public route）
 
-获取文化统计聚合指标。
+当前仓库内部 aggregate 仍会计算以下文化指标，但它们不再通过单独的 `/metrics/culture-stats` 公开接口返回：
 
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| task_id | str | 是 | 分析任务ID |
-
-**请求示例**:
-```
-GET /api/novels/10960c77/metrics/culture-stats?task_id=a1b2c3d4
-```
-
-**响应示例**:
-```json
-{
-  "idiom_density": 0.69,
-  "classical_sentence_ratio": 0.0,
-  "imagery_density": 0.012
-}
-```
-
-**字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | idiom_density | float | 成语密度 |
-| classical_sentence_ratio | float | 文言句式比例 |
+| classical_sentence_ratio | float | 古典句式比例 |
 | imagery_density | float | 整书级古典意象字符密度（按全文字符占比统计，不受 chunk 切分影响） |
 
 ---
@@ -1176,7 +1160,7 @@ outputs/
 }
 ```
 
-其中 `chunk_cultures` 的单项结构为：
+其中与文化相关的 chunk 级字段位于 `chunk_styles` 中，其单项结构可包含：
 
 ```json
 {

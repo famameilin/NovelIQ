@@ -280,6 +280,7 @@ export interface CharacterStatsAggregate {
 export interface StyleStats {
   tone_distribution?: Record<string, number>;
   vocab_breadth?: number;
+  avg_sent_len?: number;
   avg_word_len?: number;
   sent_len_std?: number;
   dialogue_ratio?: number;
@@ -287,11 +288,10 @@ export interface StyleStats {
   category_density?: Record<string, number>;
 }
 
-export interface CultureStats {
-  idiom_density?: number;
-  classical_sentence_ratio?: number;
-  imagery_density?: number;
-}
+// 说明：这里给出的是推荐的完整接口形状。
+// 当前仓库中的前端本地类型/页面只收敛并展示常用子集：
+// - 类型层已保留：vocab_breadth / avg_sent_len / dialogue_ratio
+// - 详情页卡片当前实际展示：vocab_breadth / dialogue_ratio
 
 // ========== 错误响应 ==========
 
@@ -443,7 +443,6 @@ import type {
   EmotionStats,
   CharacterStatsAggregate,
   StyleStats,
-  CultureStats,
 } from "./types";
 
 // ---- 基础结果数据 ----
@@ -564,18 +563,6 @@ export async function fetchStyleStats(
 ): Promise<StyleStats> {
   const { data } = await apiClient.get(
     `/api/novels/${novelId}/metrics/style-stats`,
-    { params: { task_id: taskId } }
-  );
-  return data;
-}
-
-/** 获取文化统计指标 */
-export async function fetchCultureStats(
-  novelId: string,
-  taskId: string
-): Promise<CultureStats> {
-  const { data } = await apiClient.get(
-    `/api/novels/${novelId}/metrics/culture-stats`,
     { params: { task_id: taskId } }
   );
   return data;
@@ -712,13 +699,13 @@ export function useDiagnosis(novelId: string, taskId: string) {
   ├─▶ useQuery(character) ──── fetchCharacterStatsAggregate() ─── GET .../metrics/character-stats
   │     └─▶ DimensionMiniCard(人物)（network_density）
   ├─▶ useQuery(style) ──────── fetchStyleStats() ─── GET .../metrics/style-stats
-  │     └─▶ DimensionMiniCard(风格)（vocab_breadth + dialogue_ratio）
-  ├─▶ useQuery(culture) ────── fetchCultureStats() ─── GET .../metrics/culture-stats
-  │     └─▶ DimensionMiniCard(文化)（idiom_density + classical_sentence_ratio + imagery_density）
+  │     └─▶ DimensionMiniCard(风格)（当前展示 vocab_breadth + dialogue_ratio）
   │
   └─▶ useQuery(curves) ─────── fetchChunkCurves() ─── GET .../chunk-curves
         └─▶ MiniCurvePreview 缩略图
 ```
+
+> 设计说明：文化指标 `idiom_density` / `classical_sentence_ratio` / `imagery_density` 仍属于研究型聚合结果，但当前产品主界面第五维已切换为“主题内容”，因此前端不再定义 `CultureStats` 接口，也不再请求 `/metrics/culture-stats`。
 
 **关键流程：主题色触发**
 
