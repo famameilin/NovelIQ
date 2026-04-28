@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import type { SSEEventType } from "@/api/streamTypes";
@@ -98,6 +98,19 @@ function emitSSEError(): void {
   });
 }
 
+/**
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 修复后台恢复后分析页卡死与白屏
+ * 新建原因: useAnalysisStatus 现在显式监听可见性恢复；测试需要稳定切换 jsdom 的 visibilityState。
+ */
+function setDocumentVisibilityState(state: "visible" | "hidden"): void {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: state,
+  });
+}
+
 describe("useAnalysisStatus", () => {
   beforeEach(() => {
     mockedIsConnected = false;
@@ -111,6 +124,12 @@ describe("useAnalysisStatus", () => {
     streamStoreState.setError.mockReset();
     streamStoreState.setStageDuration.mockReset();
     streamStoreState.reset.mockReset();
+    setDocumentVisibilityState("visible");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setDocumentVisibilityState("visible");
   });
 
   it("会把 pending 任务回填成活跃态并触发 onRunning", async () => {
@@ -311,7 +330,7 @@ describe("useAnalysisStatus", () => {
     });
   });
 
-  it("接收 LLM 流事件时应把 stream_id 原样透传给 store", async () => {
+  it("接收 LLM 流事件时应按流批量透传给 store", async () => {
     getTaskStatusMock.mockResolvedValue(createRunningStatus("task-stream-id"));
 
     render(<HookHarness novelId="novel-1" taskId="task-stream-id" />);
@@ -319,6 +338,9 @@ describe("useAnalysisStatus", () => {
     await waitFor(() => {
       expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-stream-id");
     });
+
+    vi.useFakeTimers();
+    streamStoreState.appendLLMOutput.mockClear();
 
     emitSSEEvent("llm_output", {
       action: "output",
@@ -330,8 +352,27 @@ describe("useAnalysisStatus", () => {
       total: 10,
       percent: 35,
       sub_percent: 60,
-      content: "乙流输出",
+      content: "乙流",
       message: "phase3 推理中",
+    });
+    emitSSEEvent("llm_output", {
+      action: "output",
+      stage: "annotate",
+      sub_stage: "phase3",
+      chunk_id: 3,
+      stream_id: "phase3-3-2",
+      current: 3,
+      total: 10,
+      percent: 35,
+      sub_percent: 60,
+      content: "输出",
+      message: "phase3 推理中",
+    });
+
+    expect(streamStoreState.appendLLMOutput).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(120);
     });
 
     expect(streamStoreState.appendLLMOutput).toHaveBeenCalledWith(
@@ -340,5 +381,32 @@ describe("useAnalysisStatus", () => {
         content: "乙流输出",
       }),
     );
+  });
+
+  it("前台恢复时会补做一次任务状态回填", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-foreground"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-foreground" />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledTimes(1);
+    });
+
+    getTaskStatusMock.mockClear();
+    setDocumentVisibilityState("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(getTaskStatusMock).not.toHaveBeenCalled();
+
+    setDocumentVisibilityState("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-foreground");
+    });
   });
 });

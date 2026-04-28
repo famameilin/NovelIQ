@@ -22,8 +22,10 @@ export interface LLMStreamGroup {
   subStage: string;
   chunkId: number;
   streamId: string | null;
-  outputParts: string[];
-  thinkingParts: string[];
+  outputText: string;
+  thinkingText: string;
+  outputTotalChars: number;
+  thinkingTotalChars: number;
   lastUpdatedAt: number;
 }
 
@@ -74,6 +76,60 @@ export function buildLLMOutputGroupKey(data: {
   stream_id?: string | null;
 }): string {
   return `${buildLLMOutputScopeKey(data)}-${data.stream_id || "default"}`;
+}
+
+/**
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 修复后台恢复后分析页卡死与白屏
+ * 修改内容:
+ * - 单条流输出改为有界字符串缓冲，不再让 store 无限保留细碎 token 片段。
+ * - 统一按字符数与行数双上限裁剪，避免后台恢复后 Markdown 渲染窗口持续膨胀。
+ */
+function _trimLLMOutputText(text: string): string {
+  let trimmed = text;
+  if (trimmed.length > appConfig.maxLLMOutputCharsPerGroup) {
+    trimmed = trimmed.slice(-appConfig.maxLLMOutputCharsPerGroup);
+  }
+
+  const lines = trimmed.split("\n");
+  if (lines.length > appConfig.maxLLMOutputLinesPerGroup) {
+    trimmed = lines.slice(-appConfig.maxLLMOutputLinesPerGroup).join("\n");
+  }
+
+  return trimmed;
+}
+
+/**
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 修复后台恢复后分析页卡死与白屏
+ * 修改内容:
+ * - 按 action 选择 output/thinking 文本缓冲，并在写入时立即做有界裁剪。
+ * - 同时累计总字符数，供 UI 摘要展示真实输出体量。
+ */
+function _appendBoundedLLMOutput(
+  group: LLMStreamGroup,
+  action: StreamEventData["action"],
+  content: string,
+): LLMStreamGroup {
+  if (!content) {
+    return group;
+  }
+
+  if (action === "thinking") {
+    return {
+      ...group,
+      thinkingText: _trimLLMOutputText(group.thinkingText + content),
+      thinkingTotalChars: group.thinkingTotalChars + content.length,
+    };
+  }
+
+  return {
+    ...group,
+    outputText: _trimLLMOutputText(group.outputText + content),
+    outputTotalChars: group.outputTotalChars + content.length,
+  };
 }
 
 /**
@@ -219,17 +275,13 @@ export const useStreamStore = create<StreamState>()((set) => ({
         subStage: data.sub_stage,
         chunkId: data.chunk_id ?? 0,
         streamId: data.stream_id ?? null,
-        outputParts: [...(existing?.outputParts ?? [])],
-        thinkingParts: [...(existing?.thinkingParts ?? [])],
+        outputText: existing?.outputText ?? "",
+        thinkingText: existing?.thinkingText ?? "",
+        outputTotalChars: existing?.outputTotalChars ?? 0,
+        thinkingTotalChars: existing?.thinkingTotalChars ?? 0,
         lastUpdatedAt: now,
       };
-
-      if (data.action === "thinking") {
-        nextGroup.thinkingParts.push(data.content);
-      } else {
-        nextGroup.outputParts.push(data.content);
-      }
-      newOutputs.set(groupKey, nextGroup);
+      newOutputs.set(groupKey, _appendBoundedLLMOutput(nextGroup, data.action, data.content));
 
       const nextSelections = new Map(state.activeStreamSelections);
       const nextSelectionModes = new Map(state.streamSelectionModes);
