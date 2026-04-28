@@ -25,12 +25,14 @@ load_dotenv(project_root / ".env")
 
 
 # 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：这次删除脚本需要显式读取指定的数据库 URL 环境变量，
-# 不允许在 URL 缺失时静默跳过，否则容易误以为已经完成库收口。
-def get_database_url_from_env(env_var_name: str) -> str:
+# 新建原因：脚本既支持显式指定单个目标库，也支持默认尝试处理主库和测试库；
+# 默认模式下若某个 URL 未配置应显式跳过，只有显式指定时才应报错。
+def get_database_url_from_env(env_var_name: str, *, required: bool) -> str | None:
     database_url = os.environ.get(env_var_name)
     if not database_url:
-        raise RuntimeError(f"{env_var_name} environment variable is not set")
+        if required:
+            raise RuntimeError(f"{env_var_name} environment variable is not set")
+        return None
     return database_url
 
 
@@ -131,15 +133,23 @@ def main() -> int:
     database_schema = get_database_schema_from_env()
     env_vars = args.env_vars or ["DATABASE_URL", "TEST_DATABASE_URL"]
     processed_pairs: set[tuple[str, str | None]] = set()
+    processed_any = False
 
     for env_var_name in env_vars:
-        database_url = get_database_url_from_env(env_var_name)
+        database_url = get_database_url_from_env(env_var_name, required=bool(args.env_vars))
+        if database_url is None:
+            print(f"[SKIP] {env_var_name}: environment variable is not set")
+            continue
         dedupe_key = (database_url, database_schema)
         if dedupe_key in processed_pairs:
             print(f"[SKIP] {env_var_name}: same database/schema already processed")
             continue
         drop_version_columns(database_url, database_schema, label=env_var_name)
         processed_pairs.add(dedupe_key)
+        processed_any = True
+
+    if not processed_any:
+        raise RuntimeError("No database URLs were available for timeline version column cleanup")
 
     print("[OK] timeline / graph projection version columns removed")
     return 0

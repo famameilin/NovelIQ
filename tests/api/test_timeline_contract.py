@@ -61,31 +61,31 @@ def test_get_timeline_returns_atomic_and_composite_nodes(api_client: TestClient,
         for child_id in node["child_node_ids"]
     )
 
-def test_get_timeline_ignores_legacy_max_level_query_and_returns_same_contract(
+def test_get_timeline_include_curve_only_controls_tension_curve_field(
     api_client: TestClient,
     db_session,
 ) -> None:
     scenario = create_timeline_contract_scenario(db_session)
 
-    full_response = api_client.get(
+    with_curve_response = api_client.get(
         f"/api/novels/{scenario.novel_id}/timeline",
-        params={"task_id": scenario.task_id, "include_curve": "false", "max_level": 3},
+        params={"task_id": scenario.task_id, "include_curve": "true"},
     )
-    filtered_response = api_client.get(
+    without_curve_response = api_client.get(
         f"/api/novels/{scenario.novel_id}/timeline",
-        params={"task_id": scenario.task_id, "include_curve": "false", "max_level": 2},
+        params={"task_id": scenario.task_id, "include_curve": "false"},
     )
 
-    assert full_response.status_code == 200
-    assert filtered_response.status_code == 200
+    assert with_curve_response.status_code == 200
+    assert without_curve_response.status_code == 200
 
-    full_payload = full_response.json()
-    filtered_payload = filtered_response.json()
+    with_curve_payload = with_curve_response.json()
+    without_curve_payload = without_curve_response.json()
 
-    assert full_payload["tension_curve"] is None
-    assert filtered_payload["tension_curve"] is None
-    assert filtered_payload["atomic_nodes"] == full_payload["atomic_nodes"]
-    assert filtered_payload["composite_nodes"] == full_payload["composite_nodes"]
+    assert with_curve_payload["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
+    assert without_curve_payload["tension_curve"] is None
+    assert without_curve_payload["atomic_nodes"] == with_curve_payload["atomic_nodes"]
+    assert without_curve_payload["composite_nodes"] == with_curve_payload["composite_nodes"]
 
 
 def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_shapes(
