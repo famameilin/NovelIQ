@@ -50,17 +50,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Awaitable, Callable
 
 import numpy as np
 from loguru import logger
-from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, BadRequestError
 
 from src.config import settings
 
 TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
 BatchProgressCallback = Callable[[int, int, int], Awaitable[None] | None]
+RETRYABLE_EMBEDDING_STATUS_CODES = {429, 500, 502, 503, 504}
+EMBEDDING_MAX_RETRIES = 2
+EMBEDDING_RETRY_BASE_DELAY_S = 0.5
 
 
 class EmbeddingClient:
@@ -177,6 +181,62 @@ class EmbeddingClient:
                 log_func = getattr(logger, level, logger.debug)
         log_func(msg, *args)
 
+    def _is_retryable_embedding_status_error(self, error: APIStatusError) -> bool:
+        """
+        创建时间: 2026-04-28
+        创建者: Codex
+        任务: fix-embedding-transient-502
+        新建原因: embedding 服务偶发 429/5xx 属于典型瞬时错误；
+        这里统一收口重试判定，避免 batch/single 两条链路各自散落一套条件。
+        """
+        status_code = getattr(error, "status_code", None)
+        if not isinstance(status_code, int):
+            return False
+        return status_code in RETRYABLE_EMBEDDING_STATUS_CODES
+
+    async def _create_embeddings_with_retry(self, text_input: str | list[str]):
+        """
+        创建时间: 2026-04-28
+        创建者: Codex
+        任务: fix-embedding-transient-502
+        新建原因: 上游 embedding provider 的瞬时 429/5xx 不应立即把整条分析链打死；
+        这里对可恢复状态做有限次退避重试，其余错误仍保持 fail fast。
+        """
+        for attempt in range(1, EMBEDDING_MAX_RETRIES + 2):
+            try:
+                return await self._client.embeddings.create(
+                    model=self._model,
+                    input=text_input,
+                    encoding_format="float",
+                )
+            except BadRequestError as e:
+                self._log(
+                    "error",
+                    "embedding API错误: status={} base_url={} error={}",
+                    "embedding api status error: status={} base_url={} error={}",
+                    e.status_code if hasattr(e, "status_code") else "unknown",
+                    self._base_url,
+                    str(e),
+                )
+                raise RuntimeError(f"embedding 服务错误: {e}") from e
+            except APIStatusError as e:
+                status_code = getattr(e, "status_code", "unknown")
+                should_retry = self._is_retryable_embedding_status_error(e) and attempt <= EMBEDDING_MAX_RETRIES
+                self._log(
+                    "warning" if should_retry else "error",
+                    "embedding API状态错误: status={} attempt={}/{} base_url={} retry={} error={}",
+                    "embedding api status error: status={} attempt={}/{} base_url={} retry={} error={}",
+                    status_code,
+                    attempt,
+                    EMBEDDING_MAX_RETRIES + 1,
+                    self._base_url,
+                    should_retry,
+                    str(e),
+                )
+                if not should_retry:
+                    raise RuntimeError(f"embedding 服务错误: {e}") from e
+                await asyncio.sleep(EMBEDDING_RETRY_BASE_DELAY_S * attempt)
+
     async def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
         """
         获取文本的embedding向量
@@ -215,11 +275,7 @@ class EmbeddingClient:
             chunk_id,
         )
         try:
-            response = await self._client.embeddings.create(
-                model=self._model,
-                input=text,
-                encoding_format="float",
-            )
+            response = await self._create_embeddings_with_retry(text)
 
             embedding = response.data[0].embedding
             self._validate_embedding_dimension(embedding)
@@ -266,16 +322,6 @@ class EmbeddingClient:
                 str(e),
             )
             raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
-        except BadRequestError as e:
-            self._log(
-                "error",
-                "get_embedding API错误: status={} base_url={} error={}",
-                "api status error: status={} base_url={} error={}",
-                e.status_code if hasattr(e, "status_code") else "unknown",
-                self._base_url,
-                str(e),
-            )
-            raise RuntimeError(f"embedding 服务错误: {e}") from e
         except Exception as e:
             self._log(
                 "error",
@@ -289,11 +335,7 @@ class EmbeddingClient:
         if not self._model:
             raise ValueError("embedding model is required")
 
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=probe_text,
-            encoding_format="float",
-        )
+        response = await self._create_embeddings_with_retry(probe_text)
         embedding = response.data[0].embedding
         return len(embedding)
 
@@ -366,11 +408,7 @@ class EmbeddingClient:
             )
 
             try:
-                response = await self._client.embeddings.create(
-                    model=self._model,
-                    input=batch_texts,
-                    encoding_format="float",
-                )
+                response = await self._create_embeddings_with_retry(batch_texts)
             except APIConnectionError as e:
                 self._log(
                     "error",
@@ -389,16 +427,6 @@ class EmbeddingClient:
                     str(e),
                 )
                 raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
-            except BadRequestError as e:
-                self._log(
-                    "error",
-                    "embed_texts API错误: status={} base_url={} error={}",
-                    "embed_texts api status error: status={} base_url={} error={}",
-                    e.status_code if hasattr(e, "status_code") else "unknown",
-                    self._base_url,
-                    str(e),
-                )
-                raise RuntimeError(f"embedding 服务错误: {e}") from e
             except Exception as e:
                 self._log(
                     "error",

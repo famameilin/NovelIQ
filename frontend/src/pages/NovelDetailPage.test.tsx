@@ -14,6 +14,7 @@ const createAnalysisTaskMock = vi.fn();
 const resumeAnalysisTaskMock = vi.fn();
 const batchDeleteTasksMock = vi.fn();
 const cancelAnalysisTaskMock = vi.fn();
+const getTaskStatusMock = vi.fn();
 const getNarrativeStructureMock = vi.fn();
 const getEmotionStatsMock = vi.fn();
 const getCharacterStatsMock = vi.fn();
@@ -101,6 +102,7 @@ vi.mock("@/api/analysis", () => ({
   resumeAnalysisTask: (...args: unknown[]) => resumeAnalysisTaskMock(...args),
   batchDeleteTasks: (...args: unknown[]) => batchDeleteTasksMock(...args),
   cancelAnalysisTask: (...args: unknown[]) => cancelAnalysisTaskMock(...args),
+  getTaskStatus: (...args: unknown[]) => getTaskStatusMock(...args),
 }));
 
 vi.mock("@/hooks/useAnalysisStatus", () => ({
@@ -194,6 +196,7 @@ describe("NovelDetailPage", () => {
     resumeAnalysisTaskMock.mockReset();
     batchDeleteTasksMock.mockReset();
     cancelAnalysisTaskMock.mockReset();
+    getTaskStatusMock.mockReset();
     getNarrativeStructureMock.mockReset();
     getEmotionStatsMock.mockReset();
     getCharacterStatsMock.mockReset();
@@ -225,6 +228,13 @@ describe("NovelDetailPage", () => {
       failed_count: 0,
       deleted_ids: ["task-old"],
       failed_ids: [],
+    });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-ready",
+      status: "completed",
+      progress: 100,
+      current_step: "done",
     });
     getNarrativeStructureMock.mockResolvedValue({});
     getEmotionStatsMock.mockResolvedValue({});
@@ -337,6 +347,13 @@ describe("NovelDetailPage", () => {
   it("详情页应将事件密度传给叙事结构卡片", async () => {
     currentSearchParams = "task_id=task-ready";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-ready",
+      status: "completed",
+      progress: 100,
+      current_step: "done",
+    });
     getNarrativeStructureMock.mockResolvedValue({
       act1_ratio: 0.1,
       act2_ratio: 0.6,
@@ -364,6 +381,13 @@ describe("NovelDetailPage", () => {
   it("diagnosis 合法为 null 时仍应渲染主内容而不是空白主体区", async () => {
     currentSearchParams = "task_id=task-ready";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-ready",
+      status: "completed",
+      progress: 100,
+      current_step: "done",
+    });
     getDiagnosisMock.mockResolvedValue(null);
     getNarrativeStructureMock.mockResolvedValue({});
     getEmotionStatsMock.mockResolvedValue({});
@@ -383,6 +407,13 @@ describe("NovelDetailPage", () => {
   it("旧 diagnosis 合同被判重跑时应显示统一重跑态", async () => {
     currentSearchParams = "task_id=task-ready";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-ready",
+      status: "completed",
+      progress: 100,
+      current_step: "done",
+    });
     getDiagnosisMock.mockResolvedValue({
       rerun_required: true,
       rerun_reason: "focus_contract_incomplete",
@@ -412,5 +443,30 @@ describe("NovelDetailPage", () => {
       expect(screen.queryByTestId("diagnosis-summary-card")).not.toBeInTheDocument();
       expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
     });
+  });
+
+  it("运行中任务应先显示进度态且不提前请求结果接口", async () => {
+    currentSearchParams = "task_id=task-running";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-running",
+      status: "running",
+      progress: 12,
+      current_step: "preprocess",
+      stage: "preprocess",
+      message: "任务执行中",
+    });
+
+    renderNovelDetailPage();
+
+    expect(await screen.findByTestId("analysis-progress-panel")).toBeInTheDocument();
+    expect(getNarrativeStructureMock).not.toHaveBeenCalled();
+    expect(getEmotionStatsMock).not.toHaveBeenCalled();
+    expect(getCharacterStatsMock).not.toHaveBeenCalled();
+    expect(getStyleStatsMock).not.toHaveBeenCalled();
+    expect(getTopicsMock).not.toHaveBeenCalled();
+    expect(getDiagnosisMock).not.toHaveBeenCalled();
+    expect(getChunkCurvesMock).not.toHaveBeenCalled();
   });
 });
