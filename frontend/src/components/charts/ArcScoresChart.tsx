@@ -25,6 +25,9 @@ export interface ArcScoresChartProps {
 /**
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：把诊断页弧线图也接入共享卡片壳，避免图表页和信息卡页出现两套容器体系
+ *
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：弧线图在诊断页 tab 中需要跟随面板高度伸缩，避免固定高度造成外层滚动
  */
 export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
   const themeSignature = useChartThemeSignature();
@@ -106,9 +109,10 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
       icon={<GitBranch className="h-4 w-4" />}
       accent="chart-3"
       className={cn(className)}
-      bodyClassName="gap-3"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
-      <div className="h-[300px] w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+      <div className="min-h-[260px] flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
         {hasData ? (
           <ReactEChartsCore
             key={themeSignature}

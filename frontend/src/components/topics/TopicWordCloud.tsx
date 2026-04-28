@@ -33,6 +33,10 @@ export interface TopicWordCloudProps {
   className?: string;
 }
 
+/**
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：主题词云需要在统一 tab 工作区内填满可用高度，同时保留独立使用时的最小高度
+ */
 export function TopicWordCloud({
   topics,
   maxWords = 100,
@@ -151,9 +155,10 @@ export function TopicWordCloud({
       accent="chart-3"
       showOrb
       className={cn(className)}
-      bodyClassName="gap-3"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
-      <div ref={containerRef} className="h-[300px] w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+      <div ref={containerRef} className="min-h-[300px] flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
         {hasData && isVisible ? (
           <ReactEChartsCore
             key={themeSignature}
