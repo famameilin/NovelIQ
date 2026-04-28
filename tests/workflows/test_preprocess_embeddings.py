@@ -172,6 +172,53 @@ async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> N
 
 
 @pytest.mark.asyncio
+async def test_generate_chunk_embeddings_emits_chunk_progress_with_chunk_scope_fields() -> None:
+    """
+    创建时间: 2026-04-28
+    创建者: Codex
+    任务: fix-preprocess-progress-context-leak
+    说明: chunk embedding 进度事件必须显式带上自己的 sub_stage/current/total，
+          不能继续复用前一个 semantic chunking 子阶段留下来的上下文字段。
+    """
+    chunks = [
+        Chunk(index=i, text=f"第{i}段文本", start=(i - 1) * 10, end=i * 10)
+        for i in range(1, 12)
+    ]
+    mock_client = MagicMock()
+    mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+    mock_client.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+    mock_client.embed_texts = AsyncMock(return_value=[[0.5, 0.6] for _ in chunks])
+    emitted: list[StreamEvent] = []
+
+    async def capture(event: StreamEvent) -> None:
+        emitted.append(event)
+
+    with (
+        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
+        patch("src.workflows.preprocess.ensure_chunk_embeddings_schema"),
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema"),
+        patch("src.storage.repositories.chunk.insert_chunk_embeddings"),
+        patch("src.storage.repositories.chunk.insert_paragraph_embeddings"),
+    ):
+        await _generate_chunk_embeddings(
+            session=MagicMock(),
+            run_id="run-1",
+            all_chunks=chunks,
+            emitter=capture,
+        )
+
+    chunk_start_event = emitted[0]
+    chunk_progress_events = [event for event in emitted if event.message.startswith("生成向量嵌入 ")]
+
+    assert chunk_start_event.sub_stage == "chunk_embedding"
+    assert chunk_start_event.current == 0
+    assert chunk_start_event.total == 11
+    assert chunk_progress_events[0].sub_stage == "chunk_embedding"
+    assert chunk_progress_events[0].current == 1
+    assert chunk_progress_events[0].total == 11
+
+
+@pytest.mark.asyncio
 async def test_generate_paragraph_embedding_rows_fails_fast_on_empty_embedding() -> None:
     """
     创建时间: 2026-04-24

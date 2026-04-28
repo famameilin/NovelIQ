@@ -119,6 +119,21 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "thinking": StreamMessageType.llm_thinking.value,
 }
 
+# 中文注释：这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
+# 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志。
+_DEBUG_PROGRESS_SUB_STAGES = {
+    "semantic_chunking_embedding",
+    "paragraph_embedding",
+}
+
+_STAGE_PERCENT_RANGES: dict[str, tuple[float, float]] = {
+    "preprocess": (0.0, 10.0),
+    "annotate": (10.0, 80.0),
+    "aggregate": (80.0, 90.0),
+    "topic-model": (90.0, 95.0),
+    "diagnose": (95.0, 100.0),
+}
+
 
 # ------------------------------------------------------------------ #
 #  AnalysisEventBus — 上下文保持器 + 统一发送口                        #
@@ -225,8 +240,17 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        # 中文注释：LLM 流式正文/思考片段属于高频诊断信息，降到 DEBUG，避免 INFO 日志被原始输出刷屏。
-        log_level = logger.debug if resolved_event.action in {"output", "thinking"} else logger.info
+        # 中文注释：LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
+        # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO。
+        log_level = (
+            logger.debug
+            if resolved_event.action in {"output", "thinking"}
+            or (
+                resolved_event.action == "progress"
+                and resolved_event.sub_stage in _DEBUG_PROGRESS_SUB_STAGES
+            )
+            else logger.info
+        )
         log_level(
             f"[EventBus] task_id={self.task_id}, action={resolved_event.action}, "
             f"stage={resolved_event.stage}, sub_stage={resolved_event.sub_stage}, "
@@ -288,15 +312,7 @@ class AnalysisEventBus:
 
         progress_ratio = current / total
 
-        stage_ranges = {
-            "preprocess": (0.0, 10.0),
-            "annotate": (10.0, 80.0),
-            "aggregate": (80.0, 90.0),
-            "topic-model": (90.0, 95.0),
-            "diagnose": (95.0, 100.0),
-        }
-
-        start, end = stage_ranges.get(stage, (0.0, 100.0))
+        start, end = _STAGE_PERCENT_RANGES.get(stage, (0.0, 100.0))
         return start + progress_ratio * (end - start)
 
     # ------------------------------------------------------------------
@@ -323,11 +339,12 @@ class AnalysisEventBus:
     async def emit_stage_complete(self, stage: str) -> None:
         """发送阶段完成事件"""
         self._sub_percent = 100.0
+        _, stage_end_percent = _STAGE_PERCENT_RANGES.get(stage, (0.0, 100.0))
         await self.emit(
             StreamEvent(
                 action="complete",
                 stage=stage,
-                percent=100.0,
+                percent=stage_end_percent,
                 sub_percent=100.0,
                 message=f"{stage} 完成",
             )

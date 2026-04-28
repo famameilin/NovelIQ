@@ -286,6 +286,9 @@ async def _generate_chunk_embeddings(
             StreamEvent(
                 action="start",
                 stage="preprocess",
+                sub_stage="chunk_embedding",
+                current=0,
+                total=total_chunks,
                 message="生成向量嵌入",
                 sub_percent=0.0,
             )
@@ -298,11 +301,15 @@ async def _generate_chunk_embeddings(
         if total_chunks > 1 and idx % 10 == 0:
             logger.info(f"Generating embedding for chunk {idx + 1}/{total_chunks}")
             if emitter:
-                sub_percent = (idx / total_chunks) * 100
+                completed_chunks = idx + 1
+                sub_percent = (completed_chunks / total_chunks) * 100
                 await emitter(
                     StreamEvent(
                         action="progress",
                         stage="preprocess",
+                        sub_stage="chunk_embedding",
+                        current=completed_chunks,
+                        total=total_chunks,
                         message=f"生成向量嵌入 {idx + 1}/{total_chunks}",
                         sub_percent=sub_percent,
                     )
