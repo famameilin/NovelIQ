@@ -60,7 +60,7 @@ describe("TimelineTrack", () => {
   it("没有节点时会展示空态，并隐藏张力说明徽标", () => {
     render(<TimelineTrack nodes={[]} showTension={false} totalChunks={20} />);
 
-    expect(screen.getByText("0 个关键节点")).toBeInTheDocument();
+    expect(screen.getByText("0 个可见节点")).toBeInTheDocument();
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
     expect(screen.queryByText("底图表示节奏张力")).not.toBeInTheDocument();
   });
