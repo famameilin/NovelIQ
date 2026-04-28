@@ -1,9 +1,6 @@
 """
 验证消歧证据分级功能
 
-创建时间: 2026-03-26
-创建者: TraeAI
-任务: disambiguation-evidence-grading
 说明: 使用数据库真实数据验证证据分级效果
 """
 

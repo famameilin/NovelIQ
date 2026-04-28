@@ -1,8 +1,6 @@
 """
 任务运行态持久化服务。
 
-创建时间: 2026-04-23
-任务: p2-task-runtime-persistence
 说明: 将 TaskManager 的 DB 写回、run_id 解析与 worker heartbeat 刷新逻辑收口到独立服务。
 """
 
@@ -21,19 +19,11 @@ from src.storage.repositories import RunRepository
 class TaskRuntimePersistenceService:
     """
     任务运行态持久化服务。
-
-    创建时间: 2026-04-23
-    任务: p2-task-runtime-persistence
-    新建原因: 让 TaskManager 专注执行缓存，DB 真相写回交给独立服务处理。
     """
 
     def __init__(self, worker_id: str) -> None:
         """
         初始化运行态持久化服务。
-
-        创建时间: 2026-04-23
-        任务: p2-task-runtime-persistence
-        新建原因: 绑定当前进程 worker_id，统一注入活跃运行态写回。
         """
         self._worker_id = worker_id
         self._session_factory = None
@@ -41,20 +31,12 @@ class TaskRuntimePersistenceService:
     def set_session_factory(self, factory) -> None:
         """
         设置数据库会话工厂。
-
-        创建时间: 2026-04-23
-        任务: p2-task-runtime-persistence
-        新建原因: 让依赖注入方统一配置 DB 写回能力，TaskManager 不再直接持有 session factory。
         """
         self._session_factory = factory
 
     def update_task_runtime(self, task_id: str, **kwargs) -> None:
         """
         可靠地更新数据库中的任务运行态。
-
-        创建时间: 2026-04-23
-        任务: p2-task-runtime-persistence
-        新建原因: 从 TaskManager 提取 DB 写回逻辑，统一 run_id 解析与 heartbeat 注入。
         """
         if self._session_factory is None:
             logger.warning(f"DB session factory not set, skipping DB update for task {task_id}")
@@ -62,7 +44,7 @@ class TaskRuntimePersistenceService:
 
         update_params = self._build_update_params(kwargs)
         if self._should_refresh_worker_heartbeat(update_params):
-            # 中文注释：只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
+            # 只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
             # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”。
             update_params.setdefault("worker_id", self._worker_id)
             update_params["heartbeat_at"] = datetime.now(UTC)
@@ -87,10 +69,6 @@ class TaskRuntimePersistenceService:
     def _build_update_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """
         将调用方 kwargs 规整为 repository 可接受的更新参数。
-
-        创建时间: 2026-04-23
-        任务: p2-task-runtime-persistence
-        新建原因: 让 TaskManager 不再承担字段筛选和枚举归一化职责。
         """
         update_params: dict[str, Any] = {}
         if "status" in kwargs:
@@ -116,10 +94,6 @@ class TaskRuntimePersistenceService:
     def _should_refresh_worker_heartbeat(self, update_params: dict[str, Any]) -> bool:
         """
         判断本次写回是否应刷新 worker 归属和心跳。
-
-        创建时间: 2026-04-23
-        任务: p2-task-runtime-persistence
-        新建原因: 将活跃运行态判定从 TaskManager 中拆出，统一由持久化服务维护。
         """
         active_statuses = {
             TaskStatus.PENDING.value,
@@ -137,10 +111,6 @@ class TaskRuntimePersistenceService:
     def _resolve_run_id_for_db_write(self, task_id: str, session) -> str:
         """
         将任务写回统一解析到真实 run_id。
-
-        创建时间: 2026-04-23
-        任务: p2-task-runtime-persistence
-        新建原因: 保留历史 8 位 task_id -> full run_id 的兼容写回能力，但移出 TaskManager。
         """
         if len(task_id) == 8:
             try:

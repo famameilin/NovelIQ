@@ -1,8 +1,6 @@
 """
 BaseModelClient 流式缓冲与事件发送辅助模块。
 
-创建时间: 2026-04-23
-任务: p2-base-model-client-split
 说明: 从 base.py 中拆出流式 chunk 聚合、节流发送与响应对象拼装逻辑，
       让 BaseModelClient 只保留兼容入口与运行时上下文。
 """
@@ -19,10 +17,6 @@ from typing import Any
 class StreamAggregationState:
     """
     流式响应聚合状态。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将 output/thinking 缓冲、节流时钟与 usage 聚合从 transport 主循环中拆出。
     """
 
     content_chunks: list[str] = field(default_factory=list)
@@ -46,10 +40,6 @@ async def emit_stream_delta(
 ) -> None:
     """
     处理单个流式 delta，并按节流策略发送 SSE 事件。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 统一 output/thinking 两类缓冲逻辑，减少 transport 中的重复 if 分支。
     """
     content = getattr(delta, "content", None)
     if content:
@@ -93,10 +83,6 @@ async def emit_stream_delta(
 async def flush_stream_buffers(state: StreamAggregationState, emitter: Any) -> None:
     """
     发送流末尾尚未广播的残余缓冲。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 保证 transport 在循环结束后只关心"收尾"，不重复关心两类 buffer 细节。
     """
     from src.api.models.events import StreamEvent
 
@@ -109,10 +95,6 @@ async def flush_stream_buffers(state: StreamAggregationState, emitter: Any) -> N
 def finalize_stream_content(state: StreamAggregationState) -> tuple[str, str | None]:
     """
     将聚合状态收束为最终 content/reasoning_content。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 统一处理“只有 thinking 没有正文”的兼容回退。
     """
     full_content = "".join(state.content_chunks)
     full_reasoning = "".join(state.reasoning_chunks) if state.reasoning_chunks else None
@@ -132,10 +114,6 @@ def build_stream_response(
 ) -> Any:
     """
     将流式内容拼装成与非流式一致的响应对象。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 让 transport 与 BaseModelClient 都复用同一份响应构造逻辑。
     """
     message = SimpleNamespace(
         content=content,

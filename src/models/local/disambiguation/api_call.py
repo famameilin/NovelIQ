@@ -1,25 +1,7 @@
 """
 消歧API调用模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
 说明: 提取消歧API调用相关逻辑
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: migrate-litellm-to-openai-sdk
-修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
-
-修改时间: 2026-03-22
-修改者: TraeAI
-任务: code-quality-review
-修改内容: 移除硬编码的 "gpt-4" 默认值，改用 config.model（已通过 validate 确保存在）
-
-修改时间: 2026-04-07
-修改者: TraeAI
-任务: websocket-streaming-progress
-修改内容: 添加 stream_callback 参数支持
 """
 
 from __future__ import annotations
@@ -50,56 +32,6 @@ async def call_disambiguate_api(
 ) -> DisambiguateResponseModel:
     """
         统一调用消歧API，处理响应字符串/对象两种情况
-
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: refactor-model-interaction-layer
-
-        修改时间: 2026-03-16
-        修改者: TraeAI
-        任务: 重构本地消歧客户端集成 Instructor
-        修改内容: 使用 Instructor 实现结构化输出，直接返回 DisambiguateResponseModel
-
-        修改时间: 2026-03-17
-        修改者: TraeAI
-        任务: 移除 Instructor 依赖
-        修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-        修改内容: 提取为独立模块函数
-
-        修改时间: 2026-03-23
-        修改者: TraeAI
-        任务: migrate-litellm-to-openai-sdk
-        修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
-
-        修改时间: 2026-03-23
-        修改者: TraeAI
-        任务: fix/disambig-thinking-save
-        修改内容: 添加 reasoning_effort 参数，移除 is_cloud 参数（本地和云端统一使用 reasoning_effort）
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构为 async def（适配 AsyncOpenAI）
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: count-failed-llm-calls
-    修改内容: 结构化解析失败时仍补记 token，避免请求已完成却被遗漏
-
-    修改时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    修改内容: 消歧结构化调用改走项目级 structured_output 适配层，保留 stream/emitter 与 cloud-safe schema。
-
-    修改时间: 2026-04-24
-    任务: fix-structured-output-review-findings
-    修改内容: 仅当结构化适配层带回 raw_response 时补记 token，避免本地前置错误污染 token_usage。
-
-    修改时间: 2026-04-24
-    任务: unify-disambig-transport-record-arrays
-    修改内容: 消歧传输层统一使用记录数组响应模型，解析后再归一化回内部 dict 模型。
     """
     if not config.model:
         raise ValueError("model is required")

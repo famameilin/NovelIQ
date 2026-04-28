@@ -1,10 +1,7 @@
 """
 标注数据 Repository 主类
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分annotation_repository
-说明: 主Repository类，通过组合方式使用各模块函数
+主Repository类，通过组合方式使用各模块函数
 """
 
 from __future__ import annotations
@@ -34,10 +31,7 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
     管理分块标注、角色、对话、关系等数据。
     所有操作都基于 run_id 进行数据隔离。
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - 拆分annotation_repository
-    修改内容: 使用函数组合方式重组代码结构，拆分为3个模块：
+    使用函数组合方式重组代码结构，拆分为3个模块：
         - inserts: 标注数据插入操作
         - queries: 标注数据查询操作
         - characters: 角色消歧、名称更新、别名映射
@@ -130,10 +124,7 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         """
         获取当前 chunk 可见的活跃 setup 池摘要。
 
-        修改时间: 2026-04-26
-        修改者: Codex
-        任务: fix-diagnosis-followup-findings
-        修改原因: active setup pool limit 已改为运行时读取 settings；
+        active setup pool limit 已改为运行时读取 settings；
         wrapper 不能再用默认参数把模块导入时的旧值固化回 30。
         """
         return foreshadowing_threads.fetch_active_foreshadowing_threads_for_prompt(
@@ -267,9 +258,6 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         """
         获取指定 chunk 的标注结果
 
-        创建时间: 2026-03-19
-        创建者: TraeAI
-        任务: 修复缺失的 get_annotation_by_chunk 方法
         """
         return queries.get_annotation_by_chunk(self.session, run_id, chunk_id)
 

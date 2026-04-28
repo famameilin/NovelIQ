@@ -1,38 +1,4 @@
-/**
- * TimelinePage - 叙事时间轴页面
- *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-B 叙事时间轴
- * 说明: 完整叙事时间轴页面，展示四阶段划分、关键事件节点、张力曲线叠加
- *
- * 修改时间: 2026-04-21
- * 任务: 修复叙事时间轴页面布局与节点语义表达
- * 修改内容:
- *   - 重组时间轴主体布局，将轨道、图例、张力区收敛到同一信息区
- *   - 将节点详情移到桌面端右侧，避免点击后还要滚到张力曲线下方阅读
- *   - 为未选中节点的状态补充明确引导，减少页面空白感
- *
- * 修改时间: 2026-04-21
- * 任务: 对齐时间轴页与主题页的头部表现
- * 修改内容:
- *   - 统一使用 NovelHeader 承担页面标题，避免重复标题层级
- *   - 移除页面内额外说明文案，使时间轴页与主题页保持一致的头部结构
- *
- * 修改时间: 2026-04-22
- * 任务: 收紧时间轴页统计卡高度
- * 修改内容:
- *   - 仅压缩时间轴页顶部三张统计卡的内边距与说明区，避免影响其他页面的 MetricCard
- *   - 保留原有视觉风格，只降低这组三卡的纵向占用
- *
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 时间轴合同重构第二轮
- * 修改内容:
- *   - 页面改为消费 `composite_nodes + atomic_nodes` 双层合同
- *   - `max_level` 改为前端本地筛选状态，不再触发后端裁剪
- *   - 新增 `view=composite|atomic` 视图切换，并保持深链稳定
- */
+/** 展示叙事时间轴、节点详情和双层节点视图切换 */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
@@ -53,10 +19,6 @@ import {
   TimelineControls,
 } from "@/components/timeline";
 import type { TimelineCompositeNode, TimelineNode, TimelinePhase } from "@/api/types";
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -99,14 +61,7 @@ function isCompositeTimelineNode(node: TimelineDisplayNode | null): node is Time
   return node != null && "child_node_ids" in node;
 }
 
-/**
- * 修改时间: 2026-04-27
- * 修改者: Codex
- * 任务: fix-timeline-selected-node-relation-event-conflict
- * 修改内容:
- *   - 只有当 relation_event_id 真正属于当前 selected node 时，才允许继续保留到详情面板与后续 URL。
- *   - 避免 selected_node_id 已胜出时，页面仍把别的节点 relation_event_id 带入 graph/timeline 深链。
- */
+/** 只有当 relation_event_id 真正属于当前节点时，才继续保留它 */
 function getSelectedNodeRelationEventId(node: TimelineDisplayNode | null, relationEventId: number | null): number | null {
   if (!isAtomicTimelineNode(node) || relationEventId == null) {
     return null;
@@ -115,10 +70,6 @@ function getSelectedNodeRelationEventId(node: TimelineDisplayNode | null, relati
     node.relation_events?.some((relationEvent) => relationEvent.relation_event_id === relationEventId) ?? false;
   return belongsToSelectedNode ? relationEventId : null;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
-/* ------------------------------------------------------------------ */
 
 export function TimelinePage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -190,8 +141,8 @@ export function TimelinePage() {
     navigate(buildTimelinePageUrl(novelId, storeTaskId, {
         maxLevel,
         viewMode,
-        // 中文注释：时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
-        // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮。
+        // 时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
+        // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮
         selectedNodeId: null,
         selectedChunk: null,
         relationEventId: null,
@@ -342,8 +293,8 @@ export function TimelinePage() {
         viewMode,
         selectedNodeId: selectedDetailNode?.node_id ?? null,
         selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
-        // 中文注释：控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link。
-        // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择。
+        // 控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link
+        // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择
         relationEventId: resolvedRelationEventId,
       }), { replace: true });
     },

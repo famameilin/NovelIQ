@@ -1,8 +1,5 @@
 /**
- * 创建时间：2026-04-04
- * 创建者：GLM-5
- * 任务：创建 Breadcrumb 面包屑导航组件
- * 说明：实现面包屑导航组件，支持可点击/不可点击状态，使用 ChevronRight 图标作为分隔符
+ * 实现面包屑导航组件，支持可点击/不可点击状态，使用 ChevronRight 图标作为分隔符
  */
 import { ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";

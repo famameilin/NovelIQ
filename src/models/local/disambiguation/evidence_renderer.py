@@ -222,8 +222,7 @@ def render_disambiguation_prompt_context_sections(
     prompt_context: DisambiguationPromptContext | None,
 ) -> list[str]:
     """按固定顺序渲染消歧任务上下文。
-
-    中文注释：这里的顺序就是消歧公共接口的正式消费顺序，
+    这里的顺序就是消歧公共接口的正式消费顺序，
     先放已有角色锚点，再放图谱提示，最后放共享 evidence block。
     """
 
@@ -257,7 +256,7 @@ def render_disambig_prompt_context(
     fallback_requested_names: Iterable[str] | None = None,
     priority_names: Iterable[str] | None = None,
 ) -> str | None:
-    # 中文注释：消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
+    # 消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
     shared_sections = render_shared_evidence_sections(
         bundle,
         fallback_requested_names=fallback_requested_names,
@@ -282,10 +281,6 @@ def render_disambiguation_graph_hint(
     max_lines: int | None = None,
 ) -> str | None:
     """将图谱权威数据渲染为消歧专用提示。
-
-    创建时间: 2026-04-17
-    创建者: TraeAI
-    任务: refactor/split-provider-bundle-renderer
     说明: 将 build_graph_feedback_hint 逻辑从 DisambigContextProvider 迁移至 renderer 层，
           符合 evidence layer 的 provider/renderer 职责分离原则。
     """
@@ -294,8 +289,6 @@ def render_disambiguation_graph_hint(
         """
         读取关系提示字段。
 
-        创建时间: 2026-04-23
-        任务: P0-graph-repository-dto-boundary
         说明: 正式路径读取 CurrentRelationRow DTO；保留 dict 读取仅用于旧测试 stub。
         """
         if isinstance(relation, dict):

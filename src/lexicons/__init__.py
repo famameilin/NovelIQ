@@ -9,9 +9,6 @@
 - match_terms: 使用 count_mixed_hits 替代
 - update_lexicons_from_texts: 已移除
 
-创建时间: 2026-04-06
-修改者: GLM-5
-任务: 移除向后兼容代码
 """
 
 from .registry import LexiconRegistry, get_registry, reset_registry

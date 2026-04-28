@@ -1,8 +1,5 @@
 """
-创建时间: 2026-04-26
-修改者: Codex
-任务: phase2-setup-pool
-说明: Phase2 setup 池与全量台账 ORM 模型定义。
+Phase2 setup 池与全量台账 ORM 模型定义。
 
 本模块提供：
 - ForeshadowingThread: setup thread 主表，保存跨 chunk 状态
@@ -23,10 +20,7 @@ class ForeshadowingThread(Base):
     """
     强伏笔 thread 主表。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
-    说明: 保存 setup thread 的生命周期状态，活跃池只是这张表上的过滤视图，不再额外维护 JSON 真相源。
+    保存 setup thread 的生命周期状态，活跃池只是这张表上的过滤视图，不再额外维护 JSON 真相源。
     """
 
     __tablename__ = "foreshadowing_threads"
@@ -72,10 +66,7 @@ class ForeshadowingThreadHit(Base):
     """
     强伏笔 thread 命中表。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
-    说明: 每次 Phase2 命中都落一条 hit，用于回放 anchor_chunk_ids 和最近理由，不在主表里存 JSON 数组。
+    每次 Phase2 命中都落一条 hit，用于回放 anchor_chunk_ids 和最近理由，不在主表里存 JSON 数组。
     """
 
     __tablename__ = "foreshadowing_thread_hits"

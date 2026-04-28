@@ -1,10 +1,7 @@
 """
 小说表 ORM 模型定义
 
-创建时间: 2026-04-08
-创建者: TraeAI
-任务: add-novels-table
-说明: 存储小说元数据，解决上传后列表不显示的问题
+存储小说元数据，解决上传后列表不显示的问题
 """
 
 from __future__ import annotations
@@ -21,10 +18,7 @@ class Novel(Base):
     """
     小说表
 
-    创建时间: 2026-04-08
-    创建者: TraeAI
-    任务: add-novels-table
-    说明: 存储小说元数据，上传后立即可查
+    存储小说元数据，上传后立即可查
     """
 
     __tablename__ = "novels"

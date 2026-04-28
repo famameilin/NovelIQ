@@ -1,9 +1,6 @@
 """
 名称归一化工具
 
-创建时间: 2026-03-28
-创建者: TraeAI
-任务: consolidate-codebase-architecture
 说明: 从 results_fetchers.py 拆分，包含名称归一化相关函数
 """
 
@@ -25,11 +22,6 @@ def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str |
     如果提供了 alias_map 且 name 存在于映射中，则返回规范名；
     否则返回原始名称。
 
-    创建时间: 2026-03-21
-    创建者: TraeAI
-    任务: refactor-duplicate-normalize-name
-    修改内容: 提取重复的 normalize_name 函数为模块级函数
-
     Args:
         name: 待归一化的名称
         alias_map: 别名到规范名的映射字典
@@ -47,10 +39,6 @@ def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str |
 def _normalize_name_list(values: list[str] | None, alias_map: dict[str, str] | None) -> list[str] | None:
     """
     对名称列表应用别名归一化并去重，保持原有顺序
-
-    创建时间: 2026-03-27
-    创建者: Codex
-    任务: fix-topic-label-alias-normalization
 
     Args:
         values: 待归一化的名称列表
@@ -77,10 +65,6 @@ def _normalize_name_list(values: list[str] | None, alias_map: dict[str, str] | N
 def _normalize_text_by_alias_map(text: str | None, alias_map: dict[str, str] | None) -> str | None:
     """
     对自由文本中的人物别名做谨慎归一化
-
-    创建时间: 2026-03-27
-    创建者: Codex
-    任务: fix-diagnosis-text-alias-normalization
 
     说明:
         仅对 alias_map 中 alias != canonical 的条目做精确替换，

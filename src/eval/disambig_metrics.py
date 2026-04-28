@@ -1,17 +1,4 @@
-"""
-消歧评测指标计算
-
-创建时间: 2026-04-01
-创建者: CodeBuddy
-任务: P0 评测基线系统
-
-提供金标对比和指标计算功能，支持 A/B 对比。
-
-修改时间: 2026-04-02
-修改者: TraeAI
-任务: P2.2-entity-type-metrics
-修改内容: 新增 compute_metrics_by_entity_type 函数，支持按实体类型分组统计
-"""
+"""消歧评测指标计算与金标对比"""
 
 from __future__ import annotations
 
@@ -26,7 +13,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class MergeRecord:
-    """单条合并决策记录。"""
+    """单条合并决策记录"""
 
     alias: str
     system_canonical: str  # 系统判决的规范名
@@ -36,12 +23,12 @@ class MergeRecord:
 
     @property
     def is_merge(self) -> bool:
-        """系统是否执行了合并（alias != system_canonical）。"""
+        """系统是否执行了合并（alias != system_canonical）"""
         return self.alias != self.system_canonical
 
     @property
     def is_correct(self) -> bool | None:
-        """与金标对比是否正确。None 表示无法判断。"""
+        """与金标对比是否正确。None 表示无法判断"""
         if self.gold_judgment == "ambiguous":
             return None
         if self.gold_judgment == "should_merge":
@@ -53,7 +40,7 @@ class MergeRecord:
 
 @dataclass
 class RunMetrics:
-    """单个 run 的评测指标。"""
+    """单个 run 的评测指标"""
 
     run_id: str
     total_merges: int = 0  # 系统执行的合并总数
@@ -114,7 +101,7 @@ class RunMetrics:
 
 @dataclass
 class BaselineReport:
-    """评测基线报告。"""
+    """评测基线报告"""
 
     generated_at: str = ""
     branch: str = ""
@@ -241,14 +228,14 @@ def compute_run_metrics(
             gold_independent_set.add(alias)
 
     def _find_canonical(name: str) -> str | None:
-        """在系统合并中查找 name 的 canonical。"""
+    """在系统合并中查找 name 的 canonical"""
         for a, c in sys_merge_set:
             if a == name:
                 return c
         return None
 
     def _in_same_merge_group(name_a: str, name_b: str) -> bool:
-        """检查两个名字是否在同一个合并组中。"""
+    """检查两个名字是否在同一个合并组中"""
         for g in _equiv_groups:
             if name_a in g and name_b in g:
                 return True
@@ -318,7 +305,7 @@ def compute_run_metrics(
 
 
 def build_aggregate_metrics(run_metrics_list: list[RunMetrics]) -> dict[str, float]:
-    """汇总多个 run 的指标。"""
+    """汇总多个 run 的指标"""
     if not run_metrics_list:
         return {}
     total_merges = sum(rm.total_merges for rm in run_metrics_list)
@@ -339,7 +326,7 @@ def build_aggregate_metrics(run_metrics_list: list[RunMetrics]) -> dict[str, flo
 
 
 def format_report_markdown(report: BaselineReport) -> str:
-    """将报告格式化为 Markdown。"""
+    """将报告格式化为 Markdown"""
     lines = [
         "# 消歧评测基线报告",
         "",
@@ -388,7 +375,7 @@ def format_report_markdown(report: BaselineReport) -> str:
 
 
 def compare_reports(baseline: BaselineReport, current: BaselineReport) -> str:
-    """对比两份报告，输出差异摘要。"""
+    """对比两份报告，输出差异摘要"""
     lines = [
         "# 基线对比报告",
         "",
@@ -429,9 +416,6 @@ def compute_metrics_by_entity_type(
     数据来源：从 graph_entities JOIN graph_entity_aliases 获取每个 alias 的 entity_type，
     不修改金标格式。
 
-    创建时间: 2026-04-02
-    创建者: TraeAI
-    任务: P2.2-entity-type-metrics
     """
     from loguru import logger
 

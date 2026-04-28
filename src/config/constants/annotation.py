@@ -1,15 +1,7 @@
 """
 标注相关常量
 
-创建时间: 2026-03-28
-创建者: TraeAI
-任务: consolidate-codebase-architecture
 说明: 从各模块提取的标注相关硬编码常量
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 删除运行时重试常量，仅保留静态业务字典和枚举
 """
 
 from __future__ import annotations

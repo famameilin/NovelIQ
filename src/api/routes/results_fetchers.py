@@ -1,23 +1,5 @@
 """
-创建时间: 2026-03-11
-创建者: Claude
-任务: API 路由数据获取函数
 说明: 从数据库获取分析结果的辅助函数
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: refactor-routes-use-repository
-修改内容: 重构为使用 Repository 模式，所有函数添加 run_id 参数支持
-
-修改时间: 2026-03-19
-修改者: TraeAI
-任务: 添加层级关系导出到JSON功能
-修改内容: 添加 _fetch_hierarchical_relations 函数和 HierarchicalRelation 导入
-
-修改时间: 2026-03-28
-修改者: TraeAI
-任务: consolidate-codebase-architecture
-修改内容: 拆分为子模块，此文件仅作为转发导入层
 """
 
 from src.api.services.results_queries import (

@@ -1,10 +1,7 @@
 """
 Aggregate Metrics 模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-说明: 指标聚合功能模块
+指标聚合功能模块
 """
 
 from __future__ import annotations
@@ -51,10 +48,6 @@ def aggregate_all_metrics(
     """
     Aggregate all metric groups into a single result object.
 
-    修改时间: 2026-04-04
-    修改者: TraeAI
-    任务: fix-style-stats-missing-fields
-    修改内容: 添加 fetch_style_data 调用，传递 style_data 给 compute_language_style_metrics
     """
     result = AggregateResult()
 

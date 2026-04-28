@@ -92,7 +92,7 @@ export function GraphPage() {
       return;
     }
 
-    // 中文注释：URL 上带 task_id 的首屏 deep-link 必须先等 store 同步到同一 task，
+    // URL 上带 task_id 的首屏 deep-link 必须先等 store 同步到同一 task，
     // 不能让旧 store 状态抢先回写 URL；否则会把合法 deep-link 误改成旧任务。
     if (urlTaskId === storeTaskId) {
       if (urlTaskSyncRef.current === storeTaskId) {
@@ -121,7 +121,7 @@ export function GraphPage() {
   const charactersQuery = useQuery({
     queryKey: ["characters", novelId, taskScopeId],
     queryFn: () => getCharacters(novelId!, taskScopeId!),
-    // 中文注释：appearanceCountMap 是图谱页面正式视觉语义的一部分；
+    // appearanceCountMap 是图谱页面正式视觉语义的一部分；
     // 这里只在 `/graph` 主查询成功后再请求 `/characters`，避免旧 run 或主查询失败时
     // 并发打出第二条旁路状态链。
     enabled: enabled && graphQuery.isSuccess && !graphRerunRequired,
@@ -258,7 +258,7 @@ export function GraphPage() {
       return;
     }
 
-    // 中文注释：GraphPage 自己只负责清理页面级展示状态；事件窗口分页和 deep-link 自动选中
+    // GraphPage 自己只负责清理页面级展示状态；事件窗口分页和 deep-link 自动选中
     // 已分别下沉到独立 hook，避免 task 切换时多个职责互相踩状态。
     setSelectedNode(null);
     setIsPanelOpen(false);
@@ -426,7 +426,7 @@ export function GraphPage() {
     </>
   );
 
-  // 中文注释：GraphPage 也需要和 TimelinePage 一样先兜住路由缺参空态，
+  // GraphPage 也需要和 TimelinePage 一样先兜住路由缺参空态，
   // 避免 novelId 缺失时继续渲染图谱分析入口，造成“页面存在但上下文不存在”的假象。
   if (!novelId) {
     return (

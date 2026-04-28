@@ -1,16 +1,11 @@
 """
-创建时间: 2026-03-19
-创建者: TraeAI
-任务: ID系统统一优化 - 创建ID映射工具模块
-说明: 提供统一的ID生成和转换工具，建立task_id和run_id之间的映射关系
+提供统一的ID生成和转换工具，建立task_id和run_id之间的映射关系
 
 设计原则:
 - task_id (8位): 用于API层、外部交互
 - run_id (36位): 用于数据库主键、内部数据关联
 - 映射关系: task_id = run_id[:8]
 
-修改记录:
-- 2026-03-19 TraeAI 初始创建
 """
 
 from __future__ import annotations
@@ -128,10 +123,7 @@ def task_id_to_run_id(task_id: str, conn: Connection | Session) -> str:
         >>> task_id_to_run_id('3a25baca', conn)
         '3a25baca-1a72-4444-a772-2ddc64334cd2'
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-resume-feature - 断点续传功能修复
-    修改内容: 使用 limit(1) 避免多记录时抛出异常
+    使用 limit(1) 避免多记录时抛出异常
     """
     if not task_id or len(task_id) != 8:
         raise ValueError(f"Invalid task_id: {task_id}. Expected exactly 8 characters.")

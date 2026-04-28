@@ -1,28 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: annotation 子模块初始化
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 9 继续拆分annotation_client
-修改内容: 添加新模块导出
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
-修改内容: 添加 single_call 和 foreshadowing 模块导出
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: refactor-phase3-to-annotation-layer
-修改内容: 添加 phase3 模块导出（对话归属判断）
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 移除 PHASE_MAX_RETRIES 导出，阶段重试统一从 settings.runtime 读取
 """
 
 from __future__ import annotations

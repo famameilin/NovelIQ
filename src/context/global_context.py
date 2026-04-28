@@ -1,10 +1,5 @@
 """
 全局上下文管理模块
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除 operations 导入，使用 Repository 替代
 """
 
 from __future__ import annotations
@@ -149,16 +144,6 @@ def save_global_context(
 ) -> None:
     """
     保存全局上下文信息到数据库
-
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    任务: fix-annotation-disambiguation-issues
-    修改原因: 支持存储小说标题
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 使用 StatsRepository 替代 operations 函数，添加 run_id 参数
     """
     characters_str = json.dumps(core_characters, ensure_ascii=False)
     stats_repo = StatsRepository(conn)
@@ -173,11 +158,6 @@ def load_global_context(
 ) -> dict[str, Any] | None:
     """
     加载全局上下文信息
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 使用 StatsRepository 替代 operations 函数，添加 run_id 参数
     """
     stats_repo = StatsRepository(conn)
     row = stats_repo.fetch_global_context(run_id or "default", novel_id)
@@ -206,11 +186,6 @@ def update_global_context_in_db(
 ) -> None:
     """
     更新全局上下文信息
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 使用 StatsRepository 替代 operations 函数，添加 run_id 参数
     """
     kwargs = {}
     if core_characters is not None:

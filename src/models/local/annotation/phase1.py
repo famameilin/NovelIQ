@@ -1,28 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: Phase1 基础标注逻辑
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 3 统一重试机制
-修改内容: 使用 AnnotationRetryHandler 统一重试逻辑
-
-修改时间: 2026-03-19
-修改者: TraeAI
-任务: 添加模型交互记录保存
-修改内容: 添加 save_model_interaction 工具函数
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 创建统一的模型交互记录接口
-修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: remove-unused-annotation-fields
-修改内容: 移除 character_appearances 参数
 """
 
 from __future__ import annotations
@@ -59,26 +36,7 @@ async def execute_phase1_call(
     """
     执行Phase1单次调用
 
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取_do_phase1_method
     说明: 从_annotate_chunk_phase1中提取的内嵌函数
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: unify-estimated-token-accounting
-    修改内容: Phase1 token_usage 改为基于 messages/response 的统一估算口径，不再依赖 provider usage
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-token-coverage-fallback-bucket
-    修改内容: 即使当前执行客户端切到 annotation_fallback，token_usage 仍统一记回 annotation 主业务桶，
-              避免 coverage 比较把 fallback 调用误判为未记账
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -94,7 +52,7 @@ async def execute_phase1_call(
             response, is_cloud, chunk_id, "phase1"
         )
     except Exception:
-        # 中文注释：这里的异常说明模型响应已经返回，但响应清洗/重复输出检测失败；
+        # 这里的异常说明模型响应已经返回，但响应清洗/重复输出检测失败；
         # 这种场景同样已经真实消耗了 token，需要按响应对象补记成本。
         client._record_estimated_token_usage_from_response(
             current_messages,
@@ -140,7 +98,7 @@ async def execute_phase1_call(
 
         result = client._validate_annotation(result, sources, chunk_id, content_clean)
     except Exception:
-        # 中文注释：phase1 的失败经常发生在 JSON 解析或业务校验阶段，
+        # phase1 的失败经常发生在 JSON 解析或业务校验阶段，
         # 但此时模型响应已经拿到了，仍需要把本次尝试的 token 成本记下来。
         client._record_estimated_token_usage_from_messages(
             current_messages,
@@ -151,7 +109,7 @@ async def execute_phase1_call(
         )
         raise
 
-    # 中文注释：fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1。
+    # fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1。
     client._record_estimated_token_usage_from_messages(
         current_messages,
         content_clean,
@@ -176,15 +134,6 @@ async def execute_phase1_with_retry(
 ) -> ChunkAnnotation:
     """
     执行Phase1带重试的调用
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取重试逻辑
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
     """
     from src.models.local.schema import ChunkAnnotation
 
@@ -255,15 +204,6 @@ async def annotate_chunk_phase1(
 ) -> ChunkAnnotation:
     """
     第一次调用：基础标注（带独立重试机制）
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
     """
     messages = _build_annotation_messages_v2(
         text=text,

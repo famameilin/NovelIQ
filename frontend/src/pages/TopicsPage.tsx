@@ -1,10 +1,7 @@
 /**
  * TopicsPage - 主题分布页面
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-C 主题分布
- * 说明: 展示 LDA 主题建模结果，包括词云、柱状图、表格
+ * 展示 LDA 主题建模结果，包括词云、柱状图、表格
  */
 import { useEffect, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";

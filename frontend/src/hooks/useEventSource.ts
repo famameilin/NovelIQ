@@ -1,25 +1,6 @@
-/**
- * useEventSource - SSE (Server-Sent Events) 连接管理 Hook
- *
- * 创建时间: 2026-04-09
- * 创建者: TraeAI
- * 任务: 前端适配 SSE
- * 说明: 提供 SSE 连接管理，支持自动重连（浏览器原生）、事件监听
- *
- * 修改时间: 2026-04-09
- * 创建者: GLM-5
- * 任务: sse-architecture-review
- * 修改内容:
- * - 删除未使用的 useEventSource 基础 Hook（死代码）
- * - useSSEListener: onEvent/onError 用 useRef 包裹，避免依赖不稳定导致 EventSource 频繁重建
- * - onerror 中不主动 close，让浏览器原生自动重连
- */
+/** SSE 连接管理 Hook，提供事件监听和浏览器原生自动重连 */
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
 
 export type SSEEventType =
   | "stage_start"
@@ -37,10 +18,6 @@ interface SSEEventListenerOptions {
   onError?: (error: Event) => void;
   eventTypes?: SSEEventType[];
 }
-
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
 
 export function useSSEListener(
   url: string | null,

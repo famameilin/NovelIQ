@@ -1,10 +1,6 @@
 """
 数据库迁移脚本：修复 emotion_curve 和 rhythm_curve 表的唯一约束
 
-创建时间: 2026-03-16
-创建者: TraeAI
-任务: 修复测试失败 - ON CONFLICT 需要唯一约束
-
 问题：emotion_curve 和 rhythm_curve 表在数据库中缺少复合主键约束 (chunk_id, run_id)
 导致 ON CONFLICT (chunk_id, run_id) 语句失败
 

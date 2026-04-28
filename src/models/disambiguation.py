@@ -1,30 +1,6 @@
 """
 DisambiguationClient 模块
 
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 拆分消歧专用客户端
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: unify-model-client-architecture
-修改内容: 移动到 src/models/disambiguation.py（统一客户端架构）
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: disambiguation-state-three-layer
-修改内容: 将 alias_map 改为 canonical_decisions
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: unify-estimated-token-accounting
-修改内容: stage_summary token_usage 统一改为基于 messages/summary 文本的估算口径
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: count-failed-llm-calls
-修改内容: stage_summary 响应为空或后处理失败时，仍补记已发出请求的 token 成本
-
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
 - 核心逻辑委托给 src.models.local.disambiguation 子模块
@@ -74,10 +50,6 @@ class DisambiguationClient(BaseModelClient):
     ) -> None:
         """
         初始化消歧客户端。
-
-        修改时间: 2026-04-24
-        任务: fix-structured-output-review-findings
-        修改内容: 删除 Instructor 工厂参数，业务客户端不再暴露已取消的结构化输出运行时入口。
         """
         super().__init__(
             task_type=task_type,
@@ -158,9 +130,6 @@ class DisambiguationClient(BaseModelClient):
         """
         在已确认 alias cluster 内重选最终代表名。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: final-canonical-reselect
         说明: 该调用不再判断“是不是同一人”，只负责在终消歧后为每个 cluster
               选择最终代表名，避免由本地 heuristic 代替模型完成这一步。
         """
@@ -278,9 +247,6 @@ class DisambiguationClient(BaseModelClient):
         """
         生成摘要
 
-        创建时间: 2026-04-08
-        创建者: GLM-5
-        任务: summary-full-chain-refactor
         说明: 调用 LLM 生成阶段性摘要
 
         Args:

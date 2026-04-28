@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-16
-创建者: TraeAI
-任务: 配置测试数据库
-说明: 创建测试数据库并安装 pgvector 扩展
+创建测试数据库并安装 pgvector 扩展。
 """
 import os
 import sys
@@ -31,25 +28,19 @@ QUOTED_TEST_DB_NAME = f'"{TEST_DB_NAME.replace("\"", "\"\"")}"'
 DEFAULT_DB_URL: URL = make_url(TEST_DB_URL).set(database="postgres")
 
 
-# 2026-04-28，任务：fix-setup-test-db-fallback-and-console-errors
-# 新建原因：Windows 控制台在打印包含坏编码字符的数据库异常时会再次抛 UnicodeEncodeError，
-# 这里统一做一次“按当前终端编码可打印”的降级处理，避免原始错误被二次覆盖。
+# 按当前终端编码降级异常文本，避免打印数据库错误时再次触发 UnicodeEncodeError。
 def _safe_console_text(message: object) -> str:
     raw_text = str(message)
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     return raw_text.encode(encoding, errors="replace").decode(encoding, errors="replace")
 
 
-# 2026-04-28，任务：fix-setup-test-db-fallback-and-console-errors
-# 新建原因：脚本在数据库认证失败时必须稳定输出可读错误，
-# 不能因为控制台编码问题再次中断整个 bootstrap 流程。
+# 稳定输出可读错误，避免控制台编码问题中断 bootstrap 流程。
 def _safe_print(message: object) -> None:
     print(_safe_console_text(message))
 
 
-# 2026-04-28，任务：fix-setup-test-db-fallback-and-console-errors
-# 新建原因：当前环境里连接维护库 `postgres` 可能失败，
-# 但目标测试库本身仍然可连接；这里显式判断是否具备“原地重建表结构”的降级条件。
+# 显式判断是否具备“原地重建表结构”的降级条件。
 def _can_connect(database_url: str) -> tuple[bool, str | None]:
     engine = create_engine(database_url, echo=False)
     try:
@@ -62,21 +53,7 @@ def _can_connect(database_url: str) -> tuple[bool, str | None]:
 
 
 def create_test_database():
-    """
-    创建测试数据库
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-test-db-timeline-contract-bootstrap
-    修改内容: 测试库若已存在则直接重建，而不是复用旧库。
-              这次时间轴合同重构不再依赖运行时或手动迁移脚本兜底，
-              因此测试库初始化必须显式确保得到全新的 schema。
-
-    修改时间: 2026-04-28
-    修改者: Codex
-    任务: fix-setup-test-db-fallback-and-console-errors
-    修改内容: 返回是否真的完成了整库重建；主流程可根据结果决定是否需要降级到“原地重建表结构”。
-    """
+    """创建或重建测试数据库，并返回是否完成了整库重建。"""
     engine = create_engine(DEFAULT_DB_URL, echo=False)
 
     with engine.connect() as conn:
@@ -125,26 +102,7 @@ def setup_pgvector():
 
 
 def create_tables(*, reset_existing_tables: bool = False):
-    """
-    创建所有表
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: fix-test-db-schema-bootstrap
-    修改内容: 复用 src.storage.db.init_db(include_level3_tables=True) 统一测试库建表入口，避免脚本和应用 schema 漂移。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: timeline-contract-migration-call-chain-cleanup
-    修改内容: 不再在测试库初始化流程中主动调用 graph projection migration 脚本。
-              当前测试库通过“先重建数据库，再按 ORM 建表”拿到最新时间轴合同，
-              不再依赖旧的一次性迁移脚本继续补旧 schema。
-
-    修改时间: 2026-04-28
-    修改者: Codex
-    任务: fix-setup-test-db-fallback-and-console-errors
-    修改内容: 当无法整库重建但目标测试库仍可连接时，允许显式 drop_all + init_db 原地重建表结构。
-    """
+    """按当前 ORM 建表；必要时先 drop_all 做原地表级重建。"""
     sys.path.insert(0, str(project_root))
     from src.storage import db as db_module
     from src.storage.models import Base

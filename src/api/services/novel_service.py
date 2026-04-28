@@ -1,15 +1,7 @@
 """
 小说服务类
 
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 小说服务
-
 修改历史:
-- 2026-03-14: 使用 Repository 模式重构，移除 .db 路径相关逻辑
-- 2026-03-15: PostgreSQL 迁移，完全移除 .db 文件扫描逻辑
-- 2026-04-08: 新增 novels 表，上传后立即可查
-- 2026-04-08: 添加可选 session 参数支持依赖注入
 
 说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储小说元数据和分析任务。
 """
@@ -138,11 +130,6 @@ class NovelService:
     ) -> str:
         """
         创建分析任务
-
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: DB 创建失败时不再吞异常，避免接口返回成功但无持久化真相
         """
         self.get_novel(novel_id, session)
         if task_id is None:
@@ -176,11 +163,6 @@ class NovelService:
     def _load_task_from_db(self, task_id: str, session: Session | None = None) -> dict | None:
         """
         从数据库加载任务元数据
-
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 移除 DB 异常吞掉逻辑，基础设施故障应由上层按 5xx 处理，而不是伪装成任务不存在。
         """
         with self._get_session(session) as sess:
             run_repo = RunRepository(sess)
@@ -203,11 +185,6 @@ class NovelService:
     def get_tasks_by_novel(self, novel_id: str, session: Session | None = None) -> list[dict]:
         """
         获取小说的所有任务
-
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 不再将 DB 查询失败伪装成空列表，并补齐 created_at 供任务面板显示真实时间。
         """
         with self._get_session(session) as sess:
             run_repo = RunRepository(sess)
@@ -325,9 +302,6 @@ class NovelService:
         """
         删除小说源文件。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
         说明: 仅在文件真实存在时删除，缺失文件不报错；
               若遇到真实 IO 异常则继续上抛，避免把磁盘问题静默吞掉。
         """
@@ -337,9 +311,6 @@ class NovelService:
         """
         删除任务对应的日志与导出文件。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
         说明: 输出文件按 task_id 命名，日志目录按 run_id 命名；
               为兼容历史短 run_id 目录，run_id != task_id 时会额外检查短目录。
         """
@@ -353,9 +324,6 @@ class NovelService:
         """
         收集删除小说前需要的上下文。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
         说明: 先一次性读出小说记录与其全部任务，后续删除阶段不再靠猜测接口状态。
         """
         with self._get_session(session) as sess:
@@ -370,9 +338,6 @@ class NovelService:
         """
         校验小说下的任务是否都允许删除。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
         说明: novel 级删除沿用 task 删除状态机，不允许绕过 pending/running/cancelling 护栏。
         """
         for run in runs:
@@ -385,9 +350,6 @@ class NovelService:
         """
         删除单个 run 的数据库数据与文件产物。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
         说明: DB 删除仍复用 RunRepository.delete_run；文件侧统一删除 outputs/task_id.json
               与 logs/run_id 目录，兼容历史 full run_id 日志目录。
         """
@@ -407,12 +369,6 @@ class NovelService:
     ) -> bool:
         """
         级联删除小说及其全部任务数据。
-
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
-        修改内容: 删除 novel 时先删除其全部 task 的数据库数据与文件产物，
-                  再删除 novels 记录与源文件，避免继续产生 orphan task。
         """
         novel, runs = self._collect_novel_delete_context(novel_id, session)
         self._ensure_novel_tasks_deletable(novel_id, runs)
@@ -439,12 +395,6 @@ class NovelService:
     ) -> bool:
         """
         删除任务及其数据库/文件产物。
-
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-novel-task-delete-consistency
-        修改内容: 在原有 run 级数据库删除基础上，补齐 logs 与 outputs 文件清理，
-                  并统一从服务层驱动执行缓存移除。
         """
         run_id: str | None = None
         with self._get_session(session) as sess:
@@ -454,7 +404,7 @@ class NovelService:
                 run_id = str(run["run_id"])
 
         if task_manager is not None:
-            # 中文注释：TaskManager 只负责当前进程的执行缓存，删除 task 时顺手清掉缓存，
+            # TaskManager 只负责当前进程的执行缓存，删除 task 时顺手清掉缓存，
             # 避免 DB 已删除但本进程里还残留已终态任务对象。
             task_manager.delete_task(task_id)
 

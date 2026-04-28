@@ -37,8 +37,6 @@ def _resolve_level1_relevant_names(
     requested_names: Iterable[str] | None,
 ) -> set[str]:
     """
-    创建时间: 2026-04-26
-    任务: fix-empty-requested-names-level1-fallback
     说明: snapshot fallback 也必须遵守 request 边界；
           这里只保留当前 consumer 明确请求的名字，并在 alias 命中时补齐关联 canonical。
     """
@@ -179,8 +177,6 @@ def _collect_level1_lines_from_snapshot(
     requested_names: Iterable[str] | None = None,
 ) -> Level1EvidenceBuckets:
     """
-    创建时间: 2026-04-26
-    任务: fix-empty-requested-names-level1-fallback
     说明: 当 renderer 只能从 snapshot 回退时，也要按 request 边界过滤；
           显式空请求或完全不命中时，不能重新渲染整本书的 Level1 事实。
     """
@@ -251,8 +247,6 @@ def render_level1_facts(
     max_relation_lines: int | None = None,
 ) -> str | None:
     """
-    修改时间: 2026-04-26
-    任务: fix-empty-requested-names-level1-fallback
     修改说明: renderer fallback 到 `level1_snapshot` 时也要按 `bundle.requested_names`
               过滤，显式空请求或快照 miss 都不允许回退成全量 Level1 注入。
     """
@@ -366,7 +360,7 @@ def render_disambig_candidates(
     max_candidates: int | None = None,
     priority_names: Iterable[str] | None = None,
 ) -> str | None:
-    # 中文注释：这里是共享 evidence 渲染层，只把 bundle 中已有的结构转成 prompt block，
+    # 这里是共享 evidence 渲染层，只把 bundle 中已有的结构转成 prompt block，
     # 不承担 provider 侧的取证职责。
     candidate_lines = [item.content for item in bundle.local_evidence if item.evidence_type == "disambig_candidate"]
     if not candidate_lines and bundle.requested_names:
@@ -403,11 +397,6 @@ def _select_semantic_items(
     evidence_types: set[str],
     max_items: int | None,
 ) -> list[EvidenceItem]:
-    """
-    修改时间: 2026-04-21
-    任务: emotion-rag-evidence-provider
-    新建原因: semantic_evidence 现在承载多种用途，需要在 renderer 层按 evidence_type 分流，避免不同消费者互相污染。
-    """
     filtered_items = [item for item in bundle.semantic_evidence if item.evidence_type in evidence_types]
     return filtered_items if max_items is None else filtered_items[:max_items]
 
@@ -417,13 +406,6 @@ def _collect_semantic_chunk_ids(
     *,
     evidence_types: set[str],
 ) -> set[int]:
-    """
-    创建时间: 2026-04-21
-    修改时间: 2026-04-21
-    任务: dedupe-phase1-emotion-exemplar
-    新建原因: Phase1 会同时消费 emotion exemplar 和 vector evidence，需要按
-    chunk_id 去重，避免同一条 Level3 命中在 prompt 里重复出现。
-    """
     chunk_ids: set[int] = set()
     for item in bundle.semantic_evidence:
         if item.evidence_type not in evidence_types or item.chunk_id is None:
@@ -438,8 +420,6 @@ def _prioritize_semantic_items(
     priority_names: Iterable[str] | None,
 ) -> list[EvidenceItem]:
     """
-    创建时间: 2026-04-25
-    任务: evidence-service-request-unification
     说明: `background_entities` 只作为 renderer 侧背景 hint 使用；
           这里仅调整 vector evidence 的展示顺序，不回流到 requested_names/candidate_names。
     """
@@ -473,10 +453,8 @@ def render_vector_evidence(
     exclude_chunk_ids: set[int] | None = None,
     priority_names: Iterable[str] | None = None,
 ) -> str | None:
-    # 中文注释：这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
+    # 这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
     # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算。
-    # 修改时间: 2026-04-24
-    # 任务: level3-paragraph-rerank
     # 修改说明: paragraph rerank 可提供 local_preview；渲染时优先展示局部 evidence，chunk 全文仍保留在 metadata 里兜底。
     selected_items = _select_semantic_items(
         bundle,
@@ -519,11 +497,6 @@ def render_vector_evidence(
 
 
 def render_emotion_exemplars(bundle: EvidenceBundle, max_chunks: int = 2, max_text_len: int = 160) -> str | None:
-    """
-    修改时间: 2026-04-21
-    任务: emotion-rag-evidence-provider
-    新建原因: 为 Phase1 提供相似情绪案例证据，但仍然复用统一的 semantic_evidence 主路径。
-    """
     exemplar_parts: list[str] = []
     for item in _select_semantic_items(
         bundle,
