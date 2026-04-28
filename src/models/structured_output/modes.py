@@ -1,8 +1,6 @@
 """
 结构化输出模式定义。
 
-创建时间: 2026-04-24
-任务: structured-output-adapter-instructor-unification
 说明: 为项目级结构化输出适配层提供统一 mode 字面量，避免各模块重复拼字符串。
 """
 

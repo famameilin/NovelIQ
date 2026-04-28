@@ -1,10 +1,7 @@
 /**
  * TopicTable - 主题详情表格组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-C 主题分布
- * 说明: 可排序的主题详情表格（按 ID/权重），含关键词 Badge 展示和 Framer Motion 进场动画
+ * 可排序的主题详情表格（按 ID/权重），含关键词 Badge 展示和 Framer Motion 进场动画
  */
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";

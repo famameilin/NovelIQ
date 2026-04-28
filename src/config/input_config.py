@@ -23,20 +23,6 @@ class InputConfig:
 class TaskModelConfig:
     """
     任务级模型配置
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 添加 stream_enabled 和 stream_cloud_only 字段支持流式响应
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 移除 backend_name 字段，迁移到 OpenAI SDK 后不再需要区分后端
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: 清理无效模型配置项
-    修改内容: 删除 provider 和模型级 max_retries 字段，避免 TaskModelConfig 暴露未生效参数
     """
 
     base_url: str | None = None
@@ -73,29 +59,6 @@ TaskType = Literal[
 def load_task_config(task_type: TaskType) -> TaskModelConfig:
     """
     根据任务类型加载模型配置
-
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: thinking配置从顶层settings.thinking读取，而非各模型配置中
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 添加 stream_enabled 支持
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 移除 backend_name 字段
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: 清理无效模型配置项
-    修改内容: 不再向运行时配置对象透传 provider 和模型级 max_retries
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-phase3-followup-review-findings
-    修改内容: 删除未被任何调用链消费的 top_k / presence_penalty 伪配置入口，避免继续误导调参。
     """
     task_settings = getattr(settings.models, task_type, None)
     if task_settings is None:

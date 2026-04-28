@@ -16,28 +16,12 @@ ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
 
 
 def strip_ansi_codes(text: str) -> str:
-    """
-    去除 ANSI 颜色代码
-    
-    创建时间: 2026-03-12
-    创建者: TraeAI
-    任务: 终端日志文件去除颜色代码，避免乱码
-    """
+    """去除 ANSI 颜色代码。"""
     return ANSI_ESCAPE_PATTERN.sub('', text)
 
 
 class TeeOutput:
-    """
-    同时输出到终端和文件的类
-    
-    创建时间: 2026-03-12
-    创建者: TraeAI
-    任务: 捕获所有终端输出到文件
-    
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加 ANSI 颜色代码去除功能，避免日志文件乱码
-    """
+    """同时输出到终端和文件，并在写文件前去掉 ANSI 颜色代码。"""
     
     def __init__(self, original_stream, log_file_path: Path):
         self.original_stream = original_stream
@@ -65,17 +49,7 @@ class TeeOutput:
 
 
 def is_port_in_use(port: int) -> bool:
-    """
-    检测指定端口是否被占用
-    
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: API 服务启动脚本
-    
-    修改时间: 2026-03-11
-    修改者: TraeAI
-    修改内容: 同时检测 127.0.0.1 和 0.0.0.0 两个地址，避免 Windows 下的绑定差异问题
-    """
+    """检测指定端口是否已被当前机器占用。"""
     for check_host in ["127.0.0.1", "0.0.0.0"]:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -86,17 +60,7 @@ def is_port_in_use(port: int) -> bool:
 
 
 def main() -> None:
-    """
-    启动 FastAPI 服务器
-    
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: API 服务启动脚本
-    
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 使用 TeeOutput 捕获所有终端输出（包括 uvicorn 日志、print 等）到文件
-    """
+    """启动 FastAPI 服务器并记录控制台输出。"""
     parser = argparse.ArgumentParser(description="Run FastAPI server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")

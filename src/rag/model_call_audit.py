@@ -1,9 +1,7 @@
 """
 RAG 可选模型调用审计辅助。
 
-创建时间: 2026-04-24
-任务: llm-mention-rerank-audit
-说明: 为 mention extraction / level3 rerank 复用同一套
+为 mention extraction / level3 rerank 复用同一套
       model_interactions + token_usage 审计逻辑，避免各边界模块各自拼接。
 """
 
@@ -22,9 +20,7 @@ from src.models.structured_output import StructuredOutputError, StructuredOutput
 
 def _stringify_structured_response(response_data: BaseModel) -> str:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-audit
-    说明: 在 mock/结构化响应对象没有原始 choices 时，退化为稳定的结构化文本，
+    在 mock/结构化响应对象没有原始 choices 时，退化为稳定的结构化文本，
           保证 model_interactions 至少能留下可回放的响应载荷。
     """
     try:
@@ -48,26 +44,16 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     chunk_id: int | None,
 ) -> TNormalized:
     """
-    创建时间: 2026-04-24
-    任务: llm-mention-rerank-audit
-    说明: 执行一次结构化模型调用，并统一补齐成功/失败审计和 token 记账。
+    执行一次结构化模型调用，并统一补齐成功/失败审计和 token 记账。
 
-    修改时间: 2026-04-24
-    任务: deepseek-json-object-compat
-    修改内容: 支持调用方传入 provider 原生 response_format，解决云端只支持 json_object
+    支持调用方传入 provider 原生 response_format，解决云端只支持 json_object
               但项目仍需要 Pydantic 校验内部结构的场景。
 
-    修改时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    修改内容: 改为调用项目级 structured_output 适配层，raw_response_format/mode 选择不再由 RAG 业务模块传入。
+    改为调用项目级 structured_output 适配层，raw_response_format/mode 选择不再由 RAG 业务模块传入。
 
-    修改时间: 2026-04-24
-    任务: fix-structured-output-review-findings
-    修改内容: 仅在 provider 已返回 raw_response 时补记 token，避免本地 prompt 合同校验失败被误记为模型消耗。
+    仅在 provider 已返回 raw_response 时补记 token，避免本地 prompt 合同校验失败被误记为模型消耗。
 
-    修改时间: 2026-04-24
-    任务: log-level3-evidence-gaps
-    修改内容: 补充结构化模型调用开始、成功和失败日志，暴露 mention/rerank 阶段的长等待来源。
+    补充结构化模型调用开始、成功和失败日志，暴露 mention/rerank 阶段的长等待来源。
     """
     start_time = time.time()
     response: Any = None

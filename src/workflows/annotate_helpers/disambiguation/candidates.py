@@ -1,10 +1,7 @@
 """
 候选名字收集和筛选
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-module-split
-说明: 从 disambiguation.py 拆分，包含候选名字收集和筛选相关函数
+从 disambiguation.py 拆分，包含候选名字收集和筛选相关函数
 """
 
 from __future__ import annotations
@@ -84,7 +81,7 @@ def _build_candidate_payload_by_names(
         except (TypeError, ValueError):
             count = 0
 
-        # 中文注释：数据库返回的是宽松字典，这里收口成 NameCountCandidate，
+        # 数据库返回的是宽松字典，这里收口成 NameCountCandidate，
         # 避免把仓储层的松散返回形状继续泄漏到消歧主链。
         payload.append({"name": name, "count": count})
     return payload
@@ -127,10 +124,7 @@ def _has_more_frequent_related_name(
     - 贺伯安 / 伯安
     - 小侯爷 / 侯爷
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: 修复 final candidate 收集逻辑
-    说明: 对"已 resolved 但可能只是早期自映射"的名字重新放入 final review
+    对"已 resolved 但可能只是早期自映射"的名字重新放入 final review
     """
     current_count = name_counts.get(name, 0)
     if current_count <= 0:
@@ -159,14 +153,7 @@ def _collect_final_disambiguation_candidates(
     """
     Build candidates for final disambiguation.
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 项目文件结构整理与拆解
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 修复 final candidate 收集逻辑
-    修改内容: 低频名和高频名扩展形式不再被"早期自映射"锁死，允许重新进入 final review
 
     新规则：
     - state=resolved 不再直接跳过
@@ -284,15 +271,7 @@ def extract_new_names_from_db(
 
     基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名。
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 修复增量消歧只提取当前chunk的问题
-    修改内容: 从所有已标注的chunk中提取新名字，使用 fetch_chunk_characters_full
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 修复候选人名没有频次的问题
-    修改内容: 返回带频次的字典列表 [{"name": "伯安", "count": 312}, ...]
     """
     existing_names = set(alias_map.keys()) | set(alias_map.values()) if alias_map else set()
     all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)

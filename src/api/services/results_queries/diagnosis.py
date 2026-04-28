@@ -1,9 +1,6 @@
 """
 诊断查询组装器。
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
 说明: 承载 diagnosis 相关查询组装逻辑。
 """
 
@@ -30,9 +27,6 @@ def _filter_character_list_against_arc_scores(
     arc_scores: dict[str, float] | None,
 ) -> list[str] | None:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-followup-fixes
     说明: alias 归一化会把别名和规范名折叠到同一个角色名上；
     结果读取层必须在归一化后再次按 `arc_scores` 收口，避免焦点人物、
     主要人物、核心角色继续携带失效名称。
@@ -49,9 +43,6 @@ def _derive_focus_structure_from_characters(
     focus_characters: list[str] | None,
 ) -> Literal["single", "dual", "ensemble"] | None:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-followup-fixes
     说明: alias 归一化后，焦点人物数量可能发生折叠；此时必须按归一化后的
     最终名单重新推导 focus_structure，不能把 `dual` + 单人列表这种矛盾合同继续对外暴露。
     """
@@ -74,9 +65,6 @@ def _has_complete_focus_contract(
     topic_labels: list[str] | None = None,
 ) -> bool:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-review-fixes
     说明: 当前分支已经明确“不兼容缺焦点合同的旧 diagnosis 行”；
     结果读取层必须把缺 `focus_structure` / `focus_characters` / `topic_labels` 的数据视为无效，
     统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象。
@@ -95,9 +83,6 @@ def _has_complete_focus_contract(
 
 def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> TypeGuard[DiagnosisResult]:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-review-fixes-round2
     说明: results/export/characters 都需要把“新焦点合同是否完整”当成统一真相源；
     这里收口到 DiagnosisResult 级别，避免每条链路各自重复判断。
     """
@@ -122,12 +107,6 @@ def _fetch_diagnosis(
 ) -> DiagnosisResult | None:
     """
     从数据库获取诊断结果。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: diagnosis 结果合同切到焦点结构后，这里只组装 `focus_structure` /
-    `focus_characters` 等新字段，不再保留旧单主角兼容分支。
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
     if not data:

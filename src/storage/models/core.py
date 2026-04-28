@@ -1,22 +1,13 @@
 """
-创建时间: 2026-03-15
-创建者: TraeAI
-任务: postgresql-migration
-说明: 核心表 ORM 模型定义
+核心表 ORM 模型定义
 
 本模块定义核心业务表：
 - AnalysisRun: 分析运行记录表
 - DisambigCheckpoint: 消歧检查点表
 
-修改时间: 2026-03-16
-修改者: TraeAI
-任务: fix-disambiguation-three-phase
-修改内容: 新增 DisambigCheckpoint 模型用于保存消歧检查点
+新增 DisambigCheckpoint 模型用于保存消歧检查点
 
-修改时间: 2026-04-19
-修改者: TraeAI
-任务: task-system-db-driven-refactor
-修改内容: 为 AnalysisRun 添加运行态字段
+为 AnalysisRun 添加运行态字段
           （error, message, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
 """
 
@@ -38,25 +29,13 @@ class AnalysisRun(Base):
     """
     分析运行记录表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 记录每次分析任务的运行信息，作为所有数据的隔离主键
+    记录每次分析任务的运行信息，作为所有数据的隔离主键
 
-    修改时间: 2026-04-19
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 添加完整运行态字段，使 DB 成为任务唯一真相源
+    添加完整运行态字段，使 DB 成为任务唯一真相源
 
-    修改时间: 2026-04-20
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 添加 started_at 字段，记录任务实际开始执行时间，完善运行态时间戳体系。
+    添加 started_at 字段，记录任务实际开始执行时间，完善运行态时间戳体系。
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 为 novel_id 补充到 novels 表的外键约束，阻止 task 再次脱离小说主表。
+    为 novel_id 补充到 novels 表的外键约束，阻止 task 再次脱离小说主表。
     """
 
     __tablename__ = "analysis_runs"
@@ -74,7 +53,7 @@ class AnalysisRun(Base):
     progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # 运行态字段（task-system-db-driven-refactor 新增）
+    # 运行态字段
     sub_stage: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
@@ -110,10 +89,7 @@ class DisambigCheckpoint(Base):
     仅存储 DisambiguationState 的 JSON 快照，用于断点续传。
     图投影进度通过 ChunkRelation.projection_status 查询，不在此表中记录。
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 为 run_id 补充到 analysis_runs 的外键约束，确保检查点生命周期与任务一致。
+    为 run_id 补充到 analysis_runs 的外键约束，确保检查点生命周期与任务一致。
     """
 
     __tablename__ = "disambig_checkpoint"

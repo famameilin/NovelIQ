@@ -1,39 +1,18 @@
 """
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: Repository 基类和 Protocol 接口定义
-说明: 实现 ChunkRepository 类，管理文本分块的存储和检索
+实现 ChunkRepository 类，管理文本分块的存储和检索
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: refactor-routes-use-repository
-修改内容: 添加查询方法 fetch_chunk_styles_full, fetch_chunk_cultures_full, fetch_chunk_topics_agg, fetch_chunk_counts
+添加查询方法 fetch_chunk_styles_full, fetch_chunk_cultures_full, fetch_chunk_topics_agg, fetch_chunk_counts
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
+从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
 
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - 拆分chunk_repository.py
-修改内容: 将 ChunkStyleData 数据类移至 chunk/style_data.py
-修改内容: 将 style/culture/topic 操作移至子模块
+将 ChunkStyleData 数据类移至 chunk/style_data.py
+将 style/culture/topic 操作移至子模块
 
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: 简化文化指标系统
-修改内容: 修复 fetch_chunk_cultures_full 返回类型为 List[Tuple[int, float]]
+修复 fetch_chunk_cultures_full 返回类型为 List[Tuple[int, float]]
 
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: fix-pause-density-d-value-equality
-修改内容: fetch_chunk_styles_full 返回 Sequence[Row] 支持字段名访问
+fetch_chunk_styles_full 返回 Sequence[Row] 支持字段名访问
 
-修改时间: 2026-04-20
-修改者: Codex (GPT-5)
-任务: remove-compat-layers
-修改内容: 删除 culture 兼容接口，imagery_lexicon_density 统一走 ChunkStyle 主仓储链路。
+删除 culture 兼容接口，imagery_lexicon_density 统一走 ChunkStyle 主仓储链路。
 """
 
 from __future__ import annotations
@@ -71,15 +50,9 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     """
     分块数据 Repository
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Repository 基类和 Protocol 接口定义
-    说明: 管理文本分块的存储和检索，支持 run_id 过滤
+    管理文本分块的存储和检索，支持 run_id 过滤
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session
+    从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
     def __init__(self, session: Session):
@@ -95,13 +68,9 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         批量插入分块数据
 
-        修改时间: 2026-03-16
-        修改者: TraeAI
-        修改内容: 插入前先删除该 run_id 的旧数据
+        插入前先删除该 run_id 的旧数据
 
-        修改时间: 2026-04-24
-        任务: full-global-offset-rollout
-        修改说明: 将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象。
+        将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象。
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
         models = [
@@ -157,10 +126,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         获取聚合后的分块主题数据（每个分块的平均主题权重）
 
-        修改时间: 2026-03-31
-        修改者: TraeAI
-        任务: refactor-hardcoded-index-access
-        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        返回 Sequence[Row] 支持字段名访问， 替代元组列表
         """
         return fetch_chunk_topics_agg(self.session, run_id)
 
@@ -190,10 +156,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         获取指定运行的所有分块文本（仅文本）
 
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: metrics-repository-refactor
-        修改内容: 新增方法支持 aggregate_metrics.py
+        新增方法支持 aggregate_metrics.py
 
         Args:
             run_id: 运行ID
@@ -209,10 +172,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         统计指定运行的分块数量
 
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: metrics-repository-refactor
-        修改内容: 新增方法支持 aggregate_metrics.py
+        新增方法支持 aggregate_metrics.py
 
         Args:
             run_id: 运行ID
@@ -227,10 +187,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         获取上一个分块的文本
 
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: metrics-repository-refactor
-        修改内容: 新增方法支持 rolling_memory.py
+        新增方法支持 rolling_memory.py
 
         Args:
             run_id: 运行ID
@@ -248,10 +205,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         获取下一个分块的文本
 
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: metrics-repository-refactor
-        修改内容: 新增方法支持 rolling_memory.py
+        新增方法支持 rolling_memory.py
 
         Args:
             run_id: 运行ID
@@ -267,10 +221,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         检查指定运行是否有分块数据
 
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: storage-layer-decoupling
-        修改内容: 新增方法替代 operations.completeness.has_chunks
+        新增方法替代 operations.completeness.has_chunks
 
         Args:
             run_id: 运行ID
@@ -286,15 +237,9 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         检查预处理阶段是否完成
 
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: storage-layer-decoupling
-        修改内容: 新增方法替代 operations.completeness.is_preprocess_complete
+        新增方法替代 operations.completeness.is_preprocess_complete
 
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: fix-preprocess-completion-level3-contract
-        修改内容: 当当前配置要求 Level3 chunk/paragraph embeddings 时，完成判定不再只看 chunks，
+        当当前配置要求 Level3 chunk/paragraph embeddings 时，完成判定不再只看 chunks，
                   而是要求向量 schema、chunk embeddings 与 paragraph embeddings 一并完整就绪，
                   避免半成品 run 被误判为 preprocess 已完成
 
@@ -315,7 +260,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             validate_chunk_embeddings_schema(self.session, expected_dim)
             validate_paragraph_embeddings_schema(self.session, expected_dim)
         except ValueError:
-            # 中文注释：只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
+            # 只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
             # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness。
             return False
 
@@ -333,10 +278,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         获取指定运行的所有分块摘要
 
-        修改时间: 2026-03-31
-        修改者: TraeAI
-        任务: refactor-hardcoded-index-access
-        修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
+        返回 Sequence[Row] 支持字段名访问，替代元组列表
 
         Args:
             run_id: 运行ID

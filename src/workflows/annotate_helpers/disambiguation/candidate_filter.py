@@ -30,10 +30,7 @@ def _contains_name_like_char(name: str) -> bool:
     """
     判断候选中是否包含常见的人名字符。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: preserve-deferred-disambig-candidates
-    说明: 这里只做极保守判断，用来区分“明显脏 token”和“至少像一个名字/称呼”的候选。
+    这里只做极保守判断，用来区分“明显脏 token”和“至少像一个名字/称呼”的候选。
     """
     for char in name:
         if "\u4e00" <= char <= "\u9fff":
@@ -47,10 +44,7 @@ def _is_obvious_noise_candidate(name: str) -> bool:
     """
     判断候选是否明显属于脏 token。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: preserve-deferred-disambig-candidates
-    说明: 仅对空串、纯数字、纯符号等明显不可能成为角色名的候选做硬丢弃。
+    仅对空串、纯数字、纯符号等明显不可能成为角色名的候选做硬丢弃。
     """
     stripped = name.strip()
     if not stripped:

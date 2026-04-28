@@ -1,10 +1,7 @@
 """
 关系处理逻辑
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-module-split
-说明: 从 disambiguation.py 拆分，包含关系处理相关函数
+从 disambiguation.py 拆分，包含关系处理相关函数
 """
 
 from __future__ import annotations
@@ -102,7 +99,6 @@ _PARENT_CHILD_GROUP = {"child_of", "parent_of", "son_of", "father_of"}
 def _get_valid_hierarchical_relation_types() -> set[str]:
     """
     2026-04-27，任务：graph hierarchical relation contract fixes
-    新建原因：终消歧 `entity_relations` 使用英文层级关系类型，不能继续复用 phase4 中文关系枚举。
     """
     return set(settings.analysis.valid_hierarchical_relation_types)
 
@@ -144,15 +140,7 @@ def detect_cycle_in_relations(
     注意：合法的双向关系（如 child_of/parent_of）不算作循环。
     注意：对称关系（家族、友情、爱慕）不参与循环检测。
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: fix-cycle-detection-bug
-    修改内容: 区分合法双向关系和矛盾循环
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: fix-disambig-relation-type-mismatch
-    修改内容: 添加对称关系(家族/友情/爱慕)不参与循环检测
 
     Args:
         relations: 关系列表，每个关系包含 from, to, type 字段
@@ -228,15 +216,8 @@ def _process_entity_relations(
     """
     处理实体间的层级关系
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
-    说明: 将消歧结果中的关系写入数据库
+    将消歧结果中的关系写入数据库
 
-    修改时间: 2026-03-20
-    修改者: TraeAI
-    任务: fix-hardcoded-relation-types
-    修改内容: 从配置读取有效关系类型，而非硬编码
 
     Args:
         conn: 数据库连接
@@ -285,7 +266,7 @@ def _process_entity_relations(
                 from_entity_id=from_entity_obj.entity_id,
                 to_entity_id=to_entity_obj.entity_id,
                 relation_type=rel_type,
-                # 中文注释：终消歧补写的是“正式建立关系”，必须复用图谱共享的 change_type 语义，
+                # 终消歧补写的是“正式建立关系”，必须复用图谱共享的 change_type 语义，
                 # 不能写入孤立英文标签，否则下游统计会把这类事件静默漏掉。
                 change_type="新建",
                 chunk_id=0,
@@ -323,7 +304,6 @@ def _prepare_entity_relations_for_projection(
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
     """
     2026-04-27，任务：graph final-disambiguation rebuild fixes
-    新建原因：终消歧关系既要复用同一套 cycle/alias/合法性过滤规则，又要分别支持
     “先落到 chunk_relations 再 rebuild”和“直接写 graph_* 表”两类后续处理，不能把校验逻辑绑死在单一写路径里。
     """
     if not entity_relations:

@@ -1,28 +1,5 @@
 """
 任务管理器模块
-
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 任务管理
-
-修改时间: 2026-04-09
-修改者: GLM-5
-任务: sse-architecture-review
-修改内容:
-- threading.Event → asyncio.Event，与异步分析流程语义一致
-- cancel_event.is_set() 和 set() 行为保持兼容
-
-    修改时间: 2026-04-19
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容:
-    - 重构 _update_db() 为可靠写入，移除静默失败
-    - TaskManager 职责收缩为执行缓存容器，不再承担业务真相判断
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: fix-task-system-review-findings
-    修改内容: 持久化 message 字段，并在 DB 写入后主动关闭短生命周期 Session
 """
 
 from __future__ import annotations
@@ -46,17 +23,6 @@ if TYPE_CHECKING:
 @dataclass
 class TaskInfo:
     """任务执行缓存，仅保留进程级执行对象和短期输出缓冲。
-
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 任务管理
-
-    修改时间: 2026-04-20
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 剥离业务状态字段（status/progress/stage/sub_stage/current/total/message/error/completed_at/novel_id），
-              仅保留 asyncio.Task、cancel_event、heartbeat 对象和 llm_outputs 短期缓冲。
-              业务真相统一由 DB 提供，内存不承担状态判断职责。
     """
 
     task_id: str
@@ -70,15 +36,6 @@ class TaskInfo:
 class TaskManager:
     """
     进程级执行缓存容器（非业务真相源）。
-
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 任务管理
-
-    修改时间: 2026-04-19
-    修改者: TraeAI
-    任务: task-6-task-manager-responsibility-shrink
-    修改内容: 职责收缩为纯执行缓存，移除业务真相判断
 
     职责边界:
     =========
@@ -108,11 +65,6 @@ class TaskManager:
     ):
         """
         初始化任务执行缓存管理器。
-
-        修改时间: 2026-04-20
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 为当前进程生成稳定 worker_id，后续所有运行态写回都会带上 worker 归属与心跳。
         """
         self._tasks: dict[str, TaskInfo] = {}
         self._progress_callback = progress_callback
@@ -123,22 +75,12 @@ class TaskManager:
     def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
         """
         设置数据库会话工厂。
-
-        修改时间: 2026-04-23
-        修改者: Codex
-        任务: p2-task-runtime-persistence
-        修改内容: 改为把 session factory 配置给独立的运行态持久化服务，TaskManager 本身不再持有 DB 写回细节。
         """
         self._runtime_persistence.set_session_factory(factory)
 
     def get_worker_id(self) -> str:
         """
         返回当前进程的稳定 worker_id。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-pending-task-pickup
-        修改内容: 为 DB claim / startup recovery 提供统一 worker 标识读取入口。
         """
         return self._worker_id
 
@@ -146,59 +88,24 @@ class TaskManager:
         """
         可靠地更新数据库中的任务状态。
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-system-db-driven-refactor
-
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 明确枚举→字符串转换约定。kwargs 中的 TaskStatus 枚举值会自动转为 .value 字符串，
-                  与 DB 字段类型一致。调用方混用枚举和字符串时，此处统一处理。
-
         说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相。
-
-        修改时间: 2026-04-23
-        修改者: Codex
-        任务: p2-task-runtime-persistence
-        修改内容: 改为委托 TaskRuntimePersistenceService；TaskManager 仅保留兼容入口。
         """
         self._runtime_persistence.update_task_runtime(task_id, **kwargs)
 
     def _should_refresh_worker_heartbeat(self, update_params: dict[str, Any]) -> bool:
         """
         判断本次写回是否应刷新 worker 归属和心跳。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 仅在活跃运行态写回时注入 worker_id/heartbeat_at，避免终态字段误刷新心跳。
         """
         return self._runtime_persistence._should_refresh_worker_heartbeat(update_params)
 
     def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
         """
         将任务写回统一解析到真实 run_id。
-
-        创建时间: 2026-04-19
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: 修复 task_id/run_id 混写
-        修改内容: 对 8 位 task_id 先查映射，再按完整 run_id 落库，避免历史 full run_id 任务静默不更新。
         """
         return self._runtime_persistence._resolve_run_id_for_db_write(task_id, session)
 
     def create_task(self, task_id: str, novel_id: str) -> TaskInfo:
         """创建任务的内存执行缓存。
-
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 不再初始化业务状态字段（status/progress/novel_id 等），仅创建执行缓存对象。
-                  novel_id 仅用于日志记录，不再存储到 TaskInfo 中。
         """
         task = TaskInfo(
             task_id=task_id,
@@ -213,9 +120,6 @@ class TaskManager:
         """
         查询当前进程是否持有该任务的执行缓存。
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-6-task-manager-responsibility-shrink
         说明: 仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"。
               服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态。
 
@@ -250,16 +154,6 @@ class TaskManager:
     def complete_task(self, task_id: str, success: bool = True, error: str | None = None) -> None:
         """
         更新任务完成状态的内存缓存（仅内存操作）。
-
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-6-task-manager-responsibility-shrink
-
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 改为仅更新内存状态并停止心跳，不再写 DB。业务真相的 status 更新应由调用方直接操作 DB。
-        说明: 调用方需确保已自行完成 DB 终态写入。
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -283,17 +177,6 @@ class TaskManager:
         """
         设置取消信号（纯执行层操作）。
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-6-task-manager-responsibility-shrink
-        修改内容: 移除业务状态合法性判断（已完成/已取消等），调用方应在调用前自行判断。
-
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 不再修改内存 status 字段（TaskInfo 已无 status），仅设置 cancel_event。
-                  DB cancel_requested 写入由调用方直接操作。
-
         说明: 本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断。
 
         Returns:
@@ -312,15 +195,6 @@ class TaskManager:
     def cancel_completed_task(self, task_id: str, error: str | None = None) -> None:
         """
         清理任务的内存执行缓存并停止心跳（仅内存操作）。
-
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-6-task-manager-responsibility-shrink
-
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 改为仅停止心跳并清理内存缓存，不再写 DB。业务状态应由调用方写入 DB。
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -342,11 +216,6 @@ class TaskManager:
     def store_asyncio_task(self, task_id: str, asyncio_task: asyncio.Task) -> None:
         """
         保存 asyncio.Task 引用并启动独立心跳。
-
-        修改时间: 2026-04-20
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 为长时间无进度事件的运行阶段增加独立 heartbeat，避免启动恢复误判活跃任务为 orphan。
         """
         task_info = self._tasks.get(task_id)
         if task_info:
@@ -358,9 +227,6 @@ class TaskManager:
         """
         为当前运行任务启动独立心跳协程。
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
         说明: 心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at。
         """
         task_info = self._tasks.get(task_id)
@@ -383,9 +249,6 @@ class TaskManager:
         """
         停止任务心跳协程。
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
         说明: 在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness。
         """
         task_info = self._tasks.get(task_id)
@@ -401,9 +264,6 @@ class TaskManager:
         """
         周期性刷新活跃任务的 worker 心跳。
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
         说明: 即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at。
         """
         while not stop_event.is_set():
@@ -422,7 +282,7 @@ class TaskManager:
                 break
 
             try:
-                # 中文注释：heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”。
+                # heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”。
                 self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now(UTC))
             except Exception as exc:
                 logger.error(f"Failed to refresh runtime heartbeat for task {task_id}: {exc}")
@@ -431,9 +291,6 @@ class TaskManager:
         """
         收尾 heartbeat 协程并记录异常。
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
         说明: 避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception。
         """
         task_info = self._tasks.get(task_id)
@@ -450,12 +307,6 @@ class TaskManager:
     async def shutdown(self) -> None:
         """
         回收当前进程 TaskManager 持有的执行缓存与后台任务。
-
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: investigate-slow-test-lifecycle
-        新建原因: TaskManager 是模块级单例；若测试或应用关闭时不显式停止 heartbeat /
-        asyncio_task，残留协程会跨 TestClient 生命周期泄漏并拖慢后续 shutdown。
         """
 
         task_ids = list(self._tasks.keys())
@@ -481,12 +332,6 @@ class TaskManager:
     def reset_for_testing(self) -> None:
         """
         为测试夹具同步清空执行缓存。
-
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: investigate-slow-test-lifecycle
-        新建原因: 部分 API 测试不会触发完整 app shutdown，但模块级 TaskManager
-        仍会跨测试保留缓存与已取消任务引用，需要一个无需 await 的快速重置入口。
         """
 
         task_ids = list(self._tasks.keys())

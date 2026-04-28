@@ -7,8 +7,6 @@ def parse_lexicon_term(line: str) -> str:
     """
     从纯文本或加权词表行解析词条。
 
-    创建时间: 2026-04-23
-    任务: P2-基础设施解耦
     说明: 统一处理空行、注释行和 "词条\t权重" 格式，供 lexicons 与 metrics 共用。
     """
     cleaned = line.strip()
@@ -21,8 +19,6 @@ def load_lexicon_terms(path: Path) -> list[str]:
     """
     加载词表文件中的去重词条。
 
-    创建时间: 2026-04-23
-    任务: P2-基础设施解耦
     说明: 抽出纯文本词表加载逻辑，避免 registry 与 loader 各自维护解析细节。
     """
     items: list[str] = []
@@ -39,8 +35,6 @@ def load_weighted_lexicon(filepath: str | Path, default_weight: int = 1) -> dict
     """
     加载带权重的词典。
 
-    创建时间: 2026-04-23
-    任务: P2-基础设施解耦
     说明: 将 weighted lexicon parser 从 metrics 下沉到公共层，切断 lexicons -> metrics 的反向依赖。
 
     参数:

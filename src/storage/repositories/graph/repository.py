@@ -22,9 +22,7 @@ from src.storage.repositories.base import BaseRepository
 class ActiveEntityRow:
     """GraphRepository 活跃实体查询 DTO。
 
-    创建时间: 2026-04-23
-    任务: P0-graph-repository-dto-boundary
-    说明: 替代 raw dict 返回值，让下游通过具名字段消费 graph repository 边界。
+    替代 raw dict 返回值，让下游通过具名字段消费 graph repository 边界。
     """
 
     entity_id: int | None
@@ -42,9 +40,7 @@ class ActiveEntityRow:
 class CurrentRelationRow:
     """GraphRepository 当前关系查询 DTO。
 
-    创建时间: 2026-04-23
-    任务: P0-graph-repository-dto-boundary
-    说明: 明确当前关系快照的字段集合，避免下游依赖 dict[str, Any] 形状。
+    明确当前关系快照的字段集合，避免下游依赖 dict[str, Any] 形状。
     """
 
     relation_id: int | None
@@ -66,9 +62,7 @@ class CurrentRelationRow:
 class RelationEventRow:
     """GraphRepository 关系事件查询 DTO。
 
-    创建时间: 2026-04-23
-    任务: P0-graph-repository-dto-boundary
-    说明: 让关系事件历史以具名字段跨 repository 边界传递。
+    让关系事件历史以具名字段跨 repository 边界传递。
     """
 
     relation_event_id: int
@@ -140,7 +134,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     def _relation_history_stmt(self, run_id: str):
         """
         2026-04-27，任务：graph final-disambiguation history semantics fixes
-        新建原因：终消歧补关系需要影响 current relation，但不能伪造成 chunk 级历史事件；
+        终消歧补关系需要影响 current relation，但不能伪造成 chunk 级历史事件；
         因此 graph history surface 要排除特定 source_model 的 synthetic relation rows。
         """
         return (
@@ -326,7 +320,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     ) -> tuple[int, int] | None:
         """
         2026-04-27，任务：fix-graph-projection-no-change-refresh
-        新建原因：当某条 ChunkRelation 被修正为“无变化”时，必须显式删除旧的 graph relation event，
+        当某条 ChunkRelation 被修正为“无变化”时，必须显式删除旧的 graph relation event，
         并把受影响的实体 pair 回刷给 current relation / participant projection。
         """
         event = self.session.execute(
@@ -346,7 +340,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     def refresh_current_relation(self, run_id: str, from_entity_id: int, to_entity_id: int) -> None:
         """
         2026-04-27，任务：fix-graph-projection-no-change-refresh
-        修改原因：当关系历史被删空时，current relation 也必须同步删除；
+        当关系历史被删空时，current relation 也必须同步删除；
         否则 graph / authority / timeline 会继续读到已经失效的旧关系快照。
         """
         events = list(
@@ -427,7 +421,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     ) -> None:
         """
         2026-04-27，任务：graph participant projection consistency fixes
-        新建原因：关系写入后必须把 current relation 和 participant projection 一起刷新，
+        关系写入后必须把 current relation 和 participant projection 一起刷新，
         避免调用方只补其中一层导致图谱节点与关系历史失配。
         """
         normalized_pairs = sorted(
@@ -451,7 +445,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     def refresh_entity_participants(self, run_id: str, entity_ids: Iterable[int]) -> None:
         """
         2026-04-26，任务：图谱参与者层落地
-        新建原因：图谱参与者表是最终人物图谱节点资格的持久投影，必须在关系投影后按受影响实体增量刷新。
+        图谱参与者表是最终人物图谱节点资格的持久投影，必须在关系投影后按受影响实体增量刷新。
         """
         normalized_entity_ids = sorted({int(entity_id) for entity_id in entity_ids if entity_id is not None})
         if not normalized_entity_ids:
@@ -571,9 +565,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         查询近期活跃实体。
 
-        修改时间: 2026-04-23
-        任务: P0-graph-repository-dto-boundary
-        修改内容: 返回 ActiveEntityRow DTO，替代 raw dict[str, Any]。
+        返回 ActiveEntityRow DTO，替代 raw dict[str, Any]。
         """
         if run_id is None:
             return []
@@ -616,9 +608,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         查询当前关系快照。
 
-        修改时间: 2026-04-23
-        任务: P0-graph-repository-dto-boundary
-        修改内容: 返回 CurrentRelationRow DTO，替代 raw dict[str, Any]。
+        返回 CurrentRelationRow DTO，替代 raw dict[str, Any]。
         """
         stmt = select(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
         if active_only:
@@ -719,9 +709,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         查询关系事件历史。
 
-        修改时间: 2026-04-23
-        任务: P0-graph-repository-dto-boundary
-        修改内容: 返回 RelationEventRow DTO，替代 raw dict[str, Any]。
+        返回 RelationEventRow DTO，替代 raw dict[str, Any]。
         """
         entity_names = {
             row.entity_id: row.canonical_name
@@ -824,10 +812,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         获取指定运行的图谱实体（ORM 对象）。
 
-        修改时间: 2026-04-02
-        修改者: TraeAI
-        任务: P2.1-downstream-switch
-        修改内容: 新增 status 参数支持按状态过滤
+        新增 status 参数支持按状态过滤
 
         Args:
             run_id: 运行ID
@@ -852,7 +837,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     ) -> list[ParticipantEntityRow]:
         """
         2026-04-26，任务：图谱参与者层落地
-        新建原因：最终人物图谱、graph authority report 等 consumer
+        最终人物图谱、graph authority report 等 consumer
         需要稳定读取“有关系资格”的参与者集合，而不是全量人物。
         """
         stmt = (

@@ -1,26 +1,7 @@
 """
 叙事时间轴核心算法模块。
 
-创建时间: 2026-03-30
-创建者: CodeBuddy
-任务: refactor-session-management
-说明: 提供时间轴节点重要性计算、四阶段划分、节点筛选功能
-
-修改时间: 2026-04-27
-修改者: Codex
-任务: 时间轴合同重构
-修改内容:
-- 重写时间轴引擎，改为 TimelineAtom -> TimelineNodePlan 的新模型
-- 第一轮统一 route / export 共用的预算与序列化逻辑
-- 去除 “每个 chunk 只有一个时间轴节点” 与 “无变化关系也计分” 的旧语义
-
-修改时间: 2026-04-28
-修改者: Codex
-任务: 时间轴合同重构第二轮
-修改内容:
-- 删除识别层预算与固定选点主路径，改为“全量原子节点 + 复合节点概览”
-- 新增 TimelineCompositeNodeDTO 与复合节点分组逻辑
-- route / export 共享入口升级为双层节点合同，前端展示密度改由本地 level 筛选控制
+负责从 authority 数据构建 atomic/composite 时间轴节点、阶段划分和序列化结果。
 """
 
 from __future__ import annotations
@@ -60,16 +41,16 @@ RELATION_CHANGE_WEIGHTS: dict[str, float] = {
 
 
 class TimelineDataUnavailableError(ValueError):
-    """Raised when timeline source data is genuinely unavailable."""
+    """Raised when timeline source data is genuinely unavailable"""
 
 
 class TimelineAuthorityContractError(RuntimeError):
-    """Raised when the authority-backed timeline contract is violated."""
+    """Raised when the authority-backed timeline contract is violated"""
 
 
 @dataclass(slots=True)
 class RelationEventDTO:
-    """时间轴关系事件 DTO。"""
+    """时间轴关系事件 DTO"""
 
     relation_event_id: int
     from_char: str
@@ -83,7 +64,7 @@ class RelationEventDTO:
 
 @dataclass(slots=True)
 class LifecycleEventDTO:
-    """时间轴生命周期事件 DTO。"""
+    """时间轴生命周期事件 DTO"""
 
     entity_id: int
     character_name: str
@@ -92,7 +73,7 @@ class LifecycleEventDTO:
 
 @dataclass(slots=True)
 class PlotFlagsDTO:
-    """剧情节点附加标记。"""
+    """剧情节点附加标记"""
 
     is_pivot: bool
     is_cliffhanger: bool
@@ -101,7 +82,7 @@ class PlotFlagsDTO:
 
 @dataclass(slots=True)
 class TimelinePhaseDTO:
-    """时间轴阶段 DTO。"""
+    """时间轴阶段 DTO"""
 
     name: TimelinePhaseName
     start: int
@@ -111,7 +92,7 @@ class TimelinePhaseDTO:
 
 @dataclass(slots=True)
 class TimelineNodeDTO:
-    """时间轴节点 DTO。"""
+    """时间轴节点 DTO"""
 
     node_id: str
     anchor_chunk_id: int
@@ -132,7 +113,7 @@ class TimelineNodeDTO:
 
 @dataclass(slots=True)
 class TimelineCompositeNodeDTO:
-    """时间轴复合节点 DTO。"""
+    """时间轴复合节点 DTO"""
 
     node_id: str
     anchor_chunk_id: int
@@ -154,7 +135,7 @@ class TimelineCompositeNodeDTO:
 
 @dataclass(slots=True)
 class NarrativePhase:
-    """叙事阶段内部数据结构。"""
+    """叙事阶段内部数据结构"""
 
     name: str
     start: int
@@ -164,7 +145,7 @@ class NarrativePhase:
 
 @dataclass(slots=True)
 class TimelineAnnotationSnapshot:
-    """时间轴候选节点使用的轻量标注快照。"""
+    """时间轴候选节点使用的轻量标注快照"""
 
     chunk_id: int
     event_type: str
@@ -175,7 +156,7 @@ class TimelineAnnotationSnapshot:
 
 @dataclass(slots=True)
 class TimelineAuthorityData:
-    """authority contract 校验后的时间轴只读输入。"""
+    """authority contract 校验后的时间轴只读输入"""
 
     entity_lifecycles: list[Any]
     relation_events: list[Any]
@@ -184,7 +165,7 @@ class TimelineAuthorityData:
 
 @dataclass(slots=True)
 class TimelineSourceData:
-    """时间轴候选构建所需的数据上下文。"""
+    """时间轴候选构建所需的数据上下文"""
 
     chunk_texts: list[tuple[int, str]]
     chunk_ids: list[int]
@@ -197,7 +178,7 @@ class TimelineSourceData:
 
 @dataclass(slots=True)
 class TimelinePlanBuildResult:
-    """时间轴最终构建结果。"""
+    """时间轴最终构建结果"""
 
     atomic_nodes: list[TimelineNodeDTO]
     composite_nodes: list[TimelineCompositeNodeDTO]
@@ -208,7 +189,7 @@ class TimelinePlanBuildResult:
 
 @dataclass(slots=True)
 class PlotAtom:
-    """剧情原子信号。"""
+    """剧情原子信号"""
 
     anchor_chunk_id: int
     progress: float
@@ -225,7 +206,7 @@ class PlotAtom:
 
 @dataclass(slots=True)
 class RelationAtom:
-    """关系变化原子信号。"""
+    """关系变化原子信号"""
 
     anchor_chunk_id: int
     progress: float
@@ -238,7 +219,7 @@ class RelationAtom:
 
 @dataclass(slots=True)
 class LifecycleAtom:
-    """角色生命周期原子信号。"""
+    """角色生命周期原子信号"""
 
     anchor_chunk_id: int
     progress: float
@@ -375,7 +356,7 @@ def compute_four_phases(
 
 
 def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePhaseDTO]:
-    """将内部 NarrativePhase 转换为 TimelinePhaseDTO。"""
+    """将内部 NarrativePhase 转换为 TimelinePhaseDTO"""
     result: list[TimelinePhaseDTO] = []
     for phase in phases:
         if phase.name in ("引入期", "发展期", "高潮期", "收束期"):
@@ -491,7 +472,7 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
 
 # 2026-04-27，任务：时间轴合同重构
 # 新建原因：把 authority contract 校验后的 view 收口成 timeline 专用输入，
-# 避免 route/export 继续依赖 TimelineAuthorityView 的原始形状。
+    # 避免 route/export 继续依赖 TimelineAuthorityView 的原始形状
 def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> TimelineAuthorityData:
     entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
     return TimelineAuthorityData(
@@ -502,7 +483,7 @@ def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> Time
 
 
 # 2026-04-27，任务：时间轴合同重构
-# 新建原因：把张力曲线长度校正逻辑独立出来，确保 timeline atom 计算只面对与 chunk 对齐的张力数组。
+    # 把张力曲线长度校正逻辑独立出来，确保 timeline atom 计算只面对与 chunk 对齐的张力数组
 def _normalize_tension_scores(
     chunk_curves: list[Any] | None,
     total_chunks: int,
@@ -523,7 +504,7 @@ def _normalize_tension_scores(
 
 
 # 2026-04-27，任务：时间轴合同重构
-# 新建原因：用具名快照替代函数内临时结构，明确标注数据到 plot atom 的适配边界。
+    # 用具名快照替代函数内临时结构，明确标注数据到 plot atom 的适配边界
 def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, TimelineAnnotationSnapshot]:
     if not raw_annotations:
         return {}
@@ -541,7 +522,7 @@ def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, Time
 
 
 # 2026-04-27，任务：时间轴合同重构
-# 新建原因：统一装载 chunk / summary / annotation / tension 输入，避免 timeline 新引擎继续散落访问 repository。
+    # 统一装载 chunk / summary / annotation / tension 输入，避免 timeline 新引擎继续散落访问 repository
 def _load_timeline_source_data(
     run_id: str,
     chunk_repo: Any,
@@ -608,7 +589,7 @@ def _build_character_importance_map(
 
 # 2026-04-27，任务：时间轴合同重构
 # 新建原因：plot / relation / lifecycle 的选择逻辑完全不同，先拆成原子信号，
-# 再进入统一节点规划层，避免再次退回 “每个 chunk 一个节点” 的旧模型。
+    # 再进入统一节点规划层，避免再次退回 “每个 chunk 一个节点” 的旧模型
 def build_timeline_atoms(
     source_data: TimelineSourceData,
     authority_data: TimelineAuthorityData,
@@ -778,7 +759,7 @@ def _build_lifecycle_score_breakdown(atom: LifecycleAtom) -> dict[str, float]:
 
 # 2026-04-27，任务：时间轴合同重构
 # 新建原因：节点规划层负责把不同 atom 映射为统一节点 DTO，并显式生成稳定 node_id，
-# 让 route / export / frontend 全部摆脱 chunk_id 唯一节点假设。
+    # 让 route / export / frontend 全部摆脱 chunk_id 唯一节点假设
 def compose_timeline_nodes(
     plot_atoms: list[PlotAtom],
     relation_atoms: list[RelationAtom],
@@ -884,11 +865,7 @@ def _node_sort_key(node: TimelineNodeDTO) -> tuple[float, int, str]:
 
 
 def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str, str] | None:
-    """
-    2026-04-27，任务：fix-timeline-relation-dedup-signature
-    修改原因：relation 节点的近邻去重既要压掉真正重复的同类事件，
-    也不能把同一对角色在短距离内发生的不同变化（如新建->断裂、双向 directed 事件）误吞掉。
-    """
+    """为 relation 节点生成去重签名，同时保留短距离内的真实变化"""
     if not node.relation_events:
         return None
     event = node.relation_events[0]
@@ -906,11 +883,7 @@ def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str,
 
 
 def _relation_composite_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str] | None:
-    """
-    2026-04-28，任务：时间轴合同重构第二轮
-    新建原因：复合 relation 节点需要按“角色对 + 关系类型 + 方向”分组，
-    但不能把 `change_type` 带进主分组键，否则 `新建 -> 强化` 这类连续事件会被硬拆散。
-    """
+    """为复合 relation 节点生成分组签名，但不把 `change_type` 带进主键"""
     if not node.relation_events:
         return None
     event = node.relation_events[0]
@@ -1096,12 +1069,12 @@ def _composite_node_sort_key(node: TimelineCompositeNodeDTO) -> tuple[float, int
 
 # 2026-04-28，任务：时间轴合同重构第二轮
 # 新建原因：第二轮把“识别真相”和“默认展示密度”拆开，
-# 复合节点只负责概览展示，不再承担压缩真相层节点数量的职责。
+    # 复合节点只负责概览展示，不再承担压缩真相层节点数量的职责
 def compose_composite_timeline_nodes(
     atomic_nodes: list[TimelineNodeDTO],
     phases: list[TimelinePhaseDTO],
 ) -> list[TimelineCompositeNodeDTO]:
-    del phases  # 中文注释：当前复合分组直接使用 atomic node 自带的 phase_name，不额外重算阶段归属。
+    del phases  # 当前复合分组直接使用 atomic node 自带的 phase_name，不额外重算阶段归属。
 
     composite_nodes = [
         *_build_plot_composite_nodes(atomic_nodes),
@@ -1193,14 +1166,6 @@ def serialize_timeline_phases(phases: list[TimelinePhaseDTO]) -> list[dict[str, 
         for phase in phases
     ]
 
-
-# 2026-04-27，任务：时间轴合同重构
-# 修改时间: 2026-04-28
-# 修改者: Codex
-# 任务: 时间轴合同重构第二轮
-# 修改内容:
-# - 共享入口从“已选节点列表”升级为“atomic_nodes + composite_nodes”
-# - route / export 不再感知预算器和固定上限，默认展示密度交由前端本地筛选
 def build_timeline_plan(
     run_id: str,
     chunk_repo: Any,

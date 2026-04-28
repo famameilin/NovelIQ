@@ -1,40 +1,13 @@
 """
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 从 cli 模块提取核心业务逻辑到 workflows 模块
 
 本模块从 src.cli.preprocess 提取核心业务逻辑，作为预处理流程的核心工作流模块。
 包含文本清洗、分块、写入数据库，以及风格/文化指标计算等功能。
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository 替代直接调用 operations 函数
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除向后兼容代码，只保留 Repository 模式
 
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: 重构其他 workflow 为 async
-修改内容: run_preprocess 改为 async def，所有内部调用改为 await
 
-修改时间: 2026-04-10
-修改者: TraeAI
-任务: implement-level3-vector-retrieval
-修改内容: 添加 chunk embedding 生成功能
 
-修改时间: 2026-04-24
-修改者: Codex
-任务: semantic-chunking-embedding-sse-progress
-修改内容: 将 preprocess 的 emitter 透传到语义分块 paragraph embedding 链路，支持前端实时进度。
 
-修改时间: 2026-04-24
-修改者: Codex
-任务: preprocess-paragraph-embedding-sse-progress
-修改内容: 为 preprocess 的 paragraph_embeddings 批量落库阶段补充按批次 SSE 进度，避免 UI 在长批量请求期间静默等待。
 """
 
 from __future__ import annotations
@@ -73,27 +46,8 @@ async def run_preprocess(
     """
     执行预处理流程。
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 预处理流程
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-analysis-layer-functions
-    修改内容: 重构函数，使用辅助函数拆解职责，确保函数行数不超过 200 行
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: fix-preprocess-transaction-boundary
-    修改内容: 将 chunks/style/embedding 写入切成短事务，避免长事务阻塞 analysis_runs 状态写回
 
-    修改时间: 2026-04-25
-    修改者: Codex
-    任务: remove-unused-workflow-cache-hooks
-    修改内容: 删除未被主链实际消费的 cache_path 参数，避免继续暴露无效缓存入口。
 
     Args:
         source_path: 源文件路径
@@ -196,14 +150,11 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
     """
     提交 preprocess 阶段的分段写入，及时释放事务锁。
 
-    创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
-    任务: fix-preprocess-transaction-boundary
-    说明: preprocess 会连续写 chunks、chunk_style、chunk_embeddings，这些表都外键关联 analysis_runs。
+    preprocess 会连续写 chunks、chunk_style、chunk_embeddings，这些表都外键关联 analysis_runs。
           若整段预处理共用一个长事务，EventBus 另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout。
           因此这里在关键批量写入后立即提交，主动切断长事务。
     """
-    # 中文注释：这里的 commit 目标是缩短锁持有时间，而不是改变业务原子性边界；
+    # 这里的 commit 目标是缩短锁持有时间，而不是改变业务原子性边界；
     # preprocess 本身已是可恢复阶段，分段提交比让状态写回超时更符合当前系统语义。
     session.commit()
     logger.debug(f"Committed preprocess writes after step={step}")
@@ -218,34 +169,12 @@ async def _generate_chunk_embeddings(
     """
     为所有 chunk 生成 embedding 并存入数据库
 
-    创建时间: 2026-04-10
-    创建者: TraeAI
-    任务: implement-level3-vector-retrieval
-    说明: 为 Level 3 向量检索生成 chunk embedding
+    为 Level 3 向量检索生成 chunk embedding
 
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: fix-preprocess-transaction-boundary
-    修改内容: 在 schema 准备后和 embedding 落库后及时提交，避免 embedding 长阶段阻塞 analysis_runs 状态写回
 
-    修改时间: 2026-04-24
-    任务: level3-paragraph-rerank
-    修改内容: 同步生成 paragraph_embeddings，供 Level3 在 chunk 粗召回结果内做局部 evidence rerank
 
-    修改时间: 2026-04-24
-    任务: fix-level3-embedding-partial-write
-    修改内容: chunk embedding 也改为 fail fast；任何 chunk 缺失向量都直接中断 preprocess，
-              避免留下粗召回范围不完整、却仍被 readiness 误判为可用的 run
 
-    修改时间: 2026-04-24
-    任务: fix-paragraph-failfast-atomicity
-    修改内容: paragraph rows 先完整生成，再统一执行 chunk/paragraph 向量落库；
-              避免 paragraph 失败时 session 中残留 chunk-only 向量写入
 
-    修改时间: 2026-04-24
-    任务: fix-level3-embedding-init-failfast
-    修改内容: EmbeddingClient 初始化失败时不再静默跳过；paragraph rerank 已是 Level3 硬前提，
-              preprocess 必须直接失败，避免 run 落入永久 not-ready 状态
 
     Args:
         session: 数据库连接
@@ -341,7 +270,7 @@ async def _generate_chunk_embeddings(
         ParagraphEmbeddingRow,
         emitter=emitter,
     )
-    # 中文注释：先把 paragraph rows 全部准备好，再开始任何向量表 DML；
+    # 先把 paragraph rows 全部准备好，再开始任何向量表 DML；
     # 这样 paragraph fail fast 时，当前 session 不会留下 chunk-only 半成品写入。
     if embeddings:
         insert_chunk_embeddings(session, run_id, embeddings)
@@ -374,9 +303,7 @@ def _split_chunk_paragraphs(chunk: Chunk) -> list[tuple[int, int, str]]:
     """
     将 chunk 文本拆成 chunk 内 paragraph，并保留 chunk 内字符范围。
 
-    创建时间: 2026-04-24
-    任务: level3-paragraph-rerank
-    说明: 这里专门返回 chunk 内 local offset；
+    这里专门返回 chunk 内 local offset；
           全局 offset 由调用方基于 `chunk.start` 统一折算，避免 local/global 语义再次混淆。
     """
     if not chunk.text.strip():
@@ -417,22 +344,13 @@ async def _generate_paragraph_embedding_rows(
     """
     生成 paragraph embedding 写入 DTO。
 
-    创建时间: 2026-04-24
-    任务: level3-paragraph-rerank
-    说明: 复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求。
+    复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求。
 
-    修改时间: 2026-04-24
-    任务: fix-paragraph-embedding-partial-write
     修改说明: paragraph embedding 缺失已是 Level3 硬故障，这里改为 fail fast，
               避免 preprocess 成功但后续 readiness 永远失败。
 
-    修改时间: 2026-04-24
-    任务: full-global-offset-rollout
     修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段。
 
-    修改时间: 2026-04-24
-    修改者: Codex
-    任务: preprocess-paragraph-embedding-sse-progress
     修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进。
     """
     paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
@@ -465,15 +383,12 @@ async def _generate_paragraph_embedding_rows(
         """
         发射 preprocess 阶段 paragraph embedding 的批次进度。
 
-        创建时间: 2026-04-24
-        任务: preprocess-paragraph-embedding-sse-progress
-        新建原因: Level3 paragraph_embeddings 生成可能耗时很长，必须给前端一个独立于 chunk embedding 的可见进度。
         """
         if emitter is None or total_batches <= 0:
             return
 
         sub_percent = (completed_batches / total_batches) * 100
-        # 中文注释：current/total 在这里表达的是“已完成批次/总批次”，
+        # current/total 在这里表达的是“已完成批次/总批次”，
         # message 再补充总 paragraph 数，避免和 chunk 级 current/total 语义混淆。
         await emitter(
             StreamEvent(

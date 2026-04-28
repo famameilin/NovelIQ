@@ -16,7 +16,6 @@
     pos_terms = reg.get("emotion.positive")           # 基础词表
     neg_ext = reg.get_with_domains("emotion.negative", ["xianxia"])  # 带修仙扩展
 
-创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak
 """
 
 from __future__ import annotations
@@ -208,14 +207,7 @@ class LexiconRegistry:
         - 纯词条格式：每行一个词条
         - 加权格式：每行 "词条\\t权重"，只取词条部分
 
-        修改时间: 2026-04-06
-        修改者: GLM-5
-        任务: 支持加权词典格式
-        修改内容: 处理带权重列的词典文件，只返回词条部分
 
-        修改时间: 2026-04-23
-        任务: P2-基础设施解耦
-        修改内容: 改为调用公共词表解析器，避免 registry 自行维护解析细节。
         """
         path = self._resolve_file_path(key)
         if path is None or not path.exists():
@@ -232,14 +224,7 @@ class LexiconRegistry:
         - 纯词条格式：每行一个词条
         - 加权格式：每行 "词条\\t权重"，只取词条部分
 
-        修改时间: 2026-04-06
-        修改者: GLM-5
-        任务: 支持加权词典格式
-        修改内容: 处理带权重列的词典文件，只返回词条部分
 
-        修改时间: 2026-04-23
-        任务: P2-基础设施解耦
-        修改内容: 改为调用公共词表解析器，避免 domain 加载与普通词表加载规则漂移。
         """
         domain_dir = self._base_dir / _DOMAIN_DIR
         path = domain_dir / f"{tag}.txt"
@@ -257,10 +242,6 @@ class LexiconRegistry:
         如果调用方请求 B 表且 exclude_borrowed=True，
         则该词条从 B 的返回结果中移除。
 
-        修改时间: 2026-04-06
-        修改者: GLM-5
-        任务: 代码审查问题修复
-        修改内容: 移除无效的死代码循环
         """
         borrowed: set[str] = set()
 
@@ -308,14 +289,8 @@ def get_weighted_lexicon_set(
     """
     获取完整的加权词表集合。
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 清理向后兼容代码
-    说明: 使用 load_weighted_lexicon 加载词典。
+    使用 load_weighted_lexicon 加载词典。
 
-    修改时间: 2026-04-23
-    任务: P2-基础设施解耦
-    修改内容: load_weighted_lexicon 改从公共解析层导入，切断 lexicons 对 metrics 的反向依赖。
     """
     from src.workflows.curve_metrics import WeightedLexiconSet
 

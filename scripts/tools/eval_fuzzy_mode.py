@@ -2,10 +2,6 @@
 Fuzzy 模式效果评估脚本
 
 对比 exact/phrase/fuzzy 三种模式在真实小说数据上的召回率。
-
-创建时间: 2026-04-06
-创建者: GLM-5
-任务: 词表与张力信号系统重构 - Task 9
 """
 
 from __future__ import annotations

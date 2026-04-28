@@ -1,9 +1,6 @@
 """
 解析工具模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取通用解析工具函数
 """
 
@@ -18,9 +15,6 @@ def parse_active_entities(active_entities: str | None) -> list[str]:
     """
     解析活跃实体字符串
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
     迁移自: annotation_client.py::_parse_active_entities
 
     Args:

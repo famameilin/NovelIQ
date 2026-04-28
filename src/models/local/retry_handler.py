@@ -1,15 +1,7 @@
 """
 标注客户端重试处理模块
 
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: code-quality-refactor - 统一重试机制
 说明: 提供 AnnotationClient 专用的重试逻辑，支持主客户端重试和兜底客户端 fallback
-
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: 重构 AnnotationClient 使用 async
-修改内容: execute 方法改为 async def
 """
 
 from __future__ import annotations
@@ -47,15 +39,7 @@ class AnnotationRetryHandler[T]:
     """
     标注重试处理器
 
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 统一重试机制
     说明: 处理标注客户端的复杂重试逻辑，包括主客户端重试和兜底客户端 fallback
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: execute 方法改为 async def，支持 async operation
     """
 
     def __init__(
@@ -78,15 +62,6 @@ class AnnotationRetryHandler[T]:
     ) -> T:
         """
         执行带重试的操作
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 统一重试机制
-
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: 重构 AnnotationClient 使用 async
-        修改内容: 改为 async def，使用 await 调用 operation
         """
         for attempt in range(self.config.max_retries):
             self.state.attempt = attempt + 1
@@ -149,11 +124,6 @@ class AnnotationRetryHandler[T]:
     ) -> T:
         """
         尝试兜底客户端。
-
-        修改时间: 2026-04-27
-        修改者: Codex
-        任务: fix-phase3-fastpath-followup-review-findings
-        修改内容: fallback 视为独立一次调用，进入兜底前补记真实 attempt 次数，避免 runtime 审计少记一次重试。
         """
         logger.warning(
             "{} primary client failed after {} attempts, falling back to fallback client chunk_id={}",

@@ -1,35 +1,17 @@
 /**
  * RhythmCurveChart - 节奏张力曲线图表组件
- * 
- * 创建时间: 2026-04-04
- * 创建者: AI Assistant
- * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示表层张力和综合张力曲线，支持三幕分界线和高潮标注
- * 
- * 修改时间: 2026-04-04
- * 修改者: AI Assistant
- * 修改内容: 
+ *
+ * 展示表层张力和综合张力曲线，支持三幕分界线和高潮标注
+ *
  *   - 添加 dataZoom 支持，用于 Brush 缩放同步
  *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
  *
- * 修改时间: 2026-04-21
- * 修改者: Codex
- * 任务: 修复节奏张力曲线图例颜色错位
- * 修改内容:
  *   - 将 series 主色显式绑定到 CSS 变量
  *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
  *
- * 修改时间: 2026-04-21
- * 修改者: Codex
- * 任务: display-surface-tension
- * 修改内容:
  *   - 将展示层第一条节奏曲线切换为 surface_tension
  *   - 高潮标记改为绑定综合张力，避免语义与落点错位
  *
- * 修改时间: 2026-04-21
- * 修改者: Codex
- * 任务: display-surface-tension
- * 修改内容:
  *   - 当前端检测到表层张力仍是 0-1 而综合张力是 0-10 量级时，仅在显示层对前者做 x10 适配
  *   - 保持后端原始返回值不变，先验证产品显示效果
  */
@@ -137,7 +119,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
-        // 中文注释：老 run 的综合张力仍可能是 0-10 量级，而新的 surface_tension 目前是 0-1。
+        // 老 run 的综合张力仍可能是 0-10 量级，而新的 surface_tension 目前是 0-1。
         // 这里先只在前端显示层把表层张力按 x10 对齐，便于验证视觉效果，不改后端语义。
         const values = data.map((d) => {
           const rawValue = d[config.key as keyof ChunkCurvePoint];

@@ -1,16 +1,8 @@
 """
 标注辅助函数模块 - 阶段管理
 
-创建时间: 2026-03-13
-创建者: TraeAI
-任务: 项目文件结构整理与拆解
 
-修改历史:
-- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
-- 2026-03-14: 添加 run_id 参数支持 (workflows-repository-refactor)
-- 2026-03-17: 使用 AnnotationPhaseConfig 简化多参数函数
-
-说明: 本模块包含阶段管理相关的数据类和函数。
+本模块包含阶段管理相关的数据类和函数。
 """
 
 from __future__ import annotations
@@ -80,28 +72,10 @@ async def _annotate_chunk(
     """
     Chunk 标注函数
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 标注流程
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 统一字段命名，添加 run_id 支持
 
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 增加 character_appearances 参数支持
 
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
 
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: refactor/annotate-async
-    修改内容: 改为 async def
 
     重试策略:
     - 内层: 主标注客户端最多3次（任何错误类型）
@@ -259,19 +233,8 @@ async def _init_annotation_phase(
     """
     初始化标注阶段
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 标注流程阶段化
 
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: code-quality-refactor - 简化多参数函数
-    修改内容: 改为调用 _init_annotation_phase_with_config，保持向后兼容
 
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: refactor/annotate-async
-    修改内容: 改为 async def
 
     Returns:
         AnnotationPhaseResult: 包含所有初始化后的资源
@@ -309,34 +272,11 @@ async def _process_single_chunk(
 ) -> DisambiguationState:
     """处理单个chunk
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 标注流程阶段化
 
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: 修复 _run_incremental_disambiguation 缺少 novel_id 参数的错误
-    修改内容: 添加 novel_id 参数并传递给 _run_incremental_disambiguation
 
-    修改时间: 2026-03-20
-    修改者: TraeAI
-    任务: analyze-dialogue-length-zero
-    修改内容: 传递 client 参数到 _store_annotation_results 以支持 LLM 对话归属判断
 
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-phase3-not-called
-    修改内容: 在 _process_single_chunk 中调用 phase3 计算对话长度，而不是在 storage 中
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 使用 DisambiguationState 替代 alias_map，使用 _run_incremental_disambiguation_with_state
 
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: refactor/annotate-async
-    修改内容: 改为 async def，await annotate_chunk
     """
     from .context import _prepare_chunk_context_with_level3
     from .disambiguation import _run_incremental_disambiguation_with_state
@@ -418,24 +358,9 @@ async def _process_chunks_phase(
 ) -> tuple[int, DisambiguationState]:
     """处理所有chunks阶段
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 标注流程阶段化
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: fix-entity-relations-not-saved
-    修改内容: 添加 resume 参数，支持从 checkpoint 恢复 alias_map
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 使用 _load_disambig_checkpoint 替代 _load_disambig_checkpoint，返回 DisambiguationState
 
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: refactor/annotate-async
-    修改内容: 改为 async def，await _process_single_chunk
     """
     from .disambiguation import (
         DisambiguationMaxRetriesExceededError,
@@ -513,7 +438,7 @@ async def _process_chunks_phase(
                         total=total_chunks,
                         percent=10 + (progress_count / total_chunks) * 70,
                         sub_percent=(progress_count / total_chunks) * 100,
-                        # 中文注释：resume 模式下进度条应继续从“已存在结果”往前走，
+                        # resume 模式下进度条应继续从“已存在结果”往前走，
                         # 但 workflow 返回值仍应只统计本次新成功处理的 chunk 数。
                         message=f"标注 chunk {progress_count}/{total_chunks}",
                     )
@@ -553,10 +478,6 @@ async def _run_disambiguation_phase(
 ) -> DisambiguationState:
     """执行消歧阶段
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 使用 DisambiguationState 替代 alias_map，使用 _run_final_disambiguation_with_state
     """
     from .disambiguation import _run_final_disambiguation_with_state
 

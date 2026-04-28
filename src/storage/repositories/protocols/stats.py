@@ -1,12 +1,7 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分protocols.py
-说明: 统计数据协议接口
+统计数据协议接口
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: 使用语义 DTO 和 RepositoryRecord，清理协议层动态类型与裸结构暴露。
+使用语义 DTO 和 RepositoryRecord，清理协议层动态类型与裸结构暴露。
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
 """
 统一事件模型与 Event Bus
 
-创建时间: 2026-04-09
-创建者: GLM-5
-任务: refactor/sse-unified-event-bus
 说明:
   - StreamEvent: 统一事件格式，所有 SSE 事件使用同一结构
   - AnalysisEventBus: 持有当前上下文，自动补全缺失字段，统一发送到 SSE
@@ -119,7 +116,7 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "thinking": StreamMessageType.llm_thinking.value,
 }
 
-# 中文注释：这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
+# 这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
 # 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志。
 _DEBUG_PROGRESS_SUB_STAGES = {
     "semantic_chunking_embedding",
@@ -174,13 +171,6 @@ class AnalysisEventBus:
         - 将 action 翻译为 SSE event type
         - 调用 event_manager.send() 唯一发送口
         - 同步更新 TaskManager
-
-        修改时间: 2026-04-20
-        修改任务: fix-eventbus-null-progress-write / demote-llm-output-eventbus-log
-        修改内容: 1. 区分“字段缺失”和“字段显式赋值”，避免把 current/total/progress 的 None
-                    误写回 DB 非空列，保持事件上下文补全语义与任务持久化语义一致。
-                  2. 将高频 LLM 原始流式事件（output / thinking）降为 DEBUG，避免 JSON 片段污染
-                    INFO 级运行日志，同时保留 start / progress / complete 这些业务阶段事件的可见性。
         """
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
@@ -240,7 +230,7 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        # 中文注释：LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
+        # LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
         # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO。
         log_level = (
             logger.debug
@@ -268,14 +258,14 @@ class AnalysisEventBus:
 
         # 同步更新 TaskManager
         if resolved_event.action in ("start", "progress", "complete"):
-            # 中文注释：这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
+            # 这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
             # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源。
             task_update_kwargs: dict[str, Any] = {
                 "stage": resolved_event.stage,
                 "sub_stage": resolved_event.sub_stage,
                 "message": resolved_event.message,
             }
-            # 中文注释：EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”。
+            # EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”。
             # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库。
             if resolved_event.current is not None:
                 task_update_kwargs["current"] = resolved_event.current
@@ -295,9 +285,6 @@ class AnalysisEventBus:
         """
         根据阶段和当前进度计算全局 percent
 
-        创建时间: 2026-04-11
-        创建者: GLM-5
-        任务: fix-thinking-percent-calculation
         说明: 当事件没有提供 percent 时，根据 current/total 和阶段范围自动计算
 
         各阶段进度范围:

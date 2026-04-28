@@ -99,10 +99,7 @@ function emitSSEError(): void {
 }
 
 /**
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 修复后台恢复后分析页卡死与白屏
- * 新建原因: useAnalysisStatus 现在显式监听可见性恢复；测试需要稳定切换 jsdom 的 visibilityState。
+ * useAnalysisStatus 现在显式监听可见性恢复；测试需要稳定切换 jsdom 的 visibilityState。
  */
 function setDocumentVisibilityState(state: "visible" | "hidden"): void {
   Object.defineProperty(document, "visibilityState", {

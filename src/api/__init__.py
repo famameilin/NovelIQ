@@ -24,9 +24,6 @@ def __getattr__(name: str):
     """
     延迟导入 app，避免 python -m src.api.main 时的 RuntimeWarning
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 修复模块导入警告
     说明: 当使用 python -m 运行 main.py 时，__init__.py 会先被导入，
           如果直接导入 app 会导致 main 模块在 sys.modules 中但未执行 __main__
     """

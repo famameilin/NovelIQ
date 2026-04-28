@@ -1,29 +1,11 @@
 """
 AnnotationClient 模块
 
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 拆分标注专用客户端
-
 修改历史:
-- 2026-03-14: 添加双次调用模式支持（第一次：基础标注，第二次：伏笔分析）
-- 2026-03-16: 集成 Instructor 实现结构化输出
-- 2026-03-18: 拆分核心逻辑到 annotation/ 子包，简化此类
-- 2026-03-23: 移动到 src/models/annotation.py（统一客户端架构）
-- 2026-03-29: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
-- 2026-04-07: 添加 stream_callback 参数支持（websocket-streaming-progress）
-- 2026-04-09: 重构为 async def（适配 BaseModelClient._call_api_stream 异步化）
-- 2026-04-24: 移除废弃 Instructor 构造参数，结构化输出统一走项目级适配层
-- 2026-04-24: think 关闭时不再下发 `reasoning_effort=none` / `think=false`，与统一请求契约对齐
 
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
 - 核心逻辑已移至 src.models.local.annotation 子包
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: count-failed-llm-calls
-修改内容: 对 phase2/3/4 的结构化响应解析失败路径补记 token，避免请求已返回时漏记成本
 """
 
 from __future__ import annotations
@@ -83,10 +65,6 @@ class AnnotationClient(BaseModelClient):
     ) -> None:
         """
         初始化 annotation 客户端。
-
-        修改时间: 2026-04-24
-        任务: fix-structured-output-review-findings
-        修改内容: 删除 Instructor 工厂参数，避免业务客户端继续暴露已取消的结构化输出运行时入口。
 
         结构化输出机制说明:
         - 已移除 instructor_client_factory 参数，结构化输出不再依赖 Instructor 库
@@ -189,20 +167,6 @@ class AnnotationClient(BaseModelClient):
     ) -> Any:
         """
         调用 annotation 模型 API。
-
-        修改时间: 2026-04-24
-        任务: structured-output-adapter-instructor-unification
-        修改内容: Phase2/3/4 的结构化调用改走项目级 structured_output 适配层；
-                  Phase1 仍保留原有非结构化 streaming 路径。
-
-        修改时间: 2026-04-24
-        任务: fix-structured-output-review-findings
-        修改内容: 解析失败补记 token 前先确认 raw_response 存在，避免本地前置校验失败被误记账。
-
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: omit-thinking-fields-when-disabled
-        修改内容: Phase1 非结构化流式路径在 think 关闭时同样保持请求体最小化，不再单独透传 false。
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -228,7 +192,7 @@ class AnnotationClient(BaseModelClient):
                     ),
                 )
             except StructuredOutputError as exc:
-                # 中文注释：结构化解析失败时，模型响应可能已经返回，必须保留 token 补记。
+                # 结构化解析失败时，模型响应可能已经返回，必须保留 token 补记。
                 if call_type and exc.raw_response is not None:
                     token_task_type = "annotation" if self._task_type == "annotation_fallback" else None
                     self._record_estimated_token_usage_from_response(

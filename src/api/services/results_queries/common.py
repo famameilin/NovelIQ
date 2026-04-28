@@ -1,9 +1,6 @@
 """
 结果查询共享工具。
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
 说明: 承载 route/service 共享的解析、归一化与评分工具，避免 service 反向依赖 route。
 """
 
@@ -156,14 +153,6 @@ def _calculate_narrative_focus_scores(
     focus_characters: list[str],
     main_characters: list[str],
 ) -> list[CharacterStats]:
-    """
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 旧 `protagonist_score` 语义会把“唯一主角判定”和“中心度融合分”混在一起；
-    现在保留原四因子公式，但只把它作为 `narrative_focus_score`，焦点身份改由
-    diagnosis 输出的 `focus_characters` 决定。
-    """
     if not characters:
         return characters
 
@@ -190,17 +179,6 @@ def _normalize_arc_scores(
 ) -> dict[str, float] | None:
     """
     对 arc_scores 的人物名称进行归一化，并收口为命名字典。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-diagnosis-followup-review-findings
-    修改原因: 结果 API 与前端页面都按“角色名 -> 分数”消费 arc_scores。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 焦点合同已经明确不兼容旧数据；这里不再接受匿名数组形态的旧弧线分，
-    只保留命名字典输入，避免继续在活链路里保留旧合同兼容分支。
     """
     if not arc_scores:
         return None

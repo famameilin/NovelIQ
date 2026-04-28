@@ -1,19 +1,5 @@
 """
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 settings.py 拆分API相关配置类
-
 本模块包含API和路径相关的配置数据类。
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: refactor-dialogue-attribution-pipeline
-修改内容: 添加 load_prompt_from_file 函数，支持从文件加载 prompt
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: prompt-consolidation
-修改内容: 重构 prompt 加载逻辑，按任务组织 prompt 结构
 """
 
 from __future__ import annotations
@@ -27,9 +13,6 @@ def load_prompt_from_file(prompt_name: str, config_dir: Path | None = None) -> s
     """
     从文件加载 prompt
 
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
     说明: 从 config/prompts/ 目录加载 prompt 文件
 
     Args:
@@ -51,9 +34,6 @@ def parse_prompt_sections(content: str) -> dict[str, str]:
     """
     解析包含多个分段的 prompt 文件
 
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
     说明: 解析使用 ===SECTION_NAME=== 标记的分段 prompt
 
     Args:
@@ -85,9 +65,6 @@ def parse_few_shot_examples(content: str) -> list[dict[str, str]]:
     """
     解析 Few-shot 示例
 
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
     说明: 解析使用 ---EXAMPLE_N_USER--- 和 ---EXAMPLE_N_ASSISTANT--- 标记的示例
 
     Args:
@@ -134,12 +111,6 @@ def parse_few_shot_examples(content: str) -> list[dict[str, str]]:
 
 @dataclass
 class Phase1Prompts:
-    """Phase1（基础标注）Prompt 配置
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
-    """
 
     system: str = ""
     user_template: str = ""
@@ -149,12 +120,6 @@ class Phase1Prompts:
 
 @dataclass
 class Phase2Prompts:
-    """Phase2（伏笔分析）Prompt 配置
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
-    """
 
     system: str = ""
     user_template: str = ""
@@ -163,17 +128,6 @@ class Phase2Prompts:
 
 @dataclass
 class Phase3Prompts:
-    """Phase3（对话归属）Prompt 配置
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
-
-    修改时间: 2026-04-09
-    创建者: TraeAI
-    任务: fix-phase3-content-field
-    修改内容: 添加 dialogue_batch_size，每批处理的候选对话数量
-    """
 
     system: str = ""
     user_template: str = ""
@@ -182,12 +136,6 @@ class Phase3Prompts:
 
 @dataclass
 class Phase4Prompts:
-    """Phase4（关系抽取）Prompt 配置
-
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
-    """
 
     system: str = ""
     user_template: str = ""
@@ -230,21 +178,6 @@ class APISettings:
 class PromptSettings:
     """
     Prompt 配置
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
-    修改内容: 按任务重组 prompt 结构
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: refactor-phase4-relation-extraction
-    修改内容: 添加 phase4 字段
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: final-canonical-reselect
-    修改内容: 添加最终代表名重选 prompt 配置
     """
 
     phase1: Phase1Prompts = field(default_factory=Phase1Prompts)
@@ -292,10 +225,6 @@ def _parse_api_settings(data: dict[str, Any] | None) -> APISettings:
 def _load_phase1_prompts() -> Phase1Prompts:
     """
     加载 Phase1 prompt
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
     """
     content = load_prompt_from_file("phase1")
     if not content:
@@ -317,10 +246,6 @@ def _load_phase1_prompts() -> Phase1Prompts:
 def _load_phase2_prompts() -> Phase2Prompts:
     """
     加载 Phase2 prompt
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
     """
     content = load_prompt_from_file("phase2")
     if not content:
@@ -337,10 +262,6 @@ def _load_phase2_prompts() -> Phase2Prompts:
 def _load_phase3_prompts() -> Phase3Prompts:
     """
     加载 Phase3 prompt
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
     """
     content = load_prompt_from_file("phase3")
     if not content:
@@ -356,15 +277,6 @@ def _load_phase3_prompts() -> Phase3Prompts:
 def _load_phase4_prompts() -> Phase4Prompts:
     """
     加载 Phase4 prompt
-
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: refactor-phase4-relation-extraction
-    修改内容: 移除 format 字段，添加配置验证
     """
     from loguru import logger
 
@@ -390,21 +302,6 @@ def _load_phase4_prompts() -> Phase4Prompts:
 def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
     """
     解析 Prompt 配置
-
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: prompt-consolidation
-    修改内容: 按任务从合并文件加载 prompt
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: refactor-phase4-relation-extraction
-    修改内容: 添加 phase4 prompt 加载
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: final-canonical-reselect
-    修改内容: 新增最终代表名重选 prompt 加载
     """
     return PromptSettings(
         phase1=_load_phase1_prompts(),

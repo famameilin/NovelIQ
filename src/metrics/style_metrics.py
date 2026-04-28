@@ -176,10 +176,6 @@ def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str) -> f
     """
     计算词表密度（使用 phrase 模式匹配）。
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 移除向后兼容代码
-    修改内容: 移除 text=None 死代码分支，统一使用 count_mixed_hits
     """
     total_tokens = len(tokens)
     hit_count = count_mixed_hits(text, tokens, terms)

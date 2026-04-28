@@ -33,21 +33,21 @@ interface BuildForceGraphModelOptions {
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把数值映射逻辑抽成纯函数，供数据适配和布局/样式阶段复用。
+// 把数值映射逻辑抽成纯函数，供数据适配和布局/样式阶段复用。
 export function mapValue(value: number, inMin: number, inMax: number, outMin: number, outMax: number): number {
   if (inMax === inMin) return (outMin + outMax) / 2;
   return ((value - inMin) / (inMax - inMin)) * (outMax - outMin) + outMin;
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把深浅归一化逻辑从组件中抽离，便于节点着色和后续测试复用。
+// 把深浅归一化逻辑从组件中抽离，便于节点着色和后续测试复用。
 export function normalizeToRange(value: number, minVal: number, maxVal: number): number {
   if (maxVal <= minVal) return 0.3;
   return Math.max(0, Math.min(1, (value - minVal) / (maxVal - minVal)));
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：G6 layout 的 nodeSize 回调依赖运行时配置，抽成纯函数后可避免 hook 内重复定义。
+// G6 layout 的 nodeSize 回调依赖运行时配置，抽成纯函数后可避免 hook 内重复定义。
 export function getConfiguredNodeSize(nodeCfg: unknown, fallback: number = NODE_SIZE_MIN): number {
   if (!nodeCfg || typeof nodeCfg !== "object") return fallback;
   const size = (nodeCfg as { size?: unknown }).size;
@@ -163,7 +163,7 @@ function buildOrderedLayoutNodes(nodes: ForceGraphNodeData[], edges: Record<stri
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：将 ForceGraph 的过滤、度数统计和布局排序收口成单一适配步骤，避免组件混杂数据准备逻辑。
+// 将 ForceGraph 的过滤、度数统计和布局排序收口成单一适配步骤，避免组件混杂数据准备逻辑。
 export function buildForceGraphModel({
   data,
   relationFilter,

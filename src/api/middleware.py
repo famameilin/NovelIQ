@@ -1,12 +1,5 @@
 """
-创建时间: 2026-03-19
-创建者: TraeAI
-任务: ID系统统一优化 - API中间件模块
 说明: 提供错误处理和ID转换等中间件功能
-
-修改记录:
-- 2026-03-19 TraeAI 添加ID转换相关异常处理
-- 2026-04-04 AI Assistant 添加请求日志中间件
 """
 
 from __future__ import annotations
@@ -227,15 +220,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
     请求日志中间件
 
-    创建时间: 2026-04-04
-    创建者: AI Assistant
-    任务: fix-backend-stability
     说明: 记录每个请求的进入、退出和耗时信息
-
-    修改时间: 2026-04-04
-    修改者: AI Assistant
-    任务: fix-backend-stability
-    修改内容: 移除 try-except，避免与 generic_exception_handler 产生双重日志
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -255,9 +240,6 @@ def register_middlewares(app) -> None:
     """
     注册所有中间件
 
-    创建时间: 2026-04-04
-    创建者: AI Assistant
-    任务: fix-backend-stability
     说明: 注册请求日志等中间件
     """
     app.add_middleware(RequestLoggingMiddleware)

@@ -1,15 +1,8 @@
 """
 主流程编排
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-module-split
-说明: 从 disambiguation.py 拆分，包含主流程编排相关函数
+从 disambiguation.py 拆分，包含主流程编排相关函数
 
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 创建统一的模型交互记录接口
-修改内容: 使用 record_model_interaction 替代 _save_disambiguation_interaction 函数
 """
 
 from __future__ import annotations
@@ -64,10 +57,7 @@ class DisambiguationMaxRetriesExceededError(Exception):
     """
     消歧重试次数耗尽异常
 
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 修复导入错误
-    说明: 从 phase.py 移动到 disambiguation.py，与消歧逻辑放在一起
+    从 phase.py 移动到 disambiguation.py，与消歧逻辑放在一起
     """
 
     pass
@@ -90,24 +80,9 @@ async def _retry_disambig(
     """
     带重试的消歧调用
 
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 添加消歧重试逻辑和交互记录保存
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 修复 disambiguate_characters 调用方式
-    修改内容: 使用 client.disambiguate_characters() 方法调用
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 创建统一的模型交互记录接口
-    修改内容: 使用 record_model_interaction 替代 _save_disambiguation_interaction
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: final-canonical-reselect-review-fix
-    修改内容: 模型名改为安全读取，避免轻量 fallback client 在交互日志阶段报错
     """
     call_spec = build_disambiguation_call_spec(
         client,
@@ -137,16 +112,9 @@ async def _retry_canonical_reselect(
     """
     带重试的最终代表名重选调用。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
-    说明: 终消歧后的额外重选必须继续走模型，而不是回退到本地 heuristic；
+    终消歧后的额外重选必须继续走模型，而不是回退到本地 heuristic；
           这里复用统一的交互记录，但消息体按“已确认 cluster 的代表名选择”单独构造。
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: final-canonical-reselect-review-fix
-    修改内容: 交互日志改为安全读取模型名，避免 lightweight fallback client 直接崩溃
     """
     call_spec = build_canonical_reselect_call_spec(
         client,
@@ -175,18 +143,10 @@ async def _run_final_canonical_reselect(
     """
     在最终消歧后追加一次模型代表名重选。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
-    说明: 第一轮终消歧继续允许“高频常用名做 canonical”来简化配对；
+    第一轮终消歧继续允许“高频常用名做 canonical”来简化配对；
           但真正落库前，必须再让模型基于已确认 cluster 选择最终代表名，
           避免本地 heuristic 代替模型做这一步。
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: final-canonical-reselect-review-fix
-    修改内容: 对不支持额外重选的 fallback client 回退到本地 heuristic，
-              并为异常空输出保留显式降级路径
     """
     alias_clusters = _collect_alias_clusters(state.get_alias_merges_dict())
     if not alias_clusters:
@@ -219,7 +179,7 @@ async def _run_final_canonical_reselect(
         logger.warning("final canonical reselect returned empty decisions, falling back to heuristic reselect")
         return reselect_cluster_canonicals(state, name_counts=name_counts)
 
-    # 中文注释：这里显式要求模型输出覆盖 cluster 内的所有名字；
+    # 这里显式要求模型输出覆盖 cluster 内的所有名字；
     # 若缺项或跨组指向，直接抛错，避免静默退回 heuristic 后再次把最终图谱写偏。
     return apply_model_reselected_canonicals(
         state,
@@ -311,10 +271,7 @@ async def _run_final_disambiguation_with_state(
     """
     执行最终消歧（使用新的三层状态）
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 使用 DisambiguationState 替代 alias_map
+    使用 DisambiguationState 替代 alias_map
 
     流程：
     1. 从 checkpoint 加载 state（已在外部完成）
@@ -363,7 +320,7 @@ async def _run_final_disambiguation_with_state(
         plan.context_sentences,
     )
     if new_state.alias_merges:
-        # 中文注释：只有“本轮 final 确实拿到了新的模型 alias 决策”时，才追加一次模型代表名重选；
+        # 只有“本轮 final 确实拿到了新的模型 alias 决策”时，才追加一次模型代表名重选；
         # 如果这轮没有新决策，就沿用既有 state + 全量频次做本地纠偏，避免无意义查库和额外模型调用。
         if result.canonical_decisions:
             new_state = await _run_final_canonical_reselect(

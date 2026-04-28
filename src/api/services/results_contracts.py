@@ -36,10 +36,6 @@ def _convert_narrative_structure(
     result: AggregateResult,
 ) -> NarrativeStructureStats | None:
     """转换叙事结构统计数据。
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
     说明: 从 _convert_aggregate_result 拆分出来，专门处理叙事结构统计转换。
     """
     if not result.narrative_structure:
@@ -70,10 +66,6 @@ def _convert_emotion_stats(
     result: AggregateResult,
 ) -> EmotionStats | None:
     """转换情感统计数据。
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
     说明: 从 _convert_aggregate_result 拆分出来，专门处理情感统计转换。
     """
     if not result.emotion_curve:
@@ -96,10 +88,6 @@ def _convert_character_stats(
     result: AggregateResult,
 ) -> CharacterStatsAggregate | None:
     """转换人物统计数据。
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
     说明: 从 _convert_aggregate_result 拆分出来，专门处理人物统计转换。
     """
     if not result.character_relations:
@@ -131,16 +119,7 @@ def _convert_style_stats(
     result: AggregateResult,
 ) -> StyleStats | None:
     """转换风格统计数据。
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
     说明: 从 _convert_aggregate_result 拆分出来，专门处理风格统计转换。
-
-    修改时间: 2026-04-04
-    修改者: TraeAI
-    任务: fix-style-stats-missing-fields
-    修改内容: 添加 dialogue_ratio 和 avg_sent_len 字段转换。
     """
     if not result.language_style:
         return None
@@ -184,10 +163,6 @@ def _convert_aggregate_result(
     StyleStats | None,
 ]:
     """转换聚合结果为响应模型。
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
     说明: 将原有逻辑拆分为 5 个独立的转换函数，提高代码可读性和可维护性。
     """
     narrative_structure = _convert_narrative_structure(result)
@@ -202,7 +177,7 @@ def validate_aggregate_metrics_contract(aggregate_metrics: dict[str, Any]) -> No
     """
     验证 aggregate 导出 contract。
 
-    中文注释：aggregate_metrics 是非 graph 的最终结构化结论出口，必须固定
+    aggregate_metrics 是非 graph 的最终结构化结论出口，必须固定
     为五组 aggregate 指标，不能混入 graph signals，也不能被 diagnosis/page
     字段反向污染。
     """

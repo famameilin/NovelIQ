@@ -1,17 +1,10 @@
 """
 预处理辅助函数模块 (workflows层)
 
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 从 cli 提取核心业务逻辑到 workflows 层
-说明: 此文件从 src/cli/preprocess_helpers.py 复制而来，包含预处理的核心业务逻辑函数。
+此文件从 src/cli/preprocess_helpers.py 复制而来，包含预处理的核心业务逻辑函数。
       这些函数是纯业务逻辑，不依赖CLI层，可被多个入口点复用。
 原始文件: src/cli/preprocess_helpers.py
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 从 repositories 导入 ChunkStyleData，避免触发 operations 的 deprecation warning
 """
 
 from __future__ import annotations
@@ -39,14 +32,8 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> dict[str, list[str] 
     """
     加载所有词典用于预处理
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    说明: 从 run_preprocess 中提取，负责加载所有需要的词典
+    从 run_preprocess 中提取，负责加载所有需要的词典
 
-    修改时间: 2026-04-06
-    修改者: 重构
-    修改内容: 迁移至 LexiconRegistry v2
     """
     registry = LexiconRegistry(base_dir=lexicon_dir)
     registry.load()
@@ -78,15 +65,8 @@ def _compute_chunk_style_metrics(
     """
     计算单个chunk的风格指标
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    说明: 从 run_preprocess 中提取，负责计算chunk的风格指标
+    从 run_preprocess 中提取，负责计算chunk的风格指标
 
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: remove-compat-layers
-    修改内容: 直接计算 imagery_lexicon_density 并写入 ChunkStyleData，移除独立 culture 兼容写入链路。
     """
     from src.metrics.style_metrics import imagery_density, sensory_density
 

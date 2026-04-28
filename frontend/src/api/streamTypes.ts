@@ -1,23 +1,9 @@
-// ============================================================
 // Stream Types (SSE) — 统一事件格式
-// ============================================================
-
-// 创建时间: 2026-04-07
-// 创建者: GLM-5
-// 任务: WebSocket 流式消息类型定义
-// 说明: 定义后端 SSE 推送的流式消息类型，用于任务进度实时展示
-
-// 修改时间: 2026-04-09
-// 创建者: GLM-5
-// 任务: refactor/sse-unified-event-bus
-// 修改内容: 统一 SSE 数据格式
+// 定义后端 SSE 推送的流式消息类型，用于任务进度实时展示
+// 所有进行中事件共用同一套数据结构
 //   - 所有事件使用同一个 StreamEventData 结构
 //   - 通过 action 字段区分事件类型（start/progress/complete/output/thinking）
 //   - LLM 输出不再使用独立类型，自动获得 stage/sub_stage/chunk_id 上下文
-
-// ============================================================
-// SSE Event Types — 由 action 字段映射而来
-// ============================================================
 
 export type SSEEventType =
   | "stage_start"      // action="start"
@@ -29,10 +15,6 @@ export type SSEEventType =
   | "task_error"
   | "task_cancelled"
   | "message";
-
-// ============================================================
-// 统一事件数据格式 — 后端 StreamEvent.to_dict()
-// ============================================================
 
 export interface StreamEventData {
   action: string;        // start / progress / complete / output / thinking
@@ -47,10 +29,6 @@ export interface StreamEventData {
   content: string;      // LLM 输出内容（output/thinking 时有值）
   message: string;       // 人类可读描述
 }
-
-// ============================================================
-// 终止事件数据格式（task_complete/task_error/task_cancelled）
-// ============================================================
 
 export interface TaskCompleteData {
   stage: string;
@@ -67,10 +45,6 @@ export interface TaskCancelledData {
   stage: string;
   message: string;
 }
-
-// ============================================================
-// Stream Message — SSE 消息信封
-// ============================================================
 
 export interface StreamMessage {
   type: SSEEventType;

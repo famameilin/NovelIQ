@@ -1,8 +1,6 @@
 """
 BaseModelClient token 记账辅助模块。
 
-创建时间: 2026-04-23
-任务: p2-base-model-client-split
 说明: 从 base.py 中拆出 token 使用量估算、补记与 novel_id 解析逻辑。
 """
 
@@ -18,10 +16,6 @@ from src.utils.token_counter import count_messages_tokens, count_tokens
 def resolve_token_usage_novel_id(client: Any, call_type: str) -> str | None:
     """
     解析 token 记账使用的 novel_id。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将 token 记账前置校验从 BaseModelClient 主类中外提，便于统一复用。
     """
     novel_id = getattr(client, "_novel_id", None)
     if novel_id:
@@ -37,10 +31,6 @@ def resolve_token_usage_novel_id(client: Any, call_type: str) -> str | None:
 def extract_reasoning_tokens(response: Any) -> int | None:
     """
     从响应对象中提取 reasoning token 数。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将 usage 兼容读取逻辑拆为独立纯函数，降低 BaseModelClient 的工具方法密度。
     """
 
     def _read_attr_or_key(obj: Any, name: str) -> Any:
@@ -65,10 +55,6 @@ def extract_reasoning_tokens(response: Any) -> int | None:
 def record_token_usage(client: Any, response: Any, call_type: str, chunk_id: int | None = None) -> None:
     """
     记录 provider 返回的 token 用量。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 把响应 usage 写账动作从 BaseModelClient 主类中拆离。
     """
     resolved_novel_id = resolve_token_usage_novel_id(client, call_type)
     if resolved_novel_id is None:
@@ -96,10 +82,6 @@ def record_token_usage_estimated(
 ) -> None:
     """
     写入估算 token 用量。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将流式与失败补记共用的估算写账逻辑从主类中抽离。
     """
     resolved_novel_id = resolve_token_usage_novel_id(client, call_type)
     if resolved_novel_id is None:
@@ -129,10 +111,6 @@ def record_estimated_token_usage_from_messages(
 ) -> None:
     """
     基于 prompt/response 文本统一记录估算 token。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将统一账本逻辑外提，避免 BaseModelClient 同时承担 transport 与 accounting 两类职责。
     """
     if not client._token_usage_callback:
         return
@@ -153,7 +131,7 @@ def record_estimated_token_usage_from_messages(
     completion_tokens = count_tokens(response_text or "", resolved_model)
     total_tokens = prompt_tokens + completion_tokens
 
-    # 中文注释：这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
+    # 这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
     # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度。
     client._token_usage_callback(
         resolved_novel_id,
@@ -170,10 +148,6 @@ def record_estimated_token_usage_from_messages(
 def extract_response_text_for_token_usage(client: Any, response: Any) -> str:
     """
     从响应对象中提取可用于 token 估算的文本。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 让失败补记路径独立复用响应文本提取逻辑。
     """
     if response is None or not hasattr(response, "choices") or not response.choices:
         return ""
@@ -199,10 +173,6 @@ def record_estimated_token_usage_from_response(
 ) -> None:
     """
     基于响应对象补记统一估算 token。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将“调用成功但后处理失败”的补记逻辑收束为独立 helper。
     """
     response_text = extract_response_text_for_token_usage(client, response)
     record_estimated_token_usage_from_messages(

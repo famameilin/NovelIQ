@@ -1,23 +1,3 @@
-"""
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 用户可配置项 - 从 settings.json 加载配置
-
-修改时间: 2026-03-12
-修改者: TraeAI
-修改内容: 项目文件结构整理与拆解 - 重构为使用配置数据类模块
-- 将配置数据类拆分到 schemas 子模块
-- 保持原有接口不变，确保向后兼容
-
-修改时间: 2026-03-19
-修改者: TraeAI
-修改内容: 移除 load_dotenv，改为在 config/__init__.py 中统一加载
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 添加 runtime 配置入口，统一承载流程行为参数
-"""
 
 from __future__ import annotations
 
@@ -67,19 +47,6 @@ from .schemas import (
 class Settings:
     """
     统一配置入口
-
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加 thinking 配置字段
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 添加 streaming 配置字段
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 添加 runtime 配置字段，统一管理流程重试与上下文窗口
     """
 
     models: ModelsSettings = field(default_factory=ModelsSettings)

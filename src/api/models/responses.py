@@ -25,9 +25,6 @@ class CreateTaskResponse(BaseModel):
     """
     创建并启动任务响应
 
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
     说明: 对应 POST /api/novels/{novel_id}/tasks。
     """
 
@@ -41,9 +38,6 @@ class ResumeTaskResponse(BaseModel):
     """
     继续任务响应
 
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: task-api-decouple
     说明: 对应 POST /api/novels/{novel_id}/tasks/{task_id}/resume。
     """
 
@@ -55,10 +49,6 @@ class ResumeTaskResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     """
-    2026-03-12: Claude修改，添加task_id字段
-
-    2026-04-07: TraeAI修改，添加详细进度字段
-    任务: implement-task-cancellation
     说明: 添加 sub_stage, current, total, message, llm_outputs 字段，
           使 HTTP 轮询也能返回详细进度信息，与 WebSocket 行为一致
     """
@@ -93,29 +83,7 @@ class CharacterStats(BaseModel):
     """
     角色统计模型
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: 扩展角色统计字段
     说明: 初始模型包含 name, appearance_count, role_function, avg_emotion_score
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 扩展角色统计字段
-    修改内容:
-      - 将 role_function 重命名为 dominant_role_function
-      - 新增 role_function_distribution 字段
-      - 新增 dominant_role_ratio 字段
-      - 新增 protagonist_score 字段
-      - 新增 is_protagonist 字段
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改内容:
-      - 删除 protagonist_score / is_protagonist
-      - 新增 narrative_focus_score / is_focus_character
-      - 明确区分“叙事中心度分数”和“焦点人物身份”
-
     """
 
     name: str
@@ -157,16 +125,6 @@ class ChunkRelation(BaseModel):
 
 
 class ChunkDialogue(BaseModel):
-    """
-    创建时间: 2026-03-21
-    创建者: TraeAI
-    任务: ChunkAnnotation 新增字段
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 改为 list[str] 支持多人同时说话
-    """
 
     speaker: list[str] | None = None
     length: int | None = None
@@ -207,9 +165,6 @@ class ForeshadowingThreadResponse(BaseModel):
     """
     Setup thread 结果视图。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
     说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用。
     """
 
@@ -239,10 +194,6 @@ class CharacterRelation(BaseModel):
 class HierarchicalRelation(BaseModel):
     """
     层级关系模型
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 添加层级关系导出到JSON功能
     """
 
     rel_id: int
@@ -270,11 +221,6 @@ class GlobalStats(BaseModel):
 class NarrativeStructureStats(BaseModel):
     """
     叙事结构统计模型
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: 叙事时间轴功能设计评估
-    修改内容: 新增多高潮剖面字段 (climax_count, climax_positions, climax_heights, peak_escalation, dominant_climax_pos)
     """
 
     act1_ratio: float | None = None
@@ -400,16 +346,6 @@ class ReanalyzeResponse(BaseModel):
 class TaskInfoResponse(BaseModel):
     """
     任务信息响应模型
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: postgresql-migration-cleanup
-    修改内容: 移除 db_path 字段，添加 run_id 字段
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: API接口参数统一优化
-    修改内容: 移除 run_id 字段，统一使用 task_id
     """
 
     task_id: str
@@ -426,10 +362,6 @@ class TaskListResponse(BaseModel):
 class BatchDeleteNovelsRequest(BaseModel):
     """
     批量删除小说请求模型
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 新增批量删除功能
     """
 
     novel_ids: list[str] = Field(..., description="要删除的小说ID列表")
@@ -438,10 +370,6 @@ class BatchDeleteNovelsRequest(BaseModel):
 class BatchDeleteNovelsResponse(BaseModel):
     """
     批量删除小说响应模型
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 新增批量删除功能
     """
 
     success: bool
@@ -455,10 +383,6 @@ class BatchDeleteNovelsResponse(BaseModel):
 class BatchDeleteTasksRequest(BaseModel):
     """
     批量删除任务请求模型
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 新增批量删除功能
     """
 
     task_ids: list[str] = Field(..., description="要删除的任务ID列表")
@@ -467,10 +391,6 @@ class BatchDeleteTasksRequest(BaseModel):
 class BatchDeleteTasksResponse(BaseModel):
     """
     批量删除任务响应模型
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 新增批量删除功能
     """
 
     success: bool

@@ -1,10 +1,6 @@
 """
 从数据库提取消歧决策，生成金标 JSONL 模板供人工审核。
 
-创建时间: 2026-04-01
-创建者: CodeBuddy
-任务: P0 评测基线系统 — 金标集生成
-
 用法:
     uv run python -m scripts.tools.generate_gold_standard --run-ids 6b401f00,abededd4
     uv run python -m scripts.tools.generate_gold_standard --run-ids 6b401f00 --output custom.jsonl

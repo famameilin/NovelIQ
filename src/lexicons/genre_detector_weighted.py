@@ -1,9 +1,7 @@
 """
 类型检测 weighted config 辅助。
 
-创建时间: 2026-04-23
-任务: p1-genre-detector-split
-说明: 拆出多类型加权检测和 weighted lexicon config 组装逻辑。
+拆出多类型加权检测和 weighted lexicon config 组装逻辑。
 """
 
 from __future__ import annotations
@@ -35,9 +33,7 @@ def detect_genre_weighted(
     """
     多类型加权检测。
 
-    创建时间: 2026-04-23
-    任务: p1-genre-detector-split
-    说明: 将 weighted detect 从主模块中抽出，只保留一个 detect 回调依赖。
+    将 weighted detect 从主模块中抽出，只保留一个 detect 回调依赖。
     """
     total_chunks = len(chunk_texts)
     if total_chunks == 0:
@@ -96,9 +92,7 @@ def get_weighted_lexicon_config(
     """
     根据加权类型列表获取词表配置。
 
-    创建时间: 2026-04-23
-    任务: p1-genre-detector-split
-    说明: 将 weighted config 组装独立出来，供主模块与其他调用方复用。
+    将 weighted config 组装独立出来，供主模块与其他调用方复用。
     """
     result: list[tuple[str, dict[str, list[str]], float]] = []
     for genre, weight in genre_weights:

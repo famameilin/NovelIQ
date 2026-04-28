@@ -9,12 +9,7 @@
   - phrase 模式为默认模式
   - 复用现有基础设施: _count_non_overlapping_spans 已在 lexicon_metrics 中实现
 
-创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 清理向后兼容代码
-修改内容: 移除 exact 模式，phrase 为默认模式
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
 """
 结果元数据查询组装器。
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
 说明: 承载 global_stats、token_usage、novel_name、角色别名等辅助查询逻辑。
 """
 

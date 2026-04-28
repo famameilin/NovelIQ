@@ -3,19 +3,7 @@ import { motion } from "framer-motion";
 import { FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-/**
- * 创建时间: 2026-04-04
- * 创建者: GLM-5
- * 任务: 重构 NotFoundPage 组件
- * 说明: 创建美观的 404 页面，包含居中布局、视觉元素、友好文案和进场动画
- *
- * 修改时间: 2026-04-04
- * 修改者: GLM-5
- * 修改内容:
- * - 调整动画时长符合规范（300ms）
- * - 提升可访问性，添加 ARIA 属性
- * - 提取动画配置为常量，避免每次渲染重新创建
- */
+/** 404 页面，提供居中布局、友好文案和进场动画 */
 
 const PAGE_VARIANTS = {
   container: {

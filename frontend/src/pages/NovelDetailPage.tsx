@@ -36,15 +36,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
-
 const STALE_TIME = 5 * 60 * 1000;
-
-/* ------------------------------------------------------------------ */
-/*  Skeleton                                                          */
-/* ------------------------------------------------------------------ */
 
 function SkeletonGrid() {
   return (
@@ -360,7 +352,7 @@ export function NovelDetailPage() {
           diagnosisQuery.isLoading ||
           curvesQuery.isLoading)));
 
-  // 中文注释：首页对 rerun-required diagnosis 采用“单一重跑态”；
+  // 首页对 rerun-required diagnosis 采用“单一重跑态”；
   // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败。
   const hasAnyError =
     taskStatusQuery.isError ||
