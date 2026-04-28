@@ -48,34 +48,39 @@ python -m src.api.main --port 8001
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/api/novels/{novel_id}/analyze` | 启动分析任务 |
+| POST | `/api/novels/{novel_id}/tasks` | 创建并启动新任务 |
+| POST | `/api/novels/{novel_id}/tasks/{task_id}/resume` | 继续指定任务 |
 | POST | `/api/novels/{novel_id}/reanalyze` | 重新分析 |
-| GET | `/api/novels/{novel_id}/status` | 查询分析进度 |
 | GET | `/api/novels/{novel_id}/tasks` | 获取所有分析任务 |
+| GET | `/api/novels/{novel_id}/tasks/{task_id}/status` | 查询单任务状态（推荐） |
+| GET | `/api/novels/{novel_id}/status` | 兼容状态查询（必须显式提供 task_id） |
 | DELETE | `/api/novels/{novel_id}/tasks/{task_id}` | 删除特定分析任务 |
 | POST | `/api/novels/{novel_id}/tasks/batch-delete` | 批量删除分析任务 |
 | POST | `/api/novels/{novel_id}/tasks/{task_id}/cancel` | 取消正在运行的分析任务 |
 
+**当前版本说明：**
+- 旧 `POST /api/novels/{novel_id}/analyze` 已移除，不再作为创建或续跑入口。
+- 创建新任务与继续旧任务已拆分为 `POST /tasks` 与 `POST /tasks/{task_id}/resume` 两条链。
+
 ### ID 体系说明
 
-系统使用两种 ID：
+系统对外统一使用短 ID，但内部仍兼容历史 run 形态：
 
 | ID 类型 | 格式 | 示例 | 用途 | 使用场景 |
 |---------|------|------|------|----------|
-| novel_id | UUID前8位 | `10960c77` | 小说唯一标识 | API内外通用 |
-| task_id | UUID前8位 | `a1b2c3d4` | 分析任务标识（外部使用） | 仅API层使用 |
-| run_id | 完整UUID(36位) | `a1b2c3d4-1a72-4444-a772-2ddc64334cd2` | 分析运行标识（内部使用） | 仅内部实现使用 |
+| novel_id | 8位字符串 | `10960c77` | 小说唯一标识 | API内外通用 |
+| task_id | 8位字符串 | `a1b2c3d4` | 任务标识（外部使用） | API、前端、导出文件 |
+| run_id | 内部运行标识 | `a1b2c3d4` / 历史兼容 `a1b2c3d4-1a72-4444-a772-2ddc64334cd2` | 数据隔离键 | Repository、Workflow、日志目录 |
 
 **ID映射关系：**
-- `task_id` 是 `run_id` 的前8位字符
-- 外部API只暴露 `task_id`，完全隐藏 `run_id`
-- 内部实现（Repository、Workflow）只使用 `run_id`
-- ID转换由API层和Service层负责
+- 当前新创建任务通常直接以 8 位 `task_id` 作为 `run_id` 落库。
+- 历史数据中仍可能存在完整 UUID `run_id`；API 层会兼容按 `task_id` 前缀解析。
+- 外部调用方应始终使用 `task_id`，不要假设数据库里的 `run_id` 一定是完整 UUID。
 
 **数据隔离规则：**
 - 数据通过 `run_id` 字段在 PostgreSQL 数据库中隔离
-- 日志目录：`logs/{run_id}/`（内部使用完整run_id）
-- 结果文件：`outputs/{task_id}.json`（外部使用task_id）
+- 日志目录：`logs/{run_id}/`
+- 结果文件：`outputs/{task_id}.json`
 
 ### 2.3 结果查询接口
 
@@ -89,6 +94,7 @@ python -m src.api.main --port 8001
 | GET | `/api/novels/{novel_id}/diagnosis?task_id={task_id}` | 获取诊断结果 |
 | GET | `/api/novels/{novel_id}/foreshadowing-threads?task_id={task_id}` | 获取 setup thread 台账 |
 | GET | `/api/novels/{novel_id}/graph?task_id={task_id}` | 获取知识图谱快照 |
+| GET | `/api/novels/{novel_id}/graph/events?task_id={task_id}` | 获取图谱关系事件分页结果 |
 
 ### 2.4 叙事时间轴接口
 
@@ -116,6 +122,7 @@ python -m src.api.main --port 8001
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
+| GET | `/api/events/tasks/{task_id}` | SSE 任务事件流 |
 
 ---
 
@@ -136,7 +143,7 @@ python -m src.api.main --port 8001
 **响应示例**:
 ```json
 {
-  "novel_id": "novel_20240308_abc123",
+  "novel_id": "10960c77",
   "filename": "小说名.txt",
   "status": "uploaded",
   "message": "文件上传成功"
@@ -151,15 +158,31 @@ python -m src.api.main --port 8001
 
 **响应示例**:
 ```json
-[
-  {
-    "novel_id": "novel_20240308_abc123",
-    "filename": "小说名.txt",
-    "status": "completed",
-    "created_at": "2024-03-08T10:00:00"
-  }
-]
+{
+  "items": [
+    {
+      "novel_id": "10960c77",
+      "filename": "小说名.txt",
+      "file_path": "data/uploads/10960c77_小说名.txt",
+      "status": "completed",
+      "title": "小说名.txt",
+      "author": "未知作者",
+      "upload_time": "2026-04-28T10:00:00",
+      "file_size": 123456
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 12,
+  "total_pages": 1
+}
 ```
+
+**查询参数**:
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| page | int | 1 | 页码 |
+| page_size | int | 12 | 每页数量 |
 
 ---
 
@@ -170,9 +193,14 @@ python -m src.api.main --port 8001
 **响应示例**:
 ```json
 {
-  "message": "小说已删除"
+  "message": "删除成功",
+  "novel_id": "10960c77"
 }
 ```
+
+**注意**:
+- 若小说下仍有 `pending` / `running` / `cancelling` 任务，接口会返回 `400` 并拒绝删除。
+- 删除成功时会一并清理任务数据、日志目录和导出文件。
 
 ---
 
@@ -225,20 +253,11 @@ python -m src.api.main --port 8001
 
 ### 3.2 分析任务
 
-#### POST /api/novels/{novel_id}/analyze
+#### POST /api/novels/{novel_id}/tasks
 
-启动或继续分析任务。
+创建并启动一个新的分析任务。
 
-**请求体** (JSON):
-```json
-{
-  "task_id": null
-}
-```
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| task_id | string | null | 指定任务ID，用于继续失败的任务或多任务时必须提供 |
+**请求体**：无
 
 **响应示例**:
 ```json
@@ -246,52 +265,35 @@ python -m src.api.main --port 8001
   "novel_id": "10960c77",
   "task_id": "a1b2c3d4",
   "status": "pending",
-  "message": "分析任务已启动"
+  "message": "分析任务已创建并启动"
 }
 ```
 
-**多任务判断逻辑**：
+**说明**：
+- 这是当前版本创建任务的唯一入口。
+- 旧 `POST /api/novels/{novel_id}/analyze` 已移除。
 
-当存在多个任务时，系统按以下规则自动判断：
+---
 
-| 任务情况 | 行为 |
-|---------|------|
-| 无任务 | 创建新任务 |
-| 单个任务（pending/running） | 返回该任务 |
-| 单个任务（failed） | 重新运行该任务 |
-| 1个running + 其他failed | 返回running任务 |
-| 多个completed | ❌ 报错，要求指定task_id |
-| 多个running | ❌ 报错，要求指定task_id |
-| 多个failed | ❌ 报错，要求指定task_id |
-| 多个pending | ❌ 报错，要求指定task_id |
-| 多个running + 多个failed | ❌ 报错，要求指定task_id |
+#### POST /api/novels/{novel_id}/tasks/{task_id}/resume
 
-**断点续传功能**：
+继续执行指定的 `pending` / `failed` 任务。
 
-系统会检查各阶段数据完整性，自动从中断点继续：
+**请求体**：无
 
-| 中断场景 | 继续点 |
-|---------|--------|
-| preprocess未完成 | 从preprocess开始 |
-| annotate未完成（annotations < chunks） | 从annotate继续（内部支持resume） |
-| aggregate未完成 | 从aggregate开始 |
-| topic_model未完成 | 从topic_model开始 |
-| diagnose未完成 | 从diagnose开始 |
-| 所有阶段完成 | 不做操作，直接返回 |
-
-**完整性检查标准**：
-- `preprocess`：chunks表有数据
-- `annotate`：annotations数量 ≥ chunks数量
-- `aggregate`：chunk_curves数量 ≥ chunks数量
-- `topic_model`：chunk_topics表有数据
-- `diagnose`：cloud_analysis表有数据
+**响应示例**:
+```json
+{
+  "novel_id": "10960c77",
+  "task_id": "a1b2c3d4",
+  "status": "pending",
+  "message": "分析任务已继续执行"
+}
+```
 
 **说明**：
-- 每次分析生成唯一的 `task_id`（8位短UUID）和对应的 `run_id`（36位完整UUID）
-- `task_id` 是 `run_id` 的前8位字符
-- 外部API使用 `task_id`，内部实现使用 `run_id`
-- 数据通过 `run_id` 字段在 PostgreSQL 数据库中隔离
-- 日志目录为 `logs/{run_id}/`（内部使用）
+- 该接口只负责“继续指定任务”，不再承担创建新任务的语义。
+- 如果任务不属于当前小说、状态不允许继续或任务不存在，会返回 `400/404`。
 
 ---
 
@@ -307,7 +309,7 @@ python -m src.api.main --port 8001
   "force_aggregate": false,
   "force_topic_model": false,
   "force_diagnose": false,
-  "num_topics": 25,
+  "num_topics": 20,
   "label": "v2"
 }
 ```
@@ -319,22 +321,22 @@ python -m src.api.main --port 8001
 | force_aggregate | bool | false | 强制重新聚合 |
 | force_topic_model | bool | false | 强制重新主题建模 |
 | force_diagnose | bool | false | 强制重新诊断 |
-| num_topics | int | 25 | 主题数量 |
+| num_topics | int | 20 | 主题数量 |
 | label | string | null | 分析版本标签 |
 
 **响应示例**:
 ```json
 {
   "novel_id": "10960c77",
-  "task_id": "b2c3d4e5"
+  "task_id": "b2c3d4e5",
+  "status": "pending",
+  "message": "重新分析任务已启动"
 }
 ```
 
 **说明**：
-- 每次重新分析生成新的 `task_id`（8位短UUID）和对应的 `run_id`（36位完整UUID）
-- `task_id` 是 `run_id` 的前8位字符
-- 新的分析结果通过 `run_id` 在数据库中隔离
-- 与analyze不同，reanalyze总是会创建新任务
+- 每次重新分析都会创建新任务。
+- 请求模型默认 `num_topics = 20`；若整个请求体为空，服务层会按当前配置补默认主题数。
 
 ---
 
@@ -350,12 +352,14 @@ python -m src.api.main --port 8001
     {
       "task_id": "a1b2c3d4",
       "novel_id": "10960c77",
-      "status": "completed"
+      "status": "completed",
+      "created_at": "2026-04-28T10:00:00"
     },
     {
       "task_id": "b2c3d4e5",
       "novel_id": "10960c77",
-      "status": "running"
+      "status": "running",
+      "created_at": "2026-04-28T10:05:00"
     }
   ]
 }
@@ -454,27 +458,17 @@ python -m src.api.main --port 8001
 
 **行为说明**：
 - 取消请求发出后，任务状态先变为 `cancelling`，当前阶段执行完毕后变为 `cancelled`
-- 取消后数据库中已有部分数据（如部分 chunks/annotations），后续可通过 `POST /analyze` 利用断点续传功能继续
-- 任务不在内存中时（服务重启后），直接更新数据库状态为 `cancelled`
+- 取消后数据库中已有部分数据（如部分 chunks/annotations），后续可通过 `POST /tasks/{task_id}/resume` 或重新分析继续
+- 若任务是“尚未被 worker 领取的 pending 任务”，接口会直接返回 `cancelled`
+- 若任务已由其他执行方接手但当前进程无内存句柄，接口会返回 `cancelling`，等待执行方收尾
 
 ---
 
-#### GET /api/novels/{novel_id}/status
+#### GET /api/novels/{novel_id}/tasks/{task_id}/status
 
-查询分析任务进度。
+查询单个任务状态（推荐入口）。
 
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| task_id | str | 否 | 分析任务ID，多任务时必须提供 |
-
-**多任务判断逻辑**：
-与analyze接口相同，当存在多个任务时：
-- 单个任务：返回该任务状态
-- 1个running + 其他failed：返回running任务状态
-- 多个completed/running/failed/pending：报错，要求指定task_id
-
-**响应示例（成功）**:
+**响应示例**:
 ```json
 {
   "novel_id": "10960c77",
@@ -482,16 +476,44 @@ python -m src.api.main --port 8001
   "status": "running",
   "progress": 45.5,
   "stage": "annotate",
-  "error": null,
-  "started_at": "2024-03-08T10:00:00",
-  "completed_at": null
+  "sub_stage": "phase2",
+  "current": 91,
+  "total": 200,
+  "message": "正在处理第 91 / 200 个分块",
+  "llm_outputs": null,
+  "error": null
 }
 ```
 
-**响应示例（多任务报错）**:
+**说明**：
+- 这是当前版本推荐的状态查询入口。
+- 当任务不存在或不属于当前小说时返回 `404`。
+
+---
+
+#### GET /api/novels/{novel_id}/status
+
+兼容状态查询入口。
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_id | str | 是 | 分析任务ID |
+
+**响应示例**:
 ```json
 {
-  "detail": "存在多个已完成任务(2个)，请指定task_id"
+  "novel_id": "10960c77",
+  "task_id": "a1b2c3d4",
+  "status": "running",
+  "progress": 45.5,
+  "stage": "annotate",
+  "sub_stage": "phase2",
+  "current": 91,
+  "total": 200,
+  "message": "正在处理第 91 / 200 个分块",
+  "llm_outputs": null,
+  "error": null
 }
 ```
 
@@ -502,6 +524,10 @@ python -m src.api.main --port 8001
 - `cancelled`: 已取消
 - `completed`: 已完成
 - `failed`: 执行失败
+
+**说明**：
+- 当前实现要求显式提供 `task_id`；未提供时会返回 `400`。
+- 推荐改用 `GET /api/novels/{novel_id}/tasks/{task_id}/status`。
 
 ---
 
@@ -517,7 +543,7 @@ python -m src.api.main --port 8001
 - 分析结果归档备份
 
 **前置条件**：
-- 任务必须已完成（status = "completed"）
+- 任务状态必须属于可读终态：`completed` / `aggregated` / `diagnosed`
 - 如果任务未完成，将返回错误
 
 **查询参数**:
@@ -538,7 +564,7 @@ GET /api/novels/10960c77/results?task_id=a1b2c3d4
   "file_path": "outputs/a1b2c3d4.json",
   "novel_id": "10960c77",
   "novel_name": "重明传",
-  "missing_fields": []
+  "missing_fields": null
 }
 ```
 
@@ -562,8 +588,9 @@ GET /api/novels/10960c77/results?task_id=a1b2c3d4
 **错误码**:
 | 状态码 | 说明 |
 |--------|------|
-| 400 | 任务未完成（pending/running/failed） |
+| 400 | 任务未完成或 run 不可读 |
 | 404 | 任务不存在 |
+| 409 | diagnosis 焦点合同失效，需重跑 |
 
 ---
 
@@ -611,6 +638,71 @@ GET /api/novels/10960c77/chunk-curves?task_id=a1b2c3d4
 
 ---
 
+#### GET /api/novels/{novel_id}/chunk-annotations
+
+获取分块标注与强伏笔细节。
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_id | str | 是 | 分析任务ID |
+
+**请求示例**:
+```
+GET /api/novels/10960c77/chunk-annotations?task_id=a1b2c3d4
+```
+
+**响应示例**:
+```json
+[
+  {
+    "chunk_id": 18,
+    "emotional_valence": "mild_negative",
+    "event_type": "转折",
+    "pivot_moment": true,
+    "cliffhanger": false,
+    "has_foreshadowing": true,
+    "is_strong_setup": true,
+    "foreshadowing_type": "物件",
+    "setup_kind": "异常物件",
+    "foreshadowing_desc": "铜铃异响暗示旧案未结",
+    "setup_summary": "铜铃异响反复指向山门旧案",
+    "why_unresolved_now": "真相尚未揭露",
+    "expected_payoff_family": "真相揭露",
+    "payoff_likelihood": "high",
+    "linked_setup_id": "setup-001",
+    "characters": [
+      {
+        "name": "贺伯安",
+        "role_function": "主体",
+        "action": "追查铜铃异响",
+        "emotion_score": "mild_negative"
+      }
+    ],
+    "relations": [
+      {
+        "from_char": "贺伯安",
+        "to_char": "柳婉儿",
+        "type": "盟友",
+        "change": "强化"
+      }
+    ],
+    "dialogues": [
+      {
+        "speaker": ["贺伯安"],
+        "length": 34
+      }
+    ]
+  }
+]
+```
+
+**说明**：
+- 这是当前对外公开的结构化分块结果接口。
+- 返回中既包含基础 chunk 标注，也包含强伏笔相关字段和嵌套的人物/关系/对话摘要。
+
+---
+
 #### GET /api/novels/{novel_id}/characters
 
 获取人物统计数据。
@@ -631,10 +723,10 @@ GET /api/novels/10960c77/characters?task_id=a1b2c3d4
   {
     "name": "主角名",
     "appearance_count": 35,
-    "dominant_role_function": "protagonist",
+    "dominant_role_function": "主体",
     "role_function_distribution": {
-      "protagonist": 30,
-      "helper": 5
+      "主体": 30,
+      "帮助者": 5
     },
     "dominant_role_ratio": 0.86,
     "narrative_focus_score": 0.95,
@@ -649,7 +741,7 @@ GET /api/novels/10960c77/characters?task_id=a1b2c3d4
 |------|------|------|
 | name | str | 角色名称 |
 | appearance_count | int | 出场次数 |
-| dominant_role_function | str | 主导角色功能（如 protagonist/antagonist/helper 等） |
+| dominant_role_function | str | 主导角色功能（Greimas 六元素，如 `主体/帮助者/反对者`） |
 | role_function_distribution | dict | 角色功能分布统计 |
 | dominant_role_ratio | float | 主导角色占比 |
 | narrative_focus_score | float | 叙事中心度得分（四因子融合） |
@@ -702,6 +794,8 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 **响应示例（有数据）**:
 ```json
 {
+  "rerun_required": false,
+  "rerun_reason": null,
   "foreshadow_expectation": 0.6,
   "arc_scores": {"主角A": 8.0, "主角B": 7.0},
   "narrative_type": "寓言",
@@ -724,22 +818,20 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 }
 ```
 
-**响应示例（暂无 diagnosis）**:
-```json
-null
-```
-
-**响应示例（仅 setup ledger 可用）**:
+**响应示例（需要重跑 diagnosis）**:
 ```json
 {
-  "foreshadow_expectation": 0.58
+  "rerun_required": true,
+  "rerun_reason": "focus_contract_incomplete"
 }
 ```
 
 **字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| foreshadow_expectation | float \| null | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值）；若云端 diagnosis 缺失但 ledger 已可用，可单独返回该字段 |
+| rerun_required | bool | 当前 diagnosis 合同是否要求重新分析 |
+| rerun_reason | str \| null | 需要重跑的原因 |
+| foreshadow_expectation | float \| null | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值） |
 | arc_scores | dict[str, float] | 各角色弧线得分 |
 | narrative_type | str | 叙事类型 |
 | topic_labels | list[str] | 主题标签 |
@@ -759,24 +851,9 @@ null
 | core_cast | list[str] | 核心演员列表 |
 | theme_color | str | 小说主题色，十六进制格式，如 `#4A90D9` |
 
-**实体关系数据**:
-
-分析结果中包含实体层级关系数据，存储在 `entity_relations` 表中：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| from_entity | int | 源实体ID |
-| to_entity | int | 目标实体ID |
-| rel_type | str | 关系类型：belongs_to/member_of/leader_of/affiliated_with |
-| rel_category | str | 关系类别：hierarchical（层级关系）|
-
-**实体类型**：
-
-| 类型 | 说明 | 示例 |
-|------|------|------|
-| character | 具体人物角色 | 伯安、贺重明 |
-| group | 群体/队伍统称 | 赤甲卫、禁军 |
-| organization | 组织/门派/家族 | 贺家、玄天道宗 |
+**当前合同说明**：
+- 当前 `/diagnosis` 不再把 `null` 或半成品对象当作正常成功结果。
+- 当焦点合同缺失或失效时，会返回 `rerun_required=true` 的对象，提示调用方重跑分析。
 
 ---
 
@@ -847,12 +924,114 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
 ```json
 {
   "nodes": [
-    {"id": "节点1", "type": "character"},
-    {"id": "节点2", "type": "organization"}
+    {
+      "entity_id": "1",
+      "name": "贺伯安",
+      "entity_type": "character",
+      "first_seen_chunk": 1,
+      "last_seen_chunk": 18,
+      "role": "主体",
+      "status": "active"
+    }
   ],
   "edges": [
-    {"source": "节点1", "target": "节点2", "relation": "belongs_to"}
-  ]
+    {
+      "source": "1",
+      "target": "2",
+      "relation_type": "盟友",
+      "weight": 3,
+      "from_name": "贺伯安",
+      "to_name": "柳婉儿",
+      "change_count": 2,
+      "tension_index": 0.38,
+      "is_active": true
+    }
+  ],
+  "events": [
+    {
+      "relation_event_id": 11,
+      "chunk_id": 18,
+      "from_entity_id": 1,
+      "to_entity_id": 2,
+      "from_name": "贺伯安",
+      "to_name": "柳婉儿",
+      "relation_type": "盟友",
+      "change_type": "强化",
+      "evidence": "二人再次结盟",
+      "confidence": 0.88,
+      "source_relation_row_id": 99,
+      "directionality": "directed"
+    }
+  ],
+  "events_page": {
+    "limit": 200,
+    "returned_count": 1,
+    "total": 1,
+    "has_more": false,
+    "next_cursor": null
+  },
+  "summary": {
+    "node_count": 2,
+    "edge_count": 1,
+    "density": 0.5,
+    "core_characters": ["贺伯安", "柳婉儿"],
+    "key_relations": [
+      {
+        "from": "贺伯安",
+        "to": "柳婉儿",
+        "type": "盟友",
+        "support_count": 3
+      }
+    ]
+  },
+  "quality": {
+    "conflict_count": 0,
+    "low_confidence_count": 0,
+    "conflicts": [],
+    "low_confidence_samples": []
+  }
+}
+```
+
+---
+
+#### GET /api/novels/{novel_id}/graph/events
+
+获取图谱关系事件的分页结果。
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_id | str | 是 | 分析任务ID |
+| events_cursor | str | 否 | 分页游标 |
+| events_limit | int | 否 | 返回数量上限，范围 1-200 |
+
+**响应示例**:
+```json
+{
+  "events": [
+    {
+      "relation_event_id": 11,
+      "chunk_id": 18,
+      "from_entity_id": 1,
+      "to_entity_id": 2,
+      "from_name": "贺伯安",
+      "to_name": "柳婉儿",
+      "relation_type": "盟友",
+      "change_type": "强化",
+      "evidence": "二人再次结盟",
+      "confidence": 0.88,
+      "source_relation_row_id": 99,
+      "directionality": "directed"
+    }
+  ],
+  "page_info": {
+    "limit": 50,
+    "returned_count": 1,
+    "total": 1,
+    "has_more": false,
+    "next_cursor": null
+  }
 }
 ```
 
@@ -869,7 +1048,6 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
 |------|------|------|------|
 | task_id | str | 是 | 分析任务ID |
 | include_curve | bool | 否 | 是否包含张力曲线数据（默认 false） |
-| max_level | int | 否 | 显示重要性级别 ≤ 此值的节点（默认 3，范围 1-3） |
 
 **响应示例**:
 ```json
@@ -885,31 +1063,55 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
     {"name": "高潮期", "start": 351, "end": 420, "ratio": 0.14},
     {"name": "收束期", "start": 421, "end": 500, "ratio": 0.16}
   ],
-  "nodes": [
+  "composite_nodes": [
     {
-      "chunk_id": 1,
+      "node_id": "plot:18:0",
+      "anchor_chunk_id": 18,
+      "start_chunk_id": 18,
+      "end_chunk_id": 18,
+      "progress": 0.0,
+      "start_progress": 0.0,
+      "end_progress": 0.0,
+      "importance_score": 6.0,
+      "level": 1,
+      "summary": "铜铃异响再次强化旧案悬念",
+      "characters": ["贺伯安", "柳婉儿"],
+      "phase_name": "发展期",
+      "node_type": "plot",
+      "node_subtypes": ["pivot"],
+      "representative_node_id": "plot:18:0",
+      "child_node_ids": ["plot:18:0", "relation:18:0"]
+    }
+  ],
+  "atomic_nodes": [
+    {
+      "node_id": "plot:18:0",
+      "anchor_chunk_id": 18,
       "progress": 0.0,
       "importance_score": 6.0,
       "level": 1,
-      "event": "贺重明在宗门试炼中展露天赋",
-      "characters": ["贺重明", "长老"],
-      "is_pivot": false,
-      "is_cliffhanger": false,
-      "tension_percentile": 45,
-      "node_type": "character_entry",
-      "relation_changes": null,
-      "character_entries": ["贺重明"],
-      "character_exits": null
+      "summary": "铜铃异响再次强化旧案悬念",
+      "characters": ["贺伯安", "柳婉儿"],
+      "phase_name": "发展期",
+      "node_type": "plot",
+      "node_subtype": "pivot",
+      "score_breakdown": {"tension": 2.5, "relation": 1.0},
+      "plot_flags": {
+        "is_pivot": true,
+        "is_cliffhanger": false,
+        "tension_percentile": 86
+      },
+      "relation_events": null,
+      "lifecycle_events": null
     }
   ],
   "tension_curve": null
 }
 ```
 
-**max_level 说明**:
-- 1: 仅显示重要节点
-- 2: 显示重要 + 较重要节点
-- 3: 显示全部节点
+**当前合同说明**：
+- 后端始终返回 `composite_nodes + atomic_nodes` 双层结构。
+- `max_level` 已降为前端本地筛选状态，不再作为后端请求参数。
 
 ---
 
@@ -1095,7 +1297,7 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
 
 ## 五、错误响应
 
-所有错误响应遵循统一格式：
+大多数中间件/异常处理器返回以下统一格式：
 
 ```json
 {
@@ -1105,14 +1307,28 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
 }
 ```
 
-### 错误类型
+部分 route-level 业务冲突（当前主要是 diagnosis 焦点合同失效）会返回 `409`，其 `detail` 为结构化对象：
+
+```json
+{
+  "detail": {
+    "code": "diagnosis_rerun_required",
+    "message": "当前任务的 diagnosis 焦点合同已失效，请重新分析。",
+    "reason": "focus_contract_incomplete"
+  }
+}
+```
+
+### 常见错误类型
 
 | 错误类型 | 状态码 | 说明 |
 |----------|--------|------|
 | `NovelNotFoundError` | 404 | 小说不存在 |
 | `AnalysisNotCompleteError` | 400 | 分析未完成 |
-| `FileUploadError` | 400 | 文件上传失败 |
-| `AnalysisError` | 500 | 分析过程出错 |
+| `InvalidFileError` | 400 | 上传文件类型不合法 |
+| `FileStorageError` | 500 | 文件保存失败 |
+| `GraphReadinessError` | 409 | 图谱投影未就绪，当前结果不可读 |
+| `InternalServerError` | 500 | 未预期的内部错误 |
 
 ---
 
@@ -1150,8 +1366,7 @@ outputs/
     "narrative_structure": {...},
     "emotion_stats": {...},
     "character_stats": {...},
-    "style_stats": {...},
-    "culture_stats": {...}
+    "style_stats": {...}
   },
   "token_usage_stats": {...},
   "graph_summary": {...},
@@ -1170,7 +1385,7 @@ outputs/
 ```
 
 - `imagery_lexicon_density`：chunk 级意象词表命中密度
-- `aggregate_metrics.culture_stats.imagery_density`：整书级古典意象字符密度
+- 文化指标不再作为 public `aggregate_metrics` 子组单独暴露
 
 ---
 
@@ -1182,16 +1397,19 @@ outputs/
 # 上传小说
 curl -X POST http://localhost:8000/api/novels/upload -F "file=@小说.txt"
 
-# 启动分析
-curl -X POST http://localhost:8000/api/novels/{novel_id}/analyze
+# 创建并启动新任务
+curl -X POST http://localhost:8000/api/novels/{novel_id}/tasks
 
 # 重新分析（创建新版本）
 curl -X POST http://localhost:8000/api/novels/{novel_id}/reanalyze \
   -H "Content-Type: application/json" \
   -d '{"label": "修正版", "num_topics": 30}'
 
-# 查询状态
-curl "http://localhost:8000/api/novels/{novel_id}/status?task_id={task_id}"
+# 继续指定任务
+curl -X POST http://localhost:8000/api/novels/{novel_id}/tasks/{task_id}/resume
+
+# 查询单任务状态（推荐）
+curl "http://localhost:8000/api/novels/{novel_id}/tasks/{task_id}/status"
 
 # 获取所有分析任务
 curl http://localhost:8000/api/novels/{novel_id}/tasks
@@ -1204,6 +1422,9 @@ curl "http://localhost:8000/api/novels/{novel_id}/results?task_id={task_id}"
 
 # 获取分块曲线（情绪 + 节奏）
 curl "http://localhost:8000/api/novels/{novel_id}/chunk-curves?task_id={task_id}"
+
+# 获取图谱事件分页
+curl "http://localhost:8000/api/novels/{novel_id}/graph/events?task_id={task_id}&events_limit=50"
 
 # 获取叙事时间轴
 curl "http://localhost:8000/api/novels/{novel_id}/timeline?task_id={task_id}"
@@ -1221,8 +1442,8 @@ with open("小说.txt", "rb") as f:
     response = requests.post(f"{BASE_URL}/novels/upload", files={"file": f})
     novel_id = response.json()["novel_id"]
 
-# 启动分析
-response = requests.post(f"{BASE_URL}/novels/{novel_id}/analyze")
+# 创建并启动新任务
+response = requests.post(f"{BASE_URL}/novels/{novel_id}/tasks")
 task_id = response.json()["task_id"]
 print(f"分析任务ID: {task_id}")
 
@@ -1234,10 +1455,12 @@ response = requests.post(
 task_id = response.json()["task_id"]
 print(f"新分析任务ID: {task_id}")
 
-# 查询状态
+# 继续指定任务
+requests.post(f"{BASE_URL}/novels/{novel_id}/tasks/{task_id}/resume")
+
+# 查询状态（推荐入口）
 status = requests.get(
-    f"{BASE_URL}/novels/{novel_id}/status",
-    params={"task_id": task_id}
+    f"{BASE_URL}/novels/{novel_id}/tasks/{task_id}/status"
 ).json()
 print(f"进度: {status['progress']}%")
 
@@ -1260,6 +1483,12 @@ print(f"文件路径: {result['file_path']}")
 chunk_curves = requests.get(
     f"{BASE_URL}/novels/{novel_id}/chunk-curves",
     params={"task_id": task_id}
+).json()
+
+# 获取图谱事件分页
+graph_events = requests.get(
+    f"{BASE_URL}/novels/{novel_id}/graph/events",
+    params={"task_id": task_id, "events_limit": 50}
 ).json()
 
 # 获取叙事时间轴
