@@ -218,6 +218,33 @@ describe("useAnalysisStatus", () => {
     expect(onFailed).not.toHaveBeenCalled();
   });
 
+  it("首次回填已完成任务时不会重复触发 onCompleted", async () => {
+    const onCompleted = vi.fn();
+
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-finished",
+      status: "completed",
+      progress: 100,
+      message: "分析完成",
+    });
+
+    render(<HookHarness novelId="novel-1" taskId="task-finished" onCompleted={onCompleted} />);
+
+    await waitFor(() => {
+      expect(streamStoreState.updateProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "complete",
+          stage: "completed",
+          percent: 100,
+          message: "分析完成",
+        }),
+      );
+    });
+
+    expect(onCompleted).not.toHaveBeenCalled();
+  });
+
   it("HTTP backfill 失败时会显式记录并暴露同步错误", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     getTaskStatusMock.mockRejectedValue(new Error("network down"));
