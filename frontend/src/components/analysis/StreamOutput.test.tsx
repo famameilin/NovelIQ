@@ -92,6 +92,43 @@ describe("StreamOutput 多流展示", () => {
     });
   });
 
+  /**
+   * 创建时间: 2026-04-28
+   * 任务: phase1234-stream-event-contract-closeout
+   * 说明: phase1/2/3/4 都属于标注阶段的稳定子阶段边界；
+   * 即便当前 phase 还没收到任何 output/thinking，主面板也必须先把双 tab 骨架立住，
+   * 否则并行阶段切换时会在“空面板”和“有 tab 面板”之间闪断。
+   */
+  it.each(["phase1", "phase2", "phase3", "phase4"])(
+    "%s 尚未收到流文本时也应保持输出与思考 tab 骨架",
+    (phase) => {
+      act(() => {
+        useStreamStore.getState().setTaskId(`task-pending-${phase}`);
+        useStreamStore.getState().updateProgress(
+          createLLMEvent({
+            action: "start",
+            sub_stage: phase,
+            chunk_id: 1,
+            current: 1,
+            total: 10,
+            percent: 17,
+            sub_percent: phase === "phase1" ? 0 : phase === "phase2" ? 25 : phase === "phase3" ? 50 : 75,
+            content: "",
+            message: `开始 ${phase}`,
+          }),
+        );
+      });
+
+      render(<StreamOutput taskId={`task-pending-${phase}`} />);
+
+      expect(screen.getByRole("tab", { name: "输出" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "思考" })).toBeInTheDocument();
+      expect(screen.getByText(`开始 ${phase}`)).toBeInTheDocument();
+      expect(screen.getByText(/模型输出尚未到达/)).toBeInTheDocument();
+      expect(screen.queryByText("LLM 输出将在模型推理阶段显示...")).not.toBeInTheDocument();
+    },
+  );
+
   it("单流时应继续展示当前输出且不显示多流入口", () => {
     seedTaskContext("task-1");
     act(() => {
@@ -109,33 +146,6 @@ describe("StreamOutput 多流展示", () => {
     expect(screen.getByRole("tab", { name: "输出" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "思考" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看全部流" })).not.toBeInTheDocument();
-  });
-
-  it("phase1 尚未收到流文本时也应保持输出与思考 tab 骨架", () => {
-    act(() => {
-      useStreamStore.getState().setTaskId("task-pending-phase1");
-      useStreamStore.getState().updateProgress(
-        createLLMEvent({
-          action: "start",
-          sub_stage: "phase1",
-          chunk_id: 1,
-          current: 1,
-          total: 10,
-          percent: 17,
-          sub_percent: 0,
-          content: "",
-          message: "开始 phase1",
-        }),
-      );
-    });
-
-    render(<StreamOutput taskId="task-pending-phase1" />);
-
-    expect(screen.getByRole("tab", { name: "输出" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "思考" })).toBeInTheDocument();
-    expect(screen.getByText("开始 phase1")).toBeInTheDocument();
-    expect(screen.getByText(/模型输出尚未到达/)).toBeInTheDocument();
-    expect(screen.queryByText("LLM 输出将在模型推理阶段显示...")).not.toBeInTheDocument();
   });
 
   it("当前 phase 尚无新流时应回退展示同 chunk 最近输出", () => {
@@ -214,6 +224,84 @@ describe("StreamOutput 多流展示", () => {
     await user.click(screen.getByRole("tab", { name: "思考" }));
     expect(screen.getByText("phase1 思考")).toBeInTheDocument();
     expect(screen.queryByText(/模型思考尚未到达/)).not.toBeInTheDocument();
+  });
+
+  it("phase4 首段文本到达后应停止回退 phase3 旧事件，避免旧输出和旧思考串进新阶段", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useStreamStore.getState().setTaskId("task-phase3-phase4-boundary");
+      useStreamStore.getState().updateProgress(
+        createLLMEvent({
+          action: "start",
+          sub_stage: "phase4",
+          chunk_id: 244,
+          current: 244,
+          total: 255,
+          percent: 77,
+          sub_percent: 75,
+          content: "",
+          message: "开始 phase4",
+        }),
+      );
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "output",
+          sub_stage: "phase3",
+          chunk_id: 244,
+          content: "phase3 输出",
+        }),
+      );
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "thinking",
+          sub_stage: "phase3",
+          chunk_id: 244,
+          content: "phase3 思考",
+        }),
+      );
+    });
+
+    render(<StreamOutput taskId="task-phase3-phase4-boundary" />);
+
+    expect(screen.getByText("phase3 输出")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "思考" }));
+    expect(screen.getByText("phase3 思考")).toBeInTheDocument();
+
+    act(() => {
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "output",
+          sub_stage: "phase4",
+          chunk_id: 244,
+          content: "phase4 输出",
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole("tab", { name: "输出" }));
+    expect(screen.getByText("phase4 输出")).toBeInTheDocument();
+    expect(screen.queryByText("phase3 输出")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "思考" }));
+    expect(screen.getByText(/模型思考尚未到达/)).toBeInTheDocument();
+    expect(screen.queryByText("phase3 思考")).not.toBeInTheDocument();
+
+    act(() => {
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "thinking",
+          sub_stage: "phase4",
+          chunk_id: 244,
+          content: "phase4 思考",
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole("tab", { name: "思考" }));
+    await waitFor(() => {
+      expect(screen.getByText("phase4 思考")).toBeInTheDocument();
+      expect(screen.queryByText("phase3 思考")).not.toBeInTheDocument();
+    });
   });
 
   it("多流时应默认显示最近更新流，并允许主面板切换", async () => {
