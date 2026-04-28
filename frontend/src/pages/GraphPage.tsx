@@ -297,8 +297,8 @@ export function GraphPage() {
   }, [graphData, nodeNameMap]);
 
   const activeRelationCount = useMemo(
-    () => graphData?.edges.filter((edge) => edge.is_active !== false).length ?? 0,
-    [graphData]
+    () => graphSummary?.edge_count ?? graphData?.edges.filter((edge) => edge.is_active !== false).length ?? 0,
+    [graphData, graphSummary]
   );
 
   const inactiveRelationCount = useMemo(

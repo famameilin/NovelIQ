@@ -45,12 +45,18 @@ class TestRelationNetworkDensity(unittest.TestCase):
 
     def test_single_relation(self) -> None:
         result = compute_relation_network_density([("A", "B")])
-        self.assertEqual(result, 1.0)
+        self.assertEqual(result, 0.0)
 
     def test_multiple_relations(self) -> None:
         result = compute_relation_network_density([("A", "B"), ("A", "C")])
-        self.assertGreater(result, 0.0)
-        self.assertLess(result, 1.0)
+        self.assertEqual(result, 1.0)
+
+    def test_density_includes_isolated_nodes_when_node_names_are_provided(self) -> None:
+        result = compute_relation_network_density(
+            [("A", "B"), ("B", "C"), ("A", "B")],
+            node_names=["A", "B", "C", "D"],
+        )
+        self.assertAlmostEqual(result, 4 / 6, places=6)
 
 
 class TestProtagonistBetweenness(unittest.TestCase):

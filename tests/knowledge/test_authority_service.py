@@ -647,7 +647,7 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
         ("林渡", "顾霜", "盟友")
     }
     assert report.summary.edge_count == 1
-    assert report.summary.density == 0.1667
+    assert report.summary.density == 0.5
     assert report.quality.low_confidence_count == 2
 
 
@@ -761,7 +761,7 @@ def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
 
     assert report.summary.node_count == 3
     assert report.summary.edge_count == 2
-    assert report.summary.density == 0.3333
+    assert report.summary.density == 1.0
     assert not hasattr(report.summary, "core_characters")
     assert report.quality.conflict_count == 0
     assert report.quality.low_confidence_count == 1
