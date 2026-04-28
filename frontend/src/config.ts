@@ -36,6 +36,15 @@ export const appConfig = {
   /** LLM 输出缓冲区最大 chunk key 数量（LRU 上限） */
   maxLLMOutputKeys: 500,
 
+  /** 单条 LLM 流在前端保留的最大字符数，避免后台恢复后把整页拖垮 */
+  maxLLMOutputCharsPerGroup: 24_000,
+
+  /** 单条 LLM 流在前端保留的最大行数，避免 Markdown 渲染窗口无限膨胀 */
+  maxLLMOutputLinesPerGroup: 240,
+
+  /** LLM 流式输出写入 store 的批量刷新间隔（ms） */
+  llmOutputFlushIntervalMs: 120,
+
   /** 是否启用 MSW Mock API（仅开发模式生效，生产构建自动忽略） */
   enableMock: false,
 } as const;

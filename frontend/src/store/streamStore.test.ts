@@ -58,10 +58,12 @@ describe("streamStore 多流分组", () => {
 
     const groups = Array.from(useStreamStore.getState().llmOutputs.values());
     expect(groups).toHaveLength(2);
-    expect(groups[0].outputParts).toEqual(["甲输出"]);
-    expect(groups[0].thinkingParts).toEqual(["甲思考"]);
-    expect(groups[1].outputParts).toEqual(["乙输出"]);
-    expect(groups[1].thinkingParts).toEqual([]);
+    expect(groups[0].outputText).toBe("甲输出");
+    expect(groups[0].thinkingText).toBe("甲思考");
+    expect(groups[0].outputTotalChars).toBe(3);
+    expect(groups[0].thinkingTotalChars).toBe(3);
+    expect(groups[1].outputText).toBe("乙输出");
+    expect(groups[1].thinkingText).toBe("");
   });
 
   it("缺失 stream_id 的旧事件应自动归入 default group", () => {
@@ -79,6 +81,24 @@ describe("streamStore 多流分组", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].streamId).toBeNull();
     expect(groups[0].groupKey.endsWith("-default")).toBe(true);
+  });
+
+  it("单条流文本应维持有界缓冲，同时保留累计字符数", () => {
+    const store = useStreamStore.getState();
+
+    store.appendLLMOutput(
+      createLLMEvent({
+        action: "output",
+        stream_id: "phase3-3-1",
+        content: Array.from({ length: 260 }, (_, index) => `第${index + 1}行`).join("\n"),
+      }),
+    );
+
+    const [group] = Array.from(useStreamStore.getState().llmOutputs.values());
+    expect(group.outputText).toContain("第260行");
+    expect(group.outputText).not.toContain("第1行");
+    expect(group.outputText.split("\n").length).toBeLessThanOrEqual(240);
+    expect(group.outputTotalChars).toBeGreaterThan(group.outputText.length);
   });
 
   it("默认选中最近更新流，用户手动切换后不应被其他流新输出抢走", () => {
