@@ -52,8 +52,21 @@ const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-m
 
 function getStageStatus(
   stageKey: StageKey,
-  currentPercent: number
+  currentPercent: number,
+  currentStageKey: StageKey | null
 ): "completed" | "current" | "pending" {
+  if (currentStageKey) {
+    const currentStageIndex = STAGE_ORDER.indexOf(currentStageKey);
+    const stageIndex = STAGE_ORDER.indexOf(stageKey);
+    if (stageIndex < currentStageIndex) {
+      return "completed";
+    }
+    if (stageIndex === currentStageIndex) {
+      return "current";
+    }
+    return "pending";
+  }
+
   const config = STAGE_CONFIG[stageKey];
   const [start, end] = config.range;
 
@@ -79,6 +92,13 @@ function getCurrentStageKey(percent: number): StageKey | null {
   return null;
 }
 
+function resolveCurrentStageKey(stage: string, percent: number): StageKey | null {
+  if (stage in STAGE_CONFIG) {
+    return stage as StageKey;
+  }
+  return getCurrentStageKey(percent);
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -102,7 +122,7 @@ export function ProgressDetail({ className }: ProgressDetailProps) {
   }
 
   const { stage, sub_stage, current, total, percent, sub_percent, message } = progress;
-  const currentStageKey = getCurrentStageKey(percent);
+  const currentStageKey = resolveCurrentStageKey(stage, percent);
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -196,12 +216,13 @@ function StageList({ currentPercent, stageDurations, currentStageKey }: StageLis
     <div className="space-y-1.5">
       {STAGE_ORDER.map((stageKey) => {
         const config = STAGE_CONFIG[stageKey];
-        const status = getStageStatus(stageKey, currentPercent);
+        const status = getStageStatus(stageKey, currentPercent, currentStageKey);
         const duration = stageDurations.get(stageKey);
 
         return (
           <StageItem
             key={stageKey}
+            stageKey={stageKey}
             label={config.label}
             status={status}
             duration={duration}
@@ -214,18 +235,21 @@ function StageList({ currentPercent, stageDurations, currentStageKey }: StageLis
 }
 
 interface StageItemProps {
+  stageKey: StageKey;
   label: string;
   status: "completed" | "current" | "pending";
   duration?: number;
   isActive: boolean;
 }
 
-function StageItem({ label, status, duration, isActive }: StageItemProps) {
+function StageItem({ stageKey, label, status, duration, isActive }: StageItemProps) {
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3 }}
+      data-testid={`stage-item-${stageKey}`}
+      data-status={status}
       className={cn(
         "flex items-center justify-between rounded-md px-2 py-1.5",
         isActive && "bg-surface-hover"
@@ -308,4 +332,3 @@ function SubTaskProgress({ subStage, subPercent }: SubTaskProgressProps) {
     </motion.div>
   );
 }
-
