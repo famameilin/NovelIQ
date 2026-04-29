@@ -178,7 +178,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
         {
             "foreshadow_expectation": 0.3,
             "arc_scores": '{"\\u7334\\u5b50": 6.5, "\\u7b97\\u76d8": 6.0}',
-            "narrative_type": "\u6210\u957f",
+            "genre_labels": '["\\u901a\\u7528"]',
+            "style_labels": '["\\u4e25\\u8083"]',
             "topic_labels": '["\\u4e8c\\u5988\\u5988", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
             "diagnosis": "\u7334\u5b50\u5e2e\u52a9\u4e8c\u5988\u5988\uff0c\u7b97\u76d8\u968f\u540e\u51fa\u73b0\u3002",
             "value_logic_reason": "\u4e8c\u5988\u5988\u5f71\u54cd\u4e86\u7334\u5b50\u7684\u5224\u65ad\u3002",
@@ -205,6 +206,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
 
     assert result is not None
     assert result.arc_scores == {"\u4faf\u98de\u767d": 6.5, "\u6797\u7acb\u679c": 6.0}
+    assert result.genre_labels == ["\u901a\u7528"]
+    assert result.style_labels == ["\u4e25\u8083"]
     assert result.topic_labels == ["\u67f3\u5a49\u513f", "\u767d\u82b7"]
     assert result.diagnosis == (
         "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
@@ -258,10 +261,17 @@ def test_fetch_diagnosis_marks_missing_row_as_rerun_required_even_if_ledger_exis
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: diagnosis 成功结果现在必须同时携带题材与风格标签；这里覆盖完整新合同的成功路径。
+    """
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.42,
             "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "style_labels": '["严肃"]',
             "topic_labels": '["成长"]',
             "focus_structure": "single",
             "focus_characters": '["沈砚"]',
@@ -279,6 +289,8 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
 
     assert result is not None
     assert result.foreshadow_expectation == 0.42
+    assert result.genre_labels == ["科幻"]
+    assert result.style_labels == ["严肃"]
     assert result.focus_structure == "single"
     assert result.focus_characters == ["沈砚"]
 
@@ -326,6 +338,130 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_topic_labels_missi
     assert result is not None
     assert result.rerun_required is True
     assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_genre_labels_missing():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 题材标签已经成为 diagnosis 正式合同，缺失时结果读取层必须显式要求 rerun。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "style_labels": '["严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_style_labels_missing():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 风格标签和题材标签一样属于正式 diagnosis 合同，读取层不能再把缺风格标签的 row 当作成功结果。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_controlled_labels_invalid():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 读取层需要和 CloudAnalysisSchema 的受控标签合同一致；
+          只要题材或风格标签不在允许集合内，就必须走 rerun-required。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["bad-genre"]',
+            "style_labels": '["bad-style"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 合法标签中的空白和重复值应在读取层被归一化，避免对外继续暴露脏数据。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '[" 科幻 ", "科幻", " "]',
+            "style_labels": '[" 严肃 ", "严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is False
+    assert result.genre_labels == ["科幻"]
+    assert result.style_labels == ["严肃"]
 
 
 def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
@@ -376,6 +512,8 @@ def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": '{"伯安": 7.2, "贺伯安": 8.3}',
+            "genre_labels": '["通用"]',
+            "style_labels": '["严肃"]',
             "topic_labels": '["成长"]',
             "focus_structure": "dual",
             "focus_characters": '["伯安", "贺伯安"]',

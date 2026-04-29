@@ -66,6 +66,12 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
 
 
 def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: summary-only/shared-signal 入口允许使用轻量 session stand-in；
+          这类入口拿不到 chunk 文本时，genre_labels 应明确回退为 `["通用"]`，但不能打断 graph signal 校验。
+    """
     class FakeDiagnosisRepository:
         def __init__(self, session) -> None:
             self.session = session
@@ -120,6 +126,7 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
     assert payload["known_characters"] == ["白芷"]
     assert payload["alias_merges"] == {"蒙面人": "白芷"}
     assert payload["foreshadow_expectation"] == 0.42
+    assert payload["genre_labels"] == ["通用"]
     assert payload["foreshadowing_threads"] == []
     assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 1}

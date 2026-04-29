@@ -285,7 +285,8 @@ class DiagnosisResult(BaseModel):
         ),
     )
     arc_scores: dict[str, float] | None = None
-    narrative_type: str | None = None
+    genre_labels: list[str] | None = None
+    style_labels: list[str] | None = None
     topic_labels: list[str] | None = None
     diagnosis: str | None = None
     value_logic_type: str | None = None

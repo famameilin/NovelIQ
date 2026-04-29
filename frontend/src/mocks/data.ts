@@ -331,7 +331,8 @@ export function createTopics(count = 8): Topic[] {
 export function createDiagnosis(): DiagnosisResult {
   const foreshadowExpectation = +(Math.random() * 0.3 + 0.5).toFixed(2);
   return {
-    narrative_type: "英雄之旅",
+    genre_labels: ["仙侠"],
+    style_labels: ["热血", "史诗"],
     foreshadow_expectation: foreshadowExpectation,
     focus_structure: "dual",
     focus_characters: ["萧炎", "药老"],

@@ -2,22 +2,25 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
 export interface DiagnosisHeaderProps {
-  /** 叙事类型 */
-  narrativeType?: string | null;
+  /** 稳定题材标签 */
+  genreLabels?: string[] | null;
+  /** 叙事风格标签 */
+  styleLabels?: string[] | null;
   /** 弧线类型 */
   arcType?: string | null;
   className?: string;
 }
 
 /**
- * 诊断头部 - 展示叙事类型和弧线类型标签
+ * 诊断头部 - 展示题材、风格和弧线类型标签
  */
 export function DiagnosisHeader({
-  narrativeType,
+  genreLabels,
+  styleLabels,
   arcType,
   className,
 }: DiagnosisHeaderProps) {
-  const hasData = narrativeType || arcType;
+  const hasData = (genreLabels && genreLabels.length > 0) || (styleLabels && styleLabels.length > 0) || arcType;
 
   if (!hasData) {
     return null;
@@ -25,11 +28,16 @@ export function DiagnosisHeader({
 
   return (
     <div className={cn("flex flex-wrap gap-2", className)}>
-      {narrativeType && (
-        <Badge variant="secondary" className="text-xs">
-          {narrativeType}
+      {genreLabels?.map((label) => (
+        <Badge key={`genre-${label}`} variant="secondary" className="text-xs">
+          {label}
         </Badge>
-      )}
+      ))}
+      {styleLabels?.map((label) => (
+        <Badge key={`style-${label}`} variant="outline" className="text-xs">
+          {label}
+        </Badge>
+      ))}
       {arcType && (
         <Badge variant="outline" className="text-xs">
           {arcType}
