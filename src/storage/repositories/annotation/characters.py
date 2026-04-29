@@ -13,8 +13,19 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy import delete, func, select
 
+from src.models.local.character_reference_policy import (
+    build_reference_resolution_lookup_keys,
+    CharacterReferenceDecision,
+    decide_character_reference,
+    filter_global_character_names,
+    is_global_character_surface_name,
+    is_reference_surface_name,
+    normalize_reference_name,
+    resolve_global_character_name,
+)
 from src.storage.models import (
     ChunkCharacter,
+    ChunkDialogue,
     ChunkRelation,
     GraphEntity,
     GraphEntityAlias,
@@ -30,6 +41,10 @@ def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
 
     修复返回值错误，正确返回 {alias: canonical} 映射
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 旧 graph_aliases 中可能残留“我 -> 某人”，alias_map 出口必须过滤 reference surface。
+
     Returns:
         别名到规范名的映射字典
     """
@@ -39,8 +54,17 @@ def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
         .where(GraphEntityAlias.run_id == run_id)
     )
     graph_rows = session.execute(graph_stmt).fetchall()
-    alias_map = {row.alias: row.canonical_name for row in graph_rows}
-    for _alias, canonical in list(alias_map.items()):
+    alias_map = {
+        row.alias: row.canonical_name
+        for row in graph_rows
+        if not is_reference_surface_name(row.alias) and is_global_character_surface_name(row.canonical_name)
+    }
+    canonical_names = {
+        row.canonical_name
+        for row in graph_rows
+        if is_global_character_surface_name(row.canonical_name)
+    }
+    for canonical in canonical_names | set(alias_map.values()):
         alias_map.setdefault(canonical, canonical)
     return alias_map
 
@@ -58,21 +82,197 @@ def fetch_all_character_names(
 
     移除 character_appearances 的合并逻辑，统一角色定义
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 消歧候选只能来自可进入 global character 的名字，未解析代词保留 raw 但不再进入主链。
+
     Returns:
         [{"name": "角色名", "count": 频次}, ...] 列表
     """
-    stmt = select(ChunkCharacter.name, func.count().label("appearance_count")).where(ChunkCharacter.run_id == run_id)
+    name_expr = func.coalesce(ChunkCharacter.resolved_global_name, ChunkCharacter.name).label("candidate_name")
+    stmt = select(name_expr, func.count().label("appearance_count")).where(ChunkCharacter.run_id == run_id)
     if max_chunk_id is not None:
         stmt = stmt.where(ChunkCharacter.chunk_id <= max_chunk_id)
-    stmt = stmt.group_by(ChunkCharacter.name)
+    stmt = stmt.group_by(name_expr)
     result = session.execute(stmt).fetchall()
     name_counts: dict[str, int] = {}
     for row in result:
-        name = row.name
+        name = resolve_global_character_name(row.candidate_name)
         count = int(row.appearance_count or 0)
         if name and isinstance(name, str):
             name_counts[name] = name_counts.get(name, 0) + count
     return [{"name": name, "count": count} for name, count in sorted(name_counts.items(), key=lambda x: -x[1])]
+
+
+def fetch_reference_aware_character_names(
+    session: Session,
+    run_id: str,
+    max_chunk_id: int | None = None,
+) -> list[dict[str, str | int]]:
+    """
+    获取 reference-aware 的消歧候选名及出现频次
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: incremental/final disambiguation 需要保留未解析 reference surface，
+              但已解析引用仍应折叠到 resolved_global_name，不能继续走 global-only 出口。
+
+    Returns:
+        [{"name": "候选名", "count": 频次}, ...] 列表
+    """
+    stmt = select(
+        ChunkCharacter.surface_name,
+        ChunkCharacter.name,
+        ChunkCharacter.resolved_global_name,
+    ).where(ChunkCharacter.run_id == run_id)
+    if max_chunk_id is not None:
+        stmt = stmt.where(ChunkCharacter.chunk_id <= max_chunk_id)
+
+    result = session.execute(stmt).fetchall()
+    name_counts: dict[str, int] = {}
+    for row in result:
+        resolved_global_name = normalize_reference_name(row.resolved_global_name)
+        if is_global_character_surface_name(resolved_global_name):
+            candidate_name = resolved_global_name
+        else:
+            candidate_name = normalize_reference_name(row.surface_name) or normalize_reference_name(row.name)
+        if not candidate_name:
+            continue
+        name_counts[candidate_name] = name_counts.get(candidate_name, 0) + 1
+    return [{"name": name, "count": count} for name, count in sorted(name_counts.items(), key=lambda x: -x[1])]
+
+
+def _resolve_history_reference_decision(
+    surface_name: str | None,
+    *,
+    chunk_id: int | None,
+    reference_resolutions: dict[str, str],
+    existing_resolved_global_name: str | None,
+) -> CharacterReferenceDecision:
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 当前状态里已移除的 reference resolution 必须撤销历史行上的旧 resolved 值，
+              不能因为行上残留旧实名就继续被 graph/results 误消费；同时 Phase4 relation
+              端点可能直接落 slot 名，这里也要能回退命中 surface-keyed resolution map。
+    """
+    normalized_surface = normalize_reference_name(surface_name)
+    resolved_global_name = existing_resolved_global_name
+    if normalized_surface and is_reference_surface_name(normalized_surface):
+        # reference surface 只能相信当前 checkpoint 的解析结果；
+        # 如果本轮 map 里已经没有它，说明它已被降级回 unresolved，旧 resolved 值必须清空。
+        resolved_global_name = None
+        for lookup_key in build_reference_resolution_lookup_keys(normalized_surface):
+            candidate_name = normalize_reference_name(reference_resolutions.get(lookup_key))
+            if candidate_name:
+                resolved_global_name = candidate_name
+                break
+    return decide_character_reference(
+        normalized_surface,
+        resolved_global_name=resolved_global_name,
+        chunk_id=chunk_id,
+    )
+
+
+def apply_reference_resolutions_to_history(
+    session: Session,
+    run_id: str,
+    reference_resolutions: dict[str, str],
+    *,
+    apply: bool = True,
+) -> dict[str, int]:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: reference_resolutions 不能只停留在 checkpoint；需要同步驱动 chunk_* 历史行的 resolved 字段消费。
+
+    Returns:
+        受处理的历史行统计，key 为表类型。
+    """
+    chunk_characters = (
+        session.execute(select(ChunkCharacter).where(ChunkCharacter.run_id == run_id)).scalars().all()
+    )
+    for row in chunk_characters:
+        decision = _resolve_history_reference_decision(
+            row.surface_name or row.name,
+            chunk_id=row.chunk_id,
+            reference_resolutions=reference_resolutions,
+            existing_resolved_global_name=row.resolved_global_name,
+        )
+        if apply:
+            row.surface_name = decision.surface_name
+            row.reference_kind = decision.reference_kind
+            row.reference_slot = decision.reference_slot
+            row.resolved_global_name = decision.resolved_global_name
+            row.global_skip_reason = decision.global_skip_reason
+
+    chunk_dialogues = (
+        session.execute(select(ChunkDialogue).where(ChunkDialogue.run_id == run_id)).scalars().all()
+    )
+    for row in chunk_dialogues:
+        existing_by_surface: dict[str, dict[str, object]] = {}
+        for item in row.speaker_references or []:
+            if isinstance(item, dict) and isinstance(item.get("surface_name"), str):
+                existing_by_surface[str(item["surface_name"])] = item
+
+        rebuilt_references: list[dict[str, object]] = []
+        for speaker_name in row.speaker or []:
+            if not speaker_name:
+                continue
+            existing_reference = existing_by_surface.get(str(speaker_name))
+            existing_resolved_global_name = None
+            if existing_reference is not None and isinstance(existing_reference.get("resolved_global_name"), str):
+                existing_resolved_global_name = str(existing_reference["resolved_global_name"])
+            decision = _resolve_history_reference_decision(
+                speaker_name,
+                chunk_id=row.chunk_id,
+                reference_resolutions=reference_resolutions,
+                existing_resolved_global_name=existing_resolved_global_name,
+            )
+            rebuilt_references.append(
+                {
+                    "surface_name": decision.surface_name,
+                    "reference_kind": decision.reference_kind,
+                    "reference_slot": decision.reference_slot,
+                    "resolved_global_name": decision.resolved_global_name,
+                    "can_enter_global_character": decision.can_enter_global_character,
+                    "global_skip_reason": decision.global_skip_reason,
+                }
+            )
+        if apply:
+            row.speaker_references = rebuilt_references or None
+
+    chunk_relations = session.execute(select(ChunkRelation).where(ChunkRelation.run_id == run_id)).scalars().all()
+    for row in chunk_relations:
+        from_decision = _resolve_history_reference_decision(
+            row.from_char,
+            chunk_id=row.chunk_id,
+            reference_resolutions=reference_resolutions,
+            existing_resolved_global_name=row.resolved_from_global_name,
+        )
+        to_decision = _resolve_history_reference_decision(
+            row.to_char,
+            chunk_id=row.chunk_id,
+            reference_resolutions=reference_resolutions,
+            existing_resolved_global_name=row.resolved_to_global_name,
+        )
+        reasons = [
+            f"{decision.surface_name}: {decision.global_skip_reason}"
+            for decision in (from_decision, to_decision)
+            if not decision.can_enter_global_character and decision.global_skip_reason
+        ]
+        if apply:
+            row.from_reference_kind = from_decision.reference_kind
+            row.to_reference_kind = to_decision.reference_kind
+            row.resolved_from_global_name = from_decision.resolved_global_name
+            row.resolved_to_global_name = to_decision.resolved_global_name
+            row.reference_skip_reason = "; ".join(reasons) if reasons else None
+
+    return {
+        "chunk_characters": len(chunk_characters),
+        "chunk_dialogues": len(chunk_dialogues),
+        "chunk_relations": len(chunk_relations),
+    }
 
 
 def ensure_canonical_entities(
@@ -84,6 +284,10 @@ def ensure_canonical_entities(
 ) -> dict[str, int]:
     """
     只为 known_canonical_names 创建实体（GraphEntity）
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 即使 checkpoint 被历史数据污染，graph entity 创建前也必须经过统一主链准入。
 
     Args:
         session: 数据库会话
@@ -100,7 +304,7 @@ def ensure_canonical_entities(
     graph_repo = GraphRepository(session)
     canonical_to_entity_id: dict[str, int] = {}
 
-    for canonical in known_canonical_names:
+    for canonical in filter_global_character_names(known_canonical_names):
         entity_type = entity_types.get(canonical, "character") if entity_types else "character"
         entity = graph_repo.upsert_entity(
             run_id=run_id,

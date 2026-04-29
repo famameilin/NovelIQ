@@ -112,6 +112,11 @@ class ChunkStyle(BaseModel):
 
 class ChunkCharacter(BaseModel):
     name: str
+    surface_name: str | None = None
+    reference_kind: str | None = None
+    reference_slot: str | None = None
+    resolved_global_name: str | None = None
+    global_skip_reason: str | None = None
     role_function: str | None = None
     action: str | None = None
     emotion_score: str | None = None
@@ -120,6 +125,11 @@ class ChunkCharacter(BaseModel):
 class ChunkRelation(BaseModel):
     from_char: str
     to_char: str
+    from_reference_kind: str | None = None
+    to_reference_kind: str | None = None
+    resolved_from_global_name: str | None = None
+    resolved_to_global_name: str | None = None
+    reference_skip_reason: str | None = None
     type: str
     change: str
 
@@ -127,6 +137,7 @@ class ChunkRelation(BaseModel):
 class ChunkDialogue(BaseModel):
 
     speaker: list[str] | None = None
+    speaker_references: list[dict[str, Any]] = []
     length: int | None = None
 
 
@@ -304,6 +315,7 @@ class DiagnosisResult(BaseModel):
     main_characters: list[str] | None = None
     core_cast: list[str] | None = None
     theme_color: str | None = Field(default=None, description="小说主题色，十六进制格式，如 #4A90D9")
+    reference_contract_version: int | None = None
 
 
 class NovelResultsResponse(BaseModel):

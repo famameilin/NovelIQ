@@ -12,6 +12,7 @@ from loguru import logger
 
 from src.api.models.events import StreamEvent
 from src.config import settings
+from src.models.local.character_reference_policy import collect_reference_slots_from_names, filter_global_character_names
 
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
@@ -214,17 +215,30 @@ async def _run_phase3_from_context(
 async def _run_phase4_from_context(
     context: _MultiPhaseExecutionContext,
     known_characters: list[str] | None,
+    reference_slots: list[str] | None = None,
+    phase1_seen_reference_slots: list[str] | None = None,
 ) -> _Phase4Result:
     """
     从共享上下文执行 Phase4
     """
     phase_client = _clone_annotation_client_for_phase(context.client, "phase4", context.chunk_id) or context.client
     phase_fallback_client = _clone_annotation_client_for_phase(context.fallback_client, "phase4", context.chunk_id)
-    phase4_bundle = await _resolve_phase4_bundle(context, known_characters)
+    effective_reference_slots = _merge_phase4_reference_slots(
+        context,
+        reference_slots,
+        phase1_seen_reference_slots=phase1_seen_reference_slots,
+    )
+    phase4_bundle = await _resolve_phase4_bundle(
+        context,
+        known_characters,
+        effective_reference_slots,
+        phase1_seen_reference_slots=phase1_seen_reference_slots,
+    )
     relations = await annotate_chunk_phase4(
         client=phase_client,
         text=context.text,
         known_characters=known_characters,
+        reference_slots=effective_reference_slots,
         # Phase4 统一只消费上游传入的 evidence_bundle，
         # multi_phase 负责调度，不在这里重建关系抽取上下文
         evidence_bundle=phase4_bundle,
@@ -235,9 +249,42 @@ async def _run_phase4_from_context(
     return _Phase4Result(relations=relations)
 
 
+def _merge_phase4_reference_slots(
+    context: _MultiPhaseExecutionContext,
+    reference_slots: list[str] | None,
+    *,
+    phase1_seen_reference_slots: list[str] | None = None,
+) -> list[str]:
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: Phase1 一旦已经给出仍未解析的 slot 列表，这份列表就是 Phase4 的权威输入；
+              只有在 Phase1 没有给出任何 slot 时，才回退到 template 里按文本预提的局部引用位。
+    """
+    template_slots: list[str] = []
+    if context.phase4_request_template is not None:
+        template_slots = list(context.phase4_request_template.reference_slots)
+    phase1_slots = collect_reference_slots_from_names(reference_slots or [], chunk_id=context.chunk_id)
+    seen_slots = collect_reference_slots_from_names(
+        phase1_seen_reference_slots or reference_slots or [],
+        chunk_id=context.chunk_id,
+    )
+
+    # Phase1 已经看见过的 slot（无论最终是否解析成功）都不应再从 template 回流；
+    # 只有 template 独有、Phase1 未产出的局部引用位，才允许继续作为兜底输入留给 Phase4。
+    template_fallback_slots = [slot for slot in template_slots if slot not in set(seen_slots)]
+    return collect_reference_slots_from_names(
+        [*phase1_slots, *template_fallback_slots],
+        chunk_id=context.chunk_id,
+    )
+
+
 async def _resolve_phase4_bundle(
     context: _MultiPhaseExecutionContext,
     known_characters: list[str] | None,
+    reference_slots: list[str] | None = None,
+    *,
+    phase1_seen_reference_slots: list[str] | None = None,
 ) -> EvidenceBundle | None:
     """
     修改说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 requested_names/seed_entities；
@@ -245,6 +292,10 @@ async def _resolve_phase4_bundle(
 
     修改说明: `requested_names` 只代表当前 relation consumer 真正要看的角色；
               template.seed_entities 只保留为检索锚点，不再反向抬升成 consumer target
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: Phase4 不允许未解析代词进入 requested_names/seed_entities，防止关系抽取抬升为图谱实体。
     """
     if context.phase4_bundle is not None:
         return context.phase4_bundle
@@ -252,24 +303,31 @@ async def _resolve_phase4_bundle(
         return None
 
     requested_names: list[str] = []
-    for name in (
-        list(known_characters or [])
-        + list(context.phase4_request_template.requested_names)
+    for name in filter_global_character_names(
+        list(known_characters or []) + list(context.phase4_request_template.requested_names)
     ):
         normalized = str(name).strip()
         if normalized and normalized not in requested_names:
             requested_names.append(normalized)
 
     seed_entities: list[str] = []
-    for name in list(known_characters or []) + list(context.phase4_request_template.seed_entities):
+    for name in filter_global_character_names(
+        list(known_characters or []) + list(context.phase4_request_template.seed_entities)
+    ):
         normalized = str(name).strip()
         if normalized and normalized not in seed_entities:
             seed_entities.append(normalized)
 
+    effective_reference_slots = _merge_phase4_reference_slots(
+        context,
+        reference_slots,
+        phase1_seen_reference_slots=phase1_seen_reference_slots,
+    )
     phase4_request = replace(
         context.phase4_request_template,
         requested_names=requested_names,
         seed_entities=seed_entities,
+        reference_slots=effective_reference_slots,
     )
     return await context.evidence_service.collect(phase4_request)
 
@@ -277,25 +335,77 @@ async def _resolve_phase4_bundle(
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:
     """
     从 Phase1 结果提取 canonical 角色名列表
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: Phase1 raw characters 可能包含代词，known_characters 只能返回主链准入后的实名角色。
     """
-    return [character.name for character in annotation.characters] if annotation.characters else None
+    if not annotation.characters:
+        return None
+    known_characters = filter_global_character_names(
+        [
+            getattr(character, "resolved_global_name", None)
+            or getattr(character, "surface_name", None)
+            or character.name
+            for character in annotation.characters
+        ]
+    )
+    return known_characters or None
+
+
+def _resolve_phase4_reference_slots(annotation: ChunkAnnotation, *, chunk_id: int | None) -> list[str]:
+    """
+    创建时间: 2026-04-29
+    任务: Phase4 / RAG reference_slots 合同
+    新建原因: Phase4 只能消费当前 chunk 里仍未解析到实名的局部引用位，不能把已解析引用继续当作 slot 传下去。
+    """
+    if not annotation.characters:
+        return []
+    unresolved_reference_names = [
+        getattr(character, "reference_slot", None)
+        or getattr(character, "surface_name", None)
+        or character.name
+        for character in annotation.characters
+        if not getattr(character, "resolved_global_name", None)
+    ]
+    return collect_reference_slots_from_names(unresolved_reference_names, chunk_id=chunk_id)
+
+
+def _resolve_phase4_seen_reference_slots(annotation: ChunkAnnotation, *, chunk_id: int | None) -> list[str]:
+    """
+    创建时间: 2026-04-29
+    任务: Phase4 / RAG reference_slots 合同
+    新建原因: 需要区分“Phase1 没产出某个 slot”和“Phase1 已看见但已解析掉某个 slot”，
+              这样 Phase4 才不会把已解析 slot 从 template 里重新并回 request/prompt。
+    """
+    if not annotation.characters:
+        return []
+    seen_reference_names = [
+        getattr(character, "reference_slot", None)
+        or getattr(character, "surface_name", None)
+        or character.name
+        for character in annotation.characters
+    ]
+    return collect_reference_slots_from_names(seen_reference_names, chunk_id=chunk_id)
 
 
 def _normalize_phase_outputs(
     context: _MultiPhaseExecutionContext,
     annotation: ChunkAnnotation,
     foreshadowing: ForeshadowingResult | None,
-) -> tuple[list[str] | None, ForeshadowingResult | None]:
+) -> tuple[list[str] | None, list[str], list[str], ForeshadowingResult | None]:
     """
     归一化 Phase1/2 的共享派生产物
     """
     known_characters = _resolve_known_characters(annotation)
+    reference_slots = _resolve_phase4_reference_slots(annotation, chunk_id=context.chunk_id)
+    phase1_seen_reference_slots = _resolve_phase4_seen_reference_slots(annotation, chunk_id=context.chunk_id)
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
         text=context.text,
         chunk_id=context.chunk_id,
     )
-    return known_characters, normalized_foreshadowing
+    return known_characters, reference_slots, phase1_seen_reference_slots, normalized_foreshadowing
 
 
 async def _run_phase1(
@@ -580,14 +690,23 @@ async def annotate_chunk_parallel(
     await _emit_phase_event(context, action="complete", phase_name="phase1", sub_percent=25, message="phase1 完成")
     await _emit_phase_event(context, action="complete", phase_name="phase2", sub_percent=50, message="phase2 完成")
 
-    known_characters, normalized_foreshadowing = _normalize_phase_outputs(context, annotation, foreshadowing)
+    known_characters, reference_slots, phase1_seen_reference_slots, normalized_foreshadowing = _normalize_phase_outputs(
+        context,
+        annotation,
+        foreshadowing,
+    )
 
     await _emit_phase_event(context, action="start", phase_name="phase3", sub_percent=50, message="开始 phase3")
     await _emit_phase_event(context, action="start", phase_name="phase4", sub_percent=75, message="开始 phase4")
 
     phase3_result, phase4_result = await asyncio.gather(
         _run_phase3_from_context(context, known_characters),
-        _run_phase4_from_context(context, known_characters),
+        _run_phase4_from_context(
+            context,
+            known_characters,
+            reference_slots,
+            phase1_seen_reference_slots=phase1_seen_reference_slots,
+        ),
     )
 
     await _emit_phase_event(context, action="complete", phase_name="phase3", sub_percent=75, message="phase3 完成")
@@ -659,14 +778,23 @@ async def annotate_chunk_serial(
     foreshadowing = await _run_phase2_from_context(context)
     await _emit_phase_event(context, action="complete", phase_name="phase2", sub_percent=50, message="phase2 完成")
 
-    known_characters, normalized_foreshadowing = _normalize_phase_outputs(context, annotation, foreshadowing)
+    known_characters, reference_slots, phase1_seen_reference_slots, normalized_foreshadowing = _normalize_phase_outputs(
+        context,
+        annotation,
+        foreshadowing,
+    )
 
     await _emit_phase_event(context, action="start", phase_name="phase3", sub_percent=50, message="开始 phase3")
     phase3_result = await _run_phase3_from_context(context, known_characters)
     await _emit_phase_event(context, action="complete", phase_name="phase3", sub_percent=75, message="phase3 完成")
 
     await _emit_phase_event(context, action="start", phase_name="phase4", sub_percent=75, message="开始 phase4")
-    phase4_result = await _run_phase4_from_context(context, known_characters)
+    phase4_result = await _run_phase4_from_context(
+        context,
+        known_characters,
+        reference_slots,
+        phase1_seen_reference_slots=phase1_seen_reference_slots,
+    )
     await _emit_phase_event(context, action="complete", phase_name="phase4", sub_percent=100, message="phase4 完成")
     logger.info(f"Phase4 completed for chunk_id={chunk_id}")
 

@@ -13,18 +13,18 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.models.local.character_reference_policy import filter_global_character_names
 from src.storage.models import (
     Chunk,
     ChunkAnnotation,
     ChunkCurve,
     ChunkTopic,
-    GraphEntity,
-    GraphRelationEvent,
     StageSummary,
 )
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.annotation import foreshadowing_threads as foreshadowing_thread_repo
 from src.storage.repositories.base import BaseRepository
+from src.storage.repositories.graph import GraphRepository
 
 
 class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
@@ -126,6 +126,11 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: diagnosis payload 的关系变更必须复用 graph history 主链过滤，排除 synthetic final_disambiguation
+                 和未解析代词端点事件，避免 diagnosis 与 graph page 读到不同历史面。
+
         获取关系变更记录
 
         Args:
@@ -138,35 +143,16 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if limit is None:
             limit = settings.diagnosis.relation_changes_limit
 
-        graph_stmt = (
-            select(
-                GraphRelationEvent.chunk_id,
-                GraphEntity.canonical_name,
-                GraphRelationEvent.to_entity_id,
-                GraphRelationEvent.relation_type,
-                GraphRelationEvent.change_type,
-            )
-            .join(GraphEntity, GraphRelationEvent.from_entity_id == GraphEntity.entity_id)
-            .where(GraphRelationEvent.run_id == run_id)
-            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
-            .limit(limit)
-        )
-        graph_rows = self.session.execute(graph_stmt).fetchall()
-        name_map = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-        }
+        relation_events = GraphRepository(self.session).fetch_relation_events(run_id, limit=limit, offset=0)
         return [
             (
-                row.chunk_id,
-                row.canonical_name,
-                name_map.get(row.to_entity_id, str(row.to_entity_id)),
-                row.relation_type,
-                row.change_type,
+                event.chunk_id,
+                event.from_name,
+                event.to_name,
+                event.relation_type,
+                event.change_type,
             )
-            for row in graph_rows
+            for event in relation_events
         ]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
@@ -306,6 +292,10 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_character_disambig_data(self, run_id: str) -> tuple[list[str], dict[str, str]]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: diagnosis payload 只能携带已准入的 global-character，未解析代词/泛称必须从名单和 alias_merges 中剔除。
+
         获取角色消歧数据（known_characters 和 alias_merges）
 
         从 payload.py 迁移，分离获取 known_characters 和 alias_merges
@@ -360,12 +350,25 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 f"expected list, got {type(alias_merges_list).__name__}"
             )
 
-        alias_merges_dict = {
-            str(alias): str(canonical)
-            for alias, canonical in (alias_merges_list or [])
-            if isinstance(alias, str) and isinstance(canonical, str) and alias != canonical
-        }
-        return [str(name) for name in (known_canonical_names or []) if isinstance(name, str)], alias_merges_dict
+        known_filtered = filter_global_character_names(
+            [str(name) for name in (known_canonical_names or []) if isinstance(name, str)]
+        )
+        known_set = set(known_filtered)
+        alias_merges_dict: dict[str, str] = {}
+        for alias, canonical in alias_merges_list or []:
+            if not isinstance(alias, str) or not isinstance(canonical, str) or alias == canonical:
+                continue
+            resolved = filter_global_character_names([canonical])
+            if not resolved:
+                continue
+            canonical_name = resolved[0]
+            if canonical_name not in known_set:
+                continue
+            # 未解析代词 alias 不能继续发给 diagnosis，即便 canonical 是合法角色。
+            if not filter_global_character_names([alias]):
+                continue
+            alias_merges_dict[str(alias)] = canonical_name
+        return known_filtered, alias_merges_dict
 
     def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
         """

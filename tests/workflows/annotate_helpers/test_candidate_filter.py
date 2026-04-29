@@ -53,3 +53,17 @@ def test_candidate_filter_blacklists_obvious_noise_token() -> None:
 
     assert result.category == "blacklist"
     assert "明显脏 token" in result.reason
+
+
+def test_candidate_filter_marks_pronoun_as_reference_candidate() -> None:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: 代词需要保留给消歧解析，但不能作为普通 canonical 候选进入主链。
+    """
+    candidate_filter = CandidateFilter()
+
+    result = candidate_filter.classify("她", count=1, has_context=False)
+
+    assert result.category == "reference"
+    assert "角色引用" in result.reason

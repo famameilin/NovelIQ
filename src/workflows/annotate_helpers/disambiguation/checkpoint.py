@@ -50,6 +50,10 @@ def _load_disambig_checkpoint(
     """
     从数据库加载消歧检查点
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 数据库读取统一使用字段名语义访问，避免下标索引在 schema 演进时静默错位。
+
     Returns:
         DisambiguationState: 完整的消歧状态
 
@@ -61,10 +65,10 @@ def _load_disambig_checkpoint(
         {"run_id": run_id},
     ).fetchone()
 
-    if not result or not result[0]:
+    if not result or not result._mapping["state_json"]:
         return DisambiguationState.empty()
 
-    raw_data = json.loads(result[0])
+    raw_data = json.loads(result._mapping["state_json"])
 
     if not isinstance(raw_data, dict):
         raise ValueError(

@@ -65,7 +65,8 @@ class TestDisambiguationState:
         assert state.review_status == ()
         assert state.pending_relations == ()
         assert state.entity_types == ()
-        assert state.version == 2
+        assert state.unresolved_references == frozenset()
+        assert state.reference_resolutions == frozenset()
 
     def test_create_state_with_data(self):
         state = DisambiguationState(
@@ -137,24 +138,63 @@ class TestDisambiguationState:
         data = original.to_dict()
         restored = DisambiguationState.from_dict(data)
 
+        assert "version" not in data
         assert restored.discovered_names == original.discovered_names
         assert restored.known_canonical_names == original.known_canonical_names
         assert restored.alias_merges == original.alias_merges
+        assert restored.unresolved_references == original.unresolved_references
+        assert restored.reference_resolutions == original.reference_resolutions
         assert len(restored.review_status) == 1
         assert restored.pending_relations == original.pending_relations
 
-    def test_from_dict_empty(self):
-        state = DisambiguationState.from_dict({})
-        assert state.discovered_names == frozenset()
-        assert state.known_canonical_names == frozenset()
+    def test_from_dict_rejects_empty_payload(self):
+        """
+        创建时间: 2026-04-30
+        任务: 删除 DisambiguationState.version 及旧兼容逻辑
+        新建原因: from_dict() 只接受最新 checkpoint 合同，空 payload 不能再被静默升级为空状态。
+        """
+        with pytest.raises(ValueError, match="Missing required DisambiguationState fields"):
+            DisambiguationState.from_dict({})
 
-    def test_from_dict_invalid_version(self):
-        state = DisambiguationState.from_dict({"version": 2})
-        assert state == DisambiguationState.empty()
+    def test_from_dict_rejects_legacy_review_state_without_audit_fields(self):
+        """
+        创建时间: 2026-04-30
+        任务: 删除 DisambiguationState.version 及旧兼容逻辑
+        新建原因: 旧 review_status 载荷缺少审计字段时必须直接失败，不能再走默认值补齐。
+        """
+        payload = DisambiguationState(
+            discovered_names=frozenset(["贺伯安", "伯安"]),
+            known_canonical_names=frozenset(["伯安"]),
+            review_status=(
+                (
+                    "贺伯安",
+                    NameReviewState(
+                        status="resolved",
+                        confidence="high",
+                        proposed_canonical="伯安",
+                        evidence_strength="strong",
+                    ),
+                ),
+            ),
+        ).to_dict()
+        payload["review_status"][0]["state"].pop("decision_source")
+
+        with pytest.raises(KeyError, match="decision_source"):
+            DisambiguationState.from_dict(payload)
 
 
 class TestValidateStateInvariants:
     """validate_state_invariants 测试"""
+
+    def test_empty_state_allows_empty_invalid_canonical_set(self):
+        """
+        创建时间: 2026-04-29
+        任务: 验证引用层状态不变量边界
+        新建原因: 锁定 `known_canonical_names` 为空时，invalid_canonicals 检查不会误报或触发后续异常。
+        """
+        state = DisambiguationState.empty()
+
+        assert validate_state_invariants(state) is True
 
     def test_valid_state(self):
         state = DisambiguationState(

@@ -17,6 +17,7 @@ from src.api.routes.results_fetchers import (
     _normalize_text_by_alias_map,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
+from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION
 from src.storage.repositories.annotation.foreshadowing_threads import ForeshadowingThreadView
 
 
@@ -58,13 +59,21 @@ class _DummyAnnotationRepo2:
 
 
 class _DummyStatsRepo:
-    def __init__(self, payload):
+    def __init__(self, payload, *, add_reference_contract_version: bool = True):
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 默认模拟新 diagnosis 合同，单独测试旧合同时再显式关闭版本注入。
+        """
         self.payload = payload
+        self.add_reference_contract_version = add_reference_contract_version
 
     def fetch_cloud_analysis(self, novel_id, run_id):
         assert novel_id == "novel-1"
         assert run_id == "run-1"
-        return self.payload
+        if self.payload is None or not self.add_reference_contract_version:
+            return self.payload
+        return {"reference_contract_version": REFERENCE_CONTRACT_VERSION, **self.payload}
 
 
 class _DummyCurveStatsRepo:
@@ -540,6 +549,38 @@ def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
     assert result.rerun_reason == "focus_contract_incomplete"
 
 
+def test_fetch_diagnosis_marks_missing_reference_contract_version_outdated():
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    说明: 旧 cloud_analysis 行缺少 reference_contract_version 时必须要求重跑，不能继续按新合同展示。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "style_labels": '["严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        },
+        add_reference_contract_version=False,
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "reference_contract_outdated"
+
+
 def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
     stats_repo = _DummyStatsRepo(
         {
@@ -609,6 +650,28 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
     )
 
     assert [char.name for char in result] == ["甲", "乙", "丙"]
+
+
+def test_fetch_characters_filters_unresolved_pronoun_references():
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    说明: 角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。
+    """
+    rows = [
+        _DummyRow(name="我", role_function="主体", emotion_score="neutral"),
+        _DummyRow(name="沈砚", role_function="主体", emotion_score="neutral"),
+    ]
+
+    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
+
+    result = _fetch_characters(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        limit=None,
+    )
+
+    assert [char.name for char in result] == ["沈砚"]
 
 
 def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():

@@ -14,6 +14,10 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from src.models.local.character_reference_policy import (
+    is_global_character_surface_name,
+    is_reference_surface_name,
+)
 from src.models.local.disambiguation import (
     DisambiguationState,
     ExtendedDisambigResult,
@@ -231,6 +235,8 @@ def _is_descriptor_like_name(name: str) -> bool:
     """
     stripped_name = name.strip()
     if not stripped_name:
+        return True
+    if is_reference_surface_name(stripped_name):
         return True
     if stripped_name in _load_protected_canonical_penalty_names():
         return True
@@ -652,6 +658,11 @@ def apply_disambiguation_decisions(
 
     将 canonical_decisions 分流到三层状态
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 代词/局部引用需要进入 unresolved_references/reference_resolutions，
+          不能污染 known_canonical_names 或 alias_merges。
+
     处理逻辑：
     1. A -> A 自映射：加入 discovered_names 和 known_canonical_names，不写入 alias_merges
     2. A -> B 别名合并：A、B 加入 discovered_names，B 加入 known_canonical_names，写入 alias_merges[A] = B
@@ -667,6 +678,8 @@ def apply_disambiguation_decisions(
     new_discovered = set(state.discovered_names)
     new_known_canonical = set(state.known_canonical_names)
     new_alias_merges: list[tuple[str, str]] = list(state.alias_merges)
+    new_unresolved_references = set(state.unresolved_references)
+    new_reference_resolutions: dict[str, str] = dict(state.reference_resolutions)
     new_review_status: dict[str, NameReviewState] = dict(state.review_status)
 
     for name, canonical in result.canonical_decisions.items():
@@ -694,12 +707,53 @@ def apply_disambiguation_decisions(
                 )
                 continue
 
+        evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
+
+        # 引用 surface 只能记录为“未解析引用”或“引用 -> 实名解析”，不能写入普通 alias/canonical 主链
+        if is_reference_surface_name(name):
+            has_confirmed_reference_resolution = (
+                canonical != name
+                and is_global_character_surface_name(canonical)
+                and confidence == DISAMBIG_CONFIDENCE_HIGH
+                and evidence_strength in ("mixed", "strong")
+            )
+            if has_confirmed_reference_resolution:
+                new_discovered.add(canonical)
+                new_known_canonical.add(canonical)
+                new_unresolved_references.discard(name)
+                new_reference_resolutions[name] = canonical
+                new_review_status[name] = NameReviewState(
+                    status=DISAMBIG_STATE_RESOLVED,
+                    confidence=confidence,
+                    proposed_canonical=canonical,
+                    evidence_strength=evidence_strength,
+                    decision_evidence_count=evidence_count,
+                    decision_evidence_types=evidence_types,
+                    decision_source="llm",
+                    decision_timestamp=time.time(),
+                )
+            else:
+                new_reference_resolutions.pop(name, None)
+                new_unresolved_references.add(name)
+                new_review_status[name] = NameReviewState(
+                    status=DISAMBIG_STATE_UNRESOLVED,
+                    confidence=confidence,
+                    proposed_canonical=None,
+                    evidence_strength=evidence_strength,
+                    decision_evidence_count=evidence_count,
+                    decision_evidence_types=evidence_types,
+                    decision_source="llm",
+                    decision_timestamp=time.time(),
+                )
+            continue
+
         if name == canonical:
-            is_confirmed_canonical = confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")
-            if is_confirmed_canonical:
+            is_confirmed_canonical = (
+                confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")
+            )
+            if is_confirmed_canonical and is_global_character_surface_name(name):
                 new_known_canonical.add(name)
             status_value = DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW
-            evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
             new_review_status[name] = NameReviewState(
                 status=status_value,
                 confidence=confidence,
@@ -710,18 +764,35 @@ def apply_disambiguation_decisions(
                 decision_source="llm",
                 decision_timestamp=time.time(),
             )
-        else:
+        elif is_global_character_surface_name(canonical):
             new_discovered.add(canonical)
             new_known_canonical.add(canonical)
 
             new_alias_merges.append((name, canonical))
 
-            status_value = DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW
-            evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
+            status_value = (
+                DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW
+            )
             new_review_status[name] = NameReviewState(
                 status=status_value,
                 confidence=confidence,
                 proposed_canonical=canonical,
+                evidence_strength=evidence_strength,
+                decision_evidence_count=evidence_count,
+                decision_evidence_types=evidence_types,
+                decision_source="llm",
+                decision_timestamp=time.time(),
+            )
+        else:
+            logger.warning(
+                "Ignoring invalid canonical target for '{}': '{}' is a reference surface",
+                name,
+                canonical,
+            )
+            new_review_status[name] = NameReviewState(
+                status=DISAMBIG_STATE_REVIEW,
+                confidence=confidence,
+                proposed_canonical=None,
                 evidence_strength=evidence_strength,
                 decision_evidence_count=evidence_count,
                 decision_evidence_types=evidence_types,
@@ -771,7 +842,11 @@ def apply_disambiguation_decisions(
     demoted_aliases: set[str] = set()
     for name, review in new_review_status.items():
         old_review = old_review_dict.get(name)
-        if old_review and old_review.status == DISAMBIG_STATE_RESOLVED and review.status != DISAMBIG_STATE_RESOLVED:
+        if (
+            old_review
+            and old_review.status == DISAMBIG_STATE_RESOLVED
+            and review.status != DISAMBIG_STATE_RESOLVED
+        ):
             logger.warning(f"Demoting resolved name '{name}' from '{old_review.status}' to '{review.status}'")
             demoted_aliases.add(name)
     # Apply alias_filter in a separate pass to avoid modifying list during iteration
@@ -781,14 +856,23 @@ def apply_disambiguation_decisions(
     final_alias_merges: list[tuple[str, str]] = []
     seen_aliases: set[str] = set()
     for alias, target in new_alias_merges:
-        if alias != target and alias not in seen_aliases:
+        if (
+            alias != target
+            and alias not in seen_aliases
+            and not is_reference_surface_name(alias)
+            and is_global_character_surface_name(target)
+        ):
             final_alias_merges.append((alias, target))
             seen_aliases.add(alias)
+
+    new_known_canonical = {name for name in new_known_canonical if is_global_character_surface_name(name)}
 
     new_state = state.with_updates(
         discovered_names=frozenset(new_discovered),
         known_canonical_names=frozenset(new_known_canonical),
         alias_merges=frozenset(final_alias_merges),
+        unresolved_references=frozenset(new_unresolved_references),
+        reference_resolutions=frozenset(new_reference_resolutions.items()),
         review_status=tuple(new_review_status.items()),
     )
 

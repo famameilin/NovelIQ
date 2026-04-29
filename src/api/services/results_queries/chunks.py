@@ -22,6 +22,7 @@ from src.api.models.responses import (
     ChunkStyle,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
+from src.models.local.character_reference_policy import decide_character_reference
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 
 from .common import _normalize_name
@@ -103,6 +104,10 @@ def _fetch_chunk_annotations(
     require_graph_projection: bool = True,
 ) -> list:
     """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: chunk results 读取层需要过滤未解析代词引用，避免“我”等局部引用泄漏为全局角色。
+
     获取分块标注数据
     """
     annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
@@ -130,14 +135,27 @@ def _fetch_chunk_annotations(
     characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
     for row in characters_raw:
         chunk_id = row.chunk_id
-        normalized_name = _normalize_name(str(row.name), alias_map)
-        character_name = normalized_name if normalized_name else str(row.name)
+        raw_name = str(getattr(row, "surface_name", None) or row.name)
+        decision = decide_character_reference(
+            raw_name,
+            alias_map=alias_map,
+            resolved_global_name=getattr(row, "resolved_global_name", None),
+        )
+        character_name = decision.resolved_global_name
+        if character_name is None:
+            logger.warning("跳过分块角色中的未解析局部引用: chunk_id={}, name={}", chunk_id, raw_name)
+            continue
         if valid_character_names is not None and character_name not in valid_character_names:
             logger.warning("跳过分块角色中的悬空引用: chunk_id={}, name={}", chunk_id, character_name)
             continue
         characters_by_chunk[chunk_id].append(
             ChunkCharacter(
                 name=character_name,
+                surface_name=raw_name,
+                reference_kind=getattr(row, "reference_kind", None) or decision.reference_kind,
+                reference_slot=getattr(row, "reference_slot", None) or decision.reference_slot,
+                resolved_global_name=character_name,
+                global_skip_reason=decision.global_skip_reason,
                 role_function=str(row.role_function) if row.role_function else None,
                 action=str(row.action) if row.action else None,
                 emotion_score=str(row.emotion_score) if row.emotion_score else None,
@@ -163,6 +181,11 @@ def _fetch_chunk_annotations(
             ChunkRelation(
                 from_char=from_char,
                 to_char=to_char,
+                from_reference_kind=getattr(relation_event, "from_reference_kind", None),
+                to_reference_kind=getattr(relation_event, "to_reference_kind", None),
+                resolved_from_global_name=from_char,
+                resolved_to_global_name=to_char,
+                reference_skip_reason=None,
                 type=relation_event.relation_type,
                 change=relation_event.change_type,
             )
@@ -174,9 +197,36 @@ def _fetch_chunk_annotations(
         speakers = row.speaker or []
         if not speakers:
             continue
-        normalized_speakers = [_normalize_name(speaker, alias_map) for speaker in speakers]
         valid_speakers = []
-        for normalized_speaker in normalized_speakers:
+        speaker_reference_by_surface: dict[str, dict[str, Any]] = {}
+        for item in getattr(row, "speaker_references", None) or []:
+            if not isinstance(item, dict):
+                continue
+            surface_name = str(item.get("surface_name") or "").strip()
+            if surface_name:
+                speaker_reference_by_surface[surface_name] = item
+        speaker_references: list[dict[str, Any]] = []
+        for speaker in speakers:
+            reference_payload = speaker_reference_by_surface.get(str(speaker).strip(), {})
+            decision = decide_character_reference(
+                speaker,
+                alias_map=alias_map,
+                resolved_global_name=reference_payload.get("resolved_global_name"),
+            )
+            speaker_references.append(
+                {
+                    "surface_name": decision.surface_name,
+                    "reference_kind": decision.reference_kind,
+                    "reference_slot": reference_payload.get("reference_slot") or decision.reference_slot,
+                    "resolved_global_name": decision.resolved_global_name,
+                    "can_enter_global_character": decision.can_enter_global_character,
+                    "global_skip_reason": decision.global_skip_reason,
+                }
+            )
+            normalized_speaker = decision.resolved_global_name
+            if normalized_speaker is None:
+                logger.warning("将分块对话中的未解析局部 speaker 置空: chunk_id={}, speaker={}", chunk_id, speaker)
+                continue
             if (
                 normalized_speaker
                 and valid_character_names is not None
@@ -191,6 +241,7 @@ def _fetch_chunk_annotations(
         dialogues_by_chunk[chunk_id].append(
             ChunkDialogue(
                 speaker=valid_speakers,
+                speaker_references=speaker_references,
                 length=int(row.length) if row.length is not None else None,
             )
         )

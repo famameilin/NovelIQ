@@ -271,6 +271,37 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         """获取指定运行的所有角色名及出现频次"""
         return characters.fetch_all_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
 
+    def fetch_reference_aware_character_names(
+        self,
+        run_id: str,
+        max_chunk_id: int | None = None,
+    ) -> list[dict[str, str | int]]:
+        """
+        创建时间: 2026-04-29
+        任务: 角色引用分层重构
+        新建原因: 消歧候选需要 reference-aware 入口，不能复用读侧的 global-only 出口。
+        """
+        return characters.fetch_reference_aware_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
+
+    def apply_reference_resolutions_to_history(
+        self,
+        run_id: str,
+        reference_resolutions: dict[str, str],
+        *,
+        apply: bool = True,
+    ) -> dict[str, int]:
+        """
+        创建时间: 2026-04-29
+        任务: 角色引用分层重构
+        新建原因: 持久化阶段需要把 checkpoint/reference_resolutions 下沉到 chunk_* 历史行。
+        """
+        return characters.apply_reference_resolutions_to_history(
+            self.session,
+            run_id,
+            reference_resolutions,
+            apply=apply,
+        )
+
     def ensure_canonical_entities(
         self,
         run_id: str,

@@ -59,11 +59,13 @@ from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
 )
+from src.storage.models import ChunkRelation
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
     ChunkStyleData,
     DiagnosisRepository,
+    GraphRepository,
     RunRepository,
     StatsRepository,
 )
@@ -291,6 +293,57 @@ class TestCloudDiagnose:
         relations = diag_repo.fetch_relation_changes(self.run_id)
         # relations 字段已从 ChunkAnnotation 移除，所以返回空列表
         assert len(relations) == 0
+
+    def test_build_diagnosis_payload_excludes_final_disambiguation_relation_changes(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: graph-diagnosis-mainline-blockers
+        说明: diagnosis payload 的 character_relations 必须复用 graph history 过滤，
+              final_disambiguation 的 synthetic relation 不能再从 fetch_relation_changes 漏回云端诊断。
+        """
+        self._create_full_data(3)
+
+        graph_repo = GraphRepository(self.db_session)
+        hero = graph_repo.upsert_entity(run_id=self.run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=1)
+        ally = graph_repo.upsert_entity(run_id=self.run_id, canonical_name="贺家", first_seen_chunk=1, last_seen_chunk=1)
+        synthetic_relation = ChunkRelation(
+            chunk_id=1,
+            run_id=self.run_id,
+            from_char="阿顾",
+            to_char="贺家",
+            resolved_from_global_name="顾霜",
+            resolved_to_global_name="贺家",
+            type="belongs_to",
+            change="新建",
+            evidence="阿顾属于贺家",
+            confidence=0.91,
+            source_model="final_disambiguation",
+            projection_status="projected",
+        )
+        self.db_session.add(synthetic_relation)
+        self.db_session.flush()
+
+        graph_repo.insert_relation_event(
+            run_id=self.run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="belongs_to",
+            change_type="新建",
+            chunk_id=1,
+            evidence="阿顾属于贺家",
+            confidence=0.91,
+            source_relation_row_id=synthetic_relation.id,
+            directionality="directed",
+        )
+        graph_repo.refresh_current_relation(self.run_id, hero.entity_id, ally.entity_id)
+        graph_repo.refresh_entity_participants(self.run_id, [hero.entity_id, ally.entity_id])
+        self.db_session.commit()
+
+        diag_repo = DiagnosisRepository(self.db_session)
+        payload = build_diagnosis_payload(self.db_session, self.novel_id, self.run_id)
+
+        assert diag_repo.fetch_relation_changes(self.run_id) == []
+        assert payload["character_relations"] == []
 
     def test_fetch_foreshadowing_chunks(self) -> None:
         self._create_full_data(5)
