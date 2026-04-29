@@ -18,6 +18,7 @@ from src.api.models.events import StreamEvent
 from src.config import TaskType, settings
 from src.knowledge.authority import ActiveEntityContext, KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
+from src.models.local.character_reference_policy import collect_reference_slots_from_text
 from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
 
 if TYPE_CHECKING:
@@ -387,6 +388,7 @@ def _build_evidence_request(
     query_text: str,
     requested_names: list[str],
     seed_entities: list[str],
+    reference_slots: list[str] | None,
     background_entities: list[str] | None,
     chunk_id: int,
     max_chunk_id: int | None,
@@ -407,6 +409,7 @@ def _build_evidence_request(
         query_text=query_text,
         requested_names=requested_names,
         seed_entities=seed_entities,
+        reference_slots=list(reference_slots or []),
         background_entities=list(background_entities or []),
         current_chunk=chunk_id,
         max_chunk_id=max_chunk_id,
@@ -492,6 +495,7 @@ def _prepare_chunk_context(
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
         phase1_seed_entities = _collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text)
+        phase4_reference_slots = collect_reference_slots_from_text(chunk_text, chunk_id=chunk_id)
         include_phase2_evidence = settings.analysis.multi_phase_annotation.include_phase2_evidence
 
         phase1_request = _build_evidence_request(
@@ -504,6 +508,7 @@ def _prepare_chunk_context(
                 extra_names=active_entity_names,
             ),
             seed_entities=phase1_seed_entities,
+            reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
@@ -523,6 +528,7 @@ def _prepare_chunk_context(
                 query_text=chunk_text,
                 requested_names=list(active_entity_names),
                 seed_entities=phase2_seed_entities,
+                reference_slots=[],
                 background_entities=[],
                 chunk_id=chunk_id,
                 max_chunk_id=chunk_id - 1,
@@ -539,6 +545,7 @@ def _prepare_chunk_context(
             query_text=chunk_text,
             requested_names=[],
             seed_entities=[],
+            reference_slots=phase4_reference_slots,
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
@@ -596,6 +603,7 @@ async def _prepare_chunk_context_with_level3(
 
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
+        phase4_reference_slots = collect_reference_slots_from_text(chunk_text, chunk_id=chunk_id)
         include_phase2_evidence = settings.analysis.multi_phase_annotation.include_phase2_evidence
         phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
@@ -607,6 +615,7 @@ async def _prepare_chunk_context_with_level3(
                 extra_names=active_entity_names,
             ),
             seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
@@ -622,6 +631,7 @@ async def _prepare_chunk_context_with_level3(
                 extra_names=active_entity_names,
             ),
             seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
@@ -637,6 +647,7 @@ async def _prepare_chunk_context_with_level3(
                 query_text=chunk_text,
                 requested_names=list(active_entity_names),
                 seed_entities=_collect_seed_entities(None, active_entity_names),
+                reference_slots=[],
                 background_entities=[],
                 chunk_id=chunk_id,
                 max_chunk_id=chunk_id - 1,
@@ -652,6 +663,7 @@ async def _prepare_chunk_context_with_level3(
             query_text=chunk_text,
             requested_names=[],
             seed_entities=[],
+            reference_slots=phase4_reference_slots,
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,

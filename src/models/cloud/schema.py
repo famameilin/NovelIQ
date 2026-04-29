@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION, is_global_character_surface_name
+
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 FocusStructureType = Literal["single", "dual", "ensemble"]
 GENRE_LABEL_VALUES = ("科幻", "悬疑", "历史", "仙侠", "都市", "权谋", "爽文", "通用")
@@ -79,6 +81,7 @@ class CloudAnalysis(BaseModel):
         default=None,
         description="小说主题色，十六进制格式，如 #4A90D9",
     )
+    reference_contract_version: int = Field(default=REFERENCE_CONTRACT_VERSION)
 
     @field_validator("theme_color")
     @classmethod
@@ -140,12 +143,19 @@ class CloudAnalysis(BaseModel):
     @field_validator("focus_characters", "main_characters", "core_cast")
     @classmethod
     def validate_character_lists(cls, values: list[str]) -> list[str]:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: diagnosis 正式角色名单只能包含 global-character，未解析代词必须触发重试而不是入库。
+        """
         normalized: list[str] = []
         seen: set[str] = set()
         for value in values:
             name = value.strip()
             if not name or name in seen:
                 continue
+            if not is_global_character_surface_name(name):
+                raise ValueError(f"diagnosis character list contains unresolved reference: {name}")
             seen.add(name)
             normalized.append(name)
         return normalized
@@ -153,17 +163,29 @@ class CloudAnalysis(BaseModel):
     @field_validator("arc_scores")
     @classmethod
     def validate_arc_scores(cls, values: dict[str, float]) -> dict[str, float]:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: arc_scores 是 diagnosis 角色合同源头，不能接收“我/她”等局部引用 key。
+        """
         normalized: dict[str, float] = {}
         for raw_name, raw_score in values.items():
             name = raw_name.strip()
             if not name:
                 continue
+            if not is_global_character_surface_name(name):
+                raise ValueError(f"arc_scores contains unresolved reference: {name}")
             score = float(raw_score)
             normalized[name] = score
         return normalized
 
     @model_validator(mode="after")
     def validate_focus_contract(self) -> CloudAnalysis:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: diagnosis 正式结果必须显式携带当前角色引用合同版本，旧结果不再兼容。
+        """
         # 空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
         # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
         # 就必须显式给出完整 focus contract，不能再靠默认值糊成半成品
@@ -189,6 +211,10 @@ class CloudAnalysis(BaseModel):
                 self.theme_color is not None,
             )
         )
+        if has_formal_diagnosis_payload and self.reference_contract_version != REFERENCE_CONTRACT_VERSION:
+            raise ValueError(
+                f"reference_contract_version must be {REFERENCE_CONTRACT_VERSION} for formal diagnosis payload"
+            )
 
         arc_score_names = set(self.arc_scores.keys())
 
@@ -244,6 +270,11 @@ class CloudAnalysis(BaseModel):
         return self
 
     def to_dict(self) -> dict:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 持久化和导出需要保留 reference_contract_version，用于拒绝旧 diagnosis 合同。
+        """
         return {
             "novel_id": self.novel_id,
             "foreshadow_expectation": self.foreshadow_expectation,
@@ -266,4 +297,5 @@ class CloudAnalysis(BaseModel):
             "main_characters": list(self.main_characters),
             "core_cast": list(self.core_cast),
             "theme_color": self.theme_color,
+            "reference_contract_version": self.reference_contract_version,
         }

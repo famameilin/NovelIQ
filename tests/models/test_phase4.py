@@ -116,6 +116,7 @@ def build_phase4_bundle() -> EvidenceBundle:
             )
         ],
         requested_names=["灰衣人"],
+        reference_slots=["POV_SLOT_C18_我"],
         level1_snapshot=Level1AuthoritySnapshot(
             alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
             canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
@@ -215,9 +216,10 @@ class TestRenderRelationExtractionEvidenceSections(unittest.TestCase):
         sections = render_relation_extraction_evidence_sections(bundle)
         combined = "\n\n".join(sections)
 
-        self.assertEqual(len(sections), 3)
+        self.assertEqual(len(sections), 4)
         self.assertIn("<Narrative_Evidence_Level1>", combined)
         self.assertIn("【近期活跃角色】", combined)
+        self.assertIn("<Local_Reference_Slots>", combined)
         self.assertIn("<Vector_Evidence>", combined)
         self.assertNotIn("<Disambig_Candidates>", combined)
         self.assertNotIn("<Structured_Evidence>", combined)
@@ -279,17 +281,36 @@ class TestBuildPhase4Messages(unittest.TestCase):
 
         self.assertIn("<Narrative_Evidence_Level1>", messages[1]["content"])
         self.assertIn("【近期活跃角色】", messages[1]["content"])
+        self.assertIn("<Local_Reference_Slots>", messages[1]["content"])
         self.assertIn("<Vector_Evidence>", messages[1]["content"])
 
     @patch("src.models.local.annotation.phase4.settings")
     def test_build_messages_with_no_characters(self, mock_settings: MagicMock) -> None:
         """无人物列表时显示'无'"""
         mock_settings.prompts.phase4.system = "system"
-        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}\n${reference_slots}"
 
         messages = _build_phase4_messages("文本内容", None)
 
         self.assertIn("无", messages[1]["content"])
+
+    @patch("src.models.local.annotation.phase4.settings")
+    def test_build_messages_supports_explicit_reference_slot_placeholder(self, mock_settings: MagicMock) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: Phase4 / RAG reference_slots 合同
+        新建原因: Phase4 user_template 需要能显式渲染局部引用槽，允许模型直接输出 slot endpoint。
+        """
+        mock_settings.prompts.phase4.system = "system"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}\n${reference_slots}"
+
+        messages = _build_phase4_messages(
+            "我看向她。",
+            ["汪淼"],
+            reference_slots=["POV_SLOT_C1_我", "LOCAL_REF_C1_她"],
+        )
+
+        self.assertIn("POV_SLOT_C1_我、LOCAL_REF_C1_她", messages[1]["content"])
 
     @patch("src.models.local.annotation.phase4.settings")
     def test_build_messages_empty_system_prompt_raises(self, mock_settings: MagicMock) -> None:
@@ -544,6 +565,40 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         mock_client = MagicMock()
         result = await annotate_chunk_phase4(mock_client, "文本内容", None)
         self.assertEqual(result, [])
+
+    @patch("src.models.local.annotation.phase4.settings")
+    async def test_reference_slots_allow_phase4_without_known_characters(self, mock_settings: MagicMock) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: Phase4 / RAG reference_slots 合同
+        新建原因: 当前片段只有局部引用位时，Phase4 仍应运行并看到 slot section，而不是被空 known_characters 直接短路。
+        """
+        mock_settings.prompts.phase4.system = "system"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
+        mock_settings.runtime.annotation.phase_max_retries = 3
+
+        mock_client = MagicMock()
+        mock_client._config.model = "test-model"
+        mock_client._config.thinking_enabled = False
+        mock_client._is_cloud_api.return_value = False
+        mock_client._process_annotation_response = MagicMock(return_value=('{"relations": []}', None, None))
+        mock_client._session = None
+        mock_client._call_annotation_api = AsyncMock(return_value=(RelationExtractionResult(relations=[]), MagicMock()))
+
+        with patch("src.models.local.annotation.runtime.record_model_interaction"):
+            result = await annotate_chunk_phase4(
+                mock_client,
+                "我看向她。",
+                None,
+                reference_slots=["POV_SLOT_C1_我", "LOCAL_REF_C1_她"],
+                evidence_bundle=EvidenceBundle(reference_slots=["POV_SLOT_C1_我", "LOCAL_REF_C1_她"]),
+            )
+
+        self.assertEqual(result, [])
+        call_messages = mock_client._call_annotation_api.await_args.kwargs["messages"]
+        self.assertIn("<Local_Reference_Slots>", call_messages[1]["content"])
+        self.assertIn("POV_SLOT_C1_我", call_messages[1]["content"])
+        self.assertIn("LOCAL_REF_C1_她", call_messages[1]["content"])
 
     @patch("src.models.local.annotation.phase4.settings")
     async def test_successful_annotation(self, mock_settings: MagicMock) -> None:

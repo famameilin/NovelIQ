@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from src.config import settings
+from src.models.local.character_reference_policy import resolve_global_character_name
 
 
 def _dedupe_relations(relations: list[dict[str, str]] | None) -> list[dict[str, str]]:
@@ -39,7 +40,11 @@ def _normalize_relations_with_alias_map(
     relations: list[dict[str, str]] | None,
     alias_map: dict[str, str],
 ) -> list[dict[str, str]]:
-    """按 alias_map 归一关系实体名后去重"""
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 消歧关系只能使用 global-character 端点，未解析代词不能进入 pending_relations 主链。
+    """
     if not relations:
         return []
     normalized: list[dict[str, str]] = []
@@ -49,13 +54,15 @@ def _normalize_relations_with_alias_map(
         rel_type = rel.get("type")
         if not from_name or not to_name or not rel_type:
             continue
-        normalized.append(
-            {
-                "from": alias_map.get(from_name, from_name),
-                "to": alias_map.get(to_name, to_name),
-                "type": rel_type,
-            }
-        )
+        resolved_from = resolve_global_character_name(from_name, alias_map=alias_map)
+        resolved_to = resolve_global_character_name(to_name, alias_map=alias_map)
+        if resolved_from is None or resolved_to is None:
+            logger.warning(
+                "Skipping disambiguation relation with unresolved reference endpoint: {}",
+                rel,
+            )
+            continue
+        normalized.append({"from": resolved_from, "to": resolved_to, "type": rel_type})
     return _dedupe_relations(normalized)
 
 
@@ -305,6 +312,10 @@ def _prepare_entity_relations_for_projection(
     """
     2026-04-27，任务：graph final-disambiguation rebuild fixes
     “先落到 chunk_relations 再 rebuild”和“直接写 graph_* 表”两类后续处理，不能把校验逻辑绑死在单一写路径里
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: final_disambiguation 补写关系必须再次通过 global-character 准入，避免引用 surface 写入图谱。
     """
     if not entity_relations:
         return [], []
@@ -320,19 +331,20 @@ def _prepare_entity_relations_for_projection(
     valid_relation_types = _get_valid_hierarchical_relation_types()
     prepared_relations: list[dict[str, str]] = []
     skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
+    alias_dict = dict(alias_map)
 
     for rel in valid_relations:
         raw_from_name = rel.get("from")
         raw_to_name = rel.get("to")
         rel_type = rel.get("type")
-        from_name = alias_map.get(raw_from_name, raw_from_name) if raw_from_name else None
-        to_name = alias_map.get(raw_to_name, raw_to_name) if raw_to_name else None
+        from_name = resolve_global_character_name(raw_from_name, alias_map=alias_dict) if raw_from_name else None
+        to_name = resolve_global_character_name(raw_to_name, alias_map=alias_dict) if raw_to_name else None
 
         if not from_name or not to_name or not rel_type:
             skipped_relations.append(
                 {
                     "relation": rel,
-                    "reason": "missing_fields",
+                    "reason": "missing_fields_or_unresolved_reference",
                 }
             )
             continue

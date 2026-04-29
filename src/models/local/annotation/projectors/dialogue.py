@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 
 from loguru import logger
 
-from src.models.local.schema import DialogueRecord, DialogueRecordSchema, DialogueSnapshot, QuoteCandidate
+from src.models.local.character_reference_policy import decide_character_reference
+from src.models.local.schema import DialogueRecord, DialogueRecordSchema, DialogueSnapshot, QuoteCandidate, ReferenceSnapshot
 
 
 @dataclass
@@ -159,6 +160,10 @@ def build_dialogue_snapshots(
 ) -> tuple[list[DialogueSnapshot], list[int]]:
     """
     将 Phase3 投影结果转换为可落库的 DialogueSnapshot 列表
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: speaker 继续保留 raw surface，同时补充 reference 决策供后续 graph/results 过滤。
     """
     if not dialogues:
         return [], []
@@ -169,9 +174,23 @@ def build_dialogue_snapshots(
         speaker_list = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
         tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
         identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
+        speaker_references = []
+        for speaker in speaker_list or []:
+            decision = decide_character_reference(speaker)
+            speaker_references.append(
+                ReferenceSnapshot(
+                    surface_name=decision.surface_name,
+                    reference_kind=decision.reference_kind,
+                    reference_slot=decision.reference_slot,
+                    resolved_global_name=decision.resolved_global_name,
+                    can_enter_global_character=decision.can_enter_global_character,
+                    global_skip_reason=decision.global_skip_reason,
+                )
+            )
         snapshots.append(
             DialogueSnapshot(
                 speaker=speaker_list,
+                speaker_references=speaker_references,
                 content=content,
                 tone=tone,
                 identity_clue=identity_clue,

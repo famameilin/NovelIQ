@@ -80,6 +80,7 @@ def _merge_annotation_phase1_identity_and_emotion_bundles(
         local_evidence=list(identity_bundle.local_evidence),
         semantic_evidence=merged_semantic_evidence,
         requested_names=list(identity_bundle.requested_names),
+        reference_slots=list(identity_bundle.reference_slots),
         level1_snapshot=identity_bundle.level1_snapshot,
         request_meta=dict(identity_bundle.request_meta),
         generation_meta={
@@ -213,6 +214,7 @@ class NarrativeEvidenceService:
             "objective": request.objective,
             "requested_names": list(request.requested_names),
             "seed_entities": list(request.seed_entities),
+            "reference_slots": list(request.reference_slots),
             "background_entities": list(request.background_entities),
             "current_chunk": request.current_chunk,
             "max_chunk_id": request.max_chunk_id,
@@ -273,6 +275,7 @@ class NarrativeEvidenceService:
             bundle = EvidenceBundle(
                 structured_evidence=[],
                 requested_names=list(request.requested_names),
+                reference_slots=list(request.reference_slots),
                 level1_snapshot=None,
             )
 
@@ -293,6 +296,7 @@ class NarrativeEvidenceService:
                 bundle.local_evidence.extend(self._bundle_builder.build_active_entity_fallback_items(candidates))
 
         bundle.requested_names = list(request.requested_names)
+        bundle.reference_slots = list(request.reference_slots)
         return bundle
 
     def _build_annotation_phase1_emotion_request(self, request: EvidenceRequest) -> EvidenceRequest:

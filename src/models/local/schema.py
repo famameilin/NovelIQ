@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.models.local.character_reference_policy import ReferenceKind
+
 EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
 EmotionScore = EmotionalValence
 EventType = Literal["冲突", "铺垫", "转折"]
@@ -78,10 +80,32 @@ class CharacterSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
+    surface_name: str | None = None
+    reference_kind: ReferenceKind = "global_character"
+    reference_slot: str | None = None
+    resolved_global_name: str | None = None
+    global_skip_reason: str | None = None
     role_function: str
     action: str
     action_type: str
     emotion_score: str
+
+
+class ReferenceSnapshot(BaseModel):
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: 对话与关系需要保留原文称呼及其主链准入结果，不能只靠字符串字段承载多重语义。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    surface_name: str
+    reference_kind: ReferenceKind
+    reference_slot: str | None = None
+    resolved_global_name: str | None = None
+    can_enter_global_character: bool = False
+    global_skip_reason: str | None = None
 
 
 class RelationChangeSnapshot(BaseModel):
@@ -93,6 +117,11 @@ class RelationChangeSnapshot(BaseModel):
 
     from_name: str
     to_name: str
+    from_reference_kind: ReferenceKind = "global_character"
+    to_reference_kind: ReferenceKind = "global_character"
+    resolved_from_global_name: str | None = None
+    resolved_to_global_name: str | None = None
+    reference_skip_reason: str | None = None
     type: RelationType
     change: RelationChange
     evidence: str
@@ -112,6 +141,7 @@ class DialogueSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     speaker: list[str] | None = None
+    speaker_references: list[ReferenceSnapshot] = Field(default_factory=list)
     content: str = ""
     tone: str | None = None
     identity_clue: str | None = None
@@ -475,6 +505,11 @@ class ChunkAnnotation(BaseModel):
     dialogue_lengths: list[int] | None = Field(default=None)
 
     def to_dict(self) -> dict:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 调试输出需要保留 raw surface 与统一 reference 准入字段，便于定位代词污染来源。
+        """
         return {
             "emotional_valence": self.emotional_valence,
             "event_type": self.event_type,
@@ -494,6 +529,11 @@ class ChunkAnnotation(BaseModel):
             "characters": [
                 {
                     "name": c.name,
+                    "surface_name": c.surface_name,
+                    "reference_kind": c.reference_kind,
+                    "reference_slot": c.reference_slot,
+                    "resolved_global_name": c.resolved_global_name,
+                    "global_skip_reason": c.global_skip_reason,
                     "role_function": c.role_function,
                     "action": c.action,
                     "action_type": c.action_type,
@@ -504,6 +544,17 @@ class ChunkAnnotation(BaseModel):
             "dialogues": [
                 {
                     "speaker": d.speaker,
+                    "speaker_references": [
+                        {
+                            "surface_name": ref.surface_name,
+                            "reference_kind": ref.reference_kind,
+                            "reference_slot": ref.reference_slot,
+                            "resolved_global_name": ref.resolved_global_name,
+                            "can_enter_global_character": ref.can_enter_global_character,
+                            "global_skip_reason": ref.global_skip_reason,
+                        }
+                        for ref in d.speaker_references
+                    ],
                 }
                 for d in self.dialogues
             ],
