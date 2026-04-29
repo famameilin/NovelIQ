@@ -247,11 +247,12 @@ def test_apply_final_disambiguation_result_does_not_promote_unresolved_reference
     assert "她" in new_state.unresolved_references
 
 
-def test_disambiguation_state_v3_round_trips_reference_fields() -> None:
+def test_disambiguation_state_round_trips_reference_fields() -> None:
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: v3 checkpoint 必须同步保存/恢复 unresolved_references 与 reference_resolutions。
+    修改时间: 2026-04-30
+    任务: 删除 DisambiguationState.version 及旧兼容逻辑
+    修改原因: 最新 checkpoint 合同仍需稳定保存/恢复 unresolved_references 与 reference_resolutions，
+              且不再输出 version 字段。
     """
     state = DisambiguationState(
         discovered_names=frozenset({"她", "白芷", "你"}),
@@ -260,9 +261,10 @@ def test_disambiguation_state_v3_round_trips_reference_fields() -> None:
         reference_resolutions=frozenset({("她", "白芷")}),
     )
 
-    restored = DisambiguationState.from_dict(state.to_dict())
+    payload = state.to_dict()
+    restored = DisambiguationState.from_dict(payload)
 
-    assert restored.version == 3
+    assert "version" not in payload
     assert restored.unresolved_references == frozenset({"你"})
     assert restored.get_reference_resolutions_dict() == {"她": "白芷"}
 
