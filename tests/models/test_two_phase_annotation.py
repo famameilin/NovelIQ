@@ -265,6 +265,21 @@ class TestForeshadowingParsing(unittest.TestCase):
         with self.assertRaises(ValidationError):
             parse_foreshadowing_result(data)
 
+    def test_parse_high_confidence_medium_payoff_likelihood_stays_positive(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: `confidence` 与 `payoff_likelihood` 已拆开，high confidence + medium payoff 应保留为合法入池正例。
+        """
+
+        data = _valid_positive_payload(payoff_likelihood="medium", confidence="high")
+
+        result = parse_foreshadowing_result(data)
+
+        self.assertTrue(result.has_foreshadowing)
+        self.assertEqual(result.confidence, "high")
+        self.assertEqual(result.payoff_likelihood, "medium")
+
 
 class TestForeshadowingValidation(unittest.TestCase):
     """测试伏笔结果验证。"""
@@ -348,6 +363,88 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = _malformed_positive_result(payoff_likelihood="low")
 
         self.assertFalse(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
+
+    def test_validate_high_confidence_medium_payoff_likelihood_returns_true(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: medium payoff 现在表示回收路径不够稳，但只要 confidence=high 且钩子具体，仍应允许进入强 setup 池。
+        """
+
+        result = _valid_positive_result(payoff_likelihood="medium", confidence="high")
+
+        self.assertTrue(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
+
+    def test_validate_punishment_special_treatment_description_returns_false(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: 处罚规格/特殊待遇描写不应因看起来“特殊”就进入强 setup 池污染 expectation 分母。
+        """
+
+        result = _valid_positive_result(
+            setup_kind="异常物件",
+            anchor_text="钢筋高帽和铁门牌子",
+            anchor_reason=(
+                "具体钩子：钢筋高帽和铁门牌子构成异常特殊待遇。"
+                "未闭合原因：当前还没有解释这种处罚规格会怎样影响他的后续命运。"
+            ),
+            setup_summary="钢筋高帽和铁门牌子暗示他遭受特殊待遇",
+            why_unresolved_now="当前还没有解释这种处罚规格会怎样影响他的后续命运。",
+            expected_payoff_family="命运变差",
+        )
+
+        self.assertFalse(validate_foreshadowing_result(result, "他被迫戴上钢筋高帽和铁门牌子。"))
+
+    def test_validate_chunk_223_transition_reveal_teaser_new_setup_returns_false(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: 临近揭示前的“接下来展示/揭示真相”类过渡预告不应单独新建 high thread。
+        """
+
+        result = _valid_positive_result(
+            foreshadowing_type="对话",
+            setup_kind="明确承诺",
+            anchor_text="接下来会展示截获的信息，揭示三体文明的真相。",
+            anchor_reason=(
+                "具体钩子：文本承诺接下来会展示截获的信息并揭示三体文明真相。"
+                "未闭合原因：当前还没有展示截获信息，也没有揭示三体文明真相。"
+            ),
+            setup_summary="接下来展示截获信息并揭示三体文明真相",
+            why_unresolved_now="当前还没有展示截获信息，也没有揭示三体文明真相。",
+            expected_payoff_family="其他",
+            is_new_setup=True,
+            linked_setup_id=None,
+            setup_status="open",
+        )
+
+        self.assertFalse(validate_foreshadowing_result(result, "接下来会展示截获的信息，揭示三体文明的真相。"))
+
+    def test_validate_transition_reveal_teaser_linked_thread_can_pass(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: 过渡预告只禁止单独开新 thread；如果明确强化已有 setup，仍应允许 ledger 记录推进。
+        """
+
+        result = _valid_positive_result(
+            foreshadowing_type="对话",
+            setup_kind="明确承诺",
+            anchor_text="接下来会展示截获的信息，揭示三体文明的真相。",
+            anchor_reason=(
+                "具体钩子：文本承诺接下来会展示截获的信息并揭示三体文明真相。"
+                "未闭合原因：当前还没有展示截获信息，也没有揭示三体文明真相。"
+            ),
+            setup_summary="接下来展示截获信息并揭示三体文明真相",
+            why_unresolved_now="当前还没有展示截获信息，也没有揭示三体文明真相。",
+            expected_payoff_family="其他",
+            is_new_setup=False,
+            linked_setup_id="setup-223",
+            setup_status="reinforced",
+        )
+
+        self.assertTrue(validate_foreshadowing_result(result, "接下来会展示截获的信息，揭示三体文明的真相。"))
 
     def test_validate_empty_anchor_text_returns_false(self) -> None:
         result = _malformed_positive_result(

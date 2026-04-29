@@ -14,12 +14,13 @@ import pytest
 from sqlalchemy import select
 
 from src.models.local.schema import ForeshadowingResult
-from src.storage.models import ForeshadowingThread
+from src.storage.models import Chunk, ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.repositories import AnnotationRepository, RunRepository
 from src.storage.repositories.annotation.foreshadowing_threads import (
     ACTIVE_SETUP_POOL_LIMIT,
     _archive_overflow_threads,
     _find_exact_matching_active_thread,
+    calculate_foreshadow_expectation,
     fetch_active_foreshadowing_threads_for_prompt,
     sync_foreshadowing_thread,
 )
@@ -41,7 +42,16 @@ def _create_run(db_session, insert_test_novel, novel_id: str) -> str:
     return run_id
 
 
-def _make_thread(*, run_id: str, setup_id: str, chunk_id: int, summary: str) -> ForeshadowingThread:
+def _make_thread(
+    *,
+    run_id: str,
+    setup_id: str,
+    chunk_id: int,
+    summary: str,
+    payoff_likelihood: str = "high",
+    strength: str = "medium",
+    status: str = "open",
+) -> ForeshadowingThread:
     """
     构造最小可持久化的 active thread ORM 对象。
 
@@ -49,6 +59,10 @@ def _make_thread(*, run_id: str, setup_id: str, chunk_id: int, summary: str) -> 
     修改者: Codex
     任务: fix-phase2-setup-pool-review-findings
     新建原因: overflow / visible-pool 测试只关心 thread 主表，不需要每次手写整段 ORM 初始化。
+
+    修改时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    修改原因: expectation v2 测试需要构造不同 payoff/status/strength 组合，helper 改为可参数化。
     """
 
     base_time = datetime(2026, 4, 26, 12, 0, 0) + timedelta(minutes=chunk_id)
@@ -60,13 +74,42 @@ def _make_thread(*, run_id: str, setup_id: str, chunk_id: int, summary: str) -> 
         setup_summary=summary,
         setup_kind="异常物件",
         expected_payoff_family="能力触发",
-        payoff_likelihood="high",
-        strength="medium",
-        status="open",
+        payoff_likelihood=payoff_likelihood,
+        strength=strength,
+        status=status,
         active=True,
         created_at=base_time,
         updated_at=base_time,
     )
+
+
+def _add_thread_hits(db_session, *, run_id: str, setup_id: str, chunk_ids: list[int]) -> None:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：expectation v2 按 hit_count 聚合，测试需要通过真实 chunk + hit 行覆盖 SQL 统计路径。
+    """
+
+    base_time = datetime(2026, 4, 29, 12, 0, 0)
+    for chunk_id in chunk_ids:
+        db_session.add(
+            Chunk(
+                chunk_id=chunk_id,
+                run_id=run_id,
+                text=f"测试 chunk {chunk_id}",
+            )
+        )
+        db_session.add(
+            ForeshadowingThreadHit(
+                setup_id=setup_id,
+                run_id=run_id,
+                chunk_id=chunk_id,
+                anchor_text=f"测试锚点 {chunk_id}",
+                anchor_reason="具体钩子：测试锚点。未闭合原因：当前还没有解释测试锚点。",
+                why_unresolved_now="当前还没有解释测试锚点。",
+                is_new_setup=chunk_id == chunk_ids[0],
+                created_at=base_time + timedelta(minutes=chunk_id),
+            )
+        )
 
 
 def _valid_new_setup_result(*, summary: str) -> ForeshadowingResult:
@@ -175,6 +218,199 @@ def test_archive_overflow_threads_preserves_semantic_status_when_evicted(db_sess
     assert refreshed is not None
     assert refreshed.active is False
     assert refreshed.status == "likely_paid_off"
+
+
+def test_calculate_foreshadow_expectation_returns_none_without_threads(db_session, insert_test_novel) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    新建原因: setup ledger 为空时，正式预期仍应返回 None，不能伪造 0 或旧 fallback。
+    """
+
+    run_id = _create_run(db_session, insert_test_novel, "fst005")
+
+    assert calculate_foreshadow_expectation(db_session, run_id) is None
+
+
+def test_calculate_foreshadow_expectation_distinguishes_open_and_reinforced_high_threads(
+    db_session,
+    insert_test_novel,
+) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    新建原因: v2 公式必须让 open/high/hit1 与 reinforced/high/hit2 拉开分数，不再同为 0.7。
+    """
+
+    open_run_id = _create_run(db_session, insert_test_novel, "fst006")
+    reinforced_run_id = _create_run(db_session, insert_test_novel, "fst007")
+    db_session.add(
+        _make_thread(
+            run_id=open_run_id,
+            setup_id="open-high-hit1",
+            chunk_id=1,
+            summary="open high setup",
+            strength="high",
+            status="open",
+        )
+    )
+    _add_thread_hits(db_session, run_id=open_run_id, setup_id="open-high-hit1", chunk_ids=[1])
+    db_session.add(
+        _make_thread(
+            run_id=reinforced_run_id,
+            setup_id="reinforced-high-hit2",
+            chunk_id=2,
+            summary="reinforced high setup",
+            strength="high",
+            status="reinforced",
+        )
+    )
+    _add_thread_hits(db_session, run_id=reinforced_run_id, setup_id="reinforced-high-hit2", chunk_ids=[1, 2])
+    db_session.commit()
+
+    open_score = calculate_foreshadow_expectation(db_session, open_run_id)
+    reinforced_score = calculate_foreshadow_expectation(db_session, reinforced_run_id)
+
+    assert open_score == 0.58
+    assert reinforced_score == 0.72
+    assert open_score < reinforced_score
+
+
+def test_calculate_foreshadow_expectation_medium_thread_lowers_distribution(
+    db_session,
+    insert_test_novel,
+) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    新建原因: medium payoff 需要真实进入聚合并拉低分布，避免 ledger 继续稳定贴住 0.7。
+    """
+
+    high_run_id = _create_run(db_session, insert_test_novel, "fst008")
+    mixed_run_id = _create_run(db_session, insert_test_novel, "fst009")
+    db_session.add(
+        _make_thread(
+            run_id=high_run_id,
+            setup_id="high-only",
+            chunk_id=1,
+            summary="high only setup",
+            strength="high",
+        )
+    )
+    _add_thread_hits(db_session, run_id=high_run_id, setup_id="high-only", chunk_ids=[1])
+    db_session.add_all(
+        [
+            _make_thread(
+                run_id=mixed_run_id,
+                setup_id="mixed-high",
+                chunk_id=1,
+                summary="mixed high setup",
+                strength="high",
+            ),
+            _make_thread(
+                run_id=mixed_run_id,
+                setup_id="mixed-medium",
+                chunk_id=2,
+                summary="mixed medium setup",
+                payoff_likelihood="medium",
+                strength="medium",
+            ),
+        ]
+    )
+    _add_thread_hits(db_session, run_id=mixed_run_id, setup_id="mixed-high", chunk_ids=[1])
+    _add_thread_hits(db_session, run_id=mixed_run_id, setup_id="mixed-medium", chunk_ids=[2])
+    db_session.commit()
+
+    high_only_score = calculate_foreshadow_expectation(db_session, high_run_id)
+    mixed_score = calculate_foreshadow_expectation(db_session, mixed_run_id)
+
+    assert high_only_score == 0.58
+    assert mixed_score is not None
+    assert mixed_score < high_only_score
+    assert mixed_score != 0.7
+
+
+def test_calculate_foreshadow_expectation_paid_off_scores_above_reinforced(
+    db_session,
+    insert_test_novel,
+) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    新建原因: likely_paid_off 应作为生命周期推进进入最终指标，分数必须高于普通 reinforced。
+    """
+
+    reinforced_run_id = _create_run(db_session, insert_test_novel, "fst010")
+    paid_off_run_id = _create_run(db_session, insert_test_novel, "fst011")
+    db_session.add(
+        _make_thread(
+            run_id=reinforced_run_id,
+            setup_id="reinforced-score",
+            chunk_id=1,
+            summary="reinforced score setup",
+            strength="high",
+            status="reinforced",
+        )
+    )
+    _add_thread_hits(db_session, run_id=reinforced_run_id, setup_id="reinforced-score", chunk_ids=[1, 2])
+    db_session.add(
+        _make_thread(
+            run_id=paid_off_run_id,
+            setup_id="paid-off-score",
+            chunk_id=1,
+            summary="paid off score setup",
+            strength="high",
+            status="likely_paid_off",
+        )
+    )
+    _add_thread_hits(db_session, run_id=paid_off_run_id, setup_id="paid-off-score", chunk_ids=[1, 2])
+    db_session.commit()
+
+    reinforced_score = calculate_foreshadow_expectation(db_session, reinforced_run_id)
+    paid_off_score = calculate_foreshadow_expectation(db_session, paid_off_run_id)
+
+    assert reinforced_score == 0.72
+    assert paid_off_score == 0.97
+    assert reinforced_score < paid_off_score
+
+
+def test_calculate_foreshadow_expectation_hit_count_changes_score(db_session, insert_test_novel) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    新建原因: hit_count 是持续强化证据，同一 status/payoff/strength 下也应改变单条 thread 分数。
+    """
+
+    hit1_run_id = _create_run(db_session, insert_test_novel, "fst012")
+    hit3_run_id = _create_run(db_session, insert_test_novel, "fst013")
+    db_session.add(
+        _make_thread(
+            run_id=hit1_run_id,
+            setup_id="open-hit1",
+            chunk_id=1,
+            summary="open hit1 setup",
+            strength="high",
+        )
+    )
+    _add_thread_hits(db_session, run_id=hit1_run_id, setup_id="open-hit1", chunk_ids=[1])
+    db_session.add(
+        _make_thread(
+            run_id=hit3_run_id,
+            setup_id="open-hit3",
+            chunk_id=1,
+            summary="open hit3 setup",
+            strength="high",
+        )
+    )
+    _add_thread_hits(db_session, run_id=hit3_run_id, setup_id="open-hit3", chunk_ids=[1, 2, 3])
+    db_session.commit()
+
+    hit1_score = calculate_foreshadow_expectation(db_session, hit1_run_id)
+    hit3_score = calculate_foreshadow_expectation(db_session, hit3_run_id)
+
+    assert hit1_score == 0.58
+    assert hit3_score == 0.66
+    assert hit1_score < hit3_score
 
 
 def test_find_exact_matching_active_thread_ignores_invisible_active_threads_outside_pool_limit(

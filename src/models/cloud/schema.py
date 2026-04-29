@@ -53,8 +53,8 @@ class CloudAnalysis(BaseModel):
         ge=0,
         le=1,
         description=(
-            "伏笔回收预期。该值在 diagnosis 阶段基于 setup thread ledger 语义生成，"
-            "并作为对外与持久化的单一正式字段。"
+            "伏笔回收预期。该值由后端 setup thread ledger 确定性计算，"
+            "diagnosis LLM 不负责估算；持久化前会用 payload 值收口。"
         ),
     )
     arc_scores: dict[str, float] = Field(default_factory=dict)
