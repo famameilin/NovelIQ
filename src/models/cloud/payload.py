@@ -42,7 +42,18 @@ def _build_genre_labels(conn: Session, run_id: str) -> list[str]:
     """
     2026-04-29，任务：拆分 diagnosis 题材与风格标签
     新建原因：`genre_labels` 需要成为稳定题材真相源，统一复用现有加权 genre detector，而不是继续交给 LLM 自由发挥。
+
+    修改时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    修改原因: review 发现 summary-only/shared-signal 入口会传入不具备 SQL execute 能力的轻量 session stand-in；
+              这里仅对这类非正式 DB session 明确回退到 `["通用"]`，避免打断既有 fail-fast 测试入口。
     """
+    if not callable(getattr(conn, "execute", None)):
+        logger.warning(
+            "[云端模型] 题材标签回退为通用: run_id={} 原因=session 不支持 execute()，跳过 chunk genre detector",
+            run_id,
+        )
+        return ["通用"]
 
     chunk_texts = ChunkRepository(conn).fetch_chunk_texts(run_id)
     if not chunk_texts:
