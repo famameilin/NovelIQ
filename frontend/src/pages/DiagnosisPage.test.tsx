@@ -180,7 +180,8 @@ describe("DiagnosisPage", () => {
 
   it("shows a visible warning when foreshadowing thread drill-down fails", async () => {
     getDiagnosisMock.mockResolvedValue({
-      narrative_type: "寓言",
+      genre_labels: ["科幻"],
+      style_labels: ["硬核"],
       foreshadow_expectation: 0.42,
       arc_scores: { 沈砚: 8.2 },
       focus_structure: "single",
@@ -200,7 +201,8 @@ describe("DiagnosisPage", () => {
 
   it("renders rerun-required state when diagnosis payload misses focus contract", async () => {
     getDiagnosisMock.mockResolvedValue({
-      narrative_type: "寓言",
+      genre_labels: ["科幻"],
+      style_labels: ["硬核"],
       foreshadow_expectation: 0.42,
       topic_labels: ["成长"],
     });

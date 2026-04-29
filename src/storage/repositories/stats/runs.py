@@ -42,13 +42,16 @@ def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
     raw_main_characters = _parse_json_text_field(row.main_characters)
     raw_core_cast = _parse_json_text_field(row.core_cast)
     raw_arc_scores = _parse_json_text_field(row.arc_scores)
+    raw_genre_labels = _parse_json_text_field(row.genre_labels)
+    raw_style_labels = _parse_json_text_field(row.style_labels)
     raw_topic_labels = _parse_json_text_field(row.topic_labels)
 
     has_any_diagnosis_signal = any(
         (
             row.foreshadow_expectation is not None,
             bool(raw_arc_scores),
-            row.narrative_type is not None,
+            bool(raw_genre_labels),
+            bool(raw_style_labels),
             bool(_parse_json_text_field(row.topic_labels)),
             row.diagnosis is not None,
             row.value_logic_type is not None,
@@ -76,7 +79,8 @@ def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
                 "novel_id": row.novel_id,
                 "foreshadow_expectation": row.foreshadow_expectation,
                 "arc_scores": raw_arc_scores if isinstance(raw_arc_scores, dict) else {},
-                "narrative_type": row.narrative_type,
+                "genre_labels": raw_genre_labels if isinstance(raw_genre_labels, list) else [],
+                "style_labels": raw_style_labels if isinstance(raw_style_labels, list) else [],
                 "topic_labels": raw_topic_labels if isinstance(raw_topic_labels, list) else [],
                 "diagnosis": row.diagnosis,
                 "value_logic_type": row.value_logic_type,

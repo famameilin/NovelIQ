@@ -126,6 +126,20 @@ export type ForeshadowingSetupKind =
   | "其他";
 
 export type ForeshadowingPayoffLikelihood = "high" | "medium" | "low";
+export type DiagnosisGenreLabel = "科幻" | "悬疑" | "历史" | "仙侠" | "都市" | "权谋" | "爽文" | "通用";
+export type DiagnosisStyleLabel =
+  | "硬核"
+  | "史诗"
+  | "哲思"
+  | "严肃"
+  | "黑暗"
+  | "慢热"
+  | "高概念"
+  | "实验性"
+  | "热血"
+  | "轻松"
+  | "寓言性"
+  | "冷峻";
 
 export interface ChunkAnnotation {
   chunk_id: number;
@@ -166,7 +180,8 @@ export interface Topic {
 export interface DiagnosisResult {
   rerun_required?: boolean;
   rerun_reason?: string | null;
-  narrative_type?: string | null;
+  genre_labels?: DiagnosisGenreLabel[] | null;
+  style_labels?: DiagnosisStyleLabel[] | null;
   foreshadow_expectation?: number | null;
   narrative_arc_type?: string | null;
   arc_scores?: Record<string, number> | null;

@@ -28,7 +28,11 @@ class CloudAnalysis(Base):
     为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表
 
     废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
-    以持久化 single / dual / ensemble 三类叙事焦点结构
+    以持久化 single / dual / ensemble 三类叙事焦点结构。
+
+    2026-04-29，任务：拆分 diagnosis 题材与风格标签
+    修改原因：废弃漂移严重的 `narrative_type` 单字符串，改为稳定题材数组 `genre_labels`
+    与受控风格数组 `style_labels`。
     """
 
     __tablename__ = "cloud_analysis"
@@ -41,7 +45,8 @@ class CloudAnalysis(Base):
     )
     foreshadow_expectation: Mapped[float | None] = mapped_column(Float, nullable=True)
     arc_scores: Mapped[str | None] = mapped_column(Text, nullable=True)
-    narrative_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    genre_labels: Mapped[str | None] = mapped_column(Text, nullable=True)
+    style_labels: Mapped[str | None] = mapped_column(Text, nullable=True)
     topic_labels: Mapped[str | None] = mapped_column(Text, nullable=True)
     diagnosis: Mapped[str | None] = mapped_column(Text, nullable=True)
     value_logic_type: Mapped[str | None] = mapped_column(String(50), nullable=True)

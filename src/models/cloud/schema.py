@@ -6,6 +6,21 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 FocusStructureType = Literal["single", "dual", "ensemble"]
+GENRE_LABEL_VALUES = ("科幻", "悬疑", "历史", "仙侠", "都市", "权谋", "爽文", "通用")
+STYLE_LABEL_VALUES = (
+    "硬核",
+    "史诗",
+    "哲思",
+    "严肃",
+    "黑暗",
+    "慢热",
+    "高概念",
+    "实验性",
+    "热血",
+    "轻松",
+    "寓言性",
+    "冷峻",
+)
 
 
 class DisambiguationAliasMap(BaseModel):
@@ -43,7 +58,8 @@ class CloudAnalysis(BaseModel):
         ),
     )
     arc_scores: dict[str, float] = Field(default_factory=dict)
-    narrative_type: str | None = None
+    genre_labels: list[str] = Field(default_factory=list)
+    style_labels: list[str] = Field(default_factory=list)
     topic_labels: list[str] = Field(default_factory=list)
     diagnosis: str | None = None
     value_logic_type: ValueLogicType | str | None = None
@@ -87,6 +103,40 @@ class CloudAnalysis(BaseModel):
                 raise ValueError(f"value_logic_type must be one of {valid_types}, got: {v}")
         return v
 
+    @field_validator("genre_labels")
+    @classmethod
+    def validate_genre_labels(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            label = value.strip()
+            if not label or label in seen:
+                continue
+            if label not in GENRE_LABEL_VALUES:
+                raise ValueError(f"genre_labels contains unsupported label: {label}")
+            seen.add(label)
+            normalized.append(label)
+        if len(normalized) > 3:
+            raise ValueError("genre_labels cannot exceed 3 items")
+        return normalized
+
+    @field_validator("style_labels")
+    @classmethod
+    def validate_style_labels(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            label = value.strip()
+            if not label or label in seen:
+                continue
+            if label not in STYLE_LABEL_VALUES:
+                raise ValueError(f"style_labels contains unsupported label: {label}")
+            seen.add(label)
+            normalized.append(label)
+        if len(normalized) > 3:
+            raise ValueError("style_labels cannot exceed 3 items")
+        return normalized
+
     @field_validator("focus_characters", "main_characters", "core_cast")
     @classmethod
     def validate_character_lists(cls, values: list[str]) -> list[str]:
@@ -121,7 +171,8 @@ class CloudAnalysis(BaseModel):
             (
                 self.foreshadow_expectation is not None,
                 bool(self.arc_scores),
-                self.narrative_type is not None,
+                bool(self.genre_labels),
+                bool(self.style_labels),
                 bool(self.topic_labels),
                 self.diagnosis is not None,
                 self.value_logic_type is not None,
@@ -161,6 +212,10 @@ class CloudAnalysis(BaseModel):
                 raise ValueError("core_cast is required for formal diagnosis payload")
             if not self.topic_labels:
                 raise ValueError("topic_labels is required for formal diagnosis payload")
+            if not self.genre_labels:
+                raise ValueError("genre_labels is required for formal diagnosis payload")
+            if not self.style_labels:
+                raise ValueError("style_labels is required for formal diagnosis payload")
             if len(self.main_characters) > 5:
                 raise ValueError("main_characters cannot exceed 5 items")
             if len(self.core_cast) > 10:
@@ -193,7 +248,8 @@ class CloudAnalysis(BaseModel):
             "novel_id": self.novel_id,
             "foreshadow_expectation": self.foreshadow_expectation,
             "arc_scores": dict(self.arc_scores),
-            "narrative_type": self.narrative_type,
+            "genre_labels": list(self.genre_labels),
+            "style_labels": list(self.style_labels),
             "topic_labels": list(self.topic_labels),
             "diagnosis": self.diagnosis,
             "value_logic_type": self.value_logic_type,
