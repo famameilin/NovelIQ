@@ -201,3 +201,5 @@ skills/
 .codex-runtime/ 
 .playwright-mcp/
 .pytest-tmp/
+output/
+tmp/
