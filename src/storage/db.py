@@ -442,6 +442,18 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
+        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS reference_contract_version INTEGER",
+        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS surface_name VARCHAR(255)",
+        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_kind VARCHAR(50)",
+        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_slot VARCHAR(100)",
+        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS resolved_global_name VARCHAR(255)",
+        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS global_skip_reason TEXT",
+        "ALTER TABLE chunk_dialogues ADD COLUMN IF NOT EXISTS speaker_references JSONB",
+        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS from_reference_kind VARCHAR(50)",
+        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS to_reference_kind VARCHAR(50)",
+        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS resolved_from_global_name VARCHAR(255)",
+        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS resolved_to_global_name VARCHAR(255)",
+        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS reference_skip_reason TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
@@ -491,6 +503,7 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
             "focus_characters",
             "main_characters",
             "core_cast",
+            "reference_contract_version",
         }
         missing_columns = sorted(required_columns - actual_columns)
         if missing_columns:

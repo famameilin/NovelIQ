@@ -65,7 +65,9 @@ class TestDisambiguationState:
         assert state.review_status == ()
         assert state.pending_relations == ()
         assert state.entity_types == ()
-        assert state.version == 2
+        assert state.unresolved_references == frozenset()
+        assert state.reference_resolutions == frozenset()
+        assert state.version == 3
 
     def test_create_state_with_data(self):
         state = DisambiguationState(
@@ -140,6 +142,8 @@ class TestDisambiguationState:
         assert restored.discovered_names == original.discovered_names
         assert restored.known_canonical_names == original.known_canonical_names
         assert restored.alias_merges == original.alias_merges
+        assert restored.unresolved_references == original.unresolved_references
+        assert restored.reference_resolutions == original.reference_resolutions
         assert len(restored.review_status) == 1
         assert restored.pending_relations == original.pending_relations
 
@@ -150,7 +154,9 @@ class TestDisambiguationState:
 
     def test_from_dict_invalid_version(self):
         state = DisambiguationState.from_dict({"version": 2})
-        assert state == DisambiguationState.empty()
+        assert state.version == 3
+        assert state.discovered_names == frozenset()
+        assert state.known_canonical_names == frozenset()
 
 
 class TestValidateStateInvariants:

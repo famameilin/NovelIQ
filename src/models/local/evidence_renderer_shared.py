@@ -14,6 +14,7 @@ class SharedEvidenceSections:
     structured_evidence: str | None = None
     level1_facts: str | None = None
     active_entities: str | None = None
+    reference_slots: str | None = None
     disambig_candidates: str | None = None
     emotion_exemplars: str | None = None
     vector_evidence: str | None = None
@@ -391,6 +392,30 @@ def render_disambig_candidates(
     return "<Disambig_Candidates>\n" + "\n".join(candidate_lines) + "\n</Disambig_Candidates>"
 
 
+def render_reference_slots(bundle: EvidenceBundle) -> str | None:
+    """
+    修改时间: 2026-04-29
+    任务: Phase4 / RAG reference_slots 合同
+    修改原因: Phase4 prompt 需要显式区分 global names 与局部引用槽，允许模型在关系端点输出 slot。
+    """
+    reference_slots: list[str] = []
+    for slot in bundle.reference_slots:
+        normalized_slot = str(slot).strip()
+        if normalized_slot and normalized_slot not in reference_slots:
+            reference_slots.append(normalized_slot)
+
+    if not reference_slots:
+        return None
+
+    lines = [
+        "<Local_Reference_Slots>",
+        "以下 slot 仅表示当前片段里的局部引用位，不能当作全局角色名；当关系一端只有代词或未解析称呼时，可直接输出对应 slot 名。",
+    ]
+    lines.extend(f"- {slot}" for slot in reference_slots)
+    lines.append("</Local_Reference_Slots>")
+    return "\n".join(lines)
+
+
 def _select_semantic_items(
     bundle: EvidenceBundle,
     *,
@@ -572,6 +597,7 @@ def render_shared_evidence_sections(
             active_entity_items,
             max_items=max_active_entities,
         ),
+        reference_slots=render_reference_slots(bundle),
         disambig_candidates=render_disambig_candidates(
             bundle,
             fallback_requested_names=fallback_requested_names,

@@ -88,6 +88,7 @@ class EvidenceRequest:
     top_k: int
     max_queries: int
     model_rerank_query_max_chars: int
+    reference_slots: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """
@@ -100,6 +101,7 @@ class EvidenceRequest:
         object.__setattr__(self, "seed_entities", _normalize_name_list(self.seed_entities))
         object.__setattr__(self, "background_entities", _normalize_name_list(self.background_entities))
         object.__setattr__(self, "exclude_chunk_ids", _normalize_int_list(self.exclude_chunk_ids))
+        object.__setattr__(self, "reference_slots", _normalize_name_list(self.reference_slots))
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +132,7 @@ def build_evidence_request_fingerprint(request: EvidenceRequest) -> tuple[object
         request.query_text,
         tuple(request.requested_names),
         tuple(request.seed_entities),
+        tuple(request.reference_slots),
         request.current_chunk,
         request.max_chunk_id,
         tuple(request.exclude_chunk_ids),

@@ -18,7 +18,10 @@ from src.models.local.disambiguation.evidence_renderer import (
     render_disambiguation_graph_hint,
     render_existing_character_hint,
 )
-from src.storage.repositories.annotation.characters import fetch_all_character_names
+from src.storage.repositories.annotation.characters import (
+    fetch_all_character_names,
+    fetch_reference_aware_character_names,
+)
 from src.storage.repositories.graph import CurrentRelationRow
 
 from ..sentence import build_context_sentences
@@ -269,12 +272,16 @@ def extract_new_names_from_db(
     """
     从数据库中提取新出现的人名（带频次）
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 消歧候选需要 reference-aware 入口，未解析代词/局部引用不能在进消歧前被 global-only 出口提前过滤。
+
     基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名
 
 
     """
     existing_names = set(alias_map.keys()) | set(alias_map.values()) if alias_map else set()
-    all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
+    all_names = fetch_reference_aware_character_names(conn, run_id, max_chunk_id=current_chunk_id)
 
     candidates: list[NameCountCandidate] = []
     for item in all_names:
