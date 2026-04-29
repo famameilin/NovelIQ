@@ -456,6 +456,58 @@ class TestRelationHistoryFiltering:
         assert graph_repo.count_relation_events(run_id) == 0
         assert graph_repo.fetch_relation_events(run_id) == []
 
+    def test_relation_endpoint_entity_ids_exclude_filtered_final_disambiguation_history(self, db_session) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: graph events consistency blocker 修复
+        说明: `/graph/events` 的 participant 一致性检查不能再把已被 history 过滤掉的 synthetic event
+              端点算进去，否则增量分页会被误判成 stale participant projection。
+        """
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Final Disambiguation Endpoint Filter",
+        )
+        ChunkRepository(db_session).insert_chunks(run_id, [Chunk(index=8, text="测试8", start=800, end=900)])
+
+        graph_repo = GraphRepository(db_session)
+        hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=8, last_seen_chunk=8)
+        ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺家", first_seen_chunk=8, last_seen_chunk=8)
+        source_relation = ChunkRelation(
+            chunk_id=8,
+            run_id=run_id,
+            from_char="阿顾",
+            to_char="贺家",
+            resolved_from_global_name="顾霜",
+            resolved_to_global_name="贺家",
+            type="belongs_to",
+            change="新建",
+            evidence="阿顾属于贺家",
+            confidence=0.91,
+            source_model="final_disambiguation",
+            projection_status="projected",
+        )
+        db_session.add(source_relation)
+        db_session.flush()
+
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="belongs_to",
+            change_type="新建",
+            chunk_id=8,
+            evidence="阿顾属于贺家",
+            confidence=0.91,
+            source_relation_row_id=source_relation.id,
+            directionality="directed",
+        )
+        db_session.commit()
+
+        assert graph_repo.fetch_relation_endpoint_entity_ids(run_id) == set()
+
     def test_relation_event_pagination_skips_filtered_pronoun_rows_before_offset_limit(self, db_session) -> None:
         """
         创建时间: 2026-04-29
