@@ -162,6 +162,16 @@ class TestDisambiguationState:
 class TestValidateStateInvariants:
     """validate_state_invariants 测试"""
 
+    def test_empty_state_allows_empty_invalid_canonical_set(self):
+        """
+        创建时间: 2026-04-29
+        任务: 验证引用层状态不变量边界
+        新建原因: 锁定 `known_canonical_names` 为空时，invalid_canonicals 检查不会误报或触发后续异常。
+        """
+        state = DisambiguationState.empty()
+
+        assert validate_state_invariants(state) is True
+
     def test_valid_state(self):
         state = DisambiguationState(
             discovered_names=frozenset(["伯安", "贺伯安"]),
