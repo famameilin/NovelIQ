@@ -19,6 +19,11 @@ from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
+from src.models.local.character_reference_policy import (
+    filter_global_character_names,
+    is_global_character_surface_name,
+    is_reference_surface_name,
+)
 from src.models.local.disambiguation import (
     DisambiguationPromptContext,
     DisambiguationState,
@@ -32,7 +37,10 @@ from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_
 from src.rag import EvidenceRequest
 from src.storage.models import Chunk as ChunkModel
 from src.storage.repositories import AnnotationRepository
-from src.storage.repositories.annotation.characters import fetch_all_character_names
+from src.storage.repositories.annotation.characters import (
+    fetch_all_character_names,
+    fetch_reference_aware_character_names,
+)
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
 
 from ..sentence import build_context_sentences
@@ -287,12 +295,18 @@ def _build_shared_evidence_request(
     """
     shared evidence 统一走 identity objective；seed_entities 只来自当前待消歧候选，
           已知 canonical 背景继续留在 existing_character_hint / graph_hint，不再反向污染 requested_names
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: EvidenceRequest 的 requested_names/seed_entities 只能携带 global-character，代词留在 query_text 上下文。
     """
     seed_entities: list[str] = []
-    for name in names_in_chunk:
-        normalized = str(name).strip()
-        if normalized and normalized not in seed_entities:
+    for normalized in filter_global_character_names([str(name).strip() for name in names_in_chunk]):
+        if normalized not in seed_entities:
             seed_entities.append(normalized)
+    filtered_background_entities = filter_global_character_names(
+        [str(name).strip() for name in background_entities]
+    )
 
     return EvidenceRequest(
         consumer="incremental_disambiguation" if current_chunk is not None else "final_disambiguation",
@@ -300,7 +314,7 @@ def _build_shared_evidence_request(
         query_text=query_text,
         requested_names=seed_entities,
         seed_entities=seed_entities,
-        background_entities=background_entities,
+        background_entities=filtered_background_entities,
         current_chunk=current_chunk,
         max_chunk_id=current_chunk,
         exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
@@ -487,7 +501,11 @@ def apply_incremental_disambiguation_result(
 
     if validated_result.entity_types:
         valid_names = new_state.discovered_names | new_state.known_canonical_names
-        filtered_types = {key: value for key, value in validated_result.entity_types.items() if key in valid_names}
+        filtered_types = {
+            key: value
+            for key, value in validated_result.entity_types.items()
+            if key in valid_names and is_global_character_surface_name(key)
+        }
         if len(filtered_types) < len(validated_result.entity_types):
             invalid_keys = set(validated_result.entity_types.keys()) - set(filtered_types.keys())
             logger.warning(
@@ -519,10 +537,20 @@ def persist_incremental_checkpoint(
     """
     持久化增量消歧 checkpoint
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: reference_resolutions 一旦确认，必须同步下沉到 chunk_* 历史行，不能只停留在 checkpoint。
+
     显式对应增量流程的 checkpoint 阶段，避免主流程混杂持久化判断
     """
     if new_state == old_state:
         return
+
+    if new_state.reference_resolutions != old_state.reference_resolutions:
+        AnnotationRepository(conn).apply_reference_resolutions_to_history(
+            run_id,
+            new_state.get_reference_resolutions_dict(),
+        )
 
     logger.debug(
         "DisambiguationState updated: {} discovered, {} canonicals, {} merges",
@@ -542,6 +570,10 @@ def plan_final_disambiguation(
     """
     规划最终消歧的候选集合
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: final candidate collection 需要 reference-aware 入口，不能继续复用 global-only 名字出口。
+
     显式对应“候选收集”阶段，并把后续落库所需全量上下文一并准备好
     """
     pending_relations = list(state.pending_relations)
@@ -549,7 +581,7 @@ def plan_final_disambiguation(
     if not existing_names:
         return None
 
-    raw_all_names = fetch_all_character_names(conn, run_id)
+    raw_all_names = fetch_reference_aware_character_names(conn, run_id)
     all_names: list[NameCountCandidate] = []
     for item in raw_all_names:
         name = str(item.get("name", "")).strip()
@@ -677,6 +709,10 @@ def apply_final_disambiguation_result(
     应用最终消歧模型决策
 
     显式对应“canonical reselect 前的状态应用”阶段
+
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: final review promotion 不能把未解析代词/局部引用提升为 known_canonical_names。
     """
     existing_names = list(base_state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -688,7 +724,11 @@ def apply_final_disambiguation_result(
 
     if validated_result.entity_types:
         valid_names = new_state.discovered_names | new_state.known_canonical_names
-        filtered_types = {key: value for key, value in validated_result.entity_types.items() if key in valid_names}
+        filtered_types = {
+            key: value
+            for key, value in validated_result.entity_types.items()
+            if key in valid_names and is_global_character_surface_name(key)
+        }
         if len(filtered_types) < len(validated_result.entity_types):
             invalid_keys = set(validated_result.entity_types.keys()) - set(filtered_types.keys())
             logger.warning(
@@ -709,6 +749,7 @@ def apply_final_disambiguation_result(
             and review.evidence_strength in ("mixed", "strong")
             and name not in alias_set
             and name not in new_state.known_canonical_names
+            and is_global_character_surface_name(name)
         ):
             promoted_names.append(name)
     if promoted_names:
@@ -731,6 +772,10 @@ def persist_final_disambiguation(
     """
     持久化最终消歧结果与 checkpoint
 
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: final 阶段确认的 reference_resolutions 需要立刻反写到历史 chunk_* 行，供后续 graph/results 消费。
+
     显式对应终消歧的“实体落库、关系投影、checkpoint 保存”阶段
     """
     if new_state != previous_state:
@@ -742,6 +787,11 @@ def persist_final_disambiguation(
         )
 
     ann_repo = AnnotationRepository(conn)
+    if new_state.reference_resolutions != previous_state.reference_resolutions:
+        ann_repo.apply_reference_resolutions_to_history(
+            run_id,
+            new_state.get_reference_resolutions_dict(),
+        )
     ann_repo.ensure_canonical_entities(
         run_id,
         new_state.known_canonical_names,

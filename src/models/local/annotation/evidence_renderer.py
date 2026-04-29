@@ -170,7 +170,11 @@ def render_annotation_prompt_blocks(
 def render_relation_extraction_evidence_sections(
     evidence_bundle: EvidenceBundle | None,
 ) -> list[str]:
-    """渲染 Phase 4 关系抽取可消费的共享证据区段"""
+    """
+    修改时间: 2026-04-29
+    任务: Phase4 / RAG reference_slots 合同
+    修改原因: Phase4 需要在共享 evidence 中显式暴露局部引用槽，避免模型只能在 global names 中硬猜端点。
+    """
 
     if evidence_bundle is None:
         return []
@@ -180,11 +184,11 @@ def render_relation_extraction_evidence_sections(
         include_level1_alias_mappings=False,
         policy=_PHASE4_EVIDENCE_POLICY,
     )
-    # Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
+    # Phase4 只选择稳定事实、局部活跃实体、局部引用槽和历史语义召回；
     # 不把消歧候选或 raw structured block 带进去，避免把候选身份和重复事实噪音注入关系抽取
     return select_shared_evidence_sections(
         shared_sections,
-        ("level1_facts", "active_entities", "vector_evidence"),
+        ("level1_facts", "active_entities", "reference_slots", "vector_evidence"),
     )
 
 

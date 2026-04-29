@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func, select
+
 from src.chunking.chunker import Chunk
+from src.storage.models import ChunkRelation
 from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
 
 
@@ -48,6 +51,42 @@ class TestGraphAliasMap:
         graph_repo.upsert_alias(
             run_id=run_id,
             entity_id=entity.entity_id,
+            alias="李先生",
+            source_chunk_id=1,
+            evidence="称呼",
+            confidence=0.9,
+            source_type="alias",
+        )
+
+        alias_map = graph_repo.fetch_alias_map(run_id)
+
+        assert alias_map["李先生"] == "李玄"
+        assert alias_map["李玄"] == "李玄"
+
+    def test_fetch_alias_map_filters_reference_surface_aliases(self, db_session) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: 角色引用分层重构
+        新建原因: graph alias 读侧必须过滤历史代词/泛称 alias，避免“我 -> 汪淼”“那人 -> 李玄”继续回流主链。
+        """
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Reference Alias Filter",
+        )
+
+        graph_repo = GraphRepository(db_session)
+        entity = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name="李玄",
+            first_seen_chunk=1,
+            last_seen_chunk=1,
+        )
+        graph_repo.upsert_alias(
+            run_id=run_id,
+            entity_id=entity.entity_id,
             alias="那人",
             source_chunk_id=1,
             evidence="称呼",
@@ -57,8 +96,9 @@ class TestGraphAliasMap:
 
         alias_map = graph_repo.fetch_alias_map(run_id)
 
-        assert alias_map["那人"] == "李玄"
+        assert "那人" not in alias_map
         assert alias_map["李玄"] == "李玄"
+
 
 
 class TestGraphQualitySignals:
@@ -296,3 +336,122 @@ class TestGraphParticipants:
         assert graph_repo.count_entity_participants(run_id) == 0
         assert graph_repo.fetch_entities(run_id) == []
         assert graph_repo.count_relation_events(run_id) == 0
+
+
+class TestRelationHistoryFiltering:
+    def test_relation_history_includes_null_source_model_rows(self, db_session) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: graph history 过滤回归
+        说明: 普通 ChunkRelation 的 source_model 允许为空，history/count/fetch 不能把这类真实事件误过滤。
+        """
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Null Source Model History",
+        )
+        ChunkRepository(db_session).insert_chunks(run_id, [Chunk(index=6, text="测试6", start=600, end=700)])
+
+        graph_repo = GraphRepository(db_session)
+        hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="汪淼", first_seen_chunk=6, last_seen_chunk=6)
+        ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="沈砚", first_seen_chunk=6, last_seen_chunk=6)
+        source_relation = ChunkRelation(
+            chunk_id=6,
+            run_id=run_id,
+            from_char="我",
+            to_char="沈砚",
+            resolved_from_global_name="汪淼",
+            resolved_to_global_name="沈砚",
+            type="盟友",
+            change="新建",
+            evidence="我看见沈砚",
+            confidence=0.88,
+            projection_status="projected",
+        )
+        db_session.add(source_relation)
+        db_session.flush()
+
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="盟友",
+            change_type="新建",
+            chunk_id=6,
+            evidence="我看见沈砚",
+            confidence=0.88,
+            source_relation_row_id=source_relation.id,
+            directionality="directed",
+        )
+        db_session.commit()
+
+        history_count = int(
+            db_session.execute(select(func.count()).select_from(graph_repo._relation_history_stmt(run_id).subquery())).scalar()
+            or 0
+        )
+        relation_events = graph_repo.fetch_relation_events(run_id)
+
+        assert history_count == 1
+        assert graph_repo.count_relation_events(run_id) == 1
+        assert len(relation_events) == 1
+        assert relation_events[0].source_relation_row_id == source_relation.id
+
+    def test_relation_history_excludes_final_disambiguation_rows(self, db_session) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: graph history 过滤回归
+        说明: final_disambiguation 写入的 synthetic relation 仍然只能影响 current relation，不能出现在 history。
+        """
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Final Disambiguation History Filter",
+        )
+        ChunkRepository(db_session).insert_chunks(run_id, [Chunk(index=7, text="测试7", start=700, end=800)])
+
+        graph_repo = GraphRepository(db_session)
+        hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=7, last_seen_chunk=7)
+        ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺家", first_seen_chunk=7, last_seen_chunk=7)
+        source_relation = ChunkRelation(
+            chunk_id=7,
+            run_id=run_id,
+            from_char="阿顾",
+            to_char="贺家",
+            resolved_from_global_name="顾霜",
+            resolved_to_global_name="贺家",
+            type="belongs_to",
+            change="新建",
+            evidence="阿顾属于贺家",
+            confidence=0.91,
+            source_model="final_disambiguation",
+            projection_status="projected",
+        )
+        db_session.add(source_relation)
+        db_session.flush()
+
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="belongs_to",
+            change_type="新建",
+            chunk_id=7,
+            evidence="阿顾属于贺家",
+            confidence=0.91,
+            source_relation_row_id=source_relation.id,
+            directionality="directed",
+        )
+        db_session.commit()
+
+        history_count = int(
+            db_session.execute(select(func.count()).select_from(graph_repo._relation_history_stmt(run_id).subquery())).scalar()
+            or 0
+        )
+
+        assert history_count == 0
+        assert graph_repo.count_relation_events(run_id) == 0
+        assert graph_repo.fetch_relation_events(run_id) == []

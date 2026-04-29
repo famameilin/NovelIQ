@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from src.config import settings
+from src.models.local.character_reference_policy import is_reference_surface_name
 
-Category = Literal["blacklist", "protected", "deferred", "normal"]
+Category = Literal["blacklist", "protected", "reference", "deferred", "normal"]
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class CandidateFilter:
 
     分类规则（按优先级）：
     - blacklist: 明显脏 token（空串/纯数字/纯符号）→ 丢弃
+    - reference: 代词/局部引用 → 送消歧，但禁止作为普通 canonical
     - protected: 精确匹配受保护名单 → 送消歧，但 prompt 中标记为"默认不合并"
     - deferred: 出现次数 ≤ 1 且无上下文例句 → 暂不送消歧，但保留到后续复审/终消歧
     - normal: 以上均不匹配 → 正常处理
@@ -111,7 +113,13 @@ class CandidateFilter:
         count: int,
         has_context: bool = False,
     ) -> CandidateClassification:
-        """对单个候选名进行分类"""
+        """
+        对单个候选名进行分类
+
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 将代词/局部引用识别为 reference 类，防止后续作为普通 canonical 候选。
+        """
         stripped_name = name.strip()
 
         # 1. 明显脏 token：唯一硬丢弃规则
@@ -122,7 +130,15 @@ class CandidateFilter:
                 reason="明显脏 token（空串/纯数字/纯符号）",
             )
 
-        # 2. 精确匹配受保护名单 → 送消歧但默认不合并
+        # 2. 代词/局部引用：保留给消歧解析，但不能进入普通角色主链
+        if is_reference_surface_name(stripped_name):
+            return CandidateClassification(
+                name=stripped_name,
+                category="reference",
+                reason="角色引用 surface（代词/局部引用，禁止作为普通 canonical）",
+            )
+
+        # 3. 精确匹配受保护名单 → 送消歧但默认不合并
         if stripped_name in self._protected:
             return CandidateClassification(
                 name=stripped_name,
@@ -130,7 +146,7 @@ class CandidateFilter:
                 reason="精确匹配受保护名单",
             )
 
-        # 3. 低频且暂无上下文：先保留，延后到后续复审/终消歧
+        # 4. 低频且暂无上下文：先保留，延后到后续复审/终消歧
         if count <= 1 and not has_context:
             return CandidateClassification(
                 name=stripped_name,
@@ -151,9 +167,13 @@ class CandidateFilter:
     ) -> tuple[list[CandidateClassification], list[CandidateClassification], list[CandidateClassification]]:
         """批量分类候选名，返回 (filtered, deferred, remaining)
 
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: reference 类需要随 protected + normal 一起进入模型解析，但不进入 deferred。
+
         filtered: blacklist 候选（被丢弃）
         deferred: deferred 候选（暂不送模型，但保留）
-        remaining: protected + normal 候选（保留送消歧）
+        remaining: reference + protected + normal 候选（保留送消歧）
         """
         filtered: list[CandidateClassification] = []
         deferred: list[CandidateClassification] = []

@@ -77,13 +77,19 @@ def fetch_chunk_characters_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块角色数据
 
-    Returns:
-        (chunk_id, name, role_function, action, emotion_score) 元组列表
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 读取层需要拿到 reference/global 字段，不能继续只依赖 name 字符串。
     """
     stmt = (
         select(
             ChunkCharacter.chunk_id,
             ChunkCharacter.name,
+            ChunkCharacter.surface_name,
+            ChunkCharacter.reference_kind,
+            ChunkCharacter.reference_slot,
+            ChunkCharacter.resolved_global_name,
+            ChunkCharacter.global_skip_reason,
             ChunkCharacter.role_function,
             ChunkCharacter.action,
             ChunkCharacter.emotion_score,
@@ -99,14 +105,20 @@ def fetch_chunk_relations_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块关系数据
 
-    Returns:
-        (chunk_id, from_char, to_char, type, change) 元组列表
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: graph/results 需要明确区分 raw endpoint 与已解析 global endpoint。
     """
     stmt = (
         select(
             ChunkRelation.chunk_id,
             ChunkRelation.from_char,
             ChunkRelation.to_char,
+            ChunkRelation.from_reference_kind,
+            ChunkRelation.to_reference_kind,
+            ChunkRelation.resolved_from_global_name,
+            ChunkRelation.resolved_to_global_name,
+            ChunkRelation.reference_skip_reason,
             ChunkRelation.type,
             ChunkRelation.change,
             ChunkRelation.evidence,
@@ -130,11 +142,18 @@ def fetch_chunk_dialogues_full(session: Session, run_id: str) -> list[Any]:
 
     添加 tone 字段到返回结果
 
-    Returns:
-        (chunk_id, speaker, length, tone) 元组列表
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 对话读侧需要 speaker_references 调试信息，同时保留旧 speaker surface。
     """
     stmt = (
-        select(ChunkDialogue.chunk_id, ChunkDialogue.speaker, ChunkDialogue.length, ChunkDialogue.tone)
+        select(
+            ChunkDialogue.chunk_id,
+            ChunkDialogue.speaker,
+            ChunkDialogue.speaker_references,
+            ChunkDialogue.length,
+            ChunkDialogue.tone,
+        )
         .where(ChunkDialogue.run_id == run_id)
         .order_by(ChunkDialogue.chunk_id)
     )
@@ -180,11 +199,16 @@ def fetch_characters_with_scores(session: Session, run_id: str) -> list[Any]:
     """
     获取角色数据（含情绪分数）
 
-    Returns:
-        (name, role_function, emotion_score) 元组列表
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 角色榜聚合必须基于 resolved_global_name / reference_kind 过滤未解析引用。
     """
     stmt = select(
         ChunkCharacter.name,
+        ChunkCharacter.surface_name,
+        ChunkCharacter.reference_kind,
+        ChunkCharacter.resolved_global_name,
+        ChunkCharacter.global_skip_reason,
         ChunkCharacter.role_function,
         ChunkCharacter.emotion_score,
     ).where(ChunkCharacter.run_id == run_id)
@@ -336,6 +360,11 @@ def get_annotation_by_chunk(session: Session, run_id: str, chunk_id: int) -> dic
         annotation_dict["characters"].append(
             {
                 "name": char.name,
+                "surface_name": char.surface_name,
+                "reference_kind": char.reference_kind,
+                "reference_slot": char.reference_slot,
+                "resolved_global_name": char.resolved_global_name,
+                "global_skip_reason": char.global_skip_reason,
                 "role_function": char.role_function,
                 "action": char.action,
                 "emotion_score": char.emotion_score,

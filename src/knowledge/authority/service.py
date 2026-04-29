@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from src.api.exceptions import GraphReadinessError
+from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, ParticipantEntityRow, RelationEventRow
 
@@ -227,9 +228,16 @@ class KnowledgeGraphAuthorityService:
         ]
 
     def _build_canonical_entities(self, entities: Iterable[Any]) -> list[CanonicalEntity]:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: authority view 最后一层防御过滤未解析代词节点，兼容旧图谱残留和测试替身数据。
+        """
         canonical_entities: list[CanonicalEntity] = []
         for entity in sorted(entities, key=lambda row: getattr(row, "canonical_name", getattr(row, "name", ""))):
             canonical_name = getattr(entity, "canonical_name", getattr(entity, "name", ""))
+            if not is_global_character_surface_name(canonical_name):
+                continue
             canonical_entities.append(
                 CanonicalEntity(
                     name=canonical_name,
@@ -335,8 +343,15 @@ class KnowledgeGraphAuthorityService:
         return lifecycles
 
     def _build_active_entity_contexts(self, rows: Iterable[ActiveEntityRow]) -> list[ActiveEntityContext]:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: active entity prompt view 不能继续暴露“我”等未解析局部引用节点。
+        """
         active_entities: list[ActiveEntityContext] = []
         for row in rows:
+            if not is_global_character_surface_name(row.name):
+                continue
             # Normalize repository row keys into an authority-owned Level 2 contract
             active_entities.append(
                 ActiveEntityContext(
@@ -354,8 +369,15 @@ class KnowledgeGraphAuthorityService:
         return active_entities
 
     def _build_participant_states(self, participants: Iterable[ParticipantEntityRow]) -> list[ParticipantState]:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 图谱 authority 的参与者集合只允许 global-character 准入后的节点。
+        """
         participant_states: list[ParticipantState] = []
         for participant in sorted(participants, key=lambda row: row.name):
+            if not is_global_character_surface_name(participant.name):
+                continue
             participant_states.append(
                 ParticipantState(
                     entity_id=participant.entity_id,

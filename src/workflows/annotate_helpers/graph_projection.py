@@ -11,6 +11,7 @@ from src.config.constants.annotation import (
     VALID_CHANGE_TYPES,
     VALID_RELATION_TYPES,
 )
+from src.models.local.character_reference_policy import decide_character_reference, is_reference_surface_name
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
@@ -22,13 +23,43 @@ PENDING_RETRY_LIMIT = 200
 HIERARCHICAL_SYMMETRIC_RELATION_TYPES = frozenset({"spouse_of", "sibling_of"})
 
 
-def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:
-    if raw_name is None:
+def _resolve_name(
+    raw_name: str | None,
+    alias_map: dict[str, str],
+    graph_aliases: dict[str, str],
+    *,
+    resolved_global_name: str | None = None,
+) -> str | None:
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: graph projection 只能接收已通过 global-character 准入的名字，未解析代词不能被别名表误提升。
+    """
+    if raw_name is None and resolved_global_name is None:
         return None
-    name = raw_name.strip()
-    if not name:
+    name = raw_name.strip() if raw_name else ""
+    explicit_name = resolved_global_name.strip() if resolved_global_name else None
+    if not name and not explicit_name:
         return None
-    return alias_map.get(name) or graph_aliases.get(name) or name
+    merged_aliases = {**graph_aliases, **alias_map}
+    decision = decide_character_reference(
+        name or explicit_name,
+        alias_map=merged_aliases,
+        resolved_global_name=explicit_name,
+    )
+    return decision.resolved_global_name if decision.can_enter_global_character else None
+
+
+def _should_record_alias(surface_name: str | None, resolved_name: str) -> bool:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: 已解析代词可以投影为实名节点，但 raw 代词不能写入 graph_aliases 形成全局别名。
+    """
+    if surface_name is None:
+        return False
+    normalized = surface_name.strip()
+    return bool(normalized) and normalized != resolved_name and not is_reference_surface_name(normalized)
 
 
 def _fetch_pending_relations(
@@ -37,6 +68,11 @@ def _fetch_pending_relations(
     to_chunk: int | None,
     limit: int = PENDING_RETRY_LIMIT,
 ) -> list[ChunkRelation]:
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: pending retry 会重新处理未解析端点，必须保留显式 projection_error 供诊断和重投影观察。
+    """
     query = (
         session.query(ChunkRelation)
         .filter(ChunkRelation.run_id == run_id)
@@ -51,6 +87,11 @@ def _merge_relations_for_projection(
     window_relations: list[ChunkRelation],
     retry_relations: list[ChunkRelation],
 ) -> list[ChunkRelation]:
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 合并窗口关系与 retry 关系时继续按 row id 去重，避免同一 pending 端点被重复计数。
+    """
     seen: set[int] = set()
     merged: list[ChunkRelation] = []
     for relation in [*window_relations, *retry_relations]:
@@ -62,7 +103,11 @@ def _merge_relations_for_projection(
 
 
 def _get_last_projected_chunk(session, run_id: str) -> int:
-    """查询 ChunkRelation 表中已投影的最大 chunk_id"""
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 增量投影继续以已完成关系为边界，pending 的未解析引用必须留待后续重试。
+    """
     result = session.execute(
         text("""
             SELECT COALESCE(MAX(chunk_id), -1) AS max_chunk_id
@@ -185,7 +230,13 @@ def project_graph_tables(
         )
 
     for row in chunk_characters:
-        resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
+        surface_name = row.surface_name or row.name
+        resolved_name = _resolve_name(
+            surface_name,
+            alias_map,
+            graph_alias_map,
+            resolved_global_name=row.resolved_global_name,
+        )
         if resolved_name is None:
             continue
         if resolved_name in uncertain_names:
@@ -214,27 +265,43 @@ def project_graph_tables(
             is_primary=True,
         )
         graph_alias_map[resolved_name] = resolved_name
-        if row.name and row.name != resolved_name:
+        if _should_record_alias(surface_name, resolved_name):
             graph_repo.upsert_alias(
                 run_id=run_id,
                 entity_id=entity.entity_id,
-                alias=row.name,
+                alias=surface_name,
                 source_chunk_id=row.chunk_id,
                 evidence=row.action,
                 confidence=0.9,
                 source_type="disambiguation",
                 is_primary=False,
             )
-            graph_alias_map[row.name] = resolved_name
+            graph_alias_map[surface_name] = resolved_name
 
     for row in chunk_dialogues:
         speakers = row.speaker or []
         if not speakers:
             continue
+        speaker_reference_by_surface: dict[str, str | None] = {}
+        for item in row.speaker_references or []:
+            if not isinstance(item, dict):
+                continue
+            surface_name = str(item.get("surface_name") or "").strip()
+            if surface_name:
+                speaker_reference_by_surface[surface_name] = (
+                    str(item.get("resolved_global_name")).strip()
+                    if item.get("resolved_global_name") is not None
+                    else None
+                )
         for speaker_name in speakers:
             if not speaker_name:
                 continue
-            resolved_name = _resolve_name(speaker_name, alias_map, graph_alias_map)
+            resolved_name = _resolve_name(
+                speaker_name,
+                alias_map,
+                graph_alias_map,
+                resolved_global_name=speaker_reference_by_surface.get(speaker_name),
+            )
             if resolved_name is None:
                 continue
             entity = graph_repo.upsert_entity(
@@ -258,7 +325,7 @@ def project_graph_tables(
                 is_primary=True,
             )
             graph_alias_map[resolved_name] = resolved_name
-            if speaker_name != resolved_name:
+            if _should_record_alias(speaker_name, resolved_name):
                 graph_repo.upsert_alias(
                     run_id=run_id,
                     entity_id=entity.entity_id,
@@ -279,11 +346,21 @@ def project_graph_tables(
     allowed_relation_types = VALID_RELATION_TYPES | set(settings.analysis.valid_hierarchical_relation_types)
 
     for relation in chunk_relations:
-        resolved_from = _resolve_name(relation.from_char, alias_map, graph_alias_map)
-        resolved_to = _resolve_name(relation.to_char, alias_map, graph_alias_map)
+        resolved_from = _resolve_name(
+            relation.from_char,
+            alias_map,
+            graph_alias_map,
+            resolved_global_name=relation.resolved_from_global_name,
+        )
+        resolved_to = _resolve_name(
+            relation.to_char,
+            alias_map,
+            graph_alias_map,
+            resolved_global_name=relation.resolved_to_global_name,
+        )
         if resolved_from is None or resolved_to is None:
             relation.projection_status = "pending"
-            relation.projection_error = "unresolved endpoint"
+            relation.projection_error = "unresolved global-character endpoint"
             relation.projected_at = None
             pending_count += 1
             continue
@@ -340,7 +417,7 @@ def project_graph_tables(
             is_primary=relation.from_char == resolved_from,
         )
         graph_alias_map[resolved_from] = resolved_from
-        if relation.from_char and relation.from_char != resolved_from:
+        if _should_record_alias(relation.from_char, resolved_from):
             graph_repo.upsert_alias(
                 run_id=run_id,
                 entity_id=from_entity.entity_id,
@@ -364,7 +441,7 @@ def project_graph_tables(
             is_primary=relation.to_char == resolved_to,
         )
         graph_alias_map[resolved_to] = resolved_to
-        if relation.to_char and relation.to_char != resolved_to:
+        if _should_record_alias(relation.to_char, resolved_to):
             graph_repo.upsert_alias(
                 run_id=run_id,
                 entity_id=to_entity.entity_id,
