@@ -8,7 +8,10 @@ from sqlalchemy import text
 from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult, NameReviewState
 from src.models.local.disambiguation.evidence import EVIDENCE_STRENGTH_STRONG, EvidenceProfile
 from src.storage.models import ChunkCharacter, Novel
-from src.storage.repositories.annotation.characters import fetch_all_character_names
+from src.storage.repositories.annotation.characters import (
+    fetch_all_character_names,
+    fetch_reference_aware_character_names,
+)
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.disambiguation.candidates import extract_new_names_from_db
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
@@ -360,3 +363,72 @@ def test_extract_new_names_from_db_keeps_reference_candidates_before_global_filt
 
     assert {item["name"] for item in new_names} == {"她", "白芷"}
     assert {item["name"] for item in global_names} == {"白芷"}
+
+
+def test_fetch_reference_aware_character_names_keeps_name_count_contract(db_session) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: 验证 reference-aware 候选查询替换兼容性
+    新建原因: `fetch_reference_aware_character_names()` 替换旧查询入口后，仍需稳定返回调用方期望的
+              `{\"name\": str, \"count\": int}` 结构，避免 `extract_new_names_from_db()` / final candidate 组装断约。
+    """
+    run_id = "run-ref-contract"
+    novel_id = "novref02"
+    db_session.add(Novel(novel_id=novel_id, filename="test.txt", file_path="data/test.txt", file_size=128))
+    db_session.commit()
+    db_session.execute(
+        text(
+            "INSERT INTO analysis_runs ("
+            "run_id, novel_id, source_path, title, status, progress, current, total, "
+            "task_kind, cancel_requested, created_at, updated_at"
+            ") VALUES (:run_id, :novel_id, 'test', 'Test', 'pending', 0, 0, 1, 'analysis', false, NOW(), NOW())"
+        ),
+        {"run_id": run_id, "novel_id": novel_id},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO chunks (chunk_id, run_id, text, chapter_id, char_offset, char_end_offset) "
+            "VALUES (1, :run_id, '她看向白芷。', NULL, NULL, NULL)"
+        ),
+        {"run_id": run_id},
+    )
+    db_session.add_all(
+        [
+            ChunkCharacter(
+                chunk_id=1,
+                run_id=run_id,
+                name="她",
+                surface_name="她",
+                reference_kind="pronoun",
+                reference_slot="LOCAL_REF_C1_她",
+                resolved_global_name=None,
+                global_skip_reason="unresolved pronoun reference",
+                role_function="主体",
+                action="看向",
+                action_type="其他",
+                emotion_score="neutral",
+            ),
+            ChunkCharacter(
+                chunk_id=1,
+                run_id=run_id,
+                name="白芷",
+                surface_name="白芷",
+                reference_kind="global_character",
+                reference_slot=None,
+                resolved_global_name="白芷",
+                global_skip_reason=None,
+                role_function="客体",
+                action="被看向",
+                action_type="其他",
+                emotion_score="neutral",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    all_names = fetch_reference_aware_character_names(db_session, run_id, max_chunk_id=1)
+
+    assert all(set(item.keys()) == {"name", "count"} for item in all_names)
+    assert all(isinstance(item["name"], str) for item in all_names)
+    assert all(isinstance(item["count"], int) for item in all_names)
+    assert {item["name"] for item in all_names} == {"她", "白芷"}
