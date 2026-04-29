@@ -179,7 +179,8 @@ def test_insert_cloud_analysis(db_session) -> None:
         novel_id=novel_id,
         foreshadow_expectation=0.5,
         arc_scores={"角色0": 8.2, "角色1": 7.4},
-        narrative_type="三幕",
+        genre_labels=["通用"],
+        style_labels=["严肃"],
         topic_labels=["成长"],
         diagnosis="ok",
         narrative_arc_type="白手起家",
@@ -217,7 +218,8 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
             novel_id=novel_id,
             foreshadow_expectation=0.2,
             arc_scores={"角色0": 7.0},
-            narrative_type="旧诊断",
+            genre_labels=["通用"],
+            style_labels=["严肃"],
             topic_labels=["旧主题"],
             diagnosis="old",
             narrative_arc_type="白手起家",
@@ -233,7 +235,8 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
             novel_id=novel_id,
             foreshadow_expectation=0.8,
             arc_scores={"角色1": 9.0},
-            narrative_type="新诊断",
+            genre_labels=["科幻"],
+            style_labels=["硬核"],
             topic_labels=["新主题"],
             diagnosis="new",
             narrative_arc_type="白手起家",
@@ -247,5 +250,6 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
     fetched = stats_repo.fetch_cloud_analysis(novel_id, run_id)
 
     assert fetched is not None
-    assert fetched["narrative_type"] == "新诊断"
+    assert fetched["genre_labels"] == '["科幻"]'
+    assert fetched["style_labels"] == '["硬核"]'
     assert fetched["foreshadow_expectation"] == 0.8

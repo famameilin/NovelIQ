@@ -241,6 +241,7 @@ class TestCloudDiagnose:
         assert "character_relations" in payload
         assert "foreshadowing_threads" in payload
         assert "foreshadow_expectation" in payload
+        assert "genre_labels" in payload
         assert "summaries" in payload
         assert "known_characters" in payload
         assert "alias_merges" in payload
@@ -250,6 +251,7 @@ class TestCloudDiagnose:
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_threads"]) >= 0
+        assert payload["genre_labels"]
         assert payload["known_characters"] == ["伯安"]
         assert payload["alias_merges"] == {"角色0": "伯安"}
         assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
@@ -314,7 +316,8 @@ class TestCloudDiagnose:
             client=FakeClient(),
         )
         assert analysis is not None
-        assert analysis.narrative_type == "三幕"
+        assert analysis.genre_labels == ["通用"]
+        assert analysis.style_labels == ["严肃"]
         assert analysis.foreshadow_expectation == 0.1
 
         rows = self.db_session.execute(
@@ -334,7 +337,7 @@ class TestCloudDiagnose:
         )
         rows = self.db_session.execute(
             text(
-                "SELECT novel_id, narrative_type, foreshadow_expectation, narrative_arc_type, "
+                "SELECT novel_id, genre_labels, style_labels, foreshadow_expectation, narrative_arc_type, "
                 "focus_structure, focus_characters, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
@@ -342,11 +345,13 @@ class TestCloudDiagnose:
         ).fetchall()
         assert len(rows) > 0
         assert rows[0][0] == self.novel_id
-        assert rows[0][3] == "白手起家"
-        assert rows[0][4] == "dual"
-        assert "角色0" in rows[0][5]
+        assert rows[0][1] == '["通用"]'
+        assert rows[0][2] == '["严肃"]'
+        assert rows[0][4] == "白手起家"
+        assert rows[0][5] == "dual"
         assert "角色0" in rows[0][6]
-        assert "角色1" in rows[0][7]
+        assert "角色0" in rows[0][7]
+        assert "角色1" in rows[0][8]
 
         token_rows = self.db_session.execute(
             text("SELECT novel_id FROM token_usage WHERE run_id = :run_id"),
@@ -377,7 +382,8 @@ class TestCloudDiagnose:
                 "novel_id": self.novel_id,
                 "foreshadow_expectation": 0.2,
                 "arc_scores": {"角色0": 9.1, "角色1": 7.8},
-                "narrative_type": "三幕",
+                "genre_labels": ["通用"],
+                "style_labels": ["严肃"],
                 "topic_labels": ["成长"],
                 "diagnosis": "诊断完成",
                 "narrative_arc_type": "白手起家",
@@ -437,7 +443,8 @@ class TestCloudDiagnose:
             novel_id="raw-novel",
             foreshadow_expectation=0.1,
             arc_scores={"角色0": 8.5, "角色1": 7.1},
-            narrative_type="三幕",
+            genre_labels=["科幻"],
+            style_labels=["严肃"],
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
@@ -450,10 +457,43 @@ class TestCloudDiagnose:
         finalized = client._finalize_result(result, "fixed-novel", payload={})
 
         assert finalized.novel_id == "fixed-novel"
+        assert finalized.genre_labels == ["科幻"]
         assert finalized.focus_structure == "single"
         assert finalized.focus_characters == ["角色0"]
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
+
+    def test_finalize_result_overrides_genre_labels_from_payload(self) -> None:
+        """
+        创建时间: 2026-04-29
+        创建者: Codex
+        任务: split-diagnosis-genre-style-labels
+        说明: 稳定题材数组必须以 payload 为真相源，不能继续信任模型自由发挥的 genre 输出。
+        """
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.1,
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
+            genre_labels=["通用"],
+            style_labels=["严肃"],
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色0"],
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        finalized = client._finalize_result(
+            result,
+            "fixed-novel",
+            payload={"genre_labels": ["科幻"]},
+        )
+
+        assert finalized.genre_labels == ["科幻"]
 
     def test_finalize_result_rejects_partial_topic_labels_against_payload_topic_words(self) -> None:
         """
@@ -469,7 +509,8 @@ class TestCloudDiagnose:
             novel_id="raw-novel",
             foreshadow_expectation=0.1,
             arc_scores={"角色0": 8.5, "角色1": 7.1},
-            narrative_type="三幕",
+            genre_labels=["通用"],
+            style_labels=["严肃"],
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
@@ -505,7 +546,8 @@ class TestCloudDiagnose:
             novel_id="raw-novel",
             foreshadow_expectation=0.1,
             arc_scores={"角色0": 8.5, "角色1": 7.1},
-            narrative_type="三幕",
+            genre_labels=["通用"],
+            style_labels=["严肃"],
             topic_labels=["成长", "命运"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
@@ -542,7 +584,8 @@ class TestCloudDiagnose:
                 novel_id="raw-novel",
                 foreshadow_expectation=0.1,
                 arc_scores={"角色0": 8.5, "角色1": 7.1},
-                narrative_type="三幕",
+                genre_labels=["通用"],
+                style_labels=["严肃"],
                 topic_labels=["成长"],
                 diagnosis="ok",
                 narrative_arc_type="白手起家",
@@ -564,7 +607,8 @@ class TestCloudDiagnose:
                 novel_id="raw-novel",
                 foreshadow_expectation=0.1,
                 arc_scores={"角色0": 8.5, "角色1": 7.1},
-                narrative_type="三幕",
+                genre_labels=["通用"],
+                style_labels=["严肃"],
                 topic_labels=["成长"],
                 diagnosis="ok",
                 narrative_arc_type="白手起家",
@@ -586,7 +630,8 @@ class TestCloudDiagnose:
                 novel_id="raw-novel",
                 foreshadow_expectation=0.1,
                 arc_scores={"角色0": 8.5, "角色1": 7.1},
-                narrative_type="三幕",
+                genre_labels=["通用"],
+                style_labels=["严肃"],
                 diagnosis="ok",
                 narrative_arc_type="白手起家",
                 focus_structure="single",
@@ -601,7 +646,8 @@ class TestCloudDiagnose:
                 novel_id="raw-novel",
                 foreshadow_expectation=0.1,
                 arc_scores={f"角色{i}": 7.0 + i for i in range(6)},
-                narrative_type="三幕",
+                genre_labels=["通用"],
+                style_labels=["严肃"],
                 topic_labels=["成长"],
                 diagnosis="ok",
                 narrative_arc_type="白手起家",
@@ -617,7 +663,8 @@ class TestCloudDiagnose:
                 novel_id="raw-novel",
                 foreshadow_expectation=0.1,
                 arc_scores={f"角色{i}": 7.0 + i for i in range(11)},
-                narrative_type="三幕",
+                genre_labels=["通用"],
+                style_labels=["严肃"],
                 topic_labels=["成长"],
                 diagnosis="ok",
                 narrative_arc_type="白手起家",
@@ -641,7 +688,8 @@ class TestCloudDiagnose:
             novel_id="raw-novel",
             foreshadow_expectation=0.27,
             arc_scores={"角色0": 8.5, "角色1": 7.1},
-            narrative_type="三幕",
+            genre_labels=["通用"],
+            style_labels=["严肃"],
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",

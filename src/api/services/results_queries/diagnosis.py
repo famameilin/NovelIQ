@@ -11,6 +11,7 @@ from typing import Literal, TypeGuard
 from loguru import logger
 
 from src.api.models.responses import DiagnosisResult
+from src.models.cloud.schema import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
 from src.storage.repositories import AnnotationRepository, StatsRepository
 
 from .common import (
@@ -56,6 +57,38 @@ def _derive_focus_structure_from_characters(
     return "ensemble"
 
 
+def _normalize_controlled_label_list(
+    values: list[str] | None,
+    *,
+    allowed_values: tuple[str, ...],
+) -> list[str] | None:
+    """
+    修改时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    修改原因: diagnosis 读取层必须和 CloudAnalysisSchema 的受控标签合同保持一致；
+              非法标签、超上限标签或全空白标签都应直接视为无效 diagnosis，而不是继续对外暴露。
+    """
+    if values is None:
+        return None
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            return None
+        label = value.strip()
+        if not label or label in seen:
+            continue
+        if label not in allowed_values:
+            return None
+        seen.add(label)
+        normalized.append(label)
+
+    if len(normalized) > 3:
+        return None
+    return normalized
+
+
 def _has_complete_focus_contract(
     arc_scores: dict[str, float] | None,
     focus_structure: Literal["single", "dual", "ensemble"] | None,
@@ -63,10 +96,18 @@ def _has_complete_focus_contract(
     main_characters: list[str] | None = None,
     core_cast: list[str] | None = None,
     topic_labels: list[str] | None = None,
+    genre_labels: list[str] | None = None,
+    style_labels: list[str] | None = None,
 ) -> bool:
     """
+    修改时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    修改原因: `genre_labels/style_labels` 已经成为 diagnosis 正式合同的一部分；
+              结果读取层必须和持久化完成态保持一致，缺少任一标签数组都要走 rerun-required。
+
     说明: 当前分支已经明确“不兼容缺焦点合同的旧 diagnosis 行”；
-    结果读取层必须把缺 `focus_structure` / `focus_characters` / `topic_labels` 的数据视为无效，
+    结果读取层必须把缺 `focus_structure` / `focus_characters` / `topic_labels`
+    / `genre_labels` / `style_labels` 的数据视为无效，
     统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象
     """
     if (
@@ -76,6 +117,8 @@ def _has_complete_focus_contract(
         or not main_characters
         or not core_cast
         or not topic_labels
+        or not genre_labels
+        or not style_labels
     ):
         return False
     return _derive_focus_structure_from_characters(focus_characters) == focus_structure
@@ -95,6 +138,8 @@ def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> TypeGuar
         diagnosis.main_characters,
         diagnosis.core_cast,
         diagnosis.topic_labels,
+        diagnosis.genre_labels,
+        diagnosis.style_labels,
     )
 
 
@@ -144,6 +189,18 @@ def _fetch_diagnosis(
     topic_labels_normalized = (
         _normalize_name_list(topic_labels_raw, alias_map) if isinstance(topic_labels_raw, list) else topic_labels_raw
     )
+    genre_labels_raw = _parse_json_field(data.get("genre_labels")) if data else None
+    style_labels_raw = _parse_json_field(data.get("style_labels")) if data else None
+    genre_labels_normalized = (
+        _normalize_controlled_label_list(genre_labels_raw, allowed_values=GENRE_LABEL_VALUES)
+        if isinstance(genre_labels_raw, list)
+        else None
+    )
+    style_labels_normalized = (
+        _normalize_controlled_label_list(style_labels_raw, allowed_values=STYLE_LABEL_VALUES)
+        if isinstance(style_labels_raw, list)
+        else None
+    )
     focus_structure_raw = data.get("focus_structure") if data else None
     focus_structure: Literal["single", "dual", "ensemble"] | None
     if focus_structure_raw in {"single", "dual", "ensemble"}:
@@ -183,6 +240,8 @@ def _fetch_diagnosis(
         main_characters_filtered,
         core_cast_filtered,
         topic_labels_normalized if isinstance(topic_labels_normalized, list) else None,
+        genre_labels_normalized,
+        style_labels_normalized,
     ):
         logger.warning(
             "diagnosis focus contract incomplete after normalization: run_id={} novel_id={} raw_structure={} "
@@ -202,7 +261,8 @@ def _fetch_diagnosis(
     return DiagnosisResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,
         arc_scores=arc_scores_normalized,
-        narrative_type=data.get("narrative_type") if data else None,
+        genre_labels=genre_labels_normalized,
+        style_labels=style_labels_normalized,
         topic_labels=topic_labels_normalized,
         diagnosis=_normalize_text_by_alias_map(data.get("diagnosis") if data else None, alias_map),
         value_logic_type=data.get("value_logic_type") if data else None,

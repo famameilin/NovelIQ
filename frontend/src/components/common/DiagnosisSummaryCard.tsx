@@ -74,12 +74,17 @@ export function DiagnosisSummaryCard({
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap gap-1.5">
-            {diagnosis.narrative_type && (
-              <Badge variant="secondary" className="border border-primary/10 bg-primary/10 text-primary">
-                {diagnosis.narrative_type}
+        <div className="flex flex-wrap gap-1.5">
+            {diagnosis.genre_labels?.map((label) => (
+              <Badge key={label} variant="secondary" className="border border-primary/10 bg-primary/10 text-primary">
+                {label}
               </Badge>
-            )}
+            ))}
+            {diagnosis.style_labels?.map((label) => (
+              <Badge key={label} variant="outline" className="border-primary/25 bg-surface/70 text-primary">
+                {label}
+              </Badge>
+            ))}
             {diagnosis.narrative_arc_type && (
               <Badge variant="outline" className="border-primary/25 bg-surface/70 text-primary">
                 {diagnosis.narrative_arc_type}
