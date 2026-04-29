@@ -11,7 +11,6 @@ from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_gr
 from src.lexicons.genre_detector import detect_genre_weighted
 from src.lexicons.genre_detector_rules import MIN_CONFIDENCE
 from src.lexicons.registry import LexiconRegistry
-from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION
 from src.storage.repositories import ChunkRepository
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
@@ -88,9 +87,10 @@ def _build_genre_labels(conn: Session, run_id: str) -> list[str]:
 
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
     """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: diagnosis payload 需要携带引用合同版本，并只暴露过滤后的 global-character 名单。
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: diagnosis payload 不再写入 reference_contract_version；当前结构默认按最新合同消费，
+              这里只保留真正会被下游读取的业务字段。
 
     构建诊断payload
     """
@@ -188,7 +188,6 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
     payload = {
         "novel_id": novel_id,
-        "reference_contract_version": REFERENCE_CONTRACT_VERSION,
         "pivot_blocks": pivot_blocks,
         "pivot_moments": pivot_moments,
         "high_tension_paragraphs": high_tension,

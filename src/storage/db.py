@@ -426,6 +426,10 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
 
 def _ensure_runtime_schema(engine: Engine) -> None:
     """
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: `cloud_analysis` 不再依赖 reference_contract_version 补列；启动期只补仍在使用的业务列。
+
     为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema
 
     说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进
@@ -442,7 +446,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS reference_contract_version INTEGER",
         "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS surface_name VARCHAR(255)",
         "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_kind VARCHAR(50)",
         "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_slot VARCHAR(100)",
@@ -484,6 +487,10 @@ def _ensure_runtime_schema(engine: Engine) -> None:
 
 def _assert_focus_contract_schema(engine: Engine) -> None:
     """
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: latest-only 之后只校验真实焦点合同列，不再把 reference_contract_version 当成启动前置条件。
+
     说明: 本次主角合同重构明确不兼容旧库，因此启动时必须显式检查
     `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动
     """
@@ -503,7 +510,6 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
             "focus_characters",
             "main_characters",
             "core_cast",
-            "reference_contract_version",
         }
         missing_columns = sorted(required_columns - actual_columns)
         if missing_columns:

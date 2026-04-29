@@ -213,9 +213,11 @@ class TestCloudDiagnose:
             "discovered_names": ["角色0", "伯安"],
             "known_canonical_names": ["伯安"],
             "alias_merges": [["角色0", "伯安"]],
+            "unresolved_references": [],
+            "reference_resolutions": [],
             "review_status": [],
             "pending_relations": [],
-            "version": 1,
+            "entity_types": {},
             "created_at": 1.0,
             "updated_at": 1.0,
         }
@@ -249,6 +251,7 @@ class TestCloudDiagnose:
         assert "alias_merges" in payload
         assert "graph_summary" in payload
         assert "graph_quality_report" in payload
+        assert "reference_contract_version" not in payload
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
@@ -419,6 +422,7 @@ class TestCloudDiagnose:
         assert fetched["focus_characters"] is not None
         assert fetched["main_characters"] is not None
         assert fetched["core_cast"] is not None
+        assert "reference_contract_version" not in fetched
 
     @pytest.mark.asyncio()
     async def test_run_diagnose_persists_model_interaction(self) -> None:

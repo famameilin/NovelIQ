@@ -17,7 +17,6 @@ from src.api.routes.results_fetchers import (
     _normalize_text_by_alias_map,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
-from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION
 from src.storage.repositories.annotation.foreshadowing_threads import ForeshadowingThreadView
 
 
@@ -59,21 +58,18 @@ class _DummyAnnotationRepo2:
 
 
 class _DummyStatsRepo:
-    def __init__(self, payload, *, add_reference_contract_version: bool = True):
+    def __init__(self, payload):
         """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: 默认模拟新 diagnosis 合同，单独测试旧合同时再显式关闭版本注入。
+        修改时间: 2026-04-30
+        任务: diagnosis-latest-only-reference-contract
+        修改原因: 测试桩不再自动注入 reference_contract_version；所有 cloud_analysis 样例默认按最新结构读取。
         """
         self.payload = payload
-        self.add_reference_contract_version = add_reference_contract_version
 
     def fetch_cloud_analysis(self, novel_id, run_id):
         assert novel_id == "novel-1"
         assert run_id == "run-1"
-        if self.payload is None or not self.add_reference_contract_version:
-            return self.payload
-        return {"reference_contract_version": REFERENCE_CONTRACT_VERSION, **self.payload}
+        return self.payload
 
 
 class _DummyCurveStatsRepo:
@@ -549,14 +545,16 @@ def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
     assert result.rerun_reason == "focus_contract_incomplete"
 
 
-def test_fetch_diagnosis_marks_missing_reference_contract_version_outdated():
+def test_fetch_diagnosis_accepts_missing_reference_contract_version_as_latest_shape():
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    说明: 旧 cloud_analysis 行缺少 reference_contract_version 时必须要求重跑，不能继续按新合同展示。
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: latest-only 读侧不再把缺失的 reference_contract_version 当作旧合同分支；
+              只要焦点合同字段完整，就应该按当前结构直接返回成功结果。
     """
     stats_repo = _DummyStatsRepo(
         {
+            "foreshadow_expectation": 0.42,
             "arc_scores": '{"沈砚": 8.2}',
             "genre_labels": '["科幻"]',
             "style_labels": '["严肃"]',
@@ -565,8 +563,7 @@ def test_fetch_diagnosis_marks_missing_reference_contract_version_outdated():
             "focus_characters": '["沈砚"]',
             "main_characters": '["沈砚"]',
             "core_cast": '["沈砚"]',
-        },
-        add_reference_contract_version=False,
+        }
     )
 
     result = _fetch_diagnosis(
@@ -577,8 +574,11 @@ def test_fetch_diagnosis_marks_missing_reference_contract_version_outdated():
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "reference_contract_outdated"
+    assert result.rerun_required is False
+    assert result.rerun_reason is None
+    assert result.foreshadow_expectation == 0.42
+    assert result.focus_structure == "single"
+    assert result.focus_characters == ["沈砚"]
 
 
 def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():

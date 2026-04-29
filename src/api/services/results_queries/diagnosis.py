@@ -12,7 +12,7 @@ from loguru import logger
 
 from src.api.models.responses import DiagnosisResult
 from src.models.cloud.schema import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
-from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION, filter_global_character_names
+from src.models.local.character_reference_policy import filter_global_character_names
 from src.storage.repositories import AnnotationRepository, StatsRepository
 
 from .common import (
@@ -168,9 +168,10 @@ def _fetch_diagnosis(
     alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult | None:
     """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: 缺少 reference_contract_version 的旧 cloud_analysis 不能继续作为新读侧合同暴露。
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: 读取层不再把 reference_contract_version 当成额外 gate；
+              只要当前焦点合同字段完整，就默认按最新结构对外暴露。
 
     从数据库获取诊断结果
     """
@@ -179,11 +180,6 @@ def _fetch_diagnosis(
         return DiagnosisResult(
             rerun_required=True,
             rerun_reason="diagnosis_missing_focus_contract",
-        )
-    if data.get("reference_contract_version") != REFERENCE_CONTRACT_VERSION:
-        return DiagnosisResult(
-            rerun_required=True,
-            rerun_reason="reference_contract_outdated",
         )
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None

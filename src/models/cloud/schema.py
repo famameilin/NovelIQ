@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION, is_global_character_surface_name
+from src.models.local.character_reference_policy import is_global_character_surface_name
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 FocusStructureType = Literal["single", "dual", "ensemble"]
@@ -81,7 +81,6 @@ class CloudAnalysis(BaseModel):
         default=None,
         description="小说主题色，十六进制格式，如 #4A90D9",
     )
-    reference_contract_version: int = Field(default=REFERENCE_CONTRACT_VERSION)
 
     @field_validator("theme_color")
     @classmethod
@@ -182,9 +181,10 @@ class CloudAnalysis(BaseModel):
     @model_validator(mode="after")
     def validate_focus_contract(self) -> CloudAnalysis:
         """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: diagnosis 正式结果必须显式携带当前角色引用合同版本，旧结果不再兼容。
+        修改时间: 2026-04-30
+        任务: diagnosis-latest-only-reference-contract
+        修改原因: diagnosis 正式结果仍然必须满足焦点合同，但不再额外依赖 reference_contract_version
+                  这层版本门槛；缺字段时直接按当前结构校验即可。
         """
         # 空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
         # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
@@ -211,10 +211,6 @@ class CloudAnalysis(BaseModel):
                 self.theme_color is not None,
             )
         )
-        if has_formal_diagnosis_payload and self.reference_contract_version != REFERENCE_CONTRACT_VERSION:
-            raise ValueError(
-                f"reference_contract_version must be {REFERENCE_CONTRACT_VERSION} for formal diagnosis payload"
-            )
 
         arc_score_names = set(self.arc_scores.keys())
 
@@ -271,9 +267,9 @@ class CloudAnalysis(BaseModel):
 
     def to_dict(self) -> dict:
         """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: 持久化和导出需要保留 reference_contract_version，用于拒绝旧 diagnosis 合同。
+        修改时间: 2026-04-30
+        任务: diagnosis-latest-only-reference-contract
+        修改原因: 诊断结果对外和持久化都改为 latest-only，不再暴露 reference_contract_version。
         """
         return {
             "novel_id": self.novel_id,
@@ -297,5 +293,4 @@ class CloudAnalysis(BaseModel):
             "main_characters": list(self.main_characters),
             "core_cast": list(self.core_cast),
             "theme_color": self.theme_color,
-            "reference_contract_version": self.reference_contract_version,
         }

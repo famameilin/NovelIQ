@@ -13,7 +13,6 @@ from typing import Literal
 
 ReferenceKind = Literal["global_character", "pronoun", "pov_slot", "generic_reference"]
 
-REFERENCE_CONTRACT_VERSION = 1
 POV_SLOT_PREFIX = "POV_SLOT_"
 LOCAL_REFERENCE_SLOT_PREFIX = "LOCAL_REF_"
 

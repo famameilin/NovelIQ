@@ -33,9 +33,9 @@ def _insert_test_novel(db_session, novel_id: str) -> None:
 
 def test_backfill_run_applies_checkpoint_reference_resolutions_to_history_rows(db_session) -> None:
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: backfill 脚本必须先消费 checkpoint reference_resolutions，再把历史 chunk_* 行反写成可读侧消费的 resolved 字段。
+    修改时间: 2026-04-30
+    任务: 清理 checkpoint version 残留并保持 latest-only
+    修改原因: backfill 脚本除了消费 checkpoint reference_resolutions 外，还必须移除旧 checkpoint JSON 遗留的 version 字段。
     """
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)
@@ -106,7 +106,6 @@ def test_backfill_run_applies_checkpoint_reference_resolutions_to_history_rows(d
                     "review_status": [],
                     "pending_relations": [],
                     "entity_types": {},
-                    "version": 3,
                     "created_at": time.time(),
                     "updated_at": time.time(),
                 },
@@ -122,10 +121,14 @@ def test_backfill_run_applies_checkpoint_reference_resolutions_to_history_rows(d
     db_session.refresh(chunk_character)
     db_session.refresh(chunk_dialogue)
     db_session.refresh(chunk_relation)
+    checkpoint = db_session.get(DisambigCheckpoint, run_id)
+    assert checkpoint is not None
+    checkpoint_payload = json.loads(checkpoint.state_json)
 
     assert report.character_rows == 1
     assert report.dialogue_rows == 1
     assert report.relation_rows == 1
+    assert "version" not in checkpoint_payload
     assert chunk_character.resolved_global_name == "汪淼"
     assert chunk_character.reference_kind == "pov_slot"
     assert chunk_dialogue.speaker_references[0]["resolved_global_name"] == "汪淼"
