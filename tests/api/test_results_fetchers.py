@@ -400,6 +400,70 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_style_labels_missi
     assert result.rerun_reason == "focus_contract_incomplete"
 
 
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_controlled_labels_invalid():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 读取层需要和 CloudAnalysisSchema 的受控标签合同一致；
+          只要题材或风格标签不在允许集合内，就必须走 rerun-required。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["bad-genre"]',
+            "style_labels": '["bad-style"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 合法标签中的空白和重复值应在读取层被归一化，避免对外继续暴露脏数据。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '[" 科幻 ", "科幻", " "]',
+            "style_labels": '[" 严肃 ", "严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is False
+    assert result.genre_labels == ["科幻"]
+    assert result.style_labels == ["严肃"]
+
+
 def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
     stats_repo = _DummyStatsRepo(
         {
