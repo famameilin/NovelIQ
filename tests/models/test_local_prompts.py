@@ -48,7 +48,8 @@ class TestLocalPrompts(unittest.TestCase):
         """
         修改时间: 2026-04-29
         任务: foreshadow-expectation-v2
-        修改原因: diagnosis prompt 不再要求 LLM 输出 foreshadow_expectation，只声明后端 ledger 值由系统收口。
+        修改原因: diagnosis prompt 不再要求 LLM 输出 foreshadow_expectation，同时
+                  Phase2 prompt 需要把 `confidence=medium` 明确成“允许入池但不够稳”。
         """
 
         repo_root = Path(__file__).resolve().parents[2]
@@ -57,6 +58,7 @@ class TestLocalPrompts(unittest.TestCase):
 
         self.assertIn("必须原样复用该 pool 项的值", phase2_prompt)
         self.assertIn("`payoff_likelihood` 表示“已经入池后的后续回收预期”", phase2_prompt)
+        self.assertIn("当前文本已经形成可入池的 setup", phase2_prompt)
         self.assertIn("你不需要输出、改写或重新估算这个字段", diagnose_prompt)
         self.assertNotIn('"foreshadow_expectation": 0.0', diagnose_prompt)
 

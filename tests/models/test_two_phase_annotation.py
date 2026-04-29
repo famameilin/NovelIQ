@@ -320,7 +320,7 @@ class TestForeshadowingValidation(unittest.TestCase):
         )
         self.assertFalse(validate_foreshadowing_result(result, "some anchor text in context"))
 
-    def test_validate_medium_confidence_returns_false(self) -> None:
+    def test_validate_medium_confidence_returns_true(self) -> None:
         result = _valid_positive_result(
             anchor_text="玉佩背面刻着一个归字",
             anchor_reason="具体钩子：玉佩出现异常纹样。未闭合原因：当前还没有解释玉佩的来历。",
@@ -329,7 +329,7 @@ class TestForeshadowingValidation(unittest.TestCase):
             expected_payoff_family="身份揭示",
             confidence="medium",
         )
-        self.assertFalse(validate_foreshadowing_result(result, "他捡起一块玉佩，玉佩背面刻着一个归字。"))
+        self.assertTrue(validate_foreshadowing_result(result, "他捡起一块玉佩，玉佩背面刻着一个归字。"))
 
     def test_validate_positive_without_type_returns_false(self) -> None:
         result = ForeshadowingResult.model_construct(
@@ -375,11 +375,11 @@ class TestForeshadowingValidation(unittest.TestCase):
 
         self.assertTrue(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
 
-    def test_validate_punishment_special_treatment_description_returns_false(self) -> None:
+    def test_validate_punishment_special_treatment_semantics_are_llm_owned(self) -> None:
         """
         创建时间: 2026-04-29
         任务: foreshadow-expectation-v2
-        新建原因: 处罚规格/特殊待遇描写不应因看起来“特殊”就进入强 setup 池污染 expectation 分母。
+        新建原因: 这类文本是否属于强 setup 应由 Phase2 LLM 直接判定，本地 validator 不再靠关键词二次否决。
         """
 
         result = _valid_positive_result(
@@ -394,13 +394,35 @@ class TestForeshadowingValidation(unittest.TestCase):
             expected_payoff_family="命运变差",
         )
 
-        self.assertFalse(validate_foreshadowing_result(result, "他被迫戴上钢筋高帽和铁门牌子。"))
+        self.assertTrue(validate_foreshadowing_result(result, "他被迫戴上钢筋高帽和铁门牌子。"))
 
-    def test_validate_chunk_223_transition_reveal_teaser_new_setup_returns_false(self) -> None:
+    def test_validate_punitive_mechanism_anomalous_object_can_still_pass(self) -> None:
         """
         创建时间: 2026-04-29
         任务: foreshadow-expectation-v2
-        新建原因: 临近揭示前的“接下来展示/揭示真相”类过渡预告不应单独新建 high thread。
+        新建原因: “惩罚”如果是异常物件的触发机制本身，就属于真实未闭合钩子，不应被特殊待遇规则误杀。
+        """
+
+        result = _valid_positive_result(
+            foreshadowing_type="物件",
+            setup_kind="异常物件",
+            anchor_text="黑色项圈一旦亮起红纹，就会自动收紧惩罚违令者。",
+            anchor_reason=(
+                "具体钩子：黑色项圈会在亮起红纹后自动收紧惩罚违令者，显示它具备异常规则和执行机制。"
+                "未闭合原因：当前还没有解释项圈为何会启动，也没有揭示谁在操控这套惩罚机制。"
+            ),
+            setup_summary="黑色项圈会自动收紧惩罚违令者",
+            why_unresolved_now="当前还没有解释项圈为何会启动，也没有揭示谁在操控这套惩罚机制。",
+            expected_payoff_family="规则兑现",
+        )
+
+        self.assertTrue(validate_foreshadowing_result(result, "黑色项圈一旦亮起红纹，就会自动收紧惩罚违令者。"))
+
+    def test_validate_chunk_223_transition_reveal_teaser_new_setup_semantics_are_llm_owned(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: “接下来展示/揭示真相”是否只是过渡预告属于 LLM 语义判断，本地不再按句式做 veto。
         """
 
         result = _valid_positive_result(
@@ -419,7 +441,7 @@ class TestForeshadowingValidation(unittest.TestCase):
             setup_status="open",
         )
 
-        self.assertFalse(validate_foreshadowing_result(result, "接下来会展示截获的信息，揭示三体文明的真相。"))
+        self.assertTrue(validate_foreshadowing_result(result, "接下来会展示截获的信息，揭示三体文明的真相。"))
 
     def test_validate_transition_reveal_teaser_linked_thread_can_pass(self) -> None:
         """
@@ -445,6 +467,33 @@ class TestForeshadowingValidation(unittest.TestCase):
         )
 
         self.assertTrue(validate_foreshadowing_result(result, "接下来会展示截获的信息，揭示三体文明的真相。"))
+
+    def test_validate_transition_reveal_promise_with_execution_action_can_pass(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: “接下来”不一定是叙述层预告；带明确执行动作的承诺型 setup 仍应允许新建 thread。
+        """
+
+        result = _valid_positive_result(
+            foreshadowing_type="对话",
+            setup_kind="明确承诺",
+            anchor_text="接下来我会公开父亲留下的录音，揭示当年失踪案的真相。",
+            anchor_reason=(
+                "具体钩子：角色明确承诺接下来公开录音并揭示失踪案真相。"
+                "未闭合原因：当前还没有公开录音，也没有揭示失踪案真相。"
+            ),
+            setup_summary="接下来公开录音并揭示失踪案真相",
+            why_unresolved_now="当前还没有公开录音，也没有揭示失踪案真相。",
+            expected_payoff_family="真相揭示",
+            is_new_setup=True,
+            linked_setup_id=None,
+            setup_status="open",
+        )
+
+        self.assertTrue(
+            validate_foreshadowing_result(result, "接下来我会公开父亲留下的录音，揭示当年失踪案的真相。")
+        )
 
     def test_validate_empty_anchor_text_returns_false(self) -> None:
         result = _malformed_positive_result(
@@ -492,7 +541,7 @@ class TestForeshadowingValidation(unittest.TestCase):
         chunk_text = "他捡起一块玉佩，玉佩背面刻着一个归字，随手塞进袖中。"
         self.assertFalse(validate_foreshadowing_result(result, chunk_text))
 
-    def test_validate_generic_theme_reason_returns_false(self) -> None:
+    def test_validate_generic_theme_reason_semantics_are_llm_owned(self) -> None:
         result = _valid_positive_result(
             foreshadowing_type="场景",
             setup_kind="其他",
@@ -504,9 +553,9 @@ class TestForeshadowingValidation(unittest.TestCase):
             confidence="high",
         )
         chunk_text = "在中国，任何超脱飞扬的思想都会砰然坠地的，现实的引力太沉重了。"
-        self.assertFalse(validate_foreshadowing_result(result, chunk_text))
+        self.assertTrue(validate_foreshadowing_result(result, chunk_text))
 
-    def test_validate_everyday_decision_returns_false(self) -> None:
+    def test_validate_everyday_decision_semantics_are_llm_owned(self) -> None:
         result = _valid_positive_result(
             foreshadowing_type="人物行为",
             setup_kind="其他",
@@ -518,9 +567,9 @@ class TestForeshadowingValidation(unittest.TestCase):
             confidence="high",
         )
         chunk_text = "她决定明天去镇上卖药。"
-        self.assertFalse(validate_foreshadowing_result(result, chunk_text))
+        self.assertTrue(validate_foreshadowing_result(result, chunk_text))
 
-    def test_validate_formal_setup_kind_still_requires_concrete_signal(self) -> None:
+    def test_validate_formal_setup_kind_semantics_are_llm_owned(self) -> None:
         result = _valid_positive_result(
             foreshadowing_type="人物行为",
             setup_kind="明确承诺",
@@ -532,7 +581,7 @@ class TestForeshadowingValidation(unittest.TestCase):
             confidence="high",
         )
         chunk_text = "她决定明天去镇上卖药。"
-        self.assertFalse(validate_foreshadowing_result(result, chunk_text))
+        self.assertTrue(validate_foreshadowing_result(result, chunk_text))
 
     def test_validate_concrete_future_wording_with_specific_target_returns_true(self) -> None:
         result = _valid_positive_result(
@@ -588,9 +637,9 @@ class TestForeshadowingValidation(unittest.TestCase):
                 if case["expected_is_strong_setup"]:
                     result = ForeshadowingResult(**case["result"])
                 else:
-                    # 中文注释：这些样例代表“旧 prompt/旧模型可能给出的脏 positive 输出”，
-                    # 现在真实热路径会在结构化校验阶段前置拒绝；这里仍保留 model_construct，
-                    # 继续覆盖 projector/validator 的兜底拒绝语义。
+                    # 中文注释：这些负例现在主要依赖 contract 字段本身被前置拒绝，
+                    # 例如 `is_strong_setup=false` / `confidence=medium`；
+                    # 本地 validator 不再额外用关键词规则重判语义。
                     result = ForeshadowingResult.model_construct(**case["result"])
                 self.assertEqual(
                     validate_foreshadowing_result(result, case["chunk_text"]),
