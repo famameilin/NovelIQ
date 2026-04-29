@@ -274,6 +274,15 @@ class DiagnosisClient(BaseModelClient):
                     f"got {type(payload_expectation).__name__}"
                 )
 
+        if "genre_labels" in payload:
+            payload_genre_labels = payload.get("genre_labels")
+            if not isinstance(payload_genre_labels, list):
+                raise TypeError(
+                    "payload.genre_labels must be list when provided, "
+                    f"got {type(payload_genre_labels).__name__}"
+                )
+            updates["genre_labels"] = list(payload_genre_labels)
+
         topic_words = payload.get("topic_words")
         if topic_words is not None:
             if not isinstance(topic_words, list):

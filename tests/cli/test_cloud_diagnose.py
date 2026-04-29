@@ -57,10 +57,12 @@ class TestCli:
             analysis_logger=None,
         )
 
-        assert analysis.narrative_type == "三幕"
+        assert analysis.genre_labels == ["通用"]
+        assert analysis.style_labels == ["严肃"]
 
         row = self.db_session.execute(
-            text("SELECT narrative_type FROM cloud_analysis WHERE run_id = :run_id"),
+            text("SELECT genre_labels, style_labels FROM cloud_analysis WHERE run_id = :run_id"),
             {"run_id": self.run_id},
         ).fetchone()
-        assert row[0] == "三幕"
+        assert row[0] == '["通用"]'
+        assert row[1] == '["严肃"]'
