@@ -495,6 +495,37 @@ class TestCloudDiagnose:
 
         assert finalized.genre_labels == ["科幻"]
 
+    def test_finalize_result_overrides_expectation_from_payload(self) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        新建原因: diagnosis LLM 不再拥有 foreshadow_expectation，最终结果必须始终以 payload 的 ledger 计算值为准。
+        """
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.27,
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
+            genre_labels=["通用"],
+            style_labels=["严肃"],
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色0"],
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        finalized = client._finalize_result(
+            result,
+            "fixed-novel",
+            payload={"foreshadow_expectation": 0.42},
+        )
+
+        assert finalized.foreshadow_expectation == 0.42
+
     def test_finalize_result_rejects_partial_topic_labels_against_payload_topic_words(self) -> None:
         """
         创建时间: 2026-04-27

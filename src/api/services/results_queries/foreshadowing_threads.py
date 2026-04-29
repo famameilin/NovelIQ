@@ -27,6 +27,7 @@ def _fetch_foreshadowing_threads(
             setup_kind=row.setup_kind,
             expected_payoff_family=row.expected_payoff_family,
             payoff_likelihood=row.payoff_likelihood,
+            confidence=row.confidence,
             strength=row.strength,
             status=row.status,
             active=row.active,
