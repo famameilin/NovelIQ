@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +8,20 @@ from sqlalchemy import text
 from src.knowledge.authority import GraphAuthorityReport, GraphAuthorityView, GraphQualitySignals, GraphSharedSummary
 from src.models.cloud import build_diagnosis_payload
 from src.storage.models import Novel
+
+
+def test_diagnosis_prompt_does_not_require_foreshadow_expectation_output() -> None:
+    """
+    创建时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    新建原因: diagnosis LLM 不再负责生成 foreshadow_expectation，prompt 示例不能继续把它列为输出字段。
+    """
+
+    prompt_path = Path(__file__).resolve().parents[2] / "config" / "prompts" / "diagnose.txt"
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    assert '"foreshadow_expectation":' not in prompt
+    assert "你不需要输出、改写或重新估算这个字段" in prompt
 
 
 def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):

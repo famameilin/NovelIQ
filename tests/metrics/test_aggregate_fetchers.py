@@ -133,10 +133,20 @@ def test_fetch_relation_data_raises_when_pending_exists_and_graph_empty():
 
 
 def test_fetch_relation_data_allows_empty_graph_when_no_pending():
+    """
+    修改时间: 2026-04-29
+    任务: 修复全量测试阻塞
+    修改原因: GraphAuthorityView 正式合同包含 participant_states，测试 mock 需要补齐该字段。
+    """
+
     annotation_repo = _DummyAnnotationRepo(pending=[])
     mock_service = MagicMock()
     mock_service.assert_graph_projection_ready = MagicMock()
-    mock_service.build_graph_view.return_value = SimpleNamespace(confirmed_relations=[], relation_events=[])
+    mock_service.build_graph_view.return_value = SimpleNamespace(
+        confirmed_relations=[],
+        relation_events=[],
+        participant_states=[],
+    )
 
     with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
         data = fetch_relation_data(annotation_repo, "run-1")
@@ -146,6 +156,12 @@ def test_fetch_relation_data_allows_empty_graph_when_no_pending():
 
 
 def test_fetch_relation_data_consumes_authority_view():
+    """
+    修改时间: 2026-04-29
+    任务: 修复全量测试阻塞
+    修改原因: GraphAuthorityView 正式合同包含 participant_states，测试 mock 需要补齐该字段。
+    """
+
     annotation_repo = _DummyAnnotationRepo(pending=[])
     mock_service = MagicMock()
     mock_service.assert_graph_projection_ready = MagicMock()
@@ -157,6 +173,7 @@ def test_fetch_relation_data_consumes_authority_view():
             SimpleNamespace(from_name="主角", to_name="反派", relation_type="敌对", change_type="强化"),
             SimpleNamespace(from_name="主角", to_name="同伴", relation_type="盟友", change_type="新建"),
         ],
+        participant_states=[],
     )
 
     with patch(

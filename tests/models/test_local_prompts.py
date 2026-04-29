@@ -45,13 +45,20 @@ class TestLocalPrompts(unittest.TestCase):
         self.assertIn("关系 evidence 必须落在当前文本原句上", phase4_prompt)
 
     def test_phase2_and_diagnose_prompts_declare_new_contract_edges(self) -> None:
+        """
+        修改时间: 2026-04-29
+        任务: foreshadow-expectation-v2
+        修改原因: diagnosis prompt 不再要求 LLM 输出 foreshadow_expectation，只声明后端 ledger 值由系统收口。
+        """
+
         repo_root = Path(__file__).resolve().parents[2]
         phase2_prompt = (repo_root / "config" / "prompts" / "phase2.txt").read_text(encoding="utf-8")
         diagnose_prompt = (repo_root / "config" / "prompts" / "diagnose.txt").read_text(encoding="utf-8")
 
         self.assertIn("必须原样复用该 pool 项的值", phase2_prompt)
-        self.assertIn("setup thread ledger 驱动的正式字段", diagnose_prompt)
-        self.assertIn("你必须直接沿用该数值", diagnose_prompt)
+        self.assertIn("`payoff_likelihood` 表示“已经入池后的后续回收预期”", phase2_prompt)
+        self.assertIn("你不需要输出、改写或重新估算这个字段", diagnose_prompt)
+        self.assertNotIn('"foreshadow_expectation": 0.0', diagnose_prompt)
 
     def test_annotation_client_initialization(self) -> None:
         """测试标注客户端能正确初始化"""

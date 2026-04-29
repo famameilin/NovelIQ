@@ -101,6 +101,21 @@ _GENERIC_HOOK_REJECTION_MARKERS = (
     "创伤根源",
     "心理创伤",
 )
+_PUNISHMENT_DESCRIPTION_MARKERS = (
+    "受难",
+    "迫害",
+    "批判",
+    "处罚",
+    "惩罚",
+    "折磨",
+    "特殊待遇",
+    "待遇特殊",
+    "处罚规格",
+    "规格升级",
+    "远超常人",
+    "更残酷",
+    "牺牲品",
+)
 _GENERIC_FUTURE_SPECULATION_MARKERS = (
     "可能影响后续",
     "推动剧情",
@@ -112,6 +127,32 @@ _GENERIC_FUTURE_SPECULATION_MARKERS = (
     "后文可能",
     "暗示后面有事",
     "预示命运不好",
+)
+_TRANSITION_TEASER_MARKERS = (
+    "接下来",
+    "下面",
+    "随后",
+    "马上",
+    "即将",
+    "将要",
+    "接着",
+)
+_REVEAL_TEASER_MARKERS = (
+    "展示",
+    "揭示",
+    "说明",
+    "介绍",
+    "公布",
+    "交代",
+    "讲述",
+    "呈现",
+    "真相",
+)
+_TEASER_FORM_MARKERS = (
+    "过渡",
+    "预告",
+    "导语",
+    "承上启下",
 )
 _SETUP_KIND_HOOK_MARKERS: dict[str, tuple[str, ...]] = {
     "异常物件": _ANOMALY_HOOK_MARKERS,
@@ -220,9 +261,71 @@ def _is_generic_future_speculation(text: str) -> bool:
     )
 
 
+def _is_punishment_or_special_treatment_description(
+    result: ForeshadowingResult,
+    *,
+    hook_text: str,
+    unresolved_text: str,
+) -> bool:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：强 setup 池需要前置拒绝“受难/处罚规格/特殊待遇描写”，避免这类情绪或境遇加压样本污染 thread 分母。
+    """
+
+    if result.setup_kind not in {"异常物件", "其他"}:
+        return False
+
+    combined = " ".join(
+        (
+            result.anchor_text,
+            hook_text,
+            unresolved_text,
+            result.setup_summary,
+            result.why_unresolved_now,
+            result.expected_payoff_family,
+        )
+    )
+    return _contains_any(combined, _PUNISHMENT_DESCRIPTION_MARKERS)
+
+
+def _is_transition_reveal_teaser(
+    result: ForeshadowingResult,
+    *,
+    hook_text: str,
+    unresolved_text: str,
+) -> bool:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：临近揭示前的导语/预告句不应单独开新 thread；只有强化或回收已有 thread 时才允许继续入池。
+    """
+
+    if not result.is_new_setup:
+        return False
+
+    combined = " ".join(
+        (
+            result.anchor_text,
+            hook_text,
+            unresolved_text,
+            result.setup_summary,
+            result.why_unresolved_now,
+            result.expected_payoff_family,
+        )
+    )
+    has_transition_wording = _contains_any(combined, _TRANSITION_TEASER_MARKERS) or _contains_any(
+        combined,
+        _TEASER_FORM_MARKERS,
+    )
+    return has_transition_wording and _contains_any(combined, _REVEAL_TEASER_MARKERS)
+
+
 def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     """
     判断 anchor_reason 是否满足强伏笔的最小语义门槛
+
+    修改时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    修改原因: 强 setup 入池边界继续收紧，拒绝处罚规格/特殊待遇描写与临近揭示前的过渡预告单独开 thread。
     """
     hook_text, anchor_unresolved_text = _extract_reason_sections(result.anchor_reason)
     if hook_text is None or anchor_unresolved_text is None:
@@ -256,6 +359,20 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
         return False
 
     merged_unresolved_text = f"{anchor_unresolved_text} {unresolved_text}".strip()
+    if _is_punishment_or_special_treatment_description(
+        result,
+        hook_text=hook_text,
+        unresolved_text=merged_unresolved_text,
+    ):
+        return False
+
+    if _is_transition_reveal_teaser(
+        result,
+        hook_text=hook_text,
+        unresolved_text=merged_unresolved_text,
+    ):
+        return False
+
     return _has_setup_kind_consistent_signal(result.setup_kind or "其他", hook_text, merged_unresolved_text)
 
 

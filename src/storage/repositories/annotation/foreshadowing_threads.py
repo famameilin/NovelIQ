@@ -24,8 +24,26 @@ from src.models.local.schema import (
 from src.storage.models import ForeshadowingThread, ForeshadowingThreadHit
 
 ACTIVE_SETUP_POOL_LIMIT = settings.analysis.multi_phase_annotation.active_setup_pool_limit
-_VALID_PAYOFF_LIKELIHOODS = {"high", "medium", "low"}
+_VALID_PAYOFF_LIKELIHOODS = {"high", "medium"}
 _VALID_RUNTIME_SETUP_STATUSES = {"open", "reinforced", "likely_paid_off"}
+_EXPECTATION_BASE_SCORE_BY_PAYOFF = {
+    "high": 0.62,
+    "medium": 0.38,
+}
+_EXPECTATION_STATUS_BONUS = {
+    "open": -0.07,
+    "reinforced": 0.03,
+    "likely_paid_off": 0.28,
+}
+_EXPECTATION_STRENGTH_BONUS = {
+    "high": 0.03,
+    "medium": 0.0,
+}
+_EXPECTATION_STATUS_WEIGHT = {
+    "open": 0.75,
+    "reinforced": 1.0,
+    "likely_paid_off": 1.2,
+}
 
 
 def _get_active_setup_pool_limit() -> int:
@@ -181,6 +199,47 @@ def _count_thread_hits(session, setup_id: str) -> int:
     return int(session.execute(stmt).scalar_one())
 
 
+def _count_thread_hits_for_run(session, run_id: str) -> dict[str, int]:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：expectation v2 需要按 thread 命中次数加权，统一在仓储层用语义字段聚合 hit_count。
+    """
+
+    stmt = (
+        select(ForeshadowingThreadHit.setup_id, func.count(ForeshadowingThreadHit.hit_id).label("hit_count"))
+        .where(ForeshadowingThreadHit.run_id == run_id)
+        .group_by(ForeshadowingThreadHit.setup_id)
+    )
+    rows = session.execute(stmt).all()
+    return {row.setup_id: int(row.hit_count) for row in rows}
+
+
+def _require_result_payoff_likelihood(result: ForeshadowingResult) -> ForeshadowingPayoffLikelihood:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：本轮不兼容旧 positive 缺字段输出，ledger 写入必须显式要求 high/medium payoff_likelihood。
+    """
+
+    if result.payoff_likelihood not in _VALID_PAYOFF_LIKELIHOODS:
+        raise ValueError("positive foreshadowing result requires payoff_likelihood to be high or medium")
+    return result.payoff_likelihood
+
+
+def _require_result_setup_status(result: ForeshadowingResult) -> ForeshadowingSetupStatus:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：ledger 写入不再为旧 positive 输出补默认 status，缺失或不匹配时必须显式失败。
+    """
+
+    if result.setup_status not in _VALID_RUNTIME_SETUP_STATUSES:
+        raise ValueError("positive foreshadowing result requires setup_status")
+    if result.is_new_setup and result.setup_status != "open":
+        raise ValueError("new setup result requires setup_status=open")
+    if not result.is_new_setup and result.setup_status == "open":
+        raise ValueError("linked setup result requires setup_status to be reinforced or likely_paid_off")
+    return result.setup_status
+
+
 def _select_visible_active_threads(
     session,
     *,
@@ -332,11 +391,17 @@ def sync_foreshadowing_thread(
     将一条 Phase2 positive 结果同步到 thread ledger
 
     thread 状态更新、命中插入、出池归档必须作为单一事务步骤执行，避免 chunk 视图和 ledger 漂移
+
+    修改时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    修改原因: ledger 写入不再兼容 positive 缺失 payoff_likelihood 的旧输出，必须显式携带 high/medium。
     """
 
     if not result.has_foreshadowing:
         raise ValueError("sync_foreshadowing_thread only accepts positive foreshadowing results")
 
+    result_payoff_likelihood = _require_result_payoff_likelihood(result)
+    result_setup_status = _require_result_setup_status(result)
     now = _utcnow_naive()
 
     if result.is_new_setup:
@@ -349,7 +414,7 @@ def sync_foreshadowing_thread(
         if matched_thread is not None:
             hit_count = _count_thread_hits(session, matched_thread.setup_id) + 1
             matched_thread.last_chunk_id = chunk_id
-            matched_thread.payoff_likelihood = result.payoff_likelihood or matched_thread.payoff_likelihood
+            matched_thread.payoff_likelihood = result_payoff_likelihood
             matched_thread.strength = _derive_thread_strength(
                 payoff_likelihood=matched_thread.payoff_likelihood,
                 status="reinforced",
@@ -372,16 +437,11 @@ def sync_foreshadowing_thread(
                 setup_id=matched_thread.setup_id,
                 setup_summary=matched_thread.setup_summary,
                 expected_payoff_family=matched_thread.expected_payoff_family,
-                payoff_likelihood=(
-                    matched_thread.payoff_likelihood
-                    if matched_thread.payoff_likelihood in _VALID_PAYOFF_LIKELIHOODS
-                    else "medium"
-                ),
+                payoff_likelihood=result_payoff_likelihood,
                 setup_status="reinforced",
             )
 
         setup_id = str(uuid4())
-        result_payoff_likelihood: ForeshadowingPayoffLikelihood = result.payoff_likelihood or "medium"
         strength = _derive_thread_strength(
             payoff_likelihood=result_payoff_likelihood,
             status="open",
@@ -434,14 +494,14 @@ def sync_foreshadowing_thread(
 
     hit_count = _count_thread_hits(session, thread.setup_id) + 1
     thread.last_chunk_id = chunk_id
-    thread.payoff_likelihood = result.payoff_likelihood or thread.payoff_likelihood
+    thread.payoff_likelihood = result_payoff_likelihood
     thread.strength = _derive_thread_strength(
         payoff_likelihood=thread.payoff_likelihood,
-        status=result.setup_status or "reinforced",
+        status=result_setup_status,
         hit_count=hit_count,
         prior_strength=thread.strength,
     )
-    thread.status = result.setup_status or "reinforced"
+    thread.status = result_setup_status
     thread.active = True
     thread.updated_at = now
     _insert_thread_hit(
@@ -457,13 +517,86 @@ def sync_foreshadowing_thread(
         setup_id=thread.setup_id,
         setup_summary=thread.setup_summary,
         expected_payoff_family=thread.expected_payoff_family,
-        payoff_likelihood=(
-            thread.payoff_likelihood
-            if thread.payoff_likelihood in _VALID_PAYOFF_LIKELIHOODS
-            else "medium"
-        ),
-        setup_status=thread.status if thread.status in _VALID_RUNTIME_SETUP_STATUSES else "reinforced",
+        payoff_likelihood=result_payoff_likelihood,
+        setup_status=result_setup_status,
     )
+
+
+def _clamp_expectation_score(value: float) -> float:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：单条 thread 的 score 由多个语义项相加，最终必须稳定收口到 0-1 区间。
+    """
+
+    return max(0.0, min(1.0, value))
+
+
+def _get_hit_score_bonus(hit_count: int) -> float:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：命中次数是 thread 被持续强化的证据，需要进入单条 thread 的预期分。
+    """
+
+    if hit_count >= 3:
+        return 0.08
+    if hit_count == 2:
+        return 0.04
+    return 0.0
+
+
+def _get_hit_weight_bonus(hit_count: int) -> float:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：多次命中的 thread 应在聚合时获得更高权重，避免单次 open thread 与强化 thread 等权。
+    """
+
+    if hit_count >= 3:
+        return 0.20
+    if hit_count == 2:
+        return 0.10
+    return 0.0
+
+
+def _calculate_thread_expectation_score(thread: ForeshadowingThread, *, hit_count: int) -> float:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：用 payoff/status/strength/hit_count 共同决定单条 thread 预期，
+              不再把 open/high 与 reinforced/high 等同处理。
+    """
+
+    if thread.payoff_likelihood not in _EXPECTATION_BASE_SCORE_BY_PAYOFF:
+        raise ValueError(f"Unsupported payoff_likelihood for foreshadow expectation: {thread.payoff_likelihood}")
+    if thread.status not in _EXPECTATION_STATUS_BONUS:
+        raise ValueError(f"Unsupported setup status for foreshadow expectation: {thread.status}")
+    if thread.strength not in _EXPECTATION_STRENGTH_BONUS:
+        raise ValueError(f"Unsupported thread strength for foreshadow expectation: {thread.strength}")
+    if hit_count < 1:
+        raise ValueError(f"Foreshadowing thread has no hits: {thread.setup_id}")
+
+    raw_score = (
+        _EXPECTATION_BASE_SCORE_BY_PAYOFF[thread.payoff_likelihood]
+        + _EXPECTATION_STATUS_BONUS[thread.status]
+        + _EXPECTATION_STRENGTH_BONUS[thread.strength]
+        + _get_hit_score_bonus(hit_count)
+    )
+    return _clamp_expectation_score(raw_score)
+
+
+def _calculate_thread_expectation_weight(thread: ForeshadowingThread, *, hit_count: int) -> float:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：聚合阶段需要让生命周期推进、命中次数和强度影响 thread 权重，提升指标分辨率。
+    """
+
+    if thread.status not in _EXPECTATION_STATUS_WEIGHT:
+        raise ValueError(f"Unsupported setup status for foreshadow expectation weight: {thread.status}")
+    if thread.strength not in _EXPECTATION_STRENGTH_BONUS:
+        raise ValueError(f"Unsupported thread strength for foreshadow expectation weight: {thread.strength}")
+    if hit_count < 1:
+        raise ValueError(f"Foreshadowing thread has no hits: {thread.setup_id}")
+
+    strength_bonus = 0.05 if thread.strength == "high" else 0.0
+    return _EXPECTATION_STATUS_WEIGHT[thread.status] + _get_hit_weight_bonus(hit_count) + strength_bonus
 
 
 def calculate_foreshadow_expectation(session, run_id: str) -> float | None:
@@ -471,6 +604,10 @@ def calculate_foreshadow_expectation(session, run_id: str) -> float | None:
     基于 thread ledger 计算伏笔回收预期
 
     diagnosis 展示值改由 setup ledger 驱动，不能再把 cloud_analysis 当成唯一真相源
+
+    修改时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    修改原因: 旧公式只按 payoff_likelihood 三档等权平均，容易塌成 0.7；现在改为 thread 语义加权聚合。
     """
 
     stmt = select(ForeshadowingThread).where(
@@ -481,16 +618,19 @@ def calculate_foreshadow_expectation(session, run_id: str) -> float | None:
     if not threads:
         return None
 
+    hit_counts_by_setup = _count_thread_hits_for_run(session, run_id)
     weighted_total = 0.0
+    total_weight = 0.0
     for thread in threads:
-        if thread.status == "likely_paid_off":
-            weighted_total += 1.0
-        elif thread.payoff_likelihood == "high":
-            weighted_total += 0.7
-        elif thread.payoff_likelihood == "medium":
-            weighted_total += 0.4
+        hit_count = hit_counts_by_setup.get(thread.setup_id, 0)
+        thread_score = _calculate_thread_expectation_score(thread, hit_count=hit_count)
+        thread_weight = _calculate_thread_expectation_weight(thread, hit_count=hit_count)
+        weighted_total += thread_score * thread_weight
+        total_weight += thread_weight
 
-    return round(weighted_total / len(threads), 4)
+    if total_weight <= 0:
+        raise ValueError(f"Foreshadowing expectation total weight must be positive: run_id={run_id}")
+    return round(weighted_total / total_weight, 4)
 
 
 def fetch_foreshadowing_threads(session, run_id: str) -> list[ForeshadowingThreadView]:
