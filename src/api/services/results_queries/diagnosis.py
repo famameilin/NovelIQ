@@ -63,10 +63,18 @@ def _has_complete_focus_contract(
     main_characters: list[str] | None = None,
     core_cast: list[str] | None = None,
     topic_labels: list[str] | None = None,
+    genre_labels: list[str] | None = None,
+    style_labels: list[str] | None = None,
 ) -> bool:
     """
+    修改时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    修改原因: `genre_labels/style_labels` 已经成为 diagnosis 正式合同的一部分；
+              结果读取层必须和持久化完成态保持一致，缺少任一标签数组都要走 rerun-required。
+
     说明: 当前分支已经明确“不兼容缺焦点合同的旧 diagnosis 行”；
-    结果读取层必须把缺 `focus_structure` / `focus_characters` / `topic_labels` 的数据视为无效，
+    结果读取层必须把缺 `focus_structure` / `focus_characters` / `topic_labels`
+    / `genre_labels` / `style_labels` 的数据视为无效，
     统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象
     """
     if (
@@ -76,6 +84,8 @@ def _has_complete_focus_contract(
         or not main_characters
         or not core_cast
         or not topic_labels
+        or not genre_labels
+        or not style_labels
     ):
         return False
     return _derive_focus_structure_from_characters(focus_characters) == focus_structure
@@ -95,6 +105,8 @@ def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> TypeGuar
         diagnosis.main_characters,
         diagnosis.core_cast,
         diagnosis.topic_labels,
+        diagnosis.genre_labels,
+        diagnosis.style_labels,
     )
 
 
@@ -185,6 +197,8 @@ def _fetch_diagnosis(
         main_characters_filtered,
         core_cast_filtered,
         topic_labels_normalized if isinstance(topic_labels_normalized, list) else None,
+        genre_labels_raw if isinstance(genre_labels_raw, list) else None,
+        style_labels_raw if isinstance(style_labels_raw, list) else None,
     ):
         logger.warning(
             "diagnosis focus contract incomplete after normalization: run_id={} novel_id={} raw_structure={} "

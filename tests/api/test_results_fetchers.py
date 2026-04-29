@@ -261,10 +261,17 @@ def test_fetch_diagnosis_marks_missing_row_as_rerun_required_even_if_ledger_exis
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: diagnosis 成功结果现在必须同时携带题材与风格标签；这里覆盖完整新合同的成功路径。
+    """
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.42,
             "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "style_labels": '["严肃"]',
             "topic_labels": '["成长"]',
             "focus_structure": "single",
             "focus_characters": '["沈砚"]',
@@ -282,6 +289,8 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
 
     assert result is not None
     assert result.foreshadow_expectation == 0.42
+    assert result.genre_labels == ["科幻"]
+    assert result.style_labels == ["严肃"]
     assert result.focus_structure == "single"
     assert result.focus_characters == ["沈砚"]
 
@@ -312,6 +321,66 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_topic_labels_missi
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": '{"沈砚": 8.2}',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_genre_labels_missing():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 题材标签已经成为 diagnosis 正式合同，缺失时结果读取层必须显式要求 rerun。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "style_labels": '["严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_style_labels_missing():
+    """
+    创建时间: 2026-04-29
+    任务: split-genre-style-labels-review-fixes
+    说明: 风格标签和题材标签一样属于正式 diagnosis 合同，读取层不能再把缺风格标签的 row 当作成功结果。
+    """
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "topic_labels": '["成长"]',
             "focus_structure": "single",
             "focus_characters": '["沈砚"]',
             "main_characters": '["沈砚"]',
@@ -379,6 +448,8 @@ def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": '{"伯安": 7.2, "贺伯安": 8.3}',
+            "genre_labels": '["通用"]',
+            "style_labels": '["严肃"]',
             "topic_labels": '["成长"]',
             "focus_structure": "dual",
             "focus_characters": '["伯安", "贺伯安"]',
