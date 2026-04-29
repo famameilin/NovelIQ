@@ -27,102 +27,6 @@ _HOOK_LABEL = "具体钩子："
 _UNRESOLVED_LABEL = "未闭合原因："
 _TRUE_BOOL_MARKERS = frozenset({"true", "1", "yes", "y", "on"})
 _FALSE_BOOL_MARKERS = frozenset({"false", "0", "no", "n", "off"})
-_ANOMALY_HOOK_MARKERS = (
-    "异常",
-    "异样",
-    "异象",
-    "反常",
-    "诡异",
-    "古怪",
-    "不对劲",
-    "不寻常",
-    "非普通",
-    "不是普通",
-    "自行",
-    "发热",
-    "红光",
-    "注视感",
-    "纹样",
-    "印记",
-)
-_STRONG_SETUP_TARGET_MARKERS = (
-    "身份",
-    "秘密",
-    "来历",
-    "用途",
-    "真相",
-    "规则",
-    "约定",
-    "誓言",
-    "承诺",
-    "威胁",
-    "倒计时",
-    "时限",
-    "期限",
-    "能力",
-    "力量",
-    "线索",
-    "密码",
-    "邀请",
-    "后果",
-    "代价",
-)
-_UNRESOLVED_MARKERS = (
-    "尚未",
-    "仍未",
-    "还未",
-    "未被",
-    "未曾",
-    "没有解释",
-    "没有交代",
-    "没有揭示",
-    "没有兑现",
-    "没有回收",
-    "用途未明",
-    "身份未明",
-    "来历未明",
-    "原因未明",
-    "真相未明",
-    "当前只",
-    "当前仍",
-    "还没有",
-    "用途不明",
-    "去向不明",
-)
-_GENERIC_HOOK_REJECTION_MARKERS = (
-    "暗示命运",
-    "预示命运",
-    "命运定调",
-    "体现主题",
-    "烘托主题",
-    "主题铺垫",
-    "情绪铺垫",
-    "气氛铺垫",
-    "创伤根源",
-    "心理创伤",
-)
-_GENERIC_FUTURE_SPECULATION_MARKERS = (
-    "可能影响后续",
-    "推动剧情",
-    "推动后续",
-    "可能推动",
-    "可能出事",
-    "后面可能",
-    "后续可能",
-    "后文可能",
-    "暗示后面有事",
-    "预示命运不好",
-)
-_SETUP_KIND_HOOK_MARKERS: dict[str, tuple[str, ...]] = {
-    "异常物件": _ANOMALY_HOOK_MARKERS,
-    "异常规则": ("规则", "禁忌", "条件", "代价", "限制"),
-    "隐藏身份": ("身份", "来历", "身世", "真相"),
-    "明确承诺": ("承诺", "约定", "发誓", "立誓", "答应", "保证"),
-    "明确威胁": ("威胁", "若不", "否则", "下场", "后果", "偿命", "灭门"),
-    "倒计时": ("倒计时", "时限", "期限", "限期"),
-    "未解释能力": ("能力", "力量", "术法", "本领"),
-    "因果引线": ("原因", "线索", "真相", "力量", "代价", "后果"),
-}
 
 
 def _normalize_setup_summary_text(value: str) -> str:
@@ -130,13 +34,6 @@ def _normalize_setup_summary_text(value: str) -> str:
     归一化 setup_summary 文本，用于 exact-match 去重
     """
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
-
-
-def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
-    """
-    判断文本是否命中任一关键短语
-    """
-    return any(marker in text for marker in markers)
 
 
 def _coerce_boolean_field(field_name: str, value: Any, default: bool = False) -> bool:
@@ -185,78 +82,20 @@ def _extract_reason_sections(reason: str) -> tuple[str | None, str | None]:
     return hook_text, unresolved_text
 
 
-def _has_concrete_setup_signal(hook_text: str, unresolved_text: str) -> bool:
+def _has_structured_anchor_reason(result: ForeshadowingResult) -> bool:
     """
-    判断理由里是否真的出现了强 setup 所需的具体信号
-    """
-    combined = f"{hook_text} {unresolved_text}"
-    return _contains_any(hook_text, _ANOMALY_HOOK_MARKERS) or _contains_any(combined, _STRONG_SETUP_TARGET_MARKERS)
+    判断 anchor_reason 是否满足正式结构合同
 
-
-def _has_setup_kind_consistent_signal(setup_kind: str, hook_text: str, unresolved_text: str) -> bool:
-    """
-    判断 setup_kind 是否得到了文本理由里的具体信号支撑
-    """
-    if setup_kind == "其他":
-        return _has_concrete_setup_signal(hook_text, unresolved_text)
-
-    combined = f"{hook_text} {unresolved_text}"
-    markers = _SETUP_KIND_HOOK_MARKERS.get(setup_kind, ())
-    if markers and _contains_any(combined, markers):
-        return True
-
-    # 模型就算挑了正式 setup_kind，也仍然要回到文本理由里确认
-    # “具体钩子到底是什么”；否则普通决定被误标成“明确承诺”时会直接绕过强伏笔 gate
-    return _has_concrete_setup_signal(hook_text, unresolved_text)
-
-
-def _is_generic_future_speculation(text: str) -> bool:
-    """
-    判断文本是否只是泛化的未来推测
-    """
-    return _contains_any(text, _GENERIC_FUTURE_SPECULATION_MARKERS) and not _contains_any(
-        text,
-        _STRONG_SETUP_TARGET_MARKERS,
-    )
-
-
-def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
-    """
-    判断 anchor_reason 是否满足强伏笔的最小语义门槛
+    修改时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    修改原因: Phase2 是否属于强 setup 由 LLM 在调用时判断，本地 validator 只保留
+              anchor_reason 双段结构与必填字段校验，不再用词表做第二次语义裁判。
     """
     hook_text, anchor_unresolved_text = _extract_reason_sections(result.anchor_reason)
     if hook_text is None or anchor_unresolved_text is None:
         return False
 
-    if _contains_any(hook_text, _GENERIC_HOOK_REJECTION_MARKERS):
-        return False
-
-    if _contains_any(anchor_unresolved_text, _GENERIC_HOOK_REJECTION_MARKERS):
-        return False
-
-    unresolved_text = result.why_unresolved_now.strip()
-    if not unresolved_text:
-        return False
-
-    if _contains_any(unresolved_text, _GENERIC_HOOK_REJECTION_MARKERS):
-        return False
-
-    if not _contains_any(unresolved_text, _UNRESOLVED_MARKERS):
-        return False
-
-    # 允许“后续可能揭示用途”这类带 future wording 的表述，
-    # 前提是它确实指向了具体的未闭合对象；纯“可能有影响/可能出事”仍然拒绝
-    if _is_generic_future_speculation(hook_text):
-        return False
-
-    if _is_generic_future_speculation(anchor_unresolved_text):
-        return False
-
-    if _is_generic_future_speculation(unresolved_text):
-        return False
-
-    merged_unresolved_text = f"{anchor_unresolved_text} {unresolved_text}".strip()
-    return _has_setup_kind_consistent_signal(result.setup_kind or "其他", hook_text, merged_unresolved_text)
+    return bool(result.why_unresolved_now.strip())
 
 
 def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
@@ -349,6 +188,11 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     硬校验：anchor_text 必须是原文的真实子串
 
     返回 False 则丢弃该条记录，不入库
+
+    修改时间: 2026-04-29
+    任务: foreshadow-expectation-v2
+    修改原因: Phase2 强 setup 语义判断已交给 LLM 输出字段，本地只保留合同和结构校验，
+              不再用关键词/句式规则对模型的 high/medium positive 再做二次裁决。
     """
     if not result.has_foreshadowing:
         if result.is_strong_setup:
@@ -366,7 +210,7 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     if not result.is_strong_setup:
         return False
 
-    if result.confidence != "high":
+    if result.confidence not in {"high", "medium"}:
         return False
 
     if result.foreshadowing_type is None:
@@ -414,4 +258,4 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     if not _normalize_setup_summary_text(result.setup_summary):
         return False
 
-    return _has_strong_hook_reason(result)
+    return _has_structured_anchor_reason(result)

@@ -3,7 +3,6 @@
 
 输出格式示例：
 {
-  "foreshadow_expectation": 0.0,
   "arc_scores": {"人物名1": 8.0, "人物名2": 7.0, "人物名3": 6.0},
   "genre_labels": ["科幻"],
   "style_labels": ["硬核", "史诗"],
@@ -26,9 +25,8 @@
 }
 
 字段说明：
-- foreshadow_expectation: 伏笔回收预期（0-1之间的小数）
-  这是 setup thread ledger 驱动的正式字段；如果输入 payload 已经给出 `foreshadow_expectation`，
-  你必须直接沿用该数值，不允许自行改写或重新估算
+- 如果输入 payload 中含有 `foreshadow_expectation`，它只是后端 setup thread ledger 计算出的参考上下文；
+  你不需要输出、改写或重新估算这个字段，系统会在持久化前使用后端计算值收口
 - arc_scores: 人物弧度评分字典，Key为人物名称，Value为评分(每个0-10分)，必须使用人物名称作为Key，而非纯数值数组
 - genre_labels: 稳定题材数组，只能从以下标签中选择：科幻、悬疑、历史、仙侠、都市、权谋、爽文、通用
   如果输入 payload 已经给出 `genre_labels`，你必须原样复用，不允许改写、删减或重排
