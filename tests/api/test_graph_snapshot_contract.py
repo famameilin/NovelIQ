@@ -905,6 +905,91 @@ def test_get_graph_events_pagination_contract_is_continuous(api_client, db_sessi
     assert second_payload["events"][0]["relation_event_id"] != first_payload["events"][0]["relation_event_id"]
 
 
+def test_fetch_graph_events_page_skips_filtered_legacy_rows_without_stalling(db_session) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: graph-diagnosis-mainline-blockers
+    说明: `/graph/events` 分页必须先过滤旧 pronoun 脏边，再计算 offset/limit，
+          否则第一页会空掉但 cursor 仍声称可继续翻页。
+    """
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Events Cursor Filter",
+    )
+    insert_graph_test_chunks(db_session, run_id, range(1, 5))
+
+    graph_repo = GraphRepository(db_session)
+    stale = graph_repo.upsert_entity(run_id=run_id, canonical_name="我", first_seen_chunk=4, last_seen_chunk=4)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="沈砚", first_seen_chunk=1, last_seen_chunk=4)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="陆明", first_seen_chunk=1, last_seen_chunk=3)
+    rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="秦昭", first_seen_chunk=1, last_seen_chunk=2)
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=stale.entity_id,
+        to_entity_id=hero.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=4,
+        evidence="旧代词脏边",
+        confidence=0.42,
+        source_relation_row_id=9801,
+        directionality="directed",
+    )
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="强化",
+        chunk_id=3,
+        evidence="有效事件1",
+        confidence=0.88,
+        source_relation_row_id=9802,
+        directionality="directed",
+    )
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="敌对",
+        change_type="新建",
+        chunk_id=2,
+        evidence="有效事件2",
+        confidence=0.79,
+        source_relation_row_id=9803,
+        directionality="directed",
+    )
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id, rival.entity_id])
+    db_session.commit()
+
+    annotation_repo = create_graph_annotation_repo(db_session)
+
+    first_page = _fetch_graph_events_page(run_id, annotation_repo, events_limit=1)
+    second_page = _fetch_graph_events_page(
+        run_id,
+        annotation_repo,
+        events_limit=1,
+        events_cursor=first_page["page_info"]["next_cursor"],
+    )
+
+    assert [event["chunk_id"] for event in first_page["events"]] == [3]
+    assert first_page["page_info"]["limit"] == 1
+    assert first_page["page_info"]["returned_count"] == 1
+    assert first_page["page_info"]["total"] == 2
+    assert first_page["page_info"]["has_more"] is True
+    assert first_page["page_info"]["next_cursor"] is not None
+    assert [event["chunk_id"] for event in second_page["events"]] == [2]
+    assert second_page["page_info"]["returned_count"] == 1
+    assert second_page["page_info"]["total"] == 2
+    assert second_page["page_info"]["has_more"] is False
+    assert second_page["page_info"]["next_cursor"] is None
+
+
 def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monkeypatch) -> None:
     patch_graph_authority_service(
         monkeypatch,

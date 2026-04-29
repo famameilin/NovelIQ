@@ -13,19 +13,18 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.models.local.character_reference_policy import filter_global_character_names, is_global_character_surface_name
+from src.models.local.character_reference_policy import filter_global_character_names
 from src.storage.models import (
     Chunk,
     ChunkAnnotation,
     ChunkCurve,
     ChunkTopic,
-    GraphEntity,
-    GraphRelationEvent,
     StageSummary,
 )
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.annotation import foreshadowing_threads as foreshadowing_thread_repo
 from src.storage.repositories.base import BaseRepository
+from src.storage.repositories.graph import GraphRepository
 
 
 class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
@@ -129,7 +128,8 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         """
         修改时间: 2026-04-29
         任务: 角色引用分层重构
-        修改原因: diagnosis payload 的关系变更不能携带含未解析代词端点的旧 graph event。
+        修改原因: diagnosis payload 的关系变更必须复用 graph history 主链过滤，排除 synthetic final_disambiguation
+                 和未解析代词端点事件，避免 diagnosis 与 graph page 读到不同历史面。
 
         获取关系变更记录
 
@@ -143,37 +143,16 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if limit is None:
             limit = settings.diagnosis.relation_changes_limit
 
-        graph_stmt = (
-            select(
-                GraphRelationEvent.chunk_id,
-                GraphEntity.canonical_name,
-                GraphRelationEvent.to_entity_id,
-                GraphRelationEvent.relation_type,
-                GraphRelationEvent.change_type,
-            )
-            .join(GraphEntity, GraphRelationEvent.from_entity_id == GraphEntity.entity_id)
-            .where(GraphRelationEvent.run_id == run_id)
-            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
-            .limit(limit)
-        )
-        graph_rows = self.session.execute(graph_stmt).fetchall()
-        name_map = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-            if is_global_character_surface_name(row.canonical_name)
-        }
+        relation_events = GraphRepository(self.session).fetch_relation_events(run_id, limit=limit, offset=0)
         return [
             (
-                row.chunk_id,
-                row.canonical_name,
-                name_map.get(row.to_entity_id, str(row.to_entity_id)),
-                row.relation_type,
-                row.change_type,
+                event.chunk_id,
+                event.from_name,
+                event.to_name,
+                event.relation_type,
+                event.change_type,
             )
-            for row in graph_rows
-            if row.to_entity_id in name_map and is_global_character_surface_name(row.canonical_name)
+            for event in relation_events
         ]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:

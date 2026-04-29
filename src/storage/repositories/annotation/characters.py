@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy import delete, func, select
 
 from src.models.local.character_reference_policy import (
+    CharacterReferenceDecision,
     decide_character_reference,
     filter_global_character_names,
     is_global_character_surface_name,
@@ -146,16 +147,19 @@ def _resolve_history_reference_decision(
     chunk_id: int | None,
     reference_resolutions: dict[str, str],
     existing_resolved_global_name: str | None,
-):
+) -> CharacterReferenceDecision:
     """
-    创建时间: 2026-04-29
+    修改时间: 2026-04-29
     任务: 角色引用分层重构
-    新建原因: 历史行回填必须优先消费 checkpoint/reference_resolutions，再回退到行上已有 resolved 字段。
+    修改原因: 当前状态里已移除的 reference resolution 必须撤销历史行上的旧 resolved 值，
+              不能因为行上残留旧实名就继续被 graph/results 误消费。
     """
     normalized_surface = normalize_reference_name(surface_name)
     resolved_global_name = existing_resolved_global_name
     if normalized_surface and is_reference_surface_name(normalized_surface):
-        resolved_global_name = reference_resolutions.get(normalized_surface) or existing_resolved_global_name
+        # reference surface 只能相信当前 checkpoint 的解析结果；
+        # 如果本轮 map 里已经没有它，说明它已被降级回 unresolved，旧 resolved 值必须清空。
+        resolved_global_name = reference_resolutions.get(normalized_surface)
     return decide_character_reference(
         normalized_surface,
         resolved_global_name=resolved_global_name,
