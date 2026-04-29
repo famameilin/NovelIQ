@@ -295,6 +295,7 @@ export function DiagnosisPage() {
   const hasFocusContract = hasCompleteFocusContract(diagnosis);
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
   const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
+  const primaryGenreLabel = diagnosis?.genre_labels?.[0] ?? null;
   const hasIncompleteDiagnosisContract =
     enabled &&
     diagnosisQuery.isFetched &&
@@ -306,7 +307,7 @@ export function DiagnosisPage() {
   // ---------- Render ----------
 
   return (
-    <AnalysisWorkspace title={diagnosis?.narrative_type ? `${diagnosis.narrative_type}诊断报告` : "诊断报告"}>
+    <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"}>
       {/* Loading skeleton */}
       {isLoading && <SkeletonGrid />}
 
@@ -371,7 +372,11 @@ export function DiagnosisPage() {
                 </div>
 
                 <div className="flex min-h-0 flex-col gap-4">
-                  <DiagnosisHeader narrativeType={diagnosis.narrative_type} arcType={diagnosis.narrative_arc_type} />
+                  <DiagnosisHeader
+                    genreLabels={diagnosis.genre_labels}
+                    styleLabels={diagnosis.style_labels}
+                    arcType={diagnosis.narrative_arc_type}
+                  />
                   {diagnosis.diagnosis ? (
                     <DiagnosisText diagnosisText={diagnosis.diagnosis} className="min-h-[320px] flex-1" />
                   ) : (

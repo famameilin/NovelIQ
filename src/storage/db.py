@@ -440,6 +440,8 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
+        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
+        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
@@ -482,6 +484,8 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
 
         actual_columns = _get_table_columns(conn, "cloud_analysis")
         required_columns = {
+            "genre_labels",
+            "style_labels",
             "focus_structure",
             "focus_characters",
             "main_characters",
@@ -500,6 +504,13 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
                 "cloud_analysis still contains legacy column `protagonist`. "
                 "Please recreate or manually migrate the current database schema "
                 "to remove legacy protagonist-contract columns before starting the service."
+            )
+
+        if "narrative_type" in actual_columns:
+            raise RuntimeError(
+                "cloud_analysis still contains legacy column `narrative_type`. "
+                "Please recreate or manually migrate the current database schema "
+                "to remove legacy narrative type columns before starting the service."
             )
 
 

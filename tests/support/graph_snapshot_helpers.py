@@ -65,6 +65,8 @@ def insert_focus_contract_cloud_analysis(
         novel_id=novel_id,
         foreshadow_expectation=0.42,
         arc_scores=arc_scores,
+        genre_labels=["通用"],
+        style_labels=["严肃"],
         topic_labels=list(topic_labels or ["关系命运"]),
         diagnosis="测试用焦点合同 diagnosis",
         focus_structure="single" if len(focus_names) == 1 else "dual" if len(focus_names) == 2 else "ensemble",
