@@ -176,6 +176,7 @@ class ForeshadowingThreadResponse(BaseModel):
     setup_kind: str
     expected_payoff_family: str
     payoff_likelihood: str
+    confidence: str
     strength: str
     status: str
     active: bool

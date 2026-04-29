@@ -36,16 +36,18 @@ def _render_active_setup_pool_block(active_setup_pool: Sequence[object] | None) 
         setup_kind = str(getattr(item, "setup_kind", "")).strip()
         expected_payoff_family = str(getattr(item, "expected_payoff_family", "")).strip()
         payoff_likelihood = str(getattr(item, "payoff_likelihood", "")).strip()
+        confidence = str(getattr(item, "confidence", "")).strip()
         strength = str(getattr(item, "strength", "")).strip()
         status = str(getattr(item, "status", "")).strip()
         lines.append(
             "- [{setup_id}] {summary}；类型：{kind}；预期回收：{payoff}；"
-            "回收预期：{likelihood}；强度：{strength}；当前状态：{status}".format(
+            "回收预期：{likelihood}；置信度：{confidence}；强度：{strength}；当前状态：{status}".format(
                 setup_id=setup_id or "unknown_setup",
                 summary=setup_summary or "（缺少摘要）",
                 kind=setup_kind or "其他",
                 payoff=expected_payoff_family or "其他",
                 likelihood=payoff_likelihood or "medium",
+                confidence=confidence or "high",
                 strength=strength or "medium",
                 status=status or "open",
             )

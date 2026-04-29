@@ -450,6 +450,7 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS is_new_setup INTEGER",
         "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
         "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_status VARCHAR(30)",
+        "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
         (
             "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
