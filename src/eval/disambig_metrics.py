@@ -228,14 +228,26 @@ def compute_run_metrics(
             gold_independent_set.add(alias)
 
     def _find_canonical(name: str) -> str | None:
-    """在系统合并中查找 name 的 canonical"""
+        """
+        在系统合并中查找 name 的 canonical
+
+        修改时间: 2026-04-29
+        任务: 修复 disambig_metrics 语法错误
+        修改原因: 嵌套函数 docstring 需要缩进到函数体内，避免 pytest 收集阶段触发 IndentationError。
+        """
         for a, c in sys_merge_set:
             if a == name:
                 return c
         return None
 
     def _in_same_merge_group(name_a: str, name_b: str) -> bool:
-    """检查两个名字是否在同一个合并组中"""
+        """
+        检查两个名字是否在同一个合并组中
+
+        修改时间: 2026-04-29
+        任务: 修复 disambig_metrics 语法错误
+        修改原因: 嵌套函数 docstring 需要缩进到函数体内，避免 pytest 收集阶段触发 IndentationError。
+        """
         for g in _equiv_groups:
             if name_a in g and name_b in g:
                 return True

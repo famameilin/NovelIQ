@@ -184,9 +184,17 @@ def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.M
 
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    修改时间: 2026-04-29
+    任务: 修复全量测试阻塞
+    修改原因: diagnosis 完整合同已经包含 genre_labels/style_labels，测试桩需要同步提供正式字段。
+    """
+
     diagnosis = SimpleNamespace(
         rerun_required=False,
         arc_scores={"沈砚": 8.0},
+        genre_labels=["通用"],
+        style_labels=["严肃"],
         focus_structure="single",
         focus_characters=["沈砚"],
         topic_labels=["成长"],
@@ -463,9 +471,17 @@ def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_sess
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """
+    修改时间: 2026-04-29
+    任务: 修复全量测试阻塞
+    修改原因: diagnosis 完整合同已经包含 genre_labels/style_labels，测试桩需要同步提供正式字段。
+    """
+
     diagnosis = SimpleNamespace(
         rerun_required=False,
         arc_scores={"沈砚": 8.0},
+        genre_labels=["通用"],
+        style_labels=["严肃"],
         focus_structure="single",
         focus_characters=["沈砚"],
         topic_labels=["成长"],
