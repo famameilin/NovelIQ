@@ -68,7 +68,7 @@ async def test_resolve_phase4_bundle_keeps_global_names_and_reference_slots_sepa
     """
     创建时间: 2026-04-29
     任务: Phase4 / RAG reference_slots 合同
-    新建原因: Phase4 request 必须同时携带 global names 与 reference_slots，且两者不能混成同一名单。
+    新建原因: Phase1 已确认仍未解析的 slot 列表后，Phase4 不能再把 template 里的已解析 slot 并回 request。
     """
     captured: dict[str, EvidenceRequest] = {}
 
@@ -88,8 +88,8 @@ async def test_resolve_phase4_bundle_keeps_global_names_and_reference_slots_sepa
             consumer="annotation_phase4",
             objective="relation",
             query_text="我看着汪淼。",
-            requested_names=["我", "汪淼"],
-            seed_entities=["我", "汪淼"],
+            requested_names=["我", "她", "汪淼"],
+            seed_entities=["我", "她", "汪淼"],
             background_entities=[],
             current_chunk=3,
             max_chunk_id=2,
@@ -101,7 +101,7 @@ async def test_resolve_phase4_bundle_keeps_global_names_and_reference_slots_sepa
             top_k=5,
             max_queries=3,
             model_rerank_query_max_chars=400,
-            reference_slots=["LOCAL_REF_C3_她"],
+            reference_slots=["POV_SLOT_C3_我", "LOCAL_REF_C3_她"],
         ),
         evidence_service=_DummyEvidenceService(),
     )
@@ -109,15 +109,74 @@ async def test_resolve_phase4_bundle_keeps_global_names_and_reference_slots_sepa
     bundle = await _resolve_phase4_bundle(
         context,
         known_characters=["汪淼"],
-        reference_slots=["POV_SLOT_C3_我"],
+        reference_slots=["LOCAL_REF_C3_她"],
+        phase1_seen_reference_slots=["POV_SLOT_C3_我", "LOCAL_REF_C3_她"],
     )
 
     assert captured["request"].requested_names == ["汪淼"]
     assert captured["request"].seed_entities == ["汪淼"]
-    assert captured["request"].reference_slots == ["LOCAL_REF_C3_她", "POV_SLOT_C3_我"]
+    assert captured["request"].reference_slots == ["LOCAL_REF_C3_她"]
     assert bundle is not None
     assert bundle.requested_names == ["汪淼"]
-    assert bundle.reference_slots == ["LOCAL_REF_C3_她", "POV_SLOT_C3_我"]
+    assert bundle.reference_slots == ["LOCAL_REF_C3_她"]
+
+
+@pytest.mark.asyncio
+async def test_run_phase4_from_context_drops_template_slots_already_seen_by_phase1() -> None:
+    """
+    创建时间: 2026-04-29
+    任务: Phase4 / RAG reference_slots 合同
+    新建原因: 当 Phase1 已看见并解析掉 template 里的 slot 时，Phase4 不应再把这些 slot 从 template 回流。
+    """
+    captured: dict[str, EvidenceRequest] = {}
+
+    class _DummyEvidenceService:
+        async def collect(self, request: EvidenceRequest) -> EvidenceBundle:
+            captured["request"] = request
+            return EvidenceBundle(
+                requested_names=list(request.requested_names),
+                reference_slots=list(request.reference_slots),
+            )
+
+    context = _MultiPhaseExecutionContext(
+        client=MagicMock(),
+        text="我看着她。",
+        chunk_id=3,
+        phase4_request_template=EvidenceRequest(
+            consumer="annotation_phase4",
+            objective="relation",
+            query_text="我看着她。",
+            requested_names=["我", "她", "汪淼"],
+            seed_entities=["我", "她", "汪淼"],
+            background_entities=[],
+            current_chunk=3,
+            max_chunk_id=2,
+            exclude_chunk_ids=[3],
+            need_level1=True,
+            need_level2=True,
+            need_level3=False,
+            allow_llm_query_expansion=False,
+            top_k=5,
+            max_queries=3,
+            model_rerank_query_max_chars=400,
+            reference_slots=["POV_SLOT_C3_我", "LOCAL_REF_C3_她"],
+        ),
+        evidence_service=_DummyEvidenceService(),
+    )
+
+    with patch(
+        "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+        new=AsyncMock(return_value=[]),
+    ) as mock_phase4:
+        await _run_phase4_from_context(
+            context,
+            known_characters=["汪淼"],
+            reference_slots=[],
+            phase1_seen_reference_slots=["POV_SLOT_C3_我", "LOCAL_REF_C3_她"],
+        )
+
+    assert captured["request"].reference_slots == []
+    assert mock_phase4.await_args.kwargs["reference_slots"] == []
 
 
 @pytest.mark.asyncio

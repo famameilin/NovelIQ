@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy import delete, func, select
 
 from src.models.local.character_reference_policy import (
+    build_reference_resolution_lookup_keys,
     CharacterReferenceDecision,
     decide_character_reference,
     filter_global_character_names,
@@ -152,14 +153,20 @@ def _resolve_history_reference_decision(
     修改时间: 2026-04-29
     任务: 角色引用分层重构
     修改原因: 当前状态里已移除的 reference resolution 必须撤销历史行上的旧 resolved 值，
-              不能因为行上残留旧实名就继续被 graph/results 误消费。
+              不能因为行上残留旧实名就继续被 graph/results 误消费；同时 Phase4 relation
+              端点可能直接落 slot 名，这里也要能回退命中 surface-keyed resolution map。
     """
     normalized_surface = normalize_reference_name(surface_name)
     resolved_global_name = existing_resolved_global_name
     if normalized_surface and is_reference_surface_name(normalized_surface):
         # reference surface 只能相信当前 checkpoint 的解析结果；
         # 如果本轮 map 里已经没有它，说明它已被降级回 unresolved，旧 resolved 值必须清空。
-        resolved_global_name = reference_resolutions.get(normalized_surface)
+        resolved_global_name = None
+        for lookup_key in build_reference_resolution_lookup_keys(normalized_surface):
+            candidate_name = normalize_reference_name(reference_resolutions.get(lookup_key))
+            if candidate_name:
+                resolved_global_name = candidate_name
+                break
     return decide_character_reference(
         normalized_surface,
         resolved_global_name=resolved_global_name,

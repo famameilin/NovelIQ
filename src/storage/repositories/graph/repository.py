@@ -697,40 +697,52 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         修改时间: 2026-04-29
         任务: 角色引用分层重构
-        修改原因: participant 一致性检查只统计 global-character 准入后的端点，旧 pronoun 边不再阻塞 authority view。
+        修改原因: participant 一致性检查只统计 global-character 准入后的端点，且 history 端点必须复用
+                 `_relation_history_stmt()` 的过滤语义，避免已被隐藏的 synthetic history 继续误伤 `/graph/events`。
         """
-        valid_entity_ids = {
-            int(row.entity_id)
+        entity_names = {
+            row.entity_id: row.canonical_name
             for row in self.session.execute(
                 select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
             ).fetchall()
-            if row.entity_id is not None and is_global_character_surface_name(row.canonical_name)
+            if is_global_character_surface_name(row.canonical_name)
         }
+        if not entity_names:
+            return set()
+
+        valid_entity_ids = tuple(sorted(entity_names))
+        history_rows = self.session.execute(
+            self._relation_history_stmt(run_id).where(
+                GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
+                GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
+            )
+        ).scalars().all()
         event_ids = {
             int(entity_id)
-            for entity_id in self.session.execute(
-                select(GraphRelationEvent.from_entity_id).where(GraphRelationEvent.run_id == run_id)
-            ).scalars()
-            if entity_id is not None and int(entity_id) in valid_entity_ids
-        } | {
-            int(entity_id)
-            for entity_id in self.session.execute(
-                select(GraphRelationEvent.to_entity_id).where(GraphRelationEvent.run_id == run_id)
-            ).scalars()
-            if entity_id is not None and int(entity_id) in valid_entity_ids
+            for row in history_rows
+            for entity_id in (row.from_entity_id, row.to_entity_id)
+            if entity_id is not None
         }
         current_ids = {
             int(entity_id)
             for entity_id in self.session.execute(
-                select(GraphRelationCurrent.from_entity_id).where(GraphRelationCurrent.run_id == run_id)
+                select(GraphRelationCurrent.from_entity_id).where(
+                    GraphRelationCurrent.run_id == run_id,
+                    GraphRelationCurrent.from_entity_id.in_(valid_entity_ids),
+                    GraphRelationCurrent.to_entity_id.in_(valid_entity_ids),
+                )
             ).scalars()
-            if entity_id is not None and int(entity_id) in valid_entity_ids
+            if entity_id is not None
         } | {
             int(entity_id)
             for entity_id in self.session.execute(
-                select(GraphRelationCurrent.to_entity_id).where(GraphRelationCurrent.run_id == run_id)
+                select(GraphRelationCurrent.to_entity_id).where(
+                    GraphRelationCurrent.run_id == run_id,
+                    GraphRelationCurrent.from_entity_id.in_(valid_entity_ids),
+                    GraphRelationCurrent.to_entity_id.in_(valid_entity_ids),
+                )
             ).scalars()
-            if entity_id is not None and int(entity_id) in valid_entity_ids
+            if entity_id is not None
         }
         return event_ids | current_ids
 

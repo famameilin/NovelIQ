@@ -664,6 +664,74 @@ def test_fetch_graph_events_page_rejects_missing_participant_projection(db_sessi
         _fetch_graph_events_page(run_id, annotation_repo)
 
 
+def test_fetch_graph_events_page_ignores_filtered_final_disambiguation_history(db_session) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: graph events consistency blocker 修复
+    说明: 只剩被 history 过滤掉的 synthetic final_disambiguation event 时，
+          `/graph/events` 增量分页应返回空页，而不是误报 stale participant projection。
+    """
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Events Synthetic History Filter",
+    )
+    run_repo.update_run_status(run_id, "completed")
+    insert_graph_test_chunks(db_session, run_id, range(1, 3))
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=2, last_seen_chunk=2)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺家", first_seen_chunk=2, last_seen_chunk=2)
+    source_relation = ChunkRelation(
+        chunk_id=2,
+        run_id=run_id,
+        from_char="阿顾",
+        to_char="贺家",
+        resolved_from_global_name="顾霜",
+        resolved_to_global_name="贺家",
+        type="belongs_to",
+        change="新建",
+        evidence="阿顾属于贺家",
+        confidence=0.91,
+        source_model="final_disambiguation",
+        projection_status="projected",
+    )
+    db_session.add(source_relation)
+    db_session.flush()
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="belongs_to",
+        change_type="新建",
+        chunk_id=2,
+        evidence="阿顾属于贺家",
+        confidence=0.91,
+        source_relation_row_id=source_relation.id,
+        directionality="directed",
+    )
+    db_session.commit()
+
+    annotation_repo = create_graph_annotation_repo(db_session)
+
+    page = _fetch_graph_events_page(run_id, annotation_repo)
+
+    assert page == {
+        "events": [],
+        "page_info": {
+            "limit": 200,
+            "returned_count": 0,
+            "total": 0,
+            "has_more": False,
+            "next_cursor": None,
+        },
+    }
+
+
 def test_get_graph_stale_participant_projection_returns_409(api_client, db_session) -> None:
     novel_id, _run_id, task_id = _create_stale_graph_run(db_session)
 
