@@ -32,32 +32,10 @@ describe("themeStore 持久化配置", () => {
     });
   });
 
-  it("迁移旧持久化数据时应清掉自动同步模式下残留的 seedColor", async () => {
-    const migrate = useThemeStore.persist.getOptions().migrate;
-    const migrated = await migrate?.({
-      seedColor: "#123456",
-      isDark: true,
-      autoSyncEnabled: true,
-    }, 1);
+  it("latest-only 配置下应只保留默认版本值且不再声明 migrate 兼容逻辑", () => {
+    const options = useThemeStore.persist.getOptions();
 
-    expect(migrated).toEqual({
-      isDark: true,
-      autoSyncEnabled: true,
-    });
-  });
-
-  it("迁移旧持久化数据时应把旧的自动同步关闭状态恢复为默认开启", async () => {
-    const migrate = useThemeStore.persist.getOptions().migrate;
-    const migrated = await migrate?.({
-      seedColor: "#123456",
-      isDark: false,
-      autoSyncEnabled: false,
-    }, 1);
-
-    expect(migrated).toEqual({
-      seedColor: "#123456",
-      isDark: false,
-      autoSyncEnabled: true,
-    });
+    expect(options.version).toBe(0);
+    expect(options.migrate).toBeUndefined();
   });
 });

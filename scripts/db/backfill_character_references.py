@@ -16,7 +16,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.local.character_reference_policy import (
-    REFERENCE_CONTRACT_VERSION,
     filter_global_character_names,
     is_global_character_surface_name,
     is_reference_surface_name,
@@ -31,9 +30,6 @@ from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.annotation.characters import apply_reference_resolutions_to_history
 from src.storage.repositories import GraphRepository
 from src.workflows.annotate_helpers.graph_projection import project_graph_tables
-
-OUTDATED_REFERENCE_CONTRACT_VERSION = 0
-
 
 @dataclass
 class RunBackfillReport:
@@ -148,9 +144,9 @@ def _rewrite_review_status(
 
 def _rewrite_checkpoint_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 将旧 checkpoint 中的代词 canonical/alias 拆到 unresolved_references/reference_resolutions。
+    修改时间: 2026-04-30
+    任务: 清理 checkpoint version 残留并保持 latest-only
+    修改原因: 回填脚本仍会把历史 version 字段写回 checkpoint，这会让 latest-only 合同继续残留旧形状。
     """
     discovered_names = {
         str(name).strip()
@@ -205,7 +201,7 @@ def _rewrite_checkpoint_payload(payload: dict[str, Any]) -> tuple[dict[str, Any]
     )
 
     rewritten = dict(payload)
-    rewritten["version"] = 3
+    rewritten.pop("version", None)
     rewritten["known_canonical_names"] = sorted(filter_global_character_names(known_canonical_names))
     rewritten["alias_merges"] = alias_merges
     rewritten["unresolved_references"] = sorted(unresolved_references)
@@ -270,14 +266,15 @@ def _json_contains_reference_names(raw_json: str | None) -> bool:
 
 def _mark_polluted_diagnosis(session: Session, run_id: str, *, apply: bool) -> int:
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 受旧 reference 合同污染的 diagnosis 必须显式过期，由用户重跑云端诊断。
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: latest-only 之后不再依赖 reference_contract_version 标记旧 diagnosis；
+              如果 diagnosis 仍包含未解析引用，就直接删除该行，让读侧按“缺失 diagnosis”处理。
     """
     rows = session.execute(select(CloudAnalysis).where(CloudAnalysis.run_id == run_id)).scalars().all()
     marked = 0
     for row in rows:
-        polluted = row.reference_contract_version != REFERENCE_CONTRACT_VERSION or any(
+        polluted = any(
             _json_contains_reference_names(raw_value)
             for raw_value in (row.arc_scores, row.focus_characters, row.main_characters, row.core_cast)
         )
@@ -285,7 +282,7 @@ def _mark_polluted_diagnosis(session: Session, run_id: str, *, apply: bool) -> i
             continue
         marked += 1
         if apply:
-            row.reference_contract_version = OUTDATED_REFERENCE_CONTRACT_VERSION
+            session.delete(row)
     return marked
 
 
