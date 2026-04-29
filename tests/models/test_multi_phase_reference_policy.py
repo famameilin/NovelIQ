@@ -1,8 +1,12 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.models.local.annotation.multi_phase import _resolve_known_characters
-from src.models.local.annotation.multi_phase import _MultiPhaseExecutionContext, _resolve_phase4_bundle
+from src.models.local.annotation.multi_phase import (
+    _MultiPhaseExecutionContext,
+    _resolve_known_characters,
+    _resolve_phase4_bundle,
+    _run_phase4_from_context,
+)
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
 from src.rag import EvidenceBundle, EvidenceRequest
 
@@ -97,7 +101,7 @@ async def test_resolve_phase4_bundle_keeps_global_names_and_reference_slots_sepa
             top_k=5,
             max_queries=3,
             model_rerank_query_max_chars=400,
-            reference_slots=["POV_SLOT_C3_我"],
+            reference_slots=["LOCAL_REF_C3_她"],
         ),
         evidence_service=_DummyEvidenceService(),
     )
@@ -110,7 +114,64 @@ async def test_resolve_phase4_bundle_keeps_global_names_and_reference_slots_sepa
 
     assert captured["request"].requested_names == ["汪淼"]
     assert captured["request"].seed_entities == ["汪淼"]
-    assert captured["request"].reference_slots == ["POV_SLOT_C3_我"]
+    assert captured["request"].reference_slots == ["LOCAL_REF_C3_她", "POV_SLOT_C3_我"]
     assert bundle is not None
     assert bundle.requested_names == ["汪淼"]
-    assert bundle.reference_slots == ["POV_SLOT_C3_我"]
+    assert bundle.reference_slots == ["LOCAL_REF_C3_她", "POV_SLOT_C3_我"]
+
+
+@pytest.mark.asyncio
+async def test_run_phase4_from_context_keeps_template_reference_slots_when_phase1_slots_empty() -> None:
+    """
+    创建时间: 2026-04-29
+    任务: Phase4 / RAG reference_slots 合同
+    新建原因: Phase1 没产出 slot 时，Phase4 仍必须保留 template 里按文本预提的局部引用位。
+    """
+    captured: dict[str, EvidenceRequest] = {}
+
+    class _DummyEvidenceService:
+        async def collect(self, request: EvidenceRequest) -> EvidenceBundle:
+            captured["request"] = request
+            return EvidenceBundle(
+                requested_names=list(request.requested_names),
+                reference_slots=list(request.reference_slots),
+            )
+
+    context = _MultiPhaseExecutionContext(
+        client=MagicMock(),
+        text="我看着她。",
+        chunk_id=3,
+        phase4_request_template=EvidenceRequest(
+            consumer="annotation_phase4",
+            objective="relation",
+            query_text="我看着她。",
+            requested_names=["我", "汪淼"],
+            seed_entities=["我", "汪淼"],
+            background_entities=[],
+            current_chunk=3,
+            max_chunk_id=2,
+            exclude_chunk_ids=[3],
+            need_level1=True,
+            need_level2=True,
+            need_level3=False,
+            allow_llm_query_expansion=False,
+            top_k=5,
+            max_queries=3,
+            model_rerank_query_max_chars=400,
+            reference_slots=["POV_SLOT_C3_我", "LOCAL_REF_C3_她"],
+        ),
+        evidence_service=_DummyEvidenceService(),
+    )
+
+    with patch(
+        "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+        new=AsyncMock(return_value=[]),
+    ) as mock_phase4:
+        await _run_phase4_from_context(
+            context,
+            known_characters=["汪淼"],
+            reference_slots=[],
+        )
+
+    assert captured["request"].reference_slots == ["POV_SLOT_C3_我", "LOCAL_REF_C3_她"]
+    assert mock_phase4.await_args.kwargs["reference_slots"] == ["POV_SLOT_C3_我", "LOCAL_REF_C3_她"]

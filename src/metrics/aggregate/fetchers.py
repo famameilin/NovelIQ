@@ -11,6 +11,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.models.local.character_reference_policy import decide_character_reference
 
 from .types import (
     AnnotationData,
@@ -68,6 +69,25 @@ def _canonicalize_aggregate_character_name(name: str, alias_lookup: dict[str, st
     """将 chunk 侧角色名折叠到 authority 规范名"""
 
     return alias_lookup.get(name, name)
+
+
+def _resolve_aggregate_character_name(
+    *,
+    surface_name: str | None,
+    resolved_global_name: str | None,
+    alias_lookup: dict[str, str],
+) -> str | None:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: aggregate 指标只能消费已准入的全局角色，不能把未解析代词重新混回情绪统计。
+    """
+    decision = decide_character_reference(
+        surface_name,
+        alias_map=alias_lookup,
+        resolved_global_name=resolved_global_name,
+    )
+    return decision.resolved_global_name
 
 
 def fetch_annotation_data(
@@ -133,8 +153,14 @@ def fetch_character_data(
     rows = annotation_repo.fetch_characters_with_scores(run_id)
     emotion_map: dict[str, int] = {}
     for row in rows:
-        name, _, emotion_score_raw = row
-        canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
+        canonical_name = _resolve_aggregate_character_name(
+            surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
+            resolved_global_name=getattr(row, "resolved_global_name", None),
+            alias_lookup=alias_lookup,
+        )
+        if canonical_name is None:
+            continue
+        emotion_score_raw = getattr(row, "emotion_score", None)
         emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
 
     # 3. 构建角色列表（使用 Level1 canonical entity 作为完整角色种子）
@@ -146,11 +172,17 @@ def fetch_character_data(
     # 4. 构建情感序列（仍从 chunk_characters 获取）
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
     char_emotion_map: dict[str, list[float]] = {}
-    for name, score_raw in char_emotion_rows:
-        canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
+    for row in char_emotion_rows:
+        canonical_name = _resolve_aggregate_character_name(
+            surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
+            resolved_global_name=getattr(row, "resolved_global_name", None),
+            alias_lookup=alias_lookup,
+        )
+        if canonical_name is None:
+            continue
         if canonical_name not in char_emotion_map:
             char_emotion_map[canonical_name] = []
-        score = float(map_emotion_score(score_raw))
+        score = float(map_emotion_score(getattr(row, "emotion_score", None)))
         char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 

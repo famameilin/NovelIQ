@@ -738,9 +738,25 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         修改时间: 2026-04-29
         任务: 角色引用分层重构
-        修改原因: relation event 计数必须与过滤后的 authority 事件列表一致，旧 pronoun 端点不计入分页总数。
+        修改原因: relation event 计数必须与过滤后的 authority 事件列表一致，并且要在 SQL 层先排除旧 pronoun 端点，
+                 避免 `/graph/events` 先切分页再过滤时出现空页但 cursor 不前进。
         """
-        return len(self.fetch_relation_events(run_id))
+        entity_names = {
+            row.entity_id: row.canonical_name
+            for row in self.session.execute(
+                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
+            ).fetchall()
+            if is_global_character_surface_name(row.canonical_name)
+        }
+        if not entity_names:
+            return 0
+
+        valid_entity_ids = tuple(sorted(entity_names))
+        stmt = self._relation_history_stmt(run_id).where(
+            GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
+            GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
+        )
+        return int(self.session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0)
 
     def fetch_relation_events(
         self,
@@ -751,7 +767,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         修改时间: 2026-04-29
         任务: 角色引用分层重构
-        修改原因: 关系事件读侧过滤含未解析代词端点的旧事件，authority/graph page 不能继续展示局部引用节点。
+        修改原因: 关系事件读侧必须先在 SQL 层排除含未解析代词端点的旧事件，
+                 否则 `/graph/events` 会先被脏行吃掉 offset/limit，再在 Python 层过滤出空页。
 
         查询关系事件历史
 
@@ -764,9 +781,17 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             ).fetchall()
             if is_global_character_surface_name(row.canonical_name)
         }
+        if not entity_names:
+            return []
+
+        valid_entity_ids = tuple(sorted(entity_names))
         stmt = self._relation_history_stmt(run_id).order_by(
             GraphRelationEvent.chunk_id.desc(),
             GraphRelationEvent.relation_event_id.desc(),
+        )
+        stmt = stmt.where(
+            GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
+            GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
         )
         if offset > 0:
             stmt = stmt.offset(offset)
@@ -789,7 +814,6 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 directionality=row.directionality,
             )
             for row in rows
-            if row.from_entity_id in entity_names and row.to_entity_id in entity_names
         ]
 
     def fetch_low_confidence_relation_events(

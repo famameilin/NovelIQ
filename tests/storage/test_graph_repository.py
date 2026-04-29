@@ -455,3 +455,77 @@ class TestRelationHistoryFiltering:
         assert history_count == 0
         assert graph_repo.count_relation_events(run_id) == 0
         assert graph_repo.fetch_relation_events(run_id) == []
+
+    def test_relation_event_pagination_skips_filtered_pronoun_rows_before_offset_limit(self, db_session) -> None:
+        """
+        创建时间: 2026-04-29
+        任务: graph events pagination filter order fix
+        说明: 旧 pronoun 端点事件即便还留在 graph_relation_events，也不能先吃掉 offset/limit，
+              否则第一页会返回空列表但分页总数仍大于 0。
+        """
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Relation Event Pagination Filter",
+        )
+        ChunkRepository(db_session).insert_chunks(
+            run_id,
+            [
+                Chunk(index=8, text="测试8", start=800, end=900),
+                Chunk(index=9, text="测试9", start=900, end=1000),
+                Chunk(index=10, text="测试10", start=1000, end=1100),
+            ],
+        )
+
+        graph_repo = GraphRepository(db_session)
+        stale = graph_repo.upsert_entity(run_id=run_id, canonical_name="我", first_seen_chunk=10, last_seen_chunk=10)
+        hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="沈砚", first_seen_chunk=8, last_seen_chunk=10)
+        ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="陆明", first_seen_chunk=8, last_seen_chunk=10)
+        rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="秦昭", first_seen_chunk=8, last_seen_chunk=9)
+
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=stale.entity_id,
+            to_entity_id=hero.entity_id,
+            relation_type="盟友",
+            change_type="新建",
+            chunk_id=10,
+            evidence="旧代词脏边",
+            confidence=0.4,
+            source_relation_row_id=5101,
+            directionality="directed",
+        )
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="盟友",
+            change_type="强化",
+            chunk_id=9,
+            evidence="有效事件1",
+            confidence=0.91,
+            source_relation_row_id=5102,
+            directionality="directed",
+        )
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=rival.entity_id,
+            relation_type="敌对",
+            change_type="新建",
+            chunk_id=8,
+            evidence="有效事件2",
+            confidence=0.86,
+            source_relation_row_id=5103,
+            directionality="directed",
+        )
+        db_session.commit()
+
+        first_page = graph_repo.fetch_relation_events(run_id, limit=1, offset=0)
+        second_page = graph_repo.fetch_relation_events(run_id, limit=1, offset=1)
+
+        assert graph_repo.count_relation_events(run_id) == 2
+        assert [(event.chunk_id, event.from_name, event.to_name) for event in first_page] == [(9, "沈砚", "陆明")]
+        assert [(event.chunk_id, event.from_name, event.to_name) for event in second_page] == [(8, "沈砚", "秦昭")]
