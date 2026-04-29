@@ -10,12 +10,14 @@ from src.api.routes.results_fetchers import (
     _fetch_chunk_annotations,
     _fetch_chunk_curves,
     _fetch_diagnosis,
+    _fetch_foreshadowing_threads,
     _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
+from src.storage.repositories.annotation.foreshadowing_threads import ForeshadowingThreadView
 
 
 class _DummyRow:
@@ -223,6 +225,36 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     assert result.main_characters == ["\u4faf\u98de\u767d"]
     assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
     assert result.foreshadow_expectation == 0.3
+
+
+def test_fetch_foreshadowing_threads_preserves_confidence_field():
+    class DummyRepo:
+        def fetch_foreshadowing_threads(self, run_id):
+            assert run_id == "run-1"
+            return [
+                ForeshadowingThreadView(
+                    setup_id="setup-1",
+                    first_chunk_id=2,
+                    last_chunk_id=5,
+                    anchor_chunk_ids=[2, 5],
+                    setup_summary="黑伞只在雨夜自行张开",
+                    setup_kind="异常物件",
+                    expected_payoff_family="规则兑现",
+                    payoff_likelihood="high",
+                    confidence="medium",
+                    strength="medium",
+                    status="reinforced",
+                    active=True,
+                    latest_reason="具体钩子：黑伞在雨夜自行张开。未闭合原因：当前还没有解释它为何会自己张开。",
+                    latest_why_unresolved_now="当前还没有解释它为何会自己张开。",
+                )
+            ]
+
+    rows = _fetch_foreshadowing_threads("run-1", DummyRepo())
+
+    assert len(rows) == 1
+    assert rows[0].setup_id == "setup-1"
+    assert rows[0].confidence == "medium"
 
 
 def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():

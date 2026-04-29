@@ -8,6 +8,7 @@ from sqlalchemy import text
 from src.knowledge.authority import GraphAuthorityReport, GraphAuthorityView, GraphQualitySignals, GraphSharedSummary
 from src.models.cloud import build_diagnosis_payload
 from src.storage.models import Novel
+from src.storage.repositories.annotation.foreshadowing_threads import ForeshadowingThreadView
 
 
 def test_diagnosis_prompt_does_not_require_foreshadow_expectation_output() -> None:
@@ -145,6 +146,88 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
     assert payload["foreshadowing_threads"] == []
     assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 1}
+
+
+def test_build_diagnosis_payload_preserves_thread_confidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: fix-phase2-medium-confidence-thread-semantics
+    新建原因: diagnosis payload 会把 foreshadowing_threads 继续透传给下游消费者；
+              thread confidence 必须保留下来，避免 medium thread 在展示层再次和 high 混同。
+    """
+
+    class FakeDiagnosisRepository:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def fetch_pivot_blocks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_pivot_moments(self, *_args, **_kwargs):
+            return []
+
+        def fetch_high_tension_chunks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_relation_changes(self, *_args, **_kwargs):
+            return []
+
+        def fetch_foreshadowing_threads(self, *_args, **_kwargs):
+            return [
+                ForeshadowingThreadView(
+                    setup_id="setup-1",
+                    first_chunk_id=3,
+                    last_chunk_id=3,
+                    anchor_chunk_ids=[3],
+                    setup_summary="雨夜铜铃自行作响",
+                    setup_kind="异常物件",
+                    expected_payoff_family="规则兑现",
+                    payoff_likelihood="high",
+                    confidence="medium",
+                    strength="medium",
+                    status="open",
+                    active=True,
+                    latest_reason="具体钩子：铜铃在雨夜自行作响。未闭合原因：当前还没有解释它为何会自己作响。",
+                    latest_why_unresolved_now="当前还没有解释它为何会自己作响。",
+                )
+            ]
+
+        def calculate_foreshadow_expectation(self, *_args, **_kwargs):
+            return 0.55
+
+        def fetch_stage_summaries(self, *_args, **_kwargs):
+            return []
+
+        def fetch_topic_words(self, *_args, **_kwargs):
+            return []
+
+        def fetch_character_disambig_data(self, *_args, **_kwargs):
+            return (["白芷"], {"蒙面人": "白芷"})
+
+    class FakeAuthorityService:
+        def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+            assert run_id == "run-thread-confidence"
+            return GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=1, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            )
+
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("diagnosis should not depend on full GraphAuthorityView")
+
+    monkeypatch.setattr("src.models.cloud.payload.DiagnosisRepository", FakeDiagnosisRepository)
+    monkeypatch.setattr("src.models.cloud.payload._get_total_topic_count", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        "src.models.cloud.payload.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    payload = build_diagnosis_payload(SimpleNamespace(), novel_id="novel-1", run_id="run-thread-confidence")
+
+    assert payload["foreshadow_expectation"] == 0.55
+    assert payload["foreshadowing_threads"][0]["setup_id"] == "setup-1"
+    assert payload["foreshadowing_threads"][0]["confidence"] == "medium"
+    assert payload["foreshadowing_threads"][0]["strength"] == "medium"
 
 
 def test_build_diagnosis_payload_rejects_full_graph_view_from_shared_signal_entry(

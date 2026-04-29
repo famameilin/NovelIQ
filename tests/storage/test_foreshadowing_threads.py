@@ -49,6 +49,7 @@ def _make_thread(
     chunk_id: int,
     summary: str,
     payoff_likelihood: str = "high",
+    confidence: str = "high",
     strength: str = "medium",
     status: str = "open",
 ) -> ForeshadowingThread:
@@ -75,6 +76,7 @@ def _make_thread(
         setup_kind="异常物件",
         expected_payoff_family="能力触发",
         payoff_likelihood=payoff_likelihood,
+        confidence=confidence,
         strength=strength,
         status=status,
         active=True,
@@ -274,6 +276,53 @@ def test_calculate_foreshadow_expectation_distinguishes_open_and_reinforced_high
     assert open_score == 0.58
     assert reinforced_score == 0.72
     assert open_score < reinforced_score
+
+
+def test_calculate_foreshadow_expectation_distinguishes_high_and_medium_confidence_open_threads(
+    db_session,
+    insert_test_novel,
+) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: fix-phase2-medium-confidence-thread-semantics
+    新建原因: medium confidence 入池后仍需在 ledger 预期里保留“尚不够稳”的差异，
+              不能和同 payoff/status/hit_count 的 high thread 完全同分。
+    """
+
+    high_run_id = _create_run(db_session, insert_test_novel, "fst014")
+    medium_run_id = _create_run(db_session, insert_test_novel, "fst015")
+    db_session.add(
+        _make_thread(
+            run_id=high_run_id,
+            setup_id="open-high-confidence",
+            chunk_id=1,
+            summary="high confidence setup",
+            confidence="high",
+            strength="high",
+            status="open",
+        )
+    )
+    _add_thread_hits(db_session, run_id=high_run_id, setup_id="open-high-confidence", chunk_ids=[1])
+    db_session.add(
+        _make_thread(
+            run_id=medium_run_id,
+            setup_id="open-medium-confidence",
+            chunk_id=1,
+            summary="medium confidence setup",
+            confidence="medium",
+            strength="medium",
+            status="open",
+        )
+    )
+    _add_thread_hits(db_session, run_id=medium_run_id, setup_id="open-medium-confidence", chunk_ids=[1])
+    db_session.commit()
+
+    high_score = calculate_foreshadow_expectation(db_session, high_run_id)
+    medium_score = calculate_foreshadow_expectation(db_session, medium_run_id)
+
+    assert high_score == 0.58
+    assert medium_score == 0.55
+    assert medium_score < high_score
 
 
 def test_calculate_foreshadow_expectation_medium_thread_lowers_distribution(
@@ -493,6 +542,87 @@ def test_sync_foreshadowing_thread_rejects_linked_setup_payload_mismatch(db_sess
             chunk_id=6,
             result=result,
         )
+
+
+def test_sync_foreshadowing_thread_persists_medium_confidence_and_keeps_new_thread_weaker(
+    db_session,
+    insert_test_novel,
+) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: fix-phase2-medium-confidence-thread-semantics
+    新建原因: medium positive 现在允许入池，但第一次入 ledger 时必须显式保留 medium
+              并避免与 high payoff 新 thread 直接同强度。
+    """
+
+    run_id = _create_run(db_session, insert_test_novel, "fst016")
+    db_session.add(
+        Chunk(
+            chunk_id=1,
+            run_id=run_id,
+            text="那枚玉佩在夜里自行发热。",
+        )
+    )
+    db_session.commit()
+    result = ForeshadowingResult(
+        has_foreshadowing=True,
+        is_strong_setup=True,
+        foreshadowing_type="物件",
+        setup_kind="异常物件",
+        anchor_text="那枚玉佩在夜里自行发热。",
+        anchor_reason="具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+        setup_summary="玉佩在夜里自行发热",
+        why_unresolved_now="当前还没有解释它为何会发热。",
+        expected_payoff_family="能力触发",
+        payoff_likelihood="high",
+        is_new_setup=True,
+        linked_setup_id=None,
+        setup_status="open",
+        confidence="medium",
+    )
+
+    projection = sync_foreshadowing_thread(
+        db_session,
+        run_id=run_id,
+        chunk_id=1,
+        result=result,
+    )
+
+    stored = db_session.get(ForeshadowingThread, projection.setup_id)
+    assert stored is not None
+    assert stored.confidence == "medium"
+    assert stored.strength == "medium"
+
+
+def test_fetch_active_foreshadowing_threads_for_prompt_exposes_confidence(db_session, insert_test_novel) -> None:
+    """
+    创建时间: 2026-04-29
+    任务: fix-phase2-medium-confidence-thread-semantics
+    新建原因: Active_Setup_Pool 需要显式带出 thread confidence，避免后续 Phase2 把 medium
+              与 high setup 当成相同强度上下文。
+    """
+
+    run_id = _create_run(db_session, insert_test_novel, "fst017")
+    db_session.add(
+        _make_thread(
+            run_id=run_id,
+            setup_id="setup-medium-confidence",
+            chunk_id=3,
+            summary="中等置信度 setup",
+            confidence="medium",
+        )
+    )
+    db_session.commit()
+
+    visible_pool = fetch_active_foreshadowing_threads_for_prompt(
+        db_session,
+        run_id=run_id,
+        max_chunk_id=3,
+    )
+
+    assert len(visible_pool) == 1
+    assert visible_pool[0].setup_id == "setup-medium-confidence"
+    assert visible_pool[0].confidence == "medium"
 
 
 def test_annotation_repository_delegates_prompt_pool_limit_as_runtime_none(db_session) -> None:

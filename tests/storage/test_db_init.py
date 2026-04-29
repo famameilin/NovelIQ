@@ -80,8 +80,10 @@ def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> Non
     executed_sql = [str(call.args[0]) for call in fake_conn.execute.call_args_list]
 
     expected_foreshadow_sql = "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation"
+    expected_thread_confidence_sql = "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence"
 
     assert any(expected_foreshadow_sql in sql for sql in executed_sql)
+    assert any(expected_thread_confidence_sql in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist" in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters" in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast" in sql for sql in executed_sql)

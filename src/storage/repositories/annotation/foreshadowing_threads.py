@@ -25,6 +25,7 @@ from src.storage.models import ForeshadowingThread, ForeshadowingThreadHit
 
 ACTIVE_SETUP_POOL_LIMIT = settings.analysis.multi_phase_annotation.active_setup_pool_limit
 _VALID_PAYOFF_LIKELIHOODS = {"high", "medium"}
+_VALID_THREAD_CONFIDENCES = {"high", "medium"}
 _VALID_RUNTIME_SETUP_STATUSES = {"open", "reinforced", "likely_paid_off"}
 _EXPECTATION_BASE_SCORE_BY_PAYOFF = {
     "high": 0.62,
@@ -70,6 +71,7 @@ class ActiveSetupPoolEntry:
     setup_kind: str
     expected_payoff_family: str
     payoff_likelihood: str
+    confidence: str
     strength: str
     status: str
     last_chunk_id: int
@@ -107,6 +109,7 @@ class ForeshadowingThreadView:
     setup_kind: str
     expected_payoff_family: str
     payoff_likelihood: str
+    confidence: str
     strength: str
     status: str
     active: bool
@@ -135,9 +138,45 @@ def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def _normalize_thread_confidence(value: str | None) -> str:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：thread ledger 新增 confidence 后，旧库历史行和测试桩仍可能没有该列值；
+              这里统一把缺失值收口为 high，保持老数据的既有语义。
+    """
+
+    return value if value in _VALID_THREAD_CONFIDENCES else "high"
+
+
+def _require_result_confidence(result: ForeshadowingResult) -> str:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：medium/high 的差异现在需要进入 thread ledger；storage 层不能再默默丢掉
+              Phase2 已经明确给出的 confidence。
+    """
+
+    if result.confidence not in _VALID_THREAD_CONFIDENCES:
+        raise ValueError("positive foreshadowing result requires confidence to be high or medium")
+    return result.confidence
+
+
+def _merge_thread_confidence(*, prior_confidence: str | None, incoming_confidence: str) -> str:
+    """
+    2026-04-29，任务：伏笔回收预期 v2 口径修复
+    新建原因：thread 级 confidence 表示“这条 setup 目前被确认到的最高稳定置信度”；
+              一旦某次命中已经达到 high，不应再被后续较弱 hit 降回 medium。
+    """
+
+    normalized_prior = _normalize_thread_confidence(prior_confidence)
+    if normalized_prior == "high" or incoming_confidence == "high":
+        return "high"
+    return "medium"
+
+
 def _derive_thread_strength(
     *,
     payoff_likelihood: str,
+    confidence: str,
     status: str,
     hit_count: int,
     prior_strength: str | None = None,
@@ -145,14 +184,15 @@ def _derive_thread_strength(
     """
     计算 thread 强度
 
-    thread 强度不由模型直接输出，而是根据命中次数、当前状态和 payoff 预期在仓储层稳定推导
+    thread 强度不由模型直接输出，而是根据命中次数、当前状态、payoff 预期和
+    thread confidence 在仓储层稳定推导
     """
 
     if prior_strength == "high":
         return "high"
     if status == "likely_paid_off":
         return "high"
-    if payoff_likelihood == "high":
+    if payoff_likelihood == "high" and confidence == "high":
         return "high"
     if hit_count >= 2:
         return "high"
@@ -372,6 +412,7 @@ def fetch_active_foreshadowing_threads_for_prompt(
             setup_kind=row.setup_kind,
             expected_payoff_family=row.expected_payoff_family,
             payoff_likelihood=row.payoff_likelihood,
+            confidence=_normalize_thread_confidence(getattr(row, "confidence", None)),
             strength=row.strength,
             status=row.status,
             last_chunk_id=row.last_chunk_id,
@@ -401,6 +442,7 @@ def sync_foreshadowing_thread(
         raise ValueError("sync_foreshadowing_thread only accepts positive foreshadowing results")
 
     result_payoff_likelihood = _require_result_payoff_likelihood(result)
+    result_confidence = _require_result_confidence(result)
     result_setup_status = _require_result_setup_status(result)
     now = _utcnow_naive()
 
@@ -413,10 +455,16 @@ def sync_foreshadowing_thread(
         )
         if matched_thread is not None:
             hit_count = _count_thread_hits(session, matched_thread.setup_id) + 1
+            merged_confidence = _merge_thread_confidence(
+                prior_confidence=getattr(matched_thread, "confidence", None),
+                incoming_confidence=result_confidence,
+            )
             matched_thread.last_chunk_id = chunk_id
             matched_thread.payoff_likelihood = result_payoff_likelihood
+            matched_thread.confidence = merged_confidence
             matched_thread.strength = _derive_thread_strength(
                 payoff_likelihood=matched_thread.payoff_likelihood,
+                confidence=matched_thread.confidence,
                 status="reinforced",
                 hit_count=hit_count,
                 prior_strength=matched_thread.strength,
@@ -442,8 +490,10 @@ def sync_foreshadowing_thread(
             )
 
         setup_id = str(uuid4())
+        thread_confidence = result_confidence
         strength = _derive_thread_strength(
             payoff_likelihood=result_payoff_likelihood,
+            confidence=thread_confidence,
             status="open",
             hit_count=1,
         )
@@ -457,6 +507,7 @@ def sync_foreshadowing_thread(
                 setup_kind=result.setup_kind or "其他",
                 expected_payoff_family=result.expected_payoff_family,
                 payoff_likelihood=result_payoff_likelihood,
+                confidence=thread_confidence,
                 strength=strength,
                 status="open",
                 active=True,
@@ -493,10 +544,16 @@ def sync_foreshadowing_thread(
         raise ValueError(f"linked_setup_id payload does not match setup thread identity: {result.linked_setup_id}")
 
     hit_count = _count_thread_hits(session, thread.setup_id) + 1
+    thread_confidence = _merge_thread_confidence(
+        prior_confidence=getattr(thread, "confidence", None),
+        incoming_confidence=result_confidence,
+    )
     thread.last_chunk_id = chunk_id
     thread.payoff_likelihood = result_payoff_likelihood
+    thread.confidence = thread_confidence
     thread.strength = _derive_thread_strength(
         payoff_likelihood=thread.payoff_likelihood,
+        confidence=thread.confidence,
         status=result_setup_status,
         hit_count=hit_count,
         prior_strength=thread.strength,
@@ -674,6 +731,7 @@ def fetch_foreshadowing_threads(session, run_id: str) -> list[ForeshadowingThrea
                 setup_kind=thread.setup_kind,
                 expected_payoff_family=thread.expected_payoff_family,
                 payoff_likelihood=thread.payoff_likelihood,
+                confidence=_normalize_thread_confidence(getattr(thread, "confidence", None)),
                 strength=thread.strength,
                 status=thread.status,
                 active=bool(thread.active),

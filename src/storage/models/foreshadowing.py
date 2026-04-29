@@ -38,6 +38,7 @@ class ForeshadowingThread(Base):
     setup_kind: Mapped[str] = mapped_column(String(50), nullable=False)
     expected_payoff_family: Mapped[str] = mapped_column(String(100), nullable=False)
     payoff_likelihood: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="high")
     strength: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
