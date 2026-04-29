@@ -61,6 +61,7 @@ class EvidenceBundle:
     local_evidence: list[EvidenceItem] = field(default_factory=list)
     semantic_evidence: list[EvidenceItem] = field(default_factory=list)
     requested_names: list[str] = field(default_factory=list)
+    reference_slots: list[str] = field(default_factory=list)
     level1_snapshot: Level1AuthoritySnapshot | None = None
     request_meta: dict[str, Any] = field(default_factory=dict)
     generation_meta: dict[str, Any] = field(default_factory=dict)
@@ -81,6 +82,7 @@ class EvidenceBundle:
             local_evidence=list(self.local_evidence),
             semantic_evidence=list(self.semantic_evidence),
             requested_names=list(self.requested_names),
+            reference_slots=list(self.reference_slots),
             level1_snapshot=self.level1_snapshot,
             request_meta=dict(request_meta if request_meta is not None else self.request_meta),
             generation_meta=dict(generation_meta if generation_meta is not None else self.generation_meta),

@@ -12,13 +12,25 @@ class _DummyAnnotationRepo:
         self.session = object()
         self._pending = pending or []
         self._character_rows = character_rows or [
-            ("主角", "主体", "mild_positive"),
-            ("同伴", "助手", None),
+            SimpleNamespace(
+                name="主角",
+                surface_name="主角",
+                resolved_global_name="主角",
+                role_function="主体",
+                emotion_score="mild_positive",
+            ),
+            SimpleNamespace(
+                name="同伴",
+                surface_name="同伴",
+                resolved_global_name="同伴",
+                role_function="助手",
+                emotion_score=None,
+            ),
         ]
         self._emotion_rows = emotion_rows or [
-            ("主角", "mild_positive"),
-            ("主角", "mild_negative"),
-            ("同伴", "mild_positive"),
+            SimpleNamespace(surface_name="主角", resolved_global_name="主角", emotion_score="mild_positive"),
+            SimpleNamespace(surface_name="主角", resolved_global_name="主角", emotion_score="mild_negative"),
+            SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score="mild_positive"),
         ]
 
     def fetch_pending_chunk_relations(self, run_id, to_chunk=None, limit=200):
@@ -74,13 +86,25 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
 def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
     annotation_repo = _DummyAnnotationRepo(
         character_rows=[
-            ("灰衣人", "主体", "mild_positive"),
-            ("同伴", "助手", None),
+            SimpleNamespace(
+                name="灰衣人",
+                surface_name="灰衣人",
+                resolved_global_name=None,
+                role_function="主体",
+                emotion_score="mild_positive",
+            ),
+            SimpleNamespace(
+                name="同伴",
+                surface_name="同伴",
+                resolved_global_name="同伴",
+                role_function="助手",
+                emotion_score=None,
+            ),
         ],
         emotion_rows=[
-            ("灰衣人", "mild_positive"),
-            ("灰衣人", "mild_negative"),
-            ("同伴", "mild_positive"),
+            SimpleNamespace(surface_name="灰衣人", resolved_global_name=None, emotion_score="mild_positive"),
+            SimpleNamespace(surface_name="灰衣人", resolved_global_name=None, emotion_score="mild_negative"),
+            SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score="mild_positive"),
         ],
     )
     mock_service = MagicMock()
@@ -115,6 +139,47 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
         ("同伴", [1.0]),
     ]
     mock_service.build_graph_view.assert_not_called()
+
+
+def test_fetch_character_data_skips_unresolved_reference_rows() -> None:
+    annotation_repo = _DummyAnnotationRepo(
+        character_rows=[
+            SimpleNamespace(
+                name="我",
+                surface_name="我",
+                resolved_global_name=None,
+                role_function="主体",
+                emotion_score="mild_positive",
+            ),
+            SimpleNamespace(
+                name="汪淼",
+                surface_name="汪淼",
+                resolved_global_name="汪淼",
+                role_function="主体",
+                emotion_score="mild_negative",
+            ),
+        ],
+        emotion_rows=[
+            SimpleNamespace(surface_name="我", resolved_global_name=None, emotion_score="mild_positive"),
+            SimpleNamespace(surface_name="汪淼", resolved_global_name="汪淼", emotion_score="mild_negative"),
+        ],
+    )
+    mock_service = MagicMock()
+    mock_service.build_level1_snapshot.return_value = SimpleNamespace(
+        alias_mappings=[],
+        canonical_entities=[
+            SimpleNamespace(name="汪淼", entity_type="character", status="active", primary_role_function="主体"),
+        ],
+    )
+
+    with patch(
+        "src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=mock_service,
+    ):
+        data = fetch_character_data(annotation_repo, "run-pronoun")
+
+    assert data.characters == [("汪淼", "主体", -1)]
+    assert data.char_emotion_scores == [("汪淼", [-1.0])]
 
 
 def test_fetch_relation_data_raises_when_pending_exists_and_graph_empty():

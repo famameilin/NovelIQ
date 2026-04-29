@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
+from src.models.local.character_reference_policy import is_global_character_surface_name, is_reference_surface_name
 from src.storage.models import (
     ChunkRelation,
     GraphEntity,
@@ -133,6 +134,10 @@ class GraphRepository(BaseRepository["GraphRepository"]):
 
     def _relation_history_stmt(self, run_id: str):
         """
+        修改时间: 2026-04-29
+        任务: graph history 过滤回归
+        修改原因: `source_model IS NULL` 的普通 ChunkRelation 仍然是有效 history，不能被 `NOT IN` 的三值逻辑误伤。
+
         2026-04-27，任务：graph final-disambiguation history semantics fixes
         终消歧补关系需要影响 current relation，但不能伪造成 chunk 级历史事件；
         因此 graph history surface 要排除特定 source_model 的 synthetic relation rows
@@ -150,7 +155,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             .where(
                 or_(
                     ChunkRelation.id.is_(None),
-                    ~ChunkRelation.source_model.in_(self._EXCLUDED_HISTORY_SOURCE_MODELS),
+                    ChunkRelation.source_model.is_(None),
+                    ChunkRelation.source_model.not_in(self._EXCLUDED_HISTORY_SOURCE_MODELS),
                 )
             )
         )
@@ -545,14 +551,28 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         self.session.flush()
 
     def fetch_alias_map(self, run_id: str) -> dict[str, str]:
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: graph_aliases 读取出口过滤历史代词 alias，避免“我 -> 汪淼”被误当全局别名复用。
+        """
         rows = self.session.execute(
             select(GraphEntityAlias.alias, GraphEntity.canonical_name)
             .join(GraphEntity, GraphEntityAlias.entity_id == GraphEntity.entity_id)
             .where(GraphEntityAlias.run_id == run_id)
         ).fetchall()
-        alias_pairs: list[tuple[str, str]] = [(row.alias, row.canonical_name) for row in rows]
+        alias_pairs: list[tuple[str, str]] = [
+            (row.alias, row.canonical_name)
+            for row in rows
+            if not is_reference_surface_name(row.alias) and is_global_character_surface_name(row.canonical_name)
+        ]
         alias_map: dict[str, str] = dict(alias_pairs)
-        for canonical in list(alias_map.values()):
+        canonical_names = {
+            row.canonical_name
+            for row in rows
+            if is_global_character_surface_name(row.canonical_name)
+        }
+        for canonical in canonical_names | set(alias_map.values()):
             alias_map.setdefault(canonical, canonical)
         return alias_map
 
@@ -563,6 +583,10 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         run_id: str | None = None,
     ) -> list[ActiveEntityRow]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: active_entities 是 prompt/authority 入口，必须防御性过滤未解析代词节点。
+
         查询近期活跃实体
 
         返回 ActiveEntityRow DTO，替代 raw dict[str, Any]
@@ -598,6 +622,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 chunk_id=row.last_seen_chunk,
             )
             for row in rows
+            if is_global_character_surface_name(row.canonical_name)
         ]
 
     def fetch_current_relations(
@@ -606,6 +631,10 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         active_only: bool = True,
     ) -> list[CurrentRelationRow]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 当前关系快照读取时过滤含未解析代词端点的旧图谱边，避免 authority view 误报为缺参与者。
+
         查询当前关系快照
 
         返回 CurrentRelationRow DTO，替代 raw dict[str, Any]
@@ -620,10 +649,13 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             for row in self.session.execute(
                 select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
             ).fetchall()
+            if is_global_character_surface_name(row.canonical_name)
         }
 
         result: list[CurrentRelationRow] = []
         for current in current_rows:
+            if current.from_entity_id not in entity_names or current.to_entity_id not in entity_names:
+                continue
             result.append(
                 CurrentRelationRow(
                     relation_id=current.relation_id,
@@ -662,43 +694,81 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         )
 
     def fetch_relation_endpoint_entity_ids(self, run_id: str) -> set[int]:
-        """返回关系历史和当前关系中涉及到的全部实体 ID"""
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: participant 一致性检查只统计 global-character 准入后的端点，且 history 端点必须复用
+                 `_relation_history_stmt()` 的过滤语义，避免已被隐藏的 synthetic history 继续误伤 `/graph/events`。
+        """
+        entity_names = {
+            row.entity_id: row.canonical_name
+            for row in self.session.execute(
+                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
+            ).fetchall()
+            if is_global_character_surface_name(row.canonical_name)
+        }
+        if not entity_names:
+            return set()
+
+        valid_entity_ids = tuple(sorted(entity_names))
+        history_rows = self.session.execute(
+            self._relation_history_stmt(run_id).where(
+                GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
+                GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
+            )
+        ).scalars().all()
         event_ids = {
             int(entity_id)
-            for entity_id in self.session.execute(
-                select(GraphRelationEvent.from_entity_id).where(GraphRelationEvent.run_id == run_id)
-            ).scalars()
-            if entity_id is not None
-        } | {
-            int(entity_id)
-            for entity_id in self.session.execute(
-                select(GraphRelationEvent.to_entity_id).where(GraphRelationEvent.run_id == run_id)
-            ).scalars()
+            for row in history_rows
+            for entity_id in (row.from_entity_id, row.to_entity_id)
             if entity_id is not None
         }
         current_ids = {
             int(entity_id)
             for entity_id in self.session.execute(
-                select(GraphRelationCurrent.from_entity_id).where(GraphRelationCurrent.run_id == run_id)
+                select(GraphRelationCurrent.from_entity_id).where(
+                    GraphRelationCurrent.run_id == run_id,
+                    GraphRelationCurrent.from_entity_id.in_(valid_entity_ids),
+                    GraphRelationCurrent.to_entity_id.in_(valid_entity_ids),
+                )
             ).scalars()
             if entity_id is not None
         } | {
             int(entity_id)
             for entity_id in self.session.execute(
-                select(GraphRelationCurrent.to_entity_id).where(GraphRelationCurrent.run_id == run_id)
+                select(GraphRelationCurrent.to_entity_id).where(
+                    GraphRelationCurrent.run_id == run_id,
+                    GraphRelationCurrent.from_entity_id.in_(valid_entity_ids),
+                    GraphRelationCurrent.to_entity_id.in_(valid_entity_ids),
+                )
             ).scalars()
             if entity_id is not None
         }
         return event_ids | current_ids
 
     def count_relation_events(self, run_id: str) -> int:
-        """返回指定运行的关系事件总数"""
-        return int(
-            self.session.execute(
-                select(func.count()).select_from(self._relation_history_stmt(run_id).subquery())
-            ).scalar()
-            or 0
+        """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: relation event 计数必须与过滤后的 authority 事件列表一致，并且要在 SQL 层先排除旧 pronoun 端点，
+                 避免 `/graph/events` 先切分页再过滤时出现空页但 cursor 不前进。
+        """
+        entity_names = {
+            row.entity_id: row.canonical_name
+            for row in self.session.execute(
+                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
+            ).fetchall()
+            if is_global_character_surface_name(row.canonical_name)
+        }
+        if not entity_names:
+            return 0
+
+        valid_entity_ids = tuple(sorted(entity_names))
+        stmt = self._relation_history_stmt(run_id).where(
+            GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
+            GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
         )
+        return int(self.session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0)
 
     def fetch_relation_events(
         self,
@@ -707,6 +777,11 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         offset: int = 0,
     ) -> list[RelationEventRow]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: 关系事件读侧必须先在 SQL 层排除含未解析代词端点的旧事件，
+                 否则 `/graph/events` 会先被脏行吃掉 offset/limit，再在 Python 层过滤出空页。
+
         查询关系事件历史
 
         返回 RelationEventRow DTO，替代 raw dict[str, Any]
@@ -716,10 +791,19 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             for row in self.session.execute(
                 select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
             ).fetchall()
+            if is_global_character_surface_name(row.canonical_name)
         }
+        if not entity_names:
+            return []
+
+        valid_entity_ids = tuple(sorted(entity_names))
         stmt = self._relation_history_stmt(run_id).order_by(
             GraphRelationEvent.chunk_id.desc(),
             GraphRelationEvent.relation_event_id.desc(),
+        )
+        stmt = stmt.where(
+            GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
+            GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
         )
         if offset > 0:
             stmt = stmt.offset(offset)
@@ -810,6 +894,10 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         status: str | None = None,
     ) -> list[GraphEntity]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: authority view 的实体入口需要过滤未解析代词节点，防止旧投影残留污染读侧。
+
         获取指定运行的图谱实体（ORM 对象）
 
         新增 status 参数支持按状态过滤
@@ -827,7 +915,11 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             stmt = stmt.where(GraphEntity.entity_type == entity_type)
         if status is not None:
             stmt = stmt.where(GraphEntity.status == status)
-        return list(self.session.execute(stmt).scalars().all())
+        return [
+            entity
+            for entity in self.session.execute(stmt).scalars().all()
+            if is_global_character_surface_name(entity.canonical_name)
+        ]
 
     def fetch_participant_entities(
         self,
@@ -836,6 +928,10 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         status: str | None = None,
     ) -> list[ParticipantEntityRow]:
         """
+        修改时间: 2026-04-29
+        任务: 角色引用分层重构
+        修改原因: participant authority surface 只允许已准入的全局角色或实体，旧 pronoun 节点必须被读侧挡住。
+
         2026-04-26，任务：图谱参与者层落地
         最终人物图谱、graph authority report 等 consumer
         需要稳定读取“有关系资格”的参与者集合，而不是全量人物
@@ -873,6 +969,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 latest_relation_event_id=participant.latest_relation_event_id,
             )
             for participant, entity in rows
+            if is_global_character_surface_name(entity.canonical_name)
         ]
 
     def fetch_relation_event_models(self, run_id: str) -> list[GraphRelationEvent]:

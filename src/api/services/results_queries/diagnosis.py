@@ -12,6 +12,7 @@ from loguru import logger
 
 from src.api.models.responses import DiagnosisResult
 from src.models.cloud.schema import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
+from src.models.local.character_reference_policy import REFERENCE_CONTRACT_VERSION, filter_global_character_names
 from src.storage.repositories import AnnotationRepository, StatsRepository
 
 from .common import (
@@ -28,6 +29,10 @@ def _filter_character_list_against_arc_scores(
     arc_scores: dict[str, float] | None,
 ) -> list[str] | None:
     """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 过滤 arc_scores 时先排除未解析代词，避免旧 diagnosis 把局部引用当成焦点角色。
+
     说明: alias 归一化会把别名和规范名折叠到同一个角色名上；
     结果读取层必须在归一化后再次按 `arc_scores` 收口，避免焦点人物、
     主要人物、核心角色继续携带失效名称
@@ -37,7 +42,19 @@ def _filter_character_list_against_arc_scores(
     if not arc_scores:
         return []
     valid_names = set(arc_scores.keys())
-    return [name for name in values if name in valid_names]
+    return [name for name in filter_global_character_names(values) if name in valid_names]
+
+
+def _filter_global_arc_scores(arc_scores: dict[str, float] | None) -> dict[str, float] | None:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: diagnosis 读取层的 arc_scores 是角色合同源头，必须先剔除“我”等未解析局部引用。
+    """
+    if not arc_scores:
+        return None
+    filtered = {name: score for name, score in arc_scores.items() if filter_global_character_names([name])}
+    return filtered or None
 
 
 def _derive_focus_structure_from_characters(
@@ -151,6 +168,10 @@ def _fetch_diagnosis(
     alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult | None:
     """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: 缺少 reference_contract_version 的旧 cloud_analysis 不能继续作为新读侧合同暴露。
+
     从数据库获取诊断结果
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
@@ -158,6 +179,11 @@ def _fetch_diagnosis(
         return DiagnosisResult(
             rerun_required=True,
             rerun_reason="diagnosis_missing_focus_contract",
+        )
+    if data.get("reference_contract_version") != REFERENCE_CONTRACT_VERSION:
+        return DiagnosisResult(
+            rerun_required=True,
+            rerun_reason="reference_contract_outdated",
         )
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
@@ -180,10 +206,7 @@ def _fetch_diagnosis(
     )
 
     arc_scores_raw = _parse_json_field(data.get("arc_scores")) if data else None
-    arc_scores_normalized = _normalize_arc_scores(
-        arc_scores_raw,
-        alias_map,
-    )
+    arc_scores_normalized = _filter_global_arc_scores(_normalize_arc_scores(arc_scores_raw, alias_map))
 
     topic_labels_raw = _parse_json_field(data.get("topic_labels")) if data else None
     topic_labels_normalized = (
