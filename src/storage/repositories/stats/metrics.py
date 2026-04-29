@@ -343,6 +343,10 @@ def _detect_token_coverage_gaps(
 
 def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:
     """
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: `cloud_analysis` 持久化改为 latest-only，不再写入 reference_contract_version。
+
     插入云端分析结果
 
     `cloud_analysis` 统一落库焦点合同字段，不再写入旧 `protagonist` 列
@@ -377,7 +381,6 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
         main_characters=main_characters_json,
         core_cast=core_cast_json,
         theme_color=analysis.theme_color,
-        reference_contract_version=analysis.reference_contract_version,
         run_id=run_id,
     )
     session.add(cloud_analysis)
@@ -385,7 +388,11 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 
 
 def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
-    """获取云端分析结果，只返回当前焦点合同字段"""
+    """
+    修改时间: 2026-04-30
+    任务: diagnosis-latest-only-reference-contract
+    修改原因: 读取层默认把当前 `cloud_analysis` 行当作最新结构，不再回传 reference_contract_version。
+    """
     stmt = (
         select(CloudAnalysis)
         .where(
@@ -432,7 +439,6 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
         "main_characters": result.main_characters,
         "core_cast": result.core_cast,
         "theme_color": result.theme_color,
-        "reference_contract_version": result.reference_contract_version,
         "run_id": result.run_id,
     }
 

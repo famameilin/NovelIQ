@@ -41,15 +41,16 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
     )
     state_payload = {
         "discovered_names": ["masked_person", "bai_zhi", "monkey", "hou_fei_bai"],
-        "known_canonical_names": ["bai_zhi", "hou_fei_bai", "我"],
+        "known_canonical_names": ["bai_zhi", "hou_fei_bai"],
         "alias_merges": [
             ["masked_person", "bai_zhi"],
             ["monkey", "hou_fei_bai"],
-            ["我", "bai_zhi"],
         ],
+        "unresolved_references": [],
+        "reference_resolutions": [["我", "bai_zhi"]],
         "review_status": [],
         "pending_relations": [],
-        "version": 1,
+        "entity_types": {},
         "created_at": 1.0,
         "updated_at": 1.0,
     }
@@ -75,7 +76,7 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
         "masked_person": "bai_zhi",
         "monkey": "hou_fei_bai",
     }
-    assert payload["reference_contract_version"] == 1
+    assert "reference_contract_version" not in payload
     assert "foreshadow_expectation" in payload
     assert "foreshadowing_threads" in payload
     assert "graph_summary" in payload
