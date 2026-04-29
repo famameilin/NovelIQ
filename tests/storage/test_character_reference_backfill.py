@@ -79,13 +79,13 @@ def test_backfill_run_applies_checkpoint_reference_resolutions_to_history_rows(d
     chunk_relation = ChunkRelation(
         chunk_id=1,
         run_id=run_id,
-        from_char="我",
+        from_char="POV_SLOT_C1_我",
         to_char="白芷",
         from_reference_kind="pov_slot",
         to_reference_kind="global_character",
         resolved_from_global_name=None,
         resolved_to_global_name="白芷",
-        reference_skip_reason="我: unresolved pov reference",
+        reference_skip_reason="POV_SLOT_C1_我: unresolved pov reference",
         type="盟友",
         change="新建",
         evidence="我看向白芷。",
@@ -131,6 +131,7 @@ def test_backfill_run_applies_checkpoint_reference_resolutions_to_history_rows(d
     assert chunk_dialogue.speaker_references[0]["resolved_global_name"] == "汪淼"
     assert chunk_relation.resolved_from_global_name == "汪淼"
     assert chunk_relation.resolved_to_global_name == "白芷"
+    assert chunk_relation.reference_skip_reason is None
 
 
 def test_apply_reference_resolutions_to_history_clears_removed_reference_resolutions(db_session) -> None:

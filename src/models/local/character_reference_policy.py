@@ -136,6 +136,46 @@ def build_reference_slot(surface_name: str | None, *, chunk_id: int | None = Non
     return f"{prefix}{chunk_part}_{normalized}"
 
 
+def extract_surface_name_from_reference_slot(name: str | None) -> str:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: history rewrite / backfill 需要把 Phase4 产出的 slot endpoint 还原回 surface key，
+              才能命中当前 surface-keyed reference_resolutions。
+    """
+    normalized = normalize_reference_name(name)
+    if normalized.startswith(POV_SLOT_PREFIX):
+        payload = normalized[len(POV_SLOT_PREFIX) :]
+    elif normalized.startswith(LOCAL_REFERENCE_SLOT_PREFIX):
+        payload = normalized[len(LOCAL_REFERENCE_SLOT_PREFIX) :]
+    else:
+        return normalized
+
+    if payload.startswith("C"):
+        separator_index = payload.find("_")
+        if separator_index > 1 and payload[1:separator_index].isdigit():
+            return payload[separator_index + 1 :]
+    return payload
+
+
+def build_reference_resolution_lookup_keys(name: str | None) -> list[str]:
+    """
+    创建时间: 2026-04-29
+    任务: 角色引用分层重构
+    新建原因: 当前 checkpoint 仍按 surface key 保存 resolution，但历史行可能落原始 surface 或 slot 名，
+              这里统一生成可尝试的查找 key，避免 relation slot endpoint 命不中实名解析。
+    """
+    normalized = normalize_reference_name(name)
+    if not normalized:
+        return []
+
+    lookup_keys = [normalized]
+    slot_surface = normalize_reference_name(extract_surface_name_from_reference_slot(normalized))
+    if slot_surface and slot_surface not in lookup_keys:
+        lookup_keys.append(slot_surface)
+    return lookup_keys
+
+
 def collect_reference_slots_from_names(
     names: Iterable[str | None],
     *,
