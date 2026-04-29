@@ -221,10 +221,14 @@ def fetch_character_emotion_sequence(session: Session, run_id: str) -> list[Any]
     获取角色情绪序列（按 chunk_id 排序）
 
     Returns:
-        (name, emotion_score) 元组列表，按 chunk_id 排序
+        (surface_name, resolved_global_name, emotion_score) 列表，按 chunk_id 排序
     """
     stmt = (
-        select(ChunkCharacter.name, ChunkCharacter.emotion_score)
+        select(
+            ChunkCharacter.surface_name,
+            ChunkCharacter.resolved_global_name,
+            ChunkCharacter.emotion_score,
+        )
         .where(ChunkCharacter.run_id == run_id)
         .order_by(ChunkCharacter.chunk_id)
     )

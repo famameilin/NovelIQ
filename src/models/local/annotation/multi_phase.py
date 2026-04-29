@@ -222,12 +222,13 @@ async def _run_phase4_from_context(
     """
     phase_client = _clone_annotation_client_for_phase(context.client, "phase4", context.chunk_id) or context.client
     phase_fallback_client = _clone_annotation_client_for_phase(context.fallback_client, "phase4", context.chunk_id)
-    phase4_bundle = await _resolve_phase4_bundle(context, known_characters, reference_slots)
+    effective_reference_slots = _merge_phase4_reference_slots(context, reference_slots)
+    phase4_bundle = await _resolve_phase4_bundle(context, known_characters, effective_reference_slots)
     relations = await annotate_chunk_phase4(
         client=phase_client,
         text=context.text,
         known_characters=known_characters,
-        reference_slots=reference_slots,
+        reference_slots=effective_reference_slots,
         # Phase4 统一只消费上游传入的 evidence_bundle，
         # multi_phase 负责调度，不在这里重建关系抽取上下文
         evidence_bundle=phase4_bundle,
@@ -236,6 +237,26 @@ async def _run_phase4_from_context(
         fallback_client=phase_fallback_client,
     )
     return _Phase4Result(relations=relations)
+
+
+def _merge_phase4_reference_slots(
+    context: _MultiPhaseExecutionContext,
+    reference_slots: list[str] | None,
+) -> list[str]:
+    """
+    修改时间: 2026-04-29
+    任务: 角色引用分层重构
+    修改原因: Phase4 既要保留 request template 里按文本预提的 slot，
+              也要合并 Phase1 传下来的未解析 slot，不能让后者把前者覆盖掉。
+    """
+    template_slots: list[str] = []
+    if context.phase4_request_template is not None:
+        template_slots = list(context.phase4_request_template.reference_slots)
+    # 统一经过 slot collector 去重，避免 template / Phase1 两侧重复传同一个局部引用位。
+    return collect_reference_slots_from_names(
+        [*template_slots, *(reference_slots or [])],
+        chunk_id=context.chunk_id,
+    )
 
 
 async def _resolve_phase4_bundle(
@@ -275,11 +296,12 @@ async def _resolve_phase4_bundle(
         if normalized and normalized not in seed_entities:
             seed_entities.append(normalized)
 
+    effective_reference_slots = _merge_phase4_reference_slots(context, reference_slots)
     phase4_request = replace(
         context.phase4_request_template,
         requested_names=requested_names,
         seed_entities=seed_entities,
-        reference_slots=list(reference_slots or []),
+        reference_slots=effective_reference_slots,
     )
     return await context.evidence_service.collect(phase4_request)
 
