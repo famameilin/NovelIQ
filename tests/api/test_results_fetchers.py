@@ -178,7 +178,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
         {
             "foreshadow_expectation": 0.3,
             "arc_scores": '{"\\u7334\\u5b50": 6.5, "\\u7b97\\u76d8": 6.0}',
-            "narrative_type": "\u6210\u957f",
+            "genre_labels": '["\\u901a\\u7528"]',
+            "style_labels": '["\\u4e25\\u8083"]',
             "topic_labels": '["\\u4e8c\\u5988\\u5988", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
             "diagnosis": "\u7334\u5b50\u5e2e\u52a9\u4e8c\u5988\u5988\uff0c\u7b97\u76d8\u968f\u540e\u51fa\u73b0\u3002",
             "value_logic_reason": "\u4e8c\u5988\u5988\u5f71\u54cd\u4e86\u7334\u5b50\u7684\u5224\u65ad\u3002",
@@ -205,6 +206,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
 
     assert result is not None
     assert result.arc_scores == {"\u4faf\u98de\u767d": 6.5, "\u6797\u7acb\u679c": 6.0}
+    assert result.genre_labels == ["\u901a\u7528"]
+    assert result.style_labels == ["\u4e25\u8083"]
     assert result.topic_labels == ["\u67f3\u5a49\u513f", "\u767d\u82b7"]
     assert result.diagnosis == (
         "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"

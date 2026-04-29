@@ -348,6 +348,8 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     `cloud_analysis` 统一落库焦点合同字段，不再写入旧 `protagonist` 列
     """
     arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
+    genre_labels_json = json.dumps(list(analysis.genre_labels), ensure_ascii=False)
+    style_labels_json = json.dumps(list(analysis.style_labels), ensure_ascii=False)
     topic_labels_json = json.dumps(list(analysis.topic_labels), ensure_ascii=False)
     focus_characters_json = json.dumps(list(analysis.focus_characters), ensure_ascii=False)
     main_characters_json = json.dumps(list(analysis.main_characters), ensure_ascii=False)
@@ -357,7 +359,8 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
         novel_id=analysis.novel_id,
         foreshadow_expectation=analysis.foreshadow_expectation,
         arc_scores=arc_scores_json,
-        narrative_type=analysis.narrative_type,
+        genre_labels=genre_labels_json,
+        style_labels=style_labels_json,
         topic_labels=topic_labels_json,
         diagnosis=analysis.diagnosis,
         value_logic_type=analysis.value_logic_type,
@@ -410,7 +413,8 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
         "novel_id": result.novel_id,
         "foreshadow_expectation": result.foreshadow_expectation,
         "arc_scores": result.arc_scores,
-        "narrative_type": result.narrative_type,
+        "genre_labels": result.genre_labels,
+        "style_labels": result.style_labels,
         "topic_labels": result.topic_labels,
         "diagnosis": result.diagnosis,
         "value_logic_type": result.value_logic_type,

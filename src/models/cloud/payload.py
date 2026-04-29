@@ -8,7 +8,22 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+from src.lexicons.genre_detector import detect_genre_weighted
+from src.lexicons.genre_detector_rules import MIN_CONFIDENCE
+from src.lexicons.registry import LexiconRegistry
+from src.storage.repositories import ChunkRepository
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+
+GENRE_LABEL_MAP = {
+    "scifi": "科幻",
+    "mystery": "悬疑",
+    "historical": "历史",
+    "xianxia": "仙侠",
+    "urban": "都市",
+    "power": "权谋",
+    "shuwen": "爽文",
+    "general": "通用",
+}
 
 
 def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -21,6 +36,42 @@ def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, A
 
     graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
     return serialize_graph_report_signals(graph_report)
+
+
+def _build_genre_labels(conn: Session, run_id: str) -> list[str]:
+    """
+    2026-04-29，任务：拆分 diagnosis 题材与风格标签
+    新建原因：`genre_labels` 需要成为稳定题材真相源，统一复用现有加权 genre detector，而不是继续交给 LLM 自由发挥。
+    """
+
+    chunk_texts = ChunkRepository(conn).fetch_chunk_texts(run_id)
+    if not chunk_texts:
+        return ["通用"]
+
+    registry = LexiconRegistry()
+    registry.load()
+    weighted_result = detect_genre_weighted(chunk_texts, registry=registry)
+    genre_weights = weighted_result.genre_weights
+    if not genre_weights:
+        return ["通用"]
+
+    dominant_genre, _dominant_weight = genre_weights[0]
+    if dominant_genre == "general":
+        return ["通用"]
+
+    genre_labels: list[str] = []
+    for index, (genre_code, weight) in enumerate(genre_weights):
+        if genre_code == "general":
+            continue
+        if index > 0 and weight < MIN_CONFIDENCE:
+            continue
+        label = GENRE_LABEL_MAP.get(genre_code)
+        if label and label not in genre_labels:
+            genre_labels.append(label)
+        if len(genre_labels) >= 3:
+            break
+
+    return genre_labels or ["通用"]
 
 
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
@@ -91,7 +142,9 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
     foreshadowing_threads = [asdict(thread) for thread in repo.fetch_foreshadowing_threads(effective_run_id)]
     foreshadow_expectation = repo.calculate_foreshadow_expectation(effective_run_id)
+    genre_labels = _build_genre_labels(conn, effective_run_id)
     logger.info("[云端模型] 获取foreshadowing_threads: count=%d", len(foreshadowing_threads))
+    logger.info("[云端模型] 题材标签: %s", genre_labels)
 
     stage_summaries = repo.fetch_stage_summaries(effective_run_id)
     logger.info("[云端模型] 获取阶段性摘要: count=%d", len(stage_summaries))
@@ -124,6 +177,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "high_tension_paragraphs": high_tension,
         "character_relations": relations,
         "foreshadow_expectation": foreshadow_expectation,
+        "genre_labels": genre_labels,
         "foreshadowing_threads": foreshadowing_threads,
         "summaries": stage_summaries,
         "topic_words": topic_words,

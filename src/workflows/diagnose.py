@@ -73,7 +73,8 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
     """
     logger.info("\n=== Diagnosis Summary ===")
     logger.info(f"Novel ID: {result.novel_id}")
-    logger.info(f"Narrative Type: {result.narrative_type}")
+    logger.info(f"Genre Labels: {', '.join(result.genre_labels) if result.genre_labels else '[]'}")
+    logger.info(f"Style Labels: {', '.join(result.style_labels) if result.style_labels else '[]'}")
     if result.foreshadow_expectation is not None:
         logger.info(f"Foreshadow Expectation: {result.foreshadow_expectation:.2%}")
     if result.value_logic_type:

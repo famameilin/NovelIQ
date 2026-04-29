@@ -144,6 +144,8 @@ def _fetch_diagnosis(
     topic_labels_normalized = (
         _normalize_name_list(topic_labels_raw, alias_map) if isinstance(topic_labels_raw, list) else topic_labels_raw
     )
+    genre_labels_raw = _parse_json_field(data.get("genre_labels")) if data else None
+    style_labels_raw = _parse_json_field(data.get("style_labels")) if data else None
     focus_structure_raw = data.get("focus_structure") if data else None
     focus_structure: Literal["single", "dual", "ensemble"] | None
     if focus_structure_raw in {"single", "dual", "ensemble"}:
@@ -202,7 +204,8 @@ def _fetch_diagnosis(
     return DiagnosisResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,
         arc_scores=arc_scores_normalized,
-        narrative_type=data.get("narrative_type") if data else None,
+        genre_labels=genre_labels_raw if isinstance(genre_labels_raw, list) else None,
+        style_labels=style_labels_raw if isinstance(style_labels_raw, list) else None,
         topic_labels=topic_labels_normalized,
         diagnosis=_normalize_text_by_alias_map(data.get("diagnosis") if data else None, alias_map),
         value_logic_type=data.get("value_logic_type") if data else None,
