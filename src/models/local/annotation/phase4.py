@@ -35,6 +35,7 @@ class Phase4MaxRetriesExceededError(Exception):
 def _build_phase4_messages(
     text: str,
     known_characters: list[str] | None,
+    reference_slots: list[str] | None = None,
     evidence_sections: list[str] | None = None,
 ) -> list[dict[str, str]]:
     """
@@ -52,11 +53,13 @@ def _build_phase4_messages(
         raise ValueError("Phase4 user template is empty, check config/prompts/phase4.txt")
 
     known_chars = "、".join(known_characters) if known_characters else "无"
+    local_reference_slots = "、".join(reference_slots) if reference_slots else "无"
 
     user_template = Template(user_template_str)
     user_prompt = user_template.substitute(
         chunk_text=text,
         known_characters=known_chars,
+        reference_slots=local_reference_slots,
     )
     if evidence_sections:
         # Phase4 只追加 renderer 已经选好的共享 evidence blocks，
@@ -123,6 +126,7 @@ async def annotate_chunk_phase4(
     client: AnnotationClient,
     text: str,
     known_characters: list[str] | None = None,
+    reference_slots: list[str] | None = None,
     evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
@@ -135,18 +139,19 @@ async def annotate_chunk_phase4(
     """
     if not text:
         return []
-    if not known_characters:
+    if not known_characters and not reference_slots:
         return []
 
     logger.info(
         f"Phase4 annotate_chunk_phase4 STARTING for chunk_id={chunk_id}, "
-        f"text_len={len(text)}, known_characters={known_characters}"
+        f"text_len={len(text)}, known_characters={known_characters}, reference_slots={reference_slots}"
     )
 
     evidence_sections = render_relation_extraction_evidence_sections(evidence_bundle)
     messages = _build_phase4_messages(
         text,
         known_characters,
+        reference_slots=reference_slots,
         evidence_sections=evidence_sections,
     )
 

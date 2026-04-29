@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -58,6 +59,11 @@ class ChunkCharacter(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    surface_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reference_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reference_slot: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resolved_global_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    global_skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     role_function: Mapped[str | None] = mapped_column(String(50), nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
     action_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -90,6 +96,11 @@ class ChunkRelation(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     from_char: Mapped[str | None] = mapped_column(String(255), nullable=True)
     to_char: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    from_reference_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    to_reference_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    resolved_from_global_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resolved_to_global_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reference_skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     change: Mapped[str | None] = mapped_column(String(50), nullable=True)
     directionality: Mapped[str | None] = mapped_column(String(20), nullable=True, default="directed")
@@ -126,6 +137,7 @@ class ChunkDialogue(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     speaker: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    speaker_references: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
