@@ -966,6 +966,82 @@ async def test_build_level3_query_plan_keeps_direct_when_target_is_already_resol
 
 
 @pytest.mark.asyncio
+async def test_build_level3_query_plan_keeps_direct_for_alias_resolved_workflow_target_shape() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 真实 workflow 在 alias 命中文本时，requested_names 只保留 surface，
+          canonical 继续留在 seed_entities 做 retrieval 扩锚；这类 alias-resolved target 仍应 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(return_value=MagicMock())
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    plan = await provider.build_level3_query_plan(
+        _build_evidence_request(
+            objective="identity",
+            query_text="小七看向门口的老者。",
+            requested_names=["小七"],
+            seed_entities=["小七", "程霜"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=2,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "direct_gate"
+    assert plan.planner_reason == "trusted_name_direct"
+    assert plan.llm_invoked is False
+    planner.plan_queries.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_does_not_treat_partial_substring_as_resolved_target() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 单字短 alias 只命中更长名字的 substring 时，不能直接触发 trusted_name_direct，
+          否则会把仍需区分的 identity 文本过早压回 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(
+        return_value=MagicMock(
+            should_expand=False,
+            reason="direct_query_enough",
+            queries=[],
+            dropped_queries=[],
+        )
+    )
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="白芷看向门口的老者。",
+                requested_names=["白"],
+                seed_entities=["白"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.planner_kind == "llm_query_example"
+    assert plan.planner_reason == "direct_query_enough"
+    assert plan.llm_invoked is True
+    planner.plan_queries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_build_level3_query_plan_uses_llm_fallback_when_rule_planner_returns_no_query_example() -> None:
     """
     创建时间: 2026-04-30
@@ -1300,6 +1376,44 @@ async def test_build_level3_query_plan_legacy_adapter_rule_result_does_not_claim
     assert plan.llm_invoked is False
     assert plan.expansion_queries
     assert plan.expansion_queries[0].query_source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_legacy_adapter_empty_result_does_not_claim_llm_invocation() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: legacy `mention_extractor=` 兼容路径即使返回空结果，也不应把这次 planner 审计记成 LLM 命中。
+    """
+
+    class LegacyExtractor:
+        def __init__(self) -> None:
+            self.extract_mentions = AsyncMock(return_value=[])
+
+    provider = NarrativeEvidenceService(level3_enabled=True, mention_extractor=LegacyExtractor())
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="门口的老者忽然开口。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "rule_example"
+    assert plan.planner_reason == "legacy_mention_extractor_adapter"
+    assert plan.llm_invoked is False
 
 
 @pytest.mark.asyncio
