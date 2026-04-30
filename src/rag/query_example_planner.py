@@ -15,16 +15,36 @@ from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMen
 from src.rag.query_example_types import Level3ExpansionQuery, QueryExamplePlannerRequest, QueryExamplePlannerResult
 
 
-def collect_descriptive_anchor_texts(text: str) -> tuple[str, ...]:
+def collect_descriptive_anchor_texts(
+    text: str,
+    *,
+    names_in_chunk: tuple[str, ...] = (),
+    run_id: str | None = None,
+    current_chunk: int | None = None,
+) -> tuple[str, ...]:
     """
     创建时间: 2026-04-30
+    修改时间: 2026-04-30
     任务: level3-query-exampler-mainline
     说明: 二级门槛只关心“正文里是否存在未解析的描述性人物锚点”；
           这里保留规则命中的 raw anchor 文本，供 direct gate 与 LLM fallback 共用。
+    修改原因: direct gate 与规则 planner 必须共享同一套 unresolved-anchor 过滤口径，
+              不能在 raw regex 命中层就把已解析 target 名重新当成描述性锚点拉回高阶链。
     """
 
+    normalized_mentions = normalize_person_mentions(
+        extract_person_mentions(text),
+        request=MentionExtractionRequest(
+            text=text,
+            names_in_chunk=names_in_chunk,
+            context_text=text,
+            run_id=run_id,
+            current_chunk=current_chunk,
+        ),
+        fallback_source="rule",
+    )
     anchors: list[str] = []
-    for mention in extract_person_mentions(text):
+    for mention in normalized_mentions:
         raw_text = mention.raw_text.strip()
         if raw_text and raw_text not in anchors:
             anchors.append(raw_text)

@@ -922,6 +922,50 @@ async def test_build_level3_query_plan_uses_direct_when_trusted_name_is_enough()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query_text", "requested_names"),
+    [
+        ("黑衣人忽然出手。", ["黑衣人"]),
+        ("白芷看向门口的老者。", ["白芷"]),
+        ("白芷正是那名红衣女子。", ["白芷"]),
+    ],
+)
+async def test_build_level3_query_plan_keeps_direct_when_target_is_already_resolved_in_text(
+    query_text: str,
+    requested_names: list[str],
+) -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 只要当前 consumer target 已经在正文里直出现并完成解析，
+          同段里的 role-word target、自指同位语或旁观者描述都不该再把 identity 请求拉回高阶 planner。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(return_value=MagicMock())
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    plan = await provider.build_level3_query_plan(
+        _build_evidence_request(
+            objective="identity",
+            query_text=query_text,
+            requested_names=requested_names,
+            seed_entities=requested_names,
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=2,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "direct_gate"
+    assert plan.planner_reason == "trusted_name_direct"
+    assert plan.llm_invoked is False
+    planner.plan_queries.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_build_level3_query_plan_uses_llm_fallback_when_rule_planner_returns_no_query_example() -> None:
     """
     创建时间: 2026-04-30
@@ -1206,6 +1250,56 @@ async def test_legacy_query_example_planner_adapter_preserves_rule_source() -> N
 
     assert result.queries
     assert result.queries[0].query_source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_legacy_adapter_rule_result_does_not_claim_llm_invocation() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: legacy `mention_extractor=` 兼容路径若实际只返回 rule-sourced query example，
+          上游 plan 审计也必须保持 `planner_kind=rule_example` 且 `llm_invoked=False`。
+    """
+
+    class LegacyExtractor:
+        def __init__(self) -> None:
+            self.extract_mentions = AsyncMock(
+                return_value=[
+                    PersonMention(
+                        raw_text="门口的老者",
+                        mention_type="location_role",
+                        sentence_text="门口的老者忽然开口。",
+                        cues={"location": ["门口"], "role_word": "老者"},
+                        source="rule",
+                    )
+                ]
+            )
+
+    provider = NarrativeEvidenceService(level3_enabled=True, mention_extractor=LegacyExtractor())
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="门口的老者忽然开口。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "hybrid"
+    assert plan.planner_kind == "rule_example"
+    assert plan.planner_reason == "legacy_mention_extractor_adapter"
+    assert plan.llm_invoked is False
+    assert plan.expansion_queries
+    assert plan.expansion_queries[0].query_source == "rule"
 
 
 @pytest.mark.asyncio
