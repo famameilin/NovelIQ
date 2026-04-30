@@ -282,6 +282,22 @@ def test_collect_seed_entities_keeps_canonical_when_chunk_mentions_canonical_dir
     assert seed_entities == ["程霜"]
 
 
+def test_collect_seed_entities_does_not_promote_active_entities_without_direct_text_hit():
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: authority active entities 只能作为“正文已命中后的可信候选”，
+          不能在 identity 请求里脱离正文直接升级为 retrieval seed。
+    """
+    seed_entities = _collect_seed_entities(
+        {},
+        ["陆明"],
+        query_text="黑衣人现身，屋内骤然安静。",
+    )
+
+    assert seed_entities == []
+
+
 def test_collect_requested_names_promotes_direct_canonical_mentions_only_when_explicitly_present():
     """
     创建时间: 2026-04-26
@@ -473,7 +489,10 @@ def test_prepare_chunk_context_can_collect_phase2_evidence_when_opted_in(monkeyp
     assert context.phase1_bundle is phase1_bundle
     assert context.phase2_bundle is phase2_bundle
     assert provider.collect.await_count == 2
-    assert provider.collect.await_args_list[1].args[0].consumer == "annotation_phase2"
+    phase2_request = provider.collect.await_args_list[1].args[0]
+    assert phase2_request.consumer == "annotation_phase2"
+    assert phase2_request.requested_names == ["白芷"]
+    assert phase2_request.seed_entities == ["白芷"]
 
 
 def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
@@ -607,9 +626,11 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
     phase1_request = provider.collect.await_args_list[0].args[0]
     assert phase1_request.consumer == "annotation_phase1"
     assert phase1_request.requested_names == []
-    assert phase1_request.seed_entities == ["陆明"]
+    assert phase1_request.seed_entities == []
     phase3_request = provider.collect.await_args_list[1].args[0]
     assert phase3_request.consumer == "annotation_phase3"
+    assert phase3_request.requested_names == []
+    assert phase3_request.seed_entities == []
 
 
 @pytest.mark.asyncio
@@ -702,10 +723,10 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     assert phase1_request.consumer == "annotation_phase1"
     assert phase1_request.objective == "identity"
     assert phase1_request.requested_names == ["程霜"]
-    assert phase1_request.seed_entities == ["程霜", "旧值"]
+    assert phase1_request.seed_entities == ["程霜"]
     assert phase3_request.consumer == "annotation_phase3"
     assert phase3_request.requested_names == ["程霜"]
-    assert phase3_request.seed_entities == ["程霜", "旧值"]
+    assert phase3_request.seed_entities == ["程霜"]
     assert context.phase1_bundle is phase1_bundle
     assert context.phase2_bundle is None
     assert context.phase3_bundle is phase3_bundle

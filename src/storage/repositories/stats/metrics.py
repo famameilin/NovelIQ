@@ -292,6 +292,12 @@ def _normalize_model_interaction_call_key(interaction_type: str, phase: str | No
         return _build_call_type_key("diagnosis", "diagnosis")
     if interaction_type == "stage_summary":
         return _build_call_type_key("incremental_disambig", "stage_summary")
+    if interaction_type == "level3_query_planner":
+        # 修改时间: 2026-04-30
+        # 任务: fix-level3-query-example-review-findings
+        # 修改原因: query planner 当前仍复用 mention_extraction transport/task bucket 做 token 记账，
+        #           coverage 归桶必须同步映射，否则会把真实已记账调用误报成 unknown gap。
+        return _build_call_type_key("mention_extraction", normalized_phase)
     if interaction_type == "disambiguate":
         if normalized_phase in {"incremental_disambiguation", "incremental"}:
             return _build_call_type_key("incremental_disambig", "disambiguate_characters")
