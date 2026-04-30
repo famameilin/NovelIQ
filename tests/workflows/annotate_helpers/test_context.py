@@ -809,6 +809,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     assert context.phase4_request_template.objective == "relation"
     assert context.phase4_request_template.requested_names == []
     assert context.phase4_request_template.seed_entities == []
+    assert context.phase4_request_template.need_level3 is False
     expected_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
     assert expected_blocks.active_entities is not None
     assert context.prompt_active_entities == expected_blocks.active_entities
