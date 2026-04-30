@@ -409,7 +409,10 @@ def render_reference_slots(bundle: EvidenceBundle) -> str | None:
 
     lines = [
         "<Local_Reference_Slots>",
-        "以下 slot 仅表示当前片段里的局部引用位，不能当作全局角色名；当关系一端只有代词或未解析称呼时，可直接输出对应 slot 名。",
+        (
+            "以下 slot 仅表示当前片段里的局部引用位，不能当作全局角色名；"
+            "当关系一端只有代词或未解析称呼时，可直接输出对应 slot 名。"
+        ),
     ]
     lines.extend(f"- {slot}" for slot in reference_slots)
     lines.append("</Local_Reference_Slots>")

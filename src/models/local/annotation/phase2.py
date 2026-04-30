@@ -5,7 +5,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
+
+from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
@@ -17,6 +20,7 @@ from .runtime import AnnotationPhaseCallSpec, execute_phase_call
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+    from src.storage.repositories.annotation.foreshadowing_threads import ActiveSetupPoolEntry
 
 
 def _normalize_setup_summary_for_link_check(value: str) -> str:
@@ -102,11 +106,16 @@ async def annotate_chunk_phase2(
         exception_type=Phase2MaxRetriesExceededError,
     )
 
-    active_setup_pool = []
-    if run_id and chunk_id is not None and getattr(client, "_session", None) is not None and chunk_id > 0:
+    active_setup_pool: list[ActiveSetupPoolEntry] = []
+    raw_session = getattr(client, "_session", None)
+    session: Session | None = raw_session if isinstance(raw_session, Session) else None
+    if run_id and chunk_id is not None and session is not None and chunk_id > 0:
+        # 2026-04-30，任务：annotation 静态检查收口
+        # 这里先用 getattr 保住旧测试/轻量 mock client 没有 _session 属性时的兼容性，
+        # 再把拿到的对象收窄为真实 Session，避免 Any 把 AnnotationRepository 的语义签名冲掉。
         # 活跃池只允许看到当前 chunk 之前已经落库的 thread，
         # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”
-        active_setup_pool = AnnotationRepository(client._session).fetch_active_foreshadowing_threads_for_prompt(
+        active_setup_pool = AnnotationRepository(session).fetch_active_foreshadowing_threads_for_prompt(
             run_id,
             max_chunk_id=chunk_id - 1,
         )
@@ -152,7 +161,7 @@ async def annotate_chunk_phase2(
 
 def _validate_phase2_active_setup_link(
     result: ForeshadowingResult,
-    active_setup_pool,
+    active_setup_pool: Sequence[ActiveSetupPoolEntry],
 ) -> None:
     """
     校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池

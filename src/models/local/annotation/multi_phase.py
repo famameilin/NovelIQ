@@ -6,13 +6,16 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from src.api.models.events import StreamEvent
+from src.api.models.events import StreamEvent, StreamEventAction
 from src.config import settings
-from src.models.local.character_reference_policy import collect_reference_slots_from_names, filter_global_character_names
+from src.models.local.character_reference_policy import (
+    collect_reference_slots_from_names,
+    filter_global_character_names,
+)
 
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
@@ -26,9 +29,6 @@ if TYPE_CHECKING:
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
     from src.rag import EvidenceRequest, NarrativeEvidenceService
     from src.rag.evidence_types import EvidenceBundle
-
-PhaseEventAction = Literal["start", "progress", "complete", "output", "thinking"]
-
 
 @dataclass
 class _Phase3Result:
@@ -75,7 +75,7 @@ class _MultiPhaseExecutionContext:
 async def _emit_phase_event(
     context: _MultiPhaseExecutionContext,
     *,
-    action: PhaseEventAction,
+    action: StreamEventAction,
     phase_name: str,
     sub_percent: int,
     message: str,
@@ -132,13 +132,25 @@ def _clone_annotation_client_for_phase(
 
         async def _emit_with_phase_scope(event: StreamEvent) -> None:
             if event.action in {"output", "thinking"}:
-                patch_kwargs: dict[str, str | int | None] = {}
-                if not event.sub_stage:
-                    patch_kwargs["sub_stage"] = phase_name
-                if event.chunk_id is None:
-                    patch_kwargs["chunk_id"] = chunk_id
-                if patch_kwargs:
-                    event = replace(event, **patch_kwargs)
+                resolved_sub_stage = event.sub_stage or phase_name
+                resolved_chunk_id = event.chunk_id if event.chunk_id is not None else chunk_id
+                if resolved_sub_stage != event.sub_stage or resolved_chunk_id != event.chunk_id:
+                    # 2026-04-30，任务：annotation 静态检查收口
+                    # 这里显式重建 StreamEvent，避免 dataclasses.replace + 动态 kwargs
+                    # 让 mypy 无法确认每个字段的真实类型。
+                    event = StreamEvent(
+                        action=event.action,
+                        stage=event.stage,
+                        sub_stage=resolved_sub_stage,
+                        chunk_id=resolved_chunk_id,
+                        stream_id=event.stream_id,
+                        current=event.current,
+                        total=event.total,
+                        percent=event.percent,
+                        sub_percent=event.sub_percent,
+                        content=event.content,
+                        message=event.message,
+                    )
             await parent_emitter(event)
 
         cloned_client._emitter = _emit_with_phase_scope
