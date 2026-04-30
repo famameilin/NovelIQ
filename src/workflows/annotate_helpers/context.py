@@ -157,7 +157,11 @@ def _init_optional_mention_extractor(
     run_id: str | None,
 ):
     """
-    仅在 mention_extraction 配置完整时初始化 LLM extractor；未配置时保持规则 fallback 主链不变
+    创建时间: 2026-04-24
+    修改时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    修改原因: transport 配置仍沿用 mention_extraction alias，
+              但注入到 RAG provider 的运行时语义已切换为 LLM query example planner。
     """
     model_client = _build_optional_task_model_client(
         "mention_extraction",
@@ -169,9 +173,9 @@ def _init_optional_mention_extractor(
     if model_client is None:
         return None
 
-    from src.rag.mention_extraction_llm import LLMPersonMentionExtractor
+    from src.rag.query_example_llm import LLMLevel3QueryExamplePlanner
 
-    return LLMPersonMentionExtractor(
+    return LLMLevel3QueryExamplePlanner(
         model_client,
         enable_thinking=settings.thinking.mention_extraction,
     )
@@ -318,8 +322,11 @@ def _collect_seed_entities(
     extra_names: list[str] | None = None,
 ) -> list[str]:
     """
-    Level3 seed_entities 只允许来自可信源：chunk 内显式出现的 alias/canonical、
-          authority active entities、调用方显式补充名；不能把整轮累计 alias_map 全量带进当前 chunk
+    创建时间: 2026-04-25
+    修改时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    修改原因: identity Level3 的 retrieval seed 只能来自正文显式命中的 alias/canonical
+              或调用方显式补名；authority active entities 不得再整包注入当前 chunk 的 query plan。
     """
     seed_entities: list[str] = []
     normalized_query_text = (query_text or "").strip()
@@ -342,11 +349,18 @@ def _collect_seed_entities(
 
     for entity_name in active_entity_names:
         normalized = str(entity_name).strip()
-        if normalized and normalized not in seed_entities:
+        # active entity 只有在当前正文里真的出现，才能升级为本轮 identity retrieval 的 seed。
+        if (
+            normalized
+            and normalized_query_text
+            and normalized in normalized_query_text
+            and normalized not in seed_entities
+        ):
             seed_entities.append(normalized)
 
     for name in extra_names or []:
         normalized = str(name).strip()
+        # extra_names 代表调用方显式确认要补入的锚点，不再额外要求正文命中。
         if normalized and normalized not in seed_entities:
             seed_entities.append(normalized)
 
@@ -521,7 +535,7 @@ def _prepare_chunk_context(
         # 因此只有显式打开 include_phase2_evidence 时才为 Phase2 额外收集共享 evidence，
         # 避免在默认热路径上继续支付无效检索成本
         if include_phase2_evidence:
-            phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
+            phase2_seed_entities = _collect_seed_entities(None, [], extra_names=active_entity_names)
             phase2_request = _build_evidence_request(
                 consumer="annotation_phase2",
                 objective="foreshadowing",
@@ -646,7 +660,7 @@ async def _prepare_chunk_context_with_level3(
                 objective="foreshadowing",
                 query_text=chunk_text,
                 requested_names=list(active_entity_names),
-                seed_entities=_collect_seed_entities(None, active_entity_names),
+                seed_entities=_collect_seed_entities(None, [], extra_names=active_entity_names),
                 reference_slots=[],
                 background_entities=[],
                 chunk_id=chunk_id,
