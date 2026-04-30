@@ -125,11 +125,23 @@ class EmbeddingClient:
             return False
         return status_code in RETRYABLE_EMBEDDING_STATUS_CODES
 
+    def _require_model_name(self) -> str:
+        """
+        修改时间: 2026-04-30
+        任务: fix-src-quality-gate
+        修改原因: 运行时已经要求 embedding model 必填；这里补显式收窄，
+                  避免 mypy 把后续 OpenAI 调用里的 model 继续视为可空。
+        """
+        if not self._model:
+            raise ValueError("embedding model is required")
+        return self._model
+
     async def _create_embeddings_with_retry(self, text_input: str | list[str]):
+        model_name = self._require_model_name()
         for attempt in range(1, EMBEDDING_MAX_RETRIES + 2):
             try:
                 return await self._client.embeddings.create(
-                    model=self._model,
+                    model=model_name,
                     input=text_input,
                     encoding_format="float",
                 )

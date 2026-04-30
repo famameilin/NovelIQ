@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -78,11 +78,13 @@ def _require_readable_run_status(run: dict[str, Any]) -> None:
         raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
 
 
-def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> None:
+def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> NoReturn:
     """
     说明: 当前分支已经明确不兼容旧 diagnosis 合同；
     只要结果读取命中 rerun-required diagnosis，就应在 API 层显式中止，
     不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果
+    修改时间: 2026-04-30
+    修改原因: 明确该 helper 永不返回，避免路由层把 rerun-required 分支继续当成可达路径。
     """
     raise HTTPException(
         status_code=409,
@@ -106,6 +108,8 @@ def _fetch_and_require_valid_diagnosis(
     说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
     新焦点合同是否有效；这里统一在路由层短路旧 run，避免不同页面对同一 run
     同时出现“需要重跑”和“还能继续看”的分裂状态
+    修改时间: 2026-04-30
+    修改原因: 显式把 rerun-required 分支收窄为不可返回路径，保证调用方拿到的一定是可读 diagnosis。
     """
     diagnosis = _fetch_diagnosis(
         run_id,
@@ -356,13 +360,25 @@ async def get_diagnosis(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> DiagnosisResult:
-    """获取诊断数据"""
+    """
+    获取诊断数据
+
+    修改时间: 2026-04-30
+    修改原因: diagnosis 查询链路对外声明始终返回 DiagnosisResult；
+              读取层即使出现意外空值，也要在路由层回退到 rerun-required 结果而不是泄漏 None。
+    """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
-    return _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is None:
+        return DiagnosisResult(
+            rerun_required=True,
+            rerun_reason="diagnosis_missing_focus_contract",
+        )
+    return diagnosis
 
 
 @router.get(

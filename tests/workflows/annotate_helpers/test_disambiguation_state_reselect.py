@@ -239,7 +239,7 @@ async def test_final_pipeline_preserves_deferred_names_without_model_call() -> N
         patch.object(pipeline_stages_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(
             pipeline_stages_mod,
-            "fetch_all_character_names",
+            "fetch_reference_aware_character_names",
             return_value=[{"name": "猴子", "count": 5}, {"name": "侯飞白", "count": 1}],
         ),
         patch.object(pipeline_stages_mod, "build_context_sentences", return_value={}),
@@ -335,7 +335,7 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
         patch.object(pipeline_stages_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(
             pipeline_stages_mod,
-            "fetch_all_character_names",
+            "fetch_reference_aware_character_names",
             return_value=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
         ),
         patch.object(pipeline_stages_mod, "_collect_final_disambiguation_candidates", return_value=[]),

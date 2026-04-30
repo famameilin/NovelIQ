@@ -78,7 +78,7 @@ async def execute_phase_call[T: BaseModel](
 
         process_response = getattr(client, "_process_annotation_response", None)
         response_choices = getattr(response, "choices", None)
-        if callable(process_response) and isinstance(response_choices, (list, tuple)) and response_choices:
+        if callable(process_response) and isinstance(response_choices, list | tuple) and response_choices:
             content_clean, thinking_content, extraction = process_response(
                 response,
                 is_cloud,
