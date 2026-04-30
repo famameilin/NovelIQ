@@ -24,7 +24,11 @@ EvidenceConsumer = Literal[
     "final_disambiguation",
 ]
 EvidenceObjective = Literal["identity", "emotion", "relation", "foreshadowing"]
-Level3QueryMode = Literal["direct", "high_order", "hybrid"]
+# 修改时间: 2026-04-30
+# 任务: verify-level3-query-mode-contract
+# 修改原因: 当前 Level3QueryPlan 实际只产出 `direct` / `hybrid` 两种模式；
+#           旧的 `high_order` 已不再被主链使用，继续保留只会制造合同噪音。
+Level3QueryMode = Literal["direct", "hybrid"]
 
 
 def _normalize_name_list(values: list[str]) -> list[str]:
