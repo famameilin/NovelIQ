@@ -32,7 +32,7 @@ from src.models.local.evidence_renderer_shared import (
 from src.rag.evidence_contracts import EvidenceRequest, Level3QueryPlan
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.rag.mention_extraction import extract_person_mentions
-from src.rag.mention_query import build_mention_evidence_queries
+from src.rag.query_example_planner import build_query_examples_from_mentions
 from src.rag.retriever import Level3NotReadyError, Level3VectorEvidence, NarrativeEvidenceService
 from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
 
@@ -80,6 +80,16 @@ def _build_evidence_request(
         max_queries=settings.rag.level3_max_queries,
         model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
     )
+
+
+def _build_expansion_queries(text: str, *, query_source: str = "rule") -> list:
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: Level3 集成测试里的 mock plan 统一改用 expansion query，避免继续手写旧 mention_queries 合同。
+    """
+
+    return build_query_examples_from_mentions(extract_person_mentions(text), query_source=query_source)
 
 
 class TestLevel3VectorEvidence(unittest.TestCase):
@@ -1155,16 +1165,14 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
 
 class TestNarrativeEvidenceServiceLevel3Async:
     @pytest.mark.asyncio
-    async def test_emit_level3_progress_only_updates_message_without_overriding_phase_contract(self) -> None:
+    async def test_emit_level3_progress_preserves_message_and_sub_percent(self) -> None:
         """
         创建时间: 2026-04-28
         任务: fix-level3-sse-phase-progress-contract
-        说明: Level3 mention / rerank 进度只应刷新提示文案，不应把 phase 级 sub_stage/sub_percent
-              改写成更细粒度的内部节点。
-
-        修改时间: 2026-04-28
-        任务: simplify-level3-sse-copy
-        修改说明: 前端只需要稳定看到“正在收集证据”，不再暴露内部细分步骤文案。
+        修改时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        修改原因: query planner 主线新增了规则 gate / LLM fallback 语义，progress 事件必须把
+                  message 和 sub_percent 原样透传，不能再退化成固定文案。
         """
         progress_emitter = AsyncMock()
         provider = NarrativeEvidenceService(level3_enabled=True, progress_emitter=progress_emitter)
@@ -1176,9 +1184,9 @@ class TestNarrativeEvidenceServiceLevel3Async:
         assert event.action == "progress"
         assert event.stage == "annotate"
         assert event.chunk_id == 12
-        assert event.message == "正在收集证据"
+        assert event.message == "[identity] 正在抽取 Level3 mention"
         assert event.sub_stage == ""
-        assert event.sub_percent is None
+        assert event.sub_percent == 15
 
     @pytest.mark.asyncio
     async def test_collect_evidence_with_level3_adds_emotion_exemplar_items(self) -> None:
@@ -1412,14 +1420,14 @@ class TestNarrativeEvidenceServiceLevel3Async:
                 Level3QueryPlan(
                     mode="direct",
                     base_query_text="程霜翻阅旧案卷",
-                    mention_queries=[],
+                    expansion_queries=[],
                     candidate_pool_k=20,
                     top_k=settings.rag.level3_top_k,
                 ),
                 Level3QueryPlan(
                     mode="direct",
                     base_query_text="程霜翻阅旧案卷",
-                    mention_queries=[],
+                    expansion_queries=[],
                     candidate_pool_k=20,
                     top_k=settings.rag.level3_top_k,
                 ),
@@ -1516,14 +1524,16 @@ class TestNarrativeEvidenceServiceLevel3Async:
             ]
         )
 
-        mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:2]
+        expansion_queries = _build_expansion_queries("那个穿红衣的女子突然出手。")[:2]
         provider.build_level3_query_plan = AsyncMock(
             return_value=Level3QueryPlan(
                 mode="hybrid",
                 base_query_text="那个穿红衣的女子突然出手。",
-                mention_queries=mention_queries,
+                expansion_queries=expansion_queries,
                 candidate_pool_k=20,
                 top_k=2,
+                planner_kind="rule_example",
+                planner_reason="rule_query_example_available",
                 dropped_queries=[
                     {
                         "query_text": "门口的老者",
@@ -1560,8 +1570,8 @@ class TestNarrativeEvidenceServiceLevel3Async:
                 "query_text": "穿红衣的女子",
                 "stage": "search",
                 "reason": "db timeout",
-                "mention_text": mention_queries[0].mention_text,
-                "query_variant": mention_queries[0].query_variant,
+                "mention_text": expansion_queries[0].anchor_text,
+                "query_variant": expansion_queries[0].query_variant,
             }
         ]
         assert bundle.generation_meta["dropped_queries"] == [

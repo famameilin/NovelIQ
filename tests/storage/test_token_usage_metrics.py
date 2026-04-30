@@ -131,6 +131,10 @@ def test_normalize_model_interaction_call_key_maps_mainline_calls() -> None:
         metrics._normalize_model_interaction_call_key("disambiguate", "final_disambiguation")
         == "full_disambig.disambiguate_characters"
     )
+    assert (
+        metrics._normalize_model_interaction_call_key("level3_query_planner", "level3_query_planner")
+        == "mention_extraction.level3_query_planner"
+    )
 
 
 def test_normalize_token_usage_task_type_maps_annotation_fallback_back_to_mainline() -> None:

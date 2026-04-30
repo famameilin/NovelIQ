@@ -15,6 +15,7 @@ from src.rag import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.client_init import _NoopDisambiguationClient
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
+from src.workflows.annotate_helpers.disambiguation import pipeline_stages as pipeline_stages_mod
 from src.workflows.annotate_helpers.disambiguation.candidates import (
     DisambigStateSnapshot,
     DisambigStateSnapshotEntry,
@@ -134,6 +135,25 @@ def test_collect_final_disambiguation_candidates_rereviews_self_resolved_extensi
         state_snapshot=snapshot,
     )
     assert candidates == ["贺伯安"]
+
+
+def test_build_shared_evidence_request_only_keeps_global_candidate_seeds() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: shared-evidence request 只能把 global-character 候选写入 requested_names/seed_entities；
+          背景 canonical 只留在 background_entities，代词和泛称不能回流 consumer target。
+    """
+    request = pipeline_stages_mod._build_shared_evidence_request(
+        names_in_chunk=["灰衣人", "她", "来人"],
+        background_entities=["白芷", "她", "来人"],
+        query_text="灰衣人压低声音，她没有立刻接话。",
+        current_chunk=12,
+    )
+
+    assert request.requested_names == ["灰衣人"]
+    assert request.seed_entities == ["灰衣人"]
+    assert request.background_entities == ["白芷"]
 
 
 @pytest.mark.asyncio
@@ -384,7 +404,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     )
     with (
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.fetch_all_character_names",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.fetch_reference_aware_character_names",
             return_value=[{"name": "灰衣人", "count": 3}],
         ),
         patch(

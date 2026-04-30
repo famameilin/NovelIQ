@@ -22,7 +22,6 @@ from src.models.interfaces import DisambiguationLike
 from src.models.local.character_reference_policy import (
     filter_global_character_names,
     is_global_character_surface_name,
-    is_reference_surface_name,
 )
 from src.models.local.disambiguation import (
     DisambiguationPromptContext,
@@ -38,7 +37,6 @@ from src.rag import EvidenceRequest
 from src.storage.models import Chunk as ChunkModel
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import (
-    fetch_all_character_names,
     fetch_reference_aware_character_names,
 )
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
@@ -299,11 +297,19 @@ def _build_shared_evidence_request(
     修改时间: 2026-04-29
     任务: 角色引用分层重构
     修改原因: EvidenceRequest 的 requested_names/seed_entities 只能携带 global-character，代词留在 query_text 上下文。
+
+    修改时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    修改原因: shared-evidence 继续只把 global-character 准入候选写入 seed/request，
+              背景 canonical 仅留在 background_entities 供渲染层使用，不回流 consumer target。
     """
     seed_entities: list[str] = []
     for normalized in filter_global_character_names([str(name).strip() for name in names_in_chunk]):
         if normalized not in seed_entities:
             seed_entities.append(normalized)
+    # 背景名字只保留给 prompt renderer 的 existing_character_hint / graph_hint，
+    # 不能反向扩大当前 shared-evidence request 的 consumer target。
+    requested_names = list(seed_entities)
     filtered_background_entities = filter_global_character_names(
         [str(name).strip() for name in background_entities]
     )
@@ -312,7 +318,7 @@ def _build_shared_evidence_request(
         consumer="incremental_disambiguation" if current_chunk is not None else "final_disambiguation",
         objective="identity",
         query_text=query_text,
-        requested_names=seed_entities,
+        requested_names=requested_names,
         seed_entities=seed_entities,
         background_entities=filtered_background_entities,
         current_chunk=current_chunk,
