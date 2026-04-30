@@ -160,12 +160,17 @@ class _LegacyMentionExtractorQueryPlannerAdapter:
     def resolve_audit_semantics(self, result: QueryExamplePlannerResult) -> tuple[QueryPlannerKind, bool]:
         """
         创建时间: 2026-04-30
+        修改时间: 2026-04-30
         任务: fix-level3-query-example-review-findings
         新建原因: legacy compat 路径可能只返回规则抽取结果；
                   这类 query example 不能再被上游统一误记成一次真实的 LLM planner 命中。
+        修改原因: legacy extractor 返回空列表时同样拿不到任何“真实调用了 LLM planner”的证据；
+                  审计口径应继续保守，避免把无结果 compat path 误报成 LLM planner 命中。
         """
 
-        if result.queries and all(query.query_source == "rule" for query in result.queries):
+        if not result.queries:
+            return "rule_example", False
+        if all(query.query_source == "rule" for query in result.queries):
             return "rule_example", False
         return "llm_query_example", True
 
@@ -894,7 +899,47 @@ class NarrativeEvidenceService:
         normalized_names = [name.strip() for name in requested_names if name.strip()]
         if not normalized_names:
             return False
-        return all(name in normalized_query_text for name in normalized_names)
+        return all(self._has_strong_direct_name_surface(normalized_query_text, name) for name in normalized_names)
+
+    def _has_strong_direct_name_surface(self, query_text: str, name: str) -> bool:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        新建原因: direct gate 需要保守识别“正文里真的直出了 target surface”，
+                  不能把单字短 alias 命中的 substring 也当成已解析 target。
+        """
+
+        normalized_name = name.strip()
+        if not normalized_name or normalized_name not in query_text:
+            return False
+        if len(normalized_name) > 1:
+            return True
+
+        start = 0
+        while True:
+            matched_at = query_text.find(normalized_name, start)
+            if matched_at < 0:
+                return False
+            previous_char = query_text[matched_at - 1] if matched_at > 0 else ""
+            next_index = matched_at + len(normalized_name)
+            next_char = query_text[next_index] if next_index < len(query_text) else ""
+            if not self._is_name_like_char(previous_char) and not self._is_name_like_char(next_char):
+                return True
+            start = matched_at + 1
+
+    def _is_name_like_char(self, char: str) -> bool:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        新建原因: 单字名字/别名的 direct gate 只能在边界清晰时命中；
+                  相邻仍是中英文或数字时，更可能只是更长名字的一部分。
+        """
+
+        if not char:
+            return False
+        if char.isascii():
+            return char.isalnum() or char == "_"
+        return "\u4e00" <= char <= "\u9fff"
 
     def _resolve_query_planner_audit_semantics(
         self,
