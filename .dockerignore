@@ -18,11 +18,13 @@
 .venv
 .VSCodeCounter
 .workbuddy
+frontend
 __pycache__/
 *.py[cod]
 *.log
 .env
 .env.docker
+.env.docker.local
 frontend/node_modules
 frontend/dist
 logs
