@@ -14,8 +14,8 @@ from loguru import logger
 from sqlalchemy import delete, func, select
 
 from src.models.local.character_reference_policy import (
-    build_reference_resolution_lookup_keys,
     CharacterReferenceDecision,
+    build_reference_resolution_lookup_keys,
     decide_character_reference,
     filter_global_character_names,
     is_global_character_surface_name,
@@ -185,38 +185,40 @@ def apply_reference_resolutions_to_history(
     创建时间: 2026-04-29
     任务: 角色引用分层重构
     新建原因: reference_resolutions 不能只停留在 checkpoint；需要同步驱动 chunk_* 历史行的 resolved 字段消费。
+    修改时间: 2026-04-30
+    修改原因: 显式区分 character/dialogue/relation 三类历史行变量，避免静态检查把不同 ORM 模型误判成同一类型。
 
     Returns:
         受处理的历史行统计，key 为表类型。
     """
-    chunk_characters = (
+    chunk_characters: list[ChunkCharacter] = list(
         session.execute(select(ChunkCharacter).where(ChunkCharacter.run_id == run_id)).scalars().all()
     )
-    for row in chunk_characters:
+    for character_row in chunk_characters:
         decision = _resolve_history_reference_decision(
-            row.surface_name or row.name,
-            chunk_id=row.chunk_id,
+            character_row.surface_name or character_row.name,
+            chunk_id=character_row.chunk_id,
             reference_resolutions=reference_resolutions,
-            existing_resolved_global_name=row.resolved_global_name,
+            existing_resolved_global_name=character_row.resolved_global_name,
         )
         if apply:
-            row.surface_name = decision.surface_name
-            row.reference_kind = decision.reference_kind
-            row.reference_slot = decision.reference_slot
-            row.resolved_global_name = decision.resolved_global_name
-            row.global_skip_reason = decision.global_skip_reason
+            character_row.surface_name = decision.surface_name
+            character_row.reference_kind = decision.reference_kind
+            character_row.reference_slot = decision.reference_slot
+            character_row.resolved_global_name = decision.resolved_global_name
+            character_row.global_skip_reason = decision.global_skip_reason
 
-    chunk_dialogues = (
+    chunk_dialogues: list[ChunkDialogue] = list(
         session.execute(select(ChunkDialogue).where(ChunkDialogue.run_id == run_id)).scalars().all()
     )
-    for row in chunk_dialogues:
+    for dialogue_row in chunk_dialogues:
         existing_by_surface: dict[str, dict[str, object]] = {}
-        for item in row.speaker_references or []:
+        for item in dialogue_row.speaker_references or []:
             if isinstance(item, dict) and isinstance(item.get("surface_name"), str):
                 existing_by_surface[str(item["surface_name"])] = item
 
         rebuilt_references: list[dict[str, object]] = []
-        for speaker_name in row.speaker or []:
+        for speaker_name in dialogue_row.speaker or []:
             if not speaker_name:
                 continue
             existing_reference = existing_by_surface.get(str(speaker_name))
@@ -225,7 +227,7 @@ def apply_reference_resolutions_to_history(
                 existing_resolved_global_name = str(existing_reference["resolved_global_name"])
             decision = _resolve_history_reference_decision(
                 speaker_name,
-                chunk_id=row.chunk_id,
+                chunk_id=dialogue_row.chunk_id,
                 reference_resolutions=reference_resolutions,
                 existing_resolved_global_name=existing_resolved_global_name,
             )
@@ -240,21 +242,23 @@ def apply_reference_resolutions_to_history(
                 }
             )
         if apply:
-            row.speaker_references = rebuilt_references or None
+            dialogue_row.speaker_references = rebuilt_references or None
 
-    chunk_relations = session.execute(select(ChunkRelation).where(ChunkRelation.run_id == run_id)).scalars().all()
-    for row in chunk_relations:
+    chunk_relations: list[ChunkRelation] = list(
+        session.execute(select(ChunkRelation).where(ChunkRelation.run_id == run_id)).scalars().all()
+    )
+    for relation_row in chunk_relations:
         from_decision = _resolve_history_reference_decision(
-            row.from_char,
-            chunk_id=row.chunk_id,
+            relation_row.from_char,
+            chunk_id=relation_row.chunk_id,
             reference_resolutions=reference_resolutions,
-            existing_resolved_global_name=row.resolved_from_global_name,
+            existing_resolved_global_name=relation_row.resolved_from_global_name,
         )
         to_decision = _resolve_history_reference_decision(
-            row.to_char,
-            chunk_id=row.chunk_id,
+            relation_row.to_char,
+            chunk_id=relation_row.chunk_id,
             reference_resolutions=reference_resolutions,
-            existing_resolved_global_name=row.resolved_to_global_name,
+            existing_resolved_global_name=relation_row.resolved_to_global_name,
         )
         reasons = [
             f"{decision.surface_name}: {decision.global_skip_reason}"
@@ -262,11 +266,11 @@ def apply_reference_resolutions_to_history(
             if not decision.can_enter_global_character and decision.global_skip_reason
         ]
         if apply:
-            row.from_reference_kind = from_decision.reference_kind
-            row.to_reference_kind = to_decision.reference_kind
-            row.resolved_from_global_name = from_decision.resolved_global_name
-            row.resolved_to_global_name = to_decision.resolved_global_name
-            row.reference_skip_reason = "; ".join(reasons) if reasons else None
+            relation_row.from_reference_kind = from_decision.reference_kind
+            relation_row.to_reference_kind = to_decision.reference_kind
+            relation_row.resolved_from_global_name = from_decision.resolved_global_name
+            relation_row.resolved_to_global_name = to_decision.resolved_global_name
+            relation_row.reference_skip_reason = "; ".join(reasons) if reasons else None
 
     return {
         "chunk_characters": len(chunk_characters),

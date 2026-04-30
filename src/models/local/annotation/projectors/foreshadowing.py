@@ -7,7 +7,11 @@ from __future__ import annotations
 from loguru import logger
 
 from src.models.local.parser import validate_foreshadowing_result
-from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+from src.models.local.schema import (
+    ChunkAnnotation,
+    ForeshadowingPayoffLikelihood,
+    ForeshadowingResult,
+)
 
 
 def normalize_foreshadowing_result(
@@ -38,10 +42,15 @@ def merge_annotation_foreshadowing(
     *,
     resolved_setup_id: str | None = None,
     resolved_setup_summary: str | None = None,
-    resolved_payoff_likelihood: str | None = None,
+    resolved_payoff_likelihood: ForeshadowingPayoffLikelihood | None = None,
 ) -> ChunkAnnotation:
     """
     将 Phase2 伏笔结果投影回 ChunkAnnotation 写入视图
+
+    修改时间: 2026-04-30
+    任务: annotation 静态检查收口
+    修改原因: 这里消费的是 thread_projection 的 payoff_likelihood，
+              真实合同是 high/medium/low 字面量，而不是任意字符串。
     """
     if foreshadowing is None:
         return annotation

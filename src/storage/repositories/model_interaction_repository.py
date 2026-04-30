@@ -2,7 +2,7 @@
 提供模型交互记录的增删改查操作
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import desc, select
@@ -40,6 +40,11 @@ class ModelInteractionRepository(BaseRepository):
     ) -> ModelInteraction:
         """
         保存模型交互记录
+
+        修改时间: 2026-04-30
+        任务: fix-src-quality-gate
+        修改原因: `datetime.utcnow()` 已弃用，这里改为显式 UTC aware 时间，
+                  避免 pytest 留下时区弃用警告。
 
         Args:
             run_id: 运行ID
@@ -83,7 +88,7 @@ class ModelInteractionRepository(BaseRepository):
             status=status,
             error_message=error_message,
             duration_ms=duration_ms,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
         self.session.add(interaction)
         self.session.commit()

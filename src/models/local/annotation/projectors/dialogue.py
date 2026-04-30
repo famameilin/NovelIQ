@@ -10,7 +10,13 @@ from dataclasses import dataclass, field
 from loguru import logger
 
 from src.models.local.character_reference_policy import decide_character_reference
-from src.models.local.schema import DialogueRecord, DialogueRecordSchema, DialogueSnapshot, QuoteCandidate, ReferenceSnapshot
+from src.models.local.schema import (
+    DialogueRecord,
+    DialogueRecordSchema,
+    DialogueSnapshot,
+    QuoteCandidate,
+    ReferenceSnapshot,
+)
 
 
 @dataclass

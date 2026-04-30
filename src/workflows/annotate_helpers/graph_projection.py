@@ -130,6 +130,8 @@ def project_graph_tables(
     2026-04-27，任务：timeline-contract-graph-projection
     - “无变化”关系不再写入 graph history
     - 若某条已投影关系后来被修正为“无变化”，必须删除旧事件并回刷受影响 pair
+    2026-04-30，任务：storage-api-graph-mypy-cleanup
+    - relation 端点原始别名在写入 alias 表前先做显式空值收窄，保持 None 不进入 graph alias 主链
     """
     if session is None:
         raise ValueError("session is required for project_graph_tables")
@@ -417,18 +419,19 @@ def project_graph_tables(
             is_primary=relation.from_char == resolved_from,
         )
         graph_alias_map[resolved_from] = resolved_from
-        if _should_record_alias(relation.from_char, resolved_from):
+        from_alias = relation.from_char
+        if from_alias is not None and _should_record_alias(from_alias, resolved_from):
             graph_repo.upsert_alias(
                 run_id=run_id,
                 entity_id=from_entity.entity_id,
-                alias=relation.from_char,
+                alias=from_alias,
                 source_chunk_id=relation.chunk_id,
                 evidence=relation.evidence,
                 confidence=relation.confidence,
                 source_type="relation_projection",
                 is_primary=False,
             )
-            graph_alias_map[relation.from_char] = resolved_from
+            graph_alias_map[from_alias] = resolved_from
 
         graph_repo.upsert_alias(
             run_id=run_id,
@@ -441,18 +444,19 @@ def project_graph_tables(
             is_primary=relation.to_char == resolved_to,
         )
         graph_alias_map[resolved_to] = resolved_to
-        if _should_record_alias(relation.to_char, resolved_to):
+        to_alias = relation.to_char
+        if to_alias is not None and _should_record_alias(to_alias, resolved_to):
             graph_repo.upsert_alias(
                 run_id=run_id,
                 entity_id=to_entity.entity_id,
-                alias=relation.to_char,
+                alias=to_alias,
                 source_chunk_id=relation.chunk_id,
                 evidence=relation.evidence,
                 confidence=relation.confidence,
                 source_type="relation_projection",
                 is_primary=False,
             )
-            graph_alias_map[relation.to_char] = resolved_to
+            graph_alias_map[to_alias] = resolved_to
 
         rel_type = relation.type or "未知"
         rel_change = (relation.change or "").strip()
