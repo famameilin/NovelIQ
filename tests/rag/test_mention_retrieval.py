@@ -1042,6 +1042,49 @@ async def test_build_level3_query_plan_does_not_treat_partial_substring_as_resol
 
 
 @pytest.mark.asyncio
+async def test_build_level3_query_plan_does_not_treat_multi_character_overlap_as_resolved_target() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 多字名字只命中更长 surface 的局部片段时，同样不能直接触发 trusted_name_direct；
+          否则像“白芷儿”这种后缀形式会把仍需区分的 identity 文本过早压回 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(
+        return_value=MagicMock(
+            should_expand=False,
+            reason="direct_query_enough",
+            queries=[],
+            dropped_queries=[],
+        )
+    )
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="白芷儿看向门口的老者。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.planner_kind == "llm_query_example"
+    assert plan.planner_reason == "direct_query_enough"
+    assert plan.llm_invoked is True
+    planner.plan_queries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_build_level3_query_plan_uses_llm_fallback_when_rule_planner_returns_no_query_example() -> None:
     """
     创建时间: 2026-04-30

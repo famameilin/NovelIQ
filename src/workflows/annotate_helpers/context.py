@@ -700,6 +700,7 @@ async def _prepare_chunk_context_with_level3(
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=False,
+            need_level3=False,
         )
         if context.phase1_bundle is not None:
             context.phase1_prompt_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
