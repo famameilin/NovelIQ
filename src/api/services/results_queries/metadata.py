@@ -87,7 +87,10 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
         )
     except Exception as exc:
         logger.warning(f"Failed to fetch token usage stats: {exc}")
-        return TokenUsageStats()
+        return TokenUsageStats(
+            summary=TokenUsageSummary(coverage_status="partial"),
+            coverage_gaps=["token_usage_stats_unavailable"],
+        )
 
 
 def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) -> list[str]:
