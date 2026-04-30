@@ -51,3 +51,23 @@ def test_fetch_token_usage_stats_exposes_coverage_fields() -> None:
     assert stats.summary.coverage_status == "partial"
     assert stats.by_call_type["annotation.phase3"].call_count == 2
     assert stats.coverage_gaps == ["annotation.phase4"]
+
+
+class _FailingStatsRepoStub:
+    def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> dict:
+        assert run_id == "run-1"
+        assert novel_id == "novel-1"
+        raise RuntimeError("boom")
+
+
+def test_fetch_token_usage_stats_marks_partial_when_stats_fetch_fails() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: token stats 查询失败时，fetcher 不能假装 coverage complete；
+          至少要把结果标成 partial，并暴露明确的 unavailable gap。
+    """
+    stats = _fetch_token_usage_stats("run-1", "novel-1", _FailingStatsRepoStub())
+
+    assert stats.summary.coverage_status == "partial"
+    assert stats.coverage_gaps == ["token_usage_stats_unavailable"]

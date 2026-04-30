@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from src.rag.mention_query import MentionEvidenceQuery
+from src.rag.query_example_types import Level3ExpansionQuery, QueryPlannerKind
 
 EvidenceConsumer = Literal[
     "annotation_phase1",
@@ -24,7 +24,11 @@ EvidenceConsumer = Literal[
     "final_disambiguation",
 ]
 EvidenceObjective = Literal["identity", "emotion", "relation", "foreshadowing"]
-Level3QueryMode = Literal["direct", "high_order", "hybrid"]
+# 修改时间: 2026-04-30
+# 任务: verify-level3-query-mode-contract
+# 修改原因: 当前 Level3QueryPlan 实际只产出 `direct` / `hybrid` 两种模式；
+#           旧的 `high_order` 已不再被主链使用，继续保留只会制造合同噪音。
+Level3QueryMode = Literal["direct", "hybrid"]
 
 
 def _normalize_name_list(values: list[str]) -> list[str]:
@@ -108,13 +112,22 @@ class EvidenceRequest:
 class Level3QueryPlan:
     """
     将 query planning 与 retrieval execution 解耦；plan 只描述如何检索，不负责真正执行
+
+    修改时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    修改原因: identity 高阶链已从 “mention extraction + 多变体 query”
+              收口为 “direct base query + 少量 expansion query example”，
+              因此 plan 需要显式记录 planner 来源、planner 理由和是否真的动用了 LLM。
     """
 
     mode: Level3QueryMode
     base_query_text: str
-    mention_queries: list[MentionEvidenceQuery]
+    expansion_queries: list[Level3ExpansionQuery]
     candidate_pool_k: int
     top_k: int
+    planner_kind: QueryPlannerKind = "disabled"
+    planner_reason: str = ""
+    llm_invoked: bool = False
     dropped_queries: list[dict[str, str]] = field(default_factory=list)
 
 

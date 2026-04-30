@@ -23,11 +23,19 @@ from src.rag.mention_extraction_llm import (
 )
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
-from src.rag.mention_query import MentionEvidenceQuery, build_mention_evidence_queries
+from src.rag.mention_query import build_mention_evidence_queries
 from src.rag.mention_rerank import rerank_mention_level3_results
 from src.rag.model_call_audit import audited_structured_model_call
 from src.rag.model_rerank import Level3RerankResult
 from src.rag.model_rerank_llm import LLMLevel3Reranker, LLMLevel3RerankItem, LLMLevel3RerankResponse
+from src.rag.query_example_llm import (
+    LLMLevel3QueryExamplePlanner,
+    LLMQueryExampleItem,
+    LLMQueryExampleResponse,
+    normalize_query_example_response,
+)
+from src.rag.query_example_planner import build_query_examples_from_mentions
+from src.rag.query_example_types import Level3ExpansionQuery, QueryExamplePlannerRequest
 from src.rag.retriever import NarrativeEvidenceService
 from src.storage.repositories.chunk import SimilarChunkRow
 
@@ -73,6 +81,20 @@ def _build_evidence_request(
         max_queries=max_queries,
         model_rerank_query_max_chars=model_rerank_query_max_chars,
     )
+
+
+def _build_expansion_queries(
+    text: str,
+    *,
+    query_source: str = "rule",
+) -> list[Level3ExpansionQuery]:
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: 为手写 mock plan 统一生成少量 expansion query，避免测试继续绑死旧的 mention_queries 合同。
+    """
+
+    return build_query_examples_from_mentions(extract_person_mentions(text), query_source=query_source)
 
 
 def test_extract_person_mentions_captures_descriptive_person_mentions() -> None:
@@ -217,6 +239,74 @@ async def test_mention_extraction_service_skips_llm_when_prefer_llm_disabled() -
     extractor.extract_mentions.assert_not_awaited()
     assert [mention.raw_text for mention in mentions] == ["穿红衣的女子"]
     assert mentions[0].source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_llm_query_example_planner_uses_query_planner_interaction_type() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: 新的 LLM planner 必须按 `level3_query_planner` 口径记 interaction，
+          不能继续沿用旧 `mention_extraction` 审计标签。
+    """
+    model_client = MagicMock()
+    model_client._config = MagicMock(timeout_s=30)
+    planner = LLMLevel3QueryExamplePlanner(model_client)
+    expected_result = MagicMock()
+
+    with patch(
+        "src.rag.query_example_llm.audited_structured_model_call",
+        new=AsyncMock(return_value=expected_result),
+    ) as mock_call:
+        result = await planner.plan_queries(
+            QueryExamplePlannerRequest(
+                text="那个穿红衣的女子突然出手。",
+                requested_names=("白芷",),
+                seed_entities=("白芷",),
+                anchor_candidates=("穿红衣的女子",),
+                run_id="run-1",
+                current_chunk=9,
+                max_queries=2,
+            )
+        )
+
+    assert result is expected_result
+    assert mock_call.await_args.kwargs["interaction_type"] == "level3_query_planner"
+    assert mock_call.await_args.kwargs["call_type"] == "level3_query_planner"
+    assert mock_call.await_args.kwargs["phase"] == "level3_query_planner"
+
+
+def test_normalize_query_example_response_can_decline_expansion() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: 当 LLM planner 显式返回 should_expand=false 时，归一化结果必须保持空 query，
+          让上游 stable 地回到 direct，而不是偷偷塞入 query example。
+    """
+    result = normalize_query_example_response(
+        LLMQueryExampleResponse(
+            should_expand=False,
+            reason="direct_query_enough",
+            queries=[
+                LLMQueryExampleItem(
+                    query_text="红衣 女子",
+                    anchor_text="穿红衣的女子",
+                    reason="不应被采用",
+                    confidence=0.9,
+                )
+            ],
+        ),
+        request=QueryExamplePlannerRequest(
+            text="那个穿红衣的女子突然出手。",
+            requested_names=("白芷",),
+            anchor_candidates=("穿红衣的女子",),
+            max_queries=2,
+        ),
+    )
+
+    assert result.should_expand is False
+    assert result.reason == "direct_query_enough"
+    assert result.queries == []
 
 
 @pytest.mark.asyncio
@@ -772,7 +862,9 @@ async def test_build_level3_query_plan_uses_hybrid_for_identity_requests() -> No
 
     assert plan.mode == "hybrid"
     assert plan.base_query_text == "那个穿红衣的女子突然出手。"
-    assert len(plan.mention_queries) >= 1
+    assert plan.planner_kind == "rule_example"
+    assert len(plan.expansion_queries) >= 1
+    assert plan.llm_invoked is False
     assert plan.candidate_pool_k == 20
 
 
@@ -796,34 +888,25 @@ async def test_build_level3_query_plan_uses_direct_for_relation_requests() -> No
     )
 
     assert plan.mode == "direct"
-    assert plan.mention_queries == []
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "disabled"
     assert plan.base_query_text == "白芷看向侯飞白。"
 
 
 @pytest.mark.asyncio
-async def test_build_level3_query_plan_uses_limited_hybrid_for_relation_requests_when_explicitly_allowed() -> None:
+async def test_build_level3_query_plan_uses_direct_when_trusted_name_is_enough() -> None:
     """
-    创建时间: 2026-04-25
-    任务: fix-level3-relation-query-expansion-contract
-    说明: relation objective 显式允许 expansion 时，应从默认 direct 切到受限 hybrid；
-          但 relation 只复用规则 extractor，不走 LLM 主路径。
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: identity 文本里只有可信实名且不存在描述性人物锚点时，应直接走 direct gate，
+          不能再无条件进入高阶 planner。
     """
     provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
-    provider._mention_extraction_service.extract_mentions = AsyncMock(
-        return_value=[
-            PersonMention(
-                raw_text="门口的老者",
-                mention_type="location_role",
-                sentence_text="门口的老者看向白芷。",
-                cues={"location": ["门口"], "role_word": "老者"},
-                source="rule",
-            )
-        ]
-    )
     plan = await provider.build_level3_query_plan(
         _build_evidence_request(
-            objective="relation",
-            query_text="门口的老者看向白芷。",
+            objective="identity",
+            query_text="白芷看向侯飞白。",
+            requested_names=["白芷", "侯飞白"],
             seed_entities=["白芷"],
             current_chunk=9,
             max_chunk_id=8,
@@ -832,10 +915,286 @@ async def test_build_level3_query_plan_uses_limited_hybrid_for_relation_requests
         )
     )
 
-    assert plan.mode == "hybrid"
-    assert len(plan.mention_queries) == 2
-    assert plan.base_query_text == "门口的老者看向白芷。"
-    assert provider._mention_extraction_service.extract_mentions.await_args.kwargs["prefer_llm"] is False
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "direct_gate"
+    assert plan.planner_reason == "trusted_name_direct"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query_text", "requested_names"),
+    [
+        ("黑衣人忽然出手。", ["黑衣人"]),
+        ("白芷看向门口的老者。", ["白芷"]),
+        ("白芷正是那名红衣女子。", ["白芷"]),
+    ],
+)
+async def test_build_level3_query_plan_keeps_direct_when_target_is_already_resolved_in_text(
+    query_text: str,
+    requested_names: list[str],
+) -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 只要当前 consumer target 已经在正文里直出现并完成解析，
+          同段里的 role-word target、自指同位语或旁观者描述都不该再把 identity 请求拉回高阶 planner。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(return_value=MagicMock())
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    plan = await provider.build_level3_query_plan(
+        _build_evidence_request(
+            objective="identity",
+            query_text=query_text,
+            requested_names=requested_names,
+            seed_entities=requested_names,
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=2,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "direct_gate"
+    assert plan.planner_reason == "trusted_name_direct"
+    assert plan.llm_invoked is False
+    planner.plan_queries.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_keeps_direct_for_alias_resolved_workflow_target_shape() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 真实 workflow 在 alias 命中文本时，requested_names 只保留 surface，
+          canonical 继续留在 seed_entities 做 retrieval 扩锚；这类 alias-resolved target 仍应 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(return_value=MagicMock())
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    plan = await provider.build_level3_query_plan(
+        _build_evidence_request(
+            objective="identity",
+            query_text="小七看向门口的老者。",
+            requested_names=["小七"],
+            seed_entities=["小七", "程霜"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=2,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "direct_gate"
+    assert plan.planner_reason == "trusted_name_direct"
+    assert plan.llm_invoked is False
+    planner.plan_queries.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_does_not_treat_partial_substring_as_resolved_target() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 单字短 alias 只命中更长名字的 substring 时，不能直接触发 trusted_name_direct，
+          否则会把仍需区分的 identity 文本过早压回 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(
+        return_value=MagicMock(
+            should_expand=False,
+            reason="direct_query_enough",
+            queries=[],
+            dropped_queries=[],
+        )
+    )
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="白芷看向门口的老者。",
+                requested_names=["白"],
+                seed_entities=["白"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.planner_kind == "llm_query_example"
+    assert plan.planner_reason == "direct_query_enough"
+    assert plan.llm_invoked is True
+    planner.plan_queries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_does_not_treat_multi_character_overlap_as_resolved_target() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 多字名字只命中更长 surface 的局部片段时，同样不能直接触发 trusted_name_direct；
+          否则像“白芷儿”这种后缀形式会把仍需区分的 identity 文本过早压回 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(
+        return_value=MagicMock(
+            should_expand=False,
+            reason="direct_query_enough",
+            queries=[],
+            dropped_queries=[],
+        )
+    )
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="白芷儿看向门口的老者。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.planner_kind == "llm_query_example"
+    assert plan.planner_reason == "direct_query_enough"
+    assert plan.llm_invoked is True
+    planner.plan_queries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_uses_llm_fallback_when_rule_planner_returns_no_query_example() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: level3-query-exampler-mainline
+    说明: 文本里存在描述性人物锚点但规则 planner 产空时，才允许调用 LLM planner；
+          若 LLM 明确拒绝扩展，则最终仍应回到 direct。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(
+        return_value=MagicMock(
+            should_expand=False,
+            reason="direct_query_enough",
+            queries=[],
+            dropped_queries=[],
+        )
+    )
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="门口的老者忽然开口。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=6,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "llm_query_example"
+    assert plan.planner_reason == "direct_query_enough"
+    assert plan.llm_invoked is True
+    planner.plan_queries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_falls_back_to_direct_when_llm_planner_errors() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 规则 planner 产空后，即使 LLM planner 抛异常，也必须回退到 direct 保底，
+          不能让整次 identity Level3 计划直接失败。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(side_effect=RuntimeError("planner boom"))
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="门口的老者忽然开口。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=6,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "llm_query_example"
+    assert plan.planner_reason == "llm_query_example_failed:RuntimeError"
+    assert plan.llm_invoked is True
+    planner.plan_queries.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_skips_llm_when_query_budget_is_zero() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: `max_queries=0` 应直接等价于禁用高阶扩展预算；
+          即使文本里存在描述性人物锚点，也不能再调用 LLM planner。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(return_value=MagicMock())
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    plan = await provider.build_level3_query_plan(
+        _build_evidence_request(
+            objective="identity",
+            query_text="门口的老者忽然开口。",
+            requested_names=["白芷"],
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=0,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "rule_example"
+    assert plan.planner_reason == "no_query_budget"
+    planner.plan_queries.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -857,14 +1216,14 @@ async def test_build_level3_query_plan_trims_queries_by_budget() -> None:
         )
     )
 
-    assert len(plan.mention_queries) == 1
+    assert len(plan.expansion_queries) == 1
     assert plan.base_query_text == "那个穿红衣的女子突然出手，门口的老者没有说话。"
     assert len(plan.dropped_queries) >= 1
     assert all(item["reason"] == "max_queries_budget" for item in plan.dropped_queries)
 
 
 @pytest.mark.asyncio
-async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
+async def test_provider_collects_query_examples_and_dedupes_results() -> None:
     """
     创建时间: 2026-04-23
     任务: level3-mention-retrieval
@@ -882,14 +1241,16 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
         ]
     )
 
-    mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:2]
+    expansion_queries = _build_expansion_queries("那个穿红衣的女子突然出手。")[:2]
     provider.build_level3_query_plan = AsyncMock(
         return_value=Level3QueryPlan(
             mode="hybrid",
             base_query_text="那个穿红衣的女子突然出手。",
-            mention_queries=mention_queries,
+            expansion_queries=expansion_queries,
             candidate_pool_k=20,
             top_k=2,
+            planner_kind="rule_example",
+            planner_reason="rule_query_example_available",
         )
     )
     bundle = await provider.collect(
@@ -910,12 +1271,12 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert semantic_items[0].metadata["business_rerank_score"] >= semantic_items[0].metadata["chunk_semantic_score"]
     provider._level3.search_similar_chunks_many.assert_awaited_once()
     assert provider._level3.search_similar_chunks_many.await_args.args[0] == [
-        mention_queries[0].query_text,
-        mention_queries[1].query_text,
+        expansion_queries[0].query_text,
+        expansion_queries[1].query_text,
         "那个穿红衣的女子突然出手。",
     ]
     assert provider._level3.search_similar_chunks_many.await_args.kwargs["max_chunk_id"] == 9
-    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 20
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 6
     assert provider._level3.search_similar_chunks_many.await_args.kwargs["ensure_ready"] is False
     provider._level3.search_similar_chunks.assert_not_awaited()
 
@@ -955,17 +1316,147 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
     assert semantic_items[0].metadata["query_kind"] == "mention"
     assert semantic_items[0].metadata["mention_source"] == "rule"
-    assert semantic_items[0].metadata["query_variant"] == "mention_raw"
+    assert semantic_items[0].metadata["query_variant"] in {"mention_compressed", "mention_raw"}
     assert semantic_items[0].metadata["rerank_source"] == "deterministic_fallback"
     assert bundle.request_meta["consumer"] == "incremental_disambiguation"
     assert bundle.request_meta["requested_names"] == ["白芷"]
     assert bundle.generation_meta["level3_executed"] is True
+    assert bundle.generation_meta["query_planner_kind"] == "rule_example"
     assert bundle.generation_meta["batch_mode"] == "batched"
     assert bundle.generation_meta["query_count"] >= 2
     assert bundle.generation_meta["failed_queries"] == []
-    assert batched_query_texts[0] == "穿红衣的女子"
+    assert "穿红衣的女子" in batched_query_texts
+    assert "红衣 女子 出手" in batched_query_texts
     provider._level3.search_similar_chunks_many.assert_awaited_once()
     provider._level3.search_similar_chunks.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_query_example_planner_adapter_preserves_rule_source() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 旧 `mention_extractor=` 兼容路径若底层实际回退到规则抽取，
+          适配出的 query example 也必须保持 `query_source=rule`。
+    """
+    class LegacyExtractor:
+        def __init__(self) -> None:
+            self.extract_mentions = AsyncMock(
+                return_value=[
+                    PersonMention(
+                        raw_text="门口的老者",
+                        mention_type="location_role",
+                        sentence_text="门口的老者忽然开口。",
+                        cues={"location": ["门口"], "role_word": "老者"},
+                        source="rule",
+                    )
+                ]
+            )
+
+    legacy_extractor = LegacyExtractor()
+    provider = NarrativeEvidenceService(level3_enabled=True, mention_extractor=legacy_extractor)
+
+    result = await provider._llm_query_example_planner.plan_queries(
+        QueryExamplePlannerRequest(
+            text="门口的老者忽然开口。",
+            requested_names=("白芷",),
+            seed_entities=("白芷",),
+            anchor_candidates=("门口的老者",),
+            current_chunk=9,
+            max_queries=2,
+        )
+    )
+
+    assert result.queries
+    assert result.queries[0].query_source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_legacy_adapter_rule_result_does_not_claim_llm_invocation() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: legacy `mention_extractor=` 兼容路径若实际只返回 rule-sourced query example，
+          上游 plan 审计也必须保持 `planner_kind=rule_example` 且 `llm_invoked=False`。
+    """
+
+    class LegacyExtractor:
+        def __init__(self) -> None:
+            self.extract_mentions = AsyncMock(
+                return_value=[
+                    PersonMention(
+                        raw_text="门口的老者",
+                        mention_type="location_role",
+                        sentence_text="门口的老者忽然开口。",
+                        cues={"location": ["门口"], "role_word": "老者"},
+                        source="rule",
+                    )
+                ]
+            )
+
+    provider = NarrativeEvidenceService(level3_enabled=True, mention_extractor=LegacyExtractor())
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="门口的老者忽然开口。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "hybrid"
+    assert plan.planner_kind == "rule_example"
+    assert plan.planner_reason == "legacy_mention_extractor_adapter"
+    assert plan.llm_invoked is False
+    assert plan.expansion_queries
+    assert plan.expansion_queries[0].query_source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_legacy_adapter_empty_result_does_not_claim_llm_invocation() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: legacy `mention_extractor=` 兼容路径即使返回空结果，也不应把这次 planner 审计记成 LLM 命中。
+    """
+
+    class LegacyExtractor:
+        def __init__(self) -> None:
+            self.extract_mentions = AsyncMock(return_value=[])
+
+    provider = NarrativeEvidenceService(level3_enabled=True, mention_extractor=LegacyExtractor())
+
+    with patch(
+        "src.rag.retriever.build_rule_query_examples",
+        return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+    ):
+        plan = await provider.build_level3_query_plan(
+            _build_evidence_request(
+                objective="identity",
+                query_text="门口的老者忽然开口。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                current_chunk=9,
+                max_chunk_id=8,
+                allow_llm_query_expansion=True,
+                max_queries=2,
+            )
+        )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "rule_example"
+    assert plan.planner_reason == "legacy_mention_extractor_adapter"
+    assert plan.llm_invoked is False
 
 
 @pytest.mark.asyncio
@@ -996,14 +1487,16 @@ async def test_provider_uses_model_rerank_when_available() -> None:
         ]
     )
 
-    mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:1]
+    expansion_queries = _build_expansion_queries("那个穿红衣的女子突然出手。")[:1]
     provider.build_level3_query_plan = AsyncMock(
         return_value=Level3QueryPlan(
             mode="hybrid",
             base_query_text="那个穿红衣的女子突然出手。",
-            mention_queries=mention_queries,
+            expansion_queries=expansion_queries,
             candidate_pool_k=20,
             top_k=2,
+            planner_kind="rule_example",
+            planner_reason="rule_query_example_available",
         )
     )
     bundle = await provider.collect(
@@ -1055,10 +1548,10 @@ async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> Non
         return_value=Level3QueryPlan(
             mode="hybrid",
             base_query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水，所有人都在看她。",
-            mention_queries=[
+            expansion_queries=[
                 next(
                     query
-                    for query in build_mention_evidence_queries(
+                    for query in build_query_examples_from_mentions(
                         [
                             PersonMention(
                                 raw_text="那个穿红衣的女子在门口忽然出手",
@@ -1068,21 +1561,24 @@ async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> Non
                                 normalized_query_terms=("红衣", "女子", "门口", "出手"),
                                 source="llm",
                             )
-                        ]
+                        ],
+                        query_source="llm",
                     )
                     if query.query_variant == "mention_compressed"
                 ),
-                MentionEvidenceQuery(
+                Level3ExpansionQuery(
                     query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水",
-                    mention_text="那个穿红衣的女子在门口忽然出手",
-                    mention_type="descriptive_person",
+                    anchor_text="那个穿红衣的女子在门口忽然出手",
+                    anchor_type="descriptive_person",
                     matched_features=("红衣", "门口", "出手"),
                     query_variant="mention_raw",
-                    mention_source="llm",
+                    query_source="llm",
                 ),
             ],
             candidate_pool_k=20,
             top_k=2,
+            planner_kind="llm_query_example",
+            planner_reason="llm_query_example_available",
         )
     )
 
@@ -1127,14 +1623,16 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
         ]
     )
 
-    mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:1]
+    expansion_queries = _build_expansion_queries("那个穿红衣的女子突然出手。")[:1]
     provider.build_level3_query_plan = AsyncMock(
         return_value=Level3QueryPlan(
             mode="hybrid",
             base_query_text="那个穿红衣的女子突然出手。",
-            mention_queries=mention_queries,
+            expansion_queries=expansion_queries,
             candidate_pool_k=20,
             top_k=1,
+            planner_kind="rule_example",
+            planner_reason="rule_query_example_available",
         )
     )
     bundle = await provider.collect(
@@ -1152,5 +1650,5 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     assert semantic_items[0].metadata["chunk_semantic_score"] == 0.82
     assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
     assert semantic_items[0].metadata["feature_overlap"] == ["红衣", "女子", "出手"]
-    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 20
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 10
     provider._level3.search_similar_chunks.assert_not_awaited()

@@ -13,9 +13,9 @@ from src.storage.repositories.annotation.characters import (
     fetch_reference_aware_character_names,
 )
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
-from src.workflows.annotate_helpers.disambiguation.candidates import extract_new_names_from_db
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline_stages as pipeline_stages_mod
+from src.workflows.annotate_helpers.disambiguation.candidates import extract_new_names_from_db
 
 
 def test_apply_disambiguation_decisions_keeps_uncertain_self_map_in_review() -> None:
@@ -304,7 +304,8 @@ def test_extract_new_names_from_db_keeps_reference_candidates_before_global_filt
     """
     创建时间: 2026-04-29
     任务: 角色引用分层重构
-    新建原因: 消歧候选入口必须保留未解析 reference surface，不能在 fetch_all_character_names 这类 global-only 出口提前蒸发。
+    新建原因: 消歧候选入口必须保留未解析 reference surface，
+              不能在 fetch_all_character_names 这类 global-only 出口提前蒸发。
     """
     run_id = "run-ref-candidates"
     novel_id = "novref01"
