@@ -6,8 +6,11 @@
  */
 
 export const appConfig = {
-  /** 后端 API 地址 */
-  apiBaseUrl: "http://localhost:8000",
+  /**
+   * 2026-04-30: 双模式 API/SSE 兼容
+   * 改为同源优先，源码开发走 Vite `/api` 代理，Docker/Nginx 部署走同源反代
+   */
+  apiBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
 
   /** 上传：单个文件最大字节数 */
   maxUploadSizeBytes: 10 * 1024 * 1024, // 10 MB
