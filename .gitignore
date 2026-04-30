@@ -30,6 +30,8 @@ env/
 
 # Environment Variables - 包含敏感信息，必须忽略
 .env
+.env.docker
+.env.docker.local
 
 # IDE
 .idea/
