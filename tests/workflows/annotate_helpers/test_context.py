@@ -314,6 +314,21 @@ def test_collect_requested_names_promotes_direct_canonical_mentions_only_when_ex
     assert requested_names == ["程霜"]
 
 
+def test_collect_requested_names_keeps_alias_surface_without_promoting_hidden_canonical():
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 当正文里只出现 alias 时，requested_names 只表达当前可见 target surface；
+          hidden canonical 可以继续留在 seed_entities，但不该直接抬成当前 consumer target。
+    """
+    requested_names = _collect_requested_names(
+        {"小七": "程霜"},
+        query_text="小七看向门口的老者。",
+    )
+
+    assert requested_names == ["小七"]
+
+
 class FailOnChunkRepository:
     def __init__(self, _conn) -> None:
         raise AssertionError(
@@ -493,6 +508,64 @@ def test_prepare_chunk_context_can_collect_phase2_evidence_when_opted_in(monkeyp
     assert phase2_request.consumer == "annotation_phase2"
     assert phase2_request.requested_names == ["白芷"]
     assert phase2_request.seed_entities == ["白芷"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_chunk_context_with_level3_can_collect_phase2_evidence_when_opted_in(monkeypatch):
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 异步 Level3 路径显式打开 include_phase2_evidence 时，
+          Phase2 request 也必须和同步路径一样继续关在 Level1/2，不得误开 Level3。
+    """
+    phase1_bundle = EvidenceBundle(
+        local_evidence=[EvidenceItem(evidence_type="active_entity", source="level2", content="白芷")]
+    )
+    phase2_bundle = EvidenceBundle(
+        local_evidence=[EvidenceItem(evidence_type="foreshadow", source="level2", content="旧线索")]
+    )
+    phase3_bundle = EvidenceBundle(
+        local_evidence=[EvidenceItem(evidence_type="active_entity", source="level2", content="白芷")]
+    )
+    provider = Mock()
+    provider.collect = AsyncMock(side_effect=[phase1_bundle, phase2_bundle, phase3_bundle])
+
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
+    monkeypatch.setattr(
+        context_module,
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="白芷",
+                entity_id=7,
+                role="helper",
+                recent_action="观察",
+                recent_emotion=None,
+                last_seen_chunk=12,
+            )
+        ],
+    )
+    monkeypatch.setattr(settings.analysis.multi_phase_annotation, "include_phase2_evidence", True)
+
+    context = await _prepare_chunk_context_with_level3(
+        conn=object(),
+        chunk_id=12,
+        chunk_text="蒙面人出现了",
+        alias_map={},
+        use_context_enhancement=True,
+        evidence_service=provider,
+        run_id="run-1",
+    )
+
+    assert context.phase1_bundle is phase1_bundle
+    assert context.phase2_bundle is phase2_bundle
+    assert context.phase3_bundle is phase3_bundle
+    assert provider.collect.await_count == 3
+    phase2_request = provider.collect.await_args_list[1].args[0]
+    assert phase2_request.consumer == "annotation_phase2"
+    assert phase2_request.requested_names == ["白芷"]
+    assert phase2_request.seed_entities == ["白芷"]
+    assert phase2_request.need_level3 is False
 
 
 def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):

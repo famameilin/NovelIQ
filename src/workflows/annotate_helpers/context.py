@@ -374,18 +374,35 @@ def _collect_requested_names(
     extra_names: list[str] | None = None,
 ) -> list[str]:
     """
+    创建时间: 2026-04-25
+    修改时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
     requested_names 只表达“当前 consumer 正在处理谁”，
-          不应混入 Level2 active entities 这类仅用于 retrieval 扩锚的背景名
-
+          不应混入 Level2 active entities 这类仅用于 retrieval 扩锚的背景名。
+    修改原因: alias 命中正文时，consumer target 只需要保留当前可见 surface；
+              canonical 仍可留在 seed_entities 做 retrieval 扩锚，但不应再强塞进 requested_names，
+              否则 direct gate 会把“已解析 alias + 隐式 canonical”误判成未完成解析。
     """
-    requested_names = _collect_seed_entities(
-        alias_map,
-        [],
-        query_text=query_text,
-    )
+    requested_names: list[str] = []
     normalized_query_text = (query_text or "").strip()
     if not normalized_query_text:
         return requested_names
+
+    for alias, canonical in (alias_map or {}).items():
+        normalized_alias = str(alias).strip()
+        normalized_canonical = str(canonical).strip()
+        if (
+            normalized_alias
+            and normalized_alias in normalized_query_text
+            and normalized_alias not in requested_names
+        ):
+            requested_names.append(normalized_alias)
+        if (
+            normalized_canonical
+            and normalized_canonical in normalized_query_text
+            and normalized_canonical not in requested_names
+        ):
+            requested_names.append(normalized_canonical)
 
     for name in extra_names or []:
         normalized = str(name).strip()
@@ -666,6 +683,7 @@ async def _prepare_chunk_context_with_level3(
                 chunk_id=chunk_id,
                 max_chunk_id=chunk_id - 1,
                 allow_llm_query_expansion=False,
+                need_level3=False,
             )
             context.phase2_bundle = await evidence_service.collect(phase2_request)
         context.phase3_bundle = await evidence_service.collect(phase3_request)
