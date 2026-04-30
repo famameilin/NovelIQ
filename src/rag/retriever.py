@@ -904,16 +904,26 @@ class NarrativeEvidenceService:
     def _has_strong_direct_name_surface(self, query_text: str, name: str) -> bool:
         """
         创建时间: 2026-04-30
+        修改时间: 2026-04-30
         任务: fix-level3-query-example-review-findings
         新建原因: direct gate 需要保守识别“正文里真的直出了 target surface”，
-                  不能把单字短 alias 命中的 substring 也当成已解析 target。
+                  不能把单字短 alias 或多字名字的部分重叠/后缀命中当成已解析 target。
         """
 
         normalized_name = name.strip()
         if not normalized_name or normalized_name not in query_text:
             return False
         if len(normalized_name) > 1:
-            return True
+            start = 0
+            while True:
+                matched_at = query_text.find(normalized_name, start)
+                if matched_at < 0:
+                    return False
+                next_index = matched_at + len(normalized_name)
+                next_char = query_text[next_index] if next_index < len(query_text) else ""
+                if not self._is_name_overlap_suffix_char(next_char):
+                    return True
+                start = matched_at + 1
 
         start = 0
         while True:
@@ -926,6 +936,16 @@ class NarrativeEvidenceService:
             if not self._is_name_like_char(previous_char) and not self._is_name_like_char(next_char):
                 return True
             start = matched_at + 1
+
+    def _is_name_overlap_suffix_char(self, char: str) -> bool:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        新建原因: 多字名字的 direct gate 仍需挡住常见的昵称后缀/粘连 surface，
+                  例如“白芷儿”这类并非正文直出 target surface 的重叠命中。
+        """
+
+        return char in {"儿", "子", "哥", "姐", "妹", "弟", "叔", "姨", "伯", "爷", "娘", "氏", "总"}
 
     def _is_name_like_char(self, char: str) -> bool:
         """
