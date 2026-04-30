@@ -205,3 +205,4 @@ skills/
 .pytest-tmp/
 output/
 tmp/
+scripts/tools/build_competition_report.py
