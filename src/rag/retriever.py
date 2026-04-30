@@ -42,6 +42,7 @@ from src.rag.query_example_types import (
     Level3QueryExamplePlanner,
     QueryExamplePlannerRequest,
     QueryExamplePlannerResult,
+    QueryPlannerKind,
 )
 
 if TYPE_CHECKING:
@@ -155,6 +156,18 @@ class _LegacyMentionExtractorQueryPlannerAdapter:
             queries=kept_queries,
             dropped_queries=dropped_queries,
         )
+
+    def resolve_audit_semantics(self, result: QueryExamplePlannerResult) -> tuple[QueryPlannerKind, bool]:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        新建原因: legacy compat 路径可能只返回规则抽取结果；
+                  这类 query example 不能再被上游统一误记成一次真实的 LLM planner 命中。
+        """
+
+        if result.queries and all(query.query_source == "rule" for query in result.queries):
+            return "rule_example", False
+        return "llm_query_example", True
 
 
 def _coerce_query_example_planner(planner: Any | None) -> Level3QueryExamplePlanner | None:
@@ -590,6 +603,8 @@ class NarrativeEvidenceService:
         任务: level3-query-exampler-mainline
         说明: 先做 identity 二级门槛，再决定是否启用规则/LLM query planner；
               任意 LLM 调用都只能发生在 direct gate 之后。
+        修改原因: direct gate 需要把“当前 consumer target 已在正文解析完成”作为稳定保底，
+                  不能因为同段里还有旁观者锚点或同位语描述，就重新打开高阶 planner。
         """
         base_query_text = request.query_text.strip()
         direct_candidate_pool_k = self._level3_pool_k(request.top_k)
@@ -624,13 +639,7 @@ class NarrativeEvidenceService:
                 planner_reason="llm_query_expansion_disabled",
             )
 
-        anchor_candidates = collect_descriptive_anchor_texts(base_query_text)
-        if not anchor_candidates:
-            planner_reason = (
-                "trusted_name_direct"
-                if self._has_direct_requested_names(base_query_text, request.requested_names)
-                else "no_descriptive_anchor"
-            )
+        if self._are_all_requested_names_directly_mentioned(base_query_text, request.requested_names):
             return Level3QueryPlan(
                 mode="direct",
                 base_query_text=base_query_text,
@@ -638,7 +647,24 @@ class NarrativeEvidenceService:
                 candidate_pool_k=direct_candidate_pool_k,
                 top_k=request.top_k,
                 planner_kind="direct_gate",
-                planner_reason=planner_reason,
+                planner_reason="trusted_name_direct",
+            )
+
+        anchor_candidates = collect_descriptive_anchor_texts(
+            base_query_text,
+            names_in_chunk=tuple(dict.fromkeys(request.requested_names + request.seed_entities)),
+            run_id=self._run_id,
+            current_chunk=request.current_chunk,
+        )
+        if not anchor_candidates:
+            return Level3QueryPlan(
+                mode="direct",
+                base_query_text=base_query_text,
+                expansion_queries=[],
+                candidate_pool_k=direct_candidate_pool_k,
+                top_k=request.top_k,
+                planner_kind="direct_gate",
+                planner_reason="no_descriptive_anchor",
             )
 
         planner_request = self._build_query_example_planner_request(
@@ -695,7 +721,7 @@ class NarrativeEvidenceService:
             25,
         )
         try:
-            llm_result = await self._llm_query_example_planner.plan_queries(planner_request)
+            planner_result = await self._llm_query_example_planner.plan_queries(planner_request)
         except Exception as exc:
             logger.warning(
                 "Level3 LLM query planner failed; falling back to direct query: run_id={} chunk_id={} error={}",
@@ -719,22 +745,23 @@ class NarrativeEvidenceService:
                 llm_invoked=True,
                 dropped_queries=list(rule_result.dropped_queries),
             )
-        if llm_result.should_expand and llm_result.queries:
+        planner_kind, llm_invoked = self._resolve_query_planner_audit_semantics(planner_result)
+        if planner_result.should_expand and planner_result.queries:
             await self._emit_level3_progress(
                 request.current_chunk,
-                f"[{request.objective}] LLM planner 产出 {len(llm_result.queries)} 条 query example",
+                f"[{request.objective}] LLM planner 产出 {len(planner_result.queries)} 条 query example",
                 35,
             )
             return Level3QueryPlan(
                 mode="hybrid",
                 base_query_text=base_query_text,
-                expansion_queries=llm_result.queries,
+                expansion_queries=planner_result.queries,
                 candidate_pool_k=direct_candidate_pool_k,
                 top_k=request.top_k,
-                planner_kind="llm_query_example",
-                planner_reason=llm_result.reason,
-                llm_invoked=True,
-                dropped_queries=list(llm_result.dropped_queries),
+                planner_kind=planner_kind,
+                planner_reason=planner_result.reason,
+                llm_invoked=llm_invoked,
+                dropped_queries=list(planner_result.dropped_queries),
             )
 
         return Level3QueryPlan(
@@ -743,10 +770,10 @@ class NarrativeEvidenceService:
             expansion_queries=[],
             candidate_pool_k=direct_candidate_pool_k,
             top_k=request.top_k,
-            planner_kind="llm_query_example",
-            planner_reason=llm_result.reason,
-            llm_invoked=True,
-            dropped_queries=list(llm_result.dropped_queries),
+            planner_kind=planner_kind,
+            planner_reason=planner_result.reason,
+            llm_invoked=llm_invoked,
+            dropped_queries=list(planner_result.dropped_queries),
         )
 
     async def execute_level3_query_plan(
@@ -850,18 +877,40 @@ class NarrativeEvidenceService:
             max_queries=min(max(request.max_queries, 0), 2),
         )
 
-    def _has_direct_requested_names(self, query_text: str, requested_names: list[str]) -> bool:
+    def _are_all_requested_names_directly_mentioned(self, query_text: str, requested_names: list[str]) -> bool:
         """
         创建时间: 2026-04-30
+        修改时间: 2026-04-30
         任务: level3-query-exampler-mainline
-        说明: direct gate 只把正文中显式出现的可信 consumer target 当作“已足够”信号；
-              没有正文直出现时，不应因为背景 requested_names 存在就误判为 direct-only。
+        说明: direct gate 只把“当前 consumer target 已经全部在正文直出现”当作稳定保底信号；
+              这样同段里的旁观者描述或同位语不会把已解析 target 再拉回高阶 planner。
+        修改原因: 原先按“任一 requested_name 命中”判断过于宽松，既不能表达“target 全部已解析”，
+                  也无法和 direct-first 的目标语义对齐。
         """
 
         normalized_query_text = query_text.strip()
         if not normalized_query_text:
             return False
-        return any(name.strip() and name.strip() in normalized_query_text for name in requested_names)
+        normalized_names = [name.strip() for name in requested_names if name.strip()]
+        if not normalized_names:
+            return False
+        return all(name in normalized_query_text for name in normalized_names)
+
+    def _resolve_query_planner_audit_semantics(
+        self,
+        result: QueryExamplePlannerResult,
+    ) -> tuple[QueryPlannerKind, bool]:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        新建原因: query planner transport 仍可能经由 legacy `mention_extractor` alias 注入；
+                  generation_meta 与 model_interactions 必须按实际 query source 记录，
+                  不能把 rule compat 结果统一误报成 LLM planner 命中。
+        """
+
+        if isinstance(self._llm_query_example_planner, _LegacyMentionExtractorQueryPlannerAdapter):
+            return self._llm_query_example_planner.resolve_audit_semantics(result)
+        return "llm_query_example", True
 
     async def _retrieve_candidates(
         self,
