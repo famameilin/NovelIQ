@@ -157,6 +157,45 @@ def test_build_shared_evidence_request_only_keeps_global_candidate_seeds() -> No
 
 
 @pytest.mark.asyncio
+async def test_build_prompt_context_with_shared_evidence_skips_level3_for_pure_reference_candidates() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: 当 shared-evidence 这一轮只剩 reference-class 候选时，
+          应继续保留 Level1/2 fallback，但不能再靠 pronoun-only query_text 重新打开 Level3。
+    """
+    evidence_service = _FakeNarrativeEvidenceService(
+        EvidenceBundle(
+            local_evidence=[
+                EvidenceItem(
+                    evidence_type="active_entity",
+                    source="level2",
+                    content="白芷",
+                    metadata={"name": "白芷"},
+                )
+            ],
+            requested_names=[],
+        ),
+        level3_available=True,
+        requires_level3=False,
+    )
+
+    prompt_context = await pipeline_mod._build_prompt_context_with_shared_evidence(
+        DisambiguationPromptContext(existing_character_hint="【已存在角色锚点】\n- 白芷"),
+        evidence_service,
+        [{"name": "她", "count": 2}, {"name": "来人", "count": 1}],
+        {"她": "【身份线索】她望向门外。", "来人": "【身份线索】来人没有接话。"},
+        current_chunk=12,
+        active_entity_fallback_names={"她"},
+    )
+
+    assert prompt_context is not None
+    assert evidence_service.calls[0]["requested_names"] == []
+    assert evidence_service.calls[0]["names_in_chunk"] == []
+    assert evidence_service.calls[0]["need_level3"] is False
+
+
+@pytest.mark.asyncio
 async def test_record_model_interaction_with_disambiguation() -> None:
     client = _FakeDisambigClient()
     with patch("src.workflows.annotate_helpers.disambiguation.pipeline.record_model_interaction") as mock_record:

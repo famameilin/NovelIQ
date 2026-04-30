@@ -1003,6 +1003,38 @@ async def test_build_level3_query_plan_falls_back_to_direct_when_llm_planner_err
 
 
 @pytest.mark.asyncio
+async def test_build_level3_query_plan_skips_llm_when_query_budget_is_zero() -> None:
+    """
+    创建时间: 2026-04-30
+    任务: fix-level3-query-example-review-findings
+    说明: `max_queries=0` 应直接等价于禁用高阶扩展预算；
+          即使文本里存在描述性人物锚点，也不能再调用 LLM planner。
+    """
+    planner = MagicMock()
+    planner.plan_queries = AsyncMock(return_value=MagicMock())
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, query_example_planner=planner)
+
+    plan = await provider.build_level3_query_plan(
+        _build_evidence_request(
+            objective="identity",
+            query_text="门口的老者忽然开口。",
+            requested_names=["白芷"],
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=0,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.expansion_queries == []
+    assert plan.planner_kind == "rule_example"
+    assert plan.planner_reason == "no_query_budget"
+    planner.plan_queries.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_build_level3_query_plan_trims_queries_by_budget() -> None:
     """
     创建时间: 2026-04-25

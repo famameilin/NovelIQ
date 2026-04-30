@@ -348,10 +348,31 @@ class NarrativeEvidenceService:
             generation_meta=generation_meta,
         )
 
+    def _should_cache_bundle(self, bundle: EvidenceBundle) -> bool:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        新建原因: planner 的临时基础设施故障只能触发“当次 direct 保底”，
+                  不能把 `llm_query_example_failed:*` 这种降级结果固化进后续同请求缓存。
+        """
+        planner_reason = str(bundle.generation_meta.get("query_planner_reason") or "").strip()
+        if planner_reason.startswith("llm_query_example_failed:"):
+            return False
+        return True
+
     def _cache_bundle(self, request: EvidenceRequest, bundle: EvidenceBundle) -> None:
         """
         说明: service 级 cache 只按真实取证语义复用，供同一 chunk 内的多 consumer 复用相同 bundle
         """
+        if not self._should_cache_bundle(bundle):
+            logger.info(
+                "skip caching unstable Level3 bundle: run_id={} consumer={} objective={} reason={}",
+                self._run_id,
+                request.consumer,
+                request.objective,
+                bundle.generation_meta.get("query_planner_reason"),
+            )
+            return
         cache_key = build_evidence_request_fingerprint(request)
         self._bundle_cache[cache_key] = bundle.clone_with_meta()
 
@@ -624,6 +645,16 @@ class NarrativeEvidenceService:
             request,
             anchor_candidates=anchor_candidates,
         )
+        if planner_request.max_queries <= 0:
+            return Level3QueryPlan(
+                mode="direct",
+                base_query_text=base_query_text,
+                expansion_queries=[],
+                candidate_pool_k=direct_candidate_pool_k,
+                top_k=request.top_k,
+                planner_kind="rule_example",
+                planner_reason="no_query_budget",
+            )
         await self._emit_level3_progress(
             request.current_chunk,
             f"[{request.objective}] 正在规划 Level3 query example",

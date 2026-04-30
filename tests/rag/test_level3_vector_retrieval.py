@@ -1334,6 +1334,57 @@ class TestNarrativeEvidenceServiceLevel3Async:
         assert second_bundle.request_meta["consumer"] == "annotation_phase2"
 
     @pytest.mark.asyncio
+    async def test_collect_does_not_cache_transient_llm_query_example_failure(self) -> None:
+        """
+        创建时间: 2026-04-30
+        任务: fix-level3-query-example-review-findings
+        说明: 一次临时的 LLM planner 故障只能触发当次 direct 保底，
+              不能把 `llm_query_example_failed:*` 结果固化进后续同请求 cache。
+        """
+        provider = NarrativeEvidenceService(level3_enabled=True)
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+        provider._level3.search_similar_chunks = AsyncMock(
+            return_value=[SimilarChunkRow(chunk_id=4, text="门口的老者忽然开口。", similarity=0.91)]
+        )
+        provider._llm_query_example_planner = MagicMock()
+        provider._llm_query_example_planner.plan_queries = AsyncMock(
+            side_effect=[
+                RuntimeError("planner boom"),
+                MagicMock(
+                    should_expand=False,
+                    reason="direct_query_enough",
+                    queries=[],
+                    dropped_queries=[],
+                ),
+            ]
+        )
+        request = _build_evidence_request(
+            consumer="incremental_disambiguation",
+            objective="identity",
+            query_text="门口的老者忽然开口。",
+            requested_names=["白芷"],
+            seed_entities=["白芷"],
+            current_chunk=12,
+            max_chunk_id=11,
+            need_level3=True,
+            allow_llm_query_expansion=True,
+        )
+
+        with patch(
+            "src.rag.retriever.build_rule_query_examples",
+            return_value=MagicMock(queries=[], reason="rule_empty", dropped_queries=[]),
+        ):
+            first_bundle = await provider.collect(request)
+            second_bundle = await provider.collect(request)
+
+        assert provider._llm_query_example_planner.plan_queries.await_count == 2
+        assert first_bundle.generation_meta["cache_reuse"] is False
+        assert first_bundle.generation_meta["query_planner_reason"] == "llm_query_example_failed:RuntimeError"
+        assert second_bundle.generation_meta["cache_reuse"] is False
+        assert second_bundle.generation_meta["query_planner_reason"] == "direct_query_enough"
+
+    @pytest.mark.asyncio
     async def test_collect_annotation_phase1_identity_request_applies_emotion_overlay_inside_service(self) -> None:
         """
         创建时间: 2026-04-25

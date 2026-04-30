@@ -326,7 +326,9 @@ def _build_shared_evidence_request(
         exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
         need_level1=True,
         need_level2=True,
-        need_level3=bool(query_text.strip()),
+        # 只有真正留下了 global-character 候选时，shared-evidence 才允许继续打开 Level3；
+        # pure reference batch 仍保留 Level1/2 fallback，但不再靠 pronoun-only query_text 重开 Level3。
+        need_level3=bool(query_text.strip()) and bool(requested_names),
         allow_llm_query_expansion=True,
         top_k=settings.rag.level3_top_k,
         max_queries=settings.rag.level3_max_queries,
