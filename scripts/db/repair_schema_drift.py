@@ -24,12 +24,16 @@ sys.path.insert(0, str(project_root))
 env_path = project_root / ".env"
 load_dotenv(env_path)
 
-from src.storage import db as db_module  # noqa: E402
+from src.storage import db as db_module  # noqa: E402,I001
+from src.storage.database_url import resolve_database_url_from_env  # noqa: E402,I001
 
 
 EXPECTED_RUNTIME_INDEXES: list[tuple[str, str]] = [
     ("idx_chunk_curves_run_id", "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)"),
-    ("idx_chunk_embeddings_run_id", "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)"),
+    (
+        "idx_chunk_embeddings_run_id",
+        "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)",
+    ),
 ]
 
 REDUNDANT_INDEXES: list[str] = [
@@ -246,10 +250,10 @@ EXPECTED_FOREIGN_KEYS: list[dict[str, str]] = [
 def load_database_url(target: str) -> str:
     """读取目标数据库连接串，避免脚本里硬编码真实地址"""
     env_key = "DATABASE_URL" if target == "dev" else "TEST_DATABASE_URL"
-    database_url = os.environ.get(env_key)
-    if not database_url:
-        raise RuntimeError(f"{env_key} 未配置，无法执行 schema 修复")
-    return database_url
+    try:
+        return resolve_database_url_from_env(env_key)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{env_key} 未配置，无法执行 schema 修复") from exc
 
 
 def build_engine(database_url: str) -> Engine:

@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 
 @dataclass
@@ -189,6 +190,71 @@ def _get_env_var(prefix: str, suffix: str, default: str | None = None) -> str | 
     return os.getenv(f"{prefix}_{suffix}", default)
 
 
+def _is_running_in_docker_container() -> bool:
+    """
+    2026-05-01: Docker 本机模型地址自动兼容
+    任务: docker-model-base-url-autofix
+    说明: 仅用于判断当前后端是否运行在 Docker 容器内，避免把宿主机源码运行时的 localhost 配置误改写。
+    """
+
+    return os.path.exists("/.dockerenv")
+
+
+def _replace_url_hostname(parts: SplitResult, new_hostname: str) -> str:
+    """
+    2026-05-01: Docker 本机模型地址自动兼容
+    任务: docker-model-base-url-autofix
+    说明: 保留原 URL 的协议、端口、路径和鉴权信息，仅替换主机名。
+    """
+
+    auth_prefix = ""
+    if parts.username is not None:
+        auth_prefix = parts.username
+        if parts.password is not None:
+            auth_prefix = f"{auth_prefix}:{parts.password}"
+        auth_prefix = f"{auth_prefix}@"
+
+    port_suffix = f":{parts.port}" if parts.port is not None else ""
+    host_text = f"[{new_hostname}]" if ":" in new_hostname and not new_hostname.startswith("[") else new_hostname
+    return urlunsplit(
+        (
+            parts.scheme,
+            f"{auth_prefix}{host_text}{port_suffix}",
+            parts.path,
+            parts.query,
+            parts.fragment,
+        )
+    )
+
+
+def _normalize_model_base_url_for_docker(base_url: str | None) -> str | None:
+    """
+    2026-05-01: Docker 本机模型地址自动兼容
+    任务: docker-model-base-url-autofix
+    说明: 当后端运行在 Docker 容器内时，把模型配置里误写的 localhost/127.0.0.1/::1
+    自动改写为 host.docker.internal，降低部署文档理解门槛；数据库 URL 等非模型地址不走这里。
+    """
+
+    if not base_url or not _is_running_in_docker_container():
+        return base_url
+
+    try:
+        parts = urlsplit(base_url)
+    except ValueError:
+        return base_url
+
+    hostname = parts.hostname
+    if not hostname:
+        return base_url
+
+    normalized_hostname = hostname.strip().lower()
+    if normalized_hostname not in {"localhost", "127.0.0.1", "::1"}:
+        return base_url
+
+    host_alias = os.getenv("HOST_DOCKER_INTERNAL_ALIAS", "host.docker.internal").strip() or "host.docker.internal"
+    return _replace_url_hostname(parts, host_alias)
+
+
 def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = "") -> TaskModelSettings:
     """
     解析任务模型配置
@@ -210,7 +276,7 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
         timeout_val = json_data.get("timeout_s")
 
     return TaskModelSettings(
-        base_url=env_base_url or json_data.get("base_url"),
+        base_url=_normalize_model_base_url_for_docker(env_base_url or json_data.get("base_url")),
         model=env_model or json_data.get("model"),
         api_key=env_api_key or json_data.get("api_key"),
         timeout_s=timeout_val,
@@ -260,7 +326,7 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
         batch_size_val = json_data.get("batch_size", 8)
 
     return EmbeddingModelSettings(
-        base_url=env_base_url or json_data.get("base_url"),
+        base_url=_normalize_model_base_url_for_docker(env_base_url or json_data.get("base_url")),
         model=env_model or json_data.get("model"),
         api_key=env_api_key or json_data.get("api_key"),
         timeout_s=timeout_val,

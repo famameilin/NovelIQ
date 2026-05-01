@@ -20,6 +20,8 @@ from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
+from src.storage.database_url import resolve_database_url_from_env
+
 _engine: Engine | None = None
 _session_factory: sessionmaker | None = None
 
@@ -35,14 +37,7 @@ def get_database_url() -> str:
     Returns:
         数据库连接 URL 字符串
     """
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL environment variable is not set. "
-            "Please set it to your PostgreSQL connection string, e.g., "
-            "postgresql://user:password@localhost:5432/dbname"
-        )
-    return database_url
+    return resolve_database_url_from_env("DATABASE_URL")
 
 
 def get_database_schema() -> str | None:
