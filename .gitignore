@@ -46,6 +46,7 @@ env/
 
 # Claude Code 配置
 CLAUDE.md
+CODEBUDDY.md
 .codex-tmp/
 
 # 文档草案不进 git
