@@ -7,7 +7,7 @@
  * - 优化数据获取配置，添加缓存和错误重试
  * - 优化面包屑布局，改为左对齐
  */
-import { Moon, Sun, BookOpen } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { Link, useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useThemeStore } from "@/store/themeStore";
@@ -16,6 +16,12 @@ import { cn } from "@/lib/cn";
 import { Breadcrumb, getBreadcrumbLabel } from "./Breadcrumb";
 import { getNovel } from "@/api/novels";
 
+const TOPBAR_LOGO_SRC = "/novel%20qa%20icon.svg";
+
+/**
+ * 2026-05-01: 为“顶部导航改用用户提供 logo”任务更新 TopBar。
+ * 原因：保持顶部文案不变，仅将通用书本图标替换为品牌 SVG，统一前端品牌符号。
+ */
 export function TopBar() {
   const { isDark, toggleDark } = useThemeStore();
   const { novelId } = useParams<{ novelId: string }>();
@@ -79,7 +85,15 @@ export function TopBar() {
   return (
     <header className="sticky top-0 z-50 flex h-14 items-center justify-between border-b border-border bg-surface px-6">
       <Link to="/" className="flex items-center gap-2 text-text hover:opacity-80 transition-opacity">
-        <BookOpen className="h-5 w-5 text-primary" />
+        <span className="flex h-6 w-6 items-center justify-center rounded-md">
+          <img
+            src={TOPBAR_LOGO_SRC}
+            alt="NovelIQ logo"
+            className="h-full w-full object-contain"
+            loading="eager"
+            decoding="async"
+          />
+        </span>
         <span className="text-lg font-semibold">小说量化分析</span>
       </Link>
 

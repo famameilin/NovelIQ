@@ -2,6 +2,12 @@ import { BookOpen, Upload, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { HeroPanelProps } from "./types";
 
+const HERO_LOGO_SRC = "/novel%20qa%20icon.svg";
+
+/**
+ * 2026-05-01: 为“首页左侧模块头部改用用户提供 logo”任务更新 HeroPanel。
+ * 原因：左上角模块头部应使用品牌 SVG 替换通用书本图标，同时保留现有模块名称和功能说明。
+ */
 export function HeroPanel({
   total,
   isLoading,
@@ -18,8 +24,14 @@ export function HeroPanel({
 
       <div className="relative z-10 flex flex-1 flex-col p-8">
         <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-text-on-primary shadow-lg shadow-primary/20">
-            <BookOpen className="h-6 w-6" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-primary/15 bg-surface/92 p-1.5 shadow-lg shadow-primary/20">
+            <img
+              src={HERO_LOGO_SRC}
+              alt="NovelIQ logo"
+              className="h-full w-full object-contain"
+              loading="eager"
+              decoding="async"
+            />
           </div>
           <div>
             <h1 className="text-xl font-bold text-text">小说分析</h1>
