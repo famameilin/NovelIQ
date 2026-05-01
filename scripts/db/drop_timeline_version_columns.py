@@ -21,15 +21,12 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 load_dotenv(project_root / ".env")
 
+from src.storage.database_url import resolve_database_url_from_env  # noqa: E402
+
 
 # 默认模式下可跳过未配置的 URL；只有显式指定目标库时才报错
 def get_database_url_from_env(env_var_name: str, *, required: bool) -> str | None:
-    database_url = os.environ.get(env_var_name)
-    if not database_url:
-        if required:
-            raise RuntimeError(f"{env_var_name} environment variable is not set")
-        return None
-    return database_url
+    return resolve_database_url_from_env(env_var_name, required=required)
 
 
 # 若配置了 DATABASE_SCHEMA，则在相同 search_path 下执行 DDL

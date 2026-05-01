@@ -11,12 +11,16 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
 load_dotenv(project_root / ".env")
+
+from src.storage.database_url import resolve_database_url_from_env  # noqa: E402
 
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg://postgres:sr20031109ZY@localhost:5432/novel_analysis_test"
+    "postgresql+psycopg://localhost:5432/novel_analysis_test"
 )
+TEST_DB_URL = resolve_database_url_from_env("TEST_DATABASE_URL", required=False) or TEST_DB_URL
 TEST_DB_NAME = make_url(TEST_DB_URL).database
 if not TEST_DB_NAME:
     raise RuntimeError("TEST_DATABASE_URL 必须包含数据库名")
@@ -103,7 +107,6 @@ def setup_pgvector():
 
 def create_tables(*, reset_existing_tables: bool = False):
     """按当前 ORM 建表；必要时先 drop_all 做原地表级重建"""
-    sys.path.insert(0, str(project_root))
     from src.storage import db as db_module
     from src.storage.models import Base
 

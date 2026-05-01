@@ -35,6 +35,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.storage.database_url import resolve_database_url_from_env
 from src.storage.models import Base
 
 load_dotenv()
@@ -102,10 +103,10 @@ def _build_test_engine(database_url: str, schema_name: str):
 
 def get_test_database_url() -> str:
     """获取测试数据库URL"""
-    url = os.getenv("TEST_DATABASE_URL")
-    if not url:
-        raise ValueError("TEST_DATABASE_URL 环境变量未设置")
-    return url
+    try:
+        return resolve_database_url_from_env("TEST_DATABASE_URL")
+    except RuntimeError as exc:
+        raise ValueError("TEST_DATABASE_URL 环境变量未设置") from exc
 
 
 def _reset_backend_db_singletons() -> None:

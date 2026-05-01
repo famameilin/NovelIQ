@@ -9,19 +9,23 @@
 
 from __future__ import annotations
 
-import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
 from sqlalchemy import create_engine, text
 
-load_dotenv()
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+load_dotenv(project_root / ".env")
 
+from src.storage.database_url import resolve_database_url_from_env  # noqa: E402,I001
 
 def migrate() -> None:
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
+    try:
+        database_url = resolve_database_url_from_env("DATABASE_URL")
+    except RuntimeError:
         logger.error("DATABASE_URL environment variable is not set")
         sys.exit(1)
 
@@ -40,8 +44,8 @@ def migrate() -> None:
             logger.error("chunk_dialogues.speaker column not found")
             sys.exit(1)
 
-        current_type = row[0]
-        current_udt = row[1]
+        current_type = str(row.data_type)
+        current_udt = str(row.udt_name)
         logger.info(f"Current speaker column type: {current_type} (udt_name={current_udt})")
 
         if current_udt == "_text" or current_type == "ARRAY":
@@ -65,7 +69,7 @@ def migrate() -> None:
             )
         )
         verify_row = verify_result.fetchone()
-        logger.info(f"Verified speaker column type: {verify_row[0]} (udt_name={verify_row[1]})")
+        logger.info(f"Verified speaker column type: {verify_row.data_type} (udt_name={verify_row.udt_name})")
 
 
 if __name__ == "__main__":

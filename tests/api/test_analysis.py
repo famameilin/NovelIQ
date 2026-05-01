@@ -14,7 +14,6 @@ API 分析端点测试
 修改内容: 补充直接调用 get_session_factory()() 仍绑定测试库的回归测试，防止测试污染开发库
 """
 
-import os
 import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -31,6 +30,7 @@ from src.api.routes import analysis as analysis_mod
 from src.api.services import task_application_service as task_application_mod
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
+from src.storage.database_url import resolve_database_url_from_env
 from src.storage.db import get_session_factory
 from src.storage.id_mapping import TaskIDNotFoundError
 from src.storage.repositories import RunRepository
@@ -48,7 +48,7 @@ class TestTestDatabaseIsolation:
         任务: fix-test-db-isolation
         说明: 这是此前污染开发库的直接入口，必须有回归测试锁住。
         """
-        expected_url = os.environ["TEST_DATABASE_URL"]
+        expected_url = resolve_database_url_from_env("TEST_DATABASE_URL")
         with get_session_factory()() as session:
             actual_url = session.get_bind().engine.url.render_as_string(hide_password=False)
         assert actual_url == expected_url
