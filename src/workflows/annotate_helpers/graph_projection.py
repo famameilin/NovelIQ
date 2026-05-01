@@ -14,13 +14,15 @@ from src.config.constants.annotation import (
 from src.models.local.character_reference_policy import decide_character_reference, is_reference_surface_name
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
-from src.storage.repositories import GraphRepository, RunRepository
+from src.storage.repositories import AnnotationRepository, GraphRepository, RunRepository
 from src.workflows.annotate_helpers.disambiguation.checkpoint import (
     _load_disambig_checkpoint,
 )
 
 PENDING_RETRY_LIMIT = 200
 HIERARCHICAL_SYMMETRIC_RELATION_TYPES = frozenset({"spouse_of", "sibling_of"})
+REFERENCE_ENDPOINT_KINDS = frozenset({"pov_slot", "pronoun", "generic_reference"})
+BENIGN_UNRESOLVED_REFERENCE_ERROR = "unresolved reference endpoint"
 
 
 def _resolve_name(
@@ -119,6 +121,85 @@ def _get_last_projected_chunk(session, run_id: str) -> int:
     return result._mapping["max_chunk_id"] if result else -1
 
 
+def _backfill_relation_history_before_projection(
+    session,
+    *,
+    run_id: str,
+    state: DisambiguationState,
+    from_chunk: int,
+    to_chunk: int | None,
+    retry_relations: list[ChunkRelation],
+) -> dict[str, int]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: graph projection 除了消费当前窗口，还会重试更早的 pending relation；
+              投影前必须先用最新 checkpoint 回刷这些 relation 行，避免 stale resolved 字段
+              让本来可投影或应终态化的引用关系继续卡在旧状态。
+    """
+    backfill_from_chunk = from_chunk
+    if retry_relations:
+        earliest_retry_chunk = min(relation.chunk_id for relation in retry_relations)
+        backfill_from_chunk = min(backfill_from_chunk, earliest_retry_chunk)
+    report = AnnotationRepository(session).apply_reference_resolutions_to_history(
+        run_id,
+        state.get_reference_resolutions_dict(),
+        apply=True,
+        from_chunk=backfill_from_chunk,
+        to_chunk=to_chunk,
+        table_scopes=("chunk_relations",),
+    )
+    session.flush()
+    logger.debug(
+        "relation history backfill before projection: run_id={} from_chunk={} to_chunk={} report={}",
+        run_id,
+        backfill_from_chunk,
+        to_chunk,
+        report,
+    )
+    return report
+
+
+def _is_reference_endpoint(raw_name: str | None, reference_kind: str | None) -> bool:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: unresolved 端点里只有“局部引用位”应该转成 benign failed；
+              这里统一识别 slot/pronoun/generic_reference，避免把普通实名也误终态化。
+    """
+    return (reference_kind or "").strip() in REFERENCE_ENDPOINT_KINDS or is_reference_surface_name(raw_name)
+
+
+def _should_fail_unresolved_reference_endpoint(
+    relation: ChunkRelation,
+    *,
+    resolved_from: str | None,
+    resolved_to: str | None,
+) -> bool:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: 只有“剩下没解开的都是引用端点”时，关系才能安全终态化为 benign failed；
+              如果还夹杂未解析实名，就必须继续 pending，等待后续角色主链补齐。
+    """
+    unresolved_reference_endpoint = False
+    unresolved_non_reference_endpoint = False
+
+    if resolved_from is None:
+        if _is_reference_endpoint(relation.from_char, relation.from_reference_kind):
+            unresolved_reference_endpoint = True
+        else:
+            unresolved_non_reference_endpoint = True
+
+    if resolved_to is None:
+        if _is_reference_endpoint(relation.to_char, relation.to_reference_kind):
+            unresolved_reference_endpoint = True
+        else:
+            unresolved_non_reference_endpoint = True
+
+    return unresolved_reference_endpoint and not unresolved_non_reference_endpoint
+
+
 def project_graph_tables(
     run_id: str,
     from_chunk: int | None = None,
@@ -148,6 +229,16 @@ def project_graph_tables(
         from_chunk = 0
     elif from_chunk is None:
         from_chunk = _get_last_projected_chunk(session, run_id) + 1
+
+    retry_relations = _fetch_pending_relations(session, run_id, to_chunk=to_chunk)
+    _backfill_relation_history_before_projection(
+        session,
+        run_id=run_id,
+        state=state,
+        from_chunk=from_chunk,
+        to_chunk=to_chunk,
+        retry_relations=retry_relations,
+    )
 
     chunk_characters = list(
         (
@@ -191,7 +282,6 @@ def project_graph_tables(
         .order_by(ChunkRelation.chunk_id, ChunkRelation.id)
         .all()
     )
-    retry_relations = _fetch_pending_relations(session, run_id, to_chunk=to_chunk)
     chunk_relations = _merge_relations_for_projection(window_relations, retry_relations)
 
     alias_map = state.get_alias_merges_dict()
@@ -361,10 +451,19 @@ def project_graph_tables(
             resolved_global_name=relation.resolved_to_global_name,
         )
         if resolved_from is None or resolved_to is None:
-            relation.projection_status = "pending"
-            relation.projection_error = "unresolved global-character endpoint"
             relation.projected_at = None
-            pending_count += 1
+            if _should_fail_unresolved_reference_endpoint(
+                relation,
+                resolved_from=resolved_from,
+                resolved_to=resolved_to,
+            ):
+                relation.projection_status = "failed"
+                relation.projection_error = BENIGN_UNRESOLVED_REFERENCE_ERROR
+                failed_count += 1
+            else:
+                relation.projection_status = "pending"
+                relation.projection_error = "unresolved global-character endpoint"
+                pending_count += 1
             continue
         if resolved_from == resolved_to:
             relation.projection_status = "failed"
