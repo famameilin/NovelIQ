@@ -36,12 +36,8 @@ from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_
 from src.rag import EvidenceRequest
 from src.storage.models import Chunk as ChunkModel
 from src.storage.repositories import AnnotationRepository
-from src.storage.repositories.annotation.characters import (
-    fetch_reference_aware_character_names,
-)
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
 
-from ..sentence import build_context_sentences
 from .candidate_filter import CandidateClassification
 from .candidates import (
     DisambigStateSnapshot,
@@ -51,7 +47,9 @@ from .candidates import (
     _build_name_count_lookup,
     _collect_final_disambiguation_candidates,
     _ensure_state_snapshot_has_known_names,
+    build_candidate_context_sentences,
     extract_new_names_from_db,
+    fetch_reference_aware_disambiguation_candidates,
     filter_candidates_by_class,
 )
 from .checkpoint import _save_disambig_checkpoint
@@ -68,6 +66,18 @@ from .state_logic import (
     reselect_cluster_canonicals,
     validate_confidence_with_evidence,
 )
+
+# 修改时间: 2026-05-02
+# 任务: fix-graph-projection-relations
+# 修改原因: pipeline_stages 原先直接暴露 build_context_sentences 给测试替身和调用方，
+#           这里保留同名别名，但实际实现切到会补关系端点上下文的新入口。
+build_context_sentences = build_candidate_context_sentences
+
+# 修改时间: 2026-05-02
+# 任务: fix-graph-projection-relations
+# 修改原因: final candidate collection 的真实实现已经换成“角色候选 + relation-only endpoint”
+#           的组合入口；保留旧名字是为了兼容现有测试替身和调用方，不让内部 helper 改名造成假回归。
+fetch_reference_aware_character_names = fetch_reference_aware_disambiguation_candidates
 
 if TYPE_CHECKING:
     from src.rag import NarrativeEvidenceService
@@ -589,18 +599,7 @@ def plan_final_disambiguation(
     if not existing_names:
         return None
 
-    raw_all_names = fetch_reference_aware_character_names(conn, run_id)
-    all_names: list[NameCountCandidate] = []
-    for item in raw_all_names:
-        name = str(item.get("name", "")).strip()
-        if not name:
-            continue
-        try:
-            count = int(item.get("count", 0))
-        except (TypeError, ValueError):
-            count = 0
-        all_names.append({"name": name, "count": count})
-
+    all_names = fetch_reference_aware_character_names(conn, run_id)
     final_global_freq = _build_name_count_lookup(all_names)
     review_status_dict = state.get_review_status_dict()
     alias_map_dict = state.get_alias_merges_dict()

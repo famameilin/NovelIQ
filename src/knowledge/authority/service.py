@@ -26,6 +26,8 @@ from .types import (
     TimelineAuthorityView,
 )
 
+BENIGN_GRAPH_PROJECTION_ERRORS = frozenset({"self relation", "unresolved reference endpoint"})
+
 
 class KnowledgeGraphAuthorityService:
     """Single authority facade for graph consumers outside the repository layer"""
@@ -203,6 +205,9 @@ class KnowledgeGraphAuthorityService:
         2026-04-27，任务：graph readiness consistency fixes
         新建原因：graph-derived authority consumer 必须共用同一套 pending 判定，
         不能只让 `/graph` 路由做局部检查，否则 timeline / aggregate / export 会静默读取半投影图谱
+        修改时间：2026-05-02
+        修改原因：局部引用端点最终 unresolved 时属于“不可入图但可终态化”的 benign failed，
+                  这里需要和 self relation 一起放行，避免 authority 继续被无意义的 failed 行卡死。
         """
         pending_relations = self._annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
@@ -213,7 +218,7 @@ class KnowledgeGraphAuthorityService:
         blocking_failures = [
             relation
             for relation in failed_relations
-            if getattr(relation, "projection_error", None) not in {"self relation"}
+            if getattr(relation, "projection_error", None) not in BENIGN_GRAPH_PROJECTION_ERRORS
         ]
         if blocking_failures:
             raise GraphReadinessError(
