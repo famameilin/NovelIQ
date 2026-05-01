@@ -127,6 +127,57 @@ def test_apply_model_reselected_canonicals_rewrites_cluster_to_model_selected_na
     assert review_dict["贺铮"].proposed_canonical == "贺铮"
 
 
+def test_reselect_cluster_canonicals_keeps_global_name_when_reference_resolution_depends_on_it() -> None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-professor-cluster-reselect-invalid-reference-resolution
+    新建原因: 当“教授 -> 汪淼”与“我 -> 汪淼”同时存在时，cluster 重选不能把 canonical 反选成通用称呼“教授”，
+              否则会把 reference_resolutions 依赖的实名从 known_canonical_names 中挤掉并触发状态不变量报错。
+    """
+    state = DisambiguationState(
+        discovered_names=frozenset({"我", "教授", "汪淼"}),
+        known_canonical_names=frozenset({"汪淼"}),
+        alias_merges=frozenset({("教授", "汪淼")}),
+        reference_resolutions=frozenset({("我", "汪淼")}),
+        review_status=(
+            (
+                "教授",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="汪淼",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("naming_scene",),
+                ),
+            ),
+            (
+                "我",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="汪淼",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("identity_reveal",),
+                ),
+            ),
+        ),
+    )
+
+    new_state = reselect_cluster_canonicals(
+        state,
+        name_counts={"教授": 9, "汪淼": 2},
+    )
+
+    assert new_state.known_canonical_names == frozenset({"汪淼"})
+    assert new_state.get_alias_merges_dict() == {"教授": "汪淼"}
+    assert new_state.get_reference_resolutions_dict() == {"我": "汪淼"}
+    review_dict = new_state.get_review_status_dict()
+    assert review_dict["教授"].proposed_canonical == "汪淼"
+    assert review_dict["我"].proposed_canonical == "汪淼"
+
+
 def test_apply_model_reselected_canonicals_rejects_cross_cluster_target() -> None:
     """
     创建时间: 2026-04-22

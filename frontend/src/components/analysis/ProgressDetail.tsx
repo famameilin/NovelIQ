@@ -19,9 +19,13 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   diagnose: { label: "诊断报告", range: [95, 100] },
 };
 
+// 修改时间: 2026-05-01
+// 任务: 修复 phase1/phase2 进度文案错位
+// 原因: 后端真实语义是 phase1 产出人物识别主结果、phase2 才是伏笔分析，
+//       前端展示层此前把两者写反，导致进度说明与实际执行阶段不一致。
 const PHASE_CONFIG: Record<string, { label: string }> = {
-  phase1: { label: "伏笔分析" },
-  phase2: { label: "人物识别" },
+  phase1: { label: "人物识别" },
+  phase2: { label: "伏笔分析" },
   phase3: { label: "对话归因" },
   phase4: { label: "关系识别" },
   level3: { label: "Level3 证据准备" },

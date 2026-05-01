@@ -9,6 +9,44 @@ describe("ProgressDetail", () => {
     useStreamStore.getState().reset();
   });
 
+  it("应按后端真实语义展示 phase1 和 phase2 的中文标签", () => {
+    useStreamStore.getState().updateProgress({
+      action: "start",
+      stage: "annotate",
+      sub_stage: "phase1",
+      chunk_id: 12,
+      current: 12,
+      total: 100,
+      percent: 24,
+      sub_percent: 0,
+      content: "",
+      message: "开始 phase1",
+    });
+
+    const { rerender } = render(<ProgressDetail />);
+
+    expect(screen.getByText("标注分析 - 人物识别")).toBeInTheDocument();
+    expect(screen.getByText("人物识别")).toBeInTheDocument();
+
+    useStreamStore.getState().updateProgress({
+      action: "start",
+      stage: "annotate",
+      sub_stage: "phase2",
+      chunk_id: 12,
+      current: 12,
+      total: 100,
+      percent: 36,
+      sub_percent: 25,
+      content: "",
+      message: "开始 phase2",
+    });
+
+    rerender(<ProgressDetail />);
+
+    expect(screen.getByText("标注分析 - 伏笔分析")).toBeInTheDocument();
+    expect(screen.getByText("伏笔分析")).toBeInTheDocument();
+  });
+
   it("应优先使用显式 stage，而不是仅凭 percent 推断当前阶段", () => {
     useStreamStore.getState().updateProgress({
       action: "progress",
