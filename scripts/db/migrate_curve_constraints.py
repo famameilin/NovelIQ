@@ -9,18 +9,25 @@
 2. 添加复合主键约束
 """
 
-import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-load_dotenv()
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+load_dotenv(project_root / ".env")
+
+from src.storage.database_url import resolve_database_url_from_env  # noqa: E402
 
 
 def get_database_url() -> str:
     """获取数据库URL"""
-    url = os.getenv("DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
-    if not url:
+    url = resolve_database_url_from_env("DATABASE_URL", required=False)
+    if url is None:
+        url = resolve_database_url_from_env("TEST_DATABASE_URL", required=False)
+    if url is None:
         raise ValueError("DATABASE_URL 或 TEST_DATABASE_URL 环境变量未设置")
     return url
 
@@ -106,7 +113,7 @@ def migrate_rhythm_curve(engine) -> None:
 def main() -> None:
     """主函数"""
     # 迁移主数据库
-    db_url = os.getenv("DATABASE_URL")
+    db_url = resolve_database_url_from_env("DATABASE_URL", required=False)
     if db_url:
         print("\n=== 迁移主数据库 ===")
         print(f"连接数据库: {db_url.split('@')[1] if '@' in db_url else db_url}")
@@ -117,7 +124,7 @@ def main() -> None:
         migrate_rhythm_curve(engine)
 
     # 迁移测试数据库
-    test_db_url = os.getenv("TEST_DATABASE_URL")
+    test_db_url = resolve_database_url_from_env("TEST_DATABASE_URL", required=False)
     if test_db_url:
         print("\n=== 迁移测试数据库 ===")
         print(f"连接数据库: {test_db_url.split('@')[1] if '@' in test_db_url else test_db_url}")
