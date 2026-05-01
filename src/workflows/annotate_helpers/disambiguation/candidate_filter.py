@@ -78,6 +78,7 @@ _DEFAULT_PROTECTED: frozenset[str] = frozenset(
         "众人",
         "旁人",
         # 通用职位/身份 — 可能是前期未揭示真名的角色，保留送消歧
+        "教授",
         "传令兵",
         "侍卫",
         "护卫",
