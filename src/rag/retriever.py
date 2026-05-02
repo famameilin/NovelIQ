@@ -322,6 +322,7 @@ class NarrativeEvidenceService:
             "seed_entities": list(request.seed_entities),
             "reference_slots": list(request.reference_slots),
             "background_entities": list(request.background_entities),
+            "request_observation": dict(request.request_observation),
             "current_chunk": request.current_chunk,
             "max_chunk_id": request.max_chunk_id,
             "exclude_chunk_ids": list(request.exclude_chunk_ids),
