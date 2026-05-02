@@ -57,12 +57,11 @@ function createPhases(): TimelinePhase[] {
 }
 
 describe("TimelineTrack", () => {
-  it("没有节点时会展示空态，并隐藏张力说明徽标", () => {
+  it("没有节点时会展示空态", () => {
     render(<TimelineTrack nodes={[]} showTension={false} totalChunks={20} />);
 
-    expect(screen.getByText("0 个可见节点")).toBeInTheDocument();
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
-    expect(screen.queryByText("底图表示节奏张力")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("会渲染节点卡片并把点击事件回传给上层", () => {
@@ -91,7 +90,8 @@ describe("TimelineTrack", () => {
     fireEvent.click(detailButton!);
 
     expect(onNodeClick).toHaveBeenCalledWith(node);
-    expect(screen.getByText("曲线表示叙事主轴")).toBeInTheDocument();
-    expect(screen.getByText("底图表示节奏张力")).toBeInTheDocument();
+    expect(screen.getByText("剧情节点")).toBeInTheDocument();
+    expect(screen.getByText("Chunk 3")).toBeInTheDocument();
+    expect(document.querySelector("svg path")).toBeInTheDocument();
   });
 });
