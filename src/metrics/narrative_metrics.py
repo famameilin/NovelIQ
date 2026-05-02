@@ -112,32 +112,6 @@ def find_local_peaks(scores: list[float], total_chunks: int) -> list[int]:
     return peaks
 
 
-def find_dominant_climax_peak(scores: list[float]) -> int:
-    """
-    2026-04-28，任务：三幕比例主高潮峰修复
-    新建原因：三幕比例如果只取全局最高峰，容易被前段尖峰误判成“主高潮”，
-    导致后续真正的高潮与收束被整体压扁；这里独立从张力曲线中选择更符合
-    叙事结构语义的主高潮峰，不直接依赖时间轴阶段结果。
-    """
-    if not scores:
-        return 0
-
-    total = len(scores)
-    if total < 3:
-        return find_global_peak(scores)
-
-    local_peaks = find_local_peaks(scores, total)
-    if not local_peaks:
-        return find_global_peak(scores)
-
-    half_idx = total // 2
-    late_peaks = [peak_idx for peak_idx in local_peaks if peak_idx >= half_idx]
-    if late_peaks:
-        return max(late_peaks, key=lambda peak_idx: (scores[peak_idx], peak_idx))
-
-    return local_peaks[-1]
-
-
 def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(value, maximum))
 
@@ -434,39 +408,6 @@ def compute_three_act_ratio_v2(
         pivot_moments,
         tension_composite_scores,
     ).ratio_dict()
-
-
-def compute_three_act_ratio_by_tension(
-    tension_composite_scores: list[float],
-) -> dict[str, float]:
-    """
-    2026-04-28，任务：三幕比例主高潮峰修复
-    修改原因：当前输入的 `tension_composite_scores` 已经在 aggregate 阶段完成
-    一次平滑；这里若再做二次平滑，会把后段真正主高潮继续削峰，进而把三幕
-    比例误判成“前段极短 + 后段几乎全是收束”。
-
-    当前函数保留旧口径，供轻量调用方与回归测试对照使用；
-    aggregate 主链已升级到 `compute_three_act_ratio_v2()`。
-    """
-    if not tension_composite_scores:
-        return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
-
-    total = len(tension_composite_scores)
-    if total < 3:
-        return {"act1_ratio": 1 / 3, "act2_ratio": 1 / 3, "act3_ratio": 1 / 3}
-
-    peak_idx = find_dominant_climax_peak(tension_composite_scores)
-    valley_idx = find_valley_before_peak(tension_composite_scores, peak_idx)
-
-    act1_raw = valley_idx / total
-    if peak_idx == total - 1:
-        act2_raw = (total - valley_idx) / total
-        act3_raw = 0.0
-    else:
-        act2_raw = (peak_idx - valley_idx) / total
-        act3_raw = (total - peak_idx) / total
-
-    return _build_min_ratio_normalized_result(act1_raw, act2_raw, act3_raw)
 
 
 def compute_three_act_ratio(

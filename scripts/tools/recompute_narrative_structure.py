@@ -22,7 +22,7 @@ sys.path.insert(0, str(project_root))
 from src.metrics.aggregate.fetchers import fetch_annotation_data, fetch_tension_data  # noqa: E402
 from src.metrics.narrative_metrics import analyze_three_act_structure  # noqa: E402
 from src.storage.db import get_session_factory  # noqa: E402
-from src.storage.repositories import AnnotationRepository, StatsRepository  # noqa: E402
+from src.storage.repositories import AnnotationRepository, RunRepository, StatsRepository  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,10 +37,22 @@ def main() -> int:
 
     session = get_session_factory()()
     try:
+        run_repo = RunRepository(session)
+        run_record = run_repo.get_run(args.run_id)
+        if run_record is None:
+            print(f"错误: run_id={args.run_id} 在当前数据库中不存在", file=sys.stderr)
+            return 1
+
         annotation_repo = AnnotationRepository(session)
         stats_repo = StatsRepository(session)
         annotation_data = fetch_annotation_data(annotation_repo, args.run_id)
         tension_data = fetch_tension_data(stats_repo, args.run_id)
+        if not annotation_data.chunk_ids or not tension_data.chunk_ids:
+            print(
+                f"错误: run_id={args.run_id} 缺少 annotation 或 chunk_curves 数据，无法复算三幕结构",
+                file=sys.stderr,
+            )
+            return 1
         diagnostics = analyze_three_act_structure(
             annotation_data.event_types,
             annotation_data.cliffhangers,
