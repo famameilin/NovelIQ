@@ -6,8 +6,10 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.exceptions import GraphReadinessError
 from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+from src.knowledge.authority.types import GraphAuthorityReport, GraphQualitySignals, GraphSharedSummary
 from src.lexicons.genre_detector import detect_genre_weighted
 from src.lexicons.genre_detector_rules import MIN_CONFIDENCE
 from src.lexicons.registry import LexiconRegistry
@@ -28,13 +30,28 @@ GENRE_LABEL_MAP = {
 
 def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """
+    修改时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    修改原因: diagnosis 只复用 graph-owned aggregate signals；当 graph projection 仍有 pending 行时，
+              这里应像 aggregate 一样降级为零值共享信号，而不是让整条分析任务失败。
+
     构建 diagnosis 允许复用的共享 graph signals
 
     diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
     不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入
     """
-
-    graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
+    try:
+        graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
+    except GraphReadinessError as exc:
+        logger.warning(
+            "[云端模型] graph signals 回退为零值共享信号: run_id={} 原因={}",
+            run_id,
+            exc.message,
+        )
+        graph_report = GraphAuthorityReport(
+            summary=GraphSharedSummary(),
+            quality=GraphQualitySignals(),
+        )
     return serialize_graph_report_signals(graph_report)
 
 
