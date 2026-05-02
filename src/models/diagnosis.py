@@ -33,6 +33,37 @@ class DiagnosisClient(BaseModelClient):
 
     RETRY_DELAY_SECONDS = 2
 
+    def _audit_hint_mismatch(
+        self,
+        *,
+        label_kind: str,
+        hint_labels: Any,
+        final_labels: list[str],
+        hint_details: Any,
+        novel_id: Any,
+    ) -> None:
+        """
+        创建时间: 2026-05-02
+        任务: diagnosis-genre-hints-and-fantasy-label
+        新建原因: 题材/第二标签现在由 LLM 最终决定；当结果与后端 hints 不一致时，
+                  需要留下显式审计日志，避免后续排查时只能看到最终标签而看不到偏离来源。
+        """
+        if not isinstance(hint_labels, list):
+            return
+        normalized_hints = [str(label).strip() for label in hint_labels if isinstance(label, str) and label.strip()]
+        if not normalized_hints:
+            return
+        if normalized_hints == final_labels:
+            return
+        logger.info(
+            "[云端模型] {} hints and final labels diverged: novel_id={} hints={} final={} hint_details={}",
+            label_kind,
+            novel_id,
+            normalized_hints,
+            final_labels,
+            hint_details,
+        )
+
     def __init__(
         self,
         config: TaskModelConfig | None = None,
@@ -255,6 +286,11 @@ class DiagnosisClient(BaseModelClient):
 
     def _finalize_result(self, result: CloudAnalysis, novel_id: Any, *, payload: dict[str, Any]) -> CloudAnalysis:
         """
+        修改时间: 2026-05-02
+        任务: diagnosis-genre-hints-and-fantasy-label
+        修改原因: 正式 `genre_labels` 已改由 diagnosis LLM 自行输出；
+                  这里不再允许 legacy payload 继续用规则结果覆盖模型判断，避免把 hint 误当成真相源。
+
         统一收口 diagnosis 结果的持久化前终态
         """
 
@@ -275,13 +311,7 @@ class DiagnosisClient(BaseModelClient):
                 )
 
         if "genre_labels" in payload:
-            payload_genre_labels = payload.get("genre_labels")
-            if not isinstance(payload_genre_labels, list):
-                raise TypeError(
-                    "payload.genre_labels must be list when provided, "
-                    f"got {type(payload_genre_labels).__name__}"
-                )
-            updates["genre_labels"] = list(payload_genre_labels)
+            raise ValueError("payload.genre_labels is legacy and must not be passed; use genre_hints instead")
 
         topic_words = payload.get("topic_words")
         if topic_words is not None:
@@ -300,7 +330,22 @@ class DiagnosisClient(BaseModelClient):
         final_payload = result.model_dump()
         if updates:
             final_payload.update(updates)
-        return CloudAnalysis.model_validate(final_payload)
+        final_result = CloudAnalysis.model_validate(final_payload)
+        self._audit_hint_mismatch(
+            label_kind="genre",
+            hint_labels=payload.get("genre_hints"),
+            final_labels=list(final_result.genre_labels),
+            hint_details=payload.get("genre_hint_details"),
+            novel_id=novel_id,
+        )
+        self._audit_hint_mismatch(
+            label_kind="style",
+            hint_labels=payload.get("style_hints"),
+            final_labels=list(final_result.style_labels),
+            hint_details=payload.get("style_hint_details"),
+            novel_id=novel_id,
+        )
+        return final_result
 
     def _build_messages(self, payload: dict) -> list[dict[str, str]]:
         from src.config import settings

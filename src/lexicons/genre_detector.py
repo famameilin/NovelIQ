@@ -3,12 +3,13 @@
 
 根据领域词表命中模式自动识别小说类型
 
-支持的类型:
-- xianxia: 修仙/仙侠类
-- urban: 都市/言情类
-- power: 权谋/宫斗类
-- shuwen: 爽文/快节奏类
-- general: 通用/无法确定
+当前检测代码会产出两类候选:
+- 主题材候选: xianxia / fantasy / urban / scifi / historical / mystery / general
+- 第二标签候选: power / shuwen
+
+说明:
+- `power` / `shuwen` 仍是底层 detector 的可返回 code，
+  但在 diagnosis 正式合同里不再落到 `genre_labels`，而是作为第二标签提示参与 `style_labels` 生成
 
 
 

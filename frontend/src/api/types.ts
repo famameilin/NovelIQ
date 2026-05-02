@@ -126,7 +126,7 @@ export type ForeshadowingSetupKind =
   | "其他";
 
 export type ForeshadowingPayoffLikelihood = "high" | "medium" | "low";
-export type DiagnosisGenreLabel = "科幻" | "悬疑" | "历史" | "仙侠" | "都市" | "权谋" | "爽文" | "通用";
+export type DiagnosisGenreLabel = "科幻" | "悬疑" | "历史" | "仙侠" | "玄幻" | "都市" | "通用";
 export type DiagnosisStyleLabel =
   | "硬核"
   | "史诗"
@@ -139,7 +139,9 @@ export type DiagnosisStyleLabel =
   | "热血"
   | "轻松"
   | "寓言性"
-  | "冷峻";
+  | "冷峻"
+  | "权谋"
+  | "爽文";
 
 export interface ChunkAnnotation {
   chunk_id: number;
