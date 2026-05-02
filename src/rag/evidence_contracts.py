@@ -93,6 +93,7 @@ class EvidenceRequest:
     max_queries: int
     model_rerank_query_max_chars: int
     reference_slots: list[str] = field(default_factory=list)
+    request_observation: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """
@@ -106,6 +107,7 @@ class EvidenceRequest:
         object.__setattr__(self, "background_entities", _normalize_name_list(self.background_entities))
         object.__setattr__(self, "exclude_chunk_ids", _normalize_int_list(self.exclude_chunk_ids))
         object.__setattr__(self, "reference_slots", _normalize_name_list(self.reference_slots))
+        object.__setattr__(self, "request_observation", dict(self.request_observation))
 
 
 @dataclass(frozen=True, slots=True)

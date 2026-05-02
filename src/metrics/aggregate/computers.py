@@ -38,7 +38,7 @@ from ..narrative_metrics import (
     compute_climax_spacing,
     compute_event_density,
     compute_middle_collapse_index,
-    compute_three_act_ratio_by_tension,
+    compute_three_act_ratio_v2,
 )
 from ..style_metrics_extra import (
     compute_avg_word_len,
@@ -92,7 +92,12 @@ def compute_narrative_structure_metrics(
     """
     climax_profile = compute_climax_profile(tension_data.tension_composite_scores)
     return {
-        **compute_three_act_ratio_by_tension(tension_data.tension_composite_scores),
+        **compute_three_act_ratio_v2(
+            annotation_data.event_types,
+            annotation_data.cliffhangers,
+            annotation_data.pivot_moments,
+            tension_data.tension_composite_scores,
+        ),
         "climax_spacing": compute_climax_spacing(annotation_data.chunk_ids, tension_data.tension_composite_scores),
         "middle_collapse_index": compute_middle_collapse_index(
             annotation_data.chunk_ids, tension_data.tension_composite_scores
