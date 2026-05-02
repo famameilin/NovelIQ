@@ -6,10 +6,7 @@
 任务: 多类型加权混合词表方案
 """
 
-import pytest
-
 from src.lexicons.genre_detector import (
-    WeightedGenreResult,
     detect_genre_weighted,
     get_weighted_lexicon_config,
 )
@@ -33,6 +30,21 @@ class TestDetectGenreWeighted:
         assert len(result.genre_weights) >= 1
         assert result.sample_count == 1
         assert "xianxia" in [g for g, _ in result.genre_weights]
+
+    def test_single_chunk_fantasy(self):
+        """
+        创建时间: 2026-05-02
+        任务: diagnosis-genre-hints-and-fantasy-label
+        新建原因: 正式题材集合新增 `玄幻` 后，底层 detector 至少应能识别典型玄幻强指示词，
+                  不再只能把这类文本硬塞回仙侠或都市。
+        """
+        chunk_texts = [
+            (1, "少年体内血脉封印松动，异火与灵兽共鸣，阵法试炼随之开启。"),
+        ]
+        result = detect_genre_weighted(chunk_texts)
+        assert len(result.genre_weights) >= 1
+        assert result.sample_count == 1
+        assert "fantasy" in [g for g, _ in result.genre_weights]
 
     def test_single_chunk_urban(self):
         """单个都市 chunk 检测"""

@@ -32,6 +32,22 @@ DOMAIN_KEYWORDS = {
             "道友",
         ],
     },
+    "fantasy": {
+        "indicators": [
+            "血脉",
+            "灵兽",
+            "阵法",
+            "封印",
+            "异火",
+            "火种",
+            "本源",
+            "试炼",
+            "传承",
+            "学宫",
+            "太学",
+            "威压",
+        ],
+    },
     "urban": {
         "positive": ["urban_positive"],
         "negative": ["urban_negative"],
@@ -178,6 +194,11 @@ def get_recommended_lexicons(genre: str) -> dict[str, list[str]]:
         "xianxia": {
             "pos_domains": ["xianxia_positive"],
             "neg_domains": ["xianxia_negative"],
+            "fight_domains": [],
+        },
+        "fantasy": {
+            "pos_domains": [],
+            "neg_domains": [],
             "fight_domains": [],
         },
         "urban": {

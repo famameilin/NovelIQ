@@ -245,7 +245,8 @@ class TestCloudDiagnose:
         assert "character_relations" in payload
         assert "foreshadowing_threads" in payload
         assert "foreshadow_expectation" in payload
-        assert "genre_labels" in payload
+        assert "genre_hints" in payload
+        assert "genre_hint_details" in payload
         assert "summaries" in payload
         assert "known_characters" in payload
         assert "alias_merges" in payload
@@ -256,7 +257,8 @@ class TestCloudDiagnose:
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_threads"]) >= 0
-        assert payload["genre_labels"]
+        assert payload["genre_hints"]
+        assert "genre_labels" not in payload
         assert payload["known_characters"] == ["伯安"]
         assert payload["alias_merges"] == {"角色0": "伯安"}
         assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
@@ -307,8 +309,18 @@ class TestCloudDiagnose:
         self._create_full_data(3)
 
         graph_repo = GraphRepository(self.db_session)
-        hero = graph_repo.upsert_entity(run_id=self.run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=1)
-        ally = graph_repo.upsert_entity(run_id=self.run_id, canonical_name="贺家", first_seen_chunk=1, last_seen_chunk=1)
+        hero = graph_repo.upsert_entity(
+            run_id=self.run_id,
+            canonical_name="顾霜",
+            first_seen_chunk=1,
+            last_seen_chunk=1,
+        )
+        ally = graph_repo.upsert_entity(
+            run_id=self.run_id,
+            canonical_name="贺家",
+            first_seen_chunk=1,
+            last_seen_chunk=1,
+        )
         synthetic_relation = ChunkRelation(
             chunk_id=1,
             run_id=self.run_id,
@@ -520,12 +532,12 @@ class TestCloudDiagnose:
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
 
-    def test_finalize_result_overrides_genre_labels_from_payload(self) -> None:
+    def test_finalize_result_rejects_legacy_payload_genre_labels(self) -> None:
         """
-        创建时间: 2026-04-29
-        创建者: Codex
-        任务: split-diagnosis-genre-style-labels
-        说明: 稳定题材数组必须以 payload 为真相源，不能继续信任模型自由发挥的 genre 输出。
+        创建时间: 2026-05-02
+        任务: diagnosis-genre-hints-and-fantasy-label
+        新建原因: 正式题材标签已改由 diagnosis LLM 决定；
+                  legacy payload.genre_labels 若仍进入 finalize 阶段，必须直接报错，避免静默恢复旧行为。
         """
 
         client = object.__new__(DiagnosisClient)
@@ -544,13 +556,56 @@ class TestCloudDiagnose:
             core_cast=["角色0", "角色1"],
         )
 
-        finalized = client._finalize_result(
-            result,
-            "fixed-novel",
-            payload={"genre_labels": ["科幻"]},
+        with pytest.raises(ValueError, match="payload.genre_labels is legacy"):
+            client._finalize_result(
+                result,
+                "fixed-novel",
+                payload={"genre_labels": ["科幻"]},
+            )
+
+    def test_finalize_result_logs_hint_mismatch_when_llm_deviates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        创建时间: 2026-05-02
+        任务: diagnosis-genre-hints-and-fantasy-label
+        新建原因: 当最终标签与 payload hints 不一致时，需要留下显式审计日志，方便后续排查模型为何偏离规则提示。
+        """
+
+        messages: list[str] = []
+
+        def _capture(message: str, *args) -> None:
+            messages.append(message.format(*args))
+
+        monkeypatch.setattr("src.models.diagnosis.logger.info", _capture)
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.1,
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
+            genre_labels=["玄幻"],
+            style_labels=["权谋"],
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色0"],
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
         )
 
-        assert finalized.genre_labels == ["科幻"]
+        client._finalize_result(
+            result,
+            "fixed-novel",
+            payload={
+                "genre_hints": ["仙侠"],
+                "genre_hint_details": {"sampled_detector": [{"label": "仙侠", "weight": 0.6}]},
+                "style_hints": ["爽文"],
+                "style_hint_details": {"sampled_detector": [{"label": "爽文", "weight": 0.4}]},
+            },
+        )
+
+        assert any("genre hints and final labels diverged" in message for message in messages)
+        assert any("style hints and final labels diverged" in message for message in messages)
 
     def test_finalize_result_overrides_expectation_from_payload(self) -> None:
         """
