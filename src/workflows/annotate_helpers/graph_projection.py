@@ -118,7 +118,7 @@ def _get_last_projected_chunk(session, run_id: str) -> int:
         """),
         {"run_id": run_id},
     ).fetchone()
-    return result._mapping["max_chunk_id"] if result else -1
+    return result.max_chunk_id if result else -1
 
 
 def _backfill_relation_history_before_projection(
@@ -625,6 +625,8 @@ def project_graph_tables(
 
     graph_repo.refresh_relation_projections(run_id, affected_pairs)
 
+    # 全投影作为一个事务原子提交：backfill + 窗口内 projection 共享同一个 commit，
+    # 任意子步骤失败会整体回滚，避免半完成状态污染 projected 标记。
     session.commit()
     logger.info(
         "graph projection completed: "
