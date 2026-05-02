@@ -76,6 +76,7 @@ def _build_genre_labels(conn: Session, run_id: str) -> list[str]:
     任务: split-genre-style-labels-review-fixes
     修改原因: review 发现 summary-only/shared-signal 入口会传入不具备 SQL execute 能力的轻量 session stand-in；
               这里仅对这类非正式 DB session 明确回退到 `["通用"]`，避免打断既有 fail-fast 测试入口。
+              duck-typing 检查是 pragmatically 的防御层：类型系统按 Session 标注，但运行时可能传入 stand-in。
     """
     if not callable(getattr(conn, "execute", None)):
         logger.warning(
@@ -193,9 +194,6 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
     stage_summaries = repo.fetch_stage_summaries(effective_run_id)
     logger.info("[云端模型] 获取阶段性摘要: count=%d", len(stage_summaries))
-
-    topic_words = repo.fetch_topic_words(effective_run_id, top_n=settings.diagnosis.topic_words_top_n)
-    logger.info("[云端模型] 获取topic_words: count=%d", len(topic_words))
 
     # 获取实际主题总数
     total_topics = _get_total_topic_count(effective_run_id, repo)

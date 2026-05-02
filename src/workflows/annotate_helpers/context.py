@@ -316,7 +316,6 @@ def _build_active_entities_prompt_from_authority(
 
 def _collect_seed_entities(
     alias_map: dict[str, str] | None,
-    active_entity_names: list[str],
     *,
     query_text: str | None = None,
     extra_names: list[str] | None = None,
@@ -347,11 +346,6 @@ def _collect_seed_entities(
             and normalized_canonical not in seed_entities
         ):
             seed_entities.append(normalized_canonical)
-
-    # 中文注释：保留 active_entity_names 形参是为了兼容现有签名；
-    # 正式弱锚点策略已经迁到 `_build_annotation_identity_request_inputs()`，
-    # 这里不再因为拿到了活跃实体就直接把它们塞回 seed_entities。
-    _ = active_entity_names
 
     for name in extra_names or []:
         normalized = str(name).strip()
@@ -463,7 +457,6 @@ def _build_annotation_identity_request_inputs(
     )
     strong_seed_entities = _collect_seed_entities(
         alias_map,
-        active_entity_names,
         query_text=chunk_text,
         extra_names=requested_names,
     )
@@ -637,6 +630,7 @@ def _prepare_chunk_context(
             reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
+            # chunk_id 始终 >= 1（从 1 开始编号），max_chunk_id = chunk_id - 1 确保只检索已分析的 chunk
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=False,
             request_observation=_phase1_seed_observation,
@@ -648,7 +642,7 @@ def _prepare_chunk_context(
         # 因此只有显式打开 include_phase2_evidence 时才为 Phase2 额外收集共享 evidence，
         # 避免在默认热路径上继续支付无效检索成本
         if include_phase2_evidence:
-            phase2_seed_entities = _collect_seed_entities(None, [], extra_names=active_entity_names)
+            phase2_seed_entities = _collect_seed_entities(None, extra_names=active_entity_names)
             phase2_request = _build_evidence_request(
                 consumer="annotation_phase2",
                 objective="foreshadowing",
@@ -794,7 +788,7 @@ async def _prepare_chunk_context_with_level3(
                 objective="foreshadowing",
                 query_text=chunk_text,
                 requested_names=list(active_entity_names),
-                seed_entities=_collect_seed_entities(None, [], extra_names=active_entity_names),
+                seed_entities=_collect_seed_entities(None, extra_names=active_entity_names),
                 reference_slots=[],
                 background_entities=[],
                 chunk_id=chunk_id,

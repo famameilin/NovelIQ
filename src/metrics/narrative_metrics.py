@@ -167,16 +167,20 @@ def _select_climax_region(
     cliffhangers: list[int],
     pivot_moments: list[int],
     tension_composite_scores: list[float],
-) -> tuple[int, int, int, int, float]:
+) -> tuple[int, int, int, int, int, float]:
     """
     创建时间: 2026-05-02
     任务: three-act-structure-v2
     新建原因: 正式三幕口径先识别后段主高潮区，再从区内选代表峰，
               不能继续把单个数值峰直接当成完整高潮结构。
+
+    修改时间: 2026-05-02
+    任务: review-fix-mypy-errors
+    修改原因: 返回类型标注与实际返回数量不一致，早期返回补上缺失的 best_plot_flags。
     """
     total = len(tension_composite_scores)
     if total == 0:
-        return 0, 0, 0, 0, 0.0
+        return 0, 0, 0, 0, 0, 0.0
 
     window_size = min(total, _clamp(round(total * 0.08), 8, 24))
     late_window_span = max(1, round(total * 0.45))

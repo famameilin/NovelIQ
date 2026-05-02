@@ -618,5 +618,6 @@ def cleanup_self_loop_relations(
         )
     )
 
+    # rowcount 仅在 CursorResult 上保证存在，类型系统需要防御访问
     deleted_count = result.rowcount if hasattr(result, "rowcount") else 0
     logger.info(f"Cleaned {deleted_count} self-loop relations for run {run_id}")
