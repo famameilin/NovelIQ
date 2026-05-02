@@ -28,6 +28,16 @@ GENRE_LABEL_MAP = {
 }
 
 
+def _is_pending_graph_projection_error(exc: GraphReadinessError) -> bool:
+    """
+    创建时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    新建原因: diagnosis 只允许对“projection 仍 pending”做零值降级；
+              如果 authority 明确报告 blocking failed rows，必须继续抛错，不能伪装成空图信号。
+    """
+    return "still pending" in exc.message
+
+
 def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     修改时间: 2026-05-02
@@ -43,6 +53,8 @@ def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, A
     try:
         graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
     except GraphReadinessError as exc:
+        if not _is_pending_graph_projection_error(exc):
+            raise
         logger.warning(
             "[云端模型] graph signals 回退为零值共享信号: run_id={} 原因={}",
             run_id,

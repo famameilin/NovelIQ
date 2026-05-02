@@ -218,6 +218,69 @@ def test_build_diagnosis_payload_falls_back_when_graph_projection_pending(
     assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 0}
 
 
+def test_build_diagnosis_payload_raises_when_graph_projection_has_blocking_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    新建原因: graph projection 的真实 failed rows 不能被降级为空图共享信号，
+              否则 diagnosis 会把硬失败误当成 0 节点图继续下发给云端模型。
+    """
+
+    class FakeDiagnosisRepository:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def fetch_pivot_blocks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_pivot_moments(self, *_args, **_kwargs):
+            return []
+
+        def fetch_high_tension_chunks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_relation_changes(self, *_args, **_kwargs):
+            return []
+
+        def fetch_foreshadowing_threads(self, *_args, **_kwargs):
+            return []
+
+        def calculate_foreshadow_expectation(self, *_args, **_kwargs):
+            return 0.0
+
+        def fetch_stage_summaries(self, *_args, **_kwargs):
+            return []
+
+        def fetch_topic_words(self, *_args, **_kwargs):
+            return []
+
+        def fetch_character_disambig_data(self, *_args, **_kwargs):
+            return (["白芷"], {"蒙面人": "白芷"})
+
+    class FakeAuthorityService:
+        def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+            assert run_id == "run-graph-failed"
+            raise GraphReadinessError(
+                "graph projection has failed rows; "
+                "resolve projection failures before reading graph-derived authority views."
+            )
+
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("diagnosis should not depend on full GraphAuthorityView")
+
+    monkeypatch.setattr("src.models.cloud.payload.DiagnosisRepository", FakeDiagnosisRepository)
+    monkeypatch.setattr("src.models.cloud.payload._get_total_topic_count", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        "src.models.cloud.payload.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    with pytest.raises(GraphReadinessError, match="graph projection has failed rows"):
+        build_diagnosis_payload(SimpleNamespace(), novel_id="novel-1", run_id="run-graph-failed")
+
+
 def test_build_diagnosis_payload_preserves_thread_confidence(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     创建时间: 2026-04-29
