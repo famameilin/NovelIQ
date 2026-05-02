@@ -11,9 +11,7 @@ from src.metrics.narrative_metrics import (
     compute_event_density,
     compute_middle_collapse_index,
     compute_three_act_ratio,
-    compute_three_act_ratio_by_tension,
     compute_three_act_ratio_v2,
-    find_dominant_climax_peak,
     find_global_peak,
     find_local_peaks,
     find_valley_before_peak,
@@ -26,87 +24,6 @@ class TestThreeActRatio(unittest.TestCase):
         self.assertEqual(result["act1_ratio"], 0.0)
         self.assertEqual(result["act2_ratio"], 0.0)
         self.assertEqual(result["act3_ratio"], 0.0)
-
-
-class TestThreeActRatioByTension(unittest.TestCase):
-    def test_empty_tension_scores(self) -> None:
-        result = compute_three_act_ratio_by_tension([])
-        self.assertEqual(result["act1_ratio"], 0.0)
-        self.assertEqual(result["act2_ratio"], 0.0)
-        self.assertEqual(result["act3_ratio"], 0.0)
-
-    def test_single_element(self) -> None:
-        result = compute_three_act_ratio_by_tension([0.5])
-        self.assertAlmostEqual(result["act1_ratio"], 1 / 3, places=4)
-        self.assertAlmostEqual(result["act2_ratio"], 1 / 3, places=4)
-        self.assertAlmostEqual(result["act3_ratio"], 1 / 3, places=4)
-
-    def test_two_elements(self) -> None:
-        result = compute_three_act_ratio_by_tension([0.1, 0.5])
-        self.assertAlmostEqual(result["act1_ratio"], 1 / 3, places=4)
-        self.assertAlmostEqual(result["act2_ratio"], 1 / 3, places=4)
-        self.assertAlmostEqual(result["act3_ratio"], 1 / 3, places=4)
-
-    def test_single_peak_at_end(self) -> None:
-        tension_scores = [0.1, 0.2, 0.3, 0.4, 0.5]
-        result = compute_three_act_ratio_by_tension(tension_scores)
-        self.assertGreaterEqual(result["act1_ratio"], 0.04)
-        self.assertGreaterEqual(result["act3_ratio"], 0.04)
-        total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=3)
-
-    def test_peak_at_middle(self) -> None:
-        tension_scores = [0.1, 0.2, 0.9, 0.2, 0.1]
-        result = compute_three_act_ratio_by_tension(tension_scores)
-        total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=3)
-
-    def test_peak_at_beginning(self) -> None:
-        tension_scores = [0.9, 0.5, 0.3, 0.2, 0.1]
-        result = compute_three_act_ratio_by_tension(tension_scores)
-        self.assertGreaterEqual(result["act2_ratio"], 0.04)
-        self.assertGreaterEqual(result["act3_ratio"], 0.04)
-        total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=3)
-
-    def test_flat_curve(self) -> None:
-        tension_scores = [0.5] * 100
-        result = compute_three_act_ratio_by_tension(tension_scores)
-        self.assertGreaterEqual(result["act1_ratio"], 0.04)
-        self.assertGreaterEqual(result["act2_ratio"], 0.04)
-        self.assertGreaterEqual(result["act3_ratio"], 0.04)
-        total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=3)
-
-    def test_monotonic_decreasing(self) -> None:
-        tension_scores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
-        result = compute_three_act_ratio_by_tension(tension_scores)
-        self.assertGreaterEqual(result["act1_ratio"], 0.04)
-        self.assertGreaterEqual(result["act2_ratio"], 0.04)
-        self.assertGreaterEqual(result["act3_ratio"], 0.04)
-        total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=3)
-
-    def test_normal_curve(self) -> None:
-        tension_scores = [0.1, 0.2, 0.3, 0.5, 0.8, 0.9, 0.7, 0.4, 0.2, 0.1]
-        result = compute_three_act_ratio_by_tension(tension_scores)
-        self.assertGreaterEqual(result["act1_ratio"], 0.04)
-        self.assertGreaterEqual(result["act2_ratio"], 0.04)
-        self.assertGreaterEqual(result["act3_ratio"], 0.04)
-        total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=3)
-
-    def test_multi_peak_curve_prefers_late_dominant_climax(self) -> None:
-        tension_scores = [0.2] * 255
-        tension_scores[5] = 0.95
-        tension_scores[112] = 0.01
-        tension_scores[174] = 0.90
-
-        result = compute_three_act_ratio_by_tension(tension_scores)
-
-        self.assertAlmostEqual(result["act1_ratio"], 0.4392, places=4)
-        self.assertAlmostEqual(result["act2_ratio"], 0.2431, places=4)
-        self.assertAlmostEqual(result["act3_ratio"], 0.3176, places=4)
 
 
 class TestThreeActRatioV2(unittest.TestCase):
@@ -204,22 +121,6 @@ class TestFindGlobalPeak(unittest.TestCase):
     def test_peak_at_middle(self) -> None:
         result = find_global_peak([0.1, 0.9, 0.2])
         self.assertEqual(result, 1)
-
-
-class TestFindDominantClimaxPeak(unittest.TestCase):
-    def test_returns_global_peak_when_curve_has_no_local_peak(self) -> None:
-        result = find_dominant_climax_peak([0.1, 0.2, 0.3, 0.4, 0.5])
-        self.assertEqual(result, 4)
-
-    def test_prefers_late_peak_over_early_stronger_spike(self) -> None:
-        scores = [0.2] * 255
-        scores[5] = 0.95
-        scores[112] = 0.01
-        scores[174] = 0.90
-
-        result = find_dominant_climax_peak(scores)
-
-        self.assertEqual(result, 174)
 
 
 class TestFindValleyBeforePeak(unittest.TestCase):

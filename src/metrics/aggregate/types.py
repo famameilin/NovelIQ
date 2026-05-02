@@ -83,7 +83,8 @@ class CultureData:
 class TensionData:
     """张力数据"""
 
-    tension_composite_scores: list[float]
+    chunk_ids: list[int]
+    tension_composite_scores: list[float | None]
 
 
 @dataclass
