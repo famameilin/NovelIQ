@@ -30,9 +30,9 @@ class CloudAnalysis(Base):
     废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
     以持久化 single / dual / ensemble 三类叙事焦点结构。
 
-    2026-04-29，任务：拆分 diagnosis 题材与风格标签
-    修改原因：废弃漂移严重的 `narrative_type` 单字符串，改为稳定题材数组 `genre_labels`
-    与受控风格数组 `style_labels`。
+    2026-05-02，任务：split-diagnosis-genre-and-style-labels
+    修改原因：`genre_labels` 只保留真正题材；`权谋/爽文` 这类非题材标签改收口到 `style_labels`，
+    避免继续把题材与附加定位混在同一个字段里。
     """
 
     __tablename__ = "cloud_analysis"

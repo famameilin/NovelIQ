@@ -8,7 +8,7 @@ from src.models.local.character_reference_policy import is_global_character_surf
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 FocusStructureType = Literal["single", "dual", "ensemble"]
-GENRE_LABEL_VALUES = ("科幻", "悬疑", "历史", "仙侠", "都市", "权谋", "爽文", "通用")
+GENRE_LABEL_VALUES = ("科幻", "悬疑", "历史", "仙侠", "玄幻", "都市", "通用")
 STYLE_LABEL_VALUES = (
     "硬核",
     "史诗",
@@ -22,6 +22,8 @@ STYLE_LABEL_VALUES = (
     "轻松",
     "寓言性",
     "冷峻",
+    "权谋",
+    "爽文",
 )
 
 

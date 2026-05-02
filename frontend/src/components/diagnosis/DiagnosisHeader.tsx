@@ -20,7 +20,10 @@ export function DiagnosisHeader({
   arcType,
   className,
 }: DiagnosisHeaderProps) {
-  const hasData = (genreLabels && genreLabels.length > 0) || (styleLabels && styleLabels.length > 0) || arcType;
+  const hasData =
+    (genreLabels && genreLabels.length > 0) ||
+    (styleLabels && styleLabels.length > 0) ||
+    arcType;
 
   if (!hasData) {
     return null;

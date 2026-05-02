@@ -11,7 +11,7 @@ from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 from src.knowledge.authority.types import GraphAuthorityReport, GraphQualitySignals, GraphSharedSummary
 from src.lexicons.genre_detector import detect_genre_weighted
-from src.lexicons.genre_detector_rules import MIN_CONFIDENCE
+from src.lexicons.genre_detector_rules import DOMAIN_KEYWORDS
 from src.lexicons.registry import LexiconRegistry
 from src.storage.repositories import ChunkRepository
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
@@ -21,10 +21,13 @@ GENRE_LABEL_MAP = {
     "mystery": "悬疑",
     "historical": "历史",
     "xianxia": "仙侠",
+    "fantasy": "玄幻",
     "urban": "都市",
+    "general": "通用",
+}
+STYLE_HINT_LABEL_MAP = {
     "power": "权谋",
     "shuwen": "爽文",
-    "general": "通用",
 }
 
 
@@ -67,56 +70,150 @@ def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, A
     return serialize_graph_report_signals(graph_report)
 
 
-def _build_genre_labels(conn: Session, run_id: str) -> list[str]:
+def _collect_fulltext_indicator_hits(chunk_texts: list[tuple[int, str]]) -> dict[str, int]:
     """
-    2026-04-29，任务：拆分 diagnosis 题材与风格标签
-    新建原因：`genre_labels` 需要成为稳定题材真相源，统一复用现有加权 genre detector，而不是继续交给 LLM 自由发挥。
+    创建时间: 2026-05-02
+    任务: diagnosis-genre-hints-and-fantasy-label
+    新建原因: sampled detector 容易被泛情绪词和稀疏采样带偏；
+              diagnosis payload 需要一层全书强指示词统计，给 LLM 提供可审计但不强制的题材提示。
+    """
+    full_text = "\n".join(text for _, text in chunk_texts if text)
+    if not full_text:
+        return {}
+
+    indicator_hits: dict[str, int] = {}
+    for genre_code, config in DOMAIN_KEYWORDS.items():
+        hit_count = 0
+        for indicator in config.get("indicators", []):
+            hit_count += full_text.count(indicator)
+        if hit_count > 0:
+            indicator_hits[genre_code] = hit_count
+    return indicator_hits
+
+
+def _build_ordered_hints(
+    weighted_genres: list[tuple[str, float]],
+    indicator_hits: dict[str, int],
+    *,
+    label_map: dict[str, str],
+    fallback_labels: list[str],
+) -> tuple[list[str], dict[str, list[dict[str, float | int | str]]]]:
+    """
+    创建时间: 2026-05-02
+    任务: diagnosis-genre-hints-and-fantasy-label
+    新建原因: 题材提示与第二标签提示共用同一套排序逻辑；
+              这里单独抽成 helper，便于后续做独立单测并显式约束排序/去重语义。
+    """
+    ordered_codes: list[str] = []
+    for genre_code, _hit_count in sorted(indicator_hits.items(), key=lambda item: (-item[1], item[0])):
+        if genre_code in label_map and genre_code not in ordered_codes:
+            ordered_codes.append(genre_code)
+    for genre_code, _weight in weighted_genres:
+        if genre_code in label_map and genre_code not in ordered_codes:
+            ordered_codes.append(genre_code)
+
+    ordered_labels: list[str] = []
+    for genre_code in ordered_codes:
+        label = label_map.get(genre_code)
+        if label and label not in ordered_labels:
+            ordered_labels.append(label)
+        if len(ordered_labels) >= 3:
+            break
+
+    if not ordered_labels:
+        ordered_labels = list(fallback_labels)
+
+    hint_details: dict[str, list[dict[str, float | int | str]]] = {
+        "sampled_detector": [
+            {
+                "label": label_map.get(genre_code, genre_code),
+                "weight": round(weight, 4),
+            }
+            for genre_code, weight in weighted_genres
+            if genre_code in label_map
+        ],
+        "fulltext_indicators": [
+            {
+                "label": label_map.get(genre_code, genre_code),
+                "hits": hit_count,
+            }
+            for genre_code, hit_count in sorted(indicator_hits.items(), key=lambda item: (-item[1], item[0]))
+            if genre_code in label_map
+        ],
+    }
+    return ordered_labels, hint_details
+
+
+def _build_diagnosis_label_hints(
+    conn: Session,
+    run_id: str,
+) -> tuple[
+    list[str],
+    dict[str, list[dict[str, float | int | str]]],
+    list[str],
+    dict[str, list[dict[str, float | int | str]]],
+]:
+    """
+    修改时间: 2026-05-02
+    任务: split-diagnosis-genre-and-style-labels
+    修改原因: diagnosis 结果不再把 `权谋/爽文` 混进题材数组；
+              payload 需要分别下发题材提示和风格提示，让 LLM 在两个数组里各自做最终判断。
 
     修改时间: 2026-04-29
     任务: split-genre-style-labels-review-fixes
     修改原因: review 发现 summary-only/shared-signal 入口会传入不具备 SQL execute 能力的轻量 session stand-in；
-              这里仅对这类非正式 DB session 明确回退到 `["通用"]`，避免打断既有 fail-fast 测试入口。
+              这里仅对这类非正式 DB session 明确回退到 `["通用"]` 提示，避免打断既有 fail-fast 测试入口。
               duck-typing 检查是 pragmatically 的防御层：类型系统按 Session 标注，但运行时可能传入 stand-in。
     """
+    assert set(GENRE_LABEL_MAP.keys()).isdisjoint(set(STYLE_HINT_LABEL_MAP.keys())), (
+        "GENRE_LABEL_MAP and STYLE_HINT_LABEL_MAP must stay disjoint"
+    )
+    empty_hint_details: dict[str, list[dict[str, float | int | str]]] = {
+        "sampled_detector": [],
+        "fulltext_indicators": [],
+    }
     if not callable(getattr(conn, "execute", None)):
         logger.warning(
-            "[云端模型] 题材标签回退为通用: run_id={} 原因=session 不支持 execute()，跳过 chunk genre detector",
+            "[云端模型] 诊断标签提示回退: run_id={} 原因=session 不支持 execute()，跳过 chunk genre detector",
             run_id,
         )
-        return ["通用"]
+        return ["通用"], empty_hint_details, [], empty_hint_details
 
     chunk_texts = ChunkRepository(conn).fetch_chunk_texts(run_id)
     if not chunk_texts:
-        return ["通用"]
+        return ["通用"], empty_hint_details, [], empty_hint_details
 
     registry = LexiconRegistry()
     registry.load()
     weighted_result = detect_genre_weighted(chunk_texts, registry=registry)
-    genre_weights = weighted_result.genre_weights
-    if not genre_weights:
-        return ["通用"]
-
-    dominant_genre, _dominant_weight = genre_weights[0]
-    if dominant_genre == "general":
-        return ["通用"]
-
-    genre_labels: list[str] = []
-    for index, (genre_code, weight) in enumerate(genre_weights):
-        if genre_code == "general":
-            continue
-        if index > 0 and weight < MIN_CONFIDENCE:
-            continue
-        label = GENRE_LABEL_MAP.get(genre_code)
-        if label and label not in genre_labels:
-            genre_labels.append(label)
-        if len(genre_labels) >= 3:
-            break
-
-    return genre_labels or ["通用"]
+    weighted_genres = [
+        (genre_code, weight)
+        for genre_code, weight in weighted_result.genre_weights
+        if genre_code != "general"
+    ]
+    indicator_hits = _collect_fulltext_indicator_hits(chunk_texts)
+    genre_hints, genre_hint_details = _build_ordered_hints(
+        weighted_genres,
+        indicator_hits,
+        label_map=GENRE_LABEL_MAP,
+        fallback_labels=["通用"],
+    )
+    style_hints, style_hint_details = _build_ordered_hints(
+        weighted_genres,
+        indicator_hits,
+        label_map=STYLE_HINT_LABEL_MAP,
+        fallback_labels=[],
+    )
+    return genre_hints, genre_hint_details, style_hints, style_hint_details
 
 
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
     """
+    修改时间: 2026-05-02
+    任务: diagnosis-genre-hints-and-fantasy-label
+    修改原因: diagnosis payload 不再把规则题材结果当成最终真相写给 LLM；
+              这里只下发 `genre_hints` 与明细，正式 `genre_labels` 改由 diagnosis LLM 结合全局语义决定。
+
     修改时间: 2026-04-30
     任务: diagnosis-latest-only-reference-contract
     修改原因: diagnosis payload 不再写入 reference_contract_version；当前结构默认按最新合同消费，
@@ -188,9 +285,12 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
     foreshadowing_threads = [asdict(thread) for thread in repo.fetch_foreshadowing_threads(effective_run_id)]
     foreshadow_expectation = repo.calculate_foreshadow_expectation(effective_run_id)
-    genre_labels = _build_genre_labels(conn, effective_run_id)
+    genre_hints, genre_hint_details, style_hints, style_hint_details = _build_diagnosis_label_hints(
+        conn, effective_run_id
+    )
     logger.info("[云端模型] 获取foreshadowing_threads: count=%d", len(foreshadowing_threads))
-    logger.info("[云端模型] 题材标签: %s", genre_labels)
+    logger.info("[云端模型] 题材提示: %s", genre_hints)
+    logger.info("[云端模型] 风格提示: %s", style_hints)
 
     stage_summaries = repo.fetch_stage_summaries(effective_run_id)
     logger.info("[云端模型] 获取阶段性摘要: count=%d", len(stage_summaries))
@@ -220,7 +320,10 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "high_tension_paragraphs": high_tension,
         "character_relations": relations,
         "foreshadow_expectation": foreshadow_expectation,
-        "genre_labels": genre_labels,
+        "genre_hints": genre_hints,
+        "genre_hint_details": genre_hint_details,
+        "style_hints": style_hints,
+        "style_hint_details": style_hint_details,
         "foreshadowing_threads": foreshadowing_threads,
         "summaries": stage_summaries,
         "topic_words": topic_words,
