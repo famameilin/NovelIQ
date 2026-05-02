@@ -12,6 +12,8 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.aggregate import AggregateResult, aggregate_all_metrics
+from src.metrics.aggregate.computers import compute_narrative_structure_metrics
+from src.metrics.aggregate.types import AnnotationData, TensionData
 from src.storage.models import Novel
 from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
 
@@ -185,3 +187,23 @@ class TestAggregateAllMetrics:
         result = aggregate_all_metrics(self.run_id, ann_repo, chunk_repo, stats_repo)
         assert "idiom_density" in result.traditional_culture
         assert "classical_sentence_ratio" in result.traditional_culture
+
+    def test_compute_narrative_structure_metrics_aligns_annotation_and_tension_by_chunk_id(self) -> None:
+        annotation_data = AnnotationData(
+            chunk_ids=[0, 1, 2],
+            event_types=["铺垫", "转折", "冲突"],
+            cliffhangers=[0, 1, 0],
+            pivot_moments=[0, 1, 0],
+            emotional_valences=["neutral", "neutral", "neutral"],
+        )
+        tension_data = TensionData(
+            chunk_ids=[0, 1, 2],
+            tension_composite_scores=[0.1, None, 0.9],
+        )
+
+        result = compute_narrative_structure_metrics(annotation_data, tension_data)
+
+        assert result["event_density_铺垫"] == 0.5
+        assert result["event_density_冲突"] == 0.5
+        assert result["event_density_转折"] == 0.0
+        assert result["dominant_climax_pos"] == 0.5

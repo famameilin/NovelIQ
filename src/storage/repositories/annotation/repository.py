@@ -289,17 +289,25 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         reference_resolutions: dict[str, str],
         *,
         apply: bool = True,
+        from_chunk: int | None = None,
+        to_chunk: int | None = None,
+        table_scopes: tuple[str, ...] | list[str] | set[str] | None = None,
     ) -> dict[str, int]:
         """
         创建时间: 2026-04-29
         任务: 角色引用分层重构
-        新建原因: 持久化阶段需要把 checkpoint/reference_resolutions 下沉到 chunk_* 历史行。
+        修改时间: 2026-05-02
+        修改原因: graph projection 需要在投影前只回刷当前窗口的 relations，
+                  因此仓储层也要透传 chunk window 和 table_scopes。
         """
         return characters.apply_reference_resolutions_to_history(
             self.session,
             run_id,
             reference_resolutions,
             apply=apply,
+            from_chunk=from_chunk,
+            to_chunk=to_chunk,
+            table_scopes=table_scopes,
         )
 
     def ensure_canonical_entities(
