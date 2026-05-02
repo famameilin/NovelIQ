@@ -28,7 +28,9 @@ from src.workflows.annotate_helpers import context as context_module
 from src.workflows.annotate_helpers.context import (
     ChunkContext,
     _build_active_entities_prompt_from_authority,
+    _build_annotation_identity_request_inputs,
     _build_optional_task_model_client,
+    _collect_controlled_weak_seed_entities,
     _collect_requested_names,
     _collect_seed_entities,
     _init_evidence_service,
@@ -253,17 +255,17 @@ def test_render_annotation_prompt_blocks_includes_level1_facts_in_main_disambig_
 def test_collect_seed_entities_only_keeps_aliases_explicitly_mentioned_in_current_chunk():
     """
     创建时间: 2026-04-25
+    修改时间: 2026-05-02
     任务: fix-phase-seed-entity-scope
     说明: alias_map 是整轮累计状态，seed_entities 只能保留当前 chunk 明确提到的 alias/canonical，
-          不能把无关历史别名一并带进本轮 Level3 request。
+          不能把无关历史别名或背景 active entities 一并带进本轮 Level3 request。
     """
     seed_entities = _collect_seed_entities(
         {"小七": "程霜", "老刀": "韩山"},
-        ["白芷"],
         query_text="小七跟着白芷翻阅旧案卷。",
     )
 
-    assert seed_entities == ["小七", "程霜", "白芷"]
+    assert seed_entities == ["小七", "程霜"]
 
 
 def test_collect_seed_entities_keeps_canonical_when_chunk_mentions_canonical_directly():
@@ -275,27 +277,98 @@ def test_collect_seed_entities_keeps_canonical_when_chunk_mentions_canonical_dir
     """
     seed_entities = _collect_seed_entities(
         {"小七": "程霜", "老刀": "韩山"},
-        [],
         query_text="程霜翻阅旧案卷，神色不动。",
     )
 
     assert seed_entities == ["程霜"]
 
 
-def test_collect_seed_entities_does_not_promote_active_entities_without_direct_text_hit():
+def test_collect_seed_entities_only_accepts_explicit_extra_names_for_non_alias_anchors():
     """
-    创建时间: 2026-04-30
-    任务: level3-query-exampler-mainline
-    说明: authority active entities 只能作为“正文已命中后的可信候选”，
-          不能在 identity 请求里脱离正文直接升级为 retrieval seed。
+    创建时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    说明: 正式方案里，active entities 不会再通过 `_collect_seed_entities()` 直接回灌；
+          若调用方明确确认某个名字应进入强锚点，必须通过 extra_names 显式补入。
     """
     seed_entities = _collect_seed_entities(
         {},
-        ["陆明"],
         query_text="黑衣人现身，屋内骤然安静。",
+        extra_names=["陆明"],
     )
 
-    assert seed_entities == []
+    assert seed_entities == ["陆明"]
+
+
+def test_collect_controlled_weak_seed_entities_only_keeps_recent_character_names_when_target_empty():
+    """
+    创建时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    说明: 受控弱锚点只服务 annotation Phase1/Phase3 的 identity request；
+          当 requested_names 为空时，只能保留最近出现的 character，去重后最多 3 个。
+    """
+    active_entity_contexts = [
+        ActiveEntityContext(name="青云门", entity_type="organization", last_seen_chunk=40),
+        ActiveEntityContext(name="陆明", entity_type="character", last_seen_chunk=18),
+        ActiveEntityContext(name="白芷", entity_type="character", last_seen_chunk=22),
+        ActiveEntityContext(name="苏镜", entity_type="character", last_seen_chunk=15),
+        ActiveEntityContext(name="白芷", entity_type="character", last_seen_chunk=12),
+        ActiveEntityContext(name="程霜", entity_type="character", last_seen_chunk=19),
+    ]
+
+    weak_seed_entities = _collect_controlled_weak_seed_entities(
+        active_entity_contexts,
+        consumer="annotation_phase1",
+        objective="identity",
+        requested_names=[],
+    )
+
+    assert weak_seed_entities == ["白芷", "程霜", "陆明"]
+    assert (
+        _collect_controlled_weak_seed_entities(
+            active_entity_contexts,
+            consumer="annotation_phase1",
+            objective="identity",
+            requested_names=["白芷"],
+        )
+        == []
+    )
+    assert (
+        _collect_controlled_weak_seed_entities(
+            active_entity_contexts,
+            consumer="annotation_phase2",
+            objective="foreshadowing",
+            requested_names=[],
+        )
+        == []
+    )
+
+
+def test_build_annotation_identity_request_inputs_reports_requested_and_seed_counts():
+    """
+    创建时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    说明: identity request 输入构造需要同时产出 requested_names、最终 seed_entities
+          和后续排查用的 requested/strong/weak 计数。
+    """
+    requested_names, seed_entities, observation = _build_annotation_identity_request_inputs(
+        {},
+        [
+            ActiveEntityContext(name="青云门", entity_type="organization", last_seen_chunk=30),
+            ActiveEntityContext(name="白芷", entity_type="character", last_seen_chunk=12),
+            ActiveEntityContext(name="陆明", entity_type="character", last_seen_chunk=18),
+        ],
+        consumer="annotation_phase3",
+        chunk_id=18,
+        chunk_text="黑衣人现身，屋内骤然安静。",
+    )
+
+    assert requested_names == []
+    assert seed_entities == ["陆明", "白芷"]
+    assert observation == {
+        "requested_names_count": 0,
+        "strong_seed_count": 0,
+        "weak_seed_count": 2,
+    }
 
 
 def test_collect_requested_names_promotes_direct_canonical_mentions_only_when_explicitly_present():
@@ -385,7 +458,15 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
     assert context.prompt_disambig_context is not None
     assert "「蒙面人」可能是：白芷" in context.prompt_disambig_context
     assert provider.collect.await_count == 1
-    assert provider.collect.await_args_list[0].args[0].consumer == "annotation_phase1"
+    phase1_request = provider.collect.await_args_list[0].args[0]
+    assert phase1_request.consumer == "annotation_phase1"
+    assert phase1_request.requested_names == []
+    assert phase1_request.seed_entities == ["白芷"]
+    assert phase1_request.request_observation == {
+        "requested_names_count": 0,
+        "strong_seed_count": 0,
+        "weak_seed_count": 1,
+    }
     assert context.phase4_request_template is not None
     assert context.phase4_request_template.requested_names == []
     assert context.phase4_request_template.seed_entities == []
@@ -699,11 +780,21 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
     phase1_request = provider.collect.await_args_list[0].args[0]
     assert phase1_request.consumer == "annotation_phase1"
     assert phase1_request.requested_names == []
-    assert phase1_request.seed_entities == []
+    assert phase1_request.seed_entities == ["陆明"]
+    assert phase1_request.request_observation == {
+        "requested_names_count": 0,
+        "strong_seed_count": 0,
+        "weak_seed_count": 1,
+    }
     phase3_request = provider.collect.await_args_list[1].args[0]
     assert phase3_request.consumer == "annotation_phase3"
     assert phase3_request.requested_names == []
-    assert phase3_request.seed_entities == []
+    assert phase3_request.seed_entities == ["陆明"]
+    assert phase3_request.request_observation == {
+        "requested_names_count": 0,
+        "strong_seed_count": 0,
+        "weak_seed_count": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -797,9 +888,19 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     assert phase1_request.objective == "identity"
     assert phase1_request.requested_names == ["程霜"]
     assert phase1_request.seed_entities == ["程霜"]
+    assert phase1_request.request_observation == {
+        "requested_names_count": 1,
+        "strong_seed_count": 1,
+        "weak_seed_count": 0,
+    }
     assert phase3_request.consumer == "annotation_phase3"
     assert phase3_request.requested_names == ["程霜"]
     assert phase3_request.seed_entities == ["程霜"]
+    assert phase3_request.request_observation == {
+        "requested_names_count": 1,
+        "strong_seed_count": 1,
+        "weak_seed_count": 0,
+    }
     assert context.phase1_bundle is phase1_bundle
     assert context.phase2_bundle is None
     assert context.phase3_bundle is phase3_bundle

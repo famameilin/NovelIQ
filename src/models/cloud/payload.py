@@ -6,8 +6,10 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.exceptions import GraphReadinessError
 from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+from src.knowledge.authority.types import GraphAuthorityReport, GraphQualitySignals, GraphSharedSummary
 from src.lexicons.genre_detector import detect_genre_weighted
 from src.lexicons.genre_detector_rules import MIN_CONFIDENCE
 from src.lexicons.registry import LexiconRegistry
@@ -26,15 +28,42 @@ GENRE_LABEL_MAP = {
 }
 
 
+def _is_pending_graph_projection_error(exc: GraphReadinessError) -> bool:
+    """
+    创建时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    新建原因: diagnosis 只允许对“projection 仍 pending”做零值降级；
+              如果 authority 明确报告 blocking failed rows，必须继续抛错，不能伪装成空图信号。
+    """
+    return "still pending" in exc.message
+
+
 def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """
+    修改时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    修改原因: diagnosis 只复用 graph-owned aggregate signals；当 graph projection 仍有 pending 行时，
+              这里应像 aggregate 一样降级为零值共享信号，而不是让整条分析任务失败。
+
     构建 diagnosis 允许复用的共享 graph signals
 
     diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
     不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入
     """
-
-    graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
+    try:
+        graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
+    except GraphReadinessError as exc:
+        if not _is_pending_graph_projection_error(exc):
+            raise
+        logger.warning(
+            "[云端模型] graph signals 回退为零值共享信号: run_id={} 原因={}",
+            run_id,
+            exc.message,
+        )
+        graph_report = GraphAuthorityReport(
+            summary=GraphSharedSummary(),
+            quality=GraphQualitySignals(),
+        )
     return serialize_graph_report_signals(graph_report)
 
 
@@ -47,6 +76,7 @@ def _build_genre_labels(conn: Session, run_id: str) -> list[str]:
     任务: split-genre-style-labels-review-fixes
     修改原因: review 发现 summary-only/shared-signal 入口会传入不具备 SQL execute 能力的轻量 session stand-in；
               这里仅对这类非正式 DB session 明确回退到 `["通用"]`，避免打断既有 fail-fast 测试入口。
+              duck-typing 检查是 pragmatically 的防御层：类型系统按 Session 标注，但运行时可能传入 stand-in。
     """
     if not callable(getattr(conn, "execute", None)):
         logger.warning(
@@ -164,9 +194,6 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
     stage_summaries = repo.fetch_stage_summaries(effective_run_id)
     logger.info("[云端模型] 获取阶段性摘要: count=%d", len(stage_summaries))
-
-    topic_words = repo.fetch_topic_words(effective_run_id, top_n=settings.diagnosis.topic_words_top_n)
-    logger.info("[云端模型] 获取topic_words: count=%d", len(topic_words))
 
     # 获取实际主题总数
     total_topics = _get_total_topic_count(effective_run_id, repo)

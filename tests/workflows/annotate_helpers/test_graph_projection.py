@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+import time
 import uuid
 
 from src.chunking.chunker import Chunk
 from src.storage.models import ChunkRelation, GraphEntityParticipant
+from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
 from src.workflows.annotate_helpers.graph_projection import project_graph_tables
 
@@ -133,11 +136,12 @@ def test_project_graph_tables_removes_stale_relation_when_change_becomes_no_chan
     assert graph_repo.count_entity_participants(run_id) == 0
 
 
-def test_project_graph_tables_keeps_unresolved_pronoun_endpoint_pending(db_session) -> None:
+def test_project_graph_tables_terminalizes_unresolved_reference_endpoint_as_failed(db_session) -> None:
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    说明: 未解析代词端点不能被 graph projection upsert 成实体，关系行必须显式 pending 并记录错误原因。
+    修改时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    修改原因: relation-only 引用端点在最终仍 unresolved 时不应永久 pending，
+              而应转成 benign failed，避免 authority 被无意义的重试行卡死。
     """
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)
@@ -152,11 +156,13 @@ def test_project_graph_tables_keeps_unresolved_pronoun_endpoint_pending(db_sessi
     relation = ChunkRelation(
         chunk_id=1,
         run_id=run_id,
-        from_char="我",
+        from_char="LOCAL_REF_C1_他们",
         to_char="沈砚",
+        from_reference_kind="generic_reference",
+        to_reference_kind="global_character",
         type="盟友",
         change="新建",
-        evidence="我看见沈砚",
+        evidence="他们看见沈砚",
         confidence=0.8,
         projection_status="pending",
     )
@@ -169,17 +175,59 @@ def test_project_graph_tables_keeps_unresolved_pronoun_endpoint_pending(db_sessi
     graph_repo = GraphRepository(db_session)
     entity_names = {entity.canonical_name for entity in graph_repo.fetch_entities(run_id)}
 
-    assert relation.projection_status == "pending"
-    assert relation.projection_error == "unresolved global-character endpoint"
-    assert "我" not in entity_names
+    assert relation.projection_status == "failed"
+    assert relation.projection_error == "unresolved reference endpoint"
+    assert "他们" not in entity_names
     assert graph_repo.count_relation_events(run_id) == 0
 
 
-def test_project_graph_tables_uses_resolved_pronoun_endpoint_without_aliasing_surface(db_session) -> None:
+def test_project_graph_tables_keeps_mixed_unresolved_endpoints_pending(db_session) -> None:
     """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 已解析“我 -> 汪淼”可以投影为汪淼关系，但不能把“我”写成 graph alias。
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: 这次只把“所有 unresolved 都来自引用端点”的关系终态化；
+              只要还夹着非引用端点 unresolved，就必须继续 pending，避免过早锁死。
+    """
+    novel_id = uuid.uuid4().hex[:8]
+    _insert_test_novel(db_session, novel_id)
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Mixed Unresolved Endpoints",
+    )
+    chunk_repo = ChunkRepository(db_session)
+    chunk_repo.insert_chunks(run_id, [Chunk(index=1, text="他们看见沈砚。", start=0, end=100)])
+
+    relation = ChunkRelation(
+        chunk_id=1,
+        run_id=run_id,
+        from_char="",
+        to_char="LOCAL_REF_C1_他们",
+        to_reference_kind="generic_reference",
+        type="盟友",
+        change="新建",
+        evidence="他们看见沈砚",
+        confidence=0.8,
+        projection_status="pending",
+    )
+    db_session.add(relation)
+    db_session.commit()
+
+    project_graph_tables(run_id=run_id, to_chunk=1, session=db_session)
+
+    db_session.refresh(relation)
+    graph_repo = GraphRepository(db_session)
+    assert relation.projection_status == "pending"
+    assert relation.projection_error == "unresolved global-character endpoint"
+    assert graph_repo.count_relation_events(run_id) == 0
+
+
+def test_project_graph_tables_backfills_relation_history_before_projection(db_session) -> None:
+    """
+    修改时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    修改原因: projection 前必须先用 checkpoint 的 reference_resolutions 回刷当前 relation 窗口，
+              这样 late-written slot endpoint 才能直接投影，而不是继续卡在 stale unresolved。
     """
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)
@@ -194,19 +242,38 @@ def test_project_graph_tables_uses_resolved_pronoun_endpoint_without_aliasing_su
     relation = ChunkRelation(
         chunk_id=1,
         run_id=run_id,
-        from_char="我",
+        from_char="POV_SLOT_C1_我",
         to_char="沈砚",
         from_reference_kind="pov_slot",
         to_reference_kind="global_character",
-        resolved_from_global_name="汪淼",
-        resolved_to_global_name="沈砚",
+        resolved_from_global_name=None,
+        resolved_to_global_name=None,
         type="盟友",
         change="新建",
         evidence="我看见沈砚",
         confidence=0.8,
         projection_status="pending",
     )
-    db_session.add(relation)
+    checkpoint = DisambigCheckpoint(
+        run_id=run_id,
+        state_json=json.dumps(
+            {
+                "discovered_names": ["我", "沈砚", "汪淼"],
+                "known_canonical_names": ["汪淼", "沈砚"],
+                "alias_merges": [],
+                "reference_resolutions": [["我", "汪淼"]],
+                "unresolved_references": [],
+                "review_status": [],
+                "pending_relations": [],
+                "entity_types": {},
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            },
+            ensure_ascii=False,
+        ),
+        updated_at=time.time(),
+    )
+    db_session.add_all([relation, checkpoint])
     db_session.commit()
 
     project_graph_tables(run_id=run_id, to_chunk=1, session=db_session)
@@ -217,6 +284,8 @@ def test_project_graph_tables_uses_resolved_pronoun_endpoint_without_aliasing_su
     alias_map = graph_repo.fetch_alias_map(run_id)
 
     assert relation.projection_status == "projected"
+    assert relation.resolved_from_global_name == "汪淼"
+    assert relation.resolved_to_global_name == "沈砚"
     assert entity_names == {"汪淼", "沈砚"}
     assert alias_map.get("我") is None
     assert graph_repo.count_relation_events(run_id) == 1

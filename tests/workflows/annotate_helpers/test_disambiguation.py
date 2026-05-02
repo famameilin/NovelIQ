@@ -262,13 +262,12 @@ async def test_retry_canonical_reselect_records_unknown_model_name_for_configles
 
 
 @pytest.mark.asyncio
-async def test_run_final_canonical_reselect_falls_back_for_noop_client() -> None:
+async def test_run_final_canonical_reselect_keeps_state_for_noop_client() -> None:
     """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect-review-fix
-    说明: 当 full disambig client 是 lightweight no-op fallback 时，终消歧后的额外
-          代表名重选必须回退到既有 heuristic，不能因为不支持模型调用而把主流程打挂。
+    修改时间: 2026-05-02
+    任务: final-canonical-reselect-final-only
+    修改内容: final 代表名重选改成“只有模型能选，函数只负责应用/校验”后，
+              client 不支持 reselect 时必须保留现有 state，不能再偷偷回退到本地 heuristic。
     """
     state = DisambiguationState(
         discovered_names=frozenset({"灰衣人", "白芷"}),
@@ -299,16 +298,87 @@ async def test_run_final_canonical_reselect_falls_back_for_noop_client() -> None
             ),
         ),
     )
-    new_state = await pipeline_mod._run_final_canonical_reselect(
-        conn=object(),
-        state=state,
-        full_disambig_client=_NoopDisambiguationClient(config=object()),
-        all_names=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
-        alias_keywords=["号"],
-        run_id="run-1",
+    with patch.object(pipeline_mod, "_retry_canonical_reselect", new=AsyncMock()) as retry_mock:
+        new_state = await pipeline_mod._run_final_canonical_reselect(
+            conn=object(),
+            state=state,
+            full_disambig_client=_NoopDisambiguationClient(config=object()),
+            all_names=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
+            alias_keywords=["号"],
+            run_id="run-1",
+        )
+
+    assert new_state == state
+    retry_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_final_canonical_reselect_batches_alias_clusters_by_20() -> None:
+    """
+    创建时间: 2026-05-02
+    任务: final-canonical-reselect-final-only
+    新建原因: final canonical reselect 应按 alias cluster 分批调用模型，
+              默认每批最多 20 组，避免“大书一次全塞进 prompt”。
+    """
+    alias_merges = {
+        (f"别名{index:02d}", f"人物{index:02d}")
+        for index in range(1, 22)
+    }
+    known_canonical_names = frozenset({f"人物{index:02d}" for index in range(1, 22)})
+    discovered_names = known_canonical_names | frozenset({f"别名{index:02d}" for index in range(1, 22)})
+    state = DisambiguationState(
+        discovered_names=discovered_names,
+        known_canonical_names=known_canonical_names,
+        alias_merges=frozenset(alias_merges),
     )
-    assert new_state.known_canonical_names == frozenset({"白芷"})
-    assert new_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
+    all_names = [
+        candidate
+        for index in range(1, 22)
+        for candidate in (
+            {"name": f"别名{index:02d}", "count": 1},
+            {"name": f"人物{index:02d}", "count": 5},
+        )
+    ]
+    client = _FakeDisambigClient()
+    received_batches: list[list[list[str]]] = []
+
+    async def _fake_retry(*_args, **kwargs):
+        clusters = _args[2]
+        received_batches.append([list(cluster) for cluster in clusters])
+        decisions: dict[str, str] = {}
+        for cluster in clusters:
+            selected_name = next(name for name in cluster if name.startswith("人物"))
+            for name in cluster:
+                decisions[name] = selected_name
+        return ExtendedDisambigResult(
+            canonical_decisions=decisions,
+            entity_types={},
+            entity_relations=[],
+            alias_confidence=dict.fromkeys(decisions, "high"),
+        )
+
+    with (
+        patch(
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.build_context_sentences",
+            side_effect=lambda _conn, candidates, _alias_keywords, run_id=None: {
+                str(item["name"]): f"ctx:{item['name']}" for item in candidates
+            },
+        ),
+        patch.object(pipeline_mod, "_retry_canonical_reselect", side_effect=_fake_retry) as retry_mock,
+    ):
+        new_state = await pipeline_mod._run_final_canonical_reselect(
+            conn=object(),
+            state=state,
+            full_disambig_client=client,
+            all_names=all_names,
+            alias_keywords=["号"],
+            run_id="run-1",
+        )
+
+    assert retry_mock.await_count == 2
+    assert [len(batch) for batch in received_batches] == [20, 1]
+    assert new_state.known_canonical_names == known_canonical_names
+    assert new_state.get_alias_merges_dict() == {f"别名{index:02d}": f"人物{index:02d}" for index in range(1, 22)}
 
 
 @pytest.mark.asyncio
@@ -363,10 +433,6 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline_stages.validate_confidence_with_evidence",
             side_effect=lambda result, *_: result,
-        ),
-        patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.reselect_cluster_canonicals",
-            side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline_stages.apply_disambiguation_decisions",
@@ -472,10 +538,6 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline_stages.validate_confidence_with_evidence",
             side_effect=lambda result, *_: result,
-        ),
-        patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.reselect_cluster_canonicals",
-            side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline_stages.apply_disambiguation_decisions",
@@ -662,10 +724,6 @@ async def test_incremental_pipeline_skips_active_entity_fallback_for_review_cand
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline_stages.validate_confidence_with_evidence",
             side_effect=lambda result, *_: result,
-        ),
-        patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.reselect_cluster_canonicals",
-            side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline_stages.apply_disambiguation_decisions",

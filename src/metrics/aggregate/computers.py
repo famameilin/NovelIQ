@@ -8,6 +8,7 @@ Aggregate Metrics 指标计算模块
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -33,12 +34,12 @@ from ..emotion_metrics_extra import (
     compute_pos_neg_ratio,
 )
 from ..narrative_metrics import (
+    analyze_three_act_structure,
     compute_cliffhanger_rate,
     compute_climax_profile,
     compute_climax_spacing,
     compute_event_density,
     compute_middle_collapse_index,
-    compute_three_act_ratio_by_tension,
 )
 from ..style_metrics_extra import (
     compute_avg_word_len,
@@ -60,6 +61,61 @@ from .types import (
     TensionData,
     TextData,
 )
+
+
+@dataclass(slots=True)
+class _AlignedNarrativeStructureInputs:
+    """
+    创建时间: 2026-05-02
+    任务: three-act-structure-v2-cleanup
+    新建原因: 三幕结构 v2 需要把 annotation 与 tension 按 chunk_id 对齐，
+              不能继续默认两条序列在过滤空值后仍然天然同位。
+    """
+
+    chunk_ids: list[int]
+    event_types: list[str]
+    cliffhangers: list[int]
+    pivot_moments: list[int]
+    tension_scores: list[float]
+
+
+def _align_narrative_structure_inputs(
+    annotation_data: AnnotationData,
+    tension_data: TensionData,
+) -> _AlignedNarrativeStructureInputs:
+    tension_by_chunk_id: dict[int, float] = {}
+    for chunk_id, tension_score in zip(
+        tension_data.chunk_ids,
+        tension_data.tension_composite_scores,
+        strict=True,
+    ):
+        if tension_score is None or chunk_id in tension_by_chunk_id:
+            continue
+        tension_by_chunk_id[chunk_id] = float(tension_score)
+
+    aligned_chunk_ids: list[int] = []
+    aligned_event_types: list[str] = []
+    aligned_cliffhangers: list[int] = []
+    aligned_pivot_moments: list[int] = []
+    aligned_tension_scores: list[float] = []
+
+    for index, chunk_id in enumerate(annotation_data.chunk_ids):
+        tension_score = tension_by_chunk_id.get(chunk_id)
+        if tension_score is None:
+            continue
+        aligned_chunk_ids.append(chunk_id)
+        aligned_event_types.append(annotation_data.event_types[index])
+        aligned_cliffhangers.append(annotation_data.cliffhangers[index])
+        aligned_pivot_moments.append(annotation_data.pivot_moments[index])
+        aligned_tension_scores.append(tension_score)
+
+    return _AlignedNarrativeStructureInputs(
+        chunk_ids=aligned_chunk_ids,
+        event_types=aligned_event_types,
+        cliffhangers=aligned_cliffhangers,
+        pivot_moments=aligned_pivot_moments,
+        tension_scores=aligned_tension_scores,
+    )
 
 
 def _compute_tone_distribution(dialogue_tones: list[str] | None) -> dict[str, float]:
@@ -90,20 +146,34 @@ def compute_narrative_structure_metrics(
     计算叙事结构聚合指标
 
     """
-    climax_profile = compute_climax_profile(tension_data.tension_composite_scores)
+    aligned_inputs = _align_narrative_structure_inputs(annotation_data, tension_data)
+    diagnostics = analyze_three_act_structure(
+        aligned_inputs.event_types,
+        aligned_inputs.cliffhangers,
+        aligned_inputs.pivot_moments,
+        aligned_inputs.tension_scores,
+    )
+    climax_profile = compute_climax_profile(aligned_inputs.tension_scores)
+    dominant_climax_pos = None
+    if aligned_inputs.tension_scores:
+        dominant_climax_pos = round(
+            diagnostics.representative_peak_idx / len(aligned_inputs.tension_scores),
+            3,
+        )
     return {
-        **compute_three_act_ratio_by_tension(tension_data.tension_composite_scores),
-        "climax_spacing": compute_climax_spacing(annotation_data.chunk_ids, tension_data.tension_composite_scores),
+        **diagnostics.ratio_dict(),
+        "climax_spacing": compute_climax_spacing(aligned_inputs.chunk_ids, aligned_inputs.tension_scores),
         "middle_collapse_index": compute_middle_collapse_index(
-            annotation_data.chunk_ids, tension_data.tension_composite_scores
+            aligned_inputs.chunk_ids,
+            aligned_inputs.tension_scores,
         ),
-        "cliffhanger_rate": compute_cliffhanger_rate(annotation_data.cliffhangers),
-        **{f"event_density_{k}": v for k, v in compute_event_density(annotation_data.event_types).items()},
+        "cliffhanger_rate": compute_cliffhanger_rate(aligned_inputs.cliffhangers),
+        **{f"event_density_{k}": v for k, v in compute_event_density(aligned_inputs.event_types).items()},
         "climax_count": climax_profile["climax_count"],
         "climax_positions": climax_profile["climax_positions"],
         "climax_heights": climax_profile["climax_heights"],
         "peak_escalation": climax_profile["peak_escalation"],
-        "dominant_climax_pos": climax_profile["dominant_climax_pos"],
+        "dominant_climax_pos": dominant_climax_pos,
     }
 
 
