@@ -31,3 +31,17 @@ def test_resolve_database_url_prefers_explicit_test_credentials(monkeypatch) -> 
     database_url = resolve_database_url_from_env("TEST_DATABASE_URL")
 
     assert database_url == "postgresql+psycopg://tester:test-secret@localhost:5432/novel_analysis_test"
+
+
+def test_resolve_database_url_returns_none_when_optional_and_unset(monkeypatch) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-database-url-typecheck-regression
+    新建原因: 这次修复只收窄默认 `required=True` 的类型合同；
+              需要补一条回归测试，确认 `required=False` 仍保持可选返回语义。
+    """
+    monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
+
+    database_url = resolve_database_url_from_env("TEST_DATABASE_URL", required=False)
+
+    assert database_url is None

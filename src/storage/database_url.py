@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+from typing import Literal, overload
 
 from sqlalchemy.engine import make_url
 
@@ -48,11 +49,22 @@ def _get_first_non_empty_env(env_names: list[str]) -> str | None:
     return None
 
 
+@overload
+def resolve_database_url_from_env(env_var_name: str, *, required: Literal[True] = True) -> str: ...
+
+
+@overload
+def resolve_database_url_from_env(env_var_name: str, *, required: Literal[False]) -> str | None: ...
+
+
 def resolve_database_url_from_env(env_var_name: str, *, required: bool = True) -> str | None:
     """
     2026-05-01: 拆分数据库连接串中的账号密码
     任务: split-database-url-credentials
     说明: 支持把数据库基础地址和账号密码拆到多个环境变量中配置。
+    修改时间: 2026-05-02
+    修改原因: 默认 `required=True` 的调用路径实际上是 fail-closed；
+              这里补 overload，把类型合同收窄为 `str`，修复数据库入口的 typecheck 回归。
     例如：
     - `DATABASE_URL=postgresql+psycopg://localhost:5432/novel_analysis`
     - `DATABASE_USERNAME=postgres`
