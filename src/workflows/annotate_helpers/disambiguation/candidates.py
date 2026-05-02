@@ -21,6 +21,8 @@ from src.models.local.disambiguation.evidence_renderer import (
 from src.storage.repositories.annotation.characters import (
     fetch_all_character_names,
     fetch_reference_aware_character_names,
+    fetch_relation_reference_candidates,
+    fetch_relation_reference_contexts,
 )
 from src.storage.repositories.graph import CurrentRelationRow
 
@@ -103,6 +105,91 @@ def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, i
         except (TypeError, ValueError):
             name_counts[name] = 0
     return name_counts
+
+
+def _merge_name_count_candidates(
+    *candidate_groups: Sequence[NameCountCandidate | dict[str, str | int]],
+) -> list[NameCountCandidate]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: chunk_characters 和 relation-only endpoint 现在会同时提供候选，
+              这里统一按名字聚合频次，避免增量和终态各自重复写一遍合并逻辑。
+    """
+    merged_counts: dict[str, int] = {}
+    for group in candidate_groups:
+        for item in group:
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            raw_count = item.get("count", 0)
+            try:
+                count = int(raw_count)
+            except (TypeError, ValueError):
+                count = 0
+            merged_counts[name] = merged_counts.get(name, 0) + count
+    return [{"name": name, "count": count} for name, count in sorted(merged_counts.items(), key=lambda x: -x[1])]
+
+
+def fetch_reference_aware_disambiguation_candidates(
+    conn,
+    run_id: str,
+    *,
+    max_chunk_id: int | None = None,
+) -> list[NameCountCandidate]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: 关系端点候选必须和 chunk_characters 候选一起进入增量/终态消歧，
+              否则 relation-only endpoint 永远不会进入 reference_resolutions。
+    """
+    character_candidates = fetch_reference_aware_character_names(conn, run_id, max_chunk_id=max_chunk_id)
+    relation_candidates = fetch_relation_reference_candidates(conn, run_id, max_chunk_id=max_chunk_id)
+    return _merge_name_count_candidates(character_candidates, relation_candidates)
+
+
+def build_candidate_context_sentences(
+    conn,
+    candidates: list[NameCountCandidate],
+    alias_keywords: list[str] | None = None,
+    *,
+    run_id: str,
+    max_chunk_id: int | None = None,
+    prev_chunks: int | None = None,
+    chunk_start_id: int | None = None,
+    chunk_end_id: int | None = None,
+) -> dict[str, str]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: slot 候选既需要普通例句上下文，也需要关系证据上下文，
+              这里统一拼装，避免增量/终态各自漏掉 relation-only endpoint 的可读证据。
+    """
+    context_sentences = build_context_sentences(
+        conn,
+        candidates,
+        alias_keywords,
+        run_id=run_id,
+        max_chunk_id=max_chunk_id,
+        prev_chunks=prev_chunks,
+        chunk_start_id=chunk_start_id,
+        chunk_end_id=chunk_end_id,
+    )
+    relation_contexts = fetch_relation_reference_contexts(
+        conn,
+        run_id,
+        [str(item.get("name", "")).strip() for item in candidates if str(item.get("name", "")).strip()],
+        max_chunk_id=max_chunk_id,
+        chunk_start_id=chunk_start_id,
+        chunk_end_id=chunk_end_id,
+    )
+    for name, relation_context in relation_contexts.items():
+        sentence_context = context_sentences.get(name, "").strip()
+        if sentence_context:
+            context_sentences[name] = f"{relation_context} | 例句上下文：{sentence_context}"
+        else:
+            context_sentences[name] = relation_context
+    return context_sentences
 
 
 def _is_self_resolved_leaf(name: str, alias_map: dict[str, str]) -> bool:
@@ -281,7 +368,7 @@ def extract_new_names_from_db(
 
     """
     existing_names = set(alias_map.keys()) | set(alias_map.values()) if alias_map else set()
-    all_names = fetch_reference_aware_character_names(conn, run_id, max_chunk_id=current_chunk_id)
+    all_names = fetch_reference_aware_disambiguation_candidates(conn, run_id, max_chunk_id=current_chunk_id)
 
     candidates: list[NameCountCandidate] = []
     for item in all_names:

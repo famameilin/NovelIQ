@@ -419,6 +419,54 @@ def test_graph_authority_views_ignore_benign_failed_self_relations(db_session) -
     assert [(relation.from_name, relation.to_name) for relation in view.confirmed_relations] == [("苏镜", "程霜")]
 
 
+def test_graph_authority_views_ignore_benign_failed_unresolved_reference_endpoints(db_session) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: relation-only 引用端点最终 unresolved 时会转成 benign failed；
+              readiness 必须和 self relation 一样放行，避免 graph report/view 被这类行误阻断。
+    """
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Benign Reference Failure")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13047,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="LOCAL_REF_C4_他们",
+            to_char="程霜",
+            type="盟友",
+            change="新建",
+            evidence="局部引用端点无法入图",
+            confidence=0.40,
+            projection_status="failed",
+            projection_error="unresolved reference endpoint",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    report = service.build_graph_report(run_id)
+    assert report.summary.node_count == 2
+    assert report.summary.edge_count == 1
+
+
 def test_graph_authority_report_rejects_graph_page_contracts() -> None:
     # 中文注释：report 是 diagnosis/export 的共享边界，必须拒绝 graph page
     # contract，避免页面字段被错误地重新序列化进共享 payload。

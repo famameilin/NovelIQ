@@ -253,8 +253,10 @@ def fetch_tension_data(
 
     """
     rows = stats_repo.fetch_chunk_curves_full(run_id)
-    tension_composite_scores = [row.tension_composite for row in rows if row.tension_composite is not None]
-    return TensionData(tension_composite_scores=tension_composite_scores)
+    return TensionData(
+        chunk_ids=[row.chunk_id for row in rows],
+        tension_composite_scores=[row.tension_composite for row in rows],
+    )
 
 
 def fetch_dialogue_data(

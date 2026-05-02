@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult, NameReviewState
 from src.models.local.disambiguation.evidence import EVIDENCE_STRENGTH_STRONG, EvidenceProfile
-from src.storage.models import ChunkCharacter, Novel
+from src.storage.models import ChunkCharacter, ChunkRelation, Novel
 from src.storage.repositories.annotation.characters import (
     fetch_all_character_names,
     fetch_reference_aware_character_names,
@@ -15,7 +15,10 @@ from src.storage.repositories.annotation.characters import (
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline_stages as pipeline_stages_mod
-from src.workflows.annotate_helpers.disambiguation.candidates import extract_new_names_from_db
+from src.workflows.annotate_helpers.disambiguation.candidates import (
+    build_candidate_context_sentences,
+    extract_new_names_from_db,
+)
 
 
 def test_apply_disambiguation_decisions_keeps_uncertain_self_map_in_review() -> None:
@@ -207,6 +210,41 @@ def test_apply_disambiguation_decisions_records_pronoun_to_global_resolution() -
     assert state.alias_merges == frozenset()
     assert review.status == disambig_mod.DISAMBIG_STATE_RESOLVED
     assert review.proposed_canonical == "白芷"
+
+
+def test_apply_incremental_disambiguation_result_does_not_call_local_canonical_reselect() -> None:
+    """
+    创建时间: 2026-05-02
+    任务: final-canonical-reselect-final-only
+    新建原因: 增量阶段的 canonical_decisions 只承载“同组/引用解析”语义，
+              不能在状态应用后再偷偷启动本地 canonical 选举。
+    """
+    base_state = DisambiguationState(
+        discovered_names=frozenset({"白芷"}),
+        known_canonical_names=frozenset({"白芷"}),
+    )
+    result = ExtendedDisambigResult(
+        canonical_decisions={"灰衣人": "白芷"},
+        entity_types={},
+        entity_relations=[],
+        alias_confidence={"灰衣人": "medium"},
+    )
+
+    with patch.object(
+        pipeline_stages_mod,
+        "reselect_cluster_canonicals",
+        return_value=base_state,
+    ) as reselect_mock:
+        new_state = pipeline_stages_mod.apply_incremental_disambiguation_result(
+            base_state,
+            result,
+            new_names=[{"name": "灰衣人", "count": 3}, {"name": "白芷", "count": 7}],
+            context_sentences={"灰衣人": "【身份线索】她自称白芷"},
+        )
+
+    assert new_state.known_canonical_names == frozenset({"白芷"})
+    assert new_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
+    reselect_mock.assert_not_called()
 
 
 def test_apply_final_disambiguation_result_does_not_promote_unresolved_reference() -> None:
@@ -435,3 +473,119 @@ def test_fetch_reference_aware_character_names_keeps_name_count_contract(db_sess
     assert all(isinstance(item["name"], str) for item in all_names)
     assert all(isinstance(item["count"], int) for item in all_names)
     assert {item["name"] for item in all_names} == {"她", "白芷"}
+
+
+def test_extract_new_names_from_db_includes_relation_only_slot_candidates(db_session) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: relation-only endpoint 如果不进入 extract_new_names_from_db，
+              增量/终态消歧就永远看不到这些 slot 候选。
+    """
+    run_id = "run-relation-ref-candidates"
+    novel_id = "novref03"
+    db_session.add(Novel(novel_id=novel_id, filename="test.txt", file_path="data/test.txt", file_size=128))
+    db_session.commit()
+    db_session.execute(
+        text(
+            "INSERT INTO analysis_runs ("
+            "run_id, novel_id, source_path, title, status, progress, current, total, "
+            "task_kind, cancel_requested, created_at, updated_at"
+            ") VALUES (:run_id, :novel_id, 'test', 'Test', 'pending', 0, 0, 1, 'analysis', false, NOW(), NOW())"
+        ),
+        {"run_id": run_id, "novel_id": novel_id},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO chunks (chunk_id, run_id, text, chapter_id, char_offset, char_end_offset) "
+            "VALUES (1, :run_id, '叶文洁看向他们。', NULL, NULL, NULL)"
+        ),
+        {"run_id": run_id},
+    )
+    db_session.add(
+        ChunkRelation(
+            chunk_id=1,
+            run_id=run_id,
+            from_char="叶文洁",
+            to_char="LOCAL_REF_C1_他们",
+            from_reference_kind="global_character",
+            to_reference_kind="generic_reference",
+            resolved_from_global_name="叶文洁",
+            resolved_to_global_name=None,
+            reference_skip_reason="他们: unresolved generic reference",
+            type="盟友",
+            change="新建",
+            evidence="叶文洁看向他们。",
+            confidence=0.8,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    new_names = extract_new_names_from_db(db_session, {}, run_id, current_chunk_id=1)
+
+    assert {item["name"] for item in new_names} == {"LOCAL_REF_C1_他们"}
+
+
+def test_build_candidate_context_sentences_includes_relation_reference_context(db_session) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: slot 候选不会直接命中原文检索，必须额外带上 chunk/evidence/text，
+              否则模型只能看到内部 key，无法判断具体引用场景。
+    """
+    run_id = "run-relation-ref-context"
+    novel_id = "novref04"
+    db_session.add(Novel(novel_id=novel_id, filename="test.txt", file_path="data/test.txt", file_size=128))
+    db_session.commit()
+    db_session.execute(
+        text(
+            "INSERT INTO analysis_runs ("
+            "run_id, novel_id, source_path, title, status, progress, current, total, "
+            "task_kind, cancel_requested, created_at, updated_at"
+            ") VALUES (:run_id, :novel_id, 'test', 'Test', 'pending', 0, 0, 1, 'analysis', false, NOW(), NOW())"
+        ),
+        {"run_id": run_id, "novel_id": novel_id},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO chunks (chunk_id, run_id, text, chapter_id, char_offset, char_end_offset) "
+            "VALUES (1, :run_id, '麦克说，我看见他朝他们挥手。', NULL, NULL, NULL)"
+        ),
+        {"run_id": run_id},
+    )
+    db_session.add(
+        ChunkRelation(
+            chunk_id=1,
+            run_id=run_id,
+            from_char="POV_SLOT_C1_我",
+            to_char="LOCAL_REF_C1_他们",
+            from_reference_kind="pov_slot",
+            to_reference_kind="generic_reference",
+            resolved_from_global_name=None,
+            resolved_to_global_name=None,
+            reference_skip_reason="我: unresolved pov reference; 他们: unresolved generic reference",
+            type="观察",
+            change="新建",
+            evidence="我看见他朝他们挥手。",
+            confidence=0.7,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    context_sentences = build_candidate_context_sentences(
+        db_session,
+        [{"name": "LOCAL_REF_C1_他们", "count": 1}],
+        ["某", "名", "号"],
+        run_id=run_id,
+        max_chunk_id=1,
+        chunk_start_id=1,
+        chunk_end_id=1,
+    )
+
+    context = context_sentences["LOCAL_REF_C1_他们"]
+    assert "chunk 1" in context
+    assert "原文称呼：他们" in context
+    assert "关系证据：我看见他朝他们挥手。" in context
+    assert "分块原文：麦克说，我看见他朝他们挥手。" in context

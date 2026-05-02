@@ -4,12 +4,12 @@ import json
 import time
 import uuid
 
+from scripts.db.backfill_character_references import backfill_run
 from src.chunking.chunker import Chunk
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.models.core import DisambigCheckpoint
-from src.storage.repositories.annotation.characters import apply_reference_resolutions_to_history
 from src.storage.repositories import ChunkRepository, RunRepository
-from scripts.db.backfill_character_references import backfill_run
+from src.storage.repositories.annotation.characters import apply_reference_resolutions_to_history
 
 
 def _insert_test_novel(db_session, novel_id: str) -> None:
@@ -35,7 +35,8 @@ def test_backfill_run_applies_checkpoint_reference_resolutions_to_history_rows(d
     """
     修改时间: 2026-04-30
     任务: 清理 checkpoint version 残留并保持 latest-only
-    修改原因: backfill 脚本除了消费 checkpoint reference_resolutions 外，还必须移除旧 checkpoint JSON 遗留的 version 字段。
+    修改原因: backfill 脚本除了消费 checkpoint reference_resolutions 外，
+              还必须移除旧 checkpoint JSON 遗留的 version 字段。
     """
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)
@@ -222,3 +223,99 @@ def test_apply_reference_resolutions_to_history_clears_removed_reference_resolut
     assert chunk_relation.resolved_from_global_name is None
     assert chunk_relation.reference_skip_reason == "我: unresolved pov reference"
     assert chunk_relation.resolved_to_global_name == "白芷"
+
+
+def test_apply_reference_resolutions_to_history_supports_relation_only_window_scopes(db_session) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: graph projection 投影前只需要回刷当前窗口的 chunk_relations；
+              这里锁定 table_scopes + chunk window 不会误改其他历史表。
+    """
+    novel_id = uuid.uuid4().hex[:8]
+    _insert_test_novel(db_session, novel_id)
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Reference Resolution Relation Window",
+    )
+    ChunkRepository(db_session).insert_chunks(
+        run_id,
+        [
+            Chunk(index=1, text="我说。", start=0, end=20),
+            Chunk(index=2, text="我看向白芷。", start=21, end=60),
+        ],
+    )
+
+    chunk_character = ChunkCharacter(
+        chunk_id=1,
+        run_id=run_id,
+        name="我",
+        surface_name="我",
+        reference_kind="pov_slot",
+        reference_slot="POV_SLOT_C1_我",
+        resolved_global_name=None,
+        global_skip_reason="unresolved pov reference",
+        role_function="主体",
+        action="说",
+        action_type="其他",
+        emotion_score="neutral",
+    )
+    chunk_dialogue = ChunkDialogue(
+        chunk_id=1,
+        run_id=run_id,
+        speaker=["我"],
+        speaker_references=[
+            {
+                "surface_name": "我",
+                "reference_kind": "pov_slot",
+                "reference_slot": "POV_SLOT_C1_我",
+                "resolved_global_name": None,
+                "can_enter_global_character": False,
+                "global_skip_reason": "unresolved pov reference",
+            }
+        ],
+        content="“我来了。”",
+    )
+    chunk_relation = ChunkRelation(
+        chunk_id=2,
+        run_id=run_id,
+        from_char="POV_SLOT_C2_我",
+        to_char="白芷",
+        from_reference_kind="pov_slot",
+        to_reference_kind="global_character",
+        resolved_from_global_name=None,
+        resolved_to_global_name="白芷",
+        reference_skip_reason="POV_SLOT_C2_我: unresolved pov reference",
+        type="盟友",
+        change="新建",
+        evidence="我看向白芷。",
+        confidence=0.8,
+        projection_status="pending",
+    )
+    db_session.add_all([chunk_character, chunk_dialogue, chunk_relation])
+    db_session.commit()
+
+    report = apply_reference_resolutions_to_history(
+        db_session,
+        run_id,
+        {"我": "汪淼"},
+        apply=True,
+        from_chunk=2,
+        to_chunk=2,
+        table_scopes=("chunk_relations",),
+    )
+    db_session.commit()
+    db_session.refresh(chunk_character)
+    db_session.refresh(chunk_dialogue)
+    db_session.refresh(chunk_relation)
+
+    assert report == {
+        "chunk_characters": 0,
+        "chunk_dialogues": 0,
+        "chunk_relations": 1,
+    }
+    assert chunk_character.resolved_global_name is None
+    assert chunk_dialogue.speaker_references[0]["resolved_global_name"] is None
+    assert chunk_relation.resolved_from_global_name == "汪淼"
+    assert chunk_relation.reference_skip_reason is None

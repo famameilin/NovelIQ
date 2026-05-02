@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy import delete, func, select
@@ -17,6 +17,7 @@ from src.models.local.character_reference_policy import (
     CharacterReferenceDecision,
     build_reference_resolution_lookup_keys,
     decide_character_reference,
+    extract_surface_name_from_reference_slot,
     filter_global_character_names,
     is_global_character_surface_name,
     is_reference_surface_name,
@@ -24,6 +25,7 @@ from src.models.local.character_reference_policy import (
     resolve_global_character_name,
 )
 from src.storage.models import (
+    Chunk,
     ChunkCharacter,
     ChunkDialogue,
     ChunkRelation,
@@ -33,6 +35,8 @@ from src.storage.models import (
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+HISTORY_TABLE_SCOPES: frozenset[str] = frozenset({"chunk_characters", "chunk_dialogues", "chunk_relations"})
 
 
 def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
@@ -142,6 +146,190 @@ def fetch_reference_aware_character_names(
     return [{"name": name, "count": count} for name, count in sorted(name_counts.items(), key=lambda x: -x[1])]
 
 
+def _resolve_relation_reference_candidate_name(
+    endpoint_name: str | None,
+    *,
+    chunk_id: int | None,
+    resolved_global_name: str | None,
+) -> str | None:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: relation-only endpoint 需要以 slot 级 key 进入消歧候选，
+              不能继续把不同 chunk 的“我/他们/它”混成同一个 surface。
+    """
+    decision = decide_character_reference(
+        endpoint_name,
+        resolved_global_name=resolved_global_name,
+        chunk_id=chunk_id,
+    )
+    if decision.can_enter_global_character or decision.reference_kind == "global_character":
+        return None
+    return decision.reference_slot or decision.surface_name or None
+
+
+def _fetch_character_reference_slots(
+    session: Session,
+    run_id: str,
+    *,
+    max_chunk_id: int | None = None,
+) -> set[str]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: relation-only endpoint 只应补那些没有经过 chunk_characters 候选入口的 slot；
+              这里集中收集已有角色槽位，避免重复把同一引用同时以 surface 和 slot 两种形态送进消歧。
+    """
+    stmt = select(ChunkCharacter.reference_slot).where(
+        ChunkCharacter.run_id == run_id,
+        ChunkCharacter.reference_slot.is_not(None),
+    )
+    if max_chunk_id is not None:
+        stmt = stmt.where(ChunkCharacter.chunk_id <= max_chunk_id)
+    return {
+        normalized_slot
+        for normalized_slot in (
+            normalize_reference_name(reference_slot)
+            for reference_slot in session.execute(stmt).scalars().all()
+        )
+        if normalized_slot
+    }
+
+
+def fetch_relation_reference_candidates(
+    session: Session,
+    run_id: str,
+    max_chunk_id: int | None = None,
+) -> list[dict[str, str | int]]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: 关系端点里的局部引用不会进入 chunk_characters，必须从 chunk_relations
+              单独补一条候选入口，才能真正进入 reference 消歧链路。
+    """
+    existing_character_slots = _fetch_character_reference_slots(session, run_id, max_chunk_id=max_chunk_id)
+    stmt = select(
+        ChunkRelation.chunk_id,
+        ChunkRelation.from_char,
+        ChunkRelation.to_char,
+        ChunkRelation.resolved_from_global_name,
+        ChunkRelation.resolved_to_global_name,
+    ).where(ChunkRelation.run_id == run_id)
+    if max_chunk_id is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id <= max_chunk_id)
+
+    result = session.execute(stmt).fetchall()
+    name_counts: dict[str, int] = {}
+    for row in result:
+        for candidate_name in (
+            _resolve_relation_reference_candidate_name(
+                row.from_char,
+                chunk_id=row.chunk_id,
+                resolved_global_name=row.resolved_from_global_name,
+            ),
+            _resolve_relation_reference_candidate_name(
+                row.to_char,
+                chunk_id=row.chunk_id,
+                resolved_global_name=row.resolved_to_global_name,
+            ),
+        ):
+            if not candidate_name:
+                continue
+            if candidate_name in existing_character_slots:
+                continue
+            name_counts[candidate_name] = name_counts.get(candidate_name, 0) + 1
+    return [{"name": name, "count": count} for name, count in sorted(name_counts.items(), key=lambda x: -x[1])]
+
+
+def fetch_relation_reference_contexts(
+    session: Session,
+    run_id: str,
+    candidate_names: list[str],
+    *,
+    max_chunk_id: int | None = None,
+    chunk_start_id: int | None = None,
+    chunk_end_id: int | None = None,
+    max_rows_per_candidate: int = 3,
+) -> dict[str, str]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: slot 候选不会直接命中文本检索，必须补一层“surface + chunk + 关系证据 + 原文”
+              的可读上下文，模型才能在保留 slot key 的同时判断引用去向。
+    """
+    candidate_set = {normalize_reference_name(name) for name in candidate_names if normalize_reference_name(name)}
+    if not candidate_set:
+        return {}
+
+    stmt = (
+        select(ChunkRelation, Chunk.text)
+        .join(Chunk, (Chunk.chunk_id == ChunkRelation.chunk_id) & (Chunk.run_id == ChunkRelation.run_id))
+        .where(ChunkRelation.run_id == run_id)
+        .order_by(ChunkRelation.chunk_id, ChunkRelation.id)
+    )
+    if max_chunk_id is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id <= max_chunk_id)
+    if chunk_start_id is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id >= chunk_start_id)
+    if chunk_end_id is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id <= chunk_end_id)
+
+    result = session.execute(stmt).all()
+    contexts: dict[str, list[str]] = {name: [] for name in candidate_set}
+    for relation_row, chunk_text in result:
+        endpoints = (
+            (
+                _resolve_relation_reference_candidate_name(
+                    relation_row.from_char,
+                    chunk_id=relation_row.chunk_id,
+                    resolved_global_name=relation_row.resolved_from_global_name,
+                ),
+                relation_row.from_char,
+                relation_row.to_char,
+                "from",
+            ),
+            (
+                _resolve_relation_reference_candidate_name(
+                    relation_row.to_char,
+                    chunk_id=relation_row.chunk_id,
+                    resolved_global_name=relation_row.resolved_to_global_name,
+                ),
+                relation_row.to_char,
+                relation_row.from_char,
+                "to",
+            ),
+        )
+        for candidate_name, endpoint_name, counterpart_name, direction in endpoints:
+            if candidate_name not in candidate_set:
+                continue
+            rows = contexts[candidate_name]
+            if len(rows) >= max_rows_per_candidate:
+                continue
+            surface_name = extract_surface_name_from_reference_slot(candidate_name) or normalize_reference_name(
+                endpoint_name
+            )
+            chunk_excerpt = normalize_reference_name(chunk_text)
+            if len(chunk_excerpt) > 120:
+                chunk_excerpt = f"{chunk_excerpt[:117]}..."
+            relation_evidence = normalize_reference_name(relation_row.evidence)
+            relation_type = normalize_reference_name(relation_row.type)
+            parts = [
+                f"chunk {relation_row.chunk_id}",
+                f"原文称呼：{surface_name}",
+                f"关系端点：{normalize_reference_name(endpoint_name)} ({direction})",
+                f"对端：{normalize_reference_name(counterpart_name)}",
+            ]
+            if relation_type:
+                parts.append(f"关系类型：{relation_type}")
+            if relation_evidence:
+                parts.append(f"关系证据：{relation_evidence}")
+            if chunk_excerpt:
+                parts.append(f"分块原文：{chunk_excerpt}")
+            rows.append("；".join(parts))
+
+    return {name: " | ".join(rows) for name, rows in contexts.items() if rows}
+
+
 def _resolve_history_reference_decision(
     surface_name: str | None,
     *,
@@ -174,109 +362,186 @@ def _resolve_history_reference_decision(
     )
 
 
+def _build_history_window_stmt(
+    model: type[Any],
+    *,
+    run_id: str,
+    from_chunk: int | None,
+    to_chunk: int | None,
+):
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: 关系历史回刷现在既要支持全量三表同步，也要支持 projection 前的窗口级
+              relation-only 回刷，这里统一收口 run/chunk 窗口过滤，避免三处重复拼接条件。
+    """
+    stmt = select(model).where(model.run_id == run_id)
+    if from_chunk is not None:
+        stmt = stmt.where(model.chunk_id >= from_chunk)
+    if to_chunk is not None:
+        stmt = stmt.where(model.chunk_id <= to_chunk)
+    return stmt
+
+
+def _normalize_history_table_scopes(table_scopes: tuple[str, ...] | list[str] | set[str] | None) -> tuple[str, ...]:
+    """
+    创建时间: 2026-05-02
+    任务: fix-graph-projection-relations
+    新建原因: 历史回刷需要允许调用方只处理 relations，必须先统一校验 table_scopes，
+              避免拼错 scope 名时静默降级成“什么都没刷”。
+    """
+    if table_scopes is None:
+        return tuple(sorted(HISTORY_TABLE_SCOPES))
+    normalized_scopes = tuple(dict.fromkeys(str(scope).strip() for scope in table_scopes if str(scope).strip()))
+    invalid_scopes = sorted(set(normalized_scopes) - HISTORY_TABLE_SCOPES)
+    if invalid_scopes:
+        raise ValueError(f"invalid history table scopes: {', '.join(invalid_scopes)}")
+    return normalized_scopes
+
+
 def apply_reference_resolutions_to_history(
     session: Session,
     run_id: str,
     reference_resolutions: dict[str, str],
     *,
     apply: bool = True,
+    from_chunk: int | None = None,
+    to_chunk: int | None = None,
+    table_scopes: tuple[str, ...] | list[str] | set[str] | None = None,
 ) -> dict[str, int]:
     """
     创建时间: 2026-04-29
     任务: 角色引用分层重构
     新建原因: reference_resolutions 不能只停留在 checkpoint；需要同步驱动 chunk_* 历史行的 resolved 字段消费。
-    修改时间: 2026-04-30
-    修改原因: 显式区分 character/dialogue/relation 三类历史行变量，避免静态检查把不同 ORM 模型误判成同一类型。
+    修改时间: 2026-05-02
+    修改原因: 支持 projection 前只回刷当前窗口的 chunk_relations，解决 checkpoint
+              已有 resolution 但关系历史行晚写入后长期 stale 的问题。
 
     Returns:
         受处理的历史行统计，key 为表类型。
     """
-    chunk_characters: list[ChunkCharacter] = list(
-        session.execute(select(ChunkCharacter).where(ChunkCharacter.run_id == run_id)).scalars().all()
-    )
-    for character_row in chunk_characters:
-        decision = _resolve_history_reference_decision(
-            character_row.surface_name or character_row.name,
-            chunk_id=character_row.chunk_id,
-            reference_resolutions=reference_resolutions,
-            existing_resolved_global_name=character_row.resolved_global_name,
-        )
-        if apply:
-            character_row.surface_name = decision.surface_name
-            character_row.reference_kind = decision.reference_kind
-            character_row.reference_slot = decision.reference_slot
-            character_row.resolved_global_name = decision.resolved_global_name
-            character_row.global_skip_reason = decision.global_skip_reason
-
-    chunk_dialogues: list[ChunkDialogue] = list(
-        session.execute(select(ChunkDialogue).where(ChunkDialogue.run_id == run_id)).scalars().all()
-    )
-    for dialogue_row in chunk_dialogues:
-        existing_by_surface: dict[str, dict[str, object]] = {}
-        for item in dialogue_row.speaker_references or []:
-            if isinstance(item, dict) and isinstance(item.get("surface_name"), str):
-                existing_by_surface[str(item["surface_name"])] = item
-
-        rebuilt_references: list[dict[str, object]] = []
-        for speaker_name in dialogue_row.speaker or []:
-            if not speaker_name:
-                continue
-            existing_reference = existing_by_surface.get(str(speaker_name))
-            existing_resolved_global_name = None
-            if existing_reference is not None and isinstance(existing_reference.get("resolved_global_name"), str):
-                existing_resolved_global_name = str(existing_reference["resolved_global_name"])
-            decision = _resolve_history_reference_decision(
-                speaker_name,
-                chunk_id=dialogue_row.chunk_id,
-                reference_resolutions=reference_resolutions,
-                existing_resolved_global_name=existing_resolved_global_name,
-            )
-            rebuilt_references.append(
-                {
-                    "surface_name": decision.surface_name,
-                    "reference_kind": decision.reference_kind,
-                    "reference_slot": decision.reference_slot,
-                    "resolved_global_name": decision.resolved_global_name,
-                    "can_enter_global_character": decision.can_enter_global_character,
-                    "global_skip_reason": decision.global_skip_reason,
-                }
-            )
-        if apply:
-            dialogue_row.speaker_references = rebuilt_references or None
-
-    chunk_relations: list[ChunkRelation] = list(
-        session.execute(select(ChunkRelation).where(ChunkRelation.run_id == run_id)).scalars().all()
-    )
-    for relation_row in chunk_relations:
-        from_decision = _resolve_history_reference_decision(
-            relation_row.from_char,
-            chunk_id=relation_row.chunk_id,
-            reference_resolutions=reference_resolutions,
-            existing_resolved_global_name=relation_row.resolved_from_global_name,
-        )
-        to_decision = _resolve_history_reference_decision(
-            relation_row.to_char,
-            chunk_id=relation_row.chunk_id,
-            reference_resolutions=reference_resolutions,
-            existing_resolved_global_name=relation_row.resolved_to_global_name,
-        )
-        reasons = [
-            f"{decision.surface_name}: {decision.global_skip_reason}"
-            for decision in (from_decision, to_decision)
-            if not decision.can_enter_global_character and decision.global_skip_reason
-        ]
-        if apply:
-            relation_row.from_reference_kind = from_decision.reference_kind
-            relation_row.to_reference_kind = to_decision.reference_kind
-            relation_row.resolved_from_global_name = from_decision.resolved_global_name
-            relation_row.resolved_to_global_name = to_decision.resolved_global_name
-            relation_row.reference_skip_reason = "; ".join(reasons) if reasons else None
-
-    return {
-        "chunk_characters": len(chunk_characters),
-        "chunk_dialogues": len(chunk_dialogues),
-        "chunk_relations": len(chunk_relations),
+    scopes = set(_normalize_history_table_scopes(table_scopes))
+    counts = {
+        "chunk_characters": 0,
+        "chunk_dialogues": 0,
+        "chunk_relations": 0,
     }
+
+    if "chunk_characters" in scopes:
+        chunk_characters: list[ChunkCharacter] = list(
+            session.execute(
+                _build_history_window_stmt(
+                    ChunkCharacter,
+                    run_id=run_id,
+                    from_chunk=from_chunk,
+                    to_chunk=to_chunk,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        counts["chunk_characters"] = len(chunk_characters)
+        for character_row in chunk_characters:
+            decision = _resolve_history_reference_decision(
+                character_row.surface_name or character_row.name,
+                chunk_id=character_row.chunk_id,
+                reference_resolutions=reference_resolutions,
+                existing_resolved_global_name=character_row.resolved_global_name,
+            )
+            if apply:
+                character_row.surface_name = decision.surface_name
+                character_row.reference_kind = decision.reference_kind
+                character_row.reference_slot = decision.reference_slot
+                character_row.resolved_global_name = decision.resolved_global_name
+                character_row.global_skip_reason = decision.global_skip_reason
+
+    if "chunk_dialogues" in scopes:
+        chunk_dialogues: list[ChunkDialogue] = list(
+            session.execute(
+                _build_history_window_stmt(
+                    ChunkDialogue,
+                    run_id=run_id,
+                    from_chunk=from_chunk,
+                    to_chunk=to_chunk,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        counts["chunk_dialogues"] = len(chunk_dialogues)
+        for dialogue_row in chunk_dialogues:
+            existing_by_surface: dict[str, dict[str, object]] = {}
+            for item in dialogue_row.speaker_references or []:
+                if isinstance(item, dict) and isinstance(item.get("surface_name"), str):
+                    existing_by_surface[str(item["surface_name"])] = item
+
+            rebuilt_references: list[dict[str, object]] = []
+            for speaker_name in dialogue_row.speaker or []:
+                if not speaker_name:
+                    continue
+                existing_reference = existing_by_surface.get(str(speaker_name))
+                existing_resolved_global_name = None
+                if existing_reference is not None and isinstance(existing_reference.get("resolved_global_name"), str):
+                    existing_resolved_global_name = str(existing_reference["resolved_global_name"])
+                decision = _resolve_history_reference_decision(
+                    speaker_name,
+                    chunk_id=dialogue_row.chunk_id,
+                    reference_resolutions=reference_resolutions,
+                    existing_resolved_global_name=existing_resolved_global_name,
+                )
+                rebuilt_references.append(
+                    {
+                        "surface_name": decision.surface_name,
+                        "reference_kind": decision.reference_kind,
+                        "reference_slot": decision.reference_slot,
+                        "resolved_global_name": decision.resolved_global_name,
+                        "can_enter_global_character": decision.can_enter_global_character,
+                        "global_skip_reason": decision.global_skip_reason,
+                    }
+                )
+            if apply:
+                dialogue_row.speaker_references = rebuilt_references or None
+
+    if "chunk_relations" in scopes:
+        chunk_relations: list[ChunkRelation] = list(
+            session.execute(
+                _build_history_window_stmt(
+                    ChunkRelation,
+                    run_id=run_id,
+                    from_chunk=from_chunk,
+                    to_chunk=to_chunk,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        counts["chunk_relations"] = len(chunk_relations)
+        for relation_row in chunk_relations:
+            from_decision = _resolve_history_reference_decision(
+                relation_row.from_char,
+                chunk_id=relation_row.chunk_id,
+                reference_resolutions=reference_resolutions,
+                existing_resolved_global_name=relation_row.resolved_from_global_name,
+            )
+            to_decision = _resolve_history_reference_decision(
+                relation_row.to_char,
+                chunk_id=relation_row.chunk_id,
+                reference_resolutions=reference_resolutions,
+                existing_resolved_global_name=relation_row.resolved_to_global_name,
+            )
+            reasons = [
+                f"{decision.surface_name}: {decision.global_skip_reason}"
+                for decision in (from_decision, to_decision)
+                if not decision.can_enter_global_character and decision.global_skip_reason
+            ]
+            if apply:
+                relation_row.from_reference_kind = from_decision.reference_kind
+                relation_row.to_reference_kind = to_decision.reference_kind
+                relation_row.resolved_from_global_name = from_decision.resolved_global_name
+                relation_row.resolved_to_global_name = to_decision.resolved_global_name
+                relation_row.reference_skip_reason = "; ".join(reasons) if reasons else None
+
+    return counts
 
 
 def ensure_canonical_entities(
@@ -353,5 +618,6 @@ def cleanup_self_loop_relations(
         )
     )
 
+    # rowcount 仅在 CursorResult 上保证存在，类型系统需要防御访问
     deleted_count = result.rowcount if hasattr(result, "rowcount") else 0
     logger.info(f"Cleaned {deleted_count} self-loop relations for run {run_id}")

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
+from src.api.exceptions import GraphReadinessError
 from src.knowledge.authority import GraphAuthorityReport, GraphAuthorityView, GraphQualitySignals, GraphSharedSummary
 from src.models.cloud import build_diagnosis_payload
 from src.storage.models import Novel
@@ -149,6 +150,135 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
     assert payload["foreshadowing_threads"] == []
     assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 1}
+
+
+def test_build_diagnosis_payload_falls_back_when_graph_projection_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    新建原因: diagnosis 只消费 graph-owned aggregate signals；当 authority report 因 pending projection 不可读时，
+              payload 应降级为零值共享信号并继续构建，而不是让整条任务失败。
+    """
+
+    class FakeDiagnosisRepository:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def fetch_pivot_blocks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_pivot_moments(self, *_args, **_kwargs):
+            return []
+
+        def fetch_high_tension_chunks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_relation_changes(self, *_args, **_kwargs):
+            return []
+
+        def fetch_foreshadowing_threads(self, *_args, **_kwargs):
+            return []
+
+        def calculate_foreshadow_expectation(self, *_args, **_kwargs):
+            return 0.0
+
+        def fetch_stage_summaries(self, *_args, **_kwargs):
+            return []
+
+        def fetch_topic_words(self, *_args, **_kwargs):
+            return []
+
+        def fetch_character_disambig_data(self, *_args, **_kwargs):
+            return (["白芷"], {"蒙面人": "白芷"})
+
+    class FakeAuthorityService:
+        def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+            assert run_id == "run-graph-pending"
+            raise GraphReadinessError(
+                "graph projection is still pending; finish projection before reading graph-derived authority views."
+            )
+
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("diagnosis should not depend on full GraphAuthorityView")
+
+    monkeypatch.setattr("src.models.cloud.payload.DiagnosisRepository", FakeDiagnosisRepository)
+    monkeypatch.setattr("src.models.cloud.payload._get_total_topic_count", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        "src.models.cloud.payload.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    payload = build_diagnosis_payload(SimpleNamespace(), novel_id="novel-1", run_id="run-graph-pending")
+
+    assert payload["known_characters"] == ["白芷"]
+    assert payload["alias_merges"] == {"蒙面人": "白芷"}
+    assert payload["graph_summary"] == {"node_count": 0, "edge_count": 0, "density": 0.0}
+    assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 0}
+
+
+def test_build_diagnosis_payload_raises_when_graph_projection_has_blocking_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-05-02
+    任务: diagnosis-graph-readiness-fallback
+    新建原因: graph projection 的真实 failed rows 不能被降级为空图共享信号，
+              否则 diagnosis 会把硬失败误当成 0 节点图继续下发给云端模型。
+    """
+
+    class FakeDiagnosisRepository:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def fetch_pivot_blocks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_pivot_moments(self, *_args, **_kwargs):
+            return []
+
+        def fetch_high_tension_chunks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_relation_changes(self, *_args, **_kwargs):
+            return []
+
+        def fetch_foreshadowing_threads(self, *_args, **_kwargs):
+            return []
+
+        def calculate_foreshadow_expectation(self, *_args, **_kwargs):
+            return 0.0
+
+        def fetch_stage_summaries(self, *_args, **_kwargs):
+            return []
+
+        def fetch_topic_words(self, *_args, **_kwargs):
+            return []
+
+        def fetch_character_disambig_data(self, *_args, **_kwargs):
+            return (["白芷"], {"蒙面人": "白芷"})
+
+    class FakeAuthorityService:
+        def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+            assert run_id == "run-graph-failed"
+            raise GraphReadinessError(
+                "graph projection has failed rows; "
+                "resolve projection failures before reading graph-derived authority views."
+            )
+
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("diagnosis should not depend on full GraphAuthorityView")
+
+    monkeypatch.setattr("src.models.cloud.payload.DiagnosisRepository", FakeDiagnosisRepository)
+    monkeypatch.setattr("src.models.cloud.payload._get_total_topic_count", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        "src.models.cloud.payload.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    with pytest.raises(GraphReadinessError, match="graph projection has failed rows"):
+        build_diagnosis_payload(SimpleNamespace(), novel_id="novel-1", run_id="run-graph-failed")
 
 
 def test_build_diagnosis_payload_preserves_thread_confidence(monkeypatch: pytest.MonkeyPatch) -> None:

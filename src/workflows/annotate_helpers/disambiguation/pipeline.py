@@ -22,11 +22,9 @@ from src.models.local.disambiguation import (
     NameReviewState,
 )
 
-from ..sentence import build_context_sentences
 from . import pipeline_stages as pipeline_stages_mod
 from .candidates import (
     _build_candidate_payload_by_names,
-    _build_name_count_lookup,
 )
 from .model_adapter import (
     build_canonical_reselect_call_spec,
@@ -46,7 +44,6 @@ from .pipeline_stages import (
 from .state_logic import (
     _collect_alias_clusters,
     apply_model_reselected_canonicals,
-    reselect_cluster_canonicals,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +63,12 @@ class DisambiguationMaxRetriesExceededError(Exception):
 _build_prompt_context_with_shared_evidence = pipeline_stages_mod.build_prompt_context_with_shared_evidence
 _resolve_incremental_batch_window = pipeline_stages_mod.resolve_incremental_batch_window
 _generate_and_save_stage_summary = pipeline_stages_mod.generate_and_save_stage_summary
+
+# 修改时间: 2026-05-02
+# 任务: fix-final-canonical-reselect-mainline
+# 修改原因: final canonical reselect 改成纯模型主导后，需要限制单次请求携带的 cluster 数，
+#           避免大书场景把所有 alias clusters 一次性塞进一个 prompt。
+FINAL_CANONICAL_RESELECT_MAX_CLUSTERS_PER_BATCH = 20
 
 
 async def _retry_disambig(
@@ -143,47 +146,88 @@ async def _run_final_canonical_reselect(
     """
     在最终消歧后追加一次模型代表名重选
 
-    第一轮终消歧继续允许“高频常用名做 canonical”来简化配对；
-          但真正落库前，必须再让模型基于已确认 cluster 选择最终代表名，
-          避免本地 heuristic 代替模型做这一步
+    修改时间: 2026-05-02
+    任务: fix-final-canonical-reselect-mainline
+    修改原因: canonical 主链改成“增量不选、final 只让 LLM 选”，
+              因此这里需要按 cluster 分批调用模型，并在空返回/缺项时整体保留当前 state。
+
+    第一轮终消歧的 canonical_decisions 只用于“并组/合并方向”；
+          真正落库前，再让模型只在已确认 cluster 内选择最终代表名。
+          若模型不可用、返回空、或缺项，则整体保留当前 state，不允许本地 heuristic 代选。
 
     """
     alias_clusters = _collect_alias_clusters(state.get_alias_merges_dict())
     if not alias_clusters:
         return state
 
-    name_counts = _build_name_count_lookup(all_names)
     if not supports_canonical_reselect(full_disambig_client):
-        logger.warning("final canonical reselect skipped: client does not support model reselect, falling back")
-        return reselect_cluster_canonicals(state, name_counts=name_counts)
+        logger.warning(
+            "final canonical reselect skipped: client does not support model reselect, keeping current state"
+        )
+        return state
 
-    cluster_names = sorted({name for cluster in alias_clusters for name in cluster})
-    candidate_payload = _build_candidate_payload_by_names(all_names, cluster_names)
-    if not candidate_payload:
-        logger.warning("final canonical reselect skipped: no candidate payload for alias clusters, falling back")
-        return reselect_cluster_canonicals(state, name_counts=name_counts)
-
-    context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-    review_states = state.get_review_status_dict()
-    cluster_list = [sorted(cluster) for cluster in alias_clusters]
-    reselect_result = await _retry_canonical_reselect(
-        full_disambig_client,
-        candidate_payload,
-        cluster_list,
-        context_sentences,
-        review_states,
-        stage_name="final canonical reselect",
-        run_id=run_id,
+    sorted_clusters = sorted(
+        ([*sorted(cluster)] for cluster in alias_clusters),
+        key=lambda cluster: (cluster[0], len(cluster), tuple(cluster)),
     )
-    if not reselect_result.canonical_decisions:
-        logger.warning("final canonical reselect returned empty decisions, falling back to heuristic reselect")
-        return reselect_cluster_canonicals(state, name_counts=name_counts)
+    cluster_batches = [
+        sorted_clusters[index : index + FINAL_CANONICAL_RESELECT_MAX_CLUSTERS_PER_BATCH]
+        for index in range(0, len(sorted_clusters), FINAL_CANONICAL_RESELECT_MAX_CLUSTERS_PER_BATCH)
+    ]
+    review_states = state.get_review_status_dict()
+    aggregated_decisions: dict[str, str] = {}
+    for batch_index, cluster_batch in enumerate(cluster_batches, start=1):
+        cluster_names = sorted({name for cluster in cluster_batch for name in cluster})
+        candidate_payload = _build_candidate_payload_by_names(all_names, cluster_names)
+        if not candidate_payload:
+            logger.warning(
+                "final canonical reselect skipped batch {}/{}: no candidate payload, "
+                "discarding all accumulated batch decisions and keeping original state",
+                batch_index,
+                len(cluster_batches),
+            )
+            return state
 
-    # 这里显式要求模型输出覆盖 cluster 内的所有名字；
-    # 若缺项或跨组指向，直接抛错，避免静默退回 heuristic 后再次把最终图谱写偏
+        context_sentences = pipeline_stages_mod.build_context_sentences(
+            conn,
+            candidate_payload,
+            alias_keywords,
+            run_id=run_id,
+        )
+        batch_review_states = {name: review_states[name] for name in cluster_names if name in review_states}
+        reselect_result = await _retry_canonical_reselect(
+            full_disambig_client,
+            candidate_payload,
+            cluster_batch,
+            context_sentences,
+            batch_review_states,
+            stage_name="final canonical reselect",
+            run_id=run_id,
+        )
+        if not reselect_result.canonical_decisions:
+            logger.warning(
+                "final canonical reselect returned empty decisions for batch {}/{}, keeping current state",
+                batch_index,
+                len(cluster_batches),
+            )
+            return state
+
+        missing_names = sorted(set(cluster_names) - set(reselect_result.canonical_decisions))
+        if missing_names:
+            logger.warning(
+                "final canonical reselect returned incomplete decisions for batch {}/{}: missing={}",
+                batch_index,
+                len(cluster_batches),
+                missing_names,
+            )
+            return state
+
+        for name in cluster_names:
+            aggregated_decisions[name] = reselect_result.canonical_decisions[name]
+
     return apply_model_reselected_canonicals(
         state,
-        reselect_result.canonical_decisions,
+        aggregated_decisions,
         clusters=alias_clusters,
     )
 
@@ -203,13 +247,17 @@ async def _run_incremental_disambiguation_with_state(
     """
     执行增量消歧（使用新的三层状态）
 
+    修改时间: 2026-05-02
+    任务: fix-final-canonical-reselect-mainline
+    修改原因: 增量阶段不再调用本地 heuristic canonical 选举，只保留同人判断与状态持久化。
+
     流程：
     1. 从 DB 抓候选名
     2. 用 discovered_names 判断哪些是真新名字
     3. 调模型得到 canonical_decisions
     4. 走 evidence validation
     5. state = apply_disambiguation_decisions(state, result)
-    6. 按 alias cluster 重选 canonical，避免频次直接改写配对语义
+    6. 增量阶段不做 canonical 选举，最终代表名只留给 final canonical reselect
     7. 保存 checkpoint
     """
     if (current_idx + 1) % disambig_interval != 0:
@@ -271,6 +319,11 @@ async def _run_final_disambiguation_with_state(
     """
     执行最终消歧（使用新的三层状态）
 
+    修改时间: 2026-05-02
+    任务: fix-final-canonical-reselect-mainline
+    修改原因: final canonical 只由 LLM reselect 决定，即便本轮 final_disambiguation 没有
+              新的 canonical_decisions，只要 alias clusters 已存在，也要继续跑最终重选。
+
     使用 DisambiguationState 替代 alias_map
 
     流程：
@@ -300,43 +353,42 @@ async def _run_final_disambiguation_with_state(
             alias_confidence={},
         )
         working_state = plan.state_before_apply
+        final_plan = plan
     else:
-        plan = await assemble_final_prompt_context(plan, evidence_service)
+        enriched_plan = await assemble_final_prompt_context(plan, evidence_service)
         result = await _retry_disambig(
             full_disambig_client,
-            plan.candidate_payload,
-            plan.context_sentences,
-            plan.existing_names,
+            enriched_plan.candidate_payload,
+            enriched_plan.context_sentences,
+            enriched_plan.existing_names,
             stage_name="final disambiguation",
             run_id=run_id,
-            prompt_context=plan.prompt_context,
+            prompt_context=enriched_plan.prompt_context,
         )
-        working_state = plan.state_before_apply
+        working_state = enriched_plan.state_before_apply
+        final_plan = enriched_plan
 
     new_state = apply_final_disambiguation_result(
         working_state,
         result,
-        plan.final_global_freq,
-        plan.context_sentences,
+        final_plan.final_global_freq,
+        final_plan.context_sentences,
     )
     if new_state.alias_merges:
-        # 只有“本轮 final 确实拿到了新的模型 alias 决策”时，才追加一次模型代表名重选；
-        # 如果这轮没有新决策，就沿用既有 state + 全量频次做本地纠偏，避免无意义查库和额外模型调用
-        if result.canonical_decisions:
-            new_state = await _run_final_canonical_reselect(
-                conn,
-                new_state,
-                full_disambig_client,
-                plan.all_names,
-                alias_keywords,
-                run_id,
-            )
+        new_state = await _run_final_canonical_reselect(
+            conn,
+            new_state,
+            full_disambig_client,
+            final_plan.all_names,
+            alias_keywords,
+            run_id,
+        )
     return persist_final_disambiguation(
         conn,
         novel_id,
         run_id,
         working_state,
         new_state,
-        plan.pending_relations,
+        final_plan.pending_relations,
         result,
     )
