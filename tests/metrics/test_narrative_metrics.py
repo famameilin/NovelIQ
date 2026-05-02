@@ -5,12 +5,14 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.narrative_metrics import (
+    analyze_three_act_structure,
     compute_cliffhanger_rate,
     compute_climax_spacing,
     compute_event_density,
     compute_middle_collapse_index,
     compute_three_act_ratio,
     compute_three_act_ratio_by_tension,
+    compute_three_act_ratio_v2,
     find_dominant_climax_peak,
     find_global_peak,
     find_local_peaks,
@@ -105,6 +107,85 @@ class TestThreeActRatioByTension(unittest.TestCase):
         self.assertAlmostEqual(result["act1_ratio"], 0.4392, places=4)
         self.assertAlmostEqual(result["act2_ratio"], 0.2431, places=4)
         self.assertAlmostEqual(result["act3_ratio"], 0.3176, places=4)
+
+
+class TestThreeActRatioV2(unittest.TestCase):
+    def test_v2_uses_structural_boundary_instead_of_pre_peak_absolute_valley(self) -> None:
+        total = 100
+        event_types = ["铺垫"] * total
+        cliffhangers = [0] * total
+        pivot_moments = [0] * total
+        tension_scores = [0.12] * total
+
+        # 前段有偶发尖峰，但不应被误当成最终高潮。
+        tension_scores[8] = 0.88
+
+        # 中段进入持续上升，应该被识别为第二幕，而不是被后面的绝对低谷整体吞掉。
+        for idx in range(52, 76):
+            tension_scores[idx] = 0.18 + ((idx - 52) * 0.01)
+            event_types[idx] = "转折" if idx % 3 else "冲突"
+            pivot_moments[idx] = 1 if idx % 4 == 0 else 0
+            cliffhangers[idx] = 1 if idx % 5 == 0 else 0
+
+        # 峰前人为制造一个绝对低谷，旧算法容易把第一幕拖到这里。
+        tension_scores[74] = 0.01
+        event_types[74] = "铺垫"
+        cliffhangers[74] = 0
+        pivot_moments[74] = 0
+
+        # 后段主高潮区。
+        for idx in range(80, 96):
+            tension_scores[idx] = 0.72 + ((idx - 80) * 0.015)
+            event_types[idx] = "冲突"
+            cliffhangers[idx] = 1 if idx % 2 == 0 else 0
+            pivot_moments[idx] = 1 if idx % 3 == 0 else 0
+        tension_scores[90] = 0.99
+
+        diagnostics = analyze_three_act_structure(
+            event_types,
+            cliffhangers,
+            pivot_moments,
+            tension_scores,
+        )
+
+        self.assertFalse(diagnostics.boundary_fallback_used)
+        self.assertGreaterEqual(diagnostics.climax_region_start, 55)
+        self.assertGreaterEqual(diagnostics.representative_peak_idx, 80)
+        self.assertLessEqual(diagnostics.act1_boundary_idx, 60)
+        self.assertGreaterEqual(diagnostics.act1_boundary_idx, 50)
+
+        result = compute_three_act_ratio_v2(
+            event_types,
+            cliffhangers,
+            pivot_moments,
+            tension_scores,
+        )
+        self.assertLess(result["act1_ratio"], 0.6)
+        self.assertGreater(result["act2_ratio"], 0.15)
+        self.assertAlmostEqual(sum(result.values()), 1.0, places=3)
+
+    def test_v2_falls_back_when_no_legal_structural_boundary_exists(self) -> None:
+        event_types = ["铺垫"] * 40
+        cliffhangers = [0] * 40
+        pivot_moments = [0] * 40
+        tension_scores = [0.1 + (idx * 0.01) for idx in range(40)]
+
+        diagnostics = analyze_three_act_structure(
+            event_types,
+            cliffhangers,
+            pivot_moments,
+            tension_scores,
+        )
+
+        self.assertTrue(diagnostics.boundary_fallback_used)
+        self.assertGreaterEqual(diagnostics.act1_boundary_idx, 0)
+        self.assertLess(diagnostics.act1_boundary_idx, diagnostics.representative_peak_idx)
+
+    def test_v2_keeps_equal_ratio_for_tiny_input(self) -> None:
+        result = compute_three_act_ratio_v2(["铺垫", "冲突"], [0, 1], [0, 0], [0.1, 0.9])
+        self.assertAlmostEqual(result["act1_ratio"], 1 / 3, places=4)
+        self.assertAlmostEqual(result["act2_ratio"], 1 / 3, places=4)
+        self.assertAlmostEqual(result["act3_ratio"], 1 / 3, places=4)
 
 
 class TestFindGlobalPeak(unittest.TestCase):

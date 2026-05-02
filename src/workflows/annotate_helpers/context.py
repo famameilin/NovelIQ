@@ -323,10 +323,11 @@ def _collect_seed_entities(
 ) -> list[str]:
     """
     创建时间: 2026-04-25
-    修改时间: 2026-04-30
-    任务: level3-query-exampler-mainline
-    修改原因: identity Level3 的 retrieval seed 只能来自正文显式命中的 alias/canonical
-              或调用方显式补名；authority active entities 不得再整包注入当前 chunk 的 query plan。
+    修改时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    修改原因: 正式方案里，seed_entities 的强锚点只保留正文显式命中的 alias/canonical，
+              以及调用方显式确认要并入检索锚点的名字；authority active entities 的弱锚点
+              改由专门的受控策略统一补入，不能再在这里无条件回灌。
     """
     seed_entities: list[str] = []
     normalized_query_text = (query_text or "").strip()
@@ -347,16 +348,10 @@ def _collect_seed_entities(
         ):
             seed_entities.append(normalized_canonical)
 
-    for entity_name in active_entity_names:
-        normalized = str(entity_name).strip()
-        # active entity 只有在当前正文里真的出现，才能升级为本轮 identity retrieval 的 seed。
-        if (
-            normalized
-            and normalized_query_text
-            and normalized in normalized_query_text
-            and normalized not in seed_entities
-        ):
-            seed_entities.append(normalized)
+    # 中文注释：保留 active_entity_names 形参是为了兼容现有签名；
+    # 正式弱锚点策略已经迁到 `_build_annotation_identity_request_inputs()`，
+    # 这里不再因为拿到了活跃实体就直接把它们塞回 seed_entities。
+    _ = active_entity_names
 
     for name in extra_names or []:
         normalized = str(name).strip()
@@ -412,6 +407,95 @@ def _collect_requested_names(
     return requested_names
 
 
+def _collect_controlled_weak_seed_entities(
+    active_entity_contexts: list[ActiveEntityContext],
+    *,
+    consumer: EvidenceConsumer,
+    objective: EvidenceObjective,
+    requested_names: list[str],
+) -> list[str]:
+    """
+    创建时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    新建原因: Phase1/Phase3 的 identity request 需要在 requested_names 为空时补少量弱锚点，
+              既恢复中段 chunk 的 retrieval 支点，又避免把所有活跃实体重新抬成当前 consumer target。
+    """
+    if consumer not in {"annotation_phase1", "annotation_phase3"} or objective != "identity" or requested_names:
+        return []
+
+    weak_seed_entities: list[str] = []
+    sorted_contexts = sorted(
+        active_entity_contexts,
+        key=lambda item: item.last_seen_chunk if item.last_seen_chunk is not None else -1,
+        reverse=True,
+    )
+    for context_item in sorted_contexts:
+        if str(context_item.entity_type).strip() != "character":
+            continue
+        normalized_name = str(context_item.name).strip()
+        if not normalized_name or normalized_name in weak_seed_entities:
+            continue
+        weak_seed_entities.append(normalized_name)
+        if len(weak_seed_entities) >= 3:
+            break
+    return weak_seed_entities
+
+
+def _build_annotation_identity_request_inputs(
+    alias_map: dict[str, str],
+    active_entity_contexts: list[ActiveEntityContext],
+    *,
+    consumer: EvidenceConsumer,
+    chunk_id: int,
+    chunk_text: str,
+) -> tuple[list[str], list[str], dict[str, int]]:
+    """
+    创建时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    新建原因: 统一收口 annotation identity request 的 requested_names、强锚点、弱锚点与观测计数，
+              避免同步/异步两条上下文链各自复制一套边界判断。
+    """
+    active_entity_names = _extract_active_entity_names(active_entity_contexts)
+    requested_names = _collect_requested_names(
+        alias_map,
+        query_text=chunk_text,
+        extra_names=active_entity_names,
+    )
+    strong_seed_entities = _collect_seed_entities(
+        alias_map,
+        active_entity_names,
+        query_text=chunk_text,
+        extra_names=requested_names,
+    )
+    weak_seed_entities = _collect_controlled_weak_seed_entities(
+        active_entity_contexts,
+        consumer=consumer,
+        objective="identity",
+        requested_names=requested_names,
+    )
+
+    seed_entities = list(strong_seed_entities)
+    for entity_name in weak_seed_entities:
+        if entity_name not in seed_entities:
+            seed_entities.append(entity_name)
+
+    observation = {
+        "requested_names_count": len(requested_names),
+        "strong_seed_count": len(strong_seed_entities),
+        "weak_seed_count": len(weak_seed_entities),
+    }
+    logger.debug(
+        "annotation identity seed observation: consumer={} chunk_id={} requested_names_count={} "
+        "strong_seed_count={} weak_seed_count={}",
+        consumer,
+        chunk_id,
+        observation["requested_names_count"],
+        observation["strong_seed_count"],
+        observation["weak_seed_count"],
+    )
+    return requested_names, seed_entities, observation
+
+
 def _build_evidence_request(
     *,
     consumer: EvidenceConsumer,
@@ -424,6 +508,7 @@ def _build_evidence_request(
     chunk_id: int,
     max_chunk_id: int | None,
     allow_llm_query_expansion: bool,
+    request_observation: dict[str, int] | None = None,
     need_level1: bool = True,
     need_level2: bool = True,
     need_level3: bool = True,
@@ -442,6 +527,7 @@ def _build_evidence_request(
         seed_entities=seed_entities,
         reference_slots=list(reference_slots or []),
         background_entities=list(background_entities or []),
+        request_observation=dict(request_observation or {}),
         current_chunk=chunk_id,
         max_chunk_id=max_chunk_id,
         exclude_chunk_ids=[chunk_id],
@@ -496,7 +582,10 @@ def _prepare_chunk_context(
 ) -> ChunkContext:
     """准备chunk上下文（同步版本，不使用 Level 3）
 
-
+    修改时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    修改原因: Phase1 identity request 改为“强锚点 + 受控弱锚点”双层 seed；
+              requested_names 仍保持严格，不允许被活跃实体背景名污染。
 
     """
 
@@ -525,7 +614,17 @@ def _prepare_chunk_context(
 
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
-        phase1_seed_entities = _collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text)
+        (
+            phase1_requested_names,
+            phase1_seed_entities,
+            _phase1_seed_observation,
+        ) = _build_annotation_identity_request_inputs(
+            alias_map,
+            active_entity_contexts,
+            consumer="annotation_phase1",
+            chunk_id=chunk_id,
+            chunk_text=chunk_text,
+        )
         phase4_reference_slots = collect_reference_slots_from_text(chunk_text, chunk_id=chunk_id)
         include_phase2_evidence = settings.analysis.multi_phase_annotation.include_phase2_evidence
 
@@ -533,17 +632,14 @@ def _prepare_chunk_context(
             consumer="annotation_phase1",
             objective="identity",
             query_text=chunk_text,
-            requested_names=_collect_requested_names(
-                alias_map,
-                query_text=chunk_text,
-                extra_names=active_entity_names,
-            ),
+            requested_names=phase1_requested_names,
             seed_entities=phase1_seed_entities,
             reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=False,
+            request_observation=_phase1_seed_observation,
             need_level3=False,
         )
 
@@ -606,6 +702,11 @@ async def _prepare_chunk_context_with_level3(
 
     修改说明: mention extraction/query 构造收口到 provider，workflow 只透传当前 chunk 取证上下文
 
+    修改时间: 2026-05-02
+    任务: controlled-weak-identity-anchors
+    修改原因: Phase1/Phase3 identity request 改为共享同一套受控弱锚点策略，
+              requested_names 继续保持严格，避免实验版把全部活跃实体回灌进 seed。
+
 
     """
 
@@ -634,39 +735,55 @@ async def _prepare_chunk_context_with_level3(
 
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
+        (
+            phase1_requested_names,
+            phase1_seed_entities,
+            _phase1_seed_observation,
+        ) = _build_annotation_identity_request_inputs(
+            alias_map,
+            active_entity_contexts,
+            consumer="annotation_phase1",
+            chunk_id=chunk_id,
+            chunk_text=chunk_text,
+        )
+        (
+            phase3_requested_names,
+            phase3_seed_entities,
+            _phase3_seed_observation,
+        ) = _build_annotation_identity_request_inputs(
+            alias_map,
+            active_entity_contexts,
+            consumer="annotation_phase3",
+            chunk_id=chunk_id,
+            chunk_text=chunk_text,
+        )
         phase4_reference_slots = collect_reference_slots_from_text(chunk_text, chunk_id=chunk_id)
         include_phase2_evidence = settings.analysis.multi_phase_annotation.include_phase2_evidence
         phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="identity",
             query_text=chunk_text,
-            requested_names=_collect_requested_names(
-                alias_map,
-                query_text=chunk_text,
-                extra_names=active_entity_names,
-            ),
-            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            requested_names=phase1_requested_names,
+            seed_entities=phase1_seed_entities,
             reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
+            request_observation=_phase1_seed_observation,
         )
         phase3_request = _build_evidence_request(
             consumer="annotation_phase3",
             objective="identity",
             query_text=chunk_text,
-            requested_names=_collect_requested_names(
-                alias_map,
-                query_text=chunk_text,
-                extra_names=active_entity_names,
-            ),
-            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            requested_names=phase3_requested_names,
+            seed_entities=phase3_seed_entities,
             reference_slots=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
+            request_observation=_phase3_seed_observation,
         )
         context.phase1_bundle = await evidence_service.collect(phase1_request)
         # 异步 Level3 路径与同步路径保持同一语义边界；
