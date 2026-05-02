@@ -181,7 +181,8 @@ async def _run_final_canonical_reselect(
         candidate_payload = _build_candidate_payload_by_names(all_names, cluster_names)
         if not candidate_payload:
             logger.warning(
-                "final canonical reselect skipped batch {}/{}: no candidate payload, keeping current state",
+                "final canonical reselect skipped batch {}/{}: no candidate payload, "
+                "discarding all accumulated batch decisions and keeping original state",
                 batch_index,
                 len(cluster_batches),
             )
@@ -352,31 +353,33 @@ async def _run_final_disambiguation_with_state(
             alias_confidence={},
         )
         working_state = plan.state_before_apply
+        final_plan = plan
     else:
-        plan = await assemble_final_prompt_context(plan, evidence_service)
+        enriched_plan = await assemble_final_prompt_context(plan, evidence_service)
         result = await _retry_disambig(
             full_disambig_client,
-            plan.candidate_payload,
-            plan.context_sentences,
-            plan.existing_names,
+            enriched_plan.candidate_payload,
+            enriched_plan.context_sentences,
+            enriched_plan.existing_names,
             stage_name="final disambiguation",
             run_id=run_id,
-            prompt_context=plan.prompt_context,
+            prompt_context=enriched_plan.prompt_context,
         )
-        working_state = plan.state_before_apply
+        working_state = enriched_plan.state_before_apply
+        final_plan = enriched_plan
 
     new_state = apply_final_disambiguation_result(
         working_state,
         result,
-        plan.final_global_freq,
-        plan.context_sentences,
+        final_plan.final_global_freq,
+        final_plan.context_sentences,
     )
     if new_state.alias_merges:
         new_state = await _run_final_canonical_reselect(
             conn,
             new_state,
             full_disambig_client,
-            plan.all_names,
+            final_plan.all_names,
             alias_keywords,
             run_id,
         )
@@ -386,6 +389,6 @@ async def _run_final_disambiguation_with_state(
         run_id,
         working_state,
         new_state,
-        plan.pending_relations,
+        final_plan.pending_relations,
         result,
     )

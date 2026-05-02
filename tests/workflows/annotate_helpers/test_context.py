@@ -262,7 +262,6 @@ def test_collect_seed_entities_only_keeps_aliases_explicitly_mentioned_in_curren
     """
     seed_entities = _collect_seed_entities(
         {"小七": "程霜", "老刀": "韩山"},
-        ["白芷"],
         query_text="小七跟着白芷翻阅旧案卷。",
     )
 
@@ -278,7 +277,6 @@ def test_collect_seed_entities_keeps_canonical_when_chunk_mentions_canonical_dir
     """
     seed_entities = _collect_seed_entities(
         {"小七": "程霜", "老刀": "韩山"},
-        [],
         query_text="程霜翻阅旧案卷，神色不动。",
     )
 
@@ -294,7 +292,6 @@ def test_collect_seed_entities_only_accepts_explicit_extra_names_for_non_alias_a
     """
     seed_entities = _collect_seed_entities(
         {},
-        ["陆明"],
         query_text="黑衣人现身，屋内骤然安静。",
         extra_names=["陆明"],
     )
