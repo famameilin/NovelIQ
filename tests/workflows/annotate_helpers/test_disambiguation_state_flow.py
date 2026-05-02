@@ -212,6 +212,41 @@ def test_apply_disambiguation_decisions_records_pronoun_to_global_resolution() -
     assert review.proposed_canonical == "白芷"
 
 
+def test_apply_incremental_disambiguation_result_does_not_call_local_canonical_reselect() -> None:
+    """
+    创建时间: 2026-05-02
+    任务: final-canonical-reselect-final-only
+    新建原因: 增量阶段的 canonical_decisions 只承载“同组/引用解析”语义，
+              不能在状态应用后再偷偷启动本地 canonical 选举。
+    """
+    base_state = DisambiguationState(
+        discovered_names=frozenset({"白芷"}),
+        known_canonical_names=frozenset({"白芷"}),
+    )
+    result = ExtendedDisambigResult(
+        canonical_decisions={"灰衣人": "白芷"},
+        entity_types={},
+        entity_relations=[],
+        alias_confidence={"灰衣人": "medium"},
+    )
+
+    with patch.object(
+        pipeline_stages_mod,
+        "reselect_cluster_canonicals",
+        return_value=base_state,
+    ) as reselect_mock:
+        new_state = pipeline_stages_mod.apply_incremental_disambiguation_result(
+            base_state,
+            result,
+            new_names=[{"name": "灰衣人", "count": 3}, {"name": "白芷", "count": 7}],
+            context_sentences={"灰衣人": "【身份线索】她自称白芷"},
+        )
+
+    assert new_state.known_canonical_names == frozenset({"白芷"})
+    assert new_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
+    reselect_mock.assert_not_called()
+
+
 def test_apply_final_disambiguation_result_does_not_promote_unresolved_reference() -> None:
     """
     创建时间: 2026-04-29

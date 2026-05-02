@@ -63,15 +63,21 @@ from .state_logic import (
     DISAMBIG_STATE_RESOLVED,
     DISAMBIG_STATE_UNRESOLVED,
     apply_disambiguation_decisions,
-    reselect_cluster_canonicals,
     validate_confidence_with_evidence,
 )
+from .state_logic import reselect_cluster_canonicals as _legacy_reselect_cluster_canonicals
 
 # 修改时间: 2026-05-02
 # 任务: fix-graph-projection-relations
 # 修改原因: pipeline_stages 原先直接暴露 build_context_sentences 给测试替身和调用方，
 #           这里保留同名别名，但实际实现切到会补关系端点上下文的新入口。
 build_context_sentences = build_candidate_context_sentences
+
+# 修改时间: 2026-05-02
+# 任务: final-only-canonical-reselect
+# 修改原因: 增量主路径已不再调用本地 heuristic 重选，但保留旧名字是为了兼容现有测试替身，
+#           避免 patch 目标直接失效造成假回归。
+reselect_cluster_canonicals = _legacy_reselect_cluster_canonicals
 
 # 修改时间: 2026-05-02
 # 任务: fix-graph-projection-relations
@@ -501,21 +507,16 @@ def apply_incremental_disambiguation_result(
     """
     应用增量消歧模型决策
 
+    修改时间: 2026-05-02
+    任务: fix-final-canonical-reselect-mainline
+    修改原因: 增量阶段只负责判同人和引用解析，不再在主路径里调用本地 heuristic
+              重选 canonical，避免局部上下文提前污染最终代表名。
+
     显式对应“模型决策后状态应用”阶段，隔离状态机细节
     """
     existing_names = list(state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-    incremental_global_freq = {str(item["name"]): int(item.get("count", 0)) for item in new_names}
     new_state = apply_disambiguation_decisions(state, validated_result)
-    if validated_result.canonical_decisions:
-        affected_cluster_names = set(validated_result.canonical_decisions) | set(
-            validated_result.canonical_decisions.values()
-        )
-        new_state = reselect_cluster_canonicals(
-            new_state,
-            name_counts=incremental_global_freq,
-            affected_names=affected_cluster_names,
-        )
 
     if validated_result.entity_types:
         valid_names = new_state.discovered_names | new_state.known_canonical_names
@@ -717,18 +718,16 @@ def apply_final_disambiguation_result(
 
     显式对应“canonical reselect 前的状态应用”阶段
 
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: final review promotion 不能把未解析代词/局部引用提升为 known_canonical_names。
+    修改时间: 2026-05-02
+    任务: fix-final-canonical-reselect-mainline
+    修改原因: final review promotion 不能把未解析代词/局部引用提升为 known_canonical_names，
+              且最终 canonical 选举应由 final LLM reselect 负责，这里不再做本地 heuristic 重选。
     """
     existing_names = list(base_state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
     new_state = base_state
     if validated_result.canonical_decisions:
         new_state = apply_disambiguation_decisions(base_state, validated_result)
-    if new_state.alias_merges and not validated_result.canonical_decisions:
-        new_state = reselect_cluster_canonicals(new_state, name_counts=final_global_freq)
-
     if validated_result.entity_types:
         valid_names = new_state.discovered_names | new_state.known_canonical_names
         filtered_types = {
@@ -831,7 +830,15 @@ def persist_final_disambiguation(
     if retryable_relations:
         logger.warning("Final disambig: {} relations left for retry, kept in checkpoint", len(retryable_relations))
 
-    persisted_state = new_state.with_updates(pending_relations=tuple(retryable_relations))
+    persisted_pending_relations = tuple(retryable_relations)
+    if persisted_pending_relations == new_state.pending_relations:
+        persisted_state = new_state
+    else:
+        # 修改时间: 2026-05-02
+        # 任务: fix-final-canonical-reselect-mainline
+        # 修改原因: final canonical 主链现在可能在“只重写代表名、不改 pending_relations”的情况下
+        #           直接返回；这里避免为同值 pending_relations 再做一次 with_updates，平白刷新 updated_at。
+        persisted_state = new_state.with_updates(pending_relations=persisted_pending_relations)
     _save_disambig_checkpoint(conn, run_id, persisted_state)
     return persisted_state
 
