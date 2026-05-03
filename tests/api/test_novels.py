@@ -2,12 +2,10 @@
 API 小说端点测试
 
 修改时间: 2026-04-05
-修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 
 修改时间: 2026-04-22
-修改者: Codex
 任务: fix-novel-task-delete-consistency
 修改内容: 补充小说级联删除与活动任务拦截回归测试
 """
@@ -29,7 +27,6 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
     为测试小说删除补一条已完成任务及其文件产物。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-novel-task-delete-consistency
     说明: 这里直接构造 chunks/global_context/graph/chunk_annotation 与日志导出文件，
           用于验证 novel 级删除会不会把 task 侧残留一起清掉。

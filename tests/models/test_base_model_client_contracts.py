@@ -6,7 +6,6 @@ BaseModelClient 契约测试。
 说明: 覆盖结构化解析、流式响应拼装、OpenAI SDK 异常映射，支撑后续拆分重构。
 
 修改时间: 2026-04-26
-修改者: Codex
 任务: phase3-proof-only-fastpath-batch10
 修改内容: 补充 Phase3 thinking 批处理配置解析与非法值校验测试。
 """

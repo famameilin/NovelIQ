@@ -2,12 +2,10 @@
 测试结果 API
 
 修改时间: 2026-03-16
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 更新测试以匹配当前API行为（返回空数据而非错误）
 
 修改时间: 2026-04-05
-修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """
@@ -251,7 +249,6 @@ class TestResults:
     def test_get_chunk_annotations_openapi_declares_typed_response(self):
         """
         创建时间: 2026-04-26
-        创建者: Codex
         任务: phase2-strong-foreshadowing
         说明: 新增结果接口不仅要能返回数据，也要在 OpenAPI 中发布正式响应合同，
         避免前端和自动化工具只能看到 `items: {}` 的匿名数组。
@@ -266,7 +263,6 @@ class TestResults:
     def test_get_diagnosis_openapi_declares_expectation_fallback_and_theme_color(self):
         """
         创建时间: 2026-04-26
-        修改者: Codex
         任务: fix-phase2-setup-pool-followup-findings
         说明: diagnosis 对外合同需要明确 expectation/fallback 语义，并保留 theme_color，
               避免手写文档和响应模型再次漂移。

@@ -1,19 +1,15 @@
 """
 创建时间: 2026-03-21
-创建者: TraeAI
 任务: refactor-phase3-to-annotation-layer
 说明: 测试 Phase3 对话归属判断功能
 修改时间: 2026-03-22
-修改者: TraeAI
 任务: code-quality-review
 修改内容: 更新测试用例，适配对话归属失败时抛出异常而非返回空字典
 修改时间: 2026-03-23
-修改者: TraeAI
 任务: refactor-dialogue-attribution-pipeline
 修改内容: 更新测试用例，适配新的返回格式（QuoteCandidate、DialogueRecord）
 
 修改时间: 2026-04-26
-修改者: Codex
 任务: phase3-proof-only-fastpath-batch10
 修改内容: 补充 proof-only fastpath、并行批次归并与 worker session 隔离的定向回归测试。
 """
@@ -139,15 +135,12 @@ class _Phase3ParallelTestClient:
 class TestExtractDialoguesFromText(unittest.TestCase):
     """
     创建时间: 2026-03-21
-    创建者: TraeAI
     任务: refactor-phase3-to-annotation-layer
     说明: 测试对话提取功能
     修改时间: 2026-03-23
-    修改者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
     修改内容: 更新测试用例，适配 QuoteCandidate 返回格式
     修改时间: 2026-03-23
-    修改者: TraeAI
     任务: fix-phase3-validation
     修改内容: 使用正确的 Unicode 引号字符 (U+201C/U+201D)
     """
@@ -196,16 +189,13 @@ class TestExtractDialoguesFromText(unittest.TestCase):
 class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
     """
     创建时间: 2026-03-21
-    创建者: TraeAI
     任务: refactor-phase3-to-annotation-layer
     说明: 测试 LLM 对话归属判断功能
     修改时间: 2026-03-23
-    修改者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
     修改内容: 更新测试用例，适配 DialogueRecord 返回格式
 
     修改时间: 2026-04-26
-    修改者: Codex
     任务: phase3-proof-only-fastpath-batch10
     修改内容: 增补 fastpath 命中/拒绝、混合索引与并行 worker session 隔离测试。
     """

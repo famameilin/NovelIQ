@@ -1,6 +1,5 @@
 """
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 本地模型提示词测试
 
 修改时间: 2026-04-24
@@ -8,12 +7,10 @@
 修改内容: 移除已废弃 Instructor mock 说明，客户端初始化测试只验证当前 OpenAI-compatible 入口。
 
 修改时间: 2026-03-16
-修改者: TraeAI
 任务: 修复 Mock 配置问题
 修改内容: 直接检查 _build_messages 的结果，而不是通过 mock 调用参数
 
 修改时间: 2026-03-18
-修改者: TraeAI
 任务: 移除已废弃的内部方法测试
 修改内容: _build_messages 和 _build_disambiguate_messages 方法已移除，简化测试
 """

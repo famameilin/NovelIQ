@@ -468,7 +468,7 @@ def test_graph_authority_views_ignore_benign_failed_unresolved_reference_endpoin
 
 
 def test_graph_authority_report_rejects_graph_page_contracts() -> None:
-    # 中文注释：report 是 diagnosis/export 的共享边界，必须拒绝 graph page
+    # report 是 diagnosis/export 的共享边界，必须拒绝 graph page
     # contract，避免页面字段被错误地重新序列化进共享 payload。
     with pytest.raises(TypeError, match="GraphAuthorityReport.summary must be GraphSharedSummary"):
         GraphAuthorityReport(
@@ -758,7 +758,7 @@ def test_build_graph_report_caps_low_confidence_count_to_legacy_summary_limit(db
 
     report = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_report(run_id)
 
-    # 中文注释：report 是 export/diagnosis 共用的聚合口径，仍需保持旧 summary
+    # report 是 export/diagnosis 共用的聚合口径，仍需保持旧 summary
     # 的上限行为；graph page 的全历史计数由独立 contract 负责覆盖。
     assert report.quality.low_confidence_count == 20
     assert report.quality.conflict_count == 0

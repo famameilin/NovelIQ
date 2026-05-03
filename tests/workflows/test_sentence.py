@@ -1,6 +1,5 @@
 """
 创建时间: 2026-03-16
-创建者: TraeAI
 任务: fix-disambiguation-three-phase
 说明: 测试变体反查表功能，验证变体生成逻辑和揭示句匹配功能
 """
@@ -18,7 +17,6 @@ from src.workflows.annotate_helpers.sentence import _build_sentence_pool, _get_n
 class TestGetNameVariants(unittest.TestCase):
     """
     创建时间: 2026-03-16
-    创建者: TraeAI
     任务: fix-disambiguation-three-phase
     说明: 测试 _get_name_variants 函数的变体生成逻辑
     """
@@ -79,7 +77,6 @@ class TestGetNameVariants(unittest.TestCase):
 class TestBuildSentencePoolWithVariants(unittest.TestCase):
     """
     创建时间: 2026-03-16
-    创建者: TraeAI
     任务: fix-disambiguation-three-phase
     说明: 测试 _build_sentence_pool 函数的变体匹配功能
     """
@@ -164,7 +161,6 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
 class TestBuildSentencePoolWithSpeakerArray(unittest.TestCase):
     """
     创建时间: 2026-04-08
-    创建者: TraeAI
     任务: fix-multi-speaker-support
     说明: 测试 speaker 字段为 list 类型时的稀有名字计数逻辑
     """

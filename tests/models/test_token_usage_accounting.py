@@ -14,7 +14,6 @@ class _DummyClient:
     轻量 stub，用于验证统一估算 token helper。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: 直接复用 BaseModelClient 的实例方法，不依赖真实网络客户端。
     """
@@ -54,7 +53,6 @@ class _DummyClient:
 def test_estimated_token_accounting_is_consistent_across_task_types() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: 同一组 prompt/response 在不同任务类型下，估算 token 数应一致，
           只允许 task_type / call_type 元数据不同。
@@ -96,7 +94,6 @@ def test_estimated_token_accounting_is_consistent_across_task_types() -> None:
 def test_estimated_token_accounting_handles_empty_response_text() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: 空 completion 也应正常落账，并且 completion_tokens 至少保持为 0。
     """
@@ -115,7 +112,6 @@ def test_estimated_token_accounting_handles_empty_response_text() -> None:
 def test_estimated_token_accounting_allows_business_task_override() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-token-coverage-fallback-bucket
     说明: fallback 执行客户端可以保留自己的内部 task_type，
           但 token_usage 应允许显式覆盖回 annotation 主业务桶。
@@ -141,7 +137,6 @@ def test_estimated_token_accounting_allows_business_task_override() -> None:
 def test_annotation_fallback_parse_failure_still_records_annotation_bucket() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-token-coverage-fallback-bucket
     说明: fallback annotation client 在结构化解析失败时，原始 token_usage
           也必须直接写回 annotation 主业务桶，不能留下 annotation_fallback 脏数据。

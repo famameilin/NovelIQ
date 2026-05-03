@@ -2,12 +2,10 @@
 标注配置单元测试
 
 创建时间: 2026-03-18
-创建者: TraeAI
 任务: entity-type-relation-extraction
 说明: 测试标注静态常量与 runtime 配置解析
 
 修改时间: 2026-04-20
-修改者: Codex
 任务: runtime-behavior-settings
 修改内容: 删除对 ANNOTATION_CONFIG 的依赖，改为验证 constants 与 runtime schema
 """
@@ -32,7 +30,6 @@ from src.config.schemas.analysis import _parse_analysis_settings
 class TestAnnotationConstants(unittest.TestCase):
     """
     创建时间: 2026-03-18
-    创建者: TraeAI
     任务: entity-type-relation-extraction
     说明: 测试 annotation 静态业务常量
     """

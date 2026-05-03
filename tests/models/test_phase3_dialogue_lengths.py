@@ -6,7 +6,6 @@ Phase3 对话长度与后处理验证测试
 说明: 从 test_phase3.py 拆出长度聚合、thinking 参数和 speaker 后处理场景。
 
 修改时间: 2026-04-26
-修改者: Codex
 任务: phase3-proof-only-fastpath-batch10
 修改内容: 补齐 Phase3 新批处理实现需要的 mock 配置，避免旧测试因 settings 桩不完整而失真。
 """
@@ -22,12 +21,10 @@ from src.models.local.schema import DialogueRecord, QuoteCandidate
 class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
     """
     创建时间: 2026-03-21
-    创建者: TraeAI
     任务: refactor-phase3-to-annotation-layer
     说明: 测试计算对话长度功能
 
     修改时间: 2026-03-23
-    修改者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
     修改内容: 更新测试用例，适配新的返回格式
     """

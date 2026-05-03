@@ -1,11 +1,9 @@
 """
 创建时间: 2026-04-12
-创建者: TraeAI
 任务: 用户请求创建 ChunkContext 测试
 说明: 测试 ChunkContext.evidence_bundle 字段和遗留兼容字段
 
 修改时间: 2026-04-17
-修改者: Codex
 任务: trim-legacy-string-evidence
 修改内容: 删除依赖遗留字符串字段的测试，改为仅测试主链路 prompt_* 入口和 annotation_prompt_blocks
 """
@@ -529,7 +527,6 @@ def test_prepare_chunk_context_can_collect_phase2_evidence_when_opted_in(monkeyp
     """
     创建时间: 2026-04-26
     修改时间: 2026-04-26
-    修改者: Codex
     任务: phase2-strong-foreshadowing
     修改内容: 补充 targeted ablation 回归，确认显式打开 include_phase2_evidence 后，
     同步上下文构建仍会恢复 Phase2 evidence 收集。
@@ -925,7 +922,6 @@ async def test_prepare_chunk_context_with_level3_promotes_direct_canonical_menti
     """
     创建时间: 2026-04-26
     修改时间: 2026-04-26
-    修改者: Codex
     任务: fix-direct-canonical-requested-names
     说明: 当正文直接出现 canonical 名且它来自可信 active-entity 上下文时，
           Phase1/Phase3 request 都应把它写入 requested_names，而不是只留在 seed_entities。

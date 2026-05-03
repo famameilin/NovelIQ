@@ -17,7 +17,6 @@ class TestRollingMemory(unittest.TestCase):
     滚动记忆测试
 
     修改时间: 2026-03-14
-    修改者: TraeAI
     任务: metrics-repository-refactor
     修改内容: 更新测试用例以使用 ChunkRepository 接口
     """
@@ -47,7 +46,6 @@ class TestRollingMemory(unittest.TestCase):
         测试长文本
 
         修改时间: 2026-03-13
-        修改者: TraeAI
         任务: refactor-core-data-layer-functions
         修改原因: get_prev_tail_text 已被修改为返回完整的上一个 chunk 文本，
                  而不是只返回末尾部分。此测试验证函数返回完整文本。
@@ -65,7 +63,6 @@ class TestRollingMemory(unittest.TestCase):
         测试自定义尾部字符数
 
         修改时间: 2026-03-13
-        修改者: TraeAI
         任务: refactor-core-data-layer-functions
         修改原因: get_prev_tail_text 已被修改为返回完整的上一个 chunk 文本，
                  而不是只返回末尾部分。tail_chars 参数已不再用于截断文本。

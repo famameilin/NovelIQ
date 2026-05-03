@@ -2,13 +2,11 @@
 测试用 Mock 客户端
 
 修改时间: 2026-03-12
-修改者: TraeAI
 任务: fix-annotation-disambiguation-issues
 修改内容:
 - 更新 FakeLocalModelClient.annotate_chunk 方法，返回包含新字段的 ChunkAnnotation
 
 修改时间: 2026-04-05
-修改者: TraeAI
 任务: phase4-code-review-fix
 修改内容: 移除已废弃的 relations 和 character_appearances 字段，使用 location_appearances
 """

@@ -17,7 +17,6 @@ from tests.support.disambiguation_fakes import FakeDisambigClient as _FakeDisamb
 def test_resolve_incremental_batch_window_aligns_with_disambig_interval() -> None:
     """
     创建时间: 2026-04-21
-    创建者: Codex
     任务: align-incremental-disambig-batch-window
     说明: 增量消歧上下文窗口应与批次区间对齐，而不是由 sentence 层隐式按 prev_chunks 裁剪。
     """
@@ -78,7 +77,6 @@ def test_apply_model_reselected_canonicals_rewrites_descriptor_cluster_to_model_
 def test_apply_model_reselected_canonicals_rewrites_cluster_to_model_selected_name() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: final-canonical-reselect
     说明: 最终额外调用给出新的代表名后，状态机应严格按 cluster 内模型结果重写
           alias_merges / known_canonical_names / proposed_canonical。
@@ -181,7 +179,6 @@ def test_apply_model_reselected_canonicals_keeps_global_name_when_reference_reso
 def test_apply_model_reselected_canonicals_rejects_cross_cluster_target() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: final-canonical-reselect
     说明: 额外重选调用只能在既有 cluster 内选代表名；跨 cluster 指向必须直接报错，
           不能静默回退到旧 heuristic。
@@ -209,7 +206,6 @@ def test_apply_model_reselected_canonicals_rejects_cross_cluster_target() -> Non
 async def test_incremental_pipeline_preserves_deferred_low_frequency_names() -> None:
     """
     创建时间: 2026-04-20
-    创建者: Codex
     任务: preserve-deferred-disambig-candidates
     说明: 低频且暂无上下文的正式候选不应在增量阶段蒸发，而应写入状态等待后续复审。
     """
@@ -258,7 +254,6 @@ async def test_incremental_pipeline_preserves_deferred_low_frequency_names() -> 
 async def test_final_pipeline_preserves_deferred_names_without_model_call() -> None:
     """
     创建时间: 2026-04-20
-    创建者: Codex
     任务: preserve-deferred-disambig-candidates
     说明: 终消歧阶段即便某个低频正式名仍然暂无上下文，也必须保留在状态里，不能在最终入口蒸发。
 

@@ -2,21 +2,17 @@
 测试配置文件
 
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 测试配置
 
 修改时间: 2026-03-29
-修改者: TraeAI
 任务: fix-duplicate-location-appearance
 修改内容: 添加 chunk_locations 表到清理列表
 
 修改时间: 2026-04-05
-修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 添加 api_client fixture，确保 API 测试使用测试数据库
 
 修改时间: 2026-04-20
-修改者: Codex (GPT-5)
 任务: fix-test-db-isolation
 修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE_URL，
     并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
@@ -48,7 +44,6 @@ def _build_test_schema_name() -> str:
     构造当前 pytest 进程专用的测试 schema 名称。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-test-db-concurrency
     说明: 不能再让多个 pytest 进程共享 public schema；
           这里按 worker + pid + 随机后缀生成独立 schema，避免并发 create_all 冲突。
@@ -63,7 +58,6 @@ def _validate_schema_name(schema_name: str) -> str:
     校验 schema 名称是否可安全用于 SQL 标识符。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-test-db-concurrency
     说明: 测试会把 schema 名称插入 DDL，必须先限制成 PostgreSQL 安全标识符。
     """
@@ -77,7 +71,6 @@ def _build_test_engine(database_url: str, schema_name: str):
     创建绑定到指定测试 schema 的 SQLAlchemy Engine。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-test-db-concurrency
     说明: 所有测试连接都应带固定 search_path，确保 ORM 与原生 SQL 落在同一隔离 schema。
     """
@@ -92,7 +85,7 @@ def _build_test_engine(database_url: str, schema_name: str):
 
     @event.listens_for(engine, "connect")
     def _set_test_search_path(dbapi_connection, connection_record) -> None:
-        # 中文注释：仅靠 connect_args 在某些建表/复用连接路径上不够稳定，
+        # 仅靠 connect_args 在某些建表/复用连接路径上不够稳定，
         # 这里对每条测试连接再次显式固定 search_path，避免表意外落回 public 导致用例互相串数据。
         cursor = dbapi_connection.cursor()
         cursor.execute(f"SET search_path TO {safe_schema}, public")
@@ -114,7 +107,6 @@ def _reset_backend_db_singletons() -> None:
     重置后端数据库模块中的 Engine / Session 工厂单例。
 
     创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
     任务: fix-test-db-isolation
     说明: 测试中存在直接调用 get_session_factory()() 的路径。
     若不在切换 DATABASE_URL 后立即重置单例，这些调用会继续复用旧连接，导致写入开发库。
@@ -138,7 +130,6 @@ def test_database_schema() -> str:
     当前 pytest 会话使用的独立 schema。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-test-db-concurrency
     说明: schema 隔离要在整个测试会话内保持稳定，避免不同 fixture 指到不同空间。
     """
@@ -169,7 +160,7 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
         conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
 
-    # 中文注释：当前 ORM 元数据仍未声明显式 schema，PostgreSQL dialect 的默认建表目标仍是 public。
+    # 当前 ORM 元数据仍未声明显式 schema，PostgreSQL dialect 的默认建表目标仍是 public。
     # 因此测试会话启动时需要把 public 里的 ORM 表整体重建一次，清掉上次运行残留的固定 run_id/task_id 数据，
     # 否则即便 search_path 指向隔离 schema，未限定表名仍会回落到 public 并撞上旧主键。
     Base.metadata.drop_all(bind=_test_engine)
@@ -195,7 +186,6 @@ def force_test_database_url(
     为整个后端测试会话强制注入测试数据库 URL。
 
     创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
     任务: fix-test-db-isolation
     说明:
     - 把 DATABASE_URL 固定指向 TEST_DATABASE_URL
@@ -231,7 +221,6 @@ def reset_backend_db_singletons_per_test(force_test_database_url: None) -> Gener
     每个测试前后都重置后端数据库单例。
 
     创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
     任务: fix-test-db-isolation
     说明: 防止前一个测试缓存的 Engine 持有错误连接串，确保当前测试的数据库绑定始终可预测。
     """
@@ -300,12 +289,10 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
     API 测试客户端 fixture
 
     创建时间: 2026-04-05
-    创建者: AI Assistant
     任务: fix-test-data-pollution
     说明: 基于全局数据库隔离夹具启动 FastAPI TestClient。
 
     修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
     任务: fix-test-db-isolation
     修改内容: 删除局部 DATABASE_URL 覆盖逻辑，改为复用全局自动隔离，避免夹具之间出现连接串切换竞态
 

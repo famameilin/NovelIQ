@@ -2,36 +2,29 @@
 云端诊断路由测试
 
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 测试云端诊断
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration
 修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
 
 修改时间: 2026-03-27
-修改者: TraeAI
 任务: 简化 diagnosis payload
 修改内容: 移除 common_character_names 相关测试断言
 
 修改时间: 2026-03-29
-修改者: TraeAI
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 字段相关测试
 
 修改时间: 2026-04-08
-修改者: GLM-5
 任务: summary-full-chain-refactor
 修改内容: 移除 first_chapter_summary/last_chapter_summary 测试，新增 summaries 测试
 """
@@ -77,7 +70,6 @@ def _insert_test_novel(session, novel_id: str) -> None:
     为云端诊断测试补小说主表记录。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-analysis-related-foreign-keys
     说明: diagnosis 测试直接造 run 时，必须先满足 analysis_runs 的 novel 外键。
     """
@@ -115,7 +107,7 @@ class TestCloudDiagnose:
             Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。") for i in range(chunk_count)
         ]
         chunk_repo.insert_chunks(self.run_id, chunks)
-        # 中文注释：diagnosis 现在会校验 topic_labels 数量必须和本次真正发送给 LLM 的 topic_words 数一致；
+        # diagnosis 现在会校验 topic_labels 数量必须和本次真正发送给 LLM 的 topic_words 数一致；
         # 测试基线需要显式造出至少一个主题，避免 payload.topic_words 为空时再用“单主题标签”样例误报。
         chunk_repo.insert_chunk_topics(self.run_id, [(i, 0, 1.0) for i in range(chunk_count)])
 
@@ -199,12 +191,10 @@ class TestCloudDiagnose:
     def test_build_diagnosis_payload(self) -> None:
         """
         修改时间: 2026-03-19
-        修改者: TraeAI
         任务: 修复run_id过滤BUG
         修改内容: 添加run_id参数
 
         修改时间: 2026-03-27
-        修改者: TraeAI
         任务: 简化 diagnosis payload
         修改内容: 移除不存在的 display_name_map 参数
         """
@@ -288,7 +278,6 @@ class TestCloudDiagnose:
         测试获取关系变更记录
 
         修改时间: 2026-03-29
-        修改者: TraeAI
         任务: refactor-phase1-identity-extraction
         修改内容: relations 字段已移除，此测试应返回空列表
         """
@@ -440,7 +429,6 @@ class TestCloudDiagnose:
     async def test_run_diagnose_persists_model_interaction(self) -> None:
         """
         修改时间: 2026-04-25
-        修改者: Codex
         任务: remove-diagnosis-cache-and-fix-interaction-persistence
         修改内容: 回归验证 diagnosis 阶段的 prompt/response/thinking 会写入 model_interactions。
         """
@@ -641,7 +629,6 @@ class TestCloudDiagnose:
     def test_finalize_result_rejects_partial_topic_labels_against_payload_topic_words(self) -> None:
         """
         创建时间: 2026-04-27
-        创建者: Codex
         任务: fix-diagnosis-topic-label-count-contract
         说明: diagnosis 结果里的 topic_labels 会被主题页按位置消费；
         如果本次实际发给 LLM 的 topic_words 有多个，而返回标签数不足，就必须在落库前直接拒绝。
@@ -678,7 +665,6 @@ class TestCloudDiagnose:
     def test_finalize_result_accepts_topic_labels_when_count_matches_payload_topic_words(self) -> None:
         """
         创建时间: 2026-04-27
-        创建者: Codex
         任务: fix-diagnosis-topic-label-count-contract
         说明: 多主题 payload 只要返回标签数量和本次发送给 LLM 的 topic_words 数一致，
         就应允许正常落库，不把合法 diagnosis 误判为坏结果。
@@ -716,7 +702,6 @@ class TestCloudDiagnose:
     def test_cloud_analysis_rejects_formal_diagnosis_missing_focus_contract(self) -> None:
         """
         创建时间: 2026-04-27
-        创建者: Codex
         任务: protagonist-focus-contract-review-fixes
         说明: 当前分支已经硬切焦点合同；只要是正式 diagnosis 结果，
         就不能再依赖默认值落出缺 `focus_structure` / `focus_characters` 的半成品对象。
@@ -739,7 +724,6 @@ class TestCloudDiagnose:
     def test_cloud_analysis_rejects_formal_diagnosis_missing_main_and_core_cast(self) -> None:
         """
         创建时间: 2026-04-27
-        创建者: Codex
         任务: protagonist-focus-contract-review-fixes-round2
         说明: 新焦点合同不允许主要人物/核心角色静默缺失；
         正式 diagnosis 缺这两个字段时，模型层必须直接拒绝。
@@ -762,7 +746,6 @@ class TestCloudDiagnose:
     def test_cloud_analysis_rejects_formal_diagnosis_missing_topic_labels(self) -> None:
         """
         创建时间: 2026-04-27
-        创建者: Codex
         任务: protagonist-focus-contract-review-fixes-round5
         说明: 正式 diagnosis 合同同样要求完整主题命名；
         如果 topic_labels 缺失，模型层必须直接拒绝，不能落成“焦点合同完整但主题命名为空”的半成品。
@@ -820,7 +803,6 @@ class TestCloudDiagnose:
     def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
         """
         创建时间: 2026-04-26
-        创建者: Codex
         任务: fix-diagnosis-review-findings
         说明: setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
         此时必须覆写掉 LLM 自行猜测的数值，继续保持单一真相源。
