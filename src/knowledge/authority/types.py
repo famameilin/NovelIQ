@@ -353,7 +353,7 @@ class GraphPageSummary:
     """
     Graph-page-only summary contract
 
-    中文说明：这里可以承载页面首屏高亮（如核心角色、关键关系），但这些字段
+    这里可以承载页面首屏高亮（如核心角色、关键关系），但这些字段
     不应进入 diagnosis/export/shared signals，否则 graph page 又会反向定义
     上层分析语义
     """
@@ -394,7 +394,7 @@ class GraphPageQualityDetails:
     """
     Graph-page-only quality details
 
-    中文说明：共享层只拿 counters；样本明细只服务 graph page 的排障与解释，
+    共享层只拿 counters；样本明细只服务 graph page 的排障与解释，
     不允许 diagnosis/export 继续顺手复用这些字段
     """
 
