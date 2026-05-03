@@ -181,7 +181,7 @@ class KnowledgeGraphAuthorityService:
         """
         Return one relation-history page plus the full event count
 
-        中文注释：graph page 的 load-more 只需要“稳定排序后的事件分页 + 总数”，
+        graph page 的 load-more 只需要"稳定排序后的事件分页 + 总数"，
         不应该每次都重建完整 GraphAuthorityView 再在内存里切片
         """
 

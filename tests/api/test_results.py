@@ -31,13 +31,13 @@ class TestResults:
         """
         测试获取不存在任务的结果
 
-        2026-03-13: TraeAI修改，任务refactor-api-layer-functions
+        2026-03-13: 修改，任务refactor-api-layer-functions
         修改内容: get_results端点会先检查任务是否存在，不存在返回404
 
-        2026-03-18: TraeAI修改，修复API参数问题
+        2026-03-18: 修改，修复API参数问题
         修改内容: 将task_id改为run_id，使用完整UUID查询
 
-        2026-03-19: TraeAI修改，任务API接口参数统一优化
+        2026-03-19: 修改，任务API接口参数统一优化
         修改内容: 将run_id参数改回task_id，使用8位短UUID
         """
         response = api_client.get("/api/novels/nonexistent/results?task_id=nonexist")

@@ -4,7 +4,7 @@
 说明: 测试ID映射工具模块的各项功能
 
 修改记录:
-- 2026-03-19 TraeAI 初始创建
+- 2026-03-19 初始创建
 """
 
 from unittest.mock import Mock
