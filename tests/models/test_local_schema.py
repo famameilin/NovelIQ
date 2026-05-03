@@ -2,11 +2,9 @@
 测试本地数据模型
 
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 测试数据模型
 
 修改时间: 2026-03-29
-修改者: TraeAI
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 字段相关测试
 """

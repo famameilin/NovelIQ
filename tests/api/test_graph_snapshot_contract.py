@@ -412,7 +412,7 @@ def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_vi
         monkeypatch,
         StaticGraphAuthorityService(
             expected_run_id="run-graph-page-allowlist",
-            # 中文注释：route assembler 只应该依赖 graph page allowlist；
+            # route assembler 只应该依赖 graph page allowlist；
             # 这里故意不给 canonical_entities，防止测试重新把它当必需依赖。
             view=SimpleNamespace(
                 participant_states=[
@@ -455,7 +455,7 @@ def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_vi
 def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
     import src.knowledge.authority.graph_outputs as graph_outputs
 
-    # 中文注释：authority 只保留 page facts builder，不再定义 `/graph` 的公开 DTO，
+    # authority 只保留 page facts builder，不再定义 `/graph` 的公开 DTO，
     # 防止其他 consumer 继续直接 import authority serializer 借用页面字段。
     assert not hasattr(graph_outputs, "serialize_graph_page_summary")
     assert not hasattr(graph_outputs, "serialize_graph_page_quality")

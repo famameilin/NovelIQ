@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-26
-修改者: Codex
 任务: fix-phase2-setup-pool-followup-findings
 说明: 覆盖 diagnosis 工作流日志的正式预期输出标签。
 """
@@ -16,7 +15,6 @@ def test_log_diagnosis_results_labels_expectation(monkeypatch) -> None:
     校验 diagnosis 工作流日志输出正式的伏笔回收预期字段。
 
     创建时间: 2026-04-26
-    修改者: Codex
     任务: remove-foreshadow-rate-contract
     新建原因: 彻底移除 foreshadow_rate 后，工作流日志也必须只展示正式的 foreshadow_expectation。
     """

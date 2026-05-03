@@ -1,30 +1,24 @@
 """
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: Embedding客户端测试
 
 修改时间: 2026-03-16
-修改者: TraeAI
 任务: 更新测试用例适配新架构
 修改内容: 适配 LiteLLM，将 openai.OpenAI mock 替换为 litellm.embedding mock
 
 修改时间: 2026-03-21
-修改者: TraeAI
 任务: migrate-litellm-to-openai-sdk
 修改内容: 更新测试用例适配 OpenAI SDK
 
 修改时间: 2026-03-22
-修改者: TraeAI
 任务: code-quality-review
 修改内容: 更新测试用例，适配 API key 必填的改动
 
 修改时间: 2026-04-20
-修改者: Codex (GPT-5)
 任务: batch-embedding-requests
 修改内容: 补充批量 embedding 请求测试，验证 embed_texts 会按配置批量调用 embeddings.create
 
 修改时间: 2026-04-24
-修改者: Codex
 任务: semantic-chunking-embedding-sse-progress
 修改内容: 补充批次进度回调测试，确保上层可以按 batch 驱动 SSE 进度更新。
 """

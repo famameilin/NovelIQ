@@ -2,12 +2,10 @@
 CLI workflow 测试
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db，消除 DeprecationWarning
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """

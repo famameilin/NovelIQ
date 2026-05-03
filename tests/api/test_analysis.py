@@ -1,15 +1,12 @@
 """
 API 分析端点测试
 修改时间: 2026-04-05
-修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 修改时间: 2026-04-19
-修改者: Codex (GPT-5)
 任务: fix-task-system-review-findings
 修改内容: 补充 DB-first 任务系统回归测试，覆盖创建失败、进程外取消、resume 清脏字段、message 持久化
 修改时间: 2026-04-20
-修改者: Codex (GPT-5)
 任务: fix-test-db-isolation
 修改内容: 补充直接调用 get_session_factory()() 仍绑定测试库的回归测试，防止测试污染开发库
 """
@@ -44,7 +41,6 @@ class TestTestDatabaseIsolation:
         """
         验证直接调用 get_session_factory()() 也会绑定测试数据库。
         创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
         任务: fix-test-db-isolation
         说明: 这是此前污染开发库的直接入口，必须有回归测试锁住。
         """

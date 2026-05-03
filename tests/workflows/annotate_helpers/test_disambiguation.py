@@ -82,7 +82,6 @@ def test_validate_confidence_with_evidence_does_not_merge_on_suffix_only_anchor_
 def test_validate_confidence_with_evidence_blocks_protected_merge_without_strong_evidence() -> None:
     """
     创建时间: 2026-04-20
-    创建者: Codex
     任务: enforce-protected-disambig-gate
     说明: `受保护-默认不合并` 不能只靠 prompt 约束；若没有强证据，后端也必须回退为自映射。
     """
@@ -220,7 +219,6 @@ async def test_record_model_interaction_with_disambiguation() -> None:
 async def test_retry_canonical_reselect_records_unknown_model_name_for_configless_client() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: final-canonical-reselect-review-fix
     说明: 额外 canonical 重选的交互日志不能假定 `_config.model` 一定存在；
           轻量 fallback / 自定义 stub 至少应记录为 unknown，而不是在日志阶段直接报错。

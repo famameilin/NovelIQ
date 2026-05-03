@@ -3,12 +3,10 @@
 测试完整性检查函数
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db/create_tables，确保正确关闭连接
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """

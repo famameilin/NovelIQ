@@ -63,7 +63,6 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
     def test_cloud_compatible_response_is_normalized_before_building_result(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-cloud-disambig-mapping-schema
         说明: 云端兼容响应模型应在入口处归一化回内部标准结构，避免影响后续状态机与结果构建逻辑。
         """

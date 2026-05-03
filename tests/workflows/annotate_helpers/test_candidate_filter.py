@@ -2,7 +2,6 @@
 CandidateFilter 单元测试
 
 创建时间: 2026-04-20
-创建者: Codex
 任务: preserve-deferred-disambig-candidates
 说明: 锁定候选过滤的关键边界，避免低频正式名再次被当作噪音直接蒸发。
 """
@@ -13,7 +12,6 @@ from src.workflows.annotate_helpers.disambiguation.candidate_filter import Candi
 def test_candidate_filter_defers_low_frequency_name_without_context() -> None:
     """
     创建时间: 2026-04-20
-    创建者: Codex
     任务: preserve-deferred-disambig-candidates
     说明: 低频且暂无上下文的正式名字应延后处理，而不是直接丢弃。
     """
@@ -28,7 +26,6 @@ def test_candidate_filter_defers_low_frequency_name_without_context() -> None:
 def test_candidate_filter_keeps_protected_name_for_model_review() -> None:
     """
     创建时间: 2026-04-20
-    创建者: Codex
     任务: preserve-deferred-disambig-candidates
     说明: 受保护名单中的通用职位仍应保留送消歧，不能退回到硬删除。
     """
@@ -43,7 +40,6 @@ def test_candidate_filter_keeps_protected_name_for_model_review() -> None:
 def test_candidate_filter_blacklists_obvious_noise_token() -> None:
     """
     创建时间: 2026-04-20
-    创建者: Codex
     任务: preserve-deferred-disambig-candidates
     说明: 只有明显脏 token 才允许走硬丢弃。
     """

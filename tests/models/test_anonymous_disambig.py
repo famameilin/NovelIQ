@@ -2,12 +2,10 @@
 测试匿名人物消歧功能
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration
 修改内容: 移除 sqlite3.connect mock，使用 MagicMock 模拟连接
 
 修改时间: 2026-03-18
-修改者: TraeAI
 任务: 移除已废弃的内部方法测试
 修改内容: _build_anonymous_disambig_messages 方法已移除，简化测试
 """

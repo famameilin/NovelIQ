@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
-# 中文注释：以下 allowlist 常量把 authority 输出矩阵直接固定在代码里
+# 以下 allowlist 常量把 authority 输出矩阵直接固定在代码里
 # consumer 只能依赖自己那一层明确允许的字段，避免继续跨层借字段
 LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "alias_mappings": ("alias", "canonical", "confidence", "source"),
@@ -181,7 +181,7 @@ class Level1AuthoritySnapshot:
     entity_types: list[EntityTypeFact] = field(default_factory=list)
 
 
-# 中文注释：timeline 只允许消费角色子图、生命周期与关系事件三块共享字段，
+# timeline 只允许消费角色子图、生命周期与关系事件三块共享字段，
 # 不允许从 GraphAuthorityView 或 repository 原始形状反推历史语义
 TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "character_entities": ("entity_id", "name", "entity_type"),
@@ -222,7 +222,7 @@ class TimelineAuthorityView:
     relation_events: list[RelationEvent] = field(default_factory=list)
 
 
-# 中文注释：graph page route assembler 只允许读取这三块 authority facts
+# graph page route assembler 只允许读取这三块 authority facts
 # 页面 summary / quality / events_page 仍由 route/product 层自己组装
 GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "participant_states": (
@@ -331,7 +331,7 @@ class GraphQualitySignals:
         }
 
 
-# 中文注释：report 只给 diagnosis/export 共用聚合信号，字段必须保持最小集
+# report 只给 diagnosis/export 共用聚合信号，字段必须保持最小集
 GRAPH_REPORT_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "summary": ("node_count", "edge_count", "density"),
     "quality": ("conflict_count", "low_confidence_count"),
@@ -488,7 +488,7 @@ class GraphAuthorityReport:
     quality: GraphQualitySignals = field(default_factory=GraphQualitySignals)
 
     def __post_init__(self) -> None:
-        # 中文注释：GraphAuthorityReport 是 diagnosis/export 共享边界，必须在
+        # GraphAuthorityReport 是 diagnosis/export 共享边界，必须在
         # 运行时也拒绝 graph page contract，避免调用方误把页面高亮/样本塞回共享层
         if type(self.summary) is not GraphSharedSummary:
             raise TypeError(

@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-26
-修改者: Codex
 任务: fix-phase2-setup-pool-review-findings
 说明: 覆盖 setup pool 可见性边界、overflow 归档与 thread 身份校验。
 """
@@ -31,7 +30,6 @@ def _create_run(db_session, insert_test_novel, novel_id: str) -> str:
     创建供 foreshadowing thread 测试使用的 run。
 
     创建时间: 2026-04-26
-    修改者: Codex
     任务: fix-phase2-setup-pool-review-findings
     新建原因: thread 仓储测试需要真实 run_id 外键，集中 helper 可以避免每个用例重复铺底。
     """
@@ -57,7 +55,6 @@ def _make_thread(
     构造最小可持久化的 active thread ORM 对象。
 
     创建时间: 2026-04-26
-    修改者: Codex
     任务: fix-phase2-setup-pool-review-findings
     新建原因: overflow / visible-pool 测试只关心 thread 主表，不需要每次手写整段 ORM 初始化。
 
@@ -119,7 +116,6 @@ def _valid_new_setup_result(*, summary: str) -> ForeshadowingResult:
     构造仓储层 exact-match 测试用的合法新 setup 结果。
 
     创建时间: 2026-04-26
-    修改者: Codex
     任务: fix-phase2-setup-pool-review-findings
     新建原因: _find_exact_matching_active_thread 只依赖稳定字段，使用集中 helper 更容易看清测试意图。
     """
@@ -185,7 +181,6 @@ def test_archive_overflow_threads_flushes_pending_insert_before_limit_check(db_s
 def test_archive_overflow_threads_preserves_semantic_status_when_evicted(db_session, insert_test_novel) -> None:
     """
     创建时间: 2026-04-26
-    创建者: Codex
     任务: fix-diagnosis-followup-review-findings
     说明: active pool eviction 只应改变可见性，不应覆盖 thread 语义状态；
     否则 diagnosis 的 foreshadow_expectation 会把 `likely_paid_off` / `reinforced` 误降级。
@@ -628,7 +623,6 @@ def test_fetch_active_foreshadowing_threads_for_prompt_exposes_confidence(db_ses
 def test_annotation_repository_delegates_prompt_pool_limit_as_runtime_none(db_session) -> None:
     """
     创建时间: 2026-04-26
-    创建者: Codex
     任务: fix-diagnosis-followup-findings
     说明: AnnotationRepository wrapper 不应再把 active setup pool limit 固化为模块常量；
     未显式传 limit 时，必须把 None 透传给底层 helper，由其运行时读取 settings。

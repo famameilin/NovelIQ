@@ -2,27 +2,22 @@
 测试数据库操作
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db/create_tables，确保正确关闭连接
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration
 修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入，添加 analysis_runs 记录创建
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: 配置独立测试数据库
 修改内容: 改用 pytest 风格，使用 db_session fixture
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 重命名测试文件，移除 sqlite 相关命名
 
 修改时间: 2026-04-09
-修改者: TraeAI
 任务: async-reconstruction
 修改内容: chunk_text 改为 async，添加 asyncio.run() 包装
 """

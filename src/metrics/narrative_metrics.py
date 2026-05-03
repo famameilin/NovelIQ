@@ -245,10 +245,10 @@ def _select_act1_boundary(
         return find_valley_before_peak(tension_composite_scores, representative_peak_idx), True, []
 
     candidates: list[ThreeActBoundaryCandidate] = []
-    # 中文注释：三幕里的第一幕结束点不应早于主高潮区起点的一半，
+    # 三幕里的第一幕结束点不应早于主高潮区起点的一半，
     # 否则前段任意一次小抬升都可能被误判成“正式进入第二幕”。
     earliest_boundary = max(boundary_window_size, climax_region_start // 2)
-    # 中文注释：第一幕结束点不应该落到“紧贴主高潮区”的最后一跳上，
+    # 第一幕结束点不应该落到“紧贴主高潮区”的最后一跳上，
     # 因此给主高潮区前再留出一个完整后窗缓冲带，避免边界直接吃进第三幕前沿。
     latest_boundary = climax_region_start - (2 * boundary_window_size)
     for boundary_idx in range(earliest_boundary, latest_boundary + 1):

@@ -14,7 +14,6 @@ from src.storage.vector_schema import (
 def test_ensure_chunk_embeddings_schema_creates_table_in_runtime_schema(db_session) -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-preprocess-vector-schema-parent-resolution
     说明: 预处理阶段在测试隔离 schema 下补建 `chunk_embeddings` 时，
     不应再因为父表 schema 解析错误而失败；建表后 validate 也应能在当前运行时 schema 成功通过。

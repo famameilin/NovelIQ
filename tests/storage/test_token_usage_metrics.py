@@ -8,7 +8,6 @@ from src.storage.repositories.stats import metrics
 def test_fetch_token_usage_stats_marks_partial_when_annotation_chain_is_missing() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: 如果 model_interactions 里存在 annotation 主链调用，但 token_usage 没有对应桶，
           summary 必须标记为 partial，并暴露 coverage_gaps。
@@ -60,7 +59,6 @@ def test_fetch_token_usage_stats_marks_partial_when_annotation_chain_is_missing(
 def test_fetch_token_usage_stats_marks_complete_when_counts_match() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: 新 run 所有调用都已入账时，coverage_status 应为 complete。
     """
@@ -116,7 +114,6 @@ def test_fetch_token_usage_stats_marks_complete_when_counts_match() -> None:
 def test_normalize_model_interaction_call_key_maps_mainline_calls() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: coverage 比较依赖 interaction -> call_type 的稳定映射，主链 key 不能漂移。
     """
@@ -140,7 +137,6 @@ def test_normalize_model_interaction_call_key_maps_mainline_calls() -> None:
 def test_normalize_token_usage_task_type_maps_annotation_fallback_back_to_mainline() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-token-coverage-fallback-bucket
     说明: fallback 标注客户端只是执行通道，不应在 coverage 统计里形成新的业务桶。
     """
@@ -151,7 +147,6 @@ def test_normalize_token_usage_task_type_maps_annotation_fallback_back_to_mainli
 def test_fetch_token_usage_stats_can_merge_fallback_task_bucket() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-token-coverage-fallback-bucket
     说明: 即使旧 token_usage 里残留 annotation_fallback，汇总后的业务 task 桶也应合并回 annotation。
     """
@@ -173,7 +168,6 @@ def test_fetch_token_usage_stats_can_merge_fallback_task_bucket() -> None:
 def test_fetch_model_interaction_call_counts_ignores_error_placeholders() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-token-coverage-status
     说明: coverage 分母只能统计成功拿到响应的交互，重试错误占位记录必须忽略。
     """

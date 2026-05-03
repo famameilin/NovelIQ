@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-12
-创建者: TraeAI
 任务: 用户请求创建证据类型测试
 说明: 测试 EvidenceItem、EvidenceBundle 和 Level1AuthoritySnapshot 等数据类型
 """

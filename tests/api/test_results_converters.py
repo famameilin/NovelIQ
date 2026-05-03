@@ -2,11 +2,9 @@
 测试 results_converters 模块
 
 创建时间: 2026-03-13
-创建者: TraeAI
 任务: 测试结果转换器
 
 修改时间: 2026-04-05
-修改者: TraeAI
 任务: 移动废弃测试
 修改内容: 移除 culture_stats 相关测试（功能已废弃），移动到 deprecated/tests/api/
 """

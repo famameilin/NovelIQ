@@ -17,7 +17,6 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
     测试置信度校验逻辑
 
     创建时间: 2026-03-26
-    创建者: TraeAI
     任务: disambiguation-evidence-grading
     说明: 测试证据分级约束规则
     """
@@ -156,7 +155,6 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
     def test_protected_candidate_without_strong_evidence_cannot_merge(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: enforce-protected-disambig-gate
         说明: 受保护候选即便被模型判成 merge，如果只有一般上下文而无强证据，后端也必须打回自映射。
         """
@@ -177,7 +175,6 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
     def test_protected_candidate_with_naming_scene_can_merge(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: enforce-protected-disambig-gate
         说明: 受保护候选若出现“本名/人称”这类命名场景，应保留强证据合并通道。
         """

@@ -12,7 +12,6 @@ import pytest
 def _load_drop_timeline_version_columns_module() -> ModuleType:
     """
     创建时间: 2026-04-28
-    创建者: Codex
     任务: harden-drop-timeline-version-columns-script
     说明: `scripts/` 目录不是 package；这里按文件路径加载脚本模块，
           便于单测脚本默认参数和环境边界，而不改项目导入结构。

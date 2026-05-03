@@ -2,12 +2,10 @@
 消歧循环依赖检测单元测试
 
 创建时间: 2026-03-18
-创建者: TraeAI
 任务: entity-type-relation-extraction
 说明: 测试循环依赖检测算法
 
 修改时间: 2026-03-31
-修改者: TraeAI
 任务: fix-cycle-detection-bug
 修改内容: 新增18个测试用例覆盖跨类型亲子关系配对
 """
@@ -28,7 +26,6 @@ from src.workflows.annotate_helpers.disambiguation import (
 class TestDetectCycleInRelations(unittest.TestCase):
     """
     创建时间: 2026-03-18
-    创建者: TraeAI
     任务: entity-type-relation-extraction
     说明: 测试 detect_cycle_in_relations 函数
     """
@@ -255,7 +252,6 @@ class TestDetectCycleInRelations(unittest.TestCase):
 class TestIsValidInversePair(unittest.TestCase):
     """
     创建时间: 2026-03-31
-    创建者: TraeAI
     任务: fix-cycle-detection-bug
     说明: 直接测试 _is_valid_inverse_pair 函数
     """

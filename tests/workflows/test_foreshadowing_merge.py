@@ -1,11 +1,9 @@
 """
 创建时间: 2026-03-20
-创建者: TraeAI
 任务: fix-null-fields-issue - 修复伏笔字段空值问题
 说明: 测试伏笔结果合并到 ChunkAnnotation 的逻辑
 
 修改时间: 2026-03-29
-修改者: TraeAI
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations、character_appearances、chunk_summary 字段
 """

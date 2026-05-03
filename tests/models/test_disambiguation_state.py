@@ -2,7 +2,6 @@
 DisambiguationState 单元测试
 
 创建时间: 2026-03-27
-创建者: TraeAI
 任务: disambiguation-state-three-layer - Task 1.5 编写单元测试
 说明: 测试 DisambiguationState 和 validate_state_invariants
 """

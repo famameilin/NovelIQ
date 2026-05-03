@@ -503,7 +503,6 @@ async def test_phase2_weak_positive_payload_degrades_to_negative_in_structured_p
 ) -> None:
     """
     创建时间: 2026-04-26
-    修改者: Codex
     任务: phase2-strong-foreshadowing
     说明: Phase2 热路径遇到 `has_foreshadowing=true` 但 `is_strong_setup=false` 的弱阳性时，
           应直接降级成 negative，而不是在结构化解析阶段抛错后触发重试。

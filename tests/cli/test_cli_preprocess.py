@@ -2,16 +2,13 @@
 CLI preprocess 模块测试
 
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 测试预处理流程
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning，移除不存在的 split_by_chapter 参数
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """

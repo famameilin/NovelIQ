@@ -2,7 +2,6 @@
 API 图谱端点测试
 
 修改时间: 2026-04-05
-修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """

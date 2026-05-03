@@ -8,7 +8,6 @@ class _StatsRepoStub:
     结果页 token_usage fetcher 的最小 repo stub。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     """
 
@@ -41,7 +40,6 @@ class _StatsRepoStub:
 def test_fetch_token_usage_stats_exposes_coverage_fields() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: unify-estimated-token-accounting
     说明: fetcher 应把新的 accounting / coverage / by_call_type 字段完整暴露给 API。
     """

@@ -13,7 +13,6 @@ from src.models.local.embedding import EmbeddingClient
 def _build_httpx_response(status_code: int) -> httpx.Response:
     """
     创建时间: 2026-04-28
-    创建者: Codex
     任务: fix-embedding-transient-502
     说明: OpenAI SDK 的 APIStatusError 需要携带真实 httpx.Response；
           测试里统一用这个 helper 生成最小可用响应，避免每个用例重复拼装 request/response。
@@ -26,7 +25,6 @@ def _build_httpx_response(status_code: int) -> httpx.Response:
 async def test_embed_texts_retries_retryable_502_and_recovers() -> None:
     """
     创建时间: 2026-04-28
-    创建者: Codex
     任务: fix-embedding-transient-502
     说明: 瞬时 502 属于 provider/gateway 常见抖动；batch embedding 应有限重试，而不是首次失败就终止整条 preprocess。
     """
@@ -64,7 +62,6 @@ async def test_embed_texts_retries_retryable_502_and_recovers() -> None:
 async def test_embed_texts_does_not_retry_bad_request() -> None:
     """
     创建时间: 2026-04-28
-    创建者: Codex
     任务: fix-embedding-transient-502
     说明: 4xx 参数错误不属于瞬时故障，必须继续 fail fast，避免无意义重试把真实配置问题掩盖掉。
     """

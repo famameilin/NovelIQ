@@ -17,10 +17,8 @@ class TestLexicalSentimentDensity(unittest.TestCase):
     测试词汇情感密度计算（phrase 模式）
 
     创建时间: 2026-04-06
-    创建者: GLM-5
     任务: 词表与张力信号系统重构 - Task 6
     修改时间: 2026-04-06
-    修改者: GLM-5
     修改内容: 更新参数类型为 dict[str, int]
     """
 

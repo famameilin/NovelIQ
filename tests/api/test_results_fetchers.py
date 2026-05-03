@@ -25,7 +25,6 @@ class _DummyRow:
     模拟 SQLAlchemy Row 对象，支持字段名访问
 
     修改时间: 2026-03-31
-    修改者: TraeAI
     任务: refactor-hardcoded-index-access
     修改内容: 新增类，用于测试中模拟 Row 对象
     """

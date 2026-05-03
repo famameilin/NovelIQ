@@ -1,6 +1,5 @@
 """
 创建时间: 2026-03-24
-创建者: Codex
 任务: decouple-unified-client-phase5
 修改内容: 迁移 parse_active_entities 专项用例并独立成文件
 """

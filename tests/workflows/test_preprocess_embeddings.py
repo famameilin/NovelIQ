@@ -175,7 +175,6 @@ async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> N
 async def test_generate_chunk_embeddings_emits_chunk_progress_with_chunk_scope_fields() -> None:
     """
     创建时间: 2026-04-28
-    创建者: Codex
     任务: fix-preprocess-progress-context-leak
     说明: chunk embedding 进度事件必须显式带上自己的 sub_stage/current/total，
           不能继续复用前一个 semantic chunking 子阶段留下来的上下文字段。

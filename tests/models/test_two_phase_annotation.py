@@ -1,11 +1,9 @@
 """
 创建时间: 2026-03-14
-创建者: TraeAI
 任务: Chunk 双次调用分析拆分
 说明: 测试双次调用相关功能
 
 修改时间: 2026-03-29
-修改者: TraeAI
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 和 character_appearances 相关测试
 """
@@ -637,7 +635,7 @@ class TestForeshadowingValidation(unittest.TestCase):
                 if case["expected_is_strong_setup"]:
                     result = ForeshadowingResult(**case["result"])
                 else:
-                    # 中文注释：这些负例现在主要依赖 contract 字段本身被前置拒绝，
+                    # 这些负例现在主要依赖 contract 字段本身被前置拒绝，
                     # 例如 `is_strong_setup=false` / `confidence=medium`；
                     # 本地 validator 不再额外用关键词规则重判语义。
                     result = ForeshadowingResult.model_construct(**case["result"])

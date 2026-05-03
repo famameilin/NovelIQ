@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-20
-创建者: Codex
 任务: fix-phase2-response-format-schema
 说明: 回归测试 strict structured output 的 JSON Schema 构建，避免云端接口因 additionalProperties 缺失而拒绝请求。
 """
@@ -42,7 +41,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def setUp(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-phase2-response-format-schema
         说明: 构造本地 client，仅验证 schema builder，不触发真实模型调用。
         """
@@ -65,7 +63,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def test_foreshadowing_schema_forbids_unknown_root_fields(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-phase2-response-format-schema
         说明: 锁定 phase2 伏笔结果根对象会显式输出 additionalProperties=false，
         且 required 会覆盖所有 properties。
@@ -104,7 +101,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def test_nested_model_schema_forbids_unknown_fields(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-phase2-response-format-schema
         说明: 锁定嵌套 $defs 模型也会被一并收紧，避免 phase3/phase4 后续再报同类错误。
         """
@@ -120,7 +116,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def test_mapping_schema_keeps_value_definition(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-phase2-response-format-schema
         说明: dict[str, T] 映射字段仍需保留 value schema，不能被误改成不允许任何动态键。
         """
@@ -134,7 +129,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def test_internal_thinking_field_is_excluded_from_response_schema(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-disambig-cloud-schema-internal-field
         说明: `_thinking_content` / `_reasoning_tokens` 属于运行时内部回填字段，不应要求模型通过 JSON 返回，
         否则云端 strict schema 校验可能把内部字段也当成公开契约。
@@ -149,7 +143,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def test_cloud_disambiguation_schema_uses_record_arrays_for_dynamic_mappings(self) -> None:
         """
         创建时间: 2026-04-20
-        创建者: Codex
         任务: fix-cloud-disambig-mapping-schema
         说明: 云端 provider 不兼容 dict[str, T] 形式的 strict schema，
         因此 cloud 版消歧响应必须改成显式数组记录，避免再次触发 invalid_json_schema。
@@ -169,7 +162,6 @@ class TestStructuredOutputSchema(unittest.TestCase):
     def test_cloud_disambiguation_normalization_preserves_runtime_reasoning_fields(self) -> None:
         """
         创建时间: 2026-04-21
-        创建者: Codex
         任务: fix-disambig-result-builder-thinking-and-types
         说明: 云端兼容响应在归一化回内部标准模型时，不能把 API 层单独回填的
         thinking_content / reasoning_tokens 丢掉。

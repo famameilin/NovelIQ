@@ -2,7 +2,6 @@
 消歧评测指标测试
 
 创建时间: 2026-04-02
-创建者: TraeAI
 任务: P2.2-entity-type-metrics
 说明: 测试 compute_metrics_by_entity_type 函数
 """

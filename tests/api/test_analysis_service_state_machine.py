@@ -156,7 +156,6 @@ async def test_recover_pending_tasks_schedules_pending_and_cancels_requested(db_
 async def test_recover_pending_tasks_continues_after_unexpected_resume_failure(db_session) -> None:
     """
     创建时间: 2026-04-26
-    创建者: Codex
     任务: fix-diagnosis-review-findings
     说明: startup recovery 必须按任务级隔离异常；
     单个 pending 恢复时报错时，后续 pending 仍应继续恢复。

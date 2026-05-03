@@ -2,11 +2,9 @@
 Phase1/Phase2 独立重试机制测试
 
 创建时间: 2026-03-14
-创建者: TraeAI
 任务: Phase1/Phase2独立重试机制
 
 修改时间: 2026-03-18
-修改者: TraeAI
 任务: code-quality-refactor - Task 9 拆分annotation_client
 修改内容: 更新测试以调用子模块函数
 """
@@ -164,16 +162,13 @@ class MockAnnotationClient:
     Mock AnnotationClient for testing
 
     创建时间: 2026-03-14
-    创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
 
     修改时间: 2026-03-18
-    修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 简化Mock类，移除已弃用方法
 
     修改时间: 2026-04-22
-    修改者: Codex
     任务: unify-estimated-token-accounting
     修改内容: 补充统一估算 token helper stub，覆盖 Phase1/Phase2 新记账路径
     """
@@ -291,11 +286,9 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
     Phase1 重试机制测试
 
     创建时间: 2026-03-14
-    创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
 
     修改时间: 2026-03-18
-    修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 更新测试以调用子模块函数
     """
@@ -453,11 +446,9 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
     Phase2 重试机制测试
 
     创建时间: 2026-03-14
-    创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
 
     修改时间: 2026-03-18
-    修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 更新测试以调用子模块函数
     """
@@ -632,11 +623,9 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
     双次调用集成测试
 
     创建时间: 2026-03-14
-    创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
 
     修改时间: 2026-03-18
-    修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 更新测试以调用子模块函数
     """

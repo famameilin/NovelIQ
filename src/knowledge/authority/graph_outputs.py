@@ -50,7 +50,7 @@ def build_graph_page_summary(
     """Compute graph-page-only summary highlights from stable authority facts"""
 
     shared_summary = build_graph_shared_summary(participant_states, confirmed_relations)
-    # 中文注释：graph page 的 `core_characters` 是页面契约字段，只能从 character 节点中挑选，
+    # graph page 的 `core_characters` 是页面契约字段，只能从 character 节点中挑选，
     # 不能因为组织/地点最近出现过就挤掉真正的角色
     core_characters = [
         state.name
@@ -107,7 +107,7 @@ def build_graph_quality_report(
     """Collapse graph quality details into aggregate-only report counters"""
 
     shared_quality = build_graph_quality_signals(confirmed_relations, relation_events)
-    # 中文注释：graph page 继续暴露全历史低置信事件计数；但 export/diagnosis
+    # graph page 继续暴露全历史低置信事件计数；但 export/diagnosis
     # 复用的 report 必须保持旧 summary contract，避免长篇作品把 low_confidence_count
     # 悄悄放大成“全历史事件总数”
     return GraphQualitySignals(
@@ -155,7 +155,7 @@ def _detect_relation_conflicts(confirmed_relations: list[ConfirmedRelation]) -> 
             ],
             key=lambda item: (item[0] is None, item[0] if item[0] is not None else item[1]),
         )
-        # 中文注释：这里的 pair_key 语义上永远是“两端实体组成的二元组”，显式拼成
+        # 这里的 pair_key 语义上永远是“两端实体组成的二元组”，显式拼成
         # 固定长度 tuple，避免 mypy 把 sorted(...) 的结果推断成可变长度序列
         pair_key = (sorted_pair[0], sorted_pair[1])
         pair_map[pair_key] = pair_map.get(pair_key, []) + [relation]

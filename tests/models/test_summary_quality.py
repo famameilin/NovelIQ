@@ -16,12 +16,10 @@ class TestCharacterDeduplication(unittest.TestCase):
     测试角色去重逻辑
 
     创建时间: 2026-03-27
-    创建者: TraeAI
     任务: fix-duplicate-characters-in-chunk
     说明: 测试同一人物重复出现时的去重处理
 
     修改时间: 2026-03-29
-    修改者: TraeAI
     任务: refactor-phase1-identity-extraction
     修改内容: 移除 validate_summary_quality 相关测试（chunk_summary 已移除）
     """

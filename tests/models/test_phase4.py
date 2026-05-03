@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-05
-创建者: TraeAI
 任务: phase4-code-review-fix
 说明: 测试 Phase4 关系抽取功能
 """
@@ -249,7 +248,6 @@ class TestBuildPhase4Messages(unittest.TestCase):
     测试 Phase4 消息构建
 
     创建时间: 2026-04-05
-    创建者: TraeAI
     任务: phase4-code-review-fix
     """
 
@@ -340,7 +338,6 @@ class TestConvertToSnapshots(unittest.TestCase):
     测试 LLM 输出转换为 RelationChangeSnapshot
 
     创建时间: 2026-04-05
-    创建者: TraeAI
     任务: phase4-code-review-fix
     """
 
@@ -538,7 +535,6 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
     测试 Phase4 主函数
 
     创建时间: 2026-04-05
-    创建者: TraeAI
     任务: phase4-code-review-fix
     """
 
@@ -796,7 +792,6 @@ class TestConstantsConsistency(unittest.TestCase):
     测试常量一致性
 
     创建时间: 2026-04-05
-    创建者: TraeAI
     任务: phase4-code-review-fix
     """
 
@@ -824,7 +819,6 @@ class TestPhase4MaxRetriesExceededError(unittest.TestCase):
     测试 Phase4 异常类
 
     创建时间: 2026-04-05
-    创建者: TraeAI
     任务: phase4-code-review-fix
     """
 

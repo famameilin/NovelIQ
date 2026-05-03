@@ -291,7 +291,6 @@ def test_load_character_bundle_rejects_rerun_required_diagnosis(
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     创建时间: 2026-04-26
-    创建者: Codex
     任务: fix-diagnosis-followup-review-findings
     说明: diagnosis 缺失可能在多个 bundle 链路里被检测到；
     export 返回前必须去重，避免 `missing_fields` 出现重复 diagnosis 条目。

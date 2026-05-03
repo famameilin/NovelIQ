@@ -2,7 +2,6 @@
 Metrics 模块测试
 
 修改时间: 2026-04-06
-修改者: GLM-5
 任务: 移除向后兼容代码
 修改内容: 移除旧版精确匹配函数测试，保留 phrase 模式匹配测试
 """
@@ -116,7 +115,6 @@ class TestRhythmMetrics(unittest.TestCase):
     def test_tension_proxy_no_overlap_count(self) -> None:
         """
         修改时间: 2026-03-26
-        修改者: TraeAI
         任务: 修复 fight_density 重叠计数问题
         修改内容: 新增测试用例，验证重叠词不被重复计数
         """
