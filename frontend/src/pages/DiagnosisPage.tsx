@@ -177,10 +177,10 @@ function ForeshadowingThreadsSection(props: {
 function SkeletonGrid() {
   return (
     <div className="space-y-6">
-      {/* Header skeleton */}
+      {/* 标题骨架屏 */}
       <div className="h-8 w-48 animate-pulse rounded bg-surface-hover" />
 
-      {/* Score cards skeleton */}
+      {/* 评分卡骨架屏 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i} className="h-[140px]">
@@ -197,7 +197,7 @@ function SkeletonGrid() {
         ))}
       </div>
 
-      {/* Text and chart skeleton */}
+      {/* 文本与图表骨架屏 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="h-[300px]">
           <CardContent className="p-5">
@@ -225,7 +225,7 @@ function SkeletonGrid() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -245,7 +245,7 @@ export function DiagnosisPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // Sync novelId to store on mount; initialize task from URL if present
+  // 组件挂载时把 novelId 同步到 store；如果 URL 带 task_id 就一并初始化任务
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
@@ -255,7 +255,7 @@ export function DiagnosisPage() {
     }
   }, [novelId, urlTaskId, setNovel, setTask]);
 
-  // Data fetching
+  // 数据获取
   const enabled = !!novelId && !!currentTaskId;
 
   const diagnosisQuery = useQuery({
@@ -304,14 +304,14 @@ export function DiagnosisPage() {
     diagnosis != null &&
     !hasFocusContract;
 
-  // ---------- Render ----------
+  // ---------- 渲染 ----------
 
   return (
     <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"}>
-      {/* Loading skeleton */}
+      {/* 加载骨架屏 */}
       {isLoading && <SkeletonGrid />}
 
-      {/* Error state */}
+      {/* 错误状态 */}
       {isAnalysisNotComplete && !isLoading && (
         <AnalysisNotCompleteState
           title="诊断结果尚未完成"
@@ -333,11 +333,11 @@ export function DiagnosisPage() {
         </DashboardCardShell>
       )}
 
-      {/* Empty state */}
+      {/* 空状态 */}
       {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
       {hasIncompleteDiagnosisContract && !isLoading && <IncompleteDiagnosisContractState />}
 
-      {/* Ledger fallback */}
+      {/* 台账兜底展示 */}
       {isThreadsError && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
       {foreshadowingThreads.length > 0 && !diagnosis && !isLoading && !isAnalysisNotComplete && (
         <div className="min-h-0">
@@ -345,7 +345,7 @@ export function DiagnosisPage() {
         </div>
       )}
 
-      {/* Main content */}
+      {/* 主内容 */}
       {diagnosis && hasFocusContract && !isLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}

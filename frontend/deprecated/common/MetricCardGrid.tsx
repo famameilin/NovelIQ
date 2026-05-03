@@ -19,7 +19,7 @@ import {
 } from "@/lib/normalize";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 interface MetricDefinition {
@@ -43,7 +43,7 @@ export interface MetricCardGridProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
+/*  辅助函数                                                           */
 /* ------------------------------------------------------------------ */
 
 function buildMetrics(props: MetricCardGridProps): MetricDefinition[] {
@@ -124,7 +124,7 @@ const itemVariants = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export function MetricCardGrid(props: MetricCardGridProps) {

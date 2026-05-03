@@ -9,7 +9,7 @@ sys.path.insert(0, str(project_root))
 
 from src.config.settings import settings
 
-# Manually load .env to compare
+# 手动加载 .env 以便对比
 env_path = project_root / ".env"
 load_dotenv(env_path)
 

@@ -9,7 +9,7 @@ sys.path.insert(0, str(project_root))
 from src.storage.database_url import resolve_database_url_from_env  # noqa: E402
 from src.storage.db import init_db  # noqa: E402
 
-# Load env from root
+# 从项目根目录加载 .env
 env_path = project_root / ".env"
 load_dotenv(env_path)
 

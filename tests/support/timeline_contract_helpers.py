@@ -29,7 +29,7 @@ class TimelineContractScenario:
 
 
 def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenario:
-    """Create a minimal authority-backed timeline scenario shared by API/export tests"""
+    """构造一个最小的 authority 支撑时间轴场景，供 API / export 测试共享"""
 
     novel_id = uuid.uuid4().hex[:8]
     hero_name = "顾承渊"

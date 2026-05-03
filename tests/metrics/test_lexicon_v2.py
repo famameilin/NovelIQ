@@ -27,7 +27,7 @@ from src.workflows.aggregate import TENSION_COMPOSITE_WEIGHTS, _compute_tension_
 
 
 # ====================================================================
-# Fixtures
+# 测试夹具
 # ====================================================================
 
 
@@ -198,7 +198,7 @@ class TestVersionHash:
     def test_hash_is_string(self, registry):
         h = registry.version_hash()
         assert isinstance(h, str)
-        assert len(h) == 16  # hexdigest[:16]
+        assert len(h) == 16  # 只取 hexdigest[:16]
 
     def test_hash_is_deterministic(self, registry):
         h1 = registry.version_hash()

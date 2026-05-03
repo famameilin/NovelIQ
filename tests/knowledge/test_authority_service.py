@@ -689,7 +689,7 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
     view = service.build_graph_view(run_id)
     report = service.build_graph_report(run_id)
 
-    # Current graph view should expose only active relations; broken history stays in relation_events.
+    # 当前图谱视图只应暴露活跃关系；已断裂历史应保留在 relation_events 中。
     assert len(view.confirmed_relations) == 1
     assert {(item.from_name, item.to_name, item.relation_type) for item in view.confirmed_relations} == {
         ("林渡", "顾霜", "盟友")

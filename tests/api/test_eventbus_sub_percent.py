@@ -1,5 +1,5 @@
 """
-Tests for EventBus.emit sub_percent propagation.
+EventBus.emit 的 sub_percent 透传测试。
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -204,19 +204,19 @@ async def test_eventbus_calculates_percent_for_different_stages():
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    # preprocess: 0-10%
+    # 预处理：0-10%
     assert bus._calculate_percent_for_stage("preprocess", 5, 10) == 5.0
 
-    # annotate: 10-80%
+    # 标注：10-80%
     assert bus._calculate_percent_for_stage("annotate", 5, 10) == 45.0
 
-    # aggregate: 80-90%
+    # 聚合：80-90%
     assert bus._calculate_percent_for_stage("aggregate", 5, 10) == 85.0
 
-    # topic-model: 90-95%
+    # 主题建模：90-95%
     assert bus._calculate_percent_for_stage("topic-model", 5, 10) == 92.5
 
-    # diagnose: 95-100%
+    # 诊断：95-100%
     assert bus._calculate_percent_for_stage("diagnose", 5, 10) == 97.5
 
     # 未知阶段: 0-100%

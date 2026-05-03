@@ -234,7 +234,7 @@ def build_disambiguate_messages(
     """
     构建角色消歧消息，仅接受标准候选结构
     """
-    # Build name -> category lookup
+    # 构建 name -> category 查询表
     category_map: dict[str, str] = {}
     if classifications:
         for cls in classifications:

@@ -41,11 +41,11 @@ RELATION_CHANGE_WEIGHTS: dict[str, float] = {
 
 
 class TimelineDataUnavailableError(ValueError):
-    """Raised when timeline source data is genuinely unavailable"""
+    """当时间轴源数据确实不可用时抛出"""
 
 
 class TimelineAuthorityContractError(RuntimeError):
-    """Raised when the authority-backed timeline contract is violated"""
+    """当 authority 支撑的时间轴合同被破坏时抛出"""
 
 
 @dataclass(slots=True)
@@ -389,7 +389,7 @@ def compute_importance_score(score_breakdown: dict[str, float]) -> tuple[float, 
 
 def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any], list[Any], dict[int, str]]:
     """
-    Validate the authority-backed timeline contract before building timeline plans
+    在构建时间轴规划前校验 authority 支撑的时间轴合同
     """
 
     character_entities = list(timeline_view.character_entities)

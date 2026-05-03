@@ -5,7 +5,7 @@ export interface HSL {
 }
 
 /**
- * Convert hex color string to HSL
+ * 把十六进制颜色字符串转换为 HSL
  */
 export function hexToHSL(hex: string): HSL {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
@@ -92,8 +92,8 @@ export function generateHomeThemePalette(): ThemePalette {
 }
 
 /**
- * Generate a complete theme palette from a seed hex color
- * Derives all CSS variable values for light and dark modes
+ * 根据种子十六进制颜色生成完整主题色板
+ * 同时推导浅色与深色模式下的全部 CSS 变量值
  */
 export function generateThemePalette(seedHex: string): ThemePalette {
   const { h, s } = hexToHSL(seedHex);
@@ -149,8 +149,8 @@ export function generateThemePalette(seedHex: string): ThemePalette {
 }
 
 /**
- * Convert a CSS hsl()/hsla() string to hsla() format with alpha
- * Handles both hsl(H S% L%) space-separated (Tailwind modern format) and hsl(H,S%,L%) comma-separated
+ * 把 CSS 的 hsl()/hsla() 字符串转换成带 alpha 的 hsla() 格式
+ * 同时兼容 `hsl(H S% L%)` 的空格写法（Tailwind 新格式）和 `hsl(H,S%,L%)` 的逗号写法
  */
 export function hslToHsla(hsl: string, alpha: number): string {
   const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -183,7 +183,7 @@ export function hslToHsla(hsl: string, alpha: number): string {
 }
 
 /**
- * Read a CSS variable from :root and return as hsl() string for ECharts usage
+ * 从 `:root` 读取 CSS 变量，并返回 ECharts 可用的 hsl() 字符串
  */
 export function getCSSColorVar(name: string): string {
   const value = getComputedStyle(document.documentElement)
@@ -193,7 +193,7 @@ export function getCSSColorVar(name: string): string {
 }
 
 /**
- * Get ECharts color palette from current CSS variables
+ * 从当前 CSS 变量中读取 ECharts 调色板
  */
 export function getEChartsColors(): string[] {
   return [
@@ -206,7 +206,7 @@ export function getEChartsColors(): string[] {
 }
 
 /**
- * Get emotion-specific colors (fixed semantic colors)
+ * 获取情绪维度专用颜色（固定语义色）
  */
 export function getEmotionColors() {
   return {

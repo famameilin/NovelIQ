@@ -12,7 +12,7 @@ import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface TensionOverlayProps {
@@ -23,7 +23,7 @@ export interface TensionOverlayProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export function TensionOverlay({

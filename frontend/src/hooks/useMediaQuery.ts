@@ -25,7 +25,7 @@ function subscribe(query: string, callback: () => void): () => void {
 }
 
 /**
- * React hook that tracks a CSS media query match state
+ * 跟踪 CSS 媒体查询匹配状态的 React Hook
  */
 export function useMediaQuery(query: string): boolean {
   const matches = useSyncExternalStore(

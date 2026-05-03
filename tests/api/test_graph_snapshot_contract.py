@@ -128,7 +128,7 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
     }
 
     node = snapshot["nodes"][0]
-    # GraphAuthorityView nodes now expose stable state only; transient emotion no longer belongs to the contract.
+    # GraphAuthorityView 节点现在只暴露稳定状态；瞬时情绪不再属于合同的一部分。
     assert set(node.keys()) == {
         "entity_id",
         "name",

@@ -48,7 +48,7 @@ def migrate_emotion_curve(engine) -> None:
 
         # 删除可能存在的旧主键
         for name, ctype in constraints:
-            if ctype == "p":  # primary key
+            if ctype == "p":  # 主键
                 print(f"删除旧主键: {name}")
                 conn.execute(text(f"ALTER TABLE emotion_curve DROP CONSTRAINT {name}"))
                 conn.commit()
@@ -87,7 +87,7 @@ def migrate_rhythm_curve(engine) -> None:
 
         # 删除可能存在的旧主键
         for name, ctype in constraints:
-            if ctype == "p":  # primary key
+            if ctype == "p":  # 主键
                 print(f"删除旧主键: {name}")
                 conn.execute(text(f"ALTER TABLE rhythm_curve DROP CONSTRAINT {name}"))
                 conn.commit()

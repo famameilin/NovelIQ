@@ -20,7 +20,7 @@ if response.status_code == 200:
     task_id = response.json()["task_id"]
     print(f"Task ID: {task_id}")
     
-    # Poll status
+    # 轮询状态
     import time
     while True:
         status_resp = requests.get(f"{base_url}/novels/{novel_id}/status", params={"task_id": task_id})
@@ -33,7 +33,7 @@ if response.status_code == 200:
             break
         time.sleep(2)
 
-    # Get results if completed
+    # 如果已完成就拉取结果
     if status['status'] == 'completed':
         results = requests.get(f"{base_url}/novels/{novel_id}/results", params={"task_id": task_id})
         print("Results exported:")

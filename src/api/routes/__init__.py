@@ -4,7 +4,7 @@ __all__ = ["novels_router", "analysis_router", "results_router", "timeline_route
 
 
 def __getattr__(name: str):
-    """Lazily expose routers without forcing package-wide route imports"""
+    """惰性暴露 routers，避免强制触发整包级路由导入"""
 
     if name == "analysis_router":
         from src.api.routes.analysis import router as analysis_router

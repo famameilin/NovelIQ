@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export type DimensionType = "narrative" | "emotion" | "character" | "style" | "topic";
@@ -35,7 +35,7 @@ export interface DimensionMiniCardProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Dimension Config                                                  */
+/*  维度配置                                                           */
 /* ------------------------------------------------------------------ */
 
 const DIMENSION_CONFIG: Record<
@@ -80,7 +80,7 @@ const DIMENSION_CONFIG: Record<
 };
 
 /* ------------------------------------------------------------------ */
-/*  Narrative Visualization (Semi-circular Gauge)                     */
+/*  叙事维度可视化（半圆仪表）                                         */
 /* ------------------------------------------------------------------ */
 
 function NarrativeVisualization({
@@ -161,7 +161,7 @@ function NarrativeVisualization({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Emotion Visualization (Positive/Negative Bar Chart)               */
+/*  情绪维度可视化（正负条形图）                                       */
 /* ------------------------------------------------------------------ */
 
 function EmotionVisualization({
@@ -220,7 +220,7 @@ function EmotionVisualization({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Character Visualization (Mini Network Graph)                      */
+/*  角色维度可视化（迷你关系图）                                       */
 /* ------------------------------------------------------------------ */
 
 function CharacterVisualization({ density }: { density: number | null | undefined }) {
@@ -279,7 +279,7 @@ function CharacterVisualization({ density }: { density: number | null | undefine
 }
 
 /* ------------------------------------------------------------------ */
-/*  Style Visualization (Horizontal Bar Chart)                        */
+/*  风格维度可视化（横向条形图）                                       */
 /* ------------------------------------------------------------------ */
 
 function StyleVisualization({
@@ -329,7 +329,7 @@ function StyleVisualization({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Topic Visualization (Topic Tags)                                  */
+/*  主题维度可视化（主题标签）                                         */
 /* ------------------------------------------------------------------ */
 
 function TopicVisualization({
@@ -378,7 +378,7 @@ function TopicVisualization({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Empty State                                                       */
+/*  空状态                                                             */
 /* ------------------------------------------------------------------ */
 
 function EmptyState() {
@@ -390,7 +390,7 @@ function EmptyState() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 /**

@@ -47,7 +47,7 @@ class ModelInteraction(Base):
 
     # 模型信息
     model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    model_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # local / cloud
+    model_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 本地 / 云端
 
     # 交互内容
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -57,12 +57,12 @@ class ModelInteraction(Base):
     # 响应元数据
     response_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     thinking_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    has_thinking: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)  # 0=False, 1=True
+    has_thinking: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)  # 0 表示 False，1 表示 True
     reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     thinking_state: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
 
     # 状态信息
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="success")  # success / error
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="success")  # success / error（成功 / 错误）
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # 时间戳

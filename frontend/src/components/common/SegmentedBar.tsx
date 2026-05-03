@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface SegmentedBarSegment {
@@ -18,7 +18,7 @@ export interface SegmentedBarProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export function SegmentedBar({ segments, className }: SegmentedBarProps) {

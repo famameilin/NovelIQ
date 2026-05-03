@@ -170,7 +170,7 @@ export function NovelDetailPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // Sync novelId to store on mount; initialize task from URL if present
+  // 组件挂载时把 novelId 同步到 store；如果 URL 带 task_id 就一并初始化任务
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
@@ -180,7 +180,7 @@ export function NovelDetailPage() {
     }
   }, [novelId, urlTaskId, setNovel, setTask]);
 
-  // Reflect currentTaskId to URL for shareability
+  // 把 currentTaskId 反映到 URL，方便分享与刷新恢复
   useEffect(() => {
     if (!novelId) return;
     if (currentTaskId) {
@@ -190,7 +190,7 @@ export function NovelDetailPage() {
     }
   }, [currentTaskId, novelId, navigate]);
 
-  // Parallel data fetching
+  // 并行拉取数据
   const enabled = !!novelId && !!currentTaskId;
   const taskStatusQuery = useQuery({
     queryKey: ["task-status", novelId, currentTaskId],
@@ -269,7 +269,7 @@ export function NovelDetailPage() {
     }
   }, [novelId, queryClient]);
 
-  // Fetch novel info for title
+  // 拉取小说信息用于展示标题
   const novelQuery = useQuery({
     queryKey: ["novel", novelId],
     queryFn: () => getNovel(novelId!),
@@ -377,7 +377,7 @@ export function NovelDetailPage() {
     curvesQuery.refetch();
   };
 
-  // ---------- Render ----------
+  // ---------- 渲染 ----------
 
   return (
     <AnalysisWorkspace
@@ -397,12 +397,12 @@ export function NovelDetailPage() {
         修改原因：仪表盘仍走 tabs 公共工作区，但只保留一个 tab，统一和其他分析页的边距与面板语义。
       */}
 
-      {/* No task selected — offer start analysis */}
+      {/* 未选择任务时，提示开始分析 */}
       {!currentTaskId && (
         <EmptyTaskPrompt onAnalyze={handleCreateTask} isAnalyzing={isStartingTask} />
       )}
 
-      {/* Analysis in progress — show progress panel, hide everything else */}
+      {/* 分析进行中时，只显示进度面板并隐藏其他内容 */}
       {effectiveIsAnalyzing && currentTaskId && (
         <motion.div className="flex min-h-0 flex-1 flex-col">
           <AnalysisProgressPanel
@@ -412,10 +412,10 @@ export function NovelDetailPage() {
         </motion.div>
       )}
 
-      {/* Loading skeleton - only when not analyzing */}
+      {/* 仅在未分析中时显示加载骨架屏 */}
       {!effectiveIsAnalyzing && isLoading && currentTaskId && <SkeletonGrid />}
 
-      {/* Error state — only when not analyzing */}
+      {/* 仅在未分析中时显示错误状态 */}
       {!effectiveIsAnalyzing && hasAnyError && !isLoading && currentTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
@@ -427,7 +427,7 @@ export function NovelDetailPage() {
 
       {!effectiveIsAnalyzing && diagnosisRequiresRerun && !isLoading && currentTaskId && <RerunRequiredState />}
 
-      {/* Main content - only when not analyzing */}
+      {/* 仅在未分析中时显示主内容 */}
       {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">

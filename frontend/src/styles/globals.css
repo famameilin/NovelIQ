@@ -109,11 +109,11 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* SVG gradient stop-color — maps CSS variables to stop-color property */
+  /* SVG 渐变 stop-color 会把 CSS 变量映射到 stop-color 属性 */
   .stop-color-primary { stop-color: hsl(var(--primary)); }
   .stop-color-primary-hover { stop-color: hsl(var(--primary-hover)); }
 
-  /* ===== Custom Animations ===== */
+  /* ===== 自定义动画 ===== */
   @keyframes fade-in-up {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
