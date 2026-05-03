@@ -11,7 +11,7 @@ import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import type { DiagnosisResult } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface DiagnosisSummaryCardProps {
@@ -21,7 +21,7 @@ export interface DiagnosisSummaryCardProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 /**

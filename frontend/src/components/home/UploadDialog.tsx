@@ -17,7 +17,7 @@ import { formatFileSize } from "@/lib/utils";
 import { appConfig } from "@/config";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface UploadFileInfo {
@@ -39,7 +39,7 @@ export interface UploadDialogProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Utils                                                             */
+/*  工具函数                                                           */
 /* ------------------------------------------------------------------ */
 
 function generateId(): string {
@@ -64,7 +64,7 @@ function validateFile(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Components                                                        */
+/*  组件片段                                                           */
 /* ------------------------------------------------------------------ */
 
 function FileListItem({
@@ -137,7 +137,7 @@ function FileListItem({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 export function UploadDialog({
@@ -203,7 +203,7 @@ export function UploadDialog({
     abortControllerRef.current = controller;
     setIsUploading(true);
 
-    // Update all pending files to uploading
+    // 把所有待上传文件更新为上传中
     const uploadingFiles = files.map((f) =>
       f.status === "pending" ? { ...f, status: "uploading" as const } : f
     );
@@ -212,7 +212,7 @@ export function UploadDialog({
     try {
       await onUpload?.(controller.signal);
 
-      // Mark as success
+      // 标记为成功
       onFilesChange?.(
         uploadingFiles.map((f) =>
           f.status === "uploading"

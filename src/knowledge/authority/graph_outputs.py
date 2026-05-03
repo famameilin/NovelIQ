@@ -29,7 +29,7 @@ def build_graph_shared_summary(
     participant_states: list[ParticipantState],
     confirmed_relations: list[ConfirmedRelation],
 ) -> GraphSharedSummary:
-    """Compute aggregate-only graph summary counters for shared downstream consumers"""
+    """为共享下游消费者计算仅聚合级的图谱摘要计数器"""
 
     node_count, edge_count, density = summarize_relation_network(
         [(relation.from_name, relation.to_name) for relation in confirmed_relations],
@@ -47,7 +47,7 @@ def build_graph_page_summary(
     participant_states: list[ParticipantState],
     confirmed_relations: list[ConfirmedRelation],
 ) -> GraphPageSummary:
-    """Compute graph-page-only summary highlights from stable authority facts"""
+    """根据稳定 authority 事实计算仅供图谱页面使用的摘要高亮"""
 
     shared_summary = build_graph_shared_summary(participant_states, confirmed_relations)
     # graph page 的 `core_characters` 是页面契约字段，只能从 character 节点中挑选，
@@ -90,7 +90,7 @@ def build_graph_quality_signals(
     confirmed_relations: list[ConfirmedRelation],
     relation_events: list[RelationEvent],
 ) -> GraphQualitySignals:
-    """Compute aggregate-only graph quality counters for shared downstream consumers"""
+    """为共享下游消费者计算仅聚合级的图谱质量计数器"""
 
     low_confidence_count = sum(1 for event in relation_events if event.confidence is None or event.confidence < 0.6)
     relation_conflicts = _detect_relation_conflicts(confirmed_relations)
@@ -104,7 +104,7 @@ def build_graph_quality_report(
     confirmed_relations: list[ConfirmedRelation],
     relation_events: list[RelationEvent],
 ) -> GraphQualitySignals:
-    """Collapse graph quality details into aggregate-only report counters"""
+    """把图谱质量明细收口为仅聚合级的报告计数器"""
 
     shared_quality = build_graph_quality_signals(confirmed_relations, relation_events)
     # graph page 继续暴露全历史低置信事件计数；但 export/diagnosis
@@ -120,7 +120,7 @@ def build_graph_page_quality(
     confirmed_relations: list[ConfirmedRelation],
     relation_events: list[RelationEvent],
 ) -> GraphPageQualityDetails:
-    """Compute graph-page-only quality details from stable authority facts"""
+    """根据稳定 authority 事实计算仅供图谱页面使用的质量明细"""
 
     shared_quality = build_graph_quality_signals(confirmed_relations, relation_events)
     relation_conflicts = _detect_relation_conflicts(confirmed_relations)

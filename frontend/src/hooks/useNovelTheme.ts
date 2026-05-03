@@ -16,8 +16,8 @@ const STALE_TIME = 5 * 60 * 1000;
  * 修改原因: 新建任务的诊断结果尚未生成时，不能用 DEFAULT_SEED 推导业务页背景色，
  * 否则分析进度页会先切到紫色底；只在拿到有效 theme_color 后才进入任务主题
  *
- * Applies the dynamic theme palette to :root CSS variables
- * Auto-fetches theme_color from diagnosis API when novel/task changes
+ * 把动态主题色板应用到 `:root` 的 CSS 变量
+ * 当 novel / task 变化时，自动从 diagnosis API 拉取 `theme_color`
  */
 export function useNovelTheme() {
   const { seedColor, isDark, setSeedColor } = useThemeStore();
@@ -123,7 +123,7 @@ export function useNovelTheme() {
     shouldUseNeutralTheme,
   ]);
 
-  // Apply theme to CSS variables
+  // 把主题色板应用到 CSS 变量
   useEffect(() => {
     const palette = shouldUseNeutralPalette
       ? generateHomeThemePalette()

@@ -45,7 +45,7 @@ echarts.use([
 ]);
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface RhythmCurveChartProps {
@@ -65,7 +65,7 @@ const SERIES_CONFIG = [
 ] as const;
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartProps>(

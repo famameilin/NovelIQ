@@ -156,7 +156,7 @@ export function ComponentShowcase() {
         </p>
       </div>
 
-      {/* ===== Theme Color Switcher ===== */}
+      {/* ===== 主题色切换器 ===== */}
       <Section title="动态主题色切换">
         <p className="text-sm text-text-secondary">
           点击下方色块可实时切换主题色，观察全页面颜色联动效果。当前种子色：
@@ -183,7 +183,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Live CSS Variable Monitor ===== */}
+      {/* ===== 实时 CSS 变量监视器 ===== */}
       <Section title="实时 CSS 变量监控">
         <p className="text-sm text-text-secondary">
           下表显示当前 <code>:root</code> 上的实际 CSS 变量值（切换主题色后实时变化）
@@ -191,7 +191,7 @@ export function ComponentShowcase() {
         <LiveCSSMonitor />
       </Section>
 
-      {/* ===== MetricCard ===== */}
+      {/* ===== 指标卡片 ===== */}
       <Section title="MetricCard 指标卡片">
         <p className="text-sm text-text-secondary mb-4">
           支持 <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">accent</code> 多色强调、
@@ -264,7 +264,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Buttons ===== */}
+      {/* ===== 按钮 ===== */}
       <Section title="Button 按钮">
         <div className="flex flex-wrap items-center gap-3">
           <Button>默认按钮</Button>
@@ -285,7 +285,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Badge ===== */}
+      {/* ===== 徽标 ===== */}
       <Section title="Badge 标签">
         <div className="flex flex-wrap items-center gap-3">
           <Badge>默认</Badge>
@@ -296,7 +296,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Card ===== */}
+      {/* ===== 卡片 ===== */}
       <Section title="Card 卡片">
         <p className="text-sm text-text-secondary mb-4">
           支持 <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">default</code>（基础）和
@@ -365,7 +365,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== AnalysisProgressRing ===== */}
+      {/* ===== 分析进度环 ===== */}
       <Section title="AnalysisProgressRing 进度环">
         <div className="flex flex-wrap items-end gap-6">
           <div className="flex flex-col items-center gap-2">
@@ -405,7 +405,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Select ===== */}
+      {/* ===== 选择器 ===== */}
       <Section title="Select 选择器">
         <div className="flex flex-wrap items-center gap-4">
           <Select>
@@ -442,7 +442,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Dialog ===== */}
+      {/* ===== 对话框 ===== */}
       <Section title="Dialog 对话框">
         <Dialog>
           <DialogTrigger asChild>
@@ -465,7 +465,7 @@ export function ComponentShowcase() {
         </Dialog>
       </Section>
 
-      {/* ===== Tabs ===== */}
+      {/* ===== 标签页 ===== */}
       <Section title="Tabs 标签页">
         <Tabs defaultValue="emotion" className="w-full max-w-lg">
           <TabsList>
@@ -506,7 +506,7 @@ export function ComponentShowcase() {
         </Tabs>
       </Section>
 
-      {/* ===== DropdownMenu ===== */}
+      {/* ===== 下拉菜单 ===== */}
       <Section title="DropdownMenu 下拉菜单">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -533,7 +533,7 @@ export function ComponentShowcase() {
         </DropdownMenu>
       </Section>
 
-      {/* ===== Table ===== */}
+      {/* ===== 表格 ===== */}
       <Section title="Table 表格">
         <Card>
           <Table>
@@ -578,7 +578,7 @@ export function ComponentShowcase() {
         </Card>
       </Section>
 
-      {/* ===== Tooltip ===== */}
+      {/* ===== 提示框 ===== */}
       <Section title="Tooltip 提示">
         <div className="flex flex-wrap items-center gap-4">
           <Tooltip>
@@ -602,7 +602,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Toast ===== */}
+      {/* ===== Toast 提示 ===== */}
       <Section title="Toast 通知">
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={() => toast.success("分析完成！")}>成功通知</Button>
@@ -635,7 +635,7 @@ export function ComponentShowcase() {
         </div>
       </Section>
 
-      {/* ===== Color Palette Preview ===== */}
+      {/* ===== 调色板预览 ===== */}
       <Section title="当前主题色板预览">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {[

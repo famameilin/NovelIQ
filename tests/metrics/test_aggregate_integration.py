@@ -1,5 +1,5 @@
 """
-Aggregate metrics integration tests.
+聚合指标集成测试。
 """
 
 import sys

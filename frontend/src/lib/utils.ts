@@ -1,21 +1,21 @@
 import type { TaskStatus } from "@/api/types";
 
 /**
- * Format a number to a fixed number of decimal places
+ * 按固定小数位格式化数字
  */
 export function formatNumber(value: number, decimals = 2): string {
   return value.toFixed(decimals);
 }
 
 /**
- * Format a percentage value (0-1) to display string
+ * 把百分比数值（0-1）格式化为展示字符串
  */
 export function formatPercent(value: number, decimals = 1): string {
   return `${(value * 100).toFixed(decimals)}%`;
 }
 
 /**
- * Truncate a string to a maximum length with ellipsis
+ * 按最大长度截断字符串，并补省略号
  */
 export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
@@ -23,14 +23,14 @@ export function truncate(str: string, maxLength: number): string {
 }
 
 /**
- * Validate hex color format
+ * 校验十六进制颜色格式
  */
 export function isValidHexColor(hex: string): boolean {
   return /^#[0-9A-Fa-f]{6}$/.test(hex);
 }
 
 /**
- * Format file size to human readable string
+ * 把文件大小格式化为人类可读字符串
  */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";

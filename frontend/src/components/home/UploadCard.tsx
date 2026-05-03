@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { formatFileSize } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface UploadFile {
@@ -21,13 +21,13 @@ export interface UploadFile {
 export interface UploadCardProps {
   onFilesSelected?: (files: File[]) => void;
   onUpload?: (files: UploadFile[]) => Promise<void>;
-  maxFileSize?: number; // bytes, default 10MB
-  acceptedTypes?: string[]; // default [".txt"]
+  maxFileSize?: number; // 字节数，默认 10MB
+  acceptedTypes?: string[]; // 默认 [".txt"]
   className?: string;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Utils                                                             */
+/*  工具函数                                                           */
 /* ------------------------------------------------------------------ */
 
 function generateId(): string {
@@ -52,7 +52,7 @@ function validateFile(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Components                                                        */
+/*  组件片段                                                           */
 /* ------------------------------------------------------------------ */
 
 function FileListItem({
@@ -133,13 +133,13 @@ function FileListItem({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 export function UploadCard({
   onFilesSelected,
   onUpload,
-  maxFileSize = 10 * 1024 * 1024, // 10MB
+  maxFileSize = 10 * 1024 * 1024, // 10MB 上限
   acceptedTypes = [".txt"],
   className,
 }: UploadCardProps) {
@@ -211,7 +211,7 @@ export function UploadCard({
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       processFiles(e.target.files);
-      // Reset input value to allow selecting the same file again
+      // 重置 input 值，允许再次选择同一个文件
       e.target.value = "";
     },
     [processFiles]
@@ -225,14 +225,14 @@ export function UploadCard({
     const pendingFiles = files.filter((f) => f.status === "pending");
     if (pendingFiles.length === 0) return;
 
-    // Mark all pending files as uploading
+    // 把所有待上传文件标记为上传中
     setFiles((prev) =>
       prev.map((f) =>
         f.status === "pending" ? { ...f, status: "uploading" } : f
       )
     );
 
-    // Simulate progress updates
+    // 模拟进度更新
     const progressInterval = setInterval(() => {
       setFiles((prev) =>
         prev.map((f) => {
@@ -247,7 +247,7 @@ export function UploadCard({
     try {
       await onUpload?.(pendingFiles);
 
-      // Mark as success
+      // 标记为成功
       clearInterval(progressInterval);
       setFiles((prev) =>
         prev.map((f) =>

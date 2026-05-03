@@ -308,7 +308,7 @@ def _build_active_entities_prompt_from_authority(
     chunk_id: int,
     lookback: int,
 ) -> str | None:
-    """Reuse the authority-owned Level 2 contract even when the RAG provider is unavailable"""
+    """即便 RAG provider 不可用，也继续复用 authority 自有的 Level 2 合同"""
 
     active_entities = _build_active_entity_contexts_from_authority(conn, run_id, chunk_id, lookback)
     return render_active_entities_from_authority(active_entities)

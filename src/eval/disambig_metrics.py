@@ -18,7 +18,7 @@ class MergeRecord:
     alias: str
     system_canonical: str  # 系统判决的规范名
     gold_canonical: str | None = None  # 金标中的规范名
-    gold_judgment: str | None = None  # should_merge / should_not_merge / ambiguous
+    gold_judgment: str | None = None  # should_merge / should_not_merge / ambiguous（应合并 / 不应合并 / 模糊）
     gold_evidence: str = ""
 
     @property

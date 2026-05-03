@@ -1,4 +1,4 @@
-// Novel
+// 小说
 
 export interface Novel {
   novel_id: string;
@@ -15,7 +15,7 @@ export interface NovelUploadResponse {
   message: string;
 }
 
-// Analysis tasks
+// 分析任务
 
 export type TaskStatus =
   | "pending"
@@ -69,7 +69,7 @@ export interface BatchDeleteTasksResponse {
   failed_ids: BatchDeleteTaskFailure[];
 }
 
-// Characters
+// 角色
 
 export interface Character {
   name: string;
@@ -82,7 +82,7 @@ export interface Character {
   avg_emotion_score?: number | null;
 }
 
-// Chunk curves
+// 分块曲线
 
 export interface ChunkCurvePoint {
   chunk_id: number;
@@ -164,7 +164,7 @@ export interface ChunkAnnotation {
   dialogues: ChunkDialogue[];
 }
 
-// Topics
+// 主题
 
 // LDA 主题建模结果类型定义。label 字段为可选预留字段，
 //       后端当前不返回，供未来 LLM 诊断阶段生成主题命名时使用
@@ -177,7 +177,7 @@ export interface Topic {
   label?: string;
 }
 
-// Diagnosis
+// 诊断
 
 export interface DiagnosisResult {
   rerun_required?: boolean;
@@ -220,7 +220,7 @@ export interface ForeshadowingThread {
   latest_why_unresolved_now?: string | null;
 }
 
-// Knowledge Graph
+// 知识图谱
 
 // 更新图谱节点类型，添加实体详细信息字段
 
@@ -272,8 +272,8 @@ export interface GraphKeyRelation {
   support_count: number;
 }
 
-// Graph page owns these display summaries; diagnosis/export reuse a narrower
-// aggregate-only graph report on the backend and should not share this shape
+// 这些展示摘要由图谱页独占；
+// diagnosis / export 在后端只复用更窄的聚合图谱报告，不应共用这一数据形状
 export interface GraphPageSummary {
   node_count: number;
   edge_count: number;
@@ -331,7 +331,7 @@ export interface GraphEventsPageResponse {
   page_info: GraphEventsPageInfo;
 }
 
-// Timeline
+// 时间轴
 
 // 更新 Timeline 类型定义，与后端 API 响应结构对齐
 
@@ -415,7 +415,7 @@ export interface TimelineResponse {
   tension_curve?: number[];
 }
 
-// Metrics
+// 指标
 
 export interface NarrativeStructureMetrics {
   act1_ratio?: number;
@@ -457,13 +457,13 @@ export interface StyleStatsMetrics {
   dialogue_ratio: number;
 }
 
-// Common
+// 通用
 
 export interface ApiError {
   detail: string;
 }
 
-// Pagination
+// 分页
 
 export interface PaginatedResponse<T> {
   items: T[];

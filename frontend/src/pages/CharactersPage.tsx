@@ -26,7 +26,7 @@ function SkeletonGrid() {
       animate={{ opacity: 1 }}
       className="space-y-6"
     >
-      {/* Ranking bar skeleton */}
+      {/* 排行条骨架屏 */}
       <Card variant="elevated" className="rounded-xl h-[460px] overflow-hidden">
         <CardContent className="p-5">
           <div className="space-y-3">
@@ -36,7 +36,7 @@ function SkeletonGrid() {
         </CardContent>
       </Card>
 
-      {/* Pie + Protagonist Card skeleton */}
+      {/* 饼图与主角卡片骨架屏 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card variant="elevated" className="rounded-xl h-[340px] overflow-hidden">
           <CardContent className="p-5">
@@ -99,7 +99,7 @@ function EmptyDiagnosisState() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -117,7 +117,7 @@ export function CharactersPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // Sync novelId to store on mount; initialize task from URL if present
+  // 组件挂载时把 novelId 同步到 store；如果 URL 带 task_id 就一并初始化任务
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
@@ -127,7 +127,7 @@ export function CharactersPage() {
     }
   }, [novelId, urlTaskId, setNovel, setTask]);
 
-  // Data fetching
+  // 数据获取
   const enabled = !!novelId && !!currentTaskId;
 
   const diagnosisQuery = useQuery({
@@ -184,11 +184,11 @@ export function CharactersPage() {
     !isError &&
     isDiagnosisRerunRequired;
 
-  // ---------- Render ----------
+  // ---------- 渲染 ----------
 
   return (
     <AnalysisWorkspace title="角色分析">
-      {/* No task selected prompt */}
+      {/* 未选择任务提示 */}
       {!currentTaskId && (
         <DashboardCardShell
           title="角色分析"
@@ -201,10 +201,10 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
-      {/* Loading skeleton */}
+      {/* 加载骨架屏 */}
       {isLoading && <SkeletonGrid />}
 
-      {/* Error state */}
+      {/* 错误状态 */}
       {isAnalysisNotComplete && !isLoading && (
         <AnalysisNotCompleteState
           title="角色结果尚未完成"
@@ -226,7 +226,7 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
-      {/* Empty data state */}
+      {/* 空数据状态 */}
       {characters && characters.length === 0 && !isLoading && !isError && (
         <DashboardCardShell
           title="暂无角色数据"
@@ -239,13 +239,13 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
-      {/* Diagnosis empty state */}
+      {/* diagnosis 为空时的状态 */}
       {hasNullDiagnosis && !isLoading && !isError && <EmptyDiagnosisState />}
 
-      {/* Contract-broken state */}
+      {/* 合同缺失状态 */}
       {shouldShowIncompleteFocusContractState && <IncompleteFocusContractState />}
 
-      {/* Main content */}
+      {/* 主内容 */}
       {characters && characters.length > 0 && !isLoading && !shouldShowIncompleteFocusContractState && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}

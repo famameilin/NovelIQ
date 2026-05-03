@@ -23,7 +23,7 @@ from src.models.local.disambiguation import DisambiguationPromptContext, Extende
 
 
 class _NoopDisambiguationClient:
-    """Fallback disambiguation client for injected lightweight annotation stubs"""
+    """供注入式轻量标注桩使用的后备消歧客户端"""
 
     def __init__(self, config: Any) -> None:
         self._config = config
