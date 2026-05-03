@@ -16,7 +16,6 @@ class TestEntityRegistry(unittest.TestCase):
     实体注册测试
 
     修改时间: 2026-03-14
-    修改者: TraeAI
     任务: metrics-repository-refactor
     修改内容: 测试实体上下文查询和提示词格式化（基于 GraphRepository）
     """

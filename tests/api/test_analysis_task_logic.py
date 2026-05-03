@@ -3,7 +3,6 @@
 
 创建时间: 2026-03-11
 修改时间: 2026-04-08
-修改者: TraeAI
 任务: 重写测试以匹配当前 NovelService API
 修改内容: 基于当前 NovelService 实现重写测试，使用依赖注入的 session
 说明: 只有 1 个 task 时返回，多个 task 时报错

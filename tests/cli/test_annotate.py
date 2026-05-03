@@ -2,26 +2,21 @@
 CLI annotate 模块测试
 
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 测试标注流程
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration
 修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
 
 修改时间: 2026-03-29
-修改者: TraeAI
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 字段相关测试
 """
@@ -70,11 +65,9 @@ def create_mock_annotation() -> MultiPhaseAnnotationResult:
     创建模拟的 MultiPhaseAnnotationResult
 
     修改时间: 2026-03-18
-    修改者: TraeAI
     任务: code-quality-refactor - 修复测试以适应 MultiPhaseAnnotationResult 返回类型
 
     修改时间: 2026-03-29
-    修改者: TraeAI
     任务: refactor-phase1-identity-extraction
     修改内容: 移除 relations 字段
     """

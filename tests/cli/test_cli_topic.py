@@ -2,21 +2,17 @@
 CLI topic model 模块测试
 
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 测试主题建模流程
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration
 修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
 
 修改时间: 2026-03-15
-修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
 """

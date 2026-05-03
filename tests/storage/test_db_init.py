@@ -39,7 +39,6 @@ def test_init_db_runs_focus_contract_guard_after_runtime_schema() -> None:
     验证 init_db() 主链路会在 create_all 和 runtime schema 之后执行 focus-contract fail-closed 校验。
 
     创建时间: 2026-04-27
-    创建者: Codex
     任务: fix-focus-contract-runtime-schema-conflict
     说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把 focus-contract 校验从主链路上绕开。
     """
@@ -61,7 +60,6 @@ def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> Non
     验证 PostgreSQL runtime schema 不会再补旧 protagonist-contract 列。
 
     创建时间: 2026-04-27
-    创建者: Codex
     任务: fix-focus-contract-runtime-schema-conflict
     说明: 当前主线以 focus-contract fail-closed 为准；
           若 runtime schema 仍偷偷补 `protagonist/main_characters/core_cast/theme_color`，就会和启动校验自相矛盾。
@@ -95,7 +93,6 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     验证测试库初始化后已具备新增的分析链路外键。
 
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-analysis-related-foreign-keys
     说明: 这里直接查当前测试 schema 的 pg 元数据，确保缺失的 8 条外键已经真正落到数据库。
     """
@@ -132,7 +129,6 @@ def test_timeline_contract_runtime_schema_no_longer_creates_version_columns() ->
     验证 pytest fresh schema 不再创建 timeline / graph projection 版本列。
 
     创建时间: 2026-04-28
-    修改者: Codex
     任务: remove-timeline-version-columns
     说明: 当前主线不再依赖 run-level version 标签 gate；
           fresh schema 下若还出现这两个列，说明旧兼容层又被带回来了。
@@ -169,7 +165,6 @@ def test_timeline_contract_runtime_schema_no_longer_creates_version_columns() ->
 def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
     """
     创建时间: 2026-04-27
-    创建者: Codex
     任务: fix-stage-summary-orm-duplicate-fk
     说明: StageSummary.run_id 只应在 ORM 元数据里声明一次外键；
           否则 schema diff 会持续把同义 FK 误报成元数据漂移。

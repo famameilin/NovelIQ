@@ -2,7 +2,6 @@
 phrase 模式匹配测试
 
 修改时间: 2026-04-06
-修改者: GLM-5
 任务: 移除向后兼容代码
 修改内容: 移除对 count_token_hits 的引用，仅使用 count_mixed_hits
 """

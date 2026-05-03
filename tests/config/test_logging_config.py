@@ -55,7 +55,6 @@ class TestLoggingConfig(unittest.TestCase):
         测试终端日志文件功能
 
         创建时间: 2026-03-12
-        创建者: TraeAI
         任务: 添加终端日志文件支持
         """
         with tempfile.TemporaryDirectory() as tmp:

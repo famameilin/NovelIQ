@@ -1,10 +1,8 @@
 """
 创建时间: 2025-03-11
-创建者: TraeAI
 任务: 本地模型错误处理测试
 
 修改时间: 2026-03-16
-修改者: TraeAI
 任务: 更新测试用例适配新架构
 修改内容: 适配 LiteLLM 异常类型，将 openai 异常替换为 litellm 异常
 
@@ -17,7 +15,6 @@
 修改内容: 将 unittest.TestCase 中的 async 测试改为同步方法显式 asyncio.run，确保 pytest 真正执行断言
 
 修改时间: 2026-03-16
-修改者: TraeAI
 任务: 修复测试耗时问题
 修改内容: 直接 Mock litellm.completion 而非使用 LiteLLM 类，避免内部重试"""
 
@@ -142,12 +139,10 @@ class TestErrorHandling(unittest.TestCase):
     def test_disambiguate_connection_error_raises_connection_error(self) -> None:
         """
         修改时间: 2026-03-17
-        修改者: TraeAI
         任务: 移除 Instructor 依赖
         修改内容: 直接 Mock mock_client.chat.completions.create
 
         修改时间: 2026-04-09
-        修改者: TraeAI
         任务: 修复异步测试问题
         修改内容: 添加 @patch 装饰器来 Mock call_disambiguate_api，避免调用异步方法
         """

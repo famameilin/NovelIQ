@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-10
-创建者: TraeAI
 任务: implement-level3-vector-retrieval
 说明: Level 3 向量检索单元测试
 

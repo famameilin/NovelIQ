@@ -97,7 +97,6 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
     验证 message-only progress 事件不会改写已有的 phase 级 sub_stage/sub_percent。
 
     创建时间: 2026-04-28
-    创建者: Codex
     任务: fix-level3-sse-phase-progress-contract
     说明: Level3 mention 这类更细粒度节点只应刷新提示文案，EventBus 仍应沿用当前 phase
           上下文，避免前端下方 sub 进度条从 phase 级跳成内部 mention 级。
@@ -152,7 +151,6 @@ async def test_eventbus_calculates_percent_from_current_total():
     验证 EventBus.emit 在事件没有提供 percent 时，根据 current/total 自动计算
 
     创建时间: 2026-04-11
-    创建者: GLM-5
     任务: fix-thinking-percent-calculation
     说明: 测试 thinking 事件没有 percent 字段时，EventBus 应根据 current/total 自动计算
     """
@@ -201,7 +199,6 @@ async def test_eventbus_calculates_percent_for_different_stages():
     验证 EventBus._calculate_percent_for_stage 对不同阶段的计算
 
     创建时间: 2026-04-11
-    创建者: GLM-5
     任务: fix-thinking-percent-calculation
     """
     task_manager = MagicMock()
@@ -232,7 +229,6 @@ async def test_eventbus_start_event_without_current_does_not_write_none_progress
     验证 start 事件缺少 current 时，不会把 None 透传给 TaskManager。
 
     创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
     任务: fix-eventbus-null-progress-write
     说明: workflow 内部的 start 事件通常只有 stage/message，不带 current。
           这里要求 EventBus 只写回已解析出的字段，避免 DB 非空列收到 None。
@@ -261,7 +257,6 @@ async def test_eventbus_demotes_llm_output_and_thinking_logs_to_debug():
     验证 EventBus 会把高频 LLM 流式事件记录到 DEBUG，而不是 INFO。
 
     创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
     任务: demote-llm-output-eventbus-log
     说明: output/thinking 会携带原始模型分片，若落到 INFO 会污染运行日志；
           start/progress/complete 仍应保留在 INFO，便于跟踪任务进度。
@@ -290,7 +285,6 @@ async def test_eventbus_demotes_high_frequency_embedding_progress_logs_to_debug(
     验证 EventBus 会把高频 embedding batch progress 记录到 DEBUG，而不是 INFO。
 
     创建时间: 2026-04-28
-    创建者: Codex
     任务: demote-eventbus-embedding-progress-log
     说明: `semantic_chunking_embedding` / `paragraph_embedding` 会在 preprocess 中按批次连续发 progress；
           这类日志应降到 DEBUG，但普通 progress 仍应保留在 INFO。
@@ -335,7 +329,6 @@ async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100(
     验证阶段完成事件写回的 percent 使用当前阶段终点，而不是错误地统一写成 100。
 
     创建时间: 2026-04-28
-    创建者: Codex
     任务: fix-stage-complete-percent-range
     说明: 前端和 DB 都按全局 percent 解释阶段进度；
           preprocess complete 若被写成 100，会污染当前阶段判断与后续 backfill 语义。

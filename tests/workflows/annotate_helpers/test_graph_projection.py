@@ -87,7 +87,6 @@ def test_project_graph_tables_builds_and_rebuilds_graph_entity_participants(db_s
 def test_project_graph_tables_removes_stale_relation_when_change_becomes_no_change(db_session) -> None:
     """
     创建时间: 2026-04-27
-    创建者: Codex
     任务: fix-graph-projection-no-change-refresh
     说明: 已投影的关系若后来被修正为“无变化”，graph event/current relation/participant projection
           都必须一起回刷，不能继续残留旧图谱状态。

@@ -1,6 +1,5 @@
 """
 创建时间: 2026-04-22
-创建者: Codex
 任务: distinguish-thinking-visibility
 说明: 回归测试模型交互记录器对 thinking 可见性状态的判定。
 """
@@ -22,7 +21,6 @@ def _build_messages() -> list[dict[str, str]]:
 def test_record_model_interaction_marks_tokens_only_when_reasoning_tokens_exist() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: distinguish-thinking-visibility
     说明: 没有 thinking 文本但 reasoning_tokens > 0 时，应明确记成 tokens_only。
     """
@@ -58,7 +56,6 @@ def test_record_model_interaction_marks_tokens_only_when_reasoning_tokens_exist(
 def test_record_model_interaction_marks_none_when_thinking_disabled() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: distinguish-thinking-visibility
     说明: 本次调用明确没请求 think 时，即使没有 reasoning token，也应记录为 none。
     """
@@ -94,7 +91,6 @@ def test_record_model_interaction_marks_none_when_thinking_disabled() -> None:
 def test_record_model_interaction_preserves_error_status() -> None:
     """
     创建时间: 2026-04-22
-    创建者: Codex
     任务: fix-token-coverage-status
     说明: 重试链路写入的 error 占位记录必须保留 error 状态，
           后续 coverage 才能排除这些并未拿到真实响应的调用。

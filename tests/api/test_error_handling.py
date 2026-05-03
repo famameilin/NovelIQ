@@ -2,7 +2,6 @@
 API 错误处理测试
 
 修改时间: 2026-04-05
-修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """
@@ -17,17 +16,14 @@ class TestErrorHandling:
         """测试错误响应格式
 
         修改时间: 2026-03-13
-        修改者: TraeAI
         任务: refactor-core-data-layer-functions
         修改原因: NovelNotFoundError 应返回 404（资源不存在），而非 400
 
         修改时间: 2026-03-18
-        修改者: TraeAI
         任务: 修复API参数问题
         修改内容: 将task_id改为run_id，使用完整UUID查询
 
         修改时间: 2026-03-19
-        修改者: TraeAI
         任务: API接口参数统一优化
         修改内容: 将run_id参数改回task_id，使用8位短UUID
         """
