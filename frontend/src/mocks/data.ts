@@ -26,7 +26,7 @@ import type {
 } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
+/*  辅助函数                                                           */
 /* ------------------------------------------------------------------ */
 
 function uuid(): string {
@@ -422,7 +422,7 @@ export function createGraph(): GraphData {
   };
 
   const quality = {
-    // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only
+    // Mock 合同遵循 authority 语义：`conflict_count` 只反映当前已确认关系
     conflict_count: 0,
     low_confidence_count: allEvents.filter((event) => (event.confidence ?? 0) < 0.6).length,
     conflicts: [],

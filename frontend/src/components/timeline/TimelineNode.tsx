@@ -20,7 +20,7 @@ const NODE_SIZE_MAX = 28;
 const IMPORTANCE_SCORE_MAX = 13;
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface TimelineNodeProps {
@@ -35,7 +35,7 @@ export interface TimelineNodeProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export function TimelineNode({
@@ -124,7 +124,7 @@ export function TimelineNode({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helper Functions                                                  */
+/*  辅助函数                                                           */
 /* ------------------------------------------------------------------ */
 
 function calculateNodeSize(importanceScore: number): number {

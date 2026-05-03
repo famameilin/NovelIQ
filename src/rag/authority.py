@@ -10,7 +10,7 @@ from src.rag.evidence_types import (
 
 
 class Level1AuthorityProvider:
-    """Build the minimal Level 1 authority contract from graph tables"""
+    """从图谱表构建最小 Level 1 authority 合同"""
 
     def __init__(self, graph_repo) -> None:
         self._graph_repo = graph_repo

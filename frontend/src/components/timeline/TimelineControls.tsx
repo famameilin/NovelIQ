@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Filter } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface TimelineControlsProps {
@@ -27,7 +27,7 @@ export interface TimelineControlsProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Constants                                                         */
+/*  常量                                                               */
 /* ------------------------------------------------------------------ */
 
 const LEVEL_CONFIG: Record<
@@ -40,7 +40,7 @@ const LEVEL_CONFIG: Record<
 };
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export function TimelineControls({

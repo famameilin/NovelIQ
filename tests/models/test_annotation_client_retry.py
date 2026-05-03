@@ -159,7 +159,7 @@ def create_phase4_evidence_bundle() -> EvidenceBundle:
 
 class MockAnnotationClient:
     """
-    Mock AnnotationClient for testing
+    供测试使用的 Mock AnnotationClient
 
     创建时间: 2026-03-14
     任务: Phase1/Phase2独立重试机制

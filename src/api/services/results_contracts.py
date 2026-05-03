@@ -218,7 +218,7 @@ def build_aggregate_metrics_contract_from_models(
 
 
 def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
-    """Build the stable non-graph aggregate metrics bundle used by export surfaces"""
+    """构建供导出层使用的稳定非图谱聚合指标包"""
 
     narrative_structure, emotion_stats, character_stats, style_stats = _convert_aggregate_result(result)
     return build_aggregate_metrics_contract_from_models(

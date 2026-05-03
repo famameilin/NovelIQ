@@ -69,7 +69,7 @@ def _serialize_graph_event(event: Any) -> dict[str, Any]:
 
 
 def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
-    """Convert graph-page summary facts into the public DTO"""
+    """把图谱页摘要事实转换为对外 DTO"""
     return {
         "node_count": summary.node_count,
         "edge_count": summary.edge_count,
@@ -88,7 +88,7 @@ def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
 
 
 def _serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str, Any]:
-    """Convert graph-page quality facts into the public DTO"""
+    """把图谱页质量事实转换为对外 DTO"""
     return {
         "conflict_count": quality.conflict_count,
         "low_confidence_count": quality.low_confidence_count,

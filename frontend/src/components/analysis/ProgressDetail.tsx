@@ -89,7 +89,7 @@ function formatDuration(ms: number): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface ProgressDetailProps {
@@ -132,7 +132,7 @@ export function ProgressDetail({ className }: ProgressDetailProps) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sub Components                                                    */
+/*  子组件                                                             */
 /* ------------------------------------------------------------------ */
 
 interface ProgressBarProps {

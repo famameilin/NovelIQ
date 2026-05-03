@@ -46,10 +46,10 @@ class AliasMapping:
 @dataclass(slots=True)
 class CanonicalEntity:
     """
-    Stable entity identity inside one run
+    单次运行内稳定的实体身份
 
-    Intentionally excludes transient prompt-local state like last_action or
-    last_emotion_score so Level 1 stays a minimal reusable authority contract
+    这里刻意排除 `last_action`、`last_emotion_score` 这类 prompt 局部瞬时状态，
+    以保证 Level 1 始终是最小且可复用的 authority 合同
     """
 
     name: str
@@ -65,7 +65,7 @@ class CanonicalEntity:
 
 @dataclass(slots=True)
 class ConfirmedRelation:
-    """Current authority snapshot for a relation pair, without history"""
+    """单个关系对的当前 authority 快照，不包含历史事件"""
 
     from_name: str
     to_name: str
@@ -84,7 +84,7 @@ class ConfirmedRelation:
 
 @dataclass(slots=True)
 class RelationEvent:
-    """Immutable relation history event for timeline/history consumers"""
+    """供时间轴/历史消费者使用的不可变关系历史事件"""
 
     relation_event_id: int
     chunk_id: int
@@ -111,11 +111,10 @@ class EntityTypeFact:
 @dataclass(slots=True)
 class EntityLifecycle:
     """
-    Stable span/state metadata that can be safely reused across consumers
+    可安全复用于不同消费者的稳定生命周期元数据
 
-    For timeline consumers this is the protected source of truth for
-    character entry/exit spans. Downstream code should not re-derive
-    lifecycle windows from repository rows
+    对时间轴消费者来说，这里是角色进出场区间的受保护真相源。
+    下游代码不应再从 repository 原始行重新推导生命周期窗口
     """
 
     entity_id: int
@@ -130,10 +129,10 @@ class EntityLifecycle:
 @dataclass(slots=True)
 class ActiveEntityContext:
     """
-    Level 2 local context contract for nearby active entities
+    附近活跃实体的 Level 2 局部上下文合同
 
-    This keeps prompt consumers off the repository row shape while still
-    exposing the recent local state they need for annotation/disambiguation
+    这样既能让 prompt 消费者摆脱 repository 行结构，
+    又能暴露标注/消歧所需的最近局部状态
     """
 
     name: str
@@ -150,9 +149,9 @@ class ActiveEntityContext:
 @dataclass(slots=True)
 class ParticipantState:
     """
-    Cross-chunk stable entity state
+    跨 chunk 复用的稳定实体状态
 
-    Intentionally excludes transient local context like last_action or local emotion
+    这里刻意排除 `last_action`、局部情绪等瞬时局部上下文
     """
 
     entity_id: int
@@ -169,10 +168,10 @@ class ParticipantState:
 @dataclass(slots=True)
 class Level1AuthoritySnapshot:
     """
-    Minimal Level 1 authority contract for evidence consumers
+    面向证据消费者的最小 Level 1 authority 合同
 
-    This snapshot exists to feed EvidenceBundle/Level1 assembly and should stay
-    free of timeline history, graph product summaries, and prompt-local state
+    该快照用于 EvidenceBundle / Level1 组装，
+    不应混入时间轴历史、图谱产品摘要或 prompt 局部状态
     """
 
     alias_mappings: list[AliasMapping] = field(default_factory=list)
@@ -205,16 +204,15 @@ TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
 @dataclass(slots=True)
 class TimelineAuthorityView:
     """
-    Protected timeline-facing authority contract
+    面向时间轴的受保护 authority 合同
 
-    The view is intentionally narrower than the full graph authority surface:
-    - ``character_entities`` contains only the character subgraph
-    - ``entity_lifecycles`` stays aligned with that same character set
-    - ``relation_events`` contains immutable history events whose two endpoints
-      both belong to the character subgraph
+    这个视图刻意比完整图谱 authority 面更窄：
+    - `character_entities` 只包含角色子图
+    - `entity_lifecycles` 与同一批角色集合保持一致
+    - `relation_events` 只包含两端都属于角色子图的不可变历史事件
 
-    Timeline consumers should treat this as the shared contract and avoid
-    depending on repository row shapes or current-relation projections
+    时间轴消费者应把这里当作共享合同，
+    不要依赖 repository 行结构或当前关系投影
     """
 
     character_entities: list[CanonicalEntity] = field(default_factory=list)
@@ -265,19 +263,18 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
 @dataclass(slots=True)
 class GraphAuthorityView:
     """
-    Protected graph-facing authority facts
+    面向图谱页面的受保护 authority 事实
 
-    This contract deliberately stops at stable facts:
-    - canonical entity identity
-    - current confirmed relations
-    - full immutable relation history events
-    - participant entity states
+    该合同故意只停留在稳定事实层：
+    - canonical 实体身份
+    - 当前已确认关系
+    - 完整且不可变的关系历史事件
+    - 参与者实体状态
 
-    Product-layer summaries/quality cards belong to graph page assemblers,
-    while diagnosis/aggregate conclusions belong to higher-level analysis
-    If another downstream needs a different slice, add a dedicated contract
-    instead of borrowing repository rows or overloading Level1/Timeline
-    boundaries
+    产品层摘要/质量卡片属于图谱页面组装层，
+    diagnosis / aggregate 结论属于更高层分析。
+    如果其他下游需要不同切片，应新增专用合同，
+    不要借用 repository 行，也不要挤占 Level1 / Timeline 的边界
     """
 
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
@@ -289,11 +286,10 @@ class GraphAuthorityView:
 @dataclass(slots=True)
 class GraphSharedSummary:
     """
-    Aggregate-only graph summary shared outside the graph product surface
+    在图谱产品面之外共享的聚合级图谱摘要
 
-    Diagnosis/export may reuse these counters as graph-owned input signals,
-    but richer highlights such as core characters and key relations must stay
-    in graph-page-only contracts
+    diagnosis / export 可以把这些计数器复用为图谱侧输入信号，
+    但核心角色、关键关系之类更丰富的高亮必须留在 graph-page-only 合同里
     """
 
     node_count: int = 0
@@ -301,7 +297,7 @@ class GraphSharedSummary:
     density: float = 0.0
 
     def to_contract_dict(self) -> dict[str, float | int]:
-        """Serialize the shared graph summary with an explicit field whitelist"""
+        """按显式字段白名单序列化共享图谱摘要"""
 
         return {
             "node_count": self.node_count,
@@ -313,17 +309,17 @@ class GraphSharedSummary:
 @dataclass(slots=True)
 class GraphQualitySignals:
     """
-    Aggregate-only graph quality counters shared outside the graph page
+    在图谱页面之外共享的聚合级图谱质量计数器
 
-    The detailed conflict / low-confidence samples belong to graph product
-    presentation and should not flow into diagnosis/export/aggregate layers
+    详细的冲突样本 / 低置信样本属于图谱产品展示层，
+    不应继续流入 diagnosis / export / aggregate 层
     """
 
     conflict_count: int = 0
     low_confidence_count: int = 0
 
     def to_contract_dict(self) -> dict[str, int]:
-        """Serialize the shared graph quality counters with an explicit field whitelist"""
+        """按显式字段白名单序列化共享图谱质量计数器"""
 
         return {
             "conflict_count": self.conflict_count,
@@ -340,7 +336,7 @@ GRAPH_REPORT_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
 
 @dataclass(slots=True)
 class GraphKeyRelationHighlight:
-    """Page-facing highlight for one representative confirmed relation"""
+    """页面展示用的单条代表性已确认关系高亮"""
 
     from_name: str
     to_name: str
@@ -351,7 +347,7 @@ class GraphKeyRelationHighlight:
 @dataclass(slots=True)
 class GraphPageSummary:
     """
-    Graph-page-only summary contract
+    仅供图谱页面使用的摘要合同
 
     这里可以承载页面首屏高亮（如核心角色、关键关系），但这些字段
     不应进入 diagnosis/export/shared signals，否则 graph page 又会反向定义
@@ -367,7 +363,7 @@ class GraphPageSummary:
 
 @dataclass(slots=True)
 class GraphConflictSample:
-    """Graph-page-only sample for relation type conflicts"""
+    """仅供图谱页面展示的关系类型冲突样本"""
 
     entity_pair: list[int | None] = field(default_factory=list)
     entity_names: list[str] = field(default_factory=list)
@@ -378,7 +374,7 @@ class GraphConflictSample:
 
 @dataclass(slots=True)
 class GraphLowConfidenceSample:
-    """Graph-page-only sample for one low-confidence relation event"""
+    """仅供图谱页面展示的单条低置信关系事件样本"""
 
     relation_event_id: int
     chunk_id: int
@@ -392,7 +388,7 @@ class GraphLowConfidenceSample:
 @dataclass(slots=True)
 class GraphPageQualityDetails:
     """
-    Graph-page-only quality details
+    仅供图谱页面使用的质量明细
 
     共享层只拿 counters；样本明细只服务 graph page 的排障与解释，
     不允许 diagnosis/export 继续顺手复用这些字段
@@ -406,7 +402,7 @@ class GraphPageQualityDetails:
 
 @dataclass(slots=True)
 class ExportRelationSnapshot:
-    """Current relation snapshot dedicated to legacy export payload assembly"""
+    """专供旧版导出 payload 组装的当前关系快照"""
 
     relation_id: int | None = None
     from_name: str = ""
@@ -422,12 +418,11 @@ class ExportRelationSnapshot:
 @dataclass(slots=True)
 class ExportGraphAuthorityView:
     """
-    Dedicated authority surface for legacy graph-derived export payloads
+    专供旧版图谱导出 payload 的 authority 视图
 
-    Results export still emits DTOs such as chunk-level relations and
-    hierarchical relation summaries. This view keeps those payload builders off
-    repository/projection row shapes without overloading GraphAuthorityView or
-    GraphAuthorityReport with export-only concerns
+    结果导出仍会输出 chunk 级关系、层级关系摘要等 DTO。
+    该视图让这些 payload 构建器脱离 repository / projection 行结构，
+    同时避免把仅导出相关的关注点塞进 `GraphAuthorityView` 或 `GraphAuthorityReport`
     """
 
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
@@ -476,12 +471,12 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
 @dataclass(slots=True)
 class GraphAuthorityReport:
     """
-    Narrow authority-owned graph signals for non-graph product consumers
+    面向非图谱产品消费者的精简 authority 图谱信号
 
-    Export and diagnosis may reuse these aggregate graph signals as inputs, but
-    the final diagnosis/aggregate conclusions are assembled outside authority
-    The quality payload is intentionally aggregate-only so these consumers do
-    not recouple to graph page detail samples through report-level shortcuts
+    export 与 diagnosis 可以复用这些聚合图谱信号作为输入，
+    但最终 diagnosis / aggregate 结论仍在 authority 之外组装。
+    质量 payload 也刻意只保留聚合结果，
+    避免调用方通过 report 级捷径重新耦合到图谱页面的明细样本
     """
 
     summary: GraphSharedSummary = field(default_factory=GraphSharedSummary)

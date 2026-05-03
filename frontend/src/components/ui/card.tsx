@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
-/*  Card Variants                                                     */
+/*  Card 变体                                                          */
 /* ------------------------------------------------------------------ */
 
 const cardVariants = cva(
@@ -28,7 +28,7 @@ export interface CardProps
     VariantProps<typeof cardVariants> {}
 
 /* ------------------------------------------------------------------ */
-/*  Card                                                              */
+/*  Card 组件                                                          */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -63,7 +63,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
 Card.displayName = "Card";
 
 /* ------------------------------------------------------------------ */
-/*  Sub-components (unchanged)                                        */
+/*  子组件（保持不变）                                                 */
 /* ------------------------------------------------------------------ */
 
 const CardHeader = React.forwardRef<

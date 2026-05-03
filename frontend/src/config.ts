@@ -13,19 +13,19 @@ export const appConfig = {
   apiBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
 
   /** 上传：单个文件最大字节数 */
-  maxUploadSizeBytes: 10 * 1024 * 1024, // 10 MB
+  maxUploadSizeBytes: 10 * 1024 * 1024, // 10 MB 上限
 
   /** 上传：允许的文件扩展名 */
   acceptedFileTypes: [".txt"],
 
   /** 数据预加载：hover 后缓存的 staleTime（ms） */
-  prefetchStaleTime: 5 * 60 * 1000, // 5 min
+  prefetchStaleTime: 5 * 60 * 1000, // 5 分钟
 
   /** WebSocket 心跳间隔（ms） */
-  wsHeartbeatInterval: 30 * 1000, // 30 s
+  wsHeartbeatInterval: 30 * 1000, // 30 秒
 
   /** WebSocket pong 超时（ms） */
-  wsPongTimeout: 10 * 1000, // 10 s
+  wsPongTimeout: 10 * 1000, // 10 秒
 
   /** WebSocket 指数退避：初始延迟（ms） */
   wsReconnectBaseDelay: 1000,

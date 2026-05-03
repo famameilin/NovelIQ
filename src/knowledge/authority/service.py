@@ -30,7 +30,7 @@ BENIGN_GRAPH_PROJECTION_ERRORS = frozenset({"self relation", "unresolved referen
 
 
 class KnowledgeGraphAuthorityService:
-    """Single authority facade for graph consumers outside the repository layer"""
+    """面向 repository 层外图谱消费者的统一 authority 门面"""
 
     def __init__(self, graph_repo: GraphRepository, annotation_repo: AnnotationRepository | None = None) -> None:
         self._graph_repo = graph_repo
@@ -41,7 +41,7 @@ class KnowledgeGraphAuthorityService:
         return cls(graph_repo=GraphRepository(session), annotation_repo=AnnotationRepository(session))
 
     def build_level1_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
-        """Level 1 stays intentionally minimal for evidence consumers"""
+        """Level 1 对证据消费者刻意保持最小边界"""
 
         entities = self._graph_repo.fetch_entities(run_id)
         return Level1AuthoritySnapshot(
@@ -55,12 +55,11 @@ class KnowledgeGraphAuthorityService:
 
     def build_timeline_view(self, run_id: str) -> TimelineAuthorityView:
         """
-        Build the shared contract consumed by timeline-style downstreams
+        构建供时间轴类下游复用的共享合同
 
-        The timeline contract intentionally exposes only the character subgraph:
-        non-character entities never appear in ``character_entities`` or
-        ``entity_lifecycles``, and relation history is filtered so both
-        endpoints must belong to that same character set
+        时间轴合同刻意只暴露角色子图：
+        非角色实体不会出现在 `character_entities` 或 `entity_lifecycles` 中，
+        关系历史也会被过滤，保证两端都属于同一批角色集合
         """
 
         self.assert_graph_projection_ready(run_id)
@@ -77,9 +76,9 @@ class KnowledgeGraphAuthorityService:
         )
         character_ids = {entity.entity_id for entity in character_entities if entity.entity_id is not None}
 
-        # Freeze the shared timeline contract at the "character subgraph" boundary
-        # Downstream consumers should never need to inspect repository rows to
-        # figure out whether an organization/group edge belongs on the timeline
+        # 把共享时间轴合同冻结在“角色子图”边界，
+        # 下游消费者不应再去检查 repository 原始行，
+        # 判断组织/群体边是否该出现在时间轴上
         relation_events = [
             event
             for event in self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
@@ -98,18 +97,18 @@ class KnowledgeGraphAuthorityService:
         current_chunk: int,
         lookback: int = 10,
     ) -> list[ActiveEntityContext]:
-        """Evidence consumers use a stable Level 2 view instead of raw repo rows"""
+        """证据消费者使用稳定的 Level 2 视图，而不是直接吃原始 repo 行"""
 
         rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, run_id)
         return self._build_active_entity_contexts(rows)
 
     def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
         """
-        Build aggregate graph signals for non-product consumers
+        为非产品层消费者构建聚合图谱信号
 
-        Export/diagnosis can reuse these counters as graph-owned inputs, but
-        they should still assemble their own higher-level conclusions instead
-        of treating this report as the final diagnosis layer
+        export / diagnosis 可以复用这些计数器作为图谱侧输入，
+        但它们仍应自行组装更高层结论，
+        不能把这个 report 直接当成最终 diagnosis 层
         """
 
         self.assert_graph_projection_ready(run_id)
@@ -128,7 +127,7 @@ class KnowledgeGraphAuthorityService:
         return self._assemble_graph_report(participant_states, confirmed_relations, relation_events)
 
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
-        """Return the authority surface used by graph-derived export payloads"""
+        """返回图谱导出 payload 使用的 authority 视图"""
         self.assert_graph_projection_ready(run_id)
         relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
@@ -152,7 +151,7 @@ class KnowledgeGraphAuthorityService:
         )
 
     def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-        """Return graph authority facts with full relation history for downstream product assembly"""
+        """返回带完整关系历史的图谱 authority 事实，供下游产品层组装"""
 
         self.assert_graph_projection_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
@@ -179,7 +178,7 @@ class KnowledgeGraphAuthorityService:
         limit: int | None = None,
     ) -> tuple[list[RelationEvent], int]:
         """
-        Return one relation-history page plus the full event count
+        返回一页关系历史事件以及总事件数
 
         graph page 的 load-more 只需要"稳定排序后的事件分页 + 总数"，
         不应该每次都重建完整 GraphAuthorityView 再在内存里切片
@@ -357,13 +356,13 @@ class KnowledgeGraphAuthorityService:
         for row in rows:
             if not is_global_character_surface_name(row.name):
                 continue
-            # Normalize repository row keys into an authority-owned Level 2 contract
+            # 把 repository 行键名归一化为 authority 自有的 Level 2 合同
             active_entities.append(
                 ActiveEntityContext(
                     name=str(row.name),
                     entity_id=int(row.entity_id) if row.entity_id is not None else None,
                     role=str(row.role) if row.role is not None else None,
-                    # Preserve repository-backed authority fields when present
+                    # 在字段存在时保留 repository 提供的 authority 字段
                     entity_type=str(row.entity_type) if row.entity_type is not None else "character",
                     status=str(row.status) if row.status is not None else "active",
                     last_seen_chunk=int(row.chunk_id) if row.chunk_id is not None else None,

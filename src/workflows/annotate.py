@@ -1,5 +1,5 @@
 """
-Core annotate workflow
+核心标注工作流
 
 Extracted from CLI to workflows to reduce coupling
 

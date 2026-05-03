@@ -231,7 +231,7 @@ def _build_sentence_pool(
         for v in _get_name_variants(name, name_set):
             variant_to_name[v] = name
 
-    # Split into high-priority and normal pools
+    # 拆成高优先级池和普通池
     HIGH_PRIORITY_KEYWORDS = (
         "叫作",
         "名为",
@@ -279,19 +279,19 @@ def _build_sentence_pool(
                 annotated = _annotate_dialogue_structure(sentence)
                 truncated = annotated.strip()[: settings.analysis.sentence_pool_max_chars]
 
-                # High-priority: contains naming keywords
+                # 高优先级：包含命名类关键词
                 if any(kw in sentence for kw in HIGH_PRIORITY_KEYWORDS):
                     if len(high_pool[name]) < 2:
                         high_pool[name].append(truncated)
-                # Alias keywords: insert at head of normal pool
+                # 别名关键词：插入普通池头部
                 elif any(kw in sentence for kw in alias_keywords):
                     if len(normal_pool[name]) < 3:
                         normal_pool[name].insert(0, truncated)
-                # Normal: append
+                # 普通句：直接追加
                 elif len(normal_pool[name]) < 3:
                     normal_pool[name].append(truncated)
 
-    # Merge: high-priority first, then normal
+    # 合并结果：先高优先级，再普通池
     result = {}
     for name in name_list:
         merged = high_pool[name] + normal_pool[name]

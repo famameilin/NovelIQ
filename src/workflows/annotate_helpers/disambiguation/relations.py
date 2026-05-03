@@ -75,7 +75,7 @@ def _merge_relations(
 
 
 def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None) -> list[dict[str, str]]:
-    """Extract retryable relations from skipped results for checkpoint recovery"""
+    """从跳过结果中提取可重试关系，供 checkpoint 恢复使用"""
     if not skipped_relations:
         return []
 

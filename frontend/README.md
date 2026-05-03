@@ -23,23 +23,23 @@ export default defineConfig([
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
-      // Other configs...
+      // 其他配置...
 
       // Remove tseslint.configs.recommended and replace with this
       tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
+      // 或者使用下面这段更严格的规则配置
       tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
+      // 如有需要，也可以加上这组风格规则
       tseslint.configs.stylisticTypeChecked,
 
-      // Other configs...
+      // 其他配置...
     ],
     languageOptions: {
       parserOptions: {
         project: ['./tsconfig.node.json', './tsconfig.app.json'],
         tsconfigRootDir: import.meta.dirname,
       },
-      // other options...
+      // 其他可选项...
     },
   },
 ])
@@ -57,10 +57,10 @@ export default defineConfig([
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
-      // Other configs...
-      // Enable lint rules for React
+      // 其他配置...
+      // 启用 React 的 lint 规则
       reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
+      // 启用 React 的 lint 规则 DOM
       reactDom.configs.recommended,
     ],
     languageOptions: {
@@ -68,7 +68,7 @@ export default defineConfig([
         project: ['./tsconfig.node.json', './tsconfig.app.json'],
         tsconfigRootDir: import.meta.dirname,
       },
-      // other options...
+      // 其他可选项...
     },
   },
 ])

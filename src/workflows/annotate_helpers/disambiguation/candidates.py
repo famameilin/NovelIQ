@@ -93,7 +93,7 @@ def _build_candidate_payload_by_names(
 
 
 def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, int]:
-    """Build a name -> count lookup for final disambiguation heuristics"""
+    """为最终消歧启发式构建 name -> count 查询表"""
     name_counts: dict[str, int] = {}
     for item in all_names:
         name = str(item.get("name", ""))
@@ -194,7 +194,7 @@ def build_candidate_context_sentences(
 
 def _is_self_resolved_leaf(name: str, alias_map: dict[str, str]) -> bool:
     """
-    Whether the name is currently resolved to itself and not acting as another alias's canonical target
+    判断该名字当前是否解析到自身，且没有作为其他别名的 canonical 目标
 
     This targets the "early self-mapped and then locked" case like 贺伯安 -> 贺伯安
     """
@@ -241,7 +241,7 @@ def _collect_final_disambiguation_candidates(
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:
     """
-    Build candidates for final disambiguation
+    构建最终消歧候选集
 
 
 

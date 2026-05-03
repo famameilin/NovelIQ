@@ -287,14 +287,14 @@ def project_graph_tables(
     alias_map = state.get_alias_merges_dict()
     graph_alias_map = graph_repo.fetch_alias_map(run_id)
 
-    # P1.1 fix: batch-load existing entity types to avoid hardcoded "character"
+    # P1.1 修复：批量加载已有实体类型，避免把类型硬编码成 "character"
     existing_entities = graph_repo.fetch_entities(run_id)
     existing_types: dict[str, str] = {e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name}
-    # Merge disambiguation entity_types so LLM-judged types flow into graph projection
+    # 合并消歧阶段给出的 entity_types，让 LLM 判定的类型能流入图谱投影
     if state.entity_types:
         existing_types.update(state.get_entity_types_dict())
 
-    # Build set of uncertain names: review/low status, not in alias_merges or known_canonicals
+    # 构建“不确定名字”集合：处于 review / 低置信，且不在 alias_merges 或 known_canonicals 中
     review_dict = state.get_review_status_dict()
     uncertain_names: set[str] = set()
     canonical_names = state.known_canonical_names
@@ -471,7 +471,7 @@ def project_graph_tables(
             relation.projected_at = None
             failed_count += 1
             continue
-        # P4: Filter uncertain endpoints from relation projection
+        # P4：在关系投影前过滤不确定端点
         if resolved_from in uncertain_names or resolved_to in uncertain_names:
             relation.projection_status = "pending"
             relation.projection_error = "uncertain endpoint"
@@ -560,7 +560,7 @@ def project_graph_tables(
         rel_type = relation.type or "未知"
         rel_change = (relation.change or "").strip()
 
-        # Validate relation_type and change_type before writing to graph
+        # 写入图谱前先校验 relation_type 和 change_type
         if rel_type not in allowed_relation_types:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",

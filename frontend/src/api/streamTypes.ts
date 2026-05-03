@@ -6,20 +6,20 @@
 //   - LLM 输出不再使用独立类型，自动获得 stage/sub_stage/chunk_id 上下文
 
 export type SSEEventType =
-  | "stage_start"      // action="start"
-  | "stage_progress"   // action="progress"
-  | "stage_complete"   // action="complete"
-  | "llm_output"       // action="output"
-  | "llm_thinking"     // action="thinking"
+  | "stage_start"      // action="start"（开始）
+  | "stage_progress"   // action="progress"（进度）
+  | "stage_complete"   // action="complete"（完成）
+  | "llm_output"       // action="output"（输出）
+  | "llm_thinking"     // action="thinking"（思考）
   | "task_complete"
   | "task_error"
   | "task_cancelled"
   | "message";
 
 export interface StreamEventData {
-  action: string;        // start / progress / complete / output / thinking
-  stage: string;         // preprocess / annotate / aggregate / topic-model / diagnose
-  sub_stage: string;     // phase1 / phase2 / phase3 / phase4
+  action: string;        // 开始 / 进度 / 完成 / 输出 / 思考
+  stage: string;         // 预处理 / 标注 / 聚合 / 主题建模 / 诊断
+  sub_stage: string;     // 第一阶段 / 第二阶段 / 第三阶段 / 第四阶段
   chunk_id: number;      // 当前 chunk ID（annotate 阶段有效）
   stream_id?: string | null; // 并行 LLM 流分组标识（Phase3 并行 batch 时使用）
   current: number;       // 当前 chunk 编号

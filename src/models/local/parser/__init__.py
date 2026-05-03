@@ -30,22 +30,22 @@ from .thinking import (
 from .utils import parse_active_entities
 
 __all__ = [
-    # thinking
+    # 思考参数
     "ThinkingExtraction",
     "extract_thinking_unified",
     "extract_think_content",
-    # json_utils
+    # JSON 工具
     "try_parse_json",
     "fix_json",
-    # annotation_builder
+    # 标注构建器
     "make_empty_annotation",
     "build_annotation",
-    # foreshadowing
+    # 伏笔处理
     "parse_foreshadowing_result",
     "validate_foreshadowing_result",
-    # disambiguation
+    # 消歧逻辑
     "DisambiguationParseError",
     "parse_alias_map",
-    # utils
+    # 通用工具
     "parse_active_entities",
 ]

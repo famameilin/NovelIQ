@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import type { GraphNode } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface RelatedNodeInfo {
@@ -24,7 +24,7 @@ export interface NodeDetailPanelProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Animation Variants                                                */
+/*  动画变体                                                           */
 /* ------------------------------------------------------------------ */
 
 const slideInVariants = {
@@ -48,7 +48,7 @@ const overlayVariants = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Relation Type Color Mapping                                       */
+/*  关系类型颜色映射                                                   */
 /*  与 ForceGraph.getRelationColorsFromCSS() 保持一致                  */
 /* ------------------------------------------------------------------ */
 
@@ -81,7 +81,7 @@ function getRelationTypeBarColor(relationType: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Entity Type Display Names                                         */
+/*  实体类型显示名称                                                   */
 /* ------------------------------------------------------------------ */
 
 const entityTypeDisplayNames: Record<string, string> = {
@@ -97,7 +97,7 @@ function getEntityTypeDisplayName(entityType: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sub-components                                                    */
+/*  子组件                                                             */
 /* ------------------------------------------------------------------ */
 
 interface InfoRowProps {
@@ -157,7 +157,7 @@ function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
+/*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 /**

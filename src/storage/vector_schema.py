@@ -100,8 +100,8 @@ def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None
             f"ON {runtime_schema}.chunk_embeddings USING btree (run_id)"
         )
     )
-    # Drop the legacy global ANN index so existing environments do not keep
-    # using an approximation path that mixes rows from different runs
+    # 删除遗留的全局 ANN 索引，避免现有环境继续走
+    # 会把不同 run 数据混在一起的近似检索路径
     session.execute(text(f"DROP INDEX IF EXISTS {runtime_schema}.idx_chunk_embeddings_vector"))
 
 

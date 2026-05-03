@@ -138,7 +138,7 @@ export function NovelHeader({
       <div className="flex flex-wrap items-center gap-4">
         <h1 className="text-2xl font-bold text-text">{title}</h1>
 
-        {/* Task Selector + Panel (Combined) */}
+        {/* 任务选择器与面板（合并展示） */}
         {novelId && (
           <div ref={panelRef} className="relative">
             <button
@@ -185,7 +185,7 @@ export function NovelHeader({
                   className="absolute left-0 top-full z-50 mt-2 w-96 rounded-lg border border-border bg-surface shadow-lg"
                 >
                   <div className="p-3">
-                    {/* Header with count and running indicator */}
+                    {/* 带数量与运行指示的标题区 */}
                     <div className="mb-2 flex items-center gap-2">
                       <span className="text-sm font-medium text-text">分析任务</span>
                       <span className="rounded-full bg-surface-hover px-2 py-0.5 text-xs text-text-muted">
@@ -198,7 +198,7 @@ export function NovelHeader({
                       )}
                     </div>
 
-                    {/* Task List */}
+                    {/* 任务列表 */}
                     <div className="max-h-72 space-y-0.5 overflow-y-auto">
                       {tasks.length === 0 ? (
                         <p className="py-4 text-center text-sm text-text-muted">
@@ -219,7 +219,7 @@ export function NovelHeader({
                       )}
                     </div>
 
-                    {/* New Task Button */}
+                    {/* 新建任务按钮 */}
                     <div className="mt-3 border-t border-border pt-3">
                       <Button
                         variant="outline"

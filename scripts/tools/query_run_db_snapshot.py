@@ -1,4 +1,4 @@
-"""Query DB snapshot for a run.
+"""查询某个 run 的数据库快照。
 
 2026-05-02: restored as a standalone helper for resource monitoring.
 """

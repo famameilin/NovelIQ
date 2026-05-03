@@ -46,7 +46,7 @@ def aggregate_all_metrics(
     stats_repo,
 ) -> AggregateResult:
     """
-    Aggregate all metric groups into a single result object
+    把所有指标分组聚合成一个结果对象
 
     """
     result = AggregateResult()
@@ -73,7 +73,7 @@ def aggregate_all_metrics(
 
 
 __all__ = [
-    # types
+    # 类型导出
     "AggregateResult",
     "AnnotationData",
     "CharacterData",
@@ -86,7 +86,7 @@ __all__ = [
     "TextData",
     "map_emotion_score",
     "aggregate_all_metrics",
-    # fetchers
+    # 数据提取
     "fetch_annotation_data",
     "fetch_emotion_data",
     "fetch_character_data",
@@ -96,7 +96,7 @@ __all__ = [
     "fetch_tension_data",
     "fetch_dialogue_data",
     "fetch_style_data",
-    # computers
+    # 指标计算
     "compute_narrative_structure_metrics",
     "compute_emotion_curve_metrics",
     "compute_character_relation_metrics",

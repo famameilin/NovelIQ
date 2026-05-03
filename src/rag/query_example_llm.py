@@ -1,5 +1,5 @@
 """
-Level3 LLM query example planner
+Level3 LLM 查询示例规划器
 
 创建时间: 2026-04-30
 任务: level3-query-exampler-mainline

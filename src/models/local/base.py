@@ -359,7 +359,7 @@ class BaseModelClient:
 
     def _build_thinking_params(self, enable_thinking: bool) -> tuple[str, dict[str, bool]]:
         """
-        Build thinking parameters for cloud/local providers
+        为云端 / 本地 provider 构建 thinking 参数
         """
         if enable_thinking:
             return "medium", {"think": True}

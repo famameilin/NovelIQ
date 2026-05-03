@@ -50,9 +50,9 @@ DISAMBIG_STATE_RESOLVED: _DisambigStateLiteral = "resolved"
 DISAMBIG_STATE_REVIEW: _DisambigStateLiteral = "review"
 DISAMBIG_STATE_UNRESOLVED: _DisambigStateLiteral = "unresolved"
 
-# Only these evidence signals justify overriding a model's self-mapping decision
-# naming_scene and stable_title_or_rank are excluded because "being mentioned in
-# the same context as X" does NOT imply "is an alias of X"
+# 只有这几类证据信号，才足以推翻模型给出的“自映射”判断
+# naming_scene 和 stable_title_or_rank 被排除在外，
+# 因为“和 X 出现在同一上下文里”并不等于“就是 X 的别名”
 _OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
     {
         EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
@@ -109,7 +109,7 @@ def _disambig_confidence_rank(confidence: str) -> int:
     return _CONFIDENCE_RANK.get(confidence, 2)
 
 
-# Signals that count as "structured evidence" for the evidence gate
+# 可被证据门禁视为“结构化证据”的信号
 _STRUCTURED_EVIDENCE_SIGNALS = frozenset(
     {
         EVIDENCE_SIGNAL_NAMING_SCENE,
@@ -122,7 +122,7 @@ _STRUCTURED_EVIDENCE_SIGNALS = frozenset(
 
 
 def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, tuple[str, ...]]:
-    """Build audit fields (evidence count, evidence types) from an evidence profile
+    """根据证据画像构建审计字段（证据数量、证据类型）
 
     为 NameReviewState 填充 decision_evidence_count 和 decision_evidence_types，
           实现文档 §10.4 规划的证据门禁审计链条
@@ -142,10 +142,10 @@ def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, 
 
 
 def _count_structured_evidence(profile: EvidenceProfile | None) -> int:
-    """Count structured evidence items for a candidate
+    """统计候选项的结构化证据条目数
 
-    Structured evidence = original sentences + strong signals
-    (excluding appearance_only which is not reliable)
+    结构化证据 = 原句证据 + 强信号证据
+    （排除不够可靠的 `appearance_only`）
     """
     if profile is None:
         return 0
@@ -604,7 +604,7 @@ def validate_confidence_with_evidence(
     """
     existing_set = set(existing_names) if existing_names else set()
 
-    # Structured evidence gate: high-confidence merges must have evidence
+    # 结构化证据门禁：高置信合并必须有相应证据支撑
     for name, canonical in result.canonical_decisions.items():
         current_confidence = result.alias_confidence.get(name, DISAMBIG_CONFIDENCE_MEDIUM)
         if current_confidence == DISAMBIG_CONFIDENCE_HIGH and canonical != name:
@@ -690,15 +690,15 @@ def apply_disambiguation_decisions(
         evidence_profile = result.evidence_profiles.get(name)
         evidence_strength = _normalize_evidence_strength(evidence_profile.strength if evidence_profile else None)
 
-        # Protect existing non-self-map decisions from being overwritten by self-maps
+        # 保护已有的“非自映射”决定，不要被新的自映射判断直接覆盖
         old_review = new_review_status.get(name)
         if (
             old_review is not None
             and old_review.proposed_canonical is not None
             and old_review.proposed_canonical != name
-            and canonical == name  # new decision is self-map
+            and canonical == name  # 新决定是自映射
         ):
-            # Don't overwrite a non-self-map with a self-map unless confidence is higher
+            # 除非新置信度更高，否则不要用自映射覆盖已有的非自映射
             if _disambig_confidence_rank(confidence) <= _disambig_confidence_rank(old_review.confidence):
                 logger.debug(
                     f"Protecting existing merge '{name}->{old_review.proposed_canonical}' "
@@ -834,10 +834,10 @@ def apply_disambiguation_decisions(
                     decision_timestamp=review.decision_timestamp,
                 )
 
-    # Demotion mechanism: if a previously resolved name is now demoted to review,
-    # remove its alias_merge entry to prevent stale merges in the graph
-    # P1 fix: filter alias_merges INLINE during the demotion loop instead of
-    # rebuilding new_alias_merges after the loop (which obscured the data flow)
+    # 降级机制：如果先前已 resolved 的名字现在被降回 review，
+    # 就移除它的 alias_merge，避免图谱里残留过期合并结果
+    # P1 修复：在降级循环内直接过滤 alias_merges，
+    # 而不是循环后重建 new_alias_merges，避免数据流被遮蔽
     old_review_dict = state.get_review_status_dict()
     demoted_aliases: set[str] = set()
     for name, review in new_review_status.items():
@@ -849,7 +849,7 @@ def apply_disambiguation_decisions(
         ):
             logger.warning(f"Demoting resolved name '{name}' from '{old_review.status}' to '{review.status}'")
             demoted_aliases.add(name)
-    # Apply alias_filter in a separate pass to avoid modifying list during iteration
+    # 单独做一轮 alias 过滤，避免遍历时原地修改列表
     if demoted_aliases:
         new_alias_merges = [(a, c) for a, c in new_alias_merges if a not in demoted_aliases]
 

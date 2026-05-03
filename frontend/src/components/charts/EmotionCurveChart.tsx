@@ -38,7 +38,7 @@ echarts.use([
 ]);
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface EmotionCurveChartProps {
@@ -59,7 +59,7 @@ const SERIES_CONFIG = [
 ] as const;
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartProps>(

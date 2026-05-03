@@ -8,7 +8,7 @@ import { defineConfig } from 'vitest/config'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// https://vite.dev/config/
+// Vite 配置文档：https://vite.dev/config/
 /**
  * 2026-04-30: 双模式 API/SSE 兼容
  * 开发模式默认把 `/api` 代理到本机 8000 端口，生产环境继续优先走同源 `/api`

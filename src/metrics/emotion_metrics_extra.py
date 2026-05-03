@@ -8,7 +8,7 @@ def compute_emotion_recovery_speed(
     emotion_values: list[float],
     threshold: float | None = None,
 ) -> float | None:
-    """Compute the average distance from a negative dip back toward baseline"""
+    """计算情绪从负向低谷回到基线附近的平均恢复距离"""
     if not emotion_values:
         return None
 
@@ -38,7 +38,7 @@ def compute_emotion_recovery_speed(
 def compute_emotion_polarity_distribution(
     emotional_valences: list[str],
 ) -> dict[str, float]:
-    """Compute positive, negative, and neutral valence ratios"""
+    """计算正向、负向和中性情绪的占比"""
     if not emotional_valences:
         return {"positive_ratio": 0.0, "negative_ratio": 0.0, "neutral_ratio": 0.0}
 
@@ -68,7 +68,7 @@ def compute_pivot_moment_density(
 def compute_lexical_emotion_trend(
     emotion_values: list[float],
 ) -> str:
-    """Classify lexicon-based emotion trend as rising, falling, stable, or volatile"""
+    """将基于词表的情绪走势分类为上升、下降、稳定或波动"""
     if len(emotion_values) < 3:
         return "stable"
 

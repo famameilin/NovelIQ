@@ -107,7 +107,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   }, [clearHeartbeat]);
 
   /* ---------------------------------------------------------------- */
-  /*  Connection lifecycle                                             */
+  /*  连接生命周期                                                       */
   /* ---------------------------------------------------------------- */
 
   const disconnect = useCallback(() => {

@@ -42,7 +42,7 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
   return null;
 }
 
-// GET /api/novels/:novelId/characters
+// 获取 /api/novels/:novelId/characters
 export const charactersHandler = http.get(
   `${BASE}/api/novels/:novelId/characters`,
   async ({ request, params }) => {
@@ -57,7 +57,7 @@ export const charactersHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/chunk-curves
+// 获取 /api/novels/:novelId/chunk-curves
 export const chunkCurvesHandler = http.get(
   `${BASE}/api/novels/:novelId/chunk-curves`,
   async ({ request, params }) => {
@@ -72,7 +72,7 @@ export const chunkCurvesHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/topics
+// 获取 /api/novels/:novelId/topics
 export const topicsHandler = http.get(
   `${BASE}/api/novels/:novelId/topics`,
   async ({ request, params }) => {
@@ -87,7 +87,7 @@ export const topicsHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/diagnosis
+// 获取 /api/novels/:novelId/diagnosis
 export const diagnosisHandler = http.get(
   `${BASE}/api/novels/:novelId/diagnosis`,
   async ({ request, params }) => {
@@ -102,7 +102,7 @@ export const diagnosisHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/foreshadowing-threads
+// 获取 /api/novels/:novelId/foreshadowing-threads
 export const foreshadowingThreadsHandler = http.get(
   `${BASE}/api/novels/:novelId/foreshadowing-threads`,
   async ({ request, params }) => {
@@ -117,7 +117,7 @@ export const foreshadowingThreadsHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/graph
+// 获取 /api/novels/:novelId/graph
 export const graphHandler = http.get(
   `${BASE}/api/novels/:novelId/graph`,
   async ({ request, params }) => {
@@ -132,7 +132,7 @@ export const graphHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/graph/events
+// 获取 /api/novels/:novelId/graph/events
 export const graphEventsHandler = http.get(
   `${BASE}/api/novels/:novelId/graph/events`,
   async ({ request, params }) => {
@@ -153,7 +153,7 @@ export const graphEventsHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/timeline
+// 获取 /api/novels/:novelId/timeline
 export const timelineHandler = http.get(
   `${BASE}/api/novels/:novelId/timeline`,
   async ({ request, params }) => {
@@ -171,7 +171,7 @@ export const timelineHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/metrics/narrative-structure
+// 获取 /api/novels/:novelId/metrics/narrative-structure
 export const narrativeStructureHandler = http.get(
   `${BASE}/api/novels/:novelId/metrics/narrative-structure`,
   async ({ request, params }) => {
@@ -186,7 +186,7 @@ export const narrativeStructureHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/metrics/emotion-stats
+// 获取 /api/novels/:novelId/metrics/emotion-stats
 export const emotionStatsHandler = http.get(
   `${BASE}/api/novels/:novelId/metrics/emotion-stats`,
   async ({ request, params }) => {
@@ -201,7 +201,7 @@ export const emotionStatsHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/metrics/character-stats
+// 获取 /api/novels/:novelId/metrics/character-stats
 export const characterStatsHandler = http.get(
   `${BASE}/api/novels/:novelId/metrics/character-stats`,
   async ({ request, params }) => {
@@ -216,7 +216,7 @@ export const characterStatsHandler = http.get(
   }
 );
 
-// GET /api/novels/:novelId/metrics/style-stats
+// 获取 /api/novels/:novelId/metrics/style-stats
 export const styleStatsHandler = http.get(
   `${BASE}/api/novels/:novelId/metrics/style-stats`,
   async ({ request, params }) => {

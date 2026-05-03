@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface GraphToolbarProps {
@@ -30,7 +30,7 @@ export interface GraphToolbarProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 /**

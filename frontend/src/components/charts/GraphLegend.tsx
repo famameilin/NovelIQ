@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 import { getCSSColorVar } from "@/lib/theme";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                             */
+/*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
 export interface GraphLegendProps {
@@ -76,7 +76,7 @@ function getRelationColor(relationType: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Component                                                         */
+/*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
 export function GraphLegend({

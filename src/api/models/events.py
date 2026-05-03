@@ -64,7 +64,7 @@ class StreamEvent:
         thinking — LLM 思考过程输出
     """
 
-    action: StreamEventAction  # start / progress / complete / output / thinking
+    action: StreamEventAction  # 开始 / 进度 / 完成 / 输出 / 思考
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None

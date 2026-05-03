@@ -43,7 +43,7 @@ from .summaries import (
 
 __all__ = [
     "StatsRepository",
-    # metrics
+    # 指标仓储
     "insert_global_stats",
     "fetch_global_stats",
     "fetch_global_stats_dict",
@@ -55,17 +55,17 @@ __all__ = [
     "fetch_global_context",
     "update_global_context",
     "fetch_novel_title",
-    # runs
+    # run 相关仓储
     "has_aggregated_data",
     "has_topic_data",
     "has_diagnosis_data",
     "is_aggregate_complete",
-    # chunks
+    # chunk 相关仓储
     "insert_chunk_curve",
     "fetch_chunk_culture",
     "fetch_chunk_curves_full",
     "fetch_emotion_densities",
-    # summaries
+    # 汇总仓储
     "insert_chunk_summary",
     "insert_character_appearances",
     "insert_stage_summary",

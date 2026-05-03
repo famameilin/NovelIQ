@@ -9,7 +9,7 @@ export const apiClient = axios.create({
   },
 });
 
-// Response interceptor for unified error handling
+// 统一错误处理用的响应拦截器
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
