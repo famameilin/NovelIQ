@@ -87,5 +87,20 @@ class TestMakeEmptyAnnotation(unittest.TestCase):
         self.assertIsInstance(annotation, ChunkAnnotation)
 
 
+class TestPhase1PromptContract(unittest.TestCase):
+    def test_phase1_prompt_mentions_action_type_contract(self) -> None:
+        """
+        创建时间: 2026-05-04
+        任务: 核对 Phase1 prompt 与 schema 合同一致性
+        新建原因: Phase1 prompt 漏写 action_type 时解析器会静默补“其他”，导致行为类型信号退化。
+        """
+        prompt_path = Path(__file__).resolve().parents[2] / "config" / "prompts" / "phase1.txt"
+        prompt = prompt_path.read_text(encoding="utf-8")
+
+        self.assertIn("- action_type：【战斗|逃跑|对话|决策|移动|情感|其他】", prompt)
+        self.assertIn('"action_type": "战斗|逃跑|对话|决策|移动|情感|其他"', prompt)
+        self.assertIn('"action_type": "战斗"', prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
