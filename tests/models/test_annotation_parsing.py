@@ -48,7 +48,21 @@ class TestJsonParsing(unittest.TestCase):
         self.assertEqual(result["emotional_valence"], "strong_positive")
 
     def test_parse_json_with_trailing_comma(self) -> None:
-        content = '{"emotional_valence": "neutral", "event_type": "铺垫", "pivot_moment": false, "cliffhanger": false, "has_foreshadowing": false, "foreshadowing_type": null, "foreshadowing_desc": "有描述",}'
+        content = (
+            json.dumps(
+                {
+                    "emotional_valence": "neutral",
+                    "event_type": "铺垫",
+                    "pivot_moment": False,
+                    "cliffhanger": False,
+                    "has_foreshadowing": False,
+                    "foreshadowing_type": None,
+                    "foreshadowing_desc": "有描述",
+                },
+                ensure_ascii=False,
+            )[:-1]
+            + ",}"
+        )
         result = try_parse_json(content)
         self.assertIsNotNone(result)
         assert result is not None
@@ -100,6 +114,35 @@ class TestPhase1PromptContract(unittest.TestCase):
         self.assertIn("- action_type：【战斗|逃跑|对话|决策|移动|情感|其他】", prompt)
         self.assertIn('"action_type": "战斗|逃跑|对话|决策|移动|情感|其他"', prompt)
         self.assertIn('"action_type": "战斗"', prompt)
+
+    def test_phase1_prompt_does_not_request_ignored_entity_outputs(self) -> None:
+        """
+        创建时间: 2026-05-04
+        任务: 核对 Phase1 prompt 与当前解析器合同
+        新建原因: group_appearances / organization_appearances 当前没有 schema、解析和落库路径，
+        若 prompt 继续要求输出，会让模型消耗 token 生成随后被静默丢弃的数据。
+        """
+        prompt_path = Path(__file__).resolve().parents[2] / "config" / "prompts" / "phase1.txt"
+        prompt = prompt_path.read_text(encoding="utf-8")
+
+        self.assertNotIn('"group_appearances"', prompt)
+        self.assertNotIn('"organization_appearances"', prompt)
+
+
+class TestPhase2PromptContract(unittest.TestCase):
+    def test_phase2_prompt_uses_null_for_negative_payoff_likelihood(self) -> None:
+        """
+        创建时间: 2026-05-04
+        任务: 核对 Phase2 prompt 与 ForeshadowingResult 校验合同
+        新建原因: ForeshadowingResult 要求 has_foreshadowing=false 时 payoff_likelihood 为 null，
+        prompt 不能再引导模型输出会触发校验失败的 low。
+        """
+        prompt_path = Path(__file__).resolve().parents[2] / "config" / "prompts" / "phase2.txt"
+        prompt = prompt_path.read_text(encoding="utf-8")
+
+        self.assertIn('"payoff_likelihood": "high/medium 或 null"', prompt)
+        self.assertIn("- `payoff_likelihood=null`", prompt)
+        self.assertNotIn("`low`: 只用于你最终判定 `has_foreshadowing=false` 的情况", prompt)
 
 
 if __name__ == "__main__":

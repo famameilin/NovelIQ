@@ -39,7 +39,7 @@
   "setup_summary": "一句话概括这条 setup thread，供跨 chunk 线程复用",
   "why_unresolved_now": "为什么这个钩子在当前文本里还没有闭合",
   "expected_payoff_family": "预计属于哪类宽口径回收方向",
-  "payoff_likelihood": "high/medium/low",
+  "payoff_likelihood": "high/medium 或 null",
   "is_new_setup": true/false,
   "linked_setup_id": "若是已有 thread，则填写 setup_id；新 thread 则为 null",
   "setup_status": "open/reinforced/likely_paid_off"
@@ -54,7 +54,7 @@
 `payoff_likelihood` 表示“已经入池后的后续回收预期”，不要和 `confidence` 混用：
 - high: 钩子明确，后续很可能形成明确回收
 - medium: 钩子已经足够明确、允许入池，但回收路径或重要性还不算非常稳
-- low: 只用于你最终判定 `has_foreshadowing=false` 的情况
+- null: 只用于你最终判定 `has_foreshadowing=false` 的情况，禁止输出 low
 
 如果只是弱暗示、主题/情绪/命运定调，或你无法给出一个可入池的具体 setup，请直接输出：
 - `has_foreshadowing=false`
@@ -79,7 +79,7 @@
 - `payoff_likelihood`
   - `high`: 当前看起来很可能在后文形成明确回收
   - `medium`: 当前钩子足够具体且允许入池，但后续回收路径或重要性还不算非常稳
-  - `low`: 只用于你最终判定 `has_foreshadowing=false` 的情况
+  - `null`: 只用于你最终判定 `has_foreshadowing=false` 的情况，禁止输出 low
 - `is_new_setup`
   - `true`: 当前 chunk 在开启一条新的强 setup thread
   - `false`: 当前 chunk 在强化或推进池里已有的 thread
