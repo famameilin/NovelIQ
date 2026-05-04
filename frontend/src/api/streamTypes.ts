@@ -27,7 +27,7 @@ export interface StreamEventData {
   percent: number;      // 全局进度（stage 级别百分比）
   sub_percent: number;  // 子阶段进度（chunk 内 phase 进度，0-100）
   content: string;      // LLM 输出内容（output/thinking 时有值）
-  message: string;       // 人类可读描述
+  message: string;       // 可读描述
 }
 
 export interface TaskCompleteData {
