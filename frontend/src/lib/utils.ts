@@ -30,7 +30,7 @@ export function isValidHexColor(hex: string): boolean {
 }
 
 /**
- * 把文件大小格式化为人类可读字符串
+ * 把文件大小格式化为便于阅读的字符串
  */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
