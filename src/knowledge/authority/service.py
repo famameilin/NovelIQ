@@ -76,7 +76,7 @@ class KnowledgeGraphAuthorityService:
         )
         character_ids = {entity.entity_id for entity in character_entities if entity.entity_id is not None}
 
-        # 把共享时间轴合同冻结在“角色子图”边界，
+        # 把共享时间轴合同固定在“角色子图”边界，
         # 下游消费者不应再去检查 repository 原始行，
         # 判断组织/群体边是否该出现在时间轴上
         relation_events = [
