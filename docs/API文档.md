@@ -15,6 +15,9 @@ python -m src.api.main --reload
 
 # 指定其他端口
 python -m src.api.main --port 8001
+
+# 推荐：通过 dev.ps1 脚本启动（自动处理依赖和环境）
+powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 api --reload --port 8000
 ```
 
 **启动参数说明**:
@@ -58,24 +61,15 @@ python -m src.api.main --port 8001
 | POST | `/api/novels/{novel_id}/tasks/batch-delete` | 批量删除分析任务 |
 | POST | `/api/novels/{novel_id}/tasks/{task_id}/cancel` | 取消正在运行的分析任务 |
 
-**当前版本说明：**
-- 旧 `POST /api/novels/{novel_id}/analyze` 已移除，不再作为创建或续跑入口。
-- 创建新任务与继续旧任务已拆分为 `POST /tasks` 与 `POST /tasks/{task_id}/resume` 两条链。
-
 ### ID 体系说明
 
-系统对外统一使用短 ID，但内部仍兼容历史 run 形态：
+系统对外统一使用短 ID：
 
 | ID 类型 | 格式 | 示例 | 用途 | 使用场景 |
 |---------|------|------|------|----------|
 | novel_id | 8位字符串 | `10960c77` | 小说唯一标识 | API内外通用 |
-| task_id | 8位字符串 | `a1b2c3d4` | 任务标识（外部使用） | API、前端、导出文件 |
-| run_id | 内部运行标识 | `a1b2c3d4` / 历史兼容 `a1b2c3d4-1a72-4444-a772-2ddc64334cd2` | 数据隔离键 | Repository、Workflow、日志目录 |
-
-**ID映射关系：**
-- 当前新创建任务通常直接以 8 位 `task_id` 作为 `run_id` 落库。
-- 历史数据中仍可能存在完整 UUID `run_id`；API 层会兼容按 `task_id` 前缀解析。
-- 外部调用方应始终使用 `task_id`，不要假设数据库里的 `run_id` 一定是完整 UUID。
+| task_id | 8位字符串 | `a1b2c3d4` | 任务标识 | API、前端、导出文件 |
+| run_id | 内部运行标识 | `a1b2c3d4` | 数据隔离键 | Repository、Workflow、日志目录 |
 
 **数据隔离规则：**
 - 数据通过 `run_id` 字段在 PostgreSQL 数据库中隔离
@@ -112,10 +106,6 @@ python -m src.api.main --port 8001
 | GET | `/api/novels/{novel_id}/metrics/emotion-stats?task_id={task_id}` | 获取情感统计指标 |
 | GET | `/api/novels/{novel_id}/metrics/character-stats?task_id={task_id}` | 获取人物统计指标 |
 | GET | `/api/novels/{novel_id}/metrics/style-stats?task_id={task_id}` | 获取风格统计指标 |
-
-**当前版本说明：**
-- public `/metrics/*` 路由当前只有以上 4 个。
-- 文化相关聚合（`idiom_density` / `classical_sentence_ratio` / `imagery_density`）仍保留在内部 aggregate / 研究文档中，但当前版本不作为公开 `culture-stats` 路由暴露。
 
 ### 2.6 系统接口
 
@@ -269,10 +259,6 @@ python -m src.api.main --port 8001
 }
 ```
 
-**说明**：
-- 这是当前版本创建任务的唯一入口。
-- 旧 `POST /api/novels/{novel_id}/analyze` 已移除。
-
 ---
 
 #### POST /api/novels/{novel_id}/tasks/{task_id}/resume
@@ -292,7 +278,6 @@ python -m src.api.main --port 8001
 ```
 
 **说明**：
-- 该接口只负责“继续指定任务”，不再承担创建新任务的语义。
 - 如果任务不属于当前小说、状态不允许继续或任务不存在，会返回 `400/404`。
 
 ---
@@ -436,8 +421,7 @@ python -m src.api.main --port 8001
 
 取消正在运行的分析任务。
 
-> **创建时间**: 2026-04-07  
-> **说明**: 采用协作式取消，任务将在当前阶段完成后停止，不会强制中断正在执行的 LLM 调用。
+采用协作式取消，任务将在当前阶段完成后停止，不会强制中断正在执行的 LLM 调用。
 
 **请求**：无请求体
 
@@ -481,19 +465,20 @@ python -m src.api.main --port 8001
   "total": 200,
   "message": "正在处理第 91 / 200 个分块",
   "llm_outputs": null,
-  "error": null
+  "error": null,
+  "started_at": "2026-04-28T10:00:05",
+  "completed_at": null
 }
 ```
 
 **说明**：
-- 这是当前版本推荐的状态查询入口。
 - 当任务不存在或不属于当前小说时返回 `404`。
 
 ---
 
 #### GET /api/novels/{novel_id}/status
 
-兼容状态查询入口。
+查询分析状态（需显式提供 `task_id`）。
 
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
@@ -513,7 +498,9 @@ python -m src.api.main --port 8001
   "total": 200,
   "message": "正在处理第 91 / 200 个分块",
   "llm_outputs": null,
-  "error": null
+  "error": null,
+  "started_at": "2026-04-28T10:00:05",
+  "completed_at": null
 }
 ```
 
@@ -527,7 +514,6 @@ python -m src.api.main --port 8001
 
 **说明**：
 - 当前实现要求显式提供 `task_id`；未提供时会返回 `400`。
-- 推荐改用 `GET /api/novels/{novel_id}/tasks/{task_id}/status`。
 
 ---
 
@@ -770,7 +756,8 @@ GET /api/novels/10960c77/topics?task_id=a1b2c3d4
   {
     "topic_id": 11,
     "words": ["关键词1", "关键词2", "关键词3"],
-    "weight": 6.14
+    "weight": 6.14,
+    "label": "抗争"
   }
 ]
 ```
@@ -798,7 +785,8 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
   "rerun_reason": null,
   "foreshadow_expectation": 0.6,
   "arc_scores": {"主角A": 8.0, "主角B": 7.0},
-  "narrative_type": "寓言",
+  "genre_labels": ["寓言", "成长"],
+  "style_labels": ["古典叙事", "抒情"],
   "topic_labels": ["抗争", "宿命"],
   "diagnosis": "该叙事以寓言形式探索人类面对困境的成长历程...",
   "value_logic_type": "善义有价值",
@@ -833,7 +821,8 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 | rerun_reason | str \| null | 需要重跑的原因 |
 | foreshadow_expectation | float \| null | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值） |
 | arc_scores | dict[str, float] | 各角色弧线得分 |
-| narrative_type | str | 叙事类型 |
+| genre_labels | list[str] | 叙事类型标签列表（如 `["寓言", "成长"]`） |
+| style_labels | list[str] | 风格标签列表（如 `["古典叙事", "抒情"]`） |
 | topic_labels | list[str] | 主题标签 |
 | diagnosis | str | 诊断分析文本 |
 | value_logic_type | str | 价值逻辑类型 |
@@ -850,10 +839,6 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 | main_characters | list[str] | 主要角色列表 |
 | core_cast | list[str] | 核心演员列表 |
 | theme_color | str | 小说主题色，十六进制格式，如 `#4A90D9` |
-
-**当前合同说明**：
-- 当前 `/diagnosis` 不再把 `null` 或半成品对象当作正常成功结果。
-- 当焦点合同缺失或失效时，会返回 `rerun_required=true` 的对象，提示调用方重跑分析。
 
 ---
 
@@ -883,6 +868,7 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
     "setup_kind": "异常物件",
     "expected_payoff_family": "真相揭露",
     "payoff_likelihood": "high",
+    "confidence": "medium",
     "strength": "high",
     "status": "reinforced",
     "active": true,
@@ -903,6 +889,7 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
 | setup_kind | str | setup 类型 |
 | expected_payoff_family | str | 预期回收家族 |
 | payoff_likelihood | str | 回收预期强度（如 `high/medium/low`） |
+| confidence | str | 置信度（如 `high/medium/low`） |
 | strength | str | 当前 thread 强度 |
 | status | str | thread 语义状态（如 `open/reinforced/likely_paid_off`） |
 | active | bool | 是否仍在 active setup pool 中；出池后为 `false` |
@@ -1109,10 +1096,6 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
 }
 ```
 
-**当前合同说明**：
-- 后端始终返回 `composite_nodes + atomic_nodes` 双层结构。
-- `max_level` 已降为前端本地筛选状态，不再作为后端请求参数。
-
 ---
 
 ### 3.6 聚合指标
@@ -1120,10 +1103,6 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
 #### GET /api/novels/{novel_id}/metrics/narrative-structure
 
 获取叙事结构聚合指标。
-
-说明：接口响应形状保持不变，`act1_ratio / act2_ratio / act3_ratio` 仍表示三幕比例；
-当前实现已从“单峰 + 峰前最低谷”升级为“主高潮区 + 结构切分点”，
-用于降低多峰长篇里第一幕被异常拖长的风险。
 
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
@@ -1197,9 +1176,6 @@ GET /api/novels/10960c77/metrics/emotion-stats?task_id=a1b2c3d4
 #### GET /api/novels/{novel_id}/metrics/character-stats
 
 获取人物统计聚合指标。
-
-> 说明：`network_density` 字段名保持兼容，但当前口径表示**关系集中度**（degree centralization），
-> 基于图谱当前参与者与当前有效关系计算，不再表示旧版 `networkx.density(G)` 图论密度。
 
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
@@ -1282,23 +1258,11 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
 }
 ```
 
-**新增字段说明**:
+**字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | function_word_vector | Dict[str, float] | 高频虚词分布，各虚词相对频率 |
 | category_density | Dict[str, float] | 语义类别词密度（10类） |
-
----
-
-#### 文化指标说明（研究保留，当前未开放 public route）
-
-当前仓库内部 aggregate 仍会计算以下文化指标，但它们不再通过单独的 `/metrics/culture-stats` 公开接口返回：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| idiom_density | float | 成语密度 |
-| classical_sentence_ratio | float | 古典句式比例 |
-| imagery_density | float | 整书级古典意象字符密度（按全文字符占比统计，不受 chunk 切分影响） |
 
 ---
 
@@ -1330,11 +1294,14 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
 
 | 错误类型 | 状态码 | 说明 |
 |----------|--------|------|
-| `NovelNotFoundError` | 404 | 小说不存在 |
+| `NovelNotFoundError` | 404 | 小说/任务不存在 |
 | `AnalysisNotCompleteError` | 400 | 分析未完成 |
 | `InvalidFileError` | 400 | 上传文件类型不合法 |
 | `FileStorageError` | 500 | 文件保存失败 |
 | `GraphReadinessError` | 409 | 图谱投影未就绪，当前结果不可读 |
+| `AnalysisError` | 500 | 分析过程内部错误 |
+| `TaskIDNotFoundError` | 404 | task_id 映射到 run_id 失败（task_id 不存在） |
+| `IDMappingError` | 400 | ID 格式转换错误 |
 | `InternalServerError` | 500 | 未预期的内部错误 |
 
 ---
@@ -1381,18 +1348,6 @@ outputs/
   "timeline": {...}
 }
 ```
-
-其中与文化相关的 chunk 级字段位于 `chunk_styles` 中，其单项结构可包含：
-
-```json
-{
-  "chunk_id": 0,
-  "imagery_lexicon_density": 0.18
-}
-```
-
-- `imagery_lexicon_density`：chunk 级意象词表命中密度
-- 文化指标不再作为 public `aggregate_metrics` 子组单独暴露
 
 ---
 
