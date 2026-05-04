@@ -69,6 +69,7 @@
 - 如果没有映射，使用原文中最稳定、最常用的称呼
 - role_function：【主体|客体|发送者|接收者|帮助者|反对者】
 - action：一个动词短语，本块中最重要的一个行为
+- action_type：【战斗|逃跑|对话|决策|移动|情感|其他】，按 action 的主要行为类型填写
 - emotion_score：同 emotional_valence 五档
 
 【去重规则】同一人物只记录一条，若有多行为：
@@ -131,8 +132,8 @@
   "cliffhanger": false,
   "chunk_summary": "赵云飞以灵力压制李明，李明隐忍暗中盘算",
   "characters": [
-    {"name": "赵云飞", "role_function": "反对者", "action": "以灵力压制李明", "emotion_score": "mild_negative"},
-    {"name": "李明", "role_function": "主体", "action": "跪地承受压力并暗中盘算", "emotion_score": "mild_negative"}
+    {"name": "赵云飞", "role_function": "反对者", "action": "以灵力压制李明", "action_type": "战斗", "emotion_score": "mild_negative"},
+    {"name": "李明", "role_function": "主体", "action": "跪地承受压力并暗中盘算", "action_type": "决策", "emotion_score": "mild_negative"}
   ]
 }
 
@@ -163,9 +164,9 @@
   "cliffhanger": false,
   "chunk_summary": "伯安召集侯飞白、褚大山密谋计划，三人情同手足",
   "characters": [
-    {"name": "伯安", "role_function": "主体", "action": "召集伙伴商量计划", "emotion_score": "mild_positive"},
-    {"name": "侯飞白", "role_function": "帮助者", "action": "兴奋响应伯安的号召", "emotion_score": "mild_positive"},
-    {"name": "褚大山", "role_function": "帮助者", "action": "点头表示听从伯安", "emotion_score": "mild_positive"}
+    {"name": "伯安", "role_function": "主体", "action": "召集伙伴商量计划", "action_type": "决策", "emotion_score": "mild_positive"},
+    {"name": "侯飞白", "role_function": "帮助者", "action": "兴奋响应伯安的号召", "action_type": "对话", "emotion_score": "mild_positive"},
+    {"name": "褚大山", "role_function": "帮助者", "action": "点头表示听从伯安", "action_type": "对话", "emotion_score": "mild_positive"}
   ]
 }
 
@@ -184,6 +185,7 @@
       "name": "常用名或原文称呼",
       "role_function": "主体|客体|发送者|接收者|帮助者|反对者",
       "action": "核心行为动词短语",
+      "action_type": "战斗|逃跑|对话|决策|移动|情感|其他",
       "emotion_score": "strong_positive|mild_positive|neutral|mild_negative|strong_negative"
     }
   ],
