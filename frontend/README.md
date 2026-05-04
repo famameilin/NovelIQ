@@ -60,7 +60,7 @@ export default defineConfig([
       // 其他配置...
       // 启用 React 的 lint 规则
       reactX.configs['recommended-typescript'],
-      // 启用 React 的 lint 规则 DOM
+      // 启用 React DOM 的 lint 规则
       reactDom.configs.recommended,
     ],
     languageOptions: {

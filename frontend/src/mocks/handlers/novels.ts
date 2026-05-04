@@ -68,7 +68,7 @@ export const novelDeleteHandler = http.delete(`${BASE}/api/novels/:novelId`, asy
   return new HttpResponse(null, { status: 204 });
 });
 
-// 提交 /api/novels/batch-delete
+// POST /api/novels/batch-delete（批量删除）
 export const novelBatchDeleteHandler = http.post(`${BASE}/api/novels/batch-delete`, async ({ request }) => {
   await delay(300);
   const body = await request.json() as { novel_ids: string[] };
