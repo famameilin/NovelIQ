@@ -105,6 +105,9 @@ coverage.xml
 docs/_build/
 docs/diagrams/
 
+# 文档文件夹（本地保留，不进 git）
+docs/
+
 # PyBuilder
 target/
 
