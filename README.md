@@ -122,9 +122,6 @@ python -c "from src.storage.db import get_session; get_session()"
 
 ## 使用方法
 
-### 命令行使用
-[预留图片位置：CLI使用示例]
-
 ### API调用示例
 ```python
 import requests
