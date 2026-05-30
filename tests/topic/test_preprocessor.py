@@ -7,7 +7,6 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.topic.preprocessor import TopicPreprocessor
 
-# AI辅助生成：DeepSeek-V3, 2026-3-18
 class TestTopicPreprocessor(unittest.TestCase):
     def setUp(self) -> None:
         self.preprocessor = TopicPreprocessor()
@@ -53,7 +52,6 @@ class TestTopicPreprocessor(unittest.TestCase):
         self.assertIsInstance(stopwords, set)
         self.assertIn("的", stopwords)
 
-# AI辅助生成：DeepSeek-V3, 2026-3-18
 class TestTopicPreprocessorWithUserDict(unittest.TestCase):
     def test_user_dict_loading(self) -> None:
         with patch("jieba.load_userdict") as mock_load:
