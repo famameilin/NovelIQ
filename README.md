@@ -45,12 +45,55 @@
 
 ## 快速开始
 
-### 环境要求
+### Docker部署（推荐）
+
+#### 环境要求
+- Docker 20.10+
+- Docker Compose 2.0+
+
+#### 快速启动
+1. 克隆项目
+```bash
+git clone <repository-url>
+cd novel-quantitative-analysis
+```
+
+2. 配置环境变量
+```bash
+cp .env.docker.example .env.docker
+# 编辑 .env.docker 文件，配置模型API等
+```
+
+3. 启动服务
+```bash
+docker compose up -d --build
+```
+
+4. 访问服务
+- 前端：http://localhost:18080
+- API文档：http://localhost:8000/api/docs
+- 数据库：localhost:15432
+
+#### 常用命令
+```bash
+# 查看日志
+docker compose logs -f
+
+# 停止服务
+docker compose down
+
+# 重启服务
+docker compose restart
+```
+
+### 手动安装
+
+#### 环境要求
 - Python 3.12+
 - PostgreSQL 14+
 - Node.js 18+ (可选，用于前端)
 
-### 安装步骤
+#### 安装步骤
 1. 克隆项目
 ```bash
 git clone <repository-url>
