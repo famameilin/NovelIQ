@@ -1,4 +1,4 @@
-# 小说量化分析系统
+# NovelQ
 
 > [English](README_EN.md)
 
