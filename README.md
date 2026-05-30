@@ -11,6 +11,7 @@
 - 支持txt格式小说导入，自动处理UTF-8、GBK等多种编码
 - 集成jieba分词，支持中文文本精准分词和词性标注
 - 提供文本清洗、分句、段落划分等预处理功能
+- 智能分块系统，支持语义分块和索引管理
 
 **多维度量化指标**
 
@@ -24,26 +25,28 @@
 - 基于大语言模型（LLM）的智能标注，支持本地和云端模型
 - 多阶段标注流程，支持流式输出和结构化输出
 - 实体消歧系统，自动识别人物别名和匿名人物
+- 上下文管理：实体注册、全局上下文、滚动记忆
 
 **检索增强生成（RAG）**
 
 - 三级证据检索：别名匹配、活跃实体、向量相似度
 - 智能重排机制，支持LLM辅助重排
 - 证据包构建，为标注提供上下文支持
+- 查询示例规划和LLM辅助查询
 
 **知识图谱与词典**
 
 - 人物关系网络构建和可视化
 - 情感词典、文化词典、题材检测词典
 - 支持自定义词典扩展
+- 权威知识图谱构建
 
 **诊断与评估**
 
 - 小说整体质量诊断，包括叙事类型、主题、价值观分析
 - 多维度评估指标，支持横向对比
 - 详细的分析报告生成
-
-<br />
+- 消歧评估指标，支持模型效果评估
 
 ## 技术栈
 
@@ -57,6 +60,7 @@
 - **gensim**：主题建模（LDA）
 - **NetworkX**：图分析和网络计算
 - **Pydantic**：数据验证和序列化
+- **alembic**：数据库迁移工具
 
 ### 前端技术
 
@@ -76,45 +80,6 @@
 - **PostgreSQL 17 + pgvector**：数据库和向量存储
 - **Nginx**：反向代理和静态资源服务
 
-## 目录
-
-- [功能特性](#功能特性)
-- [快速开始](#快速开始)
-- [安装部署](#安装部署)
-- [使用方法](#使用方法)
-- [API文档](#api文档)
-- [开发指南](#开发指南)
-- [架构设计](#架构设计)
-- [贡献指南](#贡献指南)
-- [许可证](#许可证)
-
-## 功能特性
-
-### 文本处理
-
-- 文本导入：支持txt文件导入，自动编码检测
-- 文本预处理：清洗、分词、分句
-- 主题建模：LDA主题分析
-
-### 量化指标
-
-- 情感指标：情感密度、正负比、情感曲线
-- 风格指标：词汇丰富度、句长统计、对话比例
-- 叙事指标：三幕结构、高潮分析、事件密度
-- 人物指标：关系网络、中心性分析、角色功能
-
-### 智能分析
-
-- LLM标注：使用大语言模型进行智能标注
-- 实体消歧：人物实体识别和消歧
-- 诊断分析：文本质量诊断
-
-### API服务
-
-- RESTful API：完整的API接口
-- 实时通信：SSE实时推送
-- 任务管理：异步任务处理
-
 ## 快速开始
 
 ### Docker部署（推荐）
@@ -133,20 +98,20 @@ git clone <repository-url>
 cd novel-quantitative-analysis
 ```
 
-1. 配置环境变量
+2. 配置环境变量
 
 ```bash
 cp .env.docker.example .env.docker
 # 编辑 .env.docker 文件，配置模型API等
 ```
 
-1. 启动服务
+3. 启动服务
 
 ```bash
 docker compose up -d --build
 ```
 
-1. 访问服务
+4. 访问服务
 
 - 前端：<http://localhost:18080>
 - API文档：<http://localhost:8000/api/docs>
@@ -182,45 +147,32 @@ git clone <repository-url>
 cd novel-quantitative-analysis
 ```
 
-1. 安装依赖
+2. 安装依赖
 
 ```bash
 pip install -e .
 ```
 
-1. 配置环境
+3. 配置环境
 
 ```bash
 # 编辑配置文件
 config/settings.json
 ```
 
-1. 初始化数据库
+4. 初始化数据库
 
 ```bash
 alembic upgrade head
 ```
 
-1. 启动服务
+5. 启动服务
 
 ```bash
 python -m src.api.main
 ```
 
-### 基本使用
-
-```python
-from src.ingest.reader import ingest_path
-from src.workflows.preprocess import preprocess_document
-
-# 导入文本
-docs = ingest_path("path/to/novel.txt")
-
-# 预处理
-processed = preprocess_document(docs[0])
-```
-
-<br />
+## 安装部署
 
 ### 配置说明
 
@@ -228,10 +180,24 @@ processed = preprocess_document(docs[0])
 
 主要配置项：
 
-- `models`: LLM模型配置
-- `database`: 数据库连接
-- `paths`: 文件路径
-- `api`: API服务配置
+- `models`: LLM模型配置（标注、消歧、诊断等）
+- `database`: 数据库连接配置
+- `paths`: 文件路径配置（上传、输出、日志等）
+- `api`: API服务配置（端口、CORS等）
+- `chunking`: 分块配置（块大小、重叠等）
+- `metrics`: 指标计算配置
+
+### 环境变量说明
+
+Docker部署使用 `.env.docker` 文件配置环境变量，主要配置项：
+
+- `UPLOAD_DIR`: 上传文件目录
+- `RESULTS_DIR`: 分析结果目录
+- `LOG_DIR`: 日志目录
+- `DB_*`: 数据库连接池配置
+- `*_BASE_URL`: 各模型API地址
+- `*_MODEL`: 各模型名称
+- `*_API_KEY`: 各模型API密钥
 
 ### 数据库设置
 
@@ -241,13 +207,13 @@ processed = preprocess_document(docs[0])
 CREATE DATABASE novel_analysis;
 ```
 
-1. 运行迁移
+2. 运行迁移
 
 ```bash
 alembic upgrade head
 ```
 
-1. 验证连接
+3. 验证连接
 
 ```bash
 python -c "from src.storage.db import get_session; get_session()"
@@ -273,9 +239,14 @@ analysis_response = requests.post(
 )
 ```
 
-### 配置选项
+### 前端使用
 
-\[预留图片位置：配置选项表格]
+访问 <http://localhost:18080> 使用前端界面：
+
+1. 上传小说文件
+2. 选择分析配置
+3. 启动分析任务
+4. 查看分析结果和可视化图表
 
 ## API文档
 
@@ -288,19 +259,42 @@ analysis_response = requests.post(
 - `GET /api/novels/{novel_id}/tasks/{task_id}/status` - 获取任务状态
 - `GET /api/results/{novel_id}` - 获取分析结果
 
-### 请求/响应格式
+### 详细文档
 
-\[预留图片位置：API文档示例]
+启动服务后访问：
 
-### 示例代码
+- Swagger UI：<http://localhost:8000/api/docs>
+- ReDoc：<http://localhost:8000/api/redoc>
 
-\[预留图片位置：API调用示例]
+## 架构设计
+
+### 系统架构图
+
+[预留图片位置：系统架构图]
+
+### 模块说明
+
+- `src/ingest`: 文本导入模块，支持多编码格式
+- `src/preprocess`: 预处理模块，包含清洗、分词、分句
+- `src/chunking`: 分块模块，支持语义分块和索引管理
+- `src/metrics`: 指标计算模块，包含情感、风格、叙事、人物等指标
+- `src/models`: LLM模型模块，支持标注、消歧、诊断
+- `src/workflows`: 工作流模块，编排分析流程
+- `src/rag`: 检索增强生成模块，三级证据检索
+- `src/context`: 上下文管理模块，实体注册和全局上下文
+- `src/knowledge`: 知识图谱模块，权威知识图谱构建
+- `src/lexicons`: 词典模块，情感词典、文化词典、题材检测
+- `src/eval`: 评估模块，消歧评估指标
+- `src/topic`: 主题建模模块，LDA主题分析
+- `src/api`: API服务模块，RESTful API接口
+- `src/storage`: 存储模块，数据库和向量存储
+- `src/report`: 报告模块，分析报告生成
+
+### 数据流
+
+[预留图片位置：数据流图]
 
 ## 开发指南
-
-### 项目架构
-
-\[预留图片位置：架构图]
 
 ### 开发环境搭建
 
@@ -310,14 +304,14 @@ analysis_response = requests.post(
 pip install -e ".[dev]"
 ```
 
-1. 配置开发环境
+2. 配置开发环境
 
 ```bash
 # 编辑配置文件
 config/settings.json
 ```
 
-1. 运行测试
+3. 运行测试
 
 ```bash
 pytest
@@ -328,6 +322,7 @@ pytest
 - 使用ruff进行代码格式化
 - 使用mypy进行类型检查
 - 遵循PEP 8规范
+- 使用中文注释和文档
 
 ### 测试说明
 
@@ -342,27 +337,33 @@ pytest tests/test_preprocess.py
 pytest --cov=src
 ```
 
-## 架构设计
+## 贡献指南
 
-### 系统架构图
+### 如何贡献
 
-\[预留图片位置：系统架构图]
+1. Fork项目
+2. 创建功能分支 (`git checkout -b feature/your-feature`)
+3. 提交更改 (`git commit -m 'Add some feature'`)
+4. 推送到分支 (`git push origin feature/your-feature`)
+5. 创建Pull Request
 
-### 模块说明
+### 提交规范
 
-- `src/ingest`: 文本导入模块
-- `src/preprocess`: 预处理模块
-- `src/metrics`: 指标计算模块
-- `src/models`: LLM模型模块
-- `src/workflows`: 工作流模块
-- `src/api`: API服务模块
-- `src/storage`: 存储模块
+使用约定式提交格式：
 
-### 数据流
+- `feat`: 新功能
+- `fix`: 修复bug
+- `docs`: 文档更新
+- `style`: 代码格式调整
+- `refactor`: 重构
+- `test`: 测试相关
+- `chore`: 构建/工具相关
 
-\[预留图片位置：数据流图]
+### 代码审查
 
-<br />
+- 所有提交需要经过代码审查
+- 确保测试通过
+- 更新相关文档
 
 ## 许可证
 
