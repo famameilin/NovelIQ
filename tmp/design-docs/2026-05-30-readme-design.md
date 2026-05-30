@@ -100,8 +100,8 @@ pip install -e .
 
 3. 配置环境
 ```bash
-cp config/example.json config/settings.json
 # 编辑配置文件
+config/settings.json
 ```
 
 4. 初始化数据库
@@ -146,7 +146,7 @@ processed = preprocess_document(docs[0])
 ### 数据库设置
 1. 创建数据库
 ```sql
-CREATE DATABASE novel_qa;
+CREATE DATABASE novel_analysis;
 ```
 
 2. 运行迁移
@@ -173,14 +173,14 @@ import requests
 
 # 上传小说
 response = requests.post(
-    "http://localhost:8000/api/novels",
+    "http://localhost:8000/api/novels/upload",
     files={"file": open("novel.txt", "rb")}
 )
 
 # 启动分析
-novel_id = response.json()["id"]
+novel_id = response.json()["novel_id"]
 analysis_response = requests.post(
-    f"http://localhost:8000/api/novels/{novel_id}/analyze"
+    f"http://localhost:8000/api/novels/{novel_id}/tasks"
 )
 ```
 
@@ -194,10 +194,11 @@ analysis_response = requests.post(
 
 ### 端点说明
 - `GET /api/novels` - 获取小说列表
-- `POST /api/novels` - 上传小说
-- `GET /api/novels/{id}` - 获取小说详情
-- `POST /api/novels/{id}/analyze` - 启动分析
-- `GET /api/results/{task_id}` - 获取分析结果
+- `POST /api/novels/upload` - 上传小说
+- `GET /api/novels/{novel_id}` - 获取小说详情
+- `POST /api/novels/{novel_id}/tasks` - 启动分析任务
+- `GET /api/novels/{novel_id}/tasks/{task_id}/status` - 获取任务状态
+- `GET /api/results/{novel_id}` - 获取分析结果
 
 ### 请求/响应格式
 [预留图片位置：API文档示例]
@@ -221,7 +222,8 @@ pip install -e ".[dev]"
 
 2. 配置开发环境
 ```bash
-cp config/example.json config/settings.json
+# 编辑配置文件
+config/settings.json
 ```
 
 3. 运行测试
