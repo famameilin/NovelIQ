@@ -1,4 +1,4 @@
-# NovelQ
+# NovelIQ
 
 > [English](README_EN.md)
 
