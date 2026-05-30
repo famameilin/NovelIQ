@@ -1,223 +1,117 @@
 # 小说量化分析系统
 
+![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker_Compose-ready-2496ED?logo=docker&logoColor=white)
+
 ## 项目简介
 
-小说量化分析系统是一个基于Python的中文网络小说智能分析平台，旨在通过自然语言处理和机器学习技术，对小说文本进行全方位的量化分析。系统采用模块化架构，集成了文本预处理、多维度指标计算、大语言模型智能标注、检索增强生成（RAG）等核心功能，为文学研究、创作辅助和内容评估提供数据支持。
+一个面向中文网络小说的智能分析平台，将自然语言处理、大语言模型与图计算结合，提供从文本导入到诊断报告的全链路自动化分析。系统接收 txt 格式小说，自动完成编码检测、清洗、分词和语义分块，经五阶段流水线（预处理→标注→聚合→主题建模→诊断）产出分析结果，每阶段独立持久化、可断点恢复。
 
 ### 核心能力
 
-**文本分析引擎**
+| 能力 | 说明 |
+|------|------|
+| **LLM 智能标注** | 四阶段标注流程：身份识别→伏笔追踪→身份确认→关系抽取，支持流式输出和结构化输出 |
+| **三级证据检索（RAG）** | Level1 别名精确匹配 → Level2 活跃实体召回 → Level3 向量语义检索+段落重排，为标注提供上下文 |
+| **实体消歧** | 增量消歧（每 N 个 chunk）+ 全量消歧（最终），自动识别人物别名和匿名人物 |
+| **多维度量化指标** | 情感曲线、节奏曲线、词汇丰富度（TTR/MTLD）、句长统计、对话比例、叙事结构识别 |
+| **知识图谱** | 人物关系网络构建与可视化、权威知识图谱、实体别名管理 |
+| **主题建模** | LDA 主题推断、主题-文档分配、主题词云 |
+| **诊断报告** | 云端 LLM 生成整体质量评估，涵盖叙事类型、主题、价值观 |
+| **实时进度** | SSE 推送分析进度到前端，支持任务创建、取消和恢复 |
 
-- 支持txt格式小说导入，自动处理UTF-8、GBK等多种编码
-- 集成jieba分词，支持中文文本精准分词和词性标注
-- 提供文本清洗、分句、段落划分等预处理功能
-- 智能分块系统，支持语义分块和索引管理
+### 技术栈
 
-**多维度量化指标**
-
-- 情感分析：情感密度、正负情感比、情感曲线、情感恢复速度等
-- 风格分析：词汇丰富度（TTR、MTLD）、句长统计、对话比例、比喻密度等
-- 叙事分析：三幕结构识别、高潮分析、事件密度、悬崖率等
-- 人物分析：关系网络密度、中心性分析、角色功能覆盖、Greimas符号学分析
-
-**智能标注系统**
-
-- 基于大语言模型（LLM）的智能标注，支持本地和云端模型
-- 多阶段标注流程，支持流式输出和结构化输出
-- 实体消歧系统，自动识别人物别名和匿名人物
-- 上下文管理：实体注册、全局上下文、滚动记忆
-
-**检索增强生成（RAG）**
-
-- 三级证据检索：别名匹配、活跃实体、向量相似度
-- 智能重排机制，支持LLM辅助重排
-- 证据包构建，为标注提供上下文支持
-- 查询示例规划和LLM辅助查询
-
-**知识图谱与词典**
-
-- 人物关系网络构建和可视化
-- 情感词典、文化词典、题材检测词典
-- 支持自定义词典扩展
-- 权威知识图谱构建
-
-**诊断与评估**
-
-- 小说整体质量诊断，包括叙事类型、主题、价值观分析
-- 多维度评估指标，支持横向对比
-- 详细的分析报告生成
-- 消歧评估指标，支持模型效果评估
-
-## 技术栈
-
-### 后端技术
-
-- **Python 3.12+**：核心开发语言
-- **FastAPI**：高性能异步Web框架
-- **SQLAlchemy + PostgreSQL**：关系型数据库，支持pgvector向量存储
-- **LiteLLM/OpenAI**：大语言模型调用框架
-- **jieba**：中文分词库
-- **gensim**：主题建模（LDA）
-- **NetworkX**：图分析和网络计算
-- **Pydantic**：数据验证和序列化
-- **alembic**：数据库迁移工具
-
-### 前端技术
-
-- **React 19**：前端框架
-- **TypeScript**：类型安全的JavaScript超集
-- **Tailwind CSS**：实用优先的CSS框架
-- **Radix UI**：无样式、可访问的UI组件库
-- **ECharts**：数据可视化图表库
-- **AntV G6**：关系图可视化
-- **Zustand**：轻量级状态管理
-- **React Query**：数据获取和缓存
-- **Vite**：下一代前端构建工具
-
-### 部署技术
-
-- **Docker + Docker Compose**：容器化部署
-- **PostgreSQL 17 + pgvector**：数据库和向量存储
-- **Nginx**：反向代理和静态资源服务
+| 层 | 技术 |
+|----|------|
+| 后端 | Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector） |
+| 模型 | OpenAI SDK（兼容本地 vLLM 和云端模型） / jieba / gensim / NetworkX |
+| 前端 | React 19 / TypeScript / ECharts / AntV G6 / Radix UI / Tailwind CSS |
+| 部署 | Docker Compose / Nginx |
 
 ## 快速开始
 
 ### Docker部署（推荐）
 
-#### 环境要求
+1. 配置环境变量
 
-- Docker 20.10+
-- Docker Compose 2.0+
+   ```powershell
+   Copy-Item .env.docker.example .env.docker
+   # 编辑 .env.docker，配置模型API地址和密钥
+   ```
 
-#### 快速启动
+2. 启动服务
 
-1. 克隆项目
+   ```powershell
+   docker compose up -d --build
+   ```
 
-```bash
-git clone <repository-url>
-cd novel-quantitative-analysis
-```
+3. 访问服务
+
+   - 前端：<http://localhost:18080>
+   - API文档：<http://localhost:18080/api/docs>
+
+### 源码安装
+
+1. 安装依赖
+
+   ```powershell
+   ./scripts/dev.ps1 setup
+   ```
 
 2. 配置环境变量
 
-```bash
-cp .env.docker.example .env.docker
-# 编辑 .env.docker 文件，配置模型API等
-```
+   ```powershell
+   Copy-Item .env.example .env
+   # 编辑 .env，配置数据库连接和模型API密钥
+   ```
 
-3. 启动服务
+3. 初始化数据库并启动
 
-```bash
-docker compose up -d --build
-```
+   ```powershell
+   alembic upgrade head
+   ./scripts/dev.ps1 api --port 8000
+   ```
 
-4. 访问服务
+4. 启动前端（新终端窗口）
 
-- 前端：<http://localhost:18080>
-- API文档：<http://localhost:8000/api/docs>
-- 数据库：localhost:15432
+   ```powershell
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-#### 常用命令
+   前端访问 <http://localhost:5173>，通过 Vite 代理转发 `/api` 到后端 8000 端口。
 
-```bash
-# 查看日志
-docker compose logs -f
+## 配置说明
 
-# 停止服务
-docker compose down
+### 配置文件
 
-# 重启服务
-docker compose restart
-```
+- `config/settings.json`：应用参数配置（模型、分块、指标等）
+- `.env` / `.env.docker`：环境变量和敏感信息
 
-### 手动安装
+### 环境变量
 
-#### 环境要求
+参考 `.env.example` 和 `.env.docker.example` 获取完整配置项。
 
-- Python 3.12+
-- PostgreSQL 14+
-- Node.js 18+ (可选，用于前端)
+**必填项：**
 
-#### 安装步骤
+- `DATABASE_URL` / `DATABASE_USERNAME` / `DATABASE_PASSWORD`：数据库连接
+- `ANNOTATION_*`：标注模型服务
+- `SEMANTIC_CHUNKING_*`：语义分块嵌入服务
+- `FULL_DISAMBIG_*`：全量消歧模型
+- `DIAGNOSIS_*`：诊断模型
 
-1. 克隆项目
+**可选项：**
 
-```bash
-git clone <repository-url>
-cd novel-quantitative-analysis
-```
-
-2. 安装依赖
-
-```bash
-pip install -e .
-```
-
-3. 配置环境
-
-```bash
-# 编辑配置文件
-config/settings.json
-```
-
-4. 初始化数据库
-
-```bash
-alembic upgrade head
-```
-
-5. 启动服务
-
-```bash
-python -m src.api.main
-```
-
-## 安装部署
-
-### 配置说明
-
-配置文件位置：`config/settings.json`
-
-主要配置项：
-
-- `models`: LLM模型配置（标注、消歧、诊断等）
-- `database`: 数据库连接配置
-- `paths`: 文件路径配置（上传、输出、日志等）
-- `api`: API服务配置（端口、CORS等）
-- `chunking`: 分块配置（块大小、重叠等）
-- `metrics`: 指标计算配置
-
-### 环境变量说明
-
-Docker部署使用 `.env.docker` 文件配置环境变量，主要配置项：
-
-- `UPLOAD_DIR`: 上传文件目录
-- `RESULTS_DIR`: 分析结果目录
-- `LOG_DIR`: 日志目录
-- `DB_*`: 数据库连接池配置
-- `*_BASE_URL`: 各模型API地址
-- `*_MODEL`: 各模型名称
-- `*_API_KEY`: 各模型API密钥
-
-### 数据库设置
-
-1. 创建数据库
-
-```sql
-CREATE DATABASE novel_analysis;
-```
-
-2. 运行迁移
-
-```bash
-alembic upgrade head
-```
-
-3. 验证连接
-
-```bash
-python -c "from src.storage.db import get_session; get_session()"
-```
+- `ANNOTATION_FALLBACK_*`：标注兜底模型
+- `INCREMENTAL_DISAMBIG_*`：增量消歧模型
+- `MENTION_EXTRACTION_*`：LLM mention提取模型
+- `LEVEL3_RERANK_*`：Level3重排模型
+- `TEST_DATABASE_URL`：测试数据库（运行测试必须配置）
 
 ## 使用方法
 
@@ -241,7 +135,7 @@ analysis_response = requests.post(
 
 ### 前端使用
 
-访问 <http://localhost:18080> 使用前端界面：
+访问 <http://localhost:18080>（Docker）或 <http://localhost:5173>（源码）：
 
 1. 上传小说文件
 2. 选择分析配置
@@ -250,121 +144,102 @@ analysis_response = requests.post(
 
 ## API文档
 
-### 端点说明
-
-- `GET /api/novels` - 获取小说列表
-- `POST /api/novels/upload` - 上传小说
-- `GET /api/novels/{novel_id}` - 获取小说详情
-- `POST /api/novels/{novel_id}/tasks` - 启动分析任务
-- `GET /api/novels/{novel_id}/tasks/{task_id}/status` - 获取任务状态
-- `GET /api/results/{novel_id}` - 获取分析结果
-
-### 详细文档
-
 启动服务后访问：
 
-- Swagger UI：<http://localhost:8000/api/docs>
-- ReDoc：<http://localhost:8000/api/redoc>
+- Docker模式：<http://localhost:18080/api/docs>
+- 源码模式：<http://localhost:8000/api/docs>
+- ReDoc（源码模式）：<http://localhost:8000/api/redoc>
 
 ## 架构设计
 
-### 系统架构图
+### 系统分层
 
-[预留图片位置：系统架构图]
+系统采用四层架构，层间单向依赖：
 
-### 模块说明
-
-- `src/ingest`: 文本导入模块，支持多编码格式
-- `src/preprocess`: 预处理模块，包含清洗、分词、分句
-- `src/chunking`: 分块模块，支持语义分块和索引管理
-- `src/metrics`: 指标计算模块，包含情感、风格、叙事、人物等指标
-- `src/models`: LLM模型模块，支持标注、消歧、诊断
-- `src/workflows`: 工作流模块，编排分析流程
-- `src/rag`: 检索增强生成模块，三级证据检索
-- `src/context`: 上下文管理模块，实体注册和全局上下文
-- `src/knowledge`: 知识图谱模块，权威知识图谱构建
-- `src/lexicons`: 词典模块，情感词典、文化词典、题材检测
-- `src/eval`: 评估模块，消歧评估指标
-- `src/topic`: 主题建模模块，LDA主题分析
-- `src/api`: API服务模块，RESTful API接口
-- `src/storage`: 存储模块，数据库和向量存储
-- `src/report`: 报告模块，分析报告生成
-
-### 数据流
-
-[预留图片位置：数据流图]
-
-## 开发指南
-
-### 开发环境搭建
-
-1. 安装开发依赖
-
-```bash
-pip install -e ".[dev]"
+```
+┌─────────────────────────────────────────────────────────┐
+│  API 层 (src/api/routes, models, dependencies)          │
+│  HTTP 参数绑定、响应装配、SSE 实时推送                   │
+├─────────────────────────────────────────────────────────┤
+│  Service 层 (src/api/services)                          │
+│  任务生命周期编排、阶段调度、取消/删除状态机、结果查询    │
+├─────────────────────────────────────────────────────────┤
+│  Workflow 层 (src/workflows)                            │
+│  核心业务逻辑：预处理、标注、聚合、主题建模、诊断        │
+│  不感知 HTTP 层，可被 API 和 CLI 共同调用                │
+├─────────────────────────────────────────────────────────┤
+│  Domain + Storage 层 (src/storage, rag, models, ...)    │
+│  数据持久化、LLM 交互、指标计算、证据检索、知识图谱      │
+└─────────────────────────────────────────────────────────┘
 ```
 
-2. 配置开发环境
+调用方向：`Route → Service → StageExecutor → Workflow → Domain/Storage`
 
-```bash
-# 编辑配置文件
-config/settings.json
+### 分析工作流
+
+分析任务严格按以下阶段顺序执行，每阶段完成后持久化结果，支持断点恢复：
+
+```mermaid
+flowchart LR
+    A[预处理] --> B[标注]
+    B --> C[聚合]
+    C --> D[主题建模]
+    D --> E[诊断]
+
+    A --- A1[文本清洗分块\n风格指标\n向量嵌入]
+    B --- B1[LLM 4-Phase 标注\n增量消歧\n图投影]
+    C --- C1[情感/节奏曲线\n全局统计\n质量门]
+    D --- D1[LDA 主题推断\n模型持久化]
+    E --- E1[云端 LLM 诊断\n诊断报告]
 ```
 
-3. 运行测试
+| 阶段 | 入口 | 产出 |
+|------|------|------|
+| **预处理** | `run_preprocess` | 文本清洗分块、风格指标、向量嵌入 |
+| **标注** | `run_annotate` | LLM 4-Phase 标注（身份→伏笔→确认→关系）、增量消歧、图投影 |
+| **聚合** | `run_aggregate` | 情感/节奏曲线、全局统计、质量门检查 |
+| **主题建模** | `run_topic_model` | LDA 主题推断与模型持久化 |
+| **诊断** | `run_diagnose` | 云端 LLM 诊断报告 |
 
-```bash
-pytest
+### 标注与 RAG 的交互
+
+标注阶段是系统最复杂的环节，每个 chunk 标注前会调用 RAG 三级证据检索：
+
+```mermaid
+flowchart TD
+    Chunk[当前 Chunk] --> RAG[RAG 三级证据检索]
+    RAG --> L1[Level1: 别名精确匹配]
+    RAG --> L2[Level2: 活跃实体召回]
+    RAG --> L3[Level3: 向量语义检索 + 段落重排]
+    L1 --> Bundle[证据包]
+    L2 --> Bundle
+    L3 --> Bundle
+    Bundle --> P1[Phase1: 身份识别]
+    Bundle --> P2[Phase2: 伏笔追踪]
+    Bundle --> P3[Phase3: 身份确认]
+    Bundle --> P4[Phase4: 关系抽取]
+    P1 --- |共享 identity 证据| P3
 ```
 
-### 代码规范
+Phase1 和 Phase3 共享 identity 证据以避免重复检索。
 
-- 使用ruff进行代码格式化
-- 使用mypy进行类型检查
-- 遵循PEP 8规范
-- 使用中文注释和文档
+### 设计原则
 
-### 测试说明
+- **数据库为唯一业务真相**：TaskManager 仅作进程级执行缓存，所有状态查询以数据库为准
+- **阶段可恢复**：每阶段完成后持久化结果，重分析时可跳过已完成阶段
+- **取消信号双层传递**：内存 cancel_event（快速响应）+ DB cancel_requested（跨进程可靠）
+- **RAG 三级递进**：Level1 精确匹配 → Level2 活跃实体 → Level3 语义检索，每级可独立开关
 
-```bash
-# 运行所有测试
-pytest
+## 开发路线图
 
-# 运行特定测试
-pytest tests/test_preprocess.py
+以下为已确认但尚未完成的方向，按优先级排列：
 
-# 生成覆盖率报告
-pytest --cov=src
-```
-
-## 贡献指南
-
-### 如何贡献
-
-1. Fork项目
-2. 创建功能分支 (`git checkout -b feature/your-feature`)
-3. 提交更改 (`git commit -m 'Add some feature'`)
-4. 推送到分支 (`git push origin feature/your-feature`)
-5. 创建Pull Request
-
-### 提交规范
-
-使用约定式提交格式：
-
-- `feat`: 新功能
-- `fix`: 修复bug
-- `docs`: 文档更新
-- `style`: 代码格式调整
-- `refactor`: 重构
-- `test`: 测试相关
-- `chore`: 构建/工具相关
-
-### 代码审查
-
-- 所有提交需要经过代码审查
-- 确保测试通过
-- 更新相关文档
-
-## 许可证
-
-本项目采用 [MIT许可证](LICENSE)。
+| 方向 | 状态 | 说明 |
+|------|------|------|
+| Phase1 runtime 对齐与 prompt 拆分 | 待实现 | 解决 Phase1 绕开统一 thin runtime、prompt 硬编码问题 |
+| 主题命名迁移到 topic 阶段 | 待实施 | 将主题命名职责从 diagnosis 迁移到 topic，diagnosis 不再拥有主题命名主责 |
+| 集成学习多信号投票框架 | 设计稿 | 统一仲裁词表、规则、LLM 标注等多源信号冲突，替代手工权重 |
+| annotation router 与预判断 | 另案评估 | 评估按需触发 Phase2/3/4 的调度策略，降低调用成本 |
+| LLM 上下文预算与 prompt 裁剪 | 讨论稿 | 多条 LLM 交互链路上下文利用不足，待补充 token 分布事实后再定方案 |
+| 增量/全量消歧与诊断 SSE | 现状审查 | 增量消歧和全量消歧无独立 SSE，诊断无流式输出，待改造 |
+| Level3 mention retrieval 评测 | 延期 | mention 级召回与 paragraph 局部 evidence 的评测闭环延期，不阻塞主线 |
