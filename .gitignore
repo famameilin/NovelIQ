@@ -199,6 +199,15 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 frontend/.env.local
+frontend/playwright-report/
+frontend/test-results/
+
+# JMeter 测试报告
+tests/jmeter/report/
+tests/jmeter/results.jtl
+
+# 生成的分析结果
+results/
 
 AGENTS.md
 
