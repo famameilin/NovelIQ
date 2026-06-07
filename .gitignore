@@ -202,9 +202,11 @@ frontend/.env.local
 frontend/playwright-report/
 frontend/test-results/
 
-# JMeter 测试报告
+# JMeter 测试报告和数据
 tests/jmeter/report/
 tests/jmeter/results.jtl
+tests/jmeter/test_files.csv
+tests/jmeter/test_novel.txt
 
 # 生成的分析结果
 results/
