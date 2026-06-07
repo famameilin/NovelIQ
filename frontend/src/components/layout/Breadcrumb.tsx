@@ -54,6 +54,7 @@ export function Breadcrumb({ items }: BreadcrumbProps) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- static config co-located with component
 export const routeNameMap: Record<string, string> = {
   "": "仪表盘",
   "/curves": "情绪/节奏曲线",
@@ -64,6 +65,7 @@ export const routeNameMap: Record<string, string> = {
   "/diagnosis": "诊断报告",
 };
 
+// eslint-disable-next-line react-refresh/only-export-components -- helper co-located with component
 export function getBreadcrumbLabel(path: string): string {
   return routeNameMap[path] || path;
 }

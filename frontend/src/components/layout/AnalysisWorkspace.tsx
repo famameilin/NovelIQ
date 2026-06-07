@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- composite component pattern */
 import {
   Children,
   isValidElement,
@@ -107,6 +108,7 @@ function AnalysisWorkspaceTabs({
 
   useEffect(() => {
     if (!isControlled && internalValue !== activeValue) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional controlled/uncontrolled sync
       setInternalValue(activeValue);
     }
   }, [activeValue, internalValue, isControlled]);

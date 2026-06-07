@@ -2,40 +2,13 @@ import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 
-export type MetricAccent =
-  | "primary"
-  | "chart-1"
-  | "chart-2"
-  | "chart-3"
-  | "chart-4"
-  | "chart-5";
+import type { MetricAccent } from "./metric-accent";
+import { METRIC_ACCENT_CARD_CLASS_MAP } from "./metric-accent";
+import { getMetricAccentColor, getMetricAccentHoverTextClass, METRIC_ACCENT_BAR_CLASS_MAP } from "./metric-accent";
 
-export const METRIC_ACCENT_CARD_CLASS_MAP: Record<MetricAccent, string> = {
-  primary: "bg-gradient-to-br from-surface via-surface to-primary/15 hover:border-primary/30",
-  "chart-1": "bg-gradient-to-br from-surface via-surface to-chart-1/15 hover:border-chart-1/30",
-  "chart-2": "bg-gradient-to-br from-surface via-surface to-chart-2/15 hover:border-chart-2/30",
-  "chart-3": "bg-gradient-to-br from-surface via-surface to-chart-3/15 hover:border-chart-3/30",
-  "chart-4": "bg-gradient-to-br from-surface via-surface to-chart-4/15 hover:border-chart-4/30",
-  "chart-5": "bg-gradient-to-br from-surface via-surface to-chart-5/15 hover:border-chart-5/30",
-};
-
-export const METRIC_ACCENT_BAR_CLASS_MAP: Record<MetricAccent, string> = {
-  primary: "bg-primary",
-  "chart-1": "bg-chart-1",
-  "chart-2": "bg-chart-2",
-  "chart-3": "bg-chart-3",
-  "chart-4": "bg-chart-4",
-  "chart-5": "bg-chart-5",
-};
-
-const METRIC_ACCENT_HOVER_TEXT_CLASS_MAP: Record<MetricAccent, string> = {
-  primary: "hover:text-primary",
-  "chart-1": "hover:text-chart-1",
-  "chart-2": "hover:text-chart-2",
-  "chart-3": "hover:text-chart-3",
-  "chart-4": "hover:text-chart-4",
-  "chart-5": "hover:text-chart-5",
-};
+export type { MetricAccent };
+// eslint-disable-next-line react-refresh/only-export-components -- re-exports from metric-accent.ts
+export { METRIC_ACCENT_CARD_CLASS_MAP, METRIC_ACCENT_BAR_CLASS_MAP, getMetricAccentColor, getMetricAccentHoverTextClass };
 
 interface DashboardCardShellProps {
   title?: string;
@@ -49,22 +22,6 @@ interface DashboardCardShellProps {
   bodyClassName?: string;
   titleClassName?: string;
   showOrb?: boolean;
-}
-
-/**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 抽出 MetricCard 的共享视觉原语，避免业务卡片各自维护第二套卡片容器样式
- */
-export function getMetricAccentColor(accent: MetricAccent, alpha?: number): string {
-  return alpha == null ? `hsl(var(--${accent}))` : `hsl(var(--${accent}) / ${alpha})`;
-}
-
-/**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 统一业务卡片底部链接的 hover 色，避免组件内重复维护静态类映射
- */
-export function getMetricAccentHoverTextClass(accent: MetricAccent): string {
-  return METRIC_ACCENT_HOVER_TEXT_CLASS_MAP[accent];
 }
 
 /**
