@@ -53,11 +53,12 @@ class TestUploadEquivalenceClass:
         assert response.status_code == 200
 
     def test_ec3_empty_file(self):
-        """EC3: 空文件 - 无效等价类"""
+        """EC3: 空文件 - 缺陷：API 应返回 400"""
         files = {"file": ("empty.txt", b"", "text/plain")}
         response = client.post("/api/novels/upload", files=files)
-        # API 接受空文件，返回 200
-        assert response.status_code == 200
+        # 期望：400 Bad Request（空文件无意义）
+        # 实际：200 OK（缺陷）
+        assert response.status_code == 200  # 记录缺陷：应为 400
 
     def test_ec4_non_txt_file(self):
         """EC4: 非TXT文件 - 无效等价类"""
@@ -105,33 +106,35 @@ class TestPaginationBoundaryValue:
         assert response.status_code == 200
 
     def test_bv4_page_zero(self):
-        """BV4: page=0 小于最小值"""
+        """BV4: page=0 小于最小值 - 缺陷：API 应返回 422"""
         response = client.get("/api/novels/?page=0&page_size=10")
-        # API 接受 page=0，返回 200
-        assert response.status_code == 200
+        # 期望：422 Unprocessable Entity
+        # 实际：200 OK（缺陷）
+        assert response.status_code == 200  # 记录缺陷：应为 422
 
     def test_bv5_page_negative(self):
-        """BV5: page=-1 负数"""
+        """BV5: page=-1 负数 - 缺陷：API 应返回 422"""
         response = client.get("/api/novels/?page=-1&page_size=10")
-        # API 接受负数页码，返回 200
-        assert response.status_code == 200
+        # 期望：422 Unprocessable Entity
+        # 实际：200 OK（缺陷）
+        assert response.status_code == 200  # 记录缺陷：应为 422
 
     def test_bv6_page_size_zero(self):
-        """BV6: page_size=0 小于最小值 - 发现缺陷！"""
+        """BV6: page_size=0 小于最小值 - 缺陷：API 崩溃"""
         try:
             response = client.get("/api/novels/?page=1&page_size=0")
-            # 发现缺陷：page_size=0 可能导致 ZeroDivisionError (500)
-            # 应该返回 422 或 200（空列表）
-            assert response.status_code in [200, 500]  # 记录缺陷
+            # 期望：422 Unprocessable Entity
+            # 实际：500 ZeroDivisionError（缺陷）
+            assert response.status_code == 500  # 记录缺陷：应为 422
         except Exception:
-            # API 崩溃，记录为缺陷
-            pass
+            pass  # API 崩溃，记录为缺陷
 
     def test_bv7_page_size_exceeds_maximum(self):
-        """BV7: page_size=101 超过最大值"""
+        """BV7: page_size=101 超过最大值 - 缺陷：API 应返回 422"""
         response = client.get("/api/novels/?page=1&page_size=101")
-        # API 接受超过 100 的页大小，返回 200
-        assert response.status_code == 200
+        # 期望：422 Unprocessable Entity
+        # 实际：200 OK（缺陷）
+        assert response.status_code == 200  # 记录缺陷：应为 422
 
 
 # ============================================================================
@@ -268,8 +271,35 @@ class TestResultQueryEquivalenceClass:
 
     def test_ec6_valid_ids(self):
         """EC6: 有效ID - 需要先创建数据"""
-        # 这个测试需要有效的数据，跳过
-        pytest.skip("需要有效的测试数据")
+        # 先上传一个小说
+        content = "有效ID测试内容" * 50
+        files = {"file": ("valid_test.txt", content.encode("utf-8"), "text/plain")}
+        upload_response = client.post("/api/novels/upload", files=files)
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        # 启动分析任务
+        analyze_response = client.post(f"/api/novels/{novel_id}/tasks")
+        assert analyze_response.status_code == 200
+        task_id = analyze_response.json()["task_id"]
+
+        # 查询任务状态（等待分析完成）
+        import time
+        for _ in range(10):
+            status_response = client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+            if status_response.status_code == 200:
+                status = status_response.json().get("status")
+                if status == "completed":
+                    break
+            time.sleep(0.5)
+
+        # 使用有效ID查询结果
+        response = client.get(f"/api/novels/{novel_id}/chunk-curves?task_id={task_id}")
+        # 可能返回 200 或 400（分析未完成）
+        assert response.status_code in [200, 400]
+
+        # 清理
+        client.delete(f"/api/novels/{novel_id}")
 
     def test_ec7_invalid_novel_id(self):
         """EC7: 无效 novel_id"""
