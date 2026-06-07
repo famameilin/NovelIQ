@@ -22,6 +22,8 @@ async def upload_novel(
     service: NovelService = Depends(get_novel_service),
 ) -> UploadResponse:
     content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="文件内容不能为空")
     novel_id = await service.save_upload(content, file.filename or "unknown.txt")
     return UploadResponse(novel_id=novel_id, filename=file.filename or "unknown.txt")
 
@@ -32,6 +34,13 @@ async def list_novels(
     page_size: int = 12,
     service: NovelService = Depends(get_novel_service),
 ):
+    if page < 1:
+        raise HTTPException(status_code=422, detail="页码必须大于 0")
+    if page_size < 1:
+        raise HTTPException(status_code=422, detail="每页数量必须大于 0")
+    if page_size > 100:
+        raise HTTPException(status_code=422, detail="每页数量不能超过 100")
+
     novels = service.list_novels()
     total = service.get_analysis_count()
     start = (page - 1) * page_size
