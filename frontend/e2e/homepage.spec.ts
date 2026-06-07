@@ -36,10 +36,8 @@ const MOCK_NOVELS = {
 
 test.describe('首页', () => {
   test.beforeEach(async ({ page }) => {
-    // Mock小说列表API
-    await page.route('**/api/novels/**', async (route) => {
-      const url = route.request().url();
-      if (route.request().method() === 'GET' && url.includes('/api/novels') && !url.includes('/tasks')) {
+    await page.route('**/api/novels/?**', async (route) => {
+      if (route.request().method() === 'GET') {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -53,19 +51,16 @@ test.describe('首页', () => {
 
   test('应正确加载首页并展示小说列表', async ({ page }) => {
     await page.goto('/');
-    // 等待页面加载完成
     await expect(page).toHaveTitle(/NovelIQ|小说/);
   });
 
   test('应展示小说卡片信息', async ({ page }) => {
     await page.goto('/');
-    // 验证小说列表中包含mock数据
-    await expect(page.getByText('测试小说')).toBeVisible();
+    await expect(page.getByText('测试小说').first()).toBeVisible();
   });
 
   test('空状态应提示上传小说', async ({ page }) => {
-    // Mock空列表
-    await page.route('**/api/novels/**', async (route) => {
+    await page.route('**/api/novels/?**', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
           status: 200,
@@ -83,7 +78,6 @@ test.describe('首页', () => {
       }
     });
     await page.goto('/');
-    // 应显示空状态提示
-    await expect(page.getByText(/上传|暂无/)).toBeVisible();
+    await expect(page.getByText('还没有小说')).toBeVisible();
   });
 });

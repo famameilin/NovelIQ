@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- lazy route definitions */
 import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";

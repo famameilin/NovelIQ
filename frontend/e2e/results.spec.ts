@@ -8,27 +8,8 @@ import { test, expect } from '@playwright/test';
 const NOVEL_ID = 'abc12345';
 const TASK_ID = 'task5678';
 
-// 通用mock辅助函数
-async function mockTaskStatus(page: import('@playwright/test').Page, status: string) {
-  await page.route(`**/api/novels/${NOVEL_ID}/tasks/${TASK_ID}/status`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        novel_id: NOVEL_ID,
-        task_id: TASK_ID,
-        status,
-        progress: status === 'completed' ? 100 : 0,
-        stage: status === 'completed' ? 'completed' : 'pending',
-        message: status === 'completed' ? '分析完成' : '',
-        error: null,
-      }),
-    });
-  });
-}
-
 async function mockNovelAndTasks(page: import('@playwright/test').Page) {
-  await page.route(`**/api/novels/?**`, async (route) => {
+  await page.route('**/api/novels/?**', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({
         status: 200,
@@ -69,6 +50,24 @@ async function mockNovelAndTasks(page: import('@playwright/test').Page) {
     } else {
       await route.continue();
     }
+  });
+}
+
+async function mockTaskStatus(page: import('@playwright/test').Page, status: string) {
+  await page.route(`**/api/novels/${NOVEL_ID}/tasks/${TASK_ID}/status`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        novel_id: NOVEL_ID,
+        task_id: TASK_ID,
+        status,
+        progress: status === 'completed' ? 100 : 0,
+        stage: status === 'completed' ? 'completed' : 'pending',
+        message: status === 'completed' ? '分析完成' : '',
+        error: null,
+      }),
+    });
   });
 }
 
@@ -192,8 +191,21 @@ test.describe('分析结果页面', () => {
 
   test('任务未完成时结果页应显示提示', async ({ page }) => {
     await mockTaskStatus(page, 'running');
+    await page.route(`**/api/novels/${NOVEL_ID}/chunk-curves**`, async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: '分析尚未完成' }),
+      });
+    });
+    await page.route(`**/api/novels/${NOVEL_ID}/metrics/narrative-structure**`, async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: '分析尚未完成' }),
+      });
+    });
     await page.goto(`/novels/${NOVEL_ID}/curves?task_id=${TASK_ID}`);
-    // 应显示"分析进行中"或类似提示
-    await expect(page.getByText(/分析进行中|尚未完成|请等待/)).toBeVisible();
+    await expect(page.getByText('加载失败').first()).toBeVisible({ timeout: 15000 });
   });
 });

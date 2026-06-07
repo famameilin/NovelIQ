@@ -34,6 +34,7 @@ export function TopicBarChart({ topics, className }: TopicBarChartProps) {
 
   const chartColors = useMemo(() => {
     return CHART_COLORS.map((c) => getCSSColorVar(c));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- themeSignature triggers re-computation on theme change
   }, [themeSignature]);
 
   const sortedTopics = useMemo(() => {

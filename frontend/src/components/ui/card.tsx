@@ -122,4 +122,5 @@ const CardFooter = React.forwardRef<
 ));
 CardFooter.displayName = "CardFooter";
 
+// eslint-disable-next-line react-refresh/only-export-components -- variants and sub-components
 export { Card, cardVariants, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };

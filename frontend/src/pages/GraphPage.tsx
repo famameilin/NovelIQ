@@ -88,7 +88,7 @@ export function GraphPage() {
         setTask(urlTaskId);
       }
     }
-  }, [novelId, setNovel, setTask, urlTaskId]);
+  }, [novelId, setNovel, setTask, urlTaskId]); // eslint-disable-line react-hooks/exhaustive-deps -- storeTaskId intentionally excluded: this syncs URL→store, not store→URL
 
   useEffect(() => {
     if (!novelId || !storeTaskId) {
@@ -263,6 +263,7 @@ export function GraphPage() {
 
     // GraphPage 自己只负责清理页面级展示状态；事件窗口分页和 deep-link 自动选中
     // 已分别下沉到独立 hook，避免 task 切换时多个职责互相踩状态
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional state reset on task change
     setSelectedNode(null);
     setIsPanelOpen(false);
     setSearchQuery("");
