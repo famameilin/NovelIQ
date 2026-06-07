@@ -8,30 +8,32 @@ import { test, expect } from '@playwright/test';
 const NOVEL_ID = 'abc12345';
 const TASK_ID = 'task5678';
 
+const MOCK_NOVEL_RESPONSE = {
+  items: [{
+    novel_id: NOVEL_ID,
+    filename: '测试小说.txt',
+    file_path: `data/uploads/${NOVEL_ID}_测试小说.txt`,
+    status: 'completed',
+    title: '测试小说',
+    author: '未知作者',
+    upload_time: '2026-05-01T10:00:00',
+    file_size: 102400,
+  }],
+  total: 1,
+  page: 1,
+  page_size: 12,
+  total_pages: 1,
+};
+
 test.describe('分析任务', () => {
   test.beforeEach(async ({ page }) => {
-    // Mock小说列表
+    // Mock小说列表（含 getNovel 的 page_size=1000 请求）
     await page.route('**/api/novels/?**', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({
-            items: [{
-              novel_id: NOVEL_ID,
-              filename: '测试小说.txt',
-              file_path: `data/uploads/${NOVEL_ID}_测试小说.txt`,
-              status: 'completed',
-              title: '测试小说',
-              author: '未知作者',
-              upload_time: '2026-05-01T10:00:00',
-              file_size: 102400,
-            }],
-            total: 1,
-            page: 1,
-            page_size: 12,
-            total_pages: 1,
-          }),
+          body: JSON.stringify(MOCK_NOVEL_RESPONSE),
         });
       } else {
         await route.continue();
@@ -50,7 +52,6 @@ test.describe('分析任务', () => {
           }),
         });
       } else if (route.request().method() === 'POST') {
-        // Mock创建任务
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -83,12 +84,10 @@ test.describe('分析任务', () => {
 
   test('无任务时应显示空状态提示', async ({ page }) => {
     await page.goto(`/novels/${NOVEL_ID}`);
-    // 应显示"尚未分析"或"开始分析"提示
-    await expect(page.getByText(/尚未分析|开始分析|暂无任务/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: '尚未分析' })).toBeVisible();
   });
 
   test('创建任务后应显示进度面板', async ({ page }) => {
-    // Mock任务状态为running
     await page.route(`**/api/novels/${NOVEL_ID}/tasks/${TASK_ID}/status`, async (route) => {
       await route.fulfill({
         status: 200,
@@ -111,10 +110,10 @@ test.describe('分析任务', () => {
     });
 
     await page.goto(`/novels/${NOVEL_ID}?task_id=${TASK_ID}`);
+    await expect(page.getByRole('heading', { name: '分析进行中' })).toBeVisible({ timeout: 15000 });
   });
 
   test('已完成任务应显示仪表盘', async ({ page }) => {
-    // Mock任务状态为completed
     await page.route(`**/api/novels/${NOVEL_ID}/tasks/${TASK_ID}/status`, async (route) => {
       await route.fulfill({
         status: 200,
@@ -133,7 +132,6 @@ test.describe('分析任务', () => {
       });
     });
 
-    // Mock任务列表包含已完成任务
     await page.route(`**/api/novels/${NOVEL_ID}/tasks`, async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
@@ -154,23 +152,32 @@ test.describe('分析任务', () => {
       }
     });
 
-    // Mock各个指标接口
     const mockEndpoints = [
       'narrative-structure',
       'emotion-stats',
       'character-stats',
       'style-stats',
+      'chunk-curves',
     ];
     for (const endpoint of mockEndpoints) {
       await page.route(`**/api/novels/${NOVEL_ID}/metrics/${endpoint}**`, async (route) => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({}),
+          body: JSON.stringify(endpoint === 'chunk-curves' ? [] : {}),
         });
       });
     }
 
+    await page.route(`**/api/novels/${NOVEL_ID}/topics**`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      });
+    });
+
     await page.goto(`/novels/${NOVEL_ID}?task_id=${TASK_ID}`);
+    await expect(page.getByText('仪表盘', { exact: true })).toBeVisible({ timeout: 15000 });
   });
 });

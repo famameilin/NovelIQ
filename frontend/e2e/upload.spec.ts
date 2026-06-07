@@ -48,7 +48,7 @@ test.describe('小说上传', () => {
 
     await page.goto('/');
     // 点击上传按钮
-    const uploadButton = page.getByText(/上传/);
+    const uploadButton = page.getByRole('button', { name: '上传小说' });
     if (await uploadButton.isVisible()) {
       await uploadButton.click();
     }

@@ -27,6 +27,7 @@ interface HomeContextValue {
 
 const HomeContext = createContext<HomeContextValue | null>(null);
 
+// eslint-disable-next-line react-refresh/only-export-components -- shared hook co-located with provider
 export function useHomeContext() {
   const ctx = useContext(HomeContext);
   return ctx;

@@ -60,6 +60,7 @@ export function useGraphDeepLinkSelection({
   }, [urlSelectedChunk]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on deep-link params change
     setHasUserSelectedEvent(false);
     setSelectedEventId(null);
   }, [initialRelationEventId, initialSelectedChunk, taskScopeId]);
@@ -73,6 +74,7 @@ export function useGraphDeepLinkSelection({
         ? loadedEvents.find((event) => event.relation_event_id === initialRelationEventId) ?? null
         : null;
     if (matchedEvent) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync from loaded events
       setSelectedEventId(matchedEvent.relation_event_id);
       return;
     }
