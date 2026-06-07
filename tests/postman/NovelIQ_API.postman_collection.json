@@ -1,0 +1,1248 @@
+{
+  "info": {
+    "name": "NovelIQ API",
+    "description": "NovelIQ 小说智能分析系统 API 测试集合\n包含全部 29 个接口的请求定义和测试脚本",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "novel_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "task_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "description": "健康检查接口",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "GET /health - 检查服务是否正常运行"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应体应包含 status 字段', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Novel Management",
+      "description": "小说管理接口 - 上传、列表、删除等操作",
+      "item": [
+        {
+          "name": "上传小说文件",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "小说文件（支持 txt 格式）"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/novels/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "upload"]
+            },
+            "description": "POST /api/novels/upload - 上传小说文件进行分析（multipart/form-data）"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200 或 201', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 30000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(30000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应应包含小说 ID', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('id');",
+                  "    pm.environment.set('novel_id', jsonData.id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取小说列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/?page=1&page_size=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", ""],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "页码"
+                },
+                {
+                  "key": "page_size",
+                  "value": "10",
+                  "description": "每页数量"
+                }
+              ]
+            },
+            "description": "GET /api/novels/ - 获取小说列表，支持分页"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应应包含分页信息', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "删除指定小说",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}"]
+            },
+            "description": "DELETE /api/novels/{novel_id} - 删除指定小说及其关联数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200 或 204', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "批量删除小说",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"novel_ids\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/novels/batch-delete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "batch-delete"]
+            },
+            "description": "POST /api/novels/batch-delete - 批量删除小说"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Analysis Tasks",
+      "description": "分析任务管理接口 - 创建、恢复、重新分析、查询、删除、取消任务",
+      "item": [
+        {
+          "name": "创建分析任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks"]
+            },
+            "description": "POST /api/novels/{novel_id}/tasks - 为指定小说创建分析任务"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200 或 201', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应应包含任务 ID', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('id');",
+                  "    pm.environment.set('task_id', jsonData.id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "恢复分析任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks/{{task_id}}/resume",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks", "{{task_id}}", "resume"]
+            },
+            "description": "POST /api/novels/{novel_id}/tasks/{task_id}/resume - 恢复已暂停或失败的分析任务"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "重新分析小说",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force_preprocess\": false,\n  \"force_annotate\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/reanalyze",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "reanalyze"]
+            },
+            "description": "POST /api/novels/{novel_id}/reanalyze - 重新分析小说，可选参数 force_preprocess、force_annotate 等"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200 或 201', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取小说的任务列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks"]
+            },
+            "description": "GET /api/novels/{novel_id}/tasks - 获取指定小说的所有分析任务"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应应为数组或包含数组的对象', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取任务状态（Tasks路径）",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks/{{task_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks", "{{task_id}}", "status"]
+            },
+            "description": "GET /api/novels/{novel_id}/tasks/{task_id}/status - 获取指定任务的状态"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应应包含状态字段', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取任务状态（Status路径）",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/status?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "status"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/status?task_id={task_id} - 通过 query 参数获取任务状态"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});",
+                  "",
+                  "pm.test('响应应包含状态字段', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "删除指定任务",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks/{{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks", "{{task_id}}"]
+            },
+            "description": "DELETE /api/novels/{novel_id}/tasks/{task_id} - 删除指定分析任务"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200 或 204', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "批量删除任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_ids\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks/batch-delete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks", "batch-delete"]
+            },
+            "description": "POST /api/novels/{novel_id}/tasks/batch-delete - 批量删除分析任务"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "取消分析任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/tasks/{{task_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "tasks", "{{task_id}}", "cancel"]
+            },
+            "description": "POST /api/novels/{novel_id}/tasks/{task_id}/cancel - 取消正在进行的分析任务"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Results Queries",
+      "description": "分析结果查询接口 - 查询各类分析结果数据",
+      "item": [
+        {
+          "name": "获取综合分析结果",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/results?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "results"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/results?task_id={task_id} - 获取综合分析结果"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取分块情绪曲线",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/chunk-curves?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "chunk-curves"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/chunk-curves?task_id={task_id} - 获取分块情绪曲线数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取分块注释",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/chunk-annotations?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "chunk-annotations"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/chunk-annotations?task_id={task_id} - 获取分块注释数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取角色信息",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/characters?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "characters"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/characters?task_id={task_id} - 获取角色分析数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取主题分析",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/topics?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "topics"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/topics?task_id={task_id} - 获取主题分析数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取诊断报告",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/diagnosis?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "diagnosis"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/diagnosis?task_id={task_id} - 获取诊断分析报告"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取伏笔线索",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/foreshadowing-threads?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "foreshadowing-threads"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/foreshadowing-threads?task_id={task_id} - 获取伏笔线索分析"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取关系图谱",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/graph?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "graph"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/graph?task_id={task_id} - 获取角色关系图谱"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取图谱事件列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/graph/events?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "graph", "events"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/graph/events?task_id={task_id} - 获取图谱事件列表"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "description": "指标统计接口 - 叙事结构、情感、角色、风格等维度的量化指标",
+      "item": [
+        {
+          "name": "获取叙事结构指标",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/metrics/narrative-structure?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "metrics", "narrative-structure"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/metrics/narrative-structure?task_id={task_id} - 获取叙事结构量化指标"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取情感统计数据",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/metrics/emotion-stats?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "metrics", "emotion-stats"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/metrics/emotion-stats?task_id={task_id} - 获取情感统计数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取角色统计数据",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/metrics/character-stats?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "metrics", "character-stats"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/metrics/character-stats?task_id={task_id} - 获取角色统计数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "获取风格统计数据",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/metrics/style-stats?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "metrics", "style-stats"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/metrics/style-stats?task_id={task_id} - 获取风格统计数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Timeline",
+      "description": "时间线接口 - 获取故事时间线数据",
+      "item": [
+        {
+          "name": "获取故事时间线",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/timeline?task_id={{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "novels", "{{novel_id}}", "timeline"],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{task_id}}",
+                  "description": "任务 ID"
+                }
+              ]
+            },
+            "description": "GET /api/novels/{novel_id}/timeline?task_id={task_id} - 获取故事时间线数据"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "",
+                  "pm.test('响应体应为 JSON', function () {",
+                  "    pm.response.to.have.header('Content-Type', /json/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SSE",
+      "description": "Server-Sent Events 接口 - 实时任务进度推送",
+      "item": [
+        {
+          "name": "SSE 任务事件流",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              },
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/events/tasks/{{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "events", "tasks", "{{task_id}}"]
+            },
+            "description": "GET /api/events/tasks/{task_id} - SSE 流，订阅任务进度事件推送"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码应为 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('响应时间应小于 10000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(10000);",
+                  "});",
+                  "",
+                  "pm.test('Content-Type 应为 text/event-stream', function () {",
+                  "    pm.response.to.have.header('Content-Type', /text\\/event-stream/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
