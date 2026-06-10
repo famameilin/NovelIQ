@@ -177,7 +177,7 @@ def estimate_from_db():
     print("- DeepSeek-V3: 64K tokens")
     print("- GPT-4 (8K版): 8K tokens")
     print("- GPT-4o: 128K tokens")
-    print("- Claude-3: 200K tokens")
+    print("- 长上下文云端模型: 200K tokens")
 
     return token_stats
 
