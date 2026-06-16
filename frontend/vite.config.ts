@@ -4,7 +4,7 @@ import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import tailwindcss from '@tailwindcss/vite'
 import { loadEnv } from 'vite'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -38,6 +38,8 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'jsdom',
+      // 2026-06-12: 默认单元测试排除 Playwright E2E 用例目录
+      exclude: [...configDefaults.exclude, 'e2e/**'],
       setupFiles: './src/test/setup.ts',
     },
   }
