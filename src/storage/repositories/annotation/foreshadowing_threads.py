@@ -23,7 +23,7 @@ from src.models.local.schema import (
 )
 from src.storage.models import ForeshadowingThread, ForeshadowingThreadHit
 
-ACTIVE_SETUP_POOL_LIMIT = settings.analysis.multi_phase_annotation.active_setup_pool_limit
+ACTIVE_SETUP_POOL_LIMIT = settings.analysis.agents.annotation.active_setup_pool_limit
 _VALID_PAYOFF_LIKELIHOODS = {"high", "medium"}
 _VALID_THREAD_CONFIDENCES = {"high", "medium"}
 _VALID_RUNTIME_SETUP_STATUSES = {"open", "reinforced", "likely_paid_off"}
@@ -54,7 +54,7 @@ def _get_active_setup_pool_limit() -> int:
     active pool limit 现在来自 settings，不能再让默认参数在模块导入时把旧值固化
     """
 
-    configured_limit = settings.analysis.multi_phase_annotation.active_setup_pool_limit
+    configured_limit = settings.analysis.agents.annotation.active_setup_pool_limit
     return configured_limit if configured_limit > 0 else ACTIVE_SETUP_POOL_LIMIT
 
 

@@ -1,5 +1,5 @@
 from src.config.schemas import _parse_rag_settings
-from src.config.schemas.analysis import _parse_multi_phase_annotation_settings
+from src.config.schemas.analysis import _parse_agent_settings
 
 
 def test_parse_rag_settings_includes_level3_fields() -> None:
@@ -33,24 +33,44 @@ def test_parse_rag_settings_uses_top_k_as_level3_fallback() -> None:
     assert settings.level3_top_k == 4
 
 
-def test_parse_multi_phase_annotation_settings_reads_active_setup_pool_limit() -> None:
-    settings = _parse_multi_phase_annotation_settings(
+def test_parse_rag_settings_ignores_removed_mention_and_rerank_fields() -> None:
+    settings = _parse_rag_settings(
         {
-            "parallel": False,
-            "include_phase2_evidence": True,
-            "active_setup_pool_limit": 12,
+            "mention_extraction_enabled": True,
+            "level3_rerank_enabled": True,
+            "level3_max_queries": 6,
         }
     )
 
-    assert settings.include_phase2_evidence is True
-    assert settings.active_setup_pool_limit == 12
+    assert not hasattr(settings, "mention_extraction_enabled")
+    assert not hasattr(settings, "level3_rerank_enabled")
+    assert not hasattr(settings, "level3_max_queries")
 
 
-def test_parse_multi_phase_annotation_settings_falls_back_when_limit_invalid() -> None:
-    settings = _parse_multi_phase_annotation_settings(
+def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
+    settings = _parse_agent_settings(
         {
-            "active_setup_pool_limit": 0,
+            "annotation": {
+                "max_iterations": 5,
+                "max_sub_agents": 4,
+                "active_setup_pool_limit": 12,
+            },
+            "diagnosis": {
+                "max_iterations": 9,
+            },
         }
     )
 
-    assert settings.active_setup_pool_limit == 30
+    assert settings.annotation.max_iterations == 5
+    assert settings.annotation.max_sub_agents == 4
+    assert settings.annotation.active_setup_pool_limit == 12
+    assert settings.diagnosis.max_iterations == 9
+
+
+def test_parse_agent_settings_defaults() -> None:
+    settings = _parse_agent_settings(None)
+
+    assert settings.annotation.max_iterations == 10
+    assert settings.annotation.max_sub_agents == 8
+    assert settings.annotation.active_setup_pool_limit == 30
+    assert settings.diagnosis.max_iterations == 15

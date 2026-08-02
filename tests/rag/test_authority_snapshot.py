@@ -186,7 +186,7 @@ class TestLevel1AuthoritySnapshot:
 
         bundle = provider._collect_base_evidence(
             EvidenceRequest(
-                consumer="annotation_phase1",
+                consumer="annotation_agent",
                 objective="identity",
                 query_text="",
                 requested_names=[],
@@ -198,10 +198,7 @@ class TestLevel1AuthoritySnapshot:
                 need_level1=False,
                 need_level2=True,
                 need_level3=False,
-                allow_llm_query_expansion=False,
                 top_k=5,
-                max_queries=1,
-                model_rerank_query_max_chars=0,
             )
         )
 

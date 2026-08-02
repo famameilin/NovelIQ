@@ -7,6 +7,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.topic.preprocessor import TopicPreprocessor
 
+
 class TestTopicPreprocessor(unittest.TestCase):
     def setUp(self) -> None:
         self.preprocessor = TopicPreprocessor()

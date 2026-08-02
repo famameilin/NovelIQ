@@ -17,12 +17,15 @@ from .input_config import (
 )
 from .logging_config import LoggingConfig, setup_logging
 from .schemas import (
+    AgentSettings,
     AnalysisSettings,
+    AnnotationAgentSettings,
     AnnotationRuntimeSettings,
     APISettings,
     ChunkingSettings,
     CommonTopicSettings,
     DatabaseSettings,
+    DiagnosisAgentSettings,
     DiagnosisRuntimeSettings,
     DiagnosisSettings,
     DisambiguationRuntimeSettings,
@@ -48,14 +51,17 @@ from .schemas import (
 from .settings import Settings, settings
 
 __all__ = [
+    "AgentSettings",
     "APISettings",
     "AnalysisSettings",
+    "AnnotationAgentSettings",
     "AnnotationRuntimeSettings",
     "CHAPTER_PATTERN",
     "ChunkingSettings",
     "CLASSICAL_PATTERNS",
     "CommonTopicSettings",
     "DatabaseSettings",
+    "DiagnosisAgentSettings",
     "DiagnosisSettings",
     "DiagnosisRuntimeSettings",
     "DisambiguationRuntimeSettings",

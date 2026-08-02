@@ -19,16 +19,14 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   diagnose: { label: "诊断报告", range: [95, 100] },
 };
 
-// 修改时间: 2026-05-01
-// 任务: 修复 phase1/phase2 进度文案错位
-// 原因: 后端真实语义是 phase1 产出人物识别主结果、phase2 才是伏笔分析，
-//       前端展示层此前把两者写反，导致进度说明与实际执行阶段不一致。
+// 修改时间: 2026-08-02
+// 任务: agent 化改造
+// 原因: 阶段 1-4 已合并为标注 Agent 任务，消歧集成进 agent 循环；
+//       前端子阶段只展示 agent / sub_agent 两种粒度。
 const PHASE_CONFIG: Record<string, { label: string }> = {
-  phase1: { label: "人物识别" },
-  phase2: { label: "伏笔分析" },
-  phase3: { label: "对话归因" },
-  phase4: { label: "关系识别" },
-  level3: { label: "Level3 证据准备" },
+  agent: { label: "标注 Agent" },
+  sub_agent: { label: "子代理" },
+  level3: { label: "Level3 段落证据准备" },
 };
 
 const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];

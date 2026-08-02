@@ -34,7 +34,7 @@ class EmbeddingClient:
         novel_id: str | None = None,
     ) -> None:
         if base_url is None or model is None:
-            semantic_config = settings.models.semantic_chunking
+            semantic_config = settings.models.paragraph_embedding
             self._base_url = base_url or semantic_config.base_url
             self._model = model or semantic_config.model
             self._api_key = api_key or semantic_config.api_key or os.environ.get("OPENAI_API_KEY", "")
@@ -55,9 +55,9 @@ class EmbeddingClient:
                 )
             self._timeout_s = timeout_s
             self._embedding_dim = (
-                embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
+                embedding_dim if embedding_dim is not None else settings.models.paragraph_embedding.embedding_dim
             )
-            self._batch_size = settings.models.semantic_chunking.batch_size
+            self._batch_size = settings.models.paragraph_embedding.batch_size
 
         if self._embedding_dim <= 0:
             raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")

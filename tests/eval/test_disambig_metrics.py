@@ -70,6 +70,7 @@ def test_compute_metrics_by_entity_type_groups_by_type():
 
 def test_compute_metrics_by_entity_type_missing_type_warning(caplog):
     import logging
+
     from loguru import logger
 
     class PropagateHandler(logging.Handler):

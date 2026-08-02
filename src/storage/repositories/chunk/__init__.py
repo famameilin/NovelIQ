@@ -12,6 +12,7 @@ from .embedding_ops import (
     insert_chunk_embeddings,
     insert_paragraph_embeddings,
     search_similar_chunks,
+    search_similar_paragraphs,
     search_similar_paragraphs_within_chunks,
 )
 from .style_data import ChunkStyleData
@@ -38,6 +39,7 @@ __all__ = [
     "get_missing_embedding_chunk_ids",
     "get_chunk_embedding",
     "search_similar_chunks",
+    "search_similar_paragraphs",
     "search_similar_paragraphs_within_chunks",
     "has_embeddings",
     "has_paragraph_embeddings",

@@ -286,7 +286,7 @@ async def test_eventbus_demotes_high_frequency_embedding_progress_logs_to_debug(
 
     创建时间: 2026-04-28
     任务: demote-eventbus-embedding-progress-log
-    说明: `semantic_chunking_embedding` / `paragraph_embedding` 会在 preprocess 中按批次连续发 progress；
+    说明: `paragraph_embedding` 会在 preprocess 中按批次连续发 progress；
           这类日志应降到 DEBUG，但普通 progress 仍应保留在 INFO。
     """
     task_manager = MagicMock()
@@ -303,7 +303,7 @@ async def test_eventbus_demotes_high_frequency_embedding_progress_logs_to_debug(
             StreamEvent(
                 action="progress",
                 stage="preprocess",
-                sub_stage="semantic_chunking_embedding",
+                sub_stage="paragraph_embedding",
                 percent=3.3,
                 sub_percent=33.0,
             )
@@ -317,7 +317,7 @@ async def test_eventbus_demotes_high_frequency_embedding_progress_logs_to_debug(
                 sub_percent=66.0,
             )
         )
-        await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="phase1", percent=10.0))
+        await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="agent", percent=10.0))
 
     assert mock_debug.call_count == 2
     assert mock_info.call_count == 1

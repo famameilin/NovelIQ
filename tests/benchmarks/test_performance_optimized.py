@@ -19,13 +19,11 @@ from src.lexicons.registry import LexiconRegistry, get_weighted_lexicon_set
 from src.metrics.emotion_metrics import lexical_sentiment_density
 from src.metrics.lexicon_metrics import (
     build_automaton,
-    count_weighted_hits,
     get_emotion_spans,
     get_emotion_spans_fast,
 )
 from src.metrics.text_utils import tokenize_words
 from src.workflows.curve_metrics import (
-    WeightedLexiconSet,
     compute_emotion_curve_weighted,
 )
 
@@ -101,7 +99,7 @@ def test_multi_type_merge_optimization():
     chunk_texts = [(i, generate_test_text(500)) for i in range(10)]
 
     print(f"\nChunk数量: {len(chunk_texts)}")
-    print(f"每个Chunk长度: 500字")
+    print("每个Chunk长度: 500字")
 
     print("\n1. 优化版（词典合并）:")
     start = time.time()
@@ -110,7 +108,7 @@ def test_multi_type_merge_optimization():
     elapsed_new = time.time() - start
     print(f"   耗时: {elapsed_new / 10 * 1000:.2f}毫秒/次")
 
-    print(f"\n✅ 预期性能提升: 3倍")
+    print("\n✅ 预期性能提升: 3倍")
     print(f"   预期耗时: ~{elapsed_new * 3:.2f}毫秒（优化前）")
 
 
@@ -145,8 +143,8 @@ def test_end_to_end_optimization():
     print(f"平均每个Chunk: {elapsed / chunk_count * 1000:.2f}毫秒")
     print(f"处理速度: {chunk_count * chunk_length / elapsed:.0f}字/秒")
 
-    print(f"\n✅ 对比优化前:")
-    print(f"   优化前: ~0.394秒")
+    print("\n✅ 对比优化前:")
+    print("   优化前: ~0.394秒")
     print(f"   优化后: {elapsed:.3f}秒")
     if elapsed < 0.394:
         speedup = 0.394 / elapsed
@@ -219,7 +217,7 @@ def test_automaton_reuse():
     elapsed_reuse = time.time() - start
     print(f"   耗时: {elapsed_reuse / 100 * 1000:.2f}毫秒/次")
 
-    print(f"\n✅ 结论: 自动机构建一次，可重复使用")
+    print("\n✅ 结论: 自动机构建一次，可重复使用")
     print(f"   构建开销: {elapsed_build * 1000:.2f}毫秒")
     print(f"   单次匹配: {elapsed_reuse / 100 * 1000:.2f}毫秒")
 

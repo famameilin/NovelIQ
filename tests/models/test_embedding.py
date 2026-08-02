@@ -129,7 +129,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
     async def test_embed_texts_batches_requests(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
-        batch_size = settings.models.semantic_chunking.batch_size
+        batch_size = settings.models.paragraph_embedding.batch_size
         total_texts = batch_size + 2
 
         first_response = MagicMock()
@@ -198,7 +198,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
     async def test_embed_texts_reports_batch_progress(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
-        batch_size = settings.models.semantic_chunking.batch_size
+        batch_size = settings.models.paragraph_embedding.batch_size
         total_texts = batch_size + 1
 
         first_response = MagicMock()

@@ -116,10 +116,9 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "thinking": StreamMessageType.llm_thinking.value,
 }
 
-# 这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
+# preprocess 的 paragraph embedding 子阶段按 embedding batch 高频发 progress 事件；
 # 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志
 _DEBUG_PROGRESS_SUB_STAGES = {
-    "semantic_chunking_embedding",
     "paragraph_embedding",
 }
 

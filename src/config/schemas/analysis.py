@@ -15,13 +15,6 @@ class ChunkingSettings:
     max_chars: int = 2000
     overlap: int = 200
     split_by_chapter: bool = True
-    use_semantic_chunking: bool = False
-    semantic_threshold: float = 0.7
-    semantic_max_chars: int = 3000
-    semantic_window_size: int = 3
-    semantic_percentile: int = 10
-    semantic_min_chars: int = 50
-    semantic_use_dynamic_threshold: bool = True
 
 
 @dataclass
@@ -63,14 +56,29 @@ class ProgressSettings:
 
 
 @dataclass
-class MultiPhaseAnnotationSettings:
-    """
-    多阶段标注配置
-    """
+class AnnotationAgentSettings:
+    """标注 Agent 配置"""
 
-    parallel: bool = False
-    include_phase2_evidence: bool = False
+    max_iterations: int = 10
+    max_sub_agents: int = 8
+    sub_chunk_max_chars: int = 2000
+    identity_lookback: int = 50
     active_setup_pool_limit: int = 30
+
+
+@dataclass
+class DiagnosisAgentSettings:
+    """诊断 Agent 配置"""
+
+    max_iterations: int = 15
+
+
+@dataclass
+class AgentSettings:
+    """Agent 配置"""
+
+    annotation: AnnotationAgentSettings = field(default_factory=AnnotationAgentSettings)
+    diagnosis: DiagnosisAgentSettings = field(default_factory=DiagnosisAgentSettings)
 
 
 @dataclass
@@ -79,7 +87,6 @@ class AnalysisSettings:
     分析配置
     """
 
-    incremental_disambig_interval: int = 10
     checkpoint_interval: int = 1
     projection_interval: int = 1
     analysis_log_rotation: str = "10 MB"
@@ -88,7 +95,7 @@ class AnalysisSettings:
     sentence_pool_max_chars: int = 80
     annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
-    multi_phase_annotation: MultiPhaseAnnotationSettings = field(default_factory=MultiPhaseAnnotationSettings)
+    agents: AgentSettings = field(default_factory=AgentSettings)
     valid_relation_types: list[str] = field(
         default_factory=lambda: [
             "师徒",
@@ -210,11 +217,7 @@ class RAGSettings:
     level1_enabled: bool = True
     level2_enabled: bool = True
     level3_enabled: bool = True
-    mention_extraction_enabled: bool = False
-    level3_rerank_enabled: bool = False
     level3_top_k: int = 5
-    level3_max_queries: int = 6
-    level3_model_rerank_query_max_chars: int = 320
 
 
 def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
@@ -225,13 +228,6 @@ def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
         max_chars=data.get("max_chars", 2000),
         overlap=data.get("overlap", 200),
         split_by_chapter=data.get("split_by_chapter", True),
-        use_semantic_chunking=data.get("use_semantic_chunking", False),
-        semantic_threshold=data.get("semantic_threshold", 0.7),
-        semantic_max_chars=data.get("semantic_max_chars", 3000),
-        semantic_window_size=data.get("semantic_window_size", 3),
-        semantic_percentile=data.get("semantic_percentile", 10),
-        semantic_min_chars=data.get("semantic_min_chars", 50),
-        semantic_use_dynamic_threshold=data.get("semantic_use_dynamic_threshold", True),
     )
 
 
@@ -281,23 +277,25 @@ def _parse_progress_settings(data: dict[str, Any] | None) -> ProgressSettings:
     )
 
 
-def _parse_multi_phase_annotation_settings(data: dict[str, Any] | None) -> MultiPhaseAnnotationSettings:
+def _parse_agent_settings(data: dict[str, Any] | None) -> AgentSettings:
     """
-    解析多阶段标注配置
+    解析 Agent 配置
     """
     if not data:
-        return MultiPhaseAnnotationSettings()
-    active_setup_pool_limit_raw = data.get("active_setup_pool_limit", 30)
-    try:
-        active_setup_pool_limit = int(active_setup_pool_limit_raw)
-    except (TypeError, ValueError):
-        active_setup_pool_limit = 30
-    if active_setup_pool_limit <= 0:
-        active_setup_pool_limit = 30
-    return MultiPhaseAnnotationSettings(
-        parallel=data.get("parallel", False),
-        include_phase2_evidence=data.get("include_phase2_evidence", False),
-        active_setup_pool_limit=active_setup_pool_limit,
+        return AgentSettings()
+    annotation_data = data.get("annotation", {}) or {}
+    diagnosis_data = data.get("diagnosis", {}) or {}
+    return AgentSettings(
+        annotation=AnnotationAgentSettings(
+            max_iterations=annotation_data.get("max_iterations", 10),
+            max_sub_agents=annotation_data.get("max_sub_agents", 8),
+            sub_chunk_max_chars=annotation_data.get("sub_chunk_max_chars", 2000),
+            identity_lookback=annotation_data.get("identity_lookback", 50),
+            active_setup_pool_limit=annotation_data.get("active_setup_pool_limit", 30),
+        ),
+        diagnosis=DiagnosisAgentSettings(
+            max_iterations=diagnosis_data.get("max_iterations", 15),
+        ),
     )
 
 
@@ -308,7 +306,6 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
     if not data:
         return AnalysisSettings()
     return AnalysisSettings(
-        incremental_disambig_interval=data.get("incremental_disambig_interval", 10),
         checkpoint_interval=data.get("checkpoint_interval", 1),
         projection_interval=data.get("projection_interval", 1),
         analysis_log_rotation=data.get("analysis_log_rotation", "10 MB"),
@@ -317,7 +314,7 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         sentence_pool_max_chars=data.get("sentence_pool_max_chars", 80),
         annotation_fallback_enabled=data.get("annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
-        multi_phase_annotation=_parse_multi_phase_annotation_settings(data.get("multi_phase_annotation")),
+        agents=_parse_agent_settings(data.get("agents")),
         valid_relation_types=data.get(
             "valid_relation_types",
             [
@@ -443,9 +440,5 @@ def _parse_rag_settings(data: dict[str, Any] | None) -> RAGSettings:
         level1_enabled=data.get("level1_enabled", True),
         level2_enabled=data.get("level2_enabled", True),
         level3_enabled=data.get("level3_enabled", True),
-        mention_extraction_enabled=data.get("mention_extraction_enabled", False),
-        level3_rerank_enabled=data.get("level3_rerank_enabled", False),
         level3_top_k=data.get("level3_top_k", data.get("top_k", 5)),
-        level3_max_queries=data.get("level3_max_queries", 6),
-        level3_model_rerank_query_max_chars=data.get("level3_model_rerank_query_max_chars", 320),
     )

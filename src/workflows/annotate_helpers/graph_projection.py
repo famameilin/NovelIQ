@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
+from src.agents.annotation.memory import IdentityMemory, load_identity_memory
 from src.config import settings
 from src.config.constants.annotation import (
     SYMMETRIC_RELATION_TYPES,
@@ -12,12 +13,8 @@ from src.config.constants.annotation import (
     VALID_RELATION_TYPES,
 )
 from src.models.local.character_reference_policy import decide_character_reference, is_reference_surface_name
-from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import AnnotationRepository, GraphRepository, RunRepository
-from src.workflows.annotate_helpers.disambiguation.checkpoint import (
-    _load_disambig_checkpoint,
-)
 
 PENDING_RETRY_LIMIT = 200
 HIERARCHICAL_SYMMETRIC_RELATION_TYPES = frozenset({"spouse_of", "sibling_of"})
@@ -125,7 +122,7 @@ def _backfill_relation_history_before_projection(
     session,
     *,
     run_id: str,
-    state: DisambiguationState,
+    state: IdentityMemory,
     from_chunk: int,
     to_chunk: int | None,
     retry_relations: list[ChunkRelation],
@@ -143,7 +140,7 @@ def _backfill_relation_history_before_projection(
         backfill_from_chunk = min(backfill_from_chunk, earliest_retry_chunk)
     report = AnnotationRepository(session).apply_reference_resolutions_to_history(
         run_id,
-        state.get_reference_resolutions_dict(),
+        _build_reference_resolutions_from_memory(state),
         apply=True,
         from_chunk=backfill_from_chunk,
         to_chunk=to_chunk,
@@ -158,6 +155,17 @@ def _backfill_relation_history_before_projection(
         report,
     )
     return report
+
+
+def _build_reference_resolutions_from_memory(state: IdentityMemory) -> dict[str, str]:
+    """
+    从 agent 身份记忆构建引用解析映射：
+    别名表（表面称呼 → 规范名）即为引用解析的权威来源，
+    规范名自身映射到自身，保证已解析实名的引用行不被误清空
+    """
+    resolutions = {name: name for name in state.known_canonical_names}
+    resolutions.update(state.alias_map)
+    return resolutions
 
 
 def _is_reference_endpoint(raw_name: str | None, reference_kind: str | None) -> bool:
@@ -222,7 +230,7 @@ def project_graph_tables(
         raise ValueError(f"run not found: {run_id}")
 
     graph_repo = GraphRepository(session)
-    state: DisambiguationState = _load_disambig_checkpoint(session, run_id)
+    state: IdentityMemory = load_identity_memory(session, run_id)
     if rebuild:
         logger.info("graph projection rebuild requested run_id={} to_chunk={}", run_id, to_chunk)
         graph_repo.reset_graph_tables(run_id)
@@ -284,42 +292,15 @@ def project_graph_tables(
     )
     chunk_relations = _merge_relations_for_projection(window_relations, retry_relations)
 
-    alias_map = state.get_alias_merges_dict()
+    alias_map = dict(state.alias_map)
     graph_alias_map = graph_repo.fetch_alias_map(run_id)
 
     # P1.1 修复：批量加载已有实体类型，避免把类型硬编码成 "character"
     existing_entities = graph_repo.fetch_entities(run_id)
     existing_types: dict[str, str] = {e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name}
-    # 合并消歧阶段给出的 entity_types，让 LLM 判定的类型能流入图谱投影
+    # 合并 agent 身份记忆给出的 entity_types，让 LLM 判定的类型能流入图谱投影
     if state.entity_types:
-        existing_types.update(state.get_entity_types_dict())
-
-    # 构建“不确定名字”集合：处于 review / 低置信，且不在 alias_merges 或 known_canonicals 中
-    review_dict = state.get_review_status_dict()
-    uncertain_names: set[str] = set()
-    canonical_names = state.known_canonical_names
-    alias_set = {a for a, _ in state.alias_merges}
-    for name, review in review_dict.items():
-        if (
-            review.status != "resolved"
-            and review.confidence in ("low", "medium")
-            and name not in canonical_names
-            and name not in alias_set
-        ):
-            uncertain_names.add(name)
-            logger.debug(
-                "Uncertain name skipped: '{}' (status={}, confidence={})",
-                name,
-                review.status,
-                review.confidence,
-            )
-
-    if uncertain_names:
-        logger.info(
-            "Skipping {} uncertain names from graph projection: {}",
-            len(uncertain_names),
-            uncertain_names,
-        )
+        existing_types.update(state.entity_types)
 
     for row in chunk_characters:
         surface_name = row.surface_name or row.name
@@ -330,8 +311,6 @@ def project_graph_tables(
             resolved_global_name=row.resolved_global_name,
         )
         if resolved_name is None:
-            continue
-        if resolved_name in uncertain_names:
             continue
         entity = graph_repo.upsert_entity(
             run_id=run_id,
@@ -470,18 +449,6 @@ def project_graph_tables(
             relation.projection_error = "self relation"
             relation.projected_at = None
             failed_count += 1
-            continue
-        # P4：在关系投影前过滤不确定端点
-        if resolved_from in uncertain_names or resolved_to in uncertain_names:
-            relation.projection_status = "pending"
-            relation.projection_error = "uncertain endpoint"
-            relation.projected_at = None
-            pending_count += 1
-            logger.debug(
-                "Skipping relation with uncertain endpoint: '{}' or '{}'",
-                resolved_from,
-                resolved_to,
-            )
             continue
 
         from_entity = graph_repo.upsert_entity(
