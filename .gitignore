@@ -222,3 +222,10 @@ skills/
 output/
 tmp/
 scripts/tools/build_competition_report.py
+
+# 未跟踪的本地素材与调试工具(移除 git 跟踪)
+noveliq-creative-proposal*.png
+scripts/db/
+scripts/manual/
+scripts/legacy/
+scripts/tools/
