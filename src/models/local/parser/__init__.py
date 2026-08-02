@@ -10,10 +10,6 @@ from .annotation_builder import (
     build_annotation,
     make_empty_annotation,
 )
-from .disambiguation import (
-    DisambiguationParseError,
-    parse_alias_map,
-)
 from .foreshadowing import (
     parse_foreshadowing_result,
     validate_foreshadowing_result,
@@ -43,9 +39,6 @@ __all__ = [
     # 伏笔处理
     "parse_foreshadowing_result",
     "validate_foreshadowing_result",
-    # 消歧逻辑
-    "DisambiguationParseError",
-    "parse_alias_map",
     # 通用工具
     "parse_active_entities",
 ]

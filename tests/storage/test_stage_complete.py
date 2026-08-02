@@ -30,10 +30,9 @@ from src.storage.repositories import (
 )
 from src.storage.repositories.chunk import (
     ParagraphEmbeddingRow,
-    insert_chunk_embeddings,
     insert_paragraph_embeddings,
 )
-from src.storage.vector_schema import ensure_chunk_embeddings_schema, ensure_paragraph_embeddings_schema
+from src.storage.vector_schema import ensure_paragraph_embeddings_schema
 
 
 def _create_chunks(count: int = 3) -> list[Chunk]:
@@ -101,6 +100,7 @@ class TestStageCompleteChecks:
         创建时间: 2026-04-24
         任务: fix-preprocess-completion-level3-contract
         说明: 当前配置要求 Level3 时，只有 chunks 或只有 chunk embeddings 都不能视为 preprocess 完成。
+              RAG 粒度固定为自然段：只有 paragraph embeddings 才算数。
         """
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
@@ -113,14 +113,12 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         chunks = _create_chunks(2)
         chunk_repo.insert_chunks(run_id, chunks)
-        ensure_chunk_embeddings_schema(db_session, 1024)
         ensure_paragraph_embeddings_schema(db_session, 1024)
-        insert_chunk_embeddings(db_session, run_id, [(0, [0.1] * 1024), (1, [0.2] * 1024)])
 
         with (
             patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", True),
             patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", True),
-            patch("src.storage.repositories.chunk_repository.settings.models.semantic_chunking.embedding_dim", 1024),
+            patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
         ):
             assert not chunk_repo.is_preprocess_complete(run_id)
 
@@ -128,7 +126,7 @@ class TestStageCompleteChecks:
         """
         创建时间: 2026-04-24
         任务: fix-preprocess-completion-level3-contract
-        说明: 当前配置要求 Level3 时，只有 chunk/paragraph embeddings 都完整就绪，preprocess 才算完成。
+        说明: 当前配置要求 Level3 时，只有 paragraph embeddings 完整就绪，preprocess 才算完成。
         """
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
@@ -141,9 +139,7 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         chunks = _create_chunks(2)
         chunk_repo.insert_chunks(run_id, chunks)
-        ensure_chunk_embeddings_schema(db_session, 1024)
         ensure_paragraph_embeddings_schema(db_session, 1024)
-        insert_chunk_embeddings(db_session, run_id, [(0, [0.1] * 1024), (1, [0.2] * 1024)])
         insert_paragraph_embeddings(
             db_session,
             run_id,
@@ -174,7 +170,7 @@ class TestStageCompleteChecks:
         with (
             patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", True),
             patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", True),
-            patch("src.storage.repositories.chunk_repository.settings.models.semantic_chunking.embedding_dim", 1024),
+            patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
         ):
             assert chunk_repo.is_preprocess_complete(run_id)
 

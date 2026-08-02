@@ -8,6 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.topic.lda_model import LDAConfig, LDATrainer, get_all_topic_words, get_topic_words
 from src.topic.schema import TopicModel, TopicResult, TopicWord
 
+
 class TestLDAConfig(unittest.TestCase):
     def test_default_config(self) -> None:
         config = LDAConfig()

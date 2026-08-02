@@ -11,7 +11,7 @@ from src.chunking.index import build_chunk_index
 class TestChunkIndex(unittest.IsolatedAsyncioTestCase):
     async def test_build_chunk_index(self) -> None:
         text = "\n\n".join(["a" * 600] * 3)
-        chunks = await chunk_text(text, max_chars=1000, split_by_chapter=False, use_semantic=False)
+        chunks = await chunk_text(text, max_chars=1000, split_by_chapter=False)
         index = build_chunk_index(chunks)
         self.assertEqual(index.total(), len(chunks))
         self.assertEqual(index.get(0).index, 0)

@@ -2,18 +2,21 @@
 RAG EvidenceBundle 组装器
 
 将 structured/local/semantic evidence 的组装细节从 provider 主类中抽离
+
+Level3 semantic evidence 的粒度固定为一个自然段（paragraph_recall），
+不再存在 chunk 级召回或 mention 级元数据
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 if TYPE_CHECKING:
     from src.knowledge.authority.types import ActiveEntityContext
     from src.rag.evidence_types import Level1AuthoritySnapshot
-    from src.storage.repositories.chunk import SimilarChunkRow
+    from src.storage.repositories.chunk import SimilarParagraphRow
 
 
 class EvidenceBundleBuilder:
@@ -159,152 +162,36 @@ class EvidenceBundleBuilder:
             for name in candidates
         ]
 
-    def _build_semantic_recall_metadata(self, result: SimilarChunkRow) -> dict[str, object]:
+    def build_paragraph_recall_items(self, level3_results: list[SimilarParagraphRow]) -> list[EvidenceItem]:
         """
-        冻结 Level3 semantic_recall 的 metadata 合同；即使某些字段当前为空，也保持键名稳定，
-              便于后续日志观察、共享 renderer 和延期评测直接复用
+        构建 Level3 自然段级语义召回证据
 
-        显式暴露 chunk / paragraph / business / final 分数，并删除已废弃的旧分数字段
-
-        paragraph offset metadata 改为显式 local/global 字段，不再继续输出旧的歧义字段名
-
-        冻结 LLM mention / query_variant / model rerank 观察字段，不改变 EvidenceBundle 主结构
-        """
-        chunk_semantic_score = (
-            result.chunk_semantic_score
-            if result.chunk_semantic_score is not None
-            else result.similarity
-        )
-        paragraph_semantic_score = result.paragraph_semantic_score
-        business_rerank_score = result.business_rerank_score
-        final_rank_score = (
-            result.final_rank_score
-            if result.final_rank_score is not None
-            else business_rerank_score
-            if business_rerank_score is not None
-            else paragraph_semantic_score
-            if paragraph_semantic_score is not None
-            else chunk_semantic_score
-        )
-        metadata: dict[str, object] = {
-            "chunk_id": result.chunk_id,
-            "text": result.text,
-            "similarity": final_rank_score,
-            "emotional_valence": result.emotional_valence,
-            "evidence_granularity": "chunk",
-            "rerank_method": "chunk_embedding",
-            "chunk_text_len": len(result.text),
-            "query_kind": result.query_kind,
-            "mention_text": result.mention_text,
-            "mention_type": result.mention_type,
-            "mention_source": result.mention_source,
-            "mention_confidence": result.mention_confidence,
-            "query_variant": result.query_variant,
-            "matched_features": list(result.matched_features),
-            "feature_overlap": list(result.feature_overlap),
-            "active_entity_bonus": result.active_entity_bonus,
-            "identity_clue_bonus": result.identity_clue_bonus,
-            "candidate_related_bonus": result.candidate_related_bonus,
-            "time_decay": result.time_decay,
-            "rerank_penalty": result.rerank_penalty,
-            "penalties": list(result.penalties),
-            "local_preview": result.local_preview,
-            "paragraph_index": result.paragraph_index,
-            "paragraph_local_start_char": result.paragraph_local_start_char,
-            "paragraph_local_end_char": result.paragraph_local_end_char,
-            "paragraph_global_start_char": result.paragraph_global_start_char,
-            "paragraph_global_end_char": result.paragraph_global_end_char,
-            "chunk_semantic_score": chunk_semantic_score,
-            "paragraph_semantic_score": paragraph_semantic_score,
-            "business_rerank_score": business_rerank_score,
-            "model_rerank_score": result.model_rerank_score,
-            "model_rerank_reason": result.model_rerank_reason,
-            "model_confidence": result.model_confidence,
-            "model_rerank_enabled": result.model_rerank_enabled,
-            "rerank_source": result.rerank_source,
-            "final_rank_score": final_rank_score,
-        }
-        if result.local_preview:
-            metadata.update(
-                {
-                    "evidence_granularity": "paragraph",
-                    "rerank_method": "chunk_then_paragraph",
-                    "local_preview_len": len(result.local_preview),
-                }
-            )
-        if result.business_rerank_score is not None:
-            metadata["business_rerank_method"] = "mention_feature_rerank"
-        if result.model_rerank_score is not None:
-            metadata["rerank_method"] = "model_rerank"
-        return metadata
-
-    def build_semantic_recall_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
-        """
-        构建 Level3 通用语义召回证据
-
-        mention query 产物额外写入 metadata，不改变 EvidenceBundle 主结构
-
-        将 paragraph rerank 的局部 preview 与分数写入 metadata，供 renderer 优先展示局部 evidence
-
-        写入 mention-aware rerank 分数与加权原因，便于后续评测和日志核对
-
-        显式转换 final_rank_score，避免 metadata 的宽 object 类型影响静态检查
+        证据单元就是一个自然段：metadata 固定记录 paragraph 文本与 local/global offset，
+        不再包含 chunk 级 / mention 级字段
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
-            metadata = self._build_semantic_recall_metadata(result)
-            final_rank_score = cast(float | int | str | None, metadata["final_rank_score"])
+            metadata: dict[str, object] = {
+                "chunk_id": result.chunk_id,
+                "paragraph_index": result.paragraph_index,
+                "text": result.paragraph_text,
+                "similarity": result.similarity,
+                "evidence_granularity": "paragraph",
+                "rerank_method": "paragraph_embedding",
+                "paragraph_text_len": len(result.paragraph_text),
+                "local_start_char": result.local_start_char,
+                "local_end_char": result.local_end_char,
+                "global_start_char": result.global_start_char,
+                "global_end_char": result.global_end_char,
+            }
             items.append(
                 EvidenceItem(
                     evidence_type="semantic_recall",
-                    source="chunk_embeddings",
-                    content=result.text,
+                    source="paragraph_embeddings",
+                    content=result.paragraph_text,
                     metadata=metadata,
                     chunk_id=result.chunk_id,
-                    score=float(final_rank_score) if final_rank_score is not None else None,
+                    score=result.similarity,
                 )
             )
         return items
-
-    def build_emotion_exemplar_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
-        """
-        构建用于情绪判断的 Level3 专用证据
-
-        emotion exemplar 只消费 chunk 级语义召回，避免 mention 身份检索结果污染情绪证据
-
-        paragraph rerank 仅影响 semantic_recall；emotion exemplar 继续使用 chunk 级分数，
-                  避免局部 paragraph 分数污染整段 chunk 示例排序语义
-
-        emotion exemplar 固定读取显式 chunk 语义分，避免 final/business 分数误入情绪示例排序
-        """
-        exemplar_items: list[EvidenceItem] = []
-        for result in level3_results:
-            if result.query_kind != "chunk":
-                continue
-            emotional_valence = result.emotional_valence
-            if emotional_valence in (None, "", "neutral"):
-                continue
-
-            exemplar_similarity = (
-                result.chunk_semantic_score
-                if result.chunk_semantic_score is not None
-                else result.similarity
-            )
-            metadata = {
-                "chunk_id": result.chunk_id,
-                "text": result.text,
-                "similarity": exemplar_similarity,
-                "emotional_valence": emotional_valence,
-                "evidence_purpose": "emotion",
-            }
-            exemplar_items.append(
-                EvidenceItem(
-                    evidence_type="emotion_exemplar",
-                    source="chunk_embeddings",
-                    content=result.text,
-                    metadata=metadata,
-                    chunk_id=result.chunk_id,
-                    score=exemplar_similarity,
-                )
-            )
-        return sorted(exemplar_items, key=lambda item: item.score if item.score is not None else 0.0, reverse=True)

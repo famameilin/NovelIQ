@@ -26,9 +26,7 @@ import asyncio
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -64,27 +62,7 @@ def _insert_test_novel(db_session, novel_id: str) -> None:
     db_session.commit()
 
 
-class MockEmbeddingClient:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def get_embedding(self, text: str):
-        import random
-
-        return [random.random() for _ in range(768)]
-
-    @staticmethod
-    def compute_similarity(vec1, vec2):
-        return 0.5
-
-
-@pytest.fixture
-def mock_embedding():
-    with patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient):
-        yield
-
-
-def test_create_and_insert(db_session, mock_embedding) -> None:
+def test_create_and_insert(db_session) -> None:
     text_content = "\n\n".join(["a" * 600] * 2)
     chunks = asyncio.run(chunk_text(text_content, max_chars=1000, split_by_chapter=False))
 

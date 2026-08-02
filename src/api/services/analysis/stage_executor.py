@@ -50,7 +50,7 @@ class StageExecutor:
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: Callable[[], bool] | None = None,
     ) -> None:
-        """执行标注阶段"""
+        """执行标注阶段（LangGraph 标注 Agent）"""
         from src.workflows import run_annotate
 
         await run_annotate(
@@ -97,16 +97,13 @@ class StageExecutor:
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> None:
         """
-        执行诊断阶段
+        执行诊断阶段（LangGraph 诊断 Agent）
         """
-        from src.models.diagnosis import DiagnosisClient
         from src.workflows import run_diagnose
 
-        diagnose_client = DiagnosisClient(analysis_logger=analysis_logger, session=session)
         await run_diagnose(
             run_id=run_id,
             session=session,
             analysis_logger=analysis_logger,
-            client=diagnose_client,
             emitter=emitter,
         )

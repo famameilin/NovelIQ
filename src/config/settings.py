@@ -92,8 +92,6 @@ class Settings:
             base.paths.log_dir = Path(os.getenv("LOG_DIR", "logs"))
         if os.getenv("API_CORS_ORIGINS"):
             base.api.cors_origins = os.getenv("API_CORS_ORIGINS", "*").split(",")
-        if os.getenv("DISAMBIG_INTERVAL"):
-            base.analysis.incremental_disambig_interval = int(os.getenv("DISAMBIG_INTERVAL", "10"))
         return base
 
     @classmethod

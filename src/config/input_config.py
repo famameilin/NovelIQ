@@ -48,10 +48,6 @@ class TaskModelConfig:
 TaskType = Literal[
     "annotation",
     "annotation_fallback",
-    "incremental_disambig",
-    "mention_extraction",
-    "full_disambig",
-    "level3_rerank",
     "diagnosis",
 ]
 

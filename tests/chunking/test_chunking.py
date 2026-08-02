@@ -10,7 +10,7 @@ from src.chunking.chunker import chunk_documents, chunk_text, split_by_chapters
 class TestChunking(unittest.IsolatedAsyncioTestCase):
     async def test_chunk_text_basic(self) -> None:
         text = "\n\n".join(["a" * 600] * 4)
-        chunks = await chunk_text(text, max_chars=1000, overlap=200, split_by_chapter=False, use_semantic=False)
+        chunks = await chunk_text(text, max_chars=1000, overlap=200, split_by_chapter=False)
         self.assertTrue(len(chunks) >= 1)
         self.assertEqual(chunks[0].start, 0)
         self.assertTrue(all(c.text for c in chunks))
@@ -22,7 +22,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         说明: chunk 的 start/end 应对应最终保留文本在原文中的真实位置，不能继续沿用 strip 前的粗边界。
         """
         text = "  第一段。  \n\n 第二段。"
-        chunks = await chunk_text(text, max_chars=100, overlap=0, split_by_chapter=False, use_semantic=False)
+        chunks = await chunk_text(text, max_chars=100, overlap=0, split_by_chapter=False)
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0].text, "第一段。  \n\n 第二段。")
@@ -40,7 +40,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
             max_chars=100,
             overlap=0,
             split_by_chapter=False,
-            use_semantic=False,
+            
         )
 
         self.assertEqual(len(chunks), 2)

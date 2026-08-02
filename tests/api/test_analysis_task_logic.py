@@ -9,12 +9,11 @@
 """
 
 import uuid
-from pathlib import Path
 
 import pytest
 
 from src.api.services.novel_service import NovelService
-from src.storage.models import Novel, AnalysisRun
+from src.storage.models import AnalysisRun, Novel
 from src.storage.repositories import RunRepository
 
 

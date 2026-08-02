@@ -16,7 +16,7 @@ from src.config import settings
 
 from .base import Base
 
-EMBEDDING_DIM = settings.models.semantic_chunking.embedding_dim
+EMBEDDING_DIM = settings.models.paragraph_embedding.embedding_dim
 
 
 class ChunkEmbedding(Base):

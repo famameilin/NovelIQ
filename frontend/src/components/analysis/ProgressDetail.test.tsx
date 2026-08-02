@@ -9,56 +9,56 @@ describe("ProgressDetail", () => {
     useStreamStore.getState().reset();
   });
 
-  it("应按后端真实语义展示 phase1 和 phase2 的中文标签", () => {
+  it("应按 agent 语义展示标注阶段的中文标签", () => {
     useStreamStore.getState().updateProgress({
       action: "start",
       stage: "annotate",
-      sub_stage: "phase1",
+      sub_stage: "agent",
       chunk_id: 12,
       current: 12,
       total: 100,
       percent: 24,
       sub_percent: 0,
       content: "",
-      message: "开始 phase1",
+      message: "标注 agent 开始",
     });
 
     const { rerender } = render(<ProgressDetail />);
 
-    expect(screen.getByText("标注分析 - 人物识别")).toBeInTheDocument();
-    expect(screen.getByText("人物识别")).toBeInTheDocument();
+    expect(screen.getByText("标注分析 - 标注 Agent")).toBeInTheDocument();
+    expect(screen.getByText("标注 Agent")).toBeInTheDocument();
 
     useStreamStore.getState().updateProgress({
-      action: "start",
+      action: "progress",
       stage: "annotate",
-      sub_stage: "phase2",
+      sub_stage: "sub_agent",
       chunk_id: 12,
       current: 12,
       total: 100,
       percent: 36,
       sub_percent: 25,
       content: "",
-      message: "开始 phase2",
+      message: "子代理处理中",
     });
 
     rerender(<ProgressDetail />);
 
-    expect(screen.getByText("标注分析 - 伏笔分析")).toBeInTheDocument();
-    expect(screen.getByText("伏笔分析")).toBeInTheDocument();
+    expect(screen.getByText("标注分析 - 子代理")).toBeInTheDocument();
+    expect(screen.getByText("子代理")).toBeInTheDocument();
   });
 
   it("应优先使用显式 stage，而不是仅凭 percent 推断当前阶段", () => {
     useStreamStore.getState().updateProgress({
       action: "progress",
       stage: "preprocess",
-      sub_stage: "semantic_chunking_embedding",
+      sub_stage: "paragraph_embedding",
       chunk_id: 0,
       current: 658,
       total: 658,
       percent: 10,
       sub_percent: 100,
       content: "",
-      message: "语义分块段落向量计算完成",
+      message: "段落向量计算完成",
     });
 
     render(<ProgressDetail />);

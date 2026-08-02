@@ -37,13 +37,11 @@ from src.storage.repositories.chunk import (
     fetch_chunk_styles_full,
     fetch_chunk_topics_agg,
     get_incomplete_paragraph_embedding_chunk_ids,
-    get_missing_embedding_chunk_ids,
-    has_embeddings,
     has_paragraph_embeddings,
     insert_chunk_style,
     insert_chunk_topics,
 )
-from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
+from src.storage.vector_schema import validate_paragraph_embeddings_schema
 
 
 class ChunkRepository(BaseRepository["ChunkModel"]):
@@ -71,19 +69,28 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         插入前先删除该 run_id 的旧数据
 
         将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象
+
+        chapter_title 按首次出现顺序映射为 chapter_id 落库，供标注 agent 章节级上下文使用
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
-        models = [
-            ChunkModel(
-                chunk_id=chunk.index,
-                chapter_id=None,
-                char_offset=chunk.start,
-                char_end_offset=chunk.end,
-                text=chunk.text,
-                run_id=run_id,
+        chapter_id_by_title: dict[str | None, int] = {}
+        next_chapter_id = 1
+        models = []
+        for chunk in chunks:
+            title = chunk.chapter_title
+            if title not in chapter_id_by_title:
+                chapter_id_by_title[title] = next_chapter_id
+                next_chapter_id += 1
+            models.append(
+                ChunkModel(
+                    chunk_id=chunk.index,
+                    chapter_id=chapter_id_by_title[title],
+                    char_offset=chunk.start,
+                    char_end_offset=chunk.end,
+                    text=chunk.text,
+                    run_id=run_id,
+                )
             )
-            for chunk in chunks
-        ]
         self.session.bulk_save_objects(models)
 
     def fetch_chunk_texts(self, run_id: str) -> list[tuple[int, str]]:
@@ -237,17 +244,11 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         检查预处理阶段是否完成
 
-        新增方法替代 operations.completeness.is_preprocess_complete
+        当当前配置要求 Level3 段落向量时，完成判定不再只看 chunks，
+        而是要求 paragraph embedding schema 与数据完整就绪，
+        避免半成品 run 被误判为 preprocess 已完成
 
-        当当前配置要求 Level3 chunk/paragraph embeddings 时，完成判定不再只看 chunks，
-                  而是要求向量 schema、chunk embeddings 与 paragraph embeddings 一并完整就绪，
-                  避免半成品 run 被误判为 preprocess 已完成
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            预处理是否完成
+        RAG 粒度固定为一个自然段：只检查 paragraph embeddings，不再检查 chunk embeddings
         """
         if not self.has_chunks(run_id):
             return False
@@ -255,19 +256,14 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         if not (settings.rag.embedding_enabled and settings.rag.level3_enabled):
             return True
 
-        expected_dim = settings.models.semantic_chunking.embedding_dim
+        expected_dim = settings.models.paragraph_embedding.embedding_dim
         try:
-            validate_chunk_embeddings_schema(self.session, expected_dim)
             validate_paragraph_embeddings_schema(self.session, expected_dim)
         except ValueError:
             # 只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
             # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness
             return False
 
-        if not has_embeddings(self.session, run_id):
-            return False
-        if get_missing_embedding_chunk_ids(self.session, run_id):
-            return False
         if not has_paragraph_embeddings(self.session, run_id):
             return False
         if get_incomplete_paragraph_embedding_chunk_ids(self.session, run_id):

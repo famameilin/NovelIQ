@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 from src.lexicons.registry import LexiconRegistry, get_weighted_lexicon_set
 from src.metrics.emotion_metrics import (
@@ -94,7 +93,7 @@ def test_lexicon_matching_performance():
         print(f"  性能: {100 / elapsed:.1f}次/秒")
 
         if elapsed / 100 > 0.1:
-            print(f"  ⚠️  警告: 单次匹配耗时超过100毫秒")
+            print("  ⚠️  警告: 单次匹配耗时超过100毫秒")
 
 
 def test_emotion_spans_performance():
@@ -150,7 +149,7 @@ def test_full_emotion_density_performance():
         print(f"  结果: pos={result['pos_density']:.4f}, neg={result['neg_density']:.4f}")
 
         if elapsed / 10 > 1.0:
-            print(f"  ⚠️  警告: 单次计算耗时超过1秒")
+            print("  ⚠️  警告: 单次计算耗时超过1秒")
 
 
 def test_weighted_multi_type_performance():

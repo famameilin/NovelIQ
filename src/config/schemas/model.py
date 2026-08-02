@@ -52,11 +52,7 @@ class ModelsSettings:
 
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
     annotation_fallback: TaskModelSettings = field(default_factory=TaskModelSettings)
-    incremental_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
-    mention_extraction: TaskModelSettings = field(default_factory=TaskModelSettings)
-    semantic_chunking: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
-    full_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
-    level3_rerank: TaskModelSettings = field(default_factory=TaskModelSettings)
+    paragraph_embedding: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
     diagnosis: TaskModelSettings = field(default_factory=TaskModelSettings)
 
 
@@ -68,26 +64,11 @@ class ThinkingSettings:
 
     annotation: bool = False
     annotation_fallback: bool = True
-    incremental_disambig: bool = True
-    mention_extraction: bool = False
-    full_disambig: bool = True
-    level3_rerank: bool = False
     diagnosis: bool = True
-    phase3_candidates_per_batch: int = 5
-    phase3_batch_parallelism: int = 2
 
     def validate(self) -> None:
-        """
-        验证配置
-        """
-        if not isinstance(self.phase3_candidates_per_batch, int) or isinstance(self.phase3_candidates_per_batch, bool):
-            raise ValueError("thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数")
-        if self.phase3_candidates_per_batch < 1:
-            raise ValueError("thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数")
-        if not isinstance(self.phase3_batch_parallelism, int) or isinstance(self.phase3_batch_parallelism, bool):
-            raise ValueError("thinking.phase3_batch_parallelism 必须是大于等于 1 的整数")
-        if self.phase3_batch_parallelism < 1:
-            raise ValueError("thinking.phase3_batch_parallelism 必须是大于等于 1 的整数")
+        """验证配置"""
+        pass
 
 
 @dataclass
@@ -98,10 +79,6 @@ class StreamingSettings:
 
     annotation: bool = False
     annotation_fallback: bool = True
-    incremental_disambig: bool = True
-    mention_extraction: bool = False
-    full_disambig: bool = True
-    level3_rerank: bool = False
     diagnosis: bool = True
     cloud_only: bool = True  # 是否仅在云端模型启用流式模式
 
@@ -121,10 +98,6 @@ class StructuredOutputSettings:
 
     annotation: str = "json_schema"
     annotation_fallback: str = "json_object"
-    incremental_disambig: str = "json_schema"
-    mention_extraction: str = "json_object"
-    full_disambig: str = "json_schema"
-    level3_rerank: str = "json_schema"
     diagnosis: str = "json_schema"
     provider_overrides: dict[str, str] = field(default_factory=lambda: {"deepseek": "json_object"})
 
@@ -168,18 +141,6 @@ def _parse_structured_output_settings(data: dict[str, Any] | None) -> Structured
             "annotation_fallback",
             defaults.annotation_fallback,
         ),
-        incremental_disambig=_parse_structured_output_mode(
-            json_data,
-            "incremental_disambig",
-            defaults.incremental_disambig,
-        ),
-        mention_extraction=_parse_structured_output_mode(
-            json_data,
-            "mention_extraction",
-            defaults.mention_extraction,
-        ),
-        full_disambig=_parse_structured_output_mode(json_data, "full_disambig", defaults.full_disambig),
-        level3_rerank=_parse_structured_output_mode(json_data, "level3_rerank", defaults.level3_rerank),
         diagnosis=_parse_structured_output_mode(json_data, "diagnosis", defaults.diagnosis),
         provider_overrides=normalized_provider_overrides,
     )
@@ -347,11 +308,7 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
             data.get("annotation_fallback"),
             "ANNOTATION_FALLBACK",
         ),
-        incremental_disambig=_parse_task_model_settings(data.get("incremental_disambig"), "INCREMENTAL_DISAMBIG"),
-        mention_extraction=_parse_task_model_settings(data.get("mention_extraction"), "MENTION_EXTRACTION"),
-        semantic_chunking=_parse_embedding_model_settings(data.get("semantic_chunking"), "SEMANTIC_CHUNKING"),
-        full_disambig=_parse_task_model_settings(data.get("full_disambig"), "FULL_DISAMBIG"),
-        level3_rerank=_parse_task_model_settings(data.get("level3_rerank"), "LEVEL3_RERANK"),
+        paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding"), "PARAGRAPH_EMBEDDING"),
         diagnosis=_parse_task_model_settings(data.get("diagnosis"), "DIAGNOSIS"),
     )
 
@@ -365,13 +322,7 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
     settings = ThinkingSettings(
         annotation=data.get("annotation", False),
         annotation_fallback=data.get("annotation_fallback", True),
-        incremental_disambig=data.get("incremental_disambig", True),
-        mention_extraction=data.get("mention_extraction", False),
-        full_disambig=data.get("full_disambig", True),
-        level3_rerank=data.get("level3_rerank", False),
         diagnosis=data.get("diagnosis", True),
-        phase3_candidates_per_batch=data.get("phase3_candidates_per_batch", 5),
-        phase3_batch_parallelism=data.get("phase3_batch_parallelism", 2),
     )
     settings.validate()
     return settings
@@ -386,10 +337,6 @@ def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:
     return StreamingSettings(
         annotation=data.get("annotation", False),
         annotation_fallback=data.get("annotation_fallback", True),
-        incremental_disambig=data.get("incremental_disambig", True),
-        mention_extraction=data.get("mention_extraction", False),
-        full_disambig=data.get("full_disambig", True),
-        level3_rerank=data.get("level3_rerank", False),
         diagnosis=data.get("diagnosis", True),
         cloud_only=data.get("cloud_only", True),
     )

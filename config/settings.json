@@ -16,45 +16,13 @@
       "temperature": 0.7,
       "top_p": 0.8
     },
-    "incremental_disambig": {
-      "base_url": null,
-      "model": null,
-      "api_key": null,
-      "timeout_s": null,
-      "temperature": 1.0,
-      "top_p": 0.95
-    },
-    "mention_extraction": {
-      "base_url": null,
-      "model": null,
-      "api_key": null,
-      "timeout_s": null,
-      "temperature": 0.2,
-      "top_p": 0.8
-    },
-    "semantic_chunking": {
+    "paragraph_embedding": {
       "base_url": null,
       "model": null,
       "api_key": null,
       "timeout_s": null,
       "embedding_dim": 1024,
       "batch_size": 4
-    },
-    "full_disambig": {
-      "base_url": null,
-      "model": null,
-      "api_key": null,
-      "timeout_s": null,
-      "temperature": 1.0,
-      "top_p": 0.95
-    },
-    "level3_rerank": {
-      "base_url": null,
-      "model": null,
-      "api_key": null,
-      "timeout_s": null,
-      "temperature": 0.0,
-      "top_p": 0.8
     },
     "diagnosis": {
       "base_url": null,
@@ -82,31 +50,17 @@
   "thinking": {
     "annotation": true,
     "annotation_fallback": true,
-    "incremental_disambig": true,
-    "mention_extraction": false,
-    "full_disambig": true,
-    "level3_rerank": true,
-    "diagnosis": true,
-    "phase3_candidates_per_batch": 10,
-    "phase3_batch_parallelism": 2
+    "diagnosis": true
   },
   "streaming": {
     "annotation": true,
     "annotation_fallback": true,
-    "incremental_disambig": true,
-    "mention_extraction": false,
-    "full_disambig": true,
-    "level3_rerank": false,
     "diagnosis": true,
     "cloud_only": false
   },
   "structured_output": {
     "annotation": "json_schema",
     "annotation_fallback": "json_object",
-    "incremental_disambig": "json_schema",
-    "mention_extraction": "json_object",
-    "full_disambig": "json_schema",
-    "level3_rerank": "json_schema",
     "diagnosis": "json_schema",
     "provider_overrides": {
       "deepseek": "json_object"
@@ -151,14 +105,7 @@
   "chunking": {
     "max_chars": 2000,
     "overlap": 200,
-    "split_by_chapter": true,
-    "use_semantic_chunking": true,
-    "semantic_threshold": 0.7,
-    "semantic_max_chars": 2000,
-    "semantic_window_size": 3,
-    "semantic_percentile": 10,
-    "semantic_min_chars": 50,
-    "semantic_use_dynamic_threshold": true
+    "split_by_chapter": true
   },
   "database": {
     "pool_size": 5,
@@ -194,7 +141,6 @@
     "query_limit": 50
   },
   "analysis": {
-    "incremental_disambig_interval": 10,
     "checkpoint_interval": 1,
     "projection_interval": 1,
     "analysis_log_rotation": "10 MB",
@@ -202,10 +148,16 @@
     "sentence_preview_max_chars": 100,
     "sentence_pool_max_chars": 80,
     "annotation_fallback_enabled": true,
-    "multi_phase_annotation": {
-      "parallel": false,
-      "include_phase2_evidence": false,
-      "active_setup_pool_limit": 30
+    "agents": {
+      "annotation": {
+        "max_iterations": 10,
+        "max_sub_agents": 8,
+        "sub_chunk_max_chars": 2000,
+        "identity_lookback": 50
+      },
+      "diagnosis": {
+        "max_iterations": 15
+      }
     },
     "progress": {
       "preprocess": { "start": 0, "end": 10 },
@@ -281,8 +233,6 @@
     "level1_enabled": true,
     "level2_enabled": true,
     "level3_enabled": true,
-    "mention_extraction_enabled": true,
-    "level3_rerank_enabled": true,
     "level3_top_k": 5
   }
 }

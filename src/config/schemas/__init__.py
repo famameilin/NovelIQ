@@ -3,10 +3,13 @@
 """
 
 from .analysis import (
+    AgentSettings,
     AnalysisSettings,
+    AnnotationAgentSettings,
     ChunkingSettings,
     CommonTopicSettings,
     DatabaseSettings,
+    DiagnosisAgentSettings,
     DiagnosisSettings,
     MetricsSettings,
     MultiBookTopicSettings,
@@ -15,6 +18,7 @@ from .analysis import (
     SingleBookTopicSettings,
     TextLimitsSettings,
     TopicModelSettings,
+    _parse_agent_settings,
     _parse_analysis_settings,
     _parse_chunking_settings,
     _parse_database_settings,
@@ -64,12 +68,15 @@ from .runtime import (
 )
 
 __all__ = [
+    "AgentSettings",
     "AnalysisSettings",
+    "AnnotationAgentSettings",
     "APISettings",
     "AnnotationRuntimeSettings",
     "ChunkingSettings",
     "CommonTopicSettings",
     "DatabaseSettings",
+    "DiagnosisAgentSettings",
     "DiagnosisSettings",
     "DiagnosisRuntimeSettings",
     "DisambiguationRuntimeSettings",
@@ -92,6 +99,7 @@ __all__ = [
     "ThinkingConfig",
     "ThinkingSettings",
     "TopicModelSettings",
+    "_parse_agent_settings",
     "_parse_analysis_settings",
     "_parse_api_settings",
     "_parse_chunking_settings",

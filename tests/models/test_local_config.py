@@ -19,11 +19,13 @@ class TestTaskModelConfigFromFile(unittest.TestCase):
 class TestTaskModelConfigFromEnv(unittest.TestCase):
     def test_from_env_with_all_values(self) -> None:
         env_vars = {
-            "DISAMBIG_INTERVAL": "20",
+            "CHUNK_MAX_CHARS": "3000",
+            "CHUNK_OVERLAP": "150",
         }
         with patch.dict(os.environ, env_vars, clear=False):
             new_settings = Settings.from_env()
-            self.assertEqual(new_settings.analysis.incremental_disambig_interval, 20)
+            self.assertEqual(new_settings.chunking.max_chars, 3000)
+            self.assertEqual(new_settings.chunking.overlap, 150)
 
 
 class TestTaskModelConfigValidate(unittest.TestCase):

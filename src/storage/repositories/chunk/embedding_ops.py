@@ -408,6 +408,64 @@ def search_similar_paragraphs_within_chunks(
     ]
 
 
+def search_similar_paragraphs(
+    session: Session,
+    run_id: str,
+    query_embedding: list[float],
+    top_k: int = 5,
+    similarity_threshold: float = 0.7,
+    exclude_chunk_ids: Sequence[int] | None = None,
+    max_chunk_id: int | None = None,
+) -> list[SimilarParagraphRow]:
+    """
+    Run 级自然段向量检索（RAG 粒度固定为一个自然段）
+
+    不再做 chunk 粗召回 + paragraph 重排，直接在 run 内全库段落检索；
+    证据单元就是一个自然段，其他粒度不再参与召回
+
+    支持 exclude_chunk_ids 与 max_chunk_id 历史截止边界，语义与旧 chunk 召回一致
+    """
+    similarity_expr = 1 - ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
+    stmt = select(
+        ParagraphEmbedding.chunk_id,
+        ParagraphEmbedding.paragraph_index,
+        ParagraphEmbedding.paragraph_text,
+        ParagraphEmbedding.local_start_char,
+        ParagraphEmbedding.local_end_char,
+        ParagraphEmbedding.global_start_char,
+        ParagraphEmbedding.global_end_char,
+        similarity_expr.label("similarity"),
+    ).where(
+        ParagraphEmbedding.run_id == run_id,
+        ParagraphEmbedding.embedding_vector.is_not(None),
+        similarity_expr >= similarity_threshold,
+    )
+    if exclude_chunk_ids:
+        stmt = stmt.where(ParagraphEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
+    if max_chunk_id is not None:
+        stmt = stmt.where(ParagraphEmbedding.chunk_id <= max_chunk_id)
+    stmt = stmt.order_by(
+        similarity_expr.desc(),
+        ParagraphEmbedding.chunk_id.asc(),
+        ParagraphEmbedding.paragraph_index.asc(),
+    ).limit(top_k)
+
+    rows = session.execute(stmt).all()
+    return [
+        SimilarParagraphRow(
+            chunk_id=int(row.chunk_id),
+            paragraph_index=int(row.paragraph_index),
+            paragraph_text=str(row.paragraph_text),
+            local_start_char=int(row.local_start_char),
+            local_end_char=int(row.local_end_char),
+            global_start_char=int(row.global_start_char),
+            global_end_char=int(row.global_end_char),
+            similarity=float(row.similarity),
+        )
+        for row in rows
+    ]
+
+
 def has_embeddings(session: Session, run_id: str) -> bool:
     """
     检查是否存在 embedding 数据

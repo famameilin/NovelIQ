@@ -15,16 +15,11 @@
 
 from __future__ import annotations
 
-import math
-from pathlib import Path
-
 import pytest
-import yaml
 
 from src.lexicons.registry import LexiconRegistry, get_registry, reset_registry
-from src.metrics.matching import count_token_hits_enhanced, _edit_distance
+from src.metrics.matching import _edit_distance, count_token_hits_enhanced
 from src.workflows.aggregate import TENSION_COMPOSITE_WEIGHTS, _compute_tension_composite
-
 
 # ====================================================================
 # 测试夹具
