@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.models.local.schema import LocationAppearance, RelationRecord
 
@@ -17,6 +17,7 @@ EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_
 EventType = Literal["冲突", "铺垫", "转折"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 ActionType = Literal["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
+EvidencePurpose = Literal["identity", "relation", "foreshadowing", "other"]
 
 
 class AgentCharacter(BaseModel):
@@ -51,6 +52,52 @@ class AgentForeshadowing(BaseModel):
     setup_status: str | None = Field(default=None, description="open|reinforced|likely_paid_off")
     confidence: str = Field(description="high|medium|low")
 
+    @model_validator(mode="after")
+    def validate_thread_contract(self) -> AgentForeshadowing:
+        """
+        2026-08-02 用于在 finish 阶段校验伏笔新建与既有线程续接合同
+        """
+        if self.has_foreshadowing:
+            if self.confidence not in {"high", "medium"}:
+                raise ValueError("positive foreshadowing confidence must be high or medium")
+            if not self.foreshadowing_type:
+                raise ValueError("positive foreshadowing requires foreshadowing_type")
+            if not self.setup_kind:
+                raise ValueError("positive foreshadowing requires setup_kind")
+            if len(self.setup_summary.strip()) < 4:
+                raise ValueError("positive foreshadowing requires setup_summary")
+            if self.payoff_likelihood not in {"high", "medium"}:
+                raise ValueError("positive foreshadowing requires high or medium payoff_likelihood")
+            if self.setup_status not in {"open", "reinforced", "likely_paid_off"}:
+                raise ValueError("positive foreshadowing requires setup_status")
+            if self.is_new_setup:
+                if self.linked_setup_id is not None:
+                    raise ValueError("new foreshadowing setup must not have linked_setup_id")
+                if self.setup_status != "open":
+                    raise ValueError("new foreshadowing setup requires setup_status=open")
+            else:
+                if not self.linked_setup_id or not self.linked_setup_id.strip():
+                    raise ValueError("existing foreshadowing setup requires linked_setup_id")
+                if self.setup_status == "open":
+                    raise ValueError("existing foreshadowing setup cannot use setup_status=open")
+            return self
+
+        if any(
+            (
+                self.foreshadowing_type is not None,
+                self.setup_kind is not None,
+                bool(self.setup_summary.strip()),
+                bool(self.why_unresolved_now.strip()),
+                bool(self.expected_payoff_family.strip()),
+                self.payoff_likelihood is not None,
+                self.is_new_setup,
+                self.linked_setup_id is not None,
+                self.setup_status is not None,
+            )
+        ):
+            raise ValueError("negative foreshadowing result must not include setup thread fields")
+        return self
+
 
 class AgentDialogue(BaseModel):
     """对话记录（合并 Phase3）"""
@@ -72,6 +119,14 @@ class IdentityDecision(BaseModel):
     evidence: str = Field(default="", description="决策依据（原文或身份线索）")
 
 
+class HistoricalEvidenceCitation(BaseModel):
+    """Agent 对历史自然段证据的结构化引用"""
+
+    evidence_id: str = Field(min_length=1, description="历史原文工具返回的稳定证据 ID")
+    purpose: EvidencePurpose = Field(description="identity|relation|foreshadowing|other")
+    claim: str = Field(min_length=1, description="该历史证据支持的具体判断")
+
+
 class MergedChunkAnnotation(BaseModel):
     """合并标注输出：阶段 1-4 + 身份消歧决策"""
 
@@ -88,3 +143,33 @@ class MergedChunkAnnotation(BaseModel):
     dialogues: list[AgentDialogue] = Field(default_factory=list)
     relations: list[RelationRecord] = Field(default_factory=list, description="关系识别结果（合并 Phase4）")
     identity_decisions: list[IdentityDecision] = Field(default_factory=list)
+    historical_evidence_citations: list[HistoricalEvidenceCitation] = Field(
+        default_factory=list,
+        description="对本轮历史取证返回证据的结构化引用",
+    )
+
+
+class MergedChunkAnnotationPatch(BaseModel):
+    """校验失败后的合并标注局部修正结构"""
+
+    emotional_valence: EmotionalValence | None = None
+    event_type: EventType | None = None
+    pivot_moment: bool | None = None
+    cliffhanger: bool | None = None
+    chunk_summary: str | None = None
+    characters: list[AgentCharacter] | None = None
+    location_appearances: list[LocationAppearance] | None = None
+    foreshadowing: AgentForeshadowing | None = None
+    dialogues: list[AgentDialogue] | None = None
+    relations: list[RelationRecord] | None = None
+    identity_decisions: list[IdentityDecision] | None = None
+    historical_evidence_citations: list[HistoricalEvidenceCitation] | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty_patch(self) -> MergedChunkAnnotationPatch:
+        """
+        2026-08-03 用于确保 revise_finish 至少提交一个明确修正字段
+        """
+        if not self.model_fields_set:
+            raise ValueError("局部修正至少需要提供一个字段")
+        return self

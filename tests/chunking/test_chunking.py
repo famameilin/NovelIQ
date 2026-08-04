@@ -14,6 +14,10 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(chunks) >= 1)
         self.assertEqual(chunks[0].start, 0)
         self.assertTrue(all(c.text for c in chunks))
+        self.assertEqual(
+            [chunk.chapter_index for chunk in chunks],
+            list(range(1, len(chunks) + 1)),
+        )
 
     async def test_chunk_text_uses_real_text_offsets_after_strip(self) -> None:
         """
@@ -40,7 +44,6 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
             max_chars=100,
             overlap=0,
             split_by_chapter=False,
-            
         )
 
         self.assertEqual(len(chunks), 2)
@@ -54,6 +57,17 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         chapters = split_by_chapters(text)
         self.assertEqual(len(chapters), 2)
         self.assertTrue(chapters[0][0].startswith("第1章"))
+
+    async def test_duplicate_chapter_titles_keep_distinct_occurrence_indices(self) -> None:
+        """
+        2026-08-02 用于保证重复章节标题按出现位置生成不同章节序号
+        """
+        text = "第1章 序章\n甲。\n第2章 中段\n乙。\n第1章 序章\n丙。"
+
+        chunks = await chunk_text(text, max_chars=100, overlap=0, split_by_chapter=True)
+
+        self.assertEqual([chunk.chapter_index for chunk in chunks], [1, 2, 3])
+        self.assertEqual(chunks[0].chapter_title, chunks[2].chapter_title)
 
 
 if __name__ == "__main__":

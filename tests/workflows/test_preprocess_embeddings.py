@@ -182,3 +182,44 @@ async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
 
     assert inserted == 1
     assert embedding_stage_commit_counts == [2]
+
+
+@pytest.mark.asyncio
+async def test_run_preprocess_passes_chapter_and_agent_chunk_limits() -> None:
+    """
+    2026-08-02 用于验证预处理入口透传分章开关并执行 Agent 子块字符上限
+    """
+    mock_session = MagicMock()
+    mock_chunk_repo = MagicMock()
+    mock_chunk_repo.is_preprocess_complete.return_value = False
+    mock_chunk_documents = AsyncMock(
+        return_value=[Chunk(index=0, text="测试文本", start=0, end=4)]
+    )
+
+    with (
+        patch("src.workflows.preprocess.ingest_path", return_value=[SimpleNamespace(text="测试文本")]),
+        patch("src.workflows.preprocess.normalize_text", side_effect=lambda text: text),
+        patch("src.workflows.preprocess.chunk_documents", new=mock_chunk_documents),
+        patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
+        patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
+        patch("src.workflows.preprocess.settings.chunking.split_by_chapter", False),
+        patch("src.workflows.preprocess.settings.analysis.agents.annotation.sub_chunk_max_chars", 1200),
+        patch("src.workflows.preprocess.settings.rag.embedding_enabled", False),
+        patch(
+            "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
+            return_value={"sensory": [], "function_words": [], "semantic_categories": {}, "imagery": []},
+        ),
+        patch("src.workflows.preprocess_helpers._compute_chunk_style_metrics", return_value=MagicMock()),
+    ):
+        await run_preprocess(
+            source_path=SimpleNamespace(),
+            run_id="run-1",
+            session=mock_session,
+            max_chars=2000,
+            overlap=1500,
+        )
+
+    call_kwargs = mock_chunk_documents.await_args.kwargs
+    assert call_kwargs["max_chars"] == 1200
+    assert call_kwargs["overlap"] == 1199
+    assert call_kwargs["split_by_chapter"] is False

@@ -22,10 +22,16 @@ SYSTEM_PROMPT_TEMPLATE = """你是专业的网络小说叙事分析 Agent，任�
 ## 工作流程
 
 1. 先调用 lookup_identity 查询本块出场人物的已知身份
-2. 调用 search_paragraph_evidence 检索历史自然段证据（粒度固定为一个自然段），
-   用于确认身份、别名与关系依据；证据不足时不要臆造
-3. 必要时调用 register_identity 注册身份映射（同一人物不同称呼合并为同一规范名）
-4. 全部确认后调用 finish 提交完整合并标注结果
+2. 对需要核对的具体名字调用 lookup_authority_facts，查询裁剪后的权威别名、实体类型与当前关系
+3. 需要了解近期出场状态时调用 list_recent_context；该结果只用于导航，不能直接证明最终结论
+4. 精确名字或事件优先调用 search_paragraph_by_keywords，语义模糊时调用 search_paragraph_evidence
+5. 段落不足以判断时，只能以相同 objective 对已定位的历史 chunk 调用 read_chunk 展开上下文
+6. 判断伏笔前调用 list_active_foreshadowing_threads 查询当前可见线程及真实 setup_id
+7. 必要时调用 register_identity 注册身份映射（同一人物不同称呼合并为同一规范名）
+8. 使用历史原文支持判断时，把返回的 evidence_id 写入 historical_evidence_citations
+9. 全部确认后首次调用 finish 提交完整合并标注结果
+10. 如果 finish 返回校验错误，上一份完整候选结果会被保留；改用 revise_finish，只提交需要修改的顶层字段，
+    不要重复输出四个阶段的完整数据
 
 ## 标注规则
 
@@ -51,7 +57,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是专业的网络小说叙事分析 Agent，任�
 - has_foreshadowing=true 时：必须给出 setup_summary（≥4字）、payoff_likelihood（high/medium）、
   setup_status（open/reinforced/likely_paid_off）
 - is_new_setup=true 时 linked_setup_id 必须为空且 setup_status=open
-- is_new_setup=false 时必须有 linked_setup_id
+- is_new_setup=false 时必须复用 list_active_foreshadowing_threads 返回的 linked_setup_id，
+  setup_summary/setup_kind/expected_payoff_family 必须与目标线程的稳定字段一致
 - 判断为无伏笔时其余字段保持默认空值
 
 ### dialogues
@@ -68,9 +75,23 @@ SYSTEM_PROMPT_TEMPLATE = """你是专业的网络小说叙事分析 Agent，任�
 - 同一人物的昵称/称呼/真名必须合并到同一 canonical
 - 每个决策必须有证据（原文或身份线索），禁止臆断合并
 
+### historical_evidence_citations
+- 只填写历史原文工具本轮真实返回的 evidence_id
+- purpose：【identity|relation|foreshadowing|other】
+- claim：明确说明该历史原文支持的具体判断
+- evidence_id 的 purpose 必须与调用检索工具时声明的 objective 一致
+- 未使用历史原文支持最终判断时保持空数组
+
+### revise_finish
+- revise_finish 只用于 finish 校验失败后的修正
+- 只填写需要改变的顶层字段，未填写字段沿用上一份候选结果
+- 如果需要清空伏笔或历史证据引用，显式提交 `null` 或空数组
+- 修正后仍会重新执行完整的结构、原文和证据引用校验
+
 ## 共享证据优先级
-当前文本中明确出现的事实 > 身份记忆 > 历史自然段证据；共享证据只用于身份确认，
-不能替代当前 chunk 的直接事件事实，不得仅凭证据把未在文本中逐字出现的人写入 characters。
+当前文本中明确出现的事实 > 已确认身份记忆与 Level1 权威事实 > 带 evidence_id 的历史自然段原文。
+Level2 近期上下文、全局背景、前文摘要和伏笔线程均是导航信息，只用于决定核对对象和检索方向。
+所有共享信息都不能替代当前 chunk 的直接事件事实，不得仅凭共享信息把未在文本中逐字出现的人写入 characters。
 
 ## 当前上下文
 

@@ -42,6 +42,9 @@ class IdentityMemory:
         decisions 结构: [{name, canonical, entity_type, confidence, evidence}]
         """
         for decision in decisions:
+            # 低置信度仅作为当前块候选，不能写入跨 chunk 的确认身份记忆
+            if str(decision.get("confidence") or "").strip().lower() == "low":
+                continue
             name = str(decision.get("name") or "").strip()
             canonical = str(decision.get("canonical") or "").strip()
             if not name or not canonical:

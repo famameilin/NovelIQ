@@ -41,6 +41,23 @@ def test_apply_decisions_ignores_empty_entries() -> None:
     assert memory.known_canonical_names == set()
 
 
+def test_apply_decisions_does_not_confirm_low_confidence_alias() -> None:
+    """
+    2026-08-04 用于防止低置信度别名污染跨 chunk 身份记忆
+    """
+    memory = IdentityMemory()
+
+    memory.apply_decisions(
+        [
+            {"name": "阿顾", "canonical": "顾霜", "entity_type": "character", "confidence": "low"},
+        ]
+    )
+
+    assert memory.alias_map == {}
+    assert memory.known_canonical_names == set()
+    assert memory.discovered_names == set()
+
+
 def test_to_dict_roundtrip() -> None:
     memory = IdentityMemory()
     memory.apply_decisions(
