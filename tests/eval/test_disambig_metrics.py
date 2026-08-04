@@ -15,6 +15,7 @@ import pytest
 from src.eval.disambig_metrics import (
     compute_metrics_by_entity_type,
     compute_run_metrics,
+    load_system_merges,
 )
 
 
@@ -142,3 +143,21 @@ def test_compute_run_metrics_missed_merge():
 
     assert metrics.missed_merges == 1
     assert metrics.gold_should_merge_total == 1
+
+
+def test_load_system_merges_reads_current_alias_map_checkpoint() -> None:
+    """
+    2026-08-02 用于保证消歧评测读取当前身份记忆的 alias_map 结构
+    """
+    merges = load_system_merges(
+        {"alias_map": {"阿顾": "顾霜", "顾霜": "顾霜"}},
+        [],
+    )
+
+    assert merges == [
+        {
+            "alias": "阿顾",
+            "canonical": "顾霜",
+            "source": "checkpoint",
+        }
+    ]
