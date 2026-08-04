@@ -9,6 +9,7 @@ from src.rag.evidence_contracts import (
     EvidenceConsumer,
     EvidenceObjective,
     EvidenceRequest,
+    EvidenceRetrievalMethod,
     build_evidence_request_fingerprint,
 )
 from src.rag.evidence_types import (
@@ -44,6 +45,7 @@ __all__ = [
     "Level3VectorEvidence",
     "EvidenceConsumer",
     "EvidenceObjective",
+    "EvidenceRetrievalMethod",
     "EvidenceRequest",
     "build_evidence_request_fingerprint",
 ]

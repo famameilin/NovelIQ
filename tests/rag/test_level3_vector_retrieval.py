@@ -32,22 +32,20 @@ def _build_request(
     *,
     query_text: str,
     current_chunk: int | None = None,
-    need_level3: bool = True,
+    semantic: bool = True,
     requested_names: list[str] | None = None,
 ) -> EvidenceRequest:
     return EvidenceRequest(
         consumer="annotation_agent",
         objective="identity",
+        mode="semantic" if semantic else None,
         query_text=query_text,
         requested_names=requested_names or [],
         seed_entities=[],
         background_entities=[],
         current_chunk=current_chunk,
-        max_chunk_id=current_chunk,
-        exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
         need_level1=True,
         need_level2=True,
-        need_level3=need_level3,
         top_k=5,
     )
 
@@ -176,18 +174,20 @@ class TestNarrativeEvidenceServiceLevel3:
             )
 
         assert isinstance(bundle, EvidenceBundle)
-        assert bundle.generation_meta["level3_executed"] is True
-        semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
+        assert bundle.generation_meta["semantic_executed"] is True
+        semantic_items = [item for item in bundle.historical_evidence if item.evidence_type == "semantic_recall"]
         assert len(semantic_items) == 2
         assert semantic_items[0].content == "顾霜推开院门"
         assert semantic_items[0].metadata["evidence_granularity"] == "paragraph"
         assert semantic_items[0].chunk_id == 2
+        assert semantic_items[0].evidence_id == "paragraph:2:0:0:6"
+        assert semantic_items[0].metadata["evidence_id"] == "paragraph:2:0:0:6"
 
     @pytest.mark.asyncio
     async def test_collect_skips_level3_when_not_required(self) -> None:
         service = NarrativeEvidenceService(graph_repo=MagicMock(), run_id="run-1")
         bundle = await service.collect(
-            _build_request(query_text="", need_level3=False)
+            _build_request(query_text="", semantic=False)
         )
-        assert bundle.generation_meta["level3_executed"] is False
-        assert bundle.semantic_evidence == []
+        assert bundle.generation_meta["semantic_executed"] is False
+        assert bundle.historical_evidence == []

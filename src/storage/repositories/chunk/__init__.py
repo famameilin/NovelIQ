@@ -15,6 +15,7 @@ from .embedding_ops import (
     search_similar_paragraphs,
     search_similar_paragraphs_within_chunks,
 )
+from .keyword_ops import KeywordMatchRow, fetch_chunk_text, search_paragraphs_by_keywords
 from .style_data import ChunkStyleData
 from .style_ops import (
     fetch_chunk_imagery_lexicon_densities,
@@ -26,6 +27,9 @@ from .topic_ops import clear_chunk_topics, fetch_chunk_topics_agg, insert_chunk_
 
 __all__ = [
     "ChunkStyleData",
+    "KeywordMatchRow",
+    "fetch_chunk_text",
+    "search_paragraphs_by_keywords",
     "fetch_chunk_styles",
     "insert_chunk_style",
     "fetch_chunk_styles_full",

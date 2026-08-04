@@ -1,10 +1,7 @@
 """
 RAG EvidenceBundle 组装器
 
-将 structured/local/semantic evidence 的组装细节从 provider 主类中抽离
-
-Level3 semantic evidence 的粒度固定为一个自然段（paragraph_recall），
-不再存在 chunk 级召回或 mention 级元数据
+将 structured/local/historical evidence 的组装细节从 provider 主类中抽离
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 if TYPE_CHECKING:
     from src.knowledge.authority.types import ActiveEntityContext
     from src.rag.evidence_types import Level1AuthoritySnapshot
-    from src.storage.repositories.chunk import SimilarParagraphRow
+    from src.storage.repositories.chunk import KeywordMatchRow, SimilarParagraphRow
 
 
 class EvidenceBundleBuilder:
@@ -39,7 +36,6 @@ class EvidenceBundleBuilder:
             return EvidenceBundle(
                 structured_evidence=[],
                 requested_names=[],
-                level1_snapshot=snapshot,
             )
         relevant_names = set(normalized_requested_names)
         if relevant_names:
@@ -125,7 +121,6 @@ class EvidenceBundleBuilder:
         return EvidenceBundle(
             structured_evidence=structured_evidence,
             requested_names=normalized_requested_names,
-            level1_snapshot=snapshot,
         )
 
     def build_active_entity_items(self, active_entities: list[ActiveEntityContext]) -> list[EvidenceItem]:
@@ -150,28 +145,20 @@ class EvidenceBundleBuilder:
             for item in active_entities
         ]
 
-    def build_active_entity_fallback_items(self, candidates: list[str]) -> list[EvidenceItem]:
-        """构建缺少 authority view 时的 Level2 fallback items"""
-        return [
-            EvidenceItem(
-                evidence_type="active_entity",
-                source="graph_active_entities",
-                content=name,
-                metadata={"name": name},
-            )
-            for name in candidates
-        ]
-
     def build_paragraph_recall_items(self, level3_results: list[SimilarParagraphRow]) -> list[EvidenceItem]:
         """
-        构建 Level3 自然段级语义召回证据
-
-        证据单元就是一个自然段：metadata 固定记录 paragraph 文本与 local/global offset，
-        不再包含 chunk 级 / mention 级字段
+        构建语义历史自然段证据
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
+            evidence_id = build_paragraph_evidence_id(
+                result.chunk_id,
+                result.paragraph_index,
+                result.global_start_char,
+                result.global_end_char,
+            )
             metadata: dict[str, object] = {
+                "evidence_id": evidence_id,
                 "chunk_id": result.chunk_id,
                 "paragraph_index": result.paragraph_index,
                 "text": result.paragraph_text,
@@ -189,9 +176,70 @@ class EvidenceBundleBuilder:
                     evidence_type="semantic_recall",
                     source="paragraph_embeddings",
                     content=result.paragraph_text,
+                    evidence_id=evidence_id,
                     metadata=metadata,
                     chunk_id=result.chunk_id,
                     score=result.similarity,
+                    retrieval_method="semantic",
                 )
             )
         return items
+
+    def build_keyword_recall_items(self, matches: list[KeywordMatchRow]) -> list[EvidenceItem]:
+        """
+        构建关键词命中的历史自然段证据
+        """
+        return [
+            EvidenceItem(
+                evidence_type="keyword_recall",
+                source="chunks.text",
+                content=match.paragraph_text,
+                evidence_id=build_paragraph_evidence_id(
+                    match.chunk_id,
+                    match.paragraph_index,
+                    match.global_start_char,
+                    match.global_end_char,
+                ),
+                metadata={
+                    "paragraph_index": match.paragraph_index,
+                    "local_start_char": match.local_start_char,
+                    "local_end_char": match.local_end_char,
+                    "global_start_char": match.global_start_char,
+                    "global_end_char": match.global_end_char,
+                    "matched_keywords": list(match.matched_keywords),
+                    "match_count": match.match_count,
+                    "evidence_granularity": "paragraph",
+                },
+                chunk_id=match.chunk_id,
+                score=float(match.match_count),
+                retrieval_method="keyword",
+            )
+            for match in matches
+        ]
+
+    def build_chunk_read_item(self, chunk_id: int, text: str) -> EvidenceItem:
+        """
+        构建受授权的历史 chunk 全文证据
+        """
+        evidence_id = f"chunk:{chunk_id}"
+        return EvidenceItem(
+            evidence_type="historical_chunk_read",
+            source="chunks.text",
+            content=text,
+            evidence_id=evidence_id,
+            metadata={"chunk_id": chunk_id, "evidence_granularity": "chunk"},
+            chunk_id=chunk_id,
+            retrieval_method="read",
+        )
+
+
+def build_paragraph_evidence_id(
+    chunk_id: int,
+    paragraph_index: int,
+    global_start_char: int,
+    global_end_char: int,
+) -> str:
+    """
+    生成跨 keyword 与 semantic 共用的稳定段落证据 ID
+    """
+    return f"paragraph:{chunk_id}:{paragraph_index}:{global_start_char}:{global_end_char}"

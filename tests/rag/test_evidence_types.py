@@ -34,7 +34,7 @@ def test_evidence_bundle_creation():
         local_evidence=[
             EvidenceItem(evidence_type="disambig_candidate", source="level2", content="「张三」可能是：张三丰、张三郎"),
         ],
-        semantic_evidence=[],
+        historical_evidence=[],
     )
     assert len(bundle.local_evidence) == 1
 
@@ -45,6 +45,7 @@ def test_evidence_bundle_does_not_carry_prompt_local_fields():
     assert not hasattr(bundle, "alias_priority")
     assert not hasattr(bundle, "active_entities_fallback")
     assert not hasattr(bundle, "graph_hint")
+    assert not hasattr(bundle, "level1_snapshot")
 
 
 def test_level1_authority_snapshot_creation():
