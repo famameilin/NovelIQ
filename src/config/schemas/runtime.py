@@ -22,28 +22,6 @@ def _parse_positive_int(
 
 
 @dataclass
-class AnnotationRuntimeSettings:
-    """
-    标注运行时配置
-    """
-
-    phase_max_retries: int = 3
-    phase3_max_retries: int = 3
-    prev_chunks: int = 3
-    lookback: int = 10
-
-    def validate(self) -> None:
-        """验证标注运行时配置"""
-        self.phase_max_retries = _parse_positive_int(self.phase_max_retries, "runtime.annotation.phase_max_retries")
-        self.phase3_max_retries = _parse_positive_int(
-            self.phase3_max_retries,
-            "runtime.annotation.phase3_max_retries",
-        )
-        self.prev_chunks = _parse_positive_int(self.prev_chunks, "runtime.annotation.prev_chunks")
-        self.lookback = _parse_positive_int(self.lookback, "runtime.annotation.lookback")
-
-
-@dataclass
 class DisambiguationRuntimeSettings:
     """
     消歧运行时配置
@@ -75,30 +53,13 @@ class RuntimeSettings:
     运行时行为配置集合
     """
 
-    annotation: AnnotationRuntimeSettings = field(default_factory=AnnotationRuntimeSettings)
     disambiguation: DisambiguationRuntimeSettings = field(default_factory=DisambiguationRuntimeSettings)
     diagnosis: DiagnosisRuntimeSettings = field(default_factory=DiagnosisRuntimeSettings)
 
     def validate(self) -> None:
         """验证整组运行时配置"""
-        self.annotation.validate()
         self.disambiguation.validate()
         self.diagnosis.validate()
-
-
-def _parse_annotation_runtime_settings(data: dict[str, Any] | None) -> AnnotationRuntimeSettings:
-    """
-    解析标注运行时配置
-    """
-    json_data = data or {}
-    settings = AnnotationRuntimeSettings(
-        phase_max_retries=json_data.get("phase_max_retries", 3),
-        phase3_max_retries=json_data.get("phase3_max_retries", 3),
-        prev_chunks=json_data.get("prev_chunks", 3),
-        lookback=json_data.get("lookback", 10),
-    )
-    settings.validate()
-    return settings
 
 
 def _parse_disambiguation_runtime_settings(data: dict[str, Any] | None) -> DisambiguationRuntimeSettings:
@@ -127,11 +88,14 @@ def _parse_diagnosis_runtime_settings(data: dict[str, Any] | None) -> DiagnosisR
 
 def _parse_runtime_settings(data: dict[str, Any] | None) -> RuntimeSettings:
     """
-    解析运行时行为配置集合
+    2026-08-03 用于解析当前运行时行为配置并拒绝已退役的标注阶段命名空间
     """
     json_data = data or {}
+    if "annotation" in json_data:
+        raise ValueError(
+            "runtime.annotation 已退役，请使用 analysis.agents.annotation 配置当前标注 Agent"
+        )
     settings = RuntimeSettings(
-        annotation=_parse_annotation_runtime_settings(json_data.get("annotation")),
         disambiguation=_parse_disambiguation_runtime_settings(json_data.get("disambiguation")),
         diagnosis=_parse_diagnosis_runtime_settings(json_data.get("diagnosis")),
     )

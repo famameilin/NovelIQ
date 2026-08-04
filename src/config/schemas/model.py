@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from src.runtime_env import ModelEnvironment
+
 
 @dataclass
 class ThinkingConfig:
@@ -146,11 +148,6 @@ def _parse_structured_output_settings(data: dict[str, Any] | None) -> Structured
     )
 
 
-def _get_env_var(prefix: str, suffix: str, default: str | None = None) -> str | None:
-    """获取环境变量值"""
-    return os.getenv(f"{prefix}_{suffix}", default)
-
-
 def _is_running_in_docker_container() -> bool:
     """
     2026-05-01: Docker 本机模型地址自动兼容
@@ -216,101 +213,72 @@ def _normalize_model_base_url_for_docker(base_url: str | None) -> str | None:
     return _replace_url_hostname(parts, host_alias)
 
 
-def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = "") -> TaskModelSettings:
+def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings:
     """
-    解析任务模型配置
+    2026-08-03 用于解析任务模型的非敏感行为参数
     """
-    env_base_url = _get_env_var(env_prefix, "BASE_URL")
-    env_model = _get_env_var(env_prefix, "MODEL")
-    env_api_key = _get_env_var(env_prefix, "API_KEY")
-    env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
 
     json_data = data or {}
 
-    timeout_val = None
-    if env_timeout:
-        try:
-            timeout_val = float(env_timeout)
-        except ValueError:
-            pass
-    elif json_data.get("timeout_s") is not None:
-        timeout_val = json_data.get("timeout_s")
-
     return TaskModelSettings(
-        base_url=_normalize_model_base_url_for_docker(env_base_url or json_data.get("base_url")),
-        model=env_model or json_data.get("model"),
-        api_key=env_api_key or json_data.get("api_key"),
-        timeout_s=timeout_val,
+        timeout_s=json_data.get("timeout_s"),
         temperature=json_data.get("temperature", 0.7),
         top_p=json_data.get("top_p", 0.8),
     )
 
 
-def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str = "") -> EmbeddingModelSettings:
+def _parse_embedding_model_settings(data: dict[str, Any] | None) -> EmbeddingModelSettings:
     """
-    解析嵌入模型配置
+    2026-08-03 用于解析嵌入模型的非敏感行为参数
     """
-    env_base_url = _get_env_var(env_prefix, "BASE_URL")
-    env_model = _get_env_var(env_prefix, "MODEL")
-    env_api_key = _get_env_var(env_prefix, "API_KEY")
-    env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
-    env_embedding_dim = _get_env_var(env_prefix, "EMBEDDING_DIM")
-    env_batch_size = _get_env_var(env_prefix, "BATCH_SIZE")
 
     json_data = data or {}
 
-    timeout_val = None
-    if env_timeout:
-        try:
-            timeout_val = float(env_timeout)
-        except ValueError:
-            pass
-    elif json_data.get("timeout_s") is not None:
-        timeout_val = json_data.get("timeout_s")
-
-    embedding_dim_val = 1536
-    if env_embedding_dim:
-        try:
-            embedding_dim_val = int(env_embedding_dim)
-        except ValueError:
-            embedding_dim_val = json_data.get("embedding_dim", 1536)
-    else:
-        embedding_dim_val = json_data.get("embedding_dim", 1536)
-
-    batch_size_val = 8
-    if env_batch_size:
-        try:
-            batch_size_val = int(env_batch_size)
-        except ValueError:
-            batch_size_val = json_data.get("batch_size", 8)
-    else:
-        batch_size_val = json_data.get("batch_size", 8)
-
     return EmbeddingModelSettings(
-        base_url=_normalize_model_base_url_for_docker(env_base_url or json_data.get("base_url")),
-        model=env_model or json_data.get("model"),
-        api_key=env_api_key or json_data.get("api_key"),
-        timeout_s=timeout_val,
-        embedding_dim=embedding_dim_val,
-        batch_size=batch_size_val,
+        timeout_s=json_data.get("timeout_s"),
+        embedding_dim=json_data.get("embedding_dim", 1536),
+        batch_size=json_data.get("batch_size", 8),
     )
 
 
 def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
     """
-    解析任务级模型配置集合
+    2026-08-03 用于解析任务级模型行为配置集合
     """
     if not data:
         data = {}
     return ModelsSettings(
-        annotation=_parse_task_model_settings(data.get("annotation"), "ANNOTATION"),
-        annotation_fallback=_parse_task_model_settings(
-            data.get("annotation_fallback"),
-            "ANNOTATION_FALLBACK",
-        ),
-        paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding"), "PARAGRAPH_EMBEDDING"),
-        diagnosis=_parse_task_model_settings(data.get("diagnosis"), "DIAGNOSIS"),
+        annotation=_parse_task_model_settings(data.get("annotation")),
+        annotation_fallback=_parse_task_model_settings(data.get("annotation_fallback")),
+        paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding")),
+        diagnosis=_parse_task_model_settings(data.get("diagnosis")),
     )
+
+
+def apply_model_environment(
+    settings: ModelsSettings,
+    model_environment: ModelEnvironment,
+    embedding_environment: ModelEnvironment,
+) -> None:
+    """
+    2026-08-03 用于把两个模型环境对象映射到当前任务配置
+    """
+
+    model_base_url = _normalize_model_base_url_for_docker(model_environment.base_url)
+    for task_settings in (
+        settings.annotation,
+        settings.annotation_fallback,
+        settings.diagnosis,
+    ):
+        task_settings.base_url = model_base_url
+        task_settings.model = model_environment.model
+        task_settings.api_key = model_environment.api_key
+
+    settings.paragraph_embedding.base_url = _normalize_model_base_url_for_docker(
+        embedding_environment.base_url
+    )
+    settings.paragraph_embedding.model = embedding_environment.model
+    settings.paragraph_embedding.api_key = embedding_environment.api_key
 
 
 def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:

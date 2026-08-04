@@ -44,7 +44,7 @@ class TestTestDatabaseIsolation:
         任务: fix-test-db-isolation
         说明: 这是此前污染开发库的直接入口，必须有回归测试锁住。
         """
-        expected_url = resolve_database_url_from_env("TEST_DATABASE_URL")
+        expected_url = resolve_database_url_from_env("TEST_DATABASE")
         with get_session_factory()() as session:
             actual_url = session.get_bind().engine.url.render_as_string(hide_password=False)
         assert actual_url == expected_url

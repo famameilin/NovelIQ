@@ -14,7 +14,7 @@
 
 修改时间: 2026-04-20
 任务: fix-test-db-isolation
-修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE_URL，
+修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE，
     并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
 """
 
@@ -97,9 +97,9 @@ def _build_test_engine(database_url: str, schema_name: str):
 def get_test_database_url() -> str:
     """获取测试数据库URL"""
     try:
-        return resolve_database_url_from_env("TEST_DATABASE_URL")
+        return resolve_database_url_from_env("TEST_DATABASE")
     except RuntimeError as exc:
-        raise ValueError("TEST_DATABASE_URL 环境变量未设置") from exc
+        raise ValueError("TEST_DATABASE 环境变量未设置") from exc
 
 
 def _reset_backend_db_singletons() -> None:
@@ -109,7 +109,7 @@ def _reset_backend_db_singletons() -> None:
     创建时间: 2026-04-20
     任务: fix-test-db-isolation
     说明: 测试中存在直接调用 get_session_factory()() 的路径。
-    若不在切换 DATABASE_URL 后立即重置单例，这些调用会继续复用旧连接，导致写入开发库。
+    若不在切换 DATABASE 后立即重置单例，这些调用会继续复用旧连接，导致写入开发库。
     """
     from src.storage import db as db_module
 
@@ -188,24 +188,27 @@ def force_test_database_url(
     创建时间: 2026-04-20
     任务: fix-test-db-isolation
     说明:
-    - 把 DATABASE_URL 固定指向 TEST_DATABASE_URL
+    - 把 DATABASE 固定为 TEST_DATABASE 的完整 JSON 对象
     - 把 DATABASE_SCHEMA 固定指向当前 pytest 进程独立 schema
     - 覆盖所有直接调用 get_session_factory()() / get_engine() 的路径
     - 会话结束后恢复原始环境变量，避免影响开发命令
     """
-    original_url = os.environ.get("DATABASE_URL")
+    original_database = os.environ.get("DATABASE")
+    test_database_config = os.environ.get("TEST_DATABASE")
+    if test_database_config is None or not test_database_config.strip():
+        raise ValueError("TEST_DATABASE 环境变量未设置")
     original_schema = os.environ.get("DATABASE_SCHEMA")
-    os.environ["DATABASE_URL"] = test_database_url
+    os.environ["DATABASE"] = test_database_config
     os.environ["DATABASE_SCHEMA"] = test_database_schema
     _reset_backend_db_singletons()
 
     try:
         yield
     finally:
-        if original_url is not None:
-            os.environ["DATABASE_URL"] = original_url
-        elif "DATABASE_URL" in os.environ:
-            del os.environ["DATABASE_URL"]
+        if original_database is not None:
+            os.environ["DATABASE"] = original_database
+        elif "DATABASE" in os.environ:
+            del os.environ["DATABASE"]
 
         if original_schema is not None:
             os.environ["DATABASE_SCHEMA"] = original_schema
@@ -294,7 +297,7 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
 
     修改时间: 2026-04-20
     任务: fix-test-db-isolation
-    修改内容: 删除局部 DATABASE_URL 覆盖逻辑，改为复用全局自动隔离，避免夹具之间出现连接串切换竞态
+    修改内容: 删除局部 DATABASE 覆盖逻辑，改为复用全局自动隔离，避免夹具之间出现连接对象切换竞态
 
     使用方式:
         def test_something(api_client):

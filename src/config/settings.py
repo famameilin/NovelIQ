@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from src.runtime_env import load_model_environment
 
 from .schemas import (
     AnalysisSettings,
@@ -41,6 +42,7 @@ from .schemas import (
     _parse_thinking_settings,
     _parse_topic_model_settings,
 )
+from .schemas.model import apply_model_environment
 
 
 @dataclass
@@ -77,21 +79,16 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        """从环境变量加载配置（覆盖JSON配置）"""
-        base = cls.from_json()
-        if os.getenv("CHUNK_MAX_CHARS"):
-            base.chunking.max_chars = int(os.getenv("CHUNK_MAX_CHARS", "2000"))
-        if os.getenv("CHUNK_OVERLAP"):
-            base.chunking.overlap = int(os.getenv("CHUNK_OVERLAP", "200"))
+        """
+        2026-08-03 用于加载四对象环境契约中的模型配置
+        """
 
-        if os.getenv("UPLOAD_DIR"):
-            base.paths.upload_dir = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
-        if os.getenv("RESULTS_DIR"):
-            base.paths.results_dir = Path(os.getenv("RESULTS_DIR", "outputs"))
-        if os.getenv("LOG_DIR"):
-            base.paths.log_dir = Path(os.getenv("LOG_DIR", "logs"))
-        if os.getenv("API_CORS_ORIGINS"):
-            base.api.cors_origins = os.getenv("API_CORS_ORIGINS", "*").split(",")
+        base = cls.from_json()
+        apply_model_environment(
+            base.models,
+            load_model_environment("MODEL"),
+            load_model_environment("EMBEDDING_MODEL"),
+        )
         return base
 
     @classmethod

@@ -57,11 +57,9 @@ from .model import (
     _parse_thinking_settings,
 )
 from .runtime import (
-    AnnotationRuntimeSettings,
     DiagnosisRuntimeSettings,
     DisambiguationRuntimeSettings,
     RuntimeSettings,
-    _parse_annotation_runtime_settings,
     _parse_diagnosis_runtime_settings,
     _parse_disambiguation_runtime_settings,
     _parse_runtime_settings,
@@ -72,7 +70,6 @@ __all__ = [
     "AnalysisSettings",
     "AnnotationAgentSettings",
     "APISettings",
-    "AnnotationRuntimeSettings",
     "ChunkingSettings",
     "CommonTopicSettings",
     "DatabaseSettings",
@@ -119,7 +116,6 @@ __all__ = [
     "_parse_task_model_settings",
     "_parse_thinking_settings",
     "_parse_topic_model_settings",
-    "_parse_annotation_runtime_settings",
     "_parse_diagnosis_runtime_settings",
     "_parse_disambiguation_runtime_settings",
 ]
