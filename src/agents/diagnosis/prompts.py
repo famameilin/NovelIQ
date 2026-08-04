@@ -21,9 +21,9 @@ SYSTEM_PROMPT = """你是专业的网络小说整体诊断 Agent，负责对已�
 ## 输出要求
 
 - genre_labels：题材标签（科幻/悬疑/历史/仙侠/玄幻/都市/通用），结合证据自主判断
-- style_labels：风格标签（权谋/爽文）
+- style_labels：风格标签，只能从 硬核/史诗/哲思/严肃/黑暗/慢热/高概念/实验性/热血/轻松/寓言性/冷峻/权谋/爽文 中选择
 - topic_labels：主题命名，数量与提供的主题词数量一致
-- arc_scores：叙事弧各阶段评分（0-10）
+- arc_scores：重点角色的叙事弧与表现评分（0-10），key 必须是角色规范名，不能使用开局/发展/高潮/结局等阶段名
 - diagnosis：综合诊断，包含结构、节奏、人物、主题、价值观的整体评价
 - power_stance_score / common_people_dignity / cultural_depth_score：1-5 分
 - focus_structure / focus_characters / main_characters / core_cast：重点结构与核心阵容

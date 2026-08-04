@@ -292,13 +292,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_character_disambig_data(self, run_id: str) -> tuple[list[str], dict[str, str]]:
         """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: diagnosis payload 只能携带已准入的 global-character，未解析代词/泛称必须从名单和 alias_merges 中剔除。
-
-        获取角色消歧数据（known_characters 和 alias_merges）
-
-        从 payload.py 迁移，分离获取 known_characters 和 alias_merges
+        获取当前身份记忆中的规范人物与别名映射
 
         禁止静默吞异常，数据格式错误时抛出 ValueError
 
@@ -330,12 +324,12 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             )
 
         known_canonical_names = raw_data.get("known_canonical_names")
-        alias_merges_list = raw_data.get("alias_merges")
+        alias_map = raw_data.get("alias_map")
 
-        if known_canonical_names is None and alias_merges_list is None:
+        if known_canonical_names is None or alias_map is None:
             raise ValueError(
                 f"Missing required fields in checkpoint data for run_id={run_id}: "
-                "'known_canonical_names' and 'alias_merges'"
+                "'known_canonical_names' and 'alias_map'"
             )
 
         if known_canonical_names is not None and not isinstance(known_canonical_names, list):
@@ -344,10 +338,10 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 f"expected list, got {type(known_canonical_names).__name__}"
             )
 
-        if alias_merges_list is not None and not isinstance(alias_merges_list, list):
+        if alias_map is not None and not isinstance(alias_map, dict):
             raise ValueError(
-                f"Invalid 'alias_merges' format for run_id={run_id}: "
-                f"expected list, got {type(alias_merges_list).__name__}"
+                f"Invalid 'alias_map' format for run_id={run_id}: "
+                f"expected dict, got {type(alias_map).__name__}"
             )
 
         known_filtered = filter_global_character_names(
@@ -355,7 +349,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         )
         known_set = set(known_filtered)
         alias_merges_dict: dict[str, str] = {}
-        for alias, canonical in alias_merges_list or []:
+        for alias, canonical in (alias_map or {}).items():
             if not isinstance(alias, str) or not isinstance(canonical, str) or alias == canonical:
                 continue
             resolved = filter_global_character_names([canonical])
