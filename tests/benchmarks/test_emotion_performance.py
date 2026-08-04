@@ -214,8 +214,8 @@ def test_end_to_end_performance():
     chunk_texts = [(i, generate_test_text(chunk_length)) for i in range(chunk_count)]
 
     start = time.time()
-    for chunk_id, text in chunk_texts:
-        result = lexical_sentiment_density(text, pos_terms, neg_terms)
+    for _chunk_id, text in chunk_texts:
+        lexical_sentiment_density(text, pos_terms, neg_terms)
     elapsed = time.time() - start
 
     print(f"\n总耗时: {elapsed:.3f}秒")

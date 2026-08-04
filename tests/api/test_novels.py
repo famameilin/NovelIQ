@@ -132,7 +132,10 @@ class TestNovelUpload:
             f.flush()
 
             with open(f.name, "rb") as file:
-                upload_response = api_client.post("/api/novels/upload", files={"file": ("cascade.txt", file, "text/plain")})
+                upload_response = api_client.post(
+                    "/api/novels/upload",
+                    files={"file": ("cascade.txt", file, "text/plain")},
+                )
 
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
@@ -193,7 +196,10 @@ class TestNovelUpload:
                 f.flush()
 
                 with open(f.name, "rb") as file:
-                    upload_response = api_client.post("/api/novels/upload", files={"file": (filename, file, "text/plain")})
+                    upload_response = api_client.post(
+                        "/api/novels/upload",
+                        files={"file": (filename, file, "text/plain")},
+                    )
             assert upload_response.status_code == 200
             novel_id = upload_response.json()["novel_id"]
             novel_ids.append(novel_id)
@@ -225,7 +231,10 @@ class TestNovelUpload:
             f.flush()
 
             with open(f.name, "rb") as file:
-                upload_response = api_client.post("/api/novels/upload", files={"file": ("active.txt", file, "text/plain")})
+                upload_response = api_client.post(
+                    "/api/novels/upload",
+                    files={"file": ("active.txt", file, "text/plain")},
+                )
 
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
