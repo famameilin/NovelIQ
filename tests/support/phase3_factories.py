@@ -39,7 +39,7 @@ def build_phase3_bundle() -> EvidenceBundle:
                 content="「灰衣人」可能是：白芷",
             ),
         ],
-        semantic_evidence=[
+        historical_evidence=[
             EvidenceItem(
                 evidence_type="semantic_recall",
                 source="level3",
@@ -49,6 +49,7 @@ def build_phase3_bundle() -> EvidenceBundle:
                     "similarity": 0.91,
                     "text": "灰衣人忽然压低声音。",
                 },
+                retrieval_method="semantic",
             )
         ],
         requested_names=["灰衣人"],
@@ -137,7 +138,7 @@ def build_phase3_overflow_bundle() -> EvidenceBundle:
     return EvidenceBundle(
         structured_evidence=structured,
         local_evidence=local,
-        semantic_evidence=semantic,
+        historical_evidence=semantic,
         requested_names=["别名1", "别名2", "别名3"],
     )
 
