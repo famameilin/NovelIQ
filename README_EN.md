@@ -12,15 +12,15 @@
 
 An intelligent analysis platform for Chinese web novels, combining Natural Language Processing, Large Language Models and graph computing to provide end-to-end automated analysis — from text ingestion to diagnostic reports.
 
-The system accepts `.txt` novel files and automatically handles encoding detection, text cleaning, word segmentation and semantic chunking. A five-stage pipeline (Preprocessing → Annotation → Aggregation → Topic Modeling → Diagnosis) produces analysis results, with each stage independently persisted and resumable.
+The system accepts `.txt` novel files and automatically handles encoding detection, text cleaning, word segmentation and chapter-first chunking. A five-stage pipeline (Preprocessing → Annotation → Aggregation → Topic Modeling → Diagnosis) produces analysis results, with each stage independently persisted and resumable.
 
 ### Core Capabilities
 
 | Capability | Description |
 |------------|-------------|
-| **LLM-powered Annotation** | Four-phase annotation: Identity Recognition → Foreshadowing Tracking → Identity Confirmation → Relation Extraction. Supports streaming and structured output |
-| **Three-level Evidence Retrieval (RAG)** | Level 1: alias exact match → Level 2: active entity recall → Level 3: vector semantic search + passage reranking. Provides context for annotation |
-| **Entity Disambiguation** | Incremental disambiguation (every N chunks) + full disambiguation (final). Automatically identifies character aliases and anonymous characters |
+| **LLM-powered Annotation** | A single LangGraph Agent calls identity, authority-fact, and historical-text tools as needed, then submits characters, foreshadowing, dialogue, relations, and identity decisions together |
+| **Unified Evidence Retrieval (RAG)** | `EvidenceRequest` defines the historical boundary and read authorization for authority facts, navigation, keyword search, semantic search, and source-text expansion |
+| **Entity Disambiguation** | The annotation Agent maintains identity memory in the same tool loop; low-confidence decisions are not persisted across chunks |
 | **Multi-dimensional Quantitative Metrics** | Sentiment curve, pacing curve, lexical richness (TTR/MTLD), sentence length stats, dialogue ratio, narrative structure recognition |
 | **Knowledge Graph** | Character relationship network construction and visualization, canonical knowledge graph, entity alias management |
 | **Topic Modeling** | LDA topic inference, topic-document assignment, topic word clouds |
@@ -95,27 +95,18 @@ The system accepts `.txt` novel files and automatically handles encoding detecti
 ### Config Files
 
 - `config/settings.json` — Application parameters (models, chunking, metrics, etc.)
-- `.env` / `.env.docker` — Environment variables and secrets
+- `.env` / `.env.docker` — Database and model service connections
 
 ### Environment Variables
 
-Refer to `.env.example` and `.env.docker.example` for the full list of configuration options.
+Environment files contain exactly four JSON objects:
 
-**Required:**
+- `DATABASE` — Development database with `url`, `username`, and `password`
+- `TEST_DATABASE` — Test database with `url`, `username`, and `password`
+- `MODEL` — Text model service with `base_url`, `model`, and `api_key`
+- `EMBEDDING_MODEL` — Embedding model service with `base_url`, `model`, and `api_key`
 
-- `DATABASE_URL` / `DATABASE_USERNAME` / `DATABASE_PASSWORD` — Database connection
-- `ANNOTATION_*` — Annotation model service
-- `SEMANTIC_CHUNKING_*` — Semantic chunking embedding service
-- `FULL_DISAMBIG_*` — Full disambiguation model
-- `DIAGNOSIS_*` — Diagnosis model
-
-**Optional:**
-
-- `ANNOTATION_FALLBACK_*` — Annotation fallback model
-- `INCREMENTAL_DISAMBIG_*` — Incremental disambiguation model
-- `MENTION_EXTRACTION_*` — LLM mention extraction model
-- `LEVEL3_RERANK_*` — Level 3 reranking model
-- `TEST_DATABASE_URL` — Test database (required for running tests)
+The database `url` contains only the scheme, host, port, and database name. Credentials use their dedicated properties. Annotation, annotation fallback, and diagnosis share `MODEL`. See `.env.example` and `.env.docker.example` for the complete format.
 
 ## Usage
 
@@ -194,7 +185,7 @@ flowchart LR
     D --> E[Diagnose]
 
     A --- A1[Text cleaning & chunking\nStyle metrics\nVector embedding]
-    B --- B1[LLM 4-Phase annotation\nIncremental disambiguation\nGraph projection]
+    B --- B1[Annotation Agent\nOn-demand evidence and identity memory\nGraph projection]
     C --- C1[Sentiment & pacing curves\nGlobal statistics\nQuality gate]
     D --- D1[LDA topic inference\nModel persistence]
     E --- E1[Cloud LLM diagnosis\nDiagnostic report]
@@ -203,50 +194,45 @@ flowchart LR
 | Stage | Entry Point | Output |
 |-------|-------------|--------|
 | **Preprocessing** | `run_preprocess` | Text cleaning & chunking, style metrics, vector embeddings |
-| **Annotation** | `run_annotate` | LLM 4-Phase annotation (identity → foreshadowing → confirmation → relations), incremental disambiguation, graph projection |
+| **Annotation** | `run_annotate` | Annotation Agent output, identity decisions, and graph projection |
 | **Aggregation** | `run_aggregate` | Sentiment & pacing curves, global statistics, quality gate checks |
 | **Topic Modeling** | `run_topic_model` | LDA topic inference and model persistence |
-| **Diagnosis** | `run_diagnose` | Cloud LLM diagnostic report |
+| **Diagnosis** | `run_diagnose` | Diagnosis Agent report grounded in tool evidence |
 
 ### Annotation & RAG Interaction
 
-The annotation stage is the most complex part of the system. Before annotating each chunk, a three-level RAG evidence retrieval is invoked:
+One annotation Agent processes each chunk. It first queries identity memory, then uses `EvidenceRequest` to request authority facts, recent navigation, keyword search, or semantic search as needed. A historical chunk can be expanded only after the same evidence objective authorizes a located result.
 
 ```mermaid
 flowchart TD
-    Chunk[Current Chunk] --> RAG[RAG 3-Level Evidence Retrieval]
-    RAG --> L1[Level 1: Alias Exact Match]
-    RAG --> L2[Level 2: Active Entity Recall]
-    RAG --> L3[Level 3: Vector Semantic Search + Passage Reranking]
-    L1 --> Bundle[Evidence Bundle]
-    L2 --> Bundle
-    L3 --> Bundle
-    Bundle --> P1[Phase 1: Identity Recognition]
-    Bundle --> P2[Phase 2: Foreshadowing Tracking]
-    Bundle --> P3[Phase 3: Identity Confirmation]
-    Bundle --> P4[Phase 4: Relation Extraction]
-    P1 --- |Shared identity evidence| P3
+    Chunk[Current Chunk] --> Agent[Annotation Agent]
+    Agent --> Memory[Identity Memory]
+    Agent --> Request[EvidenceRequest]
+    Request --> Authority[Authority Facts]
+    Request --> Navigation[Recent Navigation]
+    Request --> Historical[Keyword or Semantic History Search]
+    Historical --> Read[Authorized Source Text Expansion]
+    Authority --> Ledger[Evidence Ledger]
+    Navigation --> Ledger
+    Read --> Ledger
+    Ledger --> Finish[finish or revise_finish]
+    Finish --> Result[Merged Annotation and Identity Decisions]
 ```
 
-Phase 1 and Phase 3 share identity evidence to avoid redundant retrieval.
+The first `finish` submits the complete result. When validation fails, `revise_finish` submits only the top-level fields that need correction. Model responses, valid Provider token usage, and actual tool evidence are recorded for auditing.
 
 ### Design Principles
 
 - **Database as single source of truth** — TaskManager is only an in-process execution cache; all state queries go through the database
 - **Resumable stages** — Each stage persists results upon completion; re-analysis can skip completed stages
 - **Dual-layer cancellation signal** — In-memory `cancel_event` (fast response) + DB `cancel_requested` (cross-process reliable)
-- **Progressive three-level RAG** — Level 1 exact match → Level 2 active entities → Level 3 semantic search; each level can be independently toggled
+- **Evidence authorization loop** — Historical source text must first be located by keyword or semantic search and then expanded under the same evidence objective
+- **Traceable results** — Annotation and diagnosis record model responses, valid Provider token usage, and actual evidence sources
+- **Bounded tool loops** — Regular tool calls stop at the configured limit to prevent unbounded iteration
 
-## Roadmap
+## Current Agent Runtime Constraints
 
-The following are confirmed but not yet implemented items, sorted by priority:
-
-| Direction | Status | Description |
-|-----------|--------|-------------|
-| Phase 1 runtime alignment & prompt splitting | Pending | Resolve Phase 1 bypassing unified thin runtime and prompt hardcoding issues |
-| Topic naming migration to topic stage | To be implemented | Move topic naming responsibility from diagnosis to topic stage; diagnosis no longer owns topic naming |
-| Ensemble learning multi-signal voting framework | Design draft | Unified arbitration for vocabulary, rules, LLM annotation and other multi-source signal conflicts, replacing manual weights |
-| Annotation router & pre-judgment | Under evaluation | Evaluate on-demand triggering of Phase 2/3/4 scheduling strategy to reduce API call costs |
-| LLM context budget & prompt trimming | Discussion draft | Multiple LLM interaction chains have underutilized context; pending token distribution analysis before deciding approach |
-| Incremental/full disambiguation & diagnosis SSE | Status review | Incremental and full disambiguation lack independent SSE; diagnosis has no streaming output — to be refactored |
-| Level 3 mention retrieval evaluation | Postponed | Mention-level recall and paragraph-level local evidence evaluation loop postponed; not blocking main pipeline |
+- Annotation Agent output must pass validation against the current chunk source text, identity memory, and the evidence ledger for this run
+- Diagnosis Agent must call evidence tools, and its topic-label count must match the topic data before it can submit a result
+- When the primary annotation model raises `AnnotationAgentRunError`, enabled fallback retries the same chunk with the same identity memory and evidence service
+- Annotation, annotation fallback, and diagnosis share one text-model connection; embeddings use a separate connection
