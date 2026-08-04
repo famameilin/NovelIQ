@@ -6,6 +6,8 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.engine import make_url
+
 
 def _load_setup_test_db_module() -> ModuleType:
     """
@@ -34,10 +36,11 @@ def test_default_db_url_keeps_real_password_when_switching_to_postgres_database(
 
     module = _load_setup_test_db_module()
 
+    target_url = make_url(module.TEST_DB_URL)
+
     assert module.DEFAULT_DB_URL.database == "postgres"
-    assert module.DEFAULT_DB_URL.render_as_string(hide_password=False) == (
-        "postgresql+psycopg://postgres:sr20031109ZY@localhost:5432/postgres"
-    )
+    assert module.DEFAULT_DB_URL.username == target_url.username
+    assert module.DEFAULT_DB_URL.password == target_url.password
 
 
 def test_create_test_database_recreates_existing_database() -> None:
@@ -96,7 +99,7 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
     ):
         module.create_tables()
 
-    assert os.environ["DATABASE_URL"] == module.TEST_DB_URL
+    assert os.environ["DATABASE"] == module.TEST_DATABASE_CONFIG
     assert call_order == ["dispose", "init:True", "dispose"]
     assert mock_dispose_engine.call_count == 2
     mock_init_db.assert_called_once_with(include_level3_tables=True)

@@ -73,19 +73,25 @@ class TestRuntimeSettings(unittest.TestCase):
     """测试 runtime 配置解析。"""
 
     def test_parse_runtime_settings_defaults(self) -> None:
-        """测试 runtime 默认值。"""
+        """测试当前 runtime 默认值"""
         runtime = _parse_runtime_settings(None)
-        self.assertEqual(runtime.annotation.phase_max_retries, 3)
-        self.assertEqual(runtime.annotation.phase3_max_retries, 3)
-        self.assertEqual(runtime.annotation.prev_chunks, 3)
-        self.assertEqual(runtime.annotation.lookback, 10)
+        self.assertFalse(hasattr(runtime, "annotation"))
         self.assertEqual(runtime.disambiguation.max_retries, 3)
         self.assertEqual(runtime.diagnosis.max_retries, 3)
 
+    def test_parse_runtime_settings_rejects_retired_annotation_namespace(self) -> None:
+        """
+        2026-08-03 用于拒绝已退役的 runtime.annotation 阶段配置命名空间
+        """
+        with self.assertRaisesRegex(ValueError, "runtime.annotation"):
+            _parse_runtime_settings({"annotation": {"phase3_max_retries": 3}})
+
     def test_parse_runtime_settings_rejects_non_positive_values(self) -> None:
-        """测试 runtime 对非法值执行严格校验。"""
+        """
+        2026-08-03 用于保持当前诊断 runtime 数值配置的正整数校验
+        """
         with self.assertRaises(ValueError):
-            _parse_runtime_settings({"annotation": {"phase_max_retries": 0}})
+            _parse_runtime_settings({"diagnosis": {"max_retries": 0}})
 
     def test_parse_analysis_settings_defaults_include_hierarchical_relation_types(self) -> None:
         analysis = _parse_analysis_settings(None)

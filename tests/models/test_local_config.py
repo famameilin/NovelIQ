@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -18,14 +19,37 @@ class TestTaskModelConfigFromFile(unittest.TestCase):
 
 class TestTaskModelConfigFromEnv(unittest.TestCase):
     def test_from_env_with_all_values(self) -> None:
+        """
+        2026-08-03 用于验证 Settings 只从两个模型 JSON 对象加载连接信息
+        """
+
         env_vars = {
+            "MODEL": json.dumps(
+                {
+                    "base_url": "https://api.example.com/v1",
+                    "model": "shared-text-model",
+                    "api_key": "text-key",
+                }
+            ),
+            "EMBEDDING_MODEL": json.dumps(
+                {
+                    "base_url": "http://localhost:8080/v1",
+                    "model": "embedding-model",
+                    "api_key": "sk-no-key-required",
+                }
+            ),
             "CHUNK_MAX_CHARS": "3000",
             "CHUNK_OVERLAP": "150",
+            "ANNOTATION_MODEL": "legacy-model",
         }
         with patch.dict(os.environ, env_vars, clear=False):
             new_settings = Settings.from_env()
-            self.assertEqual(new_settings.chunking.max_chars, 3000)
-            self.assertEqual(new_settings.chunking.overlap, 150)
+            self.assertEqual(new_settings.models.annotation.model, "shared-text-model")
+            self.assertEqual(new_settings.models.annotation_fallback.model, "shared-text-model")
+            self.assertEqual(new_settings.models.diagnosis.model, "shared-text-model")
+            self.assertEqual(new_settings.models.paragraph_embedding.model, "embedding-model")
+            self.assertEqual(new_settings.chunking.max_chars, 2000)
+            self.assertEqual(new_settings.chunking.overlap, 200)
 
 
 class TestTaskModelConfigValidate(unittest.TestCase):

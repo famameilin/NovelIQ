@@ -31,13 +31,13 @@ def get_database_url() -> str:
     获取数据库连接 URL
 
     优先级：
-    1. DATABASE_URL 环境变量
+    1. DATABASE JSON 环境对象
     2. 抛出异常
 
     Returns:
         数据库连接 URL 字符串
     """
-    return resolve_database_url_from_env("DATABASE_URL")
+    return resolve_database_url_from_env("DATABASE")
 
 
 def get_database_schema() -> str | None:
