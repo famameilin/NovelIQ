@@ -15,12 +15,17 @@ from sqlalchemy.orm import Session
 from src.config import settings
 from src.models.cloud.schema import CloudAnalysis
 
+from .evidence import DiagnosisEvidenceLedger
+
 
 def build_diagnosis_tools(
     session: Session,
     run_id: str,
+    *,
+    evidence_ledger: DiagnosisEvidenceLedger | None = None,
 ) -> list[Any]:
     """构建诊断 agent 工具集"""
+    ledger = evidence_ledger or DiagnosisEvidenceLedger()
 
     @tool
     def get_aggregate_signals() -> str:
@@ -29,6 +34,8 @@ def build_diagnosis_tools(
         用于判断整体叙事节奏与情感走向。
         """
         from src.storage.repositories import StatsRepository
+
+        ledger.record_tool_call("get_aggregate_signals")
 
         stats_repo = StatsRepository(session)
         stats = stats_repo.fetch_global_stats_dict(run_id)
@@ -43,6 +50,8 @@ def build_diagnosis_tools(
         用于判断叙事结构、伏笔兑现与高潮分布。
         """
         from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+
+        ledger.record_tool_call("get_pivot_materials")
 
         repo = DiagnosisRepository(session)
         parts: list[str] = []
@@ -84,6 +93,8 @@ def build_diagnosis_tools(
         """
         from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
+        ledger.record_tool_call("get_relation_changes")
+
         repo = DiagnosisRepository(session)
         relations = repo.fetch_relation_changes(run_id, limit=settings.diagnosis.relation_changes_limit)
         if not relations:
@@ -100,6 +111,8 @@ def build_diagnosis_tools(
         用于判断核心阵容、主配角与人物命名。
         """
         from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+
+        ledger.record_tool_call("get_character_data")
 
         repo = DiagnosisRepository(session)
         known_characters, alias_merges = repo.fetch_character_disambig_data(run_id)
@@ -118,6 +131,8 @@ def build_diagnosis_tools(
         """
         from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
+        ledger.record_tool_call("get_topic_data")
+
         repo = DiagnosisRepository(session)
         topic_words = repo.fetch_topic_words(run_id, top_n=settings.diagnosis.topic_words_top_n)
         if not topic_words:
@@ -131,6 +146,8 @@ def build_diagnosis_tools(
         用于判断角色网络规模与图谱完整性。
         """
         from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+
+        ledger.record_tool_call("get_graph_signals")
 
         try:
             graph_report = KnowledgeGraphAuthorityService.from_session(session).build_graph_report(run_id)
