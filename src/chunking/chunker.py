@@ -31,6 +31,7 @@ class Chunk:
     start: int
     end: int
     chapter_title: str | None = None
+    chapter_index: int | None = None
 
 
 def _reindex(chunks: list[Chunk]) -> list[Chunk]:
@@ -42,6 +43,7 @@ def _reindex(chunks: list[Chunk]) -> list[Chunk]:
             start=chunk.start,
             end=chunk.end,
             chapter_title=chunk.chapter_title,
+            chapter_index=chunk.chapter_index,
         )
         for idx, chunk in enumerate(chunks)
     ]
@@ -179,7 +181,15 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
         span = _resolve_trimmed_span(text, start, end)
         if span is not None:
             chunk_start, chunk_end, chunk_text_content = span
-            chunks.append(Chunk(index=idx, text=chunk_text_content, start=chunk_start, end=chunk_end))
+            chunks.append(
+                Chunk(
+                    index=idx,
+                    text=chunk_text_content,
+                    start=chunk_start,
+                    end=chunk_end,
+                    chapter_index=idx + 1,
+                )
+            )
             idx += 1
 
         start = end - overlap if end < len(text) else end
@@ -203,7 +213,7 @@ def _chunk_by_chapters(
     chunks = []
     idx = 0
 
-    for chapter_title, chapter_text, chapter_start_offset, _ in chapters:
+    for chapter_index, (chapter_title, chapter_text, chapter_start_offset, _) in enumerate(chapters, start=1):
         if not chapter_text.strip():
             continue
 
@@ -229,6 +239,7 @@ def _chunk_by_chapters(
                         start=chapter_start_offset + local_start,
                         end=chapter_start_offset + local_end,
                         chapter_title=chapter_title,
+                        chapter_index=chapter_index,
                     )
                 )
                 idx += 1
@@ -258,6 +269,7 @@ async def chunk_documents(
     """
     all_chunks = []
     chunk_index_offset = 0
+    chapter_index_offset = 0
     document_char_offset = 0
 
     for text in texts:
@@ -268,6 +280,13 @@ async def chunk_documents(
             split_by_chapter,
             emitter=emitter,
         )
+        chapter_indices = sorted(
+            {
+                chunk.chapter_index
+                for chunk in chunks
+                if chunk.chapter_index is not None
+            }
+        )
         for chunk in chunks:
             all_chunks.append(
                 Chunk(
@@ -276,9 +295,16 @@ async def chunk_documents(
                     start=chunk.start + document_char_offset,
                     end=chunk.end + document_char_offset,
                     chapter_title=chunk.chapter_title,
+                    chapter_index=(
+                        chunk.chapter_index + chapter_index_offset
+                        if chunk.chapter_index is not None
+                        else None
+                    ),
                 )
             )
         chunk_index_offset += len(chunks)
+        if chapter_indices:
+            chapter_index_offset += chapter_indices[-1]
         document_char_offset += len(text)
 
     return _reindex(all_chunks)
@@ -315,5 +341,6 @@ def split_paragraphs(text: str) -> list[tuple[int, int, str]]:
     if paragraphs:
         return paragraphs
     if text.strip():
-        return [(0, len(text), text.strip())]
+        span = _resolve_trimmed_span(text, 0, len(text))
+        return [span] if span is not None else []
     return []

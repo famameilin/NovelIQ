@@ -145,6 +145,28 @@ def test_create_and_insert(db_session) -> None:
     assert offset_row.char_end_offset == chunks[0].end
 
 
+def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> None:
+    """
+    2026-08-02 用于保证重复章节标题按出现序号落为不同 chapter_id
+    """
+    text_content = "第1章 序章\n甲。\n第2章 中段\n乙。\n第1章 序章\n丙。"
+    chunks = asyncio.run(chunk_text(text_content, max_chars=100, overlap=0, split_by_chapter=True))
+
+    novel_id = uuid.uuid4().hex[:8]
+    _insert_test_novel(db_session, novel_id)
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Duplicate Chapter Titles",
+    )
+
+    chunk_repo = ChunkRepository(db_session)
+    chunk_repo.insert_chunks(run_id, chunks)
+    rows = chunk_repo.fetch_chunks_with_chapter(run_id)
+
+    assert [row[1] for row in rows] == [1, 2, 3]
+
+
 def test_insert_cloud_analysis(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)

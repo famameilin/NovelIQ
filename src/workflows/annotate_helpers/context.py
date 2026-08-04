@@ -40,8 +40,8 @@ def _init_evidence_service(
             logger.info("Level 3 paragraph retrieval enabled and required")
         except ValueError as e:
             logger.error(
-                "EmbeddingClient initialization failed; Level 3 is required and annotation will fail readiness "
-                f"checks: {e}"
+                "EmbeddingClient initialization failed; semantic historical retrieval will report readiness "
+                f"errors when requested: {e}"
             )
 
     evidence_service = NarrativeEvidenceService(

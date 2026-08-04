@@ -10,14 +10,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from src.config import settings
 
-from .schema import MergedChunkAnnotation
+from .schema import MergedChunkAnnotation, MergedChunkAnnotationPatch
 
 
-def build_annotation_graph(llm, tools: list[Any]) -> Any:
+def build_annotation_graph(
+    llm,
+    tools: list[Any],
+    *,
+    response_validator: Callable[[MergedChunkAnnotation], None] | None = None,
+) -> Any:
     """构建标注 agent 图"""
     from src.agents.graph import build_agent_graph
 
@@ -27,5 +33,12 @@ def build_annotation_graph(llm, tools: list[Any]) -> Any:
         tools,
         max_attempts=max_attempts,
         response_model=MergedChunkAnnotation,
-        first_hint="请分析当前文本块并完成标注（先查询身份记忆与历史证据，最后调用 finish 提交结果）。",
+        first_hint=(
+            "请分析当前文本块并完成标注（按需查询身份记忆、权威事实、近期导航上下文与历史原文证据，"
+            "首次完成时调用 finish 提交完整四阶段结果；若收到校验错误，改用 revise_finish 只提交需要修改的字段。"
+        ),
+        response_validator=response_validator,
+        handle_tool_errors=False,
+        revision_tool_name="revise_finish",
+        revision_response_model=MergedChunkAnnotationPatch,
     )

@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
+from src.agents.usage import record_agent_token_usage
 from src.models.local.annotation.projectors.dialogue import build_dialogue_snapshots
 from src.models.local.parser import build_annotation, parse_foreshadowing_result
 from src.models.local.schema import (
@@ -22,6 +24,7 @@ from src.models.local.schema import (
 )
 from src.rag import NarrativeEvidenceService
 
+from .evidence import AnnotationEvidenceLedger
 from .graph import build_annotation_graph
 from .memory import IdentityMemory
 from .prompts import build_system_prompt
@@ -44,7 +47,7 @@ class AnnotationChunkResult:
 
 
 def _locate_dialogue_index(content: str, chunk_text: str, used_indices: set[int], next_index: int) -> int:
-    """在 chunk 文本中定位对话原文位置，找不到时按顺序分配索引"""
+    """在 chunk 文本中定位对话原文位置"""
     if content and content in chunk_text:
         position = chunk_text.find(content)
         # 用位置做稳定索引，避免同一文本重复出现时相互覆盖
@@ -52,13 +55,116 @@ def _locate_dialogue_index(content: str, chunk_text: str, used_indices: set[int]
         while candidate in used_indices:
             candidate += 1
         return candidate
-    while next_index in used_indices:
-        next_index += 1
-    return next_index
+    raise ValueError(f"对话原文未出现在当前 chunk: {content!r}")
 
 
-def convert_merged_output(merged: MergedChunkAnnotation, chunk_text: str) -> AnnotationChunkResult:
+def validate_merged_output_against_chunk(
+    merged: MergedChunkAnnotation,
+    chunk_text: str,
+    memory: IdentityMemory | None = None,
+    evidence_ledger: AnnotationEvidenceLedger | None = None,
+) -> None:
+    """
+    2026-08-02 用于校验 Agent 标注中的人物对话关系伏笔与身份证据均可由当前原文证明
+    """
+    memory = memory or IdentityMemory()
+    errors: list[str] = []
+    known_names = (
+        set(memory.known_canonical_names)
+        | set(memory.alias_map)
+        | set(memory.alias_map.values())
+    )
+    current_resolved_names = {name for name in known_names if name and name in chunk_text}
+
+    for alias, canonical in memory.alias_map.items():
+        if alias and alias in chunk_text:
+            current_resolved_names.add(canonical)
+
+    for decision in merged.identity_decisions:
+        name = decision.name.strip()
+        canonical = decision.canonical.strip()
+        evidence = decision.evidence.strip()
+        if not name or name not in chunk_text:
+            errors.append(f"身份称呼未出现在当前原文: {decision.name!r}")
+            continue
+        if canonical != name and canonical not in known_names and canonical not in chunk_text:
+            errors.append(f"身份规范名缺少当前原文或历史记忆依据: {canonical!r}")
+        if not evidence or evidence not in chunk_text:
+            errors.append(f"身份决策证据未逐字出现在当前原文: {decision.evidence!r}")
+        current_resolved_names.add(name)
+        current_resolved_names.add(canonical)
+
+    for character in merged.characters:
+        if not character.name.strip() or character.name.strip() not in chunk_text:
+            errors.append(f"人物未逐字出现在当前原文: {character.name!r}")
+        else:
+            current_resolved_names.add(character.name.strip())
+
+    for location in merged.location_appearances:
+        if not location.raw_name.strip() or location.raw_name.strip() not in chunk_text:
+            errors.append(f"地点未逐字出现在当前原文: {location.raw_name!r}")
+
+    for dialogue in merged.dialogues:
+        content = dialogue.content.strip()
+        if not content or content not in chunk_text:
+            errors.append(f"对话未逐字出现在当前原文: {dialogue.content!r}")
+        for speaker in dialogue.speaker or []:
+            speaker_name = speaker.strip()
+            if speaker_name not in current_resolved_names and speaker_name not in chunk_text:
+                errors.append(f"对话说话人缺少当前原文身份依据: {speaker!r}")
+
+    for relation in merged.relations:
+        if not relation.evidence.strip() or relation.evidence.strip() not in chunk_text:
+            errors.append(f"关系证据未逐字出现在当前原文: {relation.evidence!r}")
+        from_name = relation.from_name.strip()
+        to_name = relation.to_name.strip()
+        if from_name not in current_resolved_names and from_name not in chunk_text:
+            errors.append(f"关系发起者缺少当前原文身份依据: {relation.from_name!r}")
+        if to_name not in current_resolved_names and to_name not in chunk_text:
+            errors.append(f"关系接受者缺少当前原文身份依据: {relation.to_name!r}")
+
+    if merged.foreshadowing is not None and merged.foreshadowing.has_foreshadowing:
+        anchor_text = merged.foreshadowing.anchor_text.strip()
+        if not anchor_text or anchor_text not in chunk_text:
+            errors.append(f"伏笔锚点未逐字出现在当前原文: {merged.foreshadowing.anchor_text!r}")
+
+    citation_ids: list[str] = []
+    citation_pairs: list[tuple[str, str]] = []
+    for citation in merged.historical_evidence_citations:
+        evidence_id = citation.evidence_id.strip()
+        if not evidence_id:
+            errors.append("历史证据引用 ID 为空")
+            continue
+        citation_ids.append(evidence_id)
+        citation_pairs.append((evidence_id, citation.purpose))
+    if citation_ids:
+        if evidence_ledger is None:
+            errors.append("历史证据引用缺少本轮证据账本")
+        else:
+            unknown_ids = evidence_ledger.unknown_evidence_ids(citation_ids)
+            if unknown_ids:
+                errors.append(f"历史证据引用未出现在本轮检索账本: {unknown_ids}")
+            objective_mismatches = evidence_ledger.citation_objective_mismatches(citation_pairs)
+            if objective_mismatches:
+                errors.append(f"历史证据引用用途与检索目标不一致: {objective_mismatches}")
+
+    if errors:
+        raise ValueError("标注原文校验失败: " + "；".join(errors))
+
+
+def convert_merged_output(
+    merged: MergedChunkAnnotation,
+    chunk_text: str,
+    memory: IdentityMemory | None = None,
+    evidence_ledger: AnnotationEvidenceLedger | None = None,
+) -> AnnotationChunkResult:
     """将合并输出转换为存储层可消费的结果"""
+    validate_merged_output_against_chunk(
+        merged,
+        chunk_text,
+        memory,
+        evidence_ledger,
+    )
     annotation_data = {
         "emotional_valence": merged.emotional_valence,
         "event_type": merged.event_type,
@@ -165,6 +271,7 @@ async def run_annotation_agent(
     memory: IdentityMemory | None = None,
     evidence_service: NarrativeEvidenceService | None = None,
     llm: Any | None = None,
+    model_task_type: str = "annotation",
     run_id: str | None = None,
     main_characters: str | None = None,
     session: Any | None = None,
@@ -177,6 +284,8 @@ async def run_annotation_agent(
     """
     start_time = time.time()
     memory = memory or IdentityMemory()
+    agent_memory = IdentityMemory.from_dict(memory.to_dict())
+    evidence_ledger = AnnotationEvidenceLedger()
 
     if llm is None:
         from src.agents.llm import build_chat_model
@@ -185,11 +294,22 @@ async def run_annotation_agent(
 
     tools = build_annotation_tools(
         evidence_service,
-        memory,
+        agent_memory,
         run_id=run_id,
         chunk_id=chunk_id,
+        session=session,
+        evidence_ledger=evidence_ledger,
     )
-    graph = build_annotation_graph(llm, tools)
+    graph = build_annotation_graph(
+        llm,
+        tools,
+        response_validator=lambda output: validate_merged_output_against_chunk(
+            output,
+            chunk_text,
+            memory,
+            evidence_ledger,
+        ),
+    )
 
     position_pct = (chunk_id / total_chunks * 100) if total_chunks > 0 else 0.0
 
@@ -198,7 +318,7 @@ async def run_annotation_agent(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
-        memory=memory,
+        memory=agent_memory,
         prev_summary=prev_summary,
         global_context=global_context,
     )
@@ -213,43 +333,99 @@ async def run_annotation_agent(
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    initial_messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_content),
+    ]
     initial_state = {
-        "messages": [SystemMessage(content=system_prompt), HumanMessage(content=user_content)],
+        "messages": initial_messages,
         "attempts": 0,
         "output": None,
         "error": None,
+        "candidate": None,
     }
 
     try:
         result_state = await graph.ainvoke(initial_state)
     except Exception as exc:  # noqa: BLE001
         logger.error("annotation agent graph failed: chunk_id={} error={}", chunk_id, exc)
+        _record_annotation_interaction(
+            session=session,
+            run_id=run_id,
+            novel_id=novel_id,
+            chunk_id=chunk_id,
+            llm=llm,
+            messages=initial_messages,
+            raw_output={"error": str(exc)},
+            evidence_ledger=evidence_ledger,
+            elapsed=time.time() - start_time,
+            task_type=model_task_type,
+            status="error",
+            error_message=str(exc),
+        )
         raise AnnotationAgentRunError(f"标注 agent 运行失败: {exc}") from exc
 
     if result_state.get("error"):
         error = str(result_state["error"])
         logger.error("annotation agent finalize error: chunk_id={} error={}", chunk_id, error)
+        _record_annotation_interaction(
+            session=session,
+            run_id=run_id,
+            novel_id=novel_id,
+            chunk_id=chunk_id,
+            llm=llm,
+            messages=result_state.get("messages") or initial_messages,
+            raw_output={"error": error},
+            evidence_ledger=evidence_ledger,
+            elapsed=time.time() - start_time,
+            task_type=model_task_type,
+            status="error",
+            error_message=error,
+        )
         raise AnnotationAgentRunError(error)
 
     raw_output = result_state.get("output")
     if raw_output is None:
-        raise AnnotationAgentRunError("标注 agent 未产出结果")
+        error = "标注 agent 未产出结果"
+        _record_annotation_interaction(
+            session=session,
+            run_id=run_id,
+            novel_id=novel_id,
+            chunk_id=chunk_id,
+            llm=llm,
+            messages=result_state.get("messages") or initial_messages,
+            raw_output={"error": error},
+            evidence_ledger=evidence_ledger,
+            elapsed=time.time() - start_time,
+            task_type=model_task_type,
+            status="error",
+            error_message=error,
+        )
+        raise AnnotationAgentRunError(error)
 
     merged = MergedChunkAnnotation.model_validate(raw_output)
     # 应用身份决策到记忆
     memory.apply_decisions([decision.model_dump() for decision in merged.identity_decisions])
 
-    result = convert_merged_output(merged, chunk_text)
+    result = convert_merged_output(
+        merged,
+        chunk_text,
+        memory,
+        evidence_ledger,
+    )
 
     elapsed = time.time() - start_time
     _record_annotation_interaction(
         session=session,
         run_id=run_id,
+        novel_id=novel_id,
         chunk_id=chunk_id,
         llm=llm,
-        initial_messages=[SystemMessage(content=system_prompt), HumanMessage(content=user_content)],
+        messages=result_state.get("messages") or initial_messages,
         raw_output=raw_output,
+        evidence_ledger=evidence_ledger,
         elapsed=elapsed,
+        task_type=model_task_type,
     )
     logger.info(
         "annotation agent complete: chunk_id={} characters={} foreshadowing={} dialogues={} "
@@ -269,11 +445,16 @@ def _record_annotation_interaction(
     *,
     session: Any,
     run_id: str | None,
+    novel_id: str,
     chunk_id: int,
     llm: Any,
-    initial_messages: list,
+    messages: list,
     raw_output: dict,
+    evidence_ledger: AnnotationEvidenceLedger,
     elapsed: float,
+    task_type: str = "annotation",
+    status: str = "success",
+    error_message: str | None = None,
 ) -> None:
     """记录标注 agent 的模型交互（供交互回放与审计）"""
     if session is None or not run_id:
@@ -281,24 +462,78 @@ def _record_annotation_interaction(
     try:
         from src.models.interactions import record_model_interaction
 
-        messages = [{"role": msg.type, "content": msg.content} for msg in initial_messages]
-        response_text = str(raw_output)
+        serialized_messages = _serialize_agent_messages(messages)
+        serialized_messages.append(
+            {
+                "role": "evidence_audit",
+                "content": json.dumps(
+                    evidence_ledger.to_dict(),
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        model_responses = [message for message in messages if getattr(message, "type", None) == "ai"]
+        record_count = max(1, len(model_responses))
         raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
         base_url = str(raw_base_url)
         provider = "cloud" if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url else "local"
-        record_model_interaction(
-            run_id=run_id,
-            chunk_id=chunk_id,
-            interaction_type="annotate",
-            phase="agent",
-            attempt_number=1,
-            messages=messages,
-            response_text=response_text,
-            thinking_content=None,
-            duration_ms=int(elapsed * 1000),
-            model_name=getattr(llm, "model_name", None),
-            model_provider=provider,
+        for attempt_number in range(1, record_count + 1):
+            response_text = json.dumps(raw_output, ensure_ascii=False)
+            if model_responses and attempt_number < record_count:
+                response_text = json.dumps(
+                    _serialize_agent_messages([model_responses[attempt_number - 1]]),
+                    ensure_ascii=False,
+                )
+            record_model_interaction(
+                run_id=run_id,
+                chunk_id=chunk_id,
+                interaction_type="annotate",
+                phase="agent",
+                attempt_number=attempt_number,
+                messages=serialized_messages,
+                response_text=response_text,
+                thinking_content=None,
+                duration_ms=int(elapsed * 1000),
+                model_name=getattr(llm, "model_name", None),
+                model_provider=provider,
+                status="success" if model_responses else status,
+                error_message=error_message,
+                session=session,
+            )
+        record_agent_token_usage(
             session=session,
+            run_id=run_id,
+            novel_id=novel_id,
+            task_type=task_type,
+            call_type="agent",
+            chunk_id=chunk_id,
+            llm=llm,
+            messages=messages,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("failed to record annotation agent interaction: {}", exc)
+
+
+def _serialize_agent_messages(messages: list[Any]) -> list[dict[str, str]]:
+    """
+    2026-08-02 用于把 Agent 全部对话和工具调用转换为模型交互审计文本
+    """
+    serialized: list[dict[str, str]] = []
+    for message in messages:
+        payload: dict[str, Any] = {"content": getattr(message, "content", "")}
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            payload["tool_calls"] = tool_calls
+        tool_name = getattr(message, "name", None)
+        if tool_name:
+            payload["tool_name"] = tool_name
+        tool_call_id = getattr(message, "tool_call_id", None)
+        if tool_call_id:
+            payload["tool_call_id"] = tool_call_id
+        serialized.append(
+            {
+                "role": str(getattr(message, "type", "unknown")),
+                "content": json.dumps(payload, ensure_ascii=False, default=str),
+            }
+        )
+    return serialized
