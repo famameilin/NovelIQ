@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from unittest.mock import MagicMock
 
 from src.chunking.chunker import Chunk
 from src.rag import Level1AuthorityProvider, NarrativeEvidenceService
@@ -193,11 +194,8 @@ class TestLevel1AuthoritySnapshot:
                 seed_entities=[],
                 background_entities=[],
                 current_chunk=12,
-                max_chunk_id=11,
-                exclude_chunk_ids=[12],
                 need_level1=False,
                 need_level2=True,
-                need_level3=False,
                 top_k=5,
             )
         )
@@ -210,3 +208,34 @@ class TestLevel1AuthoritySnapshot:
         assert metadata["recent_emotion"] == "平静"
         assert "last_action" not in metadata
         assert "last_emotion" not in metadata
+
+    def test_collect_evidence_level2_does_not_restore_rows_rejected_by_authority(self) -> None:
+        """
+        2026-08-02 用于锁定 Level2 authority 过滤为空后不再执行原始候选回退
+        """
+        provider = NarrativeEvidenceService(
+            graph_repo=MagicMock(),
+            run_id="run-1",
+            level1_enabled=False,
+            level2_enabled=True,
+            level3_enabled=False,
+        )
+        provider._graph_authority_service = MagicMock()
+        provider._graph_authority_service.build_active_entity_view.return_value = []
+
+        bundle = provider._collect_base_evidence(
+            EvidenceRequest(
+                consumer="annotation_agent",
+                objective="identity",
+                query_text="",
+                requested_names=[],
+                seed_entities=[],
+                background_entities=[],
+                current_chunk=12,
+                need_level1=False,
+                need_level2=True,
+                top_k=5,
+            )
+        )
+
+        assert bundle.local_evidence == []

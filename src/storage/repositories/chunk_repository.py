@@ -70,21 +70,34 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
         将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象
 
-        chapter_title 按首次出现顺序映射为 chapter_id 落库，供标注 agent 章节级上下文使用
+        chapter_id 按章节出现序号落库，重复标题不会被合并
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
-        chapter_id_by_title: dict[str | None, int] = {}
+        chapter_id_by_index: dict[int, int] = {}
         next_chapter_id = 1
+        previous_legacy_title: object | str | None = object()
+        previous_legacy_chapter_id: int | None = None
         models = []
         for chunk in chunks:
-            title = chunk.chapter_title
-            if title not in chapter_id_by_title:
-                chapter_id_by_title[title] = next_chapter_id
+            if chunk.chapter_index is not None:
+                chapter_id = chapter_id_by_index.get(chunk.chapter_index)
+                if chapter_id is None:
+                    chapter_id = next_chapter_id
+                    chapter_id_by_index[chunk.chapter_index] = chapter_id
+                    next_chapter_id += 1
+                previous_legacy_title = object()
+                previous_legacy_chapter_id = None
+            elif chunk.chapter_title == previous_legacy_title and previous_legacy_chapter_id is not None:
+                chapter_id = previous_legacy_chapter_id
+            else:
+                chapter_id = next_chapter_id
                 next_chapter_id += 1
+                previous_legacy_title = chunk.chapter_title
+                previous_legacy_chapter_id = chapter_id
             models.append(
                 ChunkModel(
                     chunk_id=chunk.index,
-                    chapter_id=chapter_id_by_title[title],
+                    chapter_id=chapter_id,
                     char_offset=chunk.start,
                     char_end_offset=chunk.end,
                     text=chunk.text,
@@ -92,6 +105,21 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
                 )
             )
         self.session.bulk_save_objects(models)
+
+    def fetch_chunks_with_chapter(self, run_id: str) -> list[tuple[int, int | None, str]]:
+        """
+        2026-08-02 用于按原始顺序读取标注 dispatcher 所需的 chunk 章节与文本
+        """
+        stmt = (
+            select(ChunkModel.chunk_id, ChunkModel.chapter_id, ChunkModel.text)
+            .where(ChunkModel.run_id == run_id)
+            .order_by(ChunkModel.chunk_id)
+        )
+        rows = self.session.execute(stmt).all()
+        return [
+            (row.chunk_id, row.chapter_id, row.text)
+            for row in rows
+        ]
 
     def fetch_chunk_texts(self, run_id: str) -> list[tuple[int, str]]:
         """
