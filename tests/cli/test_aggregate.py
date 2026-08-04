@@ -128,7 +128,9 @@ class TestAggregate:
 
         rows = self.db_session.execute(
             text(
-                "SELECT chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite FROM chunk_curves WHERE run_id = :run_id ORDER BY chunk_id"
+                "SELECT chunk_id, pos_density, neg_density, net_density, "
+                "smoothed_density, tension_proxy, tension_composite "
+                "FROM chunk_curves WHERE run_id = :run_id ORDER BY chunk_id"
             ),
             {"run_id": self.run_id},
         ).fetchall()
