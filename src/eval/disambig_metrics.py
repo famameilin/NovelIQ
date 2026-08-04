@@ -149,16 +149,18 @@ def load_system_merges(
     从系统数据中提取所有合并决策。
 
     合并决策来源:
-    1. disambig_checkpoint 中的 alias_merges
+    1. disambig_checkpoint 中的 alias_map
     2. graph_entity_aliases 中的非 primary 记录
     """
     merges: dict[tuple[str, str], dict] = {}
 
     if state:
-        for merge in state.get("alias_merges", []):
-            if not isinstance(merge, list | tuple) or len(merge) != 2:
+        alias_map = state.get("alias_map", {})
+        if not isinstance(alias_map, dict):
+            raise ValueError("checkpoint alias_map must be a dict")
+        for alias, canonical in alias_map.items():
+            if not isinstance(alias, str) or not isinstance(canonical, str):
                 continue
-            alias, canonical = str(merge[0]), str(merge[1])
             if alias == canonical:
                 continue
             merges[(alias, canonical)] = {
