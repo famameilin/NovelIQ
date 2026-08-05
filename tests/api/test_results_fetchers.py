@@ -17,7 +17,7 @@ from src.api.routes.results_fetchers import (
     _normalize_text_by_alias_map,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
-from src.storage.repositories.annotation.foreshadowing_threads import ForeshadowingThreadView
+from src.storage.repositories.annotation import ForeshadowingThreadView
 
 
 class _DummyRow:
@@ -50,10 +50,6 @@ class _DummyRow:
 class _DummyAnnotationRepo2:
     def __init__(self):
         self.session = object()
-        self._pending = []
-
-    def fetch_pending_chunk_relations(self, run_id, to_chunk=None, limit=200):
-        return self._pending
 
 
 class _DummyStatsRepo:
@@ -1072,7 +1068,8 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     assert result[0].relations[0].change == "新建"
 
 
-def test_fetch_chunk_annotations_allows_pending_graph_when_projection_not_required():
+def test_fetch_chunk_annotations_uses_explicit_database_graph_view():
+    """2026-08-05 用于验证 chunk 展开结果只读取显式数据库图视图"""
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chunk_annotations_full(self, _run_id):
             return [
@@ -1101,15 +1098,11 @@ def test_fetch_chunk_annotations_allows_pending_graph_when_projection_not_requir
         def fetch_chunk_dialogues_full(self, _run_id):
             return []
 
-    annotation_repo = _AnnotationRepoWithChunkRows()
-    annotation_repo._pending = [object()]
-
     result = _fetch_chunk_annotations(
         run_id="run-1",
-        annotation_repo=annotation_repo,
+        annotation_repo=_AnnotationRepoWithChunkRows(),
         alias_map={},
         export_graph_view=ExportGraphAuthorityView(),
-        require_graph_projection=False,
     )
 
     assert len(result) == 1
@@ -1119,7 +1112,8 @@ def test_fetch_chunk_annotations_allows_pending_graph_when_projection_not_requir
     assert result[0].relations == []
 
 
-def test_fetch_chunk_annotations_degrades_to_phase2_only_when_graph_view_is_not_ready(monkeypatch):
+def test_fetch_chunk_annotations_propagates_database_graph_failure(monkeypatch):
+    """2026-08-05 用于验证 chunk 消费者不会在数据库图失败时降级读取"""
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chunk_annotations_full(self, _run_id):
             return [
@@ -1156,12 +1150,9 @@ def test_fetch_chunk_annotations_degrades_to_phase2_only_when_graph_view_is_not_
         lambda *_args, **_kwargs: _GraphUnavailableService(),
     )
 
-    result = _fetch_chunk_annotations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        alias_map={},
-        require_graph_projection=False,
-    )
-
-    assert len(result) == 1
-    assert result[0].relations == []
+    with pytest.raises(GraphReadinessError, match="graph participant projection is stale"):
+        _fetch_chunk_annotations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            alias_map={},
+        )

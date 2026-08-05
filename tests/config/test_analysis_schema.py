@@ -52,7 +52,8 @@ def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
         {
             "annotation": {
                 "max_iterations": 5,
-                "max_sub_agents": 4,
+                "total_attempts": 3,
+                "retry_backoff_seconds": [1.0, 2.0],
                 "active_setup_pool_limit": 12,
             },
             "diagnosis": {
@@ -62,7 +63,8 @@ def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
     )
 
     assert settings.annotation.max_iterations == 5
-    assert settings.annotation.max_sub_agents == 4
+    assert settings.annotation.total_attempts == 3
+    assert settings.annotation.retry_backoff_seconds == (1.0, 2.0)
     assert settings.annotation.active_setup_pool_limit == 12
     assert settings.diagnosis.max_iterations == 9
 
@@ -71,6 +73,7 @@ def test_parse_agent_settings_defaults() -> None:
     settings = _parse_agent_settings(None)
 
     assert settings.annotation.max_iterations == 10
-    assert settings.annotation.max_sub_agents == 8
+    assert settings.annotation.total_attempts == 3
+    assert settings.annotation.retry_backoff_seconds == (1.0, 2.0)
     assert settings.annotation.active_setup_pool_limit == 30
     assert settings.diagnosis.max_iterations == 15

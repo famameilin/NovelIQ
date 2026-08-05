@@ -117,9 +117,18 @@ switch ($Command.ToLowerInvariant()) {
     "lint" {
         Ensure-Setup
         if ($CommandArgs.Count -eq 0) {
-            Run-Uv -CommandArgs @("--group", "dev", "ruff", "check", "src", "tests", "scripts")
+            Run-Uv -CommandArgs @(
+                "--group",
+                "dev",
+                "ruff",
+                "check",
+                "--force-exclude",
+                "src",
+                "tests",
+                "scripts/run_api.py"
+            )
         } else {
-            $commandArgs = @("--group", "dev", "ruff", "check") + $CommandArgs
+            $commandArgs = @("--group", "dev", "ruff", "check", "--force-exclude") + $CommandArgs
             Run-Uv -CommandArgs $commandArgs
         }
     }

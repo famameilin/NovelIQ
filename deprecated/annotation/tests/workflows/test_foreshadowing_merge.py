@@ -1,4 +1,6 @@
 """
+旧分块伏笔合并测试归档
+
 创建时间: 2026-03-20
 任务: fix-null-fields-issue - 修复伏笔字段空值问题
 说明: 测试伏笔结果合并到 ChunkAnnotation 的逻辑

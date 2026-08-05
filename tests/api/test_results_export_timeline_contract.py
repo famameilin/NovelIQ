@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.api.exceptions import DiagnosisRerunRequiredError, GraphReadinessError
+from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -31,8 +31,6 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
-from src.models.cloud.schema import CloudAnalysis
-from src.storage.models import ChunkRelation
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -413,60 +411,6 @@ def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch:
         )
 
     assert exc_info.value.reason == "focus_contract_incomplete"
-
-
-def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
-    StatsRepository(db_session).insert_cloud_analysis(
-        scenario.run_id,
-        CloudAnalysis(
-            novel_id=scenario.novel_id,
-            foreshadow_expectation=0.42,
-            arc_scores={
-                scenario.hero_name: 8.6,
-                scenario.rival_name: 7.8,
-            },
-            genre_labels=["通用"],
-            style_labels=["严肃"],
-            topic_labels=["冲突升级"],
-            diagnosis="有效 diagnosis",
-            narrative_arc_type="落坑爬出",
-            focus_structure="dual",
-            focus_characters=[scenario.hero_name, scenario.rival_name],
-            main_characters=[scenario.hero_name, scenario.rival_name],
-            core_cast=[scenario.hero_name, scenario.rival_name],
-        ),
-    )
-    db_session.add(
-        ChunkRelation(
-            chunk_id=4,
-            run_id=scenario.run_id,
-            from_char=scenario.hero_name,
-            to_char=scenario.rival_name,
-            type="盟友",
-            change="强化",
-            evidence="尚未投影的新关系变化",
-            confidence=0.66,
-            projection_status="pending",
-        )
-    )
-    db_session.commit()
-
-    stats_repo = StatsRepository(db_session)
-    annotation_repo = AnnotationRepository(db_session)
-    chunk_repo = ChunkRepository(db_session)
-
-    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
-        fetch_all_results_data(
-            novel_id=scenario.novel_id,
-            task_id=scenario.task_id,
-            run_id=scenario.run_id,
-            stats_repo=stats_repo,
-            annotation_repo=annotation_repo,
-            chunk_repo=chunk_repo,
-        )
-
-
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

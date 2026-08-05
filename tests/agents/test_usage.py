@@ -35,7 +35,7 @@ def test_record_agent_token_usage_skips_missing_or_zero_provider_usage() -> None
         AIMessage(content="零用量", usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}),
     ]
 
-    with patch("src.agents.usage.StatsRepository") as stats_repository:
+    with patch("src.storage.repositories.StatsRepository") as stats_repository:
         record_agent_token_usage(
             session=session,
             run_id="run-1",
@@ -61,7 +61,7 @@ def test_record_agent_token_usage_persists_each_response_with_provider_usage() -
         AIMessage(content="完成", usage_metadata={"input_tokens": 11, "output_tokens": 5, "total_tokens": 16}),
     ]
 
-    with patch("src.agents.usage.StatsRepository") as stats_repository:
+    with patch("src.storage.repositories.StatsRepository") as stats_repository:
         record_agent_token_usage(
             session=session,
             run_id="run-1",

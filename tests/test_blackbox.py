@@ -9,8 +9,6 @@
 测试对象：NovelIQ 小说智能分析系统 API
 """
 
-import io
-import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app

@@ -33,15 +33,14 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import chunk_text
 from src.models.cloud.schema import CloudAnalysis
-from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
 from src.storage.models import Novel
 from src.storage.repositories import (
-    AnnotationRepository,
     ChunkRepository,
     ChunkStyleData,
     RunRepository,
     StatsRepository,
 )
+from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 
 def _insert_test_novel(db_session, novel_id: str) -> None:
@@ -72,33 +71,17 @@ def test_create_and_insert(db_session) -> None:
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
     chunk_repo = ChunkRepository(db_session)
-    ann_repo = AnnotationRepository(db_session)
 
     chunk_repo.insert_chunks(run_id, chunks)
-
-    ann_repo.insert_chunk_annotation(
-        run_id,
-        chunks[0].index,
-        ChunkAnnotation(
-            emotional_valence="neutral",
-            event_type="铺垫",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-        ),
-    )
-    ann_repo.insert_chunk_characters(
-        run_id,
-        chunks[0].index,
-        [
-            CharacterSnapshot(
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[
+            character_fact(
+                chunk_id=chunks[0].index,
                 name="张三",
-                role_function="主体",
                 action="走",
-                action_type="移动",
-                emotion_score="neutral",
             )
         ],
     )

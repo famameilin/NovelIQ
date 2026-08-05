@@ -172,8 +172,11 @@ class TestDeleteAnalysis:
             run_repo.create_run(novel_id=novel_id, run_id=run_id)
             run_repo.update_run_task_fields(run_id, status="completed")
             session.execute(
-                text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (:chunk_id, :text, :run_id)"),
-                {"chunk_id": 0, "text": "待删除分块", "run_id": run_id},
+                text(
+                    "INSERT INTO chunks (chunk_id, chapter_id, text, run_id) "
+                    "VALUES (:chunk_id, :chapter_id, :text, :run_id)"
+                ),
+                {"chunk_id": 0, "chapter_id": 1, "text": "待删除分块", "run_id": run_id},
             )
             session.execute(
                 text(

@@ -15,21 +15,19 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.agents.annotation.schema import Evidence, ForeshadowingPayload
 from src.chunking.chunker import Chunk
 from src.models.cloud.schema import CloudAnalysis
-from src.models.local.schema import (
-    CharacterSnapshot,
-    ChunkAnnotation,
-)
 from src.storage.repositories import (
-    AnnotationRepository,
     ChunkRepository,
     ChunkStyleData,
     DiagnosisRepository,
+    ForeshadowingRepository,
     RunRepository,
     StatsRepository,
 )
 from src.workflows.diagnose import run_diagnose
+from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 
 def _insert_test_novel(session, novel_id: str) -> None:
@@ -135,29 +133,48 @@ class TestDiagnosisRoutes:
                 },
             )
 
-        ann_repo = AnnotationRepository(self.db_session)
-        for i in range(chunk_count):
-            annotation = ChunkAnnotation(
-                emotional_valence="mild_positive" if i % 2 == 0 else "mild_negative",
-                event_type="高潮" if i in [1, 2] else ("转折" if i == 3 else "铺垫"),
-                pivot_moment=(i in [1, 2]),
-                cliffhanger=(i == chunk_count - 1),
-                has_foreshadowing=(i == 0),
-                foreshadowing_type="场景" if i == 0 else None,
-                foreshadowing_desc="测试伏笔" if i == 0 else "",
-                characters=[
-                    CharacterSnapshot(
-                        name=f"角色{i}",
-                        role_function="主体" if i == 0 else "其他",
-                        action="测试行为",
-                        action_type="其他",
-                        emotion_score="neutral",
-                    )
-                ],
-                dialogues=[],
-            )
-            ann_repo.insert_chunk_annotation(self.run_id, i, annotation)
-            ann_repo.insert_chunk_characters(self.run_id, i, annotation.characters)
+        persist_chapter_annotation(
+            self.db_session,
+            run_id=self.run_id,
+            chapter_id=1,
+            emotional_valences={
+                i: "mild_positive" if i % 2 == 0 else "mild_negative"
+                for i in range(chunk_count)
+            },
+            event_types={
+                i: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"
+                for i in range(chunk_count)
+            },
+            pivot_chunks={i for i in range(chunk_count) if i in {1, 2}},
+            cliffhanger_chunks={chunk_count - 1},
+            characters=[
+                character_fact(
+                    chunk_id=i,
+                    name=f"角色{i}",
+                    action="测试行为",
+                    role_function="主体" if i == 0 else "其他",
+                )
+                for i in range(chunk_count)
+            ],
+        )
+        ForeshadowingRepository(self.db_session).sync(
+            run_id=self.run_id,
+            chunk_id=0,
+            payload=ForeshadowingPayload(
+                has_foreshadowing=True,
+                foreshadowing_type="场景",
+                setup_kind="测试场景",
+                setup_summary="测试伏笔",
+                why_unresolved_now="当前尚未解释测试伏笔",
+                expected_payoff_family="情节兑现",
+                payoff_likelihood="medium",
+                is_new_setup=True,
+                linked_setup_id=None,
+                setup_status="open",
+                confidence="medium",
+            ),
+            evidence=Evidence(reason="测试伏笔首次出现", chapterid=1),
+        )
 
         self.db_session.commit()
 
