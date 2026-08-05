@@ -107,9 +107,8 @@ def build_graph_quality_report(
     """把图谱质量明细收口为仅聚合级的报告计数器"""
 
     shared_quality = build_graph_quality_signals(confirmed_relations, relation_events)
-    # graph page 继续暴露全历史低置信事件计数；但 export/diagnosis
-    # 复用的 report 必须保持旧 summary contract，避免长篇作品把 low_confidence_count
-    # 悄悄放大成“全历史事件总数”
+    # graph page 继续暴露全历史低置信事件计数；export/diagnosis
+    # 复用的 report 保持稳定上限，避免长篇作品把低置信事件放大成全历史总数
     return GraphQualitySignals(
         conflict_count=shared_quality.conflict_count,
         low_confidence_count=min(shared_quality.low_confidence_count, LOW_CONFIDENCE_REPORT_LIMIT),

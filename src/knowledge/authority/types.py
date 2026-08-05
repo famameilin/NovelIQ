@@ -79,7 +79,7 @@ class ConfirmedRelation:
     support_count: int | None = None
     latest_event_id: int | None = None
     tension_index: float | None = None
-    source: str = "graph_relations_current"
+    source: str = "graph_facts"
 
 
 @dataclass(slots=True)
@@ -98,7 +98,7 @@ class RelationEvent:
     confidence: float | None = None
     directionality: str | None = None
     source_relation_row_id: int | None = None
-    source: str = "graph_relation_events"
+    source: str = "graph_facts"
 
 
 @dataclass(slots=True)
@@ -162,7 +162,7 @@ class ParticipantState:
     first_seen_chunk: int | None = None
     last_seen_chunk: int | None = None
     source_confidence: float | None = None
-    source: str = "graph_entity_participants"
+    source: str = "graph_facts"
 
 
 @dataclass(slots=True)
@@ -402,7 +402,7 @@ class GraphPageQualityDetails:
 
 @dataclass(slots=True)
 class ExportRelationSnapshot:
-    """专供旧版导出 payload 组装的当前关系快照"""
+    """专供结果导出 payload 组装的当前关系快照"""
 
     relation_id: int | None = None
     from_name: str = ""
@@ -412,13 +412,13 @@ class ExportRelationSnapshot:
     last_seen_chunk: int | None = None
     latest_event_id: int | None = None
     is_active: bool = True
-    source: str = "graph_relations_current"
+    source: str = "graph_facts"
 
 
 @dataclass(slots=True)
 class ExportGraphAuthorityView:
     """
-    专供旧版图谱导出 payload 的 authority 视图
+    专供图谱导出 payload 的 authority 视图
 
     结果导出仍会输出 chunk 级关系、层级关系摘要等 DTO。
     该视图让这些 payload 构建器脱离 repository / projection 行结构，

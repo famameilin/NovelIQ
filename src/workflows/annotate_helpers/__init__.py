@@ -1,21 +1,13 @@
 """
-标注辅助函数模块
-
-- context.py: 证据服务初始化与全局上下文提取
-- storage.py: 标注结果存储
-- graph_projection.py: 图谱投影（以 agent 身份记忆为别名源）
+章节标注完成事务与数据库图投影入口
 """
 
-from .context import (
-    _extract_and_save_global_context,
-    _init_evidence_service,
-)
-from .graph_projection import project_graph_tables
-from .storage import _store_annotation_results
+from .graph_projection import project_graph_tables, stable_annotation_fact_id
+from .storage import complete_annotation_run, load_completion_result
 
 __all__ = [
-    "_extract_and_save_global_context",
-    "_init_evidence_service",
-    "_store_annotation_results",
+    "complete_annotation_run",
+    "load_completion_result",
     "project_graph_tables",
+    "stable_annotation_fact_id",
 ]

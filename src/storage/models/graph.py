@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -165,4 +167,116 @@ class GraphEntityParticipant(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "entity_id", name="uq_graph_entity_participants_run_entity"),
         Index("idx_graph_entity_participants_run_entity", "run_id", "entity_id"),
+    )
+
+
+class GraphFact(Base):
+    """2026-08-05 用于保存章节标注与 continuity fact 的通用数据库图投影"""
+
+    __tablename__ = "graph_facts"
+
+    graph_fact_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stable_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    fact_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    subject_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    predicate: Mapped[str] = mapped_column(String(255), nullable=False)
+    object: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    value: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    participants: Mapped[list] = mapped_column(JSONB, nullable=False)
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+    story_time: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    assertion: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "stable_fact_id", name="uq_graph_facts_run_stable"),
+        Index("idx_graph_facts_run_subject_predicate", "run_id", "subject_name", "predicate"),
+        Index("idx_graph_facts_run_active", "run_id", "active"),
+    )
+
+
+class GraphFactSource(Base):
+    """2026-08-05 用于关联稳定来源事实与实际图投影行"""
+
+    __tablename__ = "graph_fact_sources"
+
+    source_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    graph_fact_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("graph_facts.graph_fact_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stable_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    annotation_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    continuity_fact_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("continuity_facts.fact_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    payload_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "stable_fact_id", name="uq_graph_fact_sources_run_stable"),
+        Index("idx_graph_fact_sources_annotation", "run_id", "annotation_id"),
+        Index("idx_graph_fact_sources_continuity", "run_id", "continuity_fact_id"),
+    )
+
+
+class GraphFactVersion(Base):
+    """2026-08-05 用于保存事实 refine supersede 与 retract 的稳定版本关系"""
+
+    __tablename__ = "graph_fact_versions"
+
+    version_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    previous_stable_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    current_stable_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    change_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "previous_stable_fact_id",
+            "current_stable_fact_id",
+            name="uq_graph_fact_versions_edge",
+        ),
+        Index("idx_graph_fact_versions_previous", "run_id", "previous_stable_fact_id"),
     )

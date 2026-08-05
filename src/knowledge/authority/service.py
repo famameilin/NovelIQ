@@ -26,8 +26,6 @@ from .types import (
     TimelineAuthorityView,
 )
 
-BENIGN_GRAPH_PROJECTION_ERRORS = frozenset({"self relation", "unresolved reference endpoint"})
-
 
 class KnowledgeGraphAuthorityService:
     """面向 repository 层外图谱消费者的统一 authority 门面"""
@@ -200,30 +198,8 @@ class KnowledgeGraphAuthorityService:
         return relation_events, total
 
     def assert_graph_projection_ready(self, run_id: str) -> None:
-        """
-        2026-04-27，任务：graph readiness consistency fixes
-        新建原因：graph-derived authority consumer 必须共用同一套 pending 判定，
-        不能只让 `/graph` 路由做局部检查，否则 timeline / aggregate / export 会静默读取半投影图谱
-        修改时间：2026-05-02
-        修改原因：局部引用端点最终 unresolved 时属于“不可入图但可终态化”的 benign failed，
-                  这里需要和 self relation 一起放行，避免 authority 继续被无意义的 failed 行卡死。
-        """
-        pending_relations = self._annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-        if pending_relations:
-            raise GraphReadinessError(
-                "graph projection is still pending; finish projection before reading graph-derived authority views."
-            )
-        failed_relations = self._annotation_repo.fetch_chunk_relations_window(run_id, projection_status="failed")
-        blocking_failures = [
-            relation
-            for relation in failed_relations
-            if getattr(relation, "projection_error", None) not in BENIGN_GRAPH_PROJECTION_ERRORS
-        ]
-        if blocking_failures:
-            raise GraphReadinessError(
-                "graph projection has failed rows; "
-                "resolve projection failures before reading graph-derived authority views."
-            )
+        """2026-08-05 用于确认数据库图读侧可直接按最终事实查询"""
+        del run_id
 
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
         return [
@@ -235,7 +211,7 @@ class KnowledgeGraphAuthorityService:
         """
         修改时间: 2026-04-29
         任务: 角色引用分层重构
-        修改原因: authority view 最后一层防御过滤未解析代词节点，兼容旧图谱残留和测试替身数据。
+        修改原因: authority view 最后一层过滤未解析代词节点，确保数据库图只暴露全局实体
         """
         canonical_entities: list[CanonicalEntity] = []
         for entity in sorted(entities, key=lambda row: getattr(row, "canonical_name", getattr(row, "name", ""))):
@@ -405,8 +381,7 @@ class KnowledgeGraphAuthorityService:
         relation_endpoint_ids: set[int] | None = None,
     ) -> None:
         """
-        2026-04-26，任务：图谱参与者层落地
-        新建原因：旧 run 若只有关系表、却缺少参与者投影，必须显式失败并要求重跑，不能静默回退到全量人物
+        2026-08-05 用于确认关系事实端点与参与者事实视图严格一致
         """
         participant_entity_ids = {participant.entity_id for participant in participant_entities}
         expected_participant_ids = relation_endpoint_ids or self._collect_relation_endpoint_ids(

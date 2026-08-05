@@ -1,615 +1,678 @@
+"""
+章节正式标注与连续性事实的数据库图投影
+"""
+
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hashlib
+import json
+from collections.abc import Iterator
+from typing import Any
 
-from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
-from src.agents.annotation.memory import IdentityMemory, load_identity_memory
-from src.config import settings
-from src.config.constants.annotation import (
-    SYMMETRIC_RELATION_TYPES,
-    VALID_CHANGE_TYPES,
-    VALID_RELATION_TYPES,
+from src.storage.models import (
+    ChapterAnnotationRecord,
+    ContinuityFact,
+    GraphEntity,
+    GraphEntityAlias,
+    GraphEntityParticipant,
+    GraphFact,
+    GraphFactSource,
+    GraphFactVersion,
+    GraphRelationCurrent,
+    GraphRelationEvent,
 )
-from src.models.local.character_reference_policy import decide_character_reference, is_reference_surface_name
-from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
-from src.storage.repositories import AnnotationRepository, GraphRepository, RunRepository
 
-PENDING_RETRY_LIMIT = 200
-HIERARCHICAL_SYMMETRIC_RELATION_TYPES = frozenset({"spouse_of", "sibling_of"})
-REFERENCE_ENDPOINT_KINDS = frozenset({"pov_slot", "pronoun", "generic_reference"})
-BENIGN_UNRESOLVED_REFERENCE_ERROR = "unresolved reference endpoint"
+_CONFIDENCE_SCORE = {"high": 0.9, "medium": 0.7, "low": 0.5}
+_CHANGE_LABEL = {
+    "assert": "新建",
+    "reinforce": "强化",
+    "refine": "强化",
+    "supersede": "强化",
+    "weaken": "弱化",
+    "break": "断裂",
+    "retract": "断裂",
+}
 
 
-def _resolve_name(
-    raw_name: str | None,
-    alias_map: dict[str, str],
-    graph_aliases: dict[str, str],
+def stable_annotation_fact_id(annotation_id: str, payload_path: str) -> str:
+    """2026-08-05 用于按 annotation_id 与 payload 路径生成可重建的稳定来源事实 ID"""
+    digest = hashlib.sha256(f"{annotation_id}:{payload_path}".encode()).hexdigest()
+    return f"ann_{digest}"
+
+
+def _segment_fact(
     *,
-    resolved_global_name: str | None = None,
-) -> str | None:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: graph projection 只能接收已通过 global-character 准入的名字，未解析代词不能被别名表误提升。
-    """
-    if raw_name is None and resolved_global_name is None:
-        return None
-    name = raw_name.strip() if raw_name else ""
-    explicit_name = resolved_global_name.strip() if resolved_global_name else None
-    if not name and not explicit_name:
-        return None
-    merged_aliases = {**graph_aliases, **alias_map}
-    decision = decide_character_reference(
-        name or explicit_name,
-        alias_map=merged_aliases,
-        resolved_global_name=explicit_name,
+    chapter_id: int,
+    item: dict[str, Any],
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """2026-08-05 用于把章节 segment 转换为可查询的图事实语义"""
+    content = {
+        "kind": "segment",
+        "chunk_id": item["chunk_id"],
+        "summary": item["summary"],
+        "emotional_valence": item["emotional_valence"],
+        "event_type": item["event_type"],
+        "pivot_moment": item["pivot_moment"],
+        "cliffhanger": item["cliffhanger"],
+    }
+    fact: dict[str, Any] = {
+        "fact_type": "chapter_segment",
+        "subject": {"name": f"chapter:{chapter_id}", "entity_type": "chapter"},
+        "predicate": "contains_segment",
+        "object": None,
+        "value": content,
+        "participants": [],
+        "scope": f"chapter:{chapter_id}",
+        "story_time": None,
+        "assertion": "affirmed",
+        "confidence": "high",
+        "content": content,
+    }
+    evidence = {"reason": item["summary"], "chapterid": chapter_id}
+    return "chapter_segment", fact, evidence
+
+
+def _atomic_annotation_fact(
+    *,
+    chapter_id: int,
+    field_name: str,
+    item: dict[str, Any],
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """2026-08-05 用于把各类章节原子事实规范化为统一图事实结构"""
+    subject: dict[str, Any]
+    object_value: dict[str, Any] | None = None
+    value: Any | None = None
+    predicate: str
+    participants = list(item.get("participants") or [])
+    fact_type = field_name.removesuffix("s")
+
+    if field_name == "characters":
+        subject = dict(item["entity"])
+        predicate = str(item["action_type"])
+        value = {
+            "action": item["action"],
+            "role_function": item["role_function"],
+            "emotion": item["emotion"],
+        }
+    elif field_name == "locations":
+        subject = dict(item["entity"])
+        predicate = str(item["relation_type"])
+        object_value = dict(item["location"])
+    elif field_name == "dialogues":
+        subject = dict(item["speaker"]) if item.get("speaker") else {
+            "name": "未知说话人",
+            "entity_type": "unknown",
+        }
+        predicate = "spoke"
+        value = {
+            "content": item["content"],
+            "tone": item.get("tone"),
+            "is_inner_monologue": item["is_inner_monologue"],
+        }
+    elif field_name == "events":
+        subject = (
+            dict(participants[0]["entity"])
+            if participants
+            else {"name": f"chapter:{chapter_id}:event", "entity_type": "event"}
+        )
+        predicate = str(item["event_type"])
+        value = {"summary": item["summary"]}
+    elif field_name == "relations":
+        subject = dict(item["from_entity"])
+        predicate = str(item["relation_type"])
+        object_value = dict(item["to_entity"])
+        participants = [
+            {"role": "from", "entity": dict(item["from_entity"])},
+            {"role": "to", "entity": dict(item["to_entity"])},
+        ]
+    elif field_name == "states":
+        subject = dict(item["entity"])
+        predicate = str(item["predicate"])
+        object_value = dict(item["object"]) if item.get("object") is not None else None
+        value = item.get("value")
+    else:
+        raise ValueError(f"不支持的章节事实字段: {field_name}")
+
+    content = {"kind": field_name, **item}
+    fact = {
+        "fact_type": fact_type,
+        "subject": subject,
+        "predicate": predicate,
+        "object": object_value,
+        "value": value,
+        "participants": participants,
+        "scope": f"chapter:{chapter_id}",
+        "story_time": item.get("story_time"),
+        "assertion": "affirmed",
+        "confidence": item["confidence"],
+        "content": content,
+    }
+    return fact_type, fact, dict(item["evidence"])
+
+
+def _iter_annotation_facts(
+    row: ChapterAnnotationRecord,
+) -> Iterator[tuple[str, str, dict[str, Any], dict[str, Any]]]:
+    """2026-08-05 用于按稳定 payload 路径遍历章节正式标注的全部事实源"""
+    payload = dict(row.payload)
+    for index, item in enumerate(payload.get("segments", [])):
+        path = f"segments/{index}"
+        fact_type, fact, evidence = _segment_fact(chapter_id=row.chapter_id, item=dict(item))
+        yield path, fact_type, fact, evidence
+    for field_name in ("characters", "locations", "dialogues", "events", "relations", "states"):
+        for index, item in enumerate(payload.get(field_name, [])):
+            path = f"{field_name}/{index}"
+            fact_type, fact, evidence = _atomic_annotation_fact(
+                chapter_id=row.chapter_id,
+                field_name=field_name,
+                item=dict(item),
+            )
+            yield path, fact_type, fact, evidence
+
+
+def _iter_entity_refs(fact: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """2026-08-05 用于从统一图事实中遍历真实业务实体并排除技术主体"""
+    content = fact.get("content")
+    content_payload = content if isinstance(content, dict) else {}
+    content_kind = content_payload.get("kind")
+    synthetic_subject = (
+        content_kind == "segment"
+        or (content_kind == "dialogues" and not content_payload.get("speaker"))
+        or (content_kind == "events" and not content_payload.get("participants"))
     )
-    return decision.resolved_global_name if decision.can_enter_global_character else None
+    subject = fact.get("subject")
+    if isinstance(subject, dict) and not synthetic_subject:
+        yield subject
+    object_value = fact.get("object")
+    if isinstance(object_value, dict) and "name" in object_value:
+        yield object_value
+    for participant in fact.get("participants") or []:
+        entity = participant.get("entity") if isinstance(participant, dict) else None
+        if isinstance(entity, dict):
+            yield entity
 
 
-def _should_record_alias(surface_name: str | None, resolved_name: str) -> bool:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 已解析代词可以投影为实名节点，但 raw 代词不能写入 graph_aliases 形成全局别名。
-    """
-    if surface_name is None:
-        return False
-    normalized = surface_name.strip()
-    return bool(normalized) and normalized != resolved_name and not is_reference_surface_name(normalized)
-
-
-def _fetch_pending_relations(
-    session,
-    run_id: str,
-    to_chunk: int | None,
-    limit: int = PENDING_RETRY_LIMIT,
-) -> list[ChunkRelation]:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: pending retry 会重新处理未解析端点，必须保留显式 projection_error 供诊断和重投影观察。
-    """
-    query = (
-        session.query(ChunkRelation)
-        .filter(ChunkRelation.run_id == run_id)
-        .filter(ChunkRelation.projection_status == "pending")
-    )
-    if to_chunk is not None:
-        query = query.filter(ChunkRelation.chunk_id <= to_chunk)
-    return list(query.order_by(ChunkRelation.chunk_id, ChunkRelation.id).limit(limit).all())
-
-
-def _merge_relations_for_projection(
-    window_relations: list[ChunkRelation],
-    retry_relations: list[ChunkRelation],
-) -> list[ChunkRelation]:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: 合并窗口关系与 retry 关系时继续按 row id 去重，避免同一 pending 端点被重复计数。
-    """
-    seen: set[int] = set()
-    merged: list[ChunkRelation] = []
-    for relation in [*window_relations, *retry_relations]:
-        if relation.id is None or relation.id in seen:
-            continue
-        seen.add(relation.id)
-        merged.append(relation)
-    return merged
-
-
-def _get_last_projected_chunk(session, run_id: str) -> int:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: 增量投影继续以已完成关系为边界，pending 的未解析引用必须留待后续重试。
-    """
-    result = session.execute(
-        text("""
-            SELECT COALESCE(MAX(chunk_id), -1) AS max_chunk_id
-            FROM chunk_relations
-            WHERE run_id = :run_id AND projection_status = 'projected'
-        """),
-        {"run_id": run_id},
-    ).fetchone()
-    return result.max_chunk_id if result else -1
-
-
-def _backfill_relation_history_before_projection(
-    session,
+def _upsert_graph_entity(
+    session: Session,
     *,
     run_id: str,
-    state: IdentityMemory,
-    from_chunk: int,
-    to_chunk: int | None,
-    retry_relations: list[ChunkRelation],
-) -> dict[str, int]:
-    """
-    创建时间: 2026-05-02
-    任务: fix-graph-projection-relations
-    新建原因: graph projection 除了消费当前窗口，还会重试更早的 pending relation；
-              投影前必须先用最新 checkpoint 回刷这些 relation 行，避免 stale resolved 字段
-              让本来可投影或应终态化的引用关系继续卡在旧状态。
-    """
-    backfill_from_chunk = from_chunk
-    if retry_relations:
-        earliest_retry_chunk = min(relation.chunk_id for relation in retry_relations)
-        backfill_from_chunk = min(backfill_from_chunk, earliest_retry_chunk)
-    report = AnnotationRepository(session).apply_reference_resolutions_to_history(
-        run_id,
-        _build_reference_resolutions_from_memory(state),
-        apply=True,
-        from_chunk=backfill_from_chunk,
-        to_chunk=to_chunk,
-        table_scopes=("chunk_relations",),
+    entity_ref: dict[str, Any],
+    chunk_id: int | None,
+    confidence: str,
+    evidence: dict[str, Any],
+) -> GraphEntity:
+    """2026-08-05 用于从事实实体引用维护规范实体与主别名"""
+    canonical_name = str(entity_ref["name"]).strip()
+    entity_type = str(entity_ref["entity_type"]).strip()
+    stmt = select(GraphEntity).where(
+        GraphEntity.run_id == run_id,
+        GraphEntity.canonical_name == canonical_name,
     )
+    entity = session.execute(stmt).scalar_one_or_none()
+    if entity is None:
+        entity = GraphEntity(
+            run_id=run_id,
+            canonical_name=canonical_name,
+            entity_type=entity_type,
+            first_seen_chunk=chunk_id,
+            last_seen_chunk=chunk_id,
+            status="active",
+            source_confidence=_CONFIDENCE_SCORE.get(confidence, 0.5),
+        )
+        session.add(entity)
+        session.flush()
+    else:
+        if chunk_id is not None:
+            if entity.first_seen_chunk is None or chunk_id < entity.first_seen_chunk:
+                entity.first_seen_chunk = chunk_id
+            if entity.last_seen_chunk is None or chunk_id > entity.last_seen_chunk:
+                entity.last_seen_chunk = chunk_id
+        entity.entity_type = entity_type
+        entity.status = "active"
+        entity.source_confidence = max(
+            entity.source_confidence or 0.0,
+            _CONFIDENCE_SCORE.get(confidence, 0.5),
+        )
+
+    alias_stmt = select(GraphEntityAlias).where(
+        GraphEntityAlias.run_id == run_id,
+        GraphEntityAlias.entity_id == entity.entity_id,
+        GraphEntityAlias.alias == canonical_name,
+    )
+    if session.execute(alias_stmt).scalar_one_or_none() is None:
+        session.add(
+            GraphEntityAlias(
+                run_id=run_id,
+                entity_id=entity.entity_id,
+                alias=canonical_name,
+                source_chunk_id=chunk_id,
+                evidence=json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+                confidence=_CONFIDENCE_SCORE.get(confidence, 0.5),
+                source_type="graph_fact",
+                is_primary=True,
+            )
+        )
+    return entity
+
+
+def _upsert_graph_fact(
+    session: Session,
+    *,
+    run_id: str,
+    stable_fact_id: str,
+    source_kind: str,
+    fact: dict[str, Any],
+    evidence: dict[str, Any],
+    annotation_id: str | None = None,
+    continuity_fact_id: str | None = None,
+    payload_path: str | None = None,
+) -> GraphFact:
+    """2026-08-05 用于按稳定来源事实 ID 幂等写入图事实与来源关系"""
+    source_stmt = select(GraphFactSource).where(
+        GraphFactSource.run_id == run_id,
+        GraphFactSource.stable_fact_id == stable_fact_id,
+    )
+    source = session.execute(source_stmt).scalar_one_or_none()
+    if source is not None:
+        graph_fact = session.get(GraphFact, source.graph_fact_id)
+        if graph_fact is None:
+            raise ValueError(f"graph_fact_source 指向不存在的图事实: {stable_fact_id}")
+        return graph_fact
+
+    graph_fact = GraphFact(
+        run_id=run_id,
+        stable_fact_id=stable_fact_id,
+        fact_type=str(fact["fact_type"]),
+        subject_name=str(fact["subject"]["name"]),
+        subject_type=str(fact["subject"]["entity_type"]),
+        predicate=str(fact["predicate"]),
+        object=fact.get("object"),
+        value=fact.get("value"),
+        participants=list(fact.get("participants") or []),
+        scope=str(fact["scope"]),
+        story_time=fact.get("story_time"),
+        assertion=str(fact["assertion"]),
+        confidence=str(fact["confidence"]),
+        content=dict(fact["content"]),
+        active=True,
+    )
+    session.add(graph_fact)
     session.flush()
-    logger.debug(
-        "relation history backfill before projection: run_id={} from_chunk={} to_chunk={} report={}",
-        run_id,
-        backfill_from_chunk,
-        to_chunk,
-        report,
+    session.add(
+        GraphFactSource(
+            run_id=run_id,
+            graph_fact_id=graph_fact.graph_fact_id,
+            stable_fact_id=stable_fact_id,
+            source_kind=source_kind,
+            annotation_id=annotation_id,
+            continuity_fact_id=continuity_fact_id,
+            payload_path=payload_path,
+            evidence=evidence,
+        )
     )
-    return report
+    chunk_id = fact["content"].get("chunk_id") if isinstance(fact.get("content"), dict) else None
+    for entity_ref in _iter_entity_refs(fact):
+        entity = _upsert_graph_entity(
+            session,
+            run_id=run_id,
+            entity_ref=entity_ref,
+            chunk_id=int(chunk_id) if chunk_id is not None else None,
+            confidence=str(fact["confidence"]),
+            evidence=evidence,
+        )
+        content = fact.get("content")
+        if (
+            isinstance(content, dict)
+            and content.get("kind") == "characters"
+            and entity_ref == fact.get("subject")
+        ):
+            entity.primary_role_function = str(content.get("role_function") or "") or None
+            entity.last_action = str(content.get("action") or "") or None
+            entity.last_emotion_score = str(content.get("emotion") or "") or None
+    session.flush()
+    return graph_fact
 
 
-def _build_reference_resolutions_from_memory(state: IdentityMemory) -> dict[str, str]:
-    """
-    从 agent 身份记忆构建引用解析映射：
-    别名表（表面称呼 → 规范名）即为引用解析的权威来源，
-    规范名自身映射到自身，保证已解析实名的引用行不被误清空
-    """
-    resolutions = {name: name for name in state.known_canonical_names}
-    resolutions.update(state.alias_map)
-    return resolutions
+def _continuity_fact_payload(row: ContinuityFact) -> dict[str, Any]:
+    """2026-08-05 用于把 continuity_facts 行转换为统一图事实语义"""
+    content = {
+        "kind": "continuity_fact",
+        "fact_id": row.fact_id,
+        "fact_type": row.fact_type,
+        "subject": row.subject,
+        "predicate": row.predicate,
+        "object": row.object,
+        "value": row.value,
+        "participants": row.participants,
+        "scope": row.scope,
+        "story_time": row.story_time,
+        "assertion": row.assertion,
+        "change_kind": row.change_kind,
+        "linked_fact_id": row.linked_fact_id,
+        "confidence": row.confidence,
+    }
+    return {
+        "fact_type": row.fact_type,
+        "subject": dict(row.subject),
+        "predicate": row.predicate,
+        "object": row.object,
+        "value": row.value,
+        "participants": list(row.participants),
+        "scope": row.scope,
+        "story_time": row.story_time,
+        "assertion": row.assertion,
+        "confidence": row.confidence,
+        "content": content,
+    }
 
 
-def _is_reference_endpoint(raw_name: str | None, reference_kind: str | None) -> bool:
-    """
-    创建时间: 2026-05-02
-    任务: fix-graph-projection-relations
-    新建原因: unresolved 端点里只有“局部引用位”应该转成 benign failed；
-              这里统一识别 slot/pronoun/generic_reference，避免把普通实名也误终态化。
-    """
-    return (reference_kind or "").strip() in REFERENCE_ENDPOINT_KINDS or is_reference_surface_name(raw_name)
+def _project_version_relation(session: Session, *, run_id: str, row: ContinuityFact) -> None:
+    """2026-08-05 用于建立来源事实 refine supersede 与 retract 版本边"""
+    if row.change_kind == "assert" or row.linked_fact_id is None:
+        return
+    previous_source_stmt = select(GraphFactSource).where(
+        GraphFactSource.run_id == run_id,
+        GraphFactSource.stable_fact_id == row.linked_fact_id,
+    )
+    previous_source = session.execute(previous_source_stmt).scalar_one_or_none()
+    if previous_source is None:
+        raise ValueError(f"linked_fact_id 尚未投影或不存在: {row.linked_fact_id}")
+    existing_stmt = select(GraphFactVersion).where(
+        GraphFactVersion.run_id == run_id,
+        GraphFactVersion.previous_stable_fact_id == row.linked_fact_id,
+        GraphFactVersion.current_stable_fact_id == row.fact_id,
+    )
+    if session.execute(existing_stmt).scalar_one_or_none() is None:
+        session.add(
+            GraphFactVersion(
+                run_id=run_id,
+                previous_stable_fact_id=row.linked_fact_id,
+                current_stable_fact_id=row.fact_id,
+                change_kind=row.change_kind,
+            )
+        )
+    previous_fact = session.get(GraphFact, previous_source.graph_fact_id)
+    if previous_fact is not None:
+        previous_fact.active = False
 
 
-def _should_fail_unresolved_reference_endpoint(
-    relation: ChunkRelation,
+def _chapter_anchor_chunks(session: Session, run_id: str) -> dict[int, int]:
+    """2026-08-05 用于把章节 Evidence 转换为现有关系事件表需要的 chunk 锚点"""
+    from sqlalchemy import func
+
+    from src.storage.models import Chunk
+
+    rows = session.execute(
+        select(Chunk.chapter_id, func.min(Chunk.chunk_id).label("chunk_id"))
+        .where(Chunk.run_id == run_id)
+        .group_by(Chunk.chapter_id)
+    ).all()
+    return {int(row.chapter_id): int(row.chunk_id) for row in rows}
+
+
+def _relation_projection_values(
     *,
-    resolved_from: str | None,
-    resolved_to: str | None,
-) -> bool:
-    """
-    创建时间: 2026-05-02
-    任务: fix-graph-projection-relations
-    新建原因: 只有“剩下没解开的都是引用端点”时，关系才能安全终态化为 benign failed；
-              如果还夹杂未解析实名，就必须继续 pending，等待后续角色主链补齐。
-    """
-    unresolved_reference_endpoint = False
-    unresolved_non_reference_endpoint = False
+    fact: GraphFact,
+    source: GraphFactSource,
+    chapter_anchor_chunks: dict[int, int],
+) -> tuple[str, str, str, str, int, str] | None:
+    """2026-08-05 用于从通用图事实提取关系事件投影所需的稳定语义"""
+    content = fact.content if isinstance(fact.content, dict) else {}
+    kind = content.get("kind")
+    if kind == "relations":
+        from_entity = content.get("from_entity")
+        to_entity = content.get("to_entity")
+        chunk_id = content.get("chunk_id")
+        if not isinstance(from_entity, dict) or not isinstance(to_entity, dict) or not isinstance(chunk_id, int):
+            return None
+        return (
+            str(from_entity.get("name") or "").strip(),
+            str(to_entity.get("name") or "").strip(),
+            fact.predicate,
+            _CHANGE_LABEL.get(str(content.get("change_kind") or "assert"), "新建"),
+            chunk_id,
+            str(content.get("directionality") or "directed"),
+        )
+    if kind != "continuity_fact" or fact.fact_type != "relation" or not isinstance(fact.object, dict):
+        return None
+    evidence_chapter = source.evidence.get("chapterid") if isinstance(source.evidence, dict) else None
+    if not isinstance(evidence_chapter, int) or evidence_chapter not in chapter_anchor_chunks:
+        return None
+    return (
+        fact.subject_name.strip(),
+        str(fact.object.get("name") or "").strip(),
+        fact.predicate,
+        _CHANGE_LABEL.get(str(content.get("change_kind") or "assert"), "新建"),
+        chapter_anchor_chunks[evidence_chapter],
+        "directed",
+    )
 
-    if resolved_from is None:
-        if _is_reference_endpoint(relation.from_char, relation.from_reference_kind):
-            unresolved_reference_endpoint = True
+
+def _project_relation_events(session: Session, *, run_id: str) -> None:
+    """2026-08-05 用于从 graph_facts 幂等重建现有关系事件投影"""
+    chapter_anchor_chunks = _chapter_anchor_chunks(session, run_id)
+    entity_rows = list(
+        session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars().all()
+    )
+    entities_by_name = {row.canonical_name: row for row in entity_rows}
+    fact_stmt = (
+        select(GraphFact, GraphFactSource)
+        .join(GraphFactSource, GraphFactSource.graph_fact_id == GraphFact.graph_fact_id)
+        .where(GraphFact.run_id == run_id, GraphFactSource.run_id == run_id)
+        .order_by(GraphFact.graph_fact_id)
+    )
+    existing_events = {
+        row.source_relation_row_id: row
+        for row in session.execute(
+            select(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id)
+        )
+        .scalars()
+        .all()
+        if row.source_relation_row_id is not None
+    }
+    expected_source_ids: set[int] = set()
+    for fact, source in session.execute(fact_stmt).all():
+        values = _relation_projection_values(
+            fact=fact,
+            source=source,
+            chapter_anchor_chunks=chapter_anchor_chunks,
+        )
+        if values is None:
+            continue
+        from_name, to_name, relation_type, change_type, chunk_id, directionality = values
+        from_entity = entities_by_name.get(from_name)
+        to_entity = entities_by_name.get(to_name)
+        if from_entity is None or to_entity is None:
+            raise ValueError(f"关系事实端点未投影为规范实体: {from_name} -> {to_name}")
+        expected_source_ids.add(fact.graph_fact_id)
+        reason = source.evidence.get("reason") if isinstance(source.evidence, dict) else None
+        event = existing_events.get(fact.graph_fact_id)
+        if event is None:
+            event = GraphRelationEvent(
+                run_id=run_id,
+                from_entity_id=from_entity.entity_id,
+                to_entity_id=to_entity.entity_id,
+                relation_type=relation_type,
+                change_type=change_type,
+                chunk_id=chunk_id,
+                evidence=str(reason) if reason else None,
+                confidence=_CONFIDENCE_SCORE.get(fact.confidence),
+                source_relation_row_id=fact.graph_fact_id,
+                directionality=directionality,
+            )
+            session.add(event)
         else:
-            unresolved_non_reference_endpoint = True
+            event.from_entity_id = from_entity.entity_id
+            event.to_entity_id = to_entity.entity_id
+            event.relation_type = relation_type
+            event.change_type = change_type
+            event.chunk_id = chunk_id
+            event.evidence = str(reason) if reason else None
+            event.confidence = _CONFIDENCE_SCORE.get(fact.confidence)
+            event.directionality = directionality
+    stale_event_ids = [
+        row.relation_event_id
+        for source_id, row in existing_events.items()
+        if source_id not in expected_source_ids
+    ]
+    if stale_event_ids:
+        session.execute(
+            delete(GraphRelationEvent).where(
+                GraphRelationEvent.run_id == run_id,
+                GraphRelationEvent.relation_event_id.in_(stale_event_ids),
+            )
+        )
+    session.flush()
 
-    if resolved_to is None:
-        if _is_reference_endpoint(relation.to_char, relation.to_reference_kind):
-            unresolved_reference_endpoint = True
-        else:
-            unresolved_non_reference_endpoint = True
 
-    return unresolved_reference_endpoint and not unresolved_non_reference_endpoint
+def _relation_pair(event: GraphRelationEvent) -> tuple[int, int]:
+    """2026-08-05 用于按关系方向生成当前关系快照的实体对键"""
+    if event.directionality == "bidirectional":
+        return min(event.from_entity_id, event.to_entity_id), max(event.from_entity_id, event.to_entity_id)
+    return event.from_entity_id, event.to_entity_id
+
+
+def _project_relation_current_and_participants(session: Session, *, run_id: str) -> None:
+    """2026-08-05 用于从关系事件重建当前关系与参与者统计投影"""
+    session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id))
+    session.execute(delete(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id))
+    events = list(
+        session.execute(
+            select(GraphRelationEvent)
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(GraphRelationEvent.chunk_id, GraphRelationEvent.relation_event_id)
+        )
+        .scalars()
+        .all()
+    )
+    grouped: dict[tuple[int, int], list[GraphRelationEvent]] = {}
+    for event in events:
+        grouped.setdefault(_relation_pair(event), []).append(event)
+
+    active_counterparts: dict[int, set[int]] = {}
+    for relation_events in grouped.values():
+        first = relation_events[0]
+        latest = relation_events[-1]
+        is_active = latest.change_type != "断裂"
+        tension = 0.0
+        for event in relation_events:
+            confidence = event.confidence or 0.5
+            if event.relation_type == "敌对":
+                tension += confidence
+            elif event.relation_type in {"盟友", "友情"}:
+                tension -= confidence * 0.5
+        session.add(
+            GraphRelationCurrent(
+                run_id=run_id,
+                from_entity_id=latest.from_entity_id,
+                to_entity_id=latest.to_entity_id,
+                current_type=latest.relation_type,
+                first_seen_chunk=first.chunk_id,
+                last_seen_chunk=latest.chunk_id,
+                change_count=sum(1 for event in relation_events if event.change_type != "新建"),
+                support_count=len(relation_events),
+                latest_event_id=latest.relation_event_id,
+                tension_index=tension,
+                is_active=is_active,
+            )
+        )
+        if is_active:
+            active_counterparts.setdefault(latest.from_entity_id, set()).add(latest.to_entity_id)
+            active_counterparts.setdefault(latest.to_entity_id, set()).add(latest.from_entity_id)
+
+    events_by_entity: dict[int, list[GraphRelationEvent]] = {}
+    historical_counterparts: dict[int, set[int]] = {}
+    for event in events:
+        events_by_entity.setdefault(event.from_entity_id, []).append(event)
+        events_by_entity.setdefault(event.to_entity_id, []).append(event)
+        historical_counterparts.setdefault(event.from_entity_id, set()).add(event.to_entity_id)
+        historical_counterparts.setdefault(event.to_entity_id, set()).add(event.from_entity_id)
+    for entity_id, entity_events in events_by_entity.items():
+        latest = max(entity_events, key=lambda row: (row.chunk_id, row.relation_event_id))
+        session.add(
+            GraphEntityParticipant(
+                run_id=run_id,
+                entity_id=entity_id,
+                relation_event_count=len(entity_events),
+                current_degree=len(active_counterparts.get(entity_id, set())),
+                historical_degree=len(historical_counterparts.get(entity_id, set())),
+                first_relation_chunk=min(event.chunk_id for event in entity_events),
+                last_relation_chunk=max(event.chunk_id for event in entity_events),
+                latest_relation_event_id=latest.relation_event_id,
+            )
+        )
+    session.flush()
+
+
+def _project_relation_views(session: Session, *, run_id: str) -> None:
+    """2026-08-05 用于从通用事实重建实体关系与参与者查询投影"""
+    _project_relation_events(session, run_id=run_id)
+    _project_relation_current_and_participants(session, run_id=run_id)
+
+
+def _clear_graph_projection(session: Session, run_id: str) -> None:
+    """2026-08-05 用于按外键顺序清空可从两类事实源完整重建的数据库图"""
+    for model in (
+        GraphFactVersion,
+        GraphFactSource,
+        GraphFact,
+        GraphRelationCurrent,
+        GraphEntityParticipant,
+        GraphRelationEvent,
+        GraphEntityAlias,
+        GraphEntity,
+    ):
+        session.execute(delete(model).where(model.run_id == run_id))
+    session.flush()
 
 
 def project_graph_tables(
     run_id: str,
-    from_chunk: int | None = None,
-    to_chunk: int | None = None,
-    session=None,
+    *,
+    session: Session,
+    annotation_id: str | None = None,
     rebuild: bool = False,
 ) -> None:
-    """
-    2026-04-27，任务：timeline-contract-graph-projection
-    - “无变化”关系不再写入 graph history
-    - 若某条已投影关系后来被修正为“无变化”，必须删除旧事件并回刷受影响 pair
-    2026-04-30，任务：storage-api-graph-mypy-cleanup
-    - relation 端点原始别名在写入 alias 表前先做显式空值收窄，保持 None 不进入 graph alias 主链
-    """
-    if session is None:
-        raise ValueError("session is required for project_graph_tables")
-
-    run_repo = RunRepository(session)
-    if run_repo.get_run(run_id) is None:
-        raise ValueError(f"run not found: {run_id}")
-
-    graph_repo = GraphRepository(session)
-    state: IdentityMemory = load_identity_memory(session, run_id)
+    """2026-08-05 用于只从最终 chapter_annotations 与 continuity_facts 投影并 flush 数据库图"""
     if rebuild:
-        logger.info("graph projection rebuild requested run_id={} to_chunk={}", run_id, to_chunk)
-        graph_repo.reset_graph_tables(run_id)
-        from_chunk = 0
-    elif from_chunk is None:
-        from_chunk = _get_last_projected_chunk(session, run_id) + 1
+        _clear_graph_projection(session, run_id)
 
-    retry_relations = _fetch_pending_relations(session, run_id, to_chunk=to_chunk)
-    _backfill_relation_history_before_projection(
-        session,
-        run_id=run_id,
-        state=state,
-        from_chunk=from_chunk,
-        to_chunk=to_chunk,
-        retry_relations=retry_relations,
-    )
-
-    chunk_characters = list(
-        (
-            session.query(ChunkCharacter)
-            .filter(ChunkCharacter.run_id == run_id)
-            .filter(ChunkCharacter.chunk_id >= from_chunk)
-            .filter(ChunkCharacter.chunk_id <= to_chunk)
-            if to_chunk is not None
-            else session.query(ChunkCharacter)
-            .filter(ChunkCharacter.run_id == run_id)
-            .filter(ChunkCharacter.chunk_id >= from_chunk)
-        )
-        .order_by(ChunkCharacter.chunk_id, ChunkCharacter.id)
-        .all()
-    )
-    chunk_dialogues = list(
-        (
-            session.query(ChunkDialogue)
-            .filter(ChunkDialogue.run_id == run_id)
-            .filter(ChunkDialogue.chunk_id >= from_chunk)
-            .filter(ChunkDialogue.chunk_id <= to_chunk)
-            if to_chunk is not None
-            else session.query(ChunkDialogue)
-            .filter(ChunkDialogue.run_id == run_id)
-            .filter(ChunkDialogue.chunk_id >= from_chunk)
-        )
-        .order_by(ChunkDialogue.chunk_id, ChunkDialogue.id)
-        .all()
-    )
-    window_relations = list(
-        (
-            session.query(ChunkRelation)
-            .filter(ChunkRelation.run_id == run_id)
-            .filter(ChunkRelation.chunk_id >= from_chunk)
-            .filter(ChunkRelation.chunk_id <= to_chunk)
-            if to_chunk is not None
-            else session.query(ChunkRelation)
-            .filter(ChunkRelation.run_id == run_id)
-            .filter(ChunkRelation.chunk_id >= from_chunk)
-        )
-        .order_by(ChunkRelation.chunk_id, ChunkRelation.id)
-        .all()
-    )
-    chunk_relations = _merge_relations_for_projection(window_relations, retry_relations)
-
-    alias_map = dict(state.alias_map)
-    graph_alias_map = graph_repo.fetch_alias_map(run_id)
-
-    # P1.1 修复：批量加载已有实体类型，避免把类型硬编码成 "character"
-    existing_entities = graph_repo.fetch_entities(run_id)
-    existing_types: dict[str, str] = {e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name}
-    # 合并 agent 身份记忆给出的 entity_types，让 LLM 判定的类型能流入图谱投影
-    if state.entity_types:
-        existing_types.update(state.entity_types)
-
-    for row in chunk_characters:
-        surface_name = row.surface_name or row.name
-        resolved_name = _resolve_name(
-            surface_name,
-            alias_map,
-            graph_alias_map,
-            resolved_global_name=row.resolved_global_name,
-        )
-        if resolved_name is None:
-            continue
-        entity = graph_repo.upsert_entity(
-            run_id=run_id,
-            canonical_name=resolved_name,
-            entity_type=existing_types.get(resolved_name, "character"),
-            first_seen_chunk=row.chunk_id,
-            last_seen_chunk=row.chunk_id,
-            primary_role_function=row.role_function,
-            last_emotion_score=row.emotion_score,
-            last_action=row.action,
-            source_confidence=1.0,
-        )
-        if entity.entity_id is None:
-            continue
-        graph_repo.upsert_alias(
-            run_id=run_id,
-            entity_id=entity.entity_id,
-            alias=resolved_name,
-            source_chunk_id=row.chunk_id,
-            evidence=row.action,
-            confidence=1.0,
-            source_type="chunk_character",
-            is_primary=True,
-        )
-        graph_alias_map[resolved_name] = resolved_name
-        if _should_record_alias(surface_name, resolved_name):
-            graph_repo.upsert_alias(
+    annotation_stmt = select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
+    if annotation_id is not None:
+        annotation_stmt = annotation_stmt.where(ChapterAnnotationRecord.annotation_id == annotation_id)
+    annotation_stmt = annotation_stmt.order_by(ChapterAnnotationRecord.chapter_id)
+    annotations = list(session.execute(annotation_stmt).scalars().all())
+    for annotation in annotations:
+        for path, _fact_type, fact, evidence in _iter_annotation_facts(annotation):
+            _upsert_graph_fact(
+                session,
                 run_id=run_id,
-                entity_id=entity.entity_id,
-                alias=surface_name,
-                source_chunk_id=row.chunk_id,
-                evidence=row.action,
-                confidence=0.9,
-                source_type="disambiguation",
-                is_primary=False,
+                stable_fact_id=stable_annotation_fact_id(annotation.annotation_id, path),
+                source_kind="chapter_annotation",
+                fact=fact,
+                evidence=evidence,
+                annotation_id=annotation.annotation_id,
+                payload_path=path,
             )
-            graph_alias_map[surface_name] = resolved_name
 
-    for row in chunk_dialogues:
-        speakers = row.speaker or []
-        if not speakers:
-            continue
-        speaker_reference_by_surface: dict[str, str | None] = {}
-        for item in row.speaker_references or []:
-            if not isinstance(item, dict):
-                continue
-            surface_name = str(item.get("surface_name") or "").strip()
-            if surface_name:
-                speaker_reference_by_surface[surface_name] = (
-                    str(item.get("resolved_global_name")).strip()
-                    if item.get("resolved_global_name") is not None
-                    else None
-                )
-        for speaker_name in speakers:
-            if not speaker_name:
-                continue
-            resolved_name = _resolve_name(
-                speaker_name,
-                alias_map,
-                graph_alias_map,
-                resolved_global_name=speaker_reference_by_surface.get(speaker_name),
-            )
-            if resolved_name is None:
-                continue
-            entity = graph_repo.upsert_entity(
-                run_id=run_id,
-                canonical_name=resolved_name,
-                entity_type=existing_types.get(resolved_name, "character"),
-                first_seen_chunk=row.chunk_id,
-                last_seen_chunk=row.chunk_id,
-                source_confidence=0.8,
-            )
-            if entity.entity_id is None:
-                continue
-            graph_repo.upsert_alias(
-                run_id=run_id,
-                entity_id=entity.entity_id,
-                alias=resolved_name,
-                source_chunk_id=row.chunk_id,
-                evidence=row.content,
-                confidence=0.8,
-                source_type="dialogue",
-                is_primary=True,
-            )
-            graph_alias_map[resolved_name] = resolved_name
-            if _should_record_alias(speaker_name, resolved_name):
-                graph_repo.upsert_alias(
-                    run_id=run_id,
-                    entity_id=entity.entity_id,
-                    alias=speaker_name,
-                    source_chunk_id=row.chunk_id,
-                    evidence=row.content,
-                    confidence=0.8,
-                    source_type="dialogue",
-                    is_primary=False,
-                )
-                graph_alias_map[speaker_name] = resolved_name
-
-    projected_count = 0
-    pending_count = 0
-    failed_count = 0
-    no_change_count = 0
-    affected_pairs: set[tuple[int, int]] = set()
-    allowed_relation_types = VALID_RELATION_TYPES | set(settings.analysis.valid_hierarchical_relation_types)
-
-    for relation in chunk_relations:
-        resolved_from = _resolve_name(
-            relation.from_char,
-            alias_map,
-            graph_alias_map,
-            resolved_global_name=relation.resolved_from_global_name,
-        )
-        resolved_to = _resolve_name(
-            relation.to_char,
-            alias_map,
-            graph_alias_map,
-            resolved_global_name=relation.resolved_to_global_name,
-        )
-        if resolved_from is None or resolved_to is None:
-            relation.projected_at = None
-            if _should_fail_unresolved_reference_endpoint(
-                relation,
-                resolved_from=resolved_from,
-                resolved_to=resolved_to,
-            ):
-                relation.projection_status = "failed"
-                relation.projection_error = BENIGN_UNRESOLVED_REFERENCE_ERROR
-                failed_count += 1
-            else:
-                relation.projection_status = "pending"
-                relation.projection_error = "unresolved global-character endpoint"
-                pending_count += 1
-            continue
-        if resolved_from == resolved_to:
-            relation.projection_status = "failed"
-            relation.projection_error = "self relation"
-            relation.projected_at = None
-            failed_count += 1
-            continue
-
-        from_entity = graph_repo.upsert_entity(
+    fact_stmt = select(ContinuityFact).where(ContinuityFact.run_id == run_id)
+    if annotation_id is not None:
+        fact_stmt = fact_stmt.where(ContinuityFact.created_by_annotation_id == annotation_id)
+    fact_stmt = fact_stmt.order_by(ContinuityFact.created_at, ContinuityFact.fact_id)
+    facts = list(session.execute(fact_stmt).scalars().all())
+    for row in facts:
+        _upsert_graph_fact(
+            session,
             run_id=run_id,
-            canonical_name=resolved_from,
-            entity_type=existing_types.get(resolved_from, "character"),
-            first_seen_chunk=relation.chunk_id,
-            last_seen_chunk=relation.chunk_id,
-            source_confidence=relation.confidence,
+            stable_fact_id=row.fact_id,
+            source_kind="continuity_fact",
+            fact=_continuity_fact_payload(row),
+            evidence=dict(row.evidence),
+            continuity_fact_id=row.fact_id,
         )
-        to_entity = graph_repo.upsert_entity(
-            run_id=run_id,
-            canonical_name=resolved_to,
-            entity_type=existing_types.get(resolved_to, "character"),
-            first_seen_chunk=relation.chunk_id,
-            last_seen_chunk=relation.chunk_id,
-            source_confidence=relation.confidence,
-        )
-        if from_entity.entity_id is None or to_entity.entity_id is None:
-            relation.projection_status = "failed"
-            relation.projection_error = "entity upsert failed"
-            relation.projected_at = None
-            failed_count += 1
-            continue
-
-        graph_repo.upsert_alias(
-            run_id=run_id,
-            entity_id=from_entity.entity_id,
-            alias=resolved_from,
-            source_chunk_id=relation.chunk_id,
-            evidence=relation.evidence,
-            confidence=relation.confidence,
-            source_type="relation_projection",
-            is_primary=relation.from_char == resolved_from,
-        )
-        graph_alias_map[resolved_from] = resolved_from
-        from_alias = relation.from_char
-        if from_alias is not None and _should_record_alias(from_alias, resolved_from):
-            graph_repo.upsert_alias(
-                run_id=run_id,
-                entity_id=from_entity.entity_id,
-                alias=from_alias,
-                source_chunk_id=relation.chunk_id,
-                evidence=relation.evidence,
-                confidence=relation.confidence,
-                source_type="relation_projection",
-                is_primary=False,
-            )
-            graph_alias_map[from_alias] = resolved_from
-
-        graph_repo.upsert_alias(
-            run_id=run_id,
-            entity_id=to_entity.entity_id,
-            alias=resolved_to,
-            source_chunk_id=relation.chunk_id,
-            evidence=relation.evidence,
-            confidence=relation.confidence,
-            source_type="relation_projection",
-            is_primary=relation.to_char == resolved_to,
-        )
-        graph_alias_map[resolved_to] = resolved_to
-        to_alias = relation.to_char
-        if to_alias is not None and _should_record_alias(to_alias, resolved_to):
-            graph_repo.upsert_alias(
-                run_id=run_id,
-                entity_id=to_entity.entity_id,
-                alias=to_alias,
-                source_chunk_id=relation.chunk_id,
-                evidence=relation.evidence,
-                confidence=relation.confidence,
-                source_type="relation_projection",
-                is_primary=False,
-            )
-            graph_alias_map[to_alias] = resolved_to
-
-        rel_type = relation.type or "未知"
-        rel_change = (relation.change or "").strip()
-
-        # 写入图谱前先校验 relation_type 和 change_type
-        if rel_type not in allowed_relation_types:
-            logger.warning(
-                "Skipping relation with invalid type '{}' (chunk={})",
-                rel_type,
-                relation.chunk_id,
-            )
-            relation.projection_status = "pending"
-            relation.projection_error = f"invalid relation_type: {rel_type}"
-            relation.projected_at = None
-            pending_count += 1
-            continue
-        if rel_change in {"", "无变化"}:
-            if relation.id is not None:
-                deleted_pair = graph_repo.delete_relation_event_by_source_row_id(run_id, relation.id)
-                if deleted_pair is not None:
-                    affected_pairs.add(deleted_pair)
-            relation.projection_status = "projected"
-            relation.projected_at = datetime.now(UTC)
-            relation.projection_error = None
-            no_change_count += 1
-            continue
-        if rel_change not in VALID_CHANGE_TYPES:
-            logger.warning(
-                "Skipping relation with invalid change '{}' (chunk={})",
-                rel_change,
-                relation.chunk_id,
-            )
-            relation.projection_status = "pending"
-            relation.projection_error = f"invalid change_type: {rel_change}"
-            relation.projected_at = None
-            pending_count += 1
-            continue
-
-        event = graph_repo.insert_relation_event(
-            run_id=run_id,
-            from_entity_id=from_entity.entity_id,
-            to_entity_id=to_entity.entity_id,
-            relation_type=rel_type,
-            change_type=rel_change,
-            chunk_id=relation.chunk_id,
-            evidence=relation.evidence,
-            confidence=relation.confidence,
-            source_relation_row_id=relation.id,
-            directionality=(
-                "symmetric"
-                if rel_type in (SYMMETRIC_RELATION_TYPES | HIERARCHICAL_SYMMETRIC_RELATION_TYPES)
-                else "directed"
-            ),
-        )
-        if event is None:
-            relation.projection_status = "failed"
-            relation.projection_error = "event insert failed"
-            relation.projected_at = None
-            failed_count += 1
-            continue
-
-        affected_pairs.add((from_entity.entity_id, to_entity.entity_id))
-        relation.projection_status = "projected"
-        relation.projected_at = datetime.now(UTC)
-        relation.projection_error = None
-        projected_count += 1
-
-    graph_repo.refresh_relation_projections(run_id, affected_pairs)
-
-    # 全投影作为一个事务原子提交：backfill + 窗口内 projection 共享同一个 commit，
-    # 任意子步骤失败会整体回滚，避免半完成状态污染 projected 标记。
-    session.commit()
-    logger.info(
-        "graph projection completed: "
-        "run_id={} from_chunk={} to_chunk={} rebuild={} "
-        "window_relations={} retried_pending={} total_relations={} "
-        "projected={} pending={} failed={} no_change_skipped={} affected_pairs={}",
-        run_id,
-        from_chunk,
-        to_chunk,
-        rebuild,
-        len(window_relations),
-        max(0, len(chunk_relations) - len(window_relations)),
-        len(chunk_relations),
-        projected_count,
-        pending_count,
-        failed_count,
-        no_change_count,
-        len(affected_pairs),
-    )
+        _project_version_relation(session, run_id=run_id, row=row)
+    _project_relation_views(session, run_id=run_id)
+    session.flush()
