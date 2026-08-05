@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from src.chunking.chunker import Chunk
-from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
-from src.storage.models import Novel
-from src.storage.repositories import (
-    AnnotationRepository,
-    ChunkRepository,
-    GraphRepository,
-    RunRepository,
-    StatsRepository,
+from src.storage.repositories import RunRepository, StatsRepository
+from tests.support.chapter_annotation_helpers import (
+    character_fact,
+    create_run_with_chunks,
+    persist_chapter_annotation,
+    relation_fact,
 )
 from tests.support.graph_snapshot_helpers import insert_focus_contract_cloud_analysis
 
@@ -29,47 +24,26 @@ class TimelineContractScenario:
 
 
 def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenario:
-    """构造一个最小的 authority 支撑时间轴场景，供 API / export 测试共享"""
-
-    novel_id = uuid.uuid4().hex[:8]
+    """2026-08-05 用于通过章节标注与生产图投影构造时间轴共享场景"""
     hero_name = "顾承渊"
     rival_name = "苏映雪"
     organization_name = "天衡宗"
-
-    db_session.add(
-        Novel(
-            novel_id=novel_id,
-            filename="timeline-contract.txt",
-            file_path="tests/timeline-contract.txt",
-            title="Timeline Contract",
-            file_size=128,
-            upload_time=datetime.now(),
-        )
-    )
-    db_session.commit()
-
-    run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(
-        novel_id=novel_id,
-        source_path="test",
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[
+            "顾承渊初入江湖。",
+            "苏映雪现身与他同行。",
+            "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
+            "苏映雪完成使命后离开。",
+            "顾承渊最终与苏映雪决裂，独自前行。",
+        ],
+        chapter_ids=[1, 2, 3, 4, 5],
         title="Timeline Contract",
     )
+    run_repo = RunRepository(db_session)
     run_repo.update_run_status(run_id, "completed")
 
-    chunk_repo = ChunkRepository(db_session)
     stats_repo = StatsRepository(db_session)
-    annotation_repo = AnnotationRepository(db_session)
-    graph_repo = GraphRepository(db_session)
-
-    chunks = [
-        Chunk(index=0, text="顾承渊初入江湖。", start=0, end=8),
-        Chunk(index=1, text="苏映雪现身与他同行。", start=9, end=20),
-        Chunk(index=2, text="顾承渊与苏映雪结盟，同时受天衡宗招揽。", start=21, end=42),
-        Chunk(index=3, text="苏映雪完成使命后离开。", start=43, end=56),
-        Chunk(index=4, text="顾承渊最终与苏映雪决裂，独自前行。", start=57, end=74),
-    ]
-    chunk_repo.insert_chunks(run_id, chunks)
-
     for chunk_id, summary in enumerate(
         [
             "顾承渊登场",
@@ -92,172 +66,105 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         ],
     )
 
-    annotations = [
-        ChunkAnnotation(
-            emotional_valence="neutral",
-            event_type="铺垫",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[
-                CharacterSnapshot(
-                    name=hero_name,
-                    role_function="主体",
-                    action="初入江湖",
-                    action_type="移动",
-                    emotion_score="neutral",
-                )
-            ],
-        ),
-        ChunkAnnotation(
-            emotional_valence="neutral",
-            event_type="铺垫",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[
-                CharacterSnapshot(
-                    name=rival_name,
-                    role_function="帮助者",
-                    action="现身",
-                    action_type="移动",
-                    emotion_score="neutral",
-                )
-            ],
-        ),
-        ChunkAnnotation(
-            emotional_valence="strong_negative",
-            event_type="冲突",
-            pivot_moment=True,
-            cliffhanger=True,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[
-                CharacterSnapshot(
-                    name=hero_name,
-                    role_function="主体",
-                    action="结盟",
-                    action_type="决策",
-                    emotion_score="strong_negative",
-                ),
-                CharacterSnapshot(
-                    name=rival_name,
-                    role_function="帮助者",
-                    action="回应",
-                    action_type="决策",
-                    emotion_score="neutral",
-                ),
-            ],
-        ),
-        ChunkAnnotation(
-            emotional_valence="mild_negative",
-            event_type="转折",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[
-                CharacterSnapshot(
-                    name=rival_name,
-                    role_function="帮助者",
-                    action="离开",
-                    action_type="移动",
-                    emotion_score="mild_negative",
-                )
-            ],
-        ),
-        ChunkAnnotation(
-            emotional_valence="neutral",
-            event_type="铺垫",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[
-                CharacterSnapshot(
-                    name=hero_name,
-                    role_function="主体",
-                    action="独行",
-                    action_type="移动",
-                    emotion_score="neutral",
-                )
-            ],
-        ),
-    ]
-    for chunk_id, annotation in enumerate(annotations):
-        annotation_repo.insert_chunk_annotation(run_id, chunk_id, annotation)
-
-    hero = graph_repo.upsert_entity(
+    persist_chapter_annotation(
+        db_session,
         run_id=run_id,
-        canonical_name=hero_name,
-        entity_type="character",
-        first_seen_chunk=0,
-        last_seen_chunk=4,
-        primary_role_function="protagonist",
+        chapter_id=1,
+        characters=[character_fact(chunk_id=0, name=hero_name, action="初入江湖")],
     )
-    rival = graph_repo.upsert_entity(
+    persist_chapter_annotation(
+        db_session,
         run_id=run_id,
-        canonical_name=rival_name,
-        entity_type="character",
-        first_seen_chunk=1,
-        last_seen_chunk=3,
-        primary_role_function="ally",
+        chapter_id=2,
+        characters=[
+            character_fact(
+                chunk_id=1,
+                name=rival_name,
+                action="现身",
+                role_function="帮助者",
+                chapter_id=2,
+            )
+        ],
     )
-    sect = graph_repo.upsert_entity(
+    persist_chapter_annotation(
+        db_session,
         run_id=run_id,
-        canonical_name=organization_name,
-        entity_type="organization",
-        first_seen_chunk=0,
-        last_seen_chunk=4,
+        chapter_id=3,
+        emotional_valences={2: "strong_negative"},
+        event_types={2: "冲突"},
+        pivot_chunks={2},
+        cliffhanger_chunks={2},
+        characters=[
+            character_fact(
+                chunk_id=2,
+                name=hero_name,
+                action="结盟",
+                emotion="strong_negative",
+                chapter_id=3,
+            ),
+            character_fact(
+                chunk_id=2,
+                name=rival_name,
+                action="回应",
+                role_function="帮助者",
+                chapter_id=3,
+            ),
+        ],
+        relations=[
+            relation_fact(
+                chunk_id=2,
+                from_name=hero_name,
+                to_name=rival_name,
+                relation_type="盟友",
+                evidence_reason="二人正式结盟",
+                chapter_id=3,
+            ),
+            relation_fact(
+                chunk_id=2,
+                from_name=hero_name,
+                to_name=organization_name,
+                to_entity_type="organization",
+                relation_type="归属",
+                evidence_reason="顾承渊受天衡宗招揽",
+                chapter_id=3,
+            ),
+        ],
     )
-
-    graph_repo.insert_relation_event(
+    persist_chapter_annotation(
+        db_session,
         run_id=run_id,
-        from_entity_id=hero.entity_id,
-        to_entity_id=rival.entity_id,
-        relation_type="盟友",
-        change_type="新建",
-        chunk_id=2,
-        evidence="二人正式结盟",
-        confidence=0.91,
-        source_relation_row_id=21001,
-        directionality="directed",
+        chapter_id=4,
+        emotional_valences={3: "mild_negative"},
+        event_types={3: "转折"},
+        characters=[
+            character_fact(
+                chunk_id=3,
+                name=rival_name,
+                action="离开",
+                role_function="帮助者",
+                emotion="mild_negative",
+                chapter_id=4,
+            )
+        ],
     )
-    graph_repo.insert_relation_event(
+    persist_chapter_annotation(
+        db_session,
         run_id=run_id,
-        from_entity_id=hero.entity_id,
-        to_entity_id=sect.entity_id,
-        relation_type="归属",
-        change_type="新建",
-        chunk_id=2,
-        evidence="顾承渊受天衡宗招揽",
-        confidence=0.97,
-        source_relation_row_id=21002,
-        directionality="directed",
+        chapter_id=5,
+        characters=[character_fact(chunk_id=4, name=hero_name, action="独行", chapter_id=5)],
+        relations=[
+            relation_fact(
+                chunk_id=4,
+                from_name=hero_name,
+                to_name=rival_name,
+                relation_type="盟友",
+                evidence_reason="两人最终决裂",
+                change_kind="break",
+                confidence="medium",
+                chapter_id=5,
+            )
+        ],
     )
-    graph_repo.insert_relation_event(
-        run_id=run_id,
-        from_entity_id=hero.entity_id,
-        to_entity_id=rival.entity_id,
-        relation_type="盟友",
-        change_type="断裂",
-        chunk_id=4,
-        evidence="两人最终决裂",
-        confidence=0.63,
-        source_relation_row_id=21003,
-        directionality="directed",
-    )
-    graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
-    graph_repo.refresh_current_relation(run_id, hero.entity_id, sect.entity_id)
-    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id, sect.entity_id])
-    db_session.commit()
 
     insert_focus_contract_cloud_analysis(
         db_session,

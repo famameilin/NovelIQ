@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from pgvector.sqlalchemy import Vector
 
@@ -93,14 +93,21 @@ def test_search_similar_chunks_pushes_exclusions_into_sql() -> None:
         SimpleNamespace(chunk_id=3, text="chunk-3", emotional_valence=None, similarity=0.88),
     ]
 
-    results = search_similar_chunks(
-        session,
-        run_id="run-1",
-        query_embedding=[0.1, 0.2],
-        top_k=2,
-        similarity_threshold=0.7,
-        exclude_chunk_ids=[1, 4],
-    )
+    with patch(
+        "src.storage.repositories.annotation.AnnotationRepository.fetch_chunk_annotations_full",
+        return_value=[
+            SimpleNamespace(chunk_id=2, emotional_valence="mild_negative"),
+            SimpleNamespace(chunk_id=3, emotional_valence="neutral"),
+        ],
+    ):
+        results = search_similar_chunks(
+            session,
+            run_id="run-1",
+            query_embedding=[0.1, 0.2],
+            top_k=2,
+            similarity_threshold=0.7,
+            exclude_chunk_ids=[1, 4],
+        )
 
     statement = session.execute.call_args.args[0]
     assert "NOT IN" in str(statement)
@@ -119,12 +126,16 @@ def test_search_similar_chunks_pushes_history_cutoff_into_sql() -> None:
         SimpleNamespace(chunk_id=3, text="chunk-3", emotional_valence=None, similarity=0.88),
     ]
 
-    results = search_similar_chunks(
-        session,
-        run_id="run-1",
-        query_embedding=[0.1, 0.2],
-        max_chunk_id=3,
-    )
+    with patch(
+        "src.storage.repositories.annotation.AnnotationRepository.fetch_chunk_annotations_full",
+        return_value=[],
+    ):
+        results = search_similar_chunks(
+            session,
+            run_id="run-1",
+            query_embedding=[0.1, 0.2],
+            max_chunk_id=3,
+        )
 
     statement = session.execute.call_args.args[0]
     assert "chunk_id <= :chunk_id_1" in str(statement)
@@ -137,11 +148,15 @@ def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
         SimpleNamespace(chunk_id=1, text="chunk-1", emotional_valence="neutral", similarity=0.95),
     ]
 
-    results = search_similar_chunks(
-        session,
-        run_id="run-1",
-        query_embedding=[0.1, 0.2],
-    )
+    with patch(
+        "src.storage.repositories.annotation.AnnotationRepository.fetch_chunk_annotations_full",
+        return_value=[SimpleNamespace(chunk_id=1, emotional_valence="neutral")],
+    ):
+        results = search_similar_chunks(
+            session,
+            run_id="run-1",
+            query_embedding=[0.1, 0.2],
+        )
 
     statement = session.execute.call_args.args[0]
     assert "NOT IN" not in str(statement)

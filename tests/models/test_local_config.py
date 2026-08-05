@@ -45,7 +45,6 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
         with patch.dict(os.environ, env_vars, clear=False):
             new_settings = Settings.from_env()
             self.assertEqual(new_settings.models.annotation.model, "shared-text-model")
-            self.assertEqual(new_settings.models.annotation_fallback.model, "shared-text-model")
             self.assertEqual(new_settings.models.diagnosis.model, "shared-text-model")
             self.assertEqual(new_settings.models.paragraph_embedding.model, "embedding-model")
             self.assertEqual(new_settings.chunking.max_chars, 2000)

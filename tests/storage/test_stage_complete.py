@@ -21,7 +21,6 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import Chunk
 from src.models.cloud.schema import CloudAnalysis
-from src.models.local.schema import ChunkAnnotation
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -33,11 +32,21 @@ from src.storage.repositories.chunk import (
     insert_paragraph_embeddings,
 )
 from src.storage.vector_schema import ensure_paragraph_embeddings_schema
+from tests.support.chapter_annotation_helpers import persist_chapter_annotation
 
 
 def _create_chunks(count: int = 3) -> list[Chunk]:
     """创建测试用的chunks"""
-    return [Chunk(index=i, text=f"测试文本{i}" * 100, start=i * 100, end=(i + 1) * 100) for i in range(count)]
+    return [
+        Chunk(
+            index=i,
+            text=f"测试文本{i}" * 100,
+            start=i * 100,
+            end=(i + 1) * 100,
+            chapter_index=i,
+        )
+        for i in range(count)
+    ]
 
 
 def _insert_test_novel(db_session, novel_id: str) -> None:
@@ -204,23 +213,11 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chunk_repo.insert_chunks(run_id, chunks)
-        ann_repo.insert_chunk_annotation(
-            run_id,
-            0,
-            ChunkAnnotation(
-                emotional_valence="neutral",
-                event_type="日常",
-                pivot_moment=False,
-                cliffhanger=False,
-                has_foreshadowing=False,
-                foreshadowing_type=None,
-                foreshadowing_desc="",
-            ),
-        )
+        persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
         assert not ann_repo.is_annotate_complete(run_id)
 
     def test_is_annotate_complete_all_annotations(self, db_session):
-        """annotations数量等于chunks数量时annotate完成"""
+        """2026-08-05 用于验证每个真实章节都有正式标注时 annotate 完成"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         _insert_test_novel(db_session, novel_id)
@@ -233,20 +230,8 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chunk_repo.insert_chunks(run_id, chunks)
-        for i in range(3):
-            ann_repo.insert_chunk_annotation(
-                run_id,
-                i,
-                ChunkAnnotation(
-                    emotional_valence="neutral",
-                    event_type="日常",
-                    pivot_moment=False,
-                    cliffhanger=False,
-                    has_foreshadowing=False,
-                    foreshadowing_type=None,
-                    foreshadowing_desc="",
-                ),
-            )
+        for chapter_id in range(1, 4):
+            persist_chapter_annotation(db_session, run_id=run_id, chapter_id=chapter_id)
         assert ann_repo.is_annotate_complete(run_id)
 
     def test_is_aggregate_complete_no_data(self, db_session):

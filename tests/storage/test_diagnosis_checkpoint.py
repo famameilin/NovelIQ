@@ -1,51 +1,42 @@
-import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
 
-def test_fetch_character_disambig_data_reads_identity_memory_alias_map() -> None:
-    """
-    2026-08-02 用于保证诊断人物工具读取当前 checkpoint 的 alias_map
-    """
+def test_fetch_character_disambig_data_reads_graph_characters_and_aliases() -> None:
+    """2026-08-05 用于验证诊断人物合同只读取数据库图实体与别名"""
     session = MagicMock()
-    session.execute.return_value.fetchone.return_value = SimpleNamespace(
-        state_json=json.dumps(
-            {
-                "known_canonical_names": ["顾霜"],
-                "alias_map": {
-                    "阿顾": "顾霜",
-                    "我": "顾霜",
-                    "顾霜": "顾霜",
-                },
-            },
-            ensure_ascii=False,
-        )
-    )
+    with patch("src.storage.repositories.diagnosis_repository.GraphRepository") as graph_repository:
+        graph_repository.return_value.fetch_entities.return_value = [
+            SimpleNamespace(canonical_name="顾霜"),
+            SimpleNamespace(canonical_name="司夜"),
+        ]
+        graph_repository.return_value.fetch_alias_map.return_value = {
+            "阿顾": "顾霜",
+            "顾霜": "顾霜",
+            "司夜": "司夜",
+        }
 
-    known, aliases = DiagnosisRepository(session).fetch_character_disambig_data("run-1")
+        known, aliases = DiagnosisRepository(session).fetch_character_disambig_data("run-1")
 
-    assert known == ["顾霜"]
+    assert known == ["司夜", "顾霜"]
     assert aliases == {"阿顾": "顾霜"}
 
 
-def test_fetch_character_disambig_data_rejects_obsolete_checkpoint_shape() -> None:
-    """
-    2026-08-02 用于拒绝当前诊断链路读取废弃的 alias_merges 结构
-    """
+def test_fetch_character_disambig_data_filters_aliases_without_known_target() -> None:
+    """2026-08-05 用于验证诊断别名只保留指向当前人物实体的非自映射"""
     session = MagicMock()
-    session.execute.return_value.fetchone.return_value = SimpleNamespace(
-        state_json=json.dumps(
-            {
-                "known_canonical_names": ["顾霜"],
-                "alias_merges": [["阿顾", "顾霜"]],
-            },
-            ensure_ascii=False,
-        )
-    )
+    with patch("src.storage.repositories.diagnosis_repository.GraphRepository") as graph_repository:
+        graph_repository.return_value.fetch_entities.return_value = [
+            SimpleNamespace(canonical_name="顾霜"),
+        ]
+        graph_repository.return_value.fetch_alias_map.return_value = {
+            "顾霜": "顾霜",
+            "灰衣人": "未知人物",
+        }
 
-    with pytest.raises(ValueError, match="alias_map"):
-        DiagnosisRepository(session).fetch_character_disambig_data("run-1")
+        known, aliases = DiagnosisRepository(session).fetch_character_disambig_data("run-1")
+
+    assert known == ["顾霜"]
+    assert aliases == {}

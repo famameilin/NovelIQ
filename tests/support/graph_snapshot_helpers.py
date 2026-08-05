@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from src.knowledge.authority import GraphAuthorityView, ParticipantState, RelationEvent
 from src.models.cloud.schema import CloudAnalysis
@@ -33,6 +32,7 @@ def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
         [
             ChunkModel(
                 chunk_id=chunk_id,
+                chapter_id=1,
                 run_id=run_id,
                 text=f"chunk-{chunk_id}",
             )
@@ -75,14 +75,6 @@ def insert_focus_contract_cloud_analysis(
         core_cast=core_names,
     )
     StatsRepository(db_session).insert_cloud_analysis(run_id, analysis)
-
-
-def create_graph_annotation_repo(session=object()) -> MagicMock:
-    """统一构造 graph fetcher 所需的 annotation repo 假对象"""
-    annotation_repo = MagicMock()
-    annotation_repo.session = session
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
-    return annotation_repo
 
 
 def relation_event(

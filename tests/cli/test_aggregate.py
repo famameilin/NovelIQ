@@ -27,10 +27,10 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import Chunk
-from src.models.local.schema import ChunkAnnotation
 from src.storage.models import Novel
-from src.storage.repositories import AnnotationRepository, ChunkRepository, ChunkStyleData, RunRepository
+from src.storage.repositories import ChunkRepository, ChunkStyleData, RunRepository
 from src.workflows.aggregate import run_aggregate
+from tests.support.chapter_annotation_helpers import persist_chapter_annotation
 
 
 def _insert_test_novel(db_session, novel_id: str) -> None:
@@ -202,21 +202,15 @@ class TestAggregate:
         ]
         chunk_repo.insert_chunk_style(self.run_id, style_rows)
 
-        ann_repo = AnnotationRepository(self.db_session)
-        for i in range(3):
-            annotation = ChunkAnnotation(
-                emotional_valence="positive",
-                event_type="高潮" if i == 0 else "日常",
-                pivot_moment=(i == 0),
-                cliffhanger=(i == 2),
-                has_foreshadowing=False,
-                foreshadowing_type=None,
-                foreshadowing_desc="",
-                characters=[],
-                relations=[],
-                dialogues=[],
-            )
-            ann_repo.insert_chunk_annotation(self.run_id, i, annotation)
+        persist_chapter_annotation(
+            self.db_session,
+            run_id=self.run_id,
+            chapter_id=1,
+            emotional_valences={0: "strong_positive", 1: "mild_positive", 2: "mild_positive"},
+            event_types={0: "冲突", 1: "铺垫", 2: "铺垫"},
+            pivot_chunks={0},
+            cliffhanger_chunks={2},
+        )
 
         chunks, chunk_curves_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 3

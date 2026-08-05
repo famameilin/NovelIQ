@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
+from tests.support.chapter_annotation_helpers import persist_chapter_annotation
 
 
 def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
@@ -28,7 +29,7 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
 
     创建时间: 2026-04-22
     任务: fix-novel-task-delete-consistency
-    说明: 这里直接构造 chunks/global_context/graph/chunk_annotation 与日志导出文件，
+    说明: 这里构造 chunks/global_context/graph/chapter_annotations 与日志导出文件，
           用于验证 novel 级删除会不会把 task 侧残留一起清掉。
     """
     task_id = run_id[:8]
@@ -40,21 +41,14 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
         session.execute(
             text(
                 """
-                INSERT INTO chunks (chunk_id, text, run_id)
-                VALUES (:chunk_id, :text, :run_id)
+                INSERT INTO chunks (chunk_id, chapter_id, text, run_id)
+                VALUES (:chunk_id, :chapter_id, :text, :run_id)
                 """
             ),
-            {"chunk_id": 0, "text": "测试分块", "run_id": run_id},
+            {"chunk_id": 0, "chapter_id": 1, "text": "测试分块", "run_id": run_id},
         )
-        session.execute(
-            text(
-                """
-                INSERT INTO chunk_annotation (chunk_id, run_id, emotional_valence)
-                VALUES (:chunk_id, :run_id, :emotional_valence)
-                """
-            ),
-            {"chunk_id": 0, "run_id": run_id, "emotional_valence": "positive"},
-        )
+        session.flush()
+        persist_chapter_annotation(session, run_id=run_id, chapter_id=1)
         session.execute(
             text(
                 """
@@ -169,7 +163,7 @@ class TestNovelUpload:
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
             annotation_count = session.execute(
-                text("SELECT COUNT(*) FROM chunk_annotation WHERE run_id IN (:run_id_1, :run_id_2)"),
+                text("SELECT COUNT(*) FROM chapter_annotations WHERE run_id IN (:run_id_1, :run_id_2)"),
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
             graph_count = session.execute(

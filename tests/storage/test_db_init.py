@@ -90,17 +90,16 @@ def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> Non
 
 def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     """
-    验证测试库初始化后已具备新增的分析链路外键。
-
-    创建时间: 2026-04-22
-    任务: fix-analysis-related-foreign-keys
-    说明: 这里直接查当前测试 schema 的 pg 元数据，确保缺失的 8 条外键已经真正落到数据库。
+    2026-08-05 用于验证测试库已具备章节标注连续性与数据库图主链外键
     """
     expected_constraints = {
         "analysis_runs_novel_id_fkey",
-        "disambig_checkpoint_run_id_fkey",
-        "chunk_locations_chunk_id_run_id_fkey",
-        "chunk_locations_novel_id_fkey",
+        "chapter_annotations_run_id_fkey",
+        "case_pool_cases_run_id_fkey",
+        "continuity_facts_run_id_fkey",
+        "graph_facts_run_id_fkey",
+        "graph_fact_sources_graph_fact_id_fkey",
+        "graph_fact_versions_run_id_fkey",
         "cloud_analysis_novel_id_fkey",
         "global_context_novel_id_fkey",
         "graph_relation_events_chunk_id_run_id_fkey",

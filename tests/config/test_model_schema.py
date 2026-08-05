@@ -44,13 +44,12 @@ def test_old_model_environment_variables_do_not_override_json(monkeypatch) -> No
 
 def test_apply_model_environment_shares_text_model() -> None:
     """
-    2026-08-03 用于验证三个文本任务共享 MODEL
+    2026-08-05 用于验证 annotation 与 diagnosis 共享 MODEL
     """
 
     settings = _parse_models_settings(
         {
             "annotation": {"timeout_s": 180},
-            "annotation_fallback": {"timeout_s": 180},
             "paragraph_embedding": {"timeout_s": 120},
             "diagnosis": {"timeout_s": 180},
         }
@@ -71,7 +70,6 @@ def test_apply_model_environment_shares_text_model() -> None:
     )
 
     assert settings.annotation.model == "text-model"
-    assert settings.annotation_fallback.model == "text-model"
     assert settings.diagnosis.model == "text-model"
     assert settings.paragraph_embedding.model == "embedding-model"
     assert settings.annotation.timeout_s == 180

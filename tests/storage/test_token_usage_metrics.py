@@ -134,35 +134,32 @@ def test_normalize_model_interaction_call_key_maps_mainline_calls() -> None:
     )
 
 
-def test_normalize_token_usage_task_type_maps_annotation_fallback_back_to_mainline() -> None:
+def test_normalize_token_usage_task_type_keeps_current_task_names() -> None:
     """
-    创建时间: 2026-04-22
-    任务: fix-token-coverage-fallback-bucket
-    说明: fallback 标注客户端只是执行通道，不应在 coverage 统计里形成新的业务桶。
+    2026-08-05 用于验证 token 统计只保留当前业务任务名称
     """
-    assert metrics._normalize_token_usage_task_type("annotation_fallback") == "annotation"
+    assert metrics._normalize_token_usage_task_type("annotation") == "annotation"
     assert metrics._normalize_token_usage_task_type("diagnosis") == "diagnosis"
 
 
-def test_fetch_token_usage_stats_can_merge_fallback_task_bucket() -> None:
+def test_fetch_token_usage_stats_groups_current_task_buckets() -> None:
     """
-    创建时间: 2026-04-22
-    任务: fix-token-coverage-fallback-bucket
-    说明: 即使旧 token_usage 里残留 annotation_fallback，汇总后的业务 task 桶也应合并回 annotation。
+    2026-08-05 用于验证当前 token_usage 任务桶按原始任务聚合
     """
     session = MagicMock()
     execute_result = MagicMock()
     execute_result.fetchall.return_value = [
         MagicMock(task_type="annotation", call_count=2, total_tokens=120),
-        MagicMock(task_type="annotation_fallback", call_count=1, total_tokens=30),
+        MagicMock(task_type="diagnosis", call_count=1, total_tokens=30),
     ]
     session.execute.return_value = execute_result
 
     stats = metrics._fetch_usage_by_task(session, "run-1", "novel-1")
 
-    assert stats["annotation"]["call_count"] == 3
-    assert stats["annotation"]["total_tokens"] == 150
-    assert "annotation_fallback" not in stats
+    assert stats["annotation"]["call_count"] == 2
+    assert stats["annotation"]["total_tokens"] == 120
+    assert stats["diagnosis"]["call_count"] == 1
+    assert stats["diagnosis"]["total_tokens"] == 30
 
 
 def test_fetch_model_interaction_call_counts_ignores_error_placeholders() -> None:
