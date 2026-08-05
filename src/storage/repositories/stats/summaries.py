@@ -6,13 +6,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import CharacterAppearance, ChunkSummary, StageSummary
+from src.storage.models import ChunkSummary, StageSummary
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -57,32 +56,6 @@ def insert_chunk_summary(
         session.commit()
     else:
         session.flush()
-
-
-def insert_character_appearances(session: Session, run_id: str, chunk_id: int, appearances: Sequence[Any]) -> None:
-    """
-    插入角色出场信息
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        chunk_id: 分块ID
-        appearances: 角色出场信息序列
-    """
-    if not appearances:
-        return
-    now = datetime.now().isoformat()
-    for a in appearances:
-        char_appearance = CharacterAppearance(
-            chunk_id=chunk_id,
-            raw_name=a.raw_name,
-            identity_clue=a.identity_clue,
-            clue_type=a.clue_type,
-            created_at=now,
-            run_id=run_id,
-        )
-        session.add(char_appearance)
-    session.commit()
 
 
 def insert_stage_summary(

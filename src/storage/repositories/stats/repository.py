@@ -174,7 +174,3 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     def insert_chunk_summary(self, run_id: str, chunk_id: int, summary: str, *, commit: bool = True) -> None:
         """插入分块摘要"""
         return summaries.insert_chunk_summary(self.session, run_id, chunk_id, summary, commit=commit)
-
-    def insert_character_appearances(self, run_id: str, chunk_id: int, appearances: Sequence[Any]) -> None:
-        """插入角色出场信息"""
-        return summaries.insert_character_appearances(self.session, run_id, chunk_id, appearances)

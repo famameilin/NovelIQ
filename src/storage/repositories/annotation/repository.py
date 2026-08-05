@@ -1,329 +1,383 @@
 """
-标注数据 Repository 主类
-
-主Repository类，通过组合方式使用各模块函数
+章节标注最新读侧仓储门面
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from src.models.local.schema import (
-    CharacterSnapshot,
-    DialogueSnapshot,
-    ForeshadowingResult,
-    RelationChangeSnapshot,
-)
-from src.models.local.schema import (
-    ChunkAnnotation as ChunkAnnotationSchema,
+from sqlalchemy import func, select
+
+from src.agents.annotation.schema import ChapterAnnotation
+from src.models.local.character_reference_policy import is_global_character_surface_name
+from src.storage.models import (
+    ChapterAnnotationRecord,
+    Chunk,
+    ForeshadowingThread,
+    ForeshadowingThreadHit,
+    GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
 
-# 导入各模块函数
-from . import characters, foreshadowing_threads, inserts, queries
+_EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38}
+_EXPECTATION_STATUS_BONUS = {"open": -0.07, "reinforced": 0.03, "likely_paid_off": 0.28}
+_EXPECTATION_STRENGTH_BONUS = {"high": 0.03, "medium": 0.0}
+_EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off": 1.2}
 
 
-class AnnotationRepository(BaseRepository[dict[str, Any]]):
-    """
-    标注数据 Repository
+@dataclass(frozen=True)
+class ChunkAnnotationRow:
+    """2026-08-05 用于向 chunk 消费者暴露章节 segment 的具名读模型"""
 
-    管理分块标注、角色、对话、关系等数据
-    所有操作都基于 run_id 进行数据隔离
+    chunk_id: int
+    emotional_valence: str
+    event_type: str
+    pivot_moment: bool
+    cliffhanger: bool
+    has_foreshadowing: bool | None = None
+    is_strong_setup: bool | None = None
+    foreshadowing_type: str | None = None
+    setup_kind: str | None = None
+    foreshadowing_desc: str | None = None
+    setup_summary: str | None = None
+    why_unresolved_now: str | None = None
+    expected_payoff_family: str | None = None
+    payoff_likelihood: str | None = None
+    linked_setup_id: str | None = None
 
-    使用函数组合方式重组代码结构，拆分为3个模块：
-        - inserts: 标注数据插入操作
-        - queries: 标注数据查询操作
-        - characters: 角色消歧、名称更新、别名映射
-    """
 
-    # ==================== inserts 模块方法 ====================
+@dataclass(frozen=True)
+class CharacterFactRow:
+    """2026-08-05 用于向人物与聚合消费者暴露数据库图人物事实"""
 
-    def insert_chunk_annotation(
-        self,
-        run_id: str,
-        chunk_id: int,
-        annotation: ChunkAnnotationSchema,
-        *,
-        commit: bool = True,
-    ) -> None:
-        """插入分块标注"""
-        return inserts.insert_chunk_annotation(self.session, run_id, chunk_id, annotation, commit=commit)
+    chunk_id: int
+    name: str
+    surface_name: str
+    reference_kind: str
+    reference_slot: str | None
+    resolved_global_name: str
+    global_skip_reason: str | None
+    role_function: str
+    action: str
+    emotion_score: str
 
-    def insert_chunk_characters(
-        self,
-        run_id: str,
-        chunk_id: int,
-        characters: Sequence[CharacterSnapshot],
-        *,
-        commit: bool = True,
-    ) -> None:
-        """插入分块角色数据"""
-        return inserts.insert_chunk_characters(self.session, run_id, chunk_id, characters, commit=commit)
 
-    def insert_chunk_relations(
-        self,
-        run_id: str,
-        chunk_id: int,
-        relations: Sequence[RelationChangeSnapshot],
-        *,
-        commit: bool = True,
-    ) -> None:
-        """插入分块关系数据"""
-        return inserts.insert_chunk_relations(self.session, run_id, chunk_id, relations, commit=commit)
+@dataclass(frozen=True)
+class DialogueFactRow:
+    """2026-08-05 用于向对话与情绪融合消费者暴露数据库图对话事实"""
 
-    def replace_chunk_relations_for_source_model(
-        self,
-        run_id: str,
-        chunk_id: int,
-        relations: Sequence[RelationChangeSnapshot | dict[str, Any]],
-        *,
-        source_model: str,
-        commit: bool = True,
-    ) -> None:
-        """替换指定 source_model 生成的分块关系数据"""
-        return inserts.replace_chunk_relations_for_source_model(
-            self.session,
-            run_id,
-            chunk_id,
-            relations,
-            source_model=source_model,
-            commit=commit,
+    chunk_id: int
+    speaker: list[str]
+    speaker_references: list[dict[str, Any]]
+    length: int
+    tone: str | None
+
+
+@dataclass(frozen=True)
+class ForeshadowingThreadView:
+    """2026-08-05 用于向 API 与诊断暴露伏笔线程汇总视图"""
+
+    setup_id: str
+    first_chunk_id: int
+    last_chunk_id: int
+    anchor_chunk_ids: list[int]
+    setup_summary: str
+    setup_kind: str
+    expected_payoff_family: str
+    payoff_likelihood: str
+    confidence: str
+    strength: str
+    status: str
+    active: bool
+    latest_reason: str
+    latest_why_unresolved_now: str
+
+
+class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
+    """2026-08-05 用于统一读取章节正式标注与数据库图事实"""
+
+    def _chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRecord]:
+        """2026-08-05 用于按真实章节顺序读取全部正式章节标注"""
+        stmt = (
+            select(ChapterAnnotationRecord)
+            .where(ChapterAnnotationRecord.run_id == run_id)
+            .order_by(ChapterAnnotationRecord.chapter_id)
         )
+        return list(self.session.execute(stmt).scalars().all())
 
-    def insert_chunk_dialogues(
-        self,
-        run_id: str,
-        chunk_id: int,
-        dialogues: Sequence[DialogueSnapshot],
-        lengths: Sequence[int] | None = None,
-        *,
-        commit: bool = True,
-    ) -> None:
-        """插入分块对话数据"""
-        return inserts.insert_chunk_dialogues(self.session, run_id, chunk_id, dialogues, lengths, commit=commit)
-
-    def insert_foreshadowing(
-        self,
-        run_id: str,
-        chunk_id: int,
-        result: ForeshadowingResult,
-        *,
-        commit: bool = True,
-    ) -> None:
-        """插入伏笔分析结果"""
-        return inserts.insert_foreshadowing(self.session, run_id, chunk_id, result, commit=commit)
-
-    def fetch_active_foreshadowing_threads_for_prompt(
-        self,
-        run_id: str,
-        *,
-        max_chunk_id: int,
-        limit: int | None = None,
-    ) -> list[foreshadowing_threads.ActiveSetupPoolEntry]:
-        """
-        获取当前 chunk 可见的活跃 setup 池摘要
-
-        active setup pool limit 已改为运行时读取 settings；
-        wrapper 不能再用默认参数把模块导入时的旧值固化回 30
-        """
-        return foreshadowing_threads.fetch_active_foreshadowing_threads_for_prompt(
-            self.session,
-            run_id,
-            max_chunk_id=max_chunk_id,
-            limit=limit,
+    def _graph_facts(self, run_id: str, *, content_kind: str) -> list[GraphFact]:
+        """2026-08-05 用于读取指定章节事实类型的活动数据库图事实"""
+        stmt = (
+            select(GraphFact)
+            .where(
+                GraphFact.run_id == run_id,
+                GraphFact.active.is_(True),
+            )
+            .order_by(GraphFact.graph_fact_id)
         )
+        return [
+            row
+            for row in self.session.execute(stmt).scalars().all()
+            if isinstance(row.content, dict) and row.content.get("kind") == content_kind
+        ]
 
-    def sync_foreshadowing_thread(
-        self,
-        run_id: str,
-        *,
-        chunk_id: int,
-        result: ForeshadowingResult,
-    ) -> foreshadowing_threads.ForeshadowingThreadProjection:
-        """同步一条 positive 伏笔结果到 thread ledger"""
-        return foreshadowing_threads.sync_foreshadowing_thread(
-            self.session,
-            run_id=run_id,
-            chunk_id=chunk_id,
-            result=result,
+    def _foreshadowing_by_chunk(self, run_id: str) -> dict[int, dict[str, Any]]:
+        """2026-08-05 用于把伏笔 thread 与 hit 展开到实际命中 chunk"""
+        stmt = (
+            select(ForeshadowingThreadHit, ForeshadowingThread)
+            .join(ForeshadowingThread, ForeshadowingThreadHit.setup_id == ForeshadowingThread.setup_id)
+            .where(
+                ForeshadowingThreadHit.run_id == run_id,
+                ForeshadowingThread.run_id == run_id,
+            )
+            .order_by(ForeshadowingThreadHit.chunk_id, ForeshadowingThreadHit.hit_id)
         )
+        by_chunk: dict[int, dict[str, Any]] = {}
+        for hit, thread in self.session.execute(stmt).all():
+            by_chunk[hit.chunk_id] = {
+                "has_foreshadowing": True,
+                "is_strong_setup": True,
+                "foreshadowing_type": thread.foreshadowing_type,
+                "setup_kind": thread.setup_kind,
+                "foreshadowing_desc": thread.setup_summary,
+                "setup_summary": thread.setup_summary,
+                "why_unresolved_now": hit.why_unresolved_now,
+                "expected_payoff_family": thread.expected_payoff_family,
+                "payoff_likelihood": thread.payoff_likelihood,
+                "linked_setup_id": None if hit.is_new_setup else thread.setup_id,
+            }
+        return by_chunk
 
-    def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
-        """基于 setup ledger 计算伏笔回收预期"""
-        return foreshadowing_threads.calculate_foreshadow_expectation(self.session, run_id)
+    def fetch_chunk_annotations(self, run_id: str) -> list[ChunkAnnotationRow]:
+        """2026-08-05 用于读取聚合张力所需的章节 segment 标注"""
+        return self.fetch_chunk_annotations_full(run_id)
 
-    def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_threads.ForeshadowingThreadView]:
-        """获取完整的 setup thread 汇总视图"""
-        return foreshadowing_threads.fetch_foreshadowing_threads(self.session, run_id)
+    def fetch_chunk_annotations_full(self, run_id: str) -> list[ChunkAnnotationRow]:
+        """2026-08-05 用于从正式章节 payload segments 展开完整 chunk 标注"""
+        foreshadowing_by_chunk = self._foreshadowing_by_chunk(run_id)
+        rows: list[ChunkAnnotationRow] = []
+        for record in self._chapter_annotations(run_id):
+            annotation = ChapterAnnotation.model_validate(record.payload)
+            for segment in annotation.segments:
+                rows.append(
+                    ChunkAnnotationRow(
+                        chunk_id=segment.chunk_id,
+                        emotional_valence=segment.emotional_valence,
+                        event_type=segment.event_type,
+                        pivot_moment=segment.pivot_moment,
+                        cliffhanger=segment.cliffhanger,
+                        **foreshadowing_by_chunk.get(segment.chunk_id, {}),
+                    )
+                )
+        return sorted(rows, key=lambda row: row.chunk_id)
 
-    # ==================== queries 模块方法 ====================
+    def fetch_full_annotations(self, run_id: str) -> list[ChunkAnnotationRow]:
+        """2026-08-05 用于读取指标计算所需的完整 chunk 标注字段"""
+        return self.fetch_chunk_annotations_full(run_id)
 
-    def fetch_chunk_annotations(self, run_id: str) -> list[Any]:
-        """获取指定运行的所有分块标注"""
-        return queries.fetch_chunk_annotations(self.session, run_id)
+    def fetch_chunk_characters_full(self, run_id: str) -> list[CharacterFactRow]:
+        """2026-08-05 用于从数据库图人物事实展开 chunk 人物记录"""
+        rows: list[CharacterFactRow] = []
+        for fact in self._graph_facts(run_id, content_kind="characters"):
+            content = dict(fact.content)
+            entity = content.get("entity")
+            if not isinstance(entity, dict):
+                continue
+            name = str(entity.get("name") or "").strip()
+            if entity.get("entity_type") != "character" or not is_global_character_surface_name(name):
+                continue
+            rows.append(
+                CharacterFactRow(
+                    chunk_id=int(content["chunk_id"]),
+                    name=name,
+                    surface_name=name,
+                    reference_kind="global_character",
+                    reference_slot=None,
+                    resolved_global_name=name,
+                    global_skip_reason=None,
+                    role_function=str(content["role_function"]),
+                    action=str(content["action"]),
+                    emotion_score=str(content["emotion"]),
+                )
+            )
+        return rows
 
-    def fetch_chunk_annotations_full(self, run_id: str) -> list[Any]:
-        """获取完整的分块标注数据（用于结果导出）"""
-        return queries.fetch_chunk_annotations_full(self.session, run_id)
+    def fetch_characters_with_scores(self, run_id: str) -> list[CharacterFactRow]:
+        """2026-08-05 用于读取人物榜与聚合指标需要的图人物事实"""
+        return self.fetch_chunk_characters_full(run_id)
 
-    def fetch_chunk_characters_full(self, run_id: str) -> list[Any]:
-        """获取完整的分块角色数据"""
-        return queries.fetch_chunk_characters_full(self.session, run_id)
+    def fetch_character_emotion_sequence(self, run_id: str) -> list[CharacterFactRow]:
+        """2026-08-05 用于按 chunk 顺序读取人物情绪事实序列"""
+        return sorted(self.fetch_chunk_characters_full(run_id), key=lambda row: row.chunk_id)
 
-    def fetch_chunk_relations_full(self, run_id: str) -> list[Any]:
-        """获取完整的分块关系数据"""
-        return queries.fetch_chunk_relations_full(self.session, run_id)
-
-    def fetch_chunk_dialogues_full(self, run_id: str) -> list[Any]:
-        """获取完整的分块对话数据"""
-        return queries.fetch_chunk_dialogues_full(self.session, run_id)
-
-    def fetch_annotated_chunk_ids(self, run_id: str) -> set[int]:
-        """获取指定运行已标注的分块ID集合"""
-        return queries.fetch_annotated_chunk_ids(self.session, run_id)
-
-    def fetch_full_annotations(self, run_id: str) -> list[Any]:
-        """获取完整的分块标注数据"""
-        return queries.fetch_full_annotations(self.session, run_id)
-
-    def fetch_characters_with_scores(self, run_id: str) -> list[Any]:
-        """获取角色数据（含情绪分数）"""
-        return queries.fetch_characters_with_scores(self.session, run_id)
-
-    def fetch_character_emotion_sequence(self, run_id: str) -> list[Any]:
-        """获取角色情绪序列（按 chunk_id 排序）"""
-        return queries.fetch_character_emotion_sequence(self.session, run_id)
-
-    def fetch_relations(self, run_id: str) -> list[Any]:
-        """获取角色关系（仅 from/to）"""
-        return queries.fetch_relations(self.session, run_id)
-
-    def fetch_full_relations(self, run_id: str) -> list[Any]:
-        """获取完整角色关系"""
-        return queries.fetch_full_relations(self.session, run_id)
-
-    def fetch_chunk_relations_window(
-        self,
-        run_id: str,
-        from_chunk: int | None = None,
-        to_chunk: int | None = None,
-        projection_status: str | None = None,
-    ) -> list[Any]:
-        return queries.fetch_chunk_relations_window(
-            self.session,
-            run_id,
-            from_chunk=from_chunk,
-            to_chunk=to_chunk,
-            projection_status=projection_status,
-        )
-
-    def fetch_pending_chunk_relations(
-        self,
-        run_id: str,
-        to_chunk: int | None = None,
-        limit: int = 200,
-    ) -> list[Any]:
-        return queries.fetch_pending_chunk_relations(
-            self.session,
-            run_id,
-            to_chunk=to_chunk,
-            limit=limit,
-        )
-
-    def update_relation_projection_status(
-        self,
-        relation_id: int,
-        projection_status: str,
-        projected_at=None,
-        projection_error: str | None = None,
-    ) -> None:
-        return inserts.update_relation_projection_status(
-            self.session,
-            relation_id,
-            projection_status,
-            projected_at=projected_at,
-            projection_error=projection_error,
-        )
-
-    def has_annotations(self, run_id: str) -> bool:
-        """检查指定运行是否有标注数据"""
-        return queries.has_annotations(self.session, run_id)
-
-    def is_annotate_complete(self, run_id: str) -> bool:
-        """检查标注阶段是否完成"""
-        return queries.is_annotate_complete(self.session, run_id)
-
-    def get_annotation_by_chunk(self, run_id: str, chunk_id: int) -> dict[str, Any] | None:
-        """
-        获取指定 chunk 的标注结果
-
-        """
-        return queries.get_annotation_by_chunk(self.session, run_id, chunk_id)
-
-    # ==================== characters 模块方法 ====================
+    def fetch_chunk_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
+        """2026-08-05 用于从数据库图对话事实展开 chunk 对话记录"""
+        rows: list[DialogueFactRow] = []
+        for fact in self._graph_facts(run_id, content_kind="dialogues"):
+            content = dict(fact.content)
+            speaker = content.get("speaker")
+            speaker_name = str(speaker.get("name")).strip() if isinstance(speaker, dict) else ""
+            valid_speaker = speaker_name if is_global_character_surface_name(speaker_name) else None
+            speaker_names = [valid_speaker] if valid_speaker else []
+            speaker_references = (
+                [
+                    {
+                        "surface_name": valid_speaker,
+                        "reference_kind": "global_character",
+                        "reference_slot": None,
+                        "resolved_global_name": valid_speaker,
+                        "can_enter_global_character": True,
+                        "global_skip_reason": None,
+                    }
+                ]
+                if valid_speaker
+                else []
+            )
+            text = str(content["content"])
+            rows.append(
+                DialogueFactRow(
+                    chunk_id=int(content["chunk_id"]),
+                    speaker=speaker_names,
+                    speaker_references=speaker_references,
+                    length=len(text),
+                    tone=str(content["tone"]) if content.get("tone") is not None else None,
+                )
+            )
+        return rows
 
     def fetch_alias_map(self, run_id: str) -> dict[str, str]:
-        """获取别名映射表"""
-        return characters.fetch_alias_map(self.session, run_id)
+        """2026-08-05 用于从数据库图别名表读取规范实体映射"""
+        from src.storage.repositories.graph import GraphRepository
 
-    def fetch_all_character_names(self, run_id: str, max_chunk_id: int | None = None) -> list[dict[str, str | int]]:
-        """获取指定运行的所有角色名及出现频次"""
-        return characters.fetch_all_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
+        return GraphRepository(self.session).fetch_alias_map(run_id)
 
-    def fetch_reference_aware_character_names(
-        self,
-        run_id: str,
-        max_chunk_id: int | None = None,
-    ) -> list[dict[str, str | int]]:
-        """
-        创建时间: 2026-04-29
-        任务: 角色引用分层重构
-        新建原因: 消歧候选需要 reference-aware 入口，不能复用读侧的 global-only 出口。
-        """
-        return characters.fetch_reference_aware_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
-
-    def apply_reference_resolutions_to_history(
-        self,
-        run_id: str,
-        reference_resolutions: dict[str, str],
-        *,
-        apply: bool = True,
-        from_chunk: int | None = None,
-        to_chunk: int | None = None,
-        table_scopes: tuple[str, ...] | list[str] | set[str] | None = None,
-    ) -> dict[str, int]:
-        """
-        创建时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改时间: 2026-05-02
-        修改原因: graph projection 需要在投影前只回刷当前窗口的 relations，
-                  因此仓储层也要透传 chunk window 和 table_scopes。
-        """
-        return characters.apply_reference_resolutions_to_history(
-            self.session,
-            run_id,
-            reference_resolutions,
-            apply=apply,
-            from_chunk=from_chunk,
-            to_chunk=to_chunk,
-            table_scopes=table_scopes,
+    def fetch_foreshadowing_threads(self, run_id: str) -> list[ForeshadowingThreadView]:
+        """2026-08-05 用于汇总伏笔线程与全部命中锚点"""
+        thread_stmt = (
+            select(ForeshadowingThread)
+            .where(ForeshadowingThread.run_id == run_id)
+            .order_by(ForeshadowingThread.first_chunk_id, ForeshadowingThread.setup_id)
         )
-
-    def ensure_canonical_entities(
-        self,
-        run_id: str,
-        known_canonical_names: frozenset[str],
-        novel_id: str,
-        entity_types: dict[str, str] | None = None,
-    ) -> dict[str, int]:
-        return characters.ensure_canonical_entities(
-            self.session,
-            run_id,
-            known_canonical_names,
-            novel_id,
-            entity_types,
+        threads = list(self.session.execute(thread_stmt).scalars().all())
+        if not threads:
+            return []
+        hit_stmt = (
+            select(ForeshadowingThreadHit)
+            .where(ForeshadowingThreadHit.run_id == run_id)
+            .order_by(
+                ForeshadowingThreadHit.setup_id,
+                ForeshadowingThreadHit.chunk_id,
+                ForeshadowingThreadHit.hit_id,
+            )
         )
+        hits_by_setup: dict[str, list[ForeshadowingThreadHit]] = {}
+        for hit in self.session.execute(hit_stmt).scalars().all():
+            hits_by_setup.setdefault(hit.setup_id, []).append(hit)
+        views: list[ForeshadowingThreadView] = []
+        for thread in threads:
+            hits = hits_by_setup.get(thread.setup_id, [])
+            latest = hits[-1] if hits else None
+            views.append(
+                ForeshadowingThreadView(
+                    setup_id=thread.setup_id,
+                    first_chunk_id=thread.first_chunk_id,
+                    last_chunk_id=thread.last_chunk_id,
+                    anchor_chunk_ids=sorted({hit.chunk_id for hit in hits}),
+                    setup_summary=thread.setup_summary,
+                    setup_kind=thread.setup_kind,
+                    expected_payoff_family=thread.expected_payoff_family,
+                    payoff_likelihood=thread.payoff_likelihood,
+                    confidence=thread.confidence,
+                    strength=thread.strength,
+                    status=thread.status,
+                    active=bool(thread.active),
+                    latest_reason=latest.anchor_reason if latest else "",
+                    latest_why_unresolved_now=latest.why_unresolved_now if latest else "",
+                )
+            )
+        return views
 
-    def cleanup_self_loop_relations(self, run_id: str) -> None:
-        return characters.cleanup_self_loop_relations(self.session, run_id)
+    def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
+        """2026-08-05 用于按最新伏笔线程生命周期计算回收预期"""
+        threads = list(
+            self.session.execute(
+                select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
+            )
+            .scalars()
+            .all()
+        )
+        if not threads:
+            return None
+        hit_counts = {
+            row.setup_id: int(row.hit_count)
+            for row in self.session.execute(
+                select(
+                    ForeshadowingThreadHit.setup_id,
+                    func.count().label("hit_count"),
+                )
+                .where(ForeshadowingThreadHit.run_id == run_id)
+                .group_by(ForeshadowingThreadHit.setup_id)
+            ).all()
+        }
+        weighted_total = 0.0
+        total_weight = 0.0
+        for thread in threads:
+            hit_count = hit_counts.get(thread.setup_id, 0)
+            if hit_count < 1:
+                raise ValueError(f"伏笔线程缺少命中记录: {thread.setup_id}")
+            base = _EXPECTATION_BASE_SCORE_BY_PAYOFF[thread.payoff_likelihood]
+            score = min(
+                1.0,
+                max(
+                    0.0,
+                    base
+                    + _EXPECTATION_STATUS_BONUS[thread.status]
+                    + _EXPECTATION_STRENGTH_BONUS[thread.strength]
+                    + (0.08 if hit_count >= 3 else 0.04 if hit_count == 2 else 0.0),
+                ),
+            )
+            weight = (
+                _EXPECTATION_STATUS_WEIGHT[thread.status]
+                + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0)
+                + (0.05 if thread.strength == "high" else 0.0)
+            )
+            weighted_total += score * weight
+            total_weight += weight
+        return round(weighted_total / total_weight, 4)
+
+    def has_annotations(self, run_id: str) -> bool:
+        """2026-08-05 用于判断当前 run 是否存在章节正式标注"""
+        stmt = (
+            select(func.count())
+            .select_from(ChapterAnnotationRecord)
+            .where(ChapterAnnotationRecord.run_id == run_id)
+        )
+        return int(self.session.execute(stmt).scalar_one() or 0) > 0
+
+    def is_annotate_complete(self, run_id: str) -> bool:
+        """2026-08-05 用于按真实章节集合严格判断标注阶段完成状态"""
+        expected = {
+            int(chapter_id)
+            for chapter_id in self.session.execute(
+                select(Chunk.chapter_id).where(Chunk.run_id == run_id).distinct()
+            ).scalars()
+        }
+        if not expected:
+            return False
+        actual = {
+            int(chapter_id)
+            for chapter_id in self.session.execute(
+                select(ChapterAnnotationRecord.chapter_id)
+                .where(ChapterAnnotationRecord.run_id == run_id)
+                .distinct()
+            ).scalars()
+        }
+        return actual == expected
+
+    def get_annotation_by_chunk(self, run_id: str, chunk_id: int) -> dict[str, Any] | None:
+        """2026-08-05 用于按 chunk_id 回读由章节 segment 展开的标注字典"""
+        for row in self.fetch_chunk_annotations_full(run_id):
+            if row.chunk_id == chunk_id:
+                return asdict(row)
+        return None

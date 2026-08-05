@@ -1,6 +1,14 @@
 """导出仓库实现与协议接口"""
 
-from .annotation import AnnotationRepository
+from .annotation import (
+    AnnotationRepository,
+    CasePoolRepository,
+    CaseResolutionMappingRepository,
+    ChapterAnnotationRepository,
+    ContinuityFactRepository,
+    DatabaseAnnotationQueryService,
+    ForeshadowingRepository,
+)
 from .base import BaseRepository, T
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
@@ -20,6 +28,12 @@ __all__ = [
     "T",
     "RunRepository",
     "AnnotationRepository",
+    "ChapterAnnotationRepository",
+    "CasePoolRepository",
+    "ContinuityFactRepository",
+    "ForeshadowingRepository",
+    "CaseResolutionMappingRepository",
+    "DatabaseAnnotationQueryService",
     "ChunkRepository",
     "ChunkStyleData",
     "RunRepositoryProtocol",

@@ -91,7 +91,7 @@ class ModelInteractionRepository(BaseRepository):
             created_at=datetime.now(UTC),
         )
         self.session.add(interaction)
-        self.session.commit()
+        self.session.flush()
         return interaction
 
     def get_interactions_by_chunk(

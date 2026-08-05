@@ -244,7 +244,7 @@ def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
     """
     基于 analysis_runs 回填历史表里漂移的 novel_id
 
-    说明: `cloud_analysis` / `token_usage` / `chunk_locations` 的 novel_id
+    说明: `cloud_analysis` / `token_usage` 的 novel_id
           实际是 run 侧信息的冗余镜像；补外键前先对齐到 analysis_runs，
           可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据
     """
@@ -258,13 +258,6 @@ def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
         """,
         """
         UPDATE token_usage AS child
-        SET novel_id = parent.novel_id
-        FROM analysis_runs AS parent
-        WHERE child.run_id = parent.run_id
-          AND child.novel_id IS DISTINCT FROM parent.novel_id
-        """,
-        """
-        UPDATE chunk_locations AS child
         SET novel_id = parent.novel_id
         FROM analysis_runs AS parent
         WHERE child.run_id = parent.run_id
@@ -304,52 +297,6 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
             "context": "analysis_runs.novel_id -> novels.novel_id",
         },
         {
-            "table": "disambig_checkpoint",
-            "name": "disambig_checkpoint_run_id_fkey",
-            "ddl": (
-                "ALTER TABLE disambig_checkpoint "
-                "ADD CONSTRAINT disambig_checkpoint_run_id_fkey "
-                "FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id) ON DELETE CASCADE"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM disambig_checkpoint child "
-                "LEFT JOIN analysis_runs parent ON parent.run_id = child.run_id "
-                "WHERE parent.run_id IS NULL"
-            ),
-            "context": "disambig_checkpoint.run_id -> analysis_runs.run_id",
-        },
-        {
-            "table": "chunk_locations",
-            "name": "chunk_locations_chunk_id_run_id_fkey",
-            "ddl": (
-                "ALTER TABLE chunk_locations "
-                "ADD CONSTRAINT chunk_locations_chunk_id_run_id_fkey "
-                "FOREIGN KEY (chunk_id, run_id) REFERENCES chunks(chunk_id, run_id) ON DELETE CASCADE"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM chunk_locations child "
-                "LEFT JOIN chunks parent "
-                "ON parent.chunk_id = child.chunk_id AND parent.run_id = child.run_id "
-                "WHERE parent.run_id IS NULL"
-            ),
-            "context": "chunk_locations.(chunk_id, run_id) -> chunks.(chunk_id, run_id)",
-        },
-        {
-            "table": "chunk_locations",
-            "name": "chunk_locations_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE chunk_locations "
-                "ADD CONSTRAINT chunk_locations_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM chunk_locations child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "chunk_locations.novel_id -> novels.novel_id",
-        },
-        {
             "table": "cloud_analysis",
             "name": "cloud_analysis_novel_id_fkey",
             "ddl": (
@@ -378,22 +325,6 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
                 "WHERE parent.novel_id IS NULL"
             ),
             "context": "global_context.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "graph_relation_events",
-            "name": "graph_relation_events_chunk_id_run_id_fkey",
-            "ddl": (
-                "ALTER TABLE graph_relation_events "
-                "ADD CONSTRAINT graph_relation_events_chunk_id_run_id_fkey "
-                "FOREIGN KEY (chunk_id, run_id) REFERENCES chunks(chunk_id, run_id) ON DELETE CASCADE"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM graph_relation_events child "
-                "LEFT JOIN chunks parent "
-                "ON parent.chunk_id = child.chunk_id AND parent.run_id = child.run_id "
-                "WHERE parent.run_id IS NULL"
-            ),
-            "context": "graph_relation_events.(chunk_id, run_id) -> chunks.(chunk_id, run_id)",
         },
         {
             "table": "token_usage",
@@ -441,25 +372,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS surface_name VARCHAR(255)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_kind VARCHAR(50)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_slot VARCHAR(100)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS resolved_global_name VARCHAR(255)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS global_skip_reason TEXT",
-        "ALTER TABLE chunk_dialogues ADD COLUMN IF NOT EXISTS speaker_references JSONB",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS from_reference_kind VARCHAR(50)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS to_reference_kind VARCHAR(50)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS resolved_from_global_name VARCHAR(255)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS resolved_to_global_name VARCHAR(255)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS reference_skip_reason TEXT",
-        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
-        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
-        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_summary TEXT",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS is_new_setup INTEGER",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_status VARCHAR(30)",
         "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
         (

@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -35,6 +36,7 @@ class ForeshadowingThread(Base):
     first_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     last_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     setup_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    foreshadowing_type: Mapped[str] = mapped_column(String(50), nullable=False)
     setup_kind: Mapped[str] = mapped_column(String(50), nullable=False)
     expected_payoff_family: Mapped[str] = mapped_column(String(100), nullable=False)
     payoff_likelihood: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -42,6 +44,7 @@ class ForeshadowingThread(Base):
     strength: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -87,6 +90,7 @@ class ForeshadowingThreadHit(Base):
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
     anchor_reason: Mapped[str] = mapped_column(Text, nullable=False)
     why_unresolved_now: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
