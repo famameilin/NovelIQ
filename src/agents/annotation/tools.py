@@ -1,597 +1,333 @@
 """
-标注 Agent 工具
-
-- lookup_identity: 查询身份记忆（消歧查询）
-- register_identity: 注册/更新身份映射（消歧集成进 agent 循环）
-- lookup_authority_facts: Level1 权威事实查询
-- list_recent_context: Level2 近期导航上下文
-- search_paragraph_evidence: Level3 自然段语义检索
-- search_paragraph_by_keywords: Level3 自然段关键词精确检索
-- read_chunk: 受历史边界保护的原文展开
-- finish: 提交最终合并标注结果
+章节标注 Agent 工具与运行内账本
 """
 
 from __future__ import annotations
 
-import re
-import time
-from typing import Any
+from dataclasses import asdict, dataclass, field
+from typing import Any, Protocol
 
 from langchain_core.tools import tool
 
-from src.rag import EvidenceObjective, EvidenceRequest, NarrativeEvidenceService
-
-from .evidence import AnnotationEvidenceLedger
-from .memory import IdentityMemory
-from .schema import MergedChunkAnnotation, MergedChunkAnnotationPatch
-
-
-def _render_authority_evidence(bundle) -> str:
-    """
-    2026-08-02 用于只渲染请求裁剪后的 Level1 权威事实
-    """
-    parts: list[str] = []
-
-    alias_lines = [
-        item.content
-        for item in bundle.structured_evidence
-        if item.evidence_type == "alias_mapping"
-    ]
-    entity_lines = [
-        item.content
-        for item in bundle.structured_evidence
-        if item.evidence_type == "canonical_entity"
-    ]
-    type_lines = [
-        item.content
-        for item in bundle.structured_evidence
-        if item.evidence_type == "entity_type"
-    ]
-    relation_lines = [
-        item.content
-        for item in bundle.structured_evidence
-        if item.evidence_type == "confirmed_relation"
-    ]
-    if alias_lines:
-        parts.append("<已确认别名>\n" + "\n".join(dict.fromkeys(alias_lines)))
-    if entity_lines:
-        parts.append("<已确认实体>\n" + "\n".join(dict.fromkeys(entity_lines)))
-    if type_lines:
-        parts.append("<已确认实体类型>\n" + "\n".join(dict.fromkeys(type_lines)))
-    if relation_lines:
-        parts.append("<已确认关系>\n" + "\n".join(dict.fromkeys(relation_lines)))
-
-    return "\n\n".join(parts)
+from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationProtocolError
+from .schema import (
+    AfterChunkSearchResult,
+    CaseSearchResult,
+    ChapterAnnotation,
+    ChapterAnnotationPatch,
+    FactPushOutput,
+    FactSearchResult,
+    ForeshadowingPushOutput,
+    ForeshadowingSearchResult,
+    PullResult,
+    PushOutput,
+    PushRequest,
+    PushResult,
+    SearchResult,
+)
 
 
-def _render_recent_context(bundle, *, limit: int) -> str:
-    """
-    2026-08-02 用于把 Level2 活跃实体渲染为非证明性的近期导航上下文
-    """
-    lines: list[str] = []
-    for item in bundle.local_evidence[:limit]:
-        if item.evidence_type != "active_entity":
-            continue
-        metadata = item.metadata
-        details = [
-            f"type={metadata.get('entity_type') or 'character'}",
-            f"last_chunk={metadata.get('last_seen_chunk')}",
-        ]
-        if metadata.get("role"):
-            details.append(f"role={metadata['role']}")
-        if metadata.get("recent_action"):
-            details.append(f"action={metadata['recent_action']}")
-        if metadata.get("recent_emotion"):
-            details.append(f"emotion={metadata['recent_emotion']}")
-        lines.append(f"{item.content} | " + " | ".join(details))
-    if not lines:
-        return ""
-    return "<近期导航上下文>\n" + "\n".join(lines)
+class AnnotationQueryService(Protocol):
+    """2026-08-05 用于隔离 Agent 只读检索与具体数据库实现"""
+
+    def find_initial_case_candidates(
+        self,
+        current_text: str,
+        *,
+        semantic_limit: int = 50,
+        rotation_limit: int = 50,
+    ) -> tuple[list[CaseSearchResult], list[str]]:
+        """2026-08-05 用于返回 current 语义候选和活动案例轮转 ID"""
+
+    def search_continuity(
+        self,
+        query: str,
+        *,
+        hidden_case_ids: set[str],
+        limit: int = 50,
+    ) -> SearchResult:
+        """2026-08-05 用于同时检索案例图事实与伏笔线程"""
+
+    def fetch_active_cases(self, ids: list[str]) -> list[CaseSearchResult]:
+        """2026-08-05 用于按真实案例 ID 回读当前活动案例"""
+
+    def search_after(
+        self,
+        query: str,
+        *,
+        after_chapter_ids: tuple[int, ...],
+        limit: int = 50,
+    ) -> list[AfterChunkSearchResult]:
+        """2026-08-05 用于检索固定范围内的全部后文章节 chunk"""
+
+    def read_after_chunk(
+        self,
+        *,
+        chapter_id: int,
+        chunk_id: int,
+        after_chapter_ids: tuple[int, ...],
+    ) -> str:
+        """2026-08-05 用于读取固定 after 范围内已授权的完整 chunk 原文"""
 
 
-def _render_historical_evidence(
-    bundle,
-    *,
-    objective: str,
-    ledger: AnnotationEvidenceLedger,
-) -> tuple[str, list[str]]:
-    """
-    2026-08-03 用于登记并渲染统一历史取证结果
-    """
-    historical_items = list(bundle.historical_evidence)
-    evidence_ids = ledger.register_evidence_items(historical_items, objective=objective)
-    lines: list[str] = []
-    for item in historical_items:
-        if not item.evidence_id:
-            continue
-        metadata = item.metadata
-        details = [f"evidence_id={item.evidence_id}", f"chunk={item.chunk_id}"]
-        if item.retrieval_method == "semantic":
-            score = item.score if item.score is not None else 0.0
-            details.append(f"score={score:.3f}")
-        if item.retrieval_method == "keyword":
-            matched_keywords = metadata.get("matched_keywords", [])
-            details.append(f"matches={metadata.get('match_count', len(matched_keywords))}")
-            if matched_keywords:
-                details.append(f"keywords={','.join(str(keyword) for keyword in matched_keywords)}")
-        lines.append(f"[{' '.join(details)}] {item.content}")
-    if not lines:
-        return "", evidence_ids
-    return "<历史自然段证据>\n" + "\n".join(lines), evidence_ids
+@dataclass(slots=True)
+class ToolAuditRecord:
+    """2026-08-05 用于记录工具调用请求结果与阶段"""
+
+    tool_name: str
+    phase: str
+    request: dict[str, Any]
+    response: dict[str, Any] | None = None
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class AnnotationToolLedger:
+    """2026-08-05 用于保存一次 LangGraph 尝试的全部运行内业务状态"""
+
+    current_chapter_id: int
+    current_chunk_ids: tuple[int, ...]
+    after_chapter_ids: tuple[int, ...]
+    initial_cases: dict[str, CaseSearchResult] = field(default_factory=dict)
+    rotation_case_ids: list[str] = field(default_factory=list)
+    visible_case_ids: set[str] = field(default_factory=set)
+    visible_fact_ids: set[str] = field(default_factory=set)
+    visible_setup_ids: set[str] = field(default_factory=set)
+    visible_evidence_chapter_ids: set[int] = field(default_factory=set)
+    pulled_case_ids: list[str] = field(default_factory=list)
+    staged_outputs: list[PushOutput] = field(default_factory=list)
+    authorized_after_chunks: set[tuple[int, int]] = field(default_factory=set)
+    audit_records: list[ToolAuditRecord] = field(default_factory=list)
+    frozen: bool = False
+
+    def register_initial_cases(
+        self,
+        cases: list[CaseSearchResult],
+        rotation_case_ids: list[str],
+    ) -> None:
+        """2026-08-05 用于登记第一次模型调用前可见的案例候选"""
+        self.initial_cases = {case.id: case for case in cases}
+        self.rotation_case_ids = list(dict.fromkeys(rotation_case_ids))
+        self.visible_case_ids.update(self.initial_cases)
+        self.visible_evidence_chapter_ids.update(case.evidence.chapterid for case in cases)
+
+    def record(
+        self,
+        *,
+        tool_name: str,
+        phase: str,
+        request: dict[str, Any],
+        response: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        """2026-08-05 用于按真实调用顺序追加工具审计"""
+        self.audit_records.append(
+            ToolAuditRecord(
+                tool_name=tool_name,
+                phase=phase,
+                request=request,
+                response=response,
+                error=error,
+            )
+        )
+
+    def freeze_business_results(self) -> None:
+        """2026-08-05 用于在首次有效 finish 后冻结案例与事实候选"""
+        self.validate_staged_outputs()
+        self.frozen = True
+
+    def validate_staged_outputs(self) -> None:
+        """2026-08-05 用于校验 pull 覆盖来源归属与 rejected 排他"""
+        pulled = set(self.pulled_case_ids)
+        covered: set[str] = set()
+        rejected: set[str] = set()
+        non_rejected: set[str] = set()
+        for output in self.staged_outputs:
+            source_ids = set(output.source_case_ids)
+            if not source_ids.issubset(pulled):
+                unknown = sorted(source_ids - pulled)
+                raise AnnotationInputError(f"push 引用了本轮未 pull 的案例: {unknown}")
+            covered.update(source_ids)
+            if output.output_kind == "rejected":
+                rejected.update(source_ids)
+            else:
+                non_rejected.update(source_ids)
+        missing = sorted(pulled - covered)
+        if missing:
+            raise ValueError(f"pulled 案例未被任何 push 输出覆盖: {missing}")
+        conflicts = sorted(rejected & non_rejected)
+        if conflicts:
+            raise ValueError(f"同一来源案例同时进入 rejected 与非 rejected 输出: {conflicts}")
+
+    def audit_payload(self) -> list[dict[str, Any]]:
+        """2026-08-05 用于生成完成事务可持久化的工具审计结构"""
+        return [asdict(record) for record in self.audit_records]
+
+
+def _register_search_visibility(ledger: AnnotationToolLedger, result: SearchResult) -> None:
+    """2026-08-05 用于把连续性检索结果登记为本轮可引用对象"""
+    for item in result.results:
+        if isinstance(item, CaseSearchResult):
+            ledger.visible_case_ids.add(item.id)
+        elif isinstance(item, FactSearchResult):
+            ledger.visible_fact_ids.add(item.fact_id)
+        elif isinstance(item, ForeshadowingSearchResult):
+            ledger.visible_setup_ids.add(item.record_id)
+        evidence = getattr(item, "evidence", None)
+        if evidence is not None:
+            ledger.visible_evidence_chapter_ids.add(evidence.chapterid)
+
+
+def _validate_output_visibility(output: PushOutput, ledger: AnnotationToolLedger) -> None:
+    """2026-08-05 用于校验 push Evidence 与既有事实伏笔引用均来自本轮可见范围"""
+    allowed_chapters = {ledger.current_chapter_id} | ledger.visible_evidence_chapter_ids
+    if output.evidence.chapterid not in allowed_chapters:
+        raise AnnotationAuthorizationError(
+            f"push evidence.chapterid 不在本轮可见范围: {output.evidence.chapterid}"
+        )
+    if isinstance(output, FactPushOutput):
+        linked_fact_id = output.payload.linked_fact_id
+        if linked_fact_id is not None and linked_fact_id not in ledger.visible_fact_ids:
+            raise AnnotationAuthorizationError(f"linked_fact_id 未由本轮 search 返回: {linked_fact_id}")
+    if isinstance(output, ForeshadowingPushOutput):
+        linked_setup_id = output.payload.linked_setup_id
+        if linked_setup_id is not None and linked_setup_id not in ledger.visible_setup_ids:
+            raise AnnotationAuthorizationError(f"linked_setup_id 未由本轮 search 返回: {linked_setup_id}")
 
 
 def build_annotation_tools(
-    evidence_service: NarrativeEvidenceService | None,
-    memory: IdentityMemory,
-    *,
-    run_id: str | None,
-    chunk_id: int | None,
-    session: Any | None = None,
-    evidence_ledger: AnnotationEvidenceLedger | None = None,
+    query_service: AnnotationQueryService,
+    ledger: AnnotationToolLedger,
 ) -> list[Any]:
-    """
-    2026-08-02 用于构建持有当前 chunk 身份记忆和证据账本的标注 Agent 工具集
-    """
-    ledger = evidence_ledger or AnnotationEvidenceLedger()
+    """2026-08-05 用于构建按 finish 前后切换语义的章节 Agent 工具集"""
 
     @tool
-    async def lookup_authority_facts(
-        names: list[str],
-        objective: EvidenceObjective = "identity",
-    ) -> str:
-        """
-        2026-08-02 用于查询指定名字的已确认别名规范实体类型与当前关系
-        names 只包含当前任务需要核对的名字且结果不代表当前 chunk 发生对应事件
-        """
-        started_at = time.perf_counter()
-        normalized_names = [name.strip() for name in names if name.strip()]
-        request_payload = {"names": normalized_names, "objective": objective}
-        if evidence_service is None:
-            ledger.record_tool_call(
-                tool_name="lookup_authority_facts",
-                objective=objective,
-                request=request_payload,
-                status="unavailable",
-            )
-            return "（证据服务不可用）"
-        if not normalized_names:
-            ledger.record_tool_call(
-                tool_name="lookup_authority_facts",
-                objective=objective,
-                request=request_payload,
-                status="empty_request",
-            )
-            return "（未提供需要核对的名字）"
-        request = EvidenceRequest(
-            consumer="annotation_agent",
-            objective=objective,
-            requested_names=normalized_names,
-            seed_entities=normalized_names,
-            background_entities=sorted(memory.known_canonical_names),
-            current_chunk=chunk_id,
-            need_level1=True,
-            need_level2=False,
-            top_k=0,
-        )
-        try:
-            bundle = await evidence_service.collect(request)
-        except Exception as exc:
-            ledger.record_tool_call(
-                tool_name="lookup_authority_facts",
-                objective=objective,
-                request=request_payload,
-                status="error",
-                error=str(exc),
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
-        rendered = _render_authority_evidence(bundle)
-        ledger.record_tool_call(
-            tool_name="lookup_authority_facts",
-            objective=objective,
-            request=request_payload,
-            status="success" if rendered else "empty",
-            duration_ms=int((time.perf_counter() - started_at) * 1000),
-        )
-        return rendered if rendered else "（未找到相关权威事实）"
-
-    @tool
-    async def list_recent_context(limit: int = 10) -> str:
-        """
-        2026-08-02 用于查询当前 chunk 之前的近期活跃实体导航状态
-        结果只用于决定继续核对谁和检索什么且不能单独证明最终结论
-        """
-        started_at = time.perf_counter()
-        effective_limit = max(1, min(limit, 30))
-        request_payload = {"limit": effective_limit}
-        if evidence_service is None:
-            ledger.record_tool_call(
-                tool_name="list_recent_context",
-                objective="navigation",
-                request=request_payload,
-                status="unavailable",
-            )
-            return "（证据服务不可用）"
-        request = EvidenceRequest(
-            consumer="annotation_agent",
-            objective="identity",
-            requested_names=[],
-            seed_entities=[],
-            background_entities=sorted(memory.known_canonical_names),
-            current_chunk=chunk_id,
-            need_level1=False,
-            need_level2=True,
-            top_k=effective_limit,
-        )
-        try:
-            bundle = await evidence_service.collect(request)
-        except Exception as exc:
-            ledger.record_tool_call(
-                tool_name="list_recent_context",
-                objective="navigation",
-                request=request_payload,
-                status="error",
-                error=str(exc),
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
-        rendered = _render_recent_context(bundle, limit=effective_limit)
-        ledger.record_tool_call(
-            tool_name="list_recent_context",
-            objective="navigation",
-            request=request_payload,
-            status="success" if rendered else "empty",
-            duration_ms=int((time.perf_counter() - started_at) * 1000),
-        )
-        return rendered if rendered else "（无近期活跃实体）"
-
-    @tool
-    async def search_paragraph_evidence(
-        query: str,
-        objective: EvidenceObjective = "identity",
-        top_k: int = 5,
-    ) -> str:
-        """
-        2026-08-02 用于检索当前 chunk 之前与 query 语义相似的历史自然段原文
-        返回的 evidence_id 用于 historical_evidence_citations 引用具体历史依据
-        """
-        started_at = time.perf_counter()
+    def search(query: str) -> str:
+        """2026-08-05 用于在初始阶段检索连续性并在 finish 后检索固定后文范围"""
         normalized_query = query.strip()
-        effective_top_k = max(1, min(top_k, 10))
-        request_payload = {
-            "mode": "semantic",
-            "query": normalized_query,
-            "objective": objective,
-            "top_k": effective_top_k,
-            "current_chunk": chunk_id,
-        }
-        if evidence_service is None:
-            ledger.record_tool_call(
-                tool_name="search_paragraph_evidence",
-                objective=objective,
-                request=request_payload,
-                status="unavailable",
+        if not normalized_query or len(normalized_query) > 2000:
+            raise AnnotationInputError("search.query 必须为 1 至 2000 个 Unicode 字符")
+        if ledger.frozen:
+            results = query_service.search_after(
+                normalized_query,
+                after_chapter_ids=ledger.after_chapter_ids,
+                limit=50,
             )
-            return "（证据服务不可用）"
-        if not normalized_query:
-            ledger.record_tool_call(
-                tool_name="search_paragraph_evidence",
-                objective=objective,
-                request=request_payload,
-                status="empty_request",
+            ledger.authorized_after_chunks.update((item.chapter_id, item.chunk_id) for item in results)
+            payload = SearchResult(results=list(results))
+            response = payload.model_dump(mode="json")
+            ledger.record(
+                tool_name="search",
+                phase="after_open",
+                request={"query": normalized_query},
+                response=response,
             )
-            return "（检索问题为空）"
-        request = EvidenceRequest(
-            consumer="annotation_agent",
-            objective=objective,
-            mode="semantic",
-            query_text=normalized_query,
-            current_chunk=chunk_id,
-            top_k=effective_top_k,
+            return payload.model_dump_json()
+
+        result = query_service.search_continuity(
+            normalized_query,
+            hidden_case_ids=set(ledger.pulled_case_ids),
+            limit=50,
         )
+        _register_search_visibility(ledger, result)
+        response = result.model_dump(mode="json")
+        ledger.record(
+            tool_name="search",
+            phase="running_current",
+            request={"query": normalized_query},
+            response=response,
+        )
+        return result.model_dump_json()
+
+    @tool
+    def pull(ids: list[str]) -> str:
+        """2026-08-05 用于把可见活动案例加入本次运行的处理责任集合"""
+        if ledger.frozen:
+            raise AnnotationProtocolError("首次有效 finish 后不允许 pull")
+        normalized_ids = [case_id.strip() for case_id in ids]
+        if not normalized_ids or len(normalized_ids) > 50 or any(not case_id for case_id in normalized_ids):
+            raise AnnotationInputError("pull.ids 必须包含 1 至 50 个非空案例 ID")
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise AnnotationInputError("pull.ids 不允许重复")
+        already_pulled = sorted(set(normalized_ids) & set(ledger.pulled_case_ids))
+        if already_pulled:
+            raise AnnotationInputError(f"案例已经被本轮 pull: {already_pulled}")
+        invisible = sorted(set(normalized_ids) - ledger.visible_case_ids)
+        if invisible:
+            raise AnnotationAuthorizationError(f"案例 ID 未由初始候选或本轮 search 返回: {invisible}")
+        cases = query_service.fetch_active_cases(normalized_ids)
+        returned = {case.id for case in cases}
+        missing = sorted(set(normalized_ids) - returned)
+        if missing:
+            raise AnnotationInputError(f"案例不存在或已不再 active: {missing}")
+        ledger.pulled_case_ids.extend(normalized_ids)
+        result = PullResult(cases=cases)
+        response = result.model_dump(mode="json")
+        ledger.record(
+            tool_name="pull",
+            phase="running_current",
+            request={"ids": normalized_ids},
+            response=response,
+        )
+        return result.model_dump_json()
+
+    @tool
+    def push(outputs: list[PushOutput]) -> str:
+        """2026-08-05 用于把案例事实伏笔或否定结果暂存到本次运行内存"""
+        if ledger.frozen:
+            raise AnnotationProtocolError("首次有效 finish 后不允许 push")
+        request = PushRequest(outputs=outputs)
+        for output in request.outputs:
+            _validate_output_visibility(output, ledger)
+        candidate_outputs = [*ledger.staged_outputs, *request.outputs]
+        original_outputs = ledger.staged_outputs
+        ledger.staged_outputs = candidate_outputs
         try:
-            bundle = await evidence_service.collect(request)
-        except Exception as exc:
-            ledger.record_tool_call(
-                tool_name="search_paragraph_evidence",
-                objective=objective,
-                request=request_payload,
-                status="error",
-                error=str(exc),
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
-        rendered, evidence_ids = _render_historical_evidence(
-            bundle,
-            objective=objective,
-            ledger=ledger,
+            ledger.validate_staged_outputs()
+        except ValueError as exc:
+            if "未被任何 push 输出覆盖" not in str(exc):
+                ledger.staged_outputs = original_outputs
+                raise
+        result = PushResult(staged_count=len(request.outputs))
+        ledger.record(
+            tool_name="push",
+            phase="running_current",
+            request=request.model_dump(mode="json"),
+            response=result.model_dump(mode="json"),
         )
-        ledger.record_tool_call(
-            tool_name="search_paragraph_evidence",
-            objective=objective,
-            request=request_payload,
-            status="success" if rendered else "empty",
-            evidence_ids=evidence_ids,
-            duration_ms=int((time.perf_counter() - started_at) * 1000),
-        )
-        return rendered if rendered else "（未检索到历史自然段证据）"
+        return result.model_dump_json()
 
     @tool
-    def lookup_identity(name: str) -> str:
-        """
-        2026-08-02 用于查询表面称呼的规范名实体类型与当前已知规范名
-        标注人物前调用以避免把同一角色拆成多个实体
-        """
-        normalized = name.strip()
-        if not normalized:
-            return "（名字为空）"
-        canonical = memory.alias_map.get(normalized, normalized)
-        entity_type = memory.entity_types.get(canonical, "character")
-        known = sorted(memory.known_canonical_names)
-        return (
-            f"表面称呼: {normalized}\n"
-            f"规范名: {canonical}\n"
-            f"实体类型: {entity_type}\n"
-            f"已知规范名: {known}"
+    def read_chunk(chapter_id: int, chunk_id: int) -> str:
+        """2026-08-05 用于读取本轮 after search 已命中的完整后文 chunk"""
+        if not ledger.frozen:
+            raise AnnotationAuthorizationError("首次有效 finish 前不允许读取后文 chunk")
+        target = (chapter_id, chunk_id)
+        if target not in ledger.authorized_after_chunks:
+            raise AnnotationAuthorizationError(
+                f"read_chunk 目标未由本轮 after search 命中: chapter_id={chapter_id} chunk_id={chunk_id}"
+            )
+        content = query_service.read_after_chunk(
+            chapter_id=chapter_id,
+            chunk_id=chunk_id,
+            after_chapter_ids=ledger.after_chapter_ids,
         )
-
-    @tool
-    def register_identity(name: str, canonical: str, entity_type: str = "character", evidence: str = "") -> str:
-        """
-        2026-08-02 用于把当前 chunk 中已确认的表面称呼登记到规范身份
-        仅在两个称呼能够确认为同一人物时调用
-        """
-        memory.apply_decisions(
-            [
-                {
-                    "name": name,
-                    "canonical": canonical,
-                    "entity_type": entity_type,
-                    "confidence": "high",
-                    "evidence": evidence,
-                }
-            ]
-        )
-        return f"已注册身份映射: {name} -> {canonical} (entity_type={entity_type})"
-
-    @tool
-    def list_active_foreshadowing_threads() -> str:
-        """
-        2026-08-02 用于查询当前 chunk 之前可见的活跃伏笔线程及真实 setup_id
-        用于判断当前伏笔是新建线程还是强化兑现既有线程
-        """
-        if session is None or not run_id or chunk_id is None:
-            return "（伏笔线程服务不可用）"
-
-        from src.storage.repositories.annotation.foreshadowing_threads import (
-            fetch_active_foreshadowing_threads_for_prompt,
-        )
-
-        entries = fetch_active_foreshadowing_threads_for_prompt(
-            session,
-            run_id,
-            max_chunk_id=chunk_id - 1,
-        )
-        if not entries:
-            return "（无可见的活跃伏笔线程）"
-
-        lines = ["<活跃伏笔线程>"]
-        for entry in entries:
-            lines.append(
-                f"setup_id={entry.setup_id} | summary={entry.setup_summary} | "
-                f"kind={entry.setup_kind} | payoff={entry.expected_payoff_family} | "
-                f"likelihood={entry.payoff_likelihood} | status={entry.status} | "
-                f"last_chunk={entry.last_chunk_id}"
-            )
-        lines.append("</活跃伏笔线程>")
-        return "\n".join(lines)
-
-    @tool
-    async def search_paragraph_by_keywords(
-        keywords: str,
-        objective: EvidenceObjective = "identity",
-        top_k: int = 10,
-    ) -> str:
-        """
-        2026-08-03 用于通过 EvidenceService 按关键词字面匹配当前 chunk 之前的历史自然段
-        适合确认人物名事件名与专有名词的精确出处
-        """
-        started_at = time.perf_counter()
-        effective_top_k = max(1, min(top_k, 10))
-        keyword_list = [kw.strip() for kw in re.split(r"[,，\s]+", keywords) if kw.strip()]
-        request_payload = {
-            "mode": "keyword",
-            "keywords": keyword_list,
-            "objective": objective,
-            "top_k": effective_top_k,
-            "current_chunk": chunk_id,
-        }
-        if evidence_service is None:
-            ledger.record_tool_call(
-                tool_name="search_paragraph_by_keywords",
-                objective=objective,
-                request=request_payload,
-                status="unavailable",
-            )
-            return "（关键词检索不可用）"
-        if not keyword_list:
-            ledger.record_tool_call(
-                tool_name="search_paragraph_by_keywords",
-                objective=objective,
-                request=request_payload,
-                status="empty_request",
-            )
-            return "（关键词为空）"
-        request = EvidenceRequest(
-            consumer="annotation_agent",
-            objective=objective,
-            mode="keyword",
-            keywords=keyword_list,
-            current_chunk=chunk_id,
-            top_k=effective_top_k,
-        )
-        try:
-            bundle = await evidence_service.collect(request)
-        except Exception as exc:
-            ledger.record_tool_call(
-                tool_name="search_paragraph_by_keywords",
-                objective=objective,
-                request=request_payload,
-                status="error",
-                error=str(exc),
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
-        rendered, evidence_ids = _render_historical_evidence(
-            bundle,
-            objective=objective,
-            ledger=ledger,
-        )
-        if not rendered:
-            skipped_reason = bundle.generation_meta.get("historical_skipped_reason")
-            status = "unavailable" if skipped_reason == "storage_unavailable" else "empty"
-            ledger.record_tool_call(
-                tool_name="search_paragraph_by_keywords",
-                objective=objective,
-                request=request_payload,
-                status=status,
-                evidence_ids=evidence_ids,
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return "（未找到关键词匹配的段落）"
-        ledger.record_tool_call(
-            tool_name="search_paragraph_by_keywords",
-            objective=objective,
-            request=request_payload,
-            status="success",
-            evidence_ids=evidence_ids,
-            duration_ms=int((time.perf_counter() - started_at) * 1000),
-        )
-        return rendered
-
-    @tool
-    async def read_chunk(
-        chunk_id_to_read: int,
-        objective: EvidenceObjective = "identity",
-    ) -> str:
-        """
-        2026-08-03 用于通过 EvidenceService 展开已被同一检索目标定位的历史 chunk 原文
-        当前 chunk 边界和读取授权由 EvidenceService 统一校验
-        """
-        started_at = time.perf_counter()
-        request_payload = {
-            "mode": "read",
-            "chunk_id": chunk_id_to_read,
-            "objective": objective,
-            "current_chunk": chunk_id,
-        }
-        if evidence_service is None:
-            ledger.record_tool_call(
-                tool_name="read_chunk",
-                objective=objective,
-                request=request_payload,
-                status="unavailable",
-            )
-            return "（原文读取不可用）"
-        request = EvidenceRequest(
-            consumer="annotation_agent",
-            objective=objective,
-            mode="read",
-            read_chunk_id=chunk_id_to_read,
-            current_chunk=chunk_id,
-        )
-        try:
-            bundle = await evidence_service.collect(request)
-        except Exception as exc:
-            ledger.record_tool_call(
-                tool_name="read_chunk",
-                objective=objective,
-                request=request_payload,
-                status="error",
-                error=str(exc),
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
-        read_status = bundle.generation_meta.get("read_status")
-        if read_status == "blocked_by_policy":
-            ledger.record_tool_call(
-                tool_name="read_chunk",
-                objective=objective,
-                request=request_payload,
-                status="blocked_by_policy",
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return "（只能读取同一检索目标已经定位且位于当前 chunk 之前的历史原文）"
-        if read_status == "unavailable":
-            ledger.record_tool_call(
-                tool_name="read_chunk",
-                objective=objective,
-                request=request_payload,
-                status="unavailable",
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return "（原文读取不可用）"
-        if read_status == "empty":
-            ledger.record_tool_call(
-                tool_name="read_chunk",
-                objective=objective,
-                request=request_payload,
-                status="empty",
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return f"（chunk {chunk_id_to_read} 不存在）"
-        rendered, evidence_ids = _render_historical_evidence(
-            bundle,
-            objective=objective,
-            ledger=ledger,
-        )
-        if not rendered:
-            ledger.record_tool_call(
-                tool_name="read_chunk",
-                objective=objective,
-                request=request_payload,
-                status="empty",
-                evidence_ids=evidence_ids,
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return f"（chunk {chunk_id_to_read} 不存在）"
-        evidence_id = evidence_ids[0] if evidence_ids else f"chunk:{chunk_id_to_read}"
-        ledger.record_tool_call(
+        ledger.record(
             tool_name="read_chunk",
-            objective=objective,
-            request=request_payload,
-            status="success",
-            evidence_ids=evidence_ids,
-            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            phase="after_open",
+            request={"chapter_id": chapter_id, "chunk_id": chunk_id},
+            response={"content_chars": len(content)},
         )
-        content = bundle.historical_evidence[0].content
-        return f"<历史 chunk 原文 evidence_id={evidence_id}>\n{content}\n</历史 chunk 原文>"
+        return content
 
     @tool
-    def finish(annotation: MergedChunkAnnotation) -> str:
-        """
-        2026-08-03 用于首次提交当前 chunk 的完整四阶段标注与历史证据引用
-        必须在完成所需检索与身份登记后调用
-        """
-        return "OK"
+    def finish(annotation: ChapterAnnotation) -> str:
+        """2026-08-05 用于首次提交当前完整章节标注候选"""
+        return "由 annotation 专用 LangGraph 校验"
 
     @tool
-    def revise_finish(correction: MergedChunkAnnotationPatch) -> str:
-        """
-        2026-08-03 用于校验失败后只提交需要修改的顶层字段
-        仅在收到 finish 校验错误后调用且无需重复提交完整四阶段结果
-        """
-        return "OK"
+    def revise_finish(correction: ChapterAnnotationPatch) -> str:
+        """2026-08-05 用于只提交相对当前候选实际变化的章节字段"""
+        return "由 annotation 专用 LangGraph 合并并校验"
 
-    return [
-        lookup_identity,
-        register_identity,
-        lookup_authority_facts,
-        list_recent_context,
-        search_paragraph_evidence,
-        search_paragraph_by_keywords,
-        read_chunk,
-        list_active_foreshadowing_threads,
-        finish,
-        revise_finish,
-    ]
+    return [search, pull, push, read_chunk, finish, revise_finish]

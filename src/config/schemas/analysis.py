@@ -60,9 +60,8 @@ class AnnotationAgentSettings:
     """标注 Agent 配置"""
 
     max_iterations: int = 10
-    max_sub_agents: int = 8
-    sub_chunk_max_chars: int = 2000
-    identity_lookback: int = 50
+    total_attempts: int = 3
+    retry_backoff_seconds: tuple[float, ...] = (1.0, 2.0)
     active_setup_pool_limit: int = 30
 
 
@@ -87,13 +86,10 @@ class AnalysisSettings:
     分析配置
     """
 
-    checkpoint_interval: int = 1
-    projection_interval: int = 1
     analysis_log_rotation: str = "10 MB"
     analysis_log_retention: str = "30 days"
     sentence_preview_max_chars: int = 100
     sentence_pool_max_chars: int = 80
-    annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     agents: AgentSettings = field(default_factory=AgentSettings)
     valid_relation_types: list[str] = field(
@@ -285,12 +281,15 @@ def _parse_agent_settings(data: dict[str, Any] | None) -> AgentSettings:
         return AgentSettings()
     annotation_data = data.get("annotation", {}) or {}
     diagnosis_data = data.get("diagnosis", {}) or {}
+    retry_backoff_seconds = tuple(
+        float(value)
+        for value in annotation_data.get("retry_backoff_seconds", [1, 2])
+    )
     return AgentSettings(
         annotation=AnnotationAgentSettings(
             max_iterations=annotation_data.get("max_iterations", 10),
-            max_sub_agents=annotation_data.get("max_sub_agents", 8),
-            sub_chunk_max_chars=annotation_data.get("sub_chunk_max_chars", 2000),
-            identity_lookback=annotation_data.get("identity_lookback", 50),
+            total_attempts=annotation_data.get("total_attempts", 3),
+            retry_backoff_seconds=retry_backoff_seconds,
             active_setup_pool_limit=annotation_data.get("active_setup_pool_limit", 30),
         ),
         diagnosis=DiagnosisAgentSettings(
@@ -306,13 +305,10 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
     if not data:
         return AnalysisSettings()
     return AnalysisSettings(
-        checkpoint_interval=data.get("checkpoint_interval", 1),
-        projection_interval=data.get("projection_interval", 1),
         analysis_log_rotation=data.get("analysis_log_rotation", "10 MB"),
         analysis_log_retention=data.get("analysis_log_retention", "30 days"),
         sentence_preview_max_chars=data.get("sentence_preview_max_chars", 100),
         sentence_pool_max_chars=data.get("sentence_pool_max_chars", 80),
-        annotation_fallback_enabled=data.get("annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
         agents=_parse_agent_settings(data.get("agents")),
         valid_relation_types=data.get(

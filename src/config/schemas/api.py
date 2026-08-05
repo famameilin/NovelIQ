@@ -184,9 +184,6 @@ class PromptSettings:
     phase2: Phase2Prompts = field(default_factory=Phase2Prompts)
     phase3: Phase3Prompts = field(default_factory=Phase3Prompts)
     phase4: Phase4Prompts = field(default_factory=Phase4Prompts)
-    disambiguate: str = ""
-    reselect_canonical: str = ""
-    anonymous_disambig: str = ""
     diagnose: str = ""
 
 
@@ -308,8 +305,5 @@ def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
         phase2=_load_phase2_prompts(),
         phase3=_load_phase3_prompts(),
         phase4=_load_phase4_prompts(),
-        disambiguate=load_prompt_from_file("disambiguate"),
-        reselect_canonical=load_prompt_from_file("reselect_canonical"),
-        anonymous_disambig=load_prompt_from_file("anonymous_disambig"),
         diagnose=load_prompt_from_file("diagnose"),
     )

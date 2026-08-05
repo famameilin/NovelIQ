@@ -1,30 +1,39 @@
 """
-Agent 能力包（LangGraph）
-
-- annotation: 标注 Agent（阶段 1-4 合并 + 身份消歧集成进循环 + 超长章节子代理分派）
-- diagnosis: 诊断 Agent（工具化自主取证）
+LangGraph Agent 公共惰性入口
 """
 
-from .annotation import (
-    AnnotationAgentRunError,
-    AnnotationChunkResult,
-    IdentityMemory,
-    load_identity_memory,
-    run_annotation_agent,
-    save_identity_memory,
-)
-from .diagnosis import (
-    DiagnosisAgentRunError,
-    run_diagnosis_agent,
-)
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
+
+_ANNOTATION_EXPORTS = {
+    "AgentRunResult",
+    "AnnotationAgentRunError",
+    "ChapterAnnotation",
+    "CompletionResult",
+    "run_annotation_agent",
+}
+_DIAGNOSIS_EXPORTS = {
+    "DiagnosisAgentRunError",
+    "run_diagnosis_agent",
+}
 
 __all__ = [
+    "AgentRunResult",
     "AnnotationAgentRunError",
-    "AnnotationChunkResult",
+    "ChapterAnnotation",
+    "CompletionResult",
     "DiagnosisAgentRunError",
-    "IdentityMemory",
-    "load_identity_memory",
     "run_annotation_agent",
     "run_diagnosis_agent",
-    "save_identity_memory",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """2026-08-05 用于按需加载 Agent 公共出口并避免存储层导入形成环"""
+    if name in _ANNOTATION_EXPORTS:
+        return getattr(import_module("src.agents.annotation"), name)
+    if name in _DIAGNOSIS_EXPORTS:
+        return getattr(import_module("src.agents.diagnosis"), name)
+    raise AttributeError(f"module 'src.agents' has no attribute {name!r}")

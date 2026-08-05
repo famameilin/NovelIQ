@@ -53,7 +53,6 @@ class ModelsSettings:
     """
 
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
-    annotation_fallback: TaskModelSettings = field(default_factory=TaskModelSettings)
     paragraph_embedding: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
     diagnosis: TaskModelSettings = field(default_factory=TaskModelSettings)
 
@@ -65,7 +64,6 @@ class ThinkingSettings:
     """
 
     annotation: bool = False
-    annotation_fallback: bool = True
     diagnosis: bool = True
 
     def validate(self) -> None:
@@ -80,7 +78,6 @@ class StreamingSettings:
     """
 
     annotation: bool = False
-    annotation_fallback: bool = True
     diagnosis: bool = True
     cloud_only: bool = True  # 是否仅在云端模型启用流式模式
 
@@ -99,7 +96,6 @@ class StructuredOutputSettings:
     """
 
     annotation: str = "json_schema"
-    annotation_fallback: str = "json_object"
     diagnosis: str = "json_schema"
     provider_overrides: dict[str, str] = field(default_factory=lambda: {"deepseek": "json_object"})
 
@@ -138,11 +134,6 @@ def _parse_structured_output_settings(data: dict[str, Any] | None) -> Structured
         normalized_provider_overrides[marker_text] = str(mode)
     return StructuredOutputSettings(
         annotation=_parse_structured_output_mode(json_data, "annotation", defaults.annotation),
-        annotation_fallback=_parse_structured_output_mode(
-            json_data,
-            "annotation_fallback",
-            defaults.annotation_fallback,
-        ),
         diagnosis=_parse_structured_output_mode(json_data, "diagnosis", defaults.diagnosis),
         provider_overrides=normalized_provider_overrides,
     )
@@ -249,7 +240,6 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
         data = {}
     return ModelsSettings(
         annotation=_parse_task_model_settings(data.get("annotation")),
-        annotation_fallback=_parse_task_model_settings(data.get("annotation_fallback")),
         paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding")),
         diagnosis=_parse_task_model_settings(data.get("diagnosis")),
     )
@@ -267,7 +257,6 @@ def apply_model_environment(
     model_base_url = _normalize_model_base_url_for_docker(model_environment.base_url)
     for task_settings in (
         settings.annotation,
-        settings.annotation_fallback,
         settings.diagnosis,
     ):
         task_settings.base_url = model_base_url
@@ -289,7 +278,6 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
         raise ValueError("thinking 配置不能为空，请检查 config/settings.json 中的 thinking 配置项")
     settings = ThinkingSettings(
         annotation=data.get("annotation", False),
-        annotation_fallback=data.get("annotation_fallback", True),
         diagnosis=data.get("diagnosis", True),
     )
     settings.validate()
@@ -304,7 +292,6 @@ def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:
         return StreamingSettings()
     return StreamingSettings(
         annotation=data.get("annotation", False),
-        annotation_fallback=data.get("annotation_fallback", True),
         diagnosis=data.get("diagnosis", True),
         cloud_only=data.get("cloud_only", True),
     )

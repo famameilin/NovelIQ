@@ -1,3 +1,5 @@
+"""旧分块标注与消歧本地模型归档"""
+
 from __future__ import annotations
 
 from typing import Literal
