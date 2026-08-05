@@ -87,17 +87,11 @@ async def run_preprocess(
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
 
-    configured_sub_chunk_max = settings.analysis.agents.annotation.sub_chunk_max_chars
-    effective_max_chars = (
-        min(max_chars, configured_sub_chunk_max)
-        if configured_sub_chunk_max > 0
-        else max_chars
-    )
-    effective_overlap = min(overlap, max(0, effective_max_chars - 1))
+    effective_overlap = min(overlap, max(0, max_chars - 1))
 
     all_chunks = await chunk_documents(
         normalized_texts,
-        max_chars=effective_max_chars,
+        max_chars=max_chars,
         overlap=effective_overlap,
         split_by_chapter=settings.chunking.split_by_chapter,
         emitter=emitter,

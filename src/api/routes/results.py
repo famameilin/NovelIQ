@@ -297,7 +297,6 @@ async def get_chunk_annotations(
         run_id,
         annotation_repo,
         alias_map,
-        require_graph_projection=False,
     )
 
 

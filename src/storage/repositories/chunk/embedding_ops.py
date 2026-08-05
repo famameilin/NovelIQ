@@ -21,7 +21,7 @@ from datetime import datetime
 from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding, ParagraphEmbedding
+from src.storage.models import Chunk, ChunkEmbedding, ParagraphEmbedding
 
 
 @dataclass(frozen=True)
@@ -272,15 +272,10 @@ def search_similar_chunks(
             ChunkEmbedding.chunk_id.label("chunk_id"),
             Chunk.text.label("text"),
             ChunkEmbedding.embedding_vector.label("embedding_vector"),
-            ChunkAnnotation.emotional_valence.label("emotional_valence"),
         )
         .join(
             Chunk,
             (ChunkEmbedding.chunk_id == Chunk.chunk_id) & (ChunkEmbedding.run_id == Chunk.run_id),
-        )
-        .outerjoin(
-            ChunkAnnotation,
-            (ChunkAnnotation.chunk_id == Chunk.chunk_id) & (ChunkAnnotation.run_id == Chunk.run_id),
         )
         .where(
             ChunkEmbedding.run_id == run_id,
@@ -301,7 +296,6 @@ def search_similar_chunks(
         select(
             run_scoped_chunks_subquery.c.chunk_id,
             run_scoped_chunks_subquery.c.text,
-            run_scoped_chunks_subquery.c.emotional_valence,
             similarity,
         )
         .where(similarity >= similarity_threshold)
@@ -310,6 +304,12 @@ def search_similar_chunks(
     )
 
     rows = session.execute(stmt).all()
+    from src.storage.repositories.annotation import AnnotationRepository
+
+    emotional_valence_by_chunk = {
+        row.chunk_id: row.emotional_valence
+        for row in AnnotationRepository(session).fetch_chunk_annotations_full(run_id)
+    }
 
     similar_chunks: list[SimilarChunkRow] = []
     for row in rows:
@@ -317,7 +317,7 @@ def search_similar_chunks(
             SimilarChunkRow(
                 chunk_id=int(row.chunk_id),
                 text=str(row.text),
-                emotional_valence=str(row.emotional_valence) if row.emotional_valence is not None else None,
+                emotional_valence=emotional_valence_by_chunk.get(int(row.chunk_id)),
                 similarity=float(row.similarity),
                 chunk_semantic_score=float(row.similarity),
                 final_rank_score=float(row.similarity),

@@ -2,9 +2,9 @@
 为结果展示层构建 AI 主导、词汇/语气/风格辅助的情绪曲线
 
 本模块不改写 chunk_curves 表中的词汇曲线存储，只负责把已有的：
-- chunk_annotation.emotional_valence
+- chapter_annotations.payload.segments 中的 emotional_valence
 - chunk_curves 词汇情绪密度
-- chunk_dialogues.tone
+- graph_facts 对话事实中的 tone
 - chunk_style 风格信号
 
 融合为面向前端单曲线展示的最终情绪走势

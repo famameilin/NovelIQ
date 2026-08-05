@@ -378,7 +378,7 @@ async def run_aggregate(
     chunk_annotations = ann_repo.fetch_chunk_annotations(run_id)
     chunk_styles = chunk_repo.fetch_chunk_styles(run_id)
 
-    annotation_map = {
+    annotation_map: dict[int, dict[str, str | int | None]] = {
         row.chunk_id: {"event_type": row.event_type, "cliffhanger": row.cliffhanger} for row in chunk_annotations
     }
     style_map = {

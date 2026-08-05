@@ -1,105 +1,48 @@
 """
-诊断数据 Repository 实现，管理诊断分析相关的数据查询和存储
-
-从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
+诊断阶段最新事实源仓储
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.models.local.character_reference_policy import filter_global_character_names
-from src.storage.models import (
-    Chunk,
-    ChunkAnnotation,
-    ChunkCurve,
-    ChunkTopic,
-    StageSummary,
-)
-from src.storage.models.core import DisambigCheckpoint
-from src.storage.repositories.annotation import foreshadowing_threads as foreshadowing_thread_repo
+from src.storage.models import Chunk, ChunkCurve, ChunkTopic, StageSummary
+from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph import GraphRepository
 
 
 class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
-    """
-    诊断数据 Repository
-
-    管理诊断分析相关的数据查询和存储，包括转折点、高张力分块、
-    关系变更、伏笔分块、实体快照等数据操作
-
-    从 sqlite3.Connection 迁移到 SQLAlchemy Session
-    """
+    """2026-08-05 用于向诊断 Agent 提供章节标注与数据库图事实"""
 
     def __init__(self, session: Session):
-        """
-        初始化 DiagnosisRepository
-
-        Args:
-            session: SQLAlchemy Session 实例
-        """
+        """2026-08-05 用于初始化诊断事实查询仓储"""
         super().__init__(session)
 
+    def _chunk_text_by_id(self, run_id: str) -> dict[int, str]:
+        """2026-08-05 用于构建诊断素材的 chunk 原文映射"""
+        stmt = select(Chunk.chunk_id, Chunk.text).where(Chunk.run_id == run_id)
+        return {int(row.chunk_id): str(row.text) for row in self.session.execute(stmt).all()}
+
     def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
-        """
-        获取转折点分块
-
-        Args:
-            run_id: 运行ID
-            limit: 返回数量限制
-
-        Returns:
-            (chunk_id, text, event_type) 元组列表
-        """
-        if limit is None:
-            limit = settings.diagnosis.pivot_blocks_limit
-
-        stmt = (
-            select(Chunk.chunk_id, Chunk.text, ChunkAnnotation.event_type)
-            .select_from(Chunk)
-            .join(
-                ChunkAnnotation,
-                and_(
-                    Chunk.chunk_id == ChunkAnnotation.chunk_id,
-                    Chunk.run_id == ChunkAnnotation.run_id,
-                ),
-            )
-            .where(
-                and_(
-                    ChunkAnnotation.pivot_moment == 1,
-                    ChunkAnnotation.run_id == run_id,
-                    Chunk.run_id == run_id,
-                )
-            )
-            .order_by(Chunk.chunk_id)
-            .limit(limit)
-        )
-
-        result = self.session.execute(stmt)
-        return [(row.chunk_id, row.text, row.event_type) for row in result]
+        """2026-08-05 用于从章节 segments 读取转折点原文素材"""
+        row_limit = limit if limit is not None else settings.diagnosis.pivot_blocks_limit
+        text_by_chunk = self._chunk_text_by_id(run_id)
+        rows = [
+            (row.chunk_id, text_by_chunk.get(row.chunk_id, ""), row.event_type)
+            for row in AnnotationRepository(self.session).fetch_chunk_annotations_full(run_id)
+            if row.pivot_moment
+        ]
+        return rows[:row_limit]
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
-        """
-        获取高张力分块
-
-        Args:
-            run_id: 运行ID
-            limit: 返回数量限制
-
-        Returns:
-            (chunk_id, text, tension) 元组列表
-        """
-        if limit is None:
-            limit = settings.diagnosis.high_tension_limit
-
+        """2026-08-05 用于读取高张力 chunk 原文与曲线值"""
+        row_limit = limit if limit is not None else settings.diagnosis.high_tension_limit
         tension_expr = func.abs(ChunkCurve.net_density).label("tension")
-
         stmt = (
             select(Chunk.chunk_id, Chunk.text, tension_expr)
             .select_from(Chunk)
@@ -111,39 +54,21 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 ),
             )
             .where(
-                and_(
-                    func.abs(ChunkCurve.net_density) > 0.01,
-                    ChunkCurve.run_id == run_id,
-                    Chunk.run_id == run_id,
-                )
+                func.abs(ChunkCurve.net_density) > 0.01,
+                ChunkCurve.run_id == run_id,
+                Chunk.run_id == run_id,
             )
             .order_by(tension_expr.desc())
-            .limit(limit)
+            .limit(row_limit)
         )
-
-        result = self.session.execute(stmt)
-        return [(row.chunk_id, row.text, row.tension) for row in result]
+        return [
+            (int(row.chunk_id), str(row.text), float(row.tension))
+            for row in self.session.execute(stmt)
+        ]
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: diagnosis payload 的关系变更必须复用 graph history 主链过滤，排除 synthetic final_disambiguation
-                 和未解析代词端点事件，避免 diagnosis 与 graph page 读到不同历史面。
-
-        获取关系变更记录
-
-        Args:
-            run_id: 运行ID
-            limit: 返回数量限制
-
-        Returns:
-            (chunk_id, from_char, to_char, type, change) 元组列表
-        """
-        if limit is None:
-            limit = settings.diagnosis.relation_changes_limit
-
-        relation_events = GraphRepository(self.session).fetch_relation_events(run_id, limit=limit, offset=0)
+        """2026-08-05 用于从关系 GraphFact 历史读取诊断素材"""
+        row_limit = limit if limit is not None else settings.diagnosis.relation_changes_limit
         return [
             (
                 event.chunk_id,
@@ -152,124 +77,44 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 event.relation_type,
                 event.change_type,
             )
-            for event in relation_events
+            for event in GraphRepository(self.session).fetch_relation_events(run_id, limit=row_limit)
         ]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
-        """
-        获取伏笔分块
-
-        Args:
-            run_id: 运行ID
-            limit: 返回数量限制
-
-        Returns:
-            (chunk_id, text, foreshadowing_type, foreshadowing_desc) 元组列表
-        """
-        if limit is None:
-            limit = settings.diagnosis.foreshadowing_limit
-
-        stmt = (
-            select(
-                Chunk.chunk_id,
-                Chunk.text,
-                ChunkAnnotation.foreshadowing_type,
-                ChunkAnnotation.foreshadowing_desc,
-            )
-            .select_from(Chunk)
-            .join(
-                ChunkAnnotation,
-                and_(
-                    Chunk.chunk_id == ChunkAnnotation.chunk_id,
-                    Chunk.run_id == ChunkAnnotation.run_id,
-                ),
-            )
-            .where(
-                and_(
-                    ChunkAnnotation.has_foreshadowing == 1,
-                    ChunkAnnotation.run_id == run_id,
-                    Chunk.run_id == run_id,
+        """2026-08-05 用于从伏笔 thread 与 hit 读取 chunk 级诊断素材"""
+        row_limit = limit if limit is not None else settings.diagnosis.foreshadowing_limit
+        text_by_chunk = self._chunk_text_by_id(run_id)
+        rows: list[tuple[int, str, str, str]] = []
+        for thread in AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id):
+            for chunk_id in thread.anchor_chunk_ids:
+                rows.append(
+                    (
+                        chunk_id,
+                        text_by_chunk.get(chunk_id, ""),
+                        thread.setup_kind,
+                        thread.setup_summary,
+                    )
                 )
-            )
-            .order_by(Chunk.chunk_id)
-            .limit(limit)
-        )
+        return sorted(rows, key=lambda row: row[0])[:row_limit]
 
-        result = self.session.execute(stmt)
-        return [(row.chunk_id, row.text, row.foreshadowing_type, row.foreshadowing_desc) for row in result]
-
-    def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_thread_repo.ForeshadowingThreadView]:
-        """
-        获取 setup thread ledger 视图
-
-        diagnosis 主链改为直接消费 setup ledger，不能继续停留在 chunk 级 foreshadowing_list
-        """
-
-        return foreshadowing_thread_repo.fetch_foreshadowing_threads(self.session, run_id)
+    def fetch_foreshadowing_threads(self, run_id: str) -> list[ForeshadowingThreadView]:
+        """2026-08-05 用于读取伏笔线程最新汇总视图"""
+        return AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id)
 
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
-        """
-        基于 setup thread ledger 计算伏笔回收预期
-
-        diagnosis payload 现在要把 ledger 的正式 expectation 作为单一真相源传入模型
-        """
-
-        return foreshadowing_thread_repo.calculate_foreshadow_expectation(self.session, run_id)
+        """2026-08-05 用于读取伏笔线程生命周期聚合预期"""
+        return AnnotationRepository(self.session).calculate_foreshadow_expectation(run_id)
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
-        """
-        获取高潮时刻
-
-        Args:
-            run_id: 运行ID
-            limit: 返回数量限制
-
-        Returns:
-            (chunk_id, text) 元组列表
-        """
-        if limit is None:
-            limit = settings.diagnosis.pivot_moments_limit
-
-        stmt = (
-            select(Chunk.chunk_id, Chunk.text)
-            .select_from(Chunk)
-            .join(
-                ChunkAnnotation,
-                and_(
-                    Chunk.chunk_id == ChunkAnnotation.chunk_id,
-                    Chunk.run_id == ChunkAnnotation.run_id,
-                ),
-            )
-            .where(
-                and_(
-                    ChunkAnnotation.event_type == "高潮",
-                    ChunkAnnotation.run_id == run_id,
-                    Chunk.run_id == run_id,
-                )
-            )
-            .order_by(Chunk.chunk_id)
-            .limit(limit)
-        )
-
-        result = self.session.execute(stmt)
-        return [(row.chunk_id, row.text) for row in result]
+        """2026-08-05 用于读取章节 segments 中的转折时刻"""
+        return [
+            (chunk_id, text)
+            for chunk_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)
+        ]
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
-        """
-        获取主题词
-
-        从 payload.py 迁移，获取按权重排序的主题词列表
-
-        Args:
-            run_id: 运行ID
-            top_n: 返回数量限制
-
-        Returns:
-            包含 topic_id 和 weight 的字典列表
-        """
-        if top_n is None:
-            top_n = settings.diagnosis.topic_words_top_n
-
+        """2026-08-05 用于读取按累计权重排序的主题词"""
+        row_limit = top_n if top_n is not None else settings.diagnosis.topic_words_top_n
         stmt = (
             select(
                 ChunkTopic.topic_id,
@@ -279,103 +124,31 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .group_by(ChunkTopic.topic_id)
             .order_by(func.sum(ChunkTopic.topic_weight).desc())
         )
-
-        result = self.session.execute(stmt)
-        rows = result.fetchall()[:top_n]
         return [
             {
                 "topic_id": row.topic_id,
                 "weight": round(row.total_weight, 4) if row.total_weight else 0.0,
             }
-            for row in rows
+            for row in self.session.execute(stmt).all()[:row_limit]
         ]
 
     def fetch_character_disambig_data(self, run_id: str) -> tuple[list[str], dict[str, str]]:
-        """
-        获取当前身份记忆中的规范人物与别名映射
-
-        禁止静默吞异常，数据格式错误时抛出 ValueError
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            (known_characters, alias_merges):
-                known_characters: 规范角色名列表
-                alias_merges: 别名到规范名的映射（只包含 alias != canonical）
-
-        Raises:
-            ValueError: checkpoint 数据格式无效
-        """
-        if not run_id:
-            return [], {}
-
-        stmt = select(DisambigCheckpoint.state_json).where(DisambigCheckpoint.run_id == run_id)
-
-        result = self.session.execute(stmt).fetchone()
-
-        if not result or not result.state_json:
-            return [], {}
-
-        raw_data = json.loads(result.state_json)
-        if not isinstance(raw_data, dict):
-            raise ValueError(
-                f"Invalid checkpoint data format for run_id={run_id}: expected dict, got {type(raw_data).__name__}"
-            )
-
-        known_canonical_names = raw_data.get("known_canonical_names")
-        alias_map = raw_data.get("alias_map")
-
-        if known_canonical_names is None or alias_map is None:
-            raise ValueError(
-                f"Missing required fields in checkpoint data for run_id={run_id}: "
-                "'known_canonical_names' and 'alias_map'"
-            )
-
-        if known_canonical_names is not None and not isinstance(known_canonical_names, list):
-            raise ValueError(
-                f"Invalid 'known_canonical_names' format for run_id={run_id}: "
-                f"expected list, got {type(known_canonical_names).__name__}"
-            )
-
-        if alias_map is not None and not isinstance(alias_map, dict):
-            raise ValueError(
-                f"Invalid 'alias_map' format for run_id={run_id}: "
-                f"expected dict, got {type(alias_map).__name__}"
-            )
-
-        known_filtered = filter_global_character_names(
-            [str(name) for name in (known_canonical_names or []) if isinstance(name, str)]
+        """2026-08-05 用于从数据库图实体与别名读取诊断人物合同"""
+        graph_repo = GraphRepository(self.session)
+        known_characters = sorted(
+            entity.canonical_name
+            for entity in graph_repo.fetch_entities(run_id, entity_type="character")
         )
-        known_set = set(known_filtered)
-        alias_merges_dict: dict[str, str] = {}
-        for alias, canonical in (alias_map or {}).items():
-            if not isinstance(alias, str) or not isinstance(canonical, str) or alias == canonical:
-                continue
-            resolved = filter_global_character_names([canonical])
-            if not resolved:
-                continue
-            canonical_name = resolved[0]
-            if canonical_name not in known_set:
-                continue
-            # 未解析代词 alias 不能继续发给 diagnosis，即便 canonical 是合法角色。
-            if not filter_global_character_names([alias]):
-                continue
-            alias_merges_dict[str(alias)] = canonical_name
-        return known_filtered, alias_merges_dict
+        known_character_set = set(known_characters)
+        alias_merges = {
+            alias: canonical
+            for alias, canonical in graph_repo.fetch_alias_map(run_id).items()
+            if alias != canonical and canonical in known_character_set
+        }
+        return known_characters, alias_merges
 
     def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
-        """
-        获取所有阶段性摘要
-
-        从 stage_summaries 表读取所有阶段性摘要，用于云端诊断
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            包含 start_chunk_id, end_chunk_id, summary 的字典列表
-        """
+        """2026-08-05 用于读取仍由诊断消费的阶段摘要记录"""
         stmt = (
             select(
                 StageSummary.start_chunk_id,
@@ -385,13 +158,12 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .where(StageSummary.run_id == run_id)
             .order_by(StageSummary.start_chunk_id)
         )
-        result = self.session.execute(stmt)
         return [
             {
                 "start_chunk_id": row.start_chunk_id,
                 "end_chunk_id": row.end_chunk_id,
                 "summary": row.summary,
             }
-            for row in result
+            for row in self.session.execute(stmt)
             if row.summary
         ]
