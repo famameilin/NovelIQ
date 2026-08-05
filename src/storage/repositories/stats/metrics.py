@@ -127,7 +127,7 @@ def insert_token_usage(
         run_id=run_id,
     )
     session.add(token_usage)
-    session.commit()
+    session.flush()
     return token_usage.id
 
 
@@ -221,9 +221,7 @@ def _build_call_type_key(task_type: str, call_type: str) -> str:
 
 
 def _normalize_token_usage_task_type(task_type: str) -> str:
-    """归一 token_usage 的任务类型桶。annotation_fallback 对外仍归并到 annotation"""
-    if task_type == "annotation_fallback":
-        return "annotation"
+    """2026-08-05 用于返回最新主链唯一的 Token 任务类型"""
     return task_type
 
 

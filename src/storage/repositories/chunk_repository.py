@@ -106,7 +106,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             )
         self.session.bulk_save_objects(models)
 
-    def fetch_chunks_with_chapter(self, run_id: str) -> list[tuple[int, int | None, str]]:
+    def fetch_chunks_with_chapter(self, run_id: str) -> list[tuple[int, int, str]]:
         """
         2026-08-02 用于按原始顺序读取标注 dispatcher 所需的 chunk 章节与文本
         """

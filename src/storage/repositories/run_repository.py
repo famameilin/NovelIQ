@@ -12,9 +12,9 @@ from datetime import UTC, datetime
 from typing import Any, TypeGuard, TypeVar
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import delete, inspect, select
 
-from src.storage.models import AnalysisRun
+from src.storage.models import AnalysisRun, Base
 
 from .base import BaseRepository
 
@@ -34,43 +34,10 @@ def _is_set[T](value: T | object) -> TypeGuard[T]:
 class RunRepository(BaseRepository[dict[str, Any]]):
     """运行记录数据访问层
 
-
-    增加 TASK_RELATED_TABLES 常量，统一维护删除任务时需清理的从表清单
-
     管理分析运行的创建、查询和状态更新
     使用 AnalysisRun ORM 模型
     从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
-
-    # 任务关联表清单，删除任务时需清理的从表
-    # 维护须知：新增 run 关联表时请同步更新此列表，避免删除时遗漏产生孤儿数据
-    TASK_RELATED_TABLES: list[str] = [
-        "stage_summaries",
-        "token_usage",
-        "model_interactions",
-        "chunk_summaries",
-        "chunk_curves",
-        "global_stats",
-        "global_context",
-        "chunk_annotation",
-        "chunk_characters",
-        "chunk_dialogues",
-        "chunk_foreshadowing",
-        "chunk_locations",
-        "chunk_relations",
-        "chunk_style",
-        "chunk_topics",
-        "chunks",
-        "character_appearances",
-        "graph_entity_aliases",
-        "graph_entity_participants",
-        "graph_relation_events",
-        "graph_relations_current",
-        "graph_entities",
-        "disambig_checkpoint",
-        "cloud_analysis",
-        "analysis_runs",
-    ]
 
     def _serialize_request_payload(self, request_payload: dict[str, Any] | None) -> str | None:
         """
@@ -516,26 +483,20 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         return self._to_dict(run)
 
     def delete_run(self, run_id: str) -> bool:
-        """
-        删除运行记录及相关数据
+        """2026-08-05 用于按当前 ORM 外键逆序删除运行数据并由调用方统一提交"""
+        exists_stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id == run_id)
+        if self.session.execute(exists_stmt).scalar_one_or_none() is None:
+            return False
 
-
-        修正表名列表以匹配实际数据库架构
-
-        使用 TASK_RELATED_TABLES 常量替代内联表名列表，便于统一维护
-        """
-        from sqlalchemy import text
-
-        for table in self.TASK_RELATED_TABLES:
-            try:
-                self.session.execute(text(f"DELETE FROM {table} WHERE run_id = :run_id"), {"run_id": run_id})
-            except Exception as e:
-                if "relation" in str(e).lower() or "column" in str(e).lower():
-                    pass
-                else:
-                    logger.warning(f"Failed to delete from {table}: {e}")
-
-        self.session.commit()
+        existing_table_names = set(inspect(self.session.get_bind()).get_table_names())
+        for table in reversed(Base.metadata.sorted_tables):
+            if table.name not in existing_table_names:
+                continue
+            run_id_column = table.c.get("run_id")
+            if run_id_column is None:
+                continue
+            self.session.execute(delete(table).where(run_id_column == run_id))
+        self.session.flush()
         return True
 
     def count_distinct_novels(self) -> int:

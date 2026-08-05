@@ -33,7 +33,7 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     char_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     char_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
