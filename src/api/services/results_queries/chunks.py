@@ -12,7 +12,6 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.exceptions import GraphReadinessError
 from src.api.models.responses import (
     ChunkAnnotation,
     ChunkCharacter,
@@ -101,7 +100,6 @@ def _fetch_chunk_annotations(
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
-    require_graph_projection: bool = True,
 ) -> list:
     """
     修改时间: 2026-04-29
@@ -116,30 +114,16 @@ def _fetch_chunk_annotations(
 
     if export_graph_view is None:
         authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-        if require_graph_projection:
-            export_graph_view = authority_service.build_export_view(run_id)
-        else:
-            try:
-                export_graph_view = authority_service.build_export_view(run_id)
-            except GraphReadinessError:
-                export_graph_view = ExportGraphAuthorityView()
-
-    if require_graph_projection and not export_graph_view.relation_events:
-        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-        if pending_relations:
-            raise RuntimeError(
-                "graph relation events are empty while pending relations still exist; "
-                "run graph projection before exporting results."
-            )
+        export_graph_view = authority_service.build_export_view(run_id)
 
     characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
-    for row in characters_raw:
-        chunk_id = row.chunk_id
-        raw_name = str(getattr(row, "surface_name", None) or row.name)
+    for character_row in characters_raw:
+        chunk_id = character_row.chunk_id
+        raw_name = str(getattr(character_row, "surface_name", None) or character_row.name)
         decision = decide_character_reference(
             raw_name,
             alias_map=alias_map,
-            resolved_global_name=getattr(row, "resolved_global_name", None),
+            resolved_global_name=getattr(character_row, "resolved_global_name", None),
         )
         character_name = decision.resolved_global_name
         if character_name is None:
@@ -152,13 +136,13 @@ def _fetch_chunk_annotations(
             ChunkCharacter(
                 name=character_name,
                 surface_name=raw_name,
-                reference_kind=getattr(row, "reference_kind", None) or decision.reference_kind,
-                reference_slot=getattr(row, "reference_slot", None) or decision.reference_slot,
+                reference_kind=getattr(character_row, "reference_kind", None) or decision.reference_kind,
+                reference_slot=getattr(character_row, "reference_slot", None) or decision.reference_slot,
                 resolved_global_name=character_name,
                 global_skip_reason=decision.global_skip_reason,
-                role_function=str(row.role_function) if row.role_function else None,
-                action=str(row.action) if row.action else None,
-                emotion_score=str(row.emotion_score) if row.emotion_score else None,
+                role_function=str(character_row.role_function) if character_row.role_function else None,
+                action=str(character_row.action) if character_row.action else None,
+                emotion_score=str(character_row.emotion_score) if character_row.emotion_score else None,
             )
         )
 
@@ -192,14 +176,14 @@ def _fetch_chunk_annotations(
         )
 
     dialogues_by_chunk: dict[int, list[ChunkDialogue]] = defaultdict(list)
-    for row in dialogues_raw:
-        chunk_id = row.chunk_id
-        speakers = row.speaker or []
+    for dialogue_row in dialogues_raw:
+        chunk_id = dialogue_row.chunk_id
+        speakers = dialogue_row.speaker or []
         if not speakers:
             continue
         valid_speakers = []
         speaker_reference_by_surface: dict[str, dict[str, Any]] = {}
-        for item in getattr(row, "speaker_references", None) or []:
+        for item in getattr(dialogue_row, "speaker_references", None) or []:
             if not isinstance(item, dict):
                 continue
             surface_name = str(item.get("surface_name") or "").strip()
@@ -242,39 +226,69 @@ def _fetch_chunk_annotations(
             ChunkDialogue(
                 speaker=valid_speakers,
                 speaker_references=speaker_references,
-                length=int(row.length) if row.length is not None else None,
+                length=int(dialogue_row.length) if dialogue_row.length is not None else None,
             )
         )
 
     result: list[ChunkAnnotation] = []
-    for row in annotations_raw:
-        chunk_id = int(row.chunk_id)
+    for annotation_row in annotations_raw:
+        chunk_id = int(annotation_row.chunk_id)
         result.append(
             ChunkAnnotation(
                 chunk_id=chunk_id,
-                emotional_valence=str(row.emotional_valence) if row.emotional_valence else None,
-                event_type=str(row.event_type) if row.event_type else None,
-                pivot_moment=bool(row.pivot_moment) if row.pivot_moment is not None else None,
-                cliffhanger=bool(row.cliffhanger) if row.cliffhanger is not None else None,
-                has_foreshadowing=bool(row.has_foreshadowing) if row.has_foreshadowing is not None else None,
-                is_strong_setup=(
-                    bool(row.is_strong_setup) if getattr(row, "is_strong_setup", None) is not None else None
+                emotional_valence=(
+                    str(annotation_row.emotional_valence) if annotation_row.emotional_valence else None
                 ),
-                foreshadowing_type=str(row.foreshadowing_type) if row.foreshadowing_type else None,
-                setup_kind=str(row.setup_kind) if getattr(row, "setup_kind", None) else None,
-                foreshadowing_desc=str(row.foreshadowing_desc) if row.foreshadowing_desc else None,
-                setup_summary=str(row.setup_summary) if getattr(row, "setup_summary", None) else None,
+                event_type=str(annotation_row.event_type) if annotation_row.event_type else None,
+                pivot_moment=(
+                    bool(annotation_row.pivot_moment) if annotation_row.pivot_moment is not None else None
+                ),
+                cliffhanger=(
+                    bool(annotation_row.cliffhanger) if annotation_row.cliffhanger is not None else None
+                ),
+                has_foreshadowing=(
+                    bool(annotation_row.has_foreshadowing)
+                    if annotation_row.has_foreshadowing is not None
+                    else None
+                ),
+                is_strong_setup=(
+                    bool(annotation_row.is_strong_setup)
+                    if getattr(annotation_row, "is_strong_setup", None) is not None
+                    else None
+                ),
+                foreshadowing_type=(
+                    str(annotation_row.foreshadowing_type) if annotation_row.foreshadowing_type else None
+                ),
+                setup_kind=(
+                    str(annotation_row.setup_kind) if getattr(annotation_row, "setup_kind", None) else None
+                ),
+                foreshadowing_desc=(
+                    str(annotation_row.foreshadowing_desc) if annotation_row.foreshadowing_desc else None
+                ),
+                setup_summary=(
+                    str(annotation_row.setup_summary)
+                    if getattr(annotation_row, "setup_summary", None)
+                    else None
+                ),
                 why_unresolved_now=(
-                    str(row.why_unresolved_now) if getattr(row, "why_unresolved_now", None) else None
+                    str(annotation_row.why_unresolved_now)
+                    if getattr(annotation_row, "why_unresolved_now", None)
+                    else None
                 ),
                 expected_payoff_family=(
-                    str(row.expected_payoff_family) if getattr(row, "expected_payoff_family", None) else None
+                    str(annotation_row.expected_payoff_family)
+                    if getattr(annotation_row, "expected_payoff_family", None)
+                    else None
                 ),
                 payoff_likelihood=(
-                    str(row.payoff_likelihood) if getattr(row, "payoff_likelihood", None) else None
+                    str(annotation_row.payoff_likelihood)
+                    if getattr(annotation_row, "payoff_likelihood", None)
+                    else None
                 ),
                 linked_setup_id=(
-                    str(row.linked_setup_id) if getattr(row, "linked_setup_id", None) else None
+                    str(annotation_row.linked_setup_id)
+                    if getattr(annotation_row, "linked_setup_id", None)
+                    else None
                 ),
                 characters=characters_by_chunk.get(chunk_id, []),
                 relations=relations_by_chunk.get(chunk_id, []),

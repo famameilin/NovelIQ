@@ -95,7 +95,7 @@ def fetch_annotation_data(
     run_id: str,
 ) -> AnnotationData:
     """
-    提取 chunk_annotation 表数据
+    从章节正式标注的 segments 提取 chunk 粒度指标数据
 
     """
     rows = annotation_repo.fetch_full_annotations(run_id)
@@ -149,7 +149,7 @@ def fetch_character_data(
         if entity.entity_type == "character" and entity.status == "active"
     ]
 
-    # 2. 从 chunk_characters 聚合情感分数（用于补充）
+    # 2. 从数据库图人物事实聚合情感分数
     rows = annotation_repo.fetch_characters_with_scores(run_id)
     emotion_map: dict[str, int] = {}
     for row in rows:
@@ -169,7 +169,7 @@ def fetch_character_data(
         emotion_score = emotion_map.get(entity.name, 0)
         characters.append((entity.name, entity.primary_role_function or "其他", emotion_score))
 
-    # 4. 构建情感序列（仍从 chunk_characters 获取）
+    # 4. 从数据库图人物事实构建情感序列
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
     char_emotion_map: dict[str, list[float]] = {}
     for row in char_emotion_rows:
@@ -264,9 +264,9 @@ def fetch_dialogue_data(
     run_id: str,
 ) -> DialogueData:
     """
-    提取 chunk_dialogues 表的 tone 数据
+    从数据库图对话事实提取 tone 数据
 
-    从对话表获取语气类型数据用于聚合计算
+    按事实中的 chunk_id 展开语气类型用于聚合计算
 
     """
     rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
