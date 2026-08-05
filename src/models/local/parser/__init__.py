@@ -1,19 +1,11 @@
 """
 解析模块
 
-说明: 标注结果解析模块，包含JSON解析、标注构建、伏笔解析等功能
+说明: 提供现行运行路径仍使用的 JSON、思考内容与通用文本解析工具
 """
 
 from __future__ import annotations
 
-from .annotation_builder import (
-    build_annotation,
-    make_empty_annotation,
-)
-from .foreshadowing import (
-    parse_foreshadowing_result,
-    validate_foreshadowing_result,
-)
 from .json_utils import (
     fix_json,
     try_parse_json,
@@ -33,12 +25,6 @@ __all__ = [
     # JSON 工具
     "try_parse_json",
     "fix_json",
-    # 标注构建器
-    "make_empty_annotation",
-    "build_annotation",
-    # 伏笔处理
-    "parse_foreshadowing_result",
-    "validate_foreshadowing_result",
     # 通用工具
     "parse_active_entities",
 ]

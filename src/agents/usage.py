@@ -8,8 +8,6 @@ from typing import Any
 
 from loguru import logger
 
-from src.storage.repositories import StatsRepository
-
 
 @dataclass(frozen=True, slots=True)
 class AgentTokenUsage:
@@ -76,6 +74,8 @@ def record_agent_token_usage(
     """
     if session is None or not run_id:
         return
+
+    from src.storage.repositories import StatsRepository
 
     stats_repo = StatsRepository(session)
     for message in messages:

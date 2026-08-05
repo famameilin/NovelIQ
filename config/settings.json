@@ -5,11 +5,6 @@
       "temperature": 0.7,
       "top_p": 0.8
     },
-    "annotation_fallback": {
-      "timeout_s": 180,
-      "temperature": 0.7,
-      "top_p": 0.8
-    },
     "paragraph_embedding": {
       "timeout_s": 120,
       "embedding_dim": 1024,
@@ -31,18 +26,15 @@
   },
   "thinking": {
     "annotation": true,
-    "annotation_fallback": true,
     "diagnosis": true
   },
   "streaming": {
     "annotation": true,
-    "annotation_fallback": true,
     "diagnosis": true,
     "cloud_only": false
   },
   "structured_output": {
     "annotation": "json_schema",
-    "annotation_fallback": "json_object",
     "diagnosis": "json_schema",
     "provider_overrides": {
       "deepseek": "json_object"
@@ -123,19 +115,15 @@
     "query_limit": 50
   },
   "analysis": {
-    "checkpoint_interval": 1,
-    "projection_interval": 1,
     "analysis_log_rotation": "10 MB",
     "analysis_log_retention": "30 days",
     "sentence_preview_max_chars": 100,
     "sentence_pool_max_chars": 80,
-    "annotation_fallback_enabled": true,
     "agents": {
       "annotation": {
         "max_iterations": 10,
-        "max_sub_agents": 8,
-        "sub_chunk_max_chars": 2000,
-        "identity_lookback": 50,
+        "total_attempts": 3,
+        "retry_backoff_seconds": [1, 2],
         "active_setup_pool_limit": 30
       },
       "diagnosis": {

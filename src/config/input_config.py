@@ -47,7 +47,6 @@ class TaskModelConfig:
 
 TaskType = Literal[
     "annotation",
-    "annotation_fallback",
     "diagnosis",
 ]
 

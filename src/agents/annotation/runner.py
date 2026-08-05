@@ -1,539 +1,393 @@
 """
-标注 Agent 运行入口
-
-- 单 chunk 运行：构建图 + 工具 + 身份记忆，产出合并标注结果
-- 超长章节分派子代理：同一章节被切分的多个子 chunk 各自以独立 agent 会话
-  （共享身份记忆）处理，state 携带同章节其余子块文本作为章节上下文
+章节标注 Agent 运行入口与三次重试
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from src.agents.usage import record_agent_token_usage
-from src.models.local.annotation.projectors.dialogue import build_dialogue_snapshots
-from src.models.local.parser import build_annotation, parse_foreshadowing_result
-from src.models.local.schema import (
-    ForeshadowingResult,
-    RelationChangeSnapshot,
+from src.agents.usage import extract_agent_token_usage
+from src.config import settings
+
+from .errors import (
+    AnnotationAgentError,
+    AnnotationAuthorizationError,
+    AnnotationConfigurationError,
+    AnnotationInputError,
+    AnnotationRetryableError,
 )
-from src.rag import NarrativeEvidenceService
-
-from .evidence import AnnotationEvidenceLedger
 from .graph import build_annotation_graph
-from .memory import IdentityMemory
 from .prompts import build_system_prompt
-from .schema import MergedChunkAnnotation
-from .tools import build_annotation_tools
+from .schema import (
+    AgentRunResult,
+    ChapterAnnotation,
+    SuccessAudit,
+    TokenUsageRecord,
+)
+from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
 
 
-@dataclass
-class AnnotationChunkResult:
-    """单 chunk 合并标注结果（可直接喂给存储层）"""
-
-    annotation: Any
-    foreshadowing: ForeshadowingResult | None = None
-    dialogue_speakers: dict[int, list[str]] | None = None
-    dialogues: list[tuple[int, str]] | None = None
-    dialogue_tones: dict[int, str] | None = None
-    dialogue_identity_clues: dict[int, str | None] | None = None
-    dialogue_lengths: list[int] | None = None
-    relations: list[RelationChangeSnapshot] | None = None
+class AnnotationAgentRunError(AnnotationRetryableError):
+    """2026-08-05 用于表示同一模型三次章节尝试均未成功"""
 
 
-def _locate_dialogue_index(content: str, chunk_text: str, used_indices: set[int], next_index: int) -> int:
-    """在 chunk 文本中定位对话原文位置"""
-    if content and content in chunk_text:
-        position = chunk_text.find(content)
-        # 用位置做稳定索引，避免同一文本重复出现时相互覆盖
-        candidate = position + 1
-        while candidate in used_indices:
-            candidate += 1
-        return candidate
-    raise ValueError(f"对话原文未出现在当前 chunk: {content!r}")
-
-
-def validate_merged_output_against_chunk(
-    merged: MergedChunkAnnotation,
-    chunk_text: str,
-    memory: IdentityMemory | None = None,
-    evidence_ledger: AnnotationEvidenceLedger | None = None,
+def _validate_chapter_identity(
+    *,
+    chapter_id: int,
+    current_chunks: list[tuple[int, str]],
+    after_chapter_ids: list[int],
 ) -> None:
-    """
-    2026-08-02 用于校验 Agent 标注中的人物对话关系伏笔与身份证据均可由当前原文证明
-    """
-    memory = memory or IdentityMemory()
-    errors: list[str] = []
-    known_names = (
-        set(memory.known_canonical_names)
-        | set(memory.alias_map)
-        | set(memory.alias_map.values())
-    )
-    current_resolved_names = {name for name in known_names if name and name in chunk_text}
-
-    for alias, canonical in memory.alias_map.items():
-        if alias and alias in chunk_text:
-            current_resolved_names.add(canonical)
-
-    for decision in merged.identity_decisions:
-        name = decision.name.strip()
-        canonical = decision.canonical.strip()
-        evidence = decision.evidence.strip()
-        if not name or name not in chunk_text:
-            errors.append(f"身份称呼未出现在当前原文: {decision.name!r}")
-            continue
-        if canonical != name and canonical not in known_names and canonical not in chunk_text:
-            errors.append(f"身份规范名缺少当前原文或历史记忆依据: {canonical!r}")
-        if not evidence or evidence not in chunk_text:
-            errors.append(f"身份决策证据未逐字出现在当前原文: {decision.evidence!r}")
-        current_resolved_names.add(name)
-        current_resolved_names.add(canonical)
-
-    for character in merged.characters:
-        if not character.name.strip() or character.name.strip() not in chunk_text:
-            errors.append(f"人物未逐字出现在当前原文: {character.name!r}")
-        else:
-            current_resolved_names.add(character.name.strip())
-
-    for location in merged.location_appearances:
-        if not location.raw_name.strip() or location.raw_name.strip() not in chunk_text:
-            errors.append(f"地点未逐字出现在当前原文: {location.raw_name!r}")
-
-    for dialogue in merged.dialogues:
-        content = dialogue.content.strip()
-        if not content or content not in chunk_text:
-            errors.append(f"对话未逐字出现在当前原文: {dialogue.content!r}")
-        for speaker in dialogue.speaker or []:
-            speaker_name = speaker.strip()
-            if speaker_name not in current_resolved_names and speaker_name not in chunk_text:
-                errors.append(f"对话说话人缺少当前原文身份依据: {speaker!r}")
-
-    for relation in merged.relations:
-        if not relation.evidence.strip() or relation.evidence.strip() not in chunk_text:
-            errors.append(f"关系证据未逐字出现在当前原文: {relation.evidence!r}")
-        from_name = relation.from_name.strip()
-        to_name = relation.to_name.strip()
-        if from_name not in current_resolved_names and from_name not in chunk_text:
-            errors.append(f"关系发起者缺少当前原文身份依据: {relation.from_name!r}")
-        if to_name not in current_resolved_names and to_name not in chunk_text:
-            errors.append(f"关系接受者缺少当前原文身份依据: {relation.to_name!r}")
-
-    if merged.foreshadowing is not None and merged.foreshadowing.has_foreshadowing:
-        anchor_text = merged.foreshadowing.anchor_text.strip()
-        if not anchor_text or anchor_text not in chunk_text:
-            errors.append(f"伏笔锚点未逐字出现在当前原文: {merged.foreshadowing.anchor_text!r}")
-
-    citation_ids: list[str] = []
-    citation_pairs: list[tuple[str, str]] = []
-    for citation in merged.historical_evidence_citations:
-        evidence_id = citation.evidence_id.strip()
-        if not evidence_id:
-            errors.append("历史证据引用 ID 为空")
-            continue
-        citation_ids.append(evidence_id)
-        citation_pairs.append((evidence_id, citation.purpose))
-    if citation_ids:
-        if evidence_ledger is None:
-            errors.append("历史证据引用缺少本轮证据账本")
-        else:
-            unknown_ids = evidence_ledger.unknown_evidence_ids(citation_ids)
-            if unknown_ids:
-                errors.append(f"历史证据引用未出现在本轮检索账本: {unknown_ids}")
-            objective_mismatches = evidence_ledger.citation_objective_mismatches(citation_pairs)
-            if objective_mismatches:
-                errors.append(f"历史证据引用用途与检索目标不一致: {objective_mismatches}")
-
-    if errors:
-        raise ValueError("标注原文校验失败: " + "；".join(errors))
+    """2026-08-05 用于在模型调用前校验章节身份 chunk 锚点与 after 顺序"""
+    if chapter_id <= 0:
+        raise AnnotationInputError("chapter_id 必须是真实非空正整数")
+    if not current_chunks:
+        raise AnnotationInputError("current 必须包含完整章节 chunk")
+    chunk_ids = [chunk_id for chunk_id, _text in current_chunks]
+    if len(set(chunk_ids)) != len(chunk_ids):
+        raise AnnotationInputError("current chunk_id 不允许重复")
+    if any(chunk_id < 0 for chunk_id in chunk_ids):
+        raise AnnotationInputError("current chunk_id 不允许为负数")
+    if any(not text for _chunk_id, text in current_chunks):
+        raise AnnotationInputError("current chunk 原文不能为空")
+    if len(set(after_chapter_ids)) != len(after_chapter_ids):
+        raise AnnotationInputError("after_chapter_ids 不允许重复")
+    if any(after_id <= chapter_id for after_id in after_chapter_ids):
+        raise AnnotationInputError("after_chapter_ids 必须全部晚于 current chapter_id")
+    if after_chapter_ids != sorted(after_chapter_ids):
+        raise AnnotationInputError("after_chapter_ids 必须保持原文顺序")
 
 
-def convert_merged_output(
-    merged: MergedChunkAnnotation,
-    chunk_text: str,
-    memory: IdentityMemory | None = None,
-    evidence_ledger: AnnotationEvidenceLedger | None = None,
-) -> AnnotationChunkResult:
-    """将合并输出转换为存储层可消费的结果"""
-    validate_merged_output_against_chunk(
-        merged,
-        chunk_text,
-        memory,
-        evidence_ledger,
-    )
-    annotation_data = {
-        "emotional_valence": merged.emotional_valence,
-        "event_type": merged.event_type,
-        "pivot_moment": merged.pivot_moment,
-        "cliffhanger": merged.cliffhanger,
-        "chunk_summary": merged.chunk_summary,
-        "has_foreshadowing": merged.foreshadowing is not None and merged.foreshadowing.has_foreshadowing,
-        "foreshadowing_type": merged.foreshadowing.foreshadowing_type if merged.foreshadowing else None,
-        "foreshadowing_desc": merged.foreshadowing.anchor_text if merged.foreshadowing else "",
-        "characters": [
-            {
-                "name": c.name,
-                "role_function": c.role_function,
-                "action": c.action,
-                "action_type": c.action_type,
-                "emotion_score": c.emotion_score,
-            }
-            for c in merged.characters
-        ],
-        "location_appearances": [
-            {"raw_name": loc.raw_name, "location_type": loc.location_type}
-            for loc in merged.location_appearances
-        ],
-    }
-    annotation = build_annotation(annotation_data)
+def _iter_annotation_evidence(annotation: ChapterAnnotation):
+    """2026-08-05 用于按固定章节事实字段遍历唯一 Evidence"""
+    for field_name in ("characters", "locations", "dialogues", "events", "relations", "states"):
+        for fact in getattr(annotation, field_name):
+            yield fact.evidence
 
-    foreshadowing: ForeshadowingResult | None = None
-    if merged.foreshadowing is not None:
-        foreshadowing_data = merged.foreshadowing.model_dump(mode="json")
-        # 合并输出中 has_foreshadowing=true 即视为强伏笔（与旧 Phase2 合同一致）
-        foreshadowing_data["is_strong_setup"] = bool(foreshadowing_data.get("has_foreshadowing", False))
-        foreshadowing = parse_foreshadowing_result(foreshadowing_data)
 
-    dialogues: list[tuple[int, str]] = []
-    dialogue_speakers: dict[int, list[str]] = {}
-    dialogue_tones: dict[int, str] = {}
-    dialogue_identity_clues: dict[int, str | None] = {}
-    used_indices: set[int] = set()
-    next_index = 1
-    for dialogue in merged.dialogues:
-        if not dialogue.content or not dialogue.content.strip():
-            continue
-        index = _locate_dialogue_index(dialogue.content, chunk_text, used_indices, next_index)
-        used_indices.add(index)
-        if index > next_index:
-            next_index = index + 1
-        dialogues.append((index, dialogue.content))
-        if dialogue.speaker:
-            dialogue_speakers[index] = dialogue.speaker
-        if dialogue.tone:
-            dialogue_tones[index] = dialogue.tone
-        if dialogue.identity_clue:
-            dialogue_identity_clues[index] = dialogue.identity_clue
+def validate_chapter_annotation(
+    annotation: ChapterAnnotation,
+    *,
+    chapter_id: int,
+    current_chunks: list[tuple[int, str]],
+    allowed_evidence_chapter_ids: set[int],
+) -> None:
+    """2026-08-05 用于完整校验章节 chunk 覆盖事实锚点原文与 Evidence 可见性"""
+    expected_chunk_ids = [chunk_id for chunk_id, _text in current_chunks]
+    actual_chunk_ids = [segment.chunk_id for segment in annotation.segments]
+    if actual_chunk_ids != expected_chunk_ids:
+        raise ValueError(
+            f"segments 必须按原文顺序精确覆盖 current chunks: expected={expected_chunk_ids} actual={actual_chunk_ids}"
+        )
 
-    dialogue_snapshots, dialogue_lengths = build_dialogue_snapshots(
-        dialogues,
-        dialogue_speakers=dialogue_speakers,
-        dialogue_tones=dialogue_tones,
-        dialogue_identity_clues=dialogue_identity_clues,
-    )
-    has_dialogues = bool(dialogue_snapshots)
+    chunk_text_by_id = dict(current_chunks)
+    for field_name in ("characters", "locations", "dialogues", "events", "relations", "states"):
+        for fact in getattr(annotation, field_name):
+            if fact.chunk_id not in chunk_text_by_id:
+                raise ValueError(f"{field_name} 事实锚定了非 current chunk: {fact.chunk_id}")
 
-    relations: list[RelationChangeSnapshot] | None = None
-    if merged.relations:
-        relations = [
-            RelationChangeSnapshot(
-                from_name=relation.from_name,
-                to_name=relation.to_name,
-                type=relation.type,
-                change=relation.change,
-                evidence=relation.evidence,
-                confidence=1.0,
+    for dialogue in annotation.dialogues:
+        if dialogue.content not in chunk_text_by_id[dialogue.chunk_id]:
+            raise ValueError(f"dialogue.content 未逐字出现在锚定 current chunk: {dialogue.content!r}")
+
+    for evidence in _iter_annotation_evidence(annotation):
+        if evidence.chapterid not in allowed_evidence_chapter_ids:
+            raise AnnotationAuthorizationError(
+                f"Evidence chapterid 不在当前阶段可见范围: {evidence.chapterid}"
             )
-            for relation in merged.relations
-        ]
+    if chapter_id not in allowed_evidence_chapter_ids:
+        raise AnnotationAuthorizationError("当前章节不在 Evidence 可见范围")
 
-    return AnnotationChunkResult(
-        annotation=annotation,
-        foreshadowing=foreshadowing,
-        dialogue_speakers=dialogue_speakers if has_dialogues else None,
-        dialogues=dialogues if has_dialogues else None,
-        dialogue_tones=dialogue_tones if has_dialogues else None,
-        dialogue_identity_clues=dialogue_identity_clues if has_dialogues else None,
-        dialogue_lengths=dialogue_lengths if has_dialogues else None,
-        relations=relations,
+
+def _serialize_agent_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    """2026-08-05 用于把完整模型与工具消息链转换为成功审计结构"""
+    serialized: list[dict[str, Any]] = []
+    for message in messages:
+        payload: dict[str, Any] = {
+            "role": str(getattr(message, "type", "unknown")),
+            "content": getattr(message, "content", ""),
+        }
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            payload["tool_calls"] = tool_calls
+        tool_call_id = getattr(message, "tool_call_id", None)
+        if tool_call_id:
+            payload["tool_call_id"] = tool_call_id
+        tool_name = getattr(message, "name", None)
+        if tool_name:
+            payload["tool_name"] = tool_name
+        serialized.append(payload)
+    return serialized
+
+
+def _extract_token_usage_records(messages: list[Any], llm: Any) -> list[TokenUsageRecord]:
+    """2026-08-05 用于收集本次成功尝试中每个模型响应的可信 Token 用量"""
+    records: list[TokenUsageRecord] = []
+    for message in messages:
+        if getattr(message, "type", None) != "ai":
+            continue
+        usage = extract_agent_token_usage(message)
+        if usage is None:
+            continue
+        response_metadata = getattr(message, "response_metadata", None)
+        response_model = (
+            response_metadata.get("model_name")
+            if isinstance(response_metadata, dict)
+            else None
+        )
+        records.append(
+            TokenUsageRecord(
+                model=str(
+                    response_model
+                    or getattr(llm, "model_name", None)
+                    or getattr(llm, "model", "unknown")
+                ),
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
+        )
+    return records
+
+
+def _model_provider(llm: Any) -> str:
+    """2026-08-05 用于从模型地址稳定区分本地与云端审计来源"""
+    raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
+    base_url = str(raw_base_url)
+    if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url:
+        return "cloud"
+    return "local"
+
+
+def _set_session_read_only(session: Session) -> None:
+    """2026-08-05 用于在 PostgreSQL Agent 查询会话中显式禁止写入"""
+    bind = session.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        session.execute(text("SET TRANSACTION READ ONLY"))
+
+
+def _close_read_session(session: Session) -> None:
+    """2026-08-05 用于在返回 AgentRunResult 前结束只读事务并关闭连接"""
+    try:
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _build_current_message(current_chunks: list[tuple[int, str]]) -> str:
+    """2026-08-05 用于把完整 current 章节按持久化 chunk 顺序送入同一次模型调用"""
+    blocks = [
+        f"<CurrentChunk chapter_chunk_id=\"{chunk_id}\">\n{chunk_text}\n</CurrentChunk>"
+        for chunk_id, chunk_text in current_chunks
+    ]
+    return "<CurrentChapter>\n" + "\n\n".join(blocks) + "\n</CurrentChapter>"
+
+
+def _retry_backoff_seconds(attempt_index: int) -> float:
+    """2026-08-05 用于读取三次章节尝试之间固定的 1 秒与 2 秒退避"""
+    backoffs = settings.analysis.agents.annotation.retry_backoff_seconds
+    if attempt_index < len(backoffs):
+        return max(0.0, float(backoffs[attempt_index]))
+    return 0.0
+
+
+async def _run_single_attempt(
+    *,
+    run_id: str,
+    chapter_id: int,
+    attempt_number: int,
+    current_chunks: list[tuple[int, str]],
+    after_chapter_ids: list[int],
+    novel_title: str | None,
+    llm: Any,
+    session: Session,
+    query_service_factory: Callable[[Session], AnnotationQueryService],
+) -> AgentRunResult:
+    """2026-08-05 用于以全新图账本和只读查询服务执行一次章节 Agent 尝试"""
+    started_at = time.perf_counter()
+    _set_session_read_only(session)
+    query_service = query_service_factory(session)
+    initial_cases, rotation_case_ids = query_service.find_initial_case_candidates(
+        "\n".join(chunk_text for _chunk_id, chunk_text in current_chunks),
+        semantic_limit=50,
+        rotation_limit=50,
     )
+    ledger = AnnotationToolLedger(
+        current_chapter_id=chapter_id,
+        current_chunk_ids=tuple(chunk_id for chunk_id, _text in current_chunks),
+        after_chapter_ids=tuple(after_chapter_ids),
+    )
+    ledger.register_initial_cases(initial_cases, rotation_case_ids)
+    tools = build_annotation_tools(query_service, ledger)
 
+    def initial_validator(annotation: ChapterAnnotation, allowed_chapters: set[int]) -> None:
+        """2026-08-05 用于校验 after 不可读时的完整初始章节候选"""
+        validate_chapter_annotation(
+            annotation,
+            chapter_id=chapter_id,
+            current_chunks=current_chunks,
+            allowed_evidence_chapter_ids=allowed_chapters,
+        )
 
-class AnnotationAgentRunError(RuntimeError):
-    """标注 agent 运行失败"""
+    def post_after_validator(annotation: ChapterAnnotation, allowed_chapters: set[int]) -> None:
+        """2026-08-05 用于校验后文检索后仍只描述 current 的最终候选"""
+        validate_chapter_annotation(
+            annotation,
+            chapter_id=chapter_id,
+            current_chunks=current_chunks,
+            allowed_evidence_chapter_ids=allowed_chapters,
+        )
+
+    graph = build_annotation_graph(
+        llm,
+        tools,
+        ledger=ledger,
+        max_iterations=max(1, settings.analysis.agents.annotation.max_iterations),
+        initial_validator=initial_validator,
+        post_after_validator=post_after_validator,
+    )
+    initial_messages = [
+        SystemMessage(
+            content=build_system_prompt(
+                novel_title=novel_title,
+                chapter_id=chapter_id,
+                chunk_ids=[chunk_id for chunk_id, _text in current_chunks],
+                after_chapter_ids=after_chapter_ids,
+                initial_cases=initial_cases,
+            )
+        ),
+        HumanMessage(content=_build_current_message(current_chunks)),
+    ]
+    initial_state = {
+        "messages": initial_messages,
+        "phase": "running_current",
+        "iterations": 0,
+        "candidate": None,
+        "initial_finish": None,
+        "final_annotation": None,
+        "revision_payload": {},
+        "error": None,
+    }
+    result_state = await graph.ainvoke(initial_state)
+    error = result_state.get("error")
+    if error:
+        raise AnnotationRetryableError(str(error))
+    if result_state.get("phase") != "completed":
+        raise AnnotationRetryableError("annotation LangGraph 未正常到达 END")
+    initial_finish_payload = result_state.get("initial_finish")
+    final_annotation_payload = result_state.get("final_annotation")
+    if initial_finish_payload is None or final_annotation_payload is None:
+        raise AnnotationRetryableError("annotation LangGraph 缺少完整初始或最终章节标注")
+
+    messages = list(result_state.get("messages") or initial_messages)
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    initial_finish = ChapterAnnotation.model_validate(initial_finish_payload)
+    final_annotation = ChapterAnnotation.model_validate(final_annotation_payload)
+    ledger.validate_staged_outputs()
+    return AgentRunResult(
+        run_id=run_id,
+        chapter_id=chapter_id,
+        final_annotation=final_annotation,
+        initial_finish=initial_finish,
+        after_chapter_ids=after_chapter_ids,
+        revision_payload=dict(result_state.get("revision_payload") or {}),
+        initial_case_candidate_ids=list(ledger.initial_cases),
+        rotation_case_ids=ledger.rotation_case_ids,
+        pulled_case_ids=ledger.pulled_case_ids,
+        staged_outputs=ledger.staged_outputs,
+        success_audit=SuccessAudit(
+            attempt_number=attempt_number,
+            messages=_serialize_agent_messages(messages),
+            tool_calls=ledger.audit_payload(),
+            model_name=str(getattr(llm, "model_name", None) or getattr(llm, "model", "")) or None,
+            model_provider=_model_provider(llm),
+            duration_ms=elapsed_ms,
+        ),
+        token_usage=_extract_token_usage_records(messages, llm),
+    )
 
 
 async def run_annotation_agent(
     *,
-    chunk_text: str,
-    chunk_id: int,
-    total_chunks: int,
-    novel_id: str,
+    run_id: str,
+    chapter_id: int,
+    current_chunks: list[tuple[int, str]],
+    after_chapter_ids: list[int],
+    query_service_factory: Callable[[Session], AnnotationQueryService],
+    session_factory: Callable[[], Session],
     novel_title: str | None = None,
-    chapter_id: int | None = None,
-    chapter_context: str | None = None,
-    global_context: str | None = None,
-    prev_summary: str | None = None,
-    memory: IdentityMemory | None = None,
-    evidence_service: NarrativeEvidenceService | None = None,
     llm: Any | None = None,
-    model_task_type: str = "annotation",
-    run_id: str | None = None,
-    main_characters: str | None = None,
-    session: Any | None = None,
-) -> tuple[AnnotationChunkResult, IdentityMemory]:
-    """
-    运行标注 agent（单子块）
-
-    超长章节场景：同一章节的每个子 chunk 都通过本入口启动独立子代理会话，
-    共享同一 identity memory，state 中注入 chapter_context 保证章节叙事连贯
-    """
-    start_time = time.time()
-    memory = memory or IdentityMemory()
-    agent_memory = IdentityMemory.from_dict(memory.to_dict())
-    evidence_ledger = AnnotationEvidenceLedger()
-
+) -> AgentRunResult:
+    """2026-08-05 用于按同一模型最多三次运行完整章节 Agent 并在第三次失败后终止"""
+    _validate_chapter_identity(
+        chapter_id=chapter_id,
+        current_chunks=current_chunks,
+        after_chapter_ids=after_chapter_ids,
+    )
+    configured_attempts = settings.analysis.agents.annotation.total_attempts
+    if configured_attempts != 3:
+        raise AnnotationConfigurationError("章节 Agent total_attempts 必须固定为 3")
+    if tuple(settings.analysis.agents.annotation.retry_backoff_seconds) != (1.0, 2.0):
+        raise AnnotationConfigurationError("章节 Agent retry_backoff_seconds 必须固定为 [1, 2]")
     if llm is None:
         from src.agents.llm import build_chat_model
 
         llm = build_chat_model("annotation")
 
-    tools = build_annotation_tools(
-        evidence_service,
-        agent_memory,
-        run_id=run_id,
-        chunk_id=chunk_id,
-        session=session,
-        evidence_ledger=evidence_ledger,
-    )
-    graph = build_annotation_graph(
-        llm,
-        tools,
-        response_validator=lambda output: validate_merged_output_against_chunk(
-            output,
-            chunk_text,
-            memory,
-            evidence_ledger,
-        ),
-    )
-
-    position_pct = (chunk_id / total_chunks * 100) if total_chunks > 0 else 0.0
-
-    system_prompt = build_system_prompt(
-        novel_title=novel_title,
-        main_characters=main_characters,
-        position_pct=position_pct,
-        chapter_id=chapter_id,
-        memory=agent_memory,
-        prev_summary=prev_summary,
-        global_context=global_context,
-    )
-
-    user_content_parts = [f"<Current_Chunk>\n{chunk_text}\n</Current_Chunk>"]
-    if chapter_context:
-        user_content_parts.append(
-            f"<同章节其余内容>\n{chapter_context}\n</同章节其余内容>\n"
-            "（同章节其余内容仅用于保持章节叙事连贯，标注对象仍以 Current_Chunk 为主）"
-        )
-    user_content = "\n\n".join(user_content_parts)
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    initial_messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_content),
-    ]
-    initial_state = {
-        "messages": initial_messages,
-        "attempts": 0,
-        "output": None,
-        "error": None,
-        "candidate": None,
-    }
-
-    try:
-        result_state = await graph.ainvoke(initial_state)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("annotation agent graph failed: chunk_id={} error={}", chunk_id, exc)
-        _record_annotation_interaction(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            chunk_id=chunk_id,
-            llm=llm,
-            messages=initial_messages,
-            raw_output={"error": str(exc)},
-            evidence_ledger=evidence_ledger,
-            elapsed=time.time() - start_time,
-            task_type=model_task_type,
-            status="error",
-            error_message=str(exc),
-        )
-        raise AnnotationAgentRunError(f"标注 agent 运行失败: {exc}") from exc
-
-    if result_state.get("error"):
-        error = str(result_state["error"])
-        logger.error("annotation agent finalize error: chunk_id={} error={}", chunk_id, error)
-        _record_annotation_interaction(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            chunk_id=chunk_id,
-            llm=llm,
-            messages=result_state.get("messages") or initial_messages,
-            raw_output={"error": error},
-            evidence_ledger=evidence_ledger,
-            elapsed=time.time() - start_time,
-            task_type=model_task_type,
-            status="error",
-            error_message=error,
-        )
-        raise AnnotationAgentRunError(error)
-
-    raw_output = result_state.get("output")
-    if raw_output is None:
-        error = "标注 agent 未产出结果"
-        _record_annotation_interaction(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            chunk_id=chunk_id,
-            llm=llm,
-            messages=result_state.get("messages") or initial_messages,
-            raw_output={"error": error},
-            evidence_ledger=evidence_ledger,
-            elapsed=time.time() - start_time,
-            task_type=model_task_type,
-            status="error",
-            error_message=error,
-        )
-        raise AnnotationAgentRunError(error)
-
-    merged = MergedChunkAnnotation.model_validate(raw_output)
-    # 应用身份决策到记忆
-    memory.apply_decisions([decision.model_dump() for decision in merged.identity_decisions])
-
-    result = convert_merged_output(
-        merged,
-        chunk_text,
-        memory,
-        evidence_ledger,
-    )
-
-    elapsed = time.time() - start_time
-    _record_annotation_interaction(
-        session=session,
-        run_id=run_id,
-        novel_id=novel_id,
-        chunk_id=chunk_id,
-        llm=llm,
-        messages=result_state.get("messages") or initial_messages,
-        raw_output=raw_output,
-        evidence_ledger=evidence_ledger,
-        elapsed=elapsed,
-        task_type=model_task_type,
-    )
-    logger.info(
-        "annotation agent complete: chunk_id={} characters={} foreshadowing={} dialogues={} "
-        "relations={} identity_decisions={} elapsed={:.2f}s",
-        chunk_id,
-        len(merged.characters),
-        merged.foreshadowing is not None,
-        len(merged.dialogues),
-        len(merged.relations),
-        len(merged.identity_decisions),
-        elapsed,
-    )
-    return result, memory
-
-
-def _record_annotation_interaction(
-    *,
-    session: Any,
-    run_id: str | None,
-    novel_id: str,
-    chunk_id: int,
-    llm: Any,
-    messages: list,
-    raw_output: dict,
-    evidence_ledger: AnnotationEvidenceLedger,
-    elapsed: float,
-    task_type: str = "annotation",
-    status: str = "success",
-    error_message: str | None = None,
-) -> None:
-    """记录标注 agent 的模型交互（供交互回放与审计）"""
-    if session is None or not run_id:
-        return
-    try:
-        from src.models.interactions import record_model_interaction
-
-        serialized_messages = _serialize_agent_messages(messages)
-        serialized_messages.append(
-            {
-                "role": "evidence_audit",
-                "content": json.dumps(
-                    evidence_ledger.to_dict(),
-                    ensure_ascii=False,
-                ),
-            }
-        )
-        model_responses = [message for message in messages if getattr(message, "type", None) == "ai"]
-        record_count = max(1, len(model_responses))
-        raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
-        base_url = str(raw_base_url)
-        provider = "cloud" if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url else "local"
-        for attempt_number in range(1, record_count + 1):
-            response_text = json.dumps(raw_output, ensure_ascii=False)
-            if model_responses and attempt_number < record_count:
-                response_text = json.dumps(
-                    _serialize_agent_messages([model_responses[attempt_number - 1]]),
-                    ensure_ascii=False,
-                )
-            record_model_interaction(
+    failures: list[str] = []
+    for attempt_number in range(1, configured_attempts + 1):
+        read_session = session_factory()
+        try:
+            result = await _run_single_attempt(
                 run_id=run_id,
-                chunk_id=chunk_id,
-                interaction_type="annotate",
-                phase="agent",
+                chapter_id=chapter_id,
                 attempt_number=attempt_number,
-                messages=serialized_messages,
-                response_text=response_text,
-                thinking_content=None,
-                duration_ms=int(elapsed * 1000),
-                model_name=getattr(llm, "model_name", None),
-                model_provider=provider,
-                status="success" if model_responses else status,
-                error_message=error_message,
-                session=session,
+                current_chunks=current_chunks,
+                after_chapter_ids=after_chapter_ids,
+                novel_title=novel_title,
+                llm=llm,
+                session=read_session,
+                query_service_factory=query_service_factory,
             )
-        record_agent_token_usage(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            task_type=task_type,
-            call_type="agent",
-            chunk_id=chunk_id,
-            llm=llm,
-            messages=messages,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("failed to record annotation agent interaction: {}", exc)
+        except (AnnotationInputError, AnnotationAuthorizationError, AnnotationConfigurationError):
+            _close_read_session(read_session)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _close_read_session(read_session)
+            failures.append(str(exc))
+            logger.warning(
+                "annotation chapter attempt failed run_id={} chapter_id={} attempt={}/{} error={}",
+                run_id,
+                chapter_id,
+                attempt_number,
+                configured_attempts,
+                exc,
+            )
+            if attempt_number >= configured_attempts:
+                break
+            await asyncio.sleep(_retry_backoff_seconds(attempt_number - 1))
+            continue
+        _close_read_session(read_session)
+        return result
+
+    raise AnnotationAgentRunError(
+        f"章节 Agent 连续 {configured_attempts} 次失败: "
+        + json.dumps(failures, ensure_ascii=False)
+    )
 
 
-def _serialize_agent_messages(messages: list[Any]) -> list[dict[str, str]]:
-    """
-    2026-08-02 用于把 Agent 全部对话和工具调用转换为模型交互审计文本
-    """
-    serialized: list[dict[str, str]] = []
-    for message in messages:
-        payload: dict[str, Any] = {"content": getattr(message, "content", "")}
-        tool_calls = getattr(message, "tool_calls", None)
-        if tool_calls:
-            payload["tool_calls"] = tool_calls
-        tool_name = getattr(message, "name", None)
-        if tool_name:
-            payload["tool_name"] = tool_name
-        tool_call_id = getattr(message, "tool_call_id", None)
-        if tool_call_id:
-            payload["tool_call_id"] = tool_call_id
-        serialized.append(
-            {
-                "role": str(getattr(message, "type", "unknown")),
-                "content": json.dumps(payload, ensure_ascii=False, default=str),
-            }
-        )
-    return serialized
+__all__ = [
+    "AnnotationAgentError",
+    "AnnotationAgentRunError",
+    "AgentRunResult",
+    "run_annotation_agent",
+    "validate_chapter_annotation",
+]
