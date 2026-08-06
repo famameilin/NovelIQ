@@ -224,7 +224,11 @@ def _build_post_finalize_node(
             candidate = _merge_patch(candidate, patch)
             revision_payload.update(patch.model_dump(mode="json", exclude_unset=True))
             annotation = ChapterAnnotation.model_validate(candidate)
-            validator(annotation, {ledger.current_chapter_id, *ledger.after_chapter_ids})
+            visible_after_chapters = {
+                chapter_id
+                for chapter_id, _chunk_id in ledger.authorized_after_chunks
+            }
+            validator(annotation, {ledger.current_chapter_id, *visible_after_chapters})
         except Exception as exc:  # noqa: BLE001
             return {
                 "candidate": candidate,

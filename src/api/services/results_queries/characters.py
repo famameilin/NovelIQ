@@ -12,7 +12,7 @@ from src.api.models.responses import CharacterStats
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
 from src.models.local.character_reference_policy import decide_character_reference
-from src.storage.repositories import AnnotationRepository, GraphRepository
+from src.storage.repositories import AnnotationRepository
 
 from .common import _calculate_narrative_focus_scores
 
@@ -30,8 +30,6 @@ def _fetch_characters(
     任务: 角色引用分层重构
     修改原因: 角色榜只聚合 global-character 准入后的名字，未解析代词或泛称不能进入 results。
     """
-    graph_repo = GraphRepository(annotation_repo.session)
-    alias_map = graph_repo.fetch_alias_map(run_id)
     rows = annotation_repo.fetch_characters_with_scores(run_id)
 
     merged: dict[str, dict[str, Any]] = {}
@@ -39,7 +37,6 @@ def _fetch_characters(
         name: str = str(getattr(row, "surface_name", None) or row.name)
         decision = decide_character_reference(
             name,
-            alias_map=alias_map,
             resolved_global_name=getattr(row, "resolved_global_name", None),
         )
         canonical = decision.resolved_global_name

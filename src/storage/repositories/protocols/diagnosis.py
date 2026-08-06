@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from .types import (
-    CharacterDisambigData,
     ForeshadowingChunk,
     HighTensionChunk,
     PivotBlock,
@@ -85,8 +84,8 @@ class DiagnosisRepositoryProtocol(Protocol):
         """获取主题词"""
         ...
 
-    def fetch_character_disambig_data(self, run_id: str) -> CharacterDisambigData:
-        """获取角色消歧数据"""
+    def fetch_known_characters(self, run_id: str) -> list[str]:
+        """获取数据库图中的已知人物节点"""
         ...
 
     def fetch_stage_summaries(self, run_id: str) -> list[RepositoryRecord]:

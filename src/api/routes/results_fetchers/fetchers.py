@@ -6,7 +6,6 @@
 
 from src.api.services.results_queries import (
     GRAPH_PAGE_EVENT_LIMIT,
-    _fetch_alias_merges_only,
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
@@ -47,5 +46,4 @@ __all__ = [
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
     "_fetch_known_characters",
-    "_fetch_alias_merges_only",
 ]

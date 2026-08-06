@@ -24,8 +24,6 @@ from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuth
 from src.models.local.character_reference_policy import decide_character_reference
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 
-from .common import _normalize_name
-
 
 def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
     """统一构建 chunk curve DTO"""
@@ -97,7 +95,6 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
 def _fetch_chunk_annotations(
     run_id: str,
     annotation_repo: AnnotationRepository,
-    alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
@@ -122,7 +119,6 @@ def _fetch_chunk_annotations(
         raw_name = str(getattr(character_row, "surface_name", None) or character_row.name)
         decision = decide_character_reference(
             raw_name,
-            alias_map=alias_map,
             resolved_global_name=getattr(character_row, "resolved_global_name", None),
         )
         character_name = decision.resolved_global_name
@@ -149,8 +145,8 @@ def _fetch_chunk_annotations(
     relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
     for relation_event in export_graph_view.relation_events:
         chunk_id = relation_event.chunk_id
-        from_char = _normalize_name(relation_event.from_name, alias_map) or relation_event.from_name
-        to_char = _normalize_name(relation_event.to_name, alias_map) or relation_event.to_name
+        from_char = relation_event.from_name
+        to_char = relation_event.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -194,7 +190,6 @@ def _fetch_chunk_annotations(
             reference_payload = speaker_reference_by_surface.get(str(speaker).strip(), {})
             decision = decide_character_reference(
                 speaker,
-                alias_map=alias_map,
                 resolved_global_name=reference_payload.get("resolved_global_name"),
             )
             speaker_references.append(

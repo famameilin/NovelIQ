@@ -61,63 +61,6 @@ def parse_prompt_sections(content: str) -> dict[str, str]:
     return sections
 
 
-def parse_few_shot_examples(content: str) -> list[dict[str, str]]:
-    """
-    解析 Few-shot 示例
-
-    说明: 解析使用 ---EXAMPLE_N_USER--- 和 ---EXAMPLE_N_ASSISTANT--- 标记的示例
-
-    Args:
-        content: FEW_SHOT 分段的内容
-
-    Returns:
-        示例列表，每个示例包含 user 和 assistant 两个键
-    """
-    examples: list[dict[str, str]] = []
-    current_user: str | None = None
-    current_assistant: str | None = None
-    current_content: list[str] = []
-    current_section: str | None = None
-
-    for line in content.split("\n"):
-        if line.startswith("---EXAMPLE_") and "_USER---" in line:
-            if current_user is not None and current_assistant is not None:
-                examples.append({"user": current_user, "assistant": current_assistant})
-            current_user = None
-            current_assistant = None
-            current_section = "user"
-            current_content = []
-        elif line.startswith("---EXAMPLE_") and "_ASSISTANT---" in line:
-            if current_section == "user":
-                current_user = "\n".join(current_content).strip()
-            current_section = "assistant"
-            current_content = []
-        elif line.startswith("===") and line.endswith("==="):
-            if current_section == "assistant":
-                current_assistant = "\n".join(current_content).strip()
-                if current_user is not None and current_assistant is not None:
-                    examples.append({"user": current_user, "assistant": current_assistant})
-            break
-        else:
-            current_content.append(line)
-
-    if current_section == "assistant":
-        current_assistant = "\n".join(current_content).strip()
-        if current_user is not None and current_assistant is not None:
-            examples.append({"user": current_user, "assistant": current_assistant})
-
-    return examples
-
-
-@dataclass
-class Phase1Prompts:
-
-    system: str = ""
-    user_template: str = ""
-    few_shot: list[dict[str, str]] = field(default_factory=list)
-    format: str = ""
-
-
 @dataclass
 class Phase2Prompts:
 
@@ -180,7 +123,6 @@ class PromptSettings:
     Prompt 配置
     """
 
-    phase1: Phase1Prompts = field(default_factory=Phase1Prompts)
     phase2: Phase2Prompts = field(default_factory=Phase2Prompts)
     phase3: Phase3Prompts = field(default_factory=Phase3Prompts)
     phase4: Phase4Prompts = field(default_factory=Phase4Prompts)
@@ -216,27 +158,6 @@ def _parse_api_settings(data: dict[str, Any] | None) -> APISettings:
         cors_allow_headers=data.get("cors_allow_headers", ["*"]),
         novel_name_max_length=data.get("novel_name_max_length", 50),
         query_limit=data.get("query_limit", 50),
-    )
-
-
-def _load_phase1_prompts() -> Phase1Prompts:
-    """
-    加载 Phase1 prompt
-    """
-    content = load_prompt_from_file("phase1")
-    if not content:
-        return Phase1Prompts()
-
-    sections = parse_prompt_sections(content)
-    few_shot: list[dict[str, str]] = []
-    if "FEW_SHOT" in sections:
-        few_shot = parse_few_shot_examples(sections["FEW_SHOT"])
-
-    return Phase1Prompts(
-        system=sections.get("SYSTEM", ""),
-        user_template=sections.get("USER_TEMPLATE", ""),
-        few_shot=few_shot,
-        format=sections.get("FORMAT", ""),
     )
 
 
@@ -301,7 +222,6 @@ def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
     解析 Prompt 配置
     """
     return PromptSettings(
-        phase1=_load_phase1_prompts(),
         phase2=_load_phase2_prompts(),
         phase3=_load_phase3_prompts(),
         phase4=_load_phase4_prompts(),

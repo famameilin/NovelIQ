@@ -103,7 +103,7 @@ def is_reference_surface_name(name: str | None) -> bool:
     """
     创建时间: 2026-04-29
     任务: 角色引用分层重构
-    新建原因: 消歧与图谱投影需要快速判断一个 surface 是否只能作为局部引用。
+    新建原因: 消歧与图谱构建需要快速判断一个 surface 是否只能作为局部引用。
     """
     return classify_reference_kind(name) != "global_character"
 
@@ -221,7 +221,6 @@ def collect_reference_slots_from_text(
 def resolve_global_character_name(
     surface_name: str | None,
     *,
-    alias_map: dict[str, str] | None = None,
     resolved_global_name: str | None = None,
 ) -> str | None:
     """
@@ -232,21 +231,18 @@ def resolve_global_character_name(
     explicit_resolved = normalize_reference_name(resolved_global_name)
     if explicit_resolved:
         if is_global_character_surface_name(explicit_resolved):
-            mapped_name = alias_map.get(explicit_resolved, explicit_resolved) if alias_map else explicit_resolved
-            return mapped_name if is_global_character_surface_name(mapped_name) else None
+            return explicit_resolved
         return None
 
     normalized = normalize_reference_name(surface_name)
     if not is_global_character_surface_name(normalized):
         return None
-    mapped_name = alias_map.get(normalized, normalized) if alias_map else normalized
-    return mapped_name if is_global_character_surface_name(mapped_name) else None
+    return normalized
 
 
 def decide_character_reference(
     surface_name: str | None,
     *,
-    alias_map: dict[str, str] | None = None,
     resolved_global_name: str | None = None,
     chunk_id: int | None = None,
 ) -> CharacterReferenceDecision:
@@ -259,7 +255,6 @@ def decide_character_reference(
     reference_kind = classify_reference_kind(normalized)
     global_name = resolve_global_character_name(
         normalized,
-        alias_map=alias_map,
         resolved_global_name=resolved_global_name,
     )
     can_enter = global_name is not None
@@ -288,8 +283,6 @@ def decide_character_reference(
 
 def filter_global_character_names(
     names: list[str] | tuple[str, ...] | set[str] | frozenset[str],
-    *,
-    alias_map: dict[str, str] | None = None,
 ) -> list[str]:
     """
     创建时间: 2026-04-29
@@ -298,7 +291,7 @@ def filter_global_character_names(
     """
     filtered: list[str] = []
     for name in names:
-        resolved = resolve_global_character_name(name, alias_map=alias_map)
+        resolved = resolve_global_character_name(name)
         if resolved and resolved not in filtered:
             filtered.append(resolved)
     return filtered

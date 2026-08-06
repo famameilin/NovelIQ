@@ -39,6 +39,12 @@ class GraphEntity(Base):
     last_emotion_score: Mapped[str | None] = mapped_column(String(50), nullable=True)
     last_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    is_representative: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
     source_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
@@ -48,28 +54,7 @@ class GraphEntity(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "canonical_name", name="uq_graph_entities_run_canonical"),
         Index("idx_graph_entities_run_last_seen", "run_id", "last_seen_chunk"),
-    )
-
-
-class GraphEntityAlias(Base):
-    __tablename__ = "graph_entity_aliases"
-
-    alias_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), index=True)
-    entity_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), index=True
-    )
-    alias: Mapped[str] = mapped_column(String(255), nullable=False)
-    source_chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
-    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: datetime.now(UTC))
-
-    __table_args__ = (
-        UniqueConstraint("run_id", "entity_id", "alias", name="uq_graph_entity_aliases_entity_alias"),
-        Index("idx_graph_entity_aliases_run_alias", "run_id", "alias"),
+        Index("idx_graph_entities_run_representative", "run_id", "is_representative"),
     )
 
 
@@ -171,7 +156,7 @@ class GraphEntityParticipant(Base):
 
 
 class GraphFact(Base):
-    """2026-08-05 用于保存章节标注与 continuity fact 的通用数据库图投影"""
+    """2026-08-06 用于保存章节标注与 Agent 解决结果形成的图事实节点"""
 
     __tablename__ = "graph_facts"
 
@@ -209,7 +194,7 @@ class GraphFact(Base):
 
 
 class GraphFactSource(Base):
-    """2026-08-05 用于关联稳定来源事实与实际图投影行"""
+    """2026-08-06 用于关联图事实节点与章节或 Agent 解决来源"""
 
     __tablename__ = "graph_fact_sources"
 
@@ -231,11 +216,6 @@ class GraphFactSource(Base):
         ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
         nullable=True,
     )
-    continuity_fact_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("continuity_facts.fact_id", ondelete="CASCADE"),
-        nullable=True,
-    )
     payload_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -247,36 +227,4 @@ class GraphFactSource(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "stable_fact_id", name="uq_graph_fact_sources_run_stable"),
         Index("idx_graph_fact_sources_annotation", "run_id", "annotation_id"),
-        Index("idx_graph_fact_sources_continuity", "run_id", "continuity_fact_id"),
-    )
-
-
-class GraphFactVersion(Base):
-    """2026-08-05 用于保存事实 refine supersede 与 retract 的稳定版本关系"""
-
-    __tablename__ = "graph_fact_versions"
-
-    version_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    previous_stable_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    current_stable_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    change_kind: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "run_id",
-            "previous_stable_fact_id",
-            "current_stable_fact_id",
-            name="uq_graph_fact_versions_edge",
-        ),
-        Index("idx_graph_fact_versions_previous", "run_id", "previous_stable_fact_id"),
     )

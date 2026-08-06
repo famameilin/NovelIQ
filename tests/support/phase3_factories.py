@@ -8,10 +8,10 @@ def build_phase3_bundle() -> EvidenceBundle:
     return EvidenceBundle(
         structured_evidence=[
             EvidenceItem(
-                evidence_type="alias_mapping",
+                evidence_type="entity_type",
                 source="level1",
-                content="灰衣人 -> 白芷",
-                metadata={"alias": "灰衣人", "canonical": "白芷"},
+                content="白芷:character",
+                metadata={"name": "白芷", "entity_type": "character"},
             ),
             EvidenceItem(
                 evidence_type="canonical_entity",
@@ -52,7 +52,7 @@ def build_phase3_bundle() -> EvidenceBundle:
                 retrieval_method="semantic",
             )
         ],
-        requested_names=["灰衣人"],
+        requested_names=["白芷"],
     )
 
 
@@ -60,10 +60,10 @@ def build_phase3_overflow_bundle() -> EvidenceBundle:
     """构造超过渲染上限的 evidence bundle，用来锁定证据裁剪规则"""
     structured = [
         EvidenceItem(
-            evidence_type="alias_mapping",
+            evidence_type="entity_type",
             source="level1",
-            content=f"别名{i} -> 人物{i}",
-            metadata={"alias": f"别名{i}", "canonical": f"人物{i}"},
+            content=f"人物{i}:character",
+            metadata={"name": f"人物{i}", "entity_type": "character"},
         )
         for i in range(1, 4)
     ]
@@ -139,7 +139,7 @@ def build_phase3_overflow_bundle() -> EvidenceBundle:
         structured_evidence=structured,
         local_evidence=local,
         historical_evidence=semantic,
-        requested_names=["别名1", "别名2", "别名3"],
+        requested_names=["人物1", "人物2", "人物3"],
     )
 
 

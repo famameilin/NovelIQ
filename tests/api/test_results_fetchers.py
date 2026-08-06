@@ -14,7 +14,6 @@ from src.api.routes.results_fetchers import (
     _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
-    _normalize_text_by_alias_map,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
 from src.storage.repositories.annotation import ForeshadowingThreadView
@@ -77,15 +76,10 @@ class _DummyCurveStatsRepo:
 
 
 class _DummyAnnotationRepo:
-    def __init__(self, alias_map, rows):
-        self._alias_map = alias_map
+    def __init__(self, rows):
         self._rows = rows
         self.session = MagicMock()
         self.foreshadow_expectation = None
-
-    def fetch_alias_map(self, run_id):
-        assert run_id == "run-1"
-        return self._alias_map
 
     def fetch_characters_with_scores(self, run_id):
         assert run_id == "run-1"
@@ -112,86 +106,35 @@ class _DummyChunkRepo:
         return self._style_rows
 
 
-def test_normalize_name_list_applies_alias_map_and_deduplicates():
-    values = ["\u4e8c\u5988\u5988", "\u67f3\u5a49\u513f", "\u767d\u82b7"]
-    alias_map = {"\u4e8c\u5988\u5988": "\u67f3\u5a49\u513f"}
+def test_normalize_name_list_deduplicates_graph_names():
+    values = ["柳婉儿", "柳婉儿", "白芷"]
 
-    assert _normalize_name_list(values, alias_map) == ["\u67f3\u5a49\u513f", "\u767d\u82b7"]
-
-
-def test_normalize_text_by_alias_map_rewrites_aliases_to_common_names():
-    text = (
-        "\u7334\u5b50\u5e2e\u4e86\u4e8c\u5988\u5988\uff0c"
-        "\u7b97\u76d8\u8fd8\u5728\u65c1\u8fb9\u770b\u7740\u4e8c\u5988\u5988\u3002"
-    )
-    alias_map = {
-        "\u7334\u5b50": "\u4faf\u98de\u767d",
-        "\u7b97\u76d8": "\u6797\u7acb\u679c",
-        "\u4e8c\u5988\u5988": "\u67f3\u5a49\u513f",
-    }
-
-    assert _normalize_text_by_alias_map(text, alias_map) == (
-        "\u4faf\u98de\u767d\u5e2e\u4e86\u67f3\u5a49\u513f\uff0c"
-        "\u6797\u7acb\u679c\u8fd8\u5728\u65c1\u8fb9\u770b\u7740\u67f3\u5a49\u513f\u3002"
-    )
+    assert _normalize_name_list(values) == ["柳婉儿", "白芷"]
 
 
-def test_normalize_text_by_alias_map_skips_embedded_suffixes_in_longer_names():
-    text = "\u738b\u4f2f\u5b89\u770b\u89c1\u4e86\u4f2f\u5b89\uff0c\u4f46\u6ca1\u7406\u4f1a\u963f\u4f2f\u5b89\u3002"
-    alias_map = {
-        "\u4f2f\u5b89": "\u8d3a\u4f2f\u5b89",
-    }
-
-    assert _normalize_text_by_alias_map(text, alias_map) == (
-        "\u738b\u4f2f\u5b89\u770b\u89c1\u4e86\u8d3a\u4f2f\u5b89\uff0c\u4f46\u6ca1\u7406\u4f1a\u963f\u4f2f\u5b89\u3002"
-    )
-
-
-def test_normalize_text_by_alias_map_skips_embedded_title_aliases():
-    text = (
-        "\u6797\u5bb6\u5927\u5c11\u7237\u56de\u5e9c\uff0c"
-        "\u8001\u795e\u4ed9\u63d0\u70b9\u4ed6\u795e\u4ed9\u6765\u4e86\u3002"
-    )
-    alias_map = {
-        "\u5927\u5c11\u7237": "\u8d3a\u4f2f\u5b89",
-        "\u795e\u4ed9": "\u5f20\u9053\u9675",
-    }
-
-    assert _normalize_text_by_alias_map(text, alias_map) == (
-        "\u6797\u5bb6\u5927\u5c11\u7237\u56de\u5e9c\uff0c"
-        "\u8001\u795e\u4ed9\u63d0\u70b9\u4ed6\u5f20\u9053\u9675\u6765\u4e86\u3002"
-    )
-
-
-def test_normalize_text_by_alias_map_rewrites_standalone_title_aliases():
-    text = "\u5927\u5c11\u7237\u56de\u5e9c\uff0c\u548c\u795e\u4ed9\u90fd\u6765\u4e86\u3002"
-    alias_map = {
-        "\u5927\u5c11\u7237": "\u8d3a\u4f2f\u5b89",
-        "\u795e\u4ed9": "\u5f20\u9053\u9675",
-    }
-
-    assert _normalize_text_by_alias_map(text, alias_map) == (
-        "\u8d3a\u4f2f\u5b89\u56de\u5e9c\uff0c\u548c\u5f20\u9053\u9675\u90fd\u6765\u4e86\u3002"
-    )
-
-
-def test_fetch_diagnosis_normalizes_all_character_name_fields():
+def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.3,
-            "arc_scores": '{"\\u7334\\u5b50": 6.5, "\\u7b97\\u76d8": 6.0}',
+            "arc_scores": '{"\\u4faf\\u98de\\u767d": 6.5, "\\u6797\\u7acb\\u679c": 6.0}',
             "genre_labels": '["\\u901a\\u7528"]',
             "style_labels": '["\\u4e25\\u8083"]',
-            "topic_labels": '["\\u4e8c\\u5988\\u5988", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
-            "diagnosis": "\u7334\u5b50\u5e2e\u52a9\u4e8c\u5988\u5988\uff0c\u7b97\u76d8\u968f\u540e\u51fa\u73b0\u3002",
-            "value_logic_reason": "\u4e8c\u5988\u5988\u5f71\u54cd\u4e86\u7334\u5b50\u7684\u5224\u65ad\u3002",
-            "power_stance_reason": "\u7b97\u76d8\u538b\u5236\u4e86\u4e8c\u5988\u5988\u3002",
-            "dignity_reason": "\u4e8c\u5988\u5988\u4fdd\u6301\u4f53\u9762\u3002",
-            "cultural_depth_reason": "\u7334\u5b50\u548c\u4e8c\u5988\u5988\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002",
+            "topic_labels": '["\\u67f3\\u5a49\\u513f", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
+            "diagnosis": (
+                "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c"
+                "\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
+            ),
+            "value_logic_reason": "\u67f3\u5a49\u513f\u5f71\u54cd\u4e86\u4faf\u98de\u767d\u7684\u5224\u65ad\u3002",
+            "power_stance_reason": "\u6797\u7acb\u679c\u538b\u5236\u4e86\u67f3\u5a49\u513f\u3002",
+            "dignity_reason": "\u67f3\u5a49\u513f\u4fdd\u6301\u4f53\u9762\u3002",
+            "cultural_depth_reason": (
+                "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f"
+                "\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
+            ),
             "focus_structure": "dual",
-            "focus_characters": '["\\u7334\\u5b50", "\\u7b97\\u76d8"]',
-            "main_characters": '["\\u7334\\u5b50", "\\u4e8c\\u5988\\u5988"]',
-            "core_cast": '["\\u7334\\u5b50", "\\u7b97\\u76d8", "\\u4e8c\\u5988\\u5988"]',
+            "focus_characters": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
+            "main_characters": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
+            "core_cast": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
         }
     )
 
@@ -199,11 +142,6 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={
-            "\u7334\u5b50": "\u4faf\u98de\u767d",
-            "\u7b97\u76d8": "\u6797\u7acb\u679c",
-            "\u4e8c\u5988\u5988": "\u67f3\u5a49\u513f",
-        },
     )
 
     assert result is not None
@@ -222,7 +160,7 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     )
     assert result.focus_structure == "dual"
     assert result.focus_characters == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
-    assert result.main_characters == ["\u4faf\u98de\u767d"]
+    assert result.main_characters == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
     assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
     assert result.foreshadow_expectation == 0.3
 
@@ -259,32 +197,11 @@ def test_fetch_foreshadowing_threads_preserves_confidence_field():
 
 def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
     stats_repo = _DummyStatsRepo(None)
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
 
     result = _fetch_diagnosis(
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map={},
-    )
-
-    assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "diagnosis_missing_focus_contract"
-
-
-def test_fetch_diagnosis_marks_missing_row_as_rerun_required_even_if_ledger_exists():
-    stats_repo = _DummyStatsRepo(None)
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
-    annotation_repo.foreshadow_expectation = 0.58
-
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -316,7 +233,6 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -341,7 +257,6 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_arc_scores_missing
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -364,7 +279,6 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_topic_labels_missi
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -394,7 +308,6 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_genre_labels_missi
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -424,7 +337,6 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_style_labels_missi
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -456,7 +368,6 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_controlled_labels_
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -487,7 +398,6 @@ def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -509,7 +419,6 @@ def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -532,7 +441,6 @@ def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -565,7 +473,6 @@ def test_fetch_diagnosis_accepts_missing_reference_contract_version_as_latest_sh
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={},
     )
 
     assert result is not None
@@ -576,7 +483,7 @@ def test_fetch_diagnosis_accepts_missing_reference_contract_version_as_latest_sh
     assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
+def test_fetch_diagnosis_preserves_distinct_graph_entity_names():
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": '{"伯安": 7.2, "贺伯安": 8.3}',
@@ -594,15 +501,14 @@ def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
-        alias_map={"伯安": "贺伯安"},
     )
 
     assert result is not None
-    assert result.arc_scores == {"贺伯安": 8.3}
-    assert result.focus_structure == "single"
-    assert result.focus_characters == ["贺伯安"]
-    assert result.main_characters == ["贺伯安"]
-    assert result.core_cast == ["贺伯安"]
+    assert result.arc_scores == {"伯安": 7.2, "贺伯安": 8.3}
+    assert result.focus_structure == "dual"
+    assert result.focus_characters == ["伯安", "贺伯安"]
+    assert result.main_characters == ["伯安", "贺伯安"]
+    assert result.core_cast == ["伯安", "贺伯安"]
 
 
 def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
@@ -610,7 +516,7 @@ def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
     rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
     rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score="neutral")] * 10)
 
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
+    annotation_repo = _DummyAnnotationRepo(rows=rows)
 
     result = _fetch_characters(
         run_id="run-1",
@@ -636,7 +542,7 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
     rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score="neutral")] * 2)
     rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score="neutral")] * 1)
 
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
+    annotation_repo = _DummyAnnotationRepo(rows=rows)
 
     result = _fetch_characters(
         run_id="run-1",
@@ -658,7 +564,7 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
         _DummyRow(name="沈砚", role_function="主体", emotion_score="neutral"),
     ]
 
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
+    annotation_repo = _DummyAnnotationRepo(rows=rows)
 
     result = _fetch_characters(
         run_id="run-1",
@@ -669,21 +575,18 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
     assert [char.name for char in result] == ["沈砚"]
 
 
-def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
+def test_normalize_arc_scores_preserves_named_scores():
     arc_scores = {"monkey": 6.5, "hou_fei_bai": 8.0, "abacus": 4.0}
-    alias_map = {
-        "monkey": "hou_fei_bai",
-        "abacus": "lin_li_guo",
-    }
 
-    assert _normalize_arc_scores(arc_scores, alias_map) == {
+    assert _normalize_arc_scores(arc_scores) == {
+        "monkey": 6.5,
         "hou_fei_bai": 8.0,
-        "lin_li_guo": 4.0,
+        "abacus": 4.0,
     }
 
 
 def test_normalize_arc_scores_returns_none_when_payload_is_not_named_mapping():
-    assert _normalize_arc_scores([8.0, 6.0], alias_map={}) is None
+    assert _normalize_arc_scores([8.0, 6.0]) is None
 
 
 def test_fetch_character_relations_deduplicates_across_chunks():
@@ -697,7 +600,7 @@ def test_fetch_character_relations_deduplicates_across_chunks():
 
     with patch(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+        return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
             run_id="run-1",
@@ -740,7 +643,7 @@ def test_fetch_character_relations_skips_inactive_current_relations():
 
     with patch(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+        return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
             run_id="run-1",
@@ -774,7 +677,7 @@ def test_fetch_chunk_curves_adds_surface_tension_without_rewriting_raw_proxy():
             ),
         ]
     )
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
+    annotation_repo = _DummyAnnotationRepo(rows=[])
     chunk_repo = _DummyChunkRepo(
         [
             _DummyRow(
@@ -823,7 +726,7 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
 
     with patch(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+        return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
             run_id="run-1",
@@ -841,14 +744,14 @@ def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     with patch(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(
-            assert_graph_projection_ready=lambda _run_id: (_ for _ in ()).throw(
+            assert_graph_ready=lambda _run_id: (_ for _ in ()).throw(
                 GraphReadinessError(
-                    "graph projection is still pending; finish projection before reading graph-derived authority views."
+                    "database graph is still pending; finish graph persistence before reading authority views."
                 )
             )
         ),
     ):
-        with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        with pytest.raises(GraphReadinessError, match="database graph is still pending"):
             _fetch_character_relations(
                 run_id="run-1",
                 annotation_repo=annotation_repo,
@@ -860,7 +763,7 @@ def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+        return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
             run_id="run-1",
@@ -871,12 +774,12 @@ def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     assert result == []
 
 
-def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
+def test_fetch_hierarchical_relations_uses_graph_entity_names():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
                 relation_id=1,
-                from_name="老贺",
+                from_name="贺铮",
                 to_name="伯安",
                 relation_type="father_of",
                 first_seen_chunk=2,
@@ -884,7 +787,7 @@ def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
             ),
             ExportRelationSnapshot(
                 relation_id=2,
-                from_name="老贺",
+                from_name="贺铮",
                 to_name="伯安",
                 relation_type="ally_of",
                 first_seen_chunk=2,
@@ -896,7 +799,6 @@ def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
     result = _fetch_hierarchical_relations(
         run_id="run-1",
         export_graph_view=export_graph_view,
-        alias_map={"老贺": "贺铮"},
         valid_character_names={"贺铮", "伯安"},
     )
 
@@ -906,12 +808,12 @@ def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
     assert result[0].rel_type == "father_of"
 
 
-def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
+def test_fetch_hierarchical_relations_filters_unknown_graph_endpoint():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
                 relation_id=10,
-                from_name="二妈妈",
+                from_name="柳婉儿",
                 to_name="陌生人",
                 relation_type="spouse_of",
                 first_seen_chunk=1,
@@ -923,7 +825,6 @@ def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
     result = _fetch_hierarchical_relations(
         run_id="run-1",
         export_graph_view=export_graph_view,
-        alias_map={"二妈妈": "柳婉儿"},
         valid_character_names={"柳婉儿", "贺伯安"},
     )
 
@@ -957,7 +858,6 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
     result = _fetch_hierarchical_relations(
         run_id="run-1",
         export_graph_view=export_graph_view,
-        alias_map={},
         valid_character_names={"老贺", "伯安", "阿明"},
     )
 
@@ -996,7 +896,6 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
     result = _fetch_hierarchical_relations(
         run_id="run-1",
         export_graph_view=export_graph_view,
-        alias_map={},
         valid_character_names={"伯安"},
     )
 
@@ -1040,7 +939,7 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
                 chunk_id=3,
                 from_entity_id=1,
                 to_entity_id=2,
-                from_name="老贺",
+                from_name="贺铮",
                 to_name="伯安",
                 relation_type="父子",
                 change_type="新建",
@@ -1051,7 +950,6 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     result = _fetch_chunk_annotations(
         run_id="run-1",
         annotation_repo=annotation_repo,
-        alias_map={"老贺": "贺铮"},
         valid_character_names={"贺铮", "伯安"},
         export_graph_view=export_graph_view,
     )
@@ -1101,7 +999,6 @@ def test_fetch_chunk_annotations_uses_explicit_database_graph_view():
     result = _fetch_chunk_annotations(
         run_id="run-1",
         annotation_repo=_AnnotationRepoWithChunkRows(),
-        alias_map={},
         export_graph_view=ExportGraphAuthorityView(),
     )
 
@@ -1143,16 +1040,15 @@ def test_fetch_chunk_annotations_propagates_database_graph_failure(monkeypatch):
 
     class _GraphUnavailableService:
         def build_export_view(self, _run_id):
-            raise GraphReadinessError("graph participant projection is stale or incomplete")
+            raise GraphReadinessError("graph participant state is stale or incomplete")
 
     monkeypatch.setattr(
         "src.api.services.results_queries.chunks.KnowledgeGraphAuthorityService.from_session",
         lambda *_args, **_kwargs: _GraphUnavailableService(),
     )
 
-    with pytest.raises(GraphReadinessError, match="graph participant projection is stale"):
+    with pytest.raises(GraphReadinessError, match="graph participant state is stale"):
         _fetch_chunk_annotations(
             run_id="run-1",
             annotation_repo=annotation_repo,
-            alias_map={},
         )

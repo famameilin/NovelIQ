@@ -16,9 +16,9 @@ from .schema import (
     ChapterAnnotation,
     ChapterAnnotationPatch,
     FactPushOutput,
-    FactSearchResult,
     ForeshadowingPushOutput,
     ForeshadowingSearchResult,
+    GraphSearchResult,
     PullResult,
     PushOutput,
     PushRequest,
@@ -55,19 +55,17 @@ class AnnotationQueryService(Protocol):
         self,
         query: str,
         *,
-        after_chapter_ids: tuple[int, ...],
         limit: int = 50,
     ) -> list[AfterChunkSearchResult]:
-        """2026-08-05 用于检索固定范围内的全部后文章节 chunk"""
+        """2026-08-06 用于检索当前位置之后的后文 chunk"""
 
     def read_after_chunk(
         self,
         *,
         chapter_id: int,
         chunk_id: int,
-        after_chapter_ids: tuple[int, ...],
     ) -> str:
-        """2026-08-05 用于读取固定 after 范围内已授权的完整 chunk 原文"""
+        """2026-08-06 用于读取本轮 search 已授权的完整后文 chunk"""
 
 
 @dataclass(slots=True)
@@ -87,12 +85,11 @@ class AnnotationToolLedger:
 
     current_chapter_id: int
     current_chunk_ids: tuple[int, ...]
-    after_chapter_ids: tuple[int, ...]
     initial_cases: dict[str, CaseSearchResult] = field(default_factory=dict)
     rotation_case_ids: list[str] = field(default_factory=list)
     visible_case_ids: set[str] = field(default_factory=set)
-    visible_fact_ids: set[str] = field(default_factory=set)
     visible_setup_ids: set[str] = field(default_factory=set)
+    visible_graph_entity_node_ids: set[str] = field(default_factory=set)
     visible_evidence_chapter_ids: set[int] = field(default_factory=set)
     pulled_case_ids: list[str] = field(default_factory=list)
     staged_outputs: list[PushOutput] = field(default_factory=list)
@@ -169,10 +166,14 @@ def _register_search_visibility(ledger: AnnotationToolLedger, result: SearchResu
     for item in result.results:
         if isinstance(item, CaseSearchResult):
             ledger.visible_case_ids.add(item.id)
-        elif isinstance(item, FactSearchResult):
-            ledger.visible_fact_ids.add(item.fact_id)
         elif isinstance(item, ForeshadowingSearchResult):
             ledger.visible_setup_ids.add(item.record_id)
+        elif isinstance(item, GraphSearchResult):
+            ledger.visible_graph_entity_node_ids.update(
+                node.node_id
+                for node in item.matched_nodes
+                if node.node_kind == "entity"
+            )
         evidence = getattr(item, "evidence", None)
         if evidence is not None:
             ledger.visible_evidence_chapter_ids.add(evidence.chapterid)
@@ -186,9 +187,16 @@ def _validate_output_visibility(output: PushOutput, ledger: AnnotationToolLedger
             f"push evidence.chapterid 不在本轮可见范围: {output.evidence.chapterid}"
         )
     if isinstance(output, FactPushOutput):
-        linked_fact_id = output.payload.linked_fact_id
-        if linked_fact_id is not None and linked_fact_id not in ledger.visible_fact_ids:
-            raise AnnotationAuthorizationError(f"linked_fact_id 未由本轮 search 返回: {linked_fact_id}")
+        representative_node = output.payload.representative_node
+        if (
+            representative_node is not None
+            and representative_node.node_id is not None
+            and representative_node.node_id not in ledger.visible_graph_entity_node_ids
+        ):
+            raise AnnotationAuthorizationError(
+                "representative_node.node_id 未由本轮图 search 返回: "
+                f"{representative_node.node_id}"
+            )
     if isinstance(output, ForeshadowingPushOutput):
         linked_setup_id = output.payload.linked_setup_id
         if linked_setup_id is not None and linked_setup_id not in ledger.visible_setup_ids:
@@ -210,7 +218,6 @@ def build_annotation_tools(
         if ledger.frozen:
             results = query_service.search_after(
                 normalized_query,
-                after_chapter_ids=ledger.after_chapter_ids,
                 limit=50,
             )
             ledger.authorized_after_chunks.update((item.chapter_id, item.chunk_id) for item in results)
@@ -310,7 +317,6 @@ def build_annotation_tools(
         content = query_service.read_after_chunk(
             chapter_id=chapter_id,
             chunk_id=chunk_id,
-            after_chapter_ids=ledger.after_chapter_ids,
         )
         ledger.record(
             tool_name="read_chunk",

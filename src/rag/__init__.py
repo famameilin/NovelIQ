@@ -13,7 +13,6 @@ from src.rag.evidence_contracts import (
     build_evidence_request_fingerprint,
 )
 from src.rag.evidence_types import (
-    AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
     EntityTypeFact,
@@ -23,7 +22,6 @@ from src.rag.evidence_types import (
 )
 from src.rag.retriever import (
     ActiveEntityLookup,
-    AliasLookup,
     Level3NotReadyError,
     Level3VectorEvidence,
     NarrativeEvidenceService,
@@ -31,9 +29,7 @@ from src.rag.retriever import (
 
 __all__ = [
     "NarrativeEvidenceService",
-    "AliasLookup",
     "ActiveEntityLookup",
-    "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityTypeFact",

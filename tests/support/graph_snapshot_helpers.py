@@ -166,7 +166,7 @@ class StaticGraphAuthorityService:
         assert run_id == self.expected_run_id
         return self.view
 
-    def assert_graph_projection_ready(self, run_id: str) -> None:
+    def assert_graph_ready(self, run_id: str) -> None:
         assert run_id == self.expected_run_id
 
     def build_graph_report(self, *_args, **_kwargs):
@@ -203,7 +203,7 @@ class PaginatedGraphAuthorityService:
             relation_events=self._relation_events,
         )
 
-    def assert_graph_projection_ready(self, run_id: str) -> None:
+    def assert_graph_ready(self, run_id: str) -> None:
         assert run_id == self.expected_run_id
 
     def build_graph_report(self, *_args, **_kwargs):

@@ -12,7 +12,7 @@ from tests.support.chapter_annotation_helpers import (
 
 
 def _seed_relation_graph(db_session, *, close_relation: bool = False) -> str:
-    """2026-08-05 用于通过正式章节标注与生产投影建立关系事实图"""
+    """2026-08-06 用于通过正式章节标注直接建立数据库关系图"""
     texts = ["林渡与顾霜并肩迎敌", "两人此后分道扬镳"] if close_relation else ["林渡与顾霜并肩迎敌"]
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -51,7 +51,7 @@ def _seed_relation_graph(db_session, *, close_relation: bool = False) -> str:
     return run_id
 
 
-def test_graph_repository_derives_relations_participants_and_aliases_from_graph_facts(db_session) -> None:
+def test_graph_repository_derives_relations_and_participants_from_graph_facts(db_session) -> None:
     """2026-08-05 用于验证数据库图读侧统一从通用事实生成实体关系与参与者"""
     run_id = _seed_relation_graph(db_session)
     graph_repo = GraphRepository(db_session)
@@ -59,7 +59,6 @@ def test_graph_repository_derives_relations_participants_and_aliases_from_graph_
     events = graph_repo.fetch_relation_events(run_id)
     current = graph_repo.fetch_current_relations(run_id)
     participants = graph_repo.fetch_participant_entities(run_id)
-    alias_map = graph_repo.fetch_alias_map(run_id)
 
     assert [(row.from_name, row.to_name, row.relation_type, row.change_type) for row in events] == [
         ("林渡", "顾霜", "盟友", "新建")
@@ -69,7 +68,6 @@ def test_graph_repository_derives_relations_participants_and_aliases_from_graph_
     assert current[0].is_active is True
     assert {row.name for row in participants} == {"林渡", "顾霜"}
     assert {row.current_degree for row in participants} == {1}
-    assert alias_map == {"林渡": "林渡", "顾霜": "顾霜"}
 
 
 def test_graph_repository_keeps_history_when_latest_relation_fact_breaks_edge(db_session) -> None:

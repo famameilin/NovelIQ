@@ -14,9 +14,7 @@ from .chunks import (
 from .common import (
     _calculate_narrative_focus_scores,
     _normalize_arc_scores,
-    _normalize_name,
     _normalize_name_list,
-    _normalize_text_by_alias_map,
     _parse_int_field,
     _parse_json_field,
 )
@@ -32,7 +30,6 @@ from .graph import (
     _serialize_graph_page_summary,
 )
 from .metadata import (
-    _fetch_alias_merges_only,
     _fetch_global_stats,
     _fetch_known_characters,
     _fetch_novel_name,
@@ -44,9 +41,7 @@ __all__ = [
     "GRAPH_PAGE_EVENT_LIMIT",
     "_parse_json_field",
     "_parse_int_field",
-    "_normalize_name",
     "_normalize_name_list",
-    "_normalize_text_by_alias_map",
     "_fetch_chunk_curves",
     "_fetch_raw_chunk_curves",
     "_fetch_characters",
@@ -67,5 +62,4 @@ __all__ = [
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
     "_fetch_known_characters",
-    "_fetch_alias_merges_only",
 ]

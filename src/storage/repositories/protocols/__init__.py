@@ -13,7 +13,6 @@ from .run import RunRepositoryProtocol
 from .stats import StatsRepositoryProtocol
 from .types import (
     AnnotationRecord,
-    CharacterDisambigData,
     ChunkCounts,
     ChunkCurveRow,
     ChunkTextRow,
@@ -40,7 +39,6 @@ __all__ = [
     "RunRepositoryProtocol",
     "StatsRepositoryProtocol",
     "AnnotationRecord",
-    "CharacterDisambigData",
     "ChunkCounts",
     "ChunkCurveRow",
     "ChunkTextRow",

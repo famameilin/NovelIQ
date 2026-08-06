@@ -38,34 +38,8 @@ class EvidenceBundleBuilder:
                 requested_names=[],
             )
         relevant_names = set(normalized_requested_names)
-        if relevant_names:
-            related_canonicals = {
-                mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names
-            }
-            relevant_names |= related_canonicals
 
         structured_evidence: list[EvidenceItem] = []
-        alias_mappings = snapshot.alias_mappings
-        if relevant_names:
-            alias_mappings = [
-                mapping
-                for mapping in snapshot.alias_mappings
-                if mapping.alias in relevant_names or mapping.canonical in relevant_names
-            ]
-        for mapping in alias_mappings:
-            structured_evidence.append(
-                EvidenceItem(
-                    evidence_type="alias_mapping",
-                    source=mapping.source,
-                    content=f"{mapping.alias} -> {mapping.canonical}",
-                    metadata={
-                        "alias": mapping.alias,
-                        "canonical": mapping.canonical,
-                        "confidence": mapping.confidence,
-                    },
-                )
-            )
-
         canonical_entities = snapshot.canonical_entities
         if relevant_names:
             canonical_entities = [entity for entity in snapshot.canonical_entities if entity.name in relevant_names]

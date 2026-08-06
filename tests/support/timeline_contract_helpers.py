@@ -24,7 +24,7 @@ class TimelineContractScenario:
 
 
 def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenario:
-    """2026-08-05 用于通过章节标注与生产图投影构造时间轴共享场景"""
+    """2026-08-06 用于通过章节标注与数据库图持久化构造时间轴共享场景"""
     hero_name = "顾承渊"
     rival_name = "苏映雪"
     organization_name = "天衡宗"

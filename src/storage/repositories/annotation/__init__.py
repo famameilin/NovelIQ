@@ -10,7 +10,6 @@ from .continuity import (
     CasePoolRepository,
     CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
-    ContinuityFactRepository,
     DatabaseAnnotationQueryService,
     ForeshadowingRepository,
 )
@@ -31,7 +30,6 @@ __all__ = [
     "CasePoolRepository",
     "CaseResolutionMappingRepository",
     "ChapterAnnotationRepository",
-    "ContinuityFactRepository",
     "DatabaseAnnotationQueryService",
     "ForeshadowingRepository",
 ]

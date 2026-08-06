@@ -11,7 +11,6 @@ from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, 
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from .types import (
     ActiveEntityContext,
-    AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
     EntityLifecycle,
@@ -41,12 +40,11 @@ class KnowledgeGraphAuthorityService:
     def build_level1_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
         """Level 1 对证据消费者刻意保持最小边界"""
 
-        entities = self._graph_repo.fetch_entities(run_id)
+        entities = self._graph_repo.fetch_representative_entities(run_id)
         return Level1AuthoritySnapshot(
-            alias_mappings=self._build_alias_mappings(self._graph_repo.fetch_alias_map(run_id)),
             canonical_entities=self._build_canonical_entities(entities),
             confirmed_relations=self._build_confirmed_relations(
-                self._graph_repo.fetch_current_relations(run_id, active_only=True)
+                self._graph_repo.fetch_representative_current_relations(run_id, active_only=True)
             ),
             entity_types=self._build_entity_type_facts(entities),
         )
@@ -60,9 +58,9 @@ class KnowledgeGraphAuthorityService:
         关系历史也会被过滤，保证两端都属于同一批角色集合
         """
 
-        self.assert_graph_projection_ready(run_id)
+        self.assert_graph_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
-        self._assert_participant_projection_consistency(
+        self._assert_participant_graph_consistency(
             run_id,
             relation_events=[],
             confirmed_relations=[],
@@ -70,7 +68,7 @@ class KnowledgeGraphAuthorityService:
             relation_endpoint_ids=self._graph_repo.fetch_relation_endpoint_entity_ids(run_id),
         )
         character_entities = self._build_canonical_entities(
-            self._graph_repo.fetch_entities(run_id, entity_type="character")
+            self._graph_repo.fetch_representative_entities(run_id, entity_type="character")
         )
         character_ids = {entity.entity_id for entity in character_entities if entity.entity_id is not None}
 
@@ -79,7 +77,9 @@ class KnowledgeGraphAuthorityService:
         # 判断组织/群体边是否该出现在时间轴上
         relation_events = [
             event
-            for event in self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
+            for event in self._build_relation_events(
+                self._graph_repo.fetch_representative_relation_events(run_id)
+            )
             if event.from_entity_id in character_ids and event.to_entity_id in character_ids
         ]
 
@@ -109,41 +109,35 @@ class KnowledgeGraphAuthorityService:
         不能把这个 report 直接当成最终 diagnosis 层
         """
 
-        self.assert_graph_projection_ready(run_id)
-        participant_entities = self._graph_repo.fetch_participant_entities(run_id)
-        confirmed_relations = self._build_confirmed_relations(
-            self._graph_repo.fetch_current_relations(run_id, active_only=True)
+        representative_view = self.build_representative_graph_view(run_id)
+        return self._assemble_graph_report(
+            representative_view.participant_states,
+            representative_view.confirmed_relations,
+            representative_view.relation_events,
         )
-        relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
-        self._assert_participant_projection_consistency(
-            run_id,
-            relation_events,
-            confirmed_relations,
-            participant_entities,
-        )
-        participant_states = self._build_participant_states(participant_entities)
-        return self._assemble_graph_report(participant_states, confirmed_relations, relation_events)
 
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
         """返回图谱导出 payload 使用的 authority 视图"""
-        self.assert_graph_projection_ready(run_id)
-        relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
+        self.assert_graph_ready(run_id)
+        relation_events = self._build_relation_events(
+            self._graph_repo.fetch_representative_relation_events(run_id)
+        )
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
-        self._assert_participant_projection_consistency(
+        self._assert_participant_graph_consistency(
             run_id,
             relation_events=relation_events,
             confirmed_relations=[],
             participant_entities=participant_entities,
             relation_endpoint_ids=self._graph_repo.fetch_relation_endpoint_entity_ids(run_id),
         )
-        entities = self._graph_repo.fetch_entities(run_id)
+        entities = self._graph_repo.fetch_representative_entities(run_id)
         # export 仍保留部分历史 DTO，这里统一把“当前关系快照 + 关系事件历史”
         # 以及“允许导出的规范实体集合”一起收口成 authority view，避免导出层再直接
-        # 依赖 repository/raw projection 做二次过滤
+        # 依赖 repository 原始行做二次过滤
         return ExportGraphAuthorityView(
             canonical_entities=self._build_canonical_entities(entities),
             current_relations=self._build_export_relation_snapshots(
-                self._graph_repo.fetch_current_relations(run_id, active_only=False)
+                self._graph_repo.fetch_representative_current_relations(run_id, active_only=False)
             ),
             relation_events=relation_events,
         )
@@ -151,13 +145,13 @@ class KnowledgeGraphAuthorityService:
     def build_graph_view(self, run_id: str) -> GraphAuthorityView:
         """返回带完整关系历史的图谱 authority 事实，供下游产品层组装"""
 
-        self.assert_graph_projection_ready(run_id)
+        self.assert_graph_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
             self._graph_repo.fetch_current_relations(run_id, active_only=True)
         )
         relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
-        self._assert_participant_projection_consistency(
+        self._assert_participant_graph_consistency(
             run_id, relation_events, confirmed_relations, participant_entities
         )
         participant_states = self._build_participant_states(participant_entities)
@@ -166,6 +160,36 @@ class KnowledgeGraphAuthorityService:
             confirmed_relations=confirmed_relations,
             relation_events=relation_events,
             participant_states=participant_states,
+        )
+
+    def build_representative_graph_view(self, run_id: str) -> GraphAuthorityView:
+        """2026-08-06 用于向诊断与聚合提供按常用人物节点收口的关系图"""
+        self.assert_graph_ready(run_id)
+        entities = self._graph_repo.fetch_representative_entities(run_id)
+        relations = self._graph_repo.fetch_representative_current_relations(
+            run_id,
+            active_only=True,
+        )
+        events = self._graph_repo.fetch_representative_relation_events(run_id)
+        endpoint_ids = {
+            entity_id
+            for relation in relations
+            for entity_id in (relation.from_entity_id, relation.to_entity_id)
+        } | {
+            entity_id
+            for event in events
+            for entity_id in (event.from_entity_id, event.to_entity_id)
+        }
+        participant_entities = [
+            entity
+            for entity in entities
+            if entity.entity_id in endpoint_ids
+        ]
+        return GraphAuthorityView(
+            canonical_entities=self._build_canonical_entities(participant_entities),
+            confirmed_relations=self._build_confirmed_relations(relations),
+            relation_events=self._build_relation_events(events),
+            participant_states=self._build_entity_participant_states(participant_entities),
         )
 
     def build_graph_relation_event_page(
@@ -182,9 +206,9 @@ class KnowledgeGraphAuthorityService:
         不应该每次都重建完整 GraphAuthorityView 再在内存里切片
         """
 
-        self.assert_graph_projection_ready(run_id)
+        self.assert_graph_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
-        self._assert_participant_projection_consistency(
+        self._assert_participant_graph_consistency(
             run_id,
             relation_events=[],
             confirmed_relations=[],
@@ -197,15 +221,9 @@ class KnowledgeGraphAuthorityService:
         )
         return relation_events, total
 
-    def assert_graph_projection_ready(self, run_id: str) -> None:
+    def assert_graph_ready(self, run_id: str) -> None:
         """2026-08-05 用于确认数据库图读侧可直接按最终事实查询"""
         del run_id
-
-    def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
-        return [
-            AliasMapping(alias=alias, canonical=canonical)
-            for alias, canonical in sorted(alias_map.items(), key=lambda item: (item[1], item[0]))
-        ]
 
     def _build_canonical_entities(self, entities: Iterable[Any]) -> list[CanonicalEntity]:
         """
@@ -368,11 +386,30 @@ class KnowledgeGraphAuthorityService:
                     first_seen_chunk=participant.first_seen_chunk,
                     last_seen_chunk=participant.last_seen_chunk,
                     source_confidence=participant.source_confidence,
+                    is_representative=participant.is_representative,
                 )
             )
         return participant_states
 
-    def _assert_participant_projection_consistency(
+    def _build_entity_participant_states(self, entities: Iterable[Any]) -> list[ParticipantState]:
+        """2026-08-06 用于把常用实体节点转换为诊断与聚合关系参与者"""
+        return [
+            ParticipantState(
+                entity_id=int(entity.entity_id),
+                name=str(entity.canonical_name),
+                entity_type=str(entity.entity_type or "character"),
+                status=str(entity.status or "active"),
+                primary_role_function=entity.primary_role_function,
+                first_seen_chunk=entity.first_seen_chunk,
+                last_seen_chunk=entity.last_seen_chunk,
+                source_confidence=entity.source_confidence,
+                is_representative=True,
+            )
+            for entity in sorted(entities, key=lambda row: row.canonical_name)
+            if is_global_character_surface_name(entity.canonical_name)
+        ]
+
+    def _assert_participant_graph_consistency(
         self,
         run_id: str,
         relation_events: list[RelationEvent],
@@ -392,7 +429,7 @@ class KnowledgeGraphAuthorityService:
         if not expected_participant_ids:
             if participant_entity_ids:
                 raise GraphReadinessError(
-                    "graph participant projection is stale while graph relation tables are empty; "
+                    "graph participant state is stale while graph relation tables are empty; "
                     f"re-run analysis for run_id={run_id} to rebuild graph_entity_participants."
                 )
             return
@@ -401,7 +438,7 @@ class KnowledgeGraphAuthorityService:
         stale_entity_ids = participant_entity_ids - expected_participant_ids
         if missing_entity_ids or stale_entity_ids:
             raise GraphReadinessError(
-                "graph participant projection is stale or incomplete for the current relation graph; "
+                "graph participant state is stale or incomplete for the current relation graph; "
                 f"re-run analysis for run_id={run_id} to rebuild graph_entity_participants."
             )
 

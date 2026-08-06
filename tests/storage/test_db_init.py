@@ -6,6 +6,20 @@ from src.storage.db import _ensure_runtime_schema, get_session_factory, init_db
 from src.storage.models import Base
 
 
+def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
+    """2026-08-06 用于验证 ORM 只保留图节点目标和直接图来源结构"""
+    assert "continuity_facts" not in Base.metadata.tables
+    assert "graph_fact_versions" not in Base.metadata.tables
+
+    mapping_columns = Base.metadata.tables["case_resolution_mappings"].columns
+    source_columns = Base.metadata.tables["graph_fact_sources"].columns
+    entity_columns = Base.metadata.tables["graph_entities"].columns
+    assert "target_graph_node_id" in mapping_columns
+    assert "target_fact_id" not in mapping_columns
+    assert "continuity_fact_id" not in source_columns
+    assert "is_representative" in entity_columns
+
+
 def test_init_db_excludes_level3_tables_by_default() -> None:
     with (
         patch("src.storage.db.get_engine", return_value=object()),
@@ -79,9 +93,11 @@ def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> Non
 
     expected_foreshadow_sql = "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation"
     expected_thread_confidence_sql = "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence"
+    expected_representative_sql = "ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS is_representative"
 
     assert any(expected_foreshadow_sql in sql for sql in executed_sql)
     assert any(expected_thread_confidence_sql in sql for sql in executed_sql)
+    assert any(expected_representative_sql in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist" in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters" in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast" in sql for sql in executed_sql)
@@ -96,10 +112,8 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
         "analysis_runs_novel_id_fkey",
         "chapter_annotations_run_id_fkey",
         "case_pool_cases_run_id_fkey",
-        "continuity_facts_run_id_fkey",
         "graph_facts_run_id_fkey",
         "graph_fact_sources_graph_fact_id_fkey",
-        "graph_fact_versions_run_id_fkey",
         "cloud_analysis_novel_id_fkey",
         "global_context_novel_id_fkey",
         "graph_relation_events_chunk_id_run_id_fkey",

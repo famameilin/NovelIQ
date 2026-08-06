@@ -12,14 +12,14 @@ EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_
 EventType = Literal["冲突", "铺垫", "转折"]
 Confidence = Literal["high", "medium", "low"]
 Assertion = Literal["affirmed", "negated"]
-FactChangeKind = Literal["assert", "refine", "supersede", "retract"]
 RelationChangeKind = Literal["assert", "reinforce", "weaken", "break", "refine", "supersede", "retract"]
 Directionality = Literal["directed", "bidirectional"]
+RelationSemantics = Literal["ordinary", "same_character"]
 CaseState = Literal["active", "consumed", "rejected"]
 ForeshadowingType = Literal["物件", "对话", "场景", "人物行为", "其他"]
 SetupStatus = Literal["open", "reinforced", "likely_paid_off"]
 PayoffLikelihood = Literal["high", "medium"]
-SourceKind = Literal["chapter_annotation", "continuity_fact"]
+SourceKind = Literal["chapter_annotation", "agent_resolution"]
 
 NonEmptyText = Annotated[str, Field(min_length=1)]
 
@@ -50,6 +50,20 @@ class EntityRef(StrictModel):
 
     name: str = Field(min_length=1)
     entity_type: str = Field(min_length=1)
+
+
+class RepresentativeNodeSelector(StrictModel):
+    """2026-08-06 用于按关系端点或图搜索节点 ID 选择常用人物节点"""
+
+    endpoint: Literal["subject", "object"] | None = None
+    node_id: str | None = Field(default=None, pattern=r"^entity:[1-9][0-9]*$")
+
+    @model_validator(mode="after")
+    def validate_single_selector(self) -> RepresentativeNodeSelector:
+        """2026-08-06 用于确保常用节点选择器只使用一种定位方式"""
+        if (self.endpoint is None) == (self.node_id is None):
+            raise ValueError("representative_node 必须恰好选择 endpoint 或 node_id")
+        return self
 
 
 class StoryTime(StrictModel):
@@ -137,6 +151,29 @@ class RelationFact(ChapterFactBase):
     relation_type: str = Field(min_length=1)
     change_kind: RelationChangeKind
     directionality: Directionality
+    relation_semantics: RelationSemantics = "ordinary"
+    representative_node: RepresentativeNodeSelector | None = None
+
+    @model_validator(mode="after")
+    def validate_character_identity_relation(self) -> RelationFact:
+        """2026-08-06 用于校验同一人物关系与代表人物节点选择"""
+        inactive = self.change_kind in {"break", "retract"}
+        if self.relation_semantics == "ordinary":
+            if self.representative_node is not None:
+                raise ValueError("普通关系不允许提交 representative_node")
+            return self
+        if self.from_entity.entity_type != "character" or self.to_entity.entity_type != "character":
+            raise ValueError("同一人物关系的两端必须都是 character 节点")
+        if self.from_entity.name == self.to_entity.name:
+            raise ValueError("同一人物关系必须连接两个独立 character 节点")
+        if self.directionality != "bidirectional":
+            raise ValueError("同一人物关系必须使用 bidirectional")
+        if inactive:
+            if self.representative_node is not None:
+                raise ValueError("断开同一人物关系时不允许提交 representative_node")
+        elif self.representative_node is None:
+            raise ValueError("有效同一人物关系必须选择一个 representative_node")
+        return self
 
 
 class StateFact(ChapterFactBase):
@@ -211,7 +248,7 @@ class CasePayload(StrictModel):
 
 
 class FactPayload(StrictModel):
-    """2026-08-05 用于表达可独立发布并投影到数据库图的连续性事实"""
+    """2026-08-06 用于表达写入数据库图的节点关系与属性语义"""
 
     fact_type: str = Field(min_length=1)
     subject: EntityRef
@@ -222,19 +259,33 @@ class FactPayload(StrictModel):
     scope: str = Field(min_length=1)
     story_time: StoryTime | None = None
     assertion: Assertion
-    change_kind: FactChangeKind
-    linked_fact_id: str | None = None
     confidence: Confidence
+    directionality: Directionality = "directed"
+    relation_semantics: RelationSemantics = "ordinary"
+    representative_node: RepresentativeNodeSelector | None = None
 
     @model_validator(mode="after")
-    def validate_fact_change(self) -> FactPayload:
-        """2026-08-05 用于校验事实值与版本变化引用合同"""
+    def validate_graph_value(self) -> FactPayload:
+        """2026-08-06 用于校验图关系属性互斥与同一人物节点选择"""
         if (self.object is None) == (self.value is None):
             raise ValueError("fact 的 object 与 value 必须恰好一个非空")
-        if self.change_kind == "assert" and self.linked_fact_id is not None:
-            raise ValueError("assert fact 不允许 linked_fact_id")
-        if self.change_kind != "assert" and not self.linked_fact_id:
-            raise ValueError("事实修订必须提供 linked_fact_id")
+        if self.relation_semantics == "ordinary":
+            if self.representative_node is not None:
+                raise ValueError("普通事实不允许提交 representative_node")
+            return self
+        if self.fact_type != "relation" or self.object is None:
+            raise ValueError("same_character 只允许用于实体关系事实")
+        if self.subject.entity_type != "character" or self.object.entity_type != "character":
+            raise ValueError("同一人物关系的两端必须都是 character 节点")
+        if self.subject.name == self.object.name:
+            raise ValueError("同一人物关系必须连接两个独立 character 节点")
+        if self.directionality != "bidirectional":
+            raise ValueError("同一人物关系必须使用 bidirectional")
+        if self.assertion == "negated":
+            if self.representative_node is not None:
+                raise ValueError("否定同一人物关系不允许提交 representative_node")
+        elif self.representative_node is None:
+            raise ValueError("同一人物关系必须选择一个 representative_node")
         return self
 
 
@@ -337,15 +388,36 @@ class CaseSearchResult(StrictModel):
     state: CaseState = "active"
 
 
-class FactSearchResult(StrictModel):
-    """2026-08-05 用于返回稳定来源事实 ID 与完整图事实语义"""
+class GraphSearchNode(StrictModel):
+    """2026-08-06 用于返回图查询路径中的节点及属性"""
 
-    result_kind: Literal["fact"] = "fact"
-    fact_id: str
+    node_id: str
+    node_kind: Literal["entity", "fact"]
+    label: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphSearchEdge(StrictModel):
+    """2026-08-06 用于返回图查询路径中的有向边及属性"""
+
+    from_node_id: str
+    to_node_id: str
+    edge_kind: str
+    relation_type: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphSearchResult(StrictModel):
+    """2026-08-06 用于返回图路径命中的目标节点与完整结构上下文"""
+
+    result_kind: Literal["graph"] = "graph"
+    target_node_id: str
     source_kind: SourceKind
     pullable: Literal[False] = False
-    content: dict[str, Any]
     evidence: Evidence
+    matched_nodes: list[GraphSearchNode] = Field(default_factory=list)
+    matched_edges: list[GraphSearchEdge] = Field(default_factory=list)
+    path: list[str] = Field(default_factory=list)
 
 
 class ForeshadowingSearchResult(StrictModel):
@@ -368,7 +440,7 @@ class AfterChunkSearchResult(StrictModel):
 
 
 SearchResultItem = Annotated[
-    CaseSearchResult | FactSearchResult | ForeshadowingSearchResult | AfterChunkSearchResult,
+    CaseSearchResult | GraphSearchResult | ForeshadowingSearchResult | AfterChunkSearchResult,
     Field(discriminator="result_kind"),
 ]
 
@@ -438,7 +510,6 @@ class AgentRunResult(StrictModel):
     chapter_id: int = Field(gt=0)
     final_annotation: ChapterAnnotation
     initial_finish: ChapterAnnotation
-    after_chapter_ids: list[int]
     revision_payload: dict[str, Any]
     initial_case_candidate_ids: list[str]
     rotation_case_ids: list[str]
@@ -459,9 +530,9 @@ class CompletionCase(StrictModel):
 
 
 class CompletionFact(StrictModel):
-    """2026-08-05 用于返回完成事务实际创建或复用的事实"""
+    """2026-08-06 用于返回完成事务实际写入或复用的图节点"""
 
-    fact_id: str
+    graph_node_id: str
     payload: FactPayload
     evidence: Evidence
 

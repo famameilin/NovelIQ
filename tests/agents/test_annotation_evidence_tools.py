@@ -11,6 +11,7 @@ from src.agents.annotation.schema import (
     AfterChunkSearchResult,
     CaseSearchResult,
     Evidence,
+    GraphSearchResult,
     SearchResult,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
@@ -20,8 +21,8 @@ class _QueryService:
     """2026-08-05 用于记录连续性与后文工具调用的测试查询服务"""
 
     def __init__(self) -> None:
-        """2026-08-05 用于初始化查询范围与读取记录"""
-        self.after_scope: tuple[int, ...] | None = None
+        """2026-08-06 用于初始化后文查询与读取记录"""
+        self.after_queries: list[str] = []
         self.reads: list[tuple[int, int]] = []
 
     def find_initial_case_candidates(self, current_text, *, semantic_limit=50, rotation_limit=50):
@@ -37,7 +38,26 @@ class _QueryService:
 
     def search_continuity(self, query, *, hidden_case_ids, limit=50):
         """2026-08-05 用于验证 pull 后案例从后续 search 隐藏"""
-        del query, limit
+        del limit
+        if query == "图节点":
+            return SearchResult(
+                results=[
+                    GraphSearchResult(
+                        target_node_id="fact:test",
+                        source_kind="chapter_annotation",
+                        evidence=Evidence(reason="图节点命中", chapterid=1),
+                        matched_nodes=[
+                            {
+                                "node_id": "entity:42",
+                                "node_kind": "entity",
+                                "label": "顾霜",
+                                "properties": {"entity_type": "character"},
+                            }
+                        ],
+                        path=["entity:42", "fact:test"],
+                    )
+                ]
+            )
         if "case-1" in hidden_case_ids:
             return SearchResult()
         case = self.find_initial_case_candidates("")[0][0]
@@ -48,18 +68,17 @@ class _QueryService:
         case = self.find_initial_case_candidates("")[0][0]
         return [case] if ids == ["case-1"] else []
 
-    def search_after(self, query, *, after_chapter_ids, limit=50):
-        """2026-08-05 用于记录并检索固定全部后文章节"""
-        del query, limit
-        self.after_scope = after_chapter_ids
+    def search_after(self, query, *, limit=50):
+        """2026-08-06 用于记录并检索当前位置之后的后文"""
+        del limit
+        self.after_queries.append(query)
         return [
             AfterChunkSearchResult(chapter_id=2, chunk_id=20, excerpt="第二章命中"),
             AfterChunkSearchResult(chapter_id=4, chunk_id=40, excerpt="第四章命中"),
         ]
 
-    def read_after_chunk(self, *, chapter_id, chunk_id, after_chapter_ids):
-        """2026-08-05 用于记录后文读取并返回完整原文"""
-        assert chapter_id in after_chapter_ids
+    def read_after_chunk(self, *, chapter_id, chunk_id):
+        """2026-08-06 用于记录已由 search 授权的后文读取"""
         self.reads.append((chapter_id, chunk_id))
         return f"chapter={chapter_id} chunk={chunk_id}"
 
@@ -70,16 +89,15 @@ def _find_tool(tools: list, name: str):
 
 
 def _ledger() -> AnnotationToolLedger:
-    """2026-08-05 用于构造包含全部后续章节范围的工具账本"""
+    """2026-08-06 用于构造由 search 动态授权后文的工具账本"""
     return AnnotationToolLedger(
         current_chapter_id=1,
         current_chunk_ids=(10, 11),
-        after_chapter_ids=(2, 3, 4),
     )
 
 
-def test_search_switches_to_all_after_chapters_after_finish() -> None:
-    """2026-08-05 用于验证 finish 后 search 覆盖固定全部后续章节"""
+def test_search_switches_to_later_chunk_query_after_finish() -> None:
+    """2026-08-06 用于验证 finish 后 search 返回后文章节与 chunk ID"""
     service = _QueryService()
     ledger = _ledger()
     tools = build_annotation_tools(service, ledger)
@@ -87,7 +105,7 @@ def test_search_switches_to_all_after_chapters_after_finish() -> None:
 
     payload = json.loads(_find_tool(tools, "search").invoke({"query": "顾霜"}))
 
-    assert service.after_scope == (2, 3, 4)
+    assert service.after_queries == ["顾霜"]
     assert [(item["chapter_id"], item["chunk_id"]) for item in payload["results"]] == [(2, 20), (4, 40)]
     assert ledger.authorized_after_chunks == {(2, 20), (4, 40)}
 
@@ -160,3 +178,40 @@ def test_pull_hides_case_from_later_continuity_search() -> None:
     payload = json.loads(_find_tool(tools, "search").invoke({"query": "顾霜"}))
 
     assert payload["results"] == []
+
+
+def test_fact_push_node_selector_requires_current_graph_search_visibility() -> None:
+    """2026-08-06 用于验证常用节点 ID 必须由本轮图 search 明确返回"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = build_annotation_tools(service, ledger)
+    push = _find_tool(tools, "push")
+    output = {
+        "output_kind": "fact",
+        "source_case_ids": [],
+        "evidence": {"reason": "霜姐即顾霜", "chapterid": 1},
+        "payload": {
+            "fact_type": "relation",
+            "subject": {"name": "霜姐", "entity_type": "character"},
+            "predicate": "同一人物",
+            "object": {"name": "顾霜", "entity_type": "character"},
+            "value": None,
+            "participants": [],
+            "scope": "global",
+            "story_time": None,
+            "assertion": "affirmed",
+            "confidence": "high",
+            "directionality": "bidirectional",
+            "relation_semantics": "same_character",
+            "representative_node": {"node_id": "entity:42"},
+        },
+    }
+
+    with pytest.raises(AnnotationAuthorizationError, match="未由本轮图 search 返回"):
+        push.invoke({"outputs": [output]})
+
+    _find_tool(tools, "search").invoke({"query": "图节点"})
+    payload = json.loads(push.invoke({"outputs": [output]}))
+
+    assert payload["staged_count"] == 1
+    assert ledger.visible_graph_entity_node_ids == {"entity:42"}

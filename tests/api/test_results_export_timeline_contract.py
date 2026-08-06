@@ -228,7 +228,6 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
         novel_id="novel-1",
         stats_repo=MagicMock(),
         annotation_repo=MagicMock(),
-        alias_map={},
         export_graph_view=export_graph_view,
     )
 
@@ -255,7 +254,7 @@ def test_load_character_bundle_rejects_rerun_required_diagnosis(
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
 
-    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _annotation_repo, _alias_map):
+    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo):
         return diagnosis
 
     monkeypatch.setattr(
@@ -279,7 +278,6 @@ def test_load_character_bundle_rejects_rerun_required_diagnosis(
             novel_id="novel-1",
             stats_repo=MagicMock(),
             annotation_repo=annotation_repo,
-            alias_map={},
             export_graph_view=export_graph_view,
         )
 
@@ -339,7 +337,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     monkeypatch.setattr(
         "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
         lambda *_args, **_kwargs: SimpleNamespace(
-            assert_graph_projection_ready=lambda _run_id: None,
+            assert_graph_ready=lambda _run_id: None,
             build_export_view=lambda _run_id: ExportGraphAuthorityView(),
             build_graph_report=lambda _run_id: GraphAuthorityReport(
                 summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
@@ -358,7 +356,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         task_id="task-1",
         run_id="run-1",
         stats_repo=MagicMock(session=MagicMock()),
-        annotation_repo=MagicMock(fetch_alias_map=lambda _run_id: {}),
+        annotation_repo=MagicMock(),
         chunk_repo=MagicMock(),
     )
 
@@ -386,7 +384,7 @@ def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch:
     monkeypatch.setattr(
         "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
         lambda *_args, **_kwargs: SimpleNamespace(
-            assert_graph_projection_ready=lambda _run_id: None,
+            assert_graph_ready=lambda _run_id: None,
             build_export_view=lambda _run_id: ExportGraphAuthorityView(),
             build_graph_report=lambda _run_id: GraphAuthorityReport(
                 summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
@@ -406,7 +404,7 @@ def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch:
             task_id="task-1",
             run_id="run-1",
             stats_repo=MagicMock(session=MagicMock()),
-            annotation_repo=MagicMock(fetch_alias_map=lambda _run_id: {}),
+            annotation_repo=MagicMock(),
             chunk_repo=MagicMock(),
         )
 
@@ -460,7 +458,6 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
         novel_id="novel-1",
         stats_repo=MagicMock(),
         annotation_repo=MagicMock(),
-        alias_map={},
         export_graph_view=export_graph_view,
     )
 
@@ -572,7 +569,6 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
         chunk_repo=MagicMock(),
-        alias_map={},
         valid_character_names={"苏镜", "程霜"},
         export_graph_view=export_graph_view,
         graph_report=graph_report,

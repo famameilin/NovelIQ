@@ -373,7 +373,12 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
         "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
+        "ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS is_representative BOOLEAN NOT NULL DEFAULT TRUE",
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_graph_entities_run_representative "
+            "ON graph_entities (run_id, is_representative)"
+        ),
         (
             "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
             "ON foreshadowing_threads (run_id, active, last_chunk_id)"
