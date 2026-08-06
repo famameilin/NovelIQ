@@ -13,10 +13,8 @@ from loguru import logger
 from src.api.models.responses import TopicInfo
 from src.storage.repositories import ChunkRepository
 
-from .common import _normalize_name_list
 
-
-def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str, str] | None = None) -> list:
+def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
     """获取主题数据"""
     rows = chunk_repo.fetch_chunk_topics_agg(run_id)
 
@@ -44,7 +42,6 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str,
     for row in rows:
         topic_id = row.topic_id
         words: list[str] = topic_words_map.get(topic_id, [])
-        words = _normalize_name_list(words, alias_map) or []
         label = topic_labels_map.get(topic_id)
         if words:
             result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.total_weight, label=label))

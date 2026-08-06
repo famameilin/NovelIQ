@@ -19,28 +19,28 @@ from src.agents.annotation.schema import (
     CompletionResult,
     Evidence,
     FactPayload,
+    FactPushOutput,
     ForeshadowingPayload,
 )
 from src.storage.models import (
     CasePoolCase,
     CaseResolutionMapping,
     ChapterAnnotationRecord,
-    ContinuityFact,
     ForeshadowingThread,
     ForeshadowingThreadHit,
+    GraphFact,
+    GraphFactSource,
 )
 from src.storage.repositories import (
     CasePoolRepository,
     CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
-    ContinuityFactRepository,
     ForeshadowingRepository,
     StatsRepository,
 )
 from src.storage.repositories.annotation.continuity import completion_case_view
+from src.storage.repositories.graph import graph_fact_node_id, persist_completion_graph
 from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
-
-from .graph_projection import project_graph_tables
 
 
 def _validate_locked_sources(
@@ -56,6 +56,37 @@ def _validate_locked_sources(
     inactive = [row.id for row in rows if row.state != "active"]
     if inactive:
         raise ValueError(f"来源案例已不再 active: {inactive}")
+
+
+def _validate_result_source_coverage(result: AgentRunResult) -> None:
+    """2026-08-06 用于在完成事务内复核来源案例覆盖与 rejected 排他"""
+    if len(set(result.pulled_case_ids)) != len(result.pulled_case_ids):
+        raise ValueError("pulled_case_ids 不允许重复")
+
+    pulled = set(result.pulled_case_ids)
+    covered: set[str] = set()
+    rejected: set[str] = set()
+    non_rejected: set[str] = set()
+    for output in result.staged_outputs:
+        source_ids = output.source_case_ids
+        if len(set(source_ids)) != len(source_ids):
+            raise ValueError("单个输出的 source_case_ids 不允许重复")
+        source_set = set(source_ids)
+        unknown = sorted(source_set - pulled)
+        if unknown:
+            raise ValueError(f"完成事务输出引用了未 pull 的案例: {unknown}")
+        covered.update(source_set)
+        if output.output_kind == "rejected":
+            rejected.update(source_set)
+        else:
+            non_rejected.update(source_set)
+
+    missing = sorted(pulled - covered)
+    if missing:
+        raise ValueError(f"完成事务存在未覆盖的 pulled 案例: {missing}")
+    conflicts = sorted(rejected & non_rejected)
+    if conflicts:
+        raise ValueError(f"来源案例同时进入 rejected 与非 rejected 输出: {conflicts}")
 
 
 def _mapping_sources(source_case_ids: list[str]) -> list[str | None]:
@@ -116,14 +147,18 @@ def _save_token_usage(
         )
 
 
-def _fact_completion(row: ContinuityFact) -> CompletionFact:
-    """2026-08-05 用于把已提交 continuity fact 转换为回读完成结果"""
+def _graph_fact_completion(row: GraphFact, source: GraphFactSource) -> CompletionFact:
+    """2026-08-06 用于把已持久化图节点转换为完成结果"""
+    content = row.content if isinstance(row.content, dict) else {}
     return CompletionFact(
-        fact_id=row.fact_id,
+        graph_node_id=graph_fact_node_id(source.stable_fact_id),
         payload=FactPayload.model_validate(
             {
                 "fact_type": row.fact_type,
-                "subject": row.subject,
+                "subject": {
+                    "name": row.subject_name,
+                    "entity_type": row.subject_type,
+                },
                 "predicate": row.predicate,
                 "object": row.object,
                 "value": row.value,
@@ -131,12 +166,13 @@ def _fact_completion(row: ContinuityFact) -> CompletionFact:
                 "scope": row.scope,
                 "story_time": row.story_time,
                 "assertion": row.assertion,
-                "change_kind": row.change_kind,
-                "linked_fact_id": row.linked_fact_id,
                 "confidence": row.confidence,
+                "directionality": content.get("directionality", "directed"),
+                "relation_semantics": content.get("relation_semantics", "ordinary"),
+                "representative_node": content.get("representative_node"),
             }
         ),
-        evidence=Evidence.model_validate(row.evidence),
+        evidence=Evidence.model_validate(source.evidence),
     )
 
 
@@ -195,7 +231,13 @@ def load_completion_result(
     mappings = list(session.execute(mapping_stmt).scalars().all())
 
     target_case_ids = list(dict.fromkeys(row.target_case_id for row in mappings if row.target_case_id))
-    target_fact_ids = list(dict.fromkeys(row.target_fact_id for row in mappings if row.target_fact_id))
+    target_graph_node_ids = list(
+        dict.fromkeys(
+            row.target_graph_node_id
+            for row in mappings
+            if row.target_graph_node_id
+        )
+    )
     target_hit_ids = list(dict.fromkeys(row.target_hit_id for row in mappings if row.target_hit_id is not None))
     source_case_ids = list(dict.fromkeys(row.source_case_id for row in mappings if row.source_case_id))
 
@@ -209,13 +251,30 @@ def load_completion_result(
         cases = [completion_case_view(cases_by_id[case_id]) for case_id in target_case_ids if case_id in cases_by_id]
 
     facts: list[CompletionFact] = []
-    if target_fact_ids:
-        fact_stmt = select(ContinuityFact).where(
-            ContinuityFact.run_id == run_id,
-            ContinuityFact.fact_id.in_(target_fact_ids),
+    if target_graph_node_ids:
+        stable_fact_ids = [
+            node_id.removeprefix("fact:")
+            for node_id in target_graph_node_ids
+            if node_id.startswith("fact:")
+        ]
+        fact_stmt = (
+            select(GraphFact, GraphFactSource)
+            .join(GraphFactSource, GraphFactSource.graph_fact_id == GraphFact.graph_fact_id)
+            .where(
+                GraphFact.run_id == run_id,
+                GraphFactSource.run_id == run_id,
+                GraphFactSource.stable_fact_id.in_(stable_fact_ids),
+            )
         )
-        facts_by_id = {row.fact_id: row for row in session.execute(fact_stmt).scalars().all()}
-        facts = [_fact_completion(facts_by_id[fact_id]) for fact_id in target_fact_ids if fact_id in facts_by_id]
+        facts_by_node_id = {
+            graph_fact_node_id(source.stable_fact_id): _graph_fact_completion(row, source)
+            for row, source in session.execute(fact_stmt).all()
+        }
+        facts = [
+            facts_by_node_id[node_id]
+            for node_id in target_graph_node_ids
+            if node_id in facts_by_node_id
+        ]
 
     foreshadowing: list[CompletionForeshadowing] = []
     if target_hit_ids:
@@ -270,20 +329,21 @@ def _persist_outputs(
     result: AgentRunResult,
     annotation_id: str,
     anchor_chunk_id: int,
+    graph_facts: list[CompletionFact],
 ) -> tuple[list[CompletionCase], list[CompletionFact], list[CompletionForeshadowing], set[str]]:
     """2026-08-05 用于规范化写入全部 staged outputs 与来源映射"""
     case_repo = CasePoolRepository(session)
-    fact_repo = ContinuityFactRepository(session)
     foreshadowing_repo = ForeshadowingRepository(session)
     mapping_repo = CaseResolutionMappingRepository(session)
     cases: list[CompletionCase] = []
     facts: list[CompletionFact] = []
     foreshadowing: list[CompletionForeshadowing] = []
     rejected_ids: set[str] = set()
+    graph_fact_index = 0
 
     for output in result.staged_outputs:
         if output.output_kind == "case":
-            case_target = case_repo.upsert_case(
+            case_target = case_repo.create_case(
                 run_id=result.run_id,
                 annotation_id=annotation_id,
                 payload=output.payload,
@@ -300,13 +360,11 @@ def _persist_outputs(
                     target_case_id=case_target.id,
                 )
         elif output.output_kind == "fact":
-            fact_target = fact_repo.upsert_fact(
-                run_id=result.run_id,
-                annotation_id=annotation_id,
-                payload=output.payload,
-                evidence=output.evidence,
-            )
-            facts.append(fact_repo.completion_view(fact_target))
+            if graph_fact_index >= len(graph_facts):
+                raise ValueError("图持久化结果缺少 fact 输出")
+            fact_target = graph_facts[graph_fact_index]
+            graph_fact_index += 1
+            facts.append(fact_target)
             for source_case_id in _mapping_sources(output.source_case_ids):
                 mapping_repo.add_mapping(
                     run_id=result.run_id,
@@ -314,7 +372,7 @@ def _persist_outputs(
                     result_kind="fact",
                     evidence=output.evidence,
                     source_case_id=source_case_id,
-                    target_fact_id=fact_target.fact_id,
+                    target_graph_node_id=fact_target.graph_node_id,
                 )
         elif output.output_kind == "foreshadowing":
             thread, hit = foreshadowing_repo.sync(
@@ -347,6 +405,8 @@ def _persist_outputs(
                     source_case_id=source_case_id,
                     rejected_reason_code=output.payload.reason_code,
                 )
+    if graph_fact_index != len(graph_facts):
+        raise ValueError("图持久化结果包含未消费的 fact 输出")
     return cases, facts, foreshadowing, rejected_ids
 
 
@@ -369,6 +429,7 @@ def complete_annotation_run(
             if existing is not None:
                 return existing
 
+            _validate_result_source_coverage(result)
             source_repo = CasePoolRepository(session)
             source_rows = source_repo.lock_active_cases(result.run_id, result.pulled_case_ids)
             _validate_locked_sources(pulled_case_ids=result.pulled_case_ids, rows=source_rows)
@@ -378,24 +439,28 @@ def complete_annotation_run(
                 chapter_id=result.chapter_id,
                 annotation=result.final_annotation,
                 initial_finish=result.initial_finish,
-                after_chapter_ids=result.after_chapter_ids,
                 revision_payload=result.revision_payload,
+            )
+            graph_facts = persist_completion_graph(
+                session,
+                annotation=annotation,
+                fact_outputs=[
+                    output
+                    for output in result.staged_outputs
+                    if isinstance(output, FactPushOutput)
+                ],
             )
             cases, facts, foreshadowing, rejected_ids = _persist_outputs(
                 session,
                 result=result,
                 annotation_id=annotation.annotation_id,
                 anchor_chunk_id=anchor_chunk_id,
+                graph_facts=graph_facts,
             )
             source_repo.update_source_states(source_rows, rejected_ids=rejected_ids)
             source_repo.mark_surfaced(
                 run_id=result.run_id,
                 ids=result.rotation_case_ids,
-                annotation_id=annotation.annotation_id,
-            )
-            project_graph_tables(
-                result.run_id,
-                session=session,
                 annotation_id=annotation.annotation_id,
             )
             _save_success_audit(session, result=result, anchor_chunk_id=anchor_chunk_id)

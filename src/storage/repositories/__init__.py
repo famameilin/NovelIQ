@@ -5,7 +5,6 @@ from .annotation import (
     CasePoolRepository,
     CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
-    ContinuityFactRepository,
     DatabaseAnnotationQueryService,
     ForeshadowingRepository,
 )
@@ -30,7 +29,6 @@ __all__ = [
     "AnnotationRepository",
     "ChapterAnnotationRepository",
     "CasePoolRepository",
-    "ContinuityFactRepository",
     "ForeshadowingRepository",
     "CaseResolutionMappingRepository",
     "DatabaseAnnotationQueryService",

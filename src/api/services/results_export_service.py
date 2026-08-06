@@ -81,7 +81,6 @@ def load_character_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    alias_map: dict[str, str],
     export_graph_view: ExportGraphAuthorityView,
     diagnosis: Any | None = None,
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
@@ -94,7 +93,7 @@ def load_character_bundle(
     missing_fields: list[str] = []
 
     if diagnosis is None:
-        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     if diagnosis is not None and diagnosis.rerun_required:
         raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
     diagnosis_is_complete = _is_complete_diagnosis_result(diagnosis)
@@ -126,7 +125,6 @@ def load_chunk_bundle(
     run_id: str,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    alias_map: dict[str, str],
     valid_character_names: set[str],
     export_graph_view: ExportGraphAuthorityView,
 ) -> tuple[list, list, list, list[str]]:
@@ -138,7 +136,7 @@ def load_chunk_bundle(
     """
     missing_fields: list[str] = []
 
-    topics = _fetch_topics(run_id, chunk_repo, alias_map)
+    topics = _fetch_topics(run_id, chunk_repo)
 
     chunk_styles = _fetch_chunk_styles(run_id, chunk_repo)
     if not chunk_styles:
@@ -147,7 +145,6 @@ def load_chunk_bundle(
     chunk_annotations = _fetch_chunk_annotations(
         run_id,
         annotation_repo,
-        alias_map,
         valid_character_names=valid_character_names,
         export_graph_view=export_graph_view,
     )
@@ -197,7 +194,6 @@ def load_export_relation_bundle(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    alias_map: dict[str, str],
     valid_character_names: set[str],
     export_graph_view: ExportGraphAuthorityView,
     graph_report: GraphAuthorityReport,
@@ -219,14 +215,12 @@ def load_export_relation_bundle(
     character_relations = _fetch_character_relations(
         run_id,
         annotation_repo,
-        alias_map,
         valid_character_names=valid_character_names,
         export_graph_view=export_graph_view,
     )
     hierarchical_relations = _fetch_hierarchical_relations(
         run_id,
         export_graph_view,
-        alias_map,
         valid_character_names=valid_character_names,
     )
     global_stats, token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
@@ -357,13 +351,12 @@ def fetch_all_results_data(
     """
     获取所有分析结果数据
     """
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     if diagnosis is not None and diagnosis.rerun_required:
         raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
 
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
-    graph_authority_service.assert_graph_projection_ready(run_id)
+    graph_authority_service.assert_graph_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
     graph_report = graph_authority_service.build_graph_report(run_id)
     timeline_view = graph_authority_service.build_timeline_view(run_id)
@@ -371,7 +364,7 @@ def fetch_all_results_data(
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view, diagnosis=diagnosis
+        run_id, novel_id, stats_repo, annotation_repo, export_graph_view, diagnosis=diagnosis
     )
     missing_fields.extend(char_missing)
 
@@ -383,7 +376,6 @@ def fetch_all_results_data(
         run_id,
         annotation_repo,
         chunk_repo,
-        alias_map,
         valid_character_names,
         export_graph_view,
     )
@@ -404,7 +396,6 @@ def fetch_all_results_data(
         stats_repo,
         annotation_repo,
         chunk_repo,
-        alias_map,
         valid_character_names,
         export_graph_view,
         graph_report,

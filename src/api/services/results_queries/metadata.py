@@ -1,7 +1,7 @@
 """
 结果元数据查询组装器
 
-说明: 承载 global_stats、token_usage、novel_name、角色别名等辅助查询逻辑
+说明: 承载 global_stats、token_usage、novel_name、已知角色等辅助查询逻辑
 """
 
 from __future__ import annotations
@@ -96,12 +96,4 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
 def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) -> list[str]:
     """获取已知角色列表（规范名）"""
     repo = DiagnosisRepository(annotation_repo.session)
-    known_characters, _ = repo.fetch_character_disambig_data(run_id)
-    return known_characters
-
-
-def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository) -> dict[str, str]:
-    """获取别名映射（只包含 alias != canonical）"""
-    repo = DiagnosisRepository(annotation_repo.session)
-    _, alias_merges = repo.fetch_character_disambig_data(run_id)
-    return alias_merges
+    return repo.fetch_known_characters(run_id)

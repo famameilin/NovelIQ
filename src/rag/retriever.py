@@ -1,6 +1,6 @@
 """
 说明: 本模块提供统一证据收集功能
-- Level1: 别名表精确匹配
+- Level1: 数据库图规范实体与关系
 - Level2: 活跃实体候选
 - 历史取证: keyword、semantic、read 三种模式
 输出统一 EvidenceBundle，由下游 renderer 渲染为 prompt 内容
@@ -23,7 +23,6 @@ from src.rag.evidence_contracts import (
     build_evidence_request_fingerprint,
 )
 from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
-from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
     from src.storage.repositories import GraphRepository
 
 __all__ = [
-    "AliasLookup",
     "ActiveEntityLookup",
     "Level3NotReadyError",
     "Level3VectorEvidence",
@@ -46,7 +44,7 @@ class NarrativeEvidenceService:
     """叙事证据服务（Evidence Service 层）
 
     负责接收统一的 EvidenceRequest，并编排三级证据为 EvidenceBundle：
-    - Level1: 别名表精确映射
+    - Level1: 数据库图规范实体与关系
     - Level2: 近期活跃实体
     - Level3: 自然段级向量语义相似度检索
 
@@ -116,7 +114,7 @@ class NarrativeEvidenceService:
             self._level3.set_session(session, self._run_id)
 
     def invalidate_cache(self) -> None:
-        """别名映射和关系缓存失效（每个 chunk 处理后调用，因为 projection 可能更新了别名表）"""
+        """2026-08-06 用于在每个 chunk 完成后清理数据库图证据缓存"""
         self._authority_snapshot_cache = None
         self._bundle_cache.clear()
         self._historical_authorizations.clear()

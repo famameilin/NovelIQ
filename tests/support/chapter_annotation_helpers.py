@@ -7,10 +7,17 @@ from typing import Any
 
 from sqlalchemy import select
 
-from src.agents.annotation.schema import ChapterAnnotation
+from src.agents.annotation.schema import (
+    ChapterAnnotation,
+    EntityRef,
+    Evidence,
+    FactPayload,
+    FactPushOutput,
+    RepresentativeNodeSelector,
+)
 from src.storage.models import Chunk, Novel
 from src.storage.repositories import ChapterAnnotationRepository, RunRepository
-from src.workflows.annotate_helpers.graph_projection import project_graph_tables
+from src.storage.repositories.graph import persist_completion_graph
 
 
 def create_run_with_chunks(
@@ -100,6 +107,9 @@ def relation_fact(
     change_kind: str = "assert",
     confidence: str = "high",
     directionality: str = "directed",
+    relation_semantics: str = "ordinary",
+    representative_endpoint: str | None = None,
+    representative_node_id: str | None = None,
     chapter_id: int = 1,
 ) -> dict[str, Any]:
     """2026-08-05 用于构造章节关系事实测试值"""
@@ -112,6 +122,15 @@ def relation_fact(
         "relation_type": relation_type,
         "change_kind": change_kind,
         "directionality": directionality,
+        "relation_semantics": relation_semantics,
+        "representative_node": (
+            {
+                "endpoint": representative_endpoint,
+                "node_id": representative_node_id,
+            }
+            if representative_endpoint is not None or representative_node_id is not None
+            else None
+        ),
     }
 
 
@@ -139,6 +158,47 @@ def dialogue_fact(
     }
 
 
+def identity_relation_output(
+    *,
+    subject_name: str,
+    object_name: str,
+    representative_endpoint: str | None = None,
+    representative_node_id: str | None = None,
+    assertion: str = "affirmed",
+    chapter_id: int = 1,
+) -> FactPushOutput:
+    """2026-08-06 用于构造两个独立人物节点之间的同一人物关系输出"""
+    has_single_selector = (representative_endpoint is None) != (representative_node_id is None)
+    if assertion == "affirmed" and not has_single_selector:
+        raise ValueError("常用节点测试选择器必须恰好指定 endpoint 或 node_id")
+    if assertion == "negated" and (representative_endpoint is not None or representative_node_id is not None):
+        raise ValueError("否定同一人物关系测试输出不允许选择常用节点")
+    return FactPushOutput(
+        output_kind="fact",
+        source_case_ids=[],
+        evidence=Evidence(reason=f"{subject_name}与{object_name}确认是同一人物", chapterid=chapter_id),
+        payload=FactPayload(
+            fact_type="relation",
+            subject=EntityRef(name=subject_name, entity_type="character"),
+            predicate="同一人物",
+            object=EntityRef(name=object_name, entity_type="character"),
+            scope="global",
+            assertion=assertion,
+            confidence="high",
+            directionality="bidirectional",
+            relation_semantics="same_character",
+            representative_node=(
+                RepresentativeNodeSelector(
+                    endpoint=representative_endpoint,
+                    node_id=representative_node_id,
+                )
+                if has_single_selector
+                else None
+            ),
+        ),
+    )
+
+
 def persist_chapter_annotation(
     session: Any,
     *,
@@ -154,9 +214,8 @@ def persist_chapter_annotation(
     states: list[dict[str, Any]] | None = None,
     locations: list[dict[str, Any]] | None = None,
     events: list[dict[str, Any]] | None = None,
-    rebuild_graph: bool = False,
 ) -> str:
-    """2026-08-05 用于写入正式章节标注并通过生产投影入口生成数据库图"""
+    """2026-08-06 用于写入正式章节标注并通过生产入口持久化数据库图"""
     chunk_rows = list(
         session.execute(
             select(Chunk)
@@ -199,14 +258,12 @@ def persist_chapter_annotation(
         chapter_id=chapter_id,
         annotation=annotation,
         initial_finish=annotation,
-        after_chapter_ids=[],
         revision_payload={},
     )
-    project_graph_tables(
-        run_id,
+    persist_completion_graph(
         session=session,
-        annotation_id=None if rebuild_graph else row.annotation_id,
-        rebuild=rebuild_graph,
+        annotation=row,
+        fact_outputs=[],
     )
     session.commit()
     return row.annotation_id

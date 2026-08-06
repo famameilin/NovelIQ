@@ -25,8 +25,6 @@ from src.knowledge.authority import (
 from src.knowledge.authority.graph_outputs import build_graph_page_quality, build_graph_page_summary
 from src.storage.repositories import AnnotationRepository
 
-from .common import _normalize_name
-
 GRAPH_PAGE_EVENT_LIMIT = 200
 
 
@@ -196,13 +194,12 @@ def _build_graph_events_page_info(
 def _fetch_character_relations(
     run_id: str,
     annotation_repo: AnnotationRepository,
-    alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """获取角色关系数据"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    authority_service.assert_graph_projection_ready(run_id)
+    authority_service.assert_graph_ready(run_id)
     if export_graph_view is None:
         export_graph_view = authority_service.build_export_view(run_id)
 
@@ -210,8 +207,8 @@ def _fetch_character_relations(
     for relation in export_graph_view.current_relations:
         if not relation.is_active:
             continue
-        from_char = _normalize_name(relation.from_name, alias_map) or relation.from_name
-        to_char = _normalize_name(relation.to_name, alias_map) or relation.to_name
+        from_char = relation.from_name
+        to_char = relation.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -241,7 +238,6 @@ def _fetch_character_relations(
 def _fetch_hierarchical_relations(
     run_id: str,
     export_graph_view: ExportGraphAuthorityView,
-    alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
 ) -> list:
     """获取层级关系数据"""
@@ -256,10 +252,8 @@ def _fetch_hierarchical_relations(
         rel_type = relation.relation_type
         if rel_type not in hierarchical_types:
             continue
-        from_name_raw = relation.from_name
-        to_name_raw = relation.to_name
-        from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
-        to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
+        from_entity = relation.from_name
+        to_entity = relation.to_name
         allowed_names = valid_entity_names or valid_character_names
         if allowed_names is not None and (
             from_entity not in allowed_names or to_entity not in allowed_names
@@ -302,6 +296,7 @@ def _fetch_graph_snapshot(
             "last_seen_chunk": row.last_seen_chunk,
             "role": row.primary_role_function,
             "status": row.status,
+            "is_representative": row.is_representative,
         }
         for row in participant_states
     ]

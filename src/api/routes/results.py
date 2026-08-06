@@ -101,8 +101,6 @@ def _fetch_and_require_valid_diagnosis(
     run_id: str,
     novel_id: str,
     stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult:
     """
     说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
@@ -115,8 +113,6 @@ def _fetch_and_require_valid_diagnosis(
         run_id,
         novel_id,
         stats_repo,
-        annotation_repo,
-        alias_map,
     )
     if diagnosis is None:
         _raise_rerun_required_for_focus_contract(
@@ -292,11 +288,9 @@ async def get_chunk_annotations(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
     return _fetch_chunk_annotations(
         run_id,
         annotation_repo,
-        alias_map,
     )
 
 
@@ -314,8 +308,7 @@ async def get_characters(
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     if diagnosis is not None and diagnosis.rerun_required:
         _raise_rerun_required_for_focus_contract(diagnosis)
 
@@ -340,17 +333,13 @@ async def get_topics(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     chunk_repo = ChunkRepository(session)
-    annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
     stats_repo = StatsRepository(session)
     _fetch_and_require_valid_diagnosis(
         run_id=run_id,
         novel_id=novel_id,
         stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map=alias_map,
     )
-    return _fetch_topics(run_id, chunk_repo, alias_map)
+    return _fetch_topics(run_id, chunk_repo)
 
 
 @router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult)
@@ -369,9 +358,7 @@ async def get_diagnosis(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
-    annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     if diagnosis is None:
         return DiagnosisResult(
             rerun_required=True,
@@ -412,14 +399,11 @@ async def get_graph(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
     stats_repo = StatsRepository(session)
     _fetch_and_require_valid_diagnosis(
         run_id=run_id,
         novel_id=novel_id,
         stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map=alias_map,
     )
     return _fetch_graph_snapshot(run_id, annotation_repo)
 
@@ -438,14 +422,11 @@ async def get_graph_events(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
     stats_repo = StatsRepository(session)
     _fetch_and_require_valid_diagnosis(
         run_id=run_id,
         novel_id=novel_id,
         stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map=alias_map,
     )
     try:
         return _fetch_graph_events_page(

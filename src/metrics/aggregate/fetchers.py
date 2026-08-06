@@ -27,7 +27,6 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from src.knowledge.authority.types import Level1AuthoritySnapshot
     from src.storage.repositories import (
         AnnotationRepository,
         ChunkRepository,
@@ -47,35 +46,14 @@ def _build_aggregate_graph_view(
     """
 
     service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    service.assert_graph_projection_ready(run_id)
-    return service.build_graph_view(run_id)
-
-
-def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str, str]:
-    """
-    构建 aggregate 可复用的 alias -> canonical 映射
-
-    chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
-    Level1 规范实体消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
-    和情绪序列时因为名称漂移被静默归零
-    """
-
-    return {
-        mapping.alias: mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias and mapping.canonical
-    }
-
-
-def _canonicalize_aggregate_character_name(name: str, alias_lookup: dict[str, str]) -> str:
-    """将 chunk 侧角色名折叠到 authority 规范名"""
-
-    return alias_lookup.get(name, name)
+    service.assert_graph_ready(run_id)
+    return service.build_representative_graph_view(run_id)
 
 
 def _resolve_aggregate_character_name(
     *,
     surface_name: str | None,
     resolved_global_name: str | None,
-    alias_lookup: dict[str, str],
 ) -> str | None:
     """
     创建时间: 2026-04-29
@@ -84,7 +62,6 @@ def _resolve_aggregate_character_name(
     """
     decision = decide_character_reference(
         surface_name,
-        alias_map=alias_lookup,
         resolved_global_name=resolved_global_name,
     )
     return decision.resolved_global_name
@@ -142,7 +119,6 @@ def fetch_character_data(
     """
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     snapshot = authority_service.build_level1_snapshot(run_id)
-    alias_lookup = _build_aggregate_alias_lookup(snapshot)
     active_characters = [
         entity
         for entity in snapshot.canonical_entities
@@ -156,7 +132,6 @@ def fetch_character_data(
         canonical_name = _resolve_aggregate_character_name(
             surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
             resolved_global_name=getattr(row, "resolved_global_name", None),
-            alias_lookup=alias_lookup,
         )
         if canonical_name is None:
             continue
@@ -176,7 +151,6 @@ def fetch_character_data(
         canonical_name = _resolve_aggregate_character_name(
             surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
             resolved_global_name=getattr(row, "resolved_global_name", None),
-            alias_lookup=alias_lookup,
         )
         if canonical_name is None:
             continue

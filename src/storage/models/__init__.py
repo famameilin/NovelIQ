@@ -15,17 +15,14 @@ from src.storage.models.continuity import (
     CasePoolCase,
     CaseResolutionMapping,
     ChapterAnnotationRecord,
-    ContinuityFact,
 )
 from src.storage.models.core import AnalysisRun
 from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
     GraphEntity,
-    GraphEntityAlias,
     GraphEntityParticipant,
     GraphFact,
     GraphFactSource,
-    GraphFactVersion,
     GraphRelationCurrent,
     GraphRelationEvent,
 )
@@ -46,14 +43,11 @@ __all__ = [
     "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
     "CasePoolCase",
-    "ContinuityFact",
     "CaseResolutionMapping",
     "GraphEntity",
-    "GraphEntityAlias",
     "GraphEntityParticipant",
     "GraphFact",
     "GraphFactSource",
-    "GraphFactVersion",
     "GraphRelationEvent",
     "GraphRelationCurrent",
     "CloudAnalysis",

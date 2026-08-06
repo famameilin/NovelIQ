@@ -49,7 +49,6 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
         ]
     )
     mock_service.build_level1_snapshot.return_value = SimpleNamespace(
-        alias_mappings=[],
         canonical_entities=[
             SimpleNamespace(name="主角", entity_type="character", status="active", primary_role_function="主体"),
             SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
@@ -79,13 +78,13 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
     mock_service.build_graph_view.assert_not_called()
 
 
-def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
+def test_fetch_character_data_uses_explicit_resolved_graph_name():
     annotation_repo = _DummyAnnotationRepo(
         character_rows=[
             SimpleNamespace(
                 name="灰衣人",
                 surface_name="灰衣人",
-                resolved_global_name=None,
+                resolved_global_name="白芷",
                 role_function="主体",
                 emotion_score="mild_positive",
             ),
@@ -98,8 +97,8 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
             ),
         ],
         emotion_rows=[
-            SimpleNamespace(surface_name="灰衣人", resolved_global_name=None, emotion_score="mild_positive"),
-            SimpleNamespace(surface_name="灰衣人", resolved_global_name=None, emotion_score="mild_negative"),
+            SimpleNamespace(surface_name="灰衣人", resolved_global_name="白芷", emotion_score="mild_positive"),
+            SimpleNamespace(surface_name="灰衣人", resolved_global_name="白芷", emotion_score="mild_negative"),
             SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score="mild_positive"),
         ],
     )
@@ -111,9 +110,6 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
         ]
     )
     mock_service.build_level1_snapshot.return_value = SimpleNamespace(
-        alias_mappings=[
-            SimpleNamespace(alias="灰衣人", canonical="白芷"),
-        ],
         canonical_entities=[
             SimpleNamespace(name="白芷", entity_type="character", status="active", primary_role_function="主体"),
             SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
@@ -162,7 +158,6 @@ def test_fetch_character_data_skips_unresolved_reference_rows() -> None:
     )
     mock_service = MagicMock()
     mock_service.build_level1_snapshot.return_value = SimpleNamespace(
-        alias_mappings=[],
         canonical_entities=[
             SimpleNamespace(name="汪淼", entity_type="character", status="active", primary_role_function="主体"),
         ],
@@ -181,12 +176,15 @@ def test_fetch_character_data_skips_unresolved_reference_rows() -> None:
 def test_fetch_relation_data_propagates_database_graph_readiness_failure():
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
-    mock_service.assert_graph_projection_ready = MagicMock(
+    mock_service.assert_graph_ready = MagicMock(
         side_effect=GraphReadinessError(
             "database graph is unavailable for the requested run."
         )
     )
-    mock_service.build_graph_view.return_value = SimpleNamespace(confirmed_relations=[], relation_events=[])
+    mock_service.build_representative_graph_view.return_value = SimpleNamespace(
+        confirmed_relations=[],
+        relation_events=[],
+    )
 
     with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
         with pytest.raises(GraphReadinessError, match="database graph is unavailable"):
@@ -202,8 +200,8 @@ def test_fetch_relation_data_allows_empty_database_graph():
 
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
-    mock_service.assert_graph_projection_ready = MagicMock()
-    mock_service.build_graph_view.return_value = SimpleNamespace(
+    mock_service.assert_graph_ready = MagicMock()
+    mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[],
         relation_events=[],
         participant_states=[],
@@ -225,8 +223,8 @@ def test_fetch_relation_data_consumes_authority_view():
 
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
-    mock_service.assert_graph_projection_ready = MagicMock()
-    mock_service.build_graph_view.return_value = SimpleNamespace(
+    mock_service.assert_graph_ready = MagicMock()
+    mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[
             SimpleNamespace(from_name="主角", to_name="反派"),
         ],
@@ -244,7 +242,7 @@ def test_fetch_relation_data_consumes_authority_view():
         data = fetch_relation_data(annotation_repo, "run-graph")
 
     from_session.assert_called_once_with(annotation_repo.session)
-    mock_service.build_graph_view.assert_called_once_with("run-graph")
+    mock_service.build_representative_graph_view.assert_called_once_with("run-graph")
     assert data.relations == [("主角", "反派")]
     assert data.full_relations == [
         ("主角", "反派", "敌对", "强化"),
@@ -255,12 +253,12 @@ def test_fetch_relation_data_consumes_authority_view():
 def test_fetch_relation_data_propagates_graph_failure_before_using_non_empty_view():
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
-    mock_service.assert_graph_projection_ready = MagicMock(
+    mock_service.assert_graph_ready = MagicMock(
         side_effect=GraphReadinessError(
             "database graph is unavailable for the requested run."
         )
     )
-    mock_service.build_graph_view.return_value = SimpleNamespace(
+    mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[SimpleNamespace(from_name="主角", to_name="反派")],
         relation_events=[SimpleNamespace(from_name="主角", to_name="反派", relation_type="敌对", change_type="强化")],
     )

@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import unicodedata
 from datetime import UTC, datetime
@@ -21,13 +19,11 @@ from src.agents.annotation.schema import (
     CaseSearchResult,
     ChapterAnnotation,
     CompletionCase,
-    CompletionFact,
     CompletionForeshadowing,
     Evidence,
-    FactPayload,
-    FactSearchResult,
     ForeshadowingPayload,
     ForeshadowingSearchResult,
+    GraphSearchResult,
     SearchResult,
 )
 from src.storage.models import (
@@ -35,11 +31,8 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     Chunk,
-    ContinuityFact,
     ForeshadowingThread,
     ForeshadowingThreadHit,
-    GraphFact,
-    GraphFactSource,
 )
 from src.storage.repositories.base import BaseRepository
 
@@ -47,16 +40,6 @@ from src.storage.repositories.base import BaseRepository
 def normalize_text(value: str) -> str:
     """2026-08-05 用于统一 Unicode NFC 换行和首尾空白"""
     return unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n").strip()
-
-
-def canonical_json(value: Any) -> str:
-    """2026-08-05 用于生成键排序稳定的 JSON 语义文本"""
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def build_dedupe_key(value: Any) -> str:
-    """2026-08-05 用于生成案例与事实精确复用的稳定摘要"""
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
 def _query_terms(query: str) -> list[str]:
@@ -97,12 +80,13 @@ def _excerpt(text_value: str, query: str, *, radius: int = 100) -> str:
 
 
 class DatabaseAnnotationQueryService:
-    """2026-08-05 用于通过只读 Session 实现 Agent 全部检索与 after 授权查询"""
+    """2026-08-06 用于通过只读 Session 实现连续性和当前位置后文查询"""
 
-    def __init__(self, session: Session, run_id: str):
-        """2026-08-05 用于绑定单次尝试的只读 Session 与 run 边界"""
+    def __init__(self, session: Session, run_id: str, current_last_chunk_id: int):
+        """2026-08-06 用于绑定单次尝试的 run 与当前文本位置"""
         self.session = session
         self.run_id = run_id
+        self.current_last_chunk_id = current_last_chunk_id
 
     def _active_case_rows(self) -> list[CasePoolCase]:
         """2026-08-05 用于按稳定顺序读取当前 run 的全部活动案例"""
@@ -162,22 +146,25 @@ class DatabaseAnnotationQueryService:
             if len(results) >= limit:
                 return SearchResult(results=results)
 
-        fact_stmt = (
-            select(GraphFact, GraphFactSource)
-            .join(GraphFactSource, GraphFactSource.graph_fact_id == GraphFact.graph_fact_id)
-            .where(GraphFact.run_id == self.run_id, GraphFact.active.is_(True))
-            .order_by(GraphFact.graph_fact_id)
-        )
-        for fact, source in self.session.execute(fact_stmt).all():
-            content_text = canonical_json(fact.content)
-            if not _text_matches(query, fact.subject_name, fact.predicate, content_text):
-                continue
+        graph_limit = max(0, limit - len(results))
+        from src.knowledge.graph import search_fact_graph
+
+        for match in search_fact_graph(
+            self.run_id,
+            query,
+            session=self.session,
+            limit=graph_limit,
+        ):
             results.append(
-                FactSearchResult(
-                    fact_id=source.stable_fact_id,
-                    source_kind=source.source_kind,
-                    content=dict(fact.content),
-                    evidence=Evidence.model_validate(source.evidence),
+                GraphSearchResult.model_validate(
+                    {
+                        "target_node_id": match.target_node_id,
+                        "source_kind": match.source_kind,
+                        "evidence": match.evidence,
+                        "matched_nodes": match.matched_nodes,
+                        "matched_edges": match.matched_edges,
+                        "path": match.path,
+                    }
                 )
             )
             if len(results) >= limit:
@@ -230,19 +217,16 @@ class DatabaseAnnotationQueryService:
         self,
         query: str,
         *,
-        after_chapter_ids: tuple[int, ...],
         limit: int = 50,
     ) -> list[AfterChunkSearchResult]:
-        """2026-08-05 用于遍历固定全部后续章节并只返回 query 命中的 chunk"""
-        if not after_chapter_ids:
-            return []
+        """2026-08-06 用于搜索当前位置之后的文本并返回章节与 chunk ID"""
         stmt = (
             select(Chunk.chapter_id, Chunk.chunk_id, Chunk.text)
             .where(
                 Chunk.run_id == self.run_id,
-                Chunk.chapter_id.in_(after_chapter_ids),
+                Chunk.chunk_id > self.current_last_chunk_id,
             )
-            .order_by(Chunk.chapter_id, Chunk.chunk_id)
+            .order_by(Chunk.chunk_id)
         )
         results: list[AfterChunkSearchResult] = []
         for row in self.session.execute(stmt).all():
@@ -264,15 +248,13 @@ class DatabaseAnnotationQueryService:
         *,
         chapter_id: int,
         chunk_id: int,
-        after_chapter_ids: tuple[int, ...],
     ) -> str:
-        """2026-08-05 用于读取固定 after 范围中已由工具账本授权的完整原文"""
-        if chapter_id not in after_chapter_ids:
-            raise ValueError(f"chapter_id 不属于固定 after 范围: {chapter_id}")
+        """2026-08-06 用于读取当前位置之后由工具账本授权的完整原文"""
         stmt = select(Chunk.text).where(
             Chunk.run_id == self.run_id,
             Chunk.chapter_id == chapter_id,
             Chunk.chunk_id == chunk_id,
+            Chunk.chunk_id > self.current_last_chunk_id,
         )
         content = self.session.execute(stmt).scalar_one_or_none()
         if content is None:
@@ -298,7 +280,6 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         chapter_id: int,
         annotation: ChapterAnnotation,
         initial_finish: ChapterAnnotation,
-        after_chapter_ids: list[int],
         revision_payload: dict[str, Any],
     ) -> ChapterAnnotationRecord:
         """2026-08-05 用于 add 并 flush 一条章节正式标注但不提交事务"""
@@ -308,7 +289,6 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             chapter_id=chapter_id,
             payload=annotation.model_dump(mode="json"),
             initial_finish_payload=initial_finish.model_dump(mode="json"),
-            after_chapter_ids=list(after_chapter_ids),
             revision_payload=dict(revision_payload),
         )
         self.session.add(row)
@@ -317,7 +297,7 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
 
 class CasePoolRepository(BaseRepository[CasePoolCase]):
-    """2026-08-05 用于锁定复用创建与更新案例池记录"""
+    """2026-08-06 用于锁定创建与更新案例池记录"""
 
     def lock_active_cases(self, run_id: str, ids: list[str]) -> list[CasePoolCase]:
         """2026-08-05 用于在完成事务开始时锁定全部来源案例"""
@@ -335,7 +315,7 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
         rows_by_id = {row.id: row for row in rows}
         return [rows_by_id[case_id] for case_id in ids if case_id in rows_by_id]
 
-    def upsert_case(
+    def create_case(
         self,
         *,
         run_id: str,
@@ -343,33 +323,19 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
         payload: CasePayload,
         evidence: Evidence,
     ) -> CasePoolCase:
-        """2026-08-05 用于按规范化 keys 与 description 精确复用或创建活动案例"""
+        """2026-08-06 用于为每个案例输出创建具有全新 UUID 的活动案例"""
         normalized_keys = sorted({normalize_text(key) for key in payload.keys})
         description = normalize_text(payload.description)
-        dedupe_key = build_dedupe_key({"keys": normalized_keys, "description": description})
-        stmt = select(CasePoolCase).where(
-            CasePoolCase.run_id == run_id,
-            CasePoolCase.dedupe_key == dedupe_key,
+        row = CasePoolCase(
+            id=str(uuid4()),
+            run_id=run_id,
+            keys=normalized_keys,
+            description=description,
+            evidence=evidence.model_dump(mode="json"),
+            state="active",
+            created_by_annotation_id=annotation_id,
         )
-        row = self.session.execute(stmt).scalar_one_or_none()
-        if row is None:
-            row = CasePoolCase(
-                id=str(uuid4()),
-                run_id=run_id,
-                keys=normalized_keys,
-                description=description,
-                evidence=evidence.model_dump(mode="json"),
-                state="active",
-                dedupe_key=dedupe_key,
-                created_by_annotation_id=annotation_id,
-            )
-            self.session.add(row)
-        else:
-            row.keys = normalized_keys
-            row.description = description
-            row.evidence = evidence.model_dump(mode="json")
-            row.state = "active"
-            row.updated_at = datetime.now(UTC)
+        self.session.add(row)
         self.session.flush()
         return row
 
@@ -407,74 +373,6 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
             row.last_surfaced_at = now
             row.updated_at = now
         self.session.flush()
-
-
-class ContinuityFactRepository(BaseRepository[ContinuityFact]):
-    """2026-08-05 用于精确复用或创建连续性事实"""
-
-    def upsert_fact(
-        self,
-        *,
-        run_id: str,
-        annotation_id: str,
-        payload: FactPayload,
-        evidence: Evidence,
-    ) -> ContinuityFact:
-        """2026-08-05 用于按完整规范化语义复用或新增 fact 记录"""
-        payload_data = payload.model_dump(mode="json")
-        dedupe_key = build_dedupe_key(payload_data)
-        stmt = select(ContinuityFact).where(
-            ContinuityFact.run_id == run_id,
-            ContinuityFact.dedupe_key == dedupe_key,
-        )
-        row = self.session.execute(stmt).scalar_one_or_none()
-        if row is None:
-            row = ContinuityFact(
-                fact_id=str(uuid4()),
-                run_id=run_id,
-                created_by_annotation_id=annotation_id,
-                fact_type=payload.fact_type,
-                subject=payload.subject.model_dump(mode="json"),
-                predicate=payload.predicate,
-                object=payload.object.model_dump(mode="json") if payload.object is not None else None,
-                value=payload.value,
-                participants=[item.model_dump(mode="json") for item in payload.participants],
-                scope=payload.scope,
-                story_time=payload.story_time.model_dump(mode="json") if payload.story_time is not None else None,
-                assertion=payload.assertion,
-                change_kind=payload.change_kind,
-                linked_fact_id=payload.linked_fact_id,
-                confidence=payload.confidence,
-                evidence=evidence.model_dump(mode="json"),
-                dedupe_key=dedupe_key,
-            )
-            self.session.add(row)
-            self.session.flush()
-        return row
-
-    def completion_view(self, row: ContinuityFact) -> CompletionFact:
-        """2026-08-05 用于把真实 fact 行转换为完成结果"""
-        payload = FactPayload.model_validate(
-            {
-                "fact_type": row.fact_type,
-                "subject": row.subject,
-                "predicate": row.predicate,
-                "object": row.object,
-                "value": row.value,
-                "participants": row.participants,
-                "scope": row.scope,
-                "story_time": row.story_time,
-                "assertion": row.assertion,
-                "change_kind": row.change_kind,
-                "linked_fact_id": row.linked_fact_id,
-                "confidence": row.confidence,
-            }
-        )
-        return CompletionFact(
-            fact_id=row.fact_id,
-            payload=payload,
-            evidence=Evidence.model_validate(row.evidence),
-        )
 
 
 class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
@@ -583,7 +481,7 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
         evidence: Evidence,
         source_case_id: str | None = None,
         target_case_id: str | None = None,
-        target_fact_id: str | None = None,
+        target_graph_node_id: str | None = None,
         target_setup_id: str | None = None,
         target_hit_id: int | None = None,
         rejected_reason_code: str | None = None,
@@ -596,7 +494,7 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             source_case_id=source_case_id,
             result_kind=result_kind,
             target_case_id=target_case_id,
-            target_fact_id=target_fact_id,
+            target_graph_node_id=target_graph_node_id,
             target_setup_id=target_setup_id,
             target_hit_id=target_hit_id,
             rejected_reason_code=rejected_reason_code,

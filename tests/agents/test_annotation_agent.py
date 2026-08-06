@@ -10,12 +10,17 @@ from pydantic import ValidationError
 
 from src.agents.annotation.errors import AnnotationAuthorizationError
 from src.agents.annotation.graph import build_annotation_graph
-from src.agents.annotation.runner import AnnotationAgentRunError, run_annotation_agent
+from src.agents.annotation.runner import (
+    AnnotationAgentRunError,
+    run_annotation_agent,
+    validate_chapter_annotation,
+)
 from src.agents.annotation.schema import (
     AgentRunResult,
     CasePayload,
     ChapterAnnotation,
     Evidence,
+    FactPayload,
     SuccessAudit,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
@@ -64,14 +69,14 @@ class _QueryService:
         del ids
         return []
 
-    def search_after(self, query, *, after_chapter_ids, limit=50):
+    def search_after(self, query, *, limit=50):
         """2026-08-05 用于返回空后文检索结果"""
-        del query, after_chapter_ids, limit
+        del query, limit
         return []
 
-    def read_after_chunk(self, *, chapter_id, chunk_id, after_chapter_ids):
+    def read_after_chunk(self, *, chapter_id, chunk_id):
         """2026-08-05 用于返回测试后文原文"""
-        del chapter_id, chunk_id, after_chapter_ids
+        del chapter_id, chunk_id
         return "后文"
 
 
@@ -130,7 +135,6 @@ async def _invoke_graph(llm: _SequenceLLM) -> dict:
     ledger = AnnotationToolLedger(
         current_chapter_id=1,
         current_chunk_ids=(1,),
-        after_chapter_ids=(2, 3),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -163,7 +167,6 @@ def _agent_result() -> AgentRunResult:
         chapter_id=1,
         final_annotation=annotation,
         initial_finish=annotation,
-        after_chapter_ids=[2],
         revision_payload={},
         initial_case_candidate_ids=[],
         rotation_case_ids=[],
@@ -191,6 +194,122 @@ def test_case_description_counts_unicode_characters() -> None:
     assert len(accepted.description) == 100
     with pytest.raises(ValidationError):
         CasePayload(keys=["身份"], description="甲" * 101)
+
+
+def test_fact_payload_rejects_record_version_fields() -> None:
+    """2026-08-06 用于验证 fact 只描述图节点关系与属性"""
+    payload = {
+        "fact_type": "membership",
+        "subject": {"name": "顾霜", "entity_type": "character"},
+        "predicate": "belongs_to",
+        "object": {"name": "山门", "entity_type": "location"},
+        "value": None,
+        "participants": [],
+        "scope": "novel",
+        "story_time": None,
+        "assertion": "affirmed",
+        "confidence": "high",
+    }
+    FactPayload.model_validate(payload)
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        FactPayload.model_validate({**payload, "record_version": 1})
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        FactPayload.model_validate({**payload, "change_kind": "supersede"})
+
+
+def test_fact_payload_requires_character_nodes_for_identity_relation() -> None:
+    """2026-08-06 用于验证称谓身份只能形成独立人物节点关系并选择代表节点"""
+    payload = {
+        "fact_type": "relation",
+        "subject": {"name": "霜姐", "entity_type": "character"},
+        "predicate": "同一人物",
+        "object": {"name": "顾霜", "entity_type": "character"},
+        "value": None,
+        "participants": [],
+        "scope": "novel",
+        "story_time": None,
+        "assertion": "affirmed",
+        "confidence": "high",
+        "directionality": "bidirectional",
+        "relation_semantics": "same_character",
+        "representative_node": {"endpoint": "object"},
+    }
+
+    fact = FactPayload.model_validate(payload)
+
+    assert fact.representative_node is not None
+    assert fact.representative_node.endpoint == "object"
+    with pytest.raises(ValidationError, match="同一人物关系必须选择"):
+        FactPayload.model_validate({**payload, "representative_node": None})
+    with pytest.raises(ValidationError, match="必须恰好选择"):
+        FactPayload.model_validate(
+            {
+                **payload,
+                "representative_node": {
+                    "endpoint": "object",
+                    "node_id": "entity:42",
+                },
+            }
+        )
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        FactPayload.model_validate(
+            {
+                **payload,
+                "representative_node": {"node_id": "entity:0"},
+            }
+        )
+    negated = FactPayload.model_validate(
+        {
+            **payload,
+            "assertion": "negated",
+            "representative_node": None,
+        }
+    )
+    assert negated.assertion == "negated"
+    with pytest.raises(ValidationError, match="否定同一人物关系不允许"):
+        FactPayload.model_validate(
+            {
+                **payload,
+                "assertion": "negated",
+            }
+        )
+
+
+def test_chapter_annotation_node_selector_requires_current_graph_search_visibility() -> None:
+    """2026-08-06 用于验证正式标注只能引用本轮图 search 返回的实体节点 ID"""
+    payload = _annotation_payload()
+    payload["relations"] = [
+        {
+            "chunk_id": 1,
+            "evidence": {"reason": "霜姐即顾霜", "chapterid": 1},
+            "confidence": "high",
+            "from_entity": {"name": "霜姐", "entity_type": "character"},
+            "to_entity": {"name": "顾霜", "entity_type": "character"},
+            "relation_type": "同一人物",
+            "change_kind": "assert",
+            "directionality": "bidirectional",
+            "relation_semantics": "same_character",
+            "representative_node": {"node_id": "entity:42"},
+        }
+    ]
+    annotation = ChapterAnnotation.model_validate(payload)
+
+    with pytest.raises(AnnotationAuthorizationError, match="未由本轮图 search 返回"):
+        validate_chapter_annotation(
+            annotation,
+            chapter_id=1,
+            current_chunks=[(1, "霜姐即顾霜")],
+            allowed_evidence_chapter_ids={1},
+            visible_graph_entity_node_ids=set(),
+        )
+
+    validate_chapter_annotation(
+        annotation,
+        chapter_id=1,
+        current_chunks=[(1, "霜姐即顾霜")],
+        allowed_evidence_chapter_ids={1},
+        visible_graph_entity_node_ids={"entity:42"},
+    )
 
 
 @pytest.mark.asyncio
@@ -249,7 +368,6 @@ async def test_runner_stops_after_third_retryable_failure() -> None:
                 run_id="run-1",
                 chapter_id=1,
                 current_chunks=[(1, "顾霜进入山门")],
-                after_chapter_ids=[2],
                 query_service_factory=lambda session: _QueryService(),
                 session_factory=lambda: sessions.pop(0),
                 llm=MagicMock(),
@@ -271,7 +389,6 @@ async def test_runner_does_not_retry_authorization_errors() -> None:
                 run_id="run-1",
                 chapter_id=1,
                 current_chunks=[(1, "顾霜进入山门")],
-                after_chapter_ids=[2],
                 query_service_factory=lambda current: _QueryService(),
                 session_factory=lambda: session,
                 llm=MagicMock(),
@@ -298,7 +415,6 @@ async def test_runner_retries_then_returns_successful_third_attempt() -> None:
             run_id="run-1",
             chapter_id=1,
             current_chunks=[(1, "顾霜进入山门")],
-            after_chapter_ids=[2],
             query_service_factory=lambda session: _QueryService(),
             session_factory=lambda: sessions.pop(0),
             llm=llm,

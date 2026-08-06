@@ -246,12 +246,6 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             )
         return rows
 
-    def fetch_alias_map(self, run_id: str) -> dict[str, str]:
-        """2026-08-05 用于从数据库图别名表读取规范实体映射"""
-        from src.storage.repositories.graph import GraphRepository
-
-        return GraphRepository(self.session).fetch_alias_map(run_id)
-
     def fetch_foreshadowing_threads(self, run_id: str) -> list[ForeshadowingThreadView]:
         """2026-08-05 用于汇总伏笔线程与全部命中锚点"""
         thread_stmt = (

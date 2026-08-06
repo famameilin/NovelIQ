@@ -5,7 +5,6 @@ from typing import Any, cast
 
 from src.knowledge.authority import (
     ActiveEntityContext,
-    AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
     EntityTypeFact,
@@ -15,7 +14,6 @@ from src.rag.evidence_contracts import EvidenceRetrievalMethod
 
 __all__ = [
     "ActiveEntityContext",
-    "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityTypeFact",
@@ -104,21 +102,3 @@ class EvidenceBundle:
             request_meta=dict(request_meta if request_meta is not None else self.request_meta),
             generation_meta=dict(generation_meta if generation_meta is not None else self.generation_meta),
         )
-
-    def structured_alias_map(self) -> dict[str, str]:
-        alias_map: dict[str, str] = {}
-
-        for item in self.structured_evidence:
-            if item.evidence_type != "alias_mapping":
-                continue
-            alias = str(item.metadata.get("alias", "")).strip()
-            canonical = str(item.metadata.get("canonical", "")).strip()
-            if not alias or not canonical:
-                parts = item.content.replace("->", "→").split("→", maxsplit=1)
-                if len(parts) == 2:
-                    alias = alias or parts[0].strip()
-                    canonical = canonical or parts[1].strip()
-            if alias and canonical:
-                alias_map[alias] = canonical
-
-        return alias_map

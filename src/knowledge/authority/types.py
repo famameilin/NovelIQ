@@ -6,7 +6,6 @@ from typing import Final
 # 以下 allowlist 常量把 authority 输出矩阵直接固定在代码里
 # consumer 只能依赖自己那一层明确允许的字段，避免继续跨层借字段
 LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
-    "alias_mappings": ("alias", "canonical", "confidence", "source"),
     "canonical_entities": (
         "name",
         "entity_type",
@@ -33,14 +32,6 @@ LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "entity_types": ("name", "entity_type"),
 }
-
-
-@dataclass(slots=True)
-class AliasMapping:
-    alias: str
-    canonical: str
-    source: str = "graph_alias_map"
-    confidence: float | None = None
 
 
 @dataclass(slots=True)
@@ -162,6 +153,7 @@ class ParticipantState:
     first_seen_chunk: int | None = None
     last_seen_chunk: int | None = None
     source_confidence: float | None = None
+    is_representative: bool = True
     source: str = "graph_facts"
 
 
@@ -174,7 +166,6 @@ class Level1AuthoritySnapshot:
     不应混入时间轴历史、图谱产品摘要或 prompt 局部状态
     """
 
-    alias_mappings: list[AliasMapping] = field(default_factory=list)
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     confirmed_relations: list[ConfirmedRelation] = field(default_factory=list)
     entity_types: list[EntityTypeFact] = field(default_factory=list)
@@ -212,7 +203,7 @@ class TimelineAuthorityView:
     - `relation_events` 只包含两端都属于角色子图的不可变历史事件
 
     时间轴消费者应把这里当作共享合同，
-    不要依赖 repository 行结构或当前关系投影
+    不要依赖 repository 行结构或数据库图内部关系表
     """
 
     character_entities: list[CanonicalEntity] = field(default_factory=list)
@@ -231,6 +222,7 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "primary_role_function",
         "first_seen_chunk",
         "last_seen_chunk",
+        "is_representative",
     ),
     "confirmed_relations": (
         "from_entity_id",
@@ -421,7 +413,7 @@ class ExportGraphAuthorityView:
     专供图谱导出 payload 的 authority 视图
 
     结果导出仍会输出 chunk 级关系、层级关系摘要等 DTO。
-    该视图让这些 payload 构建器脱离 repository / projection 行结构，
+    该视图让这些 payload 构建器脱离 repository 内部行结构，
     同时避免把仅导出相关的关注点塞进 `GraphAuthorityView` 或 `GraphAuthorityReport`
     """
 

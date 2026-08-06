@@ -27,21 +27,6 @@ STYLE_LABEL_VALUES = (
 )
 
 
-class DisambiguationAliasMap(BaseModel):
-    """
-    人名消歧响应数据结构
-
-    说明: 用于 Instructor 结构化输出的响应模型
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    alias_map: dict[str, str] = Field(
-        default_factory=dict,
-        description="人名到规范名的映射，key 为候选人名，value 为规范名",
-    )
-
-
 class CloudAnalysis(BaseModel):
     """
     云端分析数据结构

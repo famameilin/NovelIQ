@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from src.rag.evidence_types import (
-    AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
     EntityTypeFact,
@@ -16,14 +15,9 @@ class Level1AuthorityProvider:
         self._graph_repo = graph_repo
 
     def build_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
-        alias_map = self._graph_repo.fetch_alias_map(run_id)
-        entities = self._graph_repo.fetch_entities(run_id)
-        relations = self._graph_repo.fetch_current_relations(run_id, active_only=True)
+        entities = self._graph_repo.fetch_representative_entities(run_id)
+        relations = self._graph_repo.fetch_representative_current_relations(run_id, active_only=True)
 
-        alias_mappings = [
-            AliasMapping(alias=alias, canonical=canonical)
-            for alias, canonical in sorted(alias_map.items(), key=lambda item: (item[1], item[0]))
-        ]
         canonical_entities = [
             CanonicalEntity(name=entity.canonical_name, entity_type=entity.entity_type or "character")
             for entity in sorted(entities, key=lambda row: row.canonical_name)
@@ -50,7 +44,6 @@ class Level1AuthorityProvider:
         ]
 
         return Level1AuthoritySnapshot(
-            alias_mappings=alias_mappings,
             canonical_entities=canonical_entities,
             confirmed_relations=confirmed_relations,
             entity_types=entity_types,

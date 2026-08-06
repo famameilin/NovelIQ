@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
+from functools import partial
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -77,7 +78,6 @@ async def run_annotate(
         return 0, 0, 0
 
     chapter_groups = _group_chunks_by_chapter(chunk_rows)
-    chapter_ids = [chapter_id for chapter_id, _chunks in chapter_groups]
     total_chapters = len(chapter_groups)
     sql_session_factory = get_session_factory()
     llm = build_chat_model("annotation")
@@ -120,7 +120,6 @@ async def run_annotate(
                 existing.annotation_id,
             )
         else:
-            after_chapter_ids = chapter_ids[chapter_index + 1 :]
             if emitter:
                 await emitter(
                     StreamEvent(
@@ -140,13 +139,13 @@ async def run_annotate(
                 run_id=run_id,
                 chapter_id=chapter_id,
                 current_chunks=current_chunks,
-                after_chapter_ids=after_chapter_ids,
                 novel_title=novel_title,
                 llm=llm,
                 session_factory=sql_session_factory,
-                query_service_factory=lambda read_session: DatabaseAnnotationQueryService(
-                    read_session,
-                    run_id,
+                query_service_factory=partial(
+                    DatabaseAnnotationQueryService,
+                    run_id=run_id,
+                    current_last_chunk_id=current_chunks[-1][0],
                 ),
             )
             complete_annotation_run(

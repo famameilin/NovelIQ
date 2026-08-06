@@ -1,6 +1,5 @@
 from .authority import (
     ActiveEntityContext,
-    AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
     EntityLifecycle,
@@ -19,7 +18,6 @@ from .graph import build_networkx_from_graph_tables
 
 __all__ = [
     "ActiveEntityContext",
-    "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityLifecycle",

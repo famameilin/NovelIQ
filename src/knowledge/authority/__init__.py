@@ -7,7 +7,6 @@ from .types import (
     LEVEL1_AUTHORITY_DEPENDENCY_FIELDS,
     TIMELINE_AUTHORITY_DEPENDENCY_FIELDS,
     ActiveEntityContext,
-    AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
     EntityLifecycle,
@@ -31,7 +30,6 @@ from .types import (
 
 __all__ = [
     "ActiveEntityContext",
-    "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityLifecycle",

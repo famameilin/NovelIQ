@@ -68,7 +68,6 @@ def _agent_result(
         chapter_id=chapter_id,
         final_annotation=annotation,
         initial_finish=annotation,
-        after_chapter_ids=[2] if chapter_id == 1 else [],
         revision_payload={},
         initial_case_candidate_ids=[],
         rotation_case_ids=[],

@@ -77,7 +77,10 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 event.relation_type,
                 event.change_type,
             )
-            for event in GraphRepository(self.session).fetch_relation_events(run_id, limit=row_limit)
+            for event in GraphRepository(self.session).fetch_representative_relation_events(
+                run_id,
+                limit=row_limit,
+            )
         ]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
@@ -132,20 +135,13 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             for row in self.session.execute(stmt).all()[:row_limit]
         ]
 
-    def fetch_character_disambig_data(self, run_id: str) -> tuple[list[str], dict[str, str]]:
-        """2026-08-05 用于从数据库图实体与别名读取诊断人物合同"""
+    def fetch_known_characters(self, run_id: str) -> list[str]:
+        """2026-08-06 用于从数据库图实体节点读取诊断人物名单"""
         graph_repo = GraphRepository(self.session)
-        known_characters = sorted(
+        return sorted(
             entity.canonical_name
-            for entity in graph_repo.fetch_entities(run_id, entity_type="character")
+            for entity in graph_repo.fetch_representative_entities(run_id, entity_type="character")
         )
-        known_character_set = set(known_characters)
-        alias_merges = {
-            alias: canonical
-            for alias, canonical in graph_repo.fetch_alias_map(run_id).items()
-            if alias != canonical and canonical in known_character_set
-        }
-        return known_characters, alias_merges
 
     def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
         """2026-08-05 用于读取仍由诊断消费的阶段摘要记录"""

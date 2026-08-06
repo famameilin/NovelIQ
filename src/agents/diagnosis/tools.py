@@ -107,21 +107,18 @@ def build_diagnosis_tools(
     @tool
     def get_character_data() -> str:
         """
-        查询已确认人物名单与别名映射。
-        用于判断核心阵容、主配角与人物命名。
+        查询数据库事实图中的已确认人物节点。
+        用于判断核心阵容与主配角。
         """
         from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
         ledger.record_tool_call("get_character_data")
 
         repo = DiagnosisRepository(session)
-        known_characters, alias_merges = repo.fetch_character_disambig_data(run_id)
-        parts: list[str] = []
+        known_characters = repo.fetch_known_characters(run_id)
         if known_characters:
-            parts.append(f"已知人物: {known_characters}")
-        if alias_merges:
-            parts.append(f"别名映射: {alias_merges}")
-        return "\n".join(parts) if parts else "（无人物数据）"
+            return f"已知人物: {known_characters}"
+        return "（无人物数据）"
 
     @tool
     def get_topic_data() -> str:

@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -44,9 +44,8 @@ def _validate_chapter_identity(
     *,
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
-    after_chapter_ids: list[int],
 ) -> None:
-    """2026-08-05 用于在模型调用前校验章节身份 chunk 锚点与 after 顺序"""
+    """2026-08-06 用于在模型调用前校验章节身份与 current chunk 锚点"""
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须是真实非空正整数")
     if not current_chunks:
@@ -58,12 +57,6 @@ def _validate_chapter_identity(
         raise AnnotationInputError("current chunk_id 不允许为负数")
     if any(not text for _chunk_id, text in current_chunks):
         raise AnnotationInputError("current chunk 原文不能为空")
-    if len(set(after_chapter_ids)) != len(after_chapter_ids):
-        raise AnnotationInputError("after_chapter_ids 不允许重复")
-    if any(after_id <= chapter_id for after_id in after_chapter_ids):
-        raise AnnotationInputError("after_chapter_ids 必须全部晚于 current chapter_id")
-    if after_chapter_ids != sorted(after_chapter_ids):
-        raise AnnotationInputError("after_chapter_ids 必须保持原文顺序")
 
 
 def _iter_annotation_evidence(annotation: ChapterAnnotation):
@@ -73,12 +66,21 @@ def _iter_annotation_evidence(annotation: ChapterAnnotation):
             yield fact.evidence
 
 
+def _iter_representative_node_ids(annotation: ChapterAnnotation) -> Iterator[str]:
+    """2026-08-06 用于遍历正式关系标注引用的既有图实体节点 ID"""
+    for relation in annotation.relations:
+        selector = relation.representative_node
+        if selector is not None and selector.node_id is not None:
+            yield selector.node_id
+
+
 def validate_chapter_annotation(
     annotation: ChapterAnnotation,
     *,
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
     allowed_evidence_chapter_ids: set[int],
+    visible_graph_entity_node_ids: set[str],
 ) -> None:
     """2026-08-05 用于完整校验章节 chunk 覆盖事实锚点原文与 Evidence 可见性"""
     expected_chunk_ids = [chunk_id for chunk_id, _text in current_chunks]
@@ -102,6 +104,11 @@ def validate_chapter_annotation(
         if evidence.chapterid not in allowed_evidence_chapter_ids:
             raise AnnotationAuthorizationError(
                 f"Evidence chapterid 不在当前阶段可见范围: {evidence.chapterid}"
+            )
+    for node_id in _iter_representative_node_ids(annotation):
+        if node_id not in visible_graph_entity_node_ids:
+            raise AnnotationAuthorizationError(
+                f"representative_node.node_id 未由本轮图 search 返回: {node_id}"
             )
     if chapter_id not in allowed_evidence_chapter_ids:
         raise AnnotationAuthorizationError("当前章节不在 Evidence 可见范围")
@@ -205,7 +212,6 @@ async def _run_single_attempt(
     chapter_id: int,
     attempt_number: int,
     current_chunks: list[tuple[int, str]],
-    after_chapter_ids: list[int],
     novel_title: str | None,
     llm: Any,
     session: Session,
@@ -223,7 +229,6 @@ async def _run_single_attempt(
     ledger = AnnotationToolLedger(
         current_chapter_id=chapter_id,
         current_chunk_ids=tuple(chunk_id for chunk_id, _text in current_chunks),
-        after_chapter_ids=tuple(after_chapter_ids),
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
@@ -235,6 +240,7 @@ async def _run_single_attempt(
             chapter_id=chapter_id,
             current_chunks=current_chunks,
             allowed_evidence_chapter_ids=allowed_chapters,
+            visible_graph_entity_node_ids=ledger.visible_graph_entity_node_ids,
         )
 
     def post_after_validator(annotation: ChapterAnnotation, allowed_chapters: set[int]) -> None:
@@ -244,6 +250,7 @@ async def _run_single_attempt(
             chapter_id=chapter_id,
             current_chunks=current_chunks,
             allowed_evidence_chapter_ids=allowed_chapters,
+            visible_graph_entity_node_ids=ledger.visible_graph_entity_node_ids,
         )
 
     graph = build_annotation_graph(
@@ -260,7 +267,6 @@ async def _run_single_attempt(
                 novel_title=novel_title,
                 chapter_id=chapter_id,
                 chunk_ids=[chunk_id for chunk_id, _text in current_chunks],
-                after_chapter_ids=after_chapter_ids,
                 initial_cases=initial_cases,
             )
         ),
@@ -297,7 +303,6 @@ async def _run_single_attempt(
         chapter_id=chapter_id,
         final_annotation=final_annotation,
         initial_finish=initial_finish,
-        after_chapter_ids=after_chapter_ids,
         revision_payload=dict(result_state.get("revision_payload") or {}),
         initial_case_candidate_ids=list(ledger.initial_cases),
         rotation_case_ids=ledger.rotation_case_ids,
@@ -320,7 +325,6 @@ async def run_annotation_agent(
     run_id: str,
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
-    after_chapter_ids: list[int],
     query_service_factory: Callable[[Session], AnnotationQueryService],
     session_factory: Callable[[], Session],
     novel_title: str | None = None,
@@ -330,7 +334,6 @@ async def run_annotation_agent(
     _validate_chapter_identity(
         chapter_id=chapter_id,
         current_chunks=current_chunks,
-        after_chapter_ids=after_chapter_ids,
     )
     configured_attempts = settings.analysis.agents.annotation.total_attempts
     if configured_attempts != 3:
@@ -351,7 +354,6 @@ async def run_annotation_agent(
                 chapter_id=chapter_id,
                 attempt_number=attempt_number,
                 current_chunks=current_chunks,
-                after_chapter_ids=after_chapter_ids,
                 novel_title=novel_title,
                 llm=llm,
                 session=read_session,
