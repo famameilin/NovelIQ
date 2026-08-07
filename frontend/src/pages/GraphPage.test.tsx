@@ -183,7 +183,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         fact_id: "fact-12",
         fact_revision: 1,
         effective_chunk_id: 12,
-        changes: [{ change_kind: "新建" }],
+        changes: [{ change_kind: "assert" }],
         evidence: [{ reason: "顾霜与司夜共同离开宗门", chunk_id: 12 }],
         relation_id: "relation-1",
         relation_version_id: 9,
@@ -193,7 +193,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         from_name: "顾霜",
         to_name: "司夜",
         relation_type: "盟友",
-        relation_change_kind: "新建",
+        relation_change_kind: "assert",
         directionality: "bidirectional",
         relation_semantics: "ordinary",
       },
@@ -255,6 +255,7 @@ describe("GraphPage", () => {
 
     expect((await screen.findAllByText(/第 13 段 · 顾霜/)).length).toBeGreaterThan(0);
     expect(screen.getByText(/第 12 段 · 顾霜 → 司夜/)).toBeInTheDocument();
+    expect(screen.getByText("盟友 · 建立")).toBeInTheDocument();
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
   });
 
