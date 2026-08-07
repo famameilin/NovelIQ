@@ -9,7 +9,7 @@ import {
   createTopics,
   createDiagnosis,
   createGraph,
-  createGraphEventsPage,
+  createGraphChangesPage,
   createTimeline,
   createNarrativeStructure,
   createEmotionStats,
@@ -132,9 +132,9 @@ export const graphHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/graph/events
-export const graphEventsHandler = http.get(
-  `${BASE}/api/novels/:novelId/graph/events`,
+// 获取 /api/novels/:novelId/graph/changes
+export const graphChangesHandler = http.get(
+  `${BASE}/api/novels/:novelId/graph/changes`,
   async ({ request, params }) => {
     const { novelId } = params;
     const url = new URL(request.url);
@@ -145,9 +145,9 @@ export const graphEventsHandler = http.get(
 
     await delay(200);
     return HttpResponse.json(
-      createGraphEventsPage(
-        url.searchParams.get("events_cursor"),
-        Number(url.searchParams.get("events_limit") ?? "8")
+      createGraphChangesPage(
+        url.searchParams.get("changes_cursor"),
+        Number(url.searchParams.get("changes_limit") ?? "8")
       )
     );
   }

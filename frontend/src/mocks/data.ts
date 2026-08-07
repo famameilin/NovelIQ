@@ -13,9 +13,9 @@ import type {
   DiagnosisResult,
   ForeshadowingThread,
   GraphData,
-  GraphEvent,
-  GraphEventsPageInfo,
-  GraphEventsPageResponse,
+  GraphChange,
+  GraphChangesPageInfo,
+  GraphChangesPageResponse,
   TimelineCompositeNode,
   TimelineNode,
   TimelineResponse,
@@ -39,42 +39,42 @@ function dateAgo(days: number): string {
   return d.toISOString();
 }
 
-function encodeGraphEventsCursor(offset: number): string {
+function encodeGraphChangesCursor(offset: number): string {
   return btoa(JSON.stringify({ offset })).replace(/=+$/u, "");
 }
 
-function decodeGraphEventsCursor(cursor?: string | null): number {
+function decodeGraphChangesCursor(cursor?: string | null): number {
   if (!cursor) return 0;
   const normalized = cursor.padEnd(Math.ceil(cursor.length / 4) * 4, "=");
   const payload = JSON.parse(atob(normalized)) as { offset?: unknown };
   return typeof payload.offset === "number" && payload.offset >= 0 ? payload.offset : 0;
 }
 
-function buildGraphEventsPageInfo(total: number, start: number, limit: number): GraphEventsPageInfo {
+function buildGraphChangesPageInfo(total: number, start: number, limit: number): GraphChangesPageInfo {
   const end = Math.min(start + limit, total);
   return {
     limit,
     returned_count: end - start,
     total,
     has_more: end < total,
-    next_cursor: end < total ? encodeGraphEventsCursor(end) : null,
+    next_cursor: end < total ? encodeGraphChangesCursor(end) : null,
   };
 }
 
 const MOCK_TIMELINE_TOTAL_CHUNKS = 120;
 
 const MOCK_GRAPH_CHARACTERS = [
-  { entity_id: "1", name: "萧炎", role: "protagonist", first_seen_chunk: 1, last_seen_chunk: 118 },
-  { entity_id: "2", name: "药老", role: "main", first_seen_chunk: 4, last_seen_chunk: 115 },
-  { entity_id: "3", name: "纳兰嫣然", role: "main", first_seen_chunk: 9, last_seen_chunk: 100 },
-  { entity_id: "4", name: "美杜莎", role: "supporting", first_seen_chunk: 28, last_seen_chunk: 110 },
-  { entity_id: "5", name: "云韵", role: "supporting", first_seen_chunk: 40, last_seen_chunk: 95 },
-  { entity_id: "6", name: "小医仙", role: "supporting", first_seen_chunk: 48, last_seen_chunk: 108 },
-  { entity_id: "7", name: "薰儿", role: "main", first_seen_chunk: 15, last_seen_chunk: 120 },
-  { entity_id: "8", name: "海波东", role: "supporting", first_seen_chunk: 36, last_seen_chunk: 112 },
+  { entity_id: 1, name: "萧炎", role: "protagonist", first_seen_chunk: 1, last_seen_chunk: 118 },
+  { entity_id: 2, name: "药老", role: "main", first_seen_chunk: 4, last_seen_chunk: 115 },
+  { entity_id: 3, name: "纳兰嫣然", role: "main", first_seen_chunk: 9, last_seen_chunk: 100 },
+  { entity_id: 4, name: "美杜莎", role: "supporting", first_seen_chunk: 28, last_seen_chunk: 110 },
+  { entity_id: 5, name: "云韵", role: "supporting", first_seen_chunk: 40, last_seen_chunk: 95 },
+  { entity_id: 6, name: "小医仙", role: "supporting", first_seen_chunk: 48, last_seen_chunk: 108 },
+  { entity_id: 7, name: "薰儿", role: "main", first_seen_chunk: 15, last_seen_chunk: 120 },
+  { entity_id: 8, name: "海波东", role: "supporting", first_seen_chunk: 36, last_seen_chunk: 112 },
 ] as const;
 
-const MOCK_GRAPH_RELATION_EVENTS: GraphEvent[] = [
+const MOCK_GRAPH_RELATION_EVENTS = [
   {
     relation_event_id: 101,
     chunk_id: 12,
@@ -391,70 +391,77 @@ export function createGraph(): GraphData {
     entity_type: "character" as const,
     first_seen_chunk: character.first_seen_chunk,
     last_seen_chunk: character.last_seen_chunk,
-    role: character.role,
-    status: "active",
+    state_revision: 1,
+    state: {
+      primary_role_function: character.role,
+      status: "active",
+    },
   }));
 
   const edges = [
-    { source: "1", target: "2", relation_type: "师徒", weight: 0.95 },
-    { source: "1", target: "3", relation_type: "对手", weight: 0.78 },
-    { source: "1", target: "4", relation_type: "盟友", weight: 0.72 },
-    { source: "1", target: "5", relation_type: "盟友", weight: 0.5 },
-    { source: "1", target: "6", relation_type: "盟友", weight: 0.61 },
-    { source: "1", target: "7", relation_type: "恋人", weight: 0.85 },
-    { source: "2", target: "8", relation_type: "盟友", weight: 0.43 },
-  ];
-  const allEvents = MOCK_GRAPH_RELATION_EVENTS;
-  const initialEventLimit = 8;
-  const events = allEvents.slice(0, initialEventLimit);
+    { source: 1, target: 2, relation_type: "师徒" },
+    { source: 1, target: 3, relation_type: "对手" },
+    { source: 1, target: 4, relation_type: "盟友" },
+    { source: 1, target: 5, relation_type: "盟友" },
+    { source: 1, target: 6, relation_type: "盟友" },
+    { source: 1, target: 7, relation_type: "恋人" },
+    { source: 2, target: 8, relation_type: "盟友" },
+  ].map((edge, index) => ({
+    relation_id: `relation-${index + 1}`,
+    relation_version_id: index + 1,
+    relation_revision: 1,
+    source_entity_id: edge.source,
+    target_entity_id: edge.target,
+    source_name: nodes.find((node) => node.entity_id === edge.source)?.name ?? "未知实体",
+    target_name: nodes.find((node) => node.entity_id === edge.target)?.name ?? "未知实体",
+    relation_type: edge.relation_type,
+    directionality: "bidirectional" as const,
+    relation_semantics: "ordinary" as const,
+    attributes: {},
+    is_active: true,
+    changes: [],
+  }));
 
-  const summary = {
-    node_count: nodes.length,
-    edge_count: edges.length,
-    density: +(edges.length / (nodes.length * (nodes.length - 1))).toFixed(4),
-    core_characters: nodes.slice(0, 5).map((node) => node.name),
-    key_relations: edges.slice(0, 5).map((edge) => ({
-      from: nodes.find((node) => node.entity_id === edge.source)?.name ?? "未知角色",
-      to: nodes.find((node) => node.entity_id === edge.target)?.name ?? "未知角色",
-      type: edge.relation_type,
-      support_count: Math.max(1, Math.round((edge.weight ?? 0.4) * 10)),
-    })),
+  return {
+    graph_version_id: "mock-graph-version-1",
+    chapter_id: 12,
+    chapter_order: 12,
+    first_chunk_id: 111,
+    last_chunk_id: 120,
+    nodes,
+    edges,
   };
-
-  const quality = {
-    // Mock 合同遵循 authority 语义：`conflict_count` 只反映当前已确认关系
-    conflict_count: 0,
-    low_confidence_count: allEvents.filter((event) => (event.confidence ?? 0) < 0.6).length,
-    conflicts: [],
-    low_confidence_samples: allEvents
-      .filter((event) => (event.confidence ?? 0) < 0.6)
-      .slice(0, 5)
-      .map((event) => ({
-        relation_event_id: event.relation_event_id,
-        chunk_id: event.chunk_id,
-        from_name: event.from_name,
-        to_name: event.to_name,
-        relation_type: event.relation_type,
-        change_type: event.change_type,
-        confidence: event.confidence,
-      })),
-  };
-  const events_page = buildGraphEventsPageInfo(allEvents.length, 0, initialEventLimit);
-
-  return { nodes, edges, events, events_page, summary, quality };
 }
 
-export function createGraphEventsPage(cursor?: string | null, limit = 8): GraphEventsPageResponse {
+export function createGraphChangesPage(cursor?: string | null, limit = 8): GraphChangesPageResponse {
   const graph = createGraph();
-  const allEvents: GraphEvent[] = MOCK_GRAPH_RELATION_EVENTS.map((event) => ({
-    ...event,
-    from_name: graph.nodes.find((node) => Number(node.entity_id) === event.from_entity_id)?.name ?? event.from_name,
-    to_name: graph.nodes.find((node) => Number(node.entity_id) === event.to_entity_id)?.name ?? event.to_name,
+  const allChanges: GraphChange[] = MOCK_GRAPH_RELATION_EVENTS.map((event) => ({
+    change_id: `relation:${event.relation_event_id}`,
+    change_kind: "relation",
+    graph_version_id: graph.graph_version_id,
+    chapter_id: graph.chapter_id,
+    chapter_order: graph.chapter_order,
+    fact_id: `fact:${event.relation_event_id}`,
+    fact_revision: 1,
+    effective_chunk_id: event.chunk_id,
+    changes: [{ change_kind: event.change_type ?? "强化" }],
+    evidence: [{ reason: event.evidence ?? "当前变化缺少原文说明", chunk_id: event.chunk_id }],
+    relation_id: `relation:${event.source_relation_row_id ?? event.relation_event_id}`,
+    relation_version_id: event.source_relation_row_id ?? event.relation_event_id,
+    relation_revision: 1,
+    from_entity_id: event.from_entity_id,
+    to_entity_id: event.to_entity_id,
+    from_name: graph.nodes.find((node) => node.entity_id === event.from_entity_id)?.name ?? event.from_name,
+    to_name: graph.nodes.find((node) => node.entity_id === event.to_entity_id)?.name ?? event.to_name,
+    relation_type: event.relation_type,
+    relation_change_kind: event.change_type,
+    directionality: event.directionality === "directed" ? "directed" : "bidirectional",
+    relation_semantics: "ordinary",
   }));
-  const start = decodeGraphEventsCursor(cursor);
-  const pageInfo = buildGraphEventsPageInfo(allEvents.length, start, limit);
+  const start = decodeGraphChangesCursor(cursor);
+  const pageInfo = buildGraphChangesPageInfo(allChanges.length, start, limit);
   return {
-    events: allEvents.slice(start, start + limit),
+    changes: allChanges.slice(start, start + limit),
     page_info: pageInfo,
   };
 }

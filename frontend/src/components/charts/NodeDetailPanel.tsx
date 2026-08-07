@@ -12,7 +12,7 @@ import type { GraphNode } from "@/api/types";
 export interface RelatedNodeInfo {
   node: GraphNode;
   relationType: string;
-  weight: number;
+  relationRevision: number;
 }
 
 export interface NodeDetailPanelProps {
@@ -62,22 +62,8 @@ const relationTypeColors: Record<string, string> = {
   师徒: "bg-chart-5/20 text-chart-5",
 };
 
-const relationTypeBarColors: Record<string, string> = {
-  友好: "bg-chart-positive",
-  敌对: "bg-chart-negative",
-  从属: "bg-chart-neutral",
-  合作: "bg-chart-2",
-  亲情: "bg-chart-positive",
-  爱情: "bg-chart-4",
-  师徒: "bg-chart-5",
-};
-
 function getRelationTypeColor(relationType: string): string {
   return relationTypeColors[relationType] || "bg-primary-subtle text-primary";
-}
-
-function getRelationTypeBarColor(relationType: string): string {
-  return relationTypeBarColors[relationType] || "bg-primary";
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,9 +73,8 @@ function getRelationTypeBarColor(relationType: string): string {
 const entityTypeDisplayNames: Record<string, string> = {
   character: "角色",
   location: "地点",
-  item: "物品",
-  event: "事件",
-  concept: "概念",
+  object: "物品",
+  organization: "组织",
 };
 
 function getEntityTypeDisplayName(entityType: string): string {
@@ -120,9 +105,7 @@ interface RelatedNodeItemProps {
 }
 
 function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
-  const { node, relationType, weight } = relatedNode;
-  const maxWeight = 10;
-  const barWidth = Math.min((weight / maxWeight) * 100, 100);
+  const { node, relationType, relationRevision } = relatedNode;
 
   return (
     <motion.button
@@ -142,15 +125,7 @@ function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
             {relationType}
           </Badge>
         </div>
-        <span className="text-xs text-text-muted">{weight.toFixed(1)}</span>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${barWidth}%` }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className={cn("h-full rounded-full", getRelationTypeBarColor(relationType))}
-        />
+        <span className="text-xs text-text-muted">版本 {relationRevision}</span>
       </div>
     </motion.button>
   );
@@ -172,6 +147,10 @@ export function NodeDetailPanel({
   onClose,
   className,
 }: NodeDetailPanelProps) {
+  const primaryRole =
+    typeof node?.state.primary_role_function === "string" ? node.state.primary_role_function : null;
+  const stateStatus = typeof node?.state.status === "string" ? node.state.status : null;
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -236,13 +215,20 @@ export function NodeDetailPanel({
                       {node.first_seen_chunk !== undefined && node.last_seen_chunk !== undefined && (
                         <InfoRow
                           label="出场"
-                          value={`第${node.first_seen_chunk}章 - 第${node.last_seen_chunk}章`}
+                          value={`第 ${node.first_seen_chunk} 段 - 第 ${node.last_seen_chunk} 段`}
                         />
                       )}
-                      {node.role && (
+                      <InfoRow label="状态版本" value={`第 ${node.state_revision} 版`} />
+                      {primaryRole && (
                         <InfoRow
-                          label="角色"
-                          value={node.role}
+                          label="叙事职责"
+                          value={primaryRole}
+                        />
+                      )}
+                      {stateStatus && (
+                        <InfoRow
+                          label="当前状态"
+                          value={stateStatus}
                         />
                       )}
                     </div>

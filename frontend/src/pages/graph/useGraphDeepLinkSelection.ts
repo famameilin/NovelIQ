@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NavigateFunction } from "react-router-dom";
 
-import type { GraphEvent } from "@/api/types";
+import type { GraphChange } from "@/api/types";
 
 import { buildGraphUrl, buildTimelineSelectionUrl } from "./graphPageNavigation";
 
@@ -9,23 +9,23 @@ interface UseGraphDeepLinkSelectionOptions {
   novelId?: string;
   taskScopeId: string | null;
   timelineUrl: string | null;
-  urlRelationEventId: string | null;
+  urlChangeId: string | null;
   urlSelectedChunk: string | null;
-  loadedEvents: GraphEvent[];
-  sortedEvents: GraphEvent[];
+  loadedChanges: GraphChange[];
+  sortedChanges: GraphChange[];
   navigate: NavigateFunction;
 }
 
 /**
- *   - chunk-only deep-link 只在当前事件窗口里唯一命中时才允许自动选中
- *   - 带稳定 relation_event_id 的 deep-link 一旦 miss，不再偷偷回退到同 chunk 其他事件
+ *   - chunk-only deep-link 只在当前变化窗口里唯一命中时才允许自动选中
+ *   - 带稳定 change_id 的 deep-link 一旦 miss，不再偷偷回退到同 chunk 其他变化
  */
-function getUniqueChunkEvent(events: GraphEvent[], chunkId: number | null): GraphEvent | null {
+function getUniqueChunkChange(changes: GraphChange[], chunkId: number | null): GraphChange | null {
   if (chunkId == null) {
     return null;
   }
-  const chunkEvents = events.filter((event) => event.chunk_id === chunkId);
-  return chunkEvents.length === 1 ? chunkEvents[0] ?? null : null;
+  const chunkChanges = changes.filter((change) => change.effective_chunk_id === chunkId);
+  return chunkChanges.length === 1 ? chunkChanges[0] ?? null : null;
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
@@ -34,22 +34,16 @@ export function useGraphDeepLinkSelection({
   novelId,
   taskScopeId,
   timelineUrl,
-  urlRelationEventId,
+  urlChangeId,
   urlSelectedChunk,
-  loadedEvents,
-  sortedEvents,
+  loadedChanges,
+  sortedChanges,
   navigate,
 }: UseGraphDeepLinkSelectionOptions) {
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
-  const [hasUserSelectedEvent, setHasUserSelectedEvent] = useState(false);
+  const [selectedChangeId, setSelectedChangeId] = useState<string | null>(null);
+  const [hasUserSelectedChange, setHasUserSelectedChange] = useState(false);
 
-  const initialRelationEventId = useMemo(() => {
-    if (!urlRelationEventId) {
-      return null;
-    }
-    const parsed = Number(urlRelationEventId);
-    return Number.isInteger(parsed) ? parsed : null;
-  }, [urlRelationEventId]);
+  const initialChangeId = useMemo(() => urlChangeId?.trim() || null, [urlChangeId]);
 
   const initialSelectedChunk = useMemo(() => {
     if (!urlSelectedChunk) {
@@ -61,102 +55,112 @@ export function useGraphDeepLinkSelection({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on deep-link params change
-    setHasUserSelectedEvent(false);
-    setSelectedEventId(null);
-  }, [initialRelationEventId, initialSelectedChunk, taskScopeId]);
+    setHasUserSelectedChange(false);
+    setSelectedChangeId(null);
+  }, [initialChangeId, initialSelectedChunk, taskScopeId]);
 
   useEffect(() => {
-    if (hasUserSelectedEvent) return;
-    if (initialRelationEventId == null && initialSelectedChunk == null) return;
+    if (hasUserSelectedChange) return;
+    if (initialChangeId == null && initialSelectedChunk == null) return;
 
-    const matchedEvent =
-      initialRelationEventId != null
-        ? loadedEvents.find((event) => event.relation_event_id === initialRelationEventId) ?? null
+    const matchedChange =
+      initialChangeId != null
+        ? loadedChanges.find((change) => change.change_id === initialChangeId) ?? null
         : null;
-    if (matchedEvent) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync from loaded events
-      setSelectedEventId(matchedEvent.relation_event_id);
+    if (matchedChange) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync from loaded changes
+      setSelectedChangeId(matchedChange.change_id);
       return;
     }
 
-    if (initialRelationEventId != null) {
-      setSelectedEventId(null);
+    if (initialChangeId != null) {
+      setSelectedChangeId(null);
       return;
     }
 
-    const fallbackEvent = getUniqueChunkEvent(loadedEvents, initialSelectedChunk);
-    if (fallbackEvent) {
-      setSelectedEventId(fallbackEvent.relation_event_id);
+    const fallbackChange = getUniqueChunkChange(loadedChanges, initialSelectedChunk);
+    if (fallbackChange) {
+      setSelectedChangeId(fallbackChange.change_id);
       return;
     }
 
-    setSelectedEventId(null);
-  }, [hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, loadedEvents]);
+    setSelectedChangeId(null);
+  }, [hasUserSelectedChange, initialChangeId, initialSelectedChunk, loadedChanges]);
 
-  const selectedEvent = useMemo(() => {
-    if (sortedEvents.length === 0) return null;
-    if (selectedEventId == null) {
-      return initialRelationEventId != null || initialSelectedChunk != null ? null : sortedEvents[0];
+  const selectedChange = useMemo(() => {
+    if (sortedChanges.length === 0) return null;
+    if (selectedChangeId == null) {
+      return initialChangeId != null || initialSelectedChunk != null ? null : sortedChanges[0];
     }
-    return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? null;
-  }, [initialRelationEventId, initialSelectedChunk, selectedEventId, sortedEvents]);
+    return sortedChanges.find((change) => change.change_id === selectedChangeId) ?? null;
+  }, [initialChangeId, initialSelectedChunk, selectedChangeId, sortedChanges]);
 
-  const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+  const activeSelectedChangeId = selectedChange?.change_id ?? null;
 
-  const deepLinkResolvedEventId = useMemo(() => {
-    if (initialRelationEventId != null) {
-      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
-      if (matchedEvent) {
-        return matchedEvent.relation_event_id;
+  const deepLinkResolvedChangeId = useMemo(() => {
+    if (initialChangeId != null) {
+      const matchedChange = sortedChanges.find((change) => change.change_id === initialChangeId);
+      if (matchedChange) {
+        return matchedChange.change_id;
       }
       return null;
     }
     if (initialSelectedChunk != null) {
-      return getUniqueChunkEvent(sortedEvents, initialSelectedChunk)?.relation_event_id ?? null;
+      return getUniqueChunkChange(sortedChanges, initialSelectedChunk)?.change_id ?? null;
     }
     return null;
-  }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
+  }, [initialChangeId, initialSelectedChunk, sortedChanges]);
 
   const graphSelectionHint = useMemo(() => {
-    if (hasUserSelectedEvent) {
+    if (hasUserSelectedChange) {
       return null;
     }
-    if (activeSelectedEventId != null && (deepLinkResolvedEventId == null || activeSelectedEventId !== deepLinkResolvedEventId)) {
+    if (
+      activeSelectedChangeId != null &&
+      (deepLinkResolvedChangeId == null || activeSelectedChangeId !== deepLinkResolvedChangeId)
+    ) {
       return null;
     }
-    if (initialRelationEventId == null && initialSelectedChunk == null) {
+    if (initialChangeId == null && initialSelectedChunk == null) {
       return null;
     }
-    if (initialRelationEventId != null) {
-      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
-      if (matchedEvent) {
+    if (initialChangeId != null) {
+      const matchedChange = sortedChanges.find((change) => change.change_id === initialChangeId);
+      if (matchedChange) {
         return null;
       }
-      return "未在当前图谱事件窗口定位到指定关系事件。";
+      return "未在当前图谱变化窗口定位到指定变化。";
     }
     if (initialSelectedChunk != null) {
-      const chunkMatchedEvents = sortedEvents.filter((event) => event.chunk_id === initialSelectedChunk);
-      if (chunkMatchedEvents.length === 0) {
-        return "未在当前事件窗口定位到指定时间节点的关系变化。";
+      const chunkMatchedChanges = sortedChanges.filter((change) => change.effective_chunk_id === initialSelectedChunk);
+      if (chunkMatchedChanges.length === 0) {
+        return "未在当前变化窗口定位到指定时间节点的图谱变化。";
       }
-      if (chunkMatchedEvents.length > 1) {
-        return "该时间块包含多条关系变化，请手动选择具体事件。";
+      if (chunkMatchedChanges.length > 1) {
+        return "该时间块包含多条图谱变化，请手动选择具体变化。";
       }
     }
     return null;
-  }, [activeSelectedEventId, deepLinkResolvedEventId, hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, sortedEvents]);
+  }, [
+    activeSelectedChangeId,
+    deepLinkResolvedChangeId,
+    hasUserSelectedChange,
+    initialChangeId,
+    initialSelectedChunk,
+    sortedChanges,
+  ]);
 
-  const handleSelectEvent = useCallback(
-    (event: GraphEvent) => {
-      setHasUserSelectedEvent(true);
-      setSelectedEventId(event.relation_event_id);
+  const handleSelectChange = useCallback(
+    (change: GraphChange) => {
+      setHasUserSelectedChange(true);
+      setSelectedChangeId(change.change_id);
       if (!novelId || !taskScopeId) {
         return;
       }
       navigate(
         buildGraphUrl(novelId, taskScopeId, {
-          chunkId: event.chunk_id,
-          relationEventId: event.relation_event_id,
+          chunkId: change.effective_chunk_id,
+          changeId: change.change_id,
         }),
         { replace: true }
       );
@@ -170,21 +174,21 @@ export function useGraphDeepLinkSelection({
     }
     navigate(
       buildTimelineSelectionUrl(timelineUrl, {
-        selectedNodeId: selectedEvent ? `relation:${selectedEvent.relation_event_id}` : null,
-        chunkId: selectedEvent?.chunk_id ?? initialSelectedChunk,
-        relationEventId: selectedEvent?.relation_event_id,
+        selectedNodeId: selectedChange?.change_id ?? null,
+        chunkId: selectedChange?.effective_chunk_id ?? initialSelectedChunk,
+        changeId: selectedChange?.change_id,
       })
     );
-  }, [initialSelectedChunk, navigate, selectedEvent, timelineUrl]);
+  }, [initialSelectedChunk, navigate, selectedChange, timelineUrl]);
 
   const handleOpenTimelineChunk = useCallback(
-    (chunkId?: number, relationEventId?: number | null, selectedNodeId?: string | null) => {
+    (chunkId?: number, changeId?: string | null, selectedNodeId?: string | null) => {
       if (!timelineUrl || chunkId == null) return;
       navigate(
         buildTimelineSelectionUrl(timelineUrl, {
           selectedNodeId,
           chunkId,
-          relationEventId,
+          changeId,
         })
       );
     },
@@ -192,13 +196,13 @@ export function useGraphDeepLinkSelection({
   );
 
   return {
-    activeSelectedEventId,
+    activeSelectedChangeId,
     graphSelectionHint,
     handleGoTimeline,
     handleOpenTimelineChunk,
-    handleSelectEvent,
-    initialRelationEventId,
+    handleSelectChange,
+    initialChangeId,
     initialSelectedChunk,
-    selectedEvent,
+    selectedChange,
   };
 }

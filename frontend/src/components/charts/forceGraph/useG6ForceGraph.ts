@@ -9,7 +9,6 @@ import {
   getConfiguredNodeSize,
   LINK_WIDTH_MAX,
   LINK_WIDTH_MIN,
-  mapValue,
   normalizeToRange,
   type ForceGraphModel,
 } from "./forceGraphDataAdapter";
@@ -157,10 +156,7 @@ export function useG6ForceGraph({
     graph.edge((edgeCfg: Record<string, unknown>) => {
       const relationType = String(edgeCfg.relation_type || "");
       const color = palette.relationColors[relationType] || palette.auxColors.text;
-      const width =
-        typeof edgeCfg.weight === "number"
-          ? mapValue(edgeCfg.weight, model.weightRange.min, model.weightRange.max, LINK_WIDTH_MIN, LINK_WIDTH_MAX)
-          : (LINK_WIDTH_MIN + LINK_WIDTH_MAX) / 2;
+      const width = (LINK_WIDTH_MIN + LINK_WIDTH_MAX) / 2;
 
       return {
         style: {
