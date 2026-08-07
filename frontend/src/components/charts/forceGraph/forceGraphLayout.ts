@@ -53,7 +53,7 @@ function positionNodesInRings(
     const angle = (2 * Math.PI * indexInRing) / nodesInCurrentRing + ringIndex * 0.45 + (Math.random() - 0.5) * 0.12;
     const baseRadius = Math.min(maxRadius, innerRadius + ringIndex * ringStep);
     const radius = Math.min(maxRadius, baseRadius + (Math.random() - 0.5) * 18);
-    positionedNodes.set(node.entity_id, {
+    positionedNodes.set(String(node.entity_id), {
       ...node,
       size: getNodeSize(node),
       x: centerX + Math.cos(angle) * radius,
@@ -65,7 +65,7 @@ function positionNodesInRings(
     const count = Math.max(orderedNodes.peripheralNodes.length, 1);
     const angle = (2 * Math.PI * index) / count + Math.PI / 10 + (Math.random() - 0.5) * 0.08;
     const radius = peripheralRadius + (Math.random() - 0.5) * 14;
-    positionedNodes.set(node.entity_id, {
+    positionedNodes.set(String(node.entity_id), {
       ...node,
       size: getNodeSize(node),
       x: centerX + Math.cos(angle) * radius,
@@ -77,7 +77,7 @@ function positionNodesInRings(
     const count = Math.max(orderedNodes.isolatedNodes.length, 1);
     const angle = (2 * Math.PI * index) / count - Math.PI / 6 + (Math.random() - 0.5) * 0.05;
     const radius = isolatedRadius + (Math.random() - 0.5) * 10;
-    positionedNodes.set(node.entity_id, {
+    positionedNodes.set(String(node.entity_id), {
       ...node,
       size: getNodeSize(node),
       x: centerX + Math.cos(angle) * radius,
@@ -100,7 +100,7 @@ export function buildInitialGraphPayload(model: ForceGraphModel, width: number, 
 
   return {
     nodes: model.g6Data.nodes.map((node) => {
-      const positionedNode = positionedNodes.get(node.entity_id);
+      const positionedNode = positionedNodes.get(String(node.entity_id));
       return (
         positionedNode ?? {
           ...node,
