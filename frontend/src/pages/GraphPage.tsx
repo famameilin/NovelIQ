@@ -34,11 +34,13 @@ const pageSectionVariants = {
 };
 
 const changeTypeLabels: Record<string, string> = {
-  无变化: "延续",
-  新建: "建立",
-  强化: "强化",
-  弱化: "弱化",
-  断裂: "断裂",
+  assert: "建立",
+  reinforce: "强化",
+  weaken: "弱化",
+  break: "断裂",
+  refine: "修订",
+  supersede: "替代",
+  retract: "撤回",
 };
 
 function getChangeTypeLabel(changeType?: string | null): string {
