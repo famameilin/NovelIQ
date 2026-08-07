@@ -15,7 +15,7 @@ const getNovelMock = vi.fn();
 const getAnalysisTasksMock = vi.fn();
 const navigateMock = vi.fn();
 
-let currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&relation_event_id=31";
+let currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&change_id=relation%3A31";
 let currentTimelineNovelId = "novel-1";
 
 // 2026-04-23，任务：复杂度与耦合审查 P2。集成测试保留真实 timeline 组件，仅替换动画属性
@@ -96,6 +96,29 @@ function renderTimelinePage() {
   );
 }
 
+// 2026-08-07 用于构造时间轴集成测试的稳定图谱变化合同
+function createRelationGraphChange(changeId: string, relationChangeKind: "assert" | "break", chunkId: number) {
+  return {
+    change_id: changeId,
+    change_kind: "relation" as const,
+    graph_version_id: "graph-version-1",
+    chapter_id: 2,
+    fact_id: `fact:${changeId}`,
+    fact_revision: 1,
+    effective_chunk_id: chunkId,
+    changes: [{ change_kind: relationChangeKind }],
+    evidence: [{ reason: "关系变化证据", chunk_id: chunkId }],
+    relation_id: `relation:${changeId}`,
+    relation_version_id: Number(changeId.split(":")[1]),
+    relation_revision: 1,
+    from_char: "顾承渊",
+    to_char: changeId === "relation:32" ? "陆沉" : "苏映雪",
+    relation_type: changeId === "relation:32" ? "对手" : "盟友",
+    relation_change_kind: relationChangeKind,
+    directionality: "directed" as const,
+  };
+}
+
 // 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation node 的时间轴响应，覆盖图谱联动路径
 function createTimelineResponse(): TimelineResponse {
   return {
@@ -125,7 +148,7 @@ function createTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "苏映雪"],
         phase_name: "高潮期",
         node_type: "relation",
-        node_subtypes: ["新建"],
+        node_subtypes: ["assert"],
         representative_node_id: "relation:31",
         child_node_ids: ["relation:31"],
       },
@@ -141,30 +164,21 @@ function createTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "苏映雪"],
         phase_name: "高潮期",
         node_type: "relation",
-        node_subtype: "新建",
+        node_subtype: "assert",
         score_breakdown: { change_type_weight: 2.4, pair_importance: 1.6 },
         plot_flags: {
           is_pivot: true,
           is_cliffhanger: false,
           tension_percentile: 82,
         },
-        relation_events: [
-          {
-            relation_event_id: 31,
-            from_char: "顾承渊",
-            to_char: "苏映雪",
-            relation_type: "盟友",
-            change_type: "新建",
-          },
-        ],
+        graph_changes: [createRelationGraphChange("relation:31", "assert", 8)],
       },
     ],
     tension_curve: [0.2, 0.45, 0.8],
   };
 }
 
-// 2026-04-27，任务：fix-timeline-selected-node-relation-event-conflict
-// 构造两个 relation 节点，验证 selected_node_id 与 relation_event_id 冲突时页面不会把错误事件带回图谱
+// 2026-08-07 用于验证 selected_node_id 与 change_id 冲突时页面不会把错误变化带回图谱
 function createConflictingTimelineResponse(): TimelineResponse {
   return {
     ...createTimelineResponse(),
@@ -184,7 +198,7 @@ function createConflictingTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "陆沉"],
         phase_name: "高潮期",
         node_type: "relation",
-        node_subtypes: ["断裂"],
+        node_subtypes: ["break"],
         representative_node_id: "relation:32",
         child_node_ids: ["relation:32"],
       },
@@ -201,17 +215,9 @@ function createConflictingTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "陆沉"],
         phase_name: "高潮期",
         node_type: "relation",
-        node_subtype: "断裂",
+        node_subtype: "break",
         score_breakdown: { change_type_weight: 2.1, pair_importance: 1.3 },
-        relation_events: [
-          {
-            relation_event_id: 32,
-            from_char: "顾承渊",
-            to_char: "陆沉",
-            relation_type: "对手",
-            change_type: "断裂",
-          },
-        ],
+        graph_changes: [createRelationGraphChange("relation:32", "break", 9)],
       },
     ],
   };
@@ -232,7 +238,7 @@ function createNovel(): Novel {
 describe("TimelinePage integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&relation_event_id=31";
+    currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&change_id=relation%3A31";
     currentTimelineNovelId = "novel-1";
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
     getNovelMock.mockResolvedValue(createNovel());
@@ -248,16 +254,16 @@ describe("TimelinePage integration", () => {
     await user.click(screen.getByRole("button", { name: "重要" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=31",
+      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chunk=8&change_id=relation%3A31",
       { replace: true }
     );
 
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&relation_event_id=31");
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&change_id=relation%3A31");
   });
 
-  it("does not carry a conflicting relation_event_id back to graph when selected_node_id points elsewhere", async () => {
-    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=32";
+  it("does not carry a conflicting change_id back to graph when selected_node_id points elsewhere", async () => {
+    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chunk=8&change_id=relation%3A32";
     getTimelineMock.mockResolvedValue(createConflictingTimelineResponse());
     const user = userEvent.setup();
 
@@ -266,6 +272,6 @@ describe("TimelinePage integration", () => {
     expect((await screen.findAllByText("顾承渊与苏映雪结盟")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&relation_event_id=31");
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&change_id=relation%3A31");
   });
 });

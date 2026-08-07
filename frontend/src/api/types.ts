@@ -333,15 +333,26 @@ export interface PlotFlags {
   tension_percentile: number;
 }
 
-export interface RelationTimelineEvent {
-  relation_event_id: number;
-  from_char: string;
-  to_char: string;
-  relation_type: string;
-  change_type: "新建" | "强化" | "弱化" | "断裂";
-  evidence?: string;
-  confidence?: number | null | undefined;
-  directionality?: string | null | undefined;
+export interface TimelineGraphChange {
+  change_id: string;
+  change_kind: "state" | "relation";
+  graph_version_id: string;
+  chapter_id: number;
+  fact_id: string;
+  fact_revision: number;
+  effective_chunk_id: number;
+  changes: Array<Record<string, unknown>>;
+  evidence: GraphEvidence[];
+  entity_id?: number | null;
+  entity_name?: string | null;
+  relation_id?: string | null;
+  relation_version_id?: number | null;
+  relation_revision?: number | null;
+  from_char?: string | null;
+  to_char?: string | null;
+  relation_type?: string | null;
+  relation_change_kind?: string | null;
+  directionality?: "directed" | "bidirectional" | null;
 }
 
 export interface LifecycleTimelineEvent {
@@ -359,11 +370,11 @@ export interface TimelineNode {
   summary: string;
   characters: string[];
   phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "relation" | "lifecycle";
-  node_subtype: "plot" | "entry" | "exit" | "新建" | "强化" | "弱化" | "断裂";
+  node_type: "plot" | "state" | "relation" | "lifecycle";
+  node_subtype: "plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract";
   score_breakdown: Record<string, number>;
   plot_flags?: PlotFlags | null;
-  relation_events?: RelationTimelineEvent[] | null;
+  graph_changes?: TimelineGraphChange[] | null;
   lifecycle_events?: LifecycleTimelineEvent[] | null;
 }
 
@@ -380,8 +391,8 @@ export interface TimelineCompositeNode {
   summary: string;
   characters: string[];
   phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "relation" | "lifecycle";
-  node_subtypes: ("plot" | "entry" | "exit" | "新建" | "强化" | "弱化" | "断裂")[];
+  node_type: "plot" | "state" | "relation" | "lifecycle";
+  node_subtypes: ("plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract")[];
   representative_node_id: string;
   child_node_ids: string[];
 }
