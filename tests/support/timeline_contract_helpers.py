@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.storage.repositories import RunRepository, StatsRepository
+from src.storage.repositories import GraphRepository, RunRepository, StatsRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
@@ -21,6 +21,35 @@ class TimelineContractScenario:
     hero_name: str
     rival_name: str
     organization_name: str
+
+
+# 2026-08-07 用于按章节图最终持久化合同提交时间轴测试标注
+def persist_timeline_chapter(
+    session: Any,
+    *,
+    run_id: str,
+    chapter_id: int,
+    emotional_valences: dict[int, str] | None = None,
+    event_types: dict[int, str] | None = None,
+    pivot_chunks: set[int] | None = None,
+    cliffhanger_chunks: set[int] | None = None,
+    characters: list[dict[str, Any]] | None = None,
+    relations: list[dict[str, Any]] | None = None,
+    visible_relation_ids: set[str] | None = None,
+) -> str:
+    """2026-08-07 用于写入当前章节标注与唯一章节图版本"""
+    return persist_chapter_annotation(
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
+        emotional_valences=emotional_valences,
+        event_types=event_types,
+        pivot_chunks=pivot_chunks,
+        cliffhanger_chunks=cliffhanger_chunks,
+        characters=characters,
+        relations=relations,
+        visible_relation_ids=visible_relation_ids or set(),
+    )
 
 
 def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenario:
@@ -66,13 +95,13 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         ],
     )
 
-    persist_chapter_annotation(
+    persist_timeline_chapter(
         db_session,
         run_id=run_id,
         chapter_id=1,
         characters=[character_fact(chunk_id=0, name=hero_name, action="初入江湖")],
     )
-    persist_chapter_annotation(
+    persist_timeline_chapter(
         db_session,
         run_id=run_id,
         chapter_id=2,
@@ -86,7 +115,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
             )
         ],
     )
-    persist_chapter_annotation(
+    persist_timeline_chapter(
         db_session,
         run_id=run_id,
         chapter_id=3,
@@ -130,7 +159,16 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
             ),
         ],
     )
-    persist_chapter_annotation(
+    chapter_three_snapshot = GraphRepository(db_session).fetch_snapshot(run_id, chapter_id=3)
+    assert chapter_three_snapshot is not None
+    alliance_relation = next(
+        relation
+        for relation in chapter_three_snapshot.relations
+        if relation.from_name == hero_name
+        and relation.to_name == rival_name
+        and relation.relation_type == "盟友"
+    )
+    persist_timeline_chapter(
         db_session,
         run_id=run_id,
         chapter_id=4,
@@ -147,10 +185,11 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
             )
         ],
     )
-    persist_chapter_annotation(
+    persist_timeline_chapter(
         db_session,
         run_id=run_id,
         chapter_id=5,
+        visible_relation_ids={alliance_relation.relation_id},
         characters=[character_fact(chunk_id=4, name=hero_name, action="独行", chapter_id=5)],
         relations=[
             relation_fact(
@@ -160,6 +199,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 relation_type="盟友",
                 evidence_reason="两人最终决裂",
                 change_kind="break",
+                relation_id=alliance_relation.relation_id,
                 confidence="medium",
                 chapter_id=5,
             )
@@ -199,23 +239,33 @@ def nodes_for_anchor_chunk(items: list[Any], anchor_chunk_id: int) -> list[Any]:
     return matched
 
 
-def relation_event_tuples(relation_events: list[Any] | None) -> set[tuple[str, str, str]]:
-    if not relation_events:
+# 2026-08-07 用于提取关系章节图变化的端点与变化类型
+def graph_change_tuples(graph_changes: list[Any] | None) -> set[tuple[str, str, str]]:
+    """2026-08-07 用于提取关系章节图变化的端点与变化类型"""
+    if not graph_changes:
         return set()
     tuples: set[tuple[str, str, str]] = set()
-    for item in relation_events:
+    for item in graph_changes:
         if isinstance(item, dict):
-            tuples.add((str(item["from_char"]), str(item["to_char"]), str(item["change_type"])))
+            tuples.add(
+                (
+                    str(item["from_char"]),
+                    str(item["to_char"]),
+                    str(item["relation_change_kind"]),
+                )
+            )
         else:
-            tuples.add((str(item.from_char), str(item.to_char), str(item.change_type)))
+            tuples.add((str(item.from_char), str(item.to_char), str(item.relation_change_kind)))
     return tuples
 
 
-def relation_event_names(relation_events: list[Any] | None) -> set[str]:
-    if not relation_events:
+# 2026-08-07 用于提取关系章节图变化涉及的实体名称
+def graph_change_names(graph_changes: list[Any] | None) -> set[str]:
+    """2026-08-07 用于提取关系章节图变化涉及的实体名称"""
+    if not graph_changes:
         return set()
     names: set[str] = set()
-    for item in relation_events:
+    for item in graph_changes:
         if isinstance(item, dict):
             names.update({str(item["from_char"]), str(item["to_char"])})
         else:

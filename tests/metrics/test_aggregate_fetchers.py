@@ -183,7 +183,7 @@ def test_fetch_relation_data_propagates_database_graph_readiness_failure():
     )
     mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[],
-        relation_events=[],
+        graph_changes=[],
     )
 
     with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
@@ -203,7 +203,7 @@ def test_fetch_relation_data_allows_empty_database_graph():
     mock_service.assert_graph_ready = MagicMock()
     mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[],
-        relation_events=[],
+        graph_changes=[],
         participant_states=[],
     )
 
@@ -228,9 +228,21 @@ def test_fetch_relation_data_consumes_authority_view():
         confirmed_relations=[
             SimpleNamespace(from_name="主角", to_name="反派"),
         ],
-        relation_events=[
-            SimpleNamespace(from_name="主角", to_name="反派", relation_type="敌对", change_type="强化"),
-            SimpleNamespace(from_name="主角", to_name="同伴", relation_type="盟友", change_type="新建"),
+        graph_changes=[
+            SimpleNamespace(
+                change_kind="relation",
+                from_name="主角",
+                to_name="反派",
+                relation_type="敌对",
+                changes=[{"change_kind": "reinforce"}],
+            ),
+            SimpleNamespace(
+                change_kind="relation",
+                from_name="主角",
+                to_name="同伴",
+                relation_type="盟友",
+                changes=[{"change_kind": "assert"}],
+            ),
         ],
         participant_states=[],
     )
@@ -245,8 +257,8 @@ def test_fetch_relation_data_consumes_authority_view():
     mock_service.build_representative_graph_view.assert_called_once_with("run-graph")
     assert data.relations == [("主角", "反派")]
     assert data.full_relations == [
-        ("主角", "反派", "敌对", "强化"),
-        ("主角", "同伴", "盟友", "新建"),
+        ("主角", "反派", "敌对", "reinforce"),
+        ("主角", "同伴", "盟友", "assert"),
     ]
 
 
@@ -260,7 +272,15 @@ def test_fetch_relation_data_propagates_graph_failure_before_using_non_empty_vie
     )
     mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[SimpleNamespace(from_name="主角", to_name="反派")],
-        relation_events=[SimpleNamespace(from_name="主角", to_name="反派", relation_type="敌对", change_type="强化")],
+        graph_changes=[
+            SimpleNamespace(
+                change_kind="relation",
+                from_name="主角",
+                to_name="反派",
+                relation_type="敌对",
+                changes=[{"change_kind": "reinforce"}],
+            )
+        ],
     )
 
     with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):

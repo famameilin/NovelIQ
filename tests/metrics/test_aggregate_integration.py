@@ -29,7 +29,7 @@ class TestAggregateAllMetrics:
         self.db_session = db_session
         self.novel_id, self.run_id = create_run_with_chunks(
             db_session,
-            texts=["测试文本一心一意", "此乃天意也。"],
+            texts=["测试文本退下一心一意", "此乃天意也。"],
             chapter_ids=[1, 1],
             title="聚合指标测试",
         )

@@ -13,9 +13,9 @@ from src.metrics.timeline_metrics import (
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
+    graph_change_names,
+    graph_change_tuples,
     nodes_for_anchor_chunk,
-    relation_event_names,
-    relation_event_tuples,
 )
 
 
@@ -45,7 +45,7 @@ def test_build_timeline_plan_consumes_authority_character_subgraph_only(db_sessi
             "anchor_chunk_id": node.anchor_chunk_id,
             "node_type": node.node_type,
             "node_subtype": node.node_subtype,
-            "relation_events": node.relation_events,
+            "graph_changes": node.graph_changes,
             "lifecycle_events": node.lifecycle_events,
         }
         for node in timeline_plan.atomic_nodes
@@ -53,10 +53,10 @@ def test_build_timeline_plan_consumes_authority_character_subgraph_only(db_sessi
     anchor_two_nodes = nodes_for_anchor_chunk(atomic_node_payloads, 2)
     relation_node = next(node for node in anchor_two_nodes if node["node_type"] == "relation")
 
-    assert relation_event_tuples(relation_node["relation_events"]) == {
-        (scenario.hero_name, scenario.rival_name, "新建")
+    assert graph_change_tuples(relation_node["graph_changes"]) == {
+        (scenario.hero_name, scenario.rival_name, "assert")
     }
-    assert scenario.organization_name not in relation_event_names(relation_node["relation_events"])
+    assert scenario.organization_name not in graph_change_names(relation_node["graph_changes"])
     assert relation_node["node_id"].startswith("relation:")
     assert any(node["node_type"] == "plot" for node in anchor_two_nodes)
     assert any(
@@ -81,7 +81,7 @@ def test_resolve_timeline_authority_contract_rejects_missing_lifecycle_for_chara
                 last_seen_chunk=4,
             )
         ],
-        relation_events=[],
+        graph_changes=[],
     )
 
     with pytest.raises(TimelineAuthorityContractError, match="exactly align with character_entities"):
@@ -100,7 +100,7 @@ def test_resolve_timeline_authority_contract_rejects_lifecycle_name_drift() -> N
                 last_seen_chunk=4,
             )
         ],
-        relation_events=[],
+        graph_changes=[],
     )
 
     with pytest.raises(TimelineAuthorityContractError, match="names must match character_entities"):
@@ -126,14 +126,14 @@ def test_resolve_timeline_authority_contract_rejects_duplicate_lifecycle_entity_
                 last_seen_chunk=4,
             ),
         ],
-        relation_events=[],
+        graph_changes=[],
     )
 
     with pytest.raises(TimelineAuthorityContractError, match="must not duplicate entity_id"):
         _resolve_timeline_authority_contract(timeline_view)
 
 
-def test_resolve_timeline_authority_contract_accepts_new_relation_event_allowlist() -> None:
+def test_resolve_timeline_authority_contract_accepts_graph_change_allowlist() -> None:
     timeline_view = SimpleNamespace(
         character_entities=[
             SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
@@ -155,44 +155,58 @@ def test_resolve_timeline_authority_contract_accepts_new_relation_event_allowlis
                 last_seen_chunk=4,
             ),
         ],
-        relation_events=[
+        graph_changes=[
             SimpleNamespace(
-                relation_event_id=11,
-                chunk_id=2,
+                change_id="relation:11",
+                change_kind="relation",
+                graph_version_id="graph-version-3",
+                chapter_id=3,
+                chapter_order=3,
+                fact_id="fact-11",
+                fact_revision=1,
+                effective_chunk_id=2,
+                changes=[{"change_kind": "assert"}],
+                evidence=[{"reason": "并肩迎敌", "chunk_id": 2}],
+                entity_id=None,
+                entity_name=None,
                 from_entity_id=1,
                 to_entity_id=2,
                 from_name="顾承渊",
                 to_name="苏映雪",
                 relation_type="盟友",
-                change_type="新建",
-                evidence="并肩迎敌",
-                confidence=0.91,
                 directionality="directed",
             )
         ],
     )
 
-    entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
+    entity_lifecycles, graph_changes, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
 
-    assert TIMELINE_AUTHORITY_DEPENDENCY_FIELDS["relation_events"] == (
-        "relation_event_id",
-        "chunk_id",
+    assert TIMELINE_AUTHORITY_DEPENDENCY_FIELDS["graph_changes"] == (
+        "change_id",
+        "change_kind",
+        "graph_version_id",
+        "chapter_id",
+        "chapter_order",
+        "fact_id",
+        "fact_revision",
+        "effective_chunk_id",
+        "changes",
+        "evidence",
+        "entity_id",
+        "entity_name",
         "from_entity_id",
         "to_entity_id",
         "from_name",
         "to_name",
         "relation_type",
-        "change_type",
-        "evidence",
-        "confidence",
         "directionality",
     )
     assert len(entity_lifecycles) == 2
-    assert len(relation_events) == 1
+    assert len(graph_changes) == 1
     assert entity_name_map == {1: "顾承渊", 2: "苏映雪"}
 
 
-def test_resolve_timeline_authority_contract_rejects_missing_required_relation_event_field() -> None:
+def test_resolve_timeline_authority_contract_rejects_missing_required_graph_change_field() -> None:
     timeline_view = SimpleNamespace(
         character_entities=[
             SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
@@ -214,17 +228,24 @@ def test_resolve_timeline_authority_contract_rejects_missing_required_relation_e
                 last_seen_chunk=4,
             ),
         ],
-        relation_events=[
+        graph_changes=[
             SimpleNamespace(
-                relation_event_id=11,
-                chunk_id=2,
+                change_id="relation:11",
+                change_kind="relation",
+                graph_version_id="graph-version-3",
+                chapter_id=3,
+                chapter_order=3,
+                fact_id="fact-11",
+                fact_revision=1,
+                effective_chunk_id=2,
+                changes=[{"change_kind": "assert"}],
+                evidence=[{"reason": "并肩迎敌", "chunk_id": 2}],
+                entity_id=None,
+                entity_name=None,
                 from_entity_id=1,
                 to_entity_id=2,
                 from_name="顾承渊",
                 to_name="苏映雪",
-                change_type="新建",
-                evidence="并肩迎敌",
-                confidence=0.91,
                 directionality="directed",
             )
         ],
@@ -234,7 +255,7 @@ def test_resolve_timeline_authority_contract_rejects_missing_required_relation_e
         _resolve_timeline_authority_contract(timeline_view)
 
 
-def test_resolve_timeline_authority_contract_rejects_non_meaningful_relation_change() -> None:
+def test_resolve_timeline_authority_contract_rejects_unsupported_relation_graph_change() -> None:
     timeline_view = SimpleNamespace(
         character_entities=[
             SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
@@ -256,22 +277,29 @@ def test_resolve_timeline_authority_contract_rejects_non_meaningful_relation_cha
                 last_seen_chunk=4,
             ),
         ],
-        relation_events=[
+        graph_changes=[
             SimpleNamespace(
-                relation_event_id=11,
-                chunk_id=2,
+                change_id="relation:11",
+                change_kind="relation",
+                graph_version_id="graph-version-3",
+                chapter_id=3,
+                chapter_order=3,
+                fact_id="fact-11",
+                fact_revision=1,
+                effective_chunk_id=2,
+                changes=[{"change_kind": "unsupported"}],
+                evidence=[{"reason": "没有发生变化", "chunk_id": 2}],
+                entity_id=None,
+                entity_name=None,
                 from_entity_id=1,
                 to_entity_id=2,
                 from_name="顾承渊",
                 to_name="苏映雪",
                 relation_type="盟友",
-                change_type="无变化",
-                evidence="没有发生变化",
-                confidence=0.91,
                 directionality="directed",
             )
         ],
     )
 
-    with pytest.raises(TimelineAuthorityContractError, match="meaningful relation changes"):
+    with pytest.raises(TimelineAuthorityContractError, match="supported relation changes"):
         _resolve_timeline_authority_contract(timeline_view)

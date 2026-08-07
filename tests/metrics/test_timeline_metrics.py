@@ -14,10 +14,10 @@ from __future__ import annotations
 import pytest
 
 from src.metrics.timeline_metrics import (
+    GraphChangeDTO,
     LifecycleEventDTO,
     NarrativePhase,
     PlotFlagsDTO,
-    RelationEventDTO,
     TimelineNodeDTO,
     calculate_tension_percentile,
     compose_composite_timeline_nodes,
@@ -29,9 +29,35 @@ from src.metrics.timeline_metrics import (
 )
 
 
-# 2026-04-28，任务：时间轴合同重构第二轮
-# 新建原因：第二轮测试需要用稳定的原子节点工厂覆盖 relation / plot / lifecycle 三类复合分组语义，
-# 不能继续依赖已经删除的 budget/select 旧模型。
+# 2026-08-07 用于构造时间轴关系章节图变化
+def create_relation_graph_change(
+    *,
+    relation_version_id: int,
+    relation_change_kind: str,
+) -> GraphChangeDTO:
+    """2026-08-07 用于构造关系原子节点所需的章节图变化"""
+    return GraphChangeDTO(
+        change_id=f"relation:{relation_version_id}",
+        change_kind="relation",
+        graph_version_id=f"graph-version-{relation_version_id}",
+        chapter_id=3,
+        fact_id=f"fact-{relation_version_id}",
+        fact_revision=1,
+        effective_chunk_id=relation_version_id,
+        changes=[{"change_kind": relation_change_kind, "fact_id": f"fact-{relation_version_id}"}],
+        evidence=[{"reason": "关系变化", "chunk_id": relation_version_id}],
+        relation_id=f"relation-id-{relation_version_id}",
+        relation_version_id=relation_version_id,
+        relation_revision=1,
+        from_char="顾承渊",
+        to_char="苏映雪",
+        relation_type="盟友",
+        relation_change_kind=relation_change_kind,
+        directionality="directed",
+    )
+
+
+# 2026-08-07 用于构造时间轴原子节点
 def create_node(
     *,
     node_id: str,
@@ -43,7 +69,7 @@ def create_node(
     node_subtype: str = "plot",
     phase_name: str = "发展期",
     plot_flags: PlotFlagsDTO | None = None,
-    relation_events: list[RelationEventDTO] | None = None,
+    graph_changes: list[GraphChangeDTO] | None = None,
     lifecycle_events: list[LifecycleEventDTO] | None = None,
     characters: list[str] | None = None,
     composite_group_hint: tuple[str, ...] | None = None,
@@ -61,7 +87,7 @@ def create_node(
         node_subtype=node_subtype,  # type: ignore[arg-type]
         score_breakdown={"score": importance_score},
         plot_flags=plot_flags,
-        relation_events=relation_events,
+        graph_changes=graph_changes,
         lifecycle_events=lifecycle_events,
         composite_group_hint=composite_group_hint,
     )
@@ -153,17 +179,8 @@ class TestComposeCompositeTimelineNodes:
                 importance_score=6.9,
                 level=1,
                 node_type="relation",
-                node_subtype="新建",
-                relation_events=[
-                    RelationEventDTO(
-                        relation_event_id=101,
-                        from_char="顾承渊",
-                        to_char="苏映雪",
-                        relation_type="盟友",
-                        change_type="新建",
-                        directionality="directed",
-                    )
-                ],
+                node_subtype="assert",
+                graph_changes=[create_relation_graph_change(relation_version_id=101, relation_change_kind="assert")],
             ),
             create_node(
                 node_id="relation:102",
@@ -172,16 +189,9 @@ class TestComposeCompositeTimelineNodes:
                 importance_score=6.3,
                 level=1,
                 node_type="relation",
-                node_subtype="强化",
-                relation_events=[
-                    RelationEventDTO(
-                        relation_event_id=102,
-                        from_char="顾承渊",
-                        to_char="苏映雪",
-                        relation_type="盟友",
-                        change_type="强化",
-                        directionality="directed",
-                    )
+                node_subtype="reinforce",
+                graph_changes=[
+                    create_relation_graph_change(relation_version_id=102, relation_change_kind="reinforce")
                 ],
             ),
             create_node(
@@ -191,18 +201,9 @@ class TestComposeCompositeTimelineNodes:
                 importance_score=6.0,
                 level=1,
                 node_type="relation",
-                node_subtype="断裂",
+                node_subtype="break",
                 phase_name="高潮期",
-                relation_events=[
-                    RelationEventDTO(
-                        relation_event_id=103,
-                        from_char="顾承渊",
-                        to_char="苏映雪",
-                        relation_type="盟友",
-                        change_type="断裂",
-                        directionality="directed",
-                    )
-                ],
+                graph_changes=[create_relation_graph_change(relation_version_id=103, relation_change_kind="break")],
             ),
         ]
 
@@ -211,9 +212,9 @@ class TestComposeCompositeTimelineNodes:
 
         assert len(relation_composites) == 2
         assert relation_composites[0].child_node_ids == ["relation:101", "relation:102"]
-        assert relation_composites[0].node_subtypes == ["新建", "强化"]
+        assert relation_composites[0].node_subtypes == ["assert", "reinforce"]
         assert relation_composites[1].child_node_ids == ["relation:103"]
-        assert relation_composites[1].node_subtypes == ["断裂"]
+        assert relation_composites[1].node_subtypes == ["break"]
 
     def test_plot_composite_groups_adjacent_nodes_with_same_hint(self):
         phases = convert_to_timeline_phases(
@@ -322,19 +323,9 @@ class TestSerializeTimelineNode:
             characters=["顾承渊", "苏映雪"],
             phase_name="发展期",
             node_type="relation",
-            node_subtype="新建",
+            node_subtype="assert",
             score_breakdown={"change_type_weight": 2.4, "pair_importance": 1.1},
-            relation_events=[
-                RelationEventDTO(
-                    relation_event_id=101,
-                    from_char="顾承渊",
-                    to_char="苏映雪",
-                    relation_type="盟友",
-                    change_type="新建",
-                    confidence=0.91,
-                    directionality="directed",
-                )
-            ],
+            graph_changes=[create_relation_graph_change(relation_version_id=101, relation_change_kind="assert")],
         )
 
         payload = serialize_timeline_node(node)
@@ -352,10 +343,11 @@ class TestSerializeTimelineNode:
             "node_subtype",
             "score_breakdown",
             "plot_flags",
-            "relation_events",
+            "graph_changes",
             "lifecycle_events",
         }
-        assert payload["relation_events"][0]["relation_event_id"] == 101
+        assert payload["graph_changes"][0]["relation_id"] == "relation-id-101"
+        assert payload["graph_changes"][0]["relation_change_kind"] == "assert"
 
     def test_serialize_timeline_composite_node_uses_dual_layer_contract(self):
         phases = convert_to_timeline_phases(
@@ -375,17 +367,10 @@ class TestSerializeTimelineNode:
                     importance_score=6.7,
                     level=1,
                     node_type="relation",
-                    node_subtype="新建",
+                    node_subtype="assert",
                     phase_name="高潮期",
-                    relation_events=[
-                        RelationEventDTO(
-                            relation_event_id=101,
-                            from_char="顾承渊",
-                            to_char="苏映雪",
-                            relation_type="盟友",
-                            change_type="新建",
-                            directionality="directed",
-                        )
+                    graph_changes=[
+                        create_relation_graph_change(relation_version_id=101, relation_change_kind="assert")
                     ],
                 )
             ],
