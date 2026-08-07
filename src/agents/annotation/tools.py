@@ -1,34 +1,46 @@
 """
-章节标注 Agent 工具与运行内账本
+章节标注 Agent 图原文案例伏笔工具与运行内审计
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import unicodedata
 from dataclasses import asdict, dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from langchain_core.tools import tool
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationProtocolError
 from .schema import (
-    AfterChunkSearchResult,
+    ActiveCaseDetails,
     CaseSearchResult,
-    ChapterAnnotation,
-    ChapterAnnotationPatch,
-    FactPushOutput,
-    ForeshadowingPushOutput,
+    CaseTargetAnchor,
+    CaseType,
+    ChapterFinish,
+    ChapterFinishPatch,
+    DialogueSpeakerResolution,
+    EntityType,
     ForeshadowingSearchResult,
+    GraphEvidence,
     GraphSearchResult,
+    PulledResult,
+    PullRequest,
     PullResult,
-    PushOutput,
-    PushRequest,
+    PushCase,
     PushResult,
     SearchResult,
+    StagedPushCase,
+    TextEvidence,
+    TextSearchResult,
 )
+
+_DIALOGUE_SPEAKER_META_KEYS = {"说话人", "speaker", "谁说的", "谁说出"}
 
 
 class AnnotationQueryService(Protocol):
-    """2026-08-05 用于隔离 Agent 只读检索与具体数据库实现"""
+    """2026-08-07 用于隔离 Agent 只读图原文案例池查询与数据库实现"""
 
     def find_initial_case_candidates(
         self,
@@ -37,40 +49,39 @@ class AnnotationQueryService(Protocol):
         semantic_limit: int = 50,
         rotation_limit: int = 50,
     ) -> tuple[list[CaseSearchResult], list[str]]:
-        """2026-08-05 用于返回 current 语义候选和活动案例轮转 ID"""
+        """2026-08-07 用于返回 current 相关案例候选和活动案例轮转 ID"""
 
-    def search_continuity(
+    def search_pool(
         self,
         query: str,
         *,
         hidden_case_ids: set[str],
         limit: int = 50,
     ) -> SearchResult:
-        """2026-08-05 用于同时检索案例图事实与伏笔线程"""
+        """2026-08-07 用于检索案例与伏笔池"""
 
-    def fetch_active_cases(self, ids: list[str]) -> list[CaseSearchResult]:
-        """2026-08-05 用于按真实案例 ID 回读当前活动案例"""
+    def search_graph(self, query: str, *, limit: int = 50) -> GraphSearchResult | None:
+        """2026-08-07 用于固定查询上一已完成章节图版本"""
 
-    def search_after(
+    async def search_text(
         self,
         query: str,
         *,
+        range_name: str,
         limit: int = 50,
-    ) -> list[AfterChunkSearchResult]:
-        """2026-08-06 用于检索当前位置之后的后文 chunk"""
+    ) -> list[TextSearchResult]:
+        """2026-08-07 用于按范围联合定位原文候选"""
 
-    def read_after_chunk(
-        self,
-        *,
-        chapter_id: int,
-        chunk_id: int,
-    ) -> str:
-        """2026-08-06 用于读取本轮 search 已授权的完整后文 chunk"""
+    def read_text(self, chunk_id: int) -> str:
+        """2026-08-07 用于读取本轮文本搜索候选的完整原文"""
+
+    def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
+        """2026-08-07 用于回读单个活动案例及其内部稳定目标"""
 
 
 @dataclass(slots=True)
 class ToolAuditRecord:
-    """2026-08-05 用于记录工具调用请求结果与阶段"""
+    """2026-08-07 用于记录工具调用请求结果与阶段"""
 
     tool_name: str
     phase: str
@@ -81,259 +92,364 @@ class ToolAuditRecord:
 
 @dataclass(slots=True)
 class AnnotationToolLedger:
-    """2026-08-05 用于保存一次 LangGraph 尝试的全部运行内业务状态"""
+    """2026-08-07 用于保存一次章节 Agent 尝试的授权状态和暂存结果"""
 
     current_chapter_id: int
-    current_chunk_ids: tuple[int, ...]
+    current_chunks: dict[int, str]
+    allow_future_context: bool
+    phase: str = "current_open"
     initial_cases: dict[str, CaseSearchResult] = field(default_factory=dict)
     rotation_case_ids: list[str] = field(default_factory=list)
     visible_case_ids: set[str] = field(default_factory=set)
     visible_setup_ids: set[str] = field(default_factory=set)
-    visible_graph_entity_node_ids: set[str] = field(default_factory=set)
-    visible_evidence_chapter_ids: set[int] = field(default_factory=set)
-    pulled_case_ids: list[str] = field(default_factory=list)
-    staged_outputs: list[PushOutput] = field(default_factory=list)
-    authorized_after_chunks: set[tuple[int, int]] = field(default_factory=set)
+    visible_graph_entities: dict[int, EntityType] = field(default_factory=dict)
+    visible_graph_fact_refs: set[tuple[str, int]] = field(default_factory=set)
+    visible_graph_relation_ids: set[str] = field(default_factory=set)
+    pulled_results: list[PulledResult] = field(default_factory=list)
+    staged_push_cases: list[StagedPushCase] = field(default_factory=list)
+    candidate_text_ranges: dict[int, str] = field(default_factory=dict)
+    authorized_text_chunk_ids: set[int] = field(default_factory=set)
     audit_records: list[ToolAuditRecord] = field(default_factory=list)
-    frozen: bool = False
+
+    def __post_init__(self) -> None:
+        """2026-08-07 用于把 current 输入登记为直接授权的 TextEvidence"""
+        self.authorized_text_chunk_ids.update(self.current_chunks)
+
+    @property
+    def current_chunk_ids(self) -> tuple[int, ...]:
+        """2026-08-07 用于按输入顺序返回 current chunk ID"""
+        return tuple(self.current_chunks)
+
+    @property
+    def pulled_case_ids(self) -> set[str]:
+        """2026-08-07 用于返回本轮已经提交解决结果的案例 ID"""
+        return {result.case_id for result in self.pulled_results}
+
+    def set_phase(self, phase: str) -> None:
+        """2026-08-07 用于让工具权限与 LangGraph 当前阶段保持同步"""
+        self.phase = phase
+
+    def _register_evidence(self, evidence_items: Any) -> None:
+        """2026-08-07 用于登记案例伏笔转交的根 Evidence 授权"""
+        for evidence in evidence_items:
+            if isinstance(evidence, GraphEvidence):
+                self.visible_graph_fact_refs.add((evidence.fact_id, evidence.fact_revision))
+            elif isinstance(evidence, TextEvidence):
+                self.authorized_text_chunk_ids.add(evidence.chunk_id)
 
     def register_initial_cases(
         self,
         cases: list[CaseSearchResult],
         rotation_case_ids: list[str],
     ) -> None:
-        """2026-08-05 用于登记第一次模型调用前可见的案例候选"""
+        """2026-08-07 用于登记第一次模型调用前可见的案例与根 Evidence"""
         self.initial_cases = {case.id: case for case in cases}
         self.rotation_case_ids = list(dict.fromkeys(rotation_case_ids))
         self.visible_case_ids.update(self.initial_cases)
-        self.visible_evidence_chapter_ids.update(case.evidence.chapterid for case in cases)
+        for case in cases:
+            self._register_evidence(case.evidence)
+
+    def register_pool_result(self, result: SearchResult) -> None:
+        """2026-08-07 用于登记案例伏笔池搜索返回的可见对象和根 Evidence"""
+        for item in result.results:
+            if isinstance(item, CaseSearchResult):
+                self.visible_case_ids.add(item.id)
+            elif isinstance(item, ForeshadowingSearchResult):
+                self.visible_setup_ids.add(item.record_id)
+            self._register_evidence(item.evidence)
+
+    def register_graph_result(self, result: GraphSearchResult) -> None:
+        """2026-08-07 用于登记图搜索返回的事实关系和实体授权"""
+        self.visible_graph_entities.update(
+            {
+                entity.existing_entity_id: entity.entity_type
+                for entity in result.entities
+            }
+        )
+        self.visible_graph_fact_refs.update(
+            (fact.fact_id, fact.fact_revision)
+            for fact in result.facts
+        )
+        self.visible_graph_relation_ids.update(relation.relation_id for relation in result.relations)
 
     def record(
         self,
         *,
         tool_name: str,
-        phase: str,
         request: dict[str, Any],
         response: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
-        """2026-08-05 用于按真实调用顺序追加工具审计"""
+        """2026-08-07 用于按真实调用顺序追加工具审计"""
         self.audit_records.append(
             ToolAuditRecord(
                 tool_name=tool_name,
-                phase=phase,
+                phase=self.phase,
                 request=request,
                 response=response,
                 error=error,
             )
         )
 
-    def freeze_business_results(self) -> None:
-        """2026-08-05 用于在首次有效 finish 后冻结案例与事实候选"""
-        self.validate_staged_outputs()
-        self.frozen = True
-
-    def validate_staged_outputs(self) -> None:
-        """2026-08-05 用于校验 pull 覆盖来源归属与 rejected 排他"""
-        pulled = set(self.pulled_case_ids)
-        covered: set[str] = set()
-        rejected: set[str] = set()
-        non_rejected: set[str] = set()
-        for output in self.staged_outputs:
-            source_ids = set(output.source_case_ids)
-            if not source_ids.issubset(pulled):
-                unknown = sorted(source_ids - pulled)
-                raise AnnotationInputError(f"push 引用了本轮未 pull 的案例: {unknown}")
-            covered.update(source_ids)
-            if output.output_kind == "rejected":
-                rejected.update(source_ids)
-            else:
-                non_rejected.update(source_ids)
-        missing = sorted(pulled - covered)
-        if missing:
-            raise ValueError(f"pulled 案例未被任何 push 输出覆盖: {missing}")
-        conflicts = sorted(rejected & non_rejected)
-        if conflicts:
-            raise ValueError(f"同一来源案例同时进入 rejected 与非 rejected 输出: {conflicts}")
-
     def audit_payload(self) -> list[dict[str, Any]]:
-        """2026-08-05 用于生成完成事务可持久化的工具审计结构"""
+        """2026-08-07 用于生成完成事务可持久化的工具 Audit 结构"""
         return [asdict(record) for record in self.audit_records]
 
 
-def _register_search_visibility(ledger: AnnotationToolLedger, result: SearchResult) -> None:
-    """2026-08-05 用于把连续性检索结果登记为本轮可引用对象"""
-    for item in result.results:
-        if isinstance(item, CaseSearchResult):
-            ledger.visible_case_ids.add(item.id)
-        elif isinstance(item, ForeshadowingSearchResult):
-            ledger.visible_setup_ids.add(item.record_id)
-        elif isinstance(item, GraphSearchResult):
-            ledger.visible_graph_entity_node_ids.update(
-                node.node_id
-                for node in item.matched_nodes
-                if node.node_kind == "entity"
-            )
-        evidence = getattr(item, "evidence", None)
-        if evidence is not None:
-            ledger.visible_evidence_chapter_ids.add(evidence.chapterid)
+def _normalize_query(query: str, *, tool_name: str) -> str:
+    """2026-08-07 用于统一校验查询工具输入长度与空白"""
+    normalized = query.strip()
+    if not normalized or len(normalized) > 2000:
+        raise AnnotationInputError(f"{tool_name}.query 必须为 1 至 2000 个 Unicode 字符")
+    return normalized
 
 
-def _validate_output_visibility(output: PushOutput, ledger: AnnotationToolLedger) -> None:
-    """2026-08-05 用于校验 push Evidence 与既有事实伏笔引用均来自本轮可见范围"""
-    allowed_chapters = {ledger.current_chapter_id} | ledger.visible_evidence_chapter_ids
-    if output.evidence.chapterid not in allowed_chapters:
-        raise AnnotationAuthorizationError(
-            f"push evidence.chapterid 不在本轮可见范围: {output.evidence.chapterid}"
-        )
-    if isinstance(output, FactPushOutput):
-        representative_node = output.payload.representative_node
-        if (
-            representative_node is not None
-            and representative_node.node_id is not None
-            and representative_node.node_id not in ledger.visible_graph_entity_node_ids
-        ):
-            raise AnnotationAuthorizationError(
-                "representative_node.node_id 未由本轮图 search 返回: "
-                f"{representative_node.node_id}"
+def _target_key(run_scope: str, case: PushCase) -> str:
+    """2026-08-07 用于根据类型 chunk 和规范化关键词生成稳定案例目标键"""
+    keys = "\x1f".join(sorted(case.keys))
+    digest = hashlib.sha256(
+        f"{run_scope}:{case.type}:{case.chunkid}:{keys}".encode()
+    ).hexdigest()
+    return digest
+
+
+def _key_occurrences(text: str, key: str) -> list[int]:
+    """2026-08-07 用于返回关键词在 current chunk 中的全部非重叠位置"""
+    positions: list[int] = []
+    start = 0
+    while True:
+        index = text.find(key, start)
+        if index < 0:
+            return positions
+        positions.append(index)
+        start = index + max(1, len(key))
+
+
+def _locate_dialogue_speaker_anchor(case: PushCase, chunk_text: str) -> CaseTargetAnchor:
+    """2026-08-07 用于从案例关键词定位唯一待确认对话文本锚点"""
+    normalized_meta = {
+        unicodedata.normalize("NFC", key).lower()
+        for key in _DIALOGUE_SPEAKER_META_KEYS
+    }
+    content_keys = [
+        key
+        for key in sorted(case.keys, key=len, reverse=True)
+        if key.lower() not in normalized_meta
+    ]
+    for key in content_keys:
+        positions = _key_occurrences(chunk_text, key)
+        if len(positions) == 1:
+            start = positions[0]
+            return CaseTargetAnchor(
+                chunk_id=case.chunkid,
+                start=start,
+                end=start + len(key),
+                text=key,
             )
-    if isinstance(output, ForeshadowingPushOutput):
-        linked_setup_id = output.payload.linked_setup_id
-        if linked_setup_id is not None and linked_setup_id not in ledger.visible_setup_ids:
-            raise AnnotationAuthorizationError(f"linked_setup_id 未由本轮 search 返回: {linked_setup_id}")
+    raise AnnotationInputError(
+        "dialogue_speaker push 必须用 keys 在指定 current chunk 中定位唯一原文"
+    )
 
 
 def build_annotation_tools(
     query_service: AnnotationQueryService,
     ledger: AnnotationToolLedger,
+    *,
+    run_scope: str,
 ) -> list[Any]:
-    """2026-08-05 用于构建按 finish 前后切换语义的章节 Agent 工具集"""
+    """2026-08-07 用于构建章节 Agent 的图原文案例与提交工具集"""
 
     @tool
-    def search(query: str) -> str:
-        """2026-08-05 用于在初始阶段检索连续性并在 finish 后检索固定后文范围"""
-        normalized_query = query.strip()
-        if not normalized_query or len(normalized_query) > 2000:
-            raise AnnotationInputError("search.query 必须为 1 至 2000 个 Unicode 字符")
-        if ledger.frozen:
-            results = query_service.search_after(
-                normalized_query,
-                limit=50,
-            )
-            ledger.authorized_after_chunks.update((item.chapter_id, item.chunk_id) for item in results)
-            payload = SearchResult(results=list(results))
-            response = payload.model_dump(mode="json")
-            ledger.record(
-                tool_name="search",
-                phase="after_open",
-                request={"query": normalized_query},
-                response=response,
-            )
-            return payload.model_dump_json()
+    def search_graph(query: str) -> str:
+        """2026-08-07 用于固定查询上一已完成章节图版本"""
+        if ledger.phase not in {"current_open", "future_open"}:
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_graph")
+        normalized_query = _normalize_query(query, tool_name="search_graph")
+        result = query_service.search_graph(normalized_query, limit=50)
+        response = {"result": None} if result is None else result.model_dump(mode="json")
+        if result is not None:
+            ledger.register_graph_result(result)
+        ledger.record(
+            tool_name="search_graph",
+            request={"query": normalized_query},
+            response=response,
+        )
+        return "null" if result is None else result.model_dump_json()
 
-        result = query_service.search_continuity(
+    @tool
+    async def search_text(query: str, range: Literal["previous", "future"]) -> str:
+        """2026-08-07 用于关键词加 pgvector 定位授权范围内原文"""
+        normalized_query = _normalize_query(query, tool_name="search_text")
+        expected_range = "previous" if ledger.phase == "current_open" else "future"
+        if ledger.phase not in {"current_open", "future_open"} or range != expected_range:
+            raise AnnotationAuthorizationError(
+                f"阶段 {ledger.phase} 的 search_text.range 必须为 {expected_range}"
+            )
+        if range == "future" and not ledger.allow_future_context:
+            raise AnnotationAuthorizationError("allow_future_context=false 时禁止读取 future")
+        results = await query_service.search_text(
             normalized_query,
-            hidden_case_ids=set(ledger.pulled_case_ids),
+            range_name=range,
             limit=50,
         )
-        _register_search_visibility(ledger, result)
+        for item in results:
+            ledger.candidate_text_ranges[item.chunk_id] = range
+        payload = [item.model_dump(mode="json") for item in results]
+        ledger.record(
+            tool_name="search_text",
+            request={"query": normalized_query, "range": range},
+            response={"results": payload},
+        )
+        return json.dumps(payload, ensure_ascii=False)
+
+    @tool
+    def read_text(chunk_id: int) -> str:
+        """2026-08-07 用于读取本轮 search_text 命中的完整同 run 原文"""
+        expected_range = "previous" if ledger.phase == "current_open" else "future"
+        if ledger.phase not in {"current_open", "future_open"}:
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 read_text")
+        if ledger.candidate_text_ranges.get(chunk_id) != expected_range:
+            raise AnnotationAuthorizationError(
+                f"read_text 目标未由当前阶段 search_text 命中: chunk_id={chunk_id}"
+            )
+        content = query_service.read_text(chunk_id)
+        ledger.authorized_text_chunk_ids.add(chunk_id)
+        ledger.record(
+            tool_name="read_text",
+            request={"chunk_id": chunk_id},
+            response={"content_chars": len(content)},
+        )
+        return content
+
+    @tool
+    def search_pool(query: str) -> str:
+        """2026-08-07 用于检索活动案例与伏笔线程"""
+        if ledger.phase not in {"current_open", "future_open"}:
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_pool")
+        normalized_query = _normalize_query(query, tool_name="search_pool")
+        result = query_service.search_pool(
+            normalized_query,
+            hidden_case_ids=ledger.pulled_case_ids,
+            limit=50,
+        )
+        ledger.register_pool_result(result)
         response = result.model_dump(mode="json")
         ledger.record(
-            tool_name="search",
-            phase="running_current",
+            tool_name="search_pool",
             request={"query": normalized_query},
             response=response,
         )
         return result.model_dump_json()
 
     @tool
-    def pull(ids: list[str]) -> str:
-        """2026-08-05 用于把可见活动案例加入本次运行的处理责任集合"""
-        if ledger.frozen:
-            raise AnnotationProtocolError("首次有效 finish 后不允许 pull")
-        normalized_ids = [case_id.strip() for case_id in ids]
-        if not normalized_ids or len(normalized_ids) > 50 or any(not case_id for case_id in normalized_ids):
-            raise AnnotationInputError("pull.ids 必须包含 1 至 50 个非空案例 ID")
-        if len(set(normalized_ids)) != len(normalized_ids):
-            raise AnnotationInputError("pull.ids 不允许重复")
-        already_pulled = sorted(set(normalized_ids) & set(ledger.pulled_case_ids))
-        if already_pulled:
-            raise AnnotationInputError(f"案例已经被本轮 pull: {already_pulled}")
-        invisible = sorted(set(normalized_ids) - ledger.visible_case_ids)
-        if invisible:
-            raise AnnotationAuthorizationError(f"案例 ID 未由初始候选或本轮 search 返回: {invisible}")
-        cases = query_service.fetch_active_cases(normalized_ids)
-        returned = {case.id for case in cases}
-        missing = sorted(set(normalized_ids) - returned)
-        if missing:
-            raise AnnotationInputError(f"案例不存在或已不再 active: {missing}")
-        ledger.pulled_case_ids.extend(normalized_ids)
-        result = PullResult(cases=cases)
-        response = result.model_dump(mode="json")
+    def pull(
+        case_id: str,
+        type: Literal["dialogue_speaker"],
+        resolution: DialogueSpeakerResolution,
+    ) -> str:
+        """2026-08-07 用于暂存单个已确认活动案例的严格解决结果"""
+        if ledger.phase not in {"current_open", "future_open"}:
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 pull")
+        request = PullRequest(case_id=case_id, type=type, resolution=resolution)
+        normalized_case_id = request.case_id.strip()
+        if not normalized_case_id:
+            raise AnnotationInputError("pull.case_id 不能为空")
+        if normalized_case_id in ledger.pulled_case_ids:
+            raise AnnotationInputError(f"案例已经被本轮 pull: {normalized_case_id}")
+        if normalized_case_id not in ledger.visible_case_ids:
+            raise AnnotationAuthorizationError(
+                f"案例 ID 未由初始候选或本轮 search_pool 返回: {normalized_case_id}"
+            )
+        details = query_service.fetch_active_case_details(normalized_case_id)
+        if details is None:
+            raise AnnotationInputError(f"案例不存在或已不再 active: {normalized_case_id}")
+        if details.type != request.type:
+            raise AnnotationInputError(
+                f"pull.type 与案例类型不一致: expected={details.type} actual={request.type}"
+            )
+        evidence_chunk_id = request.resolution.evidence_chunkid
+        if evidence_chunk_id not in ledger.authorized_text_chunk_ids:
+            raise AnnotationAuthorizationError(
+                f"pull evidence_chunkid 未经 current 输入或 read_text 授权: {evidence_chunk_id}"
+            )
+        pulled = PulledResult(
+            **request.model_dump(mode="python"),
+            target_key=details.target_key,
+            target_ref=details.target_ref,
+        )
+        ledger.pulled_results.append(pulled)
+        result = PullResult(case_id=normalized_case_id)
         ledger.record(
             tool_name="pull",
-            phase="running_current",
-            request={"ids": normalized_ids},
-            response=response,
-        )
-        return result.model_dump_json()
-
-    @tool
-    def push(outputs: list[PushOutput]) -> str:
-        """2026-08-05 用于把案例事实伏笔或否定结果暂存到本次运行内存"""
-        if ledger.frozen:
-            raise AnnotationProtocolError("首次有效 finish 后不允许 push")
-        request = PushRequest(outputs=outputs)
-        for output in request.outputs:
-            _validate_output_visibility(output, ledger)
-        candidate_outputs = [*ledger.staged_outputs, *request.outputs]
-        original_outputs = ledger.staged_outputs
-        ledger.staged_outputs = candidate_outputs
-        try:
-            ledger.validate_staged_outputs()
-        except ValueError as exc:
-            if "未被任何 push 输出覆盖" not in str(exc):
-                ledger.staged_outputs = original_outputs
-                raise
-        result = PushResult(staged_count=len(request.outputs))
-        ledger.record(
-            tool_name="push",
-            phase="running_current",
             request=request.model_dump(mode="json"),
             response=result.model_dump(mode="json"),
         )
         return result.model_dump_json()
 
     @tool
-    def read_chunk(chapter_id: int, chunk_id: int) -> str:
-        """2026-08-05 用于读取本轮 after search 已命中的完整后文 chunk"""
-        if not ledger.frozen:
-            raise AnnotationAuthorizationError("首次有效 finish 前不允许读取后文 chunk")
-        target = (chapter_id, chunk_id)
-        if target not in ledger.authorized_after_chunks:
-            raise AnnotationAuthorizationError(
-                f"read_chunk 目标未由本轮 after search 命中: chapter_id={chapter_id} chunk_id={chunk_id}"
-            )
-        content = query_service.read_after_chunk(
-            chapter_id=chapter_id,
-            chunk_id=chunk_id,
+    def push(
+        description: str,
+        keys: list[str],
+        type: CaseType,
+        chunkid: int,
+    ) -> str:
+        """2026-08-07 用于暂存当前章节新发现且仍未解决的单个案例"""
+        allowed = (
+            ledger.phase == "current_open" and not ledger.allow_future_context
+        ) or (
+            ledger.phase in {"future_open", "future_finalize"}
+            and ledger.allow_future_context
         )
+        if not allowed:
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push")
+        case = PushCase(
+            description=description,
+            keys=keys,
+            type=type,
+            chunkid=chunkid,
+        )
+        if case.chunkid not in ledger.current_chunks:
+            raise AnnotationInputError(f"push.chunkid 必须属于 current: {case.chunkid}")
+        if case.type != "dialogue_speaker":
+            raise AnnotationInputError(f"尚未注册案例类型: {case.type}")
+        target_anchor = _locate_dialogue_speaker_anchor(
+            case,
+            ledger.current_chunks[case.chunkid],
+        )
+        target_key = _target_key(run_scope, case)
+        if any(item.target_key == target_key for item in ledger.staged_push_cases):
+            raise AnnotationInputError(f"同一目标已经被本轮 push: {target_key}")
+        staged = StagedPushCase(
+            **case.model_dump(mode="python"),
+            target_key=target_key,
+            target_anchor=target_anchor,
+        )
+        ledger.staged_push_cases.append(staged)
+        result = PushResult(target_key=target_key)
         ledger.record(
-            tool_name="read_chunk",
-            phase="after_open",
-            request={"chapter_id": chapter_id, "chunk_id": chunk_id},
-            response={"content_chars": len(content)},
+            tool_name="push",
+            request=case.model_dump(mode="json"),
+            response=result.model_dump(mode="json"),
         )
-        return content
+        return result.model_dump_json()
 
     @tool
-    def finish(annotation: ChapterAnnotation) -> str:
-        """2026-08-05 用于首次提交当前完整章节标注候选"""
+    def finish(annotation: ChapterFinish) -> str:
+        """2026-08-07 用于首次提交当前完整章节标注候选"""
         return "由 annotation 专用 LangGraph 校验"
 
     @tool
-    def revise_finish(correction: ChapterAnnotationPatch) -> str:
-        """2026-08-05 用于只提交相对当前候选实际变化的章节字段"""
+    def revise_finish(correction: ChapterFinishPatch) -> str:
+        """2026-08-07 用于按 ref 局部修正当前完整章节标注候选"""
         return "由 annotation 专用 LangGraph 合并并校验"
 
-    return [search, pull, push, read_chunk, finish, revise_finish]
+    return [
+        search_graph,
+        search_text,
+        read_text,
+        search_pool,
+        pull,
+        push,
+        finish,
+        revise_finish,
+    ]

@@ -28,12 +28,44 @@ from .errors import (
 from .graph import build_annotation_graph
 from .prompts import build_system_prompt
 from .schema import (
+    AgentRunAudit,
     AgentRunResult,
-    ChapterAnnotation,
+    ChapterFinish,
+    EntityType,
+    Evidence,
+    GraphEvidence,
+    PushedCase,
     SuccessAudit,
+    TextEvidence,
     TokenUsageRecord,
 )
 from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
+
+_ENTITY_FIELDS: tuple[tuple[str, EntityType], ...] = (
+    ("characters", "character"),
+    ("locations", "location"),
+    ("objects", "object"),
+    ("organizations", "organization"),
+)
+_FACT_FIELDS = (
+    "character_observations",
+    "location_observations",
+    "dialogues",
+    "events",
+    "relations",
+    "states",
+    "foreshadowings",
+)
+_LOCATION_TARGET_RELATION_TYPES = {
+    "located_at",
+    "entered",
+    "enter",
+    "arrived_at",
+    "inside",
+    "at",
+    "left",
+    "departed_from",
+}
 
 
 class AnnotationAgentRunError(AnnotationRetryableError):
@@ -55,63 +87,352 @@ def _validate_chapter_identity(
         raise AnnotationInputError("current chunk_id 不允许重复")
     if any(chunk_id < 0 for chunk_id in chunk_ids):
         raise AnnotationInputError("current chunk_id 不允许为负数")
-    if any(not text for _chunk_id, text in current_chunks):
+    if any(not chunk_text for _chunk_id, chunk_text in current_chunks):
         raise AnnotationInputError("current chunk 原文不能为空")
 
 
-def _iter_annotation_evidence(annotation: ChapterAnnotation):
-    """2026-08-05 用于按固定章节事实字段遍历唯一 Evidence"""
-    for field_name in ("characters", "locations", "dialogues", "events", "relations", "states"):
-        for fact in getattr(annotation, field_name):
-            yield fact.evidence
+def _iter_finish_evidence(finish: ChapterFinish) -> Iterator[Evidence]:
+    """2026-08-07 用于遍历实体目录和逐 chunk 标注项的全部 Evidence"""
+    for field_name, _entity_type in _ENTITY_FIELDS:
+        for entity in getattr(finish.entities, field_name):
+            yield from entity.evidence
+    for chunk in finish.chunks:
+        for field_name in _FACT_FIELDS:
+            for fact in getattr(chunk, field_name):
+                yield from fact.evidence
 
 
-def _iter_representative_node_ids(annotation: ChapterAnnotation) -> Iterator[str]:
-    """2026-08-06 用于遍历正式关系标注引用的既有图实体节点 ID"""
-    for relation in annotation.relations:
-        selector = relation.representative_node
-        if selector is not None and selector.node_id is not None:
-            yield selector.node_id
+def _validate_text_span(
+    *,
+    chunk_text_by_id: dict[int, str],
+    chunk_id: int,
+    start: int,
+    end: int,
+    expected_text: str,
+    label: str,
+) -> None:
+    """2026-08-07 用于校验 current 原文中的稳定字符区间与逐字内容"""
+    chunk_text = chunk_text_by_id.get(chunk_id)
+    if chunk_text is None:
+        raise ValueError(f"{label} 锚定了非 current chunk: {chunk_id}")
+    if end > len(chunk_text):
+        raise ValueError(f"{label} 的 end 超出 current 原文长度: {end}")
+    actual_text = chunk_text[start:end]
+    if actual_text != expected_text:
+        raise ValueError(
+            f"{label} 原文区间不匹配: expected={expected_text!r} actual={actual_text!r}"
+        )
 
 
-def validate_chapter_annotation(
-    annotation: ChapterAnnotation,
+def _entity_type_for_endpoint(
+    *,
+    ref: str | None,
+    existing_entity_id: int | None,
+    entity_types_by_ref: dict[str, EntityType],
+    visible_graph_entities: dict[int, EntityType],
+    label: str,
+) -> EntityType | None:
+    """2026-08-07 用于解析并校验 finish 端点的实体类型和搜索授权"""
+    if ref is not None:
+        entity_type = entity_types_by_ref.get(ref)
+        if entity_type is None:
+            raise ValueError(f"{label} 引用了 entities 中不存在的 ref: {ref}")
+        return entity_type
+    if existing_entity_id is not None:
+        entity_type = visible_graph_entities.get(existing_entity_id)
+        if entity_type is None:
+            raise AnnotationAuthorizationError(
+                f"{label} 的 existing_entity_id 未由本轮 search_graph 返回: "
+                f"{existing_entity_id}"
+            )
+        return entity_type
+    return None
+
+
+def _require_entity_type(
+    actual_type: EntityType | None,
+    expected_type: EntityType,
+    *,
+    label: str,
+) -> None:
+    """2026-08-07 用于拒绝人物地点等强类型端点引用错误节点"""
+    if actual_type != expected_type:
+        raise ValueError(
+            f"{label} 必须引用 {expected_type} 节点，实际为 {actual_type}"
+        )
+
+
+def _validate_entities(
+    finish: ChapterFinish,
+    *,
+    chunk_text_by_id: dict[int, str],
+    visible_graph_entities: dict[int, EntityType],
+) -> dict[str, EntityType]:
+    """2026-08-07 用于校验实体目录类型既有节点授权和 current mention"""
+    entity_types_by_ref: dict[str, EntityType] = {}
+    for field_name, expected_type in _ENTITY_FIELDS:
+        for entity in getattr(finish.entities, field_name):
+            entity_types_by_ref[entity.ref] = expected_type
+            if entity.existing_entity_id is not None:
+                visible_type = visible_graph_entities.get(entity.existing_entity_id)
+                if visible_type is None:
+                    raise AnnotationAuthorizationError(
+                        "entities.existing_entity_id 未由本轮 search_graph 返回: "
+                        f"{entity.existing_entity_id}"
+                    )
+                if visible_type != expected_type:
+                    raise ValueError(
+                        f"实体 {entity.ref} 声明为 {expected_type}，"
+                        f"但 existing_entity_id 类型为 {visible_type}"
+                    )
+            for mention in entity.mentions:
+                _validate_text_span(
+                    chunk_text_by_id=chunk_text_by_id,
+                    chunk_id=mention.chunk_id,
+                    start=mention.start,
+                    end=mention.end,
+                    expected_text=mention.text,
+                    label=f"entity {entity.ref} mention",
+                )
+    return entity_types_by_ref
+
+
+def _validate_chunk_facts(
+    finish: ChapterFinish,
+    *,
+    chunk_text_by_id: dict[int, str],
+    entity_types_by_ref: dict[str, EntityType],
+    visible_graph_entities: dict[int, EntityType],
+    visible_graph_relation_ids: set[str],
+    visible_setup_ids: set[str],
+) -> None:
+    """2026-08-07 用于校验逐 chunk 事实锚点端点类型和历史引用授权"""
+
+    def endpoint_type(
+        *,
+        ref: str | None,
+        existing_entity_id: int | None,
+        label: str,
+    ) -> EntityType | None:
+        """2026-08-07 用于在当前事实校验中解析实体端点"""
+        return _entity_type_for_endpoint(
+            ref=ref,
+            existing_entity_id=existing_entity_id,
+            entity_types_by_ref=entity_types_by_ref,
+            visible_graph_entities=visible_graph_entities,
+            label=label,
+        )
+
+    for chunk in finish.chunks:
+        chunk_text = chunk_text_by_id[chunk.chunk_id]
+        for character_observation in chunk.character_observations:
+            actual_type = endpoint_type(
+                ref=character_observation.entity_ref,
+                existing_entity_id=character_observation.entity_existing_entity_id,
+                label=f"character_observation {character_observation.ref}",
+            )
+            _require_entity_type(actual_type, "character", label=character_observation.ref)
+
+        for location_observation in chunk.location_observations:
+            actual_type = endpoint_type(
+                ref=location_observation.location_ref,
+                existing_entity_id=location_observation.location_existing_entity_id,
+                label=f"location_observation {location_observation.ref}",
+            )
+            _require_entity_type(actual_type, "location", label=location_observation.ref)
+
+        for dialogue in chunk.dialogues:
+            _validate_text_span(
+                chunk_text_by_id=chunk_text_by_id,
+                chunk_id=chunk.chunk_id,
+                start=dialogue.start,
+                end=dialogue.end,
+                expected_text=dialogue.content,
+                label=f"dialogue {dialogue.ref}",
+            )
+            speaker_type = endpoint_type(
+                ref=dialogue.speaker_ref,
+                existing_entity_id=dialogue.speaker_existing_entity_id,
+                label=f"dialogue {dialogue.ref} speaker",
+            )
+            if speaker_type is not None:
+                _require_entity_type(speaker_type, "character", label=dialogue.ref)
+
+        for event in chunk.events:
+            for participant in event.participants:
+                endpoint_type(
+                    ref=participant.entity_ref,
+                    existing_entity_id=participant.entity_existing_entity_id,
+                    label=f"event {event.ref} participant",
+                )
+            location_type = endpoint_type(
+                ref=event.location_ref,
+                existing_entity_id=event.location_existing_entity_id,
+                label=f"event {event.ref} location",
+            )
+            if location_type is not None:
+                _require_entity_type(location_type, "location", label=event.ref)
+
+        for relation in chunk.relations:
+            from_type = endpoint_type(
+                ref=relation.from_ref,
+                existing_entity_id=relation.from_existing_entity_id,
+                label=f"relation {relation.ref} from",
+            )
+            to_type = endpoint_type(
+                ref=relation.to_ref,
+                existing_entity_id=relation.to_existing_entity_id,
+                label=f"relation {relation.ref} to",
+            )
+            if relation.relation_id is not None and relation.relation_id not in visible_graph_relation_ids:
+                raise AnnotationAuthorizationError(
+                    f"relation_id 未由本轮 search_graph 返回: {relation.relation_id}"
+                )
+            if relation.relation_type.lower() in _LOCATION_TARGET_RELATION_TYPES:
+                _require_entity_type(to_type, "location", label=relation.ref)
+            if relation.relation_semantics == "same_character":
+                _require_entity_type(from_type, "character", label=relation.ref)
+                _require_entity_type(to_type, "character", label=relation.ref)
+                representative_type = endpoint_type(
+                    ref=relation.representative_ref,
+                    existing_entity_id=relation.representative_existing_entity_id,
+                    label=f"relation {relation.ref} representative",
+                )
+                if representative_type is not None:
+                    _require_entity_type(representative_type, "character", label=relation.ref)
+
+        for state in chunk.states:
+            endpoint_type(
+                ref=state.entity_ref,
+                existing_entity_id=state.entity_existing_entity_id,
+                label=f"state {state.ref} entity",
+            )
+            endpoint_type(
+                ref=state.object_ref,
+                existing_entity_id=state.object_existing_entity_id,
+                label=f"state {state.ref} object",
+            )
+
+        for foreshadowing in chunk.foreshadowings:
+            if (
+                foreshadowing.linked_setup_id is not None
+                and foreshadowing.linked_setup_id not in visible_setup_ids
+            ):
+                raise AnnotationAuthorizationError(
+                    "linked_setup_id 未由本轮 search_pool 返回: "
+                    f"{foreshadowing.linked_setup_id}"
+                )
+
+        if not isinstance(chunk_text, str):
+            raise ValueError(f"current chunk 原文类型异常: {chunk.chunk_id}")
+
+
+def validate_chapter_finish(
+    finish: ChapterFinish,
     *,
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
-    allowed_evidence_chapter_ids: set[int],
-    visible_graph_entity_node_ids: set[str],
+    authorized_text_chunk_ids: set[int],
+    visible_graph_fact_refs: set[tuple[str, int]],
+    visible_graph_entities: dict[int, EntityType],
+    visible_graph_relation_ids: set[str],
+    visible_setup_ids: set[str],
 ) -> None:
-    """2026-08-05 用于完整校验章节 chunk 覆盖事实锚点原文与 Evidence 可见性"""
+    """2026-08-07 用于校验 ChapterFinish 完整覆盖原文锚点和全部授权引用"""
     expected_chunk_ids = [chunk_id for chunk_id, _text in current_chunks]
-    actual_chunk_ids = [segment.chunk_id for segment in annotation.segments]
+    actual_chunk_ids = [chunk.chunk_id for chunk in finish.chunks]
     if actual_chunk_ids != expected_chunk_ids:
         raise ValueError(
-            f"segments 必须按原文顺序精确覆盖 current chunks: expected={expected_chunk_ids} actual={actual_chunk_ids}"
+            "chunks 必须按原文顺序精确覆盖 current chunks: "
+            f"expected={expected_chunk_ids} actual={actual_chunk_ids}"
+        )
+    coverage_chunk_ids = [coverage.chunk_id for coverage in finish.coverage]
+    if coverage_chunk_ids != expected_chunk_ids:
+        raise ValueError(
+            "coverage 必须按原文顺序精确覆盖 current chunks: "
+            f"expected={expected_chunk_ids} actual={coverage_chunk_ids}"
         )
 
     chunk_text_by_id = dict(current_chunks)
-    for field_name in ("characters", "locations", "dialogues", "events", "relations", "states"):
-        for fact in getattr(annotation, field_name):
-            if fact.chunk_id not in chunk_text_by_id:
-                raise ValueError(f"{field_name} 事实锚定了非 current chunk: {fact.chunk_id}")
+    entity_types_by_ref = _validate_entities(
+        finish,
+        chunk_text_by_id=chunk_text_by_id,
+        visible_graph_entities=visible_graph_entities,
+    )
+    _validate_chunk_facts(
+        finish,
+        chunk_text_by_id=chunk_text_by_id,
+        entity_types_by_ref=entity_types_by_ref,
+        visible_graph_entities=visible_graph_entities,
+        visible_graph_relation_ids=visible_graph_relation_ids,
+        visible_setup_ids=visible_setup_ids,
+    )
 
-    for dialogue in annotation.dialogues:
-        if dialogue.content not in chunk_text_by_id[dialogue.chunk_id]:
-            raise ValueError(f"dialogue.content 未逐字出现在锚定 current chunk: {dialogue.content!r}")
+    for evidence in _iter_finish_evidence(finish):
+        if isinstance(evidence, TextEvidence):
+            if evidence.chunk_id not in authorized_text_chunk_ids:
+                raise AnnotationAuthorizationError(
+                    f"TextEvidence 未经当前输入或 read_text 授权: chunk_id={evidence.chunk_id}"
+                )
+        elif isinstance(evidence, GraphEvidence):
+            reference = (evidence.fact_id, evidence.fact_revision)
+            if reference not in visible_graph_fact_refs:
+                raise AnnotationAuthorizationError(
+                    f"GraphEvidence 未由本轮 search_graph 或池记录授权: {reference}"
+                )
+    if chapter_id <= 0:
+        raise AnnotationInputError("chapter_id 必须为正整数")
 
-    for evidence in _iter_annotation_evidence(annotation):
-        if evidence.chapterid not in allowed_evidence_chapter_ids:
-            raise AnnotationAuthorizationError(
-                f"Evidence chapterid 不在当前阶段可见范围: {evidence.chapterid}"
+
+def _bind_pushed_cases(
+    finish: ChapterFinish,
+    ledger: AnnotationToolLedger,
+) -> list[PushedCase]:
+    """2026-08-07 用于把暂存 push 与最终未确认对话 ref 建立一一稳定绑定"""
+    unresolved_dialogues = {
+        (chunk.chunk_id, dialogue.ref): dialogue
+        for chunk in finish.chunks
+        for dialogue in chunk.dialogues
+        if dialogue.speaker_ref is None and dialogue.speaker_existing_entity_id is None
+    }
+    bound_refs: set[tuple[int, str]] = set()
+    pushed_cases: list[PushedCase] = []
+    for staged in ledger.staged_push_cases:
+        matches = [
+            (chunk_id, item_ref, dialogue)
+            for (chunk_id, item_ref), dialogue in unresolved_dialogues.items()
+            if chunk_id == staged.chunkid
+            and dialogue.start <= staged.target_anchor.start
+            and dialogue.end >= staged.target_anchor.end
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "dialogue_speaker push 必须唯一定位最终 finish 中 speaker 为空的对话: "
+                f"target_key={staged.target_key} matches={len(matches)}"
             )
-    for node_id in _iter_representative_node_ids(annotation):
-        if node_id not in visible_graph_entity_node_ids:
-            raise AnnotationAuthorizationError(
-                f"representative_node.node_id 未由本轮图 search 返回: {node_id}"
+        chunk_id, item_ref, dialogue = matches[0]
+        target = (chunk_id, item_ref)
+        if target in bound_refs:
+            raise ValueError(f"同一未解决对话不能被重复 push: {target}")
+        bound_refs.add(target)
+        pushed_cases.append(
+            PushedCase(
+                **staged.model_dump(mode="python"),
+                target_ref={
+                    "kind": "dialogue",
+                    "item_ref": item_ref,
+                    "chunk_id": chunk_id,
+                    "start": dialogue.start,
+                    "end": dialogue.end,
+                    "text": dialogue.content,
+                },
             )
-    if chapter_id not in allowed_evidence_chapter_ids:
-        raise AnnotationAuthorizationError("当前章节不在 Evidence 可见范围")
+        )
+
+    missing = sorted(set(unresolved_dialogues) - bound_refs)
+    if missing:
+        raise ValueError(f"speaker 为空的对话必须各自 push 一个 dialogue_speaker 案例: {missing}")
+    return pushed_cases
 
 
 def _serialize_agent_messages(messages: list[Any]) -> list[dict[str, Any]]:
@@ -217,7 +538,7 @@ async def _run_single_attempt(
     session: Session,
     query_service_factory: Callable[[Session], AnnotationQueryService],
 ) -> AgentRunResult:
-    """2026-08-05 用于以全新图账本和只读查询服务执行一次章节 Agent 尝试"""
+    """2026-08-07 用于以全新阶段图账本和只读服务执行一次章节 Agent 尝试"""
     started_at = time.perf_counter()
     _set_session_read_only(session)
     query_service = query_service_factory(session)
@@ -226,31 +547,39 @@ async def _run_single_attempt(
         semantic_limit=50,
         rotation_limit=50,
     )
+    allow_future_context = settings.analysis.agents.annotation.allow_future_context
     ledger = AnnotationToolLedger(
         current_chapter_id=chapter_id,
-        current_chunk_ids=tuple(chunk_id for chunk_id, _text in current_chunks),
+        current_chunks=dict(current_chunks),
+        allow_future_context=allow_future_context,
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
-    tools = build_annotation_tools(query_service, ledger)
+    tools = build_annotation_tools(query_service, ledger, run_scope=run_id)
 
-    def initial_validator(annotation: ChapterAnnotation, allowed_chapters: set[int]) -> None:
-        """2026-08-05 用于校验 after 不可读时的完整初始章节候选"""
-        validate_chapter_annotation(
-            annotation,
+    def current_validator(finish: ChapterFinish) -> None:
+        """2026-08-07 用于校验当前与已授权前文形成的完整章节候选"""
+        validate_chapter_finish(
+            finish,
             chapter_id=chapter_id,
             current_chunks=current_chunks,
-            allowed_evidence_chapter_ids=allowed_chapters,
-            visible_graph_entity_node_ids=ledger.visible_graph_entity_node_ids,
+            authorized_text_chunk_ids=ledger.authorized_text_chunk_ids,
+            visible_graph_fact_refs=ledger.visible_graph_fact_refs,
+            visible_graph_entities=ledger.visible_graph_entities,
+            visible_graph_relation_ids=ledger.visible_graph_relation_ids,
+            visible_setup_ids=ledger.visible_setup_ids,
         )
 
-    def post_after_validator(annotation: ChapterAnnotation, allowed_chapters: set[int]) -> None:
-        """2026-08-05 用于校验后文检索后仍只描述 current 的最终候选"""
-        validate_chapter_annotation(
-            annotation,
+    def future_validator(finish: ChapterFinish) -> None:
+        """2026-08-07 用于校验后文授权加入后仍只标注 current 的最终候选"""
+        validate_chapter_finish(
+            finish,
             chapter_id=chapter_id,
             current_chunks=current_chunks,
-            allowed_evidence_chapter_ids=allowed_chapters,
-            visible_graph_entity_node_ids=ledger.visible_graph_entity_node_ids,
+            authorized_text_chunk_ids=ledger.authorized_text_chunk_ids,
+            visible_graph_fact_refs=ledger.visible_graph_fact_refs,
+            visible_graph_entities=ledger.visible_graph_entities,
+            visible_graph_relation_ids=ledger.visible_graph_relation_ids,
+            visible_setup_ids=ledger.visible_setup_ids,
         )
 
     graph = build_annotation_graph(
@@ -258,8 +587,8 @@ async def _run_single_attempt(
         tools,
         ledger=ledger,
         max_iterations=max(1, settings.analysis.agents.annotation.max_iterations),
-        initial_validator=initial_validator,
-        post_after_validator=post_after_validator,
+        current_validator=current_validator,
+        future_validator=future_validator,
     )
     initial_messages = [
         SystemMessage(
@@ -268,18 +597,19 @@ async def _run_single_attempt(
                 chapter_id=chapter_id,
                 chunk_ids=[chunk_id for chunk_id, _text in current_chunks],
                 initial_cases=initial_cases,
+                allow_future_context=allow_future_context,
             )
         ),
         HumanMessage(content=_build_current_message(current_chunks)),
     ]
     initial_state = {
         "messages": initial_messages,
-        "phase": "running_current",
+        "phase": "current_open",
         "iterations": 0,
         "candidate": None,
         "initial_finish": None,
-        "final_annotation": None,
-        "revision_payload": {},
+        "final_finish": None,
+        "revision_payloads": [],
         "error": None,
     }
     result_state = await graph.ainvoke(initial_state)
@@ -289,34 +619,44 @@ async def _run_single_attempt(
     if result_state.get("phase") != "completed":
         raise AnnotationRetryableError("annotation LangGraph 未正常到达 END")
     initial_finish_payload = result_state.get("initial_finish")
-    final_annotation_payload = result_state.get("final_annotation")
-    if initial_finish_payload is None or final_annotation_payload is None:
-        raise AnnotationRetryableError("annotation LangGraph 缺少完整初始或最终章节标注")
+    final_finish_payload = result_state.get("final_finish")
+    if initial_finish_payload is None or final_finish_payload is None:
+        raise AnnotationRetryableError("annotation LangGraph 缺少完整初始或最终 ChapterFinish")
 
     messages = list(result_state.get("messages") or initial_messages)
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-    initial_finish = ChapterAnnotation.model_validate(initial_finish_payload)
-    final_annotation = ChapterAnnotation.model_validate(final_annotation_payload)
-    ledger.validate_staged_outputs()
+    initial_finish = ChapterFinish.model_validate(initial_finish_payload)
+    final_finish = ChapterFinish.model_validate(final_finish_payload)
+    pushed_cases = _bind_pushed_cases(final_finish, ledger)
     return AgentRunResult(
         run_id=run_id,
         chapter_id=chapter_id,
-        final_annotation=final_annotation,
-        initial_finish=initial_finish,
-        revision_payload=dict(result_state.get("revision_payload") or {}),
-        initial_case_candidate_ids=list(ledger.initial_cases),
-        rotation_case_ids=ledger.rotation_case_ids,
-        pulled_case_ids=ledger.pulled_case_ids,
-        staged_outputs=ledger.staged_outputs,
-        success_audit=SuccessAudit(
-            attempt_number=attempt_number,
-            messages=_serialize_agent_messages(messages),
-            tool_calls=ledger.audit_payload(),
-            model_name=str(getattr(llm, "model_name", None) or getattr(llm, "model", "")) or None,
-            model_provider=_model_provider(llm),
-            duration_ms=elapsed_ms,
+        finish=final_finish,
+        pulled_results=list(ledger.pulled_results),
+        pushed_cases=pushed_cases,
+        audit=AgentRunAudit(
+            allow_future_context=allow_future_context,
+            initial_finish=initial_finish,
+            revision_payloads=list(result_state.get("revision_payloads") or []),
+            initial_case_candidate_ids=list(ledger.initial_cases),
+            rotation_case_ids=ledger.rotation_case_ids,
+            authorized_text_chunk_ids=sorted(ledger.authorized_text_chunk_ids),
+            visible_graph_fact_refs=sorted(ledger.visible_graph_fact_refs),
+            visible_graph_entity_ids=sorted(ledger.visible_graph_entities),
+            visible_graph_relation_ids=sorted(ledger.visible_graph_relation_ids),
+            success=SuccessAudit(
+                attempt_number=attempt_number,
+                messages=_serialize_agent_messages(messages),
+                tool_calls=ledger.audit_payload(),
+                model_name=(
+                    str(getattr(llm, "model_name", None) or getattr(llm, "model", ""))
+                    or None
+                ),
+                model_provider=_model_provider(llm),
+                duration_ms=elapsed_ms,
+            ),
+            token_usage=_extract_token_usage_records(messages, llm),
         ),
-        token_usage=_extract_token_usage_records(messages, llm),
     )
 
 
@@ -391,5 +731,5 @@ __all__ = [
     "AnnotationAgentRunError",
     "AgentRunResult",
     "run_annotation_agent",
-    "validate_chapter_annotation",
+    "validate_chapter_finish",
 ]

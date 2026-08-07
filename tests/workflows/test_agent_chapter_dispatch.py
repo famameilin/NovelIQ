@@ -8,33 +8,80 @@ import pytest
 from sqlalchemy import func, select
 
 from src.agents.annotation.runner import AnnotationAgentRunError
-from src.agents.annotation.schema import AgentRunResult, ChapterAnnotation, SuccessAudit
+from src.agents.annotation.schema import (
+    AgentRunAudit,
+    AgentRunResult,
+    ChapterFinish,
+    PushedCase,
+    SuccessAudit,
+)
 from src.storage.models import ChapterAnnotationRecord
 from src.workflows.annotate import _group_chunks_by_chapter, run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
 
 
-def _annotation(chapter_id: int, chunk_id: int) -> ChapterAnnotation:
-    """2026-08-05 用于构造指定章节与 chunk 的完整正式标注"""
-    return ChapterAnnotation.model_validate(
+def _coverage(chunk_id: int) -> dict:
+    """2026-08-07 用于构造 Workflow 测试全领域 coverage"""
+    return {
+        "chunk_id": chunk_id,
+        "entities": True,
+        "character_observations": True,
+        "location_observations": True,
+        "dialogues": True,
+        "events": True,
+        "relations": True,
+        "states": True,
+        "foreshadowings": True,
+    }
+
+
+def _finish(chapter_id: int, chunk_id: int, *, create_case: bool) -> ChapterFinish:
+    """2026-08-07 用于构造指定章节的新合同完整 finish"""
+    dialogues = []
+    if create_case:
+        dialogues.append(
+            {
+                "ref": "dialogue_1",
+                "confidence": "high",
+                "evidence": [{"reason": "住手出现", "chunk_id": chunk_id}],
+                "content": "住手",
+                "start": 1,
+                "end": 3,
+                "speaker_ref": None,
+                "speaker_existing_entity_id": None,
+                "tone": None,
+                "is_inner_monologue": False,
+            }
+        )
+    return ChapterFinish.model_validate(
         {
             "chapter_summary": f"章节 {chapter_id}",
-            "segments": [
+            "entities": {
+                "characters": [],
+                "locations": [],
+                "objects": [],
+                "organizations": [],
+            },
+            "chunks": [
                 {
                     "chunk_id": chunk_id,
                     "summary": f"chunk {chunk_id}",
-                    "emotional_valence": "neutral",
-                    "event_type": "铺垫",
-                    "pivot_moment": False,
-                    "cliffhanger": False,
+                    "metrics": {
+                        "emotional_valence": "neutral",
+                        "event_type": "铺垫",
+                        "pivot_moment": False,
+                        "cliffhanger": False,
+                    },
+                    "character_observations": [],
+                    "location_observations": [],
+                    "dialogues": dialogues,
+                    "events": [],
+                    "relations": [],
+                    "states": [],
+                    "foreshadowings": [],
                 }
             ],
-            "characters": [],
-            "locations": [],
-            "dialogues": [],
-            "events": [],
-            "relations": [],
-            "states": [],
+            "coverage": [_coverage(chunk_id)],
         }
     )
 
@@ -46,19 +93,31 @@ def _agent_result(
     chunk_id: int,
     create_case: bool = False,
 ) -> AgentRunResult:
-    """2026-08-05 用于构造 Workflow 串行测试的章节 Agent 成功结果"""
-    annotation = _annotation(chapter_id, chunk_id)
-    outputs = (
+    """2026-08-07 用于构造 Workflow 串行测试的 Agent 成功结果"""
+    finish = _finish(chapter_id, chunk_id, create_case=create_case)
+    pushed_cases = (
         [
-            {
-                "output_kind": "case",
-                "source_case_ids": [],
-                "evidence": {"reason": "顾霜身份仍待确认", "chapterid": chapter_id},
-                "payload": {
-                    "keys": ["顾霜", "身份"],
-                    "description": "顾霜身份仍待后续章节确认",
+            PushedCase(
+                description="该句住手由谁说出",
+                keys=["住手", "说话人"],
+                type="dialogue_speaker",
+                chunkid=chunk_id,
+                target_key=f"target-{chapter_id}",
+                target_anchor={
+                    "chunk_id": chunk_id,
+                    "start": 1,
+                    "end": 3,
+                    "text": "住手",
                 },
-            }
+                target_ref={
+                    "kind": "dialogue",
+                    "item_ref": "dialogue_1",
+                    "chunk_id": chunk_id,
+                    "start": 1,
+                    "end": 3,
+                    "text": "住手",
+                },
+            )
         ]
         if create_case
         else []
@@ -66,19 +125,26 @@ def _agent_result(
     return AgentRunResult(
         run_id=run_id,
         chapter_id=chapter_id,
-        final_annotation=annotation,
-        initial_finish=annotation,
-        revision_payload={},
-        initial_case_candidate_ids=[],
-        rotation_case_ids=[],
-        pulled_case_ids=[],
-        staged_outputs=outputs,
-        success_audit=SuccessAudit(
-            attempt_number=1,
-            messages=[],
-            tool_calls=[],
-            model_provider="local",
-            duration_ms=1,
+        finish=finish,
+        pulled_results=[],
+        pushed_cases=pushed_cases,
+        audit=AgentRunAudit(
+            allow_future_context=False,
+            initial_finish=finish,
+            revision_payloads=[],
+            initial_case_candidate_ids=[],
+            rotation_case_ids=[],
+            authorized_text_chunk_ids=[chunk_id],
+            visible_graph_fact_refs=[],
+            visible_graph_entity_ids=[],
+            visible_graph_relation_ids=[],
+            success=SuccessAudit(
+                attempt_number=1,
+                messages=[],
+                tool_calls=[],
+                model_provider="local",
+                duration_ms=1,
+            ),
         ),
     )
 
@@ -98,25 +164,25 @@ def test_group_chunks_by_chapter_preserves_persisted_order() -> None:
 
 @pytest.mark.asyncio
 async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_case(db_session) -> None:
-    """2026-08-05 用于验证前章完成事务提交后才启动后章并可检索新案例"""
+    """2026-08-07 用于验证前章事务提交后后章可检索新 active 案例"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜初次出现", "后文点明顾霜身份"],
+        texts=["“住手”回荡", "后文点明顾霜身份"],
         chapter_ids=[1, 2],
         title="章节串行",
     )
     calls: list[int] = []
 
     async def fake_agent(**kwargs):
-        """2026-08-05 用于在第二章启动时读取第一章刚提交的案例"""
+        """2026-08-07 用于在第二章启动时读取第一章已提交案例"""
         chapter_id = kwargs["chapter_id"]
         calls.append(chapter_id)
         if chapter_id == 2:
             read_session = kwargs["session_factory"]()
             try:
                 service = kwargs["query_service_factory"](read_session)
-                search_result = service.search_continuity(
-                    "顾霜",
+                search_result = service.search_pool(
+                    "住手",
                     hidden_case_ids=set(),
                 )
                 assert [item.result_kind for item in search_result.results] == ["case"]
@@ -146,7 +212,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
 
 @pytest.mark.asyncio
 async def test_run_annotate_skips_existing_chapter_completion(db_session) -> None:
-    """2026-08-05 用于验证正式章节标注存在时直接回读并跳过 Agent"""
+    """2026-08-07 用于验证正式 ChapterFinish 存在时直接回读并跳过 Agent"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["第一章", "第二章"],
@@ -157,7 +223,7 @@ async def test_run_annotate_skips_existing_chapter_completion(db_session) -> Non
     calls: list[int] = []
 
     async def fake_agent(**kwargs):
-        """2026-08-05 用于记录仍需执行的章节"""
+        """2026-08-07 用于记录仍需执行的章节"""
         calls.append(kwargs["chapter_id"])
         return _agent_result(
             run_id=run_id,

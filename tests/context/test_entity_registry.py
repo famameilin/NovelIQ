@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -65,7 +66,7 @@ class TestEntityRegistry(unittest.TestCase):
 
     def test_get_active_entities_empty(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_active_entities.return_value = []
+        mock_repo.fetch_latest_entities.return_value = []
 
         result = get_active_entities(mock_repo, run_id="test-run", current_chunk_id=5, lookback=10)
 
@@ -73,23 +74,27 @@ class TestEntityRegistry(unittest.TestCase):
 
     def test_get_active_entities_with_data(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_active_entities.return_value = [
-            {
-                "chunk_id": 1,
-                "name": "张三",
-                "role": "主角",
-                "last_action": "走进房间",
-                "last_emotion": "平静",
-                "emotion_score": 0,
-            },
-            {
-                "chunk_id": 2,
-                "name": "李四",
-                "role": "配角",
-                "last_action": "跟随",
-                "last_emotion": "紧张",
-                "emotion_score": -2,
-            },
+        mock_repo.fetch_latest_entities.return_value = [
+            SimpleNamespace(
+                last_seen_chunk=1,
+                name="张三",
+                state={
+                    "role_function": "主角",
+                    "action": "走进房间",
+                    "emotion": "平静",
+                    "emotion_score": 0,
+                },
+            ),
+            SimpleNamespace(
+                last_seen_chunk=2,
+                name="李四",
+                state={
+                    "role_function": "配角",
+                    "action": "跟随",
+                    "emotion": "紧张",
+                    "emotion_score": -2,
+                },
+            ),
         ]
 
         result = get_active_entities(mock_repo, run_id="test-run", current_chunk_id=5, lookback=10)
@@ -100,31 +105,37 @@ class TestEntityRegistry(unittest.TestCase):
 
     def test_get_active_entities_deduplication(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_active_entities.return_value = [
-            {
-                "chunk_id": 1,
-                "name": "张三",
-                "role": "主角",
-                "last_action": "动作1",
-                "last_emotion": "情绪1",
-                "emotion_score": 0,
-            },
-            {
-                "chunk_id": 2,
-                "name": "张三",
-                "role": "主角",
-                "last_action": "动作2",
-                "last_emotion": "情绪2",
-                "emotion_score": 1,
-            },
-            {
-                "chunk_id": 3,
-                "name": "李四",
-                "role": "配角",
-                "last_action": "动作3",
-                "last_emotion": "情绪3",
-                "emotion_score": 0,
-            },
+        mock_repo.fetch_latest_entities.return_value = [
+            SimpleNamespace(
+                last_seen_chunk=1,
+                name="张三",
+                state={
+                    "role_function": "主角",
+                    "action": "动作1",
+                    "emotion": "情绪1",
+                    "emotion_score": 0,
+                },
+            ),
+            SimpleNamespace(
+                last_seen_chunk=2,
+                name="张三",
+                state={
+                    "role_function": "主角",
+                    "action": "动作2",
+                    "emotion": "情绪2",
+                    "emotion_score": 1,
+                },
+            ),
+            SimpleNamespace(
+                last_seen_chunk=3,
+                name="李四",
+                state={
+                    "role_function": "配角",
+                    "action": "动作3",
+                    "emotion": "情绪3",
+                    "emotion_score": 0,
+                },
+            ),
         ]
 
         result = get_active_entities(mock_repo, run_id="test-run", current_chunk_id=5, lookback=10)

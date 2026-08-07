@@ -83,7 +83,19 @@ def get_active_entities(
     lookback: int = 10,
 ) -> list[dict[str, Any]]:
     """获取活跃实体列表（按名称去重，保留最新）"""
-    rows = graph_repo.fetch_active_entities(current_chunk_id, lookback, run_id)
+    minimum_chunk_id = max(0, current_chunk_id - lookback)
+    rows = [
+        {
+            "chunk_id": row.last_seen_chunk,
+            "name": row.name,
+            "role": row.state.get("role_function", ""),
+            "last_action": row.state.get("action", ""),
+            "last_emotion": row.state.get("emotion", ""),
+            "emotion_score": row.state.get("emotion_score", 0),
+        }
+        for row in graph_repo.fetch_latest_entities(run_id)
+        if minimum_chunk_id <= row.last_seen_chunk <= current_chunk_id
+    ]
 
     seen: dict[str, dict[str, Any]] = {}
     for row in rows:

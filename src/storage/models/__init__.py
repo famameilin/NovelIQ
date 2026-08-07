@@ -10,7 +10,7 @@ from src.storage.models.analysis import (
 )
 from src.storage.models.base import Base
 from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
-from src.storage.models.chunk_embedding import EMBEDDING_DIM, ChunkEmbedding, ParagraphEmbedding
+from src.storage.models.chunk_embedding import EMBEDDING_DIM, ParagraphEmbedding
 from src.storage.models.continuity import (
     CasePoolCase,
     CaseResolutionMapping,
@@ -19,12 +19,12 @@ from src.storage.models.continuity import (
 from src.storage.models.core import AnalysisRun
 from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
+    EntityStateVersion,
     GraphEntity,
-    GraphEntityParticipant,
     GraphFact,
-    GraphFactSource,
-    GraphRelationCurrent,
-    GraphRelationEvent,
+    GraphRelation,
+    GraphRelationVersion,
+    GraphVersion,
 )
 from src.storage.models.model_interaction import ModelInteraction
 from src.storage.models.novel import Novel
@@ -38,18 +38,17 @@ __all__ = [
     "Chunk",
     "ChunkStyle",
     "ChunkTopic",
-    "ChunkEmbedding",
     "ParagraphEmbedding",
     "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
     "CasePoolCase",
     "CaseResolutionMapping",
+    "GraphVersion",
     "GraphEntity",
-    "GraphEntityParticipant",
     "GraphFact",
-    "GraphFactSource",
-    "GraphRelationEvent",
-    "GraphRelationCurrent",
+    "EntityStateVersion",
+    "GraphRelation",
+    "GraphRelationVersion",
     "CloudAnalysis",
     "ChunkCurve",
     "GlobalStats",

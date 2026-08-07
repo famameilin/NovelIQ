@@ -11,7 +11,7 @@ from .annotation import (
 from .base import BaseRepository, T
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
-from .graph import ActiveEntityRow, CurrentRelationRow, GraphRepository, ParticipantEntityRow, RelationEventRow
+from .graph import EntitySnapshotRow, GraphChangeRow, GraphRepository, GraphSnapshotRow, RelationSnapshotRow
 from .protocols import (
     AnnotationRepositoryProtocol,
     ChunkRepositoryProtocol,
@@ -40,10 +40,10 @@ __all__ = [
     "StatsRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "GraphRepository",
-    "ActiveEntityRow",
-    "CurrentRelationRow",
-    "ParticipantEntityRow",
-    "RelationEventRow",
+    "EntitySnapshotRow",
+    "RelationSnapshotRow",
+    "GraphSnapshotRow",
+    "GraphChangeRow",
     "DiagnosisRepository",
     "StatsRepository",
 ]

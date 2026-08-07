@@ -20,7 +20,7 @@ from sqlalchemy import text
 
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
-from tests.support.chapter_annotation_helpers import persist_chapter_annotation
+from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 
 def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
@@ -48,7 +48,18 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
             {"chunk_id": 0, "chapter_id": 1, "text": "测试分块", "run_id": run_id},
         )
         session.flush()
-        persist_chapter_annotation(session, run_id=run_id, chapter_id=1)
+        persist_chapter_annotation(
+            session,
+            run_id=run_id,
+            chapter_id=1,
+            characters=[
+                character_fact(
+                    chunk_id=0,
+                    name=f"人物-{task_id}",
+                    action="参与级联删除验证",
+                )
+            ],
+        )
         session.execute(
             text(
                 """
@@ -59,20 +70,6 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
                 """
             ),
             {"novel_id": novel_id, "novel_title": "测试小说", "run_id": run_id},
-        )
-        session.execute(
-            text(
-                """
-                INSERT INTO graph_entities (run_id, canonical_name, entity_type, status)
-                VALUES (:run_id, :canonical_name, :entity_type, :status)
-                """
-            ),
-            {
-                "run_id": run_id,
-                "canonical_name": f"人物-{task_id}",
-                "entity_type": "character",
-                "status": "active",
-            },
         )
         session.commit()
 

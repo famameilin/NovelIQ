@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,7 +40,7 @@ class ChapterAnnotationRecord(Base):
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     initial_finish_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    revision_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    revision_payloads: Mapped[list] = mapped_column("revision_payload", JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
@@ -40,7 +50,7 @@ class ChapterAnnotationRecord(Base):
 
 
 class CasePoolCase(Base):
-    """2026-08-05 用于保存需要后续章节继续处理的活动或历史案例"""
+    """2026-08-07 用于保存带稳定目标的活动或已解决案例"""
 
     __tablename__ = "case_pool_cases"
 
@@ -50,9 +60,13 @@ class CasePoolCase(Base):
         ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
         nullable=False,
     )
+    case_type: Mapped[str] = mapped_column("type", String(50), nullable=False)
+    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     keys: Mapped[list] = mapped_column(JSONB, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    target_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    evidence: Mapped[list] = mapped_column(JSONB, nullable=False)
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_by_annotation_id: Mapped[str] = mapped_column(
         String(36),
@@ -74,11 +88,25 @@ class CasePoolCase(Base):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+            name="case_pool_cases_chunk_run_fkey",
+        ),
+        CheckConstraint(
+            "state IN ('active', 'resolved')",
+            name="ck_case_pool_cases_state",
+        ),
+        UniqueConstraint("run_id", "target_key", name="uq_case_pool_cases_run_target_key"),
         Index("idx_case_pool_cases_run_state", "run_id", "state"),
+        Index("idx_case_pool_cases_run_type", "run_id", "type"),
         Index("idx_case_pool_cases_rotation", "run_id", "state", "last_surfaced_at", "id"),
     )
+
+
 class CaseResolutionMapping(Base):
-    """2026-08-05 用于关联章节输出来源案例与实际业务目标"""
+    """2026-08-07 用于关联 pulled 案例解决结果与历史事实修订"""
 
     __tablename__ = "case_resolution_mappings"
 
@@ -93,33 +121,27 @@ class CaseResolutionMapping(Base):
         ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
         nullable=False,
     )
-    source_case_id: Mapped[str | None] = mapped_column(
+    case_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("case_pool_cases.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("case_pool_cases.id", ondelete="CASCADE"),
+        nullable=False,
     )
-    result_kind: Mapped[str] = mapped_column(String(20), nullable=False)
-    target_case_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("case_pool_cases.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    target_graph_node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    target_setup_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("foreshadowing_threads.setup_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    target_hit_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("foreshadowing_thread_hits.hit_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    rejected_reason_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    case_type: Mapped[str] = mapped_column("type", String(50), nullable=False)
+    target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    resolution: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    evidence_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_fact_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["evidence_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+            name="case_resolution_mappings_evidence_chunk_run_fkey",
+        ),
+        UniqueConstraint("run_id", "case_id", name="uq_case_resolution_mappings_run_case"),
         Index("idx_case_resolution_mappings_annotation", "run_id", "annotation_id"),
-        Index("idx_case_resolution_mappings_source", "run_id", "source_case_id"),
+        Index("idx_case_resolution_mappings_case", "run_id", "case_id"),
     )

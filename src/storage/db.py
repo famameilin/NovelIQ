@@ -373,12 +373,8 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
         "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
-        "ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS is_representative BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb",
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
-        (
-            "CREATE INDEX IF NOT EXISTS idx_graph_entities_run_representative "
-            "ON graph_entities (run_id, is_representative)"
-        ),
         (
             "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
             "ON foreshadowing_threads (run_id, active, last_chunk_id)"
@@ -392,9 +388,90 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
-        if _table_exists(conn, "chunk_embeddings"):
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)"))
         _ensure_analysis_related_foreign_keys(conn)
+
+
+def _create_graph_read_views(engine: Engine) -> None:
+    """2026-08-07 用于创建章节版本图的当前状态关系与参与统计只读视图"""
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    statements = [
+        """
+        CREATE OR REPLACE VIEW entity_state_current AS
+        SELECT DISTINCT ON (state_row.run_id, state_row.entity_id)
+            state_row.state_version_id,
+            state_row.graph_version_id,
+            state_row.run_id,
+            state_row.chapter_id,
+            state_row.entity_id,
+            state_row.state_revision,
+            state_row.state,
+            state_row.changes,
+            state_row.created_at
+        FROM entity_state_versions AS state_row
+        JOIN graph_versions AS version_row
+          ON version_row.graph_version_id = state_row.graph_version_id
+        ORDER BY
+            state_row.run_id,
+            state_row.entity_id,
+            version_row.chapter_order DESC,
+            state_row.state_revision DESC
+        """,
+        """
+        CREATE OR REPLACE VIEW graph_relations_current AS
+        SELECT latest.*
+        FROM (
+            SELECT DISTINCT ON (version_row.run_id, version_row.relation_id)
+                version_row.relation_version_id,
+                version_row.graph_version_id,
+                version_row.run_id,
+                version_row.chapter_id,
+                version_row.relation_id,
+                version_row.relation_revision,
+                version_row.relation_type,
+                version_row.attributes,
+                version_row.is_active,
+                version_row.changes,
+                version_row.created_at
+            FROM graph_relation_versions AS version_row
+            JOIN graph_versions AS graph_version
+              ON graph_version.graph_version_id = version_row.graph_version_id
+            ORDER BY
+                version_row.run_id,
+                version_row.relation_id,
+                graph_version.chapter_order DESC,
+                version_row.relation_revision DESC
+        ) AS latest
+        WHERE latest.is_active
+        """,
+        """
+        CREATE OR REPLACE VIEW graph_entity_participants AS
+        SELECT
+            entity_row.run_id,
+            entity_row.entity_id,
+            COUNT(current_relation.relation_id)::INTEGER AS current_degree,
+            MIN(version_row.chapter_order) AS first_relation_chapter_order,
+            MAX(version_row.chapter_order) AS last_relation_chapter_order
+        FROM graph_entities AS entity_row
+        LEFT JOIN graph_relations AS relation_row
+          ON relation_row.run_id = entity_row.run_id
+         AND (
+             relation_row.from_entity_id = entity_row.entity_id
+             OR relation_row.to_entity_id = entity_row.entity_id
+         )
+        LEFT JOIN graph_relations_current AS current_relation
+          ON current_relation.run_id = relation_row.run_id
+         AND current_relation.relation_id = relation_row.relation_id
+        LEFT JOIN graph_versions AS version_row
+          ON version_row.graph_version_id = current_relation.graph_version_id
+        GROUP BY entity_row.run_id, entity_row.entity_id
+        """,
+    ]
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
 
 
 def _assert_focus_contract_schema(engine: Engine) -> None:
@@ -446,6 +523,52 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
             )
 
 
+def _assert_annotation_contract_schema(engine: Engine) -> None:
+    """2026-08-07 用于阻止旧案例映射表继续承载新 finish pull push 合同"""
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    required_columns = {
+        "case_pool_cases": {
+            "id",
+            "run_id",
+            "type",
+            "chunk_id",
+            "keys",
+            "description",
+            "target_key",
+            "target_ref",
+            "evidence",
+            "state",
+            "created_by_annotation_id",
+        },
+        "case_resolution_mappings": {
+            "mapping_id",
+            "run_id",
+            "annotation_id",
+            "case_id",
+            "type",
+            "target_ref",
+            "resolution",
+            "evidence_chunk_id",
+            "target_fact_id",
+            "target_fact_revision",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, required in required_columns.items():
+            if not _table_exists(connection, table_name):
+                continue
+            actual = _get_table_columns(connection, table_name)
+            missing = sorted(required - actual)
+            if missing:
+                raise RuntimeError(
+                    f"{table_name} is missing annotation contract columns: {missing}. "
+                    "Please recreate or explicitly migrate the continuity tables before starting the service."
+                )
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
@@ -478,7 +601,7 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db(include_level3_tables: bool = False) -> None:
+def init_db() -> None:
     """
     初始化数据库（创建所有表）
 
@@ -489,14 +612,16 @@ def init_db(include_level3_tables: bool = False) -> None:
     from src.storage.models import Base
 
     engine = get_engine()
-    tables = list(Base.metadata.sorted_tables)
-    if not include_level3_tables:
-        # Level3 的 pgvector 表由 preprocess 按需 ensure；
-        # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连
-        tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
+    tables = [
+        table
+        for table in Base.metadata.sorted_tables
+        if table.name != "paragraph_embeddings"
+    ]
     Base.metadata.create_all(bind=engine, tables=tables)
+    _create_graph_read_views(engine)
     _ensure_runtime_schema(engine)
     _assert_focus_contract_schema(engine)
+    _assert_annotation_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 
