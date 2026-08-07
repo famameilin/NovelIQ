@@ -1,450 +1,326 @@
-"""章节事实数据库图持久化测试"""
+"""ChapterFinish 图持久化测试"""
 
 from __future__ import annotations
 
-import uuid
-
-import pytest
 from sqlalchemy import select
 
-from src.knowledge.graph import search_fact_graph
+from src.agents.annotation.schema import ChapterFinish
 from src.storage.models import (
-    ChapterAnnotationRecord,
+    EntityStateVersion,
     GraphEntity,
-    GraphEntityParticipant,
     GraphFact,
-    GraphFactSource,
-    GraphRelationCurrent,
-    GraphRelationEvent,
+    GraphRelation,
+    GraphRelationVersion,
+    GraphVersion,
 )
-from src.storage.repositories.graph import GraphRepository, persist_completion_graph, stable_annotation_fact_id
-from tests.support.chapter_annotation_helpers import (
-    character_fact,
-    create_run_with_chunks,
-    identity_relation_output,
-    persist_chapter_annotation,
-    relation_fact,
-)
+from src.storage.repositories import ChapterAnnotationRepository
+from src.storage.repositories.graph import persist_completion_graph, stable_annotation_fact_id
+from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
-def test_annotation_fact_id_is_deterministic() -> None:
-    """2026-08-05 用于验证 annotation_id 与 payload 路径稳定生成同一图节点键"""
-    first = stable_annotation_fact_id("annotation-1", "relations/0")
-    second = stable_annotation_fact_id("annotation-1", "relations/0")
-    other = stable_annotation_fact_id("annotation-1", "relations/1")
+def _span(text: str, value: str, chunk_id: int = 0) -> dict:
+    """2026-08-07 用于构造精确实体 mention"""
+    start = text.index(value)
+    return {
+        "chunk_id": chunk_id,
+        "start": start,
+        "end": start + len(value),
+        "text": value,
+    }
+
+
+def _entity(
+    text: str,
+    *,
+    ref: str,
+    name: str,
+    chunk_id: int = 0,
+) -> dict:
+    """2026-08-07 用于构造带 current mention 的实体目录项"""
+    return {
+        "ref": ref,
+        "name": name,
+        "existing_entity_id": None,
+        "mentions": [_span(text, name, chunk_id)],
+        "confidence": "high",
+        "evidence": [{"reason": f"{name}出现", "chunk_id": chunk_id}],
+    }
+
+
+def _coverage(chunk_id: int = 0) -> dict:
+    """2026-08-07 用于构造全领域 coverage"""
+    return {
+        "chunk_id": chunk_id,
+        "entities": True,
+        "character_observations": True,
+        "location_observations": True,
+        "dialogues": True,
+        "events": True,
+        "relations": True,
+        "states": True,
+        "foreshadowings": True,
+    }
+
+
+def _finish(text: str) -> ChapterFinish:
+    """2026-08-07 用于构造覆盖四类实体与逐 chunk 事实的完整 finish"""
+    return ChapterFinish.model_validate(
+        {
+            "chapter_summary": "顾霜进入山门并受宗门庇护",
+            "entities": {
+                "characters": [_entity(text, ref="character_1", name="顾霜")],
+                "locations": [
+                    {
+                        **_entity(text, ref="location_1", name="山门"),
+                        "location_type": "宗门入口",
+                        "description": "青石山门",
+                    }
+                ],
+                "objects": [
+                    {
+                        **_entity(text, ref="object_1", name="玄剑"),
+                        "object_type": "兵器",
+                    }
+                ],
+                "organizations": [
+                    {
+                        **_entity(text, ref="organization_1", name="天衡宗"),
+                        "organization_type": "宗门",
+                    }
+                ],
+            },
+            "chunks": [
+                {
+                    "chunk_id": 0,
+                    "summary": "顾霜进入山门",
+                    "metrics": {
+                        "emotional_valence": "neutral",
+                        "event_type": "铺垫",
+                        "pivot_moment": False,
+                        "cliffhanger": False,
+                    },
+                    "character_observations": [
+                        {
+                            "ref": "character_observation_1",
+                            "confidence": "high",
+                            "evidence": [{"reason": "顾霜进入", "chunk_id": 0}],
+                            "entity_ref": "character_1",
+                            "role_function": "主体",
+                            "action": "进入山门",
+                            "action_type": "移动",
+                            "emotion": "neutral",
+                        }
+                    ],
+                    "location_observations": [
+                        {
+                            "ref": "location_observation_1",
+                            "confidence": "high",
+                            "evidence": [{"reason": "山门为宗门入口", "chunk_id": 0}],
+                            "location_ref": "location_1",
+                            "predicate": "status",
+                            "value": "open",
+                        }
+                    ],
+                    "dialogues": [],
+                    "events": [
+                        {
+                            "ref": "event_1",
+                            "confidence": "high",
+                            "evidence": [{"reason": "顾霜进入山门", "chunk_id": 0}],
+                            "event_type": "进入",
+                            "summary": "顾霜进入山门",
+                            "participants": [
+                                {"role": "actor", "entity_ref": "character_1"}
+                            ],
+                            "location_ref": "location_1",
+                        }
+                    ],
+                    "relations": [
+                        {
+                            "ref": "relation_1",
+                            "confidence": "high",
+                            "evidence": [{"reason": "顾霜位于山门", "chunk_id": 0}],
+                            "from_ref": "character_1",
+                            "to_ref": "location_1",
+                            "relation_type": "located_at",
+                            "change_kind": "assert",
+                        }
+                    ],
+                    "states": [
+                        {
+                            "ref": "state_1",
+                            "confidence": "high",
+                            "evidence": [{"reason": "顾霜持有玄剑", "chunk_id": 0}],
+                            "entity_ref": "character_1",
+                            "predicate": "holds",
+                            "object_ref": "object_1",
+                        }
+                    ],
+                    "foreshadowings": [
+                        {
+                            "ref": "foreshadowing_1",
+                            "confidence": "high",
+                            "evidence": [{"reason": "天衡宗庇护尚待回收", "chunk_id": 0}],
+                            "foreshadowing_type": "场景",
+                            "setup_kind": "宗门庇护",
+                            "setup_summary": "天衡宗将庇护顾霜",
+                            "why_unresolved_now": "本章尚未兑现",
+                            "expected_payoff_family": "援助",
+                            "payoff_likelihood": "high",
+                            "is_new_setup": True,
+                            "setup_status": "open",
+                        }
+                    ],
+                }
+            ],
+            "coverage": [_coverage()],
+        }
+    )
+
+
+def _persist_finish(db_session, *, run_id: str, finish: ChapterFinish):
+    """2026-08-07 用于通过生产入口持久化测试 finish"""
+    annotation = ChapterAnnotationRepository(db_session).add_annotation(
+        run_id=run_id,
+        chapter_id=1,
+        finish=finish,
+        initial_finish=finish,
+        revision_payloads=[],
+    )
+    result = persist_completion_graph(
+        db_session,
+        annotation=annotation,
+        pulled_results=[],
+        authorized_text_chunk_ids={0},
+        visible_graph_fact_refs=set(),
+        visible_relation_ids=set(),
+        visible_graph_entity_ids=set(),
+    )
+    return annotation, result
+
+
+def test_annotation_fact_id_uses_stable_item_ref() -> None:
+    """2026-08-07 用于验证事实 ID 不再依赖数组下标"""
+    first = stable_annotation_fact_id("annotation-1", "relation_1")
+    second = stable_annotation_fact_id("annotation-1", "relation_1")
+    other = stable_annotation_fact_id("annotation-1", "relation_2")
+
     assert first == second
     assert first != other
 
 
-def test_annotation_persistence_writes_graph_nodes_edges_and_properties(db_session) -> None:
-    """2026-08-06 用于验证正式标注直接形成数据库图节点关系与属性"""
+def test_finish_persistence_creates_four_entity_types_and_ref_facts(db_session) -> None:
+    """2026-08-07 用于验证实体目录先创建四类节点并逐 chunk 写事实"""
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["林渡与顾霜并肩迎敌"],
-        title="数据库图持久化",
+        texts=[text],
+        title="新合同图持久化",
     )
-    annotation_id = persist_chapter_annotation(
+    annotation, result = _persist_finish(
         db_session,
         run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
-        ],
-        relations=[
-            relation_fact(
-                chunk_id=0,
-                from_name="林渡",
-                to_name="顾霜",
-                relation_type="盟友",
-            )
-        ],
-    )
-
-    facts = list(
-        db_session.execute(
-            select(GraphFact)
-            .where(GraphFact.run_id == run_id)
-            .order_by(GraphFact.graph_fact_id)
-        )
-        .scalars()
-        .all()
-    )
-    sources = list(
-        db_session.execute(
-            select(GraphFactSource).where(GraphFactSource.run_id == run_id)
-        )
-        .scalars()
-        .all()
-    )
-    relation_source = next(
-        row
-        for row in sources
-        if row.stable_fact_id == stable_annotation_fact_id(annotation_id, "relations/0")
-    )
-    relation_fact_row = next(row for row in facts if row.graph_fact_id == relation_source.graph_fact_id)
-
-    assert len(facts) == 4
-    assert {row.source_kind for row in sources} == {"chapter_annotation"}
-    assert relation_fact_row.content["kind"] == "relations"
-    assert relation_fact_row.content["directionality"] == "directed"
-    assert len(
-        db_session.execute(
-            select(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id)
-        )
-        .scalars()
-        .all()
-    ) == 1
-    assert len(
-        db_session.execute(
-            select(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
-        )
-        .scalars()
-        .all()
-    ) == 1
-    participants = list(
-        db_session.execute(
-            select(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id)
-        )
-        .scalars()
-        .all()
-    )
-    assert len(participants) == 2
-    assert {row.relation_event_count for row in participants} == {1}
-
-
-def test_persist_completion_graph_only_flushes_caller_transaction(db_session) -> None:
-    """2026-08-06 用于验证图持久化不会自行提交调用方事务"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜进入山门"],
-        title="图持久化事务边界",
-    )
-    annotation = ChapterAnnotationRecord(
-        annotation_id=str(uuid.uuid4()),
-        run_id=run_id,
-        chapter_id=1,
-        payload={
-            "chapter_summary": "顾霜进入山门",
-            "segments": [
-                {
-                    "chunk_id": 0,
-                    "summary": "顾霜进入山门",
-                    "emotional_valence": "neutral",
-                    "event_type": "铺垫",
-                    "pivot_moment": False,
-                    "cliffhanger": False,
-                }
-            ],
-            "characters": [],
-            "locations": [],
-            "dialogues": [],
-            "events": [],
-            "relations": [],
-            "states": [],
-        },
-        initial_finish_payload={},
-        revision_payload={},
-    )
-    db_session.add(annotation)
-    db_session.flush()
-
-    persist_completion_graph(
-        db_session,
-        annotation=annotation,
-        fact_outputs=[],
-    )
-    assert db_session.in_transaction()
-    db_session.rollback()
-
-    assert db_session.execute(
-        select(GraphFact).where(GraphFact.run_id == run_id)
-    ).scalars().all() == []
-
-
-def test_fact_graph_search_traverses_entity_relation_to_unmatched_fact(db_session) -> None:
-    """2026-08-06 用于验证图查询沿实体关系命中不含查询文本的目标事实"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜与贺重明结盟，贺重明守住山门"],
-        title="结构图检索",
-    )
-    annotation_id = persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="顾霜", action="与贺重明结盟"),
-            character_fact(chunk_id=0, name="贺重明", action="守住山门"),
-        ],
-        relations=[
-            relation_fact(
-                chunk_id=0,
-                from_name="顾霜",
-                to_name="贺重明",
-                relation_type="盟友",
-            )
-        ],
-    )
-    annotation = db_session.get(ChapterAnnotationRecord, annotation_id)
-    assert annotation is not None
-    persist_completion_graph(
-        db_session,
-        annotation=annotation,
-        fact_outputs=[
-            identity_relation_output(
-                subject_name="霜姐",
-                object_name="顾霜",
-                representative_endpoint="object",
-            )
-        ],
+        finish=_finish(text),
     )
     db_session.commit()
-    source_entity = db_session.execute(
-        select(GraphEntity).where(
-            GraphEntity.run_id == run_id,
-            GraphEntity.canonical_name == "霜姐",
-        )
-    ).scalar_one()
-
-    target_graph_node_key = stable_annotation_fact_id(annotation_id, "characters/0")
-    matches = search_fact_graph(run_id, "霜姐", session=db_session, max_hops=3)
-    target = next(item for item in matches if item.target_node_id == f"fact:{target_graph_node_key}")
-
-    assert target.path[0] == f"entity:{source_entity.entity_id}"
-    assert target.path[-1] == f"fact:{target_graph_node_key}"
-    assert [edge["edge_kind"] for edge in target.matched_edges] == ["relation", "subject"]
-    assert target.matched_edges[0]["properties"]["relation_type"] == "同一人物"
-    assert target.matched_edges[0]["properties"]["relation_semantics"] == "same_character"
-    assert f"entity:{source_entity.entity_id}" in target.path
-
-
-def test_identity_component_reselects_one_existing_character_node(db_session) -> None:
-    """2026-08-06 用于验证同一人物连通分量保留全部节点并重选唯一常用节点"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["霜姐、顾霜与顾姑娘是同一人物的不同称谓"],
-        title="常用人物节点选举",
-    )
-    annotation_id = persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="霜姐", action="现身"),
-            character_fact(chunk_id=0, name="顾霜", action="被点明本名"),
-            character_fact(chunk_id=0, name="顾姑娘", action="被人称呼"),
-        ],
-    )
-    annotation = db_session.get(ChapterAnnotationRecord, annotation_id)
-    assert annotation is not None
-    entities_by_name = {
-        row.canonical_name: row
-        for row in db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        )
-        .scalars()
-        .all()
-    }
-
-    persist_completion_graph(
-        db_session,
-        annotation=annotation,
-        fact_outputs=[
-            identity_relation_output(
-                subject_name="霜姐",
-                object_name="顾霜",
-                representative_endpoint="object",
-            ),
-            identity_relation_output(
-                subject_name="霜姐",
-                object_name="顾姑娘",
-                representative_node_id=f"entity:{entities_by_name['顾霜'].entity_id}",
-            ),
-            identity_relation_output(
-                subject_name="顾霜",
-                object_name="顾姑娘",
-                representative_endpoint="object",
-            ),
-        ],
-    )
-    db_session.flush()
 
     entities = list(
         db_session.execute(
             select(GraphEntity)
             .where(GraphEntity.run_id == run_id)
-            .order_by(GraphEntity.entity_id)
-        )
-        .scalars()
-        .all()
+            .order_by(GraphEntity.entity_type)
+        ).scalars()
     )
-    assert {row.canonical_name for row in entities} == {"霜姐", "顾霜", "顾姑娘"}
-    assert [row.canonical_name for row in entities if row.is_representative] == ["顾姑娘"]
-    assert [
-        row.canonical_name
-        for row in GraphRepository(db_session).fetch_representative_entities(
-            run_id,
-            entity_type="character",
-        )
-    ] == ["顾姑娘"]
+    facts = list(
+        db_session.execute(
+            select(GraphFact)
+            .where(GraphFact.run_id == run_id)
+            .order_by(GraphFact.payload_path)
+        ).scalars()
+    )
+    assert {entity.entity_type for entity in entities} == {
+        "character",
+        "location",
+        "object",
+        "organization",
+    }
+    location = next(entity for entity in entities if entity.entity_type == "location")
+    assert location.attributes["location_type"] == "宗门入口"
+    assert {fact.content["kind"] for fact in facts} == {
+        "character_observation",
+        "location_observation",
+        "event",
+        "relation",
+        "state",
+        "foreshadowing",
+    }
+    assert result.finish_facts_by_ref["relation_1"].fact_id == stable_annotation_fact_id(
+        annotation.annotation_id,
+        "relation_1",
+    )
+    assert all(fact.source_kind == "chapter_finish" for fact in facts)
 
 
-def test_identity_component_rejects_representative_outside_component(db_session) -> None:
-    """2026-08-06 用于验证代表人物节点必须属于已确认同一人物连通分量"""
+def test_finish_persistence_writes_state_and_relation_versions(db_session) -> None:
+    """2026-08-07 用于验证观察状态和关系仍驱动下游版本表"""
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["霜姐与顾霜身份确认，林渡是另一人"],
-        title="常用人物节点边界",
+        texts=[text],
+        title="状态关系版本",
     )
-    annotation_id = persist_chapter_annotation(
+    _annotation, result = _persist_finish(
         db_session,
         run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="霜姐", action="现身"),
-            character_fact(chunk_id=0, name="顾霜", action="身份揭示"),
-            character_fact(chunk_id=0, name="林渡", action="旁观"),
-        ],
-    )
-    annotation = db_session.get(ChapterAnnotationRecord, annotation_id)
-    assert annotation is not None
-    outside_entity = db_session.execute(
-        select(GraphEntity).where(
-            GraphEntity.run_id == run_id,
-            GraphEntity.canonical_name == "林渡",
-        )
-    ).scalar_one()
-
-    with pytest.raises(ValueError, match="代表节点不属于同一人物连通分量"):
-        persist_completion_graph(
-            db_session,
-            annotation=annotation,
-            fact_outputs=[
-                identity_relation_output(
-                    subject_name="霜姐",
-                    object_name="顾霜",
-                    representative_node_id=f"entity:{outside_entity.entity_id}",
-                )
-            ],
-        )
-
-
-def test_identity_component_rejects_representative_from_other_run(db_session) -> None:
-    """2026-08-06 用于验证常用节点 ID 必须属于当前数据库图运行"""
-    _foreign_novel_id, foreign_run_id = create_run_with_chunks(
-        db_session,
-        texts=["外部运行人物"],
-        title="外部人物节点",
-    )
-    persist_chapter_annotation(
-        db_session,
-        run_id=foreign_run_id,
-        chapter_id=1,
-        characters=[character_fact(chunk_id=0, name="林渡", action="旁观")],
-    )
-    foreign_entity = db_session.execute(
-        select(GraphEntity).where(
-            GraphEntity.run_id == foreign_run_id,
-            GraphEntity.canonical_name == "林渡",
-        )
-    ).scalar_one()
-
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["霜姐即顾霜"],
-        title="当前人物节点",
-    )
-    annotation_id = persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="霜姐", action="现身"),
-            character_fact(chunk_id=0, name="顾霜", action="身份揭示"),
-        ],
-    )
-    annotation = db_session.get(ChapterAnnotationRecord, annotation_id)
-    assert annotation is not None
-
-    with pytest.raises(ValueError, match="常用节点不属于当前 run_id"):
-        persist_completion_graph(
-            db_session,
-            annotation=annotation,
-            fact_outputs=[
-                identity_relation_output(
-                    subject_name="霜姐",
-                    object_name="顾霜",
-                    representative_node_id=f"entity:{foreign_entity.entity_id}",
-                )
-            ],
-        )
-
-
-def test_negated_identity_fact_closes_edge_and_preserves_nodes(db_session) -> None:
-    """2026-08-06 用于验证否定同一人物事实关闭当前边并保留历史节点"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["霜姐被认为是顾霜", "后来确认霜姐并非顾霜"],
-        chapter_ids=[1, 2],
-        title="同一人物关系否定",
-    )
-    first_annotation_id = persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="霜姐", action="现身"),
-            character_fact(chunk_id=0, name="顾霜", action="被提及"),
-        ],
-    )
-    first_annotation = db_session.get(ChapterAnnotationRecord, first_annotation_id)
-    assert first_annotation is not None
-    persist_completion_graph(
-        db_session,
-        annotation=first_annotation,
-        fact_outputs=[
-            identity_relation_output(
-                subject_name="霜姐",
-                object_name="顾霜",
-                representative_endpoint="object",
-            )
-        ],
+        finish=_finish(text),
     )
     db_session.commit()
 
-    second_annotation_id = persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=2,
-        characters=[
-            character_fact(
-                chunk_id=1,
-                name="霜姐",
-                action="确认与顾霜不是同一人物",
-                chapter_id=2,
+    state_rows = list(
+        db_session.execute(
+            select(EntityStateVersion).where(
+                EntityStateVersion.graph_version_id
+                == result.graph_version.graph_version_id
             )
-        ],
+        ).scalars()
     )
-    second_annotation = db_session.get(ChapterAnnotationRecord, second_annotation_id)
-    assert second_annotation is not None
-    persist_completion_graph(
-        db_session,
-        annotation=second_annotation,
-        fact_outputs=[
-            identity_relation_output(
-                subject_name="霜姐",
-                object_name="顾霜",
-                assertion="negated",
-                chapter_id=2,
-            )
-        ],
-    )
-    db_session.flush()
+    relation = db_session.execute(
+        select(GraphRelation).where(GraphRelation.run_id == run_id)
+    ).scalar_one()
+    relation_version = db_session.execute(
+        select(GraphRelationVersion).where(
+            GraphRelationVersion.graph_version_id
+            == result.graph_version.graph_version_id
+        )
+    ).scalar_one()
 
-    repository = GraphRepository(db_session)
-    assert repository.fetch_current_relations(run_id, active_only=True) == []
-    assert [row.change_type for row in repository.fetch_relation_events(run_id)] == ["断裂", "新建"]
-    entities = repository.fetch_entities(run_id, entity_type="character")
-    assert {row.canonical_name for row in entities} == {"霜姐", "顾霜"}
-    assert all(row.is_representative for row in entities)
+    assert len(state_rows) == 2
+    assert relation.to_entity_id == next(
+        entity.entity_id
+        for entity in db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalars()
+        if entity.entity_type == "location"
+    )
+    assert relation_version.relation_revision == 1
+    assert relation_version.changes[0]["fact_id"] == result.finish_facts_by_ref["relation_1"].fact_id
+
+
+def test_persist_completion_graph_only_flushes_caller_transaction(db_session) -> None:
+    """2026-08-07 用于验证图写入由外层完成事务统一提交或回滚"""
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护"
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[text],
+        title="图版本事务边界",
+    )
+    _persist_finish(db_session, run_id=run_id, finish=_finish(text))
+    assert db_session.in_transaction()
+    db_session.rollback()
+
+    assert db_session.execute(
+        select(GraphVersion).where(GraphVersion.run_id == run_id)
+    ).scalars().all() == []
+    assert db_session.execute(
+        select(GraphFact).where(GraphFact.run_id == run_id)
+    ).scalars().all() == []

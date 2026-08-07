@@ -1,822 +1,1360 @@
 """
-Agent 完成结果的持久化数据库图写入
+章节级事实图版本原子写入
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import delete, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.schema import CompletionFact, FactPushOutput
+from src.agents.annotation.schema import (
+    ChapterFinish,
+    EntityType,
+    Evidence,
+    EvidenceList,
+    PulledResult,
+    TextEvidence,
+)
 from src.storage.models import (
     ChapterAnnotationRecord,
+    Chunk,
+    EntityStateVersion,
     GraphEntity,
-    GraphEntityParticipant,
     GraphFact,
-    GraphFactSource,
-    GraphRelationCurrent,
-    GraphRelationEvent,
+    GraphRelation,
+    GraphRelationVersion,
+    GraphVersion,
 )
 
-_CONFIDENCE_SCORE = {"high": 0.9, "medium": 0.7, "low": 0.5}
-_CHANGE_LABEL = {
-    "assert": "新建",
-    "reinforce": "强化",
-    "refine": "强化",
-    "supersede": "强化",
-    "weaken": "弱化",
-    "break": "断裂",
-    "retract": "断裂",
+_ENTITY_FIELDS: tuple[tuple[str, EntityType], ...] = (
+    ("characters", "character"),
+    ("locations", "location"),
+    ("objects", "object"),
+    ("organizations", "organization"),
+)
+_FACT_FIELDS = (
+    "character_observations",
+    "location_observations",
+    "dialogues",
+    "events",
+    "relations",
+    "states",
+    "foreshadowings",
+)
+_FACT_KIND_BY_FIELD = {
+    "character_observations": "character_observation",
+    "location_observations": "location_observation",
+    "dialogues": "dialogue",
+    "events": "event",
+    "relations": "relation",
+    "states": "state",
+    "foreshadowings": "foreshadowing",
 }
 
 
-@dataclass(frozen=True, slots=True)
-class _RelationEdgeValues:
-    """2026-08-06 用于承载图关系边及同一人物代表节点选择"""
+@dataclass(slots=True)
+class PersistedGraphResult:
+    """2026-08-07 用于返回图版本和 finish pull 事实的真实持久化映射"""
 
-    from_name: str
-    to_name: str
+    graph_version: GraphVersion
+    finish_facts_by_ref: dict[str, GraphFact]
+    pulled_facts_by_case_id: dict[str, GraphFact]
+
+
+@dataclass(slots=True)
+class _RelationDraft:
+    """2026-08-07 用于在单章内汇总同一稳定关系的多次变化"""
+
+    relation: GraphRelation
+    previous_revision: int
     relation_type: str
-    change_type: str
-    chunk_id: int
-    directionality: str
-    relation_semantics: str
-    representative_selector: dict[str, Any] | None
+    attributes: dict[str, Any]
+    is_active: bool
+    changes: list[dict[str, Any]]
 
 
-def _parse_entity_node_id(node_id: str) -> int:
-    """2026-08-06 用于把图查询实体节点 ID 严格解析为数据库主键"""
-    prefix, separator, raw_entity_id = node_id.partition(":")
-    if (
-        prefix != "entity"
-        or separator != ":"
-        or not raw_entity_id.isdigit()
-        or raw_entity_id.startswith("0")
-    ):
-        raise ValueError(f"无效的图实体节点 ID: {node_id}")
-    return int(raw_entity_id)
-
-
-def stable_annotation_fact_id(annotation_id: str, payload_path: str) -> str:
-    """2026-08-05 用于按 annotation_id 与 payload 路径生成可重建的稳定来源事实 ID"""
-    digest = hashlib.sha256(f"{annotation_id}:{payload_path}".encode()).hexdigest()
+def stable_annotation_fact_id(annotation_id: str, item_ref: str) -> str:
+    """2026-08-07 用于按 annotation_id 与稳定标注项 ref 生成事实 ID"""
+    digest = hashlib.sha256(f"{annotation_id}:{item_ref}".encode()).hexdigest()
     return f"ann_{digest}"
 
 
-def stable_agent_resolution_fact_id(annotation_id: str, output_index: int) -> str:
-    """2026-08-06 用于按完成事务与 fact 输出顺序生成稳定图节点键"""
-    digest = hashlib.sha256(f"{annotation_id}:agent_resolution:{output_index}".encode()).hexdigest()
-    return f"res_{digest}"
+def _graph_version_id(run_id: str, chapter_id: int) -> str:
+    """2026-08-07 用于为同一 run 章节生成事务重试稳定的图版本 ID"""
+    return str(uuid5(NAMESPACE_URL, f"noveliq:graph-version:{run_id}:{chapter_id}"))
 
 
-def graph_fact_node_id(stable_fact_id: str) -> str:
-    """2026-08-06 用于把数据库图事实键转换为图查询统一节点 ID"""
-    return f"fact:{stable_fact_id}"
+def _relation_id(run_id: str, fact_id: str) -> str:
+    """2026-08-07 用于为 assert 关系事实生成事务重试稳定的关系 ID"""
+    return str(uuid5(NAMESPACE_URL, f"noveliq:relation:{run_id}:{fact_id}"))
 
 
-def _segment_fact(
-    *,
-    chapter_id: int,
-    item: dict[str, Any],
-) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """2026-08-05 用于把章节 segment 转换为可查询的图事实语义"""
-    content = {
-        "kind": "segment",
-        "chunk_id": item["chunk_id"],
-        "summary": item["summary"],
-        "emotional_valence": item["emotional_valence"],
-        "event_type": item["event_type"],
-        "pivot_moment": item["pivot_moment"],
-        "cliffhanger": item["cliffhanger"],
-    }
-    fact: dict[str, Any] = {
-        "fact_type": "chapter_segment",
-        "subject": {"name": f"chapter:{chapter_id}", "entity_type": "chapter"},
-        "predicate": "contains_segment",
-        "object": None,
-        "value": content,
-        "participants": [],
-        "scope": f"chapter:{chapter_id}",
-        "story_time": None,
-        "assertion": "affirmed",
-        "confidence": "high",
-        "content": content,
-    }
-    evidence = {"reason": item["summary"], "chapterid": chapter_id}
-    return "chapter_segment", fact, evidence
-
-
-def _atomic_annotation_fact(
-    *,
-    chapter_id: int,
-    field_name: str,
-    item: dict[str, Any],
-) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """2026-08-05 用于把各类章节原子事实规范化为统一图事实结构"""
-    subject: dict[str, Any]
-    object_value: dict[str, Any] | None = None
-    value: Any | None = None
-    predicate: str
-    participants = list(item.get("participants") or [])
-    fact_type = field_name.removesuffix("s")
-
-    if field_name == "characters":
-        subject = dict(item["entity"])
-        predicate = str(item["action_type"])
-        value = {
-            "action": item["action"],
-            "role_function": item["role_function"],
-            "emotion": item["emotion"],
-        }
-    elif field_name == "locations":
-        subject = dict(item["entity"])
-        predicate = str(item["relation_type"])
-        object_value = dict(item["location"])
-    elif field_name == "dialogues":
-        subject = dict(item["speaker"]) if item.get("speaker") else {
-            "name": "未知说话人",
-            "entity_type": "unknown",
-        }
-        predicate = "spoke"
-        value = {
-            "content": item["content"],
-            "tone": item.get("tone"),
-            "is_inner_monologue": item["is_inner_monologue"],
-        }
-    elif field_name == "events":
-        subject = (
-            dict(participants[0]["entity"])
-            if participants
-            else {"name": f"chapter:{chapter_id}:event", "entity_type": "event"}
-        )
-        predicate = str(item["event_type"])
-        value = {"summary": item["summary"]}
-    elif field_name == "relations":
-        subject = dict(item["from_entity"])
-        predicate = str(item["relation_type"])
-        object_value = dict(item["to_entity"])
-        participants = [
-            {"role": "from", "entity": dict(item["from_entity"])},
-            {"role": "to", "entity": dict(item["to_entity"])},
-        ]
-    elif field_name == "states":
-        subject = dict(item["entity"])
-        predicate = str(item["predicate"])
-        object_value = dict(item["object"]) if item.get("object") is not None else None
-        value = item.get("value")
-    else:
-        raise ValueError(f"不支持的章节事实字段: {field_name}")
-
-    content = {"kind": field_name, **item}
-    fact = {
-        "fact_type": fact_type,
-        "subject": subject,
-        "predicate": predicate,
-        "object": object_value,
-        "value": value,
-        "participants": participants,
-        "scope": f"chapter:{chapter_id}",
-        "story_time": item.get("story_time"),
-        "assertion": "affirmed",
-        "confidence": item["confidence"],
-        "content": content,
-    }
-    return fact_type, fact, dict(item["evidence"])
-
-
-def _iter_annotation_facts(
-    row: ChapterAnnotationRecord,
-) -> Iterator[tuple[str, str, dict[str, Any], dict[str, Any]]]:
-    """2026-08-05 用于按稳定 payload 路径遍历章节正式标注的全部事实源"""
-    payload = dict(row.payload)
-    for index, item in enumerate(payload.get("segments", [])):
-        path = f"segments/{index}"
-        fact_type, fact, evidence = _segment_fact(chapter_id=row.chapter_id, item=dict(item))
-        yield path, fact_type, fact, evidence
-    for field_name in ("characters", "locations", "dialogues", "events", "relations", "states"):
-        for index, item in enumerate(payload.get(field_name, [])):
-            path = f"{field_name}/{index}"
-            fact_type, fact, evidence = _atomic_annotation_fact(
-                chapter_id=row.chapter_id,
-                field_name=field_name,
-                item=dict(item),
+def _chapter_bounds(session: Session, run_id: str, chapter_id: int) -> tuple[int, int, int]:
+    """2026-08-07 用于按具名字段读取章节顺序和首尾 chunk 边界"""
+    chapter_rows = list(
+        session.execute(
+            select(
+                Chunk.chapter_id.label("chapter_id"),
+                func.min(Chunk.chunk_id).label("first_chunk_id"),
+                func.max(Chunk.chunk_id).label("last_chunk_id"),
             )
-            yield path, fact_type, fact, evidence
-
-
-def _iter_entity_refs(fact: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """2026-08-05 用于从统一图事实中遍历真实业务实体并排除技术主体"""
-    content = fact.get("content")
-    content_payload = content if isinstance(content, dict) else {}
-    content_kind = content_payload.get("kind")
-    synthetic_subject = (
-        content_kind == "segment"
-        or (content_kind == "dialogues" and not content_payload.get("speaker"))
-        or (content_kind == "events" and not content_payload.get("participants"))
+            .where(Chunk.run_id == run_id)
+            .group_by(Chunk.chapter_id)
+            .order_by(func.min(Chunk.chunk_id))
+        ).all()
     )
-    subject = fact.get("subject")
-    if isinstance(subject, dict) and not synthetic_subject:
-        yield subject
-    object_value = fact.get("object")
-    if isinstance(object_value, dict) and "name" in object_value:
-        yield object_value
-    for participant in fact.get("participants") or []:
-        entity = participant.get("entity") if isinstance(participant, dict) else None
-        if isinstance(entity, dict):
-            yield entity
+    for chapter_order, row in enumerate(chapter_rows, start=1):
+        if int(row.chapter_id) == chapter_id:
+            return chapter_order, int(row.first_chunk_id), int(row.last_chunk_id)
+    raise ValueError(f"章节不存在或没有 chunk: run_id={run_id} chapter_id={chapter_id}")
 
 
-def _upsert_graph_entity(
+def _iter_finish_evidence(finish: ChapterFinish) -> list[Evidence]:
+    """2026-08-07 用于收集实体目录和全部逐 chunk 标注项 Evidence"""
+    evidence_items: list[Evidence] = []
+    for field_name, _entity_type in _ENTITY_FIELDS:
+        for entity in getattr(finish.entities, field_name):
+            evidence_items.extend(entity.evidence)
+    for chunk in finish.chunks:
+        for field_name in _FACT_FIELDS:
+            for item in getattr(chunk, field_name):
+                evidence_items.extend(item.evidence)
+    return evidence_items
+
+
+def _finish_fact_refs(annotation_id: str, finish: ChapterFinish) -> set[tuple[str, int]]:
+    """2026-08-07 用于生成本章全部待提交事实引用以阻止自引用"""
+    return {
+        (stable_annotation_fact_id(annotation_id, item.ref), 1)
+        for chunk in finish.chunks
+        for field_name in _FACT_FIELDS
+        for item in getattr(chunk, field_name)
+    }
+
+
+def _validate_evidence_authorization(
+    session: Session,
+    *,
+    annotation: ChapterAnnotationRecord,
+    finish: ChapterFinish,
+    chapter_order: int,
+    authorized_text_chunk_ids: set[int],
+    visible_graph_fact_refs: set[tuple[str, int]],
+) -> None:
+    """2026-08-07 用于复核 finish Evidence 的同 run 授权与依赖方向"""
+    pending_refs = _finish_fact_refs(annotation.annotation_id, finish)
+    text_chunk_ids: set[int] = set()
+    graph_fact_refs: set[tuple[str, int]] = set()
+    for evidence in _iter_finish_evidence(finish):
+        if isinstance(evidence, TextEvidence):
+            if evidence.chunk_id not in authorized_text_chunk_ids:
+                raise ValueError(
+                    f"TextEvidence 未经本轮原文读取授权: chunk_id={evidence.chunk_id}"
+                )
+            text_chunk_ids.add(evidence.chunk_id)
+            continue
+        reference = (evidence.fact_id, evidence.fact_revision)
+        if reference in pending_refs:
+            raise ValueError(f"GraphEvidence 不允许引用本章待提交事实: {reference}")
+        if reference not in visible_graph_fact_refs:
+            raise ValueError(f"GraphEvidence 未由本轮图搜索授权: {reference}")
+        graph_fact_refs.add(reference)
+
+    if text_chunk_ids:
+        existing_chunk_ids = set(
+            session.execute(
+                select(Chunk.chunk_id).where(
+                    Chunk.run_id == annotation.run_id,
+                    Chunk.chunk_id.in_(text_chunk_ids),
+                )
+            ).scalars()
+        )
+        missing_chunk_ids = sorted(text_chunk_ids - existing_chunk_ids)
+        if missing_chunk_ids:
+            raise ValueError(f"TextEvidence 引用了跨 run 或不存在的 chunk: {missing_chunk_ids}")
+
+    if graph_fact_refs:
+        rows = session.execute(
+            select(
+                GraphFact.fact_id.label("fact_id"),
+                GraphFact.fact_revision.label("fact_revision"),
+                GraphVersion.chapter_order.label("chapter_order"),
+            )
+            .join(GraphVersion, GraphVersion.graph_version_id == GraphFact.graph_version_id)
+            .where(
+                GraphFact.run_id == annotation.run_id,
+                tuple_(GraphFact.fact_id, GraphFact.fact_revision).in_(graph_fact_refs),
+            )
+        ).all()
+        existing_refs = {
+            (str(row.fact_id), int(row.fact_revision))
+            for row in rows
+        }
+        missing_refs = sorted(graph_fact_refs - existing_refs)
+        if missing_refs:
+            raise ValueError(f"GraphEvidence 引用了跨 run 或不存在的事实版本: {missing_refs}")
+        invalid_order = [
+            (str(row.fact_id), int(row.fact_revision))
+            for row in rows
+            if int(row.chapter_order) >= chapter_order
+        ]
+        if invalid_order:
+            raise ValueError(f"GraphEvidence 只能引用前序章节事实版本: {invalid_order}")
+
+
+def _entity_attributes(entity: Any, entity_type: EntityType) -> dict[str, Any]:
+    """2026-08-07 用于提取不同实体类型的目录扩展属性"""
+    payload = entity.model_dump(mode="json")
+    common_fields = {
+        "ref",
+        "name",
+        "existing_entity_id",
+        "mentions",
+        "confidence",
+        "evidence",
+    }
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in common_fields and value is not None
+    } | {"entity_type": entity_type}
+
+
+def _resolve_entity_directory(
+    session: Session,
+    *,
+    annotation: ChapterAnnotationRecord,
+    finish: ChapterFinish,
+    visible_graph_entity_ids: set[int],
+) -> tuple[dict[str, GraphEntity], dict[int, GraphEntity]]:
+    """2026-08-07 用于先解析实体目录并显式创建或匹配四类图节点"""
+    entities_by_ref: dict[str, GraphEntity] = {}
+    entities_by_id: dict[int, GraphEntity] = {}
+    for field_name, entity_type in _ENTITY_FIELDS:
+        for entity_item in getattr(finish.entities, field_name):
+            first_seen_chunk = min(mention.chunk_id for mention in entity_item.mentions)
+            last_seen_chunk = max(mention.chunk_id for mention in entity_item.mentions)
+            attributes = _entity_attributes(entity_item, entity_type)
+            if entity_item.existing_entity_id is not None:
+                if entity_item.existing_entity_id not in visible_graph_entity_ids:
+                    raise ValueError(
+                        "existing_entity_id 未由本轮图搜索授权: "
+                        f"{entity_item.existing_entity_id}"
+                    )
+                entity = session.get(GraphEntity, entity_item.existing_entity_id)
+                if entity is None or entity.run_id != annotation.run_id:
+                    raise ValueError(
+                        "existing_entity_id 不存在或跨 run: "
+                        f"{entity_item.existing_entity_id}"
+                    )
+                if entity.entity_type != entity_type:
+                    raise ValueError(
+                        f"existing_entity_id 类型不一致: id={entity.entity_id} "
+                        f"expected={entity_type} actual={entity.entity_type}"
+                    )
+                entity.first_seen_chunk = min(entity.first_seen_chunk, first_seen_chunk)
+                entity.last_seen_chunk = max(entity.last_seen_chunk, last_seen_chunk)
+                entity.attributes = {**dict(entity.attributes or {}), **attributes}
+            else:
+                duplicate = session.execute(
+                    select(GraphEntity).where(
+                        GraphEntity.run_id == annotation.run_id,
+                        GraphEntity.canonical_name == entity_item.name,
+                    )
+                ).scalar_one_or_none()
+                if duplicate is not None:
+                    raise ValueError(
+                        "新实体名称已存在，必须使用 search_graph 返回的 existing_entity_id: "
+                        f"{entity_item.name}"
+                    )
+                entity = GraphEntity(
+                    run_id=annotation.run_id,
+                    canonical_name=entity_item.name,
+                    entity_type=entity_type,
+                    attributes=attributes,
+                    first_seen_chunk=first_seen_chunk,
+                    last_seen_chunk=last_seen_chunk,
+                )
+                session.add(entity)
+                session.flush()
+            entities_by_ref[entity_item.ref] = entity
+            entities_by_id[int(entity.entity_id)] = entity
+    return entities_by_ref, entities_by_id
+
+
+def _load_authorized_entity(
     session: Session,
     *,
     run_id: str,
-    entity_ref: dict[str, Any],
-    chunk_id: int | None,
-    confidence: str,
-    evidence: dict[str, Any],
+    entity_id: int,
+    visible_graph_entity_ids: set[int],
+    cache: dict[int, GraphEntity],
+    chunk_id: int,
 ) -> GraphEntity:
-    """2026-08-06 用于从图事实实体引用维护规范实体节点"""
-    canonical_name = str(entity_ref["name"]).strip()
-    entity_type = str(entity_ref["entity_type"]).strip()
-    stmt = select(GraphEntity).where(
-        GraphEntity.run_id == run_id,
-        GraphEntity.canonical_name == canonical_name,
-    )
-    entity = session.execute(stmt).scalar_one_or_none()
-    if entity is None:
-        entity = GraphEntity(
-            run_id=run_id,
-            canonical_name=canonical_name,
-            entity_type=entity_type,
-            first_seen_chunk=chunk_id,
-            last_seen_chunk=chunk_id,
-            status="active",
-            is_representative=True,
-            source_confidence=_CONFIDENCE_SCORE.get(confidence, 0.5),
-        )
-        session.add(entity)
-        session.flush()
-    else:
-        if chunk_id is not None:
-            if entity.first_seen_chunk is None or chunk_id < entity.first_seen_chunk:
-                entity.first_seen_chunk = chunk_id
-            if entity.last_seen_chunk is None or chunk_id > entity.last_seen_chunk:
-                entity.last_seen_chunk = chunk_id
-        entity.entity_type = entity_type
-        entity.status = "active"
-        entity.source_confidence = max(
-            entity.source_confidence or 0.0,
-            _CONFIDENCE_SCORE.get(confidence, 0.5),
-        )
-
+    """2026-08-07 用于按授权 existing_entity_id 读取并维护出现边界"""
+    if entity_id not in visible_graph_entity_ids:
+        raise ValueError(f"existing_entity_id 未由本轮图搜索授权: {entity_id}")
+    entity = cache.get(entity_id) or session.get(GraphEntity, entity_id)
+    if entity is None or entity.run_id != run_id:
+        raise ValueError(f"existing_entity_id 不存在或跨 run: {entity_id}")
+    entity.last_seen_chunk = max(entity.last_seen_chunk, chunk_id)
+    cache[entity_id] = entity
     return entity
 
 
-def _upsert_graph_fact(
+def _resolve_endpoint(
     session: Session,
     *,
     run_id: str,
-    stable_fact_id: str,
-    source_kind: str,
-    fact: dict[str, Any],
-    evidence: dict[str, Any],
-    annotation_id: str | None = None,
-    payload_path: str | None = None,
-    source_chunk_id: int | None = None,
-) -> GraphFact:
-    """2026-08-05 用于按稳定来源事实 ID 幂等写入图事实与来源关系"""
-    source_stmt = select(GraphFactSource).where(
-        GraphFactSource.run_id == run_id,
-        GraphFactSource.stable_fact_id == stable_fact_id,
-    )
-    source = session.execute(source_stmt).scalar_one_or_none()
-    if source is not None:
-        graph_fact = session.get(GraphFact, source.graph_fact_id)
-        if graph_fact is None:
-            raise ValueError(f"graph_fact_source 指向不存在的图事实: {stable_fact_id}")
-        return graph_fact
-
-    graph_fact = GraphFact(
-        run_id=run_id,
-        stable_fact_id=stable_fact_id,
-        fact_type=str(fact["fact_type"]),
-        subject_name=str(fact["subject"]["name"]),
-        subject_type=str(fact["subject"]["entity_type"]),
-        predicate=str(fact["predicate"]),
-        object=fact.get("object"),
-        value=fact.get("value"),
-        participants=list(fact.get("participants") or []),
-        scope=str(fact["scope"]),
-        story_time=fact.get("story_time"),
-        assertion=str(fact["assertion"]),
-        confidence=str(fact["confidence"]),
-        content=dict(fact["content"]),
-        active=True,
-    )
-    session.add(graph_fact)
-    session.flush()
-    session.add(
-        GraphFactSource(
-            run_id=run_id,
-            graph_fact_id=graph_fact.graph_fact_id,
-            stable_fact_id=stable_fact_id,
-            source_kind=source_kind,
-            annotation_id=annotation_id,
-            payload_path=payload_path,
-            evidence=evidence,
-        )
-    )
-    content_chunk_id = fact["content"].get("chunk_id") if isinstance(fact.get("content"), dict) else None
-    chunk_id = content_chunk_id if isinstance(content_chunk_id, int) else source_chunk_id
-    for entity_ref in _iter_entity_refs(fact):
-        entity = _upsert_graph_entity(
+    ref: str | None,
+    existing_entity_id: int | None,
+    entities_by_ref: dict[str, GraphEntity],
+    entities_by_id: dict[int, GraphEntity],
+    visible_graph_entity_ids: set[int],
+    chunk_id: int,
+) -> GraphEntity | None:
+    """2026-08-07 用于把 finish 内部 ref 或授权既有 ID 解析为图实体"""
+    if ref is not None:
+        entity = entities_by_ref.get(ref)
+        if entity is None:
+            raise ValueError(f"实体 ref 不存在: {ref}")
+        entity.last_seen_chunk = max(entity.last_seen_chunk, chunk_id)
+        return entity
+    if existing_entity_id is not None:
+        return _load_authorized_entity(
             session,
             run_id=run_id,
-            entity_ref=entity_ref,
+            entity_id=existing_entity_id,
+            visible_graph_entity_ids=visible_graph_entity_ids,
+            cache=entities_by_id,
             chunk_id=chunk_id,
-            confidence=str(fact["confidence"]),
-            evidence=evidence,
         )
-        content = fact.get("content")
-        if (
-            isinstance(content, dict)
-            and content.get("kind") == "characters"
-            and entity_ref == fact.get("subject")
-        ):
-            entity.primary_role_function = str(content.get("role_function") or "") or None
-            entity.last_action = str(content.get("action") or "") or None
-            entity.last_emotion_score = str(content.get("emotion") or "") or None
-    session.flush()
-    return graph_fact
+    return None
 
 
-def _agent_resolution_payload(output: FactPushOutput) -> dict[str, Any]:
-    """2026-08-06 用于把 Agent fact 输出转换为数据库图节点关系与属性"""
-    payload = output.payload.model_dump(mode="json")
-    content = {
-        "kind": "agent_resolution",
-        "fact_type": payload["fact_type"],
-        "subject": payload["subject"],
-        "predicate": payload["predicate"],
-        "object": payload["object"],
-        "value": payload["value"],
-        "participants": payload["participants"],
-        "scope": payload["scope"],
-        "story_time": payload["story_time"],
-        "assertion": payload["assertion"],
-        "confidence": payload["confidence"],
-        "directionality": payload["directionality"],
-        "relation_semantics": payload["relation_semantics"],
-        "representative_node": payload["representative_node"],
-    }
+def _entity_descriptor(entity: GraphEntity | None) -> dict[str, Any] | None:
+    """2026-08-07 用于把已解析实体转换为事实内容中的稳定描述"""
+    if entity is None:
+        return None
     return {
-        "fact_type": payload["fact_type"],
-        "subject": dict(payload["subject"]),
-        "predicate": payload["predicate"],
-        "object": payload["object"],
-        "value": payload["value"],
-        "participants": list(payload["participants"]),
-        "scope": payload["scope"],
-        "story_time": payload["story_time"],
-        "assertion": payload["assertion"],
-        "confidence": payload["confidence"],
-        "content": content,
+        "entity_id": int(entity.entity_id),
+        "name": str(entity.canonical_name),
+        "entity_type": str(entity.entity_type),
     }
 
 
-def _chapter_anchor_chunks(session: Session, run_id: str) -> dict[int, int]:
-    """2026-08-05 用于把章节 Evidence 转换为现有关系事件表需要的 chunk 锚点"""
-    from sqlalchemy import func
-
-    from src.storage.models import Chunk
-
-    rows = session.execute(
-        select(Chunk.chapter_id, func.min(Chunk.chunk_id).label("chunk_id"))
-        .where(Chunk.run_id == run_id)
-        .group_by(Chunk.chapter_id)
-    ).all()
-    return {int(row.chapter_id): int(row.chunk_id) for row in rows}
-
-
-def _relation_edge_values(
+def _new_graph_fact(
     *,
-    fact: GraphFact,
-    source: GraphFactSource,
-    chapter_anchor_chunks: dict[int, int],
-) -> _RelationEdgeValues | None:
-    """2026-08-06 用于从通用图事实提取关系事件边所需的稳定语义"""
-    content = fact.content if isinstance(fact.content, dict) else {}
-    kind = content.get("kind")
-    if kind == "relations":
-        from_entity = content.get("from_entity")
-        to_entity = content.get("to_entity")
-        chunk_id = content.get("chunk_id")
-        if not isinstance(from_entity, dict) or not isinstance(to_entity, dict) or not isinstance(chunk_id, int):
-            return None
-        representative = content.get("representative_node")
-        return _RelationEdgeValues(
-            from_name=str(from_entity.get("name") or "").strip(),
-            to_name=str(to_entity.get("name") or "").strip(),
-            relation_type=fact.predicate,
-            change_type=_CHANGE_LABEL.get(str(content.get("change_kind") or "assert"), "新建"),
-            chunk_id=chunk_id,
-            directionality=str(content.get("directionality") or "directed"),
-            relation_semantics=str(content.get("relation_semantics") or "ordinary"),
-            representative_selector=dict(representative) if isinstance(representative, dict) else None,
-        )
-    if kind != "agent_resolution" or fact.fact_type != "relation" or not isinstance(fact.object, dict):
-        return None
-    evidence_chapter = source.evidence.get("chapterid") if isinstance(source.evidence, dict) else None
-    if not isinstance(evidence_chapter, int) or evidence_chapter not in chapter_anchor_chunks:
-        return None
-    representative = content.get("representative_node")
-    return _RelationEdgeValues(
-        from_name=fact.subject_name.strip(),
-        to_name=str(fact.object.get("name") or "").strip(),
-        relation_type=fact.predicate,
-        change_type="断裂" if fact.assertion == "negated" else "新建",
-        chunk_id=chapter_anchor_chunks[evidence_chapter],
-        directionality=str(content.get("directionality") or "directed"),
-        relation_semantics=str(content.get("relation_semantics") or "ordinary"),
-        representative_selector=dict(representative) if isinstance(representative, dict) else None,
+    graph_version: GraphVersion,
+    annotation: ChapterAnnotationRecord,
+    item_ref: str,
+    kind: str,
+    chunk_id: int,
+    subject: GraphEntity | None,
+    predicate: str,
+    object_value: dict[str, Any] | None,
+    value: Any | None,
+    participants: list[dict[str, Any]],
+    story_time: dict[str, Any] | None,
+    assertion: str,
+    confidence: str,
+    content: dict[str, Any],
+    evidence: EvidenceList,
+) -> GraphFact:
+    """2026-08-07 用于从稳定标注项 ref 构造单个 chapter_finish 事实版本"""
+    return GraphFact(
+        graph_version_id=graph_version.graph_version_id,
+        run_id=annotation.run_id,
+        chapter_id=annotation.chapter_id,
+        fact_id=stable_annotation_fact_id(annotation.annotation_id, item_ref),
+        fact_revision=1,
+        fact_type=kind,
+        subject_entity_id=subject.entity_id if subject is not None else None,
+        predicate=predicate,
+        object=object_value,
+        value=value,
+        participants=participants,
+        scope=f"chapter:{annotation.chapter_id}:chunk:{chunk_id}",
+        story_time=story_time,
+        assertion=assertion,
+        confidence=confidence,
+        content=content,
+        evidence=evidence.model_dump(mode="json"),
+        effective_chunk_id=chunk_id,
+        source_kind="chapter_finish",
+        annotation_id=annotation.annotation_id,
+        payload_path=f"chunks/{chunk_id}/{kind}/{item_ref}",
     )
 
 
-def _resolve_representative_entity_id(
+def _persist_finish_facts(
+    session: Session,
     *,
-    run_id: str,
-    values: _RelationEdgeValues,
-    from_entity: GraphEntity,
-    to_entity: GraphEntity,
+    annotation: ChapterAnnotationRecord,
+    finish: ChapterFinish,
+    graph_version: GraphVersion,
+    entities_by_ref: dict[str, GraphEntity],
     entities_by_id: dict[int, GraphEntity],
-) -> int:
-    """2026-08-06 用于把端点或图搜索节点选择器解析为当前运行的真实人物节点 ID"""
-    selector = values.representative_selector
-    if selector is None:
-        raise ValueError(
-            f"同一人物关系缺少常用节点选择器: {values.from_name} -> {values.to_name}"
-        )
-    endpoint = selector.get("endpoint")
-    node_id = selector.get("node_id")
-    if (endpoint is None) == (node_id is None):
-        raise ValueError("同一人物常用节点选择器必须恰好包含 endpoint 或 node_id")
-    if endpoint == "subject":
-        return from_entity.entity_id
-    if endpoint == "object":
-        return to_entity.entity_id
-    if endpoint is not None:
-        raise ValueError(f"无效的同一人物关系端点选择器: {endpoint}")
-    if not isinstance(node_id, str):
-        raise ValueError("同一人物常用节点 node_id 必须是字符串")
-    entity_id = _parse_entity_node_id(node_id)
-    selected = entities_by_id.get(entity_id)
-    if selected is None or selected.run_id != run_id:
-        raise ValueError(f"常用节点不属于当前 run_id: {node_id}")
-    if selected.entity_type != "character":
-        raise ValueError(f"常用节点必须是 character 节点: {node_id}")
-    return selected.entity_id
+    visible_graph_entity_ids: set[int],
+) -> dict[str, GraphFact]:
+    """2026-08-07 用于按 chunk 顺序解析观察对话事件关系状态和伏笔事实"""
+    rows_by_ref: dict[str, GraphFact] = {}
 
+    def endpoint(
+        *,
+        ref: str | None,
+        existing_entity_id: int | None,
+        chunk_id: int,
+    ) -> GraphEntity | None:
+        """2026-08-07 用于在逐 chunk 事实转换中解析实体端点"""
+        return _resolve_endpoint(
+            session,
+            run_id=annotation.run_id,
+            ref=ref,
+            existing_entity_id=existing_entity_id,
+            entities_by_ref=entities_by_ref,
+            entities_by_id=entities_by_id,
+            visible_graph_entity_ids=visible_graph_entity_ids,
+            chunk_id=chunk_id,
+        )
 
-def _sync_relation_events(session: Session, *, run_id: str) -> None:
-    """2026-08-06 用于从数据库图事实同步关系事件边"""
-    chapter_anchor_chunks = _chapter_anchor_chunks(session, run_id)
-    entity_rows = list(
-        session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars().all()
-    )
-    entities_by_name = {row.canonical_name: row for row in entity_rows}
-    fact_stmt = (
-        select(GraphFact, GraphFactSource)
-        .join(GraphFactSource, GraphFactSource.graph_fact_id == GraphFact.graph_fact_id)
-        .where(GraphFact.run_id == run_id, GraphFactSource.run_id == run_id)
-        .order_by(GraphFact.graph_fact_id)
-    )
-    existing_events = {
-        row.source_relation_row_id: row
-        for row in session.execute(
-            select(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id)
-        )
-        .scalars()
-        .all()
-        if row.source_relation_row_id is not None
-    }
-    expected_source_ids: set[int] = set()
-    for fact, source in session.execute(fact_stmt).all():
-        values = _relation_edge_values(
-            fact=fact,
-            source=source,
-            chapter_anchor_chunks=chapter_anchor_chunks,
-        )
-        if values is None:
-            continue
-        from_entity = entities_by_name.get(values.from_name)
-        to_entity = entities_by_name.get(values.to_name)
-        if from_entity is None or to_entity is None:
-            raise ValueError(f"关系事实端点缺少实体节点: {values.from_name} -> {values.to_name}")
-        expected_source_ids.add(fact.graph_fact_id)
-        reason = source.evidence.get("reason") if isinstance(source.evidence, dict) else None
-        event = existing_events.get(fact.graph_fact_id)
-        if event is None:
-            event = GraphRelationEvent(
-                run_id=run_id,
-                from_entity_id=from_entity.entity_id,
-                to_entity_id=to_entity.entity_id,
-                relation_type=values.relation_type,
-                change_type=values.change_type,
-                chunk_id=values.chunk_id,
-                evidence=str(reason) if reason else None,
-                confidence=_CONFIDENCE_SCORE.get(fact.confidence),
-                source_relation_row_id=fact.graph_fact_id,
-                directionality=values.directionality,
+    for chunk in finish.chunks:
+        chunk_id = chunk.chunk_id
+        for character_observation in chunk.character_observations:
+            entity = endpoint(
+                ref=character_observation.entity_ref,
+                existing_entity_id=character_observation.entity_existing_entity_id,
+                chunk_id=chunk_id,
             )
-            session.add(event)
-        else:
-            event.from_entity_id = from_entity.entity_id
-            event.to_entity_id = to_entity.entity_id
-            event.relation_type = values.relation_type
-            event.change_type = values.change_type
-            event.chunk_id = values.chunk_id
-            event.evidence = str(reason) if reason else None
-            event.confidence = _CONFIDENCE_SCORE.get(fact.confidence)
-            event.directionality = values.directionality
-    stale_event_ids = [
-        row.relation_event_id
-        for source_id, row in existing_events.items()
-        if source_id not in expected_source_ids
-    ]
-    if stale_event_ids:
-        session.execute(
-            delete(GraphRelationEvent).where(
-                GraphRelationEvent.run_id == run_id,
-                GraphRelationEvent.relation_event_id.in_(stale_event_ids),
+            content = {
+                "kind": "character_observation",
+                "ref": character_observation.ref,
+                "chunk_id": chunk_id,
+                "entity": _entity_descriptor(entity),
+                "role_function": character_observation.role_function,
+                "action": character_observation.action,
+                "action_type": character_observation.action_type,
+                "emotion": character_observation.emotion,
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=character_observation.ref,
+                kind="character_observation",
+                chunk_id=chunk_id,
+                subject=entity,
+                predicate=character_observation.action_type,
+                object_value=None,
+                value={
+                    "role_function": character_observation.role_function,
+                    "action": character_observation.action,
+                    "emotion": character_observation.emotion,
+                },
+                participants=[],
+                story_time=None,
+                assertion="affirmed",
+                confidence=character_observation.confidence,
+                content=content,
+                evidence=character_observation.evidence,
             )
-        )
+            session.add(row)
+            rows_by_ref[character_observation.ref] = row
+
+        for location_observation in chunk.location_observations:
+            location = endpoint(
+                ref=location_observation.location_ref,
+                existing_entity_id=location_observation.location_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            content = {
+                "kind": "location_observation",
+                "ref": location_observation.ref,
+                "chunk_id": chunk_id,
+                "location": _entity_descriptor(location),
+                "predicate": location_observation.predicate,
+                "value": location_observation.value,
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=location_observation.ref,
+                kind="location_observation",
+                chunk_id=chunk_id,
+                subject=location,
+                predicate=location_observation.predicate,
+                object_value=None,
+                value=location_observation.value,
+                participants=[],
+                story_time=(
+                    location_observation.story_time.model_dump(mode="json")
+                    if location_observation.story_time is not None
+                    else None
+                ),
+                assertion="affirmed",
+                confidence=location_observation.confidence,
+                content=content,
+                evidence=location_observation.evidence,
+            )
+            session.add(row)
+            rows_by_ref[location_observation.ref] = row
+
+        for dialogue in chunk.dialogues:
+            speaker = endpoint(
+                ref=dialogue.speaker_ref,
+                existing_entity_id=dialogue.speaker_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            content = {
+                "kind": "dialogue",
+                "ref": dialogue.ref,
+                "chunk_id": chunk_id,
+                "content": dialogue.content,
+                "start": dialogue.start,
+                "end": dialogue.end,
+                "speaker": _entity_descriptor(speaker),
+                "tone": dialogue.tone,
+                "is_inner_monologue": dialogue.is_inner_monologue,
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=dialogue.ref,
+                kind="dialogue",
+                chunk_id=chunk_id,
+                subject=speaker,
+                predicate="spoke",
+                object_value=None,
+                value={
+                    "content": dialogue.content,
+                    "start": dialogue.start,
+                    "end": dialogue.end,
+                    "tone": dialogue.tone,
+                    "is_inner_monologue": dialogue.is_inner_monologue,
+                },
+                participants=(
+                    [{"role": "speaker", "entity": _entity_descriptor(speaker)}]
+                    if speaker is not None
+                    else []
+                ),
+                story_time=None,
+                assertion="affirmed",
+                confidence=dialogue.confidence,
+                content=content,
+                evidence=dialogue.evidence,
+            )
+            session.add(row)
+            rows_by_ref[dialogue.ref] = row
+
+        for event in chunk.events:
+            resolved_participants: list[dict[str, Any]] = []
+            participant_entities: list[GraphEntity] = []
+            for participant in event.participants:
+                entity = endpoint(
+                    ref=participant.entity_ref,
+                    existing_entity_id=participant.entity_existing_entity_id,
+                    chunk_id=chunk_id,
+                )
+                if entity is None:
+                    raise ValueError(f"event participant 缺少实体: {event.ref}")
+                participant_entities.append(entity)
+                resolved_participants.append(
+                    {
+                        "role": participant.role,
+                        "entity": _entity_descriptor(entity),
+                    }
+                )
+            location = endpoint(
+                ref=event.location_ref,
+                existing_entity_id=event.location_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            content = {
+                "kind": "event",
+                "ref": event.ref,
+                "chunk_id": chunk_id,
+                "event_type": event.event_type,
+                "summary": event.summary,
+                "participants": resolved_participants,
+                "location": _entity_descriptor(location),
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=event.ref,
+                kind="event",
+                chunk_id=chunk_id,
+                subject=participant_entities[0] if participant_entities else None,
+                predicate=event.event_type,
+                object_value=_entity_descriptor(location),
+                value={"summary": event.summary},
+                participants=resolved_participants,
+                story_time=(
+                    event.story_time.model_dump(mode="json")
+                    if event.story_time is not None
+                    else None
+                ),
+                assertion="affirmed",
+                confidence=event.confidence,
+                content=content,
+                evidence=event.evidence,
+            )
+            session.add(row)
+            rows_by_ref[event.ref] = row
+
+        for relation in chunk.relations:
+            from_entity = endpoint(
+                ref=relation.from_ref,
+                existing_entity_id=relation.from_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            to_entity = endpoint(
+                ref=relation.to_ref,
+                existing_entity_id=relation.to_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            representative = endpoint(
+                ref=relation.representative_ref,
+                existing_entity_id=relation.representative_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            if from_entity is None or to_entity is None:
+                raise ValueError(f"relation 端点缺失: {relation.ref}")
+            fact_id = stable_annotation_fact_id(annotation.annotation_id, relation.ref)
+            relation_id = relation.relation_id or _relation_id(annotation.run_id, fact_id)
+            content = {
+                "kind": "relation",
+                "ref": relation.ref,
+                "chunk_id": chunk_id,
+                "from_entity": _entity_descriptor(from_entity),
+                "to_entity": _entity_descriptor(to_entity),
+                "relation_type": relation.relation_type,
+                "change_kind": relation.change_kind,
+                "relation_id": relation_id,
+                "directionality": relation.directionality,
+                "relation_semantics": relation.relation_semantics,
+                "representative_entity_id": (
+                    int(representative.entity_id)
+                    if representative is not None
+                    else None
+                ),
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=relation.ref,
+                kind="relation",
+                chunk_id=chunk_id,
+                subject=from_entity,
+                predicate=relation.relation_type,
+                object_value=_entity_descriptor(to_entity),
+                value=None,
+                participants=[
+                    {"role": "from", "entity": _entity_descriptor(from_entity)},
+                    {"role": "to", "entity": _entity_descriptor(to_entity)},
+                ],
+                story_time=None,
+                assertion="affirmed",
+                confidence=relation.confidence,
+                content=content,
+                evidence=relation.evidence,
+            )
+            session.add(row)
+            rows_by_ref[relation.ref] = row
+
+        for state in chunk.states:
+            entity = endpoint(
+                ref=state.entity_ref,
+                existing_entity_id=state.entity_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            object_entity = endpoint(
+                ref=state.object_ref,
+                existing_entity_id=state.object_existing_entity_id,
+                chunk_id=chunk_id,
+            )
+            content = {
+                "kind": "state",
+                "ref": state.ref,
+                "chunk_id": chunk_id,
+                "entity": _entity_descriptor(entity),
+                "predicate": state.predicate,
+                "object": _entity_descriptor(object_entity),
+                "value": state.value,
+                "assertion": state.assertion,
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=state.ref,
+                kind="state",
+                chunk_id=chunk_id,
+                subject=entity,
+                predicate=state.predicate,
+                object_value=_entity_descriptor(object_entity),
+                value=state.value,
+                participants=[],
+                story_time=(
+                    state.story_time.model_dump(mode="json")
+                    if state.story_time is not None
+                    else None
+                ),
+                assertion=state.assertion,
+                confidence=state.confidence,
+                content=content,
+                evidence=state.evidence,
+            )
+            session.add(row)
+            rows_by_ref[state.ref] = row
+
+        for foreshadowing in chunk.foreshadowings:
+            content = {
+                "kind": "foreshadowing",
+                "ref": foreshadowing.ref,
+                "chunk_id": chunk_id,
+                **foreshadowing.model_dump(mode="json", exclude={"evidence", "ref", "confidence"}),
+            }
+            row = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                item_ref=foreshadowing.ref,
+                kind="foreshadowing",
+                chunk_id=chunk_id,
+                subject=None,
+                predicate=foreshadowing.setup_kind,
+                object_value=None,
+                value={
+                    "setup_summary": foreshadowing.setup_summary,
+                    "expected_payoff_family": foreshadowing.expected_payoff_family,
+                    "payoff_likelihood": foreshadowing.payoff_likelihood,
+                    "setup_status": foreshadowing.setup_status,
+                },
+                participants=[],
+                story_time=None,
+                assertion="affirmed",
+                confidence=foreshadowing.confidence,
+                content=content,
+                evidence=foreshadowing.evidence,
+            )
+            session.add(row)
+            rows_by_ref[foreshadowing.ref] = row
+
     session.flush()
+    return rows_by_ref
 
 
-def _relation_pair(event: GraphRelationEvent) -> tuple[int, int]:
-    """2026-08-05 用于按关系方向生成当前关系快照的实体对键"""
-    if event.directionality == "bidirectional":
-        return min(event.from_entity_id, event.to_entity_id), max(event.from_entity_id, event.to_entity_id)
-    return event.from_entity_id, event.to_entity_id
-
-
-def _sync_relation_current_and_participants(session: Session, *, run_id: str) -> None:
-    """2026-08-06 用于从关系事件同步当前关系边与参与者属性"""
-    session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id))
-    session.execute(delete(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id))
-    events = list(
-        session.execute(
-            select(GraphRelationEvent)
-            .where(GraphRelationEvent.run_id == run_id)
-            .order_by(GraphRelationEvent.chunk_id, GraphRelationEvent.relation_event_id)
-        )
-        .scalars()
-        .all()
-    )
-    grouped: dict[tuple[int, int], list[GraphRelationEvent]] = {}
-    for event in events:
-        grouped.setdefault(_relation_pair(event), []).append(event)
-
-    active_counterparts: dict[int, set[int]] = {}
-    for relation_events in grouped.values():
-        first = relation_events[0]
-        latest = relation_events[-1]
-        is_active = latest.change_type != "断裂"
-        tension = 0.0
-        for event in relation_events:
-            confidence = event.confidence or 0.5
-            if event.relation_type == "敌对":
-                tension += confidence
-            elif event.relation_type in {"盟友", "友情"}:
-                tension -= confidence * 0.5
-        session.add(
-            GraphRelationCurrent(
-                run_id=run_id,
-                from_entity_id=latest.from_entity_id,
-                to_entity_id=latest.to_entity_id,
-                current_type=latest.relation_type,
-                first_seen_chunk=first.chunk_id,
-                last_seen_chunk=latest.chunk_id,
-                change_count=sum(1 for event in relation_events if event.change_type != "新建"),
-                support_count=len(relation_events),
-                latest_event_id=latest.relation_event_id,
-                tension_index=tension,
-                is_active=is_active,
-            )
-        )
-        if is_active:
-            active_counterparts.setdefault(latest.from_entity_id, set()).add(latest.to_entity_id)
-            active_counterparts.setdefault(latest.to_entity_id, set()).add(latest.from_entity_id)
-
-    events_by_entity: dict[int, list[GraphRelationEvent]] = {}
-    historical_counterparts: dict[int, set[int]] = {}
-    for event in events:
-        events_by_entity.setdefault(event.from_entity_id, []).append(event)
-        events_by_entity.setdefault(event.to_entity_id, []).append(event)
-        historical_counterparts.setdefault(event.from_entity_id, set()).add(event.to_entity_id)
-        historical_counterparts.setdefault(event.to_entity_id, set()).add(event.from_entity_id)
-    for entity_id, entity_events in events_by_entity.items():
-        latest = max(entity_events, key=lambda row: (row.chunk_id, row.relation_event_id))
-        session.add(
-            GraphEntityParticipant(
-                run_id=run_id,
-                entity_id=entity_id,
-                relation_event_count=len(entity_events),
-                current_degree=len(active_counterparts.get(entity_id, set())),
-                historical_degree=len(historical_counterparts.get(entity_id, set())),
-                first_relation_chunk=min(event.chunk_id for event in entity_events),
-                last_relation_chunk=max(event.chunk_id for event in entity_events),
-                latest_relation_event_id=latest.relation_event_id,
-            )
-        )
-    session.flush()
-
-
-def _active_identity_edges(
+def _previous_entity_state(
     session: Session,
     *,
     run_id: str,
-    entities_by_name: dict[str, GraphEntity],
-    entities_by_id: dict[int, GraphEntity],
-) -> list[tuple[int, int, int, int]]:
-    """2026-08-06 用于读取当前有效同一人物边及其代表节点选择"""
-    chapter_anchor_chunks = _chapter_anchor_chunks(session, run_id)
-    fact_stmt = (
-        select(GraphFact, GraphFactSource)
-        .join(GraphFactSource, GraphFactSource.graph_fact_id == GraphFact.graph_fact_id)
-        .where(GraphFact.run_id == run_id, GraphFactSource.run_id == run_id)
-        .order_by(GraphFact.graph_fact_id)
-    )
-    latest_by_pair: dict[tuple[int, int], tuple[int, _RelationEdgeValues]] = {}
-    for fact, source in session.execute(fact_stmt).all():
-        values = _relation_edge_values(
-            fact=fact,
-            source=source,
-            chapter_anchor_chunks=chapter_anchor_chunks,
+    entity_id: int,
+    chapter_order: int,
+) -> tuple[int, dict[str, Any]]:
+    """2026-08-07 用于读取目标章节之前最近的实体完整状态"""
+    row = session.execute(
+        select(EntityStateVersion)
+        .join(GraphVersion, GraphVersion.graph_version_id == EntityStateVersion.graph_version_id)
+        .where(
+            EntityStateVersion.run_id == run_id,
+            EntityStateVersion.entity_id == entity_id,
+            GraphVersion.chapter_order < chapter_order,
         )
-        if values is None or values.relation_semantics != "same_character":
-            continue
-        from_entity = entities_by_name.get(values.from_name)
-        to_entity = entities_by_name.get(values.to_name)
-        if from_entity is None or to_entity is None:
-            raise ValueError(f"同一人物关系端点缺少实体节点: {values.from_name} -> {values.to_name}")
-        if from_entity.entity_type != "character" or to_entity.entity_type != "character":
-            raise ValueError("同一人物关系的两端必须都是 character 节点")
-        if from_entity.entity_id == to_entity.entity_id:
-            raise ValueError("同一人物关系必须连接两个独立 character 节点")
-        if values.directionality != "bidirectional":
-            raise ValueError("同一人物关系必须使用 bidirectional")
-        left_entity_id, right_entity_id = sorted((from_entity.entity_id, to_entity.entity_id))
-        pair = (left_entity_id, right_entity_id)
-        latest_by_pair[pair] = (fact.graph_fact_id, values)
+        .order_by(GraphVersion.chapter_order.desc(), EntityStateVersion.state_revision.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return 0, {}
+    return int(row.state_revision), dict(row.state)
 
-    active_edges: list[tuple[int, int, int, int]] = []
-    for (from_entity_id, to_entity_id), (graph_fact_id, values) in latest_by_pair.items():
-        if values.change_type == "断裂":
+
+def _state_updates(fact: GraphFact) -> dict[str, Any]:
+    """2026-08-07 用于把观察和状态事实转换为实体状态字段更新"""
+    content = dict(fact.content)
+    kind = content.get("kind")
+    if kind == "character_observation":
+        return {
+            "role_function": content["role_function"],
+            "action": content["action"],
+            "action_type": content["action_type"],
+            "emotion": content["emotion"],
+        }
+    if kind == "location_observation":
+        return {fact.predicate: fact.value}
+    if kind == "state":
+        next_value: Any = fact.object if fact.object is not None else fact.value
+        return {fact.predicate: next_value if fact.assertion == "affirmed" else None}
+    return {}
+
+
+def _persist_state_versions(
+    session: Session,
+    *,
+    graph_version: GraphVersion,
+    chapter_order: int,
+    facts: list[GraphFact],
+) -> None:
+    """2026-08-07 用于汇总同一实体本章多次观察和状态变化"""
+    state_by_entity: dict[int, dict[str, Any]] = {}
+    revision_by_entity: dict[int, int] = {}
+    changes_by_entity: dict[int, list[dict[str, Any]]] = {}
+    for fact in facts:
+        if fact.subject_entity_id is None:
             continue
-        original_from_entity = entities_by_name[values.from_name]
-        original_to_entity = entities_by_name[values.to_name]
-        representative_entity_id = _resolve_representative_entity_id(
-            run_id=run_id,
-            values=values,
-            from_entity=original_from_entity,
-            to_entity=original_to_entity,
-            entities_by_id=entities_by_id,
-        )
-        active_edges.append(
-            (
-                graph_fact_id,
-                from_entity_id,
-                to_entity_id,
-                representative_entity_id,
+        updates = _state_updates(fact)
+        if not updates:
+            continue
+        entity_id = int(fact.subject_entity_id)
+        if entity_id not in state_by_entity:
+            previous_revision, previous_state = _previous_entity_state(
+                session,
+                run_id=graph_version.run_id,
+                entity_id=entity_id,
+                chapter_order=chapter_order,
+            )
+            revision_by_entity[entity_id] = previous_revision
+            state_by_entity[entity_id] = previous_state
+            changes_by_entity[entity_id] = []
+        state = state_by_entity[entity_id]
+        for field_name, after in updates.items():
+            before = state.get(field_name)
+            if before == after:
+                continue
+            if after is None:
+                state.pop(field_name, None)
+            else:
+                state[field_name] = after
+            changes_by_entity[entity_id].append(
+                {
+                    "field": field_name,
+                    "before": before,
+                    "after": after,
+                    "fact_id": fact.fact_id,
+                    "fact_revision": fact.fact_revision,
+                    "chunk_id": fact.effective_chunk_id,
+                }
+            )
+
+    for entity_id, changes in changes_by_entity.items():
+        if not changes:
+            continue
+        session.add(
+            EntityStateVersion(
+                graph_version_id=graph_version.graph_version_id,
+                run_id=graph_version.run_id,
+                chapter_id=graph_version.chapter_id,
+                entity_id=entity_id,
+                state_revision=revision_by_entity[entity_id] + 1,
+                state=state_by_entity[entity_id],
+                changes=changes,
             )
         )
-    return active_edges
 
 
-def _identity_components(active_edges: list[tuple[int, int, int, int]]) -> list[set[int]]:
-    """2026-08-06 用于从有效同一人物边构建人物节点连通分量"""
-    adjacency: dict[int, set[int]] = {}
-    for _graph_fact_id, from_entity_id, to_entity_id, _representative_entity_id in active_edges:
-        adjacency.setdefault(from_entity_id, set()).add(to_entity_id)
-        adjacency.setdefault(to_entity_id, set()).add(from_entity_id)
-
-    components: list[set[int]] = []
-    visited: set[int] = set()
-    for root in sorted(adjacency):
-        if root in visited:
-            continue
-        component: set[int] = set()
-        pending = [root]
-        while pending:
-            entity_id = pending.pop()
-            if entity_id in visited:
-                continue
-            visited.add(entity_id)
-            component.add(entity_id)
-            pending.extend(sorted(adjacency.get(entity_id, set()) - visited, reverse=True))
-        components.append(component)
-    return components
+def _relation_key(
+    from_entity_id: int,
+    to_entity_id: int,
+    *,
+    directionality: str,
+    relation_semantics: str,
+    relation_type: str,
+) -> tuple[int, int, str, str, str]:
+    """2026-08-07 用于生成等价活动关系的稳定比较键"""
+    left_id, right_id = from_entity_id, to_entity_id
+    if directionality == "bidirectional" and left_id > right_id:
+        left_id, right_id = right_id, left_id
+    return left_id, right_id, directionality, relation_semantics, relation_type
 
 
-def _sync_character_representatives(session: Session, *, run_id: str) -> None:
-    """2026-08-06 用于按同一人物连通分量选举并标记唯一常用人物节点"""
-    entities = list(
-        session.execute(
-            select(GraphEntity)
-            .where(GraphEntity.run_id == run_id)
-            .order_by(GraphEntity.entity_id)
+def _previous_relation_draft(
+    session: Session,
+    *,
+    run_id: str,
+    relation_id: str,
+    chapter_order: int,
+) -> _RelationDraft:
+    """2026-08-07 用于读取目标章节之前最近的稳定关系版本"""
+    relation = session.get(GraphRelation, relation_id)
+    if relation is None or relation.run_id != run_id:
+        raise ValueError(f"relation_id 不存在或跨 run: {relation_id}")
+    version = session.execute(
+        select(GraphRelationVersion)
+        .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
+        .where(
+            GraphRelationVersion.run_id == run_id,
+            GraphRelationVersion.relation_id == relation_id,
+            GraphVersion.chapter_order < chapter_order,
         )
-        .scalars()
-        .all()
+        .order_by(GraphVersion.chapter_order.desc(), GraphRelationVersion.relation_revision.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if version is None:
+        raise ValueError(f"relation_id 在上一章节图版本不可见: {relation_id}")
+    return _RelationDraft(
+        relation=relation,
+        previous_revision=int(version.relation_revision),
+        relation_type=str(version.relation_type),
+        attributes=dict(version.attributes),
+        is_active=bool(version.is_active),
+        changes=[],
     )
-    entities_by_name = {entity.canonical_name: entity for entity in entities}
-    entities_by_id = {entity.entity_id: entity for entity in entities}
-    character_entities = [entity for entity in entities if entity.entity_type == "character"]
-    for entity in character_entities:
-        entity.is_representative = True
 
-    active_edges = _active_identity_edges(
+
+def _active_relation_keys(
+    session: Session,
+    *,
+    run_id: str,
+    chapter_order: int,
+) -> dict[tuple[int, int, str, str, str], str]:
+    """2026-08-07 用于读取上一章节边界的全部等价活动关系键"""
+    rows = session.execute(
+        select(GraphRelationVersion, GraphRelation)
+        .join(GraphRelation, GraphRelation.relation_id == GraphRelationVersion.relation_id)
+        .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
+        .where(
+            GraphRelationVersion.run_id == run_id,
+            GraphVersion.chapter_order < chapter_order,
+        )
+        .order_by(
+            GraphRelationVersion.relation_id,
+            GraphVersion.chapter_order.desc(),
+            GraphRelationVersion.relation_revision.desc(),
+        )
+    ).all()
+    latest: dict[str, tuple[GraphRelationVersion, GraphRelation]] = {}
+    for version, relation in rows:
+        latest.setdefault(str(relation.relation_id), (version, relation))
+    keys: dict[tuple[int, int, str, str, str], str] = {}
+    for version, relation in latest.values():
+        if not version.is_active:
+            continue
+        key = _relation_key(
+            int(relation.from_entity_id),
+            int(relation.to_entity_id),
+            directionality=str(relation.directionality),
+            relation_semantics=str(relation.relation_semantics),
+            relation_type=str(version.relation_type),
+        )
+        keys[key] = str(relation.relation_id)
+    return keys
+
+
+def _apply_relation_change(
+    *,
+    draft: _RelationDraft,
+    fact: GraphFact,
+    change_kind: str,
+    relation_type: str,
+) -> None:
+    """2026-08-07 用于在关系草稿上应用强化弱化修订取代或断裂"""
+    before = {
+        "relation_type": draft.relation_type,
+        "attributes": dict(draft.attributes),
+        "is_active": draft.is_active,
+    }
+    if change_kind == "assert":
+        draft.relation_type = relation_type
+        draft.is_active = True
+        draft.attributes.setdefault("support_count", 1)
+    elif change_kind == "reinforce":
+        draft.is_active = True
+        draft.attributes["support_count"] = int(draft.attributes.get("support_count", 1)) + 1
+    elif change_kind == "weaken":
+        draft.attributes["strength"] = int(draft.attributes.get("strength", 0)) - 1
+    elif change_kind in {"refine", "supersede"}:
+        draft.relation_type = relation_type
+        draft.is_active = True
+    elif change_kind in {"break", "retract"}:
+        draft.is_active = False
+    else:
+        raise ValueError(f"不支持的关系变化类型: {change_kind}")
+    after = {
+        "relation_type": draft.relation_type,
+        "attributes": dict(draft.attributes),
+        "is_active": draft.is_active,
+    }
+    draft.changes.append(
+        {
+            "change_kind": change_kind,
+            "before": before,
+            "after": after,
+            "fact_id": fact.fact_id,
+            "fact_revision": fact.fact_revision,
+            "chunk_id": fact.effective_chunk_id,
+        }
+    )
+
+
+def _relation_endpoints_match(
+    relation: GraphRelation,
+    *,
+    from_entity_id: int,
+    to_entity_id: int,
+) -> bool:
+    """2026-08-07 用于校验关系变化仍指向同一稳定端点"""
+    if relation.directionality == "bidirectional":
+        return {int(relation.from_entity_id), int(relation.to_entity_id)} == {
+            from_entity_id,
+            to_entity_id,
+        }
+    return (
+        int(relation.from_entity_id) == from_entity_id
+        and int(relation.to_entity_id) == to_entity_id
+    )
+
+
+def _persist_relation_versions(
+    session: Session,
+    *,
+    graph_version: GraphVersion,
+    chapter_order: int,
+    facts: list[GraphFact],
+    visible_relation_ids: set[str],
+) -> None:
+    """2026-08-07 用于汇总稳定 relation ref 形成的本章关系版本"""
+    active_keys = _active_relation_keys(
         session,
-        run_id=run_id,
-        entities_by_name=entities_by_name,
-        entities_by_id=entities_by_id,
+        run_id=graph_version.run_id,
+        chapter_order=chapter_order,
     )
-    for component in _identity_components(active_edges):
-        component_edges = [
-            edge
-            for edge in active_edges
-            if edge[1] in component and edge[2] in component
-        ]
-        latest_edge = max(component_edges, key=lambda edge: edge[0])
-        representative_entity_id = latest_edge[3]
-        if representative_entity_id not in component:
-            selected = entities_by_id.get(representative_entity_id)
-            selected_name = selected.canonical_name if selected is not None else representative_entity_id
-            raise ValueError(f"代表节点不属于同一人物连通分量: {selected_name}")
-        for entity_id in component:
-            entity = entities_by_id[entity_id]
-            entity.is_representative = entity_id == representative_entity_id
-    session.flush()
+    drafts: dict[str, _RelationDraft] = {}
+    for fact in facts:
+        content = dict(fact.content)
+        if content.get("kind") != "relation":
+            continue
+        if fact.subject_entity_id is None or not isinstance(fact.object, dict):
+            raise ValueError(f"relation 事实缺少已解析端点: {fact.fact_id}")
+        from_entity_id = int(fact.subject_entity_id)
+        to_entity_id = int(fact.object["entity_id"])
+        directionality = str(content["directionality"])
+        relation_semantics = str(content["relation_semantics"])
+        relation_type = str(content["relation_type"])
+        change_kind = str(content["change_kind"])
+        relation_id = str(content["relation_id"])
+
+        if change_kind == "assert":
+            key = _relation_key(
+                from_entity_id,
+                to_entity_id,
+                directionality=directionality,
+                relation_semantics=relation_semantics,
+                relation_type=relation_type,
+            )
+            if key in active_keys:
+                raise ValueError(
+                    "等价活动关系已存在，必须使用 reinforce 或 refine: "
+                    f"relation_id={active_keys[key]}"
+                )
+            relation = GraphRelation(
+                relation_id=relation_id,
+                run_id=graph_version.run_id,
+                from_entity_id=from_entity_id,
+                to_entity_id=to_entity_id,
+                directionality=directionality,
+                relation_semantics=relation_semantics,
+            )
+            session.add(relation)
+            session.flush()
+            attributes: dict[str, Any] = {}
+            representative_entity_id = content.get("representative_entity_id")
+            if representative_entity_id is not None:
+                attributes["representative_entity_id"] = int(representative_entity_id)
+            draft = _RelationDraft(
+                relation=relation,
+                previous_revision=0,
+                relation_type=relation_type,
+                attributes=attributes,
+                is_active=False,
+                changes=[],
+            )
+            drafts[relation_id] = draft
+            active_keys[key] = relation_id
+        else:
+            if relation_id not in visible_relation_ids:
+                raise ValueError(
+                    f"关系变化引用了本轮图搜索不可见的 relation_id: {relation_id}"
+                )
+            existing_draft = drafts.get(relation_id)
+            if existing_draft is None:
+                existing_draft = _previous_relation_draft(
+                    session,
+                    run_id=graph_version.run_id,
+                    relation_id=relation_id,
+                    chapter_order=chapter_order,
+                )
+                drafts[relation_id] = existing_draft
+            draft = existing_draft
+            if not _relation_endpoints_match(
+                draft.relation,
+                from_entity_id=from_entity_id,
+                to_entity_id=to_entity_id,
+            ):
+                raise ValueError(f"relation_id 的稳定端点与本次变化不一致: {relation_id}")
+            if (
+                str(draft.relation.directionality) != directionality
+                or str(draft.relation.relation_semantics) != relation_semantics
+            ):
+                raise ValueError(f"relation_id 的方向或关系语义不可变: {relation_id}")
+
+        _apply_relation_change(
+            draft=draft,
+            fact=fact,
+            change_kind=change_kind,
+            relation_type=relation_type,
+        )
+
+    for relation_id, draft in drafts.items():
+        session.add(
+            GraphRelationVersion(
+                graph_version_id=graph_version.graph_version_id,
+                run_id=graph_version.run_id,
+                chapter_id=graph_version.chapter_id,
+                relation_id=relation_id,
+                relation_revision=draft.previous_revision + 1,
+                relation_type=draft.relation_type,
+                attributes=draft.attributes,
+                is_active=draft.is_active,
+                changes=draft.changes,
+            )
+        )
 
 
-def _sync_relation_graph(session: Session, *, run_id: str) -> None:
-    """2026-08-06 用于同步数据库图中的关系边参与者与常用人物节点"""
-    _sync_relation_events(session, run_id=run_id)
-    _sync_relation_current_and_participants(session, run_id=run_id)
-    _sync_character_representatives(session, run_id=run_id)
+def _resolution_speaker_entity(
+    session: Session,
+    *,
+    run_id: str,
+    pulled_result: PulledResult,
+    entities_by_ref: dict[str, GraphEntity],
+) -> GraphEntity:
+    """2026-08-07 用于把 dialogue_speaker resolution 映射为人物图节点"""
+    speaker_name = pulled_result.resolution.speaker.name
+    for candidate_entity in entities_by_ref.values():
+        if candidate_entity.entity_type == "character" and candidate_entity.canonical_name == speaker_name:
+            return candidate_entity
+    existing_entity = session.execute(
+        select(GraphEntity).where(
+            GraphEntity.run_id == run_id,
+            GraphEntity.canonical_name == speaker_name,
+        )
+    ).scalar_one_or_none()
+    evidence_chunk_id = pulled_result.resolution.evidence_chunkid
+    if existing_entity is None:
+        new_entity = GraphEntity(
+            run_id=run_id,
+            canonical_name=speaker_name,
+            entity_type="character",
+            attributes={},
+            first_seen_chunk=evidence_chunk_id,
+            last_seen_chunk=evidence_chunk_id,
+        )
+        session.add(new_entity)
+        session.flush()
+        return new_entity
+    if existing_entity.entity_type != "character":
+        raise ValueError(f"pull resolution speaker 名称已属于非人物节点: {speaker_name}")
+    existing_entity.last_seen_chunk = max(existing_entity.last_seen_chunk, evidence_chunk_id)
+    return existing_entity
+
+
+def _validate_case_target(target: GraphFact, pulled_result: PulledResult) -> None:
+    """2026-08-07 用于核对案例内部目标仍精确指向原历史对话事实"""
+    target_ref = pulled_result.target_ref
+    content = dict(target.content)
+    if content.get("kind") != "dialogue" or target.fact_type != "dialogue":
+        raise ValueError(f"dialogue_speaker 案例目标不是对话事实: {pulled_result.case_id}")
+    expected_fields = {
+        "item_ref": content.get("ref"),
+        "chunk_id": target.effective_chunk_id,
+        "start": content.get("start"),
+        "end": content.get("end"),
+        "text": content.get("content"),
+    }
+    for field_name, expected in expected_fields.items():
+        if target_ref.get(field_name) != expected:
+            raise ValueError(
+                f"案例目标字段与历史对话不一致: case_id={pulled_result.case_id} "
+                f"field={field_name}"
+            )
+    if content.get("speaker") is not None:
+        raise ValueError(f"案例目标对话已经具有说话人: {pulled_result.case_id}")
+
+
+def _next_fact_revision(session: Session, run_id: str, fact_id: str) -> int:
+    """2026-08-07 用于读取同一事实下一条不可变修订号"""
+    revision = session.execute(
+        select(func.max(GraphFact.fact_revision)).where(
+            GraphFact.run_id == run_id,
+            GraphFact.fact_id == fact_id,
+        )
+    ).scalar_one()
+    return int(revision or 0) + 1
+
+
+def _persist_pulled_results(
+    session: Session,
+    *,
+    annotation: ChapterAnnotationRecord,
+    graph_version: GraphVersion,
+    pulled_results: list[PulledResult],
+    authorized_text_chunk_ids: set[int],
+    entities_by_ref: dict[str, GraphEntity],
+) -> dict[str, GraphFact]:
+    """2026-08-07 用于把 pull resolution 写成同一新图版本中的历史事实修订"""
+    rows_by_case_id: dict[str, GraphFact] = {}
+    for pulled_result in pulled_results:
+        evidence_chunk_id = pulled_result.resolution.evidence_chunkid
+        if evidence_chunk_id not in authorized_text_chunk_ids:
+            raise ValueError(
+                f"pull evidence_chunkid 未经本轮原文授权: {evidence_chunk_id}"
+            )
+        target_fact_id = str(pulled_result.target_ref.get("fact_id") or "")
+        target_fact_revision = pulled_result.target_ref.get("fact_revision")
+        if not target_fact_id or not isinstance(target_fact_revision, int):
+            raise ValueError(
+                f"案例缺少历史目标 fact_id/fact_revision: {pulled_result.case_id}"
+            )
+        target = session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == annotation.run_id,
+                GraphFact.fact_id == target_fact_id,
+                GraphFact.fact_revision == target_fact_revision,
+            )
+        ).scalar_one_or_none()
+        if target is None:
+            raise ValueError(f"案例目标事实不存在或跨 run: {pulled_result.case_id}")
+        _validate_case_target(target, pulled_result)
+        speaker = _resolution_speaker_entity(
+            session,
+            run_id=annotation.run_id,
+            pulled_result=pulled_result,
+            entities_by_ref=entities_by_ref,
+        )
+        speaker_descriptor = _entity_descriptor(speaker)
+        content = dict(target.content)
+        content["speaker"] = speaker_descriptor
+        content["resolved_by_case_id"] = pulled_result.case_id
+        evidence = EvidenceList.model_validate(
+            [
+                *list(target.evidence),
+                TextEvidence(
+                    reason=f"案例 {pulled_result.case_id} 的说话人已由后续原文确认",
+                    chunk_id=evidence_chunk_id,
+                ).model_dump(mode="json"),
+            ]
+        )
+        row = GraphFact(
+            graph_version_id=graph_version.graph_version_id,
+            run_id=annotation.run_id,
+            chapter_id=annotation.chapter_id,
+            fact_id=target.fact_id,
+            fact_revision=_next_fact_revision(
+                session,
+                annotation.run_id,
+                target.fact_id,
+            ),
+            fact_type=target.fact_type,
+            subject_entity_id=speaker.entity_id,
+            predicate=target.predicate,
+            object=target.object,
+            value=target.value,
+            participants=[{"role": "speaker", "entity": speaker_descriptor}],
+            scope=target.scope,
+            story_time=target.story_time,
+            assertion=target.assertion,
+            confidence=target.confidence,
+            content=content,
+            evidence=evidence.model_dump(mode="json"),
+            effective_chunk_id=target.effective_chunk_id,
+            source_kind="case_resolution",
+            annotation_id=annotation.annotation_id,
+            payload_path=f"case_resolution/{pulled_result.case_id}",
+        )
+        session.add(row)
+        session.flush()
+        rows_by_case_id[pulled_result.case_id] = row
+    return rows_by_case_id
 
 
 def persist_completion_graph(
     session: Session,
     *,
     annotation: ChapterAnnotationRecord,
-    fact_outputs: list[FactPushOutput],
-) -> list[CompletionFact]:
-    """2026-08-06 用于在 Agent END 后直接持久化正式标注与已解决案例图结果"""
-    run_id = annotation.run_id
-    chapter_anchor_chunks = _chapter_anchor_chunks(session, run_id)
-
-    for path, _fact_type, fact, evidence in _iter_annotation_facts(annotation):
-        _upsert_graph_fact(
-            session,
-            run_id=run_id,
-            stable_fact_id=stable_annotation_fact_id(annotation.annotation_id, path),
-            source_kind="chapter_annotation",
-            fact=fact,
-            evidence=evidence,
-            annotation_id=annotation.annotation_id,
-            payload_path=path,
-        )
-
-    completions: list[CompletionFact] = []
-    for output_index, output in enumerate(fact_outputs):
-        stable_fact_id = stable_agent_resolution_fact_id(annotation.annotation_id, output_index)
-        evidence = output.evidence.model_dump(mode="json")
-        _upsert_graph_fact(
-            session,
-            run_id=run_id,
-            stable_fact_id=stable_fact_id,
-            source_kind="agent_resolution",
-            fact=_agent_resolution_payload(output),
-            evidence=evidence,
-            annotation_id=annotation.annotation_id,
-            payload_path=f"agent_resolutions/{output_index}",
-            source_chunk_id=chapter_anchor_chunks.get(output.evidence.chapterid),
-        )
-        completions.append(
-            CompletionFact(
-                graph_node_id=graph_fact_node_id(stable_fact_id),
-                payload=output.payload,
-                evidence=output.evidence,
-            )
-        )
-
-    _sync_relation_graph(session, run_id=run_id)
+    pulled_results: list[PulledResult],
+    authorized_text_chunk_ids: set[int],
+    visible_graph_fact_refs: set[tuple[str, int]],
+    visible_relation_ids: set[str],
+    visible_graph_entity_ids: set[int],
+) -> PersistedGraphResult:
+    """2026-08-07 用于在一个图版本中写入最终 finish 和全部 pull 修订"""
+    finish = ChapterFinish.model_validate(annotation.payload)
+    chapter_order, first_chunk_id, last_chunk_id = _chapter_bounds(
+        session,
+        annotation.run_id,
+        annotation.chapter_id,
+    )
+    _validate_evidence_authorization(
+        session,
+        annotation=annotation,
+        finish=finish,
+        chapter_order=chapter_order,
+        authorized_text_chunk_ids=authorized_text_chunk_ids,
+        visible_graph_fact_refs=visible_graph_fact_refs,
+    )
+    graph_version = GraphVersion(
+        graph_version_id=_graph_version_id(annotation.run_id, annotation.chapter_id),
+        run_id=annotation.run_id,
+        chapter_id=annotation.chapter_id,
+        chapter_order=chapter_order,
+        first_chunk_id=first_chunk_id,
+        last_chunk_id=last_chunk_id,
+        annotation_id=annotation.annotation_id,
+    )
+    session.add(graph_version)
     session.flush()
-    return completions
+
+    entities_by_ref, entities_by_id = _resolve_entity_directory(
+        session,
+        annotation=annotation,
+        finish=finish,
+        visible_graph_entity_ids=visible_graph_entity_ids,
+    )
+    finish_facts_by_ref = _persist_finish_facts(
+        session,
+        annotation=annotation,
+        finish=finish,
+        graph_version=graph_version,
+        entities_by_ref=entities_by_ref,
+        entities_by_id=entities_by_id,
+        visible_graph_entity_ids=visible_graph_entity_ids,
+    )
+    finish_fact_rows = list(finish_facts_by_ref.values())
+    _persist_state_versions(
+        session,
+        graph_version=graph_version,
+        chapter_order=chapter_order,
+        facts=finish_fact_rows,
+    )
+    _persist_relation_versions(
+        session,
+        graph_version=graph_version,
+        chapter_order=chapter_order,
+        facts=finish_fact_rows,
+        visible_relation_ids=visible_relation_ids,
+    )
+    pulled_facts_by_case_id = _persist_pulled_results(
+        session,
+        annotation=annotation,
+        graph_version=graph_version,
+        pulled_results=pulled_results,
+        authorized_text_chunk_ids=authorized_text_chunk_ids,
+        entities_by_ref=entities_by_ref,
+    )
+    session.flush()
+    return PersistedGraphResult(
+        graph_version=graph_version,
+        finish_facts_by_ref=finish_facts_by_ref,
+        pulled_facts_by_case_id=pulled_facts_by_case_id,
+    )

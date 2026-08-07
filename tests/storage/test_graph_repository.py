@@ -1,7 +1,10 @@
-"""数据库图事实读侧仓储测试"""
+"""章节级图版本查询仓储测试"""
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
+from src.storage.models import GraphRelation
 from src.storage.repositories import GraphRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -11,33 +14,14 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def _seed_relation_graph(db_session, *, close_relation: bool = False) -> str:
-    """2026-08-06 用于通过正式章节标注直接建立数据库关系图"""
-    texts = ["林渡与顾霜并肩迎敌", "两人此后分道扬镳"] if close_relation else ["林渡与顾霜并肩迎敌"]
+def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_session) -> None:
+    """2026-08-07 用于验证章节快照继承状态并按事实原因返回关系变化"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=texts,
-        chapter_ids=[1] * len(texts),
-        title="数据库图读侧",
+        texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
+        chapter_ids=[1, 2],
+        title="图快照查询",
     )
-    relations = [
-        relation_fact(
-            chunk_id=0,
-            from_name="林渡",
-            to_name="顾霜",
-            relation_type="盟友",
-        )
-    ]
-    if close_relation:
-        relations.append(
-            relation_fact(
-                chunk_id=1,
-                from_name="林渡",
-                to_name="顾霜",
-                relation_type="盟友",
-                change_kind="break",
-            )
-        )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -46,43 +30,103 @@ def _seed_relation_graph(db_session, *, close_relation: bool = False) -> str:
             character_fact(chunk_id=0, name="林渡", action="迎敌"),
             character_fact(chunk_id=0, name="顾霜", action="迎敌"),
         ],
-        relations=relations,
+        relations=[
+            relation_fact(
+                chunk_id=0,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="盟友",
+            )
+        ],
     )
-    return run_id
+    db_session.commit()
+    first_version = GraphRepository(db_session).resolve_graph_version(run_id, chapter_id=1)
+    assert first_version is not None
+    first_version_id = first_version.graph_version_id
+    relation_id = db_session.execute(
+        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
+    ).scalar_one()
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        relations=[
+            relation_fact(
+                chunk_id=1,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="盟友",
+                change_kind="break",
+                relation_id=relation_id,
+            )
+        ],
+        visible_relation_ids={relation_id},
+    )
+    db_session.commit()
+    second_version = GraphRepository(db_session).resolve_graph_version(run_id, chapter_id=2)
+    assert second_version is not None
+    second_version_id = second_version.graph_version_id
 
+    repository = GraphRepository(db_session)
+    first_snapshot = repository.fetch_snapshot(run_id, graph_version_id=first_version_id)
+    second_snapshot = repository.fetch_snapshot(run_id, graph_version_id=second_version_id)
+    changes, total = repository.fetch_changes(run_id)
 
-def test_graph_repository_derives_relations_and_participants_from_graph_facts(db_session) -> None:
-    """2026-08-05 用于验证数据库图读侧统一从通用事实生成实体关系与参与者"""
-    run_id = _seed_relation_graph(db_session)
-    graph_repo = GraphRepository(db_session)
-
-    events = graph_repo.fetch_relation_events(run_id)
-    current = graph_repo.fetch_current_relations(run_id)
-    participants = graph_repo.fetch_participant_entities(run_id)
-
-    assert [(row.from_name, row.to_name, row.relation_type, row.change_type) for row in events] == [
-        ("林渡", "顾霜", "盟友", "新建")
+    assert first_snapshot is not None
+    assert second_snapshot is not None
+    assert [(row.from_name, row.to_name, row.is_active) for row in first_snapshot.relations] == [
+        ("林渡", "顾霜", True)
     ]
-    assert len(current) == 1
-    assert current[0].support_count == 1
-    assert current[0].is_active is True
-    assert {row.name for row in participants} == {"林渡", "顾霜"}
-    assert {row.current_degree for row in participants} == {1}
+    assert second_snapshot.relations == []
+    assert {(entity.name, entity.state_revision) for entity in second_snapshot.entities} == {
+        ("林渡", 1),
+        ("顾霜", 1),
+    }
+    assert total == len(changes)
+    relation_changes = [row for row in changes if row.change_kind == "relation"]
+    assert [(row.chapter_id, row.relation_id, row.fact_revision) for row in relation_changes] == [
+        (2, relation_id, 1),
+        (1, relation_id, 1),
+    ]
+    assert relation_changes[0].changes[0]["change_kind"] == "break"
+    assert relation_changes[0].evidence[0].chunk_id == 1
 
 
-def test_graph_repository_keeps_history_when_latest_relation_fact_breaks_edge(db_session) -> None:
-    """2026-08-05 用于验证断裂事实关闭当前关系但完整保留关系历史"""
-    run_id = _seed_relation_graph(db_session, close_relation=True)
-    graph_repo = GraphRepository(db_session)
+def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(db_session) -> None:
+    """2026-08-07 用于验证同一实体对可并行保存不同关系语义"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜既是盟友也是师徒"],
+        title="并行稳定关系",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[
+            character_fact(chunk_id=0, name="林渡", action="授艺"),
+            character_fact(chunk_id=0, name="顾霜", action="学习"),
+        ],
+        relations=[
+            relation_fact(
+                chunk_id=0,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="盟友",
+            ),
+            relation_fact(
+                chunk_id=0,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="师徒",
+            ),
+        ],
+    )
+    db_session.commit()
 
-    assert graph_repo.fetch_current_relations(run_id, active_only=True) == []
-    current = graph_repo.fetch_current_relations(run_id, active_only=False)
-    events = graph_repo.fetch_relation_events(run_id)
-    participants = graph_repo.fetch_participant_entities(run_id)
+    snapshot = GraphRepository(db_session).fetch_snapshot(run_id, chapter_id=1)
 
-    assert len(current) == 1
-    assert current[0].is_active is False
-    assert current[0].change_count == 1
-    assert [(row.chunk_id, row.change_type) for row in events] == [(1, "断裂"), (0, "新建")]
-    assert {row.current_degree for row in participants} == {0}
-    assert {row.historical_degree for row in participants} == {1}
+    assert snapshot is not None
+    assert len({row.relation_id for row in snapshot.relations}) == 2
+    assert {row.relation_type for row in snapshot.relations} == {"盟友", "师徒"}
+    assert all(row.relation_revision == 1 for row in snapshot.relations)

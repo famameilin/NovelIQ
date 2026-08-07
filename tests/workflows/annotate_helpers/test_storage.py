@@ -1,4 +1,4 @@
-"""章节标注唯一完成事务测试"""
+"""章节标注原子完成事务测试"""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
 from src.agents.annotation.schema import (
+    AgentRunAudit,
     AgentRunResult,
-    CasePushOutput,
-    ChapterAnnotation,
-    FactPushOutput,
-    RejectedPushOutput,
+    ChapterFinish,
+    PulledResult,
+    PushedCase,
     SuccessAudit,
 )
 from src.storage.models import (
@@ -21,7 +21,7 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     GraphFact,
-    GraphFactSource,
+    GraphVersion,
     ModelInteraction,
     TokenUsage,
 )
@@ -29,77 +29,131 @@ from src.workflows.annotate_helpers.storage import complete_annotation_run, load
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
-def _annotation(*, chapter_id: int = 1, chunk_id: int = 0) -> ChapterAnnotation:
-    """2026-08-05 用于构造唯一完成事务的章节正式标注"""
-    return ChapterAnnotation.model_validate(
+def _coverage(chunk_id: int) -> dict:
+    """2026-08-07 用于构造全领域 coverage"""
+    return {
+        "chunk_id": chunk_id,
+        "entities": True,
+        "character_observations": True,
+        "location_observations": True,
+        "dialogues": True,
+        "events": True,
+        "relations": True,
+        "states": True,
+        "foreshadowings": True,
+    }
+
+
+def _finish(
+    *,
+    chunk_id: int,
+    text: str,
+    unresolved_dialogue: bool = False,
+    speaker_entity: bool = False,
+) -> ChapterFinish:
+    """2026-08-07 用于构造含未解决对话或确认人物的完整 finish"""
+    characters = []
+    observations = []
+    if speaker_entity:
+        start = text.index("顾霜")
+        characters.append(
+            {
+                "ref": "character_1",
+                "name": "顾霜",
+                "existing_entity_id": None,
+                "mentions": [
+                    {
+                        "chunk_id": chunk_id,
+                        "start": start,
+                        "end": start + 2,
+                        "text": "顾霜",
+                    }
+                ],
+                "confidence": "high",
+                "evidence": [{"reason": "顾霜出现", "chunk_id": chunk_id}],
+            }
+        )
+        observations.append(
+            {
+                "ref": "character_observation_1",
+                "confidence": "high",
+                "evidence": [{"reason": "顾霜喝道", "chunk_id": chunk_id}],
+                "entity_ref": "character_1",
+                "role_function": "主体",
+                "action": "喝道",
+                "action_type": "发言",
+                "emotion": "neutral",
+            }
+        )
+    dialogues = []
+    if unresolved_dialogue:
+        start = text.index("住手")
+        dialogues.append(
+            {
+                "ref": "dialogue_1",
+                "confidence": "high",
+                "evidence": [{"reason": "原文出现住手", "chunk_id": chunk_id}],
+                "content": "住手",
+                "start": start,
+                "end": start + 2,
+                "speaker_ref": None,
+                "speaker_existing_entity_id": None,
+                "tone": "急切",
+                "is_inner_monologue": False,
+            }
+        )
+    return ChapterFinish.model_validate(
         {
-            "chapter_summary": "顾霜进入山门",
-            "segments": [
+            "chapter_summary": text,
+            "entities": {
+                "characters": characters,
+                "locations": [],
+                "objects": [],
+                "organizations": [],
+            },
+            "chunks": [
                 {
                     "chunk_id": chunk_id,
-                    "summary": "顾霜进入山门",
-                    "emotional_valence": "neutral",
-                    "event_type": "铺垫",
-                    "pivot_moment": False,
-                    "cliffhanger": False,
+                    "summary": text,
+                    "metrics": {
+                        "emotional_valence": "neutral",
+                        "event_type": "铺垫",
+                        "pivot_moment": False,
+                        "cliffhanger": False,
+                    },
+                    "character_observations": observations,
+                    "location_observations": [],
+                    "dialogues": dialogues,
+                    "events": [],
+                    "relations": [],
+                    "states": [],
+                    "foreshadowings": [],
                 }
             ],
-            "characters": [
-                {
-                    "chunk_id": chunk_id,
-                    "evidence": {"reason": "顾霜进入山门", "chapterid": chapter_id},
-                    "confidence": "high",
-                    "entity": {"name": "顾霜", "entity_type": "character"},
-                    "role_function": "主体",
-                    "action": "进入山门",
-                    "action_type": "移动",
-                    "emotion": "neutral",
-                }
-            ],
-            "locations": [],
-            "dialogues": [],
-            "events": [],
-            "relations": [],
-            "states": [],
+            "coverage": [_coverage(chunk_id)],
         }
     )
 
 
-def _result(run_id: str) -> AgentRunResult:
-    """2026-08-06 用于构造含 Agent 图结果输出的完整 AgentRunResult"""
-    annotation = _annotation()
-    return AgentRunResult(
-        run_id=run_id,
-        chapter_id=1,
-        final_annotation=annotation,
-        initial_finish=annotation,
-        revision_payload={},
-        initial_case_candidate_ids=[],
+def _audit(
+    finish: ChapterFinish,
+    *,
+    authorized_chunk_ids: list[int],
+    initial_case_ids: list[str] | None = None,
+) -> AgentRunAudit:
+    """2026-08-07 用于构造完成事务审计和可信 Token 记录"""
+    return AgentRunAudit(
+        allow_future_context=False,
+        initial_finish=finish,
+        revision_payloads=[],
+        initial_case_candidate_ids=initial_case_ids or [],
         rotation_case_ids=[],
-        pulled_case_ids=[],
-        staged_outputs=[
-            FactPushOutput.model_validate(
-                {
-                    "output_kind": "fact",
-                    "source_case_ids": [],
-                    "evidence": {"reason": "顾霜属于山门", "chapterid": 1},
-                    "payload": {
-                        "fact_type": "membership",
-                        "subject": {"name": "顾霜", "entity_type": "character"},
-                        "predicate": "belongs_to",
-                        "object": {"name": "山门", "entity_type": "location"},
-                        "value": None,
-                        "participants": [],
-                        "scope": "novel",
-                        "story_time": None,
-                        "assertion": "affirmed",
-                        "confidence": "high",
-                    },
-                }
-            )
-        ],
-        success_audit=SuccessAudit(
-            attempt_number=3,
+        authorized_text_chunk_ids=authorized_chunk_ids,
+        visible_graph_fact_refs=[],
+        visible_graph_entity_ids=[],
+        visible_graph_relation_ids=[],
+        success=SuccessAudit(
+            attempt_number=1,
             messages=[{"role": "ai", "content": "done"}],
             tool_calls=[],
             model_name="test-model",
@@ -117,8 +171,58 @@ def _result(run_id: str) -> AgentRunResult:
     )
 
 
+def _result(
+    *,
+    run_id: str,
+    chapter_id: int,
+    finish: ChapterFinish,
+    pulled_results: list[PulledResult] | None = None,
+    pushed_cases: list[PushedCase] | None = None,
+    authorized_chunk_ids: list[int] | None = None,
+) -> AgentRunResult:
+    """2026-08-07 用于构造新合同 AgentRunResult"""
+    pulled = pulled_results or []
+    return AgentRunResult(
+        run_id=run_id,
+        chapter_id=chapter_id,
+        finish=finish,
+        pulled_results=pulled,
+        pushed_cases=pushed_cases or [],
+        audit=_audit(
+            finish,
+            authorized_chunk_ids=authorized_chunk_ids or [finish.chunks[0].chunk_id],
+            initial_case_ids=[item.case_id for item in pulled],
+        ),
+    )
+
+
+def _pushed_case() -> PushedCase:
+    """2026-08-07 用于构造绑定 dialogue_1 的暂存后案例"""
+    return PushedCase(
+        description="该句住手由谁说出",
+        keys=["住手", "说话人"],
+        type="dialogue_speaker",
+        chunkid=0,
+        target_key="target-dialogue-1",
+        target_anchor={
+            "chunk_id": 0,
+            "start": 1,
+            "end": 3,
+            "text": "住手",
+        },
+        target_ref={
+            "kind": "dialogue",
+            "item_ref": "dialogue_1",
+            "chunk_id": 0,
+            "start": 1,
+            "end": 3,
+            "text": "住手",
+        },
+    )
+
+
 def _count(session, model, run_id: str) -> int:
-    """2026-08-05 用于按 run 统计完成事务相关 ORM 行"""
+    """2026-08-07 用于按 run 统计完成事务相关持久化行数"""
     return int(
         session.execute(
             select(func.count()).select_from(model).where(model.run_id == run_id)
@@ -126,58 +230,140 @@ def _count(session, model, run_id: str) -> int:
     )
 
 
-def test_complete_annotation_run_commits_all_results_once(db_session) -> None:
-    """2026-08-05 用于验证章节业务结果图审计与 Token 用量一次提交"""
+def test_complete_annotation_run_commits_finish_push_and_is_idempotent(db_session) -> None:
+    """2026-08-07 用于验证 finish 与 push 同时提交且重复完成保持幂等"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜进入山门"],
+        texts=["“住手”回荡"],
         title="完成事务成功",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    finish = _finish(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
+    result = _result(
+        run_id=run_id,
+        chapter_id=1,
+        finish=finish,
+        pushed_cases=[_pushed_case()],
+    )
 
-    completion = complete_annotation_run(
-        result=_result(run_id),
+    first = complete_annotation_run(
+        result=result,
+        novel_id=novel_id,
+        session_factory=factory,
+    )
+    second = complete_annotation_run(
+        result=result,
         novel_id=novel_id,
         session_factory=factory,
     )
 
     db_session.rollback()
-    assert completion.chapter_id == 1
-    assert len(completion.facts) == 1
-    assert completion.facts[0].graph_node_id.startswith("fact:")
-    assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
-    assert _count(db_session, CaseResolutionMapping, run_id) == 1
-    assert _count(db_session, GraphFact, run_id) == 3
-    assert _count(db_session, GraphFactSource, run_id) == 3
-    assert _count(db_session, ModelInteraction, run_id) == 1
-    assert _count(db_session, TokenUsage, run_id) == 1
-    interaction = db_session.execute(
-        select(ModelInteraction).where(ModelInteraction.run_id == run_id)
+    case = db_session.execute(
+        select(CasePoolCase).where(CasePoolCase.run_id == run_id)
     ).scalar_one()
-    mapping = db_session.execute(
-        select(CaseResolutionMapping).where(CaseResolutionMapping.run_id == run_id)
-    ).scalar_one()
-    graph_source = db_session.execute(
-        select(GraphFactSource).where(
-            GraphFactSource.run_id == run_id,
-            GraphFactSource.stable_fact_id
-            == completion.facts[0].graph_node_id.removeprefix("fact:"),
+    dialogue = db_session.execute(
+        select(GraphFact).where(
+            GraphFact.run_id == run_id,
+            GraphFact.fact_type == "dialogue",
         )
     ).scalar_one()
-    assert interaction.attempt_number == 3
-    assert mapping.target_graph_node_id == completion.facts[0].graph_node_id
-    assert graph_source.source_kind == "agent_resolution"
-    assert graph_source.annotation_id == completion.annotation_id
+
+    assert first == second
+    assert first.pushed_cases[0].id == case.id
+    assert case.case_type == "dialogue_speaker"
+    assert case.chunk_id == 0
+    assert case.target_ref["fact_id"] == dialogue.fact_id
+    assert case.target_ref["fact_revision"] == 1
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
+    assert _count(db_session, GraphVersion, run_id) == 1
+    assert _count(db_session, ModelInteraction, run_id) == 1
+    assert _count(db_session, TokenUsage, run_id) == 1
 
 
-def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_session) -> None:
-    """2026-08-05 用于验证事务末端失败后章节输出图和审计全部回滚"""
+def test_pull_resolution_revises_historical_dialogue_in_same_new_graph_version(db_session) -> None:
+    """2026-08-07 用于验证 pull 按案例类型修订历史对话并解决案例"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜进入山门"],
+        texts=["“住手”回荡", "顾霜喝道"],
+        chapter_ids=[1, 2],
+        title="后文确认说话人",
+    )
+    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    first_finish = _finish(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
+    first = complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            finish=first_finish,
+            pushed_cases=[_pushed_case()],
+        ),
+        novel_id=novel_id,
+        session_factory=factory,
+    )
+    db_session.rollback()
+    case = db_session.get(CasePoolCase, first.pushed_cases[0].id)
+    assert case is not None
+    pulled = PulledResult(
+        case_id=case.id,
+        type="dialogue_speaker",
+        resolution={
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "evidence_chunkid": 1,
+        },
+        target_key=case.target_key,
+        target_ref=dict(case.target_ref),
+    )
+    second_finish = _finish(chunk_id=1, text="顾霜喝道", speaker_entity=True)
+    second = complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=2,
+            finish=second_finish,
+            pulled_results=[pulled],
+            authorized_chunk_ids=[1],
+        ),
+        novel_id=novel_id,
+        session_factory=factory,
+    )
+
+    db_session.rollback()
+    revisions = list(
+        db_session.execute(
+            select(GraphFact)
+            .where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_id == case.target_ref["fact_id"],
+            )
+            .order_by(GraphFact.fact_revision)
+        ).scalars()
+    )
+    resolved_case = db_session.get(CasePoolCase, case.id)
+    mapping = db_session.execute(
+        select(CaseResolutionMapping).where(
+            CaseResolutionMapping.run_id == run_id,
+            CaseResolutionMapping.case_id == case.id,
+        )
+    ).scalar_one()
+
+    assert [row.fact_revision for row in revisions] == [1, 2]
+    assert revisions[0].content["speaker"] is None
+    assert revisions[1].content["speaker"]["name"] == "顾霜"
+    assert revisions[1].source_kind == "case_resolution"
+    assert revisions[1].graph_version_id == second.graph_version_id
+    assert resolved_case is not None and resolved_case.state == "resolved"
+    assert mapping.target_fact_revision == 2
+    assert second.pulled_results[0].case_id == case.id
+
+
+def test_complete_annotation_run_rolls_back_finish_pull_push_when_audit_fails(db_session) -> None:
+    """2026-08-07 用于验证完成事务任一步失败时全部结果同时回滚"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["“住手”回荡"],
         title="完成事务回滚",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    finish = _finish(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
 
     with patch(
         "src.workflows.annotate_helpers.storage._save_success_audit",
@@ -185,7 +371,12 @@ def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_sessi
     ):
         with pytest.raises(RuntimeError, match="audit failed"):
             complete_annotation_run(
-                result=_result(run_id),
+                result=_result(
+                    run_id=run_id,
+                    chapter_id=1,
+                    finish=finish,
+                    pushed_cases=[_pushed_case()],
+                ),
                 novel_id=novel_id,
                 session_factory=factory,
             )
@@ -193,9 +384,10 @@ def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_sessi
     db_session.rollback()
     for model in (
         ChapterAnnotationRecord,
+        CasePoolCase,
         CaseResolutionMapping,
+        GraphVersion,
         GraphFact,
-        GraphFactSource,
         ModelInteraction,
         TokenUsage,
     ):
@@ -203,15 +395,16 @@ def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_sessi
 
 
 def test_load_completion_result_reads_existing_chapter_without_writes(db_session) -> None:
-    """2026-08-05 用于验证已提交章节可以直接回读同一个 CompletionResult"""
+    """2026-08-07 用于验证已冻结章节可回读同一完成结果而不新增版本"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜进入山门"],
+        texts=["顾霜喝道"],
         title="完成结果回读",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    finish = _finish(chunk_id=0, text="顾霜喝道", speaker_entity=True)
     expected = complete_annotation_run(
-        result=_result(run_id),
+        result=_result(run_id=run_id, chapter_id=1, finish=finish),
         novel_id=novel_id,
         session_factory=factory,
     )
@@ -221,320 +414,50 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
 
     assert actual == expected
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
+    assert _count(db_session, GraphVersion, run_id) == 1
 
 
-def _case_result(
-    run_id: str,
-    *,
-    chapter_id: int,
-    chunk_id: int,
-    source_case_ids: list[str],
-) -> AgentRunResult:
-    """2026-08-06 用于构造新建或重新推入案例的完成结果"""
-    annotation = _annotation(chapter_id=chapter_id, chunk_id=chunk_id)
-    return AgentRunResult(
-        run_id=run_id,
-        chapter_id=chapter_id,
-        final_annotation=annotation,
-        initial_finish=annotation,
-        revision_payload={},
-        initial_case_candidate_ids=list(source_case_ids),
-        rotation_case_ids=[],
-        pulled_case_ids=list(source_case_ids),
-        staged_outputs=[
-            CasePushOutput.model_validate(
-                {
-                    "output_kind": "case",
-                    "source_case_ids": source_case_ids,
-                    "evidence": {"reason": "身份仍需继续确认", "chapterid": chapter_id},
-                    "payload": {
-                        "keys": ["顾霜", "身份"],
-                        "description": "顾霜身份仍待后续章节确认",
-                    },
-                }
-            )
-        ],
-        success_audit=SuccessAudit(
-            attempt_number=1,
-            messages=[],
-            tool_calls=[],
-            model_provider="local",
-            duration_ms=1,
-        ),
-    )
-
-
-def test_requeued_case_uses_new_uuid_and_consumes_source(db_session) -> None:
-    """2026-08-06 用于验证同内容案例重推后来源消耗且目标使用全新 UUID"""
+def test_missing_pulled_case_rolls_back_before_finish_write(db_session) -> None:
+    """2026-08-07 用于验证无法锁定 pulled 案例时不写任何章节结果"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜身份成谜", "身份仍未揭晓"],
-        chapter_ids=[1, 2],
-        title="案例重新入池",
+        texts=["顾霜喝道"],
+        title="来源案例锁定失败",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    first = complete_annotation_run(
-        result=_case_result(
-            run_id,
-            chapter_id=1,
-            chunk_id=0,
-            source_case_ids=[],
-        ),
-        novel_id=novel_id,
-        session_factory=factory,
-    )
-    source_case_id = first.cases[0].id
-    second = complete_annotation_run(
-        result=_case_result(
-            run_id,
-            chapter_id=2,
-            chunk_id=1,
-            source_case_ids=[source_case_id],
-        ),
-        novel_id=novel_id,
-        session_factory=factory,
-    )
-    target_case_id = second.cases[0].id
-
-    db_session.rollback()
-    rows = list(
-        db_session.execute(
-            select(CasePoolCase)
-            .where(CasePoolCase.id.in_([source_case_id, target_case_id]))
-            .order_by(CasePoolCase.created_at, CasePoolCase.id)
-        )
-        .scalars()
-        .all()
-    )
-    mapping = db_session.execute(
-        select(CaseResolutionMapping).where(
-            CaseResolutionMapping.run_id == run_id,
-            CaseResolutionMapping.source_case_id == source_case_id,
-            CaseResolutionMapping.target_case_id == target_case_id,
-        )
-    ).scalar_one()
-
-    assert source_case_id != target_case_id
-    assert {row.id: row.state for row in rows} == {
-        source_case_id: "consumed",
-        target_case_id: "active",
-    }
-    assert mapping.result_kind == "case"
-
-
-def _resolved_case_result(
-    run_id: str,
-    *,
-    chapter_id: int,
-    chunk_id: int,
-    source_case_id: str,
-) -> AgentRunResult:
-    """2026-08-06 用于构造把来源案例解决为数据库图结果的完成结果"""
-    annotation = _annotation(chapter_id=chapter_id, chunk_id=chunk_id)
-    return AgentRunResult(
-        run_id=run_id,
-        chapter_id=chapter_id,
-        final_annotation=annotation,
-        initial_finish=annotation,
-        revision_payload={},
-        initial_case_candidate_ids=[source_case_id],
-        rotation_case_ids=[],
-        pulled_case_ids=[source_case_id],
-        staged_outputs=[
-            FactPushOutput.model_validate(
-                {
-                    "output_kind": "fact",
-                    "source_case_ids": [source_case_id],
-                    "evidence": {"reason": "后文确认顾霜属于山门", "chapterid": chapter_id},
-                    "payload": {
-                        "fact_type": "membership",
-                        "subject": {"name": "顾霜", "entity_type": "character"},
-                        "predicate": "belongs_to",
-                        "object": {"name": "山门", "entity_type": "location"},
-                        "value": None,
-                        "participants": [],
-                        "scope": "novel",
-                        "story_time": None,
-                        "assertion": "affirmed",
-                        "confidence": "high",
-                    },
-                }
-            )
-        ],
-        success_audit=SuccessAudit(
-            attempt_number=1,
-            messages=[],
-            tool_calls=[],
-            model_provider="local",
-            duration_ms=1,
-        ),
+    finish = _finish(chunk_id=0, text="顾霜喝道", speaker_entity=True)
+    pulled = PulledResult(
+        case_id="missing-case",
+        type="dialogue_speaker",
+        resolution={
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "evidence_chunkid": 0,
+        },
+        target_key="missing-target",
+        target_ref={
+            "kind": "dialogue",
+            "item_ref": "dialogue_1",
+            "chunk_id": 0,
+            "start": 0,
+            "end": 2,
+            "text": "住手",
+            "fact_id": "missing-fact",
+            "fact_revision": 1,
+        },
     )
 
-
-def test_resolved_pulled_case_becomes_graph_result_and_is_consumed(db_session) -> None:
-    """2026-08-06 用于验证已解决来源案例退出池并映射到数据库图节点"""
-    novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜身份成谜", "顾霜属于山门"],
-        chapter_ids=[1, 2],
-        title="案例解决入图",
-    )
-    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    first = complete_annotation_run(
-        result=_case_result(
-            run_id,
-            chapter_id=1,
-            chunk_id=0,
-            source_case_ids=[],
-        ),
-        novel_id=novel_id,
-        session_factory=factory,
-    )
-    source_case_id = first.cases[0].id
-    resolved = complete_annotation_run(
-        result=_resolved_case_result(
-            run_id,
-            chapter_id=2,
-            chunk_id=1,
-            source_case_id=source_case_id,
-        ),
-        novel_id=novel_id,
-        session_factory=factory,
-    )
-
-    db_session.rollback()
-    source_case = db_session.get(CasePoolCase, source_case_id)
-    mapping = db_session.execute(
-        select(CaseResolutionMapping).where(
-            CaseResolutionMapping.run_id == run_id,
-            CaseResolutionMapping.source_case_id == source_case_id,
-            CaseResolutionMapping.result_kind == "fact",
-        )
-    ).scalar_one()
-    graph_source = db_session.execute(
-        select(GraphFactSource).where(
-            GraphFactSource.run_id == run_id,
-            GraphFactSource.stable_fact_id
-            == resolved.facts[0].graph_node_id.removeprefix("fact:"),
-        )
-    ).scalar_one()
-
-    assert source_case is not None
-    assert source_case.state == "consumed"
-    assert resolved.cases == []
-    assert mapping.target_graph_node_id == resolved.facts[0].graph_node_id
-    assert graph_source.source_kind == "agent_resolution"
-
-
-def test_rejected_pulled_case_exits_without_graph_resolution(db_session) -> None:
-    """2026-08-06 用于验证被否定来源案例退出池且不产生 Agent 图结果"""
-    novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜身份成谜", "旧推断被否定"],
-        chapter_ids=[1, 2],
-        title="案例拒绝",
-    )
-    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    first = complete_annotation_run(
-        result=_case_result(
-            run_id,
-            chapter_id=1,
-            chunk_id=0,
-            source_case_ids=[],
-        ),
-        novel_id=novel_id,
-        session_factory=factory,
-    )
-    source_case_id = first.cases[0].id
-    annotation = _annotation(chapter_id=2, chunk_id=1)
-    rejected_result = AgentRunResult(
-        run_id=run_id,
-        chapter_id=2,
-        final_annotation=annotation,
-        initial_finish=annotation,
-        revision_payload={},
-        initial_case_candidate_ids=[source_case_id],
-        rotation_case_ids=[],
-        pulled_case_ids=[source_case_id],
-        staged_outputs=[
-            RejectedPushOutput.model_validate(
-                {
-                    "output_kind": "rejected",
-                    "source_case_ids": [source_case_id],
-                    "evidence": {"reason": "后文明确否定旧推断", "chapterid": 2},
-                    "payload": {
-                        "reason_code": "contradicted",
-                        "rejected_assumptions": ["顾霜身份未知"],
-                    },
-                }
-            )
-        ],
-        success_audit=SuccessAudit(
-            attempt_number=1,
-            messages=[],
-            tool_calls=[],
-            model_provider="local",
-            duration_ms=1,
-        ),
-    )
-    completion = complete_annotation_run(
-        result=rejected_result,
-        novel_id=novel_id,
-        session_factory=factory,
-    )
-
-    db_session.rollback()
-    source_case = db_session.get(CasePoolCase, source_case_id)
-    mapping = db_session.execute(
-        select(CaseResolutionMapping).where(
-            CaseResolutionMapping.run_id == run_id,
-            CaseResolutionMapping.source_case_id == source_case_id,
-            CaseResolutionMapping.result_kind == "rejected",
-        )
-    ).scalar_one()
-    agent_sources = list(
-        db_session.execute(
-            select(GraphFactSource).where(
-                GraphFactSource.run_id == run_id,
-                GraphFactSource.annotation_id == completion.annotation_id,
-                GraphFactSource.source_kind == "agent_resolution",
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    assert source_case is not None
-    assert source_case.state == "rejected"
-    assert completion.facts == []
-    assert completion.rejected_source_case_ids == [source_case_id]
-    assert mapping.target_graph_node_id is None
-    assert agent_sources == []
-
-
-def test_completion_revalidates_pulled_case_coverage_before_writes(db_session) -> None:
-    """2026-08-06 用于验证完成事务拒绝未被 staged output 覆盖的来源案例"""
-    novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜身份成谜"],
-        title="完成事务来源复核",
-    )
-    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    result = _case_result(
-        run_id,
-        chapter_id=1,
-        chunk_id=0,
-        source_case_ids=[],
-    )
-    result.pulled_case_ids = ["missing-source-case"]
-
-    with pytest.raises(ValueError, match="未覆盖的 pulled 案例"):
+    with pytest.raises(ValueError, match="无法锁定全部 pulled 案例"):
         complete_annotation_run(
-            result=result,
+            result=_result(
+                run_id=run_id,
+                chapter_id=1,
+                finish=finish,
+                pulled_results=[pulled],
+            ),
             novel_id=novel_id,
             session_factory=factory,
         )
 
     db_session.rollback()
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 0
-    assert _count(db_session, GraphFact, run_id) == 0
+    assert _count(db_session, GraphVersion, run_id) == 0

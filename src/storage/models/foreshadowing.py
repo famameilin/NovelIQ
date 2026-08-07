@@ -44,7 +44,7 @@ class ForeshadowingThread(Base):
     strength: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    evidence: Mapped[list] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -90,7 +90,7 @@ class ForeshadowingThreadHit(Base):
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
     anchor_reason: Mapped[str] = mapped_column(Text, nullable=False)
     why_unresolved_now: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    evidence: Mapped[list] = mapped_column(JSONB, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 

@@ -60,15 +60,15 @@ async def run_annotate(
     novel_id: str = "default",
     novel_title: str | None = None,
     use_context_enhancement: bool = True,
-    use_rag: bool = True,
     is_cancelled: Callable[[], bool] | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """2026-08-05 用于严格串行执行每章一次 Agent 并在成功后完成唯一事务"""
-    del resume, analysis_logger, use_context_enhancement, use_rag
+    del resume, analysis_logger, use_context_enhancement
 
     from src.agents.annotation import run_annotation_agent
     from src.agents.llm import build_chat_model
+    from src.models.local.embedding import EmbeddingClient
     from src.workflows.annotate_helpers.storage import complete_annotation_run
 
     started_at = time.perf_counter()
@@ -81,6 +81,7 @@ async def run_annotate(
     total_chapters = len(chapter_groups)
     sql_session_factory = get_session_factory()
     llm = build_chat_model("annotation")
+    embedding_client = EmbeddingClient(novel_id=novel_id)
     success_count = 0
 
     if emitter:
@@ -145,7 +146,10 @@ async def run_annotate(
                 query_service_factory=partial(
                     DatabaseAnnotationQueryService,
                     run_id=run_id,
+                    current_chapter_id=chapter_id,
+                    current_first_chunk_id=current_chunks[0][0],
                     current_last_chunk_id=current_chunks[-1][0],
+                    embedding_client=embedding_client,
                 ),
             )
             complete_annotation_run(

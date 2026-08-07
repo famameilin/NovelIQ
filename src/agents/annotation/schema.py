@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, model_validator
 
 EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
 EventType = Literal["冲突", "铺垫", "转折"]
@@ -15,59 +16,76 @@ Assertion = Literal["affirmed", "negated"]
 RelationChangeKind = Literal["assert", "reinforce", "weaken", "break", "refine", "supersede", "retract"]
 Directionality = Literal["directed", "bidirectional"]
 RelationSemantics = Literal["ordinary", "same_character"]
-CaseState = Literal["active", "consumed", "rejected"]
+CaseState = Literal["active", "resolved"]
+CaseType = Literal["dialogue_speaker"]
 ForeshadowingType = Literal["物件", "对话", "场景", "人物行为", "其他"]
 SetupStatus = Literal["open", "reinforced", "likely_paid_off"]
 PayoffLikelihood = Literal["high", "medium"]
-SourceKind = Literal["chapter_annotation", "agent_resolution"]
+EntityType = Literal["character", "location", "object", "organization"]
 
 NonEmptyText = Annotated[str, Field(min_length=1)]
 
 
 class StrictModel(BaseModel):
-    """2026-08-05 用于统一禁止 Agent 合同中的额外字段"""
+    """2026-08-07 用于统一禁止标注 Agent 合同中的额外字段"""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-class Evidence(StrictModel):
-    """2026-08-05 用于表达全文唯一的章节级结果依据"""
+class GraphEvidence(StrictModel):
+    """2026-08-07 用于引用前序章节图版本中可见的事实版本"""
 
+    fact_id: str = Field(min_length=1)
+    fact_revision: int = Field(gt=0)
     reason: str = Field(min_length=1)
-    chapterid: int = Field(gt=0)
 
     @model_validator(mode="after")
-    def validate_reason(self) -> Evidence:
-        """2026-08-05 用于拒绝只含空白字符的 Evidence 理由"""
+    def validate_reason(self) -> GraphEvidence:
+        """2026-08-07 用于拒绝只含空白字符的图事实依据理由"""
         self.reason = self.reason.strip()
         if not self.reason:
-            raise ValueError("evidence.reason 不能为空")
+            raise ValueError("graph evidence reason 不能为空")
         return self
 
 
-class EntityRef(StrictModel):
-    """2026-08-05 用于统一表达事实中的实体引用"""
+class TextEvidence(StrictModel):
+    """2026-08-07 用于引用当前章节输入或本轮已读取的同 run 原文"""
 
-    name: str = Field(min_length=1)
-    entity_type: str = Field(min_length=1)
-
-
-class RepresentativeNodeSelector(StrictModel):
-    """2026-08-06 用于按关系端点或图搜索节点 ID 选择常用人物节点"""
-
-    endpoint: Literal["subject", "object"] | None = None
-    node_id: str | None = Field(default=None, pattern=r"^entity:[1-9][0-9]*$")
+    reason: str = Field(min_length=1)
+    chunk_id: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_single_selector(self) -> RepresentativeNodeSelector:
-        """2026-08-06 用于确保常用节点选择器只使用一种定位方式"""
-        if (self.endpoint is None) == (self.node_id is None):
-            raise ValueError("representative_node 必须恰好选择 endpoint 或 node_id")
+    def validate_reason(self) -> TextEvidence:
+        """2026-08-07 用于拒绝只含空白字符的原文依据理由"""
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValueError("text evidence reason 不能为空")
         return self
+
+
+Evidence = GraphEvidence | TextEvidence
+
+
+class EvidenceList(RootModel[list[Evidence]]):
+    """2026-08-07 用于把全部业务依据固定为非空双源 Evidence 列表"""
+
+    root: list[Evidence] = Field(min_length=1)
+
+    def __iter__(self):
+        """2026-08-07 用于按提交顺序遍历 Evidence 列表"""
+        return iter(self.root)
+
+    def __len__(self) -> int:
+        """2026-08-07 用于返回 Evidence 列表长度"""
+        return len(self.root)
+
+    def __getitem__(self, index: int) -> Evidence:
+        """2026-08-07 用于按索引读取 Evidence 列表元素"""
+        return self.root[index]
 
 
 class StoryTime(StrictModel):
-    """2026-08-05 用于表达结构化故事时间而不混入处理时间"""
+    """2026-08-07 用于表达结构化故事时间而不混入处理时间"""
 
     label: str | None = None
     order: int | None = None
@@ -76,24 +94,116 @@ class StoryTime(StrictModel):
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> StoryTime:
-        """2026-08-05 用于确保故事时间至少包含一个明确字段"""
+        """2026-08-07 用于确保故事时间至少包含一个明确字段"""
         if not self.model_fields_set:
             raise ValueError("story_time 至少需要一个字段")
         return self
 
 
-class FactParticipant(StrictModel):
-    """2026-08-05 用于表达事实参与者及其语义角色"""
+def _validate_endpoint(
+    *,
+    ref: str | None,
+    existing_entity_id: int | None,
+    label: str,
+    required: bool,
+) -> None:
+    """2026-08-07 用于校验 finish 实体端点只使用一种定位方式"""
+    selected = int(ref is not None) + int(existing_entity_id is not None)
+    if required and selected != 1:
+        raise ValueError(f"{label} 必须恰好提交 ref 或 existing_entity_id")
+    if not required and selected > 1:
+        raise ValueError(f"{label} 不能同时提交 ref 与 existing_entity_id")
 
-    role: str = Field(min_length=1)
-    entity: EntityRef
 
-
-class ChapterSegment(StrictModel):
-    """2026-08-05 用于保留章节正式标注中的原始 chunk 锚点"""
+class TextSpan(StrictModel):
+    """2026-08-07 用于稳定定位 current 原文中的实体 mention"""
 
     chunk_id: int = Field(ge=0)
-    summary: str = Field(min_length=1)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> TextSpan:
+        """2026-08-07 用于拒绝倒置或空文本区间"""
+        if self.end <= self.start:
+            raise ValueError("TextSpan.end 必须大于 start")
+        return self
+
+
+class EntityBase(StrictModel):
+    """2026-08-07 用于统一 finish 实体目录的稳定引用与依据"""
+
+    ref: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    existing_entity_id: int | None = Field(default=None, gt=0)
+    mentions: list[TextSpan] = Field(min_length=1)
+    confidence: Confidence
+    evidence: EvidenceList
+
+    @model_validator(mode="after")
+    def normalize_identity(self) -> EntityBase:
+        """2026-08-07 用于规范化实体内部引用和名称"""
+        self.ref = self.ref.strip()
+        self.name = self.name.strip()
+        if not self.ref or not self.name:
+            raise ValueError("实体 ref 与 name 不能为空")
+        return self
+
+
+class CharacterEntity(EntityBase):
+    """2026-08-07 用于声明当前章节明确出现的人物图节点"""
+
+
+class LocationEntity(EntityBase):
+    """2026-08-07 用于声明当前章节明确出现的地点图节点"""
+
+    location_type: str | None = None
+    description: str | None = None
+
+
+class ObjectEntity(EntityBase):
+    """2026-08-07 用于声明当前章节明确出现的物品图节点"""
+
+    object_type: str | None = None
+    description: str | None = None
+
+
+class OrganizationEntity(EntityBase):
+    """2026-08-07 用于声明当前章节明确出现的组织图节点"""
+
+    organization_type: str | None = None
+    description: str | None = None
+
+
+class EntityDirectory(StrictModel):
+    """2026-08-07 用于保存当前章节全部一等图实体目录"""
+
+    characters: list[CharacterEntity] = Field(default_factory=list)
+    locations: list[LocationEntity] = Field(default_factory=list)
+    objects: list[ObjectEntity] = Field(default_factory=list)
+    organizations: list[OrganizationEntity] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_refs(self) -> EntityDirectory:
+        """2026-08-07 用于确保实体 ref 和既有节点 ID 在 finish 内唯一"""
+        entities = [*self.characters, *self.locations, *self.objects, *self.organizations]
+        refs = [entity.ref for entity in entities]
+        if len(set(refs)) != len(refs):
+            raise ValueError("entities 中的 ref 必须全局唯一")
+        existing_ids = [
+            entity.existing_entity_id
+            for entity in entities
+            if entity.existing_entity_id is not None
+        ]
+        if len(set(existing_ids)) != len(existing_ids):
+            raise ValueError("同一个 existing_entity_id 在 finish 中只能声明一次")
+        return self
+
+
+class ChapterMetrics(StrictModel):
+    """2026-08-07 用于保存逐 chunk 的情绪与叙事结构指标"""
+
     emotional_valence: EmotionalValence
     event_type: EventType
     pivot_moment: bool = False
@@ -101,198 +211,222 @@ class ChapterSegment(StrictModel):
 
 
 class ChapterFactBase(StrictModel):
-    """2026-08-05 用于统一章节原子事实的锚点依据与置信度"""
+    """2026-08-07 用于统一逐 chunk 标注项的稳定引用依据与置信度"""
 
-    chunk_id: int = Field(ge=0)
-    evidence: Evidence
+    ref: str = Field(min_length=1)
     confidence: Confidence
+    evidence: EvidenceList
+
+    @model_validator(mode="after")
+    def normalize_ref(self) -> ChapterFactBase:
+        """2026-08-07 用于拒绝空白标注项 ref"""
+        self.ref = self.ref.strip()
+        if not self.ref:
+            raise ValueError("标注项 ref 不能为空")
+        return self
 
 
-class CharacterFact(ChapterFactBase):
-    """2026-08-05 用于表达章节中的人物行为与情绪事实"""
+class CharacterObservation(ChapterFactBase):
+    """2026-08-07 用于表达人物在当前 chunk 的功能动作与情绪"""
 
-    entity: EntityRef
+    entity_ref: str | None = None
+    entity_existing_entity_id: int | None = Field(default=None, gt=0)
     role_function: str = Field(min_length=1)
     action: str = Field(min_length=1)
     action_type: str = Field(min_length=1)
     emotion: EmotionalValence
 
+    @model_validator(mode="after")
+    def validate_entity(self) -> CharacterObservation:
+        """2026-08-07 用于确保人物观察端点唯一"""
+        _validate_endpoint(
+            ref=self.entity_ref,
+            existing_entity_id=self.entity_existing_entity_id,
+            label="character_observation.entity",
+            required=True,
+        )
+        return self
 
-class LocationFact(ChapterFactBase):
-    """2026-08-05 用于表达实体与地点之间的章节事实"""
 
-    entity: EntityRef
-    location: EntityRef
-    relation_type: str = Field(min_length=1)
+class LocationObservation(ChapterFactBase):
+    """2026-08-07 用于表达地点自身属性与状态"""
+
+    location_ref: str | None = None
+    location_existing_entity_id: int | None = Field(default=None, gt=0)
+    predicate: str = Field(min_length=1)
+    value: JsonValue
+    story_time: StoryTime | None = None
+
+    @model_validator(mode="after")
+    def validate_location(self) -> LocationObservation:
+        """2026-08-07 用于确保地点观察端点唯一"""
+        _validate_endpoint(
+            ref=self.location_ref,
+            existing_entity_id=self.location_existing_entity_id,
+            label="location_observation.location",
+            required=True,
+        )
+        return self
 
 
-class DialogueFact(ChapterFactBase):
-    """2026-08-05 用于表达章节对话及其说话人事实"""
+class Dialogue(ChapterFactBase):
+    """2026-08-07 用于表达当前 chunk 对话及稳定原文锚点"""
 
     content: str = Field(min_length=1)
-    speaker: EntityRef | None = None
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    speaker_ref: str | None = None
+    speaker_existing_entity_id: int | None = Field(default=None, gt=0)
     tone: str | None = None
     is_inner_monologue: bool = False
 
+    @model_validator(mode="after")
+    def validate_dialogue(self) -> Dialogue:
+        """2026-08-07 用于校验对话区间和可空说话人端点"""
+        if self.end <= self.start:
+            raise ValueError("dialogue.end 必须大于 start")
+        _validate_endpoint(
+            ref=self.speaker_ref,
+            existing_entity_id=self.speaker_existing_entity_id,
+            label="dialogue.speaker",
+            required=False,
+        )
+        return self
 
-class EventFact(ChapterFactBase):
-    """2026-08-05 用于表达章节事件与参与者"""
+
+class EventParticipant(StrictModel):
+    """2026-08-07 用于表达事件参与者与语义角色"""
+
+    role: str = Field(min_length=1)
+    entity_ref: str | None = None
+    entity_existing_entity_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_entity(self) -> EventParticipant:
+        """2026-08-07 用于确保事件参与者端点唯一"""
+        _validate_endpoint(
+            ref=self.entity_ref,
+            existing_entity_id=self.entity_existing_entity_id,
+            label="event.participant",
+            required=True,
+        )
+        return self
+
+
+class Event(ChapterFactBase):
+    """2026-08-07 用于表达当前 chunk 事件参与者与发生地点"""
 
     event_type: str = Field(min_length=1)
     summary: str = Field(min_length=1)
-    participants: list[FactParticipant] = Field(default_factory=list)
+    participants: list[EventParticipant] = Field(default_factory=list)
+    location_ref: str | None = None
+    location_existing_entity_id: int | None = Field(default=None, gt=0)
+    story_time: StoryTime | None = None
+
+    @model_validator(mode="after")
+    def validate_location(self) -> Event:
+        """2026-08-07 用于校验事件可空地点端点"""
+        _validate_endpoint(
+            ref=self.location_ref,
+            existing_entity_id=self.location_existing_entity_id,
+            label="event.location",
+            required=False,
+        )
+        return self
 
 
-class RelationFact(ChapterFactBase):
-    """2026-08-05 用于表达章节实体关系及变化"""
+class Relation(ChapterFactBase):
+    """2026-08-07 用于表达当前 chunk 实体关系及关系版本变化"""
 
-    from_entity: EntityRef
-    to_entity: EntityRef
+    from_ref: str | None = None
+    from_existing_entity_id: int | None = Field(default=None, gt=0)
+    to_ref: str | None = None
+    to_existing_entity_id: int | None = Field(default=None, gt=0)
     relation_type: str = Field(min_length=1)
     change_kind: RelationChangeKind
-    directionality: Directionality
-    relation_semantics: RelationSemantics = "ordinary"
-    representative_node: RepresentativeNodeSelector | None = None
-
-    @model_validator(mode="after")
-    def validate_character_identity_relation(self) -> RelationFact:
-        """2026-08-06 用于校验同一人物关系与代表人物节点选择"""
-        inactive = self.change_kind in {"break", "retract"}
-        if self.relation_semantics == "ordinary":
-            if self.representative_node is not None:
-                raise ValueError("普通关系不允许提交 representative_node")
-            return self
-        if self.from_entity.entity_type != "character" or self.to_entity.entity_type != "character":
-            raise ValueError("同一人物关系的两端必须都是 character 节点")
-        if self.from_entity.name == self.to_entity.name:
-            raise ValueError("同一人物关系必须连接两个独立 character 节点")
-        if self.directionality != "bidirectional":
-            raise ValueError("同一人物关系必须使用 bidirectional")
-        if inactive:
-            if self.representative_node is not None:
-                raise ValueError("断开同一人物关系时不允许提交 representative_node")
-        elif self.representative_node is None:
-            raise ValueError("有效同一人物关系必须选择一个 representative_node")
-        return self
-
-
-class StateFact(ChapterFactBase):
-    """2026-08-05 用于表达章节实体状态与时间范围"""
-
-    entity: EntityRef
-    predicate: str = Field(min_length=1)
-    object: EntityRef | None = None
-    value: JsonValue | None = None
-    story_time: StoryTime | None = None
-
-    @model_validator(mode="after")
-    def validate_object_or_value(self) -> StateFact:
-        """2026-08-05 用于确保状态事实在对象和值之间恰好选择一种表达"""
-        if (self.object is None) == (self.value is None):
-            raise ValueError("state fact 的 object 与 value 必须恰好一个非空")
-        return self
-
-
-class ChapterAnnotation(StrictModel):
-    """2026-08-05 用于保存当前完整章节的唯一正式标注候选"""
-
-    chapter_summary: str = Field(min_length=1)
-    segments: list[ChapterSegment] = Field(min_length=1)
-    characters: list[CharacterFact] = Field(default_factory=list)
-    locations: list[LocationFact] = Field(default_factory=list)
-    dialogues: list[DialogueFact] = Field(default_factory=list)
-    events: list[EventFact] = Field(default_factory=list)
-    relations: list[RelationFact] = Field(default_factory=list)
-    states: list[StateFact] = Field(default_factory=list)
-
-
-class ChapterAnnotationPatch(StrictModel):
-    """2026-08-05 用于在初始或后文阶段局部修正章节候选"""
-
-    chapter_summary: str | None = None
-    segments: list[ChapterSegment] | None = None
-    characters: list[CharacterFact] | None = None
-    locations: list[LocationFact] | None = None
-    dialogues: list[DialogueFact] | None = None
-    events: list[EventFact] | None = None
-    relations: list[RelationFact] | None = None
-    states: list[StateFact] | None = None
-
-    @model_validator(mode="after")
-    def validate_non_empty_patch(self) -> ChapterAnnotationPatch:
-        """2026-08-05 用于拒绝没有实际提交字段的章节修正"""
-        if not self.model_fields_set:
-            raise ValueError("revise_finish 至少需要提供一个修正字段")
-        return self
-
-
-class CasePayload(StrictModel):
-    """2026-08-05 用于表达需要后续章节继续处理的完整未解决案例"""
-
-    keys: list[str] = Field(min_length=1, max_length=20)
-    description: str = Field(min_length=1, max_length=100)
-
-    @model_validator(mode="after")
-    def normalize_and_validate(self) -> CasePayload:
-        """2026-08-05 用于清理案例关键词并校验去重后的完整描述"""
-        normalized_keys = [key.strip() for key in self.keys]
-        if any(not key for key in normalized_keys):
-            raise ValueError("case.keys 不允许空字符串")
-        if len(set(normalized_keys)) != len(normalized_keys):
-            raise ValueError("case.keys 不允许重复")
-        self.keys = normalized_keys
-        self.description = self.description.strip()
-        if not self.description:
-            raise ValueError("case.description 不能为空")
-        return self
-
-
-class FactPayload(StrictModel):
-    """2026-08-06 用于表达写入数据库图的节点关系与属性语义"""
-
-    fact_type: str = Field(min_length=1)
-    subject: EntityRef
-    predicate: str = Field(min_length=1)
-    object: EntityRef | None = None
-    value: JsonValue | None = None
-    participants: list[FactParticipant] = Field(default_factory=list)
-    scope: str = Field(min_length=1)
-    story_time: StoryTime | None = None
-    assertion: Assertion
-    confidence: Confidence
+    relation_id: str | None = None
     directionality: Directionality = "directed"
     relation_semantics: RelationSemantics = "ordinary"
-    representative_node: RepresentativeNodeSelector | None = None
+    representative_ref: str | None = None
+    representative_existing_entity_id: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
-    def validate_graph_value(self) -> FactPayload:
-        """2026-08-06 用于校验图关系属性互斥与同一人物节点选择"""
-        if (self.object is None) == (self.value is None):
-            raise ValueError("fact 的 object 与 value 必须恰好一个非空")
+    def validate_relation(self) -> Relation:
+        """2026-08-07 用于校验关系端点版本引用和同一人物代表节点"""
+        _validate_endpoint(
+            ref=self.from_ref,
+            existing_entity_id=self.from_existing_entity_id,
+            label="relation.from",
+            required=True,
+        )
+        _validate_endpoint(
+            ref=self.to_ref,
+            existing_entity_id=self.to_existing_entity_id,
+            label="relation.to",
+            required=True,
+        )
+        if self.change_kind == "assert":
+            if self.relation_id is not None:
+                raise ValueError("assert 关系不允许提交 relation_id")
+        elif not self.relation_id:
+            raise ValueError("非 assert 关系必须提交本轮图搜索可见的 relation_id")
+        inactive = self.change_kind in {"break", "retract"}
         if self.relation_semantics == "ordinary":
-            if self.representative_node is not None:
-                raise ValueError("普通事实不允许提交 representative_node")
+            if self.representative_ref is not None or self.representative_existing_entity_id is not None:
+                raise ValueError("普通关系不允许提交 representative")
             return self
-        if self.fact_type != "relation" or self.object is None:
-            raise ValueError("same_character 只允许用于实体关系事实")
-        if self.subject.entity_type != "character" or self.object.entity_type != "character":
-            raise ValueError("同一人物关系的两端必须都是 character 节点")
-        if self.subject.name == self.object.name:
-            raise ValueError("同一人物关系必须连接两个独立 character 节点")
         if self.directionality != "bidirectional":
-            raise ValueError("同一人物关系必须使用 bidirectional")
-        if self.assertion == "negated":
-            if self.representative_node is not None:
-                raise ValueError("否定同一人物关系不允许提交 representative_node")
-        elif self.representative_node is None:
-            raise ValueError("同一人物关系必须选择一个 representative_node")
+            raise ValueError("same_character 关系必须使用 bidirectional")
+        if inactive:
+            if self.representative_ref is not None or self.representative_existing_entity_id is not None:
+                raise ValueError("断开 same_character 关系时不允许提交 representative")
+        else:
+            _validate_endpoint(
+                ref=self.representative_ref,
+                existing_entity_id=self.representative_existing_entity_id,
+                label="relation.representative",
+                required=True,
+            )
         return self
 
 
-class ForeshadowingPayload(StrictModel):
-    """2026-08-05 用于表达已确认伏笔线程的新建或续接结果"""
+class State(ChapterFactBase):
+    """2026-08-07 用于表达当前 chunk 实体状态与时间范围"""
 
-    has_foreshadowing: Literal[True]
+    entity_ref: str | None = None
+    entity_existing_entity_id: int | None = Field(default=None, gt=0)
+    predicate: str = Field(min_length=1)
+    object_ref: str | None = None
+    object_existing_entity_id: int | None = Field(default=None, gt=0)
+    value: JsonValue | None = None
+    story_time: StoryTime | None = None
+    assertion: Assertion = "affirmed"
+
+    @model_validator(mode="after")
+    def validate_state(self) -> State:
+        """2026-08-07 用于校验状态主体与对象值互斥"""
+        _validate_endpoint(
+            ref=self.entity_ref,
+            existing_entity_id=self.entity_existing_entity_id,
+            label="state.entity",
+            required=True,
+        )
+        object_selected = self.object_ref is not None or self.object_existing_entity_id is not None
+        if object_selected:
+            _validate_endpoint(
+                ref=self.object_ref,
+                existing_entity_id=self.object_existing_entity_id,
+                label="state.object",
+                required=True,
+            )
+        if object_selected == (self.value is not None):
+            raise ValueError("state 的 object 与 value 必须恰好一个非空")
+        return self
+
+
+class Foreshadowing(ChapterFactBase):
+    """2026-08-07 用于表达当前 chunk 可确认的伏笔事实"""
+
     foreshadowing_type: ForeshadowingType
     setup_kind: str = Field(min_length=1)
     setup_summary: str = Field(min_length=1)
@@ -302,11 +436,10 @@ class ForeshadowingPayload(StrictModel):
     is_new_setup: bool
     linked_setup_id: str | None = None
     setup_status: SetupStatus
-    confidence: Literal["high", "medium"]
 
     @model_validator(mode="after")
-    def validate_setup_link(self) -> ForeshadowingPayload:
-        """2026-08-05 用于校验新建与续接伏笔线程的真实 ID 合同"""
+    def validate_setup_link(self) -> Foreshadowing:
+        """2026-08-07 用于校验新建与续接伏笔线程的真实 ID 合同"""
         if self.is_new_setup:
             if self.linked_setup_id is not None or self.setup_status != "open":
                 raise ValueError("新伏笔必须使用空 linked_setup_id 且状态为 open")
@@ -315,176 +448,350 @@ class ForeshadowingPayload(StrictModel):
         return self
 
 
-class RejectedPayload(StrictModel):
-    """2026-08-05 用于表达来源案例被否定的原因分类"""
+class ChapterChunkFinish(StrictModel):
+    """2026-08-07 用于保存单个 current chunk 的完整标注"""
 
-    reason_code: str = Field(min_length=1)
-    rejected_assumptions: list[str] = Field(default_factory=list)
-
-
-class PushOutputBase(StrictModel):
-    """2026-08-05 用于统一 push 输出的来源案例与唯一 Evidence"""
-
-    source_case_ids: list[str] = Field(default_factory=list)
-    evidence: Evidence
-
-
-class CasePushOutput(PushOutputBase):
-    """2026-08-05 用于暂存未解决案例输出"""
-
-    output_kind: Literal["case"]
-    payload: CasePayload
-
-
-class FactPushOutput(PushOutputBase):
-    """2026-08-05 用于暂存已解决事实输出"""
-
-    output_kind: Literal["fact"]
-    payload: FactPayload
-
-
-class ForeshadowingPushOutput(PushOutputBase):
-    """2026-08-05 用于暂存已确认伏笔输出"""
-
-    output_kind: Literal["foreshadowing"]
-    payload: ForeshadowingPayload
-
-
-class RejectedPushOutput(PushOutputBase):
-    """2026-08-05 用于暂存被否定案例输出"""
-
-    output_kind: Literal["rejected"]
-    payload: RejectedPayload
+    chunk_id: int = Field(ge=0)
+    summary: str = Field(min_length=1)
+    metrics: ChapterMetrics
+    character_observations: list[CharacterObservation]
+    location_observations: list[LocationObservation]
+    dialogues: list[Dialogue]
+    events: list[Event]
+    relations: list[Relation]
+    states: list[State]
+    foreshadowings: list[Foreshadowing]
 
     @model_validator(mode="after")
-    def validate_sources(self) -> RejectedPushOutput:
-        """2026-08-05 用于确保 rejected 始终关联至少一个来源案例"""
-        if not self.source_case_ids:
-            raise ValueError("rejected 输出必须包含 source_case_ids")
+    def validate_unique_refs(self) -> ChapterChunkFinish:
+        """2026-08-07 用于确保单个 chunk 内标注项 ref 唯一"""
+        facts = [
+            *self.character_observations,
+            *self.location_observations,
+            *self.dialogues,
+            *self.events,
+            *self.relations,
+            *self.states,
+            *self.foreshadowings,
+        ]
+        refs = [fact.ref for fact in facts]
+        if len(set(refs)) != len(refs):
+            raise ValueError(f"chunk {self.chunk_id} 中的标注项 ref 必须唯一")
         return self
 
 
-PushOutput = Annotated[
-    CasePushOutput | FactPushOutput | ForeshadowingPushOutput | RejectedPushOutput,
-    Field(discriminator="output_kind"),
-]
+class ChunkCoverage(StrictModel):
+    """2026-08-07 用于声明单个 current chunk 的全部领域均已检查"""
+
+    chunk_id: int = Field(ge=0)
+    entities: Literal[True]
+    character_observations: Literal[True]
+    location_observations: Literal[True]
+    dialogues: Literal[True]
+    events: Literal[True]
+    relations: Literal[True]
+    states: Literal[True]
+    foreshadowings: Literal[True]
+
+
+class ChapterFinish(StrictModel):
+    """2026-08-07 用于保存当前章节唯一正式完整标注"""
+
+    chapter_summary: str = Field(min_length=1)
+    entities: EntityDirectory
+    chunks: list[ChapterChunkFinish] = Field(min_length=1)
+    coverage: list[ChunkCoverage] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_global_refs(self) -> ChapterFinish:
+        """2026-08-07 用于确保全部 chunk 标注项 ref 在 finish 内全局唯一"""
+        refs = [
+            fact.ref
+            for chunk in self.chunks
+            for fact in [
+                *chunk.character_observations,
+                *chunk.location_observations,
+                *chunk.dialogues,
+                *chunk.events,
+                *chunk.relations,
+                *chunk.states,
+                *chunk.foreshadowings,
+            ]
+        ]
+        if len(set(refs)) != len(refs):
+            raise ValueError("ChapterFinish 中的标注项 ref 必须全局唯一")
+        return self
+
+
+class EntityDirectoryPatch(StrictModel):
+    """2026-08-07 用于按实体 ref 局部新增修改或删除目录项"""
+
+    upsert_characters: list[CharacterEntity] | None = None
+    upsert_locations: list[LocationEntity] | None = None
+    upsert_objects: list[ObjectEntity] | None = None
+    upsert_organizations: list[OrganizationEntity] | None = None
+    remove_refs: list[str] | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty(self) -> EntityDirectoryPatch:
+        """2026-08-07 用于拒绝没有实体变更的目录补丁"""
+        if not self.model_fields_set:
+            raise ValueError("entities patch 至少需要一个字段")
+        return self
+
+
+class ChunkFinishPatch(StrictModel):
+    """2026-08-07 用于按 chunk_id 和标注项 ref 局部修正 finish"""
+
+    chunk_id: int = Field(ge=0)
+    summary: str | None = None
+    metrics: ChapterMetrics | None = None
+    upsert_character_observations: list[CharacterObservation] | None = None
+    upsert_location_observations: list[LocationObservation] | None = None
+    upsert_dialogues: list[Dialogue] | None = None
+    upsert_events: list[Event] | None = None
+    upsert_relations: list[Relation] | None = None
+    upsert_states: list[State] | None = None
+    upsert_foreshadowings: list[Foreshadowing] | None = None
+    remove_refs: list[str] | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty(self) -> ChunkFinishPatch:
+        """2026-08-07 用于拒绝只有定位字段的 chunk 补丁"""
+        if self.model_fields_set == {"chunk_id"}:
+            raise ValueError("chunk patch 至少需要一个修正字段")
+        return self
+
+
+class ChapterFinishPatch(StrictModel):
+    """2026-08-07 用于按 ref 对当前完整 finish 执行局部修正"""
+
+    chapter_summary: str | None = None
+    entities: EntityDirectoryPatch | None = None
+    chunks: list[ChunkFinishPatch] | None = None
+    coverage: list[ChunkCoverage] | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty(self) -> ChapterFinishPatch:
+        """2026-08-07 用于拒绝没有实际提交字段的 finish 修正"""
+        if not self.model_fields_set:
+            raise ValueError("revise_finish 至少需要提供一个修正字段")
+        return self
 
 
 class SearchRequest(StrictModel):
-    """2026-08-05 用于约束连续性或后文原文检索输入"""
+    """2026-08-07 用于约束连续性或原文检索输入"""
 
     query: str = Field(min_length=1, max_length=2000)
 
 
 class CaseSearchResult(StrictModel):
-    """2026-08-05 用于返回可 pull 的活动案例"""
+    """2026-08-07 用于返回可解决的活动案例"""
 
-    id: str
-    keys: list[str]
+    id: str = Field(min_length=1)
+    type: CaseType
+    chunkid: int = Field(ge=0)
+    keys: list[str] = Field(min_length=1, max_length=20)
     description: str = Field(min_length=1, max_length=100)
-    evidence: Evidence
+    evidence: EvidenceList
     result_kind: Literal["case"] = "case"
     pullable: Literal[True] = True
-    state: CaseState = "active"
+    state: Literal["active"] = "active"
 
 
-class GraphSearchNode(StrictModel):
-    """2026-08-06 用于返回图查询路径中的节点及属性"""
+class ActiveCaseDetails(CaseSearchResult):
+    """2026-08-07 用于在工具后端携带不暴露给 Agent 的稳定案例目标"""
 
-    node_id: str
-    node_kind: Literal["entity", "fact"]
-    label: str
-    properties: dict[str, Any] = Field(default_factory=dict)
+    target_key: str = Field(min_length=1)
+    target_ref: dict[str, Any]
 
 
-class GraphSearchEdge(StrictModel):
-    """2026-08-06 用于返回图查询路径中的有向边及属性"""
+class GraphSearchFact(StrictModel):
+    """2026-08-07 用于返回可构造 GraphEvidence 的事实版本"""
 
-    from_node_id: str
-    to_node_id: str
-    edge_kind: str
+    fact_id: str
+    fact_revision: int = Field(gt=0)
+    fact_type: str
+    predicate: str
+    effective_chunk_id: int = Field(ge=0)
+    content: dict[str, Any]
+    evidence: EvidenceList
+
+
+class GraphSearchEntity(StrictModel):
+    """2026-08-07 用于返回目标章节截止位置的实体完整状态"""
+
+    existing_entity_id: int = Field(gt=0)
+    name: str
+    entity_type: EntityType
+    state_revision: int = Field(ge=0)
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphSearchRelation(StrictModel):
+    """2026-08-07 用于返回目标章节截止位置的有效稳定关系"""
+
+    relation_id: str
+    relation_revision: int = Field(gt=0)
+    from_entity_id: int = Field(gt=0)
+    to_entity_id: int = Field(gt=0)
+    from_name: str
+    to_name: str
     relation_type: str
-    properties: dict[str, Any] = Field(default_factory=dict)
+    directionality: Directionality
+    relation_semantics: RelationSemantics
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    is_active: bool
 
 
 class GraphSearchResult(StrictModel):
-    """2026-08-06 用于返回图路径命中的目标节点与完整结构上下文"""
+    """2026-08-07 用于返回上一已完成章节的事实实体关系和有限路径"""
 
     result_kind: Literal["graph"] = "graph"
-    target_node_id: str
-    source_kind: SourceKind
     pullable: Literal[False] = False
-    evidence: Evidence
-    matched_nodes: list[GraphSearchNode] = Field(default_factory=list)
-    matched_edges: list[GraphSearchEdge] = Field(default_factory=list)
-    path: list[str] = Field(default_factory=list)
+    graph_version_id: str
+    facts: list[GraphSearchFact] = Field(default_factory=list)
+    entities: list[GraphSearchEntity] = Field(default_factory=list)
+    relations: list[GraphSearchRelation] = Field(default_factory=list)
+    paths: list[list[str]] = Field(default_factory=list)
 
 
 class ForeshadowingSearchResult(StrictModel):
-    """2026-08-05 用于返回不可 pull 的真实伏笔线程"""
+    """2026-08-07 用于返回不可 pull 的真实伏笔线程"""
 
     result_kind: Literal["foreshadowing"] = "foreshadowing"
     record_id: str
     pullable: Literal[False] = False
     content: dict[str, Any]
-    evidence: Evidence
-
-
-class AfterChunkSearchResult(StrictModel):
-    """2026-08-05 用于返回后文检索命中的章节和 chunk 授权锚点"""
-
-    result_kind: Literal["after_chunk"] = "after_chunk"
-    chapter_id: int = Field(gt=0)
-    chunk_id: int = Field(ge=0)
-    excerpt: str
+    evidence: EvidenceList
 
 
 SearchResultItem = Annotated[
-    CaseSearchResult | GraphSearchResult | ForeshadowingSearchResult | AfterChunkSearchResult,
+    CaseSearchResult | ForeshadowingSearchResult,
     Field(discriminator="result_kind"),
 ]
 
 
 class SearchResult(StrictModel):
-    """2026-08-05 用于返回单次检索的合并结果"""
+    """2026-08-07 用于返回案例池与伏笔线程检索结果"""
 
     results: list[SearchResultItem] = Field(default_factory=list, max_length=50)
 
 
-class PullRequest(StrictModel):
-    """2026-08-05 用于约束本轮接受处理的活动案例集合"""
+class TextSearchResult(StrictModel):
+    """2026-08-07 用于返回原文定位候选而不把搜索结果当作 Evidence"""
 
-    ids: list[str] = Field(min_length=1, max_length=50)
+    result_kind: Literal["text"] = "text"
+    chapter_id: int = Field(gt=0)
+    chunk_id: int = Field(ge=0)
+    excerpt: str
+    keyword_score: float = Field(ge=0)
+    semantic_score: float | None = None
+
+
+class ResolutionEntity(StrictModel):
+    """2026-08-07 用于表达案例解决结果中的实体描述"""
+
+    name: str = Field(min_length=1)
+    entity_type: Literal["character"]
 
     @model_validator(mode="after")
-    def validate_unique_ids(self) -> PullRequest:
-        """2026-08-05 用于拒绝重复 pull 同一案例"""
-        if len(set(self.ids)) != len(self.ids):
-            raise ValueError("pull.ids 不允许重复")
+    def normalize_name(self) -> ResolutionEntity:
+        """2026-08-07 用于拒绝空白解决实体名称"""
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("resolution speaker.name 不能为空")
         return self
 
 
-class PullResult(StrictModel):
-    """2026-08-05 用于返回已经进入本轮处理责任的完整案例"""
+class DialogueSpeakerResolution(StrictModel):
+    """2026-08-07 用于严格确认历史对话说话人"""
 
-    cases: list[CaseSearchResult]
+    speaker: ResolutionEntity
+    evidence_chunkid: int = Field(ge=0)
 
 
-class PushRequest(StrictModel):
-    """2026-08-05 用于约束一次 push 中的全部运行内候选输出"""
+class PullRequest(StrictModel):
+    """2026-08-07 用于提交单个已确认案例的严格解决结果"""
 
-    outputs: list[PushOutput] = Field(min_length=1)
+    case_id: str = Field(min_length=1)
+    type: Literal["dialogue_speaker"]
+    resolution: DialogueSpeakerResolution
+
+
+class PulledResult(PullRequest):
+    """2026-08-07 用于保存运行内已确认案例及原稳定目标"""
+
+    target_key: str = Field(min_length=1)
+    target_ref: dict[str, Any]
+
+
+class PushCase(StrictModel):
+    """2026-08-07 用于提交当前章节新发现且仍未解决的案例"""
+
+    description: str = Field(min_length=1, max_length=100)
+    keys: list[str] = Field(min_length=1, max_length=20)
+    type: CaseType
+    chunkid: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def normalize_case(self) -> PushCase:
+        """2026-08-07 用于规范化案例描述关键词并拒绝重复"""
+        self.description = unicodedata.normalize("NFC", self.description).strip()
+        normalized_keys = [unicodedata.normalize("NFC", key).strip() for key in self.keys]
+        if not self.description or any(not key for key in normalized_keys):
+            raise ValueError("push description 和 keys 不能为空")
+        if len(set(normalized_keys)) != len(normalized_keys):
+            raise ValueError("push keys 不允许重复")
+        self.keys = normalized_keys
+        return self
+
+
+class CaseTargetAnchor(StrictModel):
+    """2026-08-07 用于保存 push 在 current 原文中定位的稳定目标锚点"""
+
+    chunk_id: int = Field(ge=0)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> CaseTargetAnchor:
+        """2026-08-07 用于拒绝倒置的案例目标区间"""
+        if self.end <= self.start:
+            raise ValueError("case target end 必须大于 start")
+        return self
+
+
+class StagedPushCase(PushCase):
+    """2026-08-07 用于保存工具阶段尚未绑定 finish ref 的案例"""
+
+    target_key: str = Field(min_length=1)
+    target_anchor: CaseTargetAnchor
+
+
+class PushedCase(StagedPushCase):
+    """2026-08-07 用于保存已绑定最终 finish 标注项的案例"""
+
+    target_ref: dict[str, Any]
 
 
 class PushResult(StrictModel):
-    """2026-08-05 用于确认候选只进入本轮运行内存"""
+    """2026-08-07 用于确认单个案例只进入本轮运行内存"""
 
     accepted: Literal[True] = True
-    staged_count: int = Field(ge=1)
+    target_key: str = Field(min_length=1)
+
+
+class PullResult(StrictModel):
+    """2026-08-07 用于确认单个案例解决结果只进入本轮运行内存"""
+
+    accepted: Literal[True] = True
+    case_id: str = Field(min_length=1)
 
 
 class SuccessAudit(StrictModel):
-    """2026-08-05 用于把成功模型与工具审计交给完成事务"""
+    """2026-08-07 用于保存成功模型与工具调用审计"""
 
     attempt_number: int = Field(ge=1, le=3)
     messages: list[dict[str, Any]]
@@ -495,7 +802,7 @@ class SuccessAudit(StrictModel):
 
 
 class TokenUsageRecord(StrictModel):
-    """2026-08-05 用于把可信模型 Token 用量交给完成事务"""
+    """2026-08-07 用于保存可信模型 Token 用量"""
 
     model: str
     prompt_tokens: int = Field(ge=0)
@@ -503,56 +810,61 @@ class TokenUsageRecord(StrictModel):
     total_tokens: int = Field(ge=0)
 
 
-class AgentRunResult(StrictModel):
-    """2026-08-05 用于承载 LangGraph 到达 END 后的完整章节运行结果"""
+class AgentRunAudit(StrictModel):
+    """2026-08-07 用于承载不参与业务读取的运行审计数据"""
 
-    run_id: str
-    chapter_id: int = Field(gt=0)
-    final_annotation: ChapterAnnotation
-    initial_finish: ChapterAnnotation
-    revision_payload: dict[str, Any]
+    allow_future_context: bool
+    initial_finish: ChapterFinish
+    revision_payloads: list[dict[str, Any]]
     initial_case_candidate_ids: list[str]
     rotation_case_ids: list[str]
-    pulled_case_ids: list[str]
-    staged_outputs: list[PushOutput]
-    success_audit: SuccessAudit
+    authorized_text_chunk_ids: list[int]
+    visible_graph_fact_refs: list[tuple[str, int]]
+    visible_graph_entity_ids: list[int]
+    visible_graph_relation_ids: list[str]
+    success: SuccessAudit
     token_usage: list[TokenUsageRecord] = Field(default_factory=list)
 
 
+class AgentRunResult(StrictModel):
+    """2026-08-07 用于承载章节 Agent 到达 END 后的正式业务结果"""
+
+    run_id: str
+    chapter_id: int = Field(gt=0)
+    finish: ChapterFinish
+    pulled_results: list[PulledResult]
+    pushed_cases: list[PushedCase]
+    audit: AgentRunAudit
+
+
 class CompletionCase(StrictModel):
-    """2026-08-05 用于返回完成事务实际创建或复用的案例"""
+    """2026-08-07 用于返回完成事务实际创建的活动案例"""
 
     id: str
+    type: CaseType
+    chunkid: int = Field(ge=0)
     keys: list[str]
     description: str
-    evidence: Evidence
+    target_ref: dict[str, Any]
+    evidence: EvidenceList
     state: CaseState
 
 
-class CompletionFact(StrictModel):
-    """2026-08-06 用于返回完成事务实际写入或复用的图节点"""
+class CompletionPulledResult(StrictModel):
+    """2026-08-07 用于返回完成事务实际写入的案例解决事实版本"""
 
-    graph_node_id: str
-    payload: FactPayload
-    evidence: Evidence
-
-
-class CompletionForeshadowing(StrictModel):
-    """2026-08-05 用于返回完成事务实际创建或复用的伏笔记录"""
-
-    setup_id: str
-    hit_id: int
-    payload: ForeshadowingPayload
-    evidence: Evidence
+    case_id: str
+    type: CaseType
+    resolution: DialogueSpeakerResolution
+    target_fact_id: str
+    target_fact_revision: int = Field(gt=0)
 
 
 class CompletionResult(StrictModel):
-    """2026-08-05 用于回读或返回章节唯一完成事务的真实结果"""
+    """2026-08-07 用于回读或返回章节唯一完成事务的真实结果"""
 
     annotation_id: str
+    graph_version_id: str
     chapter_id: int = Field(gt=0)
-    cases: list[CompletionCase] = Field(default_factory=list)
-    facts: list[CompletionFact] = Field(default_factory=list)
-    foreshadowing: list[CompletionForeshadowing] = Field(default_factory=list)
-    rejected_source_case_ids: list[str] = Field(default_factory=list)
-    source_case_states: dict[str, CaseState] = Field(default_factory=dict)
+    pushed_cases: list[CompletionCase] = Field(default_factory=list)
+    pulled_results: list[CompletionPulledResult] = Field(default_factory=list)
