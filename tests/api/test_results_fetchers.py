@@ -15,7 +15,7 @@ from src.api.routes.results_fetchers import (
     _normalize_arc_scores,
     _normalize_name_list,
 )
-from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
+from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 from src.storage.repositories.annotation import ForeshadowingThreadView
 
 
@@ -778,7 +778,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id=1,
+                relation_id="relation-1",
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="father_of",
@@ -786,7 +786,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
                 last_seen_chunk=9,
             ),
             ExportRelationSnapshot(
-                relation_id=2,
+                relation_id="relation-2",
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="ally_of",
@@ -835,7 +835,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id=1,
+                relation_id="relation-1",
                 from_name="老贺",
                 to_name="伯安",
                 relation_type="father_of",
@@ -844,7 +844,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
                 is_active=False,
             ),
             ExportRelationSnapshot(
-                relation_id=2,
+                relation_id="relation-2",
                 from_name="老贺",
                 to_name="阿明",
                 relation_type="father_of",
@@ -861,7 +861,9 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
         valid_character_names={"老贺", "伯安", "阿明"},
     )
 
-    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [(2, "老贺", "阿明")]
+    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [
+        ("relation-2", "老贺", "阿明")
+    ]
 
 
 def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
@@ -873,7 +875,7 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
         ],
         current_relations=[
             ExportRelationSnapshot(
-                relation_id=11,
+                relation_id="relation-11",
                 from_name="伯安",
                 to_name="贺家",
                 relation_type="belongs_to",
@@ -882,7 +884,7 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
                 is_active=True,
             ),
             ExportRelationSnapshot(
-                relation_id=12,
+                relation_id="relation-12",
                 from_name="赵甲卫",
                 to_name="贺家",
                 relation_type="affiliated_with",
@@ -900,8 +902,8 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
     )
 
     assert [(item.rel_id, item.rel_type, item.from_entity, item.to_entity) for item in result] == [
-        (11, "belongs_to", "伯安", "贺家"),
-        (12, "affiliated_with", "赵甲卫", "贺家"),
+        ("relation-11", "belongs_to", "伯安", "贺家"),
+        ("relation-12", "affiliated_with", "赵甲卫", "贺家"),
     ]
 
 
@@ -933,16 +935,34 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
 
     annotation_repo = _AnnotationRepoWithChunkRows()
     export_graph_view = ExportGraphAuthorityView(
-        relation_events=[
-            RelationEvent(
-                relation_event_id=101,
-                chunk_id=3,
+        graph_changes=[
+            GraphChange(
+                change_id="relation:101",
+                change_kind="relation",
+                graph_version_id="graph-version-1",
+                chapter_id=1,
+                chapter_order=1,
+                fact_id="fact-101",
+                fact_revision=1,
+                effective_chunk_id=3,
+                confidence="high",
+                changes=[
+                    {
+                        "change_kind": "assert",
+                        "before": None,
+                        "after": {"relation_type": "父子", "is_active": True},
+                        "fact_id": "fact-101",
+                        "fact_revision": 1,
+                        "chunk_id": 3,
+                    }
+                ],
+                evidence=[{"reason": "贺铮与伯安确认父子关系", "chunk_id": 3}],
                 from_entity_id=1,
                 to_entity_id=2,
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="父子",
-                change_type="新建",
+                directionality="directed",
             )
         ]
     )
@@ -963,7 +983,7 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     assert result[0].relations[0].from_char == "贺铮"
     assert result[0].relations[0].to_char == "伯安"
     assert result[0].relations[0].type == "父子"
-    assert result[0].relations[0].change == "新建"
+    assert result[0].relations[0].change == "assert"
 
 
 def test_fetch_chunk_annotations_uses_explicit_database_graph_view():

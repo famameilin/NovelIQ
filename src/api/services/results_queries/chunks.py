@@ -143,10 +143,12 @@ def _fetch_chunk_annotations(
         )
 
     relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
-    for relation_event in export_graph_view.relation_events:
-        chunk_id = relation_event.chunk_id
-        from_char = relation_event.from_name
-        to_char = relation_event.to_name
+    for graph_change in export_graph_view.graph_changes:
+        if graph_change.change_kind != "relation":
+            continue
+        chunk_id = graph_change.effective_chunk_id
+        from_char = graph_change.from_name or ""
+        to_char = graph_change.to_name or ""
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -161,13 +163,13 @@ def _fetch_chunk_annotations(
             ChunkRelation(
                 from_char=from_char,
                 to_char=to_char,
-                from_reference_kind=getattr(relation_event, "from_reference_kind", None),
-                to_reference_kind=getattr(relation_event, "to_reference_kind", None),
+                from_reference_kind=None,
+                to_reference_kind=None,
                 resolved_from_global_name=from_char,
                 resolved_to_global_name=to_char,
                 reference_skip_reason=None,
-                type=relation_event.relation_type,
-                change=relation_event.change_type,
+                type=graph_change.relation_type or "",
+                change=str(graph_change.changes[0].get("change_kind") or "refine"),
             )
         )
 

@@ -18,6 +18,7 @@ from src.api.dependencies import (
     resolve_run_id,
 )
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
+from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
 from src.api.models.responses import (
     CharacterStats,
     DiagnosisResult,
@@ -33,7 +34,7 @@ from src.api.routes.results_fetchers import (
     _fetch_chunk_curves,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
-    _fetch_graph_events_page,
+    _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_topics,
 )
@@ -50,7 +51,7 @@ from src.storage.repositories import (
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-GRAPH_PAGE_EVENT_LIMIT = 200
+GRAPH_CHANGE_LIMIT = 200
 READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
 
 
@@ -387,56 +388,56 @@ async def get_foreshadowing_threads(
     return _fetch_foreshadowing_threads(run_id, annotation_repo)
 
 
-@router.get("/{novel_id}/graph")
+@router.get("/{novel_id}/graph", response_model=GraphSnapshotResponse)
 async def get_graph(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
-    """
-    获取知识图谱快照
-    """
+    chapter_id: Annotated[int | None, Query(gt=0)] = None,
+    graph_version_id: Annotated[str | None, Query(min_length=1)] = None,
+) -> GraphSnapshotResponse:
+    """2026-08-07 用于读取指定章节边界或最新章节的动态图快照"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    stats_repo = StatsRepository(session)
-    _fetch_and_require_valid_diagnosis(
-        run_id=run_id,
-        novel_id=novel_id,
-        stats_repo=stats_repo,
-    )
-    return _fetch_graph_snapshot(run_id, annotation_repo)
-
-
-@router.get("/{novel_id}/graph/events")
-async def get_graph_events(
-    novel_id: str,
-    run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
-    events_cursor: Annotated[str | None, Query(description="graph relation events 分页 cursor")] = None,
-    events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
-) -> dict:
-    """
-    获取 graph page relation events 的增量分页结果
-    """
-    run = _require_run_for_novel(session, novel_id, run_id)
-    _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
-    stats_repo = StatsRepository(session)
-    _fetch_and_require_valid_diagnosis(
-        run_id=run_id,
-        novel_id=novel_id,
-        stats_repo=stats_repo,
-    )
     try:
-        return _fetch_graph_events_page(
+        payload = _fetch_graph_snapshot(
             run_id,
             annotation_repo,
-            events_cursor=events_cursor,
-            events_limit=events_limit,
+            chapter_id=chapter_id,
+            graph_version_id=graph_version_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return GraphSnapshotResponse.model_validate(payload)
+
+
+@router.get("/{novel_id}/graph/changes", response_model=GraphChangesResponse)
+async def get_graph_changes(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    chapter_id: Annotated[int | None, Query(gt=0)] = None,
+    changes_cursor: Annotated[str | None, Query(description="章节图变化分页 cursor")] = None,
+    changes_limit: Annotated[int, Query(ge=1, le=GRAPH_CHANGE_LIMIT)] = GRAPH_CHANGE_LIMIT,
+) -> GraphChangesResponse:
+    """2026-08-07 用于按章节分页读取实体状态与稳定关系变化"""
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    annotation_repo = AnnotationRepository(session)
+    try:
+        payload = _fetch_graph_changes_page(
+            run_id,
+            annotation_repo,
+            chapter_id=chapter_id,
+            changes_cursor=changes_cursor,
+            changes_limit=changes_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GraphChangesResponse.model_validate(payload)
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")

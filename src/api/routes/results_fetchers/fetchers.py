@@ -5,7 +5,7 @@
 """
 
 from src.api.services.results_queries import (
-    GRAPH_PAGE_EVENT_LIMIT,
+    GRAPH_CHANGE_LIMIT,
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
@@ -13,7 +13,7 @@ from src.api.services.results_queries import (
     _fetch_chunk_styles,
     _fetch_diagnosis,
     _fetch_global_stats,
-    _fetch_graph_events_page,
+    _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_hierarchical_relations,
     _fetch_known_characters,
@@ -21,23 +21,19 @@ from src.api.services.results_queries import (
     _fetch_raw_chunk_curves,
     _fetch_token_usage_stats,
     _fetch_topics,
-    _serialize_graph_page_quality,
-    _serialize_graph_page_summary,
 )
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 
 __all__ = [
     "KnowledgeGraphAuthorityService",
-    "GRAPH_PAGE_EVENT_LIMIT",
+    "GRAPH_CHANGE_LIMIT",
     "_fetch_chunk_curves",
     "_fetch_raw_chunk_curves",
     "_fetch_characters",
     "_fetch_topics",
     "_fetch_diagnosis",
-    "_fetch_graph_events_page",
+    "_fetch_graph_changes_page",
     "_fetch_graph_snapshot",
-    "_serialize_graph_page_quality",
-    "_serialize_graph_page_summary",
     "_fetch_chunk_styles",
     "_fetch_chunk_annotations",
     "_fetch_character_relations",
