@@ -22,21 +22,21 @@ from src.knowledge.authority import (
     ExportRelationSnapshot,
     GraphAuthorityReport,
     GraphAuthorityView,
+    GraphChange,
     GraphPageQualityDetails,
     GraphPageSummary,
     GraphQualitySignals,
     GraphSharedSummary,
     KnowledgeGraphAuthorityService,
-    RelationEvent,
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
+    graph_change_names,
+    graph_change_tuples,
     nodes_for_anchor_chunk,
-    relation_event_names,
-    relation_event_tuples,
 )
 
 
@@ -66,10 +66,10 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         for node in nodes_for_anchor_chunk(timeline_data["atomic_nodes"], 2)
         if node["node_type"] == "relation"
     )
-    assert relation_event_tuples(relation_node["relation_events"]) == {
-        (scenario.hero_name, scenario.rival_name, "新建")
+    assert graph_change_tuples(relation_node["graph_changes"]) == {
+        (scenario.hero_name, scenario.rival_name, "assert")
     }
-    assert scenario.organization_name not in relation_event_names(relation_node["relation_events"])
+    assert scenario.organization_name not in graph_change_names(relation_node["graph_changes"])
 
     assert "entity_lifecycles" not in timeline_data
     assert set(relation_node.keys()) == {
@@ -85,17 +85,28 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         "node_subtype",
         "score_breakdown",
         "plot_flags",
-        "relation_events",
+        "graph_changes",
         "lifecycle_events",
     }
-    assert set(relation_node["relation_events"][0].keys()) == {
-        "relation_event_id",
+    assert set(relation_node["graph_changes"][0].keys()) == {
+        "change_id",
+        "change_kind",
+        "graph_version_id",
+        "chapter_id",
+        "fact_id",
+        "fact_revision",
+        "effective_chunk_id",
+        "changes",
+        "evidence",
+        "entity_id",
+        "entity_name",
+        "relation_id",
+        "relation_version_id",
+        "relation_revision",
         "from_char",
         "to_char",
         "relation_type",
-        "change_type",
-        "evidence",
-        "confidence",
+        "relation_change_kind",
         "directionality",
     }
     assert timeline_data["composite_nodes"]
@@ -346,7 +357,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
             build_timeline_view=lambda _run_id: SimpleNamespace(
                 character_entities=[],
                 entity_lifecycles=[],
-                relation_events=[],
+                graph_changes=[],
             ),
         ),
     )
@@ -393,7 +404,7 @@ def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch:
             build_timeline_view=lambda _run_id: SimpleNamespace(
                 character_entities=[],
                 entity_lifecycles=[],
-                relation_events=[],
+                graph_changes=[],
             ),
         ),
     )
@@ -520,7 +531,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id=22,
+                relation_id="relation-22",
                 from_name="苏镜",
                 to_name="程霜",
                 relation_type="spouse_of",
@@ -528,7 +539,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 last_seen_chunk=5,
             ),
             ExportRelationSnapshot(
-                relation_id=23,
+                relation_id="relation-23",
                 from_name="苏镜",
                 to_name="旧友",
                 relation_type="spouse_of",
@@ -537,16 +548,28 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 is_active=False,
             ),
         ],
-        relation_events=[
-            RelationEvent(
-                relation_event_id=22,
-                chunk_id=5,
+        graph_changes=[
+            GraphChange(
+                change_id="relation:22",
+                change_kind="relation",
+                graph_version_id="graph-version-5",
+                chapter_id=5,
+                chapter_order=5,
+                fact_id="fact-22",
+                fact_revision=1,
+                effective_chunk_id=5,
+                confidence="high",
+                changes=[{"change_kind": "assert"}],
+                evidence=[{"reason": "苏镜与程霜结为夫妻", "chunk_id": 5}],
                 from_entity_id=1,
                 to_entity_id=2,
                 from_name="苏镜",
                 to_name="程霜",
                 relation_type="spouse_of",
-                change_type="新建",
+                relation_id="relation-22",
+                relation_version_id=22,
+                relation_revision=1,
+                directionality="directed",
             )
         ],
     )
@@ -577,7 +600,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
     assert len(character_relations) == 1
     assert character_relations[0].from_char == "苏镜"
     assert len(hierarchical_relations) == 1
-    assert hierarchical_relations[0].rel_id == 22
+    assert hierarchical_relations[0].rel_id == "relation-22"
     assert graph_summary == {"node_count": 4, "edge_count": 2, "density": 0.3333}
     assert graph_quality_report == {"conflict_count": 1, "low_confidence_count": 0}
 
@@ -600,7 +623,7 @@ def test_shared_graph_signal_serializer_rejects_non_report_consumers() -> None:
             GraphAuthorityView(
                 canonical_entities=[],
                 confirmed_relations=[],
-                relation_events=[],
+                graph_changes=[],
                 participant_states=[],
             )
         )

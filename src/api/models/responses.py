@@ -208,7 +208,7 @@ class HierarchicalRelation(BaseModel):
     层级关系模型
     """
 
-    rel_id: int
+    rel_id: str
     rel_type: str
     first_chunk: int | None = None
     last_chunk: int | None = None
