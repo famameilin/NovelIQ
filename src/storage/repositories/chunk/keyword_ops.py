@@ -38,6 +38,7 @@ def search_paragraphs_by_keywords(
     keywords: Sequence[str],
     top_k: int = 10,
     exclude_chunk_ids: Sequence[int] | None = None,
+    min_chunk_id: int | None = None,
     max_chunk_id: int | None = None,
 ) -> list[KeywordMatchRow]:
     """
@@ -67,6 +68,8 @@ def search_paragraphs_by_keywords(
     )
     if exclude_chunk_ids:
         stmt = stmt.where(Chunk.chunk_id.not_in(list(exclude_chunk_ids)))
+    if min_chunk_id is not None:
+        stmt = stmt.where(Chunk.chunk_id >= min_chunk_id)
     if max_chunk_id is not None:
         stmt = stmt.where(Chunk.chunk_id <= max_chunk_id)
 
@@ -87,6 +90,8 @@ def search_paragraphs_by_keywords(
         )
         if exclude_chunk_ids:
             all_rows_stmt = all_rows_stmt.where(Chunk.chunk_id.not_in(list(exclude_chunk_ids)))
+        if min_chunk_id is not None:
+            all_rows_stmt = all_rows_stmt.where(Chunk.chunk_id >= min_chunk_id)
         if max_chunk_id is not None:
             all_rows_stmt = all_rows_stmt.where(Chunk.chunk_id <= max_chunk_id)
         rows = session.execute(all_rows_stmt).all()

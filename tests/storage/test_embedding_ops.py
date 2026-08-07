@@ -1,22 +1,15 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from pgvector.sqlalchemy import Vector
 
-from src.storage.models import ChunkEmbedding, ParagraphEmbedding
+from src.storage.models import ParagraphEmbedding
 from src.storage.repositories.chunk.embedding_ops import (
     ParagraphEmbeddingRow,
-    get_chunk_embedding,
     get_incomplete_paragraph_embedding_chunk_ids,
-    insert_chunk_embeddings,
     insert_paragraph_embeddings,
-    search_similar_chunks,
     search_similar_paragraphs_within_chunks,
 )
-
-
-def test_chunk_embedding_uses_pgvector_column_type() -> None:
-    assert isinstance(ChunkEmbedding.__table__.c.embedding_vector.type, Vector)
 
 
 def test_paragraph_embedding_uses_pgvector_column_type() -> None:
@@ -26,20 +19,6 @@ def test_paragraph_embedding_uses_pgvector_column_type() -> None:
     说明: paragraph embedding 表应使用 pgvector 列，保持与 chunk embedding 检索语义一致。
     """
     assert isinstance(ParagraphEmbedding.__table__.c.embedding_vector.type, Vector)
-
-
-def test_insert_chunk_embeddings_preserves_vector_payloads() -> None:
-    session = MagicMock()
-
-    inserted = insert_chunk_embeddings(
-        session,
-        run_id="run-1",
-        embeddings=[(1, [0.1, 0.2])],
-    )
-
-    assert inserted == 1
-    _, rows = session.execute.call_args_list[1].args
-    assert rows[0]["embedding_vector"] == [0.1, 0.2]
 
 
 def test_insert_paragraph_embeddings_preserves_local_metadata() -> None:
@@ -75,96 +54,6 @@ def test_insert_paragraph_embeddings_preserves_local_metadata() -> None:
     assert rows[0]["global_start_char"] == 105
     assert rows[0]["global_end_char"] == 113
     assert rows[0]["embedding_vector"] == [0.3, 0.4]
-
-
-def test_get_chunk_embedding_returns_python_list() -> None:
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = (0.1, 0.2, 0.3)
-
-    result = get_chunk_embedding(session, run_id="run-1", chunk_id=1)
-
-    assert result == [0.1, 0.2, 0.3]
-
-
-def test_search_similar_chunks_pushes_exclusions_into_sql() -> None:
-    session = MagicMock()
-    session.execute.return_value.all.return_value = [
-        SimpleNamespace(chunk_id=2, text="chunk-2", emotional_valence="mild_negative", similarity=0.91),
-        SimpleNamespace(chunk_id=3, text="chunk-3", emotional_valence=None, similarity=0.88),
-    ]
-
-    with patch(
-        "src.storage.repositories.annotation.AnnotationRepository.fetch_chunk_annotations_full",
-        return_value=[
-            SimpleNamespace(chunk_id=2, emotional_valence="mild_negative"),
-            SimpleNamespace(chunk_id=3, emotional_valence="neutral"),
-        ],
-    ):
-        results = search_similar_chunks(
-            session,
-            run_id="run-1",
-            query_embedding=[0.1, 0.2],
-            top_k=2,
-            similarity_threshold=0.7,
-            exclude_chunk_ids=[1, 4],
-        )
-
-    statement = session.execute.call_args.args[0]
-    assert "NOT IN" in str(statement)
-    assert [row.chunk_id for row in results] == [2, 3]
-    assert results[0].emotional_valence == "mild_negative"
-
-
-def test_search_similar_chunks_pushes_history_cutoff_into_sql() -> None:
-    """
-    创建时间: 2026-04-23
-    任务: level3-history-cutoff
-    说明: Level3 检索必须在 SQL 层应用 max_chunk_id，防止增量路径召回未来 chunk。
-    """
-    session = MagicMock()
-    session.execute.return_value.all.return_value = [
-        SimpleNamespace(chunk_id=3, text="chunk-3", emotional_valence=None, similarity=0.88),
-    ]
-
-    with patch(
-        "src.storage.repositories.annotation.AnnotationRepository.fetch_chunk_annotations_full",
-        return_value=[],
-    ):
-        results = search_similar_chunks(
-            session,
-            run_id="run-1",
-            query_embedding=[0.1, 0.2],
-            max_chunk_id=3,
-        )
-
-    statement = session.execute.call_args.args[0]
-    assert "chunk_id <= :chunk_id_1" in str(statement)
-    assert [row.chunk_id for row in results] == [3]
-
-
-def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
-    session = MagicMock()
-    session.execute.return_value.all.return_value = [
-        SimpleNamespace(chunk_id=1, text="chunk-1", emotional_valence="neutral", similarity=0.95),
-    ]
-
-    with patch(
-        "src.storage.repositories.annotation.AnnotationRepository.fetch_chunk_annotations_full",
-        return_value=[SimpleNamespace(chunk_id=1, emotional_valence="neutral")],
-    ):
-        results = search_similar_chunks(
-            session,
-            run_id="run-1",
-            query_embedding=[0.1, 0.2],
-        )
-
-    statement = session.execute.call_args.args[0]
-    assert "NOT IN" not in str(statement)
-    assert len(results) == 1
-    assert results[0].chunk_id == 1
-    assert results[0].text == "chunk-1"
-    assert results[0].emotional_valence == "neutral"
-    assert results[0].similarity == 0.95
 
 
 def test_search_similar_paragraphs_requires_candidate_chunk_ids() -> None:

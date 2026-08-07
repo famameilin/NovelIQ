@@ -166,8 +166,7 @@ async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
         patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
         patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
         patch("src.workflows.preprocess._generate_paragraph_embeddings", new=fake_generate_paragraph_embeddings),
-        patch("src.workflows.preprocess.settings.rag.embedding_enabled", True),
-        patch("src.workflows.preprocess.settings.rag.level3_enabled", True),
+        patch("src.workflows.preprocess.settings.text_retrieval.semantic_enabled", True),
         patch(
             "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
             return_value={"sensory": [], "function_words": [], "semantic_categories": {}, "imagery": []},
@@ -203,7 +202,7 @@ async def test_run_preprocess_passes_chapter_and_chunk_limits() -> None:
         patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
         patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
         patch("src.workflows.preprocess.settings.chunking.split_by_chapter", False),
-        patch("src.workflows.preprocess.settings.rag.embedding_enabled", False),
+        patch("src.workflows.preprocess.settings.text_retrieval.semantic_enabled", False),
         patch(
             "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
             return_value={"sensory": [], "function_words": [], "semantic_categories": {}, "imagery": []},

@@ -272,7 +272,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         检查预处理阶段是否完成
 
-        当当前配置要求 Level3 段落向量时，完成判定不再只看 chunks，
+        当当前配置要求语义原文定位时，完成判定不再只看 chunks，
         而是要求 paragraph embedding schema 与数据完整就绪，
         避免半成品 run 被误判为 preprocess 已完成
 
@@ -281,14 +281,14 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         if not self.has_chunks(run_id):
             return False
 
-        if not (settings.rag.embedding_enabled and settings.rag.level3_enabled):
+        if not settings.text_retrieval.semantic_enabled:
             return True
 
         expected_dim = settings.models.paragraph_embedding.embedding_dim
         try:
             validate_paragraph_embeddings_schema(self.session, expected_dim)
         except ValueError:
-            # 只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
+            # 只要当前运行环境要求语义原文定位，而 schema 尚未就绪，就不能跳过 preprocess；
             # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness
             return False
 

@@ -85,8 +85,8 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         assert not chunk_repo.is_preprocess_complete(run_id)
 
-    def test_is_preprocess_complete_with_chunks_when_level3_disabled(self, db_session):
-        """关闭 Level3 时，有 chunks 即可视为 preprocess 完成"""
+    def test_is_preprocess_complete_with_chunks_when_semantic_search_disabled(self, db_session):
+        """2026-08-07 用于验证关闭语义原文定位时 chunks 足以完成预处理"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         _insert_test_novel(db_session, novel_id)
@@ -98,13 +98,13 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         chunks = _create_chunks(1)
         chunk_repo.insert_chunks(run_id, chunks)
-        with (
-            patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", False),
-            patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", False),
+        with patch(
+            "src.storage.repositories.chunk_repository.settings.text_retrieval.semantic_enabled",
+            False,
         ):
             assert chunk_repo.is_preprocess_complete(run_id)
 
-    def test_is_preprocess_complete_false_when_level3_paragraph_embeddings_missing(self, db_session):
+    def test_is_preprocess_complete_false_when_semantic_paragraph_embeddings_missing(self, db_session):
         """
         创建时间: 2026-04-24
         任务: fix-preprocess-completion-level3-contract
@@ -125,13 +125,15 @@ class TestStageCompleteChecks:
         ensure_paragraph_embeddings_schema(db_session, 1024)
 
         with (
-            patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", True),
-            patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", True),
+            patch(
+                "src.storage.repositories.chunk_repository.settings.text_retrieval.semantic_enabled",
+                True,
+            ),
             patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
         ):
             assert not chunk_repo.is_preprocess_complete(run_id)
 
-    def test_is_preprocess_complete_true_when_level3_embeddings_complete(self, db_session):
+    def test_is_preprocess_complete_true_when_semantic_embeddings_complete(self, db_session):
         """
         创建时间: 2026-04-24
         任务: fix-preprocess-completion-level3-contract
@@ -177,8 +179,10 @@ class TestStageCompleteChecks:
         )
 
         with (
-            patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", True),
-            patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", True),
+            patch(
+                "src.storage.repositories.chunk_repository.settings.text_retrieval.semantic_enabled",
+                True,
+            ),
             patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
         ):
             assert chunk_repo.is_preprocess_complete(run_id)
