@@ -72,7 +72,7 @@ def fetch_annotation_data(
     run_id: str,
 ) -> AnnotationData:
     """
-    从章节正式标注的 segments 提取 chunk 粒度指标数据
+    从章节正式标注的 chunks metrics 提取 chunk 粒度指标数据
 
     """
     rows = annotation_repo.fetch_full_annotations(run_id)
@@ -138,7 +138,7 @@ def fetch_character_data(
         emotion_score_raw = getattr(row, "emotion_score", None)
         emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
 
-    # 3. 构建角色列表（使用 Level1 canonical entity 作为完整角色种子）
+    # 3. 构建角色列表（使用共享 canonical entity 作为完整角色种子）
     characters = []
     for entity in active_characters:
         emotion_score = emotion_map.get(entity.name, 0)
@@ -176,12 +176,25 @@ def fetch_relation_data(
     """提取 graph_* 关系数据（权威来源）"""
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
     current_relations = list(graph_view.confirmed_relations)
-    relation_events = list(graph_view.relation_events)
+    relation_changes = [
+        change
+        for change in graph_view.graph_changes
+        if change.change_kind == "relation"
+        and change.from_name
+        and change.to_name
+        and change.relation_type
+    ]
 
     return RelationData(
         relations=[(relation.from_name, relation.to_name) for relation in current_relations],
         full_relations=[
-            (event.from_name, event.to_name, event.relation_type, event.change_type) for event in relation_events
+            (
+                change.from_name or "",
+                change.to_name or "",
+                change.relation_type or "",
+                str(change.changes[0].get("change_kind") or "refine"),
+            )
+            for change in relation_changes
         ],
         participant_names=[state.name for state in graph_view.participant_states if state.name],
     )

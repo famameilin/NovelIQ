@@ -1,34 +1,49 @@
-"""数据库图 authority 现行合同测试"""
+"""章节级图 authority 合同测试"""
 
 from __future__ import annotations
 
-from sqlalchemy import delete
+from typing import Any
+
+from sqlalchemy import select
 
 from src.knowledge.authority import KnowledgeGraphAuthorityService
-from src.storage.models import (
-    ChapterAnnotationRecord,
-    GraphEntityParticipant,
-    GraphRelationCurrent,
-    GraphRelationEvent,
-)
-from src.storage.repositories.graph import persist_completion_graph
+from src.storage.models import GraphRelation
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
-    identity_relation_output,
     persist_chapter_annotation,
     relation_fact,
 )
 
 
-def _seed_authority_graph(db_session) -> str:
-    """2026-08-05 用于通过章节事实建立 authority 测试数据库图"""
+def _persist_authority_chapter(
+    session,
+    *,
+    run_id: str,
+    chapter_id: int,
+    characters: list[dict[str, Any]] | None = None,
+    relations: list[dict[str, Any]] | None = None,
+    visible_relation_ids: set[str] | None = None,
+) -> None:
+    """2026-08-07 用于为 authority 视图写入章节版本图数据"""
+    persist_chapter_annotation(
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
+        characters=characters,
+        relations=relations,
+        visible_relation_ids=visible_relation_ids or set(),
+    )
+
+
+def test_authority_views_project_chapter_versions_and_graph_changes(db_session) -> None:
+    """2026-08-07 用于验证 authority 从章节快照输出实体关系和变化合同"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌"],
-        title="数据库图 authority",
+        title="章节图 authority",
     )
-    persist_chapter_annotation(
+    _persist_authority_chapter(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -45,14 +60,9 @@ def _seed_authority_graph(db_session) -> str:
             )
         ],
     )
-    return run_id
+    db_session.commit()
 
-
-def test_authority_views_expose_graph_fact_contracts_for_each_consumer(db_session) -> None:
-    """2026-08-05 用于验证各 authority 视图共享同一数据库图事实来源"""
-    run_id = _seed_authority_graph(db_session)
     service = KnowledgeGraphAuthorityService.from_session(db_session)
-
     level1 = service.build_level1_snapshot(run_id)
     timeline = service.build_timeline_view(run_id)
     graph_view = service.build_graph_view(run_id)
@@ -61,80 +71,75 @@ def test_authority_views_expose_graph_fact_contracts_for_each_consumer(db_sessio
 
     assert {row.name for row in level1.canonical_entities} == {"林渡", "顾霜"}
     assert [(row.from_name, row.to_name, row.source) for row in level1.confirmed_relations] == [
-        ("林渡", "顾霜", "graph_facts")
+        ("林渡", "顾霜", "graph_relation_versions")
     ]
-    assert [(row.chunk_id, row.source) for row in timeline.relation_events] == [(0, "graph_facts")]
+    assert {row.change_kind for row in timeline.graph_changes} == {"state", "relation"}
+    assert all(row.fact_id and row.fact_revision == 1 for row in timeline.graph_changes)
+    assert all(row.evidence for row in graph_view.graph_changes)
     assert {row.name for row in graph_view.participant_states} == {"林渡", "顾霜"}
-    assert {row.source for row in graph_view.participant_states} == {"graph_facts"}
-    assert export_view.current_relations[0].source == "graph_facts"
+    assert export_view.current_relations[0].relation_id
+    assert export_view.current_relations[0].source == "graph_relation_versions"
     assert report.summary.node_count == 2
     assert report.summary.edge_count == 1
 
 
-def test_authority_relation_reads_do_not_depend_on_derived_relation_rows(db_session) -> None:
-    """2026-08-06 用于验证关系派生表清空后 authority 仍从 graph_facts 读取"""
-    run_id = _seed_authority_graph(db_session)
-    for model in (GraphEntityParticipant, GraphRelationCurrent, GraphRelationEvent):
-        db_session.execute(delete(model).where(model.run_id == run_id))
-    db_session.commit()
-
-    graph_view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
-
-    assert [(row.from_name, row.to_name, row.relation_type) for row in graph_view.confirmed_relations] == [
-        ("林渡", "顾霜", "盟友")
-    ]
-    assert [(row.chunk_id, row.change_type) for row in graph_view.relation_events] == [(0, "新建")]
-    assert {row.name for row in graph_view.participant_states} == {"林渡", "顾霜"}
-
-
-def test_representative_authority_view_projects_edges_without_changing_raw_graph(db_session) -> None:
-    """2026-08-06 用于验证诊断视图解析常用节点而原始图保留全部称谓节点"""
+def test_authority_keeps_relation_change_history_after_break(db_session) -> None:
+    """2026-08-07 用于验证当前关系消失后 authority 仍保留章节关系变化历史"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["霜姐即顾霜，并与林渡结盟"],
-        title="常用节点读侧",
+        texts=["林渡与顾霜结盟", "两人分道扬镳"],
+        chapter_ids=[1, 2],
+        title="authority 关系历史",
     )
-    annotation_id = persist_chapter_annotation(
+    _persist_authority_chapter(
         db_session,
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="霜姐", action="与林渡结盟"),
-            character_fact(chunk_id=0, name="顾霜", action="身份揭示"),
-            character_fact(chunk_id=0, name="林渡", action="接受结盟"),
+            character_fact(chunk_id=0, name="林渡", action="结盟"),
+            character_fact(chunk_id=0, name="顾霜", action="结盟"),
         ],
         relations=[
             relation_fact(
                 chunk_id=0,
-                from_name="霜姐",
-                to_name="林渡",
+                from_name="林渡",
+                to_name="顾霜",
                 relation_type="盟友",
             )
         ],
     )
-    annotation = db_session.get(ChapterAnnotationRecord, annotation_id)
-    assert annotation is not None
-    persist_completion_graph(
+    db_session.commit()
+    relation_id = db_session.execute(
+        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
+    ).scalar_one()
+    _persist_authority_chapter(
         db_session,
-        annotation=annotation,
-        fact_outputs=[
-            identity_relation_output(
-                subject_name="霜姐",
-                object_name="顾霜",
-                representative_endpoint="object",
+        run_id=run_id,
+        chapter_id=2,
+        relations=[
+            relation_fact(
+                chunk_id=1,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="盟友",
+                change_kind="break",
+                relation_id=relation_id,
             )
         ],
+        visible_relation_ids={relation_id},
     )
-    db_session.flush()
+    db_session.commit()
 
-    service = KnowledgeGraphAuthorityService.from_session(db_session)
-    raw_view = service.build_graph_view(run_id)
-    representative_view = service.build_representative_graph_view(run_id)
+    graph_view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+    export_view = KnowledgeGraphAuthorityService.from_session(db_session).build_export_view(run_id)
 
-    assert {row.name for row in raw_view.participant_states} == {"霜姐", "顾霜", "林渡"}
-    assert {row.relation_type for row in raw_view.confirmed_relations} == {"同一人物", "盟友"}
-    assert {row.name for row in representative_view.participant_states} == {"顾霜", "林渡"}
-    assert [
-        (row.from_name, row.to_name, row.relation_type)
-        for row in representative_view.confirmed_relations
-    ] == [("顾霜", "林渡", "盟友")]
+    assert graph_view.confirmed_relations == []
+    relation_changes = [row for row in graph_view.graph_changes if row.change_kind == "relation"]
+    assert [(row.chapter_id, row.relation_id) for row in relation_changes] == [
+        (2, relation_id),
+        (1, relation_id),
+    ]
+    assert relation_changes[0].changes[0]["change_kind"] == "break"
+    assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [
+        (relation_id, False)
+    ]

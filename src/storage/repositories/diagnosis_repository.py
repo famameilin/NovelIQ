@@ -29,7 +29,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         return {int(row.chunk_id): str(row.text) for row in self.session.execute(stmt).all()}
 
     def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
-        """2026-08-05 用于从章节 segments 读取转折点原文素材"""
+        """2026-08-07 用于从章节 chunks metrics 读取转折点原文素材"""
         row_limit = limit if limit is not None else settings.diagnosis.pivot_blocks_limit
         text_by_chunk = self._chunk_text_by_id(run_id)
         rows = [
@@ -67,21 +67,25 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         ]
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
-        """2026-08-05 用于从关系 GraphFact 历史读取诊断素材"""
+        """2026-08-07 用于从章节关系版本逐次变化读取诊断素材"""
         row_limit = limit if limit is not None else settings.diagnosis.relation_changes_limit
-        return [
-            (
-                event.chunk_id,
-                event.from_name,
-                event.to_name,
-                event.relation_type,
-                event.change_type,
-            )
-            for event in GraphRepository(self.session).fetch_representative_relation_events(
-                run_id,
-                limit=row_limit,
-            )
-        ]
+        rows: list[tuple[int, str, str, str, str]] = []
+        for relation in GraphRepository(self.session).fetch_relation_history(run_id):
+            if relation.relation_semantics == "same_character":
+                continue
+            for change in relation.changes:
+                raw_after = change.get("after")
+                after = raw_after if isinstance(raw_after, dict) else {}
+                rows.append(
+                    (
+                        int(change["chunk_id"]),
+                        relation.from_name,
+                        relation.to_name,
+                        str(after.get("relation_type") or relation.relation_type),
+                        str(change.get("change_kind") or "refine"),
+                    )
+                )
+        return rows[:row_limit]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
         """2026-08-05 用于从伏笔 thread 与 hit 读取 chunk 级诊断素材"""
@@ -109,7 +113,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         return AnnotationRepository(self.session).calculate_foreshadow_expectation(run_id)
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
-        """2026-08-05 用于读取章节 segments 中的转折时刻"""
+        """2026-08-07 用于读取章节 chunks metrics 中的转折时刻"""
         return [
             (chunk_id, text)
             for chunk_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)
@@ -136,11 +140,11 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         ]
 
     def fetch_known_characters(self, run_id: str) -> list[str]:
-        """2026-08-06 用于从数据库图实体节点读取诊断人物名单"""
+        """2026-08-07 用于从最新章节实体状态读取诊断人物名单"""
         graph_repo = GraphRepository(self.session)
         return sorted(
-            entity.canonical_name
-            for entity in graph_repo.fetch_representative_entities(run_id, entity_type="character")
+            entity.name
+            for entity in graph_repo.fetch_latest_entities(run_id, entity_type="character")
         )
 
     def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:

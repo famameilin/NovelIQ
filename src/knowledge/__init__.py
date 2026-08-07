@@ -8,13 +8,12 @@ from .authority import (
     ExportRelationSnapshot,
     GraphAuthorityReport,
     GraphAuthorityView,
+    GraphChange,
     KnowledgeGraphAuthorityService,
     Level1AuthoritySnapshot,
     ParticipantState,
-    RelationEvent,
     TimelineAuthorityView,
 )
-from .graph import build_networkx_from_graph_tables
 
 __all__ = [
     "ActiveEntityContext",
@@ -26,10 +25,9 @@ __all__ = [
     "ExportRelationSnapshot",
     "GraphAuthorityReport",
     "GraphAuthorityView",
+    "GraphChange",
     "KnowledgeGraphAuthorityService",
     "Level1AuthoritySnapshot",
     "ParticipantState",
-    "RelationEvent",
     "TimelineAuthorityView",
-    "build_networkx_from_graph_tables",
 ]

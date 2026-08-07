@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from src.agents.annotation.schema import ChapterAnnotation
+from src.agents.annotation.schema import ChapterFinish
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
     ChapterAnnotationRecord,
@@ -107,20 +107,27 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         return list(self.session.execute(stmt).scalars().all())
 
     def _graph_facts(self, run_id: str, *, content_kind: str) -> list[GraphFact]:
-        """2026-08-05 用于读取指定章节事实类型的活动数据库图事实"""
+        """2026-08-07 用于读取指定类型每个 fact_id 的最新不可变版本"""
         stmt = (
             select(GraphFact)
-            .where(
-                GraphFact.run_id == run_id,
-                GraphFact.active.is_(True),
+            .where(GraphFact.run_id == run_id)
+            .order_by(
+                GraphFact.fact_id,
+                GraphFact.fact_revision.desc(),
+                GraphFact.graph_fact_version_id.desc(),
             )
-            .order_by(GraphFact.graph_fact_id)
         )
-        return [
-            row
-            for row in self.session.execute(stmt).scalars().all()
-            if isinstance(row.content, dict) and row.content.get("kind") == content_kind
-        ]
+        latest_by_fact_id: dict[str, GraphFact] = {}
+        for row in self.session.execute(stmt).scalars().all():
+            latest_by_fact_id.setdefault(str(row.fact_id), row)
+        return sorted(
+            (
+                row
+                for row in latest_by_fact_id.values()
+                if isinstance(row.content, dict) and row.content.get("kind") == content_kind
+            ),
+            key=lambda row: (row.effective_chunk_id, row.graph_fact_version_id),
+        )
 
     def _foreshadowing_by_chunk(self, run_id: str) -> dict[int, dict[str, Any]]:
         """2026-08-05 用于把伏笔 thread 与 hit 展开到实际命中 chunk"""
@@ -154,20 +161,20 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         return self.fetch_chunk_annotations_full(run_id)
 
     def fetch_chunk_annotations_full(self, run_id: str) -> list[ChunkAnnotationRow]:
-        """2026-08-05 用于从正式章节 payload segments 展开完整 chunk 标注"""
+        """2026-08-07 用于从 ChapterFinish chunks metrics 展开完整 chunk 标注"""
         foreshadowing_by_chunk = self._foreshadowing_by_chunk(run_id)
         rows: list[ChunkAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
-            annotation = ChapterAnnotation.model_validate(record.payload)
-            for segment in annotation.segments:
+            finish = ChapterFinish.model_validate(record.payload)
+            for chunk in finish.chunks:
                 rows.append(
                     ChunkAnnotationRow(
-                        chunk_id=segment.chunk_id,
-                        emotional_valence=segment.emotional_valence,
-                        event_type=segment.event_type,
-                        pivot_moment=segment.pivot_moment,
-                        cliffhanger=segment.cliffhanger,
-                        **foreshadowing_by_chunk.get(segment.chunk_id, {}),
+                        chunk_id=chunk.chunk_id,
+                        emotional_valence=chunk.metrics.emotional_valence,
+                        event_type=chunk.metrics.event_type,
+                        pivot_moment=chunk.metrics.pivot_moment,
+                        cliffhanger=chunk.metrics.cliffhanger,
+                        **foreshadowing_by_chunk.get(chunk.chunk_id, {}),
                     )
                 )
         return sorted(rows, key=lambda row: row.chunk_id)
@@ -179,7 +186,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
     def fetch_chunk_characters_full(self, run_id: str) -> list[CharacterFactRow]:
         """2026-08-05 用于从数据库图人物事实展开 chunk 人物记录"""
         rows: list[CharacterFactRow] = []
-        for fact in self._graph_facts(run_id, content_kind="characters"):
+        for fact in self._graph_facts(run_id, content_kind="character_observation"):
             content = dict(fact.content)
             entity = content.get("entity")
             if not isinstance(entity, dict):
@@ -214,7 +221,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
     def fetch_chunk_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
         """2026-08-05 用于从数据库图对话事实展开 chunk 对话记录"""
         rows: list[DialogueFactRow] = []
-        for fact in self._graph_facts(run_id, content_kind="dialogues"):
+        for fact in self._graph_facts(run_id, content_kind="dialogue"):
             content = dict(fact.content)
             speaker = content.get("speaker")
             speaker_name = str(speaker.get("name")).strip() if isinstance(speaker, dict) else ""

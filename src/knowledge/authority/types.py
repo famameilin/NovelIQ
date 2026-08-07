@@ -27,7 +27,7 @@ LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "last_seen_chunk",
         "change_count",
         "support_count",
-        "latest_event_id",
+        "latest_relation_version_id",
         "tension_index",
     ),
     "entity_types": ("name", "entity_type"),
@@ -68,28 +68,40 @@ class ConfirmedRelation:
     last_seen_chunk: int | None = None
     change_count: int | None = None
     support_count: int | None = None
-    latest_event_id: int | None = None
+    latest_relation_version_id: int | None = None
     tension_index: float | None = None
-    source: str = "graph_facts"
+    source: str = "graph_relation_versions"
 
 
 @dataclass(slots=True)
-class RelationEvent:
-    """供时间轴/历史消费者使用的不可变关系历史事件"""
+class GraphChange:
+    """2026-08-07 用于向章节版本消费者传递事实原因与双源 Evidence"""
 
-    relation_event_id: int
-    chunk_id: int
-    from_entity_id: int
-    to_entity_id: int
-    from_name: str
-    to_name: str
-    relation_type: str
-    change_type: str
-    evidence: str | None = None
-    confidence: float | None = None
+    change_id: str
+    change_kind: str
+    graph_version_id: str
+    chapter_id: int
+    chapter_order: int
+    fact_id: str
+    fact_revision: int
+    effective_chunk_id: int
+    confidence: str
+    changes: list[dict]
+    evidence: list[dict]
+    entity_id: int | None = None
+    entity_name: str | None = None
+    entity_type: str | None = None
+    relation_id: str | None = None
+    relation_version_id: int | None = None
+    relation_revision: int | None = None
+    from_entity_id: int | None = None
+    to_entity_id: int | None = None
+    from_name: str | None = None
+    to_name: str | None = None
+    relation_type: str | None = None
     directionality: str | None = None
-    source_relation_row_id: int | None = None
-    source: str = "graph_facts"
+    relation_semantics: str | None = None
+    source: str = "chapter_graph_versions"
 
 
 @dataclass(slots=True)
@@ -160,10 +172,10 @@ class ParticipantState:
 @dataclass(slots=True)
 class Level1AuthoritySnapshot:
     """
-    面向证据消费者的最小 Level 1 authority 合同
+    面向实体关系消费者的最小 authority 合同
 
-    该快照用于 EvidenceBundle / Level1 组装，
-    不应混入时间轴历史、图谱产品摘要或 prompt 局部状态
+    该快照用于共享实体与关系读取
+    不混入时间轴历史、图谱产品摘要或 prompt 局部状态
     """
 
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
@@ -171,22 +183,29 @@ class Level1AuthoritySnapshot:
     entity_types: list[EntityTypeFact] = field(default_factory=list)
 
 
-# timeline 只允许消费角色子图、生命周期与关系事件三块共享字段，
+# timeline 只允许消费角色子图、生命周期与章节图变化三块共享字段，
 # 不允许从 GraphAuthorityView 或 repository 原始形状反推历史语义
 TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "character_entities": ("entity_id", "name", "entity_type"),
     "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chunk", "last_seen_chunk"),
-    "relation_events": (
-        "relation_event_id",
-        "chunk_id",
+    "graph_changes": (
+        "change_id",
+        "change_kind",
+        "graph_version_id",
+        "chapter_id",
+        "chapter_order",
+        "fact_id",
+        "fact_revision",
+        "effective_chunk_id",
+        "changes",
+        "evidence",
+        "entity_id",
+        "entity_name",
         "from_entity_id",
         "to_entity_id",
         "from_name",
         "to_name",
         "relation_type",
-        "change_type",
-        "evidence",
-        "confidence",
         "directionality",
     ),
 }
@@ -200,7 +219,7 @@ class TimelineAuthorityView:
     这个视图刻意比完整图谱 authority 面更窄：
     - `character_entities` 只包含角色子图
     - `entity_lifecycles` 与同一批角色集合保持一致
-    - `relation_events` 只包含两端都属于角色子图的不可变历史事件
+    - `graph_changes` 包含角色状态变化与角色子图关系变化
 
     时间轴消费者应把这里当作共享合同，
     不要依赖 repository 行结构或数据库图内部关系表
@@ -208,7 +227,7 @@ class TimelineAuthorityView:
 
     character_entities: list[CanonicalEntity] = field(default_factory=list)
     entity_lifecycles: list[EntityLifecycle] = field(default_factory=list)
-    relation_events: list[RelationEvent] = field(default_factory=list)
+    graph_changes: list[GraphChange] = field(default_factory=list)
 
 
 # graph page route assembler 只允许读取这三块 authority facts
@@ -235,19 +254,15 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "tension_index",
         "is_active",
     ),
-    "relation_events": (
-        "relation_event_id",
-        "chunk_id",
-        "from_entity_id",
-        "to_entity_id",
-        "from_name",
-        "to_name",
-        "relation_type",
-        "change_type",
+    "graph_changes": (
+        "change_id",
+        "change_kind",
+        "graph_version_id",
+        "chapter_id",
+        "fact_id",
+        "fact_revision",
+        "changes",
         "evidence",
-        "confidence",
-        "directionality",
-        "source_relation_row_id",
     ),
 }
 
@@ -260,18 +275,18 @@ class GraphAuthorityView:
     该合同故意只停留在稳定事实层：
     - canonical 实体身份
     - 当前已确认关系
-    - 完整且不可变的关系历史事件
+    - 完整且不可变的章节实体与关系变化
     - 参与者实体状态
 
     产品层摘要/质量卡片属于图谱页面组装层，
     diagnosis / aggregate 结论属于更高层分析。
     如果其他下游需要不同切片，应新增专用合同，
-    不要借用 repository 行，也不要挤占 Level1 / Timeline 的边界
+    不要借用 repository 行，也不要挤占实体关系与 Timeline 的边界
     """
 
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     confirmed_relations: list[ConfirmedRelation] = field(default_factory=list)
-    relation_events: list[RelationEvent] = field(default_factory=list)
+    graph_changes: list[GraphChange] = field(default_factory=list)
     participant_states: list[ParticipantState] = field(default_factory=list)
 
 
@@ -361,20 +376,25 @@ class GraphConflictSample:
     entity_names: list[str] = field(default_factory=list)
     relation_types: list[str] = field(default_factory=list)
     relation_count: int = 0
-    latest_event_ids: list[int] = field(default_factory=list)
+    latest_relation_version_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class GraphLowConfidenceSample:
-    """仅供图谱页面展示的单条低置信关系事件样本"""
+    """仅供图谱页面展示的单条低置信关系变化样本"""
 
-    relation_event_id: int
-    chunk_id: int
+    change_id: str
+    graph_version_id: str
+    chapter_id: int
+    fact_id: str
+    fact_revision: int
+    effective_chunk_id: int
+    relation_id: str | None
     from_name: str
     to_name: str
     relation_type: str | None = None
-    change_type: str | None = None
-    confidence: float | None = None
+    change_kind: str | None = None
+    confidence: str | None = None
 
 
 @dataclass(slots=True)
@@ -396,15 +416,15 @@ class GraphPageQualityDetails:
 class ExportRelationSnapshot:
     """专供结果导出 payload 组装的当前关系快照"""
 
-    relation_id: int | None = None
+    relation_id: str | None = None
     from_name: str = ""
     to_name: str = ""
     relation_type: str = ""
     first_seen_chunk: int | None = None
     last_seen_chunk: int | None = None
-    latest_event_id: int | None = None
+    relation_version_id: int | None = None
     is_active: bool = True
-    source: str = "graph_facts"
+    source: str = "graph_relation_versions"
 
 
 @dataclass(slots=True)
@@ -419,7 +439,7 @@ class ExportGraphAuthorityView:
 
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     current_relations: list[ExportRelationSnapshot] = field(default_factory=list)
-    relation_events: list[RelationEvent] = field(default_factory=list)
+    graph_changes: list[GraphChange] = field(default_factory=list)
 
 
 EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
@@ -440,22 +460,18 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "relation_type",
         "first_seen_chunk",
         "last_seen_chunk",
-        "latest_event_id",
+        "relation_version_id",
         "is_active",
     ),
-    "relation_events": (
-        "relation_event_id",
-        "chunk_id",
-        "from_entity_id",
-        "to_entity_id",
-        "from_name",
-        "to_name",
-        "relation_type",
-        "change_type",
+    "graph_changes": (
+        "change_id",
+        "change_kind",
+        "graph_version_id",
+        "chapter_id",
+        "fact_id",
+        "fact_revision",
+        "changes",
         "evidence",
-        "confidence",
-        "directionality",
-        "source_relation_row_id",
     ),
 }
 

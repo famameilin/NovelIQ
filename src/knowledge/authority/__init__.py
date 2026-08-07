@@ -15,6 +15,7 @@ from .types import (
     ExportRelationSnapshot,
     GraphAuthorityReport,
     GraphAuthorityView,
+    GraphChange,
     GraphConflictSample,
     GraphKeyRelationHighlight,
     GraphLowConfidenceSample,
@@ -24,7 +25,6 @@ from .types import (
     GraphSharedSummary,
     Level1AuthoritySnapshot,
     ParticipantState,
-    RelationEvent,
     TimelineAuthorityView,
 )
 
@@ -40,6 +40,7 @@ __all__ = [
     "GraphConflictSample",
     "GraphAuthorityReport",
     "GraphAuthorityView",
+    "GraphChange",
     "GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS",
     "GraphKeyRelationHighlight",
     "GraphLowConfidenceSample",
@@ -52,7 +53,6 @@ __all__ = [
     "LEVEL1_AUTHORITY_DEPENDENCY_FIELDS",
     "Level1AuthoritySnapshot",
     "ParticipantState",
-    "RelationEvent",
     "serialize_graph_report_signals",
     "TIMELINE_AUTHORITY_DEPENDENCY_FIELDS",
     "TimelineAuthorityView",

@@ -14,8 +14,20 @@ from loguru import logger
 from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS, TimelineAuthorityView
 from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
 
-TimelineNodeType = Literal["plot", "relation", "lifecycle"]
-TimelineNodeSubtype = Literal["plot", "entry", "exit", "新建", "强化", "弱化", "断裂"]
+TimelineNodeType = Literal["plot", "state", "relation", "lifecycle"]
+TimelineNodeSubtype = Literal[
+    "plot",
+    "entry",
+    "exit",
+    "state",
+    "assert",
+    "reinforce",
+    "weaken",
+    "break",
+    "refine",
+    "supersede",
+    "retract",
+]
 TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 ImportanceLevel = Literal[1, 2, 3]
 LifecycleType = Literal["entry", "exit"]
@@ -33,10 +45,13 @@ EMOTIONAL_VALENCE_WEIGHTS: dict[str, float] = {
     "neutral": 0.0,
 }
 RELATION_CHANGE_WEIGHTS: dict[str, float] = {
-    "新建": 2.4,
-    "强化": 1.8,
-    "弱化": 1.6,
-    "断裂": 2.6,
+    "assert": 2.4,
+    "reinforce": 1.8,
+    "weaken": 1.6,
+    "break": 2.6,
+    "refine": 1.4,
+    "supersede": 2.0,
+    "retract": 2.2,
 }
 
 
@@ -49,16 +64,27 @@ class TimelineAuthorityContractError(RuntimeError):
 
 
 @dataclass(slots=True)
-class RelationEventDTO:
-    """时间轴关系事件 DTO"""
+class GraphChangeDTO:
+    """2026-08-07 用于时间轴返回实体或关系章节变化"""
 
-    relation_event_id: int
-    from_char: str
-    to_char: str
-    relation_type: str
-    change_type: Literal["新建", "强化", "弱化", "断裂"]
-    evidence: str | None = None
-    confidence: float | None = None
+    change_id: str
+    change_kind: Literal["state", "relation"]
+    graph_version_id: str
+    chapter_id: int
+    fact_id: str
+    fact_revision: int
+    effective_chunk_id: int
+    changes: list[dict[str, Any]]
+    evidence: list[dict[str, Any]]
+    entity_id: int | None = None
+    entity_name: str | None = None
+    relation_id: str | None = None
+    relation_version_id: int | None = None
+    relation_revision: int | None = None
+    from_char: str | None = None
+    to_char: str | None = None
+    relation_type: str | None = None
+    relation_change_kind: str | None = None
     directionality: str | None = None
 
 
@@ -106,7 +132,7 @@ class TimelineNodeDTO:
     node_subtype: TimelineNodeSubtype
     score_breakdown: dict[str, float]
     plot_flags: PlotFlagsDTO | None = None
-    relation_events: list[RelationEventDTO] | None = None
+    graph_changes: list[GraphChangeDTO] | None = None
     lifecycle_events: list[LifecycleEventDTO] | None = None
     composite_group_hint: tuple[str, ...] | None = None
 
@@ -159,7 +185,7 @@ class TimelineAuthorityData:
     """authority contract 校验后的时间轴只读输入"""
 
     entity_lifecycles: list[Any]
-    relation_events: list[Any]
+    graph_changes: list[Any]
     entity_name_map: dict[int, str]
 
 
@@ -211,10 +237,21 @@ class RelationAtom:
     anchor_chunk_id: int
     progress: float
     phase_name: TimelinePhaseName
-    relation_event: RelationEventDTO
+    graph_change: GraphChangeDTO
     characters: list[str]
     phase_rarity: float
     pair_importance: float
+
+
+@dataclass(slots=True)
+class StateAtom:
+    """2026-08-07 用于承载实体状态章节变化原子信号"""
+
+    anchor_chunk_id: int
+    progress: float
+    phase_name: TimelinePhaseName
+    graph_change: GraphChangeDTO
+    characters: list[str]
 
 
 @dataclass(slots=True)
@@ -394,12 +431,12 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
 
     character_entities = list(timeline_view.character_entities)
     entity_lifecycles = list(timeline_view.entity_lifecycles)
-    relation_events = list(timeline_view.relation_events)
+    graph_changes = list(timeline_view.graph_changes)
 
     for slice_name, items in {
         "character_entities": character_entities,
         "entity_lifecycles": entity_lifecycles,
-        "relation_events": relation_events,
+        "graph_changes": graph_changes,
     }.items():
         for item in items:
             missing_fields = [
@@ -457,27 +494,42 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
                 "TimelineAuthorityView.entity_lifecycles names must match character_entities"
             )
 
-    for event in relation_events:
-        if event.from_entity_id not in character_ids or event.to_entity_id not in character_ids:
+    for change in graph_changes:
+        if change.change_kind == "state":
+            if change.entity_id not in character_ids:
+                raise TimelineAuthorityContractError(
+                    "TimelineAuthorityView.graph_changes state rows must stay inside the character subgraph"
+                )
+            continue
+        if change.change_kind != "relation":
             raise TimelineAuthorityContractError(
-                "TimelineAuthorityView.relation_events must stay inside the character subgraph"
+                "TimelineAuthorityView.graph_changes must use state or relation"
             )
-        if getattr(event, "change_type", None) not in RELATION_CHANGE_WEIGHTS:
+        if change.from_entity_id not in character_ids or change.to_entity_id not in character_ids:
             raise TimelineAuthorityContractError(
-                "TimelineAuthorityView.relation_events must expose only meaningful relation changes"
+                "TimelineAuthorityView.graph_changes relation rows must stay inside the character subgraph"
+            )
+        relation_change_kind = (
+            str(change.changes[0].get("change_kind"))
+            if change.changes
+            else ""
+        )
+        if relation_change_kind not in RELATION_CHANGE_WEIGHTS:
+            raise TimelineAuthorityContractError(
+                "TimelineAuthorityView.graph_changes must expose supported relation changes"
             )
 
-    return entity_lifecycles, relation_events, {entity_id: entity.name for entity_id, entity in character_map.items()}
+    return entity_lifecycles, graph_changes, {entity_id: entity.name for entity_id, entity in character_map.items()}
 
 
 # 2026-04-27，任务：时间轴合同重构
 # 新建原因：把 authority contract 校验后的 view 收口成 timeline 专用输入，
     # 避免 route/export 继续依赖 TimelineAuthorityView 的原始形状
 def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> TimelineAuthorityData:
-    entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
+    entity_lifecycles, graph_changes, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
     return TimelineAuthorityData(
         entity_lifecycles=entity_lifecycles,
-        relation_events=relation_events,
+        graph_changes=graph_changes,
         entity_name_map=entity_name_map,
     )
 
@@ -565,12 +617,14 @@ def _build_character_importance_map(
     authority_data: TimelineAuthorityData,
 ) -> dict[int, float]:
     relation_counterpart_map: dict[int, set[int]] = {}
-    relation_event_count_map: dict[int, int] = {}
-    for event in authority_data.relation_events:
-        relation_counterpart_map.setdefault(event.from_entity_id, set()).add(event.to_entity_id)
-        relation_counterpart_map.setdefault(event.to_entity_id, set()).add(event.from_entity_id)
-        relation_event_count_map[event.from_entity_id] = relation_event_count_map.get(event.from_entity_id, 0) + 1
-        relation_event_count_map[event.to_entity_id] = relation_event_count_map.get(event.to_entity_id, 0) + 1
+    relation_change_count_map: dict[int, int] = {}
+    for change in authority_data.graph_changes:
+        if change.change_kind != "relation":
+            continue
+        relation_counterpart_map.setdefault(change.from_entity_id, set()).add(change.to_entity_id)
+        relation_counterpart_map.setdefault(change.to_entity_id, set()).add(change.from_entity_id)
+        relation_change_count_map[change.from_entity_id] = relation_change_count_map.get(change.from_entity_id, 0) + 1
+        relation_change_count_map[change.to_entity_id] = relation_change_count_map.get(change.to_entity_id, 0) + 1
 
     importance_map: dict[int, float] = {}
     for lifecycle in authority_data.entity_lifecycles:
@@ -581,20 +635,20 @@ def _build_character_importance_map(
         span = max(last_seen_chunk - first_seen_chunk + 1, 1)
         span_score = span / max(source_data.total_chunks, 1) * 3.0
         degree_score = len(relation_counterpart_map.get(lifecycle.entity_id, set())) * 0.6
-        relation_event_score = relation_event_count_map.get(lifecycle.entity_id, 0) * 0.35
-        importance_map[lifecycle.entity_id] = round(span_score + degree_score + relation_event_score, 2)
+        relation_change_score = relation_change_count_map.get(lifecycle.entity_id, 0) * 0.35
+        importance_map[lifecycle.entity_id] = round(span_score + degree_score + relation_change_score, 2)
 
     return importance_map
 
 
 # 2026-04-27，任务：时间轴合同重构
-# 新建原因：plot / relation / lifecycle 的选择逻辑完全不同，先拆成原子信号，
+# 新建原因：plot / state / relation / lifecycle 的选择逻辑完全不同，先拆成原子信号，
     # 再进入统一节点规划层，避免再次退回 “每个 chunk 一个节点” 的旧模型
 def build_timeline_atoms(
     source_data: TimelineSourceData,
     authority_data: TimelineAuthorityData,
     phases: list[TimelinePhaseDTO],
-) -> tuple[list[PlotAtom], list[RelationAtom], list[LifecycleAtom]]:
+) -> tuple[list[PlotAtom], list[StateAtom], list[RelationAtom], list[LifecycleAtom]]:
     phase_names_by_chunk = {
         chunk_id: _resolve_phase_name(chunk_id, phases)
         for chunk_id in source_data.chunk_ids
@@ -634,53 +688,100 @@ def build_timeline_atoms(
             )
         )
 
+    state_atoms: list[StateAtom] = []
+    for graph_change in authority_data.graph_changes:
+        if graph_change.change_kind != "state":
+            continue
+        chunk_index = source_data.chunk_id_to_idx.get(graph_change.effective_chunk_id)
+        if chunk_index is None:
+            continue
+        entity_name = graph_change.entity_name or authority_data.entity_name_map.get(
+            graph_change.entity_id,
+            str(graph_change.entity_id),
+        )
+        state_atoms.append(
+            StateAtom(
+                anchor_chunk_id=graph_change.effective_chunk_id,
+                progress=chunk_index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
+                phase_name=phase_names_by_chunk.get(graph_change.effective_chunk_id, "引入期"),
+                graph_change=GraphChangeDTO(
+                    change_id=graph_change.change_id,
+                    change_kind="state",
+                    graph_version_id=graph_change.graph_version_id,
+                    chapter_id=graph_change.chapter_id,
+                    fact_id=graph_change.fact_id,
+                    fact_revision=graph_change.fact_revision,
+                    effective_chunk_id=graph_change.effective_chunk_id,
+                    changes=list(graph_change.changes),
+                    evidence=list(graph_change.evidence),
+                    entity_id=graph_change.entity_id,
+                    entity_name=entity_name,
+                ),
+                characters=[entity_name],
+            )
+        )
+
     relation_phase_counts: dict[str, int] = {}
-    for relation_event in authority_data.relation_events:
-        phase_name = phase_names_by_chunk.get(relation_event.chunk_id, "引入期")
+    for graph_change in authority_data.graph_changes:
+        if graph_change.change_kind != "relation":
+            continue
+        phase_name = phase_names_by_chunk.get(graph_change.effective_chunk_id, "引入期")
         relation_phase_counts[phase_name] = relation_phase_counts.get(phase_name, 0) + 1
 
     max_phase_relation_count = max(relation_phase_counts.values(), default=1)
     relation_atoms: list[RelationAtom] = []
-    for relation_event in authority_data.relation_events:
-        chunk_index = source_data.chunk_id_to_idx.get(relation_event.chunk_id)
+    for graph_change in authority_data.graph_changes:
+        if graph_change.change_kind != "relation":
+            continue
+        chunk_index = source_data.chunk_id_to_idx.get(graph_change.effective_chunk_id)
         if chunk_index is None:
             continue
-        phase_name = phase_names_by_chunk.get(relation_event.chunk_id, "引入期")
+        phase_name = phase_names_by_chunk.get(graph_change.effective_chunk_id, "引入期")
         from_name = authority_data.entity_name_map.get(
-            relation_event.from_entity_id,
-            str(relation_event.from_entity_id),
+            graph_change.from_entity_id,
+            graph_change.from_name or str(graph_change.from_entity_id),
         )
         to_name = authority_data.entity_name_map.get(
-            relation_event.to_entity_id,
-            str(relation_event.to_entity_id),
+            graph_change.to_entity_id,
+            graph_change.to_name or str(graph_change.to_entity_id),
         )
-        relation_event_dto = RelationEventDTO(
-            relation_event_id=int(relation_event.relation_event_id),
+        relation_change_kind = str(graph_change.changes[0].get("change_kind") or "refine")
+        graph_change_dto = GraphChangeDTO(
+            change_id=graph_change.change_id,
+            change_kind="relation",
+            graph_version_id=graph_change.graph_version_id,
+            chapter_id=graph_change.chapter_id,
+            fact_id=graph_change.fact_id,
+            fact_revision=graph_change.fact_revision,
+            effective_chunk_id=graph_change.effective_chunk_id,
+            changes=list(graph_change.changes),
+            evidence=list(graph_change.evidence),
+            relation_id=graph_change.relation_id,
+            relation_version_id=graph_change.relation_version_id,
+            relation_revision=graph_change.relation_revision,
             from_char=from_name,
             to_char=to_name,
-            relation_type=relation_event.relation_type,
-            change_type=cast(Literal["新建", "强化", "弱化", "断裂"], relation_event.change_type),
-            evidence=relation_event.evidence,
-            confidence=relation_event.confidence,
-            directionality=relation_event.directionality,
+            relation_type=graph_change.relation_type,
+            relation_change_kind=relation_change_kind,
+            directionality=graph_change.directionality,
         )
         phase_rarity = 1.0 - (
             relation_phase_counts.get(phase_name, 0) / max(max_phase_relation_count, 1)
         )
         pair_importance = round(
             (
-                character_importance_map.get(relation_event.from_entity_id, 0.0)
-                + character_importance_map.get(relation_event.to_entity_id, 0.0)
+                character_importance_map.get(graph_change.from_entity_id, 0.0)
+                + character_importance_map.get(graph_change.to_entity_id, 0.0)
             )
             / 2,
             2,
         )
         relation_atoms.append(
             RelationAtom(
-                anchor_chunk_id=relation_event.chunk_id,
+                anchor_chunk_id=graph_change.effective_chunk_id,
                 progress=chunk_index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
                 phase_name=phase_name,
-                relation_event=relation_event_dto,
+                graph_change=graph_change_dto,
                 characters=sorted({from_name, to_name}),
                 phase_rarity=round(phase_rarity, 2),
                 pair_importance=pair_importance,
@@ -728,7 +829,7 @@ def build_timeline_atoms(
                 )
             )
 
-    return plot_atoms, relation_atoms, lifecycle_atoms
+    return plot_atoms, state_atoms, relation_atoms, lifecycle_atoms
 
 
 def _build_plot_score_breakdown(atom: PlotAtom) -> dict[str, float]:
@@ -743,10 +844,18 @@ def _build_plot_score_breakdown(atom: PlotAtom) -> dict[str, float]:
 
 def _build_relation_score_breakdown(atom: RelationAtom) -> dict[str, float]:
     return {
-        "change_type_weight": RELATION_CHANGE_WEIGHTS.get(atom.relation_event.change_type, 0.0),
+        "change_type_weight": RELATION_CHANGE_WEIGHTS.get(atom.graph_change.relation_change_kind or "", 0.0),
         "pair_importance": atom.pair_importance,
         "phase_rarity": round(atom.phase_rarity, 2),
         "duplicate_penalty": 0.0,
+    }
+
+
+def _build_state_score_breakdown(atom: StateAtom) -> dict[str, float]:
+    """2026-08-07 用于按状态字段变化数量计算时间轴重要性"""
+    return {
+        "state_change": 1.2,
+        "field_count": min(len(atom.graph_change.changes) * 0.4, 2.0),
     }
 
 
@@ -762,6 +871,7 @@ def _build_lifecycle_score_breakdown(atom: LifecycleAtom) -> dict[str, float]:
     # 让 route / export / frontend 全部摆脱 chunk_id 唯一节点假设
 def compose_timeline_nodes(
     plot_atoms: list[PlotAtom],
+    state_atoms: list[StateAtom],
     relation_atoms: list[RelationAtom],
     lifecycle_atoms: list[LifecycleAtom],
 ) -> list[TimelineNodeDTO]:
@@ -797,26 +907,53 @@ def compose_timeline_nodes(
             )
         )
 
+    for state_atom in state_atoms:
+        score_breakdown = _build_state_score_breakdown(state_atom)
+        importance_score, level = compute_importance_score(score_breakdown)
+        changed_fields = [
+            str(change.get("field") or "")
+            for change in state_atom.graph_change.changes
+            if change.get("field")
+        ]
+        field_summary = "、".join(changed_fields) if changed_fields else "状态"
+        nodes.append(
+            TimelineNodeDTO(
+                node_id=state_atom.graph_change.change_id,
+                anchor_chunk_id=state_atom.anchor_chunk_id,
+                progress=round(state_atom.progress, 4),
+                importance_score=importance_score,
+                level=level,
+                summary=f"{state_atom.graph_change.entity_name or '实体'}更新{field_summary}",
+                characters=state_atom.characters,
+                phase_name=state_atom.phase_name,
+                node_type="state",
+                node_subtype="state",
+                score_breakdown=score_breakdown,
+                graph_changes=[state_atom.graph_change],
+            )
+        )
+
     for relation_atom in relation_atoms:
         score_breakdown = _build_relation_score_breakdown(relation_atom)
         importance_score, level = compute_importance_score(score_breakdown)
+        relation_change_kind = relation_atom.graph_change.relation_change_kind or "refine"
         nodes.append(
             TimelineNodeDTO(
-                node_id=f"relation:{relation_atom.relation_event.relation_event_id}",
+                node_id=relation_atom.graph_change.change_id,
                 anchor_chunk_id=relation_atom.anchor_chunk_id,
                 progress=round(relation_atom.progress, 4),
                 importance_score=importance_score,
                 level=level,
                 summary=(
-                    f"{relation_atom.relation_event.from_char}与{relation_atom.relation_event.to_char}"
-                    f"{relation_atom.relation_event.change_type}{relation_atom.relation_event.relation_type}"
+                    f"{relation_atom.graph_change.from_char}与{relation_atom.graph_change.to_char}"
+                    f"{relation_change_kind}{relation_atom.graph_change.relation_type}"
                 ),
                 characters=relation_atom.characters,
                 phase_name=relation_atom.phase_name,
                 node_type="relation",
-                node_subtype=cast(TimelineNodeSubtype, relation_atom.relation_event.change_type),
+                node_subtype=cast(TimelineNodeSubtype, relation_change_kind),
                 score_breakdown=score_breakdown,
-                relation_events=[relation_atom.relation_event],
+                graph_changes=[relation_atom.graph_change],
             )
         )
 
@@ -855,43 +992,51 @@ def _node_sort_key(node: TimelineNodeDTO) -> tuple[float, int, str]:
     subtype_rank = {
         "plot": 0,
         "entry": 1,
-        "新建": 2,
-        "强化": 3,
-        "弱化": 4,
-        "断裂": 5,
-        "exit": 6,
+        "state": 2,
+        "assert": 3,
+        "reinforce": 4,
+        "weaken": 5,
+        "refine": 6,
+        "supersede": 7,
+        "break": 8,
+        "retract": 9,
+        "exit": 10,
     }
     return (node.progress, node.anchor_chunk_id, f"{subtype_rank.get(node.node_subtype, 9)}:{node.node_id}")
 
 
 def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str, str] | None:
     """为 relation 节点生成去重签名，同时保留短距离内的真实变化"""
-    if not node.relation_events:
+    if not node.graph_changes:
         return None
-    event = node.relation_events[0]
-    if event.directionality == "symmetric":
-        left_name, right_name = tuple(sorted((event.from_char, event.to_char)))
+    change = node.graph_changes[0]
+    from_char = change.from_char or ""
+    to_char = change.to_char or ""
+    if change.directionality == "bidirectional":
+        left_name, right_name = tuple(sorted((from_char, to_char)))
     else:
-        left_name, right_name = event.from_char, event.to_char
+        left_name, right_name = from_char, to_char
     return (
         left_name,
         right_name,
-        event.relation_type,
-        event.change_type,
-        event.directionality or "unknown",
+        change.relation_type or "",
+        change.relation_change_kind or "",
+        change.directionality or "unknown",
     )
 
 
 def _relation_composite_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str] | None:
     """为复合 relation 节点生成分组签名，但不把 `change_type` 带进主键"""
-    if not node.relation_events:
+    if not node.graph_changes:
         return None
-    event = node.relation_events[0]
-    if event.directionality == "symmetric":
-        left_name, right_name = tuple(sorted((event.from_char, event.to_char)))
+    change = node.graph_changes[0]
+    from_char = change.from_char or ""
+    to_char = change.to_char or ""
+    if change.directionality == "bidirectional":
+        left_name, right_name = tuple(sorted((from_char, to_char)))
     else:
-        left_name, right_name = event.from_char, event.to_char
-    return (left_name, right_name, event.relation_type, event.directionality or "unknown")
+        left_name, right_name = from_char, to_char
+    return (left_name, right_name, change.relation_type or "", change.directionality or "unknown")
 
 
 def _unique_preserving_order(values: list[str]) -> list[str]:
@@ -918,10 +1063,10 @@ def _character_overlap_ratio(left: list[str], right: list[str]) -> float:
 
 def _is_opposite_relation_change(left_change: str, right_change: str) -> bool:
     opposite_pairs = {
-        ("新建", "断裂"),
-        ("断裂", "新建"),
-        ("强化", "弱化"),
-        ("弱化", "强化"),
+        ("assert", "break"),
+        ("break", "assert"),
+        ("reinforce", "weaken"),
+        ("weaken", "reinforce"),
     }
     return (left_change, right_change) in opposite_pairs
 
@@ -938,11 +1083,14 @@ def _can_extend_relation_composite(group_nodes: list[TimelineNodeDTO], candidate
     candidate_signature = _relation_composite_signature(candidate)
     if group_signature is None or group_signature != candidate_signature:
         return False
-    last_event = last_node.relation_events[0] if last_node.relation_events else None
-    candidate_event = candidate.relation_events[0] if candidate.relation_events else None
-    if last_event is None or candidate_event is None:
+    last_change = last_node.graph_changes[0] if last_node.graph_changes else None
+    candidate_change = candidate.graph_changes[0] if candidate.graph_changes else None
+    if last_change is None or candidate_change is None:
         return False
-    if _is_opposite_relation_change(last_event.change_type, candidate_event.change_type):
+    if _is_opposite_relation_change(
+        last_change.relation_change_kind or "",
+        candidate_change.relation_change_kind or "",
+    ):
         return False
     return True
 
@@ -1062,8 +1210,20 @@ def _build_lifecycle_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[Timel
     return composite_nodes
 
 
+def _build_state_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[TimelineCompositeNodeDTO]:
+    """2026-08-07 用于把每条实体状态变化保留为独立时间轴复合节点"""
+    state_nodes = sorted((node for node in nodes if node.node_type == "state"), key=_node_sort_key)
+    ordinal_by_anchor: dict[int, int] = {}
+    composite_nodes: list[TimelineCompositeNodeDTO] = []
+    for node in state_nodes:
+        next_ordinal = ordinal_by_anchor.get(node.anchor_chunk_id, 0)
+        composite_nodes.append(_build_composite_node([node], next_ordinal))
+        ordinal_by_anchor[node.anchor_chunk_id] = next_ordinal + 1
+    return composite_nodes
+
+
 def _composite_node_sort_key(node: TimelineCompositeNodeDTO) -> tuple[float, int, str]:
-    type_rank = {"plot": 0, "relation": 1, "lifecycle": 2}
+    type_rank = {"plot": 0, "state": 1, "relation": 2, "lifecycle": 3}
     return (node.start_progress, type_rank.get(node.node_type, 9), node.node_id)
 
 
@@ -1078,6 +1238,7 @@ def compose_composite_timeline_nodes(
 
     composite_nodes = [
         *_build_plot_composite_nodes(atomic_nodes),
+        *_build_state_composite_nodes(atomic_nodes),
         *_build_relation_composite_nodes(atomic_nodes),
         *_build_lifecycle_composite_nodes(atomic_nodes),
     ]
@@ -1099,7 +1260,7 @@ def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
         "node_subtype": node.node_subtype,
         "score_breakdown": {key: round(value, 2) for key, value in node.score_breakdown.items()},
         "plot_flags": None,
-        "relation_events": None,
+        "graph_changes": None,
         "lifecycle_events": None,
     }
     if node.plot_flags is not None:
@@ -1108,19 +1269,30 @@ def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
             "is_cliffhanger": node.plot_flags.is_cliffhanger,
             "tension_percentile": node.plot_flags.tension_percentile,
         }
-    if node.relation_events is not None:
-        payload["relation_events"] = [
+    if node.graph_changes is not None:
+        payload["graph_changes"] = [
             {
-                "relation_event_id": event.relation_event_id,
-                "from_char": event.from_char,
-                "to_char": event.to_char,
-                "relation_type": event.relation_type,
-                "change_type": event.change_type,
-                "evidence": event.evidence,
-                "confidence": event.confidence,
-                "directionality": event.directionality,
+                "change_id": change.change_id,
+                "change_kind": change.change_kind,
+                "graph_version_id": change.graph_version_id,
+                "chapter_id": change.chapter_id,
+                "fact_id": change.fact_id,
+                "fact_revision": change.fact_revision,
+                "effective_chunk_id": change.effective_chunk_id,
+                "changes": change.changes,
+                "evidence": change.evidence,
+                "entity_id": change.entity_id,
+                "entity_name": change.entity_name,
+                "relation_id": change.relation_id,
+                "relation_version_id": change.relation_version_id,
+                "relation_revision": change.relation_revision,
+                "from_char": change.from_char,
+                "to_char": change.to_char,
+                "relation_type": change.relation_type,
+                "relation_change_kind": change.relation_change_kind,
+                "directionality": change.directionality,
             }
-            for event in node.relation_events
+            for change in node.graph_changes
         ]
     if node.lifecycle_events is not None:
         payload["lifecycle_events"] = [
@@ -1176,8 +1348,12 @@ def build_timeline_plan(
     source_data = _load_timeline_source_data(run_id, chunk_repo, annotation_repo, stats_repo)
     authority_data = _adapt_timeline_authority_view(timeline_view)
     phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chunk_ids))
-    plot_atoms, relation_atoms, lifecycle_atoms = build_timeline_atoms(source_data, authority_data, phases)
-    atomic_nodes = compose_timeline_nodes(plot_atoms, relation_atoms, lifecycle_atoms)
+    plot_atoms, state_atoms, relation_atoms, lifecycle_atoms = build_timeline_atoms(
+        source_data,
+        authority_data,
+        phases,
+    )
+    atomic_nodes = compose_timeline_nodes(plot_atoms, state_atoms, relation_atoms, lifecycle_atoms)
     composite_nodes = compose_composite_timeline_nodes(atomic_nodes, phases)
     return TimelinePlanBuildResult(
         atomic_nodes=sorted(atomic_nodes, key=_node_sort_key),
