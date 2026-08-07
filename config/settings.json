@@ -124,7 +124,8 @@
         "max_iterations": 10,
         "total_attempts": 3,
         "retry_backoff_seconds": [1, 2],
-        "active_setup_pool_limit": 30
+        "active_setup_pool_limit": 30,
+        "allow_future_context": false
       },
       "diagnosis": {
         "max_iterations": 15
@@ -195,15 +196,8 @@
     "middle_collapse_min_chunks": 10,
     "character_max_iter": 100
   },
-  "rag": {
-    "enabled": true,
-    "embedding_enabled": true,
-    "similarity_threshold": 0.7,
-    "lookback_chunks": 10,
-    "top_k": 3,
-    "level1_enabled": true,
-    "level2_enabled": true,
-    "level3_enabled": true,
-    "level3_top_k": 5
+  "text_retrieval": {
+    "semantic_enabled": true,
+    "top_k": 5
   }
 }

@@ -1,50 +1,38 @@
-from src.config.schemas import _parse_rag_settings
+from src.config.schemas import _parse_text_retrieval_settings
 from src.config.schemas.analysis import _parse_agent_settings
 
 
-def test_parse_rag_settings_includes_level3_fields() -> None:
-    settings = _parse_rag_settings(
+def test_parse_text_retrieval_settings_reads_semantic_fields() -> None:
+    settings = _parse_text_retrieval_settings(
         {
-            "enabled": True,
-            "embedding_enabled": True,
-            "similarity_threshold": 0.8,
-            "lookback_chunks": 12,
-            "top_k": 4,
-            "level1_enabled": True,
-            "level2_enabled": False,
-            "level3_enabled": False,
-            "level3_top_k": 9,
+            "semantic_enabled": False,
+            "top_k": 9,
         }
     )
 
-    assert settings.level3_enabled is False
-    assert settings.level3_top_k == 9
+    assert settings.semantic_enabled is False
+    assert settings.top_k == 9
 
 
-def test_parse_rag_settings_uses_top_k_as_level3_fallback() -> None:
-    settings = _parse_rag_settings(
+def test_parse_text_retrieval_settings_defaults() -> None:
+    settings = _parse_text_retrieval_settings(None)
+
+    assert settings.semantic_enabled is True
+    assert settings.top_k == 5
+
+
+def test_parse_text_retrieval_settings_ignores_removed_rag_fields() -> None:
+    settings = _parse_text_retrieval_settings(
         {
-            "top_k": 4,
             "level3_enabled": True,
-        }
-    )
-
-    assert settings.top_k == 4
-    assert settings.level3_top_k == 4
-
-
-def test_parse_rag_settings_ignores_removed_mention_and_rerank_fields() -> None:
-    settings = _parse_rag_settings(
-        {
-            "mention_extraction_enabled": True,
+            "level3_top_k": 9,
             "level3_rerank_enabled": True,
-            "level3_max_queries": 6,
         }
     )
 
-    assert not hasattr(settings, "mention_extraction_enabled")
+    assert not hasattr(settings, "level3_enabled")
+    assert not hasattr(settings, "level3_top_k")
     assert not hasattr(settings, "level3_rerank_enabled")
-    assert not hasattr(settings, "level3_max_queries")
 
 
 def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
@@ -55,6 +43,7 @@ def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
                 "total_attempts": 3,
                 "retry_backoff_seconds": [1.0, 2.0],
                 "active_setup_pool_limit": 12,
+                "allow_future_context": True,
             },
             "diagnosis": {
                 "max_iterations": 9,
@@ -66,6 +55,7 @@ def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
     assert settings.annotation.total_attempts == 3
     assert settings.annotation.retry_backoff_seconds == (1.0, 2.0)
     assert settings.annotation.active_setup_pool_limit == 12
+    assert settings.annotation.allow_future_context is True
     assert settings.diagnosis.max_iterations == 9
 
 
@@ -76,4 +66,21 @@ def test_parse_agent_settings_defaults() -> None:
     assert settings.annotation.total_attempts == 3
     assert settings.annotation.retry_backoff_seconds == (1.0, 2.0)
     assert settings.annotation.active_setup_pool_limit == 30
+    assert settings.annotation.allow_future_context is False
     assert settings.diagnosis.max_iterations == 15
+
+
+def test_parse_agent_settings_rejects_non_boolean_future_switch() -> None:
+    """2026-08-07 用于验证后文开关只接受严格布尔值"""
+    try:
+        _parse_agent_settings(
+            {
+                "annotation": {
+                    "allow_future_context": "false",
+                }
+            }
+        )
+    except ValueError as exc:
+        assert "allow_future_context 必须是 bool" in str(exc)
+    else:
+        raise AssertionError("非布尔 allow_future_context 应被拒绝")

@@ -19,10 +19,10 @@ from .schemas import (
     ModelsSettings,
     PathSettings,
     PromptSettings,
-    RAGSettings,
     RuntimeSettings,
     StreamingSettings,
     StructuredOutputSettings,
+    TextRetrievalSettings,
     ThinkingSettings,
     TopicModelSettings,
     _parse_analysis_settings,
@@ -35,10 +35,10 @@ from .schemas import (
     _parse_models_settings,
     _parse_path_settings,
     _parse_prompt_settings,
-    _parse_rag_settings,
     _parse_runtime_settings,
     _parse_streaming_settings,
     _parse_structured_output_settings,
+    _parse_text_retrieval_settings,
     _parse_thinking_settings,
     _parse_topic_model_settings,
 )
@@ -65,7 +65,7 @@ class Settings:
     topic_model: TopicModelSettings = field(default_factory=TopicModelSettings)
     diagnosis: DiagnosisSettings = field(default_factory=DiagnosisSettings)
     metrics: MetricsSettings = field(default_factory=MetricsSettings)
-    rag: RAGSettings = field(default_factory=RAGSettings)
+    text_retrieval: TextRetrievalSettings = field(default_factory=TextRetrievalSettings)
     prompts: PromptSettings = field(default_factory=PromptSettings)
 
     @classmethod
@@ -109,7 +109,7 @@ class Settings:
             topic_model=_parse_topic_model_settings(data.get("topic_model")),
             diagnosis=_parse_diagnosis_settings(data.get("diagnosis")),
             metrics=_parse_metrics_settings(data.get("metrics")),
-            rag=_parse_rag_settings(data.get("rag")),
+            text_retrieval=_parse_text_retrieval_settings(data.get("text_retrieval")),
             prompts=_parse_prompt_settings(data.get("prompts")),
         )
 

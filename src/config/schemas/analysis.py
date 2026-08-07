@@ -63,6 +63,7 @@ class AnnotationAgentSettings:
     total_attempts: int = 3
     retry_backoff_seconds: tuple[float, ...] = (1.0, 2.0)
     active_setup_pool_limit: int = 30
+    allow_future_context: bool = False
 
 
 @dataclass
@@ -202,18 +203,11 @@ class MetricsSettings:
 
 
 @dataclass
-class RAGSettings:
-    """RAG 检索配置"""
+class TextRetrievalSettings:
+    """原文关键词与段落向量联合定位配置"""
 
-    enabled: bool = True
-    embedding_enabled: bool = True
-    similarity_threshold: float = 0.7
-    lookback_chunks: int = 10
-    top_k: int = 3
-    level1_enabled: bool = True
-    level2_enabled: bool = True
-    level3_enabled: bool = True
-    level3_top_k: int = 5
+    semantic_enabled: bool = True
+    top_k: int = 5
 
 
 def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
@@ -281,6 +275,9 @@ def _parse_agent_settings(data: dict[str, Any] | None) -> AgentSettings:
         return AgentSettings()
     annotation_data = data.get("annotation", {}) or {}
     diagnosis_data = data.get("diagnosis", {}) or {}
+    allow_future_context = annotation_data.get("allow_future_context", False)
+    if not isinstance(allow_future_context, bool):
+        raise ValueError("analysis.agents.annotation.allow_future_context 必须是 bool")
     retry_backoff_seconds = tuple(
         float(value)
         for value in annotation_data.get("retry_backoff_seconds", [1, 2])
@@ -291,6 +288,7 @@ def _parse_agent_settings(data: dict[str, Any] | None) -> AgentSettings:
             total_attempts=annotation_data.get("total_attempts", 3),
             retry_backoff_seconds=retry_backoff_seconds,
             active_setup_pool_limit=annotation_data.get("active_setup_pool_limit", 30),
+            allow_future_context=allow_future_context,
         ),
         diagnosis=DiagnosisAgentSettings(
             max_iterations=diagnosis_data.get("max_iterations", 15),
@@ -423,18 +421,11 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
     )
 
 
-def _parse_rag_settings(data: dict[str, Any] | None) -> RAGSettings:
-    """解析RAG配置"""
+def _parse_text_retrieval_settings(data: dict[str, Any] | None) -> TextRetrievalSettings:
+    """2026-08-07 用于解析原文语义定位配置"""
     if not data:
-        return RAGSettings()
-    return RAGSettings(
-        enabled=data.get("enabled", True),
-        embedding_enabled=data.get("embedding_enabled", True),
-        similarity_threshold=data.get("similarity_threshold", 0.7),
-        lookback_chunks=data.get("lookback_chunks", 10),
-        top_k=data.get("top_k", 3),
-        level1_enabled=data.get("level1_enabled", True),
-        level2_enabled=data.get("level2_enabled", True),
-        level3_enabled=data.get("level3_enabled", True),
-        level3_top_k=data.get("level3_top_k", data.get("top_k", 5)),
+        return TextRetrievalSettings()
+    return TextRetrievalSettings(
+        semantic_enabled=data.get("semantic_enabled", True),
+        top_k=data.get("top_k", 5),
     )
