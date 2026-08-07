@@ -74,114 +74,114 @@ const MOCK_GRAPH_CHARACTERS = [
   { entity_id: 8, name: "海波东", role: "supporting", first_seen_chunk: 36, last_seen_chunk: 112 },
 ] as const;
 
-const MOCK_GRAPH_RELATION_EVENTS = [
+const MOCK_GRAPH_RELATION_CHANGES = [
   {
-    relation_event_id: 101,
+    change_id: "relation:101",
     chunk_id: 12,
     from_entity_id: 1,
     to_entity_id: 2,
     from_name: "萧炎",
     to_name: "药老",
     relation_type: "师徒",
-    change_type: "新建",
+    relation_change_kind: "assert",
     evidence: "药老正式收萧炎为徒。",
     confidence: 0.96,
     source_relation_row_id: 1001,
     directionality: "directed",
   },
   {
-    relation_event_id: 102,
+    change_id: "relation:102",
     chunk_id: 24,
     from_entity_id: 1,
     to_entity_id: 3,
     from_name: "萧炎",
     to_name: "纳兰嫣然",
     relation_type: "对手",
-    change_type: "强化",
+    relation_change_kind: "reinforce",
     evidence: "三年之约进一步升级双方对立。",
     confidence: 0.87,
     source_relation_row_id: 1002,
     directionality: "directed",
   },
   {
-    relation_event_id: 103,
+    change_id: "relation:103",
     chunk_id: 39,
     from_entity_id: 1,
     to_entity_id: 8,
     from_name: "萧炎",
     to_name: "海波东",
     relation_type: "盟友",
-    change_type: "新建",
+    relation_change_kind: "assert",
     evidence: "海波东决定与萧炎合作。",
     confidence: 0.82,
     source_relation_row_id: 1003,
     directionality: "directed",
   },
   {
-    relation_event_id: 104,
+    change_id: "relation:104",
     chunk_id: 56,
     from_entity_id: 1,
     to_entity_id: 4,
     from_name: "萧炎",
     to_name: "美杜莎",
     relation_type: "盟友",
-    change_type: "强化",
+    relation_change_kind: "reinforce",
     evidence: "险境中二人关系更加稳固。",
     confidence: 0.73,
     source_relation_row_id: 1004,
     directionality: "directed",
   },
   {
-    relation_event_id: 105,
+    change_id: "relation:105",
     chunk_id: 72,
     from_entity_id: 1,
     to_entity_id: 7,
     from_name: "萧炎",
     to_name: "薰儿",
     relation_type: "恋人",
-    change_type: "强化",
+    relation_change_kind: "reinforce",
     evidence: "重逢后彼此情感被再次确认。",
     confidence: 0.9,
     source_relation_row_id: 1005,
     directionality: "directed",
   },
   {
-    relation_event_id: 106,
+    change_id: "relation:106",
     chunk_id: 90,
     from_entity_id: 1,
     to_entity_id: 5,
     from_name: "萧炎",
     to_name: "云韵",
     relation_type: "盟友",
-    change_type: "弱化",
+    relation_change_kind: "weaken",
     evidence: "局势变化导致两人的合作松动。",
     confidence: 0.61,
     source_relation_row_id: 1006,
     directionality: "directed",
   },
   {
-    relation_event_id: 107,
+    change_id: "relation:107",
     chunk_id: 104,
     from_entity_id: 1,
     to_entity_id: 6,
     from_name: "萧炎",
     to_name: "小医仙",
     relation_type: "盟友",
-    change_type: "强化",
+    relation_change_kind: "reinforce",
     evidence: "共同经历险境后互信提升。",
     confidence: 0.66,
     source_relation_row_id: 1007,
     directionality: "directed",
   },
   {
-    relation_event_id: 108,
+    change_id: "relation:108",
     chunk_id: 116,
     from_entity_id: 1,
     to_entity_id: 3,
     from_name: "萧炎",
     to_name: "纳兰嫣然",
     relation_type: "对手",
-    change_type: "断裂",
+    relation_change_kind: "break",
     evidence: "恩怨在终局被彻底切断。",
     confidence: 0.78,
     source_relation_row_id: 1008,
@@ -435,27 +435,27 @@ export function createGraph(): GraphData {
 
 export function createGraphChangesPage(cursor?: string | null, limit = 8): GraphChangesPageResponse {
   const graph = createGraph();
-  const allChanges: GraphChange[] = MOCK_GRAPH_RELATION_EVENTS.map((event) => ({
-    change_id: `relation:${event.relation_event_id}`,
+  const allChanges: GraphChange[] = MOCK_GRAPH_RELATION_CHANGES.map((change) => ({
+    change_id: change.change_id,
     change_kind: "relation",
     graph_version_id: graph.graph_version_id,
     chapter_id: graph.chapter_id,
     chapter_order: graph.chapter_order,
-    fact_id: `fact:${event.relation_event_id}`,
+    fact_id: `fact:${change.change_id}`,
     fact_revision: 1,
-    effective_chunk_id: event.chunk_id,
-    changes: [{ change_kind: event.change_type ?? "强化" }],
-    evidence: [{ reason: event.evidence ?? "当前变化缺少原文说明", chunk_id: event.chunk_id }],
-    relation_id: `relation:${event.source_relation_row_id ?? event.relation_event_id}`,
-    relation_version_id: event.source_relation_row_id ?? event.relation_event_id,
+    effective_chunk_id: change.chunk_id,
+    changes: [{ change_kind: change.relation_change_kind }],
+    evidence: [{ reason: change.evidence ?? "当前变化缺少原文说明", chunk_id: change.chunk_id }],
+    relation_id: `relation:${change.source_relation_row_id ?? change.change_id}`,
+    relation_version_id: change.source_relation_row_id,
     relation_revision: 1,
-    from_entity_id: event.from_entity_id,
-    to_entity_id: event.to_entity_id,
-    from_name: graph.nodes.find((node) => node.entity_id === event.from_entity_id)?.name ?? event.from_name,
-    to_name: graph.nodes.find((node) => node.entity_id === event.to_entity_id)?.name ?? event.to_name,
-    relation_type: event.relation_type,
-    relation_change_kind: event.change_type,
-    directionality: event.directionality === "directed" ? "directed" : "bidirectional",
+    from_entity_id: change.from_entity_id,
+    to_entity_id: change.to_entity_id,
+    from_name: graph.nodes.find((node) => node.entity_id === change.from_entity_id)?.name ?? change.from_name,
+    to_name: graph.nodes.find((node) => node.entity_id === change.to_entity_id)?.name ?? change.to_name,
+    relation_type: change.relation_type,
+    relation_change_kind: change.relation_change_kind,
+    directionality: change.directionality === "directed" ? "directed" : "bidirectional",
     relation_semantics: "ordinary",
   }));
   const start = decodeGraphChangesCursor(cursor);
@@ -531,40 +531,81 @@ export function createTimeline(): TimelineResponse {
     },
   }));
 
-  const relationNodes: TimelineNode[] = MOCK_GRAPH_RELATION_EVENTS.map((event) => ({
-    node_id: `relation:${event.relation_event_id}`,
-    anchor_chunk_id: event.chunk_id,
-    progress: +(event.chunk_id / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
+  const relationNodes: TimelineNode[] = createGraphChangesPage(null, MOCK_GRAPH_RELATION_CHANGES.length).changes.map((change) => ({
+    node_id: change.change_id,
+    anchor_chunk_id: change.effective_chunk_id,
+    progress: +(change.effective_chunk_id / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
     importance_score:
-      event.change_type === "断裂" || event.change_type === "新建"
+      change.relation_change_kind === "break" || change.relation_change_kind === "assert"
         ? 0.88
-        : event.change_type === "强化"
+        : change.relation_change_kind === "reinforce"
           ? 0.74
           : 0.63,
-    level: event.change_type === "断裂" || event.change_type === "新建" ? 1 : 2,
-    summary: `${event.from_name}与${event.to_name}${event.change_type}${event.relation_type}`,
-    characters: [event.from_name, event.to_name],
-    phase_name: resolveTimelinePhaseName(event.chunk_id),
+    level: change.relation_change_kind === "break" || change.relation_change_kind === "assert" ? 1 : 2,
+    summary: `${change.from_name}与${change.to_name}关系变化`,
+    characters: [change.from_name ?? "未知实体", change.to_name ?? "未知实体"],
+    phase_name: resolveTimelinePhaseName(change.effective_chunk_id),
     node_type: "relation" as const,
-    node_subtype: event.change_type as "新建" | "强化" | "弱化" | "断裂",
+    node_subtype: (change.relation_change_kind ?? "refine") as TimelineNode["node_subtype"],
     score_breakdown: {
       change_type_weight:
-        event.change_type === "断裂" ? 2.6 : event.change_type === "新建" ? 2.4 : event.change_type === "强化" ? 1.8 : 1.6,
-      pair_importance: +(event.confidence ?? 0.6).toFixed(2),
+        change.relation_change_kind === "break" ? 2.6 : change.relation_change_kind === "assert" ? 2.4 : change.relation_change_kind === "reinforce" ? 1.8 : 1.6,
+      pair_importance: 0.8,
     },
-    relation_events: [
+    graph_changes: [
       {
-        relation_event_id: event.relation_event_id,
-        from_char: event.from_name,
-        to_char: event.to_name,
-        relation_type: event.relation_type ?? "盟友",
-        change_type: (event.change_type ?? "强化") as "新建" | "强化" | "弱化" | "断裂",
-        evidence: event.evidence,
-        confidence: event.confidence,
-        directionality: event.directionality,
+        change_id: change.change_id,
+        change_kind: "relation",
+        graph_version_id: change.graph_version_id,
+        chapter_id: change.chapter_id,
+        fact_id: change.fact_id,
+        fact_revision: change.fact_revision,
+        effective_chunk_id: change.effective_chunk_id,
+        changes: change.changes,
+        evidence: change.evidence,
+        relation_id: change.relation_id,
+        relation_version_id: change.relation_version_id,
+        relation_revision: change.relation_revision,
+        from_char: change.from_name,
+        to_char: change.to_name,
+        relation_type: change.relation_type,
+        relation_change_kind: change.relation_change_kind,
+        directionality: change.directionality,
       },
     ],
   }));
+
+  const stateNodes: TimelineNode[] = MOCK_GRAPH_CHARACTERS.slice(0, 2).map((character, index) => {
+    const anchorChunkId = index === 0 ? 18 : 42;
+    return {
+      node_id: `state:${character.entity_id}:${anchorChunkId}`,
+      anchor_chunk_id: anchorChunkId,
+      progress: +(anchorChunkId / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
+      importance_score: index === 0 ? 0.76 : 0.62,
+      level: index === 0 ? 1 : 2,
+      summary: `${character.name}状态更新`,
+      characters: [character.name],
+      phase_name: resolveTimelinePhaseName(anchorChunkId),
+      node_type: "state" as const,
+      node_subtype: "state" as const,
+      score_breakdown: { state_change_weight: index === 0 ? 2.2 : 1.5 },
+      graph_changes: [
+        {
+          change_id: `state:${character.entity_id}:${anchorChunkId}`,
+          change_kind: "state" as const,
+          graph_version_id: "mock-graph-version-1",
+          chapter_id: 12,
+          fact_id: `state-fact:${character.entity_id}:${anchorChunkId}`,
+          fact_revision: 1,
+          effective_chunk_id: anchorChunkId,
+          changes: [{ field: "status", value: index === 0 ? "突破" : "收徒" }],
+          evidence: [{ reason: `${character.name}在本段完成状态变化`, chunk_id: anchorChunkId }],
+          entity_id: character.entity_id,
+          entity_name: character.name,
+        },
+      ],
+    };
+  });
 
   const lifecycleNodes: TimelineNode[] = MOCK_GRAPH_CHARACTERS.flatMap((character) => [
     {
@@ -597,7 +638,7 @@ export function createTimeline(): TimelineResponse {
     },
   ]);
 
-  const nodes: TimelineNode[] = [...plotNodes, ...relationNodes, ...lifecycleNodes].sort((a, b) => a.progress - b.progress);
+  const nodes: TimelineNode[] = [...plotNodes, ...stateNodes, ...relationNodes, ...lifecycleNodes].sort((a, b) => a.progress - b.progress);
 
   const tension_curve = Array.from({ length: MOCK_TIMELINE_TOTAL_CHUNKS }, (_, i) => {
     const t = i / MOCK_TIMELINE_TOTAL_CHUNKS;

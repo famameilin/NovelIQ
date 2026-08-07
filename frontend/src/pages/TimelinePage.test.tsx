@@ -13,7 +13,7 @@ const getTimelineMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
-let currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
+let currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9002";
 let currentTimelineNovelId = "novel-1";
 type TimelineDisplayNode = TimelineNode | TimelineCompositeNode;
 
@@ -129,20 +129,20 @@ vi.mock("@/components/timeline", () => ({
   ),
   TimelineNodeDetail: ({
     node,
-    selectedRelationEventId,
+    selectedGraphChangeId,
     atomicNodes,
     onSelectAtomicNode,
     onClose,
   }: {
     node: TimelineDisplayNode | null;
-    selectedRelationEventId?: number | null;
+    selectedGraphChangeId?: string | null;
     atomicNodes?: TimelineNode[];
     onSelectAtomicNode?: (node: TimelineNode) => void;
     onClose?: () => void;
   }) => (
     <div data-testid="timeline-node-detail">
       <span>{node ? `selected-${node.node_id}` : "selected-none"}</span>
-      <span>{selectedRelationEventId != null ? `event-${selectedRelationEventId}` : "event-none"}</span>
+      <span>{selectedGraphChangeId != null ? `change-${selectedGraphChangeId}` : "change-none"}</span>
       <span>{atomicNodes?.length != null ? `atomic-count-${atomicNodes.length}` : "atomic-count-none"}</span>
       <button type="button" onClick={() => atomicNodes?.[0] && onSelectAtomicNode?.(atomicNodes[0])}>
         选择第一个原子节点
@@ -183,6 +183,29 @@ function createNovel(): Novel {
   };
 }
 
+// 2026-08-07 用于构造时间轴节点消费的稳定图谱变化合同
+function createRelationGraphChange(changeId: string, relationChangeKind: "assert" | "break") {
+  return {
+    change_id: changeId,
+    change_kind: "relation" as const,
+    graph_version_id: "graph-version-1",
+    chapter_id: 2,
+    fact_id: `fact:${changeId}`,
+    fact_revision: 1,
+    effective_chunk_id: changeId === "relation:9001" ? 8 : 12,
+    changes: [{ change_kind: relationChangeKind }],
+    evidence: [{ reason: "关系变化证据", chunk_id: changeId === "relation:9001" ? 8 : 12 }],
+    relation_id: `relation:${changeId}`,
+    relation_version_id: changeId === "relation:9001" ? 9001 : 9002,
+    relation_revision: 1,
+    from_char: "顾承渊",
+    to_char: "苏映雪",
+    relation_type: "盟友",
+    relation_change_kind: relationChangeKind,
+    directionality: "directed" as const,
+  };
+}
+
 function createTimelineResponse(): TimelineResponse {
   return {
     meta: {
@@ -211,7 +234,7 @@ function createTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "苏映雪"],
         phase_name: "发展期",
         node_type: "relation",
-        node_subtypes: ["新建"],
+        node_subtypes: ["assert"],
         representative_node_id: "relation:9001",
         child_node_ids: ["relation:9001"],
       },
@@ -229,7 +252,7 @@ function createTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "苏映雪"],
         phase_name: "高潮期",
         node_type: "relation",
-        node_subtypes: ["断裂"],
+        node_subtypes: ["break"],
         representative_node_id: "relation:9002",
         child_node_ids: ["relation:9002"],
       },
@@ -245,17 +268,9 @@ function createTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "苏映雪"],
         phase_name: "发展期",
         node_type: "relation",
-        node_subtype: "新建",
+        node_subtype: "assert",
         score_breakdown: { change_type_weight: 2.4 },
-        relation_events: [
-          {
-            relation_event_id: 9001,
-            from_char: "顾承渊",
-            to_char: "苏映雪",
-            relation_type: "盟友",
-            change_type: "新建",
-          },
-        ],
+        graph_changes: [createRelationGraphChange("relation:9001", "assert")],
       },
       {
         node_id: "relation:9002",
@@ -267,22 +282,14 @@ function createTimelineResponse(): TimelineResponse {
         characters: ["顾承渊", "苏映雪"],
         phase_name: "高潮期",
         node_type: "relation",
-        node_subtype: "断裂",
+        node_subtype: "break",
         score_breakdown: { change_type_weight: 2.6 },
         plot_flags: {
           is_pivot: true,
           is_cliffhanger: false,
           tension_percentile: 90,
         },
-        relation_events: [
-          {
-            relation_event_id: 9002,
-            from_char: "顾承渊",
-            to_char: "苏映雪",
-            relation_type: "盟友",
-            change_type: "断裂",
-          },
-        ],
+        graph_changes: [createRelationGraphChange("relation:9002", "break")],
       },
     ],
     tension_curve: [0.2, 0.4, 0.8],
@@ -300,6 +307,65 @@ function createEmptyTimelineResponse(): TimelineResponse {
     composite_nodes: [],
     atomic_nodes: [],
     tension_curve: [],
+  };
+}
+
+// 2026-08-07 用于验证实体状态变化可由 change_id 精确定位
+function createStateTimelineResponse(): TimelineResponse {
+  return {
+    ...createTimelineResponse(),
+    composite_nodes: [
+      ...createTimelineResponse().composite_nodes,
+      {
+        node_id: "composite:state:9:0",
+        anchor_chunk_id: 9,
+        start_chunk_id: 9,
+        end_chunk_id: 9,
+        progress: 0.45,
+        start_progress: 0.45,
+        end_progress: 0.45,
+        importance_score: 7,
+        level: 1,
+        summary: "顾承渊状态更新",
+        characters: ["顾承渊"],
+        phase_name: "发展期",
+        node_type: "state",
+        node_subtypes: ["state"],
+        representative_node_id: "state:12:9",
+        child_node_ids: ["state:12:9"],
+      },
+    ],
+    atomic_nodes: [
+      ...createTimelineResponse().atomic_nodes,
+      {
+        node_id: "state:12:9",
+        anchor_chunk_id: 9,
+        progress: 0.45,
+        importance_score: 7,
+        level: 1,
+        summary: "顾承渊状态更新",
+        characters: ["顾承渊"],
+        phase_name: "发展期",
+        node_type: "state",
+        node_subtype: "state",
+        score_breakdown: { state_change_weight: 2.1 },
+        graph_changes: [
+          {
+            change_id: "state:12:9",
+            change_kind: "state",
+            graph_version_id: "graph-version-1",
+            chapter_id: 2,
+            fact_id: "fact:state:12:9",
+            fact_revision: 1,
+            effective_chunk_id: 9,
+            changes: [{ field: "status", value: "结盟" }],
+            evidence: [{ reason: "顾承渊明确放下戒备", chunk_id: 9 }],
+            entity_id: 12,
+            entity_name: "顾承渊",
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -364,7 +430,7 @@ function renderPage() {
 describe("TimelinePage deep links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9002";
     currentTimelineNovelId = "novel-1";
     useNovelStore.setState({
       currentNovelId: null,
@@ -400,7 +466,7 @@ describe("TimelinePage deep links", () => {
   });
 
   it("keeps the URL deep-link task authoritative when the store still holds an older task", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9002";
     useNovelStore.setState({
       currentNovelId: "novel-1",
       currentTaskId: "task-b",
@@ -419,22 +485,32 @@ describe("TimelinePage deep links", () => {
     );
   });
 
-  it("prefers relation_event_id over selected_chunk when deep-linking from graph", async () => {
+  it("prefers change_id over selected_chunk when deep-linking from graph", async () => {
     renderPage();
 
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
-    expect(screen.getByText("event-9002")).toBeInTheDocument();
-    expect(screen.queryByText("未定位到指定关系事件，已回退到对应时间节点。")).not.toBeInTheDocument();
+    expect(screen.getByText("change-relation:9002")).toBeInTheDocument();
+    expect(screen.queryByText("未定位到指定图谱变化，已回退到对应时间节点。")).not.toBeInTheDocument();
   });
 
-  it("prefers selected_node_id over a conflicting relation_event_id and drops the stale event binding", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_node_id=relation%3A9001&selected_chunk=8&relation_event_id=9002";
+  it("selects a state node by its stable change_id", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=9&change_id=state%3A12%3A9";
+    getTimelineMock.mockResolvedValue(createStateTimelineResponse());
+
+    renderPage();
+
+    expect(await screen.findByText("selected-state:12:9")).toBeInTheDocument();
+    expect(screen.getByText("change-state:12:9")).toBeInTheDocument();
+  });
+
+  it("prefers selected_node_id over a conflicting change_id and drops the stale change binding", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_node_id=relation%3A9001&selected_chunk=8&change_id=relation%3A9002";
     const user = userEvent.setup();
 
     renderPage();
 
     expect(await screen.findByText("selected-relation:9001")).toBeInTheDocument();
-    expect(screen.getByText("event-none")).toBeInTheDocument();
+    expect(screen.getByText("change-none")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "切到重要" }));
 
@@ -444,14 +520,14 @@ describe("TimelinePage deep links", () => {
     );
   });
 
-  it("falls back to selected_chunk when relation_event_id is missing", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9999";
+  it("falls back to selected_chunk when change_id is missing", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9999";
 
     renderPage();
 
     expect(await screen.findByText("selected-composite:relation:12:0")).toBeInTheDocument();
-    expect(screen.getByText("event-none")).toBeInTheDocument();
-    expect(screen.getByText("未定位到指定关系事件，已回退到对应时间节点。")).toBeInTheDocument();
+    expect(screen.getByText("change-none")).toBeInTheDocument();
+    expect(screen.getByText("未定位到指定图谱变化，已回退到对应时间节点。")).toBeInTheDocument();
   });
 
   it("does not guess a node when selected_chunk maps to multiple timeline nodes", async () => {
@@ -465,14 +541,14 @@ describe("TimelinePage deep links", () => {
     expect(screen.getByText("该时间块包含多个不同类型节点，请使用稳定节点链接重新定位。")).toBeInTheDocument();
   });
 
-  it("shows a no-match hint without keeping stale selection when neither relation event nor chunk exists", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=99&relation_event_id=9999";
+  it("shows a no-match hint without keeping stale selection when neither graph change nor chunk exists", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=99&change_id=relation%3A9999";
 
     renderPage();
 
     await screen.findByTestId("timeline-track");
     expect(screen.queryByTestId("timeline-node-detail")).not.toBeInTheDocument();
-    expect(screen.getByText("未定位到对应事件。")).toBeInTheDocument();
+    expect(screen.getByText("未定位到对应图谱变化。")).toBeInTheDocument();
   });
 
   it("shows explicit empty states for missing phases and nodes", async () => {
@@ -506,11 +582,11 @@ describe("TimelinePage deep links", () => {
     await screen.findByText("selected-relation:9002");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&relation_event_id=9002",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&change_id=relation%3A9002",
       { replace: true }
     );
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&relation_event_id=9002";
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&change_id=relation%3A9002";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />
@@ -519,8 +595,8 @@ describe("TimelinePage deep links", () => {
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
   });
 
-  it("drops a stale relation_event_id when controls change after falling back to selected_chunk", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9999";
+  it("drops a stale change_id when controls change after falling back to selected_chunk", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9999";
     const user = userEvent.setup();
 
     renderPage();
@@ -534,7 +610,7 @@ describe("TimelinePage deep links", () => {
     );
   });
 
-  it("clears stale relation_event_id after the user manually selects another timeline node", async () => {
+  it("clears stale change_id after the user manually selects another timeline node", async () => {
     const user = userEvent.setup();
 
     renderPage();

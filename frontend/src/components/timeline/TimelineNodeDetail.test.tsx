@@ -39,6 +39,29 @@ vi.mock("framer-motion", () => ({
   },
 }));
 
+// 2026-08-07 用于构造时间轴节点消费的稳定图谱变化合同
+function createRelationGraphChange(changeId = "relation:9002") {
+  return {
+    change_id: changeId,
+    change_kind: "relation" as const,
+    graph_version_id: "graph-version-1",
+    chapter_id: 2,
+    fact_id: `fact:${changeId}`,
+    fact_revision: 1,
+    effective_chunk_id: 12,
+    changes: [{ change_kind: "break" }],
+    evidence: [{ reason: "二人决裂", chunk_id: 12 }],
+    relation_id: "relation:88",
+    relation_version_id: 88,
+    relation_revision: 1,
+    from_char: "顾承渊",
+    to_char: "苏映雪",
+    relation_type: "盟友",
+    relation_change_kind: "break",
+    directionality: "directed" as const,
+  };
+}
+
 function createRelationNode(): TimelineNode {
   return {
     node_id: "relation:9002",
@@ -50,20 +73,9 @@ function createRelationNode(): TimelineNode {
     characters: ["顾承渊", "苏映雪"],
     phase_name: "高潮期",
     node_type: "relation",
-    node_subtype: "断裂",
+    node_subtype: "break",
     score_breakdown: { change_type_weight: 2.6, pair_importance: 1.2 },
-    relation_events: [
-      {
-        relation_event_id: 9002,
-        from_char: "顾承渊",
-        to_char: "苏映雪",
-        relation_type: "盟友",
-        change_type: "断裂",
-        evidence: "二人决裂",
-        confidence: 0.63,
-        directionality: "directed",
-      },
-    ],
+    graph_changes: [createRelationGraphChange()],
   };
 }
 
@@ -90,6 +102,38 @@ function createLifecycleNode(): TimelineNode {
   };
 }
 
+// 2026-08-07 用于验证实体状态变化也可稳定回跳到章节图
+function createStateNode(): TimelineNode {
+  return {
+    node_id: "state:12:9",
+    anchor_chunk_id: 9,
+    progress: 0.45,
+    importance_score: 7,
+    level: 1,
+    summary: "顾承渊从试探转为结盟",
+    characters: ["顾承渊"],
+    phase_name: "发展期",
+    node_type: "state",
+    node_subtype: "state",
+    score_breakdown: { state_change_weight: 2.1 },
+    graph_changes: [
+      {
+        change_id: "state:12:9",
+        change_kind: "state",
+        graph_version_id: "graph-version-1",
+        chapter_id: 2,
+        fact_id: "fact:state:12:9",
+        fact_revision: 1,
+        effective_chunk_id: 9,
+        changes: [{ field: "status", value: "结盟" }],
+        evidence: [{ reason: "顾承渊明确放下戒备", chunk_id: 9 }],
+        entity_id: 12,
+        entity_name: "顾承渊",
+      },
+    ],
+  };
+}
+
 function createMultiRelationNode(): TimelineNode {
   return {
     node_id: "relation:multi",
@@ -101,22 +145,19 @@ function createMultiRelationNode(): TimelineNode {
     characters: ["顾承渊", "苏映雪", "陆沉"],
     phase_name: "收束期",
     node_type: "relation",
-    node_subtype: "强化",
+    node_subtype: "reinforce",
     score_breakdown: { change_type_weight: 1.8, pair_importance: 1.9 },
-    relation_events: [
+    graph_changes: [
       {
-        relation_event_id: 9101,
-        from_char: "顾承渊",
+        ...createRelationGraphChange("relation:9101"),
         to_char: "苏映雪",
-        relation_type: "盟友",
-        change_type: "弱化",
+        relation_change_kind: "weaken",
       },
       {
-        relation_event_id: 9102,
-        from_char: "顾承渊",
+        ...createRelationGraphChange("relation:9102"),
         to_char: "陆沉",
         relation_type: "对手",
-        change_type: "强化",
+        relation_change_kind: "reinforce",
       },
     ],
   };
@@ -137,7 +178,7 @@ function createCompositeRelationNode(): TimelineCompositeNode {
     characters: ["顾承渊", "苏映雪"],
     phase_name: "高潮期",
     node_type: "relation",
-    node_subtypes: ["强化", "断裂"],
+    node_subtypes: ["reinforce", "break"],
     representative_node_id: "relation:9002",
     child_node_ids: ["relation:9002", "relation:9101"],
   };
@@ -165,7 +206,30 @@ describe("TimelineNodeDetail", () => {
     expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
   });
 
-  it("highlights the selected relation event and can jump back to graph", async () => {
+  it("shows a state graph change and can jump back to graph", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TimelineNodeDetail
+        node={createStateNode()}
+        atomicNodes={[createStateNode()]}
+        novelId="novel-1"
+        taskId="task-a"
+        selectedGraphChangeId="state:12:9"
+      />,
+    );
+
+    expect(screen.getByText("顾承渊状态更新")).toBeInTheDocument();
+    expect(screen.getByText("变化 state:12:9")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=9&change_id=state%3A12%3A9",
+    );
+  });
+
+  it("highlights the selected graph change and can jump back to graph", async () => {
     const user = userEvent.setup();
 
     render(
@@ -174,23 +238,22 @@ describe("TimelineNodeDetail", () => {
         atomicNodes={[createRelationNode()]}
         novelId="novel-1"
         taskId="task-a"
-        selectedRelationEventId={9002}
+        selectedGraphChangeId="relation:9002"
       />,
     );
 
-    expect(screen.getByText("事件 #9002")).toBeInTheDocument();
-    expect(screen.getByText("置信 63%")).toBeInTheDocument();
+    expect(screen.getByText("变化 relation:9002")).toBeInTheDocument();
     expect(screen.getByText("directed")).toBeInTheDocument();
     expect(screen.getByText("二人决裂")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002",
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A9002",
     );
   });
 
-  it("ignores an external relation_event_id that does not belong to the current node", async () => {
+  it("ignores an external change_id that does not belong to the current node", async () => {
     const user = userEvent.setup();
 
     render(
@@ -199,18 +262,18 @@ describe("TimelineNodeDetail", () => {
         atomicNodes={[createRelationNode()]}
         novelId="novel-1"
         taskId="task-a"
-        selectedRelationEventId={9101}
+        selectedGraphChangeId="relation:9101"
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002",
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A9002",
     );
   });
 
-  it("does not send a graph auto-selection when the node contains multiple relation events", async () => {
+  it("does not send a graph auto-selection when the node contains multiple graph changes", async () => {
     const user = userEvent.setup();
 
     render(<TimelineNodeDetail node={createMultiRelationNode()} atomicNodes={[createMultiRelationNode()]} novelId="novel-1" taskId="task-a" />);
@@ -220,7 +283,7 @@ describe("TimelineNodeDetail", () => {
     expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
   });
 
-  it("falls back to the node's only relation event when the url-level selection is absent", async () => {
+  it("falls back to the node's only graph change when the url-level selection is absent", async () => {
     const user = userEvent.setup();
 
     render(<TimelineNodeDetail node={createRelationNode()} atomicNodes={[createRelationNode()]} novelId="novel-1" taskId="task-a" />);
@@ -228,7 +291,7 @@ describe("TimelineNodeDetail", () => {
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002",
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A9002",
     );
   });
 
@@ -240,15 +303,7 @@ describe("TimelineNodeDetail", () => {
       ...createRelationNode(),
       node_id: "relation:9101",
       anchor_chunk_id: 13,
-      relation_events: [
-        {
-          relation_event_id: 9101,
-          from_char: "顾承渊",
-          to_char: "苏映雪",
-          relation_type: "盟友",
-          change_type: "强化",
-        },
-      ],
+      graph_changes: [createRelationGraphChange("relation:9101")],
     };
 
     render(
