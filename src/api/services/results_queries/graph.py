@@ -219,8 +219,26 @@ def _fetch_graph_changes_page(
                 "chapter_order": row.chapter_order,
                 "fact_id": row.fact_id,
                 "fact_revision": row.fact_revision,
+                "effective_chunk_id": row.effective_chunk_id,
                 "changes": row.changes,
                 "evidence": row.evidence.model_dump(mode="json"),
+                "entity_id": row.entity_id,
+                "entity_name": row.entity_name,
+                "relation_id": row.relation_id,
+                "relation_version_id": row.relation_version_id,
+                "relation_revision": row.relation_revision,
+                "from_entity_id": row.from_entity_id,
+                "to_entity_id": row.to_entity_id,
+                "from_name": row.from_name,
+                "to_name": row.to_name,
+                "relation_type": row.relation_type,
+                "relation_change_kind": (
+                    str(row.changes[0].get("change_kind"))
+                    if row.change_kind == "relation" and row.changes and row.changes[0].get("change_kind") is not None
+                    else None
+                ),
+                "directionality": row.directionality,
+                "relation_semantics": row.relation_semantics,
             }
             for row in rows
         ],

@@ -61,8 +61,22 @@ class GraphChange(BaseModel):
     chapter_order: int = Field(gt=0)
     fact_id: str
     fact_revision: int = Field(gt=0)
+    effective_chunk_id: int = Field(ge=0)
     changes: list[dict[str, Any]] = Field(min_length=1)
     evidence: list[GraphEvidence | TextEvidence] = Field(min_length=1)
+    entity_id: int | None = None
+    entity_name: str | None = None
+    relation_id: str | None = None
+    relation_version_id: int | None = None
+    relation_revision: int | None = None
+    from_entity_id: int | None = None
+    to_entity_id: int | None = None
+    from_name: str | None = None
+    to_name: str | None = None
+    relation_type: str | None = None
+    relation_change_kind: str | None = None
+    directionality: Literal["directed", "bidirectional"] | None = None
+    relation_semantics: Literal["ordinary", "same_character"] | None = None
 
 
 class GraphChangesPageInfo(BaseModel):
