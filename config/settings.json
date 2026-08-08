@@ -3,41 +3,32 @@
     "annotation": {
       "timeout_s": 180,
       "temperature": 0.7,
-      "top_p": 0.8
+      "top_p": 0.8,
+      "thinking": true,
+      "streaming": true,
+      "structured_output": "json_object",
+      "max_iterations": 20,
+      "total_attempts": 3,
+      "retry_backoff_seconds": 5000,
+      "allow_future_context": true
     },
     "paragraph_embedding": {
       "timeout_s": 120,
       "embedding_dim": 1024,
-      "batch_size": 4
+      "batch_size": 4,
+      "semantic_enabled": true,
+      "top_k": 5
     },
     "diagnosis": {
       "timeout_s": 180,
       "temperature": 1.0,
-      "top_p": 0.95
-    }
-  },
-  "runtime": {
-    "disambiguation": {
-      "max_retries": 3
-    },
-    "diagnosis": {
-      "max_retries": 3
-    }
-  },
-  "thinking": {
-    "annotation": true,
-    "diagnosis": true
-  },
-  "streaming": {
-    "annotation": true,
-    "diagnosis": true,
-    "cloud_only": false
-  },
-  "structured_output": {
-    "annotation": "json_schema",
-    "diagnosis": "json_schema",
-    "provider_overrides": {
-      "deepseek": "json_object"
+      "top_p": 0.95,
+      "thinking": true,
+      "streaming": true,
+      "structured_output": "json_object",
+      "max_iterations": 30,
+      "total_attempts": 3,
+      "retry_backoff_seconds": 5000
     }
   },
   "logging": {
@@ -76,93 +67,43 @@
     "third_party_level": "WARNING",
     "json_parse_preview_chars": 200
   },
-  "chunking": {
-    "max_chars": 2000,
-    "overlap": 200,
-    "split_by_chapter": true
-  },
-  "database": {
-    "pool_size": 5,
-    "max_overflow": 10,
-    "pool_timeout": 30,
-    "pool_recycle": 3600,
-    "echo": false
-  },
   "paths": {
     "upload_dir": "data/uploads",
     "results_dir": "outputs",
     "log_dir": "logs",
     "lexicons_dir": "data/lexicons"
   },
-  "api": {
-    "title": "小说量化分析 API",
-    "version": "0.1.0",
-    "description": "小说文本量化分析服务的 RESTful API",
-    "docs_url": "/api/docs",
-    "redoc_url": "/api/redoc",
-    "openapi_url": "/api/openapi.json",
-    "cors_origins": [
-      "*"
-    ],
-    "cors_allow_credentials": true,
-    "cors_allow_methods": [
-      "*"
-    ],
-    "cors_allow_headers": [
-      "*"
-    ],
-    "novel_name_max_length": 50,
-    "query_limit": 50
+  "chunking": {
+    "start_chars": 4000,
+    "max_chars": 2000
   },
-  "analysis": {
-    "analysis_log_rotation": "10 MB",
-    "analysis_log_retention": "30 days",
-    "sentence_preview_max_chars": 100,
-    "sentence_pool_max_chars": 80,
-    "agents": {
-      "annotation": {
-        "max_iterations": 10,
-        "total_attempts": 3,
-        "retry_backoff_seconds": [1, 2],
-        "active_setup_pool_limit": 30,
-        "allow_future_context": false
-      },
-      "diagnosis": {
-        "max_iterations": 15
-      }
+  "progress": {
+    "preprocess": {
+      "start": 0,
+      "end": 10
     },
-    "progress": {
-      "preprocess": { "start": 0, "end": 10 },
-      "annotate": { "start": 10, "end": 80 },
-      "aggregate": { "start": 80, "end": 90 },
-      "topic_model": { "start": 90, "end": 95 },
-      "diagnose": { "start": 95, "end": 100 }
+    "annotate": {
+      "start": 10,
+      "end": 80
     },
-    "valid_hierarchical_relation_types": [
-      "belongs_to",
-      "member_of",
-      "leader_of",
-      "affiliated_with",
-      "father_of",
-      "son_of",
-      "parent_of",
-      "child_of",
-      "sibling_of",
-      "spouse_of"
-    ]
+    "aggregate": {
+      "start": 80,
+      "end": 90
+    },
+    "topic_model": {
+      "start": 90,
+      "end": 95
+    },
+    "diagnose": {
+      "start": 95,
+      "end": 100
+    }
   },
   "topic_model": {
-    "single_book": {
-      "num_topics": 25,
-      "passes": 10,
-      "iterations": 500
-    },
-    "multi_book": {
-      "num_topics": 120,
-      "passes": 15,
-      "iterations": 1000
-    },
-    "common": {
+    "num_topics": 25,
+    "passes": 10,
+    "iterations": 500,
+    "lda": {
       "alpha": "auto",
       "eta": "auto",
       "random_state": 42,
@@ -172,32 +113,10 @@
       "no_above": 0.5
     }
   },
-  "diagnosis": {
-    "pivot_blocks_limit": 20,
-    "pivot_moments_limit": 10,
-    "high_tension_limit": 10,
-    "relation_changes_limit": 50,
-    "foreshadowing_limit": 30,
-    "first_last_max_chars": 500,
-    "topic_words_top_n": 10,
-    "text_limits": {
-      "pivot_block": 300,
-      "pivot_moment": 400,
-      "high_tension": 300,
-      "foreshadowing": 200,
-      "summary": 4000
-    }
-  },
   "metrics": {
     "mtld_threshold": 0.72,
-    "emotion_recovery_threshold": 0.3,
-    "slope_threshold": 0.01,
-    "std_dev_threshold": 0.15,
     "middle_collapse_min_chunks": 10,
-    "character_max_iter": 100
-  },
-  "text_retrieval": {
-    "semantic_enabled": true,
-    "top_k": 5
+    "character_max_iter": 100,
+    "fourier_smooth_keep_ratio": 0.1
   }
 }

@@ -10,11 +10,23 @@ from typing import Any
 from loguru import logger
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
-from src.config import settings
 from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.storage.repositories import AnnotationRepository, GraphRepository
 
 GRAPH_CHANGE_LIMIT = 200
+
+HIERARCHICAL_RELATION_TYPES = {
+    "belongs_to",
+    "member_of",
+    "leader_of",
+    "affiliated_with",
+    "father_of",
+    "son_of",
+    "parent_of",
+    "child_of",
+    "sibling_of",
+    "spouse_of",
+}
 
 
 def _encode_graph_changes_cursor(offset: int) -> str:
@@ -107,7 +119,7 @@ def _fetch_hierarchical_relations(
 ) -> list[HierarchicalRelation]:
     """2026-08-07 用于从最新章节关系版本生成层级关系导出数据"""
     del run_id
-    hierarchical_types = set(settings.analysis.valid_hierarchical_relation_types)
+    hierarchical_types = HIERARCHICAL_RELATION_TYPES
     valid_entity_names = {
         entity.name for entity in export_graph_view.canonical_entities if entity.name
     }

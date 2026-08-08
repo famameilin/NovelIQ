@@ -59,10 +59,9 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
     if task_settings is None:
         raise ValueError(f"未知的任务类型: {task_type}")
 
-    thinking_enabled = getattr(settings.thinking, task_type, False)
-    stream_enabled = getattr(settings.streaming, task_type, False) if hasattr(settings, "streaming") else False
-
-    stream_cloud_only = getattr(settings.streaming, "cloud_only", True) if hasattr(settings, "streaming") else True
+    thinking_enabled = getattr(task_settings, "thinking", False)
+    stream_enabled = getattr(task_settings, "streaming", False)
+    stream_cloud_only = getattr(task_settings, "stream_cloud_only", False)
 
     return TaskModelConfig(
         base_url=task_settings.base_url,

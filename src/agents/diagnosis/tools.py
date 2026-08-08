@@ -12,7 +12,6 @@ from typing import Any
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
-from src.config import settings
 from src.models.cloud.schema import CloudAnalysis
 
 from .evidence import DiagnosisEvidenceLedger
@@ -56,26 +55,26 @@ def build_diagnosis_tools(
         repo = DiagnosisRepository(session)
         parts: list[str] = []
 
-        pivot_blocks = repo.fetch_pivot_blocks(run_id, limit=settings.diagnosis.pivot_blocks_limit)
+        pivot_blocks = repo.fetch_pivot_blocks(run_id, limit=20)
         if pivot_blocks:
             parts.append("<转折块>")
             for chunk_id, chunk_text, event_type in pivot_blocks:
-                preview = (chunk_text or "")[: settings.diagnosis.text_limits.pivot_block]
+                preview = (chunk_text or "")[:300]
                 parts.append(f"[chunk {chunk_id}] ({event_type}) {preview}")
             parts.append("</转折块>")
 
-        high_tension = repo.fetch_high_tension_chunks(run_id, limit=settings.diagnosis.high_tension_limit)
+        high_tension = repo.fetch_high_tension_chunks(run_id, limit=10)
         if high_tension:
             parts.append("<高张力>")
             for chunk_id, chunk_text, tension in high_tension:
-                preview = (chunk_text or "")[: settings.diagnosis.text_limits.high_tension]
+                preview = (chunk_text or "")[:300]
                 parts.append(f"[chunk {chunk_id}] (tension={tension:.4f}) {preview}")
             parts.append("</高张力>")
 
         foreshadowing_threads = repo.fetch_foreshadowing_threads(run_id)
         if foreshadowing_threads:
             parts.append("<伏笔线程>")
-            for thread in foreshadowing_threads[: settings.diagnosis.foreshadowing_limit]:
+            for thread in foreshadowing_threads[:30]:
                 parts.append(thread.model_dump_json() if hasattr(thread, "model_dump_json") else str(thread))
             parts.append("</伏笔线程>")
 
@@ -96,7 +95,7 @@ def build_diagnosis_tools(
         ledger.record_tool_call("get_relation_changes")
 
         repo = DiagnosisRepository(session)
-        relations = repo.fetch_relation_changes(run_id, limit=settings.diagnosis.relation_changes_limit)
+        relations = repo.fetch_relation_changes(run_id, limit=50)
         if not relations:
             return "（无关系变化数据）"
         return "\n".join(
@@ -131,7 +130,7 @@ def build_diagnosis_tools(
         ledger.record_tool_call("get_topic_data")
 
         repo = DiagnosisRepository(session)
-        topic_words = repo.fetch_topic_words(run_id, top_n=settings.diagnosis.topic_words_top_n)
+        topic_words = repo.fetch_topic_words(run_id, top_n=10)
         if not topic_words:
             return "（无主题数据）"
         return "\n".join(f"{index}. {words}" for index, words in enumerate(topic_words, start=1))

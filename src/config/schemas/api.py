@@ -100,24 +100,6 @@ class PathSettings:
 
 
 @dataclass
-class APISettings:
-    """API服务配置"""
-
-    title: str = "小说量化分析 API"
-    version: str = "0.1.0"
-    description: str = "小说文本量化分析服务的 RESTful API"
-    docs_url: str = "/api/docs"
-    redoc_url: str = "/api/redoc"
-    openapi_url: str = "/api/openapi.json"
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
-    cors_allow_credentials: bool = True
-    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
-    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
-    novel_name_max_length: int = 50
-    query_limit: int = 50
-
-
-@dataclass
 class PromptSettings:
     """
     Prompt 配置
@@ -138,26 +120,6 @@ def _parse_path_settings(data: dict[str, Any] | None) -> PathSettings:
         results_dir=Path(data.get("results_dir", "outputs")),
         log_dir=Path(data.get("log_dir", "logs")),
         lexicons_dir=Path(data.get("lexicons_dir", "data/lexicons")),
-    )
-
-
-def _parse_api_settings(data: dict[str, Any] | None) -> APISettings:
-    """解析API配置"""
-    if not data:
-        return APISettings()
-    return APISettings(
-        title=data.get("title", "小说量化分析 API"),
-        version=data.get("version", "0.1.0"),
-        description=data.get("description", ""),
-        docs_url=data.get("docs_url", "/api/docs"),
-        redoc_url=data.get("redoc_url", "/api/redoc"),
-        openapi_url=data.get("openapi_url", "/api/openapi.json"),
-        cors_origins=data.get("cors_origins", ["*"]),
-        cors_allow_credentials=data.get("cors_allow_credentials", True),
-        cors_allow_methods=data.get("cors_allow_methods", ["*"]),
-        cors_allow_headers=data.get("cors_allow_headers", ["*"]),
-        novel_name_max_length=data.get("novel_name_max_length", 50),
-        query_limit=data.get("query_limit", 50),
     )
 
 

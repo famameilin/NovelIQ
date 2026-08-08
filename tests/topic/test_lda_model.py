@@ -20,11 +20,6 @@ class TestLDAConfig(unittest.TestCase):
         self.assertEqual(config.num_topics, 25)
         self.assertEqual(config.iterations, 500)
 
-    def test_for_multi_book(self) -> None:
-        config = LDAConfig.for_multi_book()
-        self.assertEqual(config.num_topics, 120)
-        self.assertEqual(config.iterations, 1000)
-
 class TestTopicWord(unittest.TestCase):
     def test_creation(self) -> None:
         tw = TopicWord(word="测试", weight=0.5)

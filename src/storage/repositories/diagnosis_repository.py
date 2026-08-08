@@ -9,7 +9,6 @@ from typing import Any
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from src.config import settings
 from src.storage.models import Chunk, ChunkCurve, ChunkTopic, StageSummary
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
 from src.storage.repositories.base import BaseRepository
@@ -30,7 +29,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
         """2026-08-07 用于从章节 chunks metrics 读取转折点原文素材"""
-        row_limit = limit if limit is not None else settings.diagnosis.pivot_blocks_limit
+        row_limit = limit if limit is not None else 20
         text_by_chunk = self._chunk_text_by_id(run_id)
         rows = [
             (row.chunk_id, text_by_chunk.get(row.chunk_id, ""), row.event_type)
@@ -41,7 +40,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
         """2026-08-05 用于读取高张力 chunk 原文与曲线值"""
-        row_limit = limit if limit is not None else settings.diagnosis.high_tension_limit
+        row_limit = limit if limit is not None else 10
         tension_expr = func.abs(ChunkCurve.net_density).label("tension")
         stmt = (
             select(Chunk.chunk_id, Chunk.text, tension_expr)
@@ -68,7 +67,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
         """2026-08-07 用于从章节关系版本逐次变化读取诊断素材"""
-        row_limit = limit if limit is not None else settings.diagnosis.relation_changes_limit
+        row_limit = limit if limit is not None else 50
         rows: list[tuple[int, str, str, str, str]] = []
         for relation in GraphRepository(self.session).fetch_relation_history(run_id):
             if relation.relation_semantics == "same_character":
@@ -89,7 +88,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
         """2026-08-05 用于从伏笔 thread 与 hit 读取 chunk 级诊断素材"""
-        row_limit = limit if limit is not None else settings.diagnosis.foreshadowing_limit
+        row_limit = limit if limit is not None else 30
         text_by_chunk = self._chunk_text_by_id(run_id)
         rows: list[tuple[int, str, str, str]] = []
         for thread in AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id):
@@ -121,7 +120,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
         """2026-08-05 用于读取按累计权重排序的主题词"""
-        row_limit = top_n if top_n is not None else settings.diagnosis.topic_words_top_n
+        row_limit = top_n if top_n is not None else 10
         stmt = (
             select(
                 ChunkTopic.topic_id,

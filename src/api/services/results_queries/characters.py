@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from src.api.models.responses import CharacterStats
-from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
 from src.models.local.character_reference_policy import decide_character_reference
 from src.storage.repositories import AnnotationRepository
@@ -23,7 +22,7 @@ def _fetch_characters(
     arc_scores: dict[str, float] | None = None,
     focus_characters: list[str] | None = None,
     main_characters: list[str] | None = None,
-    limit: int | None = settings.api.query_limit,
+    limit: int | None = 50,
 ) -> list:
     """
     修改时间: 2026-04-29

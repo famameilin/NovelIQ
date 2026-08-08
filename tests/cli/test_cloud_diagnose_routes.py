@@ -15,7 +15,11 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.annotation.schema import EvidenceList, Foreshadowing, TextEvidence
+from src.agents.annotation.schema import (
+    BoundForeshadowing,
+    EvidenceList,
+    TextEvidence,
+)
 from src.chunking.chunker import Chunk
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
@@ -152,7 +156,7 @@ class TestDiagnosisRoutes:
                     chunk_id=i,
                     name=f"角色{i}",
                     action="测试行为",
-                    role_function="主体" if i == 0 else "其他",
+                    role_function="主体" if i == 0 else "客体",
                 )
                 for i in range(chunk_count)
             ],
@@ -160,18 +164,16 @@ class TestDiagnosisRoutes:
         ForeshadowingRepository(self.db_session).sync(
             run_id=self.run_id,
             chunk_id=0,
-            foreshadowing=Foreshadowing(
-                ref="foreshadowing_test_scene",
+            foreshadowing=BoundForeshadowing(
                 foreshadowing_type="场景",
-                setup_kind="测试场景",
+                setup_kind="其他",
                 setup_summary="测试伏笔",
                 why_unresolved_now="当前尚未解释测试伏笔",
                 expected_payoff_family="情节兑现",
                 payoff_likelihood="medium",
-                is_new_setup=True,
-                linked_setup_id=None,
                 setup_status="open",
                 confidence="medium",
+                reason="测试伏笔首次出现",
                 evidence=EvidenceList(
                     root=[TextEvidence(reason="测试伏笔首次出现", chunk_id=0)]
                 ),

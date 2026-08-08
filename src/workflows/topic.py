@@ -49,9 +49,9 @@ async def run_topic_model(
     Returns:
         Tuple[int, int]: (总块数, 主题数量)
     """
-    _num_topics = num_topics if num_topics is not None else settings.topic_model.single_book.num_topics
-    _passes = passes if passes is not None else settings.topic_model.single_book.passes
-    _iterations = iterations if iterations is not None else settings.topic_model.single_book.iterations
+    _num_topics = num_topics if num_topics is not None else settings.topic_model.num_topics
+    _passes = passes if passes is not None else settings.topic_model.passes
+    _iterations = iterations if iterations is not None else settings.topic_model.iterations
 
     start_time = time.time()
 

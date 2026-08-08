@@ -281,7 +281,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         if not self.has_chunks(run_id):
             return False
 
-        if not settings.text_retrieval.semantic_enabled:
+        if not settings.models.paragraph_embedding.semantic_enabled:
             return True
 
         expected_dim = settings.models.paragraph_embedding.embedding_dim

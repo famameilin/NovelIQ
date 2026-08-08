@@ -27,36 +27,28 @@ class LDAConfig:
 
     def __post_init__(self) -> None:
         if self.num_topics is None:
-            self.num_topics = settings.topic_model.single_book.num_topics
+            self.num_topics = settings.topic_model.num_topics
         if self.passes is None:
-            self.passes = settings.topic_model.single_book.passes
+            self.passes = settings.topic_model.passes
         if self.iterations is None:
-            self.iterations = settings.topic_model.single_book.iterations
+            self.iterations = settings.topic_model.iterations
         if self.alpha is None:
-            self.alpha = settings.topic_model.common.alpha
+            self.alpha = settings.topic_model.lda.alpha
         if self.eta is None:
-            self.eta = settings.topic_model.common.eta
+            self.eta = settings.topic_model.lda.eta
         if self.random_state is None:
-            self.random_state = settings.topic_model.common.random_state
+            self.random_state = settings.topic_model.lda.random_state
         if self.chunksize is None:
-            self.chunksize = settings.topic_model.common.chunksize
+            self.chunksize = settings.topic_model.lda.chunksize
         if self.minimum_probability is None:
-            self.minimum_probability = settings.topic_model.common.minimum_probability
+            self.minimum_probability = settings.topic_model.lda.minimum_probability
 
     @classmethod
     def for_single_book(cls) -> LDAConfig:
         return cls(
-            num_topics=settings.topic_model.single_book.num_topics,
-            passes=settings.topic_model.single_book.passes,
-            iterations=settings.topic_model.single_book.iterations,
-        )
-
-    @classmethod
-    def for_multi_book(cls) -> LDAConfig:
-        return cls(
-            num_topics=settings.topic_model.multi_book.num_topics,
-            passes=settings.topic_model.multi_book.passes,
-            iterations=settings.topic_model.multi_book.iterations,
+            num_topics=settings.topic_model.num_topics,
+            passes=settings.topic_model.passes,
+            iterations=settings.topic_model.iterations,
         )
 
 
@@ -72,9 +64,9 @@ class LDATrainer:
         no_above: float | None = None,
     ) -> TopicModel:
         if no_below is None:
-            no_below = settings.topic_model.common.no_below
+            no_below = settings.topic_model.lda.no_below
         if no_above is None:
-            no_above = settings.topic_model.common.no_above
+            no_above = settings.topic_model.lda.no_above
         logger.info(
             "开始LDA训练: 主题数={}, 文档数={}, 迭代次数={}",
             self._config.num_topics,

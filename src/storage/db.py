@@ -14,11 +14,14 @@ import os
 import re
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import Connection, Engine, create_engine, event, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool, QueuePool
 
 from src.storage.database_url import resolve_database_url_from_env
 
@@ -56,6 +59,65 @@ def get_database_schema() -> str | None:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized):
         raise RuntimeError(f"Invalid DATABASE_SCHEMA: {schema}")
     return normalized
+
+
+def _database_name_from_url(database_url: str) -> str | None:
+    """2026-08-08 用于从 SQLAlchemy URL 解析目标数据库名称"""
+    if not database_url.startswith("postgresql"):
+        return None
+    url = make_url(database_url)
+    database = url.database
+    if not database:
+        return None
+    return database
+
+
+def _admin_database_url(database_url: str) -> str:
+    """2026-08-08 用于把目标库 URL 指向默认 postgres 库以执行建库 DDL"""
+    return make_url(database_url).set(database="postgres").render_as_string(
+        hide_password=False
+    )
+
+
+def _safe_identifier(name: str) -> bool:
+    """2026-08-08 用于限制自动建库标识符为 PostgreSQL 安全格式"""
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", name))
+
+
+def ensure_database_exists() -> None:
+    """2026-08-08 用于首次启动时自动创建缺失的目标数据库"""
+    if os.environ.get("DB_AUTO_CREATE_DATABASE", "true").lower() != "true":
+        return
+    database_url = get_database_url()
+    database_name = _database_name_from_url(database_url)
+    if database_name is None or not _safe_identifier(database_name):
+        return
+    admin_engine: Any = None
+    try:
+        admin_engine = create_engine(
+            _admin_database_url(database_url),
+            poolclass=NullPool,
+            isolation_level="AUTOCOMMIT",
+            connect_args={"connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))},
+        )
+        with admin_engine.connect() as connection:
+            exists = connection.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": database_name},
+            ).scalar_one_or_none()
+            if exists:
+                return
+            connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+            logger.info("Auto-created missing database: {}", database_name)
+    except OperationalError as exc:
+        logger.warning(
+            "Failed to auto-create database {}: {}; startup will retry direct connection",
+            database_name,
+            exc,
+        )
+    finally:
+        if admin_engine is not None:
+            admin_engine.dispose()
 
 
 def get_engine():
@@ -524,12 +586,19 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
 
 
 def _assert_annotation_contract_schema(engine: Engine) -> None:
-    """2026-08-07 用于阻止旧案例映射表继续承载新 finish pull push 合同"""
+    """2026-08-07 用于阻止旧合同列继续承载新语义写入标注"""
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
         return
 
     required_columns = {
+        "chapter_annotations": {
+            "annotation_id",
+            "run_id",
+            "chapter_id",
+            "payload",
+            "created_at",
+        },
         "case_pool_cases": {
             "id",
             "run_id",
@@ -556,6 +625,12 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "target_fact_revision",
         },
     }
+    legacy_columns = {
+        "chapter_annotations": {
+            "initial_finish_payload",
+            "revision_payload",
+        },
+    }
     with engine.begin() as connection:
         for table_name, required in required_columns.items():
             if not _table_exists(connection, table_name):
@@ -566,6 +641,14 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
                 raise RuntimeError(
                     f"{table_name} is missing annotation contract columns: {missing}. "
                     "Please recreate or explicitly migrate the continuity tables before starting the service."
+                )
+            leftover = sorted(
+                legacy_columns.get(table_name, set()) & actual
+            )
+            if leftover:
+                raise RuntimeError(
+                    f"{table_name} still contains legacy annotation contract columns: {leftover}. "
+                    "Please drop the legacy columns or recreate the tables before starting the service."
                 )
 
 
@@ -605,12 +688,13 @@ def init_db() -> None:
     """
     初始化数据库（创建所有表）
 
-    说明: 使用 ORM 模型创建所有数据库表
+    说明: 使用 ORM 模型创建所有数据库表；目标数据库缺失时先自动创建
 
     注意：生产环境推荐使用 Alembic 迁移
     """
     from src.storage.models import Base
 
+    ensure_database_exists()
     engine = get_engine()
     tables = [
         table
