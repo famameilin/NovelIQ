@@ -48,7 +48,7 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
             self.assertEqual(new_settings.models.diagnosis.model, "shared-text-model")
             self.assertEqual(new_settings.models.paragraph_embedding.model, "embedding-model")
             self.assertEqual(new_settings.chunking.max_chars, 2000)
-            self.assertEqual(new_settings.chunking.overlap, 200)
+            self.assertEqual(new_settings.chunking.start_chars, 4000)
 
 
 class TestTaskModelConfigValidate(unittest.TestCase):

@@ -122,24 +122,23 @@ def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
 
 async def chunk_text(
     text: str,
-    max_chars: int = 1000,
-    overlap: int = 100,
-    split_by_chapter: bool = True,
+    max_chars: int = 2000,
+    start_chars: int = 4000,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """
     将文本分割成块（async 版本）
 
     分章策略：
-    - 优先按原始章节分割：每个章节为一个 chunk（保留 chapter_title），
-      章节文本超过 max_chars 时按段落/句子边界切分为子块（保留章节归属）
+    - 优先按原始章节分割：每个章节为一个 chunk（保留 chapter_title）
+    - 章节文本不超过 start_chars 时整章保留为一个 chunk
+    - 超过 start_chars 时按 max_chars 在段落/句子边界切分为子块（保留章节归属，无重叠）
     - 无法捕捉原始章节时，回退到固定字数段落分割（_chunk_simple）
 
     Args:
         text: 输入文本
-        max_chars: 每块最大字符数
-        overlap: 块间重叠字符数
-        split_by_chapter: 是否优先按章节分割
+        max_chars: 超过 start_chars 后每个子块的最大字符数
+        start_chars: 章节文本超过该长度才切分子块
 
     Returns:
         Chunk对象列表
@@ -147,20 +146,34 @@ async def chunk_text(
     if not text.strip():
         return []
 
-    if split_by_chapter:
-        chapters = _split_by_chapters_with_offsets(text)
-        if _chapters_detected(chapters):
-            return _chunk_by_chapters(text, chapters, max_chars, overlap)
+    chapters = _split_by_chapters_with_offsets(text)
+    if _chapters_detected(chapters):
+        return _chunk_by_chapters(text, chapters, max_chars, start_chars)
 
-    return _chunk_simple(text, max_chars, overlap)
+    return _chunk_simple(text, max_chars, start_chars)
 
 
-def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
+def _chunk_simple(text: str, max_chars: int, start_chars: int) -> list[Chunk]:
     """
     固定字数段落分割（章节不可用时回退策略）
 
     生成的 `Chunk.start/end` 为最终保留文本的真实全文范围
     """
+    if len(text) <= start_chars:
+        span = _resolve_trimmed_span(text, 0, len(text))
+        if span is None:
+            return []
+        chunk_start, chunk_end, chunk_text_content = span
+        return [
+            Chunk(
+                index=0,
+                text=chunk_text_content,
+                start=chunk_start,
+                end=chunk_end,
+                chapter_index=1,
+            )
+        ]
+
     chunks = []
     start = 0
     idx = 0
@@ -192,7 +205,7 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
             )
             idx += 1
 
-        start = end - overlap if end < len(text) else end
+        start = end
 
     return chunks
 
@@ -201,7 +214,7 @@ def _chunk_by_chapters(
     text: str,
     chapters: list[tuple[str | None, str, int, int]],
     max_chars: int,
-    overlap: int,
+    start_chars: int,
 ) -> list[Chunk]:
     """
     按章节分块
@@ -215,6 +228,24 @@ def _chunk_by_chapters(
 
     for chapter_index, (chapter_title, chapter_text, chapter_start_offset, _) in enumerate(chapters, start=1):
         if not chapter_text.strip():
+            continue
+
+        if len(chapter_text) <= start_chars:
+            span = _resolve_trimmed_span(chapter_text, 0, len(chapter_text))
+            if span is None:
+                continue
+            local_start, local_end, chunk_text_content = span
+            chunks.append(
+                Chunk(
+                    index=idx,
+                    text=chunk_text_content,
+                    start=chapter_start_offset + local_start,
+                    end=chapter_start_offset + local_end,
+                    chapter_title=chapter_title,
+                    chapter_index=chapter_index,
+                )
+            )
+            idx += 1
             continue
 
         start = 0
@@ -244,7 +275,7 @@ def _chunk_by_chapters(
                 )
                 idx += 1
 
-            start = end - overlap if end < len(chapter_text) else end
+            start = end
 
     return _reindex(chunks)
 
@@ -256,9 +287,8 @@ def _chunk_by_chapters(
 
 async def chunk_documents(
     texts: Iterable[str],
-    max_chars: int = 1000,
-    overlap: int = 100,
-    split_by_chapter: bool = True,
+    max_chars: int = 2000,
+    start_chars: int = 4000,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """
@@ -276,8 +306,7 @@ async def chunk_documents(
         chunks = await chunk_text(
             text,
             max_chars,
-            overlap,
-            split_by_chapter,
+            start_chars,
             emitter=emitter,
         )
         chapter_indices = sorted(
