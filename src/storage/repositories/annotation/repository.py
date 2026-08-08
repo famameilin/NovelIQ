@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from src.agents.annotation.schema import ChapterFinish
+from src.agents.annotation.schema import BoundChapterAnnotation
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
     ChapterAnnotationRecord,
@@ -110,7 +110,10 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         """2026-08-07 用于读取指定类型每个 fact_id 的最新不可变版本"""
         stmt = (
             select(GraphFact)
-            .where(GraphFact.run_id == run_id)
+            .where(
+                GraphFact.run_id == run_id,
+                GraphFact.source_kind == "annotation",
+            )
             .order_by(
                 GraphFact.fact_id,
                 GraphFact.fact_revision.desc(),
@@ -161,17 +164,17 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         return self.fetch_chunk_annotations_full(run_id)
 
     def fetch_chunk_annotations_full(self, run_id: str) -> list[ChunkAnnotationRow]:
-        """2026-08-07 用于从 ChapterFinish chunks metrics 展开完整 chunk 标注"""
+        """2026-08-07 用于从最新系统绑定 payload 展开完整 chunk 标注"""
         foreshadowing_by_chunk = self._foreshadowing_by_chunk(run_id)
         rows: list[ChunkAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
-            finish = ChapterFinish.model_validate(record.payload)
-            for chunk in finish.chunks:
+            annotation = BoundChapterAnnotation.model_validate(record.payload)
+            for chunk in annotation.chunks:
                 rows.append(
                     ChunkAnnotationRow(
                         chunk_id=chunk.chunk_id,
                         emotional_valence=chunk.metrics.emotional_valence,
-                        event_type=chunk.metrics.event_type,
+                        event_type=chunk.metrics.narrative_function,
                         pivot_moment=chunk.metrics.pivot_moment,
                         cliffhanger=chunk.metrics.cliffhanger,
                         **foreshadowing_by_chunk.get(chunk.chunk_id, {}),

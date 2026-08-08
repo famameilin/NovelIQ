@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.annotation.schema import CaseSearchResult, EvidenceList, PushedCase, TextEvidence
+from src.agents.annotation.schema import (
+    CaseSearchResult,
+    EvidenceList,
+    PendingCase,
+    TextEvidence,
+)
 from src.config import settings
 from src.storage.repositories.annotation.continuity import (
     CasePoolRepository,
@@ -33,21 +38,14 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
     row = CasePoolRepository(db_session).create_case(
         run_id=run_id,
         annotation_id=annotation_id,
-        pushed_case=PushedCase(
+        pending_case=PendingCase(
             keys=["顾霜"],
             description="真实身份悬而未决",
-            type="dialogue_speaker",
-            chunkid=0,
+            chunk_id=0,
             target_key="target-case-1",
-            target_anchor={
-                "chunk_id": 0,
-                "start": 0,
-                "end": 2,
-                "text": "顾霜",
-            },
             target_ref={
                 "kind": "dialogue",
-                "item_ref": "dialogue_1",
+                "candidate_key": "candidate-1",
                 "chunk_id": 0,
                 "start": 0,
                 "end": 2,
@@ -55,8 +53,8 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
                 "fact_id": "fact-dialogue-1",
                 "fact_revision": 1,
             },
+            evidence=EvidenceList(root=[TextEvidence(reason="本章没有揭示身份", chunk_id=0)]),
         ),
-        evidence=EvidenceList(root=[TextEvidence(reason="本章没有揭示身份", chunk_id=0)]),
     )
     db_session.commit()
     service = DatabaseAnnotationQueryService(
@@ -108,9 +106,6 @@ def test_graph_search_returns_nodes_edges_and_properties(db_session) -> None:
                 from_name="霜姐",
                 to_name="顾霜",
                 relation_type="同一人物",
-                directionality="bidirectional",
-                relation_semantics="same_character",
-                representative_endpoint="object",
             )
         ],
     )
@@ -131,14 +126,16 @@ def test_graph_search_returns_nodes_edges_and_properties(db_session) -> None:
     assert len(graph_result.relations) == 1
     assert graph_result.relations[0].relation_semantics == "same_character"
     assert graph_result.relations[0].attributes["representative_entity_id"] in {
-        entity.existing_entity_id for entity in graph_result.entities if entity.name == "顾霜"
+        entity.entity_id
+        for entity in graph_result.entities
+        if entity.name in {"顾霜", "霜姐"}
     }
 
 
 @pytest.mark.asyncio
 async def test_text_search_returns_only_matching_later_chunks(db_session, monkeypatch) -> None:
     """2026-08-06 用于验证后文搜索只返回当前位置之后的匹配章节与 chunk"""
-    monkeypatch.setattr(settings.text_retrieval, "semantic_enabled", False)
+    monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜在当前章现身", "第二章没有目标内容", "第三章顾霜身份揭晓"],

@@ -39,8 +39,6 @@ class ChapterAnnotationRecord(Base):
     )
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    initial_finish_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    revision_payloads: Mapped[list] = mapped_column("revision_payload", JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

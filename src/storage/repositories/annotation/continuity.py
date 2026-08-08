@@ -14,15 +14,15 @@ from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import (
     ActiveCaseDetails,
+    BoundChapterAnnotation,
+    BoundForeshadowing,
     CaseSearchResult,
-    ChapterFinish,
     CompletionCase,
     EvidenceList,
-    Foreshadowing,
     ForeshadowingSearchResult,
     GraphSearchResult,
-    PulledResult,
-    PushedCase,
+    PendingCase,
+    ResolvedCase,
     SearchResult,
     TextSearchResult,
 )
@@ -70,7 +70,7 @@ def _case_view(row: CasePoolCase) -> CaseSearchResult:
         {
             "id": row.id,
             "type": row.case_type,
-            "chunkid": row.chunk_id,
+            "chunk_id": row.chunk_id,
             "keys": list(row.keys),
             "description": row.description,
             "evidence": row.evidence,
@@ -116,8 +116,8 @@ class DatabaseAnnotationQueryService:
             session,
             run_id=run_id,
             embedding_client=embedding_client,
-            semantic_enabled=settings.text_retrieval.semantic_enabled,
-            semantic_top_k=settings.text_retrieval.top_k,
+            semantic_enabled=settings.models.paragraph_embedding.semantic_enabled,
+            semantic_top_k=settings.models.paragraph_embedding.top_k,
         )
 
     def _active_case_rows(self) -> list[CasePoolCase]:
@@ -260,7 +260,7 @@ class DatabaseAnnotationQueryService:
         return self.text_search_service.read(chunk_id)
 
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
-        """2026-08-07 用于回读 active 案例并向 pull 后端恢复稳定目标"""
+        """2026-08-07 用于回读 active 案例并恢复系统稳定目标"""
         statement = select(CasePoolCase).where(
             CasePoolCase.run_id == self.run_id,
             CasePoolCase.id == case_id,
@@ -277,7 +277,7 @@ class DatabaseAnnotationQueryService:
 
 
 class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
-    """2026-08-07 用于查询和新增章节唯一 ChapterFinish"""
+    """2026-08-07 用于查询和新增章节唯一系统绑定标注"""
 
     def get_by_chapter(self, run_id: str, chapter_id: int) -> ChapterAnnotationRecord | None:
         """2026-08-05 用于按 run 与真实 chapter_id 查询已提交正式标注"""
@@ -292,18 +292,14 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         *,
         run_id: str,
         chapter_id: int,
-        finish: ChapterFinish,
-        initial_finish: ChapterFinish,
-        revision_payloads: list[dict],
+        annotation: BoundChapterAnnotation,
     ) -> ChapterAnnotationRecord:
-        """2026-08-07 用于保存最终 finish 并把初稿修订仅作为运行审计"""
+        """2026-08-07 用于保存最新合同的最终系统绑定章节标注"""
         row = ChapterAnnotationRecord(
             annotation_id=str(uuid4()),
             run_id=run_id,
             chapter_id=chapter_id,
-            payload=finish.model_dump(mode="json"),
-            initial_finish_payload=initial_finish.model_dump(mode="json"),
-            revision_payloads=list(revision_payloads),
+            payload=annotation.model_dump(mode="json"),
         )
         self.session.add(row)
         self.session.flush()
@@ -314,7 +310,7 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
     """2026-08-07 用于锁定创建解决和轮转稳定目标案例"""
 
     def lock_active_cases(self, run_id: str, ids: list[str]) -> list[CasePoolCase]:
-        """2026-08-05 用于在完成事务开始时锁定全部 pulled 案例"""
+        """2026-08-05 用于在完成事务开始时锁定全部待解决案例"""
         if not ids:
             return []
         statement = (
@@ -334,21 +330,20 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
         *,
         run_id: str,
         annotation_id: str,
-        pushed_case: PushedCase,
-        evidence: EvidenceList,
+        pending_case: PendingCase,
     ) -> CasePoolCase:
-        """2026-08-07 用于创建带类型 chunk 和内部目标引用的 active 案例"""
-        normalized_keys = sorted({normalize_text(key) for key in pushed_case.keys})
+        """2026-08-07 用于创建系统自动绑定目标的 active 案例"""
+        normalized_keys = sorted({normalize_text(key) for key in pending_case.keys})
         row = CasePoolCase(
             id=str(uuid4()),
             run_id=run_id,
-            case_type=pushed_case.type,
-            chunk_id=pushed_case.chunkid,
+            case_type=pending_case.type,
+            chunk_id=pending_case.chunk_id,
             keys=normalized_keys,
-            description=normalize_text(pushed_case.description),
-            target_key=pushed_case.target_key,
-            target_ref=dict(pushed_case.target_ref),
-            evidence=evidence.model_dump(mode="json"),
+            description=normalize_text(pending_case.description),
+            target_key=pending_case.target_key,
+            target_ref=dict(pending_case.target_ref),
+            evidence=pending_case.evidence.model_dump(mode="json"),
             state="active",
             created_by_annotation_id=annotation_id,
         )
@@ -357,7 +352,7 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
         return row
 
     def resolve_cases(self, rows: list[CasePoolCase]) -> None:
-        """2026-08-07 用于在解决事实已写入后把 pulled 案例更新为 resolved"""
+        """2026-08-07 用于在解决事实已写入后把案例更新为 resolved"""
         now = datetime.now(UTC)
         for row in rows:
             row.state = "resolved"
@@ -388,37 +383,27 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
 
 
 class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
-    """2026-08-07 用于从 ChapterFinish 写入或续接已确认伏笔线程"""
+    """2026-08-07 用于从系统绑定标注写入或续接伏笔线程"""
 
     def sync(
         self,
         *,
         run_id: str,
         chunk_id: int,
-        foreshadowing: Foreshadowing,
+        foreshadowing: BoundForeshadowing,
     ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit]:
-        """2026-08-07 用于按稳定字段或 linked_setup_id 同步伏笔并 flush"""
-        if foreshadowing.is_new_setup:
-            statement = select(ForeshadowingThread).where(
-                ForeshadowingThread.run_id == run_id,
-                ForeshadowingThread.setup_summary == normalize_text(foreshadowing.setup_summary),
-                ForeshadowingThread.setup_kind == foreshadowing.setup_kind,
-                ForeshadowingThread.expected_payoff_family == foreshadowing.expected_payoff_family,
-            )
-            thread = self.session.execute(statement).scalar_one_or_none()
-        else:
-            thread = self.session.get(ForeshadowingThread, foreshadowing.linked_setup_id)
-            if thread is None or thread.run_id != run_id:
-                raise ValueError(
-                    f"linked_setup_id 不存在或跨 run: {foreshadowing.linked_setup_id}"
-                )
-            if (
-                normalize_text(thread.setup_summary)
-                != normalize_text(foreshadowing.setup_summary)
-                or thread.setup_kind != foreshadowing.setup_kind
-                or thread.expected_payoff_family != foreshadowing.expected_payoff_family
-            ):
-                raise ValueError("linked_setup_id 的稳定字段与 finish foreshadowing 不一致")
+        """2026-08-07 用于按规范化稳定语义字段解析或创建伏笔线程"""
+        statement = select(ForeshadowingThread).where(
+            ForeshadowingThread.run_id == run_id,
+            ForeshadowingThread.setup_summary == normalize_text(foreshadowing.setup_summary),
+            ForeshadowingThread.setup_kind == foreshadowing.setup_kind,
+            ForeshadowingThread.expected_payoff_family == foreshadowing.expected_payoff_family,
+        )
+        matches = list(self.session.execute(statement).scalars().all())
+        if len(matches) > 1:
+            raise ValueError("伏笔稳定语义字段匹配到多个线程")
+        thread = matches[0] if matches else None
+        is_new_setup = thread is None
 
         now = datetime.now(UTC)
         evidence_payload = foreshadowing.evidence.model_dump(mode="json")
@@ -461,7 +446,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
             anchor_reason=foreshadowing.evidence[0].reason,
             why_unresolved_now=foreshadowing.why_unresolved_now,
             evidence=evidence_payload,
-            is_new_setup=foreshadowing.is_new_setup,
+            is_new_setup=is_new_setup,
             created_at=now,
         )
         self.session.add(hit)
@@ -470,14 +455,14 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
 
 
 class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
-    """2026-08-07 用于保存 pulled 案例到历史事实修订的解决映射"""
+    """2026-08-07 用于保存案例到历史事实修订的解决映射"""
 
     def add_mapping(
         self,
         *,
         run_id: str,
         annotation_id: str,
-        pulled_result: PulledResult,
+        resolved_case: ResolvedCase,
         target_fact: GraphFact,
     ) -> CaseResolutionMapping:
         """2026-08-07 用于写入严格案例类型解决结果和实际目标事实版本"""
@@ -485,11 +470,14 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             mapping_id=str(uuid4()),
             run_id=run_id,
             annotation_id=annotation_id,
-            case_id=pulled_result.case_id,
-            case_type=pulled_result.type,
-            target_ref=dict(pulled_result.target_ref),
-            resolution=pulled_result.resolution.model_dump(mode="json"),
-            evidence_chunk_id=pulled_result.resolution.evidence_chunkid,
+            case_id=resolved_case.case_id,
+            case_type=resolved_case.type,
+            target_ref=dict(resolved_case.target_ref),
+            resolution={
+                "speaker": resolved_case.speaker,
+                "reason": resolved_case.reason,
+            },
+            evidence_chunk_id=resolved_case.evidence_chunk_id,
             target_fact_id=target_fact.fact_id,
             target_fact_revision=target_fact.fact_revision,
         )
@@ -504,7 +492,7 @@ def completion_case_view(row: CasePoolCase) -> CompletionCase:
         {
             "id": row.id,
             "type": row.case_type,
-            "chunkid": row.chunk_id,
+            "chunk_id": row.chunk_id,
             "keys": list(row.keys),
             "description": row.description,
             "target_ref": dict(row.target_ref),
