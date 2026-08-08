@@ -63,7 +63,7 @@ def _insert_test_novel(db_session, novel_id: str) -> None:
 
 def test_create_and_insert(db_session) -> None:
     text_content = "\n\n".join(["a" * 600] * 2)
-    chunks = asyncio.run(chunk_text(text_content, max_chars=1000, split_by_chapter=False))
+    chunks = asyncio.run(chunk_text(text_content, max_chars=1000))
 
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)
@@ -133,7 +133,7 @@ def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> No
     2026-08-02 用于保证重复章节标题按出现序号落为不同 chapter_id
     """
     text_content = "第1章 序章\n甲。\n第2章 中段\n乙。\n第1章 序章\n丙。"
-    chunks = asyncio.run(chunk_text(text_content, max_chars=100, overlap=0, split_by_chapter=True))
+    chunks = asyncio.run(chunk_text(text_content, max_chars=100))
 
     novel_id = uuid.uuid4().hex[:8]
     _insert_test_novel(db_session, novel_id)
