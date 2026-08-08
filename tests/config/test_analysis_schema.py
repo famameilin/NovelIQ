@@ -1,86 +1,99 @@
-from src.config.schemas import _parse_text_retrieval_settings
-from src.config.schemas.analysis import _parse_agent_settings
+from src.config.schemas import (
+    _parse_chunking_settings,
+    _parse_metrics_settings,
+    _parse_progress_settings,
+    _parse_topic_model_settings,
+)
 
 
-def test_parse_text_retrieval_settings_reads_semantic_fields() -> None:
-    settings = _parse_text_retrieval_settings(
+def test_parse_chunking_settings_reads_start_and_max_chars() -> None:
+    settings = _parse_chunking_settings(
         {
-            "semantic_enabled": False,
-            "top_k": 9,
+            "start_chars": 4000,
+            "max_chars": 2000,
         }
     )
 
-    assert settings.semantic_enabled is False
-    assert settings.top_k == 9
+    assert settings.start_chars == 4000
+    assert settings.max_chars == 2000
 
 
-def test_parse_text_retrieval_settings_defaults() -> None:
-    settings = _parse_text_retrieval_settings(None)
+def test_parse_chunking_settings_defaults() -> None:
+    settings = _parse_chunking_settings(None)
 
-    assert settings.semantic_enabled is True
-    assert settings.top_k == 5
+    assert settings.start_chars == 4000
+    assert settings.max_chars == 2000
 
 
-def test_parse_text_retrieval_settings_ignores_removed_rag_fields() -> None:
-    settings = _parse_text_retrieval_settings(
+def test_parse_progress_settings_reads_stage_ranges() -> None:
+    settings = _parse_progress_settings(
         {
-            "level3_enabled": True,
-            "level3_top_k": 9,
-            "level3_rerank_enabled": True,
+            "preprocess": {"start": 0, "end": 10},
+            "annotate": {"start": 10, "end": 80},
+            "diagnose": {"start": 95, "end": 100},
         }
     )
 
-    assert not hasattr(settings, "level3_enabled")
-    assert not hasattr(settings, "level3_top_k")
-    assert not hasattr(settings, "level3_rerank_enabled")
+    assert settings.annotate.start == 10
+    assert settings.annotate.end == 80
+    assert settings.diagnose.start == 95
 
 
-def test_parse_agent_settings_reads_annotation_and_diagnosis_limits() -> None:
-    settings = _parse_agent_settings(
+def test_parse_topic_model_settings_reads_flat_and_lda_fields() -> None:
+    settings = _parse_topic_model_settings(
         {
-            "annotation": {
-                "max_iterations": 5,
-                "total_attempts": 3,
-                "retry_backoff_seconds": [1.0, 2.0],
-                "active_setup_pool_limit": 12,
-                "allow_future_context": True,
+            "num_topics": 30,
+            "passes": 12,
+            "iterations": 600,
+            "lda": {
+                "alpha": "auto",
+                "eta": "auto",
+                "random_state": 42,
+                "chunksize": 2000,
+                "minimum_probability": 0.01,
+                "no_below": 5,
+                "no_above": 0.5,
             },
-            "diagnosis": {
-                "max_iterations": 9,
-            },
         }
     )
 
-    assert settings.annotation.max_iterations == 5
-    assert settings.annotation.total_attempts == 3
-    assert settings.annotation.retry_backoff_seconds == (1.0, 2.0)
-    assert settings.annotation.active_setup_pool_limit == 12
-    assert settings.annotation.allow_future_context is True
-    assert settings.diagnosis.max_iterations == 9
+    assert settings.num_topics == 30
+    assert settings.passes == 12
+    assert settings.iterations == 600
+    assert settings.lda.random_state == 42
+    assert settings.lda.no_below == 5
 
 
-def test_parse_agent_settings_defaults() -> None:
-    settings = _parse_agent_settings(None)
+def test_parse_topic_model_settings_defaults() -> None:
+    settings = _parse_topic_model_settings(None)
 
-    assert settings.annotation.max_iterations == 10
-    assert settings.annotation.total_attempts == 3
-    assert settings.annotation.retry_backoff_seconds == (1.0, 2.0)
-    assert settings.annotation.active_setup_pool_limit == 30
-    assert settings.annotation.allow_future_context is False
-    assert settings.diagnosis.max_iterations == 15
+    assert settings.num_topics == 25
+    assert settings.passes == 10
+    assert settings.iterations == 500
+    assert settings.lda.alpha == "auto"
+    assert settings.lda.no_above == 0.5
 
 
-def test_parse_agent_settings_rejects_non_boolean_future_switch() -> None:
-    """2026-08-07 用于验证后文开关只接受严格布尔值"""
-    try:
-        _parse_agent_settings(
-            {
-                "annotation": {
-                    "allow_future_context": "false",
-                }
-            }
-        )
-    except ValueError as exc:
-        assert "allow_future_context 必须是 bool" in str(exc)
-    else:
-        raise AssertionError("非布尔 allow_future_context 应被拒绝")
+def test_parse_metrics_settings_reads_thresholds() -> None:
+    settings = _parse_metrics_settings(
+        {
+            "mtld_threshold": 0.7,
+            "middle_collapse_min_chunks": 8,
+            "character_max_iter": 50,
+            "fourier_smooth_keep_ratio": 0.2,
+        }
+    )
+
+    assert settings.mtld_threshold == 0.7
+    assert settings.middle_collapse_min_chunks == 8
+    assert settings.character_max_iter == 50
+    assert settings.fourier_smooth_keep_ratio == 0.2
+
+
+def test_parse_metrics_settings_defaults() -> None:
+    settings = _parse_metrics_settings(None)
+
+    assert settings.mtld_threshold == 0.72
+    assert settings.middle_collapse_min_chunks == 10
+    assert settings.character_max_iter == 100
+    assert settings.fourier_smooth_keep_ratio == 0.1

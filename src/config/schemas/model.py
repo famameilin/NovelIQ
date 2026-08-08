@@ -13,17 +13,9 @@ from src.runtime_env import ModelEnvironment
 
 
 @dataclass
-class ThinkingConfig:
-    """任务级思考模式配置"""
-
-    enabled: bool = False
-    budget_tokens: int | None = None
-
-
-@dataclass
 class TaskModelSettings:
     """
-    任务模型配置（不包含thinking，thinking统一在顶层配置）
+    任务模型配置（含 Agent 运行参数与行为开关）
     """
 
     base_url: str | None = None
@@ -32,6 +24,14 @@ class TaskModelSettings:
     timeout_s: float | None = None
     temperature: float = 0.7
     top_p: float = 0.8
+    thinking: bool = False
+    streaming: bool = False
+    stream_cloud_only: bool = False
+    structured_output: str = "json_schema"
+    max_iterations: int = 10
+    total_attempts: int = 3
+    retry_backoff_ms: int = 5000
+    allow_future_context: bool = False
 
 
 @dataclass
@@ -44,6 +44,8 @@ class EmbeddingModelSettings:
     timeout_s: float | None = None
     embedding_dim: int = 1536
     batch_size: int = 8
+    semantic_enabled: bool = True
+    top_k: int = 5
 
 
 @dataclass
@@ -57,49 +59,6 @@ class ModelsSettings:
     diagnosis: TaskModelSettings = field(default_factory=TaskModelSettings)
 
 
-@dataclass
-class ThinkingSettings:
-    """
-    各任务thinking开关配置
-    """
-
-    annotation: bool = False
-    diagnosis: bool = True
-
-    def validate(self) -> None:
-        """验证配置"""
-        pass
-
-
-@dataclass
-class StreamingSettings:
-    """
-    各任务streaming开关配置
-    """
-
-    annotation: bool = False
-    diagnosis: bool = True
-    cloud_only: bool = True  # 是否仅在云端模型启用流式模式
-
-    def validate(self) -> None:
-        """验证配置"""
-        pass
-
-
-@dataclass
-class StructuredOutputSettings:
-    """
-    结构化输出模式配置
-
-    说明: 集中配置各任务默认使用 json_schema / json_object，
-          并允许按 provider marker 覆盖，避免业务模块散落 provider 兼容判断
-    """
-
-    annotation: str = "json_schema"
-    diagnosis: str = "json_schema"
-    provider_overrides: dict[str, str] = field(default_factory=lambda: {"deepseek": "json_object"})
-
-
 _STRUCTURED_OUTPUT_ALLOWED_MODES = {"json_schema", "json_object"}
 
 
@@ -110,33 +69,8 @@ def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) 
     mode = data.get(key, default)
     if mode not in _STRUCTURED_OUTPUT_ALLOWED_MODES:
         allowed = ", ".join(sorted(_STRUCTURED_OUTPUT_ALLOWED_MODES))
-        raise ValueError(f"structured_output.{key} 必须是以下值之一: {allowed}")
+        raise ValueError(f"models.{key}.structured_output 必须是以下值之一: {allowed}")
     return mode
-
-
-def _parse_structured_output_settings(data: dict[str, Any] | None) -> StructuredOutputSettings:
-    """
-    解析结构化输出模式配置
-    """
-    json_data = data or {}
-    defaults = StructuredOutputSettings()
-    provider_overrides = json_data.get("provider_overrides", defaults.provider_overrides)
-    if not isinstance(provider_overrides, dict):
-        raise ValueError("structured_output.provider_overrides 必须是对象")
-    normalized_provider_overrides: dict[str, str] = {}
-    for marker, mode in provider_overrides.items():
-        marker_text = str(marker).strip().lower()
-        if not marker_text:
-            raise ValueError("structured_output.provider_overrides 不允许空 provider marker")
-        if mode not in _STRUCTURED_OUTPUT_ALLOWED_MODES:
-            allowed = ", ".join(sorted(_STRUCTURED_OUTPUT_ALLOWED_MODES))
-            raise ValueError(f"structured_output.provider_overrides.{marker_text} 必须是以下值之一: {allowed}")
-        normalized_provider_overrides[marker_text] = str(mode)
-    return StructuredOutputSettings(
-        annotation=_parse_structured_output_mode(json_data, "annotation", defaults.annotation),
-        diagnosis=_parse_structured_output_mode(json_data, "diagnosis", defaults.diagnosis),
-        provider_overrides=normalized_provider_overrides,
-    )
 
 
 def _is_running_in_docker_container() -> bool:
@@ -215,6 +149,19 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         timeout_s=json_data.get("timeout_s"),
         temperature=json_data.get("temperature", 0.7),
         top_p=json_data.get("top_p", 0.8),
+        thinking=json_data.get("thinking", False),
+        streaming=json_data.get("streaming", False),
+        stream_cloud_only=json_data.get("cloud_only", False),
+        structured_output=_parse_structured_output_mode(
+            json_data,
+            "structured_output",
+            TaskModelSettings().structured_output,
+        ),
+        max_iterations=json_data.get("max_iterations", 10),
+        total_attempts=json_data.get("total_attempts", 3),
+        # 键名沿用 retry_backoff_seconds，值统一按毫秒处理（默认 5000ms = 5s）
+        retry_backoff_ms=json_data.get("retry_backoff_seconds", 5000),
+        allow_future_context=json_data.get("allow_future_context", False),
     )
 
 
@@ -229,6 +176,8 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None) -> EmbeddingMod
         timeout_s=json_data.get("timeout_s"),
         embedding_dim=json_data.get("embedding_dim", 1536),
         batch_size=json_data.get("batch_size", 8),
+        semantic_enabled=json_data.get("semantic_enabled", True),
+        top_k=json_data.get("top_k", 5),
     )
 
 
@@ -268,30 +217,3 @@ def apply_model_environment(
     )
     settings.paragraph_embedding.model = embedding_environment.model
     settings.paragraph_embedding.api_key = embedding_environment.api_key
-
-
-def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
-    """
-    解析thinking配置
-    """
-    if not data:
-        raise ValueError("thinking 配置不能为空，请检查 config/settings.json 中的 thinking 配置项")
-    settings = ThinkingSettings(
-        annotation=data.get("annotation", False),
-        diagnosis=data.get("diagnosis", True),
-    )
-    settings.validate()
-    return settings
-
-
-def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:
-    """
-    解析streaming配置
-    """
-    if not data:
-        return StreamingSettings()
-    return StreamingSettings(
-        annotation=data.get("annotation", False),
-        diagnosis=data.get("diagnosis", True),
-        cloud_only=data.get("cloud_only", True),
-    )

@@ -23,8 +23,6 @@ from src.config.constants import (
     VALID_RELATION_TYPES,
     VALID_ROLE_FUNCTIONS,
 )
-from src.config.schemas import _parse_runtime_settings
-from src.config.schemas.analysis import _parse_analysis_settings
 
 
 class TestAnnotationConstants(unittest.TestCase):
@@ -67,49 +65,6 @@ class TestAnnotationConstants(unittest.TestCase):
             "naming_scene",
         )
         self.assertEqual(tuple(VALID_CLUE_TYPES), expected)
-
-
-class TestRuntimeSettings(unittest.TestCase):
-    """测试 runtime 配置解析。"""
-
-    def test_parse_runtime_settings_defaults(self) -> None:
-        """测试当前 runtime 默认值"""
-        runtime = _parse_runtime_settings(None)
-        self.assertFalse(hasattr(runtime, "annotation"))
-        self.assertEqual(runtime.disambiguation.max_retries, 3)
-        self.assertEqual(runtime.diagnosis.max_retries, 3)
-
-    def test_parse_runtime_settings_rejects_retired_annotation_namespace(self) -> None:
-        """
-        2026-08-03 用于拒绝已退役的 runtime.annotation 阶段配置命名空间
-        """
-        with self.assertRaisesRegex(ValueError, "runtime.annotation"):
-            _parse_runtime_settings({"annotation": {"phase3_max_retries": 3}})
-
-    def test_parse_runtime_settings_rejects_non_positive_values(self) -> None:
-        """
-        2026-08-03 用于保持当前诊断 runtime 数值配置的正整数校验
-        """
-        with self.assertRaises(ValueError):
-            _parse_runtime_settings({"diagnosis": {"max_retries": 0}})
-
-    def test_parse_analysis_settings_defaults_include_hierarchical_relation_types(self) -> None:
-        analysis = _parse_analysis_settings(None)
-        self.assertEqual(
-            analysis.valid_hierarchical_relation_types,
-            [
-                "belongs_to",
-                "member_of",
-                "leader_of",
-                "affiliated_with",
-                "father_of",
-                "son_of",
-                "parent_of",
-                "child_of",
-                "sibling_of",
-                "spouse_of",
-            ],
-        )
 
 
 if __name__ == "__main__":

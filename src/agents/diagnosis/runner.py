@@ -187,14 +187,14 @@ async def run_diagnosis_agent(
     diagnosis_repo = DiagnosisRepository(session)
     topic_rows = diagnosis_repo.fetch_topic_words(
         run_id,
-        top_n=settings.diagnosis.topic_words_top_n,
+        top_n=10,
     )
     expected_topic_label_count = len(topic_rows)
     foreshadow_expectation = diagnosis_repo.calculate_foreshadow_expectation(run_id)
 
     evidence_ledger = DiagnosisEvidenceLedger()
     tools = build_diagnosis_tools(session, run_id, evidence_ledger=evidence_ledger)
-    max_attempts = max(1, settings.analysis.agents.diagnosis.max_iterations)
+    max_attempts = max(1, settings.models.diagnosis.max_iterations)
     graph = build_agent_graph(
         llm,
         tools,

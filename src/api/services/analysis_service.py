@@ -79,8 +79,6 @@ class AnalysisService:
         analysis_logger: AnalysisLogger | None,
         skip_stages: dict[str, bool],
         num_topics: int,
-        max_chars: int = 2000,
-        overlap: int = 200,
     ) -> None:
         """
         执行各分析阶段
@@ -94,11 +92,11 @@ class AnalysisService:
         # ── 预处理 ──
         if not skip_stages["skip_preprocess"]:
             await bus.emit_stage_start(
-                "preprocess", message="开始预处理", percent=settings.analysis.progress.preprocess.start
+                "preprocess", message="开始预处理", percent=settings.progress.preprocess.start
             )
 
             await self.stage_executor.run_preprocess(
-                source_path, run_id, session, max_chars, overlap, self._make_stage_emitter(bus, "preprocess")
+                source_path, run_id, session, emitter=self._make_stage_emitter(bus, "preprocess")
             )
             await bus.emit_stage_complete("preprocess")
 
@@ -127,7 +125,7 @@ class AnalysisService:
             await bus.emit_stage_start(
                 "annotate",
                 message="开始标注分析",
-                percent=settings.analysis.progress.annotate.start,
+                percent=settings.progress.annotate.start,
                 total=total_chunks,
             )
 
@@ -149,7 +147,7 @@ class AnalysisService:
         # ── 聚合 ──
         if not skip_stages["skip_aggregate"]:
             await bus.emit_stage_start(
-                "aggregate", message="开始数据聚合", percent=settings.analysis.progress.aggregate.start
+                "aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start
             )
 
             await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
@@ -162,7 +160,7 @@ class AnalysisService:
         # ── 主题建模 ──
         if not skip_stages["skip_topic_model"]:
             await bus.emit_stage_start(
-                "topic-model", message="开始主题建模", percent=settings.analysis.progress.topic_model.start
+                "topic-model", message="开始主题建模", percent=settings.progress.topic_model.start
             )
 
             await self.stage_executor.run_topic_model(
@@ -177,7 +175,7 @@ class AnalysisService:
         # ── 诊断 ──
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start(
-                "diagnose", message="开始诊断报告", percent=settings.analysis.progress.diagnose.start
+                "diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start
             )
 
             await self.stage_executor.run_diagnose(
@@ -591,9 +589,7 @@ class AnalysisService:
         """
         执行分析任务
         """
-        num_topics = settings.topic_model.single_book.num_topics
-        max_chars = settings.chunking.max_chars
-        overlap = settings.chunking.overlap
+        num_topics = settings.topic_model.num_topics
 
         def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
             return self.env_initializer.check_stage_completion_status(session, run_id)
@@ -610,8 +606,6 @@ class AnalysisService:
             skip_stages_builder=skip_stages_builder,
             num_topics=num_topics,
             log_prefix="Analysis",
-            max_chars=max_chars,
-            overlap=overlap,
             pre_execute_hook=pre_execute_hook,
         )
 
@@ -621,7 +615,7 @@ class AnalysisService:
         """
         skip_stages = self._build_reanalysis_skip_stages(request)
         logger.info(f"Reanalysis skip_stages: {skip_stages}")
-        num_topics = request.num_topics if request else settings.topic_model.single_book.num_topics
+        num_topics = request.num_topics if request else settings.topic_model.num_topics
 
         def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
             return skip_stages
@@ -645,40 +639,23 @@ class AnalysisService:
         analysis_logger: AnalysisLogger | None,
         skip_stages: dict[str, bool],
         num_topics: int,
-        max_chars: int | None = None,
-        overlap: int | None = None,
     ) -> None:
         """
-        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数
+        调用 _execute_analysis_stages
 
         说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑
         """
-        if max_chars is not None and overlap is not None:
-            await self._execute_analysis_stages(
-                bus=bus,
-                session=session,
-                run_id=run_id,
-                source_path=source_path,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                analysis_logger=analysis_logger,
-                skip_stages=skip_stages,
-                num_topics=num_topics,
-                max_chars=max_chars,
-                overlap=overlap,
-            )
-        else:
-            await self._execute_analysis_stages(
-                bus=bus,
-                session=session,
-                run_id=run_id,
-                source_path=source_path,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                analysis_logger=analysis_logger,
-                skip_stages=skip_stages,
-                num_topics=num_topics,
-            )
+        await self._execute_analysis_stages(
+            bus=bus,
+            session=session,
+            run_id=run_id,
+            source_path=source_path,
+            novel_id=novel_id,
+            novel_title=novel_title,
+            analysis_logger=analysis_logger,
+            skip_stages=skip_stages,
+            num_topics=num_topics,
+        )
 
     async def _run_analysis_core(
         self,
@@ -687,8 +664,6 @@ class AnalysisService:
         skip_stages_builder: Callable[[Session, str], dict[str, bool]],
         num_topics: int,
         log_prefix: str = "Analysis",
-        max_chars: int | None = None,
-        overlap: int | None = None,
         pre_execute_hook: Callable[[str, dict[str, bool]], bool] | None = None,
     ) -> None:
         """
@@ -702,8 +677,6 @@ class AnalysisService:
             skip_stages_builder: 构建 skip_stages 的函数
             num_topics: 主题数量
             log_prefix: 日志前缀
-            max_chars: 分块最大字符数
-            overlap: 分块重叠字符数
             pre_execute_hook: 执行前的钩子函数，返回 True 表示跳过执行
         """
         start_time = time.time()
@@ -752,8 +725,6 @@ class AnalysisService:
                 analysis_logger=analysis_logger,
                 skip_stages=skip_stages,
                 num_topics=num_topics,
-                max_chars=max_chars,
-                overlap=overlap,
             )
 
             if self._is_cancelled(task_id):

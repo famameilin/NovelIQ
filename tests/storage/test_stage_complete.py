@@ -99,7 +99,7 @@ class TestStageCompleteChecks:
         chunks = _create_chunks(1)
         chunk_repo.insert_chunks(run_id, chunks)
         with patch(
-            "src.storage.repositories.chunk_repository.settings.text_retrieval.semantic_enabled",
+            "src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.semantic_enabled",
             False,
         ):
             assert chunk_repo.is_preprocess_complete(run_id)
@@ -126,7 +126,7 @@ class TestStageCompleteChecks:
 
         with (
             patch(
-                "src.storage.repositories.chunk_repository.settings.text_retrieval.semantic_enabled",
+                "src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.semantic_enabled",
                 True,
             ),
             patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
@@ -180,7 +180,7 @@ class TestStageCompleteChecks:
 
         with (
             patch(
-                "src.storage.repositories.chunk_repository.settings.text_retrieval.semantic_enabled",
+                "src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.semantic_enabled",
                 True,
             ),
             patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),

@@ -24,8 +24,6 @@ class StageExecutor:
         source_path: Path,
         run_id: str,
         session: Session,
-        max_chars: int = 2000,
-        overlap: int = 200,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> None:
         """执行预处理阶段"""
@@ -35,8 +33,6 @@ class StageExecutor:
             source_path=source_path,
             run_id=run_id,
             session=session,
-            max_chars=max_chars,
-            overlap=overlap,
             emitter=emitter,
         )
 
@@ -86,7 +82,7 @@ class StageExecutor:
         from src.workflows import run_topic_model
 
         if num_topics is None:
-            num_topics = settings.topic_model.single_book.num_topics
+            num_topics = settings.topic_model.num_topics
         await run_topic_model(run_id=run_id, session=session, num_topics=num_topics, emitter=emitter)
 
     async def run_diagnose(

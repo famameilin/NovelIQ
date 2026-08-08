@@ -87,13 +87,10 @@ async def run_preprocess(
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
 
-    effective_overlap = min(overlap, max(0, max_chars - 1))
-
     all_chunks = await chunk_documents(
         normalized_texts,
-        max_chars=max_chars,
-        overlap=effective_overlap,
-        split_by_chapter=settings.chunking.split_by_chapter,
+        max_chars=settings.chunking.max_chars,
+        start_chars=settings.chunking.start_chars,
         emitter=emitter,
     )
 
@@ -124,7 +121,7 @@ async def run_preprocess(
     chunk_repo.insert_chunk_style(run_id, style_rows)
     _commit_preprocess_writes(session, step="insert_chunk_style")
 
-    if settings.text_retrieval.semantic_enabled:
+    if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
         await _generate_paragraph_embeddings(session, run_id, all_chunks, emitter=emitter)
 
