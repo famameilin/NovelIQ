@@ -23,7 +23,6 @@ def _persist_authority_chapter(
     chapter_id: int,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
-    visible_relation_ids: set[str] | None = None,
 ) -> None:
     """2026-08-07 用于为 authority 视图写入章节版本图数据"""
     persist_chapter_annotation(
@@ -32,7 +31,6 @@ def _persist_authority_chapter(
         chapter_id=chapter_id,
         characters=characters,
         relations=relations,
-        visible_relation_ids=visible_relation_ids or set(),
     )
 
 
@@ -49,7 +47,7 @@ def test_authority_views_project_chapter_versions_and_graph_changes(db_session) 
         chapter_id=1,
         characters=[
             character_fact(chunk_id=0, name="林渡", action="迎敌", role_function="主体"),
-            character_fact(chunk_id=0, name="顾霜", action="协助", role_function="助手"),
+            character_fact(chunk_id=0, name="顾霜", action="协助", role_function="帮助者"),
         ],
         relations=[
             relation_fact(
@@ -123,10 +121,8 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
                 to_name="顾霜",
                 relation_type="盟友",
                 change_kind="break",
-                relation_id=relation_id,
             )
         ],
-        visible_relation_ids={relation_id},
     )
     db_session.commit()
 

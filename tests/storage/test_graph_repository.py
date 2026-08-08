@@ -57,10 +57,8 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
                 to_name="顾霜",
                 relation_type="盟友",
                 change_kind="break",
-                relation_id=relation_id,
             )
         ],
-        visible_relation_ids={relation_id},
     )
     db_session.commit()
     second_version = GraphRepository(db_session).resolve_graph_version(run_id, chapter_id=2)

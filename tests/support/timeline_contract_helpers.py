@@ -35,7 +35,6 @@ def persist_timeline_chapter(
     cliffhanger_chunks: set[int] | None = None,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
-    visible_relation_ids: set[str] | None = None,
 ) -> str:
     """2026-08-07 用于写入当前章节标注与唯一章节图版本"""
     return persist_chapter_annotation(
@@ -48,7 +47,6 @@ def persist_timeline_chapter(
         cliffhanger_chunks=cliffhanger_chunks,
         characters=characters,
         relations=relations,
-        visible_relation_ids=visible_relation_ids or set(),
     )
 
 
@@ -153,7 +151,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 from_name=hero_name,
                 to_name=organization_name,
                 to_entity_type="organization",
-                relation_type="归属",
+                relation_type="belongs_to",
                 evidence_reason="顾承渊受天衡宗招揽",
                 chapter_id=3,
             ),
@@ -161,12 +159,11 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     )
     chapter_three_snapshot = GraphRepository(db_session).fetch_snapshot(run_id, chapter_id=3)
     assert chapter_three_snapshot is not None
-    alliance_relation = next(
-        relation
-        for relation in chapter_three_snapshot.relations
-        if relation.from_name == hero_name
+    assert any(
+        relation.from_name == hero_name
         and relation.to_name == rival_name
         and relation.relation_type == "盟友"
+        for relation in chapter_three_snapshot.relations
     )
     persist_timeline_chapter(
         db_session,
@@ -189,7 +186,6 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=5,
-        visible_relation_ids={alliance_relation.relation_id},
         characters=[character_fact(chunk_id=4, name=hero_name, action="独行", chapter_id=5)],
         relations=[
             relation_fact(
@@ -199,7 +195,6 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 relation_type="盟友",
                 evidence_reason="两人最终决裂",
                 change_kind="break",
-                relation_id=alliance_relation.relation_id,
                 confidence="medium",
                 chapter_id=5,
             )

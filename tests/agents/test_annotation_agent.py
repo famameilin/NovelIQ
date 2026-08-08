@@ -1,4 +1,4 @@
-"""章节级标注 Agent 新合同测试"""
+"""章节级标注 Agent 逐 chunk LangGraph 与 Runner 测试"""
 
 from __future__ import annotations
 
@@ -6,72 +6,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import ValidationError
 
 from src.agents.annotation.errors import AnnotationAuthorizationError
 from src.agents.annotation.graph import build_annotation_graph
+from src.agents.annotation.prompts import build_chunk_message
 from src.agents.annotation.runner import (
     AnnotationAgentRunError,
     run_annotation_agent,
-    validate_chapter_finish,
+    validate_bound_annotation,
 )
 from src.agents.annotation.schema import (
     AgentRunAudit,
     AgentRunResult,
-    ChapterFinish,
-    GraphEvidence,
+    BoundChapterAnnotation,
+    BoundChunkAnnotation,
+    BoundDialogue,
+    BoundEntityDirectory,
+    ChunkMetricsInput,
     SuccessAudit,
-    TextEvidence,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
-
-
-def _coverage(chunk_id: int) -> dict:
-    """2026-08-07 用于构造声明全部领域已检查的 coverage"""
-    return {
-        "chunk_id": chunk_id,
-        "entities": True,
-        "character_observations": True,
-        "location_observations": True,
-        "dialogues": True,
-        "events": True,
-        "relations": True,
-        "states": True,
-        "foreshadowings": True,
-    }
-
-
-def _finish_payload(*, summary: str = "顾霜进入山门") -> dict:
-    """2026-08-07 用于构造最小完整 ChapterFinish 参数"""
-    return {
-        "chapter_summary": summary,
-        "entities": {
-            "characters": [],
-            "locations": [],
-            "objects": [],
-            "organizations": [],
-        },
-        "chunks": [
-            {
-                "chunk_id": 1,
-                "summary": "顾霜进入山门",
-                "metrics": {
-                    "emotional_valence": "neutral",
-                    "event_type": "铺垫",
-                    "pivot_moment": False,
-                    "cliffhanger": False,
-                },
-                "character_observations": [],
-                "location_observations": [],
-                "dialogues": [],
-                "events": [],
-                "relations": [],
-                "states": [],
-                "foreshadowings": [],
-            }
-        ],
-        "coverage": [_coverage(1)],
-    }
 
 
 class _QueryService:
@@ -117,6 +71,7 @@ class _SequenceLLM:
         """2026-08-07 用于保存待返回的模型消息序列"""
         self.responses = list(responses)
         self.calls = 0
+        self.captured_messages: list[list] = []
 
     def bind_tools(self, tools):
         """2026-08-07 用于模拟 LangChain 工具绑定"""
@@ -124,95 +79,226 @@ class _SequenceLLM:
         return self
 
     async def ainvoke(self, messages):
-        """2026-08-07 用于返回下一条测试模型消息"""
-        del messages
+        """2026-08-07 用于返回下一条测试模型消息并记录输入"""
         self.calls += 1
+        self.captured_messages.append(list(messages))
         return self.responses.pop(0)
 
 
-def _finish_message(payload: dict, *, call_id: str = "finish-1") -> AIMessage:
-    """2026-08-07 用于构造唯一 finish 工具调用消息"""
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "finish",
-                "args": {"annotation": payload},
-                "id": call_id,
-                "type": "tool_call",
-            }
-        ],
+def _tool_message(calls: list[dict]) -> AIMessage:
+    """2026-08-07 用于构造带工具调用的模型回复"""
+    return AIMessage(content="", tool_calls=calls)
+
+
+def _write_call(
+    name: str,
+    args: dict,
+    *,
+    call_id: str,
+) -> dict:
+    """2026-08-07 用于构造单个工具调用"""
+    return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
+
+
+def _metrics_call(call_id: str = "call-metrics") -> dict:
+    """2026-08-07 用于构造合法 write_metrics 调用"""
+    return _write_call(
+        "write_metrics",
+        {
+            "summary": "住手回荡",
+            "emotional_valence": "neutral",
+            "narrative_function": "铺垫",
+            "confidence": "high",
+            "reason": "本章开端",
+        },
+        call_id=call_id,
     )
 
 
-def _revise_message(correction: dict, *, call_id: str = "revise-1") -> AIMessage:
-    """2026-08-07 用于构造唯一 revise_finish 工具调用消息"""
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "revise_finish",
-                "args": {"correction": correction},
-                "id": call_id,
-                "type": "tool_call",
-            }
-        ],
+def _entities_call(call_id: str = "call-entities") -> dict:
+    """2026-08-07 用于构造合法 write_entities 调用"""
+    return _write_call(
+        "write_entities",
+        {
+            "characters": [{"name": "顾霜", "confidence": "high", "reason": "人物出现"}],
+            "locations": [],
+            "objects": [],
+            "organizations": [],
+        },
+        call_id=call_id,
     )
+
+
+def _observations_call(call_id: str = "call-observations") -> dict:
+    """2026-08-07 用于构造合法 write_character_observations 调用"""
+    return _write_call(
+        "write_character_observations",
+        {
+            "items": [
+                {
+                    "character": "顾霜",
+                    "role_function": "主体",
+                    "action": "喝止",
+                    "action_type": "对话",
+                    "emotion": "mild_negative",
+                    "confidence": "high",
+                    "reason": "顾霜喝止",
+                }
+            ]
+        },
+        call_id=call_id,
+    )
+
+
+def _dialogues_call(call_id: str = "call-dialogues") -> dict:
+    """2026-08-07 用于构造按候选顺序的 write_dialogues 调用"""
+    return _write_call(
+        "write_dialogues",
+        {
+            "items": [
+                {
+                    "is_dialogue": True,
+                    "description": "喝止住手",
+                    "speaker": None,
+                    "confidence": "high",
+                    "reason": "原文双引号",
+                }
+            ]
+        },
+        call_id=call_id,
+    )
+
+
+def _events_call(call_id: str = "call-events") -> dict:
+    """2026-08-07 用于构造合法 write_events 调用"""
+    return _write_call(
+        "write_events",
+        {
+            "items": [
+                {
+                    "description": "顾霜喝止众人",
+                    "participants": [{"entity": "顾霜", "participation": "主体"}],
+                    "confidence": "high",
+                    "reason": "喝止事件",
+                }
+            ]
+        },
+        call_id=call_id,
+    )
+
+
+def _empty_domain_calls() -> list[dict]:
+    """2026-08-07 用于构造剩余三个空领域的写入调用"""
+    return [
+        _write_call("write_relations", {"items": []}, call_id="call-relations"),
+        _write_call("write_states", {"items": []}, call_id="call-states"),
+        _write_call("write_foreshadowings", {"items": []}, call_id="call-foreshadowings"),
+    ]
+
+
+def _full_write_calls(
+    *,
+    dialogues: dict | None = None,
+) -> list[dict]:
+    """2026-08-07 用于构造同一回复的全部八个领域写入调用"""
+    resolved_dialogues = dialogues if dialogues is not None else _dialogues_call()
+    return [
+        _metrics_call(),
+        _entities_call(),
+        _observations_call(),
+        resolved_dialogues,
+        _events_call(),
+        *_empty_domain_calls(),
+    ]
 
 
 async def _invoke_graph(
     llm: _SequenceLLM,
     *,
     allow_future_context: bool,
+    chunks: list[tuple[int, str]] | None = None,
+    max_iterations: int = 30,
 ) -> dict:
-    """2026-08-07 用于执行最小新合同章节 LangGraph"""
+    """2026-08-07 用于执行最小逐 chunk 章节 LangGraph"""
+    resolved_chunks = chunks or [(1, "“住手”回荡")]
     ledger = AnnotationToolLedger(
+        run_scope="run-1",
         current_chapter_id=1,
-        current_chunks={1: "顾霜进入山门"},
+        current_chunks=resolved_chunks,
         allow_future_context=allow_future_context,
     )
-    tools = build_annotation_tools(_QueryService(), ledger, run_scope="run-1")
+    tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
         llm,
         tools,
         ledger=ledger,
-        max_iterations=8,
-        current_validator=lambda finish: None,
-        future_validator=lambda finish: None,
+        max_iterations=max_iterations,
     )
+    first_chunk_id, first_chunk_text = resolved_chunks[0]
     return await graph.ainvoke(
         {
-            "messages": [SystemMessage(content="test"), HumanMessage(content="current")],
-            "phase": "current_open",
+            "messages": [
+                SystemMessage(content="test"),
+                HumanMessage(
+                    content=build_chunk_message(
+                        chunk_index=1,
+                        chunk_total=len(resolved_chunks),
+                        chunk_text=first_chunk_text,
+                        candidates=ledger.dialogue_candidates[first_chunk_id],
+                    )
+                ),
+            ],
+            "phase": "chunk_open",
             "iterations": 0,
-            "candidate": None,
-            "initial_finish": None,
-            "final_finish": None,
-            "revision_payloads": [],
             "error": None,
         }
     )
 
 
+def evidence(reason: str, chunk_id: int) -> list[dict]:
+    """2026-08-07 用于构造系统文本依据"""
+    return [{"reason": reason, "chunk_id": chunk_id}]
+
+
+def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnnotation:
+    """2026-08-07 用于构造 Runner 重试测试的最小章节标注"""
+    return BoundChapterAnnotation(
+        chapter_summary=summary,
+        chunks=[
+            BoundChunkAnnotation(
+                chunk_id=1,
+                metrics=ChunkMetricsInput(
+                    summary="顾霜进入山门",
+                    emotional_valence="neutral",
+                    narrative_function="铺垫",
+                    confidence="high",
+                    reason="进入",
+                ),
+                entities=BoundEntityDirectory(),
+                character_observations=[],
+                dialogues=[],
+                events=[],
+                relations=[],
+                states=[],
+                foreshadowings=[],
+            )
+        ],
+    )
+
+
 def _agent_result() -> AgentRunResult:
     """2026-08-07 用于构造 Runner 重试测试的完整成功结果"""
-    finish = ChapterFinish.model_validate(_finish_payload())
     return AgentRunResult(
         run_id="run-1",
         chapter_id=1,
-        finish=finish,
-        pulled_results=[],
-        pushed_cases=[],
+        annotation=_bound_annotation(),
+        resolved_cases=[],
+        pending_cases=[],
         audit=AgentRunAudit(
             allow_future_context=False,
-            initial_finish=finish,
-            revision_payloads=[],
-            initial_case_candidate_ids=[],
+            write_revisions=[],
             rotation_case_ids=[],
             authorized_text_chunk_ids=[1],
-            visible_graph_fact_refs=[],
-            visible_graph_entity_ids=[],
-            visible_graph_relation_ids=[],
             success=SuccessAudit(
                 attempt_number=1,
                 messages=[],
@@ -224,163 +310,171 @@ def _agent_result() -> AgentRunResult:
     )
 
 
-def test_evidence_rejects_extra_fields() -> None:
-    """2026-08-07 用于验证双源 Evidence 拒绝旧合同字段"""
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        TextEvidence.model_validate({"reason": "依据", "chunk_id": 2, "chapterid": 1})
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        GraphEvidence.model_validate(
-            {
-                "reason": "前序事实",
-                "fact_id": "fact-1",
-                "fact_revision": 1,
-                "excerpt": "旧搜索结果",
-            }
-        )
-
-
-def test_finish_requires_fact_arrays_and_coverage() -> None:
-    """2026-08-07 用于验证只有摘要指标的 finish 不能成为完整事实标注"""
-    payload = _finish_payload()
-    del payload["coverage"]
-    del payload["chunks"][0]["relations"]
-
-    with pytest.raises(ValidationError):
-        ChapterFinish.model_validate(payload)
-
-
-def test_validate_finish_requires_exact_chunk_and_coverage_order() -> None:
-    """2026-08-07 用于验证 chunks coverage 精确覆盖全部 current"""
-    finish = ChapterFinish.model_validate(_finish_payload())
-    validate_chapter_finish(
-        finish,
-        chapter_id=1,
-        current_chunks=[(1, "顾霜进入山门")],
-        authorized_text_chunk_ids={1},
-        visible_graph_fact_refs=set(),
-        visible_graph_entities={},
-        visible_graph_relation_ids=set(),
-        visible_setup_ids=set(),
-    )
-    invalid = finish.model_copy(
-        update={"coverage": [finish.coverage[0].model_copy(update={"chunk_id": 2})]}
-    )
-    with pytest.raises(ValueError, match="coverage 必须"):
-        validate_chapter_finish(
-            invalid,
-            chapter_id=1,
-            current_chunks=[(1, "顾霜进入山门")],
-            authorized_text_chunk_ids={1},
-            visible_graph_fact_refs=set(),
-            visible_graph_entities={},
-            visible_graph_relation_ids=set(),
-            visible_setup_ids=set(),
-        )
-
-
-def test_location_relation_target_must_be_location() -> None:
-    """2026-08-07 用于验证 located_at 目标只能引用地点节点"""
-    payload = _finish_payload()
-    payload["entities"]["characters"] = [
-        {
-            "ref": "character_1",
-            "name": "顾霜",
-            "existing_entity_id": None,
-            "mentions": [{"chunk_id": 1, "start": 0, "end": 2, "text": "顾霜"}],
-            "confidence": "high",
-            "evidence": [{"reason": "人物出现", "chunk_id": 1}],
-        },
-        {
-            "ref": "character_2",
-            "name": "山门",
-            "existing_entity_id": None,
-            "mentions": [{"chunk_id": 1, "start": 4, "end": 6, "text": "山门"}],
-            "confidence": "high",
-            "evidence": [{"reason": "误标为人物", "chunk_id": 1}],
-        },
-    ]
-    payload["chunks"][0]["relations"] = [
-        {
-            "ref": "relation_1",
-            "confidence": "high",
-            "evidence": [{"reason": "顾霜进入山门", "chunk_id": 1}],
-            "from_ref": "character_1",
-            "to_ref": "character_2",
-            "relation_type": "located_at",
-            "change_kind": "assert",
-        }
-    ]
-    finish = ChapterFinish.model_validate(payload)
-
-    with pytest.raises(ValueError, match="必须引用 location"):
-        validate_chapter_finish(
-            finish,
-            chapter_id=1,
-            current_chunks=[(1, "顾霜进入山门")],
-            authorized_text_chunk_ids={1},
-            visible_graph_fact_refs=set(),
-            visible_graph_entities={},
-            visible_graph_relation_ids=set(),
-            visible_setup_ids=set(),
-        )
-
-
 @pytest.mark.asyncio
-async def test_future_disabled_finishes_immediately() -> None:
-    """2026-08-07 用于验证关闭后文开关时首份有效 finish 直接结束"""
-    llm = _SequenceLLM([_finish_message(_finish_payload())])
+async def test_single_chunk_chapter_completes_via_write_and_finalizers() -> None:
+    """2026-08-07 用于验证单 chunk 章节经领域写入和单独完成工具冻结"""
+    llm = _SequenceLLM(
+        [
+            _tool_message(_full_write_calls()),
+            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete")]),
+            _tool_message(
+                [_write_call("finish_chapter", {"chapter_summary": "顾霜喝止众人"}, call_id="call-finish")]
+            ),
+        ]
+    )
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
-    assert result["final_finish"] == _finish_payload()
-    assert llm.calls == 1
+    assert result.get("error") is None
+    assert llm.calls == 3
 
 
 @pytest.mark.asyncio
-async def test_future_enabled_can_revise_by_ref_and_continue_until_no_tools() -> None:
-    """2026-08-07 用于验证 future 修正后继续开放并由无工具响应结束"""
-    payload = _finish_payload()
-    payload["chunks"][0]["states"] = [
-        {
-            "ref": "state_1",
-            "confidence": "high",
-            "evidence": [{"reason": "状态", "chunk_id": 1}],
-            "entity_existing_entity_id": 42,
-            "predicate": "status",
-            "value": "unknown",
-        }
-    ]
+async def test_multi_chunk_chapter_activates_chunks_in_database_order() -> None:
+    """2026-08-07 用于验证 complete_chunk 后系统激活并注入下一个 chunk"""
     llm = _SequenceLLM(
         [
-            _finish_message(payload),
-            _revise_message(
-                {
-                    "chunks": [
-                        {
-                            "chunk_id": 1,
-                            "upsert_states": [
-                                {
-                                    "ref": "state_1",
-                                    "confidence": "high",
-                                    "evidence": [{"reason": "后文确认", "chunk_id": 2}],
-                                    "entity_existing_entity_id": 42,
-                                    "predicate": "status",
-                                    "value": "confirmed",
-                                }
-                            ],
-                        }
-                    ]
-                }
+            _tool_message(_full_write_calls()),
+            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete-1")]),
+            _tool_message(
+                _full_write_calls(dialogues=_write_call("write_dialogues", {"items": []}, call_id="call-dialogues-2"))
             ),
-            AIMessage(content="完成"),
+            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete-2")]),
+            _tool_message(
+                [_write_call("finish_chapter", {"chapter_summary": "两段结束"}, call_id="call-finish")]
+            ),
         ]
     )
-    result = await _invoke_graph(llm, allow_future_context=True)
+    result = await _invoke_graph(
+        llm,
+        allow_future_context=False,
+        chunks=[(1, "“住手”回荡"), (2, "众人沉默")],
+    )
 
     assert result["phase"] == "completed"
-    assert result["final_finish"]["chunks"][0]["states"][0]["value"] == "confirmed"
-    assert len(result["revision_payloads"]) == 1
-    assert llm.calls == 3
+    assert llm.calls == 5
+    second_chunk_message = llm.captured_messages[2][-1]
+    assert isinstance(second_chunk_message, HumanMessage)
+    assert "众人沉默" in second_chunk_message.content
+
+
+@pytest.mark.asyncio
+async def test_batch_failure_rolls_back_then_recovers_with_new_revisions() -> None:
+    """2026-08-07 用于验证同轮失败整体回滚且重新提交后从修订 1 开始"""
+    invalid_entities = _write_call(
+        "write_entities",
+        {
+            "characters": [{"name": "顾霜", "confidence": "certain", "reason": "非法置信度"}],
+            "locations": [],
+            "objects": [],
+            "organizations": [],
+        },
+        call_id="call-entities-bad",
+    )
+    llm = _SequenceLLM(
+        [
+            _tool_message([_metrics_call(), invalid_entities]),
+            _tool_message(_full_write_calls()),
+            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete")]),
+            _tool_message(
+                [_write_call("finish_chapter", {"chapter_summary": "回滚后恢复"}, call_id="call-finish")]
+            ),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "completed"
+    assert llm.calls == 4
+    rolled_back_messages = llm.captured_messages[1]
+    assert any("已整体回滚" in str(message.content) for message in rolled_back_messages)
+
+
+@pytest.mark.asyncio
+async def test_protocol_error_rejects_mixed_finalizer_calls() -> None:
+    """2026-08-07 用于验证 complete_chunk 与 finish_chapter 不能同轮调用"""
+    llm = _SequenceLLM(
+        [
+            _tool_message(
+                [
+                    _write_call("complete_chunk", {}, call_id="call-complete"),
+                    _write_call("finish_chapter", {"chapter_summary": "混合"}, call_id="call-finish"),
+                ]
+            ),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "chunk_open"
+    assert "必须单独调用" in str(result["error"])
+
+
+@pytest.mark.asyncio
+async def test_protocol_error_rejects_plain_text_reply() -> None:
+    """2026-08-07 用于验证无工具回复不能推进章节"""
+    llm = _SequenceLLM([AIMessage(content="已经完成")])
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert "annotation 工具协议错误" in str(result["error"])
+
+
+@pytest.mark.asyncio
+async def test_future_disabled_batch_rollback_keeps_ledger_untouched() -> None:
+    """2026-08-07 用于验证禁止 future 时整批回滚且账本保持未写入"""
+    future_call = _write_call(
+        "search_text",
+        {"query": "顾霜", "range": "future"},
+        call_id="call-future",
+    )
+    llm = _SequenceLLM(
+        [
+            _tool_message([future_call]),
+            _tool_message(_full_write_calls()),
+            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete")]),
+            _tool_message(
+                [_write_call("finish_chapter", {"chapter_summary": "拒绝后文"}, call_id="call-finish")]
+            ),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "completed"
+    assert llm.calls == 4
+    assert any("已整体回滚" in str(message.content) for message in llm.captured_messages[1])
+
+
+def test_validate_bound_annotation_requires_exact_chunk_order() -> None:
+    """2026-08-07 用于验证系统绑定 chunks 必须精确覆盖 current"""
+    annotation = _bound_annotation()
+    with pytest.raises(ValueError, match="必须按原文顺序精确覆盖"):
+        validate_bound_annotation(
+            annotation,
+            chapter_id=1,
+            current_chunks=[(2, "另一个原文")],
+        )
+
+
+def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
+    """2026-08-07 用于验证对话原文位置与内容由系统绑定且可回查"""
+    annotation = _bound_annotation()
+    chunk = annotation.chunks[0]
+    chunk.dialogues = [
+        BoundDialogue(
+            candidate_key="dlg_1",
+            content="住手",
+            start=0,
+            end=2,
+            description="喝止",
+            confidence="high",
+            reason="原文",
+            evidence=evidence("原文", 1),
+        )
+    ]
+    with pytest.raises(ValueError, match="系统对话原文绑定不一致"):
+        validate_bound_annotation(
+            annotation,
+            chapter_id=1,
+            current_chunks=[(1, "顾霜进入山门")],
+        )
 
 
 @pytest.mark.asyncio

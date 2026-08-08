@@ -202,9 +202,6 @@ def test_fresh_schema_uses_chapter_graph_versions_without_legacy_event_table() -
 
 def test_graph_read_views_project_latest_state_active_relations_and_participants(db_session) -> None:
     """2026-08-07 用于验证当前图三个 SQL View 选择最新章节版本并过滤失效关系"""
-    from sqlalchemy import select
-
-    from src.storage.models import GraphRelation
     from tests.support.chapter_annotation_helpers import (
         character_fact,
         create_run_with_chunks,
@@ -236,9 +233,6 @@ def test_graph_read_views_project_latest_state_active_relations_and_participants
         ],
     )
     db_session.commit()
-    relation_id = db_session.execute(
-        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
-    ).scalar_one()
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -251,10 +245,8 @@ def test_graph_read_views_project_latest_state_active_relations_and_participants
                 to_name="顾霜",
                 relation_type="盟友",
                 change_kind="break",
-                relation_id=relation_id,
             )
         ],
-        visible_relation_ids={relation_id},
     )
     db_session.commit()
     _create_graph_read_views(db_session.get_bind())

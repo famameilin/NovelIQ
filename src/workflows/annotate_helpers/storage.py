@@ -1,5 +1,5 @@
 """
-章节标注唯一完成事务
+章节语义标注唯一完成事务
 """
 
 from __future__ import annotations
@@ -15,11 +15,9 @@ from src.agents.annotation.schema import (
     AgentRunResult,
     CaseType,
     CompletionCase,
-    CompletionPulledResult,
+    CompletionResolvedCase,
     CompletionResult,
-    DialogueSpeakerResolution,
-    EvidenceList,
-    PulledResult,
+    ResolvedCase,
 )
 from src.storage.models import (
     CasePoolCase,
@@ -41,29 +39,29 @@ from src.storage.repositories.model_interaction_repository import ModelInteracti
 
 def _validate_locked_cases(
     *,
-    pulled_results: list[PulledResult],
+    resolved_cases: list[ResolvedCase],
     rows: list[CasePoolCase],
 ) -> None:
-    """2026-08-07 用于确认全部 pulled 案例仍 active 且类型目标未变化"""
-    case_ids = [result.case_id for result in pulled_results]
+    """2026-08-07 用于确认全部解决案例仍 active 且稳定目标未变化"""
+    case_ids = [result.case_id for result in resolved_cases]
     if len(set(case_ids)) != len(case_ids):
-        raise ValueError("pulled_results.case_id 不允许重复")
+        raise ValueError("resolved_cases.case_id 不允许重复")
     rows_by_id = {row.id: row for row in rows}
     missing = [case_id for case_id in case_ids if case_id not in rows_by_id]
     if missing:
-        raise ValueError(f"完成事务无法锁定全部 pulled 案例: {missing}")
-    results_by_id = {result.case_id: result for result in pulled_results}
+        raise ValueError(f"完成事务无法锁定全部 resolved cases: {missing}")
+    results_by_id = {result.case_id: result for result in resolved_cases}
     for row in rows:
         result = results_by_id[row.id]
         if row.state != "active":
-            raise ValueError(f"pulled 案例已不再 active: {row.id}")
+            raise ValueError(f"resolved case 已不再 active: {row.id}")
         if row.case_type != result.type:
             raise ValueError(
-                f"pulled 案例类型已变化: case_id={row.id} "
+                f"resolved case 类型已变化: case_id={row.id} "
                 f"expected={row.case_type} actual={result.type}"
             )
         if row.target_key != result.target_key or dict(row.target_ref) != result.target_ref:
-            raise ValueError(f"pulled 案例稳定目标已变化: {row.id}")
+            raise ValueError(f"resolved case 稳定目标已变化: {row.id}")
 
 
 def _save_success_audit(
@@ -72,7 +70,7 @@ def _save_success_audit(
     result: AgentRunResult,
     anchor_chunk_id: int,
 ) -> None:
-    """2026-08-07 用于在完成事务中写入最终成功模型与工具审计"""
+    """2026-08-07 用于在完成事务中写入模型工具和领域修订审计"""
     success = result.audit.success
     ModelInteractionRepository(session).save_interaction(
         run_id=result.run_id,
@@ -87,13 +85,12 @@ def _save_success_audit(
                 "messages": success.messages,
                 "tool_calls": success.tool_calls,
                 "allow_future_context": result.audit.allow_future_context,
-                "initial_finish": result.audit.initial_finish.model_dump(mode="json"),
-                "revision_payloads": result.audit.revision_payloads,
+                "write_revisions": result.audit.write_revisions,
             },
             ensure_ascii=False,
             sort_keys=True,
         ),
-        response=result.finish.model_dump_json(),
+        response=result.annotation.model_dump_json(),
         duration_ms=success.duration_ms,
         status="success",
     )
@@ -106,7 +103,7 @@ def _save_token_usage(
     novel_id: str,
     anchor_chunk_id: int,
 ) -> None:
-    """2026-08-07 用于在完成事务中写入成功尝试的全部可信 Token 用量"""
+    """2026-08-07 用于保存成功尝试的全部可信 Token 用量"""
     stats_repo = StatsRepository(session)
     for usage in result.audit.token_usage:
         stats_repo.insert_token_usage(
@@ -128,7 +125,7 @@ def load_completion_result(
     run_id: str,
     chapter_id: int,
 ) -> CompletionResult | None:
-    """2026-08-07 用于按已提交 finish 案例和解决映射回读完成结果"""
+    """2026-08-07 用于按最新合同标注案例和解决映射回读完成结果"""
     annotation = session.execute(
         select(ChapterAnnotationRecord).where(
             ChapterAnnotationRecord.run_id == run_id,
@@ -137,6 +134,11 @@ def load_completion_result(
     ).scalar_one_or_none()
     if annotation is None:
         return None
+    if annotation.payload.get("contract_version") != "agent-semantic-v1":
+        raise ValueError(
+            "章节标注使用旧合同，必须重新运行 annotation: "
+            f"run_id={run_id} chapter_id={chapter_id}"
+        )
     graph_version = session.execute(
         select(GraphVersion).where(
             GraphVersion.run_id == run_id,
@@ -148,8 +150,7 @@ def load_completion_result(
         raise ValueError(
             f"章节标注缺少唯一图版本: run_id={run_id} chapter_id={chapter_id}"
         )
-
-    pushed_rows = list(
+    created_rows = list(
         session.execute(
             select(CasePoolCase)
             .where(
@@ -169,11 +170,12 @@ def load_completion_result(
             .order_by(CaseResolutionMapping.created_at, CaseResolutionMapping.mapping_id)
         ).scalars()
     )
-    pulled_results = [
-        CompletionPulledResult(
+    resolved = [
+        CompletionResolvedCase(
             case_id=row.case_id,
             type=cast(CaseType, row.case_type),
-            resolution=DialogueSpeakerResolution.model_validate(row.resolution),
+            speaker=str(row.resolution["speaker"]),
+            reason=str(row.resolution["reason"]),
             target_fact_id=row.target_fact_id,
             target_fact_revision=row.target_fact_revision,
         )
@@ -183,8 +185,8 @@ def load_completion_result(
         annotation_id=annotation.annotation_id,
         graph_version_id=graph_version.graph_version_id,
         chapter_id=annotation.chapter_id,
-        pushed_cases=[completion_case_view(row) for row in pushed_rows],
-        pulled_results=pulled_results,
+        created_cases=[completion_case_view(row) for row in created_rows],
+        resolved_cases=resolved,
     )
 
 
@@ -193,9 +195,9 @@ def _persist_foreshadowing(
     *,
     result: AgentRunResult,
 ) -> None:
-    """2026-08-07 用于把最终 finish 的伏笔事实投影到线程与命中表"""
+    """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表"""
     repository = ForeshadowingRepository(session)
-    for chunk in result.finish.chunks:
+    for chunk in result.annotation.chunks:
         for foreshadowing in chunk.foreshadowings:
             repository.sync(
                 run_id=result.run_id,
@@ -204,32 +206,32 @@ def _persist_foreshadowing(
             )
 
 
-def _persist_pushed_cases(
+def _persist_pending_cases(
     session: Session,
     *,
     result: AgentRunResult,
     annotation_id: str,
-    finish_facts_by_ref: dict,
+    dialogue_facts_by_candidate_key: dict,
 ) -> list[CompletionCase]:
-    """2026-08-07 用于把最终未解决案例绑定实际对话事实后创建 active 记录"""
+    """2026-08-07 用于把系统自动案例绑定实际对话事实后创建记录"""
     repository = CasePoolRepository(session)
     completion_cases: list[CompletionCase] = []
-    for pushed_case in result.pushed_cases:
-        item_ref = str(pushed_case.target_ref.get("item_ref") or "")
-        target_fact = finish_facts_by_ref.get(item_ref)
+    for pending_case in result.pending_cases:
+        candidate_key = str(pending_case.target_ref.get("candidate_key") or "")
+        target_fact = dialogue_facts_by_candidate_key.get(candidate_key)
         if target_fact is None:
             raise ValueError(
-                f"pushed case 目标 ref 未生成图事实: {pushed_case.target_key}"
+                f"pending case 目标未生成对话事实: {pending_case.target_key}"
             )
         content = dict(target_fact.content)
         if content.get("kind") != "dialogue" or content.get("speaker") is not None:
             raise ValueError(
-                f"pushed dialogue_speaker 目标不是未解决对话: {pushed_case.target_key}"
+                f"pending dialogue_speaker 目标不是未解决对话: {pending_case.target_key}"
             )
-        enriched_case = pushed_case.model_copy(
+        enriched = pending_case.model_copy(
             update={
                 "target_ref": {
-                    **pushed_case.target_ref,
+                    **pending_case.target_ref,
                     "fact_id": target_fact.fact_id,
                     "fact_revision": target_fact.fact_revision,
                 }
@@ -238,38 +240,38 @@ def _persist_pushed_cases(
         row = repository.create_case(
             run_id=result.run_id,
             annotation_id=annotation_id,
-            pushed_case=enriched_case,
-            evidence=EvidenceList.model_validate(target_fact.evidence),
+            pending_case=enriched,
         )
         completion_cases.append(completion_case_view(row))
     return completion_cases
 
 
-def _persist_pull_mappings(
+def _persist_resolution_mappings(
     session: Session,
     *,
     result: AgentRunResult,
     annotation_id: str,
-    pulled_facts_by_case_id: dict,
-) -> list[CompletionPulledResult]:
-    """2026-08-07 用于保存 pulled 案例与实际历史事实修订的解决映射"""
+    resolved_facts_by_case_id: dict,
+) -> list[CompletionResolvedCase]:
+    """2026-08-07 用于保存案例解决与历史事实修订映射"""
     repository = CaseResolutionMappingRepository(session)
-    completion_results: list[CompletionPulledResult] = []
-    for pulled_result in result.pulled_results:
-        target_fact = pulled_facts_by_case_id.get(pulled_result.case_id)
+    completion_results: list[CompletionResolvedCase] = []
+    for resolved_case in result.resolved_cases:
+        target_fact = resolved_facts_by_case_id.get(resolved_case.case_id)
         if target_fact is None:
-            raise ValueError(f"pull 未生成历史事实修订: {pulled_result.case_id}")
+            raise ValueError(f"resolve_case 未生成历史事实修订: {resolved_case.case_id}")
         repository.add_mapping(
             run_id=result.run_id,
             annotation_id=annotation_id,
-            pulled_result=pulled_result,
+            resolved_case=resolved_case,
             target_fact=target_fact,
         )
         completion_results.append(
-            CompletionPulledResult(
-                case_id=pulled_result.case_id,
-                type=pulled_result.type,
-                resolution=pulled_result.resolution,
+            CompletionResolvedCase(
+                case_id=resolved_case.case_id,
+                type=resolved_case.type,
+                speaker=resolved_case.speaker,
+                reason=resolved_case.reason,
                 target_fact_id=target_fact.fact_id,
                 target_fact_revision=target_fact.fact_revision,
             )
@@ -283,8 +285,8 @@ def complete_annotation_run(
     novel_id: str,
     session_factory: Callable[[], Session],
 ) -> CompletionResult:
-    """2026-08-07 用于原子提交 finish pull push 图版本审计和 Token 用量"""
-    anchor_chunk_id = result.finish.chunks[0].chunk_id
+    """2026-08-07 用于原子提交正式标注图版本连续性审计和 Token 用量"""
+    anchor_chunk_id = result.annotation.chunks[0].chunk_id
     session = session_factory()
     try:
         with session.begin():
@@ -297,44 +299,40 @@ def complete_annotation_run(
                 return existing
 
             case_repository = CasePoolRepository(session)
-            pulled_case_ids = [item.case_id for item in result.pulled_results]
+            resolved_case_ids = [item.case_id for item in result.resolved_cases]
             locked_rows = case_repository.lock_active_cases(
                 result.run_id,
-                pulled_case_ids,
+                resolved_case_ids,
             )
             _validate_locked_cases(
-                pulled_results=result.pulled_results,
+                resolved_cases=result.resolved_cases,
                 rows=locked_rows,
             )
-
             annotation = ChapterAnnotationRepository(session).add_annotation(
                 run_id=result.run_id,
                 chapter_id=result.chapter_id,
-                finish=result.finish,
-                initial_finish=result.audit.initial_finish,
-                revision_payloads=result.audit.revision_payloads,
+                annotation=result.annotation,
             )
             graph_result = persist_completion_graph(
                 session,
                 annotation=annotation,
-                pulled_results=result.pulled_results,
+                resolved_cases=result.resolved_cases,
                 authorized_text_chunk_ids=set(result.audit.authorized_text_chunk_ids),
-                visible_graph_fact_refs=set(result.audit.visible_graph_fact_refs),
-                visible_relation_ids=set(result.audit.visible_graph_relation_ids),
-                visible_graph_entity_ids=set(result.audit.visible_graph_entity_ids),
             )
-            pulled_completion = _persist_pull_mappings(
+            resolved_completion = _persist_resolution_mappings(
                 session,
                 result=result,
                 annotation_id=annotation.annotation_id,
-                pulled_facts_by_case_id=graph_result.pulled_facts_by_case_id,
+                resolved_facts_by_case_id=graph_result.resolved_facts_by_case_id,
             )
             case_repository.resolve_cases(locked_rows)
-            pushed_completion = _persist_pushed_cases(
+            created_completion = _persist_pending_cases(
                 session,
                 result=result,
                 annotation_id=annotation.annotation_id,
-                finish_facts_by_ref=graph_result.finish_facts_by_ref,
+                dialogue_facts_by_candidate_key=(
+                    graph_result.dialogue_facts_by_candidate_key
+                ),
             )
             _persist_foreshadowing(session, result=result)
             case_repository.mark_surfaced(
@@ -357,8 +355,8 @@ def complete_annotation_run(
                 annotation_id=annotation.annotation_id,
                 graph_version_id=graph_result.graph_version.graph_version_id,
                 chapter_id=result.chapter_id,
-                pushed_cases=pushed_completion,
-                pulled_results=pulled_completion,
+                created_cases=created_completion,
+                resolved_cases=resolved_completion,
             )
         return completion
     finally:

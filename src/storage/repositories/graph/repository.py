@@ -413,7 +413,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             ],
             entities=[
                 GraphSearchEntity(
-                    existing_entity_id=entity.entity_id,
+                    entity_id=entity.entity_id,
                     name=entity.name,
                     entity_type=type_cast(EntityType, entity.entity_type),
                     state_revision=entity.state_revision,

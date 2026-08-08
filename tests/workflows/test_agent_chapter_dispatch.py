@@ -7,82 +7,106 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy import func, select
 
+from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.runner import AnnotationAgentRunError
 from src.agents.annotation.schema import (
     AgentRunAudit,
     AgentRunResult,
-    ChapterFinish,
-    PushedCase,
+    BoundChapterAnnotation,
+    BoundChunkAnnotation,
+    BoundDialogue,
+    BoundEntityDirectory,
+    CaseSearchResult,
+    ChunkMetricsInput,
+    PendingCase,
     SuccessAudit,
 )
 from src.storage.models import ChapterAnnotationRecord
 from src.workflows.annotate import _group_chunks_by_chapter, run_annotate
-from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
+from tests.support.chapter_annotation_helpers import create_run_with_chunks, evidence, persist_chapter_annotation
 
 
-def _coverage(chunk_id: int) -> dict:
-    """2026-08-07 用于构造 Workflow 测试全领域 coverage"""
-    return {
-        "chunk_id": chunk_id,
-        "entities": True,
-        "character_observations": True,
-        "location_observations": True,
-        "dialogues": True,
-        "events": True,
-        "relations": True,
-        "states": True,
-        "foreshadowings": True,
-    }
-
-
-def _finish(chapter_id: int, chunk_id: int, *, create_case: bool) -> ChapterFinish:
-    """2026-08-07 用于构造指定章节的新合同完整 finish"""
-    dialogues = []
+def _annotation(
+    *,
+    chapter_id: int,
+    chunk_id: int,
+    chunk_text: str,
+    create_case: bool,
+) -> BoundChapterAnnotation:
+    """2026-08-07 用于构造指定章节的新合同完整标注"""
+    dialogues: list[BoundDialogue] = []
     if create_case:
-        dialogues.append(
-            {
-                "ref": "dialogue_1",
-                "confidence": "high",
-                "evidence": [{"reason": "住手出现", "chunk_id": chunk_id}],
-                "content": "住手",
-                "start": 1,
-                "end": 3,
-                "speaker_ref": None,
-                "speaker_existing_entity_id": None,
-                "tone": None,
-                "is_inner_monologue": False,
-            }
+        candidate = next(
+            item
+            for item in extract_dialogue_candidates(chunk_id, chunk_text)
+            if item.content == "住手"
         )
-    return ChapterFinish.model_validate(
-        {
-            "chapter_summary": f"章节 {chapter_id}",
-            "entities": {
-                "characters": [],
-                "locations": [],
-                "objects": [],
-                "organizations": [],
-            },
-            "chunks": [
-                {
-                    "chunk_id": chunk_id,
-                    "summary": f"chunk {chunk_id}",
-                    "metrics": {
-                        "emotional_valence": "neutral",
-                        "event_type": "铺垫",
-                        "pivot_moment": False,
-                        "cliffhanger": False,
-                    },
-                    "character_observations": [],
-                    "location_observations": [],
-                    "dialogues": dialogues,
-                    "events": [],
-                    "relations": [],
-                    "states": [],
-                    "foreshadowings": [],
-                }
-            ],
-            "coverage": [_coverage(chunk_id)],
-        }
+        dialogues.append(
+            BoundDialogue(
+                candidate_key=candidate.candidate_key,
+                content=candidate.content,
+                start=candidate.start,
+                end=candidate.end,
+                description="住手出现",
+                speaker=None,
+                tone=None,
+                is_inner_monologue=False,
+                confidence="high",
+                reason="住手出现",
+                evidence=evidence("住手出现", chunk_id),
+            )
+        )
+    return BoundChapterAnnotation(
+        chapter_summary=f"章节 {chapter_id}",
+        chunks=[
+            BoundChunkAnnotation(
+                chunk_id=chunk_id,
+                metrics=ChunkMetricsInput(
+                    summary=f"chunk {chunk_id}",
+                    emotional_valence="neutral",
+                    narrative_function="铺垫",
+                    confidence="high",
+                    reason="摘要",
+                ),
+                entities=BoundEntityDirectory(),
+                character_observations=[],
+                dialogues=dialogues,
+                events=[],
+                relations=[],
+                states=[],
+                foreshadowings=[],
+            )
+        ],
+    )
+
+
+def _pending_case(
+    *,
+    chunk_id: int,
+    chunk_text: str,
+    chapter_id: int,
+) -> PendingCase:
+    """2026-08-07 用于构造绑定 chapter 对话的系统自动案例"""
+    candidate = next(
+        item
+        for item in extract_dialogue_candidates(chunk_id, chunk_text)
+        if item.content == "住手"
+    )
+    return PendingCase(
+        type="dialogue_speaker",
+        chunk_id=chunk_id,
+        keys=["住手", "说话人"],
+        description="该句住手由谁说出",
+        target_key=f"target-{chapter_id}",
+        target_ref={
+            "kind": "dialogue",
+            "candidate_key": candidate.candidate_key,
+            "chunk_id": chunk_id,
+            "start": candidate.start,
+            "end": candidate.end,
+            "text": candidate.content,
+        },
+        evidence=evidence("住手出现", chunk_id),
     )
 
 
@@ -91,53 +115,31 @@ def _agent_result(
     run_id: str,
     chapter_id: int,
     chunk_id: int,
+    chunk_text: str,
     create_case: bool = False,
 ) -> AgentRunResult:
     """2026-08-07 用于构造 Workflow 串行测试的 Agent 成功结果"""
-    finish = _finish(chapter_id, chunk_id, create_case=create_case)
-    pushed_cases = (
-        [
-            PushedCase(
-                description="该句住手由谁说出",
-                keys=["住手", "说话人"],
-                type="dialogue_speaker",
-                chunkid=chunk_id,
-                target_key=f"target-{chapter_id}",
-                target_anchor={
-                    "chunk_id": chunk_id,
-                    "start": 1,
-                    "end": 3,
-                    "text": "住手",
-                },
-                target_ref={
-                    "kind": "dialogue",
-                    "item_ref": "dialogue_1",
-                    "chunk_id": chunk_id,
-                    "start": 1,
-                    "end": 3,
-                    "text": "住手",
-                },
-            )
-        ]
-        if create_case
-        else []
+    annotation = _annotation(
+        chapter_id=chapter_id,
+        chunk_id=chunk_id,
+        chunk_text=chunk_text,
+        create_case=create_case,
     )
     return AgentRunResult(
         run_id=run_id,
         chapter_id=chapter_id,
-        finish=finish,
-        pulled_results=[],
-        pushed_cases=pushed_cases,
+        annotation=annotation,
+        resolved_cases=[],
+        pending_cases=(
+            [_pending_case(chunk_id=chunk_id, chunk_text=chunk_text, chapter_id=chapter_id)]
+            if create_case
+            else []
+        ),
         audit=AgentRunAudit(
             allow_future_context=False,
-            initial_finish=finish,
-            revision_payloads=[],
-            initial_case_candidate_ids=[],
+            write_revisions=[],
             rotation_case_ids=[],
             authorized_text_chunk_ids=[chunk_id],
-            visible_graph_fact_refs=[],
-            visible_graph_entity_ids=[],
-            visible_graph_relation_ids=[],
             success=SuccessAudit(
                 attempt_number=1,
                 messages=[],
@@ -177,6 +179,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
         """2026-08-07 用于在第二章启动时读取第一章已提交案例"""
         chapter_id = kwargs["chapter_id"]
         calls.append(chapter_id)
+        chunk_text = kwargs["current_chunks"][0][1]
         if chapter_id == 2:
             read_session = kwargs["session_factory"]()
             try:
@@ -185,7 +188,10 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
                     "住手",
                     hidden_case_ids=set(),
                 )
-                assert [item.result_kind for item in search_result.results] == ["case"]
+                assert all(
+                    isinstance(item, CaseSearchResult) for item in search_result.results
+                )
+                assert search_result.results[0].description == "该句住手由谁说出"
             finally:
                 read_session.rollback()
                 read_session.close()
@@ -193,6 +199,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
             run_id=run_id,
             chapter_id=chapter_id,
             chunk_id=chapter_id - 1,
+            chunk_text=chunk_text,
             create_case=chapter_id == 1,
         )
 
@@ -212,7 +219,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
 
 @pytest.mark.asyncio
 async def test_run_annotate_skips_existing_chapter_completion(db_session) -> None:
-    """2026-08-07 用于验证正式 ChapterFinish 存在时直接回读并跳过 Agent"""
+    """2026-08-07 用于验证正式标注存在时直接回读并跳过 Agent"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["第一章", "第二章"],
@@ -225,10 +232,12 @@ async def test_run_annotate_skips_existing_chapter_completion(db_session) -> Non
     async def fake_agent(**kwargs):
         """2026-08-07 用于记录仍需执行的章节"""
         calls.append(kwargs["chapter_id"])
+        chunk_text = kwargs["current_chunks"][0][1]
         return _agent_result(
             run_id=run_id,
             chapter_id=kwargs["chapter_id"],
             chunk_id=1,
+            chunk_text=chunk_text,
         )
 
     with (

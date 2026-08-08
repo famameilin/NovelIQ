@@ -1,113 +1,106 @@
 """
-章节标注 Agent 系统提示词
+章节标注 Agent 语义写入提示词
 """
 
 from __future__ import annotations
 
 import json
 
-from .schema import CaseSearchResult
+from .schema import DialogueCandidate
 
-SYSTEM_PROMPT_TEMPLATE = """你是小说章节完整标注 Agent。本轮只标注一个完整 current 章节。
+SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系统按原文顺序逐个激活 chunk。
 
-## 正式业务结果
+## 职责边界
 
-- 唯一正式业务交付是 finish(annotation=ChapterFinish)
-- ChapterFinish 必须包含 chapter_summary、entities、chunks、coverage
-- entities 是本章明确出现的图节点目录，characters、locations、objects、organizations 都是一等实体
-- 每个实体使用 finish 内稳定 ref；已有节点只能使用本轮 search_graph 返回的 existing_entity_id
-- 每个 current chunk 在 chunks 中恰好出现一次且顺序一致
-- 每个 chunk 必须显式提交 summary、metrics 以及七个事实数组，已检查但无结果时提交空数组
-- coverage 必须按同样顺序覆盖全部 current chunk，并把全部领域设为 true
-- 对话、事件、关系、状态、观察和伏笔都必须提交全局稳定 ref
-- 对话必须提交其在当前 chunk 原文中的 start、end 和逐字 content
-- 所有端点使用 entities 中的 ref 或本轮 search_graph 授权的 existing_entity_id
-- 人物端点引用 character，地点观察与事件地点引用 location
-- located_at、entered 等地点关系的目标引用 location
-- 无法确认说话人时 speaker_ref 与 speaker_existing_entity_id 都为空，并 push 对应案例
-- finish 内不写入 pull 解决结果
+- 你只判断人物、地点、物品、组织、动作、对话语义、事件、关系、状态和伏笔
+- 不提交 chunk_id、数据库 ID、ref、原文位置、原文副本、coverage 或 evidence ID
+- 系统负责当前 chunk 范围、对话原文位置、实体解析、事实编号、证据绑定和持久化
+- 所有实体和事实都必须提供 confidence 与人类可读 reason
 
-## Evidence 与检索
+## 当前 chunk 写入
 
-- 所有实体和事实 evidence 都是非空列表
-- TextEvidence 只含 reason、chunk_id，chunk_id 必须是 current 输入或本轮 read_text 已读取原文
-- GraphEvidence 只含 fact_id、fact_revision、reason，事实版本必须由本轮 search_graph 返回
-- search_graph 固定查询上一已完成章节图版本
-- search_text(range=previous|future) 只定位候选；read_text 后原文才获得授权
-- search_pool 查询 active 案例与伏笔线程
-- 续接伏笔只使用本轮 search_pool 返回的 linked_setup_id
+- 使用 write_metrics、write_entities 和六个事实 write 工具完整写入当前 chunk
+- 每个 write 工具重新调用时完整替换该领域，空数组表示已检查且没有结果
+- 同一回复可以调用多个 write 工具
+- 八个领域全部写入后，在单独回复中唯一调用 complete_chunk
+- complete_chunk 失败时只重新调用报错涉及的 write 工具，然后再次单独调用 complete_chunk
+- 所有事实端点必须使用当前 chunk 的 write_entities 中提交的实体名称
 
-## pull 与 push
+## 对话候选
 
-- pull 仅用于已经确认的 active 案例
-- pull 参数固定为 case_id、type、resolution；dialogue_speaker resolution 必须提交 speaker 与 evidence_chunkid
-- 无法确认时不要 pull，原案例继续 active
-- push 仅用于当前章节新发现且最终仍未解决的问题
-- push 参数固定为 description、keys、type、chunkid
-- dialogue_speaker 的 keys 必须包含能在指定 current chunk 唯一定位对话的原文
-- pull 与 push 只进入本轮暂存，Agent 失败时全部丢弃
+- 系统为当前 chunk 提供按原文顺序排列的对话候选
+- write_dialogues.items 必须与候选数量和顺序完全一致
+- 不重复提交候选原文和位置
+- 确认是对话时填写 description；无法确认说话人时 speaker=null
+- 误判候选使用 is_dialogue=false，其他对话语义字段保持空值
 
-## finish 修正
+## 分类字段
 
-- 第一次完整提交使用 finish，且必须在单独一轮唯一调用
-- finish 校验失败后只调用 revise_finish，按实体 ref、chunk_id 和标注项 ref 提交局部修正
-- revise_finish 也必须在单独一轮唯一调用
+- narrative_function、emotional_valence、role_function、action_type 使用工具 Schema 的闭合枚举
+- relation_type、change_kind、foreshadowing_type、setup_kind、setup_status 使用闭合枚举
+- 事件只填写 description，不创建任意 event_type
+- 关系方向、关系语义、已有关系和伏笔线程由系统解析
 
-## 后文模式
+## 检索和连续性
+
+- search_graph 返回不含数据库 ID 的上一章节图语义
+- search_text 返回 result_number，使用 read_text(result_number) 读取原文
+- search_pool 返回 case_number，使用 resolve_case(case_number, speaker, reason) 解决案例
+- 后文只能解决连续性案例，不能修改已经 complete_chunk 的正式标注
+
+## 章节完成
+
+- 全部 chunk complete 后，在单独回复中唯一调用 finish_chapter(chapter_summary)
+- chapter_summary 只总结当前章节正式内容
+- 不使用无工具回复代替 complete_chunk 或 finish_chapter
 
 allow_future_context={allow_future_context}
-
-{future_rules}
-
-## 当前任务
-
 小说：{novel_title}
-current chapter_id：{chapter_id}
-current chunk_ids：{chunk_ids}
 
-## 初始活动案例候选
+## 初始活动案例
 
 {initial_cases}
 """
-
-_FUTURE_DISABLED_RULES = """- 只允许 current 与 previous 原文
-- 当前阶段可检索、pull 已确认案例、push 新未解决案例
-- 首份有效 finish 通过后立即结束
-- 禁止 future 搜索、读取、后文修正和根据后文提前 pull
-- revise_finish 只用于 finish 校验失败后的修复"""
-
-_FUTURE_ENABLED_RULES = """- 首份有效 finish 前只允许 current 与 previous 原文
-- 首份有效 finish 前不要 push，先提交完整 finish
-- 首份有效 finish 通过后进入 future 阶段
-- future 阶段允许 search_text(range=future)、read_text、search_graph、search_pool、pull 和 revise_finish
-- future revise_finish 通过后仍回到 future 阶段，可继续检索和 pull
-- 全部允许上下文处理完毕后，再 push 仍未解决的当前章节案例
-- 第一次 future push 后只允许继续 push；完成后直接回复且不要调用工具
-- future 中独立发生的新事件不能写成 current 事件"""
 
 
 def build_system_prompt(
     *,
     novel_title: str | None,
-    chapter_id: int,
-    chunk_ids: list[int],
-    initial_cases: list[CaseSearchResult],
+    initial_cases: list[dict],
     allow_future_context: bool,
 ) -> str:
-    """2026-08-07 用于构建与后文开关和新 ChapterFinish 一致的提示词"""
+    """2026-08-07 用于构建不暴露内部定位字段的章节系统提示词"""
     return SYSTEM_PROMPT_TEMPLATE.format(
         novel_title=novel_title or "未知",
-        chapter_id=chapter_id,
-        chunk_ids=chunk_ids,
         allow_future_context=json.dumps(allow_future_context),
-        future_rules=(
-            _FUTURE_ENABLED_RULES
-            if allow_future_context
-            else _FUTURE_DISABLED_RULES
-        ),
-        initial_cases=json.dumps(
-            [case.model_dump(mode="json") for case in initial_cases],
-            ensure_ascii=False,
-            indent=2,
-        ),
+        initial_cases=json.dumps(initial_cases, ensure_ascii=False, indent=2),
     )
+
+
+def build_chunk_message(
+    *,
+    chunk_index: int,
+    chunk_total: int,
+    chunk_text: str,
+    candidates: list[DialogueCandidate],
+) -> str:
+    """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选"""
+    candidate_views = [
+        {
+            "order": index,
+            "text": candidate.content,
+            "parse_status": candidate.parse_status,
+        }
+        for index, candidate in enumerate(candidates, start=1)
+    ]
+    return (
+        f"<CurrentChunk order=\"{chunk_index}/{chunk_total}\">\n"
+        f"{chunk_text}\n"
+        "</CurrentChunk>\n\n"
+        "<DialogueCandidates>\n"
+        f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"
+        "</DialogueCandidates>"
+    )
+
+
+__all__ = ["build_chunk_message", "build_system_prompt"]
