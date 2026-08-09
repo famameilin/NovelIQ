@@ -8,16 +8,14 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.agents.stream import AgentStream
 from src.agents.usage import extract_agent_token_usage
-from src.config import settings
 
 from .errors import (
     AnnotationAgentError,
@@ -36,6 +34,9 @@ from .schema import (
     TokenUsageRecord,
 )
 from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
+
+if TYPE_CHECKING:
+    from src.agents.stream import AgentStream
 
 
 class AnnotationAgentRunError(AnnotationRetryableError):
@@ -167,6 +168,8 @@ def _close_read_session(session: Session) -> None:
 
 def _retry_backoff_seconds(attempt_index: int) -> float:
     """2026-08-05 用于读取三次章节尝试之间固定的退避时间"""
+    from src.config import settings
+
     del attempt_index
     return max(0.0, settings.models.annotation.retry_backoff_ms / 1000.0)
 
@@ -184,6 +187,8 @@ async def _run_single_attempt(
     stream: AgentStream | None = None,
 ) -> AgentRunResult:
     """2026-08-07 用于以全新账本执行一次逐 chunk 章节 Agent 尝试"""
+    from src.config import settings
+
     started_at = time.perf_counter()
     _set_session_read_only(session)
     query_service = query_service_factory(session)
@@ -288,6 +293,8 @@ async def run_annotation_agent(
     stream: AgentStream | None = None,
 ) -> AgentRunResult:
     """2026-08-07 用于按同一模型最多三次运行逐 chunk 章节 Agent"""
+    from src.config import settings
+
     _validate_chapter_identity(
         chapter_id=chapter_id,
         current_chunks=current_chunks,
