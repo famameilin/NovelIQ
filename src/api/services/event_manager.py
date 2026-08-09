@@ -35,8 +35,10 @@ class EventManager:
         if task_id not in self._connections:
             self._connections[task_id] = []
             self._locks[task_id] = asyncio.Lock()
-            self._buffers[task_id] = deque(maxlen=self._buffer_size)
             self._start_cleanup_task()
+        # 缓冲可能已在 send() 阶段创建（连接建立前的事件），此处只补建不覆盖
+        if task_id not in self._buffers:
+            self._buffers[task_id] = deque(maxlen=self._buffer_size)
 
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._connections[task_id].append(queue)
@@ -65,19 +67,18 @@ class EventManager:
                 await self.disconnect_all(task_id)
 
     async def disconnect(self, task_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
-        """断开指定的 SSE 连接（只移除自己的 Queue）"""
+        """断开指定的 SSE 连接（只移除自己的 Queue，保留消息缓冲供重连回放）"""
         if task_id in self._connections:
             try:
                 self._connections[task_id].remove(queue)
             except ValueError:
                 pass
-            # 如果该 task_id 已无任何连接，清理全部资源
+            # 如果该 task_id 已无任何连接，清理连接级资源；
+            # 消息缓冲保留给晚到/重连的客户端回放，由 idle cleanup 统一回收
             if not self._connections[task_id]:
                 del self._connections[task_id]
                 del self._locks[task_id]
                 del self._last_activity[task_id]
-                if task_id in self._buffers:
-                    del self._buffers[task_id]
 
     async def disconnect_all(self, task_id: str) -> None:
         """断开 task_id 的所有 SSE 连接"""
@@ -91,19 +92,17 @@ class EventManager:
             del self._buffers[task_id]
 
     async def send(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
-        """发送消息到该 task_id 的所有 SSE 连接，并写入缓冲"""
-        if task_id not in self._connections:
-            return
-
+        """发送消息到该 task_id 的所有 SSE 连接，并写入缓冲（无连接也缓冲）"""
         self._last_activity[task_id] = time.monotonic()
         message: dict[str, Any] = {"type": event_type, "data": data}
 
-        # 写入环形缓冲
-        if task_id in self._buffers:
-            self._buffers[task_id].append(message)
+        # 写入环形缓冲：连接建立前 / 断线重连窗口期的事件也不丢失，
+        # late-joiner 通过 connect() 回放
+        buffer = self._buffers.setdefault(task_id, deque(maxlen=self._buffer_size))
+        buffer.append(message)
 
         # 推送到所有活跃连接
-        for queue in self._connections[task_id]:
+        for queue in self._connections.get(task_id, []):
             await queue.put(message)
 
     async def shutdown(self) -> None:
