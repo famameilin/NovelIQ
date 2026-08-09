@@ -57,39 +57,38 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                     reason="进入",
                 ),
                 entities=BoundEntityDirectory(
-                    characters=[
+                    entities=[
                         BoundEntity(
                             name="顾霜",
+                            entity_type="character",
                             confidence="high",
                             reason="人物出现",
                             evidence=evidence("顾霜出现", 0),
-                        )
-                    ],
-                    locations=[
+                        ),
                         BoundEntity(
                             name="山门",
+                            entity_type="location",
                             description="青石山门",
                             confidence="high",
                             reason="地点出现",
                             evidence=evidence("山门出现", 0),
-                        )
-                    ],
-                    objects=[
+                        ),
                         BoundEntity(
                             name="玄剑",
+                            entity_type="item",
+                            tags=["宝剑"],
                             confidence="high",
                             reason="物品出现",
                             evidence=evidence("玄剑出现", 0),
-                        )
-                    ],
-                    organizations=[
+                        ),
                         BoundEntity(
                             name="天衡宗",
+                            entity_type="organization",
                             confidence="high",
                             reason="组织出现",
                             evidence=evidence("天衡宗出现", 0),
-                        )
-                    ],
+                        ),
+                    ]
                 ),
                 character_observations=[
                     BoundCharacterObservation(
@@ -134,7 +133,7 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                     BoundRelation(
                         from_entity="顾霜",
                         to_entity="山门",
-                        relation_type="located_at",
+                        relation_type="位于",
                         change_kind="assert",
                         confidence="high",
                         reason="顾霜位于山门",
@@ -240,11 +239,13 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     assert {entity.entity_type for entity in entities} == {
         "character",
         "location",
-        "object",
+        "item",
         "organization",
     }
     location = next(entity for entity in entities if entity.entity_type == "location")
     assert location.attributes["description"] == "青石山门"
+    sword = next(entity for entity in entities if entity.entity_type == "item")
+    assert sword.tags == ["宝剑"]
     assert {fact.content["kind"] for fact in facts} == {
         "character_observation",
         "dialogue",
@@ -373,6 +374,139 @@ def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -
     assert entities[0].last_seen_chunk == 1
 
 
+def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
+    """2026-08-08 用于验证同一名称跨章变更大类按身份复用报错而非静默合并"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["赤羽炽尾鸡昂首踱步。", "赤羽炽尾鸡张开双翼"],
+        chapter_ids=[1, 2],
+        title="身份复用拒绝",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[
+            character_fact(chunk_id=0, name="赤羽炽尾鸡", action="踱步")
+        ],
+    )
+    item_fact = {
+        "chunk_id": 1,
+        "entity": "赤羽炽尾鸡",
+        "predicate": "possesses",
+        "value": "灵火",
+        "confidence": "high",
+        "reason": "持有灵火",
+        "_entity_specs": [{"name": "赤羽炽尾鸡", "entity_type": "item"}],
+    }
+    with pytest.raises(ValueError, match="实体名称已属于其他大类"):
+        persist_chapter_annotation(
+            db_session,
+            run_id=run_id,
+            chapter_id=2,
+            states=[item_fact],
+        )
+
+
+def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
+    """2026-08-08 用于验证器物与寄宿灵体使用区分性名称并存为两个节点"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["玄剑悬于墙上。", "剑灵在玄剑中开口"],
+        chapter_ids=[1, 2],
+        title="剑灵拆分",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        states=[
+            {
+                "chunk_id": 0,
+                "entity": "玄剑",
+                "predicate": "status",
+                "value": "active",
+                "confidence": "high",
+                "reason": "状态",
+                "_entity_specs": [
+                    {"name": "玄剑", "entity_type": "item", "tags": ["法宝"]}
+                ],
+            }
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        states=[
+            {
+                "chunk_id": 1,
+                "entity": "剑灵",
+                "predicate": "resides_in",
+                "object": "玄剑",
+                "confidence": "high",
+                "reason": "寄宿于玄剑",
+                "_entity_specs": [
+                    {"name": "剑灵", "entity_type": "character"},
+                    {"name": "玄剑", "entity_type": "item"},
+                ],
+            }
+        ],
+    )
+    db_session.commit()
+
+    entities = list(
+        db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalars()
+    )
+    assert {entity.canonical_name for entity in entities} == {"玄剑", "剑灵"}
+    assert {entity.entity_type for entity in entities} == {"item", "character"}
+
+
+def test_entity_tags_merged_and_deduplicated_across_chapters(db_session) -> None:
+    """2026-08-08 用于验证实体标签跨章合并且去重"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
+        chapter_ids=[1, 2],
+        title="标签合并",
+    )
+    for chapter_id, chunk_id in ((1, 0), (2, 1)):
+        persist_chapter_annotation(
+            db_session,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            states=[
+                {
+                    "chunk_id": chunk_id,
+                    "entity": "玄剑",
+                    "predicate": "status",
+                    "value": "active",
+                    "confidence": "high",
+                    "reason": "状态",
+                    "_entity_specs": [
+                        {
+                            "name": "玄剑",
+                            "entity_type": "item",
+                            "tags": ["宝剑"],
+                        }
+                    ],
+                }
+            ],
+        )
+    db_session.commit()
+
+    entities = list(
+        db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalars()
+    )
+    assert len(entities) == 1
+    assert entities[0].entity_type == "item"
+    assert entities[0].tags == ["宝剑"]
+
+
 def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
     """2026-08-07 用于验证事实端点未在实体目录声明时直接失败"""
     text = "顾霜在山门修炼，“住手”回荡。"
@@ -382,7 +516,7 @@ def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
         title="未解析端点",
     )
     annotation = _full_annotation(text)
-    annotation.chunks[0].entities.characters[0].name = "无名客"
+    annotation.chunks[0].entities.entities[0].name = "无名客"
     with pytest.raises(ValueError, match="事实端点实体未被系统解析"):
         _persist(db_session, run_id=run_id, annotation=annotation)
 

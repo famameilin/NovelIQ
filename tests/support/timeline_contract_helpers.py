@@ -151,7 +151,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 from_name=hero_name,
                 to_name=organization_name,
                 to_entity_type="organization",
-                relation_type="belongs_to",
+                relation_type="隶属",
                 evidence_reason="顾承渊受天衡宗招揽",
                 chapter_id=3,
             ),
