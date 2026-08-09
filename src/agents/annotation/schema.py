@@ -86,33 +86,19 @@ class RelationChangeKind(StrEnum):
 
 
 class RelationType(StrEnum):
-    """2026-08-07 用于提供唯一闭合关系类型注册表"""
+    """2026-08-09 用于提供唯一闭合关系类型注册表（精简中文词表）"""
 
     FAMILY = "家族"
     MASTER_DISCIPLE = "师徒"
+    MASTER_SERVANT = "主从"
     HOSTILE = "敌对"
     ALLY = "盟友"
     FRIENDSHIP = "友情"
     AFFECTION = "爱慕"
-    MASTER_SERVANT = "主从"
     INTEREST = "利益"
     SAME_CHARACTER = "同一人物"
-    BELONGS_TO = "belongs_to"
-    MEMBER_OF = "member_of"
-    LEADER_OF = "leader_of"
-    AFFILIATED_WITH = "affiliated_with"
-    FATHER_OF = "father_of"
-    SON_OF = "son_of"
-    PARENT_OF = "parent_of"
-    CHILD_OF = "child_of"
-    SIBLING_OF = "sibling_of"
-    SPOUSE_OF = "spouse_of"
-    LOCATED_AT = "located_at"
-    ENTERED = "entered"
-    ARRIVED_AT = "arrived_at"
-    INSIDE = "inside"
-    LEFT = "left"
-    DEPARTED_FROM = "departed_from"
+    SUBORDINATION = "隶属"
+    LOCATED = "位于"
 
 
 class ForeshadowingType(StrEnum):
@@ -154,25 +140,19 @@ class PayoffLikelihood(StrEnum):
     MEDIUM = "medium"
 
 
-EntityType = Literal["character", "location", "object", "organization"]
+EntityType = Literal["character", "location", "item", "organization"]
 Directionality = Literal["directed", "bidirectional"]
 RelationSemantics = Literal["ordinary", "same_character"]
 CaseType = Literal["dialogue_speaker"]
 CaseState = Literal["active", "resolved"]
 DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 
-_ALL_ENTITY_TYPES: tuple[EntityType, ...] = (
-    "character",
-    "location",
-    "object",
-    "organization",
-)
 _ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = ("character", "organization")
 _CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = ("character",)
 _LOCATION_ENTITY_TYPES: tuple[EntityType, ...] = ("location",)
 _MOBILE_ENTITY_TYPES: tuple[EntityType, ...] = (
     "character",
-    "object",
+    "item",
     "organization",
 )
 
@@ -194,6 +174,12 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
         "to_types": _CHARACTER_ENTITY_TYPES,
     },
     "师徒": {
+        "directionality": "directed",
+        "semantics": "ordinary",
+        "from_types": _CHARACTER_ENTITY_TYPES,
+        "to_types": _CHARACTER_ENTITY_TYPES,
+    },
+    "主从": {
         "directionality": "directed",
         "semantics": "ordinary",
         "from_types": _CHARACTER_ENTITY_TYPES,
@@ -223,12 +209,6 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
         "from_types": _CHARACTER_ENTITY_TYPES,
         "to_types": _CHARACTER_ENTITY_TYPES,
     },
-    "主从": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
     "利益": {
         "directionality": "directed",
         "semantics": "ordinary",
@@ -241,97 +221,13 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
         "from_types": _CHARACTER_ENTITY_TYPES,
         "to_types": _CHARACTER_ENTITY_TYPES,
     },
-    "belongs_to": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _ALL_ENTITY_TYPES,
-        "to_types": _ALL_ENTITY_TYPES,
-    },
-    "member_of": {
+    "隶属": {
         "directionality": "directed",
         "semantics": "ordinary",
         "from_types": _ACTOR_ENTITY_TYPES,
         "to_types": ("organization",),
     },
-    "leader_of": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": ("organization",),
-    },
-    "affiliated_with": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _ACTOR_ENTITY_TYPES,
-        "to_types": ("organization",),
-    },
-    "father_of": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
-    "son_of": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
-    "parent_of": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
-    "child_of": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
-    "sibling_of": {
-        "directionality": "bidirectional",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
-    "spouse_of": {
-        "directionality": "bidirectional",
-        "semantics": "ordinary",
-        "from_types": _CHARACTER_ENTITY_TYPES,
-        "to_types": _CHARACTER_ENTITY_TYPES,
-    },
-    "located_at": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _MOBILE_ENTITY_TYPES,
-        "to_types": _LOCATION_ENTITY_TYPES,
-    },
-    "entered": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _MOBILE_ENTITY_TYPES,
-        "to_types": _LOCATION_ENTITY_TYPES,
-    },
-    "arrived_at": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _MOBILE_ENTITY_TYPES,
-        "to_types": _LOCATION_ENTITY_TYPES,
-    },
-    "inside": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _ALL_ENTITY_TYPES,
-        "to_types": _LOCATION_ENTITY_TYPES,
-    },
-    "left": {
-        "directionality": "directed",
-        "semantics": "ordinary",
-        "from_types": _MOBILE_ENTITY_TYPES,
-        "to_types": _LOCATION_ENTITY_TYPES,
-    },
-    "departed_from": {
+    "位于": {
         "directionality": "directed",
         "semantics": "ordinary",
         "from_types": _MOBILE_ENTITY_TYPES,
@@ -414,15 +310,27 @@ class SemanticItem(StrictModel):
 
 
 class EntityInput(SemanticItem):
-    """2026-08-07 用于提交当前 chunk 明确出现的实体"""
+    """2026-08-08 用于提交当前 chunk 明确出现的实体"""
 
     name: str = Field(min_length=1)
+    entity_type: EntityType
+    tags: list[str] = Field(default_factory=list)
     description: str | None = None
 
     @model_validator(mode="after")
     def normalize_entity(self) -> EntityInput:
-        """2026-08-07 用于规范化实体名称和可选描述"""
+        """2026-08-08 用于规范化实体名称、可选描述和自由标签"""
         self.name = normalize_semantic_text(self.name, label="entity.name")
+        normalized_tags: list[str] = []
+        for tag in self.tags:
+            cleaned = unicodedata.normalize("NFC", tag).strip()
+            if cleaned and cleaned not in normalized_tags:
+                normalized_tags.append(cleaned)
+        if len(normalized_tags) > 3:
+            raise ValueError("entity.tags 最多 3 个标签")
+        if any(len(tag) > 3 for tag in normalized_tags):
+            raise ValueError("entity.tags 每个标签最多 3 个字")
+        self.tags = normalized_tags
         if self.description is not None:
             self.description = normalize_semantic_text(
                 self.description,
@@ -432,12 +340,9 @@ class EntityInput(SemanticItem):
 
 
 class EntityDirectoryInput(StrictModel):
-    """2026-08-07 用于按实体大类提交当前 chunk 出现目录"""
+    """2026-08-08 用于提交当前 chunk 出现的全部实体（单列表）"""
 
-    characters: list[EntityInput] = Field(default_factory=list)
-    locations: list[EntityInput] = Field(default_factory=list)
-    objects: list[EntityInput] = Field(default_factory=list)
-    organizations: list[EntityInput] = Field(default_factory=list)
+    entities: list[EntityInput] = Field(default_factory=list)
 
 
 class ChunkMetricsInput(SemanticItem):
@@ -642,20 +547,19 @@ class DialogueCandidate(StrictModel):
 
 
 class BoundEntity(SemanticItem):
-    """2026-08-07 用于系统绑定当前 chunk 实体出现及文本依据"""
+    """2026-08-08 用于系统绑定当前 chunk 实体出现及文本依据"""
 
     name: str
+    entity_type: EntityType
+    tags: list[str] = Field(default_factory=list)
     description: str | None = None
     evidence: EvidenceList
 
 
 class BoundEntityDirectory(StrictModel):
-    """2026-08-07 用于保存当前 chunk 四类实体出现"""
+    """2026-08-08 用于保存当前 chunk 实体出现（单列表）"""
 
-    characters: list[BoundEntity] = Field(default_factory=list)
-    locations: list[BoundEntity] = Field(default_factory=list)
-    objects: list[BoundEntity] = Field(default_factory=list)
-    organizations: list[BoundEntity] = Field(default_factory=list)
+    entities: list[BoundEntity] = Field(default_factory=list)
 
 
 class BoundCharacterObservation(CharacterObservationInput):
