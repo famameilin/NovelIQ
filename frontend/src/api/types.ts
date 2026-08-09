@@ -225,7 +225,8 @@ export interface ForeshadowingThread {
 export interface GraphNode {
   entity_id: number;
   name: string;
-  entity_type: "character" | "location" | "object" | "organization";
+  entity_type: "character" | "location" | "item" | "organization";
+  tags?: string[] | null;
   first_seen_chunk: number;
   last_seen_chunk: number;
   state_revision: number;
