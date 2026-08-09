@@ -50,7 +50,7 @@ class EmbeddingClient:
 
         self._api_key = api_key if api_key is not None else semantic_config.api_key
         if not self._api_key:
-            raise ValueError("EMBEDDING_MODEL.api_key 不能为空")
+            raise ValueError("EMBEDDING_MODEL_KEY 不能为空")
         if self._embedding_dim <= 0:
             raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")
         if self._batch_size <= 0:

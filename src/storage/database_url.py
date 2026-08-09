@@ -33,7 +33,7 @@ def resolve_database_url_from_env(
     required: bool = True,
 ) -> str | None:
     """
-    2026-08-03 用于从数据库 JSON 对象生成完整 SQLAlchemy URL
+    2026-08-08 用于从数据库平铺变量生成完整 SQLAlchemy URL
     """
 
     database_environment = load_database_environment(env_var_name, required=required)
@@ -43,12 +43,12 @@ def resolve_database_url_from_env(
     try:
         url = make_url(database_environment.url)
     except Exception as exc:
-        raise ValueError(f"{env_var_name}.url 不是有效数据库 URL") from exc
+        raise ValueError(f"{env_var_name}_URL 不是有效数据库 URL") from exc
 
     if url.username is not None or url.password is not None:
         raise ValueError(
-            f"{env_var_name}.url 不允许包含账号密码，请使用 "
-            f"{env_var_name}.username 和 {env_var_name}.password"
+            f"{env_var_name}_URL 不允许包含账号密码，请使用 "
+            f"{env_var_name}_USERNAME 和 {env_var_name}_PASSWORD"
         )
 
     return url.set(

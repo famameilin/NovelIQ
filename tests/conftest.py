@@ -188,27 +188,31 @@ def force_test_database_url(
     创建时间: 2026-04-20
     任务: fix-test-db-isolation
     说明:
-    - 把 DATABASE 固定为 TEST_DATABASE 的完整 JSON 对象
+    - 把 DATABASE_* 固定为 TEST_DATABASE_* 的平铺变量
     - 把 DATABASE_SCHEMA 固定指向当前 pytest 进程独立 schema
     - 覆盖所有直接调用 get_session_factory()() / get_engine() 的路径
     - 会话结束后恢复原始环境变量，避免影响开发命令
     """
-    original_database = os.environ.get("DATABASE")
-    test_database_config = os.environ.get("TEST_DATABASE")
-    if test_database_config is None or not test_database_config.strip():
-        raise ValueError("TEST_DATABASE 环境变量未设置")
+    database_fields = ("DATABASE_URL", "DATABASE_USERNAME", "DATABASE_PASSWORD")
+    test_database_fields = ("TEST_DATABASE_URL", "TEST_DATABASE_USERNAME", "TEST_DATABASE_PASSWORD")
+    original_database = {field: os.environ.get(field) for field in database_fields}
+    for database_field, test_database_field in zip(database_fields, test_database_fields, strict=True):
+        test_database_value = os.environ.get(test_database_field)
+        if test_database_value is None or not test_database_value.strip():
+            raise ValueError(f"{test_database_field} 环境变量未设置")
+        os.environ[database_field] = test_database_value
     original_schema = os.environ.get("DATABASE_SCHEMA")
-    os.environ["DATABASE"] = test_database_config
     os.environ["DATABASE_SCHEMA"] = test_database_schema
     _reset_backend_db_singletons()
 
     try:
         yield
     finally:
-        if original_database is not None:
-            os.environ["DATABASE"] = original_database
-        elif "DATABASE" in os.environ:
-            del os.environ["DATABASE"]
+        for database_field, original_value in original_database.items():
+            if original_value is not None:
+                os.environ[database_field] = original_value
+            else:
+                os.environ.pop(database_field, None)
 
         if original_schema is not None:
             os.environ["DATABASE_SCHEMA"] = original_schema

@@ -100,7 +100,10 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
     ):
         module.create_tables()
 
-    assert os.environ["DATABASE"] == module.TEST_DATABASE_CONFIG
+    assert os.environ["DATABASE_URL"] == os.environ["TEST_DATABASE_URL"]
+    assert os.environ["DATABASE_USERNAME"] == os.environ["TEST_DATABASE_USERNAME"]
+    assert os.environ["DATABASE_PASSWORD"] == os.environ["TEST_DATABASE_PASSWORD"]
+    assert "DATABASE" not in os.environ
     assert call_order == ["dispose", "init", "dispose"]
     assert mock_dispose_engine.call_count == 2
     mock_init_db.assert_called_once_with()
