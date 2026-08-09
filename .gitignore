@@ -68,6 +68,9 @@ logs/
 # Uploads - 用户上传的文件
 data/uploads/
 
+# Novels - 本地样例小说（不入库）
+data/novel/
+
 # Outputs - 分析输出结果
 outputs/
 
