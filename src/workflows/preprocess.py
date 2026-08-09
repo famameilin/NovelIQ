@@ -37,23 +37,16 @@ async def run_preprocess(
     run_id: str,
     session: Session,
     metadata_path: Path | None = None,
-    max_chars: int = 2000,
-    overlap: int = 200,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, float]:
     """
     执行预处理流程
-
-
-
 
     Args:
         source_path: 源文件路径
         run_id: 运行ID
         session: 数据库连接
         metadata_path: 元数据路径
-        max_chars: 最大字符数
-        overlap: 重叠字符数
 
     Returns:
         Tuple[int, int, float]: (总块数, 总字符数, 耗时)
@@ -89,8 +82,6 @@ async def run_preprocess(
 
     all_chunks = await chunk_documents(
         normalized_texts,
-        max_chars=settings.chunking.max_chars,
-        start_chars=settings.chunking.start_chars,
         emitter=emitter,
     )
 

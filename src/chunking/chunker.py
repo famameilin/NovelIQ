@@ -14,6 +14,8 @@ import re
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
+from loguru import logger
+
 from src.api.models.events import StreamEvent
 from src.config import CHAPTER_PATTERN
 
@@ -82,6 +84,10 @@ def _split_by_chapters_with_offsets(text: str) -> list[tuple[str | None, str, in
             chapter_text = text[last_end : match.start()]
             if chapter_text.strip():
                 chapters.append((last_title, chapter_text, last_end, match.start()))
+            elif last_title is not None:
+                logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
+        elif last_title is not None:
+            logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
         last_title = match.group(0).strip()
         last_end = match.end()
 
@@ -89,6 +95,10 @@ def _split_by_chapters_with_offsets(text: str) -> list[tuple[str | None, str, in
         chapter_text = text[last_end:]
         if chapter_text.strip():
             chapters.append((last_title, chapter_text, last_end, len(text)))
+        elif last_title is not None:
+            logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
+    elif last_title is not None:
+        logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
 
     if chapters:
         return chapters
@@ -122,23 +132,17 @@ def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
 
 async def chunk_text(
     text: str,
-    max_chars: int = 2000,
-    start_chars: int = 4000,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """
     将文本分割成块（async 版本）
 
     分章策略：
-    - 优先按原始章节分割：每个章节为一个 chunk（保留 chapter_title）
-    - 章节文本不超过 start_chars 时整章保留为一个 chunk
-    - 超过 start_chars 时按 max_chars 在段落/句子边界切分为子块（保留章节归属，无重叠）
+    - 优先按原始章节分割：每个章节为一个 chunk（保留 chapter_title/chapter_index，无论多长不再切）
     - 无法捕捉原始章节时，回退到固定字数段落分割（_chunk_simple）
 
     Args:
         text: 输入文本
-        max_chars: 超过 start_chars 后每个子块的最大字符数
-        start_chars: 章节文本超过该长度才切分子块
 
     Returns:
         Chunk对象列表
@@ -148,18 +152,20 @@ async def chunk_text(
 
     chapters = _split_by_chapters_with_offsets(text)
     if _chapters_detected(chapters):
-        return _chunk_by_chapters(text, chapters, max_chars, start_chars)
+        return _chunk_by_chapters(text, chapters)
 
-    return _chunk_simple(text, max_chars, start_chars)
+    return _chunk_simple(text)
 
 
-def _chunk_simple(text: str, max_chars: int, start_chars: int) -> list[Chunk]:
+def _chunk_simple(text: str, max_chars: int = 2000) -> list[Chunk]:
     """
     固定字数段落分割（章节不可用时回退策略）
 
+    文本不超过 max_chars 时整段一个 chunk；超过时在段落/句子边界按 max_chars 切分，无重叠。
+
     生成的 `Chunk.start/end` 为最终保留文本的真实全文范围
     """
-    if len(text) <= start_chars:
+    if len(text) <= max_chars:
         span = _resolve_trimmed_span(text, 0, len(text))
         if span is None:
             return []
@@ -213,69 +219,33 @@ def _chunk_simple(text: str, max_chars: int, start_chars: int) -> list[Chunk]:
 def _chunk_by_chapters(
     text: str,
     chapters: list[tuple[str | None, str, int, int]],
-    max_chars: int,
-    start_chars: int,
 ) -> list[Chunk]:
     """
     按章节分块
 
-    每个章节为一个 chunk（保留 chapter_title）；章节超长时按固定字数
-    段落边界切分为子块，子块同样保留章节归属。
+    每个章节为一个 chunk（保留 chapter_title），不再按字数切分章节。
     章节内局部切片写回 Chunk 时统一折算为整本全文的真实 offset
     """
-    chunks = []
-    idx = 0
+    chunks: list[Chunk] = []
 
     for chapter_index, (chapter_title, chapter_text, chapter_start_offset, _) in enumerate(chapters, start=1):
         if not chapter_text.strip():
             continue
 
-        if len(chapter_text) <= start_chars:
-            span = _resolve_trimmed_span(chapter_text, 0, len(chapter_text))
-            if span is None:
-                continue
-            local_start, local_end, chunk_text_content = span
-            chunks.append(
-                Chunk(
-                    index=idx,
-                    text=chunk_text_content,
-                    start=chapter_start_offset + local_start,
-                    end=chapter_start_offset + local_end,
-                    chapter_title=chapter_title,
-                    chapter_index=chapter_index,
-                )
-            )
-            idx += 1
+        span = _resolve_trimmed_span(chapter_text, 0, len(chapter_text))
+        if span is None:
             continue
-
-        start = 0
-        while start < len(chapter_text):
-            end = start + max_chars
-            if end < len(chapter_text):
-                paragraph_end = chapter_text.rfind("\n\n", start, end)
-                if paragraph_end > start + max_chars * 0.5:
-                    end = paragraph_end
-                else:
-                    sentence_end = chapter_text.rfind("。", start, end)
-                    if sentence_end > start + max_chars * 0.5:
-                        end = sentence_end + 1
-
-            span = _resolve_trimmed_span(chapter_text, start, end)
-            if span is not None:
-                local_start, local_end, chunk_text_content = span
-                chunks.append(
-                    Chunk(
-                        index=idx,
-                        text=chunk_text_content,
-                        start=chapter_start_offset + local_start,
-                        end=chapter_start_offset + local_end,
-                        chapter_title=chapter_title,
-                        chapter_index=chapter_index,
-                    )
-                )
-                idx += 1
-
-            start = end
+        local_start, local_end, chunk_text_content = span
+        chunks.append(
+            Chunk(
+                index=len(chunks),
+                text=chunk_text_content,
+                start=chapter_start_offset + local_start,
+                end=chapter_start_offset + local_end,
+                chapter_title=chapter_title,
+                chapter_index=chapter_index,
+            )
+        )
 
     return _reindex(chunks)
 
@@ -287,8 +257,6 @@ def _chunk_by_chapters(
 
 async def chunk_documents(
     texts: Iterable[str],
-    max_chars: int = 2000,
-    start_chars: int = 4000,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """
@@ -305,8 +273,6 @@ async def chunk_documents(
     for text in texts:
         chunks = await chunk_text(
             text,
-            max_chars,
-            start_chars,
             emitter=emitter,
         )
         chapter_indices = sorted(
@@ -343,29 +309,59 @@ async def chunk_documents(
 # 自然段分割（RAG 粒度）
 # =============================================================================
 
-PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n")
+PARAGRAPH_SPLIT_RE = re.compile(r"\n")
+_SENTENCE_BOUNDARY_CHARS = ("。", "！", "？", "…", "；")
 
 
-def split_paragraphs(text: str) -> list[tuple[int, int, str]]:
+def _split_oversized_span(
+    text: str,
+    start: int,
+    end: int,
+    max_chars: int,
+) -> list[tuple[int, int, str]]:
+    """
+    2026-08-08 用于把段落切分出的超大区间按句子边界再切到 max_chars 以内
+
+    单段 token 数可能超过 embedding 服务的物理 batch 上限，
+    必须在段落粒度内按句子边界再切（无句子边界时退化为固定字数硬切）
+    """
+    spans: list[tuple[int, int, str]] = []
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + max_chars, end)
+        if chunk_end < end:
+            sentence_end = max(
+                (text.rfind(boundary, cursor, chunk_end) for boundary in _SENTENCE_BOUNDARY_CHARS),
+                default=-1,
+            )
+            if sentence_end > cursor + max_chars * 0.5:
+                chunk_end = sentence_end + 1
+        span = _resolve_trimmed_span(text, cursor, chunk_end)
+        if span is not None:
+            spans.append(span)
+        cursor = chunk_end
+    return spans
+
+
+def split_paragraphs(text: str, max_chars: int = 1500) -> list[tuple[int, int, str]]:
     """
     将文本按自然段分割，返回 (start, end, text) 三元组（strip 后真实坐标）
 
-    RAG 检索粒度固定为一个自然段，本函数是段落级证据的统一分割入口
+    RAG 检索粒度固定为一个自然段，本函数是段落级证据的统一分割入口。
+    段落边界为任意换行（单换行也算段落边界，网文 txt 常以单换行分段），
+    连续空行产生的空段自动跳过；超过 max_chars 的超长段落再按句子边界切分，
+    保证单段 token 数不超过 embedding 服务物理 batch 上限
     """
     paragraphs: list[tuple[int, int, str]] = []
     start = 0
 
     for match in PARAGRAPH_SPLIT_RE.finditer(text):
         end = match.start()
-        span = _resolve_trimmed_span(text, start, end)
-        if span is not None:
-            paragraphs.append(span)
+        paragraphs.extend(_split_oversized_span(text, start, end, max_chars))
         start = match.end()
 
     if start < len(text):
-        span = _resolve_trimmed_span(text, start, len(text))
-        if span is not None:
-            paragraphs.append(span)
+        paragraphs.extend(_split_oversized_span(text, start, len(text), max_chars))
 
     if paragraphs:
         return paragraphs

@@ -9,14 +9,6 @@ from typing import Any
 
 
 @dataclass
-class ChunkingSettings:
-    """分块配置"""
-
-    start_chars: int = 4000
-    max_chars: int = 2000
-
-
-@dataclass
 class StageProgressRange:
     """
     阶段进度范围配置
@@ -74,16 +66,6 @@ class MetricsSettings:
     middle_collapse_min_chunks: int = 10
     character_max_iter: int = 100
     fourier_smooth_keep_ratio: float = 0.1
-
-
-def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
-    """解析分块配置"""
-    if not data:
-        return ChunkingSettings()
-    return ChunkingSettings(
-        start_chars=data.get("start_chars", 4000),
-        max_chars=data.get("max_chars", 2000),
-    )
 
 
 def _parse_stage_progress_range(

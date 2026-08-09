@@ -17,7 +17,6 @@ from .input_config import (
 )
 from .logging_setup import setup_logging
 from .schemas import (
-    ChunkingSettings,
     EmbeddingModelSettings,
     LdaSettings,
     LoggingModuleSettings,
@@ -35,7 +34,6 @@ from .settings import Settings, settings
 __all__ = [
     "CHAPTER_PATTERN",
     "CLASSICAL_PATTERNS",
-    "ChunkingSettings",
     "EmbeddingModelSettings",
     "EVENT_TYPE_SCORES",
     "InputConfig",
