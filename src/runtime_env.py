@@ -1,10 +1,9 @@
 """
-四对象运行时环境配置解析
+平铺运行时环境配置解析
 """
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import Literal
@@ -14,6 +13,32 @@ ModelEnvironmentName = Literal["MODEL", "EMBEDDING_MODEL"]
 
 _DATABASE_ENVIRONMENT_NAMES = {"DATABASE", "TEST_DATABASE"}
 _MODEL_ENVIRONMENT_NAMES = {"MODEL", "EMBEDDING_MODEL"}
+
+_DATABASE_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
+    "DATABASE": (
+        ("url", "DATABASE_URL"),
+        ("username", "DATABASE_USERNAME"),
+        ("password", "DATABASE_PASSWORD"),
+    ),
+    "TEST_DATABASE": (
+        ("url", "TEST_DATABASE_URL"),
+        ("username", "TEST_DATABASE_USERNAME"),
+        ("password", "TEST_DATABASE_PASSWORD"),
+    ),
+}
+
+_MODEL_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
+    "MODEL": (
+        ("base_url", "MODEL_BASE_URL"),
+        ("model", "MODEL_ID"),
+        ("api_key", "MODEL_KEY"),
+    ),
+    "EMBEDDING_MODEL": (
+        ("base_url", "EMBEDDING_MODEL_BASE_URL"),
+        ("model", "EMBEDDING_MODEL_ID"),
+        ("api_key", "EMBEDDING_MODEL_KEY"),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -34,43 +59,36 @@ class ModelEnvironment:
     api_key: str
 
 
-def _load_json_object(env_var_name: str, *, required: bool) -> dict[str, object] | None:
-    """
-    2026-08-03 用于读取并校验 JSON 对象环境变量
-    """
+def _load_flat_fields(
+    env_var_name: str,
+    fields: tuple[tuple[str, str], ...],
+    *,
+    required: bool,
+) -> dict[str, str] | None:
+    """读取一组平铺环境变量，并区分整组缺失与部分缺失。"""
 
-    raw_value = os.environ.get(env_var_name)
-    if raw_value is None or not raw_value.strip():
+    raw_values = {field_name: os.environ.get(environment_name) for field_name, environment_name in fields}
+    configured_values = [value for value in raw_values.values() if value is not None and value.strip()]
+    if not configured_values:
         if required:
             raise RuntimeError(f"{env_var_name} 环境变量未配置")
         return None
 
-    try:
-        parsed_value = json.loads(raw_value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{env_var_name} 必须是有效 JSON 对象") from exc
+    validated_values: dict[str, str] = {}
+    for field_name, environment_name in fields:
+        value = raw_values[field_name]
+        if value is None:
+            raise RuntimeError(f"{environment_name} 环境变量未配置")
+        if not value.strip():
+            raise ValueError(f"{environment_name} 不能为空")
+        validated_values[field_name] = value
+    return validated_values
 
-    if not isinstance(parsed_value, dict):
-        raise ValueError(f"{env_var_name} 必须是 JSON 对象")
-    return parsed_value
 
+def _get_value(values: dict[str, str], field_name: str, *, preserve_whitespace: bool = False) -> str:
+    """读取已校验的字段，并按字段语义处理首尾空白。"""
 
-def _require_string_field(
-    config: dict[str, object],
-    env_var_name: str,
-    field_name: str,
-    *,
-    preserve_whitespace: bool = False,
-) -> str:
-    """
-    2026-08-03 用于读取必填字符串子字段并报告完整字段路径
-    """
-
-    value = config.get(field_name)
-    if not isinstance(value, str):
-        raise ValueError(f"{env_var_name}.{field_name} 必须是字符串")
-    if not value.strip():
-        raise ValueError(f"{env_var_name}.{field_name} 不能为空")
+    value = values[field_name]
     return value if preserve_whitespace else value.strip()
 
 
@@ -79,46 +97,32 @@ def load_database_environment(
     *,
     required: bool = True,
 ) -> DatabaseEnvironment | None:
-    """
-    2026-08-03 用于加载数据库 JSON 环境对象
-    """
+    """加载数据库平铺环境变量。"""
 
     if env_var_name not in _DATABASE_ENVIRONMENT_NAMES:
         raise ValueError(f"不支持的数据库环境变量: {env_var_name}")
 
-    config = _load_json_object(env_var_name, required=required)
-    if config is None:
+    values = _load_flat_fields(env_var_name, _DATABASE_FIELD_NAMES[env_var_name], required=required)
+    if values is None:
         return None
     return DatabaseEnvironment(
-        url=_require_string_field(config, env_var_name, "url"),
-        username=_require_string_field(config, env_var_name, "username"),
-        password=_require_string_field(
-            config,
-            env_var_name,
-            "password",
-            preserve_whitespace=True,
-        ),
+        url=_get_value(values, "url"),
+        username=_get_value(values, "username"),
+        password=_get_value(values, "password", preserve_whitespace=True),
     )
 
 
 def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironment:
-    """
-    2026-08-03 用于加载模型 JSON 环境对象
-    """
+    """加载模型平铺环境变量。"""
 
     if env_var_name not in _MODEL_ENVIRONMENT_NAMES:
         raise ValueError(f"不支持的模型环境变量: {env_var_name}")
 
-    config = _load_json_object(env_var_name, required=True)
-    if config is None:
+    values = _load_flat_fields(env_var_name, _MODEL_FIELD_NAMES[env_var_name], required=True)
+    if values is None:
         raise RuntimeError(f"{env_var_name} 环境变量未配置")
     return ModelEnvironment(
-        base_url=_require_string_field(config, env_var_name, "base_url"),
-        model=_require_string_field(config, env_var_name, "model"),
-        api_key=_require_string_field(
-            config,
-            env_var_name,
-            "api_key",
-            preserve_whitespace=True,
-        ),
+        base_url=_get_value(values, "base_url"),
+        model=_get_value(values, "model"),
+        api_key=_get_value(values, "api_key", preserve_whitespace=True),
     )

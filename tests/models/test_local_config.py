@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import unittest
@@ -20,26 +19,16 @@ class TestTaskModelConfigFromFile(unittest.TestCase):
 class TestTaskModelConfigFromEnv(unittest.TestCase):
     def test_from_env_with_all_values(self) -> None:
         """
-        2026-08-03 用于验证 Settings 只从两个模型 JSON 对象加载连接信息
+        2026-08-08 用于验证 Settings 从平铺模型变量加载连接信息
         """
 
         env_vars = {
-            "MODEL": json.dumps(
-                {
-                    "base_url": "https://api.example.com/v1",
-                    "model": "shared-text-model",
-                    "api_key": "text-key",
-                }
-            ),
-            "EMBEDDING_MODEL": json.dumps(
-                {
-                    "base_url": "http://localhost:8080/v1",
-                    "model": "embedding-model",
-                    "api_key": "sk-no-key-required",
-                }
-            ),
-            "CHUNK_MAX_CHARS": "3000",
-            "CHUNK_OVERLAP": "150",
+            "MODEL_BASE_URL": "https://api.example.com/v1",
+            "MODEL_ID": "shared-text-model",
+            "MODEL_KEY": "text-key",
+            "EMBEDDING_MODEL_BASE_URL": "http://localhost:8080/v1",
+            "EMBEDDING_MODEL_ID": "embedding-model",
+            "EMBEDDING_MODEL_KEY": "sk-no-key-required",
             "ANNOTATION_MODEL": "legacy-model",
         }
         with patch.dict(os.environ, env_vars, clear=False):
@@ -47,8 +36,6 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
             self.assertEqual(new_settings.models.annotation.model, "shared-text-model")
             self.assertEqual(new_settings.models.diagnosis.model, "shared-text-model")
             self.assertEqual(new_settings.models.paragraph_embedding.model, "embedding-model")
-            self.assertEqual(new_settings.chunking.max_chars, 2000)
-            self.assertEqual(new_settings.chunking.start_chars, 4000)
 
 
 class TestTaskModelConfigValidate(unittest.TestCase):

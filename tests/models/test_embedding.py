@@ -115,7 +115,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "legacy-key"}, clear=False),
             patch.object(settings.models.paragraph_embedding, "api_key", None),
-            self.assertRaisesRegex(ValueError, r"EMBEDDING_MODEL\.api_key"),
+            self.assertRaisesRegex(ValueError, r"EMBEDDING_MODEL_KEY"),
         ):
             EmbeddingClient(base_url="http://test", model="test-model")
         mock_openai.assert_not_called()

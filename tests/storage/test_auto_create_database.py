@@ -48,10 +48,10 @@ def test_safe_identifier_guards_sql_injection() -> None:
     assert _safe_identifier("novel-analysis") is False
 
 
-_DATABASE_JSON = (
-    '{"url": "postgresql://localhost:5432/novel_analysis", '
-    '"username": "u", "password": "p"}'
-)
+def _set_database_environment(monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:5432/novel_analysis")
+    monkeypatch.setenv("DATABASE_USERNAME", "u")
+    monkeypatch.setenv("DATABASE_PASSWORD", "p")
 
 
 def test_ensure_database_exists_skips_when_already_present(monkeypatch) -> None:
@@ -64,7 +64,7 @@ def test_ensure_database_exists_skips_when_already_present(monkeypatch) -> None:
     engine = MagicMock()
     engine.connect.return_value.__enter__.return_value = connection
     monkeypatch.setattr("src.storage.db.create_engine", lambda *a, **k: engine)
-    monkeypatch.setenv("DATABASE", _DATABASE_JSON)
+    _set_database_environment(monkeypatch)
 
     ensure_database_exists()
 
@@ -82,7 +82,7 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch) -> None:
     engine = MagicMock()
     engine.connect.return_value.__enter__.return_value = connection
     monkeypatch.setattr("src.storage.db.create_engine", lambda *a, **k: engine)
-    monkeypatch.setenv("DATABASE", _DATABASE_JSON)
+    _set_database_environment(monkeypatch)
 
     ensure_database_exists()
 
@@ -100,7 +100,7 @@ def test_ensure_database_exists_respects_disable_switch(monkeypatch) -> None:
 
     monkeypatch.setattr("src.storage.db.create_engine", fail)
     monkeypatch.setenv("DB_AUTO_CREATE_DATABASE", "false")
-    monkeypatch.setenv("DATABASE", _DATABASE_JSON)
+    _set_database_environment(monkeypatch)
 
     ensure_database_exists()
 
