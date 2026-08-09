@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { isAnalysisNotCompleteError } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
@@ -275,6 +275,10 @@ export function DiagnosisPage() {
   const isAnalysisNotComplete =
     enabled &&
     (isAnalysisNotCompleteError(diagnosisQuery.error) || isAnalysisNotCompleteError(foreshadowingThreadsQuery.error));
+  const analysisFailed =
+    enabled &&
+    (getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed" ||
+      getAnalysisNotCompleteRunStatus(foreshadowingThreadsQuery.error) === "failed");
   const isDiagnosisError = enabled && diagnosisQuery.isError && !isAnalysisNotComplete;
   const isThreadsError = enabled && foreshadowingThreadsQuery.isError && !isAnalysisNotComplete;
   const hasNullDiagnosis =
@@ -314,8 +318,13 @@ export function DiagnosisPage() {
       {/* 错误状态 */}
       {isAnalysisNotComplete && !isLoading && (
         <AnalysisNotCompleteState
-          title="诊断结果尚未完成"
-          description="当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。"
+          title={analysisFailed ? "诊断分析任务已失败" : "诊断结果尚未完成"}
+          description={
+            analysisFailed
+              ? "该分析任务已失败，诊断报告和 setup 台账无法读取，请重新发起分析后再查看。"
+              : "当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。"
+          }
+          failed={analysisFailed}
         />
       )}
       {isDiagnosisError && !isLoading && (

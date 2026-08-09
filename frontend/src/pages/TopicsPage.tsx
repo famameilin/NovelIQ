@@ -7,7 +7,7 @@ import { useEffect, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { isAnalysisNotCompleteError } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getTopics, getDiagnosis } from "@/api/results";
 import type { Topic } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
@@ -109,6 +109,9 @@ export function TopicsPage() {
   const isLoading = topicsQuery.isLoading || diagnosisQuery.isLoading;
   const isAnalysisNotComplete =
     isAnalysisNotCompleteError(topicsQuery.error) || isAnalysisNotCompleteError(diagnosisQuery.error);
+  const analysisFailed =
+    getAnalysisNotCompleteRunStatus(topicsQuery.error) === "failed" ||
+    getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed";
   const isError = (topicsQuery.isError || diagnosisQuery.isError) && !diagnosisRequiresRerun && !isAnalysisNotComplete;
   const errors = [topicsQuery.error, diagnosisQuery.error].filter(Boolean);
   const error = errors[0];
@@ -197,8 +200,13 @@ export function TopicsPage() {
       return (
         <motion.div variants={itemVariants}>
           <AnalysisNotCompleteState
-            title="主题结果尚未完成"
-            description="当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。"
+            title={analysisFailed ? "主题分析任务已失败" : "主题结果尚未完成"}
+            description={
+              analysisFailed
+                ? "该分析任务已失败，主题结果无法读取，请重新发起分析后再查看。"
+                : "当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。"
+            }
+            failed={analysisFailed}
           />
         </motion.div>
       );

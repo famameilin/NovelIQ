@@ -10,7 +10,7 @@ import {
   Network,
   RefreshCw,
 } from "lucide-react";
-import { isAnalysisNotCompleteError, isDiagnosisRerunRequiredError } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, isDiagnosisRerunRequiredError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getCharacters, getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
@@ -265,6 +265,9 @@ export function GraphPage() {
 
   const isAnalysisNotComplete =
     isAnalysisNotCompleteError(graphQuery.error) || isAnalysisNotCompleteError(charactersQuery.error);
+  const analysisFailed =
+    getAnalysisNotCompleteRunStatus(graphQuery.error) === "failed" ||
+    getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed";
   const isLoading = graphQuery.isLoading || charactersQuery.isLoading;
   const isError = (graphQuery.isError || charactersQuery.isError) && !graphRerunRequired && !isAnalysisNotComplete;
   const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
@@ -452,8 +455,13 @@ export function GraphPage() {
             transition={{ duration: 0.28, delay: 0.05 }}
           >
             <AnalysisNotCompleteState
-              title="图谱结果尚未完成"
-              description="当前任务仍在分析中，人物关系图谱和关系变化记录暂时不可读，请等待任务进入完成态后再查看。"
+              title={analysisFailed ? "图谱分析任务已失败" : "图谱结果尚未完成"}
+              description={
+                analysisFailed
+                  ? "该分析任务已失败，人物关系图谱和关系变化记录无法读取，请重新发起分析后再查看。"
+                  : "当前任务仍在分析中，人物关系图谱和关系变化记录暂时不可读，请等待任务进入完成态后再查看。"
+              }
+              failed={analysisFailed}
             />
           </motion.section>
         ) : isError ? (

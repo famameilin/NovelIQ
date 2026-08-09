@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { isAnalysisNotCompleteError } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getCharacters, getDiagnosis } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
@@ -157,6 +157,10 @@ export function CharactersPage() {
     enabled &&
     (isAnalysisNotCompleteError(diagnosisQuery.error) ||
       (shouldFetchCharacters && isAnalysisNotCompleteError(charactersQuery.error)));
+  const analysisFailed =
+    enabled &&
+    (getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed" ||
+      (shouldFetchCharacters && getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed"));
   const isError =
     enabled &&
     (diagnosisQuery.isError || (shouldFetchCharacters && charactersQuery.isError)) &&
@@ -207,8 +211,13 @@ export function CharactersPage() {
       {/* 错误状态 */}
       {isAnalysisNotComplete && !isLoading && (
         <AnalysisNotCompleteState
-          title="角色结果尚未完成"
-          description="当前任务仍在分析中，角色焦点结果暂时不可读，请等待任务进入完成态后再查看。"
+          title={analysisFailed ? "角色分析任务已失败" : "角色结果尚未完成"}
+          description={
+            analysisFailed
+              ? "该分析任务已失败，角色焦点结果无法读取，请重新发起分析后再查看。"
+              : "当前任务仍在分析中，角色焦点结果暂时不可读，请等待任务进入完成态后再查看。"
+          }
+          failed={analysisFailed}
         />
       )}
       {isError && !isLoading && (

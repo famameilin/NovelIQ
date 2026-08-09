@@ -13,7 +13,7 @@ import {
   getDiagnosis,
   getChunkCurves,
 } from "@/api/results";
-import { isDiagnosisRerunRequiredError } from "@/api/errorGuards";
+import { isDiagnosisRerunRequiredError, isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import {
   createAnalysisTask,
@@ -25,6 +25,7 @@ import {
 import { useNovelStore } from "@/store/novelStore";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { DiagnosisSummaryCard } from "@/components/common/DiagnosisSummaryCard";
 import { ScoreOverviewCard } from "@/components/common/ScoreOverviewCard";
 import { DimensionMiniCard } from "@/components/common/DimensionMiniCard";
@@ -197,6 +198,13 @@ export function NovelDetailPage() {
     queryFn: () => getTaskStatus(novelId!, currentTaskId!),
     enabled,
     staleTime: 5 * 1000,
+    // 2026-08-08 用于让 resume 后的任务自动进入进度态：
+    // taskId 不变时 queryKey 不变化，缓存会停留在旧终态（如 cancelled），
+    // 活跃期每 3 秒轮询一次，终态后停止轮询
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "pending" || status === "running" || status === "cancelling" ? 3000 : false;
+    },
   });
   const taskStatus = taskStatusQuery.data?.status;
   const isTaskActivelyProcessing =
@@ -221,7 +229,7 @@ export function NovelDetailPage() {
     }
   }, [novelId, isTaskBusy, queryClient, setTask]);
 
-  /** 继续失败/待处理任务：调用 resumeAnalysisTask → 刷新任务列表 → 保持 task_id 不变 */
+  /** 继续失败/待处理/已取消任务：调用 resumeAnalysisTask → 刷新任务列表与状态 → 保持 task_id 不变 */
   const handleResumeTask = useCallback(async (taskId: string) => {
     if (!novelId || isTaskBusy) return;
     const normalizedTaskId = taskId.trim();
@@ -230,6 +238,7 @@ export function NovelDetailPage() {
     try {
       const result = await resumeAnalysisTask(novelId, normalizedTaskId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
+      queryClient.invalidateQueries({ queryKey: ["task-status", novelId, normalizedTaskId] });
       setTask(result.task_id);
       toast.info("继续分析任务已启动...");
     } catch {
@@ -366,6 +375,20 @@ export function NovelDetailPage() {
     diagnosisQuery.isError ||
     curvesQuery.isError;
 
+  const resultQueryErrors = [
+    narrativeQuery.error,
+    emotionQuery.error,
+    characterQuery.error,
+    styleQuery.error,
+    topicsQuery.error,
+    diagnosisQuery.error,
+    curvesQuery.error,
+  ];
+  const analysisNotComplete = resultQueryErrors.some(isAnalysisNotCompleteError);
+  const analysisFailed = resultQueryErrors.some(
+    (error) => getAnalysisNotCompleteRunStatus(error) === "failed"
+  );
+
   const retryAll = () => {
     taskStatusQuery.refetch();
     narrativeQuery.refetch();
@@ -416,7 +439,20 @@ export function NovelDetailPage() {
       {!effectiveIsAnalyzing && isLoading && currentTaskId && <SkeletonGrid />}
 
       {/* 仅在未分析中时显示错误状态 */}
-      {!effectiveIsAnalyzing && hasAnyError && !isLoading && currentTaskId && (
+      {!effectiveIsAnalyzing && analysisNotComplete && !isLoading && currentTaskId && (
+        <AnalysisNotCompleteState
+          title={analysisFailed ? "分析任务已失败" : "分析尚未完成"}
+          description={
+            analysisFailed
+              ? "该分析任务已失败，结果无法读取，请重新发起分析后再查看。"
+              : "当前任务仍在分析中，结果暂时不可读，请等待任务进入完成态后再查看。"
+          }
+          failed={analysisFailed}
+        />
+      )}
+
+      {/* 仅在未分析中时显示其他错误状态 */}
+      {!effectiveIsAnalyzing && hasAnyError && !analysisNotComplete && !isLoading && currentTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
           <Button variant="ghost" size="sm" onClick={retryAll}>
