@@ -133,11 +133,12 @@ def _find_tool(tools: list, name: str):
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
-    """2026-08-07 用于构造带 current 原文和后文开关的工具账本"""
+    """2026-08-07 用于构造带唯一 current 原文和后文开关的工具账本"""
     return AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
-        current_chunks=[(10, "“住手”回荡"), (11, "众人沉默")],
+        current_chunk_id=10,
+        current_chunk_text="“住手”回荡",
         allow_future_context=allow_future_context,
     )
 
@@ -159,12 +160,16 @@ def _write_metrics_args() -> dict:
 
 
 def _write_entities_args() -> dict:
-    """2026-08-07 用于构造当前 chunk 合法实体目录参数"""
+    """2026-08-08 用于构造当前 chunk 合法实体目录参数（单列表）"""
     return {
-        "characters": [{"name": "顾霜", "confidence": "high", "reason": "人物出现"}],
-        "locations": [],
-        "objects": [],
-        "organizations": [],
+        "entities": [
+            {
+                "name": "顾霜",
+                "entity_type": "character",
+                "confidence": "high",
+                "reason": "人物出现",
+            }
+        ]
     }
 
 
@@ -260,7 +265,7 @@ def test_schema_rejects_deleted_contract_fields() -> None:
             {
                 "from_entity": "顾霜",
                 "to_entity": "山门",
-                "relation_type": "located_at",
+                "relation_type": "位于",
                 "change_kind": "assert",
                 "confidence": "high",
                 "reason": "进入",
@@ -333,6 +338,53 @@ def test_schema_rejects_non_closed_enums() -> None:
         )
 
 
+def test_entity_tags_limited_to_three_and_three_chars() -> None:
+    """2026-08-08 用于验证实体标签最多 3 个且每个最多 3 个字"""
+    with pytest.raises(ValidationError, match="最多 3 个标签"):
+        EntityInput.model_validate(
+            {
+                "name": "玄剑",
+                "entity_type": "item",
+                "tags": ["法宝", "灵器", "神兵", "古剑"],
+                "confidence": "high",
+                "reason": "出现",
+            }
+        )
+    with pytest.raises(ValidationError, match="每个标签最多 3 个字"):
+        EntityInput.model_validate(
+            {
+                "name": "玄剑",
+                "entity_type": "item",
+                "tags": ["传世法宝"],
+                "confidence": "high",
+                "reason": "出现",
+            }
+        )
+
+
+def test_entity_tags_normalized_deduplicated_and_type_enforced() -> None:
+    """2026-08-08 用于验证标签规范化去重并拒绝非法实体类型"""
+    entity = EntityInput.model_validate(
+        {
+            "name": "赤羽炽尾鸡",
+            "entity_type": "character",
+            "tags": [" 灵兽 ", "灵兽", "妖兽"],
+            "confidence": "high",
+            "reason": "出现",
+        }
+    )
+    assert entity.tags == ["灵兽", "妖兽"]
+    with pytest.raises(ValidationError):
+        EntityInput.model_validate(
+            {
+                "name": "玄剑",
+                "entity_type": "object",
+                "confidence": "high",
+                "reason": "出现",
+            }
+        )
+
+
 def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     """2026-08-07 用于验证一个回复可调用多个 write 工具并完整冻结 chunk"""
     service = _QueryService()
@@ -351,11 +403,10 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     response = _call(tools, "complete_chunk", {})
     assert response["accepted"] is True
     assert response["completed_chunk"] == 10
-    assert response["remaining_chunks"] == 1
 
     chunk = ledger.completed_chunks[0]
     assert chunk.chunk_id == 10
-    assert ledger.active_chunk == (11, "众人沉默")
+    assert ledger.phase == "continuity_open"
     dialogue = chunk.dialogues[0]
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.content == "住手"
@@ -381,11 +432,10 @@ def test_domain_reinvocation_completely_replaces_payload() -> None:
     second = _write_remaining_args()["events"]
     _call(tools, "write_events", second)
 
-    chunk_id = ledger.active_chunk_id
-    stored = ledger.domain_payloads[chunk_id]["events"]
+    stored = ledger.domain_payloads["events"]
     assert len(stored) == 1
     assert stored[0].description == "顾霜喝止众人"
-    assert ledger.domain_revision_counts[(chunk_id, "events")] == 2
+    assert ledger.domain_revision_counts["events"] == 2
     assert len([item for item in ledger.write_revisions if item["domain"] == "events"]) == 2
 
 
@@ -399,7 +449,7 @@ def test_complete_chunk_requires_all_eight_domains() -> None:
     with pytest.raises(ValueError, match="尚未写入全部领域"):
         _call(tools, "complete_chunk", {})
     assert ledger.completed_chunks == []
-    assert ledger.active_chunk == (10, "“住手”回荡")
+    assert ledger.phase == "chunk_open"
 
 
 def test_complete_chunk_requires_dialogue_candidate_alignment() -> None:
@@ -452,7 +502,7 @@ def test_write_tools_reject_invalid_enum_at_call_time() -> None:
     args["emotional_valence"] = "unknown"
     with pytest.raises(ValidationError):
         _find_tool(tools, "write_metrics").invoke(args)
-    assert ledger.domain_receipts[10] == set()
+    assert ledger.domain_receipts == set()
 
 
 def test_unresolved_speaker_creates_system_pending_case() -> None:
@@ -492,7 +542,7 @@ def test_write_dialogues_requires_description_for_valid_dialogue() -> None:
     del args["items"][0]["description"]
     with pytest.raises(ValidationError, match="有效对话必须提供 description"):
         _find_tool(tools, "write_dialogues").invoke(args)
-    assert ledger.domain_receipts[10] == set()
+    assert ledger.domain_receipts == set()
 
 
 def test_future_disabled_rejects_future_search_and_read() -> None:
@@ -592,11 +642,11 @@ def test_search_graph_hides_database_ids_from_agent() -> None:
     assert payload["facts"][0]["content"]["action"] == "前章动作"
 
 
-def test_finish_chapter_requires_all_chunks_completed() -> None:
-    """2026-08-07 用于验证仍有未完成 chunk 时不能 finish_chapter"""
+def test_finish_chapter_requires_chunk_frozen_first() -> None:
+    """2026-08-07 用于验证 chunk 未冻结时不能 finish_chapter"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationProtocolError, match="仍有未完成 chunk"):
+    with pytest.raises(AnnotationProtocolError, match="不允许 finish_chapter"):
         _find_tool(tools, "finish_chapter").invoke({"chapter_summary": "章节结束"})
