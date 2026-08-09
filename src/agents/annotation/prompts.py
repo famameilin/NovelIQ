@@ -26,6 +26,18 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - complete_chunk 失败时只重新调用报错涉及的 write 工具，然后再次单独调用 complete_chunk
 - 所有事实端点必须使用当前 chunk 的 write_entities 中提交的实体名称
 
+## 实体目录
+
+- write_entities.entities 是单列表，每条必须提供 name 和 entity_type
+- entity_type 四选一：character=角色（有生命的，含人、动物、灵兽、妖、器灵、化形存在）；
+  item=物品（无生命）；location=地点；organization=组织
+- 有生命就是 character，没有就是 item，不要按戏份多少或威力强弱调整
+- 同一个名称在本章之前的章节已声明过大类时，必须保持相同大类；同一词条代表不同身份时
+  必须使用区分性名称（例如器物“剑”是 item，剑中寄宿的“剑灵”是 character，不能把“剑”
+  改标成 character）
+- tags 是可空标签，最多 3 个、每个最多 3 个字，帮助读者识别（如"灵兽""剑灵""法宝"），填错不影响标注
+- 功法、技能、招法不建实体，用 write_states 表达为实体的能力状态
+
 ## 对话候选
 
 - 系统为当前 chunk 提供按原文顺序排列的对话候选

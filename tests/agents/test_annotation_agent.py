@@ -116,14 +116,18 @@ def _metrics_call(call_id: str = "call-metrics") -> dict:
 
 
 def _entities_call(call_id: str = "call-entities") -> dict:
-    """2026-08-07 用于构造合法 write_entities 调用"""
+    """2026-08-08 用于构造合法 write_entities 调用"""
     return _write_call(
         "write_entities",
         {
-            "characters": [{"name": "顾霜", "confidence": "high", "reason": "人物出现"}],
-            "locations": [],
-            "objects": [],
-            "organizations": [],
+            "entities": [
+                {
+                    "name": "顾霜",
+                    "entity_type": "character",
+                    "confidence": "high",
+                    "reason": "人物出现",
+                }
+            ]
         },
         call_id=call_id,
     )
@@ -216,15 +220,17 @@ async def _invoke_graph(
     llm: _SequenceLLM,
     *,
     allow_future_context: bool,
-    chunks: list[tuple[int, str]] | None = None,
+    chunk: tuple[int, str] | None = None,
     max_iterations: int = 30,
 ) -> dict:
-    """2026-08-07 用于执行最小逐 chunk 章节 LangGraph"""
-    resolved_chunks = chunks or [(1, "“住手”回荡")]
+    """2026-08-07 用于执行最小单 chunk 章节 LangGraph"""
+    resolved_chunk = chunk or (1, "“住手”回荡")
+    chunk_id, chunk_text = resolved_chunk
     ledger = AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
-        current_chunks=resolved_chunks,
+        current_chunk_id=chunk_id,
+        current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
     )
     tools = build_annotation_tools(_QueryService(), ledger)
@@ -234,7 +240,6 @@ async def _invoke_graph(
         ledger=ledger,
         max_iterations=max_iterations,
     )
-    first_chunk_id, first_chunk_text = resolved_chunks[0]
     return await graph.ainvoke(
         {
             "messages": [
@@ -242,9 +247,9 @@ async def _invoke_graph(
                 HumanMessage(
                     content=build_chunk_message(
                         chunk_index=1,
-                        chunk_total=len(resolved_chunks),
-                        chunk_text=first_chunk_text,
-                        candidates=ledger.dialogue_candidates[first_chunk_id],
+                        chunk_total=1,
+                        chunk_text=chunk_text,
+                        candidates=ledger.dialogue_candidates,
                     )
                 ),
             ],
@@ -330,44 +335,14 @@ async def test_single_chunk_chapter_completes_via_write_and_finalizers() -> None
 
 
 @pytest.mark.asyncio
-async def test_multi_chunk_chapter_activates_chunks_in_database_order() -> None:
-    """2026-08-07 用于验证 complete_chunk 后系统激活并注入下一个 chunk"""
-    llm = _SequenceLLM(
-        [
-            _tool_message(_full_write_calls()),
-            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete-1")]),
-            _tool_message(
-                _full_write_calls(dialogues=_write_call("write_dialogues", {"items": []}, call_id="call-dialogues-2"))
-            ),
-            _tool_message([_write_call("complete_chunk", {}, call_id="call-complete-2")]),
-            _tool_message(
-                [_write_call("finish_chapter", {"chapter_summary": "两段结束"}, call_id="call-finish")]
-            ),
-        ]
-    )
-    result = await _invoke_graph(
-        llm,
-        allow_future_context=False,
-        chunks=[(1, "“住手”回荡"), (2, "众人沉默")],
-    )
-
-    assert result["phase"] == "completed"
-    assert llm.calls == 5
-    second_chunk_message = llm.captured_messages[2][-1]
-    assert isinstance(second_chunk_message, HumanMessage)
-    assert "众人沉默" in second_chunk_message.content
-
-
-@pytest.mark.asyncio
 async def test_batch_failure_rolls_back_then_recovers_with_new_revisions() -> None:
     """2026-08-07 用于验证同轮失败整体回滚且重新提交后从修订 1 开始"""
     invalid_entities = _write_call(
         "write_entities",
         {
-            "characters": [{"name": "顾霜", "confidence": "certain", "reason": "非法置信度"}],
-            "locations": [],
-            "objects": [],
-            "organizations": [],
+            "entities": [
+                {"name": "顾霜", "entity_type": "character", "confidence": "certain", "reason": "非法置信度"}
+            ]
         },
         call_id="call-entities-bad",
     )

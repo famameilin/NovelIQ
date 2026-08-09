@@ -15,6 +15,7 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from src.agents.stream import AgentStream
 from src.agents.usage import extract_agent_token_usage
 from src.config import settings
 
@@ -46,17 +47,15 @@ def _validate_chapter_identity(
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
 ) -> None:
-    """2026-08-07 用于在模型调用前校验章节身份和真实 chunk 输入"""
+    """2026-08-07 用于在模型调用前校验章节身份和唯一真实 chunk 输入"""
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须是真实非空正整数")
-    if not current_chunks:
-        raise AnnotationInputError("current 必须包含完整章节 chunk")
-    chunk_ids = [chunk_id for chunk_id, _text in current_chunks]
-    if len(set(chunk_ids)) != len(chunk_ids):
-        raise AnnotationInputError("current chunk_id 不允许重复")
-    if any(chunk_id < 0 for chunk_id in chunk_ids):
+    if len(current_chunks) != 1:
+        raise AnnotationInputError("章节 Agent 每章必须恰好一个 chunk（分组恒为 1 个）")
+    chunk_id, chunk_text = current_chunks[0]
+    if chunk_id < 0:
         raise AnnotationInputError("current chunk_id 不允许为负数")
-    if any(not chunk_text for _chunk_id, chunk_text in current_chunks):
+    if not chunk_text:
         raise AnnotationInputError("current chunk 原文不能为空")
 
 
@@ -182,13 +181,15 @@ async def _run_single_attempt(
     llm: Any,
     session: Session,
     query_service_factory: Callable[[Session], AnnotationQueryService],
+    stream: AgentStream | None = None,
 ) -> AgentRunResult:
     """2026-08-07 用于以全新账本执行一次逐 chunk 章节 Agent 尝试"""
     started_at = time.perf_counter()
     _set_session_read_only(session)
     query_service = query_service_factory(session)
+    first_chunk_id, first_chunk_text = current_chunks[0]
     initial_cases, rotation_case_ids = query_service.find_initial_case_candidates(
-        "\n".join(chunk_text for _chunk_id, chunk_text in current_chunks),
+        first_chunk_text,
         semantic_limit=50,
         rotation_limit=50,
     )
@@ -196,23 +197,20 @@ async def _run_single_attempt(
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=chapter_id,
-        current_chunks=list(current_chunks),
+        current_chunk_id=first_chunk_id,
+        current_chunk_text=first_chunk_text,
         allow_future_context=allow_future_context,
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
-    total_iteration_limit = (
-        max(1, settings.models.annotation.max_iterations)
-        * max(1, len(current_chunks))
-        + 5
-    )
+    total_iteration_limit = max(1, settings.models.annotation.max_iterations) + 5
     graph = build_annotation_graph(
         llm,
         tools,
         ledger=ledger,
         max_iterations=total_iteration_limit,
+        stream=stream,
     )
-    first_chunk_id, first_chunk_text = current_chunks[0]
     initial_messages = [
         SystemMessage(
             content=build_system_prompt(
@@ -224,9 +222,9 @@ async def _run_single_attempt(
         HumanMessage(
             content=build_chunk_message(
                 chunk_index=1,
-                chunk_total=len(current_chunks),
+                chunk_total=1,
                 chunk_text=first_chunk_text,
-                candidates=ledger.dialogue_candidates[first_chunk_id],
+                candidates=ledger.dialogue_candidates,
             )
         ),
     ]
@@ -287,6 +285,7 @@ async def run_annotation_agent(
     session_factory: Callable[[], Session],
     novel_title: str | None = None,
     llm: Any | None = None,
+    stream: AgentStream | None = None,
 ) -> AgentRunResult:
     """2026-08-07 用于按同一模型最多三次运行逐 chunk 章节 Agent"""
     _validate_chapter_identity(
@@ -308,6 +307,8 @@ async def run_annotation_agent(
     failures: list[str] = []
     for attempt_number in range(1, configured_attempts + 1):
         read_session = session_factory()
+        if stream is not None:
+            await stream.thinking(f"章节 {chapter_id} 标注尝试 {attempt_number}/{configured_attempts} 开始")
         try:
             result = await _run_single_attempt(
                 run_id=run_id,
@@ -318,6 +319,7 @@ async def run_annotation_agent(
                 llm=llm,
                 session=read_session,
                 query_service_factory=query_service_factory,
+                stream=stream,
             )
         except (AnnotationInputError, AnnotationAuthorizationError, AnnotationConfigurationError):
             _close_read_session(read_session)
@@ -325,6 +327,8 @@ async def run_annotation_agent(
         except Exception as exc:  # noqa: BLE001
             _close_read_session(read_session)
             failures.append(str(exc))
+            if stream is not None:
+                await stream.tool_call_failed("章节标注", str(exc))
             logger.warning(
                 "annotation chapter attempt failed run_id={} chapter_id={} attempt={}/{} error={}",
                 run_id,
@@ -338,6 +342,8 @@ async def run_annotation_agent(
             await asyncio.sleep(_retry_backoff_seconds(attempt_number - 1))
             continue
         _close_read_session(read_session)
+        if stream is not None:
+            await stream.output(f"章节 {chapter_id} 标注完成（第 {attempt_number} 次尝试）")
         return result
 
     raise AnnotationAgentRunError(

@@ -62,12 +62,6 @@ _DOMAIN_NAMES = (
     "states",
     "foreshadowings",
 )
-_ENTITY_FIELDS: tuple[tuple[str, EntityType], ...] = (
-    ("characters", "character"),
-    ("locations", "location"),
-    ("objects", "object"),
-    ("organizations", "organization"),
-)
 _INTERNAL_GRAPH_KEYS = {
     "candidate_key",
     "chunk_id",
@@ -134,18 +128,18 @@ class ToolAuditRecord:
 
 @dataclass(slots=True)
 class AnnotationToolLedger:
-    """2026-08-07 用于保存逐 chunk 领域写入和系统绑定状态"""
+    """2026-08-07 用于保存单 chunk 领域写入和系统绑定状态"""
 
     run_scope: str
     current_chapter_id: int
-    current_chunks: list[tuple[int, str]]
+    current_chunk_id: int
+    current_chunk_text: str
     allow_future_context: bool
     phase: str = "chunk_open"
-    active_chunk_index: int = 0
-    dialogue_candidates: dict[int, list[DialogueCandidate]] = field(default_factory=dict)
-    domain_payloads: dict[int, dict[str, Any]] = field(default_factory=dict)
-    domain_receipts: dict[int, set[str]] = field(default_factory=dict)
-    domain_revision_counts: dict[tuple[int, str], int] = field(default_factory=dict)
+    dialogue_candidates: list[DialogueCandidate] = field(default_factory=list)
+    domain_payloads: dict[str, Any] = field(default_factory=dict)
+    domain_receipts: set[str] = field(default_factory=set)
+    domain_revision_counts: dict[str, int] = field(default_factory=dict)
     write_revisions: list[dict[str, Any]] = field(default_factory=list)
     completed_chunks: list[BoundChunkAnnotation] = field(default_factory=list)
     initial_cases: dict[str, CaseSearchResult] = field(default_factory=dict)
@@ -164,37 +158,14 @@ class AnnotationToolLedger:
     audit_records: list[ToolAuditRecord] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        """2026-08-07 用于初始化每个 chunk 的候选和领域暂存容器"""
-        if not self.current_chunks:
-            raise AnnotationInputError("current_chunks 不能为空")
-        for chunk_id, text in self.current_chunks:
-            self.dialogue_candidates[chunk_id] = extract_dialogue_candidates(chunk_id, text)
-            self.domain_payloads[chunk_id] = {}
-            self.domain_receipts[chunk_id] = set()
-        self.last_evidence_chunk_id = self.current_chunks[0][0]
-
-    @property
-    def active_chunk(self) -> tuple[int, str] | None:
-        """2026-08-07 用于返回系统当前激活的唯一 chunk"""
-        if self.active_chunk_index >= len(self.current_chunks):
-            return None
-        return self.current_chunks[self.active_chunk_index]
-
-    @property
-    def active_chunk_id(self) -> int:
-        """2026-08-07 用于返回当前激活 chunk 的真实 ID"""
-        active = self.active_chunk
-        if active is None:
-            raise AnnotationProtocolError("当前没有可写入的 active chunk")
-        return active[0]
-
-    @property
-    def active_chunk_text(self) -> str:
-        """2026-08-07 用于返回当前激活 chunk 的真实原文"""
-        active = self.active_chunk
-        if active is None:
-            raise AnnotationProtocolError("当前没有可写入的 active chunk")
-        return active[1]
+        """2026-08-07 用于初始化唯一 chunk 的对话候选"""
+        if not self.current_chunk_text.strip():
+            raise AnnotationInputError("current_chunk_text 不能为空")
+        self.dialogue_candidates = extract_dialogue_candidates(
+            self.current_chunk_id,
+            self.current_chunk_text,
+        )
+        self.last_evidence_chunk_id = self.current_chunk_id
 
     @property
     def resolved_case_ids(self) -> set[str]:
@@ -210,7 +181,6 @@ class AnnotationToolLedger:
         return deepcopy(
             {
                 "phase": self.phase,
-                "active_chunk_index": self.active_chunk_index,
                 "domain_payloads": self.domain_payloads,
                 "domain_receipts": self.domain_receipts,
                 "domain_revision_counts": self.domain_revision_counts,
@@ -299,12 +269,11 @@ class AnnotationToolLedger:
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
         if domain not in _DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
-        chunk_id = self.active_chunk_id
-        revision_key = (chunk_id, domain)
-        revision = self.domain_revision_counts.get(revision_key, 0) + 1
-        self.domain_revision_counts[revision_key] = revision
-        self.domain_payloads[chunk_id][domain] = payload
-        self.domain_receipts[chunk_id].add(domain)
+        chunk_id = self.current_chunk_id
+        revision = self.domain_revision_counts.get(domain, 0) + 1
+        self.domain_revision_counts[domain] = revision
+        self.domain_payloads[domain] = payload
+        self.domain_receipts.add(domain)
         dumped = (
             payload.model_dump(mode="json")
             if hasattr(payload, "model_dump")
@@ -329,17 +298,16 @@ class AnnotationToolLedger:
         self,
         directory: EntityDirectoryInput,
     ) -> tuple[dict[str, EntityType], dict[str, str]]:
-        """2026-08-07 用于建立当前 chunk 唯一实体名称和类型目录"""
+        """2026-08-08 用于建立当前 chunk 唯一实体名称和类型目录"""
         types: dict[str, EntityType] = {}
         names: dict[str, str] = {}
-        for field_name, entity_type in _ENTITY_FIELDS:
-            for entity in getattr(directory, field_name):
-                normalized = unicodedata.normalize("NFC", entity.name).strip()
-                key = normalized.casefold()
-                if key in types:
-                    raise ValueError(f"当前 chunk 实体名称重复: {normalized}")
-                types[key] = entity_type
-                names[key] = normalized
+        for entity in directory.entities:
+            normalized = unicodedata.normalize("NFC", entity.name).strip()
+            key = normalized.casefold()
+            if key in types:
+                raise ValueError(f"当前 chunk 实体名称重复: {normalized}")
+            types[key] = entity.entity_type
+            names[key] = normalized
         return types, names
 
     def _require_entity(
@@ -483,17 +451,16 @@ class AnnotationToolLedger:
         *,
         chunk_id: int,
     ) -> BoundEntityDirectory:
-        """2026-08-07 用于给当前 chunk 实体目录注入系统文本依据"""
-        payload: dict[str, list[BoundEntity]] = {}
-        for field_name, _entity_type in _ENTITY_FIELDS:
-            payload[field_name] = [
+        """2026-08-08 用于给当前 chunk 实体目录注入系统文本依据"""
+        return BoundEntityDirectory(
+            entities=[
                 BoundEntity(
                     **item.model_dump(mode="python"),
                     evidence=self._evidence(item.reason, chunk_id),
                 )
-                for item in getattr(directory, field_name)
+                for item in directory.entities
             ]
-        return BoundEntityDirectory.model_validate(payload)
+        )
 
     def _pending_case(
         self,
@@ -529,16 +496,16 @@ class AnnotationToolLedger:
         """2026-08-07 用于校验八个领域并冻结当前 chunk 正式标注"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chunk")
-        chunk_id = self.active_chunk_id
+        chunk_id = self.current_chunk_id
         missing = [
             domain
             for domain in _DOMAIN_NAMES
-            if domain not in self.domain_receipts[chunk_id]
+            if domain not in self.domain_receipts
         ]
         if missing:
             raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
-        payloads = self.domain_payloads[chunk_id]
-        candidates = self.dialogue_candidates[chunk_id]
+        payloads = self.domain_payloads
+        candidates = self.dialogue_candidates
         dialogue_inputs: list[DialogueInput] = payloads["dialogues"]
         if len(dialogue_inputs) != len(candidates):
             raise ValueError(
@@ -623,15 +590,11 @@ class AnnotationToolLedger:
         self.completed_chunks.append(chunk)
         self.authorized_text_chunk_ids.add(chunk_id)
         self.last_evidence_chunk_id = chunk_id
-        self.active_chunk_index += 1
-        if self.active_chunk is None:
-            self.phase = "continuity_open"
+        self.phase = "continuity_open"
         return chunk
 
     def finish(self, chapter_summary: str) -> BoundChapterAnnotation:
-        """2026-08-07 用于在全部 chunk 冻结后生成章节正式标注"""
-        if self.active_chunk is not None:
-            raise AnnotationProtocolError("仍有未完成 chunk，不能 finish_chapter")
+        """2026-08-07 用于在 chunk 冻结后生成章节正式标注"""
         if self.phase != "continuity_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chapter")
         annotation = BoundChapterAnnotation(
@@ -699,19 +662,9 @@ def build_annotation_tools(
         return json.dumps(result, ensure_ascii=False)
 
     @tool
-    def write_entities(
-        characters: list[EntityInput],
-        locations: list[EntityInput],
-        objects: list[EntityInput],
-        organizations: list[EntityInput],
-    ) -> str:
-        """2026-08-07 用于完整替换当前 chunk 四类实体出现目录"""
-        payload = EntityDirectoryInput(
-            characters=characters,
-            locations=locations,
-            objects=objects,
-            organizations=organizations,
-        )
+    def write_entities(entities: list[EntityInput]) -> str:
+        """2026-08-08 用于完整替换当前 chunk 实体出现目录（单列表）"""
+        payload = EntityDirectoryInput(entities=entities)
         result = ledger.write_domain("entities", payload)
         ledger.record(
             tool_name="write_entities",
@@ -788,12 +741,11 @@ def build_annotation_tools(
 
     @tool
     def complete_chunk() -> str:
-        """2026-08-07 用于校验冻结当前 chunk 并推进系统范围"""
+        """2026-08-07 用于校验冻结当前 chunk 并进入连续性阶段"""
         chunk = ledger.complete_active_chunk()
         result = {
             "accepted": True,
             "completed_chunk": chunk.chunk_id,
-            "remaining_chunks": len(ledger.current_chunks) - ledger.active_chunk_index,
         }
         ledger.record(tool_name="complete_chunk", request={}, response=result)
         return json.dumps(result, ensure_ascii=False)

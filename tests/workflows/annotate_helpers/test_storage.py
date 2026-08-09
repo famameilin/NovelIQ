@@ -49,6 +49,7 @@ def _annotation(
         characters.append(
             BoundEntity(
                 name="顾霜",
+                entity_type="character",
                 confidence="high",
                 reason="顾霜出现",
                 evidence=evidence("顾霜出现", chunk_id),
@@ -87,7 +88,7 @@ def _annotation(
                     reason="摘要",
                 ),
                 entities=BoundEntityDirectory(
-                    characters=characters,
+                    entities=characters,
                 ),
                 character_observations=[],
                 dialogues=dialogues,
