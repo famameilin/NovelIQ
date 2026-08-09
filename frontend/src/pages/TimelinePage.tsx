@@ -6,9 +6,11 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, GitBranch, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelStore } from "@/store/novelStore";
 import { MetricCard } from "@/components/common/MetricCard";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
 import {
   TimelineLegend,
@@ -361,7 +363,9 @@ export function TimelinePage() {
   }, [timelineQuery]);
 
   const isLoading = timelineQuery.isLoading || novelQuery.isLoading;
-  const isError = timelineQuery.isError || novelQuery.isError;
+  const isAnalysisNotComplete = isAnalysisNotCompleteError(timelineQuery.error);
+  const analysisFailed = getAnalysisNotCompleteRunStatus(timelineQuery.error) === "failed";
+  const isError = (timelineQuery.isError || novelQuery.isError) && !isAnalysisNotComplete;
 
   if (!novelId) {
     return (
@@ -451,6 +455,18 @@ export function TimelinePage() {
             <div className="mt-2 flex-1 min-h-0">
               {isLoading ? (
                 <div className="h-[360px] w-full animate-pulse rounded-[28px] border border-border/60 bg-surface-hover" />
+              ) : isAnalysisNotComplete ? (
+                <div className="h-[360px] rounded-[28px] border border-border/60 bg-surface/70">
+                  <AnalysisNotCompleteState
+                    title={analysisFailed ? "时间轴分析任务已失败" : "时间轴结果尚未完成"}
+                    description={
+                      analysisFailed
+                        ? "该分析任务已失败，时间轴数据无法读取，请重新发起分析后再查看。"
+                        : "当前任务仍在分析中，时间轴数据暂时不可读，请等待任务进入完成态后再查看。"
+                    }
+                    failed={analysisFailed}
+                  />
+                </div>
               ) : isError ? (
                 <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
                   <span>加载失败</span>

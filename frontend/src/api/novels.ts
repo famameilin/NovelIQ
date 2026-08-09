@@ -1,3 +1,4 @@
+import axios from "axios";
 import { apiClient } from "./client";
 import type {
   Novel,
@@ -23,10 +24,15 @@ export async function getNovels(
 }
 
 export async function getNovel(novelId: string): Promise<Novel | null> {
-  const { data } = await apiClient.get<PaginatedResponse<Novel>>("/api/novels/", {
-    params: { page: 1, page_size: 1000 },
-  });
-  return data.items.find((novel) => novel.novel_id === novelId) || null;
+  try {
+    const { data } = await apiClient.get<Novel>(`/api/novels/${novelId}`);
+    return data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function uploadNovel(

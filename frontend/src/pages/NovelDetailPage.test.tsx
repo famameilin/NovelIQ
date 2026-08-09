@@ -469,4 +469,43 @@ describe("NovelDetailPage", () => {
     expect(getDiagnosisMock).not.toHaveBeenCalled();
     expect(getChunkCurvesMock).not.toHaveBeenCalled();
   });
+
+  it("已失败任务应显示友好失败提示而非数据加载失败", async () => {
+    currentSearchParams = "task_id=task-failed";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-failed",
+      status: "failed",
+      progress: 0,
+      current_step: "done",
+    });
+    const notCompleteError = {
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: failed",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+          run_status: "failed",
+        },
+      },
+    };
+    getNarrativeStructureMock.mockRejectedValue(notCompleteError);
+    getEmotionStatsMock.mockRejectedValue(notCompleteError);
+    getCharacterStatsMock.mockRejectedValue(notCompleteError);
+    getStyleStatsMock.mockRejectedValue(notCompleteError);
+    getTopicsMock.mockRejectedValue(notCompleteError);
+    getDiagnosisMock.mockRejectedValue(notCompleteError);
+    getChunkCurvesMock.mockRejectedValue(notCompleteError);
+
+    renderNovelDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("分析任务已失败")).toBeInTheDocument();
+      expect(screen.getByText(/请重新发起分析/)).toBeInTheDocument();
+      expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
+    });
+  });
 });

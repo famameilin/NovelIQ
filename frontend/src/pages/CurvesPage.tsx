@@ -5,9 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react";
 import { getChunkCurves, getNarrativeStructure } from "@/api/results";
 import { getNovel } from "@/api/novels";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
 import { CurveToolbar } from "@/components/charts/CurveToolbar";
 import { EmotionCurveChart } from "@/components/charts/EmotionCurveChart";
@@ -176,7 +178,12 @@ export function CurvesPage() {
   }, [curvesQuery, narrativeQuery]);
 
   const isLoading = curvesQuery.isLoading || narrativeQuery.isLoading;
-  const isError = curvesQuery.isError || narrativeQuery.isError;
+  const isAnalysisNotComplete =
+    isAnalysisNotCompleteError(curvesQuery.error) || isAnalysisNotCompleteError(narrativeQuery.error);
+  const analysisFailed =
+    getAnalysisNotCompleteRunStatus(curvesQuery.error) === "failed" ||
+    getAnalysisNotCompleteRunStatus(narrativeQuery.error) === "failed";
+  const isError = (curvesQuery.isError || narrativeQuery.isError) && !isAnalysisNotComplete;
 
   if (!currentTaskId) {
     return (
@@ -222,6 +229,16 @@ export function CurvesPage() {
             <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-full w-full animate-pulse rounded bg-surface-hover" />
+              ) : isAnalysisNotComplete ? (
+                <AnalysisNotCompleteState
+                  title={analysisFailed ? "曲线分析任务已失败" : "曲线结果尚未完成"}
+                  description={
+                    analysisFailed
+                      ? "该分析任务已失败，曲线数据无法读取，请重新发起分析后再查看。"
+                      : "当前任务仍在分析中，曲线数据暂时不可读，请等待任务进入完成态后再查看。"
+                  }
+                  failed={analysisFailed}
+                />
               ) : isError ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted">
                   <span>加载失败</span>
@@ -268,6 +285,16 @@ export function CurvesPage() {
             <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-full w-full animate-pulse rounded bg-surface-hover" />
+              ) : isAnalysisNotComplete ? (
+                <AnalysisNotCompleteState
+                  title={analysisFailed ? "曲线分析任务已失败" : "曲线结果尚未完成"}
+                  description={
+                    analysisFailed
+                      ? "该分析任务已失败，曲线数据无法读取，请重新发起分析后再查看。"
+                      : "当前任务仍在分析中，曲线数据暂时不可读，请等待任务进入完成态后再查看。"
+                  }
+                  failed={analysisFailed}
+                />
               ) : isError ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted">
                   <span>加载失败</span>
