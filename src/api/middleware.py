@@ -31,16 +31,18 @@ from src.storage.id_mapping import (
 
 
 class ErrorResponse:
-    def __init__(self, detail: str, error_type: str, status_code: int):
+    def __init__(self, detail: str, error_type: str, status_code: int, extra: dict | None = None):
         self.detail = detail
         self.error_type = error_type
         self.status_code = status_code
+        self.extra = extra or {}
 
     def to_dict(self) -> dict:
         return {
             "detail": self.detail,
             "error_type": self.error_type,
             "status_code": self.status_code,
+            **self.extra,
         }
 
     def to_json_response(self) -> JSONResponse:
@@ -50,8 +52,13 @@ class ErrorResponse:
         )
 
 
-def create_error_response(detail: str, error_type: str, status_code: int) -> ErrorResponse:
-    return ErrorResponse(detail=detail, error_type=error_type, status_code=status_code)
+def create_error_response(
+    detail: str,
+    error_type: str,
+    status_code: int,
+    extra: dict | None = None,
+) -> ErrorResponse:
+    return ErrorResponse(detail=detail, error_type=error_type, status_code=status_code, extra=extra)
 
 
 async def novel_not_found_handler(request: Request, exc: NovelNotFoundError) -> JSONResponse:
@@ -80,6 +87,7 @@ async def analysis_not_complete_handler(request: Request, exc: AnalysisNotComple
         detail=exc.message,
         error_type="AnalysisNotCompleteError",
         status_code=status.HTTP_400_BAD_REQUEST,
+        extra={"run_status": exc.run_status} if exc.run_status is not None else None,
     )
     return error_response.to_json_response()
 

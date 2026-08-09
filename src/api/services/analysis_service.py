@@ -529,7 +529,7 @@ class AnalysisService:
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行 pending/failed 任务
+        继续执行 pending/failed/cancelled 任务
 
         说明: 只负责“继续已有任务”，不创建新任务
         """
@@ -540,8 +540,8 @@ class AnalysisService:
             raise ValueError(f"任务 {task_id} 不属于小说 {novel_id}")
 
         status = task.get("status", "")
-        if status not in ("pending", "failed"):
-            raise ValueError(f"仅支持继续 pending/failed 任务，当前状态为 {status}")
+        if status not in ("pending", "failed", "cancelled"):
+            raise ValueError(f"仅支持继续 pending/failed/cancelled 任务，当前状态为 {status}")
 
         task_info = self.task_manager.get_task(task_id)
         if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():

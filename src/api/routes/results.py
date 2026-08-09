@@ -76,7 +76,10 @@ def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict
 
 def _require_readable_run_status(run: dict[str, Any]) -> None:
     if run["status"] not in READABLE_RUN_STATUSES:
-        raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
+        raise AnalysisNotCompleteError(
+            f"分析未完成，当前状态: {run['status']}",
+            run_status=run["status"],
+        )
 
 
 def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> NoReturn:

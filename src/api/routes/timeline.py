@@ -88,7 +88,10 @@ async def get_timeline(
 
     run_id = run_data["run_id"]
     if run_data["status"] not in ("completed", "aggregated", "diagnosed"):
-        raise AnalysisNotCompleteError(f"分析尚未完成，当前状态: {run_data['status']}")
+        raise AnalysisNotCompleteError(
+            f"分析尚未完成，当前状态: {run_data['status']}",
+            run_status=run_data["status"],
+        )
 
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)

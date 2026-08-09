@@ -16,8 +16,14 @@ class InvalidFileError(Exception):
 
 
 class AnalysisNotCompleteError(Exception):
-    def __init__(self, novel_id: str | None = None, message: str | None = None):
+    def __init__(
+        self,
+        novel_id: str | None = None,
+        message: str | None = None,
+        run_status: str | None = None,
+    ):
         self.novel_id = novel_id
+        self.run_status = run_status
         self.message = (
             message or f"Analysis not complete for novel: {novel_id}" if novel_id else "Analysis not complete"
         )

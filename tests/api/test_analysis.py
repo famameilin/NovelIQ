@@ -417,6 +417,49 @@ class TestAnalysis:
         assert run["cancel_requested"] is False
         assert run["completed_at"] is None
 
+    def test_resume_cancelled_task_allowed(self, api_client: TestClient):
+        """2026-08-08 用于验证 cancelled 任务可以继续分析并重置运行态"""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("resume_cancelled_test.txt", file, "text/plain")}
+                )
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                task_id,
+                status="cancelled",
+                progress=45.0,
+                stage="annotate",
+                sub_stage="chapter_agent",
+                current=3,
+                total=8,
+                message="用户取消",
+                error=None,
+                cancel_requested=True,
+                completed_at=None,
+            )
+        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+            resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
+        assert resume_response.status_code == 200
+        status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+        assert status_response.status_code == 200
+        data = status_response.json()
+        assert data["status"] == "pending"
+        assert data["progress"] == 0.0
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+        assert run is not None
+        assert run["cancel_requested"] is False
+
     def test_legacy_analyze_route_is_removed(self, api_client: TestClient):
         """测试旧 /analyze 兼容入口已删除"""
         response = api_client.post("/api/novels/nonexistent/analyze", json={"task_id": "resume-me"})
