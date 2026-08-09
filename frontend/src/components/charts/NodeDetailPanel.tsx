@@ -53,13 +53,17 @@ const overlayVariants = {
 /* ------------------------------------------------------------------ */
 
 const relationTypeColors: Record<string, string> = {
-  友好: "bg-chart-positive/20 text-chart-positive",
+  家族: "bg-chart-neutral/20 text-chart-neutral",
+  师徒: "bg-chart-neutral/20 text-chart-neutral",
+  主从: "bg-chart-neutral/20 text-chart-neutral",
   敌对: "bg-chart-negative/20 text-chart-negative",
-  从属: "bg-chart-neutral/20 text-chart-neutral",
-  合作: "bg-chart-2/20 text-chart-2",
-  亲情: "bg-chart-positive/20 text-chart-positive",
-  爱情: "bg-chart-4/20 text-chart-4",
-  师徒: "bg-chart-5/20 text-chart-5",
+  盟友: "bg-chart-positive/20 text-chart-positive",
+  友情: "bg-chart-positive/20 text-chart-positive",
+  爱慕: "bg-chart-positive/20 text-chart-positive",
+  利益: "bg-chart-neutral/20 text-chart-neutral",
+  同一人物: "bg-chart-neutral/20 text-chart-neutral",
+  隶属: "bg-chart-neutral/20 text-chart-neutral",
+  位于: "bg-chart-neutral/20 text-chart-neutral",
 };
 
 function getRelationTypeColor(relationType: string): string {
@@ -73,8 +77,9 @@ function getRelationTypeColor(relationType: string): string {
 const entityTypeDisplayNames: Record<string, string> = {
   character: "角色",
   location: "地点",
-  object: "物品",
+  item: "物品",
   organization: "组织",
+  object: "物品",
 };
 
 function getEntityTypeDisplayName(entityType: string): string {
@@ -212,6 +217,18 @@ export function NodeDetailPanel({
                         label="类型"
                         value={getEntityTypeDisplayName(node.entity_type)}
                       />
+                      {Array.isArray(node.tags) && node.tags.length > 0 && (
+                        <div className="flex items-center justify-between gap-3 py-2">
+                          <span className="text-sm text-text-muted">标签</span>
+                          <span className="flex flex-wrap justify-end gap-1">
+                            {node.tags.map((tag) => (
+                              <Badge key={tag} variant="outline" className="text-[10px]">
+                                {tag}
+                              </Badge>
+                            ))}
+                          </span>
+                        </div>
+                      )}
                       {node.first_seen_chunk !== undefined && node.last_seen_chunk !== undefined && (
                         <InfoRow
                           label="出场"

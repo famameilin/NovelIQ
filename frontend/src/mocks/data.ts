@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Mock 数据工厂函数
  *
  * 生成与后端 API 类型一致的假数据，用于 MSW handler
@@ -96,7 +96,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     to_entity_id: 3,
     from_name: "萧炎",
     to_name: "纳兰嫣然",
-    relation_type: "对手",
+    relation_type: "敌对",
     relation_change_kind: "reinforce",
     evidence: "三年之约进一步升级双方对立。",
     confidence: 0.87,
@@ -138,7 +138,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     to_entity_id: 7,
     from_name: "萧炎",
     to_name: "薰儿",
-    relation_type: "恋人",
+    relation_type: "爱慕",
     relation_change_kind: "reinforce",
     evidence: "重逢后彼此情感被再次确认。",
     confidence: 0.9,
@@ -180,7 +180,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     to_entity_id: 3,
     from_name: "萧炎",
     to_name: "纳兰嫣然",
-    relation_type: "对手",
+    relation_type: "敌对",
     relation_change_kind: "break",
     evidence: "恩怨在终局被彻底切断。",
     confidence: 0.78,
@@ -400,11 +400,11 @@ export function createGraph(): GraphData {
 
   const edges = [
     { source: 1, target: 2, relation_type: "师徒" },
-    { source: 1, target: 3, relation_type: "对手" },
+    { source: 1, target: 3, relation_type: "敌对" },
     { source: 1, target: 4, relation_type: "盟友" },
     { source: 1, target: 5, relation_type: "盟友" },
     { source: 1, target: 6, relation_type: "盟友" },
-    { source: 1, target: 7, relation_type: "恋人" },
+    { source: 1, target: 7, relation_type: "爱慕" },
     { source: 2, target: 8, relation_type: "盟友" },
   ].map((edge, index) => ({
     relation_id: `relation-${index + 1}`,
