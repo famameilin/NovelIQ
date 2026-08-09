@@ -135,7 +135,6 @@ class TestPreprocess:
             source_path=source_path,
             run_id=run_id,
             session=db_session,
-            max_chars=500,
         )
         assert chunks_inserted > 0
         assert total_chars > 0
@@ -164,7 +163,6 @@ class TestPreprocess:
             source_path=source_path,
             run_id=run_id,
             session=db_session,
-            max_chars=500,
         )
         assert chunks_inserted == 0
         assert total_chars == 0
@@ -188,7 +186,6 @@ class TestPreprocess:
             source_path=source_path,
             run_id=run_id,
             session=db_session,
-            max_chars=500,
         )
         assert chunks_inserted > 0
 
@@ -210,7 +207,6 @@ class TestPreprocess:
             source_path=source_path,
             run_id=run_id,
             session=db_session,
-            max_chars=500,
         )
         assert chunks1 > 0
 
@@ -218,6 +214,5 @@ class TestPreprocess:
             source_path=source_path,
             run_id=run_id,
             session=db_session,
-            max_chars=500,
         )
         assert chunks2 == 0

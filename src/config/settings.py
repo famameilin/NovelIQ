@@ -9,7 +9,6 @@ from typing import Any
 from src.runtime_env import load_model_environment
 
 from .schemas import (
-    ChunkingSettings,
     LoggingSettings,
     MetricsSettings,
     ModelsSettings,
@@ -17,7 +16,6 @@ from .schemas import (
     ProgressSettings,
     PromptSettings,
     TopicModelSettings,
-    _parse_chunking_settings,
     _parse_logging_settings,
     _parse_metrics_settings,
     _parse_models_settings,
@@ -37,7 +35,6 @@ class Settings:
 
     models: ModelsSettings = field(default_factory=ModelsSettings)
     logging: LoggingSettings = field(default_factory=LoggingSettings)
-    chunking: ChunkingSettings = field(default_factory=ChunkingSettings)
     paths: PathSettings = field(default_factory=PathSettings)
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     topic_model: TopicModelSettings = field(default_factory=TopicModelSettings)
@@ -73,7 +70,6 @@ class Settings:
         return cls(
             models=_parse_models_settings(data.get("models")),
             logging=_parse_logging_settings(data.get("logging")),
-            chunking=_parse_chunking_settings(data.get("chunking")),
             paths=_parse_path_settings(data.get("paths")),
             progress=_parse_progress_settings(data.get("progress")),
             topic_model=_parse_topic_model_settings(data.get("topic_model")),

@@ -1,28 +1,8 @@
 from src.config.schemas import (
-    _parse_chunking_settings,
     _parse_metrics_settings,
     _parse_progress_settings,
     _parse_topic_model_settings,
 )
-
-
-def test_parse_chunking_settings_reads_start_and_max_chars() -> None:
-    settings = _parse_chunking_settings(
-        {
-            "start_chars": 4000,
-            "max_chars": 2000,
-        }
-    )
-
-    assert settings.start_chars == 4000
-    assert settings.max_chars == 2000
-
-
-def test_parse_chunking_settings_defaults() -> None:
-    settings = _parse_chunking_settings(None)
-
-    assert settings.start_chars == 4000
-    assert settings.max_chars == 2000
 
 
 def test_parse_progress_settings_reads_stage_ranges() -> None:

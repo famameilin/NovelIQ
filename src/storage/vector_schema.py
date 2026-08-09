@@ -60,6 +60,7 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
     """2026-08-07 用于创建或验证原文自然段向量表"""
     if embedding_dim <= 0:
         raise ValueError("embedding_dim must be positive")
+    session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     schema = _runtime_schema()
     table_regclass = f"{schema}.paragraph_embeddings"
     table_exists = session.execute(

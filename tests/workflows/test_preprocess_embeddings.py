@@ -139,10 +139,42 @@ def test_split_paragraphs_returns_chunk_local_offsets() -> None:
     assert paragraphs == [(1, 5, "第一段。"), (7, 11, "第二段。")]
 
 
-def test_split_paragraphs_single_paragraph_without_blank_lines() -> None:
-    """没有空行分隔的连续文本视为一个自然段"""
+def test_split_paragraphs_single_newline_is_paragraph_boundary() -> None:
+    """2026-08-08 用于验证单换行也算段落边界，每行一个自然段"""
     paragraphs = split_paragraphs("第一段。\n第二段。")
-    assert paragraphs == [(0, 9, "第一段。\n第二段。")]
+    assert paragraphs == [(0, 4, "第一段。"), (5, 9, "第二段。")]
+
+
+def test_split_paragraphs_blank_lines_do_not_produce_empty_paragraphs() -> None:
+    """连续空行不产生空段落，段落坐标保持真实原文位置"""
+    text = "第一段。\n\n\n第二段。"
+    paragraphs = split_paragraphs(text)
+    assert paragraphs == [(0, 4, "第一段。"), (7, 11, "第二段。")]
+
+
+def test_split_paragraphs_splits_oversized_paragraph_at_sentence_boundaries() -> None:
+    """
+    2026-08-08 用于验证无空行分隔的超长章节按句子边界切分，
+    单段不超过 embedding 服务物理 batch 上限
+    """
+    text = ("第一句。" * 500) + "第二句。" * 200
+    paragraphs = split_paragraphs(text)
+
+    assert len(paragraphs) > 1
+    assert all(len(paragraph) <= 1500 for _, _, paragraph in paragraphs)
+    assert all(paragraph.endswith("。") for _, _, paragraph in paragraphs)
+    joined = "".join(paragraph for _, _, paragraph in paragraphs)
+    assert joined == text
+
+
+def test_split_paragraphs_oversized_without_sentence_boundaries_falls_back_hard_cut() -> None:
+    """2026-08-08 用于验证无句子边界可用的超长段落退化为固定字数硬切"""
+    text = "字" * 4000
+    paragraphs = split_paragraphs(text)
+
+    assert len(paragraphs) > 1
+    assert all(len(paragraph) <= 1500 for _, _, paragraph in paragraphs)
+    assert "".join(paragraph for _, _, paragraph in paragraphs) == text
 
 
 @pytest.mark.asyncio
@@ -184,9 +216,9 @@ async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_preprocess_passes_chapter_and_chunk_limits() -> None:
+async def test_run_preprocess_passes_only_emitter_to_chunk_documents() -> None:
     """
-    2026-08-05 用于验证预处理入口只透传分章开关与自身分块上限
+    2026-08-05 用于验证预处理入口只向 chunk_documents 透传 emitter
     """
     mock_session = MagicMock()
     mock_chunk_repo = MagicMock()
@@ -201,7 +233,6 @@ async def test_run_preprocess_passes_chapter_and_chunk_limits() -> None:
         patch("src.workflows.preprocess.chunk_documents", new=mock_chunk_documents),
         patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
         patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
-        patch("src.workflows.preprocess.settings.chunking.start_chars", 1000),
         patch("src.workflows.preprocess.settings.models.paragraph_embedding.semantic_enabled", False),
         patch(
             "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
@@ -216,5 +247,6 @@ async def test_run_preprocess_passes_chapter_and_chunk_limits() -> None:
         )
 
     call_kwargs = mock_chunk_documents.await_args.kwargs
-    assert call_kwargs["max_chars"] == 2000
-    assert call_kwargs["start_chars"] == 1000
+    assert "max_chars" not in call_kwargs
+    assert "start_chars" not in call_kwargs
+    assert call_kwargs.get("emitter") is None

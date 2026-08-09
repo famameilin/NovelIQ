@@ -3,12 +3,10 @@
 """
 
 from .analysis import (
-    ChunkingSettings,
     LdaSettings,
     MetricsSettings,
     ProgressSettings,
     TopicModelSettings,
-    _parse_chunking_settings,
     _parse_metrics_settings,
     _parse_progress_settings,
     _parse_topic_model_settings,
@@ -34,7 +32,6 @@ from .model import (
 )
 
 __all__ = [
-    "ChunkingSettings",
     "EmbeddingModelSettings",
     "LdaSettings",
     "LoggingModuleSettings",
@@ -46,7 +43,6 @@ __all__ = [
     "PromptSettings",
     "TaskModelSettings",
     "TopicModelSettings",
-    "_parse_chunking_settings",
     "_parse_embedding_model_settings",
     "_parse_logging_settings",
     "_parse_metrics_settings",

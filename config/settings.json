@@ -43,6 +43,10 @@
         "file": "api.log",
         "level": "DEBUG"
       },
+      "chunking": {
+        "file": "chunking.log",
+        "level": "WARNING"
+      },
       "workflow": {
         "file": "workflow.log",
         "level": "INFO"
@@ -72,10 +76,6 @@
     "results_dir": "outputs",
     "log_dir": "logs",
     "lexicons_dir": "data/lexicons"
-  },
-  "chunking": {
-    "start_chars": 4000,
-    "max_chars": 2000
   },
   "progress": {
     "preprocess": {
