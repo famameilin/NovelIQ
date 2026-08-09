@@ -11,6 +11,7 @@ from functools import partial
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.agents.stream import AgentStream
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
 from src.storage.db import get_session_factory
@@ -136,6 +137,18 @@ async def run_annotate(
                     )
                 )
 
+            agent_stream = (
+                AgentStream(
+                    emitter,
+                    chunk_id=current_chunks[0][0],
+                    sub_stage="chapter_agent",
+                )
+                if emitter is not None
+                else None
+            )
+            if agent_stream is not None:
+                await agent_stream.thinking(f"章节 {chapter_id} 标注 Agent 开始处理")
+
             agent_result = await run_annotation_agent(
                 run_id=run_id,
                 chapter_id=chapter_id,
@@ -151,6 +164,7 @@ async def run_annotate(
                     current_last_chunk_id=current_chunks[-1][0],
                     embedding_client=embedding_client,
                 ),
+                stream=agent_stream,
             )
             complete_annotation_run(
                 result=agent_result,

@@ -21,6 +21,7 @@ from src.agents.annotation.schema import (
     PendingCase,
     SuccessAudit,
 )
+from src.agents.stream import AgentStream
 from src.storage.models import ChapterAnnotationRecord
 from src.workflows.annotate import _group_chunks_by_chapter, run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, evidence, persist_chapter_annotation
@@ -259,6 +260,51 @@ async def test_run_annotate_skips_existing_chapter_completion(db_session) -> Non
         .where(ChapterAnnotationRecord.run_id == run_id)
     ).scalar_one()
     assert count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
+    """2026-08-09 用于验证 emitter 会以 AgentStream 形式透传给章节 Agent"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["第一章"],
+        chapter_ids=[1],
+        title="流式透传",
+    )
+    emitted: list[tuple[str, str]] = []
+    seen_streams: list[AgentStream | None] = []
+
+    async def fake_agent(**kwargs):
+        """2026-08-09 用于捕获 stream 参数并返回合法章节结果"""
+        seen_streams.append(kwargs.get("stream"))
+        chunk_text = kwargs["current_chunks"][0][1]
+        return _agent_result(
+            run_id=run_id,
+            chapter_id=1,
+            chunk_id=0,
+            chunk_text=chunk_text,
+        )
+
+    async def emitter(event) -> None:
+        """2026-08-09 用于记录 workflow 级事件"""
+        emitted.append((event.action, event.content))
+
+    with (
+        patch("src.agents.annotation.run_annotation_agent", new=fake_agent),
+        patch("src.agents.llm.build_chat_model", return_value=MagicMock()),
+    ):
+        result = await run_annotate(
+            run_id=run_id,
+            session=db_session,
+            novel_id=novel_id,
+            emitter=emitter,
+        )
+
+    assert result == (1, 0, 1)
+    assert len(seen_streams) == 1
+    assert isinstance(seen_streams[0], AgentStream)
+    # 章节开始 thinking 事件已通过 AgentStream 到达 emitter
+    assert ("thinking", "章节 1 标注 Agent 开始处理") in emitted
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from src.agents.annotation.schema import (
     BoundEntity,
     BoundEntityDirectory,
     BoundRelation,
+    BoundState,
     ChunkMetricsInput,
     EntityType,
 )
@@ -80,9 +81,16 @@ def evidence(reason: str, chunk_id: int) -> list[dict[str, Any]]:
     return [{"reason": reason, "chunk_id": chunk_id}]
 
 
-def _entity_spec(name: str, entity_type: EntityType) -> dict[str, str]:
-    """2026-08-07 用于声明事实隐含的实体名称与大类"""
-    return {"name": name, "entity_type": entity_type}
+def _entity_spec(
+    name: str,
+    entity_type: EntityType,
+    tags: list[str] | None = None,
+) -> dict[str, str | list[str]]:
+    """2026-08-08 用于声明事实隐含的实体名称、大类与可选标签"""
+    spec: dict[str, str | list[str]] = {"name": name, "entity_type": entity_type}
+    if tags:
+        spec["tags"] = tags
+    return spec
 
 
 def character_fact(
@@ -178,29 +186,23 @@ def identity_relation_output(
     )
 
 
-_ENTITY_FIELD_BY_TYPE: dict[EntityType, str] = {
-    "character": "characters",
-    "location": "locations",
-    "object": "objects",
-    "organization": "organizations",
-}
-
-
 def _register_entity(
     directory: dict[str, list[BoundEntity]],
     *,
     name: str,
     entity_type: EntityType,
     chunk_id: int,
+    tags: list[str] | None = None,
 ) -> None:
-    """2026-08-07 用于把事实隐含实体注册到当前 chunk 实体目录"""
-    field_name = _ENTITY_FIELD_BY_TYPE[entity_type]
-    for existing in directory[field_name]:
+    """2026-08-08 用于把事实隐含实体注册到当前 chunk 实体目录"""
+    for existing in directory["entities"]:
         if existing.name == name:
             return
-    directory[field_name].append(
+    directory["entities"].append(
         BoundEntity(
             name=name,
+            entity_type=entity_type,
+            tags=tags or [],
             confidence="high",
             reason=f"{name} 在本章出现",
             evidence=evidence(f"{name} 在本章出现", chunk_id),
@@ -220,6 +222,7 @@ def persist_chapter_annotation(
     characters: list[dict[str, Any]] | None = None,
     dialogues: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
+    states: list[dict[str, Any]] | None = None,
 ) -> str:
     """2026-08-07 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化"""
     chunk_rows = list(
@@ -240,12 +243,7 @@ def persist_chapter_annotation(
             candidate_by_content[(chunk_id, candidate.content)] = candidate
 
     directories: dict[int, dict[str, list[BoundEntity]]] = {
-        chunk_id: {
-            "characters": [],
-            "locations": [],
-            "objects": [],
-            "organizations": [],
-        }
+        chunk_id: {"entities": []}
         for chunk_id in chunk_text_by_id
     }
     observations_by_chunk: dict[int, list[BoundCharacterObservation]] = {
@@ -255,6 +253,9 @@ def persist_chapter_annotation(
         chunk_id: [] for chunk_id in chunk_text_by_id
     }
     relations_by_chunk: dict[int, list[BoundRelation]] = {
+        chunk_id: [] for chunk_id in chunk_text_by_id
+    }
+    states_by_chunk: dict[int, list[BoundState]] = {
         chunk_id: [] for chunk_id in chunk_text_by_id
     }
 
@@ -268,6 +269,7 @@ def persist_chapter_annotation(
                 name=spec["name"],
                 entity_type=spec["entity_type"],
                 chunk_id=chunk_id,
+                tags=spec.get("tags"),
             )
         observations_by_chunk[chunk_id].append(
             BoundCharacterObservation(
@@ -292,6 +294,7 @@ def persist_chapter_annotation(
                 name=spec["name"],
                 entity_type=spec["entity_type"],
                 chunk_id=chunk_id,
+                tags=spec.get("tags"),
             )
         definition = RELATION_DEFINITIONS[fact["relation_type"]]
         relations_by_chunk[chunk_id].append(
@@ -304,6 +307,31 @@ def persist_chapter_annotation(
                 reason=fact["reason"],
                 directionality=definition["directionality"],
                 relation_semantics=definition["semantics"],
+                evidence=evidence(fact["reason"], chunk_id),
+            )
+        )
+
+    for fact in states or []:
+        chunk_id = int(fact.get("chunk_id", -1))
+        if chunk_id not in chunk_text_by_id:
+            raise ValueError(f"测试事实引用了非本章 chunk: {chunk_id}")
+        for spec in fact.get("_entity_specs", []):
+            _register_entity(
+                directories[chunk_id],
+                name=spec["name"],
+                entity_type=spec["entity_type"],
+                chunk_id=chunk_id,
+                tags=spec.get("tags"),
+            )
+        states_by_chunk[chunk_id].append(
+            BoundState(
+                entity=fact["entity"],
+                predicate=fact["predicate"],
+                object=fact.get("object"),
+                value=fact.get("value"),
+                assertion=fact.get("assertion", "affirmed"),
+                confidence=fact["confidence"],
+                reason=fact["reason"],
                 evidence=evidence(fact["reason"], chunk_id),
             )
         )
@@ -360,7 +388,7 @@ def persist_chapter_annotation(
                 dialogues=dialogues_by_chunk[chunk_id],
                 events=[],
                 relations=relations_by_chunk[chunk_id],
-                states=[],
+                states=states_by_chunk[chunk_id],
                 foreshadowings=[],
             )
         )

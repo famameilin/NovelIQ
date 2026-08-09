@@ -7,11 +7,12 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any, Literal, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from .prompts import build_chunk_message
+from src.agents.stream import AgentStream, run_model_call
+
 from .tools import AnnotationToolLedger
 
 AnnotationPhase = Literal["chunk_open", "continuity_open", "completed"]
@@ -33,6 +34,7 @@ def _build_agent_node(
     *,
     ledger: AnnotationToolLedger,
     max_iterations: int,
+    stream: AgentStream | None = None,
 ):
     """2026-08-07 用于构建同步系统阶段并限制循环次数的模型节点"""
 
@@ -42,7 +44,9 @@ def _build_agent_node(
         if iterations >= max_iterations:
             return {"error": f"annotation LangGraph 内部循环达到上限 {max_iterations}"}
         ledger.set_phase(state["phase"])
-        response = await llm.bind_tools(tools).ainvoke(list(state["messages"]))
+        if stream is not None:
+            await stream.thinking(f"章节标注推理中（第 {iterations + 1} 轮）...")
+        response = await run_model_call(llm.bind_tools(tools), list(state["messages"]), stream)
         return {"messages": [response], "iterations": iterations + 1}
 
     return agent_node
@@ -86,6 +90,7 @@ def _build_tool_batch_node(
     tools: list[Any],
     *,
     ledger: AnnotationToolLedger,
+    stream: AgentStream | None = None,
 ):
     """2026-08-07 用于构建按调用顺序执行且整批可回滚的工具节点"""
     tool_map = {candidate.name: candidate for candidate in tools}
@@ -97,16 +102,23 @@ def _build_tool_batch_node(
         messages: list[BaseMessage] = []
         try:
             for call in calls:
+                name = str(call.get("name"))
+                if stream is not None:
+                    await stream.tool_call_started(name)
                 result = await _invoke_tool(tool_map, call)
+                if stream is not None:
+                    await stream.tool_call_succeeded(name, result)
                 messages.append(
                     ToolMessage(
                         content=result,
                         tool_call_id=str(call["id"]),
-                        name=str(call["name"]),
+                        name=name,
                     )
                 )
         except Exception as exc:  # noqa: BLE001
             ledger.restore(snapshot)
+            if stream is not None:
+                await stream.tool_call_failed(str(call.get("name") or "unknown"), str(exc))
             messages = [
                 ToolMessage(
                     content=json.dumps(
@@ -139,18 +151,26 @@ def _build_finalizer_node(
     tools: list[Any],
     *,
     ledger: AnnotationToolLedger,
+    stream: AgentStream | None = None,
 ):
     """2026-08-07 用于构建 complete_chunk 和 finish_chapter 单独执行节点"""
     tool_map = {candidate.name: candidate for candidate in tools}
 
     async def finalizer(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-07 用于执行完成工具并注入下一系统范围"""
+        """2026-08-07 用于执行完成工具并注入连续性阶段消息"""
         call = _tool_calls(state)[0]
+        name = str(call.get("name"))
         snapshot = ledger.snapshot()
         try:
+            if stream is not None:
+                await stream.tool_call_started(name)
             result = await _invoke_tool(tool_map, call)
+            if stream is not None:
+                await stream.tool_call_succeeded(name, result)
         except Exception as exc:  # noqa: BLE001
             ledger.restore(snapshot)
+            if stream is not None:
+                await stream.tool_call_failed(name, str(exc))
             return {
                 "messages": [
                     ToolMessage(
@@ -159,10 +179,10 @@ def _build_finalizer_node(
                             ensure_ascii=False,
                         ),
                         tool_call_id=str(call["id"]),
-                        name=str(call["name"]),
+                        name=name,
                     ),
                     SystemMessage(
-                        content=f"{call['name']} 校验失败: {exc}",
+                        content=f"{name} 校验失败: {exc}",
                     ),
                 ],
                 "phase": ledger.phase,
@@ -172,34 +192,20 @@ def _build_finalizer_node(
             ToolMessage(
                 content=result,
                 tool_call_id=str(call["id"]),
-                name=str(call["name"]),
+                name=name,
             )
         ]
-        if call["name"] == "complete_chunk":
-            active = ledger.active_chunk
-            if active is not None:
-                chunk_id, chunk_text = active
-                messages.append(
-                    HumanMessage(
-                        content=build_chunk_message(
-                            chunk_index=ledger.active_chunk_index + 1,
-                            chunk_total=len(ledger.current_chunks),
-                            chunk_text=chunk_text,
-                            candidates=ledger.dialogue_candidates[chunk_id],
-                        )
+        if name == "complete_chunk":
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "全部 chunk 已冻结，可处理连续性。"
+                        "可继续处理活动连续性案例；"
+                        "后文只用于 resolve_case，不能修改正式标注。"
+                        "处理完成后最后单独调用 finish_chapter"
                     )
                 )
-            else:
-                messages.append(
-                    SystemMessage(
-                        content=(
-                            "全部 current chunk 正式标注已经冻结。"
-                            "可继续处理活动连续性案例；"
-                            "后文只用于 resolve_case，不能修改正式标注。"
-                            "处理完成后单独调用 finish_chapter"
-                        )
-                    )
-                )
+            )
         return {"messages": messages, "phase": ledger.phase}
 
     return finalizer
@@ -230,6 +236,7 @@ def build_annotation_graph(
     *,
     ledger: AnnotationToolLedger,
     max_iterations: int,
+    stream: AgentStream | None = None,
 ) -> Any:
     """2026-08-07 用于构建逐 chunk 领域写入和章节完成状态机"""
     graph = StateGraph(AnnotationGraphState)
@@ -240,15 +247,16 @@ def build_annotation_graph(
             tools,
             ledger=ledger,
             max_iterations=max_iterations,
+            stream=stream,
         ),
     )
     graph.add_node(
         "tool_batch",
-        _build_tool_batch_node(tools, ledger=ledger),
+        _build_tool_batch_node(tools, ledger=ledger, stream=stream),
     )
     graph.add_node(
         "finalizer",
-        _build_finalizer_node(tools, ledger=ledger),
+        _build_finalizer_node(tools, ledger=ledger, stream=stream),
     )
     graph.add_node("protocol_error", _protocol_error)
 
