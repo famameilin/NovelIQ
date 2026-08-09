@@ -5,15 +5,16 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from src.agents.stream import AgentStream, run_model_call
-
 from .tools import AnnotationToolLedger
+
+if TYPE_CHECKING:
+    from src.agents.stream import AgentStream
 
 AnnotationPhase = Literal["chunk_open", "continuity_open", "completed"]
 _FINALIZER_NAMES = {"complete_chunk", "finish_chapter"}
@@ -46,6 +47,8 @@ def _build_agent_node(
         ledger.set_phase(state["phase"])
         if stream is not None:
             await stream.thinking(f"章节标注推理中（第 {iterations + 1} 轮）...")
+        from src.agents.stream import run_model_call
+
         response = await run_model_call(llm.bind_tools(tools), list(state["messages"]), stream)
         return {"messages": [response], "iterations": iterations + 1}
 
