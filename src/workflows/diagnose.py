@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.agents.stream import AgentStream
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud.schema import CloudAnalysis
@@ -72,11 +73,14 @@ async def run_diagnose(
         raise ValueError(f"run {run_id} is missing novel_id, cannot build diagnosis payload")
     novel_title = str(run.get("novel_title", "")).strip() or None
 
+    agent_stream = AgentStream(emitter, sub_stage="diagnosis") if emitter is not None else None
+
     result = await run_diagnosis_agent(
         session=session,
         run_id=run_id,
         novel_id=novel_id,
         novel_title=novel_title,
+        stream=agent_stream,
     )
 
     stats_repo = StatsRepository(session)
