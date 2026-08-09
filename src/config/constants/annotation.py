@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from src.agents.annotation.schema import RelationType
+
 EMOTION_SCORE_MAPPING: dict[str, int] = {
     "strong_positive": 2,
     "mild_positive": 1,
@@ -39,9 +41,9 @@ VALID_CLUE_TYPES: tuple[str, ...] = (
 VALID_EVENT_TYPES: tuple[str, ...] = ("冲突", "铺垫", "转折")
 VALID_FORESHADOWING_TYPES: tuple[str, ...] = ("物件", "对话", "场景", "人物行为", "其他")
 
-SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "友情", "盟友"})
+SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "盟友", "友情", "同一人物"})
 
-VALID_RELATION_TYPES: frozenset[str] = frozenset({"家族", "师徒", "敌对", "盟友", "友情", "爱慕", "主从", "利益"})
+VALID_RELATION_TYPES: frozenset[str] = frozenset(RelationType)
 
 VALID_CHANGE_TYPES: frozenset[str] = frozenset({"新建", "强化", "弱化", "断裂"})
 
