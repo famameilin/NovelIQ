@@ -84,6 +84,7 @@ class GraphEntity(Base):
     )
     canonical_name: Mapped[str] = mapped_column(String(255), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     first_seen_chunk: Mapped[int] = mapped_column(Integer, nullable=False)
     last_seen_chunk: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -97,7 +98,7 @@ class GraphEntity(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "entity_type IN ('character', 'location', 'object', 'organization')",
+            "entity_type IN ('character', 'location', 'item', 'organization')",
             name="ck_graph_entities_type",
         ),
         UniqueConstraint("run_id", "canonical_name", name="uq_graph_entities_run_canonical"),

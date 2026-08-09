@@ -36,11 +36,12 @@ from src.storage.repositories.base import BaseRepository
 
 @dataclass(frozen=True, slots=True)
 class EntitySnapshotRow:
-    """2026-08-07 用于返回目标章节边界的实体身份与完整状态"""
+    """2026-08-08 用于返回目标章节边界的实体身份与完整状态"""
 
     entity_id: int
     name: str
     entity_type: str
+    tags: list[str]
     attributes: dict[str, Any]
     first_seen_chunk: int
     last_seen_chunk: int
@@ -198,6 +199,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                 entity_id=int(entity.entity_id),
                 name=str(entity.canonical_name),
                 entity_type=str(entity.entity_type),
+                tags=list(entity.tags or []),
                 attributes=dict(entity.attributes or {}),
                 first_seen_chunk=int(entity.first_seen_chunk),
                 last_seen_chunk=min(int(entity.last_seen_chunk), int(boundary.last_chunk_id)),

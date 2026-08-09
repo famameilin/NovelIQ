@@ -32,13 +32,6 @@ from src.storage.models import (
     GraphVersion,
 )
 
-_ENTITY_FIELDS: tuple[tuple[str, EntityType], ...] = (
-    ("characters", "character"),
-    ("locations", "location"),
-    ("objects", "object"),
-    ("organizations", "organization"),
-)
-
 
 @dataclass(slots=True)
 class PersistedGraphResult:
@@ -149,7 +142,7 @@ def _validate_annotation_chunks(
 
 
 def _entity_attributes(entity: BoundEntity, entity_type: EntityType) -> dict[str, Any]:
-    """2026-08-07 用于提取系统绑定实体的持久化属性"""
+    """2026-08-08 用于提取系统绑定实体的持久化属性"""
     attributes: dict[str, Any] = {"entity_type": entity_type}
     if entity.description is not None:
         attributes["description"] = entity.description
@@ -162,20 +155,21 @@ def _resolve_entities(
     annotation: ChapterAnnotationRecord,
     payload: BoundChapterAnnotation,
 ) -> dict[str, GraphEntity]:
-    """2026-08-07 用于按规范化名称匹配或创建实体并维护出现边界"""
+    """2026-08-08 用于按规范化名称匹配或创建实体并维护出现边界"""
     appearances: dict[str, list[tuple[int, EntityType, BoundEntity]]] = {}
     display_names: dict[str, str] = {}
     for chunk in payload.chunks:
-        for field_name, entity_type in _ENTITY_FIELDS:
-            for item in getattr(chunk.entities, field_name):
-                key = _normalized_name(item.name)
-                existing_name = display_names.get(key)
-                if existing_name is not None and existing_name != item.name:
-                    raise ValueError(
-                        f"实体名称规范化后冲突: {existing_name} / {item.name}"
-                    )
-                display_names[key] = item.name
-                appearances.setdefault(key, []).append((chunk.chunk_id, entity_type, item))
+        for item in chunk.entities.entities:
+            key = _normalized_name(item.name)
+            existing_name = display_names.get(key)
+            if existing_name is not None and existing_name != item.name:
+                raise ValueError(
+                    f"实体名称规范化后冲突: {existing_name} / {item.name}"
+                )
+            display_names[key] = item.name
+            appearances.setdefault(key, []).append(
+                (chunk.chunk_id, item.entity_type, item)
+            )
 
     existing_by_key: dict[str, list[GraphEntity]] = {}
     for entity in session.execute(
@@ -191,29 +185,39 @@ def _resolve_entities(
         entity_types = {entity_type for _chunk_id, entity_type, _item in items}
         if len(entity_types) != 1:
             raise ValueError(f"同一实体名称被声明为多个大类: {display_names[key]}")
-        entity_type = next(iter(entity_types))
+        entity_type: EntityType = next(iter(entity_types))
         chunk_ids = [chunk_id for chunk_id, _item_type, _item in items]
         attributes: dict[str, Any] = {}
+        tags: list[str] = []
         for _chunk_id, _item_type, item in items:
             attributes.update(_entity_attributes(item, entity_type))
+            for tag in item.tags:
+                if tag not in tags:
+                    tags.append(tag)
         matches = existing_by_key.get(key, [])
         if len(matches) > 1:
             raise ValueError(f"实体名称匹配到多个节点: {display_names[key]}")
         if matches:
             entity = matches[0]
             if entity.entity_type != entity_type:
+                # 2026-08-08 同一名称跨章变更大类不是归类波动而是身份复用：
+                # 前文“剑”是 item 器物，后文出现有灵的“剑灵”应使用不同名称提交，
+                # 这里直接报错，避免静默吞掉后文的新身份
                 raise ValueError(
                     f"实体名称已属于其他大类: {display_names[key]} "
-                    f"expected={entity_type} actual={entity.entity_type}"
+                    f"expected={entity.entity_type} actual={entity_type}；"
+                    "若后文是寄宿或附身等独立身份，请改用区分性名称重新提交"
                 )
             entity.first_seen_chunk = min(entity.first_seen_chunk, min(chunk_ids))
             entity.last_seen_chunk = max(entity.last_seen_chunk, max(chunk_ids))
             entity.attributes = {**dict(entity.attributes or {}), **attributes}
+            entity.tags = list(dict.fromkeys([*list(entity.tags or []), *tags]))
         else:
             entity = GraphEntity(
                 run_id=annotation.run_id,
                 canonical_name=display_names[key],
                 entity_type=entity_type,
+                tags=tags,
                 attributes=attributes,
                 first_seen_chunk=min(chunk_ids),
                 last_seen_chunk=max(chunk_ids),

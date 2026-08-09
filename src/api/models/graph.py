@@ -10,11 +10,12 @@ from src.agents.annotation.schema import GraphEvidence, TextEvidence
 
 
 class GraphNode(BaseModel):
-    """2026-08-07 用于返回目标章节边界的实体节点"""
+    """2026-08-08 用于返回目标章节边界的实体节点"""
 
     entity_id: int = Field(gt=0)
     name: str
-    entity_type: Literal["character", "location", "object", "organization"]
+    entity_type: Literal["character", "location", "item", "organization"]
+    tags: list[str] = Field(default_factory=list)
     first_seen_chunk: int = Field(ge=0)
     last_seen_chunk: int = Field(ge=0)
     state_revision: int = Field(ge=0)
