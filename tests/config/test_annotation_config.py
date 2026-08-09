@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config.constants import (
+    SYMMETRIC_RELATION_TYPES,
     VALID_ACTION_TYPES,
     VALID_CLUE_TYPES,
     VALID_ENTITY_TYPES,
@@ -34,8 +35,13 @@ class TestAnnotationConstants(unittest.TestCase):
 
     def test_valid_relation_types(self) -> None:
         """测试关系类型常量"""
-        expected = {"师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"}
+        expected = {"家族", "师徒", "主从", "敌对", "盟友", "友情", "爱慕", "利益", "同一人物", "隶属", "位于"}
         self.assertEqual(set(VALID_RELATION_TYPES), expected)
+
+    def test_symmetric_relation_types(self) -> None:
+        """测试对称关系类型常量"""
+        expected = {"家族", "盟友", "友情", "同一人物"}
+        self.assertEqual(set(SYMMETRIC_RELATION_TYPES), expected)
 
     def test_valid_entity_types(self) -> None:
         """测试实体类型常量"""
