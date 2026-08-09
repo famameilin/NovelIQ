@@ -781,7 +781,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
                 relation_id="relation-1",
                 from_name="贺铮",
                 to_name="伯安",
-                relation_type="father_of",
+                relation_type="隶属",
                 first_seen_chunk=2,
                 last_seen_chunk=9,
             ),
@@ -789,7 +789,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
                 relation_id="relation-2",
                 from_name="贺铮",
                 to_name="伯安",
-                relation_type="ally_of",
+                relation_type="家族",
                 first_seen_chunk=2,
                 last_seen_chunk=9,
             ),
@@ -805,7 +805,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
     assert len(result) == 1
     assert result[0].from_entity == "贺铮"
     assert result[0].to_entity == "伯安"
-    assert result[0].rel_type == "father_of"
+    assert result[0].rel_type == "隶属"
 
 
 def test_fetch_hierarchical_relations_filters_unknown_graph_endpoint():
@@ -815,7 +815,7 @@ def test_fetch_hierarchical_relations_filters_unknown_graph_endpoint():
                 relation_id=10,
                 from_name="柳婉儿",
                 to_name="陌生人",
-                relation_type="spouse_of",
+                relation_type="隶属",
                 first_seen_chunk=1,
                 last_seen_chunk=4,
             )
@@ -838,7 +838,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
                 relation_id="relation-1",
                 from_name="老贺",
                 to_name="伯安",
-                relation_type="father_of",
+                relation_type="隶属",
                 first_seen_chunk=2,
                 last_seen_chunk=9,
                 is_active=False,
@@ -847,7 +847,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
                 relation_id="relation-2",
                 from_name="老贺",
                 to_name="阿明",
-                relation_type="father_of",
+                relation_type="隶属",
                 first_seen_chunk=3,
                 last_seen_chunk=10,
                 is_active=True,
@@ -878,7 +878,7 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
                 relation_id="relation-11",
                 from_name="伯安",
                 to_name="贺家",
-                relation_type="belongs_to",
+                relation_type="隶属",
                 first_seen_chunk=2,
                 last_seen_chunk=9,
                 is_active=True,
@@ -887,7 +887,7 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
                 relation_id="relation-12",
                 from_name="赵甲卫",
                 to_name="贺家",
-                relation_type="affiliated_with",
+                relation_type="隶属",
                 first_seen_chunk=3,
                 last_seen_chunk=10,
                 is_active=True,
@@ -902,8 +902,8 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
     )
 
     assert [(item.rel_id, item.rel_type, item.from_entity, item.to_entity) for item in result] == [
-        ("relation-11", "belongs_to", "伯安", "贺家"),
-        ("relation-12", "affiliated_with", "赵甲卫", "贺家"),
+        ("relation-11", "隶属", "伯安", "贺家"),
+        ("relation-12", "隶属", "赵甲卫", "贺家"),
     ]
 
 

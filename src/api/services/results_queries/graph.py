@@ -16,16 +16,7 @@ from src.storage.repositories import AnnotationRepository, GraphRepository
 GRAPH_CHANGE_LIMIT = 200
 
 HIERARCHICAL_RELATION_TYPES = {
-    "belongs_to",
-    "member_of",
-    "leader_of",
-    "affiliated_with",
-    "father_of",
-    "son_of",
-    "parent_of",
-    "child_of",
-    "sibling_of",
-    "spouse_of",
+    "隶属",
 }
 
 
@@ -174,6 +165,7 @@ def _fetch_graph_snapshot(
                 "entity_id": entity.entity_id,
                 "name": entity.name,
                 "entity_type": entity.entity_type,
+                "tags": entity.tags,
                 "first_seen_chunk": entity.first_seen_chunk,
                 "last_seen_chunk": entity.last_seen_chunk,
                 "state_revision": entity.state_revision,
