@@ -24,6 +24,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+from src.agents.stream import AgentStream, emit_tool_results, run_model_call
+
 
 class AgentLoopState(TypedDict):
     """工具循环 agent 图状态"""
@@ -126,6 +128,25 @@ def _merge_candidate_patch(
     return merged
 
 
+def _retry_messages(state: AgentLoopState, error_text: str) -> list[BaseMessage]:
+    """
+    2026-08-09 用于构造 finalize 失败重试消息：
+    最后 AIMessage 的每条 tool_call 都追加对应 ToolMessage 响应，
+    避免悬空 tool_calls 再次发送给 OpenAI 触发 400
+    """
+    last_message = state["messages"][-1]
+    if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+        return [SystemMessage(content=error_text)]
+    return [
+        ToolMessage(
+            content=error_text,
+            tool_call_id=str(call.get("id", "")),
+            name=str(call.get("name", "")),
+        )
+        for call in last_message.tool_calls
+    ]
+
+
 def _build_finalize_node(
     max_attempts: int,
     response_model: type[Any],
@@ -135,13 +156,14 @@ def _build_finalize_node(
     revision_tool_name: str | None = None,
     revision_response_model: type[Any] | None = None,
     revision_payload_field: str | None = None,
+    stream: AgentStream | None = None,
 ):
     """构造 finalize 节点：提取 finish 工具参数并校验结构化输出"""
 
     async def finalize_node(state: AgentLoopState) -> dict[str, Any]:
-        """
-        2026-08-02 用于只校验最新 Agent 消息中的唯一 finish 调用并阻止旧调用复用
-        """
+        """2026-08-02 用于只校验最新 Agent 消息中的唯一 finish 调用并阻止旧调用复用"""
+        if stream is not None:
+            await stream.thinking("校验最终结构化输出...")
         last_message = state["messages"][-1]
         tool_calls = last_message.tool_calls if isinstance(last_message, AIMessage) else []
         submission_tool_names = {tool_name}
@@ -167,7 +189,10 @@ def _build_finalize_node(
             )
             return {
                 "attempts": attempts,
-                "messages": [SystemMessage(content=f"错误: {error_msg}。{retry_instruction}")],
+                "messages": _retry_messages(
+                    state,
+                    f"错误: {error_msg}。{retry_instruction}",
+                ),
             }
 
         submission_call = finish_calls[0]
@@ -212,32 +237,39 @@ def _build_finalize_node(
             )
             update: dict[str, Any] = {
                 "attempts": attempts,
-                "messages": [SystemMessage(content=f"错误: {error_msg}\n{retry_instruction}")],
+                "messages": _retry_messages(
+                    state,
+                    f"错误: {error_msg}\n{retry_instruction}",
+                ),
             }
             if candidate_for_state is not None:
                 update["candidate"] = candidate_for_state
             return update
 
+        if stream is not None:
+            await stream.output("最终结果已生成并通过校验")
         return {"output": parsed.model_dump(mode="json"), "error": None}
 
     return finalize_node
 
 
-def _build_agent_node(llm: Any, tools: list[Any], first_hint: str):
-    """构造 agent 节点：绑定工具后调用 LLM"""
+def _build_agent_node(llm: Any, tools: list[Any], first_hint: str, stream: AgentStream | None = None):
+    """构造 agent 节点：绑定工具后调用 LLM（支持流式过程推送）"""
 
     async def agent_node(state: AgentLoopState) -> dict[str, Any]:
         model_with_tools = llm.bind_tools(tools)
         messages = list(state["messages"])
         if not any(isinstance(message, HumanMessage) for message in messages):
             messages = [HumanMessage(content=first_hint)] + messages
-        response = await model_with_tools.ainvoke(messages)
+        if stream is not None:
+            await stream.thinking("正在推理，规划下一步动作...")
+        response = await run_model_call(model_with_tools, messages, stream)
         return {"messages": [response]}
 
     return agent_node
 
 
-def _build_tools_node(tool_node: ToolNode):
+def _build_tools_node(tool_node: ToolNode, stream: AgentStream | None = None):
     """
     2026-08-04 用于在执行普通工具后累计真实工具调用次数
     """
@@ -249,6 +281,9 @@ def _build_tools_node(tool_node: ToolNode):
         update = await tool_node.ainvoke(state)
         last_message = state["messages"][-1]
         call_count = len(last_message.tool_calls) if isinstance(last_message, AIMessage) else 0
+        if stream is not None:
+            tool_messages = update.get("messages") or []
+            await emit_tool_results(stream, tool_messages)
         return {
             **dict(update),
             "tool_iterations": int(state.get("tool_iterations") or 0) + call_count,
@@ -289,6 +324,7 @@ def build_agent_graph(
     revision_tool_name: str | None = None,
     revision_response_model: type[Any] | None = None,
     max_tool_iterations: int | None = None,
+    stream: AgentStream | None = None,
 ) -> Any:
     """构建通用工具循环 agent 图"""
     graph = StateGraph(AgentLoopState)
@@ -305,12 +341,12 @@ def build_agent_graph(
         {finish_tool_name, revision_tool_name} if revision_tool_name is not None else {finish_tool_name}
     )
 
-    graph.add_node("agent", _build_agent_node(llm, tools, first_hint))
+    graph.add_node("agent", _build_agent_node(llm, tools, first_hint, stream=stream))
     raw_tool_node = ToolNode(tools) if handle_tool_errors is None else ToolNode(
         tools,
         handle_tool_errors=handle_tool_errors,
     )
-    graph.add_node("tools", _build_tools_node(raw_tool_node))
+    graph.add_node("tools", _build_tools_node(raw_tool_node, stream=stream))
     graph.add_node("tool_limit", _build_tool_limit_node(resolved_max_tool_iterations))
     graph.add_node(
         "finalize",
@@ -323,6 +359,7 @@ def build_agent_graph(
             revision_tool_name,
             revision_response_model,
             revision_payload_field,
+            stream=stream,
         ),
     )
 

@@ -101,6 +101,29 @@ class _EvidenceThenFinishLLM(_FinishOnlyLLM):
         )
 
 
+class _CapturingRetryLLM(_FinishOnlyLLM):
+    """先提交非法 finish 再重试，并捕获第二次收到的完整消息序列"""
+
+    def __init__(self, payload: dict) -> None:
+        super().__init__(payload, first_bad=True, wrapped=False)
+        self.captured_messages: list | None = None
+
+    async def ainvoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            bad = dict(self.payload)
+            bad["power_stance_score"] = 99
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "finish", "args": bad, "id": "c1", "type": "tool_call"}],
+            )
+        self.captured_messages = list(messages)
+        return AIMessage(
+            content="",
+            tool_calls=[{"name": "finish", "args": self.payload, "id": "c1", "type": "tool_call"}],
+        )
+
+
 @pytest.mark.asyncio
 async def test_diagnosis_agent_produces_cloud_analysis() -> None:
     graph = build_agent_graph(
@@ -153,6 +176,45 @@ async def test_diagnosis_agent_retries_on_invalid_output() -> None:
 
     assert result.get("error") is None
     assert llm.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_answers_every_pending_tool_call_with_tool_message() -> None:
+    """
+    2026-08-09 用于保证校验失败重试时最后 AIMessage 的每条 tool_call
+    都有紧随的 ToolMessage 响应，避免真实 OpenAI 400 tool_calls 悬空
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+
+    llm = _CapturingRetryLLM(_analysis_payload())
+    graph = build_agent_graph(
+        llm,
+        [],
+        max_attempts=5,
+        response_model=CloudAnalysis,
+        first_hint="完成诊断",
+    )
+
+    result = await graph.ainvoke(
+        {
+            "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
+            "attempts": 0,
+            "output": None,
+            "error": None,
+        }
+    )
+
+    assert result.get("error") is None
+    assert llm.calls == 2
+    assert llm.captured_messages is not None
+    messages = llm.captured_messages
+    for message, next_message in zip(messages, messages[1:], strict=False):
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            continue
+        for call in message.tool_calls:
+            assert isinstance(next_message, ToolMessage)
+            assert next_message.tool_call_id == call["id"]
+            assert next_message.name == call["name"]
 
 
 @pytest.mark.asyncio

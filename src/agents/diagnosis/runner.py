@@ -11,6 +11,7 @@ from typing import Any, cast
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.agents.stream import AgentStream
 from src.agents.usage import record_agent_token_usage
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
@@ -167,6 +168,7 @@ async def run_diagnosis_agent(
     novel_id: str,
     novel_title: str | None = None,
     llm: Any | None = None,
+    stream: AgentStream | None = None,
 ) -> CloudAnalysis:
     """
     运行诊断 agent（工具化自主取证）
@@ -184,6 +186,8 @@ async def run_diagnosis_agent(
 
         llm = build_chat_model("diagnosis")
 
+    if stream is not None:
+        await stream.thinking("诊断 Agent 开始取证...")
     diagnosis_repo = DiagnosisRepository(session)
     topic_rows = diagnosis_repo.fetch_topic_words(
         run_id,
@@ -206,6 +210,7 @@ async def run_diagnosis_agent(
             expected_topic_label_count=expected_topic_label_count,
             evidence_ledger=evidence_ledger,
         ),
+        stream=stream,
     )
 
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -302,4 +307,6 @@ async def run_diagnosis_agent(
         analysis.style_labels,
         elapsed,
     )
+    if stream is not None:
+        await stream.output("整体诊断完成，结果已通过校验")
     return analysis
