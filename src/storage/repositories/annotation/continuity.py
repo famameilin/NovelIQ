@@ -19,7 +19,6 @@ from src.agents.annotation.schema import (
     BoundForeshadowing,
     CaseSearchResult,
     CompletionCase,
-    EvidenceList,
     ForeshadowingSearchResult,
     PendingCase,
     ResolvedCase,
@@ -73,7 +72,6 @@ def _case_view(row: CasePoolCase) -> CaseSearchResult:
             "chunk_id": row.chunk_id,
             "keys": list(row.keys),
             "description": row.description,
-            "evidence": row.evidence,
             "state": row.state,
         }
     )
@@ -200,7 +198,6 @@ class DatabaseAnnotationQueryService:
                         "payoff_likelihood": thread.payoff_likelihood,
                         "status": thread.status,
                     },
-                    evidence=EvidenceList.model_validate(thread.evidence),
                 )
             )
             if len(results) >= limit:
@@ -341,7 +338,6 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
             description=normalize_text(pending_case.description),
             target_key=pending_case.target_key,
             target_ref=dict(pending_case.target_ref),
-            evidence=pending_case.evidence.model_dump(mode="json"),
             state="active",
             created_by_annotation_id=annotation_id,
         )
@@ -416,9 +412,7 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
                 speaker=dialogue.speaker,
                 tone=dialogue.tone,
                 is_inner_monologue=dialogue.is_inner_monologue,
-                description=dialogue.description,
-                confidence=dialogue.confidence,
-                evidence=dialogue.evidence.model_dump(mode="json"),
+                confidence="medium",
             )
             self.session.add(row)
             existing_keys.add(dialogue.candidate_key)
@@ -441,23 +435,13 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
         *,
         speaker: str | None,
         tone: str | None,
-        description: str | None,
         is_inner_monologue: bool | None,
-        reason: str,
-        evidence_chunk_id: int,
     ) -> None:
         """2026-08-11 用于把 dialogue 动作解决结果直接改到对话记录表"""
-        evidence_payload = list(record.evidence)
-        evidence_payload.append(
-            {"reason": reason, "chunk_id": evidence_chunk_id}
-        )
-        record.evidence = evidence_payload
         if speaker is not None:
             record.speaker = speaker
         if tone is not None:
             record.tone = tone
-        if description is not None:
-            record.description = description
         if is_inner_monologue is not None:
             record.is_inner_monologue = is_inner_monologue
         record.updated_at = datetime.now(UTC)
@@ -473,62 +457,43 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         run_id: str,
         chunk_id: int,
         foreshadowing: BoundForeshadowing,
-    ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit]:
-        """2026-08-07 用于按规范化稳定语义字段解析或创建伏笔线程"""
-        statement = select(ForeshadowingThread).where(
-            ForeshadowingThread.run_id == run_id,
-            ForeshadowingThread.setup_summary == normalize_text(foreshadowing.setup_summary),
-            ForeshadowingThread.setup_kind == foreshadowing.setup_kind,
-            ForeshadowingThread.expected_payoff_family == foreshadowing.expected_payoff_family,
-        )
-        matches = list(self.session.execute(statement).scalars().all())
-        if len(matches) > 1:
-            raise ValueError("伏笔稳定语义字段匹配到多个线程")
-        thread = matches[0] if matches else None
-        is_new_setup = thread is None
-
-        now = datetime.now(UTC)
-        evidence_payload = foreshadowing.evidence.model_dump(mode="json")
-        if thread is None:
-            thread = ForeshadowingThread(
-                setup_id=str(uuid4()),
-                run_id=run_id,
-                first_chunk_id=chunk_id,
-                last_chunk_id=chunk_id,
-                setup_summary=normalize_text(foreshadowing.setup_summary),
-                foreshadowing_type=foreshadowing.foreshadowing_type,
-                setup_kind=foreshadowing.setup_kind,
-                expected_payoff_family=foreshadowing.expected_payoff_family,
-                payoff_likelihood=foreshadowing.payoff_likelihood,
-                confidence=foreshadowing.confidence,
-                strength=foreshadowing.confidence,
-                status=foreshadowing.setup_status,
-                active=True,
-                evidence=evidence_payload,
-                created_at=now,
-                updated_at=now,
+    ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit | None]:
+        """2026-08-11 用于只创建新伏笔线程（description 相同视为同一伏笔，已存在时不再重复创建）"""
+        normalized = normalize_text(foreshadowing.description)
+        thread = self.session.execute(
+            select(ForeshadowingThread).where(
+                ForeshadowingThread.run_id == run_id,
+                ForeshadowingThread.setup_summary == normalized,
             )
-            self.session.add(thread)
-        else:
-            thread.last_chunk_id = chunk_id
-            thread.foreshadowing_type = foreshadowing.foreshadowing_type
-            thread.payoff_likelihood = foreshadowing.payoff_likelihood
-            thread.confidence = foreshadowing.confidence
-            thread.strength = foreshadowing.confidence
-            thread.status = foreshadowing.setup_status
-            thread.active = True
-            thread.evidence = evidence_payload
-            thread.updated_at = now
+        ).scalar_one_or_none()
+        if thread is not None:
+            return thread, None
+        now = datetime.now(UTC)
+        thread = ForeshadowingThread(
+            setup_id=str(uuid4()),
+            run_id=run_id,
+            first_chunk_id=chunk_id,
+            last_chunk_id=chunk_id,
+            setup_summary=normalized,
+            foreshadowing_type="其他",
+            setup_kind="其他",
+            expected_payoff_family="未指定",
+            payoff_likelihood="medium",
+            confidence=foreshadowing.confidence,
+            strength=foreshadowing.confidence,
+            status="open",
+            active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        self.session.add(thread)
         self.session.flush()
         hit = ForeshadowingThreadHit(
             setup_id=thread.setup_id,
             run_id=run_id,
             chunk_id=chunk_id,
-            anchor_text=foreshadowing.setup_summary,
-            anchor_reason=foreshadowing.evidence[0].reason,
-            why_unresolved_now=foreshadowing.why_unresolved_now,
-            evidence=evidence_payload,
-            is_new_setup=is_new_setup,
+            anchor_text=normalized,
+            is_new_setup=True,
             created_at=now,
         )
         self.session.add(hit)
@@ -585,7 +550,6 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             case_type=resolved_case.type,
             target_ref=dict(resolved_case.target_ref),
             resolution=resolution,
-            evidence_chunk_id=resolved_case.evidence_chunk_id,
             target_fact_id=target_fact.fact_id if target_fact is not None else None,
             target_fact_revision=target_fact.fact_revision if target_fact is not None else None,
             target_dialogue_id=target_dialogue_id,
@@ -606,7 +570,6 @@ def completion_case_view(row: CasePoolCase) -> CompletionCase:
             "keys": list(row.keys),
             "description": row.description,
             "target_ref": dict(row.target_ref),
-            "evidence": row.evidence,
             "state": row.state,
         }
     )

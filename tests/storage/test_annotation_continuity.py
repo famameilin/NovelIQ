@@ -6,9 +6,7 @@ import pytest
 
 from src.agents.annotation.schema import (
     CaseSearchResult,
-    EvidenceList,
     PendingCase,
-    TextEvidence,
 )
 from src.config import settings
 from src.storage.repositories.annotation.continuity import (
@@ -50,7 +48,6 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
                 "end": 2,
                 "text": "顾霜",
             },
-            evidence=EvidenceList(root=[TextEvidence(reason="本章没有揭示身份", chunk_id=0)]),
         ),
     )
     db_session.commit()

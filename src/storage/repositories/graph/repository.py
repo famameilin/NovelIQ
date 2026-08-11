@@ -12,7 +12,6 @@ from typing import cast as type_cast
 from sqlalchemy import String, func, or_, select, text
 from sqlalchemy import cast as sql_cast
 
-from src.agents.annotation.schema import EvidenceList
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
     EntityStateVersion,
@@ -77,7 +76,6 @@ class GraphChangeRow:
     effective_chunk_id: int
     confidence: str
     changes: list[dict[str, Any]]
-    evidence: EvidenceList
     entity_id: int | None = None
     entity_name: str | None = None
     entity_type: str | None = None
@@ -356,7 +354,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         offset: int = 0,
         limit: int | None = 200,
     ) -> tuple[list[GraphChangeRow], int]:
-        """2026-08-07 用于在 PostgreSQL 中按章节倒序分页返回变化及根 Evidence"""
+        """2026-08-07 用于在 PostgreSQL 中按章节倒序分页返回变化及根事实"""
         if offset < 0:
             raise ValueError("graph changes offset 不能小于 0")
         page_limit = None if limit is None else max(1, min(limit, 200))
@@ -488,8 +486,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                 SELECT
                     cause_rows.*,
                     fact.effective_chunk_id,
-                    fact.confidence,
-                    fact.evidence
+                    fact.confidence
                 FROM cause_rows
                 LEFT JOIN graph_facts AS fact
                   ON fact.run_id = :run_id
@@ -545,7 +542,6 @@ class GraphRepository(BaseRepository[GraphFact]):
                     effective_chunk_id=int(result["effective_chunk_id"]),
                     confidence=str(result["confidence"]),
                     changes=list(result["changes"]),
-                    evidence=EvidenceList.model_validate(result["evidence"]),
                     entity_id=int(result["entity_id"]) if result["entity_id"] is not None else None,
                     entity_name=str(result["entity_name"]) if result["entity_name"] is not None else None,
                     entity_type=str(result["entity_type"]) if result["entity_type"] is not None else None,

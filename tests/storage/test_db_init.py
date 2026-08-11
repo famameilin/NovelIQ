@@ -23,14 +23,19 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
         "type",
         "target_ref",
         "resolution",
-        "evidence_chunk_id",
         "target_fact_id",
         "target_fact_revision",
         "target_dialogue_id",
         "target_setup_id",
     } <= set(mapping_columns.keys())
     assert {"type", "chunk_id", "target_key", "target_ref"} <= set(case_columns.keys())
-    assert {"graph_version_id", "source_kind", "annotation_id", "payload_path", "evidence"} <= set(fact_columns.keys())
+    assert {
+        "graph_version_id",
+        "source_kind",
+        "annotation_id",
+        "payload_path",
+        "fact_revision",
+    } <= set(fact_columns.keys())
     assert "attributes" in entity_columns
     assert {
         "dialogue_id",
@@ -44,9 +49,7 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
         "speaker",
         "tone",
         "is_inner_monologue",
-        "description",
         "confidence",
-        "evidence",
     } <= set(dialogue_columns.keys())
 
 
@@ -304,7 +307,7 @@ def test_graph_read_views_project_latest_state_active_relations_and_participants
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
-                change_kind="break",
+                state="ended",
             )
         ],
     )

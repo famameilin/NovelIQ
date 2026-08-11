@@ -11,22 +11,17 @@ from .errors import (
     AnnotationRetryableError,
 )
 from .graph import build_annotation_graph
-from .runner import AnnotationAgentRunError, run_annotation_agent, validate_bound_annotation
+from .runner import run_annotation_agent, validate_bound_annotation
 from .schema import (
     AgentRunResult,
     BoundChapterAnnotation,
     CompletionResult,
-    Evidence,
-    EvidenceList,
-    GraphEvidence,
-    TextEvidence,
 )
 from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
 
 __all__ = [
     "AgentRunResult",
     "AnnotationAgentError",
-    "AnnotationAgentRunError",
     "AnnotationAuthorizationError",
     "AnnotationConfigurationError",
     "AnnotationInputError",
@@ -36,10 +31,6 @@ __all__ = [
     "AnnotationToolLedger",
     "BoundChapterAnnotation",
     "CompletionResult",
-    "Evidence",
-    "EvidenceList",
-    "GraphEvidence",
-    "TextEvidence",
     "build_annotation_graph",
     "build_annotation_tools",
     "run_annotation_agent",

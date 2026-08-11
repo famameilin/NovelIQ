@@ -16,7 +16,6 @@ from src.agents.annotation.schema import (
     BoundEvent,
     BoundForeshadowing,
     BoundRelation,
-    BoundState,
     ChunkMetricsInput,
 )
 from src.storage.models import (
@@ -33,14 +32,13 @@ from src.storage.repositories.graph import persist_completion_graph, stable_anno
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
-    evidence,
     persist_chapter_annotation,
     relation_fact,
 )
 
 
 def _full_annotation(text: str) -> BoundChapterAnnotation:
-    """2026-08-07 用于构造覆盖四类实体与全部领域事实的完整章节标注"""
+    """2026-08-11 用于构造覆盖四类实体与全部领域事实的完整章节标注"""
     candidates = extract_dialogue_candidates(0, text)
     dialogue_candidate = next(candidate for candidate in candidates if candidate.content == "住手")
     return BoundChapterAnnotation(
@@ -54,40 +52,26 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                     narrative_function="铺垫",
                     pivot_moment=False,
                     cliffhanger=False,
-                    confidence="high",
-                    reason="进入",
                 ),
                 entities=BoundEntityDirectory(
                     entities=[
                         BoundEntity(
                             name="顾霜",
                             entity_type="character",
-                            confidence="high",
-                            reason="人物出现",
-                            evidence=evidence("顾霜出现", 0),
                         ),
                         BoundEntity(
                             name="山门",
                             entity_type="location",
                             description="青石山门",
-                            confidence="high",
-                            reason="地点出现",
-                            evidence=evidence("山门出现", 0),
                         ),
                         BoundEntity(
                             name="玄剑",
                             entity_type="item",
                             tags=["宝剑"],
-                            confidence="high",
-                            reason="物品出现",
-                            evidence=evidence("玄剑出现", 0),
                         ),
                         BoundEntity(
                             name="天衡宗",
                             entity_type="organization",
-                            confidence="high",
-                            reason="组织出现",
-                            evidence=evidence("天衡宗出现", 0),
                         ),
                     ]
                 ),
@@ -96,38 +80,28 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                         character="顾霜",
                         role_function="主体",
                         action="进入山门",
-                        action_type="移动",
                         emotion="neutral",
-                        confidence="high",
-                        reason="顾霜进入",
-                        evidence=evidence("顾霜进入", 0),
                     )
                 ],
                 dialogues=[
                     BoundDialogue(
+                        candidate_index=1,
                         candidate_key=dialogue_candidate.candidate_key,
                         content=dialogue_candidate.content,
                         start=dialogue_candidate.start,
                         end=dialogue_candidate.end,
-                        description="喝止住手",
                         speaker=None,
-                        tone="急切",
+                        tone="紧张",
                         is_inner_monologue=False,
-                        confidence="high",
-                        reason="双引号",
-                        evidence=evidence("住手", 0),
                     )
                 ],
                 events=[
                     BoundEvent(
                         description="顾霜进入山门",
                         participants=[
-                            {"entity": "顾霜", "participation": "主体"}
+                            {"entity": "顾霜", "role": "行动者"},
+                            {"entity": "山门", "role": "地点"},
                         ],
-                        location="山门",
-                        confidence="high",
-                        reason="进入事件",
-                        evidence=evidence("顾霜进入山门", 0),
                     )
                 ],
                 relations=[
@@ -135,36 +109,15 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                         from_entity="顾霜",
                         to_entity="山门",
                         relation_type="位于",
-                        change_kind="assert",
-                        confidence="high",
-                        reason="顾霜位于山门",
+                        state="present",
                         directionality="directed",
                         relation_semantics="ordinary",
-                        evidence=evidence("顾霜位于山门", 0),
-                    )
-                ],
-                states=[
-                    BoundState(
-                        entity="顾霜",
-                        predicate="holds",
-                        object="玄剑",
-                        confidence="high",
-                        reason="顾霜持有玄剑",
-                        evidence=evidence("顾霜持有玄剑", 0),
                     )
                 ],
                 foreshadowings=[
                     BoundForeshadowing(
-                        foreshadowing_type="场景",
-                        setup_kind="其他",
-                        setup_summary="天衡宗将庇护顾霜",
-                        why_unresolved_now="本章尚未兑现",
-                        expected_payoff_family="援助",
-                        payoff_likelihood="high",
-                        setup_status="open",
+                        description="天衡宗将庇护顾霜",
                         confidence="high",
-                        reason="庇护伏笔",
-                        evidence=evidence("天衡宗庇护尚待回收", 0),
                     )
                 ],
             )
@@ -258,7 +211,6 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
         "character_observation",
         "event",
         "relation",
-        "state",
         "foreshadowing",
     }
     assert all(fact.source_kind == "annotation" for fact in facts)
@@ -276,6 +228,7 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.speaker is None
     assert dialogue.chunk_id == 0
+    assert dialogue.confidence == "medium"
 
 
 def test_dialogue_record_binds_system_original_text_and_position(db_session) -> None:
@@ -299,6 +252,7 @@ def test_dialogue_record_binds_system_original_text_and_position(db_session) -> 
     assert dialogue.content == "住手"
     assert dialogue.chunk_id == 0
     assert dialogue.is_inner_monologue is False
+    assert dialogue.confidence == "medium"
     assert db_session.execute(
         select(GraphFact).where(
             GraphFact.run_id == run_id,
@@ -308,7 +262,7 @@ def test_dialogue_record_binds_system_original_text_and_position(db_session) -> 
 
 
 def test_persistence_writes_state_and_relation_versions(db_session) -> None:
-    """2026-08-07 用于验证观察状态和关系仍驱动下游版本表"""
+    """2026-08-11 用于验证观察字段与实体属性仍驱动一章一版本的下游状态表"""
     text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -339,8 +293,20 @@ def test_persistence_writes_state_and_relation_versions(db_session) -> None:
             GraphFact.fact_type == "relation",
         )
     ).scalar_one()
+    observation_fact = db_session.execute(
+        select(GraphFact).where(
+            GraphFact.run_id == run_id,
+            GraphFact.fact_type == "character_observation",
+        )
+    ).scalar_one()
 
     assert len(state_rows) == 1
+    assert state_rows[0].entity_id == observation_fact.subject_entity_id
+    assert state_rows[0].state["entity_type"] == "character"
+    assert state_rows[0].state["role_function"] == "主体"
+    assert state_rows[0].state["action"] == "进入山门"
+    assert state_rows[0].state["emotion"] == "neutral"
+    assert state_rows[0].changes[0]["fact_id"] == observation_fact.fact_id
     assert relation_row.to_entity_id == next(
         entity.entity_id
         for entity in db_session.execute(
@@ -401,21 +367,21 @@ def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
             character_fact(chunk_id=0, name="赤羽炽尾鸡", action="踱步")
         ],
     )
-    item_fact = {
-        "chunk_id": 1,
-        "entity": "赤羽炽尾鸡",
-        "predicate": "possesses",
-        "value": "灵火",
-        "confidence": "high",
-        "reason": "持有灵火",
-        "_entity_specs": [{"name": "赤羽炽尾鸡", "entity_type": "item"}],
-    }
     with pytest.raises(ValueError, match="实体名称已属于其他大类"):
         persist_chapter_annotation(
             db_session,
             run_id=run_id,
             chapter_id=2,
-            states=[item_fact],
+            relations=[
+                relation_fact(
+                    chunk_id=1,
+                    from_name="赤羽炽尾鸡",
+                    to_name="山门",
+                    relation_type="位于",
+                    from_entity_type="item",
+                    to_entity_type="location",
+                )
+            ],
         )
 
 
@@ -431,38 +397,22 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=1,
-        states=[
-            {
-                "chunk_id": 0,
-                "entity": "玄剑",
-                "predicate": "status",
-                "value": "active",
-                "confidence": "high",
-                "reason": "状态",
-                "_entity_specs": [
-                    {"name": "玄剑", "entity_type": "item", "tags": ["法宝"]}
-                ],
-            }
+        relations=[
+            relation_fact(
+                chunk_id=0,
+                from_name="玄剑",
+                to_name="山门",
+                relation_type="位于",
+                from_entity_type="item",
+                to_entity_type="location",
+            )
         ],
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        states=[
-            {
-                "chunk_id": 1,
-                "entity": "剑灵",
-                "predicate": "resides_in",
-                "object": "玄剑",
-                "confidence": "high",
-                "reason": "寄宿于玄剑",
-                "_entity_specs": [
-                    {"name": "剑灵", "entity_type": "character"},
-                    {"name": "玄剑", "entity_type": "item"},
-                ],
-            }
-        ],
+        characters=[character_fact(chunk_id=1, name="剑灵", action="开口")],
     )
     db_session.commit()
 
@@ -471,104 +421,31 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
             select(GraphEntity).where(GraphEntity.run_id == run_id)
         ).scalars()
     )
-    assert {entity.canonical_name for entity in entities} == {"玄剑", "剑灵"}
-    assert {entity.entity_type for entity in entities} == {"item", "character"}
+    by_name = {entity.canonical_name: entity for entity in entities}
+    assert {"玄剑", "剑灵"} <= set(by_name)
+    assert by_name["玄剑"].entity_type == "item"
+    assert by_name["剑灵"].entity_type == "character"
 
 
-def test_entity_tags_merged_and_deduplicated_across_chapters(db_session) -> None:
-    """2026-08-08 用于验证实体标签跨章合并且去重"""
+def test_entity_attributes_merged_across_chapters(db_session) -> None:
+    """2026-08-11 用于验证已登记实体跨章按 JSON Merge Patch 合并且未提交字段沿用"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
         chapter_ids=[1, 2],
-        title="标签合并",
-    )
-    for chapter_id, chunk_id in ((1, 0), (2, 1)):
-        persist_chapter_annotation(
-            db_session,
-            run_id=run_id,
-            chapter_id=chapter_id,
-            states=[
-                {
-                    "chunk_id": chunk_id,
-                    "entity": "玄剑",
-                    "predicate": "status",
-                    "value": "active",
-                    "confidence": "high",
-                    "reason": "状态",
-                    "_entity_specs": [
-                        {
-                            "name": "玄剑",
-                            "entity_type": "item",
-                            "tags": ["宝剑"],
-                        }
-                    ],
-                }
-            ],
-        )
-    db_session.commit()
-
-    entities = list(
-        db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
-    assert len(entities) == 1
-    assert entities[0].entity_type == "item"
-    assert entities[0].tags == ["宝剑"]
-
-
-def test_entity_tags_overwritten_when_later_chapter_submits_new_values(db_session) -> None:
-    """2026-08-09 用于验证已登记实体再次提交属性时按覆盖式更新"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
-        chapter_ids=[1, 2],
-        title="标签覆盖",
+        title="属性合并",
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
-        states=[
-            {
-                "chunk_id": 0,
-                "entity": "玄剑",
-                "predicate": "status",
-                "value": "active",
-                "confidence": "high",
-                "reason": "状态",
-                "_entity_specs": [
-                    {
-                        "name": "玄剑",
-                        "entity_type": "item",
-                        "tags": ["宝剑", "神兵"],
-                    }
-                ],
-            }
-        ],
+        entity_attributes={(0, "玄剑"): {"status": "active", "grade": "凡品"}},
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        states=[
-            {
-                "chunk_id": 1,
-                "entity": "玄剑",
-                "predicate": "status",
-                "value": "active",
-                "confidence": "high",
-                "reason": "状态",
-                "_entity_specs": [
-                    {
-                        "name": "玄剑",
-                        "entity_type": "item",
-                        "tags": ["灵剑"],
-                    }
-                ],
-            }
-        ],
+        entity_attributes={(1, "玄剑"): {"grade": "灵品"}},
     )
     db_session.commit()
 
@@ -578,7 +455,92 @@ def test_entity_tags_overwritten_when_later_chapter_submits_new_values(db_sessio
         ).scalars()
     )
     assert len(entities) == 1
-    assert entities[0].tags == ["灵剑"]
+    assert entities[0].attributes == {
+        "entity_type": "character",
+        "status": "active",
+        "grade": "灵品",
+    }
+    attribute_facts = list(
+        db_session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_type == "entity_attribute",
+            )
+        ).scalars()
+    )
+    assert len(attribute_facts) == 1
+    assert attribute_facts[0].content["kind"] == "entity_attribute"
+    assert attribute_facts[0].content["field"] == "grade"
+    state_rows = list(
+        db_session.execute(
+            select(EntityStateVersion).where(EntityStateVersion.run_id == run_id)
+        ).scalars()
+    )
+    assert len(state_rows) == 1
+    assert state_rows[0].state == {
+        "entity_type": "character",
+        "status": "active",
+        "grade": "灵品",
+    }
+
+
+def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) -> None:
+    """2026-08-11 用于验证属性 null 删除与覆盖式更新并驱动状态版本"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
+        chapter_ids=[1, 2],
+        title="属性覆盖",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        entity_attributes={(0, "玄剑"): {"status": "active", "grade": "凡品"}},
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        entity_attributes={(1, "玄剑"): {"status": None, "grade": "灵品"}},
+    )
+    db_session.commit()
+
+    entities = list(
+        db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalars()
+    )
+    assert len(entities) == 1
+    assert entities[0].attributes == {
+        "entity_type": "character",
+        "grade": "灵品",
+    }
+    attribute_facts = list(
+        db_session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_type == "entity_attribute",
+            )
+        ).scalars()
+    )
+    assert {fact.content["field"] for fact in attribute_facts} == {"status", "grade"}
+    status_fact = next(
+        fact for fact in attribute_facts if fact.content["field"] == "status"
+    )
+    assert status_fact.content["before"] == "active"
+    assert status_fact.content["after"] is None
+    state_rows = list(
+        db_session.execute(
+            select(EntityStateVersion).where(EntityStateVersion.run_id == run_id)
+        ).scalars()
+    )
+    assert len(state_rows) == 1
+    assert state_rows[0].state_revision == 1
+    assert state_rows[0].state == {
+        "entity_type": "character",
+        "grade": "灵品",
+    }
 
 
 def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
@@ -616,7 +578,7 @@ def test_persist_completion_graph_only_flushes_caller_transaction(db_session) ->
 
 
 def test_relation_break_resolves_same_stable_relation_in_later_chapter(db_session) -> None:
-    """2026-08-07 用于验证后文 break 按端点类型解析同一稳定关系"""
+    """2026-08-11 用于验证后文 ended 状态按端点类型解析同一稳定关系"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
@@ -650,7 +612,7 @@ def test_relation_break_resolves_same_stable_relation_in_later_chapter(db_sessio
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
-                change_kind="break",
+                state="ended",
             )
         ],
     )

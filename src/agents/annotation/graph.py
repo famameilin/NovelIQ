@@ -33,7 +33,6 @@ _DOMAIN_NAMES = (
     "dialogues",
     "events",
     "relations",
-    "states",
     "foreshadowings",
 )
 _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
@@ -176,6 +175,11 @@ def _build_tool_batch_node(
                         call_index=call_index,
                         tool_name=name,
                         request_args=dict(call.get("args") or {}),
+                        raw_args=(
+                            str(call.get("raw_args"))
+                            if call.get("raw_args") is not None
+                            else None
+                        ),
                         response=json.loads(result),
                         receipt=json.loads(result),
                         status="error",
@@ -224,6 +228,11 @@ def _build_tool_batch_node(
                     call_index=call_index,
                     tool_name=name,
                     request_args=dict(call.get("args") or {}),
+                    raw_args=(
+                        str(call.get("raw_args"))
+                        if call.get("raw_args") is not None
+                        else None
+                    ),
                     response=receipt,
                     receipt=receipt,
                     status=status,

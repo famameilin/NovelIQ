@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy import func, select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
-from src.agents.annotation.runner import AnnotationAgentRunError
 from src.agents.annotation.schema import (
     AgentRunAudit,
     AgentRunResult,
@@ -23,7 +22,7 @@ from src.agents.annotation.schema import (
 from src.agents.stream import AgentStream
 from src.storage.models import ChapterAnnotationRecord
 from src.workflows.annotate import _group_chunks_by_chapter, run_annotate
-from tests.support.chapter_annotation_helpers import create_run_with_chunks, evidence, persist_chapter_annotation
+from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
 
 
 def _annotation(
@@ -43,17 +42,14 @@ def _annotation(
         )
         dialogues.append(
             BoundDialogue(
+                candidate_index=1,
                 candidate_key=candidate.candidate_key,
                 content=candidate.content,
                 start=candidate.start,
                 end=candidate.end,
-                description="住手出现",
                 speaker=None,
                 tone=None,
                 is_inner_monologue=False,
-                confidence="high",
-                reason="住手出现",
-                evidence=evidence("住手出现", chunk_id),
             )
         )
     return BoundChapterAnnotation(
@@ -65,15 +61,12 @@ def _annotation(
                     summary=f"chunk {chunk_id}",
                     emotional_valence="neutral",
                     narrative_function="铺垫",
-                    confidence="high",
-                    reason="摘要",
                 ),
                 entities=BoundEntityDirectory(),
                 character_observations=[],
                 dialogues=dialogues,
                 events=[],
                 relations=[],
-                states=[],
                 foreshadowings=[],
             )
         ],
@@ -103,7 +96,6 @@ def _pending_case(
             "dialogue_id": candidate.candidate_key,
             "chunk_id": chunk_id,
         },
-        evidence=evidence("住手出现", chunk_id),
     )
 
 
@@ -297,25 +289,25 @@ async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_annotate_stops_entire_stage_on_agent_exhaustion(db_session) -> None:
-    """2026-08-05 用于验证章节 Agent 三次耗尽后不启动任何后续章节"""
+async def test_run_annotate_stops_entire_stage_on_agent_failure(db_session) -> None:
+    """2026-08-11 用于验证章节 Agent 单次失败后不启动任何后续章节"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["第一章", "第二章"],
         chapter_ids=[1, 2],
         title="章节失败终止",
     )
-    agent = MagicMock(side_effect=AnnotationAgentRunError("三次失败"))
+    agent = MagicMock(side_effect=RuntimeError("标注失败"))
 
     async def failing_agent(**kwargs):
-        """2026-08-05 用于模拟首章三次尝试耗尽"""
+        """2026-08-11 用于模拟首章 Agent 失败"""
         return agent(**kwargs)
 
     with (
         patch("src.agents.annotation.run_annotation_agent", new=failing_agent),
         patch("src.agents.llm.build_chat_model", return_value=MagicMock()),
     ):
-        with pytest.raises(AnnotationAgentRunError, match="三次失败"):
+        with pytest.raises(RuntimeError, match="标注失败"):
             await run_annotate(
                 run_id=run_id,
                 session=db_session,

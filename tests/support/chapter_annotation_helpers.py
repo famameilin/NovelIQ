@@ -17,7 +17,6 @@ from src.agents.annotation.schema import (
     BoundEntity,
     BoundEntityDirectory,
     BoundRelation,
-    BoundState,
     ChunkMetricsInput,
     EntityType,
 )
@@ -76,11 +75,6 @@ def create_run_with_chunks(
     return novel_id, run_id
 
 
-def evidence(reason: str, chunk_id: int) -> list[dict[str, Any]]:
-    """2026-08-07 用于构造当前原文 chunk 授权的 TextEvidence 列表"""
-    return [{"reason": reason, "chunk_id": chunk_id}]
-
-
 def _entity_spec(
     name: str,
     entity_type: EntityType,
@@ -100,20 +94,16 @@ def character_fact(
     action: str,
     role_function: str = "主体",
     emotion: str = "neutral",
-    action_type: str = "其他",
     chapter_id: int = 1,
 ) -> dict[str, Any]:
-    """2026-08-07 用于构造逐 chunk 人物观察输入测试值"""
+    """2026-08-11 用于构造逐 chunk 人物观察输入测试值"""
     del chapter_id
     return {
         "chunk_id": chunk_id,
         "character": name,
         "role_function": role_function,
         "action": action,
-        "action_type": action_type,
         "emotion": emotion,
-        "confidence": "high",
-        "reason": action,
         "_entity_specs": [_entity_spec(name, "character")],
     }
 
@@ -126,21 +116,17 @@ def relation_fact(
     relation_type: str,
     from_entity_type: EntityType = "character",
     to_entity_type: EntityType = "character",
-    evidence_reason: str | None = None,
-    change_kind: str = "assert",
-    confidence: str = "high",
+    state: str = "present",
     chapter_id: int = 1,
 ) -> dict[str, Any]:
-    """2026-08-07 用于构造逐 chunk 闭合类型关系输入测试值"""
+    """2026-08-11 用于构造逐 chunk 闭合类型关系输入测试值（state 缺省 present）"""
     del chapter_id
     return {
         "chunk_id": chunk_id,
         "from_entity": from_name,
         "to_entity": to_name,
         "relation_type": relation_type,
-        "change_kind": change_kind,
-        "confidence": confidence,
-        "reason": evidence_reason or f"{from_name}{relation_type}{to_name}",
+        "state": state,
         "_entity_specs": [
             _entity_spec(from_name, from_entity_type),
             _entity_spec(to_name, to_entity_type),
@@ -154,18 +140,16 @@ def dialogue_fact(
     content: str,
     speaker: str | None,
     tone: str | None = None,
+    verdict: str = "dialogue",
     chapter_id: int = 1,
 ) -> dict[str, Any]:
-    """2026-08-07 用于构造按系统候选对齐的对话输入测试值"""
+    """2026-08-11 用于构造按系统候选对齐的对话输入测试值"""
     del chapter_id
     return {
         "candidate_content": content,
-        "description": content,
+        "verdict": verdict,
         "speaker": speaker,
         "tone": tone,
-        "is_inner_monologue": False,
-        "confidence": "high",
-        "reason": content,
         "_chunk_id": chunk_id,
         "_entity_specs": [_entity_spec(speaker, "character")] if speaker else [],
     }
@@ -191,10 +175,9 @@ def _register_entity(
     *,
     name: str,
     entity_type: EntityType,
-    chunk_id: int,
     tags: list[str] | None = None,
 ) -> None:
-    """2026-08-08 用于把事实隐含实体注册到当前 chunk 实体目录"""
+    """2026-08-11 用于把事实隐含实体注册到当前 chunk 实体目录"""
     for existing in directory["entities"]:
         if existing.name == name:
             return
@@ -203,9 +186,6 @@ def _register_entity(
             name=name,
             entity_type=entity_type,
             tags=tags or [],
-            confidence="high",
-            reason=f"{name} 在本章出现",
-            evidence=evidence(f"{name} 在本章出现", chunk_id),
         )
     )
 
@@ -222,9 +202,9 @@ def persist_chapter_annotation(
     characters: list[dict[str, Any]] | None = None,
     dialogues: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
-    states: list[dict[str, Any]] | None = None,
+    entity_attributes: dict[tuple[int, str], dict[str, Any]] | None = None,
 ) -> str:
-    """2026-08-07 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化"""
+    """2026-08-11 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化"""
     chunk_rows = list(
         session.execute(
             select(Chunk)
@@ -255,9 +235,6 @@ def persist_chapter_annotation(
     relations_by_chunk: dict[int, list[BoundRelation]] = {
         chunk_id: [] for chunk_id in chunk_text_by_id
     }
-    states_by_chunk: dict[int, list[BoundState]] = {
-        chunk_id: [] for chunk_id in chunk_text_by_id
-    }
 
     for fact in characters or []:
         chunk_id = int(fact["_chunk_id"]) if "_chunk_id" in fact else int(fact.get("chunk_id", -1))
@@ -268,7 +245,6 @@ def persist_chapter_annotation(
                 directories[chunk_id],
                 name=spec["name"],
                 entity_type=spec["entity_type"],
-                chunk_id=chunk_id,
                 tags=spec.get("tags"),
             )
         observations_by_chunk[chunk_id].append(
@@ -276,11 +252,7 @@ def persist_chapter_annotation(
                 character=fact["character"],
                 role_function=fact["role_function"],
                 action=fact["action"],
-                action_type=fact["action_type"],
                 emotion=fact["emotion"],
-                confidence=fact["confidence"],
-                reason=fact["reason"],
-                evidence=evidence(fact["reason"], chunk_id),
             )
         )
 
@@ -293,7 +265,6 @@ def persist_chapter_annotation(
                 directories[chunk_id],
                 name=spec["name"],
                 entity_type=spec["entity_type"],
-                chunk_id=chunk_id,
                 tags=spec.get("tags"),
             )
         definition = RELATION_DEFINITIONS[fact["relation_type"]]
@@ -302,37 +273,9 @@ def persist_chapter_annotation(
                 from_entity=fact["from_entity"],
                 to_entity=fact["to_entity"],
                 relation_type=fact["relation_type"],
-                change_kind=fact["change_kind"],
-                confidence=fact["confidence"],
-                reason=fact["reason"],
+                state=fact.get("state", "present"),
                 directionality=definition["directionality"],
                 relation_semantics=definition["semantics"],
-                evidence=evidence(fact["reason"], chunk_id),
-            )
-        )
-
-    for fact in states or []:
-        chunk_id = int(fact.get("chunk_id", -1))
-        if chunk_id not in chunk_text_by_id:
-            raise ValueError(f"测试事实引用了非本章 chunk: {chunk_id}")
-        for spec in fact.get("_entity_specs", []):
-            _register_entity(
-                directories[chunk_id],
-                name=spec["name"],
-                entity_type=spec["entity_type"],
-                chunk_id=chunk_id,
-                tags=spec.get("tags"),
-            )
-        states_by_chunk[chunk_id].append(
-            BoundState(
-                entity=fact["entity"],
-                predicate=fact["predicate"],
-                object=fact.get("object"),
-                value=fact.get("value"),
-                assertion=fact.get("assertion", "affirmed"),
-                confidence=fact["confidence"],
-                reason=fact["reason"],
-                evidence=evidence(fact["reason"], chunk_id),
             )
         )
 
@@ -350,23 +293,38 @@ def persist_chapter_annotation(
                 directories[chunk_id],
                 name=speaker,
                 entity_type="character",
-                chunk_id=chunk_id,
             )
         dialogues_by_chunk[chunk_id].append(
             BoundDialogue(
+                candidate_index=1,
                 candidate_key=candidate.candidate_key,
                 content=candidate.content,
                 start=candidate.start,
                 end=candidate.end,
-                description=fact["description"],
                 speaker=speaker,
                 tone=fact["tone"],
-                is_inner_monologue=fact["is_inner_monologue"],
-                confidence=fact["confidence"],
-                reason=fact["reason"],
-                evidence=evidence(fact["reason"], chunk_id),
+                is_inner_monologue=fact.get("verdict", "dialogue") == "inner_monologue",
             )
         )
+
+    for (chunk_id, entity_name), attributes in (entity_attributes or {}).items():
+        if chunk_id not in chunk_text_by_id:
+            raise ValueError(f"测试实体属性引用了非本章 chunk: {chunk_id}")
+        registered = [
+            entity
+            for entity in directories[chunk_id]["entities"]
+            if entity.name == entity_name
+        ]
+        if registered:
+            registered[0].attributes = dict(attributes)
+        else:
+            directories[chunk_id]["entities"].append(
+                BoundEntity(
+                    name=entity_name,
+                    entity_type="character",
+                    attributes=dict(attributes),
+                )
+            )
 
     chunks: list[BoundChunkAnnotation] = []
     for chunk_id, chunk_text in chunk_text_by_id.items():
@@ -380,15 +338,12 @@ def persist_chapter_annotation(
                     narrative_function=(event_types or {}).get(chunk_id, "铺垫"),
                     pivot_moment=chunk_id in (pivot_chunks or set()),
                     cliffhanger=chunk_id in (cliffhanger_chunks or set()),
-                    confidence="high",
-                    reason=f"chunk {chunk_id} 摘要判断",
                 ),
                 entities=BoundEntityDirectory.model_validate(directories[chunk_id]),
                 character_observations=observations_by_chunk[chunk_id],
                 dialogues=dialogues_by_chunk[chunk_id],
                 events=[],
                 relations=relations_by_chunk[chunk_id],
-                states=states_by_chunk[chunk_id],
                 foreshadowings=[],
             )
         )

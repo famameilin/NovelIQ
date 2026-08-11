@@ -18,9 +18,7 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundEntity,
     EntityType,
-    EvidenceList,
     ResolvedCase,
-    TextEvidence,
 )
 from src.storage.models import (
     ChapterAnnotationRecord,
@@ -144,10 +142,12 @@ def _validate_annotation_chunks(
 
 
 def _entity_attributes(entity: BoundEntity, entity_type: EntityType) -> dict[str, Any]:
-    """2026-08-08 用于提取系统绑定实体的持久化属性"""
+    """2026-08-11 用于提取系统绑定实体的持久化属性（null 键保留以表达 JSON Merge Patch 删除）"""
     attributes: dict[str, Any] = {"entity_type": entity_type}
     if entity.description is not None:
         attributes["description"] = entity.description
+    for key, value in (entity.attributes or {}).items():
+        attributes[key] = value
     return attributes
 
 
@@ -156,8 +156,8 @@ def _resolve_entities(
     *,
     annotation: ChapterAnnotationRecord,
     payload: BoundChapterAnnotation,
-) -> dict[str, GraphEntity]:
-    """2026-08-08 用于按规范化名称匹配或创建实体并维护出现边界"""
+) -> tuple[dict[str, GraphEntity], dict[int, list[dict[str, Any]]]]:
+    """2026-08-11 用于按规范化名称匹配或创建实体并维护出现边界，返回实体表与属性变化"""
     appearances: dict[str, list[tuple[int, EntityType, BoundEntity]]] = {}
     display_names: dict[str, str] = {}
     for chunk in payload.chunks:
@@ -183,6 +183,7 @@ def _resolve_entities(
         ).append(entity)
 
     resolved: dict[str, GraphEntity] = {}
+    attribute_patches: dict[int, list[dict[str, Any]]] = {}
     for key, items in appearances.items():
         entity_types = {entity_type for _chunk_id, entity_type, _item in items}
         if len(entity_types) != 1:
@@ -212,10 +213,31 @@ def _resolve_entities(
                 )
             entity.first_seen_chunk = min(entity.first_seen_chunk, min(chunk_ids))
             entity.last_seen_chunk = max(entity.last_seen_chunk, max(chunk_ids))
-            # 2026-08-09 属性覆盖式更新：本次提交的字段替换旧值，未提交字段沿用
-            entity.attributes = {**dict(entity.attributes or {}), **attributes}
+            # 2026-08-11 属性 JSON Merge Patch：本次提交字段替换旧值，null 删除，未提交字段沿用
+            before = dict(entity.attributes or {})
+            merged = dict(entity.attributes or {})
+            for field_name, value in attributes.items():
+                if value is None:
+                    merged.pop(field_name, None)
+                else:
+                    merged[field_name] = value
+            entity.attributes = merged
             if tags:
                 entity.tags = list(dict.fromkeys(tags))
+            after = dict(entity.attributes or {})
+            field_changes: list[dict[str, Any]] = []
+            for field_name in before.keys() | after.keys():
+                if before.get(field_name) != after.get(field_name):
+                    field_changes.append(
+                        {
+                            "field": field_name,
+                            "before": before.get(field_name),
+                            "after": after.get(field_name),
+                            "chunk_id": min(chunk_ids),
+                        }
+                    )
+            if field_changes:
+                attribute_patches[int(entity.entity_id)] = field_changes
         else:
             entity = GraphEntity(
                 run_id=annotation.run_id,
@@ -233,7 +255,7 @@ def _resolve_entities(
     for key, entities in existing_by_key.items():
         if key not in resolved and len(entities) == 1:
             resolved[key] = entities[0]
-    return resolved
+    return resolved, attribute_patches
 
 
 def _entity(
@@ -276,9 +298,8 @@ def _new_graph_fact(
     assertion: str,
     confidence: str,
     content: dict[str, Any],
-    evidence: EvidenceList,
 ) -> GraphFact:
-    """2026-08-07 用于从系统绑定位置构造单个不可变事实版本"""
+    """2026-08-11 用于从系统绑定位置构造单个不可变事实版本"""
     return GraphFact(
         graph_version_id=graph_version.graph_version_id,
         run_id=annotation.run_id,
@@ -301,7 +322,6 @@ def _new_graph_fact(
         assertion=assertion,
         confidence=confidence,
         content=content,
-        evidence=evidence.model_dump(mode="json"),
         effective_chunk_id=chunk_id,
         source_kind="annotation",
         annotation_id=annotation.annotation_id,
@@ -363,6 +383,32 @@ def _active_relation_keys(
     return keys
 
 
+def _bump_referenced_last_seen(
+    entities_by_name: dict[str, GraphEntity],
+    chunk: Any,
+    chunk_id: int,
+) -> None:
+    """2026-08-11 用于任意工具引用实体时自动更新 last_seen_chunk（含对话/观察/事件/关系端点）"""
+    referenced: dict[str, None] = {}
+    for entity in chunk.entities.entities:
+        referenced.setdefault(_normalized_name(entity.name), None)
+    for observation in chunk.character_observations:
+        referenced.setdefault(_normalized_name(observation.character), None)
+    for dialogue in chunk.dialogues:
+        if dialogue.speaker is not None:
+            referenced.setdefault(_normalized_name(dialogue.speaker), None)
+    for event_item in chunk.events:
+        for participant in event_item.participants:
+            referenced.setdefault(_normalized_name(participant.entity), None)
+    for relation_item in chunk.relations:
+        referenced.setdefault(_normalized_name(relation_item.from_entity), None)
+        referenced.setdefault(_normalized_name(relation_item.to_entity), None)
+    for key in referenced:
+        entity = entities_by_name.get(key)
+        if entity is not None:
+            entity.last_seen_chunk = max(int(entity.last_seen_chunk), chunk_id)
+
+
 def _persist_annotation_facts(
     session: Session,
     *,
@@ -371,7 +417,8 @@ def _persist_annotation_facts(
     graph_version: GraphVersion,
     chapter_order: int,
     entities_by_name: dict[str, GraphEntity],
-) -> list[GraphFact]:
+    attribute_patches: dict[int, list[dict[str, Any]]],
+) -> tuple[list[GraphFact], dict[int, list[dict[str, Any]]]]:
     """2026-08-11 用于按 chunk 和领域顺序写入正式语义事实（对话单独落 dialogue_records）"""
     facts: list[GraphFact] = []
     active_relations = _active_relation_keys(
@@ -379,9 +426,17 @@ def _persist_annotation_facts(
         run_id=annotation.run_id,
         chapter_order=chapter_order,
     )
+    entity_by_id = {int(entity.entity_id): entity for entity in entities_by_name.values()}
+    attribute_changes_by_entity: dict[int, list[dict[str, Any]]] = {}
+    attribute_ordinal = 0
 
     for chunk in payload.chunks:
         chunk_id = chunk.chunk_id
+        _bump_referenced_last_seen(
+            entities_by_name,
+            chunk,
+            chunk_id,
+        )
         for ordinal, observation in enumerate(chunk.character_observations):
             subject = _entity(entities_by_name, observation.character)
             content = {
@@ -390,9 +445,7 @@ def _persist_annotation_facts(
                 "entity": _entity_descriptor(subject),
                 "role_function": observation.role_function,
                 "action": observation.action,
-                "action_type": observation.action_type,
                 "emotion": observation.emotion,
-                "reason": observation.reason,
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
@@ -401,7 +454,7 @@ def _persist_annotation_facts(
                 domain="character_observation",
                 ordinal=ordinal,
                 subject=subject,
-                predicate=str(observation.action_type),
+                predicate="observation",
                 object_value=None,
                 value={
                     "role_function": observation.role_function,
@@ -411,9 +464,8 @@ def _persist_annotation_facts(
                 participants=[],
                 story_time=None,
                 assertion="affirmed",
-                confidence=str(observation.confidence),
+                confidence="medium",
                 content=content,
-                evidence=observation.evidence,
             )
             session.add(fact)
             facts.append(fact)
@@ -428,18 +480,15 @@ def _persist_annotation_facts(
                 participant_entities.append(entity)
                 participants.append(
                     {
-                        "role": participant.participation,
+                        "role": str(participant.role),
                         "entity": _entity_descriptor(entity),
                     }
                 )
-            location = _entity(entities_by_name, event_item.location)
             content = {
                 "kind": "event",
                 "chunk_id": chunk_id,
                 "description": event_item.description,
                 "participants": participants,
-                "location": _entity_descriptor(location),
-                "reason": event_item.reason,
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
@@ -449,18 +498,13 @@ def _persist_annotation_facts(
                 ordinal=ordinal,
                 subject=participant_entities[0] if participant_entities else None,
                 predicate="event",
-                object_value=_entity_descriptor(location),
+                object_value=None,
                 value={"description": event_item.description},
                 participants=participants,
-                story_time=(
-                    event_item.story_time.model_dump(mode="json")
-                    if event_item.story_time is not None
-                    else None
-                ),
+                story_time=None,
                 assertion="affirmed",
-                confidence=str(event_item.confidence),
+                confidence="medium",
                 content=content,
-                evidence=event_item.evidence,
             )
             session.add(fact)
             facts.append(fact)
@@ -471,7 +515,6 @@ def _persist_annotation_facts(
             if from_entity is None or to_entity is None:
                 raise ValueError("relation 端点缺少实体")
             relation_type = str(relation_item.relation_type)
-            definition = RELATION_DEFINITIONS[relation_type]
             directionality = str(relation_item.directionality)
             semantics = str(relation_item.relation_semantics)
             key = _relation_key(
@@ -481,9 +524,10 @@ def _persist_annotation_facts(
                 relation_semantics=semantics,
                 relation_type=relation_type,
             )
+            relation_state = str(relation_item.state)
             relation_id = active_relations.get(key)
             if relation_id is None:
-                if str(relation_item.change_kind) != "assert":
+                if relation_state != "present":
                     raise ValueError(
                         "关系变化未匹配到已有活动关系: "
                         f"{relation_item.from_entity} {relation_type} {relation_item.to_entity}"
@@ -496,23 +540,24 @@ def _persist_annotation_facts(
                     directionality,
                 )
                 active_relations[key] = relation_id
-            representative_id = (
-                min(int(from_entity.entity_id), int(to_entity.entity_id))
-                if definition["semantics"] == "same_character"
-                else None
-            )
+                change_kind = "assert"
+            else:
+                change_kind = {
+                    "present": "reinforce",
+                    "weakened": "weaken",
+                    "ended": "break",
+                }[relation_state]
             content = {
                 "kind": "relation",
                 "chunk_id": chunk_id,
                 "from_entity": _entity_descriptor(from_entity),
                 "to_entity": _entity_descriptor(to_entity),
                 "relation_type": relation_type,
-                "change_kind": relation_item.change_kind,
+                "state": relation_state,
+                "change_kind": change_kind,
                 "relation_id": relation_id,
                 "directionality": directionality,
                 "relation_semantics": semantics,
-                "representative_entity_id": representative_id,
-                "reason": relation_item.reason,
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
@@ -530,46 +575,8 @@ def _persist_annotation_facts(
                 ],
                 story_time=None,
                 assertion="affirmed",
-                confidence=str(relation_item.confidence),
+                confidence="medium",
                 content=content,
-                evidence=relation_item.evidence,
-            )
-            session.add(fact)
-            facts.append(fact)
-
-        for ordinal, state_item in enumerate(chunk.states):
-            subject = _entity(entities_by_name, state_item.entity)
-            object_entity = _entity(entities_by_name, state_item.object)
-            content = {
-                "kind": "state",
-                "chunk_id": chunk_id,
-                "entity": _entity_descriptor(subject),
-                "predicate": state_item.predicate,
-                "object": _entity_descriptor(object_entity),
-                "value": state_item.value,
-                "assertion": state_item.assertion,
-                "reason": state_item.reason,
-            }
-            fact = _new_graph_fact(
-                graph_version=graph_version,
-                annotation=annotation,
-                chunk_id=chunk_id,
-                domain="state",
-                ordinal=ordinal,
-                subject=subject,
-                predicate=state_item.predicate,
-                object_value=_entity_descriptor(object_entity),
-                value=state_item.value,
-                participants=[],
-                story_time=(
-                    state_item.story_time.model_dump(mode="json")
-                    if state_item.story_time is not None
-                    else None
-                ),
-                assertion=str(state_item.assertion),
-                confidence=str(state_item.confidence),
-                content=content,
-                evidence=state_item.evidence,
             )
             session.add(fact)
             facts.append(fact)
@@ -578,10 +585,8 @@ def _persist_annotation_facts(
             content = {
                 "kind": "foreshadowing",
                 "chunk_id": chunk_id,
-                **foreshadowing.model_dump(
-                    mode="json",
-                    exclude={"evidence", "confidence"},
-                ),
+                "description": foreshadowing.description,
+                "confidence": str(foreshadowing.confidence),
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
@@ -590,26 +595,64 @@ def _persist_annotation_facts(
                 domain="foreshadowing",
                 ordinal=ordinal,
                 subject=None,
-                predicate=str(foreshadowing.setup_kind),
+                predicate="其他",
                 object_value=None,
                 value={
-                    "setup_summary": foreshadowing.setup_summary,
-                    "expected_payoff_family": foreshadowing.expected_payoff_family,
-                    "payoff_likelihood": foreshadowing.payoff_likelihood,
-                    "setup_status": foreshadowing.setup_status,
+                    "description": foreshadowing.description,
+                    "setup_summary": foreshadowing.description,
                 },
                 participants=[],
                 story_time=None,
                 assertion="affirmed",
                 confidence=str(foreshadowing.confidence),
                 content=content,
-                evidence=foreshadowing.evidence,
             )
             session.add(fact)
             facts.append(fact)
 
+        for entity_id, patches in attribute_patches.items():
+            entity = entity_by_id.get(entity_id)
+            if entity is None:
+                raise ValueError(f"属性变化事实缺少已解析实体: {entity_id}")
+            for patch in patches:
+                attribute_ordinal += 1
+                fact = _new_graph_fact(
+                    graph_version=graph_version,
+                    annotation=annotation,
+                    chunk_id=int(patch["chunk_id"]),
+                    domain="entity_attribute",
+                    ordinal=attribute_ordinal,
+                    subject=entity,
+                    predicate=str(patch["field"]),
+                    object_value=None,
+                    value=patch["after"],
+                    participants=[],
+                    story_time=None,
+                    assertion="affirmed",
+                    confidence="medium",
+                    content={
+                        "kind": "entity_attribute",
+                        "field": patch["field"],
+                        "before": patch["before"],
+                        "after": patch["after"],
+                        "chunk_id": patch["chunk_id"],
+                    },
+                )
+                session.add(fact)
+                facts.append(fact)
+                attribute_changes_by_entity.setdefault(entity_id, []).append(
+                    {
+                        "field": patch["field"],
+                        "before": patch["before"],
+                        "after": patch["after"],
+                        "fact_id": fact.fact_id,
+                        "fact_revision": fact.fact_revision,
+                        "chunk_id": patch["chunk_id"],
+                    }
+                )
+
     session.flush()
-    return facts
+    return facts, attribute_changes_by_entity
 
 
 def _previous_entity_state(
@@ -637,19 +680,15 @@ def _previous_entity_state(
 
 
 def _state_updates(fact: GraphFact) -> dict[str, Any]:
-    """2026-08-07 用于把观察和状态事实转换为实体状态字段更新"""
+    """2026-08-11 用于把观察事实转换为实体状态字段更新"""
     content = dict(fact.content)
     kind = content.get("kind")
     if kind == "character_observation":
         return {
             "role_function": content["role_function"],
             "action": content["action"],
-            "action_type": content["action_type"],
             "emotion": content["emotion"],
         }
-    if kind == "state":
-        next_value: Any = fact.object if fact.object is not None else fact.value
-        return {fact.predicate: next_value if fact.assertion == "affirmed" else None}
     return {}
 
 
@@ -659,8 +698,11 @@ def _persist_state_versions(
     graph_version: GraphVersion,
     chapter_order: int,
     facts: list[GraphFact],
+    entities_by_name: dict[str, GraphEntity],
+    attribute_changes: dict[int, list[dict[str, Any]]],
 ) -> None:
-    """2026-08-07 用于汇总同一实体本章多次观察和状态变化"""
+    """2026-08-11 用于汇总同一实体本章观察与属性变化，一章每实体产生一个版本"""
+    entity_by_id = {int(entity.entity_id): entity for entity in entities_by_name.values()}
     state_by_entity: dict[int, dict[str, Any]] = {}
     revision_by_entity: dict[int, int] = {}
     changes_by_entity: dict[int, list[dict[str, Any]]] = {}
@@ -679,7 +721,13 @@ def _persist_state_versions(
                 chapter_order=chapter_order,
             )
             revision_by_entity[entity_id] = previous_revision
-            state_by_entity[entity_id] = previous_state
+            entity = entity_by_id.get(entity_id)
+            if entity is None:
+                raise ValueError(f"实体状态版本缺少已解析实体: {entity_id}")
+            state_by_entity[entity_id] = {
+                **dict(entity.attributes or {}),
+                **previous_state,
+            }
             changes_by_entity[entity_id] = []
         state = state_by_entity[entity_id]
         for field_name, after in updates.items():
@@ -698,6 +746,42 @@ def _persist_state_versions(
                     "fact_id": fact.fact_id,
                     "fact_revision": fact.fact_revision,
                     "chunk_id": fact.effective_chunk_id,
+                }
+            )
+
+    for entity_id, changes in attribute_changes.items():
+        if entity_id not in state_by_entity:
+            previous_revision, previous_state = _previous_entity_state(
+                session,
+                run_id=graph_version.run_id,
+                entity_id=entity_id,
+                chapter_order=chapter_order,
+            )
+            revision_by_entity[entity_id] = previous_revision
+            entity = entity_by_id.get(entity_id)
+            if entity is None:
+                raise ValueError(f"实体状态版本缺少已解析实体: {entity_id}")
+            state_by_entity[entity_id] = {
+                **dict(entity.attributes or {}),
+                **previous_state,
+            }
+            changes_by_entity[entity_id] = []
+        for change in changes:
+            if change["before"] == change["after"]:
+                continue
+            state = state_by_entity[entity_id]
+            if change["after"] is None:
+                state.pop(change["field"], None)
+            else:
+                state[change["field"]] = change["after"]
+            changes_by_entity[entity_id].append(
+                {
+                    "field": change["field"],
+                    "before": change["before"],
+                    "after": change["after"],
+                    "fact_id": change["fact_id"],
+                    "fact_revision": change["fact_revision"],
+                    "chunk_id": change["chunk_id"],
                 }
             )
 
@@ -831,15 +915,11 @@ def _persist_relation_versions(
                 )
                 session.add(existing)
                 session.flush()
-                attributes: dict[str, Any] = {}
-                representative = content.get("representative_entity_id")
-                if representative is not None:
-                    attributes["representative_entity_id"] = int(representative)
                 draft = _RelationDraft(
                     relation=existing,
                     previous_revision=0,
                     relation_type=str(content["relation_type"]),
-                    attributes=attributes,
+                    attributes={},
                     is_active=False,
                     changes=[],
                 )
@@ -874,6 +954,14 @@ def _persist_relation_versions(
         )
 
 
+def _target_chunk_id(resolved_case: ResolvedCase) -> int:
+    """2026-08-11 用于读取案例登记时的原文 chunk 位置"""
+    chunk_id = resolved_case.target_ref.get("chunk_id")
+    if chunk_id is None:
+        raise ValueError(f"案例目标缺少 chunk_id: {resolved_case.case_id}")
+    return int(chunk_id)
+
+
 def _resolve_case_entity(
     session: Session,
     *,
@@ -881,7 +969,7 @@ def _resolve_case_entity(
     name: str,
     entities_by_name: dict[str, GraphEntity],
     allowed_types: tuple[str, ...],
-    evidence_chunk_id: int,
+    chunk_id: int,
 ) -> GraphEntity:
     """2026-08-11 用于把案例端点名称解析为图实体节点"""
     key = _normalized_name(name)
@@ -911,7 +999,7 @@ def _resolve_case_entity(
             )
         entity.last_seen_chunk = max(
             entity.last_seen_chunk,
-            evidence_chunk_id,
+            chunk_id,
         )
         return entity
     if len(allowed_types) != 1:
@@ -923,8 +1011,8 @@ def _resolve_case_entity(
         canonical_name=name,
         entity_type=allowed_types[0],
         attributes={},
-        first_seen_chunk=evidence_chunk_id,
-        last_seen_chunk=evidence_chunk_id,
+        first_seen_chunk=chunk_id,
+        last_seen_chunk=chunk_id,
     )
     session.add(entity)
     session.flush()
@@ -978,17 +1066,10 @@ def _persist_dialogue_resolution(
     if record is None:
         raise ValueError(f"案例目标对话记录不存在或跨 run: {resolved_case.case_id}")
     _validate_dialogue_target(record, resolved_case)
-    evidence_payload = list(record.evidence)
-    evidence_payload.append(
-        {"reason": resolved_case.reason, "chunk_id": resolved_case.evidence_chunk_id}
-    )
-    record.evidence = evidence_payload
     if resolved_case.speaker is not None:
         record.speaker = resolved_case.speaker
     if resolved_case.tone is not None:
         record.tone = resolved_case.tone
-    if resolved_case.description is not None:
-        record.description = resolved_case.description
     if resolved_case.is_inner_monologue is not None:
         record.is_inner_monologue = resolved_case.is_inner_monologue
     record.updated_at = datetime.now(UTC)
@@ -1047,13 +1128,14 @@ def _persist_fact_resolution(
     change_kind = str(resolved_case.change_kind)
     directionality = str(definition["directionality"])
     semantics = str(definition["semantics"])
+    target_chunk_id = _target_chunk_id(resolved_case)
     from_entity = _resolve_case_entity(
         session,
         run_id=annotation.run_id,
         name=resolved_case.from_entity or "",
         entities_by_name=entities_by_name,
         allowed_types=tuple(definition["from_types"]),
-        evidence_chunk_id=resolved_case.evidence_chunk_id,
+        chunk_id=target_chunk_id,
     )
     to_entity = _resolve_case_entity(
         session,
@@ -1061,13 +1143,12 @@ def _persist_fact_resolution(
         name=resolved_case.to_entity or "",
         entities_by_name=entities_by_name,
         allowed_types=tuple(definition["to_types"]),
-        evidence_chunk_id=resolved_case.evidence_chunk_id,
+        chunk_id=target_chunk_id,
     )
     if int(from_entity.entity_id) == int(to_entity.entity_id):
         raise ValueError(f"fact 动作两端解析为同一实体: {resolved_case.case_id}")
     from_id = int(from_entity.entity_id)
     to_id = int(to_entity.entity_id)
-    representative_id = min(from_id, to_id) if semantics == "same_character" else None
     relation_id = _relation_id(
         annotation.run_id,
         from_id,
@@ -1101,11 +1182,7 @@ def _persist_fact_resolution(
             run_id=annotation.run_id,
             relation=relation,
             relation_type=relation_type,
-            attributes=(
-                {"representative_entity_id": representative_id}
-                if representative_id is not None
-                else {}
-            ),
+            attributes={},
         )
     else:
         draft = _latest_relation_draft(
@@ -1117,7 +1194,7 @@ def _persist_fact_resolution(
         )
     content = {
         "kind": "relation",
-        "chunk_id": resolved_case.evidence_chunk_id,
+        "chunk_id": target_chunk_id,
         "from_entity": _entity_descriptor(from_entity),
         "to_entity": _entity_descriptor(to_entity),
         "relation_type": relation_type,
@@ -1125,17 +1202,8 @@ def _persist_fact_resolution(
         "relation_id": relation_id,
         "directionality": directionality,
         "relation_semantics": semantics,
-        "representative_entity_id": representative_id,
         "reason": resolved_case.reason,
     }
-    evidence = EvidenceList.model_validate(
-        [
-            TextEvidence(
-                reason=resolved_case.reason,
-                chunk_id=resolved_case.evidence_chunk_id,
-            ).model_dump(mode="json")
-        ]
-    )
     fact_id = str(
         uuid5(NAMESPACE_URL, f"noveliq:case-resolution:{annotation.run_id}:{relation_id}")
     )
@@ -1158,11 +1226,8 @@ def _persist_fact_resolution(
         assertion="affirmed",
         confidence="high",
         content=content,
-        evidence=evidence.model_dump(mode="json"),
-        scope=(
-            f"chapter:{annotation.chapter_id}:chunk:{resolved_case.evidence_chunk_id}"
-        ),
-        effective_chunk_id=resolved_case.evidence_chunk_id,
+        scope=f"chapter:{annotation.chapter_id}:chunk:{target_chunk_id}",
+        effective_chunk_id=target_chunk_id,
         source_kind="case_resolution",
         annotation_id=annotation.annotation_id,
         payload_path=f"case_resolution/{resolved_case.case_id}",
@@ -1235,10 +1300,11 @@ def _persist_resolved_cases(
     """2026-08-11 用于按案例动作分派解决（dialogue 改对话表 / fact 改图 / foreshadowing 写线程 / close 无目标）"""
     targets_by_case_id: dict[str, Any] = {}
     for resolved_case in resolved_cases:
-        if resolved_case.evidence_chunk_id not in authorized_text_chunk_ids:
+        target_chunk_id = _target_chunk_id(resolved_case)
+        if target_chunk_id not in authorized_text_chunk_ids:
             raise ValueError(
                 "resolve_case 使用了未经系统读取授权的原文: "
-                f"{resolved_case.evidence_chunk_id}"
+                f"{target_chunk_id}"
             )
         target: Any = None
         if resolved_case.action == "dialogue":
@@ -1300,24 +1366,27 @@ def persist_completion_graph(
     session.add(graph_version)
     session.flush()
 
-    entities_by_name = _resolve_entities(
+    entities_by_name, attribute_patches = _resolve_entities(
         session,
         annotation=annotation,
         payload=payload,
     )
-    facts = _persist_annotation_facts(
+    facts, attribute_changes = _persist_annotation_facts(
         session,
         annotation=annotation,
         payload=payload,
         graph_version=graph_version,
         chapter_order=chapter_order,
         entities_by_name=entities_by_name,
+        attribute_patches=attribute_patches,
     )
     _persist_state_versions(
         session,
         graph_version=graph_version,
         chapter_order=chapter_order,
         facts=facts,
+        entities_by_name=entities_by_name,
+        attribute_changes=attribute_changes,
     )
     _persist_relation_versions(
         session,

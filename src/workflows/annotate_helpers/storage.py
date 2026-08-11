@@ -279,6 +279,46 @@ def _persist_resolution_mappings(
     return completion_results
 
 
+def _reelect_representatives(
+    session: Session,
+    *,
+    run_id: str,
+) -> None:
+    """2026-08-11 用于每章完成后全量清空并重选规范名标记写入实体属性"""
+    from src.storage.models.graph import GraphEntity, GraphRelation, GraphRelationVersion
+    from src.storage.repositories.graph.election import elect_representatives
+
+    entities = list(
+        session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalars()
+    )
+    relation_rows = (
+        session.execute(
+            select(GraphRelation.from_entity_id, GraphRelation.to_entity_id)
+            .join(
+                GraphRelationVersion,
+                GraphRelationVersion.relation_id == GraphRelation.relation_id,
+            )
+            .where(
+                GraphRelation.run_id == run_id,
+                GraphRelationVersion.run_id == run_id,
+                GraphRelationVersion.is_active.is_(True),
+                GraphRelation.relation_semantics == "same_character",
+            )
+            .distinct()
+        ).all()
+    )
+    pairs = [(int(row[0]), int(row[1])) for row in relation_rows]
+    flags = elect_representatives(entities, pairs=pairs)
+    for entity in entities:
+        attributes = dict(entity.attributes or {})
+        if attributes.get("is_representative") == flags[int(entity.entity_id)]:
+            continue
+        attributes["is_representative"] = bool(flags[int(entity.entity_id)])
+        entity.attributes = attributes
+
+
 def complete_annotation_run(
     *,
     result: AgentRunResult,
@@ -321,6 +361,7 @@ def complete_annotation_run(
                 resolved_cases=result.resolved_cases,
                 authorized_text_chunk_ids=set(result.audit.authorized_text_chunk_ids),
             )
+            _reelect_representatives(session, run_id=result.run_id)
             resolved_completion = _persist_resolution_mappings(
                 session,
                 result=result,

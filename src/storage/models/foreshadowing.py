@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -44,7 +43,6 @@ class ForeshadowingThread(Base):
     strength: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    evidence: Mapped[list] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -88,9 +86,6 @@ class ForeshadowingThreadHit(Base):
     )
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
-    anchor_reason: Mapped[str] = mapped_column(Text, nullable=False)
-    why_unresolved_now: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[list] = mapped_column(JSONB, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 

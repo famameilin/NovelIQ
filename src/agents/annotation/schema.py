@@ -8,7 +8,7 @@ import unicodedata
 from enum import StrEnum
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 class StrictModel(BaseModel):
@@ -36,7 +36,7 @@ class NarrativeFunction(StrEnum):
 
 
 class Confidence(StrEnum):
-    """2026-08-07 用于约束 Agent 语义判断置信度"""
+    """2026-08-07 用于约束伏笔置信度（Agent 可见合同仅伏笔使用）"""
 
     HIGH = "high"
     MEDIUM = "medium"
@@ -54,27 +54,49 @@ class RoleFunction(StrEnum):
     OPPONENT = "反对者"
 
 
-class ActionType(StrEnum):
-    """2026-08-07 用于约束人物动作的宽口径类别"""
+class DialogueVerdict(StrEnum):
+    """2026-08-11 用于约束对话候选的三态判断结果"""
 
-    COMBAT = "战斗"
-    ESCAPE = "逃跑"
-    DIALOGUE = "对话"
-    DECISION = "决策"
-    MOVEMENT = "移动"
-    EMOTION = "情感"
-    OTHER = "其他"
+    DIALOGUE = "dialogue"
+    INNER_MONOLOGUE = "inner_monologue"
+    NOT_DIALOGUE = "not_dialogue"
 
 
-class Assertion(StrEnum):
-    """2026-08-07 用于约束状态事实肯定或否定"""
+class Tone(StrEnum):
+    """2026-08-11 用于约束对话语气的闭合枚举"""
 
-    AFFIRMED = "affirmed"
-    NEGATED = "negated"
+    CALM = "平静"
+    ANGRY = "愤怒"
+    SAD = "悲伤"
+    JOYFUL = "喜悦"
+    FEARFUL = "恐惧"
+    TENSE = "紧张"
+    SARCASTIC = "嘲讽"
+    PLEADING = "恳求"
+
+
+class RelationState(StrEnum):
+    """2026-08-11 用于约束关系写入时的存在状态（present 由系统自动选择 assert 或 reinforce）"""
+
+    PRESENT = "present"
+    WEAKENED = "weakened"
+    ENDED = "ended"
+
+
+class EventParticipantRole(StrEnum):
+    """2026-08-11 用于约束事件参与者的闭合角色（地点作为参与者角色，不单独设字段）"""
+
+    ACTOR = "行动者"
+    SUFFERER = "承受者"
+    RECEIVER = "接收者"
+    HELPER = "协助者"
+    OPPONENT = "对抗者"
+    WITNESS = "见证者"
+    LOCATION = "地点"
 
 
 class RelationChangeKind(StrEnum):
-    """2026-08-07 用于约束关系事实的生命周期变化"""
+    """2026-08-07 用于约束关系事实的生命周期变化（系统内部与案例解决使用）"""
 
     ASSERT = "assert"
     REINFORCE = "reinforce"
@@ -99,10 +121,11 @@ class RelationType(StrEnum):
     SAME_CHARACTER = "同一人物"
     SUBORDINATION = "隶属"
     LOCATED = "位于"
+    LEADER = "领导"
 
 
 class ForeshadowingType(StrEnum):
-    """2026-08-07 用于约束伏笔载体类别"""
+    """2026-08-07 用于约束伏笔载体类别（系统内部默认值使用）"""
 
     OBJECT = "物件"
     DIALOGUE = "对话"
@@ -112,7 +135,7 @@ class ForeshadowingType(StrEnum):
 
 
 class SetupKind(StrEnum):
-    """2026-08-07 用于约束伏笔 setup 的宽口径类别"""
+    """2026-08-07 用于约束伏笔 setup 的宽口径类别（系统内部默认值使用）"""
 
     ABNORMAL_OBJECT = "异常物件"
     ABNORMAL_RULE = "异常规则"
@@ -126,7 +149,7 @@ class SetupKind(StrEnum):
 
 
 class SetupStatus(StrEnum):
-    """2026-08-07 用于约束伏笔线程当前阶段"""
+    """2026-08-07 用于约束伏笔线程当前阶段（系统内部默认值使用）"""
 
     OPEN = "open"
     REINFORCED = "reinforced"
@@ -134,7 +157,7 @@ class SetupStatus(StrEnum):
 
 
 class PayoffLikelihood(StrEnum):
-    """2026-08-07 用于约束伏笔回收可能性"""
+    """2026-08-07 用于约束伏笔回收可能性（系统内部默认值使用）"""
 
     HIGH = "high"
     MEDIUM = "medium"
@@ -155,6 +178,12 @@ _MOBILE_ENTITY_TYPES: tuple[EntityType, ...] = (
     "character",
     "item",
     "organization",
+)
+_POSITIONED_ENTITY_TYPES: tuple[EntityType, ...] = (
+    "character",
+    "item",
+    "organization",
+    "location",
 )
 
 
@@ -216,6 +245,12 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
         "from_types": _ACTOR_ENTITY_TYPES,
         "to_types": _ACTOR_ENTITY_TYPES,
     },
+    "领导": {
+        "directionality": "directed",
+        "semantics": "ordinary",
+        "from_types": _ACTOR_ENTITY_TYPES,
+        "to_types": _ACTOR_ENTITY_TYPES,
+    },
     "同一人物": {
         "directionality": "bidirectional",
         "semantics": "same_character",
@@ -231,10 +266,25 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
     "位于": {
         "directionality": "directed",
         "semantics": "ordinary",
-        "from_types": _MOBILE_ENTITY_TYPES,
+        "from_types": _POSITIONED_ENTITY_TYPES,
         "to_types": _LOCATION_ENTITY_TYPES,
     },
 }
+
+
+_DIRECTION_LABEL: dict[str, str] = {"directed": "单向", "bidirectional": "双向"}
+
+
+def relation_catalog_text() -> str:
+    """2026-08-11 用于渲染 Agent 可见的闭合关系目录（方向/语义/端点类型）"""
+    lines: list[str] = []
+    for relation_type, definition in RELATION_DEFINITIONS.items():
+        direction = _DIRECTION_LABEL[definition["directionality"]]
+        semantics = "同一人物归并" if definition["semantics"] == "same_character" else "普通关系"
+        from_types = "/".join(definition["from_types"])
+        to_types = "/".join(definition["to_types"])
+        lines.append(f"{relation_type}：{direction}，{from_types} → {to_types}，{semantics}")
+    return "\n".join(lines)
 
 
 def normalize_semantic_text(value: str, *, label: str) -> str:
@@ -245,72 +295,7 @@ def normalize_semantic_text(value: str, *, label: str) -> str:
     return normalized
 
 
-class GraphEvidence(StrictModel):
-    """2026-08-07 用于系统内部保存前序图事实依据"""
-
-    fact_id: str = Field(min_length=1)
-    fact_revision: int = Field(gt=0)
-    reason: str = Field(min_length=1)
-
-
-class TextEvidence(StrictModel):
-    """2026-08-07 用于系统内部保存真实原文依据"""
-
-    reason: str = Field(min_length=1)
-    chunk_id: int = Field(ge=0)
-
-
-Evidence = GraphEvidence | TextEvidence
-
-
-class EvidenceList(RootModel[list[Evidence]]):
-    """2026-08-07 用于保证持久化事实至少具有一条系统依据"""
-
-    root: list[Evidence] = Field(min_length=1)
-
-    def __iter__(self):
-        """2026-08-07 用于按系统绑定顺序遍历依据"""
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        """2026-08-07 用于返回系统依据数量"""
-        return len(self.root)
-
-    def __getitem__(self, index: int) -> Evidence:
-        """2026-08-07 用于按位置读取系统依据"""
-        return self.root[index]
-
-
-class StoryTime(StrictModel):
-    """2026-08-07 用于表达故事内时间而不混入处理顺序"""
-
-    label: str | None = None
-    order: int | None = None
-    start: str | None = None
-    end: str | None = None
-
-    @model_validator(mode="after")
-    def validate_non_empty(self) -> StoryTime:
-        """2026-08-07 用于拒绝没有任何语义字段的故事时间"""
-        if not self.model_fields_set:
-            raise ValueError("story_time 至少需要一个字段")
-        return self
-
-
-class SemanticItem(StrictModel):
-    """2026-08-07 用于统一 Agent 语义判断的置信度和解释"""
-
-    confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
-    reason: str = Field(min_length=1, description="判断依据，引用原文或上下文事实")
-
-    @model_validator(mode="after")
-    def normalize_reason(self) -> SemanticItem:
-        """2026-08-07 用于规范化并校验语义判断说明"""
-        self.reason = normalize_semantic_text(self.reason, label="reason")
-        return self
-
-
-class EntityInput(SemanticItem):
+class EntityInput(StrictModel):
     """2026-08-08 用于提交当前 chunk 明确出现的实体"""
 
     name: str = Field(min_length=1, description="实体名称（新实体用本章出现的名称，已登记实体用登记名）")
@@ -325,6 +310,11 @@ class EntityInput(SemanticItem):
     description: str | None = Field(
         default=None,
         description="实体一句话简介（已登记实体不要重复提交）",
+    )
+    attributes: dict[str, JsonValue | None] = Field(
+        default_factory=dict,
+        description="JSON Merge Patch：普通值表示设置该属性，null 表示删除该属性；"
+        "已登记实体只提交本次变化的字段",
     )
 
     @model_validator(mode="after")
@@ -346,6 +336,13 @@ class EntityInput(SemanticItem):
                 self.description,
                 label="entity.description",
             )
+        normalized_attributes: dict[str, JsonValue | None] = {}
+        for key, value in self.attributes.items():
+            cleaned = unicodedata.normalize("NFC", key).strip()
+            if not cleaned:
+                raise ValueError("entity.attributes 键不能为空")
+            normalized_attributes[cleaned] = value
+        self.attributes = normalized_attributes
         return self
 
 
@@ -355,7 +352,7 @@ class EntityDirectoryInput(StrictModel):
     entities: list[EntityInput] = Field(default_factory=list)
 
 
-class ChunkMetricsInput(SemanticItem):
+class ChunkMetricsInput(StrictModel):
     """2026-08-07 用于提交当前 chunk 摘要和叙事指标"""
 
     summary: str = Field(min_length=1)
@@ -371,13 +368,12 @@ class ChunkMetricsInput(SemanticItem):
         return self
 
 
-class CharacterObservationInput(SemanticItem):
+class CharacterObservationInput(StrictModel):
     """2026-08-07 用于提交人物在当前 chunk 的动作和功能"""
 
     character: str = Field(min_length=1, description="人物名称（已登记实体用登记名）")
     role_function: RoleFunction = Field(description="人物在本动作中的功能角色：主体/客体/发送者/接收者/帮助者/反对者")
     action: str = Field(min_length=1, description="动作描述，一句话概括人物做了什么")
-    action_type: ActionType = Field(description="动作宽口径类别：战斗/逃跑/对话/决策/移动/情感/其他")
     emotion: EmotionalValence = Field(description="动作伴随的情绪方向与强度")
 
     @model_validator(mode="after")
@@ -388,132 +384,98 @@ class CharacterObservationInput(SemanticItem):
         return self
 
 
-class DialogueInput(SemanticItem):
-    """2026-08-07 用于按系统候选顺序提交对话语义判断"""
+class DialogueInput(StrictModel):
+    """2026-08-11 用于按候选序号提交对话三态判断"""
 
-    is_dialogue: bool = Field(description="该候选是否为真实对话；误判候选（如题字/内心描写被引号包裹）填 false")
-    description: str | None = Field(
-        default=None,
-        description="有效对话的语义说明（is_dialogue=true 时必填）；误判候选必须留空",
+    candidate_index: int = Field(gt=0, description="候选序号，从 1 开始，与系统候选列表的 index 一致")
+    verdict: DialogueVerdict = Field(
+        description="判断结果：dialogue=真实对话；inner_monologue=内心独白；"
+        "not_dialogue=误判候选（如题字/描写被引号包裹）"
     )
     speaker: str | None = Field(
         default=None,
         description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
     )
-    tone: str | None = Field(default=None, description="语气描述，如\"愤怒呵斥\"；误判候选必须留空")
-    is_inner_monologue: bool = Field(
-        default=False,
-        description="是否为内心独白；误判候选必须为 false",
-    )
+    tone: Tone | None = Field(default=None, description="对话语气闭合枚举：平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求")
 
     @model_validator(mode="after")
     def validate_dialogue(self) -> DialogueInput:
-        """2026-08-07 用于约束有效对话和误判候选的字段组合"""
-        if self.is_dialogue:
-            if self.description is None:
-                raise ValueError("有效对话必须提供 description")
-            self.description = normalize_semantic_text(
-                self.description,
-                label="dialogue.description",
-            )
-            if self.speaker is not None:
-                self.speaker = normalize_semantic_text(
-                    self.speaker,
-                    label="dialogue.speaker",
+        """2026-08-11 用于规范化说话人并约束三态字段组合"""
+        if self.verdict == DialogueVerdict.NOT_DIALOGUE:
+            if self.speaker is not None or self.tone is not None:
+                raise ValueError(
+                    "not_dialogue 候选只能提交 candidate_index 和 verdict；speaker/tone 必须为 null"
                 )
-            if self.tone is not None:
-                self.tone = normalize_semantic_text(self.tone, label="dialogue.tone")
             return self
-        if any(
-            value is not None
-            for value in (self.description, self.speaker, self.tone)
-        ) or self.is_inner_monologue:
-            raise ValueError(
-                "非对话候选只能提交判断结果置信度和 reason；"
-                "含 action/emotion/role_function 的条目应提交到 write_character_observations"
+        if self.speaker is not None:
+            self.speaker = normalize_semantic_text(
+                self.speaker,
+                label="dialogue.speaker",
             )
         return self
 
 
 class DialogueSubmissionItem(BaseModel):
-    """2026-08-09 用于宽容接收模型提交的对话判断（order 等多余字段直接忽略）"""
+    """2026-08-09 用于宽容接收模型提交的对话判断（多余字段直接忽略）"""
 
     model_config = ConfigDict(extra="ignore", use_enum_values=True)
 
-    is_dialogue: bool = Field(description="该候选是否为真实对话；误判候选（如题字/内心描写被引号包裹）填 false")
-    description: str | None = Field(
-        default=None,
-        description="有效对话的语义说明（is_dialogue=true 时必填）；误判候选必须留空",
+    candidate_index: int = Field(gt=0, description="候选序号，从 1 开始，与系统候选列表的 index 一致")
+    verdict: DialogueVerdict = Field(
+        description="判断结果：dialogue=真实对话；inner_monologue=内心独白；"
+        "not_dialogue=误判候选（如题字/描写被引号包裹）"
     )
     speaker: str | None = Field(
         default=None,
         description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
     )
-    tone: str | None = Field(default=None, description="语气描述，如\"愤怒呵斥\"；误判候选必须留空")
-    is_inner_monologue: bool = Field(
-        default=False,
-        description="是否为内心独白；误判候选必须为 false",
-    )
-    confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
-    reason: str = Field(min_length=1, description="判断依据，引用原文或上下文事实")
+    tone: Tone | None = Field(default=None, description="对话语气闭合枚举：平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求")
 
 
 class EventParticipantInput(StrictModel):
-    """2026-08-07 用于描述实体如何参与当前事件"""
+    """2026-08-11 用于描述实体在当前事件中的闭合角色"""
 
     entity: str = Field(min_length=1)
-    participation: str = Field(min_length=1)
+    role: EventParticipantRole = Field(
+        description="参与角色：行动者/承受者/接收者/协助者/对抗者/见证者/地点（地点作为参与者角色）"
+    )
 
     @model_validator(mode="after")
     def normalize_participant(self) -> EventParticipantInput:
-        """2026-08-07 用于规范化参与实体和参与方式"""
+        """2026-08-11 用于规范化参与实体名称"""
         self.entity = normalize_semantic_text(self.entity, label="event.participant.entity")
-        self.participation = normalize_semantic_text(
-            self.participation,
-            label="event.participant.participation",
-        )
         return self
 
 
-class EventInput(SemanticItem):
-    """2026-08-07 用于提交不依赖任意 event_type 的事件描述"""
+class EventInput(StrictModel):
+    """2026-08-11 用于提交不依赖任意 event_type 的事件描述和参与者角色"""
 
     description: str = Field(min_length=1)
     participants: list[EventParticipantInput] = Field(default_factory=list)
-    location: str | None = None
-    story_time: StoryTime | None = None
 
     @model_validator(mode="after")
     def normalize_event(self) -> EventInput:
-        """2026-08-07 用于规范化事件说明和可选地点"""
+        """2026-08-11 用于规范化事件说明"""
         self.description = normalize_semantic_text(
             self.description,
             label="event.description",
         )
-        if self.location is not None:
-            self.location = normalize_semantic_text(
-                self.location,
-                label="event.location",
-            )
         return self
 
 
-class RelationInput(SemanticItem):
-    """2026-08-07 用于通过实体名称提交闭合类型关系变化"""
+class RelationInput(StrictModel):
+    """2026-08-11 用于通过实体名称提交闭合类型关系状态"""
 
     from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
     to_entity: str = Field(min_length=1, description="关系终点实体（图上的登记名称）")
     relation_type: RelationType = Field(
-        description="闭合关系类型：家族/师徒/主从/敌对/盟友/友情/爱慕/利益/同一人物/隶属/位于"
+        description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text()
     )
-    change_kind: RelationChangeKind = Field(
-        description="变化类型：assert=新建关系；reinforce=强化已存在关系（要求图里已有该边）；"
-        "break/retract=解除关系；refine=微调；supersede=取代；不确定边是否存在时用 assert"
-    )
+    state: RelationState = RelationState.PRESENT
 
     @model_validator(mode="after")
     def normalize_relation(self) -> RelationInput:
-        """2026-08-07 用于规范化关系两端实体名称"""
+        """2026-08-11 用于规范化关系两端实体名称"""
         self.from_entity = normalize_semantic_text(
             self.from_entity,
             label="relation.from_entity",
@@ -527,63 +489,18 @@ class RelationInput(SemanticItem):
         return self
 
 
-class StateInput(SemanticItem):
-    """2026-08-07 用于提交实体当前状态及可选实体对象"""
+class ForeshadowingInput(StrictModel):
+    """2026-08-11 用于提交新伏笔描述与置信度（只创建新伏笔）"""
 
-    entity: str = Field(min_length=1, description="状态主体（已登记实体用登记名）")
-    predicate: str = Field(min_length=1, description="状态谓词，如\"伤势\"\"修为\"\"持有\"")
-    object: str | None = Field(
-        default=None,
-        description="对象化状态内容（如\"白金离火\"\"玉戒尺\"\"封印血咒\"）；"
-        "与 value 二选一，表达对象化存在时填此项",
-    )
-    value: JsonValue | None = Field(
-        default=None,
-        description="属性取值（如 6、\"重伤\"、\"初稳\"）；与 object 二选一，表达数值/取值时填此项",
-    )
-    story_time: StoryTime | None = None
-    assertion: Assertion = Assertion.AFFIRMED
-
-    @model_validator(mode="after")
-    def validate_state(self) -> StateInput:
-        """2026-08-07 用于规范化状态并保证 object 与 value 二选一"""
-        self.entity = normalize_semantic_text(self.entity, label="state.entity")
-        self.predicate = normalize_semantic_text(self.predicate, label="state.predicate")
-        if self.object is not None:
-            self.object = normalize_semantic_text(self.object, label="state.object")
-        if (self.object is None) == (self.value is None):
-            raise ValueError(
-                "state.object 与 state.value 必须恰好一个非空：object 填对象化存在"
-                "（如\"白金离火\"\"玉戒尺\"），value 填属性取值（如数字/短句），拿不准优先填 object"
-            )
-        return self
-
-
-class ForeshadowingInput(SemanticItem):
-    """2026-08-07 用于通过稳定语义字段提交伏笔线程变化"""
-
-    foreshadowing_type: ForeshadowingType
-    setup_kind: SetupKind
-    setup_summary: str = Field(min_length=1)
-    why_unresolved_now: str = Field(min_length=1)
-    expected_payoff_family: str = Field(min_length=1)
-    payoff_likelihood: PayoffLikelihood
-    setup_status: SetupStatus
+    description: str = Field(min_length=1, description="伏笔描述，一句话说明埋设了什么悬念")
+    confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
 
     @model_validator(mode="after")
     def normalize_foreshadowing(self) -> ForeshadowingInput:
-        """2026-08-07 用于规范化伏笔稳定字段和未解决原因"""
-        self.setup_summary = normalize_semantic_text(
-            self.setup_summary,
-            label="foreshadowing.setup_summary",
-        )
-        self.expected_payoff_family = normalize_semantic_text(
-            self.expected_payoff_family,
-            label="foreshadowing.expected_payoff_family",
-        )
-        self.why_unresolved_now = normalize_semantic_text(
-            self.why_unresolved_now,
-            label="foreshadowing.why_unresolved_now",
+        """2026-08-11 用于规范化伏笔描述"""
+        self.description = normalize_semantic_text(
+            self.description,
+            label="foreshadowing.description",
         )
         return self
 
@@ -606,14 +523,8 @@ class DialogueCandidate(StrictModel):
         return self
 
 
-class BoundEntity(SemanticItem):
-    """2026-08-08 用于系统绑定当前 chunk 实体出现及文本依据"""
-
-    name: str
-    entity_type: EntityType
-    tags: list[str] = Field(default_factory=list)
-    description: str | None = None
-    evidence: EvidenceList
+class BoundEntity(EntityInput):
+    """2026-08-11 用于系统绑定当前 chunk 实体出现（与输入模型同构，标记已校验）"""
 
 
 class BoundEntityDirectory(StrictModel):
@@ -623,29 +534,24 @@ class BoundEntityDirectory(StrictModel):
 
 
 class BoundCharacterObservation(CharacterObservationInput):
-    """2026-08-07 用于系统绑定人物观察文本依据"""
-
-    evidence: EvidenceList
+    """2026-08-11 用于系统绑定人物观察（与输入模型同构，标记已校验）"""
 
 
-class BoundDialogue(SemanticItem):
-    """2026-08-07 用于系统绑定有效对话原文位置和语义结果"""
+class BoundDialogue(StrictModel):
+    """2026-08-11 用于系统绑定有效对话原文位置和语义结果"""
 
+    candidate_index: int = Field(gt=0)
     candidate_key: str
     content: str
     start: int = Field(ge=0)
     end: int = Field(gt=0)
-    description: str
     speaker: str | None = None
-    tone: str | None = None
+    tone: Tone | None = None
     is_inner_monologue: bool = False
-    evidence: EvidenceList
 
 
 class BoundEvent(EventInput):
-    """2026-08-07 用于系统绑定事件文本依据"""
-
-    evidence: EvidenceList
+    """2026-08-11 用于系统绑定事件（与输入模型同构，标记已校验）"""
 
 
 class BoundRelation(RelationInput):
@@ -653,19 +559,10 @@ class BoundRelation(RelationInput):
 
     directionality: Directionality
     relation_semantics: RelationSemantics
-    evidence: EvidenceList
-
-
-class BoundState(StateInput):
-    """2026-08-07 用于系统绑定状态文本依据"""
-
-    evidence: EvidenceList
 
 
 class BoundForeshadowing(ForeshadowingInput):
-    """2026-08-07 用于系统绑定伏笔文本依据"""
-
-    evidence: EvidenceList
+    """2026-08-11 用于系统绑定伏笔（与输入模型同构，标记已校验）"""
 
 
 class BoundChunkAnnotation(StrictModel):
@@ -678,7 +575,6 @@ class BoundChunkAnnotation(StrictModel):
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
     relations: list[BoundRelation]
-    states: list[BoundState]
     foreshadowings: list[BoundForeshadowing]
 
 
@@ -720,7 +616,6 @@ class CaseSearchResult(StrictModel):
     chunk_id: int = Field(ge=0)
     keys: list[str] = Field(min_length=1, max_length=20)
     description: str = Field(min_length=1, max_length=100)
-    evidence: EvidenceList
     state: Literal["active"] = "active"
 
 
@@ -736,7 +631,6 @@ class ForeshadowingSearchResult(StrictModel):
 
     record_id: str
     content: dict[str, Any]
-    evidence: EvidenceList
 
 
 SearchResultItem = Annotated[
@@ -758,7 +652,6 @@ class ResolvedCase(StrictModel):
     action: CaseAction
     type: CaseType = ""
     reason: str
-    evidence_chunk_id: int = Field(ge=0)
     target_key: str
     target_ref: dict[str, Any] = Field(default_factory=dict)
     # dialogue 动作：改 dialogue_records
@@ -853,7 +746,6 @@ class PendingCase(StrictModel):
     description: str
     target_key: str
     target_ref: dict[str, Any]
-    evidence: EvidenceList
 
 
 class AgentRunAudit(StrictModel):
@@ -886,7 +778,6 @@ class CompletionCase(StrictModel):
     keys: list[str]
     description: str
     target_ref: dict[str, Any]
-    evidence: EvidenceList
     state: CaseState
 
 
