@@ -7,15 +7,21 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from functools import partial
+from typing import TYPE_CHECKING, Any
+from typing import cast as type_cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.agents.annotation.schema import EntityType
 from src.agents.stream import AgentStream
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
 from src.storage.db import get_session_factory
 from src.storage.repositories import ChunkRepository, DatabaseAnnotationQueryService
+
+if TYPE_CHECKING:
+    from src.agents.annotation.fact_graph import FactGraph
 
 
 def _group_chunks_by_chapter(
@@ -53,6 +59,56 @@ def _load_existing_completion(
         read_session.close()
 
 
+def _build_fact_graph(
+    *,
+    session_factory: Callable[[], Session],
+    run_id: str,
+) -> FactGraph:
+    """2026-08-09 用于在首个章节 Agent 启动时从库加载常驻事实图"""
+    from src.agents.annotation.fact_graph import FactGraph, _stable_relation_key
+    from src.storage.repositories.graph import GraphRepository
+
+    read_session = session_factory()
+    try:
+        graph_repo = GraphRepository(read_session)
+        latest = graph_repo.resolve_graph_version(run_id)
+        history_entity_types: dict[str, EntityType] = {}
+        history_entity_names: dict[str, str] = {}
+        history_entity_tags: dict[str, list[str]] = {}
+        history_entity_attributes: dict[str, dict[str, Any]] = {}
+        history_entity_state: dict[str, dict[str, Any]] = {}
+        history_relations: set[tuple[str, str, str]] = set()
+        history_relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = {}
+        if latest is not None:
+            for entity_row in graph_repo.fetch_entity_snapshots(latest):
+                key = entity_row.name.strip().casefold()
+                history_entity_types[key] = type_cast(EntityType, entity_row.entity_type)
+                history_entity_names[key] = entity_row.name
+                history_entity_tags[key] = list(entity_row.tags or [])
+                history_entity_attributes[key] = dict(entity_row.attributes or {})
+                history_entity_state[key] = dict(entity_row.state or {})
+            for relation_row in graph_repo.fetch_relation_snapshots(latest, active_only=True):
+                relation_key = _stable_relation_key(
+                    relation_row.from_name,
+                    relation_row.to_name,
+                    relation_row.relation_type,
+                )
+                history_relations.add(relation_key)
+                history_relation_attributes[relation_key] = dict(relation_row.attributes or {})
+        return FactGraph(
+            history_entity_types=history_entity_types,
+            history_entity_names=history_entity_names,
+            history_entity_tags=history_entity_tags,
+            history_entity_attributes=history_entity_attributes,
+            history_entity_state=history_entity_state,
+            history_relations=history_relations,
+            history_relation_attributes=history_relation_attributes,
+        )
+    finally:
+        read_session.rollback()
+        read_session.close()
+
+
 async def run_annotate(
     run_id: str,
     session: Session,
@@ -69,6 +125,7 @@ async def run_annotate(
 
     from src.agents.annotation import run_annotation_agent
     from src.agents.llm import build_chat_model
+    from src.agents.usage import build_token_usage_callback
     from src.models.local.embedding import EmbeddingClient
     from src.workflows.annotate_helpers.storage import complete_annotation_run
 
@@ -82,7 +139,14 @@ async def run_annotate(
     total_chapters = len(chapter_groups)
     sql_session_factory = get_session_factory()
     llm = build_chat_model("annotation")
-    embedding_client = EmbeddingClient(novel_id=novel_id)
+    embedding_client = EmbeddingClient(
+        novel_id=novel_id,
+        token_usage_callback=build_token_usage_callback(session=session, run_id=run_id),
+    )
+    graph_state = _build_fact_graph(
+        session_factory=sql_session_factory,
+        run_id=run_id,
+    )
     success_count = 0
 
     if emitter:
@@ -154,6 +218,7 @@ async def run_annotate(
                 chapter_id=chapter_id,
                 current_chunks=current_chunks,
                 novel_title=novel_title,
+                novel_id=novel_id,
                 llm=llm,
                 session_factory=sql_session_factory,
                 query_service_factory=partial(
@@ -165,6 +230,7 @@ async def run_annotate(
                     embedding_client=embedding_client,
                 ),
                 stream=agent_stream,
+                graph_state=graph_state,
             )
             complete_annotation_run(
                 result=agent_result,

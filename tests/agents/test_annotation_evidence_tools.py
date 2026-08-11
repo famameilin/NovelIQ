@@ -12,6 +12,7 @@ from src.agents.annotation.errors import (
     AnnotationInputError,
     AnnotationProtocolError,
 )
+from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
@@ -19,9 +20,7 @@ from src.agents.annotation.schema import (
     EntityInput,
     EventInput,
     ForeshadowingInput,
-    GraphSearchEntity,
-    GraphSearchFact,
-    GraphSearchResult,
+    ForeshadowingSearchResult,
     RelationInput,
     SearchResult,
     StateInput,
@@ -57,37 +56,20 @@ class _QueryService:
 
     def search_pool(self, query, *, hidden_case_ids, limit=50):
         """2026-08-07 用于验证已解决案例从后续池搜索隐藏"""
-        del query, limit
+        del limit
         if "case-1" in hidden_case_ids:
             return SearchResult()
+        if "线索" in query:
+            return SearchResult(
+                results=[
+                    ForeshadowingSearchResult(
+                        record_id="thread-1",
+                        content={"setup_summary": "护佑山门", "setup_kind": "明确承诺"},
+                        evidence=[TextEvidence(reason="伏笔", chunk_id=10)],
+                    )
+                ]
+            )
         return SearchResult(results=[self._case()])
-
-    def search_graph(self, query, *, limit=50):
-        """2026-08-07 用于返回上一章节图版本中的实体与事实语义"""
-        del query, limit
-        return GraphSearchResult(
-            graph_version_id="graph-version-1",
-            facts=[
-                GraphSearchFact(
-                    fact_id="fact-1",
-                    fact_revision=1,
-                    fact_type="character_observation",
-                    predicate="action",
-                    effective_chunk_id=1,
-                    content={"kind": "character_observation", "action": "前章动作"},
-                    evidence=[TextEvidence(reason="前章原文确认", chunk_id=1)],
-                )
-            ],
-            entities=[
-                GraphSearchEntity(
-                    entity_id=42,
-                    name="顾霜",
-                    entity_type="character",
-                    state_revision=1,
-                    state={"status": "active"},
-                )
-            ],
-        )
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-08-07 用于记录范围并返回原文候选"""
@@ -116,15 +98,71 @@ class _QueryService:
             target_key="target-1",
             target_ref={
                 "kind": "dialogue",
-                "candidate_key": "candidate-1",
+                "dialogue_id": "candidate-1",
                 "chunk_id": 10,
                 "start": 1,
                 "end": 3,
                 "text": "住手",
-                "fact_id": "fact-dialogue",
-                "fact_revision": 1,
             },
         )
+
+    def thread_exists(self, setup_id):
+        """2026-08-11 用于校验 push_case 携带的伏笔线程 id"""
+        return setup_id == "thread-1"
+
+
+class _AliasQueryService(_QueryService):
+    """2026-08-09 用于提供 entity_alias 类型的活动案例"""
+
+    def _case(self) -> CaseSearchResult:
+        """2026-08-09 用于构造疑似同一人物案例"""
+        return CaseSearchResult(
+            id="alias-1",
+            type="entity_alias",
+            chunk_id=10,
+            keys=["同一人物", "顾霜", "顾老"],
+            description="疑似同一人物：顾霜 与 顾老 共享邻居重叠度 50%",
+            evidence=[TextEvidence(reason="共享邻居较高", chunk_id=10)],
+        )
+
+    def fetch_active_case_details(self, case_id):
+        """2026-08-09 用于返回 alias 案例稳定目标"""
+        if case_id != "alias-1":
+            return None
+        return ActiveCaseDetails(
+            **self._case().model_dump(mode="python"),
+            target_key="target-alias-1",
+            target_ref={"kind": "alias", "name_a": "顾霜", "name_b": "顾老", "chunk_id": 10},
+        )
+
+    def thread_exists(self, setup_id):
+        """2026-08-11 用于校验 push_case 携带的伏笔线程 id"""
+        return setup_id == "thread-1"
+
+
+class _GraphTestEntity:
+    """2026-08-11 用于构造内存图测试实体目录项"""
+
+    def __init__(self, name: str, entity_type: str) -> None:
+        self.name = name
+        self.entity_type = entity_type
+
+
+def _graph_relation(
+    from_entity: str,
+    to_entity: str,
+    relation_type: str,
+    change_kind: str,
+) -> RelationInput:
+    """2026-08-11 用于构造闭合类型关系输入"""
+    return RelationInput(
+        from_entity=from_entity,
+        to_entity=to_entity,
+        relation_type=relation_type,
+        change_kind=change_kind,
+        confidence="high",
+        reason=f"{from_entity}{relation_type}{to_entity}",
+    )
 
 
 def _find_tool(tools: list, name: str):
@@ -143,6 +181,14 @@ def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
     )
 
 
+def _graph_with_entities(names: dict[str, str]) -> FactGraph:
+    """2026-08-11 用于构造带历史实体的内存事实图"""
+    return FactGraph(
+        history_entity_types=dict(names),
+        history_entity_names=dict(names),
+    )
+
+
 def _tools(service: _QueryService, ledger: AnnotationToolLedger) -> list:
     """2026-08-07 用于构建绑定查询服务与账本的测试工具"""
     return build_annotation_tools(service, ledger)
@@ -156,6 +202,7 @@ def _write_metrics_args() -> dict:
         "narrative_function": "铺垫",
         "confidence": "high",
         "reason": "本章开端",
+        "chapter_summary": "住手回荡",
     }
 
 
@@ -338,8 +385,8 @@ def test_schema_rejects_non_closed_enums() -> None:
         )
 
 
-def test_entity_tags_limited_to_three_and_three_chars() -> None:
-    """2026-08-08 用于验证实体标签最多 3 个且每个最多 3 个字"""
+def test_entity_tags_limited_to_three_and_five_chars() -> None:
+    """2026-08-08 用于验证实体标签最多 3 个且每个最多 5 个字"""
     with pytest.raises(ValidationError, match="最多 3 个标签"):
         EntityInput.model_validate(
             {
@@ -350,12 +397,12 @@ def test_entity_tags_limited_to_three_and_three_chars() -> None:
                 "reason": "出现",
             }
         )
-    with pytest.raises(ValidationError, match="每个标签最多 3 个字"):
+    with pytest.raises(ValidationError, match="每个标签最多 5 个字"):
         EntityInput.model_validate(
             {
                 "name": "玄剑",
                 "entity_type": "item",
-                "tags": ["传世法宝"],
+                "tags": ["传世神兵法宝"],
                 "confidence": "high",
                 "reason": "出现",
             }
@@ -400,12 +447,10 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     _call(tools, "write_states", _write_remaining_args()["states"])
     _call(tools, "write_foreshadowings", _write_remaining_args()["foreshadowings"])
 
-    response = _call(tools, "complete_chunk", {})
-    assert response["accepted"] is True
-    assert response["completed_chunk"] == 10
-
-    chunk = ledger.completed_chunks[0]
+    chunk = ledger.complete_active_chunk()
     assert chunk.chunk_id == 10
+
+    assert ledger.completed_chunks[0].chunk_id == 10
     assert ledger.phase == "continuity_open"
     dialogue = chunk.dialogues[0]
     assert dialogue.candidate_key.startswith("dlg_")
@@ -414,12 +459,102 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     assert dialogue.evidence[0].chunk_id == 10
 
 
+def test_write_receipts_carry_fixed_compact_shape() -> None:
+    """2026-08-10 用于验证成功 write 的模型回执固定压缩为 accepted/tool/domain/revision/item_count/state_digest"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    receipt = _call(tools, "write_entities", _write_entities_args())
+
+    assert set(receipt) == {
+        "accepted",
+        "tool",
+        "domain",
+        "revision",
+        "item_count",
+        "state_digest",
+    }
+    assert receipt == {
+        "accepted": True,
+        "tool": "write_entities",
+        "domain": "entities",
+        "revision": 1,
+        "item_count": 1,
+        "state_digest": receipt["state_digest"],
+    }
+    assert receipt["state_digest"].startswith("sha256:")
+    metrics_receipt = _call(tools, "write_metrics", _write_metrics_args())
+    assert metrics_receipt["item_count"] == 1
+    assert metrics_receipt["tool"] == "write_metrics"
+
+
+def test_failed_write_keeps_other_domain_receipts_and_revisions() -> None:
+    """2026-08-10 用于验证单个领域写入失败后其他成功领域的 receipt 与修订保留"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    _call(tools, "write_metrics", _write_metrics_args())
+    _call(tools, "write_entities", _write_entities_args())
+    invalid = _write_remaining_args()["states"]
+    invalid["items"] = [
+        {
+            "entity": "顾霜",
+            "predicate": "状态",
+            "object": None,
+            "value": None,
+            "confidence": "high",
+            "reason": "缺少 object 与 value",
+        }
+    ]
+    with pytest.raises(ValueError, match="必须恰好一个非空"):
+        _call(tools, "write_states", invalid)
+
+    assert "metrics" in ledger.domain_receipts
+    assert "entities" in ledger.domain_receipts
+    assert "states" not in ledger.domain_receipts
+    assert ledger.domain_revision_counts["metrics"] == 1
+    assert ledger.domain_revision_counts["entities"] == 1
+    assert "states" not in ledger.domain_revision_counts
+    assert ledger.ready_chunk is None
+
+
+def test_replacement_write_rebuilds_ready_chunk_revision() -> None:
+    """2026-08-10 用于验证八领域齐全后重写领域会重建 ready_chunk 且 complete 冻结新值"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    for name, args in [
+        ("write_metrics", _write_metrics_args()),
+        ("write_entities", _write_entities_args()),
+        ("write_character_observations", _write_remaining_args()["character_observations"]),
+        ("write_dialogues", _write_dialogues_args()),
+        ("write_events", _write_remaining_args()["events"]),
+        ("write_relations", _write_remaining_args()["relations"]),
+        ("write_states", _write_remaining_args()["states"]),
+        ("write_foreshadowings", _write_remaining_args()["foreshadowings"]),
+    ]:
+        _call(tools, name, args)
+    assert ledger.ready_chunk is not None
+
+    replaced = _write_remaining_args()["events"]
+    replaced["items"][0]["description"] = "新事件描述"
+    _call(tools, "write_events", replaced)
+    assert ledger.ready_chunk.events[0].description == "新事件描述"
+
+    ledger.complete_active_chunk()
+    assert ledger.completed_chunks[0].events[0].description == "新事件描述"
+
+
 def test_domain_reinvocation_completely_replaces_payload() -> None:
     """2026-08-07 用于验证领域重新调用完整替换旧暂存值"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
+    _call(tools, "write_entities", _write_entities_args())
     first = _write_remaining_args()["events"]
     first["items"] = [
         {
@@ -447,13 +582,13 @@ def test_complete_chunk_requires_all_eight_domains() -> None:
 
     _call(tools, "write_metrics", _write_metrics_args())
     with pytest.raises(ValueError, match="尚未写入全部领域"):
-        _call(tools, "complete_chunk", {})
+        ledger.complete_active_chunk()
     assert ledger.completed_chunks == []
     assert ledger.phase == "chunk_open"
 
 
-def test_complete_chunk_requires_dialogue_candidate_alignment() -> None:
-    """2026-08-07 用于验证漏标或超标对话候选无法完成 chunk"""
+def test_write_dialogues_requires_candidate_alignment() -> None:
+    """2026-08-10 用于验证对话候选数量不齐在 write_dialogues 时即失败"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -465,14 +600,14 @@ def test_complete_chunk_requires_dialogue_candidate_alignment() -> None:
     _call(tools, "write_relations", _write_remaining_args()["relations"])
     _call(tools, "write_states", _write_remaining_args()["states"])
     _call(tools, "write_foreshadowings", _write_remaining_args()["foreshadowings"])
-    _call(tools, "write_dialogues", {"items": []})
 
     with pytest.raises(ValueError, match="必须按系统候选顺序逐项提交"):
-        _call(tools, "complete_chunk", {})
+        _call(tools, "write_dialogues", {"items": []})
+    assert "dialogues" not in ledger.domain_receipts
 
 
-def test_complete_chunk_rejects_unknown_entity_endpoint() -> None:
-    """2026-08-07 用于验证事实端点必须来自当前 chunk 的 write_entities"""
+def test_fact_endpoint_validation_moves_to_write_time() -> None:
+    """2026-08-10 用于验证事实端点校验前移到对应 write 调用"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -481,15 +616,69 @@ def test_complete_chunk_rejects_unknown_entity_endpoint() -> None:
     _call(tools, "write_entities", _write_entities_args())
     invalid = _write_remaining_args()["character_observations"]
     invalid["items"][0]["character"] = "山门"
-    _call(tools, "write_character_observations", invalid)
+    with pytest.raises(ValueError, match="未在当前 chunk 的 write_entities 中声明"):
+        _call(tools, "write_character_observations", invalid)
+    assert "character_observations" not in ledger.domain_receipts
+
+
+def test_write_entities_requires_prior_search_graph_when_registered_entities_exist() -> None:
+    """2026-08-09 用于验证存在已登记实体时未先 search_graph 禁止提交实体目录"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    tools = _tools(service, ledger)
+
+    with pytest.raises(AnnotationAuthorizationError, match="必须先调用 search_graph"):
+        _call(tools, "write_entities", _write_entities_args())
+    assert "entities" not in ledger.domain_receipts
+
+
+def test_write_entities_allowed_after_search_graph() -> None:
+    """2026-08-09 用于验证 search_graph 之后可正常提交实体目录"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    tools = _tools(service, ledger)
+
+    _call(tools, "search_graph", {"entities": ["顾霜"]})
+    assert ledger.graph_queried is True
+    _call(tools, "write_entities", _write_entities_args())
+
+
+def test_complete_chunk_accepts_registered_entity_endpoint_without_declaration() -> None:
+    """2026-08-09 用于验证已登记实体可直接作为事实端点，无需当前 chunk 重复声明"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character", "伯安": "character"})
+    ledger.graph_queried = True
+    tools = _tools(service, ledger)
+
+    _call(tools, "write_metrics", _write_metrics_args())
+    _call(tools, "write_entities", _write_entities_args())
+    _call(tools, "write_character_observations", _write_remaining_args()["character_observations"])
     _call(tools, "write_dialogues", _write_dialogues_args())
     _call(tools, "write_events", _write_remaining_args()["events"])
     _call(tools, "write_relations", _write_remaining_args()["relations"])
     _call(tools, "write_states", _write_remaining_args()["states"])
     _call(tools, "write_foreshadowings", _write_remaining_args()["foreshadowings"])
 
-    with pytest.raises(ValueError, match="未在当前 chunk 的 write_entities 中声明"):
-        _call(tools, "complete_chunk", {})
+    ledger.complete_active_chunk()
+
+
+def test_complete_chunk_rejects_registered_entity_type_change() -> None:
+    """2026-08-09 用于验证已登记实体重新提交时大类必须保持一致（写入时即失败）"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    ledger.graph_queried = True
+    tools = _tools(service, ledger)
+
+    _call(tools, "write_metrics", _write_metrics_args())
+    args = _write_entities_args()
+    args["entities"][0]["entity_type"] = "item"
+    with pytest.raises(ValueError, match="已登记实体不允许变更大类"):
+        _call(tools, "write_entities", args)
+    assert "entities" not in ledger.domain_receipts
 
 
 def test_write_tools_reject_invalid_enum_at_call_time() -> None:
@@ -505,8 +694,8 @@ def test_write_tools_reject_invalid_enum_at_call_time() -> None:
     assert ledger.domain_receipts == set()
 
 
-def test_unresolved_speaker_creates_system_pending_case() -> None:
-    """2026-08-07 用于验证 speaker=null 的对话自动创建连续性案例"""
+def test_unresolved_speaker_no_longer_auto_creates_case() -> None:
+    """2026-08-11 用于验证 speaker=null 的对话不再自动生成案例，案例只能由 push_case 登记"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -519,17 +708,9 @@ def test_unresolved_speaker_creates_system_pending_case() -> None:
     _call(tools, "write_relations", _write_remaining_args()["relations"])
     _call(tools, "write_states", _write_remaining_args()["states"])
     _call(tools, "write_foreshadowings", _write_remaining_args()["foreshadowings"])
-    _call(tools, "complete_chunk", {})
+    ledger.complete_active_chunk()
 
-    assert len(ledger.pending_cases) == 1
-    pending = ledger.pending_cases[0]
-    assert pending.type == "dialogue_speaker"
-    assert pending.chunk_id == 10
-    assert pending.target_ref["kind"] == "dialogue"
-    assert pending.target_ref["chunk_id"] == 10
-    assert pending.target_ref["start"] == 1
-    assert pending.target_ref["end"] == 3
-    assert pending.target_ref["text"] == "住手"
+    assert ledger.pushed_cases == []
 
 
 def test_write_dialogues_requires_description_for_valid_dialogue() -> None:
@@ -553,15 +734,13 @@ def test_future_disabled_rejects_future_search_and_read() -> None:
     ledger = _ledger(allow_future_context=False)
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationAuthorizationError, match="range 必须为 previous"):
-        asyncio.run(_find_tool(tools, "search_text").ainvoke(
-            {"query": "顾霜", "range": "future"}
-        ))
+    payload = json.loads(
+        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
+    )
+    assert payload[0]["result_number"] == 1
     ledger.set_phase("continuity_open")
     with pytest.raises(AnnotationAuthorizationError, match="allow_future_context=false"):
-        asyncio.run(_find_tool(tools, "search_text").ainvoke(
-            {"query": "顾霜", "range": "future"}
-        ))
+        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
 
 
 def test_search_text_numbering_and_read_authorization() -> None:
@@ -574,12 +753,14 @@ def test_search_text_numbering_and_read_authorization() -> None:
     tools = _tools(service, ledger)
 
     payload = json.loads(
-        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜", "range": "future"}))
+        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
     )
     assert payload[0]["result_number"] == 1
     assert "chunk_id" not in payload[0]
-    content = _find_tool(tools, "read_text").invoke({"result_number": 1})
-    assert content == "顾霜喝道"
+    read_receipt = json.loads(
+        _find_tool(tools, "read_text").invoke({"result_number": 1})
+    )
+    assert read_receipt == {"content": "顾霜喝道"}
     assert service.reads == [20]
 
     ledger.set_phase("chunk_open")
@@ -589,10 +770,12 @@ def test_search_text_numbering_and_read_authorization() -> None:
         _find_tool(tools, "read_text").invoke({"result_number": 99})
 
 
-def test_search_pool_uses_case_numbers_and_resolve_case() -> None:
-    """2026-08-07 用于验证临时 case_number 解决活动案例且不可重复"""
+def test_search_pool_uses_case_numbers_and_resolve_dialogue_case() -> None:
+    """2026-08-11 用于验证临时 case_number 解决对话案例且不可重复"""
     service = _QueryService()
     ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    ledger.graph_queried = True
     initial_cases, rotation_ids = service.find_initial_case_candidates("current")
     ledger.register_initial_cases(initial_cases, rotation_ids)
     tools = _tools(service, ledger)
@@ -601,16 +784,19 @@ def test_search_pool_uses_case_numbers_and_resolve_case() -> None:
     assert [item["result_kind"] for item in view["results"]] == ["case"]
     case_number = view["results"][0]["case_number"]
     response = json.loads(
-        _find_tool(tools, "resolve_case").invoke(
+        _find_tool(tools, "resolve_dialogue_case").invoke(
             {"case_number": case_number, "speaker": "顾霜", "reason": "后文点明"}
         )
     )
     assert response["accepted"] is True
+    assert response["action"] == "dialogue"
     assert ledger.resolved_cases[0].case_id == "case-1"
+    assert ledger.resolved_cases[0].action == "dialogue"
+    assert ledger.resolved_cases[0].speaker == "顾霜"
     assert ledger.resolved_cases[0].target_key == "target-1"
 
     with pytest.raises(AnnotationInputError, match="已经解决"):
-        _find_tool(tools, "resolve_case").invoke(
+        _find_tool(tools, "resolve_dialogue_case").invoke(
             {"case_number": case_number, "speaker": "顾霜", "reason": "重复"}
         )
     hidden = json.loads(_find_tool(tools, "search_pool").invoke({"query": "住手"}))
@@ -618,35 +804,298 @@ def test_search_pool_uses_case_numbers_and_resolve_case() -> None:
 
 
 def test_resolve_case_rejects_unknown_case_number() -> None:
-    """2026-08-07 用于验证未登记的 case_number 直接拒绝"""
+    """2026-08-11 用于验证未登记的 case_number 直接拒绝"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
     with pytest.raises(AnnotationAuthorizationError, match="未由初始候选或 search_pool 返回"):
-        _find_tool(tools, "resolve_case").invoke(
+        _find_tool(tools, "resolve_dialogue_case").invoke(
             {"case_number": 999, "speaker": "顾霜", "reason": "猜测"}
         )
 
 
-def test_search_graph_hides_database_ids_from_agent() -> None:
-    """2026-08-07 用于验证图查询结果不暴露数据库 ID 与内部字段"""
+def test_resolve_dialogue_case_requires_declared_character_speaker() -> None:
+    """2026-08-11 用于验证对话解决 speaker 必须是已登记或本章声明的人物"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    ledger.graph_queried = True
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["case-1"]
+    with pytest.raises(ValueError, match="resolve_dialogue_case.speaker 未在当前"):
+        _find_tool(tools, "resolve_dialogue_case").invoke(
+            {"case_number": case_number, "speaker": "无名客", "reason": "猜测"}
+        )
+    response = json.loads(
+        _find_tool(tools, "resolve_dialogue_case").invoke(
+            {"case_number": case_number, "speaker": "顾霜", "reason": "后文点明"}
+        )
+    )
+    assert response["accepted"] is True
+
+
+def test_close_case_only_closes_alias_case() -> None:
+    """2026-08-11 用于验证确认非同一人物用 close_case 只关闭案例不产生变化"""
+    service = _AliasQueryService()
+    ledger = _ledger()
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["alias-1"]
+    response = json.loads(
+        _find_tool(tools, "close_case").invoke(
+            {"case_number": case_number, "reason": "夫妻关系非同一人物"}
+        )
+    )
+    assert response["accepted"] is True
+    assert ledger.resolved_cases[0].case_id == "alias-1"
+    assert ledger.resolved_cases[0].action == "close"
+
+    with pytest.raises(AnnotationInputError, match="已经解决"):
+        _find_tool(tools, "close_case").invoke(
+            {"case_number": case_number, "reason": "重复"}
+        )
+
+
+def test_resolve_fact_case_asserts_same_character_relation() -> None:
+    """2026-08-11 用于验证 entity_alias 案例可用 resolve_fact_case 建同一人物关系"""
+    service = _AliasQueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
+    ledger.graph_queried = True
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["alias-1"]
+    response = json.loads(
+        _find_tool(tools, "resolve_fact_case").invoke(
+            {
+                "case_number": case_number,
+                "from_entity": "顾霜",
+                "to_entity": "顾老",
+                "relation_type": "同一人物",
+                "change_kind": "assert",
+                "reason": "姓名指向同一人",
+            }
+        )
+    )
+    assert response["accepted"] is True
+    resolved = ledger.resolved_cases[0]
+    assert resolved.action == "fact"
+    assert resolved.relation_type == "同一人物"
+    assert resolved.change_kind == "assert"
+
+
+def test_resolve_fact_case_rejects_unregistered_entity() -> None:
+    """2026-08-11 用于验证 fact 解决端点必须已登记或本章声明"""
+    service = _AliasQueryService()
+    ledger = _ledger()
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["alias-1"]
+    with pytest.raises(ValueError, match="resolve_fact_case.from_entity 未在当前"):
+        _find_tool(tools, "resolve_fact_case").invoke(
+            {
+                "case_number": case_number,
+                "from_entity": "顾霜",
+                "to_entity": "顾老",
+                "relation_type": "同一人物",
+                "change_kind": "assert",
+                "reason": "指向同一人",
+            }
+        )
+
+
+def test_push_case_accepts_arbitrary_type_and_dialogue_id() -> None:
+    """2026-08-11 用于验证 push_case 类型放开且对话疑点携带 dialogue_id"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    payload = json.loads(_find_tool(tools, "search_graph").invoke({"query": "顾霜"}))
-    assert "fact_id" not in payload["facts"][0]
-    assert "fact_revision" not in payload["facts"][0]
-    assert "entity_id" not in payload["entities"][0]
-    assert payload["facts"][0]["content"]["action"] == "前章动作"
+    dialogue_id = ledger.dialogue_candidates[0].candidate_key
+    response = json.loads(
+        _find_tool(tools, "push_case").invoke(
+            {
+                "description": "神秘仪式疑点",
+                "keys": ["住手", "仪式"],
+                "type": "神秘仪式",
+                "dialogue_id": dialogue_id,
+            }
+        )
+    )
+    assert response["accepted"] is True
+    assert response["target_key"]
+    pushed = ledger.pushed_cases[0]
+    assert pushed.type == "神秘仪式"
+    assert pushed.target_ref["kind"] == "神秘仪式"
+    assert pushed.target_ref["dialogue_id"] == dialogue_id
+    assert pushed.target_ref["chunk_id"] == 10
+
+
+def test_push_case_rejects_unknown_dialogue_or_thread_id() -> None:
+    """2026-08-11 用于验证 push_case 校验 dialogue_id 与 setup_id"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    with pytest.raises(AnnotationInputError, match="不是当前 chunk 的对话候选 id"):
+        _find_tool(tools, "push_case").invoke(
+            {
+                "description": "对话疑点",
+                "keys": ["住手"],
+                "type": "dialogue_speaker",
+                "dialogue_id": "dlg_not_exist",
+            }
+        )
+    with pytest.raises(AnnotationInputError, match="不是当前 run 的活跃伏笔线程"):
+        _find_tool(tools, "push_case").invoke(
+            {
+                "description": "伏笔疑点",
+                "keys": ["线索"],
+                "type": "foreshadowing_suspect",
+                "setup_id": "thread-not-exist",
+            }
+        )
+
+
+def test_push_case_accepts_setup_id_and_resolve_foreshadowing_case() -> None:
+    """2026-08-11 用于验证伏笔疑点携带 setup_id 且可动作式解决"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    response = json.loads(
+        _find_tool(tools, "push_case").invoke(
+            {
+                "description": "伏笔疑点",
+                "keys": ["线索"],
+                "type": "foreshadowing_suspect",
+                "setup_id": "thread-1",
+            }
+        )
+    )
+    assert response["accepted"] is True
+    pushed = ledger.pushed_cases[0]
+    assert pushed.target_ref["setup_id"] == "thread-1"
+
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    case_number = ledger.case_number_by_id["case-1"]
+    resolved = json.loads(
+        _find_tool(tools, "resolve_foreshadowing_case").invoke(
+            {
+                "case_number": case_number,
+                "setup_status": "reinforced",
+                "reason": "后续章节强化",
+            }
+        )
+    )
+    assert resolved["accepted"] is True
+    assert ledger.resolved_cases[-1].action == "foreshadowing"
+    assert ledger.resolved_cases[-1].setup_status == "reinforced"
+
+
+def test_search_pool_exposes_thread_id_for_foreshadowing_results() -> None:
+    """2026-08-11 用于验证伏笔线程视图携带 id 供 push_case 登记疑点"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    view = json.loads(_find_tool(tools, "search_pool").invoke({"query": "线索"}))
+    assert view["results"][0]["result_kind"] == "foreshadowing"
+    assert view["results"][0]["id"] == "thread-1"
+    assert view["results"][0]["content"]["setup_summary"] == "护佑山门"
+
+
+def test_write_dialogues_ignores_order_field() -> None:
+    """2026-08-09 用于验证模型附带 order 字段时仍能通过并保持候选顺序"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    args = _write_dialogues_args()
+    args["items"][0]["order"] = 1
+    response = _call(tools, "write_dialogues", args)
+    assert response["accepted"] is True
+    stored = ledger.domain_payloads["dialogues"]
+    assert stored[0].is_dialogue is True
+    assert not hasattr(stored[0], "order")
+
+
+def test_search_graph_returns_one_hop_neighborhood() -> None:
+    """2026-08-09 用于验证图查询返回节点、missing、边和邻居且不暴露内部字段"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = FactGraph(
+        history_entity_types={"顾霜": "character", "顾老": "character"},
+        history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
+        history_relations={("顾老", "顾霜", "同一人物")},
+    )
+    tools = _tools(service, ledger)
+
+    payload = json.loads(
+        _find_tool(tools, "search_graph").invoke(
+            {"entities": ["顾霜", "贺老"], "relation_type": None}
+        )
+    )
+    assert payload["matches"][0]["name"] == "顾霜"
+    assert payload["missing"] == ["贺老"]
+    assert payload["relations"][0]["relation_type"] == "同一人物"
+    assert payload["neighbors"][0]["name"] == "顾老"
+    assert "entity_id" not in payload["matches"][0]
+    assert "relation_id" not in payload["relations"][0]
+    assert "facts" not in payload
+    assert "paths" not in payload
+
+
+def test_search_graph_queries_live_fact_graph_without_database() -> None:
+    """2026-08-11 用于验证 search_graph 只访问常驻内存图，本章增量立即可见"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = FactGraph(
+        history_entity_types={"顾霜": "character", "顾老": "character"},
+        history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
+        history_entity_tags={"顾霜": ["女主"]},
+        history_entity_attributes={"顾霜": {"entity_type": "character", "description": "主角"}},
+        history_entity_state={"顾霜": {"status": "active"}},
+        history_relations={("顾老", "顾霜", "同一人物")},
+        history_relation_attributes={("顾老", "顾霜", "同一人物"): {"support_count": 1}},
+    )
+    ledger.graph.apply_relation(_graph_relation("顾老", "顾霜", "同一人物", "assert"))
+    tools = _tools(service, ledger)
+
+    payload = json.loads(
+        _find_tool(tools, "search_graph").invoke(
+            {"entities": ["顾霜", "铁帅"], "relation_type": None}
+        )
+    )
+
+    assert [item["name"] for item in payload["matches"]] == ["顾霜"]
+    assert payload["missing"] == ["铁帅"]
+    assert payload["matches"][0]["tags"] == ["女主"]
+    assert payload["matches"][0]["state"]["status"] == "active"
+    assert len(payload["relations"]) == 1
+    relation = payload["relations"][0]
+    assert {relation["from_name"], relation["to_name"]} == {"顾霜", "顾老"}
+    assert relation["relation_type"] == "同一人物"
+    assert relation["is_active"] is True
+    assert relation["attributes"]["support_count"] == 2
+    assert [item["name"] for item in payload["neighbors"]] == ["顾老"]
 
 
 def test_finish_chapter_requires_chunk_frozen_first() -> None:
     """2026-08-07 用于验证 chunk 未冻结时不能 finish_chapter"""
     service = _QueryService()
     ledger = _ledger()
-    tools = _tools(service, ledger)
+    _tools(service, ledger)
 
     with pytest.raises(AnnotationProtocolError, match="不允许 finish_chapter"):
-        _find_tool(tools, "finish_chapter").invoke({"chapter_summary": "章节结束"})
+        ledger.finish()

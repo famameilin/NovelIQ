@@ -4,24 +4,15 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 from typing import cast as type_cast
 
-import networkx as nx
 from sqlalchemy import String, func, or_, select, text
 from sqlalchemy import cast as sql_cast
 
-from src.agents.annotation.schema import (
-    Directionality,
-    EntityType,
-    EvidenceList,
-    GraphSearchEntity,
-    GraphSearchFact,
-    GraphSearchRelation,
-    GraphSearchResult,
-    RelationSemantics,
-)
+from src.agents.annotation.schema import EvidenceList
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
     EntityStateVersion,
@@ -333,13 +324,19 @@ class GraphRepository(BaseRepository[GraphFact]):
         )
         normalized_query = (query or "").strip()
         if normalized_query:
-            pattern = f"%{normalized_query}%"
-            stmt = stmt.where(
-                or_(
-                    GraphFact.predicate.ilike(pattern),
-                    sql_cast(GraphFact.content, String).ilike(pattern),
+            tokens = [token for token in re.split(r"[\s,，、；;]+", normalized_query) if token]
+            if tokens:
+                stmt = stmt.where(
+                    or_(
+                        *[
+                            or_(
+                                GraphFact.predicate.ilike(f"%{token}%"),
+                                sql_cast(GraphFact.content, String).ilike(f"%{token}%"),
+                            )
+                            for token in tokens
+                        ]
+                    )
                 )
-            )
         stmt = (
             stmt.distinct(GraphFact.fact_id)
             .order_by(
@@ -350,131 +347,6 @@ class GraphRepository(BaseRepository[GraphFact]):
             .limit(max(1, limit))
         )
         return list(self.session.execute(stmt).scalars().all())
-
-    def search_graph(
-        self,
-        run_id: str,
-        *,
-        graph_version_id: str,
-        query: str,
-        limit: int = 50,
-    ) -> GraphSearchResult:
-        """2026-08-07 用于在固定章节图版本上检索事实实体关系和有限实体路径"""
-        boundary = self.resolve_graph_version(run_id, graph_version_id=graph_version_id)
-        if boundary is None:
-            raise ValueError(f"graph_version_id 不存在或跨 run: {graph_version_id}")
-        normalized_query = query.strip()
-        facts = self.fetch_visible_facts(boundary, query=normalized_query, limit=limit)
-        all_entities = self.fetch_entity_snapshots(boundary)
-        all_relations = self.fetch_relation_snapshots(boundary, active_only=True)
-        query_lower = normalized_query.lower()
-        matched_entity_ids = {
-            entity.entity_id
-            for entity in all_entities
-            if query_lower in entity.name.lower()
-            or query_lower in str(entity.state).lower()
-        }
-        matched_entity_ids.update(
-            int(fact.subject_entity_id)
-            for fact in facts
-            if fact.subject_entity_id is not None
-        )
-        matched_relations = [
-            relation
-            for relation in all_relations
-            if relation.from_entity_id in matched_entity_ids
-            or relation.to_entity_id in matched_entity_ids
-            or query_lower in relation.relation_type.lower()
-            or query_lower in relation.from_name.lower()
-            or query_lower in relation.to_name.lower()
-        ][:limit]
-        matched_entity_ids.update(
-            entity_id
-            for relation in matched_relations
-            for entity_id in (relation.from_entity_id, relation.to_entity_id)
-        )
-        matched_entities = [
-            entity
-            for entity in all_entities
-            if entity.entity_id in matched_entity_ids
-        ][:limit]
-        paths = self._build_paths(matched_entities, matched_relations)
-        return GraphSearchResult(
-            graph_version_id=boundary.graph_version_id,
-            facts=[
-                GraphSearchFact(
-                    fact_id=fact.fact_id,
-                    fact_revision=fact.fact_revision,
-                    fact_type=fact.fact_type,
-                    predicate=fact.predicate,
-                    effective_chunk_id=fact.effective_chunk_id,
-                    content=dict(fact.content),
-                    evidence=EvidenceList.model_validate(fact.evidence),
-                )
-                for fact in facts
-            ],
-            entities=[
-                GraphSearchEntity(
-                    entity_id=entity.entity_id,
-                    name=entity.name,
-                    entity_type=type_cast(EntityType, entity.entity_type),
-                    state_revision=entity.state_revision,
-                    state={**entity.attributes, **entity.state},
-                )
-                for entity in matched_entities
-            ],
-            relations=[
-                GraphSearchRelation(
-                    relation_id=relation.relation_id,
-                    relation_revision=relation.relation_revision,
-                    from_entity_id=relation.from_entity_id,
-                    to_entity_id=relation.to_entity_id,
-                    from_name=relation.from_name,
-                    to_name=relation.to_name,
-                    relation_type=relation.relation_type,
-                    directionality=type_cast(Directionality, relation.directionality),
-                    relation_semantics=type_cast(RelationSemantics, relation.relation_semantics),
-                    attributes=relation.attributes,
-                    is_active=relation.is_active,
-                )
-                for relation in matched_relations
-            ],
-            paths=paths,
-        )
-
-    def _build_paths(
-        self,
-        entities: list[EntitySnapshotRow],
-        relations: list[RelationSnapshotRow],
-    ) -> list[list[str]]:
-        """2026-08-07 用于只以实体节点和稳定关系边构建有限 NetworkX 路径"""
-        graph = nx.Graph()
-        for entity in entities:
-            graph.add_node(str(entity.entity_id))
-        relation_by_pair: dict[frozenset[str], str] = {}
-        for relation in relations:
-            from_id = str(relation.from_entity_id)
-            to_id = str(relation.to_entity_id)
-            graph.add_edge(from_id, to_id)
-            relation_by_pair[frozenset((from_id, to_id))] = relation.relation_id
-        entity_ids = sorted(graph.nodes)
-        paths: list[list[str]] = []
-        for index, source in enumerate(entity_ids):
-            for target in entity_ids[index + 1 :]:
-                if len(paths) >= 20:
-                    return paths
-                try:
-                    node_path = nx.shortest_path(graph, source=source, target=target)
-                except nx.NetworkXNoPath:
-                    continue
-                if len(node_path) > 5:
-                    continue
-                serialized: list[str] = [f"entity:{node_path[0]}"]
-                for left, right in zip(node_path, node_path[1:], strict=False):
-                    relation_id = relation_by_pair[frozenset((left, right))]
-                    serialized.extend((f"relation:{relation_id}", f"entity:{right}"))
-                paths.append(serialized)
-        return paths
 
     def fetch_changes(
         self,

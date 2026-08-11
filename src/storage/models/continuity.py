@@ -128,8 +128,10 @@ class CaseResolutionMapping(Base):
     target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
     resolution: Mapped[dict] = mapped_column(JSONB, nullable=False)
     evidence_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    target_fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    target_fact_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_fact_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    target_fact_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_dialogue_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_setup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

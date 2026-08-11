@@ -143,7 +143,8 @@ class PayoffLikelihood(StrEnum):
 EntityType = Literal["character", "location", "item", "organization"]
 Directionality = Literal["directed", "bidirectional"]
 RelationSemantics = Literal["ordinary", "same_character"]
-CaseType = Literal["dialogue_speaker"]
+CaseType = str
+CaseAction = Literal["dialogue", "fact", "foreshadowing", "close"]
 CaseState = Literal["active", "resolved"]
 DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 
@@ -299,8 +300,8 @@ class StoryTime(StrictModel):
 class SemanticItem(StrictModel):
     """2026-08-07 用于统一 Agent 语义判断的置信度和解释"""
 
-    confidence: Confidence
-    reason: str = Field(min_length=1)
+    confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
+    reason: str = Field(min_length=1, description="判断依据，引用原文或上下文事实")
 
     @model_validator(mode="after")
     def normalize_reason(self) -> SemanticItem:
@@ -312,10 +313,19 @@ class SemanticItem(StrictModel):
 class EntityInput(SemanticItem):
     """2026-08-08 用于提交当前 chunk 明确出现的实体"""
 
-    name: str = Field(min_length=1)
-    entity_type: EntityType
-    tags: list[str] = Field(default_factory=list)
-    description: str | None = None
+    name: str = Field(min_length=1, description="实体名称（新实体用本章出现的名称，已登记实体用登记名）")
+    entity_type: EntityType = Field(
+        description="实体大类：character=有生命的（含人/动物/灵兽/妖/器灵），item=无生命物品，"
+        "location=地点，organization=组织；有生命就是 character，不要按戏份调整"
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="可空标签，最多 3 个，每个最多 5 个字，如\"灵兽\"\"剑灵\"\"法宝\"",
+    )
+    description: str | None = Field(
+        default=None,
+        description="实体一句话简介（已登记实体不要重复提交）",
+    )
 
     @model_validator(mode="after")
     def normalize_entity(self) -> EntityInput:
@@ -328,8 +338,8 @@ class EntityInput(SemanticItem):
                 normalized_tags.append(cleaned)
         if len(normalized_tags) > 3:
             raise ValueError("entity.tags 最多 3 个标签")
-        if any(len(tag) > 3 for tag in normalized_tags):
-            raise ValueError("entity.tags 每个标签最多 3 个字")
+        if any(len(tag) > 5 for tag in normalized_tags):
+            raise ValueError("entity.tags 每个标签最多 5 个字")
         self.tags = normalized_tags
         if self.description is not None:
             self.description = normalize_semantic_text(
@@ -364,11 +374,11 @@ class ChunkMetricsInput(SemanticItem):
 class CharacterObservationInput(SemanticItem):
     """2026-08-07 用于提交人物在当前 chunk 的动作和功能"""
 
-    character: str = Field(min_length=1)
-    role_function: RoleFunction
-    action: str = Field(min_length=1)
-    action_type: ActionType
-    emotion: EmotionalValence
+    character: str = Field(min_length=1, description="人物名称（已登记实体用登记名）")
+    role_function: RoleFunction = Field(description="人物在本动作中的功能角色：主体/客体/发送者/接收者/帮助者/反对者")
+    action: str = Field(min_length=1, description="动作描述，一句话概括人物做了什么")
+    action_type: ActionType = Field(description="动作宽口径类别：战斗/逃跑/对话/决策/移动/情感/其他")
+    emotion: EmotionalValence = Field(description="动作伴随的情绪方向与强度")
 
     @model_validator(mode="after")
     def normalize_character_observation(self) -> CharacterObservationInput:
@@ -381,11 +391,20 @@ class CharacterObservationInput(SemanticItem):
 class DialogueInput(SemanticItem):
     """2026-08-07 用于按系统候选顺序提交对话语义判断"""
 
-    is_dialogue: bool
-    description: str | None = None
-    speaker: str | None = None
-    tone: str | None = None
-    is_inner_monologue: bool = False
+    is_dialogue: bool = Field(description="该候选是否为真实对话；误判候选（如题字/内心描写被引号包裹）填 false")
+    description: str | None = Field(
+        default=None,
+        description="有效对话的语义说明（is_dialogue=true 时必填）；误判候选必须留空",
+    )
+    speaker: str | None = Field(
+        default=None,
+        description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
+    )
+    tone: str | None = Field(default=None, description="语气描述，如\"愤怒呵斥\"；误判候选必须留空")
+    is_inner_monologue: bool = Field(
+        default=False,
+        description="是否为内心独白；误判候选必须为 false",
+    )
 
     @model_validator(mode="after")
     def validate_dialogue(self) -> DialogueInput:
@@ -409,8 +428,34 @@ class DialogueInput(SemanticItem):
             value is not None
             for value in (self.description, self.speaker, self.tone)
         ) or self.is_inner_monologue:
-            raise ValueError("非对话候选只能提交判断结果置信度和 reason")
+            raise ValueError(
+                "非对话候选只能提交判断结果置信度和 reason；"
+                "含 action/emotion/role_function 的条目应提交到 write_character_observations"
+            )
         return self
+
+
+class DialogueSubmissionItem(BaseModel):
+    """2026-08-09 用于宽容接收模型提交的对话判断（order 等多余字段直接忽略）"""
+
+    model_config = ConfigDict(extra="ignore", use_enum_values=True)
+
+    is_dialogue: bool = Field(description="该候选是否为真实对话；误判候选（如题字/内心描写被引号包裹）填 false")
+    description: str | None = Field(
+        default=None,
+        description="有效对话的语义说明（is_dialogue=true 时必填）；误判候选必须留空",
+    )
+    speaker: str | None = Field(
+        default=None,
+        description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
+    )
+    tone: str | None = Field(default=None, description="语气描述，如\"愤怒呵斥\"；误判候选必须留空")
+    is_inner_monologue: bool = Field(
+        default=False,
+        description="是否为内心独白；误判候选必须为 false",
+    )
+    confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
+    reason: str = Field(min_length=1, description="判断依据，引用原文或上下文事实")
 
 
 class EventParticipantInput(StrictModel):
@@ -456,10 +501,15 @@ class EventInput(SemanticItem):
 class RelationInput(SemanticItem):
     """2026-08-07 用于通过实体名称提交闭合类型关系变化"""
 
-    from_entity: str = Field(min_length=1)
-    to_entity: str = Field(min_length=1)
-    relation_type: RelationType
-    change_kind: RelationChangeKind
+    from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
+    to_entity: str = Field(min_length=1, description="关系终点实体（图上的登记名称）")
+    relation_type: RelationType = Field(
+        description="闭合关系类型：家族/师徒/主从/敌对/盟友/友情/爱慕/利益/同一人物/隶属/位于"
+    )
+    change_kind: RelationChangeKind = Field(
+        description="变化类型：assert=新建关系；reinforce=强化已存在关系（要求图里已有该边）；"
+        "break/retract=解除关系；refine=微调；supersede=取代；不确定边是否存在时用 assert"
+    )
 
     @model_validator(mode="after")
     def normalize_relation(self) -> RelationInput:
@@ -480,10 +530,17 @@ class RelationInput(SemanticItem):
 class StateInput(SemanticItem):
     """2026-08-07 用于提交实体当前状态及可选实体对象"""
 
-    entity: str = Field(min_length=1)
-    predicate: str = Field(min_length=1)
-    object: str | None = None
-    value: JsonValue | None = None
+    entity: str = Field(min_length=1, description="状态主体（已登记实体用登记名）")
+    predicate: str = Field(min_length=1, description="状态谓词，如\"伤势\"\"修为\"\"持有\"")
+    object: str | None = Field(
+        default=None,
+        description="对象化状态内容（如\"白金离火\"\"玉戒尺\"\"封印血咒\"）；"
+        "与 value 二选一，表达对象化存在时填此项",
+    )
+    value: JsonValue | None = Field(
+        default=None,
+        description="属性取值（如 6、\"重伤\"、\"初稳\"）；与 object 二选一，表达数值/取值时填此项",
+    )
     story_time: StoryTime | None = None
     assertion: Assertion = Assertion.AFFIRMED
 
@@ -495,7 +552,10 @@ class StateInput(SemanticItem):
         if self.object is not None:
             self.object = normalize_semantic_text(self.object, label="state.object")
         if (self.object is None) == (self.value is None):
-            raise ValueError("state.object 与 state.value 必须恰好一个非空")
+            raise ValueError(
+                "state.object 与 state.value 必须恰好一个非空：object 填对象化存在"
+                "（如\"白金离火\"\"玉戒尺\"），value 填属性取值（如数字/短句），拿不准优先填 object"
+            )
         return self
 
 
@@ -652,54 +712,6 @@ class TextSearchResult(StrictModel):
     semantic_score: float | None = None
 
 
-class GraphSearchFact(StrictModel):
-    """2026-08-07 用于查询服务内部保存可见图事实版本"""
-
-    fact_id: str
-    fact_revision: int = Field(gt=0)
-    fact_type: str
-    predicate: str
-    effective_chunk_id: int = Field(ge=0)
-    content: dict[str, Any]
-    evidence: EvidenceList
-
-
-class GraphSearchEntity(StrictModel):
-    """2026-08-07 用于查询服务内部保存可见实体状态"""
-
-    entity_id: int = Field(gt=0)
-    name: str
-    entity_type: EntityType
-    state_revision: int = Field(ge=0)
-    state: dict[str, Any] = Field(default_factory=dict)
-
-
-class GraphSearchRelation(StrictModel):
-    """2026-08-07 用于查询服务内部保存可见稳定关系"""
-
-    relation_id: str
-    relation_revision: int = Field(gt=0)
-    from_entity_id: int = Field(gt=0)
-    to_entity_id: int = Field(gt=0)
-    from_name: str
-    to_name: str
-    relation_type: str
-    directionality: Directionality
-    relation_semantics: RelationSemantics
-    attributes: dict[str, Any] = Field(default_factory=dict)
-    is_active: bool
-
-
-class GraphSearchResult(StrictModel):
-    """2026-08-07 用于查询服务内部返回上一章节图快照"""
-
-    graph_version_id: str
-    facts: list[GraphSearchFact] = Field(default_factory=list)
-    entities: list[GraphSearchEntity] = Field(default_factory=list)
-    relations: list[GraphSearchRelation] = Field(default_factory=list)
-    paths: list[list[str]] = Field(default_factory=list)
-
-
 class CaseSearchResult(StrictModel):
     """2026-08-07 用于查询服务内部返回活动连续性案例"""
 
@@ -740,21 +752,102 @@ class SearchResult(StrictModel):
 
 
 class ResolvedCase(StrictModel):
-    """2026-08-07 用于系统暂存 Agent 对活动案例的语义解决结果"""
+    """2026-08-11 用于系统暂存 Agent 对活动案例的动作式解决结果"""
 
     case_id: str
-    type: CaseType
-    speaker: str
+    action: CaseAction
+    type: CaseType = ""
     reason: str
     evidence_chunk_id: int = Field(ge=0)
     target_key: str
-    target_ref: dict[str, Any]
+    target_ref: dict[str, Any] = Field(default_factory=dict)
+    # dialogue 动作：改 dialogue_records
+    speaker: str | None = None
+    tone: str | None = None
+    description: str | None = None
+    is_inner_monologue: bool | None = None
+    # fact 动作：建/改/删图关系（change_kind 表达变化）
+    from_entity: str | None = None
+    to_entity: str | None = None
+    relation_type: str | None = None
+    change_kind: str | None = None
+    # foreshadowing 动作：改伏笔线程（setup_id 定位，字段即更新值）
+    setup_summary: str | None = None
+    setup_kind: str | None = None
+    expected_payoff_family: str | None = None
+    payoff_likelihood: str | None = None
+    setup_status: str | None = None
+    confidence: str | None = None
+    strength: str | None = None
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> ResolvedCase:
+        """2026-08-11 用于按 action 校验对应字段齐全且不混填"""
+        if self.action == "dialogue":
+            if self.speaker is not None:
+                self.speaker = normalize_semantic_text(self.speaker, label="resolve.speaker")
+            if self.tone is not None:
+                self.tone = normalize_semantic_text(self.tone, label="resolve.tone")
+            if self.description is not None:
+                self.description = normalize_semantic_text(
+                    self.description,
+                    label="resolve.description",
+                )
+            if all(
+                value is None
+                for value in (self.speaker, self.tone, self.description, self.is_inner_monologue)
+            ):
+                raise ValueError("dialogue 动作必须至少提供 speaker/tone/description/is_inner_monologue 之一")
+            return self
+        if self.action == "fact":
+            missing = [
+                name
+                for name in ("from_entity", "to_entity", "relation_type", "change_kind")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(f"fact 动作缺少字段: {missing}")
+            self.from_entity = normalize_semantic_text(
+                self.from_entity or "",
+                label="resolve.from_entity",
+            )
+            self.to_entity = normalize_semantic_text(
+                self.to_entity or "",
+                label="resolve.to_entity",
+            )
+            return self
+        if self.action == "foreshadowing":
+            if all(
+                value is None
+                for value in (
+                    self.setup_summary,
+                    self.setup_kind,
+                    self.expected_payoff_family,
+                    self.payoff_likelihood,
+                    self.setup_status,
+                    self.confidence,
+                    self.strength,
+                )
+            ):
+                raise ValueError("foreshadowing 动作必须至少提供一个更新字段")
+            for field_name in ("setup_summary", "expected_payoff_family"):
+                value = getattr(self, field_name)
+                if value is not None:
+                    setattr(
+                        self,
+                        field_name,
+                        normalize_semantic_text(value, label=f"resolve.{field_name}"),
+                    )
+            return self
+        if self.action == "close":
+            return self
+        raise ValueError(f"未知案例动作: {self.action}")
 
 
 class PendingCase(StrictModel):
-    """2026-08-07 用于系统自动保存当前未确认对话案例"""
+    """2026-08-11 用于保存模型 push 登记的新连续性疑点案例"""
 
-    type: CaseType = "dialogue_speaker"
+    type: CaseType
     chunk_id: int = Field(ge=0)
     keys: list[str] = Field(min_length=1)
     description: str
@@ -763,35 +856,14 @@ class PendingCase(StrictModel):
     evidence: EvidenceList
 
 
-class SuccessAudit(StrictModel):
-    """2026-08-07 用于保存成功模型调用和工具批次审计"""
-
-    attempt_number: int = Field(ge=1, le=3)
-    messages: list[dict[str, Any]]
-    tool_calls: list[dict[str, Any]]
-    model_name: str | None = None
-    model_provider: str
-    duration_ms: int = Field(ge=0)
-
-
-class TokenUsageRecord(StrictModel):
-    """2026-08-07 用于保存可信模型 Token 用量"""
-
-    model: str
-    prompt_tokens: int = Field(ge=0)
-    completion_tokens: int = Field(ge=0)
-    total_tokens: int = Field(ge=0)
-
-
 class AgentRunAudit(StrictModel):
-    """2026-08-07 用于保存系统范围搜索凭据和领域修订记录"""
+    """2026-08-10 用于保存系统范围搜索凭据和领域修订记录（完整工具审计进入新审计表）"""
 
     allow_future_context: bool
     write_revisions: list[dict[str, Any]]
     rotation_case_ids: list[str]
     authorized_text_chunk_ids: list[int]
-    success: SuccessAudit
-    token_usage: list[TokenUsageRecord] = Field(default_factory=list)
+    closed_case_ids: list[str] = Field(default_factory=list)
 
 
 class AgentRunResult(StrictModel):
@@ -801,7 +873,7 @@ class AgentRunResult(StrictModel):
     chapter_id: int = Field(gt=0)
     annotation: BoundChapterAnnotation
     resolved_cases: list[ResolvedCase]
-    pending_cases: list[PendingCase]
+    pushed_cases: list[PendingCase] = Field(default_factory=list)
     audit: AgentRunAudit
 
 
@@ -819,14 +891,16 @@ class CompletionCase(StrictModel):
 
 
 class CompletionResolvedCase(StrictModel):
-    """2026-08-07 用于返回完成事务写入的案例解决事实版本"""
+    """2026-08-11 用于返回完成事务按 action 写入的解决目标（close 动作无目标）"""
 
     case_id: str
+    action: CaseAction
     type: CaseType
-    speaker: str
     reason: str
-    target_fact_id: str
-    target_fact_revision: int = Field(gt=0)
+    target_dialogue_id: str | None = None
+    target_setup_id: str | None = None
+    target_fact_id: str | None = None
+    target_fact_revision: int | None = Field(default=None, gt=0)
 
 
 class CompletionResult(StrictModel):

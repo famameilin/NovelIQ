@@ -25,3 +25,8 @@ class AnnotationConfigurationError(AnnotationAgentError):
 
 class AnnotationProtocolError(AnnotationRetryableError):
     """2026-08-05 用于标记 Agent 违反当前阶段工具时序的运行失败"""
+
+
+class AnnotationInvariantError(AnnotationAgentError):
+    """2026-08-10 用于标记系统不变量被破坏（如 8 个 receipt 齐全但 ready_chunk 缺失），
+    直接终止章节，不返回给模型修正"""

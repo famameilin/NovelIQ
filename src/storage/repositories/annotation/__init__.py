@@ -11,6 +11,7 @@ from .continuity import (
     CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
     DatabaseAnnotationQueryService,
+    DialogueRecordRepository,
     ForeshadowingRepository,
 )
 from .repository import (
@@ -31,5 +32,6 @@ __all__ = [
     "CaseResolutionMappingRepository",
     "ChapterAnnotationRepository",
     "DatabaseAnnotationQueryService",
+    "DialogueRecordRepository",
     "ForeshadowingRepository",
 ]
