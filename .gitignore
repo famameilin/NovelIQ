@@ -213,7 +213,7 @@ tests/jmeter/test_files.csv
 tests/jmeter/test_novel.txt
 
 # 生成的分析结果
-results/
+tests/jmeter/results/archive/
 
 AGENTS.md
 
@@ -222,7 +222,6 @@ skills/
 .codex-runtime/ 
 .playwright-mcp/
 .pytest-tmp/
-output/
 tmp/
 scripts/tools/build_competition_report.py
 
@@ -232,3 +231,4 @@ scripts/db/
 scripts/manual/
 scripts/legacy/
 scripts/tools/
+scripts/experiments/
