@@ -86,6 +86,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
             "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
             "completed_at": run.completed_at.isoformat() if run.completed_at else None,
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "updated_at": run.updated_at.isoformat() if run.updated_at else None,
@@ -163,6 +164,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
             run.status = status
+            if status in ("completed", "failed", "cancelled"):
+                run.completed_at = now
             run.updated_at = now
             self.session.commit()
 

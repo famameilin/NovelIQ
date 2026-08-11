@@ -72,6 +72,50 @@ def test_prepare_task_execution_claim_claims_pending_run(db_session) -> None:
     assert refreshed["status"] == "running"
     assert refreshed["worker_id"] == "worker-a"
     assert refreshed["heartbeat_at"] is not None
+    assert refreshed["started_at"] is not None
+
+
+def test_update_run_status_completed_persists_completed_at(db_session) -> None:
+    """成功收口写入 completed 终态时，应同时记录 completed_at。"""
+    _insert_novel(db_session, "svcdone")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcdone")
+
+    run_repo.update_run_status(run_id, "completed")
+    refreshed = run_repo.get_run(run_id)
+
+    assert refreshed is not None
+    assert refreshed["status"] == "completed"
+    assert refreshed["completed_at"] is not None
+
+
+def test_update_run_status_failed_persists_completed_at(db_session) -> None:
+    """失败收口写入 failed 终态时，应同时记录 completed_at。"""
+    _insert_novel(db_session, "svcfail2")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcfail2")
+
+    run_repo.update_run_status(run_id, "failed")
+    refreshed = run_repo.get_run(run_id)
+
+    assert refreshed is not None
+    assert refreshed["status"] == "failed"
+    assert refreshed["completed_at"] is not None
+
+
+def test_get_run_exposes_started_at_after_claim(db_session) -> None:
+    """任务被 worker 认领后，get_run 应能读到 started_at。"""
+    _insert_novel(db_session, "svcstart")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcstart")
+    service = _make_service(db_session, worker_id="worker-b")
+
+    service._prepare_task_execution_claim(run_id[:8])
+    refreshed = run_repo.get_run(run_id)
+
+    assert refreshed is not None
+    assert refreshed["status"] == "running"
+    assert refreshed["started_at"] is not None
 
 
 def test_prepare_task_execution_claim_cancels_unclaimed_pending_run(db_session) -> None:
