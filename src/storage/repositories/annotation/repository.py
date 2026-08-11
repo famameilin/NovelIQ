@@ -14,6 +14,7 @@ from src.models.local.character_reference_policy import is_global_character_surf
 from src.storage.models import (
     ChapterAnnotationRecord,
     Chunk,
+    DialogueRecord,
     ForeshadowingThread,
     ForeshadowingThreadHit,
     GraphFact,
@@ -22,8 +23,9 @@ from src.storage.repositories.base import BaseRepository
 
 _EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38}
 _EXPECTATION_STATUS_BONUS = {"open": -0.07, "reinforced": 0.03, "likely_paid_off": 0.28}
-_EXPECTATION_STRENGTH_BONUS = {"high": 0.03, "medium": 0.0}
+_EXPECTATION_STRENGTH_BONUS = {"high": 0.03, "medium": 0.0, "low": -0.05}
 _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off": 1.2}
+_EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
 
 
 @dataclass(frozen=True)
@@ -222,13 +224,18 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         return sorted(self.fetch_chunk_characters_full(run_id), key=lambda row: row.chunk_id)
 
     def fetch_chunk_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
-        """2026-08-05 用于从数据库图对话事实展开 chunk 对话记录"""
+        """2026-08-11 用于从对话记录表展开 chunk 对话记录"""
         rows: list[DialogueFactRow] = []
-        for fact in self._graph_facts(run_id, content_kind="dialogue"):
-            content = dict(fact.content)
-            speaker = content.get("speaker")
-            speaker_name = str(speaker.get("name")).strip() if isinstance(speaker, dict) else ""
-            valid_speaker = speaker_name if is_global_character_surface_name(speaker_name) else None
+        statement = (
+            select(DialogueRecord)
+            .where(DialogueRecord.run_id == run_id)
+            .order_by(DialogueRecord.chunk_id, DialogueRecord.start)
+        )
+        for record in self.session.execute(statement).scalars().all():
+            speaker_name = str(record.speaker or "").strip()
+            valid_speaker = (
+                speaker_name if is_global_character_surface_name(speaker_name) else None
+            )
             speaker_names = [valid_speaker] if valid_speaker else []
             speaker_references = (
                 [
@@ -244,14 +251,13 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 if valid_speaker
                 else []
             )
-            text = str(content["content"])
             rows.append(
                 DialogueFactRow(
-                    chunk_id=int(content["chunk_id"]),
+                    chunk_id=int(record.chunk_id),
                     speaker=speaker_names,
                     speaker_references=speaker_references,
-                    length=len(text),
-                    tone=str(content["tone"]) if content.get("tone") is not None else None,
+                    length=len(record.content),
+                    tone=record.tone,
                 )
             )
         return rows
@@ -344,7 +350,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             weight = (
                 _EXPECTATION_STATUS_WEIGHT[thread.status]
                 + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0)
-                + (0.05 if thread.strength == "high" else 0.0)
+                + _EXPECTATION_STRENGTH_WEIGHT[thread.strength]
             )
             weighted_total += score * weight
             total_weight += weight

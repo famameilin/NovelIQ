@@ -19,7 +19,6 @@ from src.agents.annotation.schema import (
     CaseSearchResult,
     ChunkMetricsInput,
     PendingCase,
-    SuccessAudit,
 )
 from src.agents.stream import AgentStream
 from src.storage.models import ChapterAnnotationRecord
@@ -100,12 +99,9 @@ def _pending_case(
         description="该句住手由谁说出",
         target_key=f"target-{chapter_id}",
         target_ref={
-            "kind": "dialogue",
-            "candidate_key": candidate.candidate_key,
+            "kind": "dialogue_speaker",
+            "dialogue_id": candidate.candidate_key,
             "chunk_id": chunk_id,
-            "start": candidate.start,
-            "end": candidate.end,
-            "text": candidate.content,
         },
         evidence=evidence("住手出现", chunk_id),
     )
@@ -131,7 +127,7 @@ def _agent_result(
         chapter_id=chapter_id,
         annotation=annotation,
         resolved_cases=[],
-        pending_cases=(
+        pushed_cases=(
             [_pending_case(chunk_id=chunk_id, chunk_text=chunk_text, chapter_id=chapter_id)]
             if create_case
             else []
@@ -141,13 +137,6 @@ def _agent_result(
             write_revisions=[],
             rotation_case_ids=[],
             authorized_text_chunk_ids=[chunk_id],
-            success=SuccessAudit(
-                attempt_number=1,
-                messages=[],
-                tool_calls=[],
-                model_provider="local",
-                duration_ms=1,
-            ),
         ),
     )
 

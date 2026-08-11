@@ -1,5 +1,9 @@
 """
 章节标注语义写入工具与系统运行账本
+
+核心合同: 每个 write_* 调用完成该领域的全部业务校验并写入当前候选 revision，
+返回固定压缩回执 {accepted, tool, domain, revision, item_count, state_digest}。
+完整参数、完整结果和历史 revision 只进入审计库，不回到模型上下文。
 """
 
 from __future__ import annotations
@@ -8,13 +12,20 @@ import hashlib
 import json
 import unicodedata
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
-from typing import Any, Literal, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+from uuid import uuid4
 
 from langchain_core.tools import tool
 
 from .candidates import extract_dialogue_candidates
-from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationProtocolError
+from .errors import (
+    AnnotationAuthorizationError,
+    AnnotationInputError,
+    AnnotationInvariantError,
+    AnnotationProtocolError,
+)
+from .fact_graph import FactGraph
 from .schema import (
     RELATION_DEFINITIONS,
     ActiveCaseDetails,
@@ -34,6 +45,7 @@ from .schema import (
     Confidence,
     DialogueCandidate,
     DialogueInput,
+    DialogueSubmissionItem,
     EmotionalValence,
     EntityDirectoryInput,
     EntityInput,
@@ -41,7 +53,6 @@ from .schema import (
     EventInput,
     EvidenceList,
     ForeshadowingInput,
-    GraphSearchResult,
     NarrativeFunction,
     PendingCase,
     RelationInput,
@@ -62,6 +73,7 @@ _DOMAIN_NAMES = (
     "states",
     "foreshadowings",
 )
+_DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
 _INTERNAL_GRAPH_KEYS = {
     "candidate_key",
     "chunk_id",
@@ -70,7 +82,6 @@ _INTERNAL_GRAPH_KEYS = {
     "fact_revision",
     "relation_id",
     "representative_entity_id",
-    "resolved_by_case_id",
     "start",
 }
 
@@ -96,9 +107,6 @@ class AnnotationQueryService(Protocol):
     ) -> SearchResult:
         """2026-08-07 用于检索活动案例与伏笔线程"""
 
-    def search_graph(self, query: str, *, limit: int = 50) -> GraphSearchResult | None:
-        """2026-08-07 用于查询上一已完成章节图版本"""
-
     async def search_text(
         self,
         query: str,
@@ -114,16 +122,15 @@ class AnnotationQueryService(Protocol):
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于读取活动案例内部稳定目标"""
 
+    def thread_exists(self, setup_id: str) -> bool:
+        """2026-08-11 用于校验 push_case 携带的伏笔线程 id 属于当前 run 活跃线程"""
 
-@dataclass(slots=True)
-class ToolAuditRecord:
-    """2026-08-07 用于记录真实工具请求结果和运行阶段"""
 
-    tool_name: str
-    phase: str
-    request: dict[str, Any]
-    response: dict[str, Any] | None = None
-    error: str | None = None
+def _content_digest(value: Any) -> str:
+    """2026-08-10 用于生成确定性内容摘要标识"""
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
 
 
 @dataclass(slots=True)
@@ -138,10 +145,12 @@ class AnnotationToolLedger:
     phase: str = "chunk_open"
     dialogue_candidates: list[DialogueCandidate] = field(default_factory=list)
     domain_payloads: dict[str, Any] = field(default_factory=dict)
+    bound_payloads: dict[str, Any] = field(default_factory=dict)
     domain_receipts: set[str] = field(default_factory=set)
     domain_revision_counts: dict[str, int] = field(default_factory=dict)
     write_revisions: list[dict[str, Any]] = field(default_factory=list)
     completed_chunks: list[BoundChunkAnnotation] = field(default_factory=list)
+    ready_chunk: BoundChunkAnnotation | None = None
     initial_cases: dict[str, CaseSearchResult] = field(default_factory=dict)
     rotation_case_ids: list[str] = field(default_factory=list)
     case_number_registry: dict[int, str] = field(default_factory=dict)
@@ -151,11 +160,15 @@ class AnnotationToolLedger:
     next_case_number: int = 1
     next_text_result_number: int = 1
     resolved_cases: list[ResolvedCase] = field(default_factory=list)
-    pending_cases: list[PendingCase] = field(default_factory=list)
+    pushed_cases: list[PendingCase] = field(default_factory=list)
     authorized_text_chunk_ids: set[int] = field(default_factory=set)
     last_evidence_chunk_id: int | None = None
     annotation: BoundChapterAnnotation | None = None
-    audit_records: list[ToolAuditRecord] = field(default_factory=list)
+    chapter_summary: str = ""
+    errors: list[str] = field(default_factory=list)
+    search_log: list[dict[str, Any]] = field(default_factory=list)
+    graph_queried: bool = False
+    graph: FactGraph | None = None
 
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一 chunk 的对话候选"""
@@ -177,15 +190,17 @@ class AnnotationToolLedger:
         self.phase = phase
 
     def snapshot(self) -> dict[str, Any]:
-        """2026-08-07 用于在工具批次执行前保存可回滚账本状态"""
+        """2026-08-10 用于在单个工具调用执行前保存可回滚账本状态"""
         return deepcopy(
             {
                 "phase": self.phase,
                 "domain_payloads": self.domain_payloads,
+                "bound_payloads": self.bound_payloads,
                 "domain_receipts": self.domain_receipts,
                 "domain_revision_counts": self.domain_revision_counts,
                 "write_revisions": self.write_revisions,
                 "completed_chunks": self.completed_chunks,
+                "ready_chunk": self.ready_chunk,
                 "case_number_registry": self.case_number_registry,
                 "case_number_by_id": self.case_number_by_id,
                 "text_result_registry": self.text_result_registry,
@@ -193,41 +208,19 @@ class AnnotationToolLedger:
                 "next_case_number": self.next_case_number,
                 "next_text_result_number": self.next_text_result_number,
                 "resolved_cases": self.resolved_cases,
-                "pending_cases": self.pending_cases,
+                "pushed_cases": self.pushed_cases,
                 "authorized_text_chunk_ids": self.authorized_text_chunk_ids,
                 "last_evidence_chunk_id": self.last_evidence_chunk_id,
                 "annotation": self.annotation,
-                "audit_records": self.audit_records,
+                "chapter_summary": self.chapter_summary,
+                "search_log": self.search_log,
             }
         )
 
     def restore(self, snapshot: dict[str, Any]) -> None:
-        """2026-08-07 用于在工具批次失败时恢复全部系统暂存状态"""
+        """2026-08-10 用于在单个工具调用失败时恢复该调用开始前的账本状态"""
         for field_name, value in snapshot.items():
             setattr(self, field_name, value)
-
-    def record(
-        self,
-        *,
-        tool_name: str,
-        request: dict[str, Any],
-        response: dict[str, Any] | None = None,
-        error: str | None = None,
-    ) -> None:
-        """2026-08-07 用于按真实调用顺序追加工具审计"""
-        self.audit_records.append(
-            ToolAuditRecord(
-                tool_name=tool_name,
-                phase=self.phase,
-                request=request,
-                response=response,
-                error=error,
-            )
-        )
-
-    def audit_payload(self) -> list[dict[str, Any]]:
-        """2026-08-07 用于生成可持久化工具审计结构"""
-        return [asdict(record) for record in self.audit_records]
 
     def register_initial_cases(
         self,
@@ -263,26 +256,34 @@ class AnnotationToolLedger:
             for case in self.initial_cases.values()
         ]
 
-    def write_domain(self, domain: str, payload: Any) -> dict[str, Any]:
-        """2026-08-07 用于完整替换当前 chunk 单个领域暂存值"""
+    # ------------------------------------------------------------------
+    # 领域写入核心合同
+    # ------------------------------------------------------------------
+
+    def write_domain(self, domain: str, payload: Any, *, tool_name: str) -> dict[str, Any]:
+        """2026-08-10 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入候选 revision"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
         if domain not in _DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
+        bound = self._bind_domain(domain, payload)
+        if self.graph is not None:
+            if domain == "entities":
+                self.graph.register_entities(list(payload.entities))
+            elif domain == "relations":
+                self.graph.reset_chapter_relations()
+                for item in payload:
+                    self.graph.apply_relation(item)
         chunk_id = self.current_chunk_id
         revision = self.domain_revision_counts.get(domain, 0) + 1
         self.domain_revision_counts[domain] = revision
         self.domain_payloads[domain] = payload
+        self.bound_payloads[domain] = bound
         self.domain_receipts.add(domain)
         dumped = (
             payload.model_dump(mode="json")
             if hasattr(payload, "model_dump")
-            else [
-                item.model_dump(mode="json")
-                if hasattr(item, "model_dump")
-                else item
-                for item in payload
-            ]
+            else [item.model_dump(mode="json") for item in payload]
         )
         self.write_revisions.append(
             {
@@ -292,7 +293,41 @@ class AnnotationToolLedger:
                 "payload": dumped,
             }
         )
-        return {"accepted": True, "domain": domain, "revision": revision}
+        self._rebuild_ready_chunk_if_complete()
+        return self._receipt(tool_name=tool_name, domain=domain, payload=payload, revision=revision)
+
+    def _receipt(
+        self,
+        *,
+        tool_name: str,
+        domain: str,
+        payload: Any,
+        revision: int,
+    ) -> dict[str, Any]:
+        """2026-08-10 用于生成模型可见的固定压缩回执"""
+        if domain == "metrics":
+            item_count = 1
+        elif domain == "entities":
+            item_count = len(payload.entities)
+        else:
+            item_count = len(payload)
+        dumped = (
+            payload.model_dump(mode="json")
+            if hasattr(payload, "model_dump")
+            else [item.model_dump(mode="json") for item in payload]
+        )
+        return {
+            "accepted": True,
+            "tool": tool_name,
+            "domain": domain,
+            "revision": revision,
+            "item_count": item_count,
+            "state_digest": f"sha256:{_content_digest(dumped)}",
+        }
+
+    # ------------------------------------------------------------------
+    # 领域绑定与校验
+    # ------------------------------------------------------------------
 
     def _entity_catalog(
         self,
@@ -310,6 +345,17 @@ class AnnotationToolLedger:
             names[key] = normalized
         return types, names
 
+    def _fact_entity_catalog(self) -> dict[str, EntityType]:
+        """2026-08-10 用于合并内存图已登记实体与当前 chunk 已声明实体作为事实端点目录"""
+        catalog = (
+            dict(self.graph.entity_types) if self.graph is not None else {}
+        )
+        entities_payload = self.domain_payloads.get("entities")
+        if entities_payload is not None:
+            types, _names = self._entity_catalog(entities_payload)
+            catalog.update(types)
+        return catalog
+
     def _require_entity(
         self,
         name: str,
@@ -318,79 +364,90 @@ class AnnotationToolLedger:
         expected_types: tuple[EntityType, ...] | None = None,
         label: str,
     ) -> str:
-        """2026-08-07 用于校验事实端点已经由当前 chunk 实体目录声明"""
+        """2026-08-07 用于校验事实端点已由当前 chunk 实体目录或已登记实体声明"""
         key = unicodedata.normalize("NFC", name).strip().casefold()
         actual_type = entity_types.get(key)
         if actual_type is None:
-            raise ValueError(f"{label} 未在当前 chunk 的 write_entities 中声明: {name}")
+            raise ValueError(
+                f"{label} 未在当前 chunk 的 write_entities 中声明: {name}（"
+                "请先在 write_entities 声明该实体，或改用已登记实体名）"
+            )
         if expected_types is not None and actual_type not in expected_types:
             raise ValueError(
                 f"{label} 端点类型必须属于 {list(expected_types)}，实际为 {actual_type}"
+                f"（该名称在图上的登记类型是 {actual_type}，"
+                "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
             )
         return key
 
-    def _validate_fact_endpoints(
+    def _validate_domain_endpoints(
         self,
-        payloads: dict[str, Any],
+        domain: str,
+        payload: Any,
         *,
         entity_types: dict[str, EntityType],
     ) -> None:
-        """2026-08-07 用于校验当前 chunk 全部事实端点和闭合关系约束"""
-        for item in payloads["character_observations"]:
-            self._require_entity(
-                item.character,
-                entity_types=entity_types,
-                expected_types=("character",),
-                label="character_observation.character",
-            )
-        for item in payloads["dialogues"]:
-            if item.is_dialogue and item.speaker is not None:
+        """2026-08-10 用于在单个领域写入时校验其事实端点与闭合关系约束"""
+        if domain == "character_observations":
+            for item in payload:
                 self._require_entity(
-                    item.speaker,
+                    item.character,
                     entity_types=entity_types,
                     expected_types=("character",),
-                    label="dialogue.speaker",
+                    label="character_observation.character",
                 )
-        for item in payloads["events"]:
-            for participant in item.participants:
+        elif domain == "dialogues":
+            for item in payload:
+                if item.is_dialogue and item.speaker is not None:
+                    self._require_entity(
+                        item.speaker,
+                        entity_types=entity_types,
+                        expected_types=("character",),
+                        label="dialogue.speaker",
+                    )
+        elif domain == "events":
+            for item in payload:
+                for participant in item.participants:
+                    self._require_entity(
+                        participant.entity,
+                        entity_types=entity_types,
+                        label="event.participant.entity",
+                    )
+                if item.location is not None:
+                    self._require_entity(
+                        item.location,
+                        entity_types=entity_types,
+                        expected_types=("location",),
+                        label="event.location",
+                    )
+        elif domain == "relations":
+            for item in payload:
+                definition = RELATION_DEFINITIONS[str(item.relation_type)]
                 self._require_entity(
-                    participant.entity,
+                    item.from_entity,
                     entity_types=entity_types,
-                    label="event.participant.entity",
+                    expected_types=definition["from_types"],
+                    label="relation.from_entity",
                 )
-            if item.location is not None:
                 self._require_entity(
-                    item.location,
+                    item.to_entity,
                     entity_types=entity_types,
-                    expected_types=("location",),
-                    label="event.location",
+                    expected_types=definition["to_types"],
+                    label="relation.to_entity",
                 )
-        for item in payloads["relations"]:
-            definition = RELATION_DEFINITIONS[str(item.relation_type)]
-            self._require_entity(
-                item.from_entity,
-                entity_types=entity_types,
-                expected_types=definition["from_types"],
-                label="relation.from_entity",
-            )
-            self._require_entity(
-                item.to_entity,
-                entity_types=entity_types,
-                expected_types=definition["to_types"],
-                label="relation.to_entity",
-            )
-        for item in payloads["states"]:
-            self._require_entity(
-                item.entity,
-                entity_types=entity_types,
-                label="state.entity",
-            )
-            if item.object is not None:
+        elif domain == "states":
+            for item in payload:
                 self._require_entity(
-                    item.object,
+                    item.entity,
                     entity_types=entity_types,
-                    label="state.object",
+                    label="state.entity",
                 )
+                if item.object is not None:
+                    self._require_entity(
+                        item.object,
+                        entity_types=entity_types,
+                        label="state.object",
+                    )
 
     def _validate_domain_duplicates(self, payloads: dict[str, Any]) -> None:
         """2026-08-07 用于拒绝当前 chunk 各领域的重复语义事实"""
@@ -439,6 +496,39 @@ class AnnotationToolLedger:
             if len(set(keys)) != len(keys):
                 raise ValueError(f"当前 chunk 的 {domain} 存在重复语义项")
 
+    def _validate_fact_endpoints(
+        self,
+        payloads: dict[str, Any],
+        *,
+        entity_types: dict[str, EntityType],
+    ) -> None:
+        """2026-08-10 用于在 ready_chunk 构造时按最终实体目录全量校验事实端点"""
+        self._validate_domain_endpoints(
+            "character_observations",
+            payloads["character_observations"],
+            entity_types=entity_types,
+        )
+        self._validate_domain_endpoints(
+            "dialogues",
+            payloads["dialogues"],
+            entity_types=entity_types,
+        )
+        self._validate_domain_endpoints(
+            "events",
+            payloads["events"],
+            entity_types=entity_types,
+        )
+        self._validate_domain_endpoints(
+            "relations",
+            payloads["relations"],
+            entity_types=entity_types,
+        )
+        self._validate_domain_endpoints(
+            "states",
+            payloads["states"],
+            entity_types=entity_types,
+        )
+
     def _evidence(self, reason: str, chunk_id: int) -> EvidenceList:
         """2026-08-07 用于把 Agent 理由绑定为当前 chunk 系统文本依据"""
         return EvidenceList.model_validate(
@@ -462,104 +552,74 @@ class AnnotationToolLedger:
             ]
         )
 
-    def _pending_case(
-        self,
-        dialogue: BoundDialogue,
-        *,
-        chunk_id: int,
-    ) -> PendingCase:
-        """2026-08-07 用于从 speaker 为空的系统对话自动构造连续性案例"""
-        content_hash = hashlib.sha256(dialogue.content.encode("utf-8")).hexdigest()
-        target_key = hashlib.sha256(
-            (
-                f"{self.run_scope}:dialogue:{chunk_id}:{dialogue.start}:"
-                f"{dialogue.end}:{content_hash}"
-            ).encode()
-        ).hexdigest()
-        return PendingCase(
-            chunk_id=chunk_id,
-            keys=[dialogue.content, "说话人"],
-            description=f"确认对话“{dialogue.content[:40]}”的说话人",
-            target_key=target_key,
-            target_ref={
-                "kind": "dialogue",
-                "candidate_key": dialogue.candidate_key,
-                "chunk_id": chunk_id,
-                "start": dialogue.start,
-                "end": dialogue.end,
-                "text": dialogue.content,
-            },
-            evidence=dialogue.evidence,
-        )
-
-    def complete_active_chunk(self) -> BoundChunkAnnotation:
-        """2026-08-07 用于校验八个领域并冻结当前 chunk 正式标注"""
-        if self.phase != "chunk_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chunk")
+    def _bind_domain(self, domain: str, payload: Any) -> Any:
+        """2026-08-10 用于校验单个领域并构造系统绑定结果，校验失败直接抛出"""
         chunk_id = self.current_chunk_id
-        missing = [
-            domain
-            for domain in _DOMAIN_NAMES
-            if domain not in self.domain_receipts
-        ]
-        if missing:
-            raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
-        payloads = self.domain_payloads
-        candidates = self.dialogue_candidates
-        dialogue_inputs: list[DialogueInput] = payloads["dialogues"]
-        if len(dialogue_inputs) != len(candidates):
-            raise ValueError(
-                "write_dialogues 必须按系统候选顺序逐项提交: "
-                f"expected={len(candidates)} actual={len(dialogue_inputs)}"
-            )
-        entity_types, _entity_names = self._entity_catalog(payloads["entities"])
-        self._validate_fact_endpoints(payloads, entity_types=entity_types)
-        self._validate_domain_duplicates(payloads)
-
-        bound_dialogues: list[BoundDialogue] = []
-        for candidate, item in zip(candidates, dialogue_inputs, strict=True):
-            if not item.is_dialogue:
-                continue
-            dialogue = BoundDialogue(
-                candidate_key=candidate.candidate_key,
-                content=candidate.content,
-                start=candidate.start,
-                end=candidate.end,
-                description=str(item.description),
-                speaker=item.speaker,
-                tone=item.tone,
-                is_inner_monologue=item.is_inner_monologue,
-                confidence=item.confidence,
-                reason=item.reason,
-                evidence=self._evidence(item.reason, chunk_id),
-            )
-            bound_dialogues.append(dialogue)
-            if dialogue.speaker is None:
-                pending = self._pending_case(dialogue, chunk_id=chunk_id)
-                if not any(item.target_key == pending.target_key for item in self.pending_cases):
-                    self.pending_cases.append(pending)
-
-        metrics: ChunkMetricsInput = payloads["metrics"]
-        chunk = BoundChunkAnnotation(
-            chunk_id=chunk_id,
-            metrics=metrics,
-            entities=self._bound_entities(payloads["entities"], chunk_id=chunk_id),
-            character_observations=[
+        entity_types = self._fact_entity_catalog()
+        self._validate_domain_endpoints(domain, payload, entity_types=entity_types)
+        if domain == "metrics":
+            return payload
+        if domain == "entities":
+            for entity in payload.entities:
+                key = unicodedata.normalize("NFC", entity.name).strip().casefold()
+                registered_type = (
+                    self.graph.entity_types.get(key)
+                    if self.graph is not None
+                    else None
+                )
+                if registered_type is not None and registered_type != entity.entity_type:
+                    raise ValueError(
+                        f"已登记实体不允许变更大类: {entity.name} "
+                        f"registered={registered_type} actual={entity.entity_type}（"
+                        "同一词条的不同身份请使用区分性名称，如\"圣城\"是 location、"
+                        "\"圣城朝堂\"是 organization，不要互相改类）"
+                    )
+            return self._bound_entities(payload, chunk_id=chunk_id)
+        if domain == "character_observations":
+            return [
                 BoundCharacterObservation(
                     **item.model_dump(mode="python"),
                     evidence=self._evidence(item.reason, chunk_id),
                 )
-                for item in payloads["character_observations"]
-            ],
-            dialogues=bound_dialogues,
-            events=[
+                for item in payload
+            ]
+        if domain == "dialogues":
+            candidates = self.dialogue_candidates
+            if len(payload) != len(candidates):
+                raise ValueError(
+                    "write_dialogues 必须按系统候选顺序逐项提交: "
+                    f"expected={len(candidates)} actual={len(payload)}"
+                )
+            bound_dialogues: list[BoundDialogue] = []
+            for candidate, item in zip(candidates, payload, strict=True):
+                if not item.is_dialogue:
+                    continue
+                bound_dialogues.append(
+                    BoundDialogue(
+                        candidate_key=candidate.candidate_key,
+                        content=candidate.content,
+                        start=candidate.start,
+                        end=candidate.end,
+                        description=str(item.description),
+                        speaker=item.speaker,
+                        tone=item.tone,
+                        is_inner_monologue=item.is_inner_monologue,
+                        confidence=item.confidence,
+                        reason=item.reason,
+                        evidence=self._evidence(item.reason, chunk_id),
+                    )
+                )
+            return bound_dialogues
+        if domain == "events":
+            return [
                 BoundEvent(
                     **item.model_dump(mode="python"),
                     evidence=self._evidence(item.reason, chunk_id),
                 )
-                for item in payloads["events"]
-            ],
-            relations=[
+                for item in payload
+            ]
+        if domain == "relations":
+            return [
                 BoundRelation(
                     **item.model_dump(mode="python"),
                     directionality=RELATION_DEFINITIONS[str(item.relation_type)][
@@ -570,40 +630,248 @@ class AnnotationToolLedger:
                     ],
                     evidence=self._evidence(item.reason, chunk_id),
                 )
-                for item in payloads["relations"]
-            ],
-            states=[
+                for item in payload
+            ]
+        if domain == "states":
+            return [
                 BoundState(
                     **item.model_dump(mode="python"),
                     evidence=self._evidence(item.reason, chunk_id),
                 )
-                for item in payloads["states"]
-            ],
-            foreshadowings=[
+                for item in payload
+            ]
+        if domain == "foreshadowings":
+            return [
                 BoundForeshadowing(
                     **item.model_dump(mode="python"),
                     evidence=self._evidence(item.reason, chunk_id),
                 )
-                for item in payloads["foreshadowings"]
-            ],
+                for item in payload
+            ]
+        raise AnnotationInputError(f"未知标注领域: {domain}")
+
+    # ------------------------------------------------------------------
+    # ready_chunk 构造与冻结
+    # ------------------------------------------------------------------
+
+    def _rebuild_ready_chunk_if_complete(self) -> None:
+        """2026-08-10 用于在第八个领域写入成功后同步构造并缓存 ready_chunk"""
+        if not _DOMAIN_NAMES_SET <= self.domain_receipts:
+            return
+        self.ready_chunk = self._build_ready_chunk()
+
+    def _build_ready_chunk(self) -> BoundChunkAnnotation:
+        """2026-08-10 用于从全部已接受领域校验并构造完整 BoundChunkAnnotation"""
+        chunk_id = self.current_chunk_id
+        payloads = self.domain_payloads
+        candidates = self.dialogue_candidates
+        entity_types, _entity_names = self._entity_catalog(payloads["entities"])
+        resolved_entity_types = {
+            **(self.graph.entity_types if self.graph is not None else {}),
+            **entity_types,
+        }
+        self._validate_fact_endpoints(payloads, entity_types=resolved_entity_types)
+        self._validate_domain_duplicates(payloads)
+        dialogue_inputs: list[DialogueInput] = payloads["dialogues"]
+        if len(dialogue_inputs) != len(candidates):
+            raise ValueError(
+                "write_dialogues 必须按系统候选顺序逐项提交: "
+                f"expected={len(candidates)} actual={len(dialogue_inputs)}"
+            )
+        bound_dialogues = list(self.bound_payloads["dialogues"])
+        return BoundChunkAnnotation(
+            chunk_id=chunk_id,
+            metrics=payloads["metrics"],
+            entities=self.bound_payloads["entities"],
+            character_observations=list(self.bound_payloads["character_observations"]),
+            dialogues=bound_dialogues,
+            events=list(self.bound_payloads["events"]),
+            relations=list(self.bound_payloads["relations"]),
+            states=list(self.bound_payloads["states"]),
+            foreshadowings=list(self.bound_payloads["foreshadowings"]),
         )
+
+    def complete_active_chunk(self) -> BoundChunkAnnotation:
+        """2026-08-10 用于只检查阶段、八个 receipt 与 ready_chunk，然后冻结当前 chunk"""
+        if self.phase != "chunk_open":
+            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chunk")
+        missing = [
+            domain
+            for domain in _DOMAIN_NAMES
+            if domain not in self.domain_receipts
+        ]
+        if missing:
+            raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
+        if self.ready_chunk is None:
+            raise AnnotationInvariantError(
+                "八个领域均已写入但 ready_chunk 缺失，系统不变量被破坏"
+            )
+        chunk = self.ready_chunk
         self.completed_chunks.append(chunk)
-        self.authorized_text_chunk_ids.add(chunk_id)
-        self.last_evidence_chunk_id = chunk_id
+        self.authorized_text_chunk_ids.add(self.current_chunk_id)
+        self.last_evidence_chunk_id = self.current_chunk_id
         self.phase = "continuity_open"
         return chunk
 
-    def finish(self, chapter_summary: str) -> BoundChapterAnnotation:
-        """2026-08-07 用于在 chunk 冻结后生成章节正式标注"""
+    def finish(self) -> BoundChapterAnnotation:
+        """2026-08-10 用于在 chunk 冻结后生成章节正式标注（摘要由 write_metrics 提交）"""
         if self.phase != "continuity_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chapter")
+        if not self.chapter_summary:
+            raise AnnotationInputError("chapter_summary 为空，write_metrics 必须提交章节摘要")
         annotation = BoundChapterAnnotation(
-            chapter_summary=chapter_summary,
+            chapter_summary=self.chapter_summary,
             chunks=list(self.completed_chunks),
         )
         self.annotation = annotation
         self.phase = "completed"
         return annotation
+
+    # ------------------------------------------------------------------
+    # 确定性上下文摘要与搜索压缩
+    # ------------------------------------------------------------------
+
+    def _domain_fact_views(self) -> dict[str, Any]:
+        """2026-08-10 用于生成当前候选各领域的事实语义键视图"""
+        payloads = self.domain_payloads
+        views: dict[str, Any] = {}
+        if "metrics" in payloads:
+            views["metrics"] = {
+                "summary": payloads["metrics"].summary,
+                "emotional_valence": str(payloads["metrics"].emotional_valence),
+                "narrative_function": str(payloads["metrics"].narrative_function),
+            }
+        if "entities" in payloads:
+            views["entities"] = {
+                "items": len(payloads["entities"].entities),
+                "names": [entity.name for entity in payloads["entities"].entities],
+            }
+        if "character_observations" in payloads:
+            views["character_observations"] = [
+                {
+                    "character": item.character,
+                    "action": item.action,
+                    "action_type": str(item.action_type),
+                }
+                for item in payloads["character_observations"]
+            ]
+        if "dialogues" in payloads:
+            views["dialogues"] = [
+                {
+                    "is_dialogue": item.is_dialogue,
+                    "speaker": item.speaker,
+                    "description": item.description,
+                }
+                for item in payloads["dialogues"]
+            ]
+        if "events" in payloads:
+            views["events"] = [
+                {
+                    "description": item.description,
+                    "participants": [participant.entity for participant in item.participants],
+                    "location": item.location,
+                }
+                for item in payloads["events"]
+            ]
+        if "relations" in payloads:
+            views["relations"] = [
+                {
+                    "from": item.from_entity,
+                    "to": item.to_entity,
+                    "relation_type": str(item.relation_type),
+                    "change_kind": str(item.change_kind),
+                }
+                for item in payloads["relations"]
+            ]
+        if "states" in payloads:
+            views["states"] = [
+                {
+                    "entity": item.entity,
+                    "predicate": item.predicate,
+                    "object": item.object,
+                    "value": item.value,
+                    "assertion": str(item.assertion),
+                }
+                for item in payloads["states"]
+            ]
+        if "foreshadowings" in payloads:
+            views["foreshadowings"] = [
+                {
+                    "setup_kind": str(item.setup_kind),
+                    "setup_summary": item.setup_summary,
+                    "expected_payoff_family": item.expected_payoff_family,
+                }
+                for item in payloads["foreshadowings"]
+            ]
+        return views
+
+    def context_summary(self) -> dict[str, Any]:
+        """2026-08-10 用于从账本确定性生成当前模型请求的上下文摘要"""
+        return {
+            "phase": self.phase,
+            "chunk_id": self.current_chunk_id,
+            "revisions": {
+                domain: {
+                    "revision": self.domain_revision_counts.get(domain, 0),
+                    "accepted": domain in self.domain_receipts,
+                }
+                for domain in _DOMAIN_NAMES
+            },
+            "missing_domains": [
+                domain for domain in _DOMAIN_NAMES if domain not in self.domain_receipts
+            ],
+            "entities": {
+                "declared": [
+                    {"name": entity.name, "entity_type": entity.entity_type}
+                    for entity in self.domain_payloads.get("entities", EntityDirectoryInput()).entities
+                ],
+                "registered": (
+                    [
+                        {"name": display_name, "entity_type": self.graph.entity_types[key]}
+                        for key, display_name in sorted(self.graph.entity_names.items())
+                    ]
+                    if self.graph is not None
+                    else []
+                ),
+            },
+            "facts": self._domain_fact_views(),
+            "errors": list(self.errors),
+            "cases": {
+                "resolved": [
+                    {
+                        "case_id": item.case_id,
+                        "type": item.type,
+                        "action": item.action,
+                    }
+                    for item in self.resolved_cases
+                ],
+            },
+            "evidence": {
+                "text_results": [
+                    {
+                        "result_number": number,
+                        "range": self.text_result_range.get(number),
+                        "excerpt": item.excerpt[:80],
+                    }
+                    for number, item in sorted(self.text_result_registry.items())
+                ],
+                "search_log": list(self.search_log[-8:]),
+            },
+        }
+
+    def append_search_log(self, entry: dict[str, Any]) -> None:
+        """2026-08-10 用于登记搜索结果压缩条目（查询、命中编号、证据引用与 digest）"""
+        self.search_log.append(entry)
+
+    def mark_read_evidence(self, result_number: int, chunk_id: int) -> None:
+        """2026-08-10 用于把 read_text 的证据引用回填到产生该编号的搜索条目"""
+        for entry in reversed(self.search_log):
+            hits = entry.get("hits") or []
+            if result_number in hits:
+                read_refs = entry.setdefault("read_chunk_ids", [])
+                if chunk_id not in read_refs:
+                    read_refs.append(chunk_id)
+                break
 
 
 def _normalize_query(query: str, *, tool_name: str) -> str:
@@ -627,6 +895,88 @@ def _semantic_graph_value(value: Any) -> Any:
     return value
 
 
+def _norm_graph_name(name: str) -> str:
+    """2026-08-11 用于生成与 FactGraph 一致的实体名称精确匹配键"""
+    return unicodedata.normalize("NFC", name).strip().casefold()
+
+
+def _live_graph_response(
+    graph: FactGraph,
+    entities: list[str],
+    *,
+    relation_type: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    """2026-08-11 用于从常驻内存图回答节点邻域查询（运行时唯一图真相源）"""
+    names_by_key = dict(graph.entity_names)
+    types_by_key = dict(graph.entity_types)
+    tags_by_key = dict(graph.entity_tags)
+    state_by_key = {
+        key: {**dict(graph.entity_attributes.get(key) or {}), **dict(graph.entity_state.get(key) or {})}
+        for key in names_by_key
+    }
+    matched_keys: set[str] = set()
+    matches: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for raw_name in entities:
+        key = _norm_graph_name(raw_name)
+        display_name = names_by_key.get(key)
+        if display_name is None:
+            missing.append(raw_name)
+            continue
+        matched_keys.add(key)
+        matches.append(
+            {
+                "name": display_name,
+                "entity_type": types_by_key[key],
+                "tags": list(tags_by_key.get(key) or []),
+                "state": _semantic_graph_value(state_by_key[key]),
+            }
+        )
+
+    relation_attributes = dict(graph.relation_attributes)
+    relations: list[dict[str, Any]] = []
+    neighbor_keys: set[str] = set()
+    for from_key, to_key, rel_type in sorted(graph.active_relations):
+        if relation_type is not None and rel_type != relation_type:
+            continue
+        if from_key not in matched_keys and to_key not in matched_keys:
+            continue
+        relations.append(
+            {
+                "from_name": names_by_key.get(from_key, from_key),
+                "to_name": names_by_key.get(to_key, to_key),
+                "relation_type": rel_type,
+                "is_active": True,
+                "attributes": _semantic_graph_value(
+                    dict(relation_attributes.get((from_key, to_key, rel_type)) or {})
+                ),
+            }
+        )
+        if from_key not in matched_keys:
+            neighbor_keys.add(from_key)
+        if to_key not in matched_keys:
+            neighbor_keys.add(to_key)
+    relations = relations[:limit]
+
+    neighbors = [
+        {
+            "name": names_by_key[neighbor_key],
+            "entity_type": types_by_key[neighbor_key],
+            "tags": list(tags_by_key.get(neighbor_key) or []),
+            "state": _semantic_graph_value(state_by_key[neighbor_key]),
+        }
+        for neighbor_key in sorted(neighbor_keys)
+    ][:limit]
+
+    return {
+        "matches": matches[:limit],
+        "missing": missing,
+        "relations": relations,
+        "neighbors": neighbors,
+    }
+
+
 def build_annotation_tools(
     query_service: AnnotationQueryService,
     ledger: AnnotationToolLedger,
@@ -642,8 +992,14 @@ def build_annotation_tools(
         reason: str,
         pivot_moment: bool = False,
         cliffhanger: bool = False,
+        chapter_summary: str | None = None,
     ) -> str:
-        """2026-08-07 用于完整替换当前 chunk 摘要和叙事指标"""
+        """2026-08-07 用于完整替换当前 chunk 摘要和叙事指标，chapter_summary 提交整章摘要"""
+        if chapter_summary is None or not chapter_summary.strip():
+            raise AnnotationInputError(
+                "write_metrics.chapter_summary 必须提交整章摘要，不能为空"
+            )
+        ledger.chapter_summary = chapter_summary.strip()
         payload = ChunkMetricsInput(
             summary=summary,
             emotional_valence=emotional_valence,
@@ -653,186 +1009,140 @@ def build_annotation_tools(
             pivot_moment=pivot_moment,
             cliffhanger=cliffhanger,
         )
-        result = ledger.write_domain("metrics", payload)
-        ledger.record(
-            tool_name="write_metrics",
-            request=payload.model_dump(mode="json"),
-            response=result,
+        return json.dumps(
+            ledger.write_domain("metrics", payload, tool_name="write_metrics"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def write_entities(entities: list[EntityInput]) -> str:
         """2026-08-08 用于完整替换当前 chunk 实体出现目录（单列表）"""
+        if (
+            ledger.graph is not None
+            and ledger.graph.entity_types
+            and not ledger.graph_queried
+        ):
+            raise AnnotationAuthorizationError(
+                "提交 write_entities 前必须先调用 search_graph 查询已登记实体"
+            )
         payload = EntityDirectoryInput(entities=entities)
-        result = ledger.write_domain("entities", payload)
-        ledger.record(
-            tool_name="write_entities",
-            request=payload.model_dump(mode="json"),
-            response=result,
+        return json.dumps(
+            ledger.write_domain("entities", payload, tool_name="write_entities"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def write_character_observations(items: list[CharacterObservationInput]) -> str:
         """2026-08-07 用于完整替换当前 chunk 人物动作观察"""
-        result = ledger.write_domain("character_observations", items)
-        ledger.record(
-            tool_name="write_character_observations",
-            request={"items": [item.model_dump(mode="json") for item in items]},
-            response=result,
+        return json.dumps(
+            ledger.write_domain(
+                "character_observations",
+                items,
+                tool_name="write_character_observations",
+            ),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
-    def write_dialogues(items: list[DialogueInput]) -> str:
+    def write_dialogues(items: list[DialogueSubmissionItem]) -> str:
         """2026-08-07 用于按系统候选顺序完整替换当前 chunk 对话判断"""
-        result = ledger.write_domain("dialogues", items)
-        ledger.record(
-            tool_name="write_dialogues",
-            request={"items": [item.model_dump(mode="json") for item in items]},
-            response=result,
+        payload = [DialogueInput.model_validate(item.model_dump()) for item in items]
+        return json.dumps(
+            ledger.write_domain("dialogues", payload, tool_name="write_dialogues"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def write_events(items: list[EventInput]) -> str:
         """2026-08-07 用于完整替换当前 chunk 事件描述"""
-        result = ledger.write_domain("events", items)
-        ledger.record(
-            tool_name="write_events",
-            request={"items": [item.model_dump(mode="json") for item in items]},
-            response=result,
+        return json.dumps(
+            ledger.write_domain("events", items, tool_name="write_events"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def write_relations(items: list[RelationInput]) -> str:
         """2026-08-07 用于完整替换当前 chunk 闭合类型关系变化"""
-        result = ledger.write_domain("relations", items)
-        ledger.record(
-            tool_name="write_relations",
-            request={"items": [item.model_dump(mode="json") for item in items]},
-            response=result,
+        return json.dumps(
+            ledger.write_domain("relations", items, tool_name="write_relations"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def write_states(items: list[StateInput]) -> str:
         """2026-08-07 用于完整替换当前 chunk 实体状态"""
-        result = ledger.write_domain("states", items)
-        ledger.record(
-            tool_name="write_states",
-            request={"items": [item.model_dump(mode="json") for item in items]},
-            response=result,
+        return json.dumps(
+            ledger.write_domain("states", items, tool_name="write_states"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
     def write_foreshadowings(items: list[ForeshadowingInput]) -> str:
         """2026-08-07 用于完整替换当前 chunk 伏笔语义"""
-        result = ledger.write_domain("foreshadowings", items)
-        ledger.record(
-            tool_name="write_foreshadowings",
-            request={"items": [item.model_dump(mode="json") for item in items]},
-            response=result,
+        return json.dumps(
+            ledger.write_domain("foreshadowings", items, tool_name="write_foreshadowings"),
+            ensure_ascii=False,
         )
-        return json.dumps(result, ensure_ascii=False)
 
     @tool
-    def complete_chunk() -> str:
-        """2026-08-07 用于校验冻结当前 chunk 并进入连续性阶段"""
-        chunk = ledger.complete_active_chunk()
-        result = {
-            "accepted": True,
-            "completed_chunk": chunk.chunk_id,
-        }
-        ledger.record(tool_name="complete_chunk", request={}, response=result)
-        return json.dumps(result, ensure_ascii=False)
-
-    @tool
-    def finish_chapter(chapter_summary: str) -> str:
-        """2026-08-07 用于完成全部正式 chunk 和连续性操作"""
-        annotation = ledger.finish(chapter_summary)
-        result = {
-            "accepted": True,
-            "contract_version": annotation.contract_version,
-            "chunk_count": len(annotation.chunks),
-        }
-        ledger.record(
-            tool_name="finish_chapter",
-            request={"chapter_summary": chapter_summary},
-            response=result,
-        )
-        return json.dumps(result, ensure_ascii=False)
-
-    @tool
-    def search_graph(query: str) -> str:
-        """2026-08-07 用于返回不含数据库 ID 的前序图语义视图"""
+    def search_graph(entities: list[str], relation_type: str | None = None) -> str:
+        """2026-08-09 用于按实体名查询图节点及与其相连的一跳邻域（边和邻居节点）"""
         if ledger.phase not in {"chunk_open", "continuity_open"}:
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_graph")
-        normalized_query = _normalize_query(query, tool_name="search_graph")
-        result = query_service.search_graph(normalized_query, limit=50)
-        if result is None:
-            response: dict[str, Any] = {"entities": [], "facts": [], "relations": []}
-        else:
-            response = {
-                "entities": [
-                    {
-                        "name": item.name,
-                        "entity_type": item.entity_type,
-                        "state": _semantic_graph_value(item.state),
-                    }
-                    for item in result.entities
-                ],
-                "facts": [
-                    {
-                        "fact_type": item.fact_type,
-                        "predicate": item.predicate,
-                        "content": _semantic_graph_value(item.content),
-                    }
-                    for item in result.facts
-                ],
-                "relations": [
-                    {
-                        "from_name": item.from_name,
-                        "to_name": item.to_name,
-                        "relation_type": item.relation_type,
-                        "is_active": item.is_active,
-                        "attributes": _semantic_graph_value(item.attributes),
-                    }
-                    for item in result.relations
-                ],
+        if not entities:
+            raise AnnotationInputError("search_graph.entities 不能为空")
+        normalized_entities = [
+            _normalize_query(entity, tool_name="search_graph") for entity in entities
+        ]
+        if ledger.graph is None:
+            response: dict[str, Any] = {
+                "matches": [],
+                "missing": list(entities),
+                "relations": [],
+                "neighbors": [],
             }
-        ledger.record(
-            tool_name="search_graph",
-            request={"query": normalized_query},
-            response=response,
+        else:
+            response = _live_graph_response(
+                ledger.graph,
+                normalized_entities,
+                relation_type=relation_type,
+                limit=50,
+            )
+        ledger.graph_queried = True
+        ledger.append_search_log(
+            {
+                "tool": "search_graph",
+                "query": list(normalized_entities),
+                "hits": [item["name"] for item in response["matches"]],
+                "digest": f"sha256:{_content_digest(response)}",
+            }
         )
         return json.dumps(response, ensure_ascii=False)
 
     @tool
-    async def search_text(query: str, range: Literal["previous", "future"]) -> str:
-        """2026-08-07 用于返回运行内编号而不暴露真实 chunk ID"""
+    async def search_text(query: str) -> str:
+        """2026-08-07 用于返回运行内编号而不暴露真实 chunk ID（范围由当前阶段自动决定）"""
         normalized_query = _normalize_query(query, tool_name="search_text")
         expected_range = "previous" if ledger.phase == "chunk_open" else "future"
-        if ledger.phase not in {"chunk_open", "continuity_open"} or range != expected_range:
+        if ledger.phase not in {"chunk_open", "continuity_open"}:
             raise AnnotationAuthorizationError(
-                f"阶段 {ledger.phase} 的 search_text.range 必须为 {expected_range}"
+                f"阶段 {ledger.phase} 不允许 search_text"
             )
-        if range == "future" and not ledger.allow_future_context:
+        if expected_range == "future" and not ledger.allow_future_context:
             raise AnnotationAuthorizationError("allow_future_context=false 时禁止读取 future")
         results = await query_service.search_text(
             normalized_query,
-            range_name=range,
+            range_name=expected_range,
             limit=50,
         )
         views: list[dict[str, Any]] = []
+        result_numbers: list[int] = []
         for item in results:
             result_number = ledger.next_text_result_number
             ledger.next_text_result_number += 1
             ledger.text_result_registry[result_number] = item
-            ledger.text_result_range[result_number] = range
+            ledger.text_result_range[result_number] = expected_range
+            result_numbers.append(result_number)
             views.append(
                 {
                     "result_number": result_number,
@@ -841,10 +1151,13 @@ def build_annotation_tools(
                     "semantic_score": item.semantic_score,
                 }
             )
-        ledger.record(
-            tool_name="search_text",
-            request={"query": normalized_query, "range": range},
-            response={"results": views},
+        ledger.append_search_log(
+            {
+                "tool": "search_text",
+                "query": normalized_query,
+                "hits": result_numbers,
+                "digest": f"sha256:{_content_digest(views)}",
+            }
         )
         return json.dumps(views, ensure_ascii=False)
 
@@ -864,12 +1177,8 @@ def build_annotation_tools(
         content = query_service.read_text(item.chunk_id)
         ledger.authorized_text_chunk_ids.add(item.chunk_id)
         ledger.last_evidence_chunk_id = item.chunk_id
-        ledger.record(
-            tool_name="read_text",
-            request={"result_number": result_number},
-            response={"content_chars": len(content)},
-        )
-        return content
+        ledger.mark_read_evidence(result_number, item.chunk_id)
+        return json.dumps({"content": content}, ensure_ascii=False)
 
     @tool
     def search_pool(query: str) -> str:
@@ -883,12 +1192,15 @@ def build_annotation_tools(
             limit=50,
         )
         views: list[dict[str, Any]] = []
+        case_numbers: list[int] = []
         for item in result.results:
             if isinstance(item, CaseSearchResult):
+                case_number = ledger.register_case_number(item.id)
+                case_numbers.append(case_number)
                 views.append(
                     {
                         "result_kind": "case",
-                        "case_number": ledger.register_case_number(item.id),
+                        "case_number": case_number,
                         "type": item.type,
                         "description": item.description,
                         "keys": list(item.keys),
@@ -898,21 +1210,29 @@ def build_annotation_tools(
                 views.append(
                     {
                         "result_kind": "foreshadowing",
+                        "id": item.record_id,
                         "content": item.content,
                     }
                 )
-        ledger.record(
-            tool_name="search_pool",
-            request={"query": normalized_query},
-            response={"results": views},
+        ledger.append_search_log(
+            {
+                "tool": "search_pool",
+                "query": normalized_query,
+                "hits": case_numbers,
+                "digest": f"sha256:{_content_digest(views)}",
+            }
         )
         return json.dumps({"results": views}, ensure_ascii=False)
 
-    @tool
-    def resolve_case(case_number: int, speaker: str, reason: str) -> str:
-        """2026-08-07 用于通过临时编号解决活动对话说话人案例"""
+    def _resolve_case_details(
+        *,
+        ledger: AnnotationToolLedger,
+        case_number: int,
+        tool_name: str,
+    ) -> ActiveCaseDetails:
+        """2026-08-11 用于公共校验案例编号并回读活动案例稳定目标"""
         if ledger.phase not in {"chunk_open", "continuity_open"}:
-            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 resolve_case")
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 {tool_name}")
         case_id = ledger.case_number_registry.get(case_number)
         if case_id is None:
             raise AnnotationAuthorizationError(
@@ -923,29 +1243,248 @@ def build_annotation_tools(
         details = query_service.fetch_active_case_details(case_id)
         if details is None:
             raise AnnotationInputError(f"案例不存在或已不再 active: {case_number}")
+        return details
+
+    def _resolve_evidence_chunk_id(ledger: AnnotationToolLedger) -> int:
+        """2026-08-11 用于读取当前可用于案例解决的系统原文 chunk"""
         evidence_chunk_id = ledger.last_evidence_chunk_id
         if evidence_chunk_id is None:
             raise AnnotationAuthorizationError("当前没有可用于案例解决的系统原文")
+        return evidence_chunk_id
+
+    def _append_resolved(
+        ledger: AnnotationToolLedger,
+        details: ActiveCaseDetails,
+        resolved: ResolvedCase,
+    ) -> str:
+        """2026-08-11 用于登记解决结果并返回固定回执"""
+        ledger.resolved_cases.append(resolved)
+        case_number = ledger.case_number_by_id[details.id]
+        return json.dumps(
+            {"accepted": True, "case_number": case_number, "action": resolved.action},
+            ensure_ascii=False,
+        )
+
+    def _require_action_entity(
+        ledger: AnnotationToolLedger,
+        name: str,
+        *,
+        expected_types: tuple[EntityType, ...],
+        label: str,
+    ) -> None:
+        """2026-08-11 用于校验解决端点已由当前 chunk 或已登记实体声明"""
+        entity_types = ledger._fact_entity_catalog()
+        ledger._require_entity(
+            name,
+            entity_types=entity_types,
+            expected_types=expected_types,
+            label=label,
+        )
+
+    @tool
+    def resolve_dialogue_case(
+        case_number: int,
+        reason: str,
+        speaker: str | None = None,
+        tone: str | None = None,
+        description: str | None = None,
+        is_inner_monologue: bool | None = None,
+    ) -> str:
+        """2026-08-11 用于通过临时编号把案例解决为对话记录更新（至少提供一个更新字段）"""
+        details = _resolve_case_details(
+            ledger=ledger,
+            case_number=case_number,
+            tool_name="resolve_dialogue_case",
+        )
+        if speaker is not None:
+            _require_action_entity(
+                ledger,
+                speaker,
+                expected_types=("character",),
+                label="resolve_dialogue_case.speaker",
+            )
         resolved = ResolvedCase(
-            case_id=case_id,
+            case_id=details.id,
+            action="dialogue",
             type=details.type,
-            speaker=speaker,
             reason=reason,
-            evidence_chunk_id=evidence_chunk_id,
+            evidence_chunk_id=_resolve_evidence_chunk_id(ledger),
+            target_key=details.target_key,
+            target_ref=details.target_ref,
+            speaker=speaker,
+            tone=tone,
+            description=description,
+            is_inner_monologue=is_inner_monologue,
+        )
+        return _append_resolved(ledger, details, resolved)
+
+    @tool
+    def resolve_fact_case(
+        case_number: int,
+        reason: str,
+        from_entity: str,
+        to_entity: str,
+        relation_type: str,
+        change_kind: str,
+    ) -> str:
+        """2026-08-11 用于通过临时编号把案例解决为图关系建改删（change_kind 表达变化）"""
+        details = _resolve_case_details(
+            ledger=ledger,
+            case_number=case_number,
+            tool_name="resolve_fact_case",
+        )
+        definition = RELATION_DEFINITIONS.get(relation_type)
+        if definition is None:
+            raise AnnotationInputError(
+                f"resolve_fact_case.relation_type 必须是闭合关系类型: {relation_type}"
+            )
+        _require_action_entity(
+            ledger,
+            from_entity,
+            expected_types=tuple(definition["from_types"]),
+            label="resolve_fact_case.from_entity",
+        )
+        _require_action_entity(
+            ledger,
+            to_entity,
+            expected_types=tuple(definition["to_types"]),
+            label="resolve_fact_case.to_entity",
+        )
+        resolved = ResolvedCase(
+            case_id=details.id,
+            action="fact",
+            type=details.type,
+            reason=reason,
+            evidence_chunk_id=_resolve_evidence_chunk_id(ledger),
+            target_key=details.target_key,
+            target_ref=details.target_ref,
+            from_entity=from_entity,
+            to_entity=to_entity,
+            relation_type=relation_type,
+            change_kind=change_kind,
+        )
+        return _append_resolved(ledger, details, resolved)
+
+    @tool
+    def resolve_foreshadowing_case(
+        case_number: int,
+        reason: str,
+        setup_summary: str | None = None,
+        setup_kind: str | None = None,
+        expected_payoff_family: str | None = None,
+        payoff_likelihood: str | None = None,
+        setup_status: str | None = None,
+        confidence: str | None = None,
+        strength: str | None = None,
+    ) -> str:
+        """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）"""
+        details = _resolve_case_details(
+            ledger=ledger,
+            case_number=case_number,
+            tool_name="resolve_foreshadowing_case",
+        )
+        resolved = ResolvedCase(
+            case_id=details.id,
+            action="foreshadowing",
+            type=details.type,
+            reason=reason,
+            evidence_chunk_id=_resolve_evidence_chunk_id(ledger),
+            target_key=details.target_key,
+            target_ref=details.target_ref,
+            setup_summary=setup_summary,
+            setup_kind=setup_kind,
+            expected_payoff_family=expected_payoff_family,
+            payoff_likelihood=payoff_likelihood,
+            setup_status=setup_status,
+            confidence=confidence,
+            strength=strength,
+        )
+        return _append_resolved(ledger, details, resolved)
+
+    @tool
+    def close_case(case_number: int, reason: str) -> str:
+        """2026-08-11 用于通过临时编号关闭案例（不产生任何语义变化，仅标记已解决）"""
+        details = _resolve_case_details(
+            ledger=ledger,
+            case_number=case_number,
+            tool_name="close_case",
+        )
+        resolved = ResolvedCase(
+            case_id=details.id,
+            action="close",
+            type=details.type,
+            reason=reason,
+            evidence_chunk_id=_resolve_evidence_chunk_id(ledger),
             target_key=details.target_key,
             target_ref=details.target_ref,
         )
-        ledger.resolved_cases.append(resolved)
-        response = {"accepted": True, "case_number": case_number}
-        ledger.record(
-            tool_name="resolve_case",
-            request={
-                "case_number": case_number,
-                "speaker": speaker,
-                "reason": reason,
-            },
-            response=response,
+        return _append_resolved(ledger, details, resolved)
+
+    @tool
+    def push_case(
+        description: str,
+        keys: list[str],
+        type: str,
+        dialogue_id: str | None = None,
+        setup_id: str | None = None,
+    ) -> str:
+        """2026-08-11 用于把分析中发现的新连续性疑点创建为新案例登记进案例池（类型任意字符串）"""
+        if ledger.phase not in {"chunk_open", "continuity_open"}:
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push_case")
+        normalized_type = unicodedata.normalize("NFC", type).strip()
+        if not normalized_type:
+            raise AnnotationInputError("push_case.type 不能为空")
+        normalized_description = unicodedata.normalize("NFC", description).strip()
+        if not normalized_description:
+            raise AnnotationInputError("push_case.description 不能为空")
+        normalized_keys = [
+            unicodedata.normalize("NFC", key).strip() for key in keys
+        ]
+        if not normalized_keys or any(not key for key in normalized_keys):
+            raise AnnotationInputError("push_case.keys 不能为空")
+        if len(set(normalized_keys)) != len(normalized_keys):
+            raise AnnotationInputError("push_case.keys 不允许重复")
+        target_ref: dict[str, Any] = {
+            "kind": normalized_type,
+            "chunk_id": ledger.current_chunk_id,
+            "keys": normalized_keys,
+        }
+        if dialogue_id is not None:
+            normalized_dialogue_id = unicodedata.normalize("NFC", dialogue_id).strip()
+            candidate_keys = {
+                candidate.candidate_key for candidate in ledger.dialogue_candidates
+            }
+            if normalized_dialogue_id not in candidate_keys:
+                raise AnnotationInputError(
+                    f"push_case.dialogue_id 不是当前 chunk 的对话候选 id: {normalized_dialogue_id}"
+                )
+            target_ref["dialogue_id"] = normalized_dialogue_id
+        if setup_id is not None:
+            normalized_setup_id = unicodedata.normalize("NFC", setup_id).strip()
+            if not query_service.thread_exists(normalized_setup_id):
+                raise AnnotationInputError(
+                    f"push_case.setup_id 不是当前 run 的活跃伏笔线程: {normalized_setup_id}"
+                )
+            target_ref["setup_id"] = normalized_setup_id
+        target_key = uuid4().hex
+        pushed = PendingCase(
+            type=normalized_type,
+            chunk_id=ledger.current_chunk_id,
+            keys=normalized_keys,
+            description=normalized_description,
+            target_key=target_key,
+            target_ref=target_ref,
+            evidence=EvidenceList.model_validate(
+                [
+                    TextEvidence(
+                        reason="模型 push 新案例登记",
+                        chunk_id=ledger.current_chunk_id,
+                    )
+                ]
+            ),
         )
+        ledger.pushed_cases.append(pushed)
+        response = {"accepted": True, "target_key": target_key}
         return json.dumps(response, ensure_ascii=False)
 
     return [
@@ -957,19 +1496,20 @@ def build_annotation_tools(
         write_relations,
         write_states,
         write_foreshadowings,
-        complete_chunk,
-        finish_chapter,
         search_graph,
         search_text,
         read_text,
         search_pool,
-        resolve_case,
+        resolve_dialogue_case,
+        resolve_fact_case,
+        resolve_foreshadowing_case,
+        close_case,
+        push_case,
     ]
 
 
 __all__ = [
     "AnnotationQueryService",
     "AnnotationToolLedger",
-    "ToolAuditRecord",
     "build_annotation_tools",
 ]

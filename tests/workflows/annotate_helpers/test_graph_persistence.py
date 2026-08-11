@@ -20,6 +20,7 @@ from src.agents.annotation.schema import (
     ChunkMetricsInput,
 )
 from src.storage.models import (
+    DialogueRecord,
     EntityStateVersion,
     GraphEntity,
     GraphFact,
@@ -27,7 +28,7 @@ from src.storage.models import (
     GraphRelationVersion,
     GraphVersion,
 )
-from src.storage.repositories import ChapterAnnotationRepository
+from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository
 from src.storage.repositories.graph import persist_completion_graph, stable_annotation_fact_id
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -195,6 +196,13 @@ def _persist(
         resolved_cases=[],
         authorized_text_chunk_ids={chunk.chunk_id for chunk in annotation.chunks},
     )
+    for chunk in annotation.chunks:
+        DialogueRecordRepository(db_session).sync_dialogues(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            chunk_id=chunk.chunk_id,
+            dialogues=chunk.dialogues,
+        )
     return row, result
 
 
@@ -248,7 +256,6 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     assert sword.tags == ["宝剑"]
     assert {fact.content["kind"] for fact in facts} == {
         "character_observation",
-        "dialogue",
         "event",
         "relation",
         "state",
@@ -263,16 +270,16 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
         "relation",
         0,
     )
-    dialogue = next(fact for fact in facts if fact.content["kind"] == "dialogue")
-    assert dialogue.payload_path == "chunks/0/dialogue/0"
-    assert dialogue.content["speaker"] is None
-    assert result.dialogue_facts_by_candidate_key[dialogue.content["candidate_key"]].fact_id == (
-        dialogue.fact_id
-    )
+    dialogue = db_session.execute(
+        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
+    ).scalar_one()
+    assert dialogue.candidate_key.startswith("dlg_")
+    assert dialogue.speaker is None
+    assert dialogue.chunk_id == 0
 
 
-def test_dialogue_fact_binds_system_original_text_and_position(db_session) -> None:
-    """2026-08-07 用于验证对话原文位置与内容全部由系统候选绑定"""
+def test_dialogue_record_binds_system_original_text_and_position(db_session) -> None:
+    """2026-08-11 用于验证对话原文位置与内容全部由系统候选绑定且不写图事实"""
     text = "顾霜进入山门，“住手”回荡。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -283,17 +290,21 @@ def test_dialogue_fact_binds_system_original_text_and_position(db_session) -> No
     db_session.commit()
 
     dialogue = db_session.execute(
+        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
+    ).scalar_one()
+    chunk_text = "顾霜进入山门，“住手”回荡。"
+    start = int(dialogue.start)
+    end = int(dialogue.end)
+    assert chunk_text[start:end] == "住手"
+    assert dialogue.content == "住手"
+    assert dialogue.chunk_id == 0
+    assert dialogue.is_inner_monologue is False
+    assert db_session.execute(
         select(GraphFact).where(
             GraphFact.run_id == run_id,
             GraphFact.fact_type == "dialogue",
         )
-    ).scalar_one()
-    chunk_text = "顾霜进入山门，“住手”回荡。"
-    start = int(dialogue.content["start"])
-    end = int(dialogue.content["end"])
-    assert chunk_text[start:end] == "住手"
-    assert dialogue.content["content"] == "住手"
-    assert dialogue.content["chunk_id"] == 0
+    ).scalars().all() == []
 
 
 def test_persistence_writes_state_and_relation_versions(db_session) -> None:
@@ -505,6 +516,69 @@ def test_entity_tags_merged_and_deduplicated_across_chapters(db_session) -> None
     assert len(entities) == 1
     assert entities[0].entity_type == "item"
     assert entities[0].tags == ["宝剑"]
+
+
+def test_entity_tags_overwritten_when_later_chapter_submits_new_values(db_session) -> None:
+    """2026-08-09 用于验证已登记实体再次提交属性时按覆盖式更新"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
+        chapter_ids=[1, 2],
+        title="标签覆盖",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        states=[
+            {
+                "chunk_id": 0,
+                "entity": "玄剑",
+                "predicate": "status",
+                "value": "active",
+                "confidence": "high",
+                "reason": "状态",
+                "_entity_specs": [
+                    {
+                        "name": "玄剑",
+                        "entity_type": "item",
+                        "tags": ["宝剑", "神兵"],
+                    }
+                ],
+            }
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        states=[
+            {
+                "chunk_id": 1,
+                "entity": "玄剑",
+                "predicate": "status",
+                "value": "active",
+                "confidence": "high",
+                "reason": "状态",
+                "_entity_specs": [
+                    {
+                        "name": "玄剑",
+                        "entity_type": "item",
+                        "tags": ["灵剑"],
+                    }
+                ],
+            }
+        ],
+    )
+    db_session.commit()
+
+    entities = list(
+        db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalars()
+    )
+    assert len(entities) == 1
+    assert entities[0].tags == ["灵剑"]
 
 
 def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:

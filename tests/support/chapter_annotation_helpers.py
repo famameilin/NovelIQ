@@ -22,7 +22,7 @@ from src.agents.annotation.schema import (
     EntityType,
 )
 from src.storage.models import Chunk, Novel
-from src.storage.repositories import ChapterAnnotationRepository, RunRepository
+from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository, RunRepository
 from src.storage.repositories.graph import persist_completion_graph
 
 
@@ -407,5 +407,12 @@ def persist_chapter_annotation(
         resolved_cases=[],
         authorized_text_chunk_ids=set(chunk_text_by_id),
     )
+    for chunk in annotation.chunks:
+        DialogueRecordRepository(session).sync_dialogues(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            chunk_id=chunk.chunk_id,
+            dialogues=chunk.dialogues,
+        )
     session.commit()
     return row.annotation_id

@@ -1,12 +1,14 @@
 """
 章节标注 Agent 逐 chunk 运行入口与三次重试
+
+审计: 每次尝试开启 agent_invocations 行，模型回合与工具调用通过
+AgentTurnObserver 写入独立短事务；失败尝试同样保留完整审计记录。
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -15,27 +17,23 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.agents.usage import extract_agent_token_usage
-
 from .errors import (
     AnnotationAgentError,
     AnnotationAuthorizationError,
     AnnotationConfigurationError,
     AnnotationInputError,
+    AnnotationInvariantError,
     AnnotationRetryableError,
 )
+from .fact_graph import FactGraph
 from .graph import build_annotation_graph
 from .prompts import build_chunk_message, build_system_prompt
-from .schema import (
-    AgentRunAudit,
-    AgentRunResult,
-    BoundChapterAnnotation,
-    SuccessAudit,
-    TokenUsageRecord,
-)
+from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation
 from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
 
 if TYPE_CHECKING:
+    from src.agents.audit.observer import AgentTurnObserver
+    from src.agents.audit.recorder import AgentAuditRecorder
     from src.agents.stream import AgentStream
 
 
@@ -91,57 +89,6 @@ def validate_bound_annotation(
                 )
 
 
-def _serialize_agent_messages(messages: list[Any]) -> list[dict[str, Any]]:
-    """2026-08-05 用于把完整模型与工具消息链转换为成功审计结构"""
-    serialized: list[dict[str, Any]] = []
-    for message in messages:
-        payload: dict[str, Any] = {
-            "role": str(getattr(message, "type", "unknown")),
-            "content": getattr(message, "content", ""),
-        }
-        tool_calls = getattr(message, "tool_calls", None)
-        if tool_calls:
-            payload["tool_calls"] = tool_calls
-        tool_call_id = getattr(message, "tool_call_id", None)
-        if tool_call_id:
-            payload["tool_call_id"] = tool_call_id
-        tool_name = getattr(message, "name", None)
-        if tool_name:
-            payload["tool_name"] = tool_name
-        serialized.append(payload)
-    return serialized
-
-
-def _extract_token_usage_records(messages: list[Any], llm: Any) -> list[TokenUsageRecord]:
-    """2026-08-05 用于收集成功尝试中每个模型响应的可信 Token 用量"""
-    records: list[TokenUsageRecord] = []
-    for message in messages:
-        if getattr(message, "type", None) != "ai":
-            continue
-        usage = extract_agent_token_usage(message)
-        if usage is None:
-            continue
-        response_metadata = getattr(message, "response_metadata", None)
-        response_model = (
-            response_metadata.get("model_name")
-            if isinstance(response_metadata, dict)
-            else None
-        )
-        records.append(
-            TokenUsageRecord(
-                model=str(
-                    response_model
-                    or getattr(llm, "model_name", None)
-                    or getattr(llm, "model", "unknown")
-                ),
-                prompt_tokens=usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens,
-                total_tokens=usage.total_tokens,
-            )
-        )
-    return records
-
-
 def _model_provider(llm: Any) -> str:
     """2026-08-05 用于从模型地址稳定区分本地与云端审计来源"""
     raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
@@ -149,6 +96,11 @@ def _model_provider(llm: Any) -> str:
     if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url:
         return "cloud"
     return "local"
+
+
+def _model_name(llm: Any) -> str | None:
+    """2026-08-10 用于从模型对象稳定读取审计用模型名"""
+    return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
 def _set_session_read_only(session: Session) -> None:
@@ -185,11 +137,12 @@ async def _run_single_attempt(
     session: Session,
     query_service_factory: Callable[[Session], AnnotationQueryService],
     stream: AgentStream | None = None,
+    graph_state: FactGraph | None = None,
+    observer: AgentTurnObserver | None = None,
 ) -> AgentRunResult:
-    """2026-08-07 用于以全新账本执行一次逐 chunk 章节 Agent 尝试"""
+    """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试"""
     from src.config import settings
 
-    started_at = time.perf_counter()
     _set_session_read_only(session)
     query_service = query_service_factory(session)
     first_chunk_id, first_chunk_text = current_chunks[0]
@@ -205,6 +158,7 @@ async def _run_single_attempt(
         current_chunk_id=first_chunk_id,
         current_chunk_text=first_chunk_text,
         allow_future_context=allow_future_context,
+        graph=graph_state,
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
@@ -215,6 +169,7 @@ async def _run_single_attempt(
         ledger=ledger,
         max_iterations=total_iteration_limit,
         stream=stream,
+        observer=observer,
     )
     initial_messages = [
         SystemMessage(
@@ -252,31 +207,17 @@ async def _run_single_attempt(
         chapter_id=chapter_id,
         current_chunks=current_chunks,
     )
-    messages = list(result_state.get("messages") or initial_messages)
-    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     return AgentRunResult(
         run_id=run_id,
         chapter_id=chapter_id,
         annotation=ledger.annotation,
         resolved_cases=list(ledger.resolved_cases),
-        pending_cases=list(ledger.pending_cases),
+        pushed_cases=list(ledger.pushed_cases),
         audit=AgentRunAudit(
             allow_future_context=allow_future_context,
             write_revisions=list(ledger.write_revisions),
             rotation_case_ids=ledger.rotation_case_ids,
             authorized_text_chunk_ids=sorted(ledger.authorized_text_chunk_ids),
-            success=SuccessAudit(
-                attempt_number=attempt_number,
-                messages=_serialize_agent_messages(messages),
-                tool_calls=ledger.audit_payload(),
-                model_name=(
-                    str(getattr(llm, "model_name", None) or getattr(llm, "model", ""))
-                    or None
-                ),
-                model_provider=_model_provider(llm),
-                duration_ms=elapsed_ms,
-            ),
-            token_usage=_extract_token_usage_records(messages, llm),
         ),
     )
 
@@ -289,10 +230,15 @@ async def run_annotation_agent(
     query_service_factory: Callable[[Session], AnnotationQueryService],
     session_factory: Callable[[], Session],
     novel_title: str | None = None,
+    novel_id: str = "default",
     llm: Any | None = None,
     stream: AgentStream | None = None,
+    graph_state: FactGraph | None = None,
+    audit_recorder: AgentAuditRecorder | None = None,
 ) -> AgentRunResult:
-    """2026-08-07 用于按同一模型最多三次运行逐 chunk 章节 Agent"""
+    """2026-08-10 用于按同一模型最多三次运行逐 chunk 章节 Agent，每次尝试独立审计"""
+    from src.agents.audit.observer import AgentTurnObserver
+    from src.agents.audit.recorder import AgentAuditRecorder
     from src.config import settings
 
     _validate_chapter_identity(
@@ -311,9 +257,33 @@ async def run_annotation_agent(
 
         llm = build_chat_model("annotation")
 
+    recorder = audit_recorder or AgentAuditRecorder(session_factory)
+    model_name = _model_name(llm)
+    model_provider = _model_provider(llm)
+    if graph_state is not None:
+        graph_state.begin_chapter()
+    baseline_snapshot = graph_state.snapshot() if graph_state is not None else None
     failures: list[str] = []
     for attempt_number in range(1, configured_attempts + 1):
         read_session = session_factory()
+        invocation_id = recorder.start_invocation(
+            run_id=run_id,
+            task_type="annotation",
+            chapter_id=chapter_id,
+            attempt_number=attempt_number,
+            model_name=model_name,
+            model_provider=model_provider,
+        )
+        observer = AgentTurnObserver(
+            recorder,
+            invocation_id=invocation_id,
+            run_id=run_id,
+            novel_id=novel_id,
+            task_type="annotation",
+            call_type="agent",
+            model_name=model_name or "unknown",
+            model_provider=model_provider,
+        )
         if stream is not None:
             await stream.thinking(f"章节 {chapter_id} 标注尝试 {attempt_number}/{configured_attempts} 开始")
         try:
@@ -327,13 +297,26 @@ async def run_annotation_agent(
                 session=read_session,
                 query_service_factory=query_service_factory,
                 stream=stream,
+                graph_state=graph_state,
+                observer=observer,
             )
-        except (AnnotationInputError, AnnotationAuthorizationError, AnnotationConfigurationError):
+        except (
+            AnnotationInputError,
+            AnnotationAuthorizationError,
+            AnnotationConfigurationError,
+            AnnotationInvariantError,
+        ) as exc:
+            if baseline_snapshot is not None:
+                graph_state.restore(baseline_snapshot)  # type: ignore[union-attr]
             _close_read_session(read_session)
+            recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
             raise
         except Exception as exc:  # noqa: BLE001
+            if baseline_snapshot is not None:
+                graph_state.restore(baseline_snapshot)  # type: ignore[union-attr]
             _close_read_session(read_session)
             failures.append(str(exc))
+            recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
             if stream is not None:
                 await stream.tool_call_failed("章节标注", str(exc))
             logger.warning(
@@ -349,6 +332,7 @@ async def run_annotation_agent(
             await asyncio.sleep(_retry_backoff_seconds(attempt_number - 1))
             continue
         _close_read_session(read_session)
+        recorder.finish_invocation(invocation_id, status="success")
         if stream is not None:
             await stream.output(f"章节 {chapter_id} 标注完成（第 {attempt_number} 次尝试）")
         return result

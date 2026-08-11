@@ -434,6 +434,14 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
         "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
         "ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb",
+        (
+            "ALTER TABLE case_resolution_mappings "
+            "ADD COLUMN IF NOT EXISTS target_dialogue_id VARCHAR(64)"
+        ),
+        (
+            "ALTER TABLE case_resolution_mappings "
+            "ADD COLUMN IF NOT EXISTS target_setup_id VARCHAR(36)"
+        ),
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
         (
             "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
@@ -597,6 +605,22 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "payload",
             "created_at",
         },
+        "dialogue_records": {
+            "dialogue_id",
+            "run_id",
+            "chunk_id",
+            "chapter_id",
+            "candidate_key",
+            "content",
+            "start",
+            "end",
+            "speaker",
+            "tone",
+            "is_inner_monologue",
+            "description",
+            "confidence",
+            "evidence",
+        },
         "case_pool_cases": {
             "id",
             "run_id",
@@ -621,6 +645,8 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "evidence_chunk_id",
             "target_fact_id",
             "target_fact_revision",
+            "target_dialogue_id",
+            "target_setup_id",
         },
     }
     legacy_columns = {

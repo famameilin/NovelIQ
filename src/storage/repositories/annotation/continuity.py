@@ -15,12 +15,12 @@ from sqlalchemy.orm import Session
 from src.agents.annotation.schema import (
     ActiveCaseDetails,
     BoundChapterAnnotation,
+    BoundDialogue,
     BoundForeshadowing,
     CaseSearchResult,
     CompletionCase,
     EvidenceList,
     ForeshadowingSearchResult,
-    GraphSearchResult,
     PendingCase,
     ResolvedCase,
     SearchResult,
@@ -33,12 +33,12 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     Chunk,
+    DialogueRecord,
     ForeshadowingThread,
     ForeshadowingThreadHit,
     GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
-from src.storage.repositories.graph import GraphRepository
 from src.text_search import TextSearchService
 
 
@@ -108,10 +108,6 @@ class DatabaseAnnotationQueryService:
         if current_chapter_id not in chapter_ids:
             raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
         self.current_chapter_order = chapter_ids.index(current_chapter_id) + 1
-        self.previous_graph_version = GraphRepository(session).previous_graph_version(
-            run_id,
-            chapter_order=self.current_chapter_order,
-        )
         self.text_search_service = TextSearchService(
             session,
             run_id=run_id,
@@ -211,17 +207,6 @@ class DatabaseAnnotationQueryService:
                 break
         return SearchResult(results=results)
 
-    def search_graph(self, query: str, *, limit: int = 50) -> GraphSearchResult | None:
-        """2026-08-07 用于固定查询当前章节之前最近完成的图版本"""
-        if self.previous_graph_version is None:
-            return None
-        return GraphRepository(self.session).search_graph(
-            self.run_id,
-            graph_version_id=self.previous_graph_version.graph_version_id,
-            query=query,
-            limit=limit,
-        )
-
     async def search_text(
         self,
         query: str,
@@ -273,6 +258,19 @@ class DatabaseAnnotationQueryService:
             **_case_view(row).model_dump(mode="python"),
             target_key=row.target_key,
             target_ref=dict(row.target_ref),
+        )
+
+    def thread_exists(self, setup_id: str) -> bool:
+        """2026-08-11 用于校验伏笔线程 id 属于当前 run 活跃线程"""
+        return (
+            self.session.execute(
+                select(ForeshadowingThread.setup_id).where(
+                    ForeshadowingThread.run_id == self.run_id,
+                    ForeshadowingThread.setup_id == setup_id,
+                    ForeshadowingThread.active.is_(True),
+                )
+            ).scalar_one_or_none()
+            is not None
         )
 
 
@@ -382,6 +380,90 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
         self.session.flush()
 
 
+class DialogueRecordRepository(BaseRepository[DialogueRecord]):
+    """2026-08-11 用于写入系统绑定对话记录并按案例目标定位更新"""
+
+    def sync_dialogues(
+        self,
+        *,
+        run_id: str,
+        chapter_id: int,
+        chunk_id: int,
+        dialogues: list[BoundDialogue],
+    ) -> list[DialogueRecord]:
+        """2026-08-11 用于把最终系统绑定对话投影到对话记录表（幂等按 candidate_key 去重）"""
+        rows: list[DialogueRecord] = []
+        existing_keys = set(
+            self.session.execute(
+                select(DialogueRecord.candidate_key).where(
+                    DialogueRecord.run_id == run_id,
+                    DialogueRecord.chunk_id == chunk_id,
+                )
+            ).scalars()
+        )
+        for dialogue in dialogues:
+            if dialogue.candidate_key in existing_keys:
+                continue
+            row = DialogueRecord(
+                dialogue_id=str(uuid4()),
+                run_id=run_id,
+                chunk_id=chunk_id,
+                chapter_id=chapter_id,
+                candidate_key=dialogue.candidate_key,
+                content=dialogue.content,
+                start=dialogue.start,
+                end=dialogue.end,
+                speaker=dialogue.speaker,
+                tone=dialogue.tone,
+                is_inner_monologue=dialogue.is_inner_monologue,
+                description=dialogue.description,
+                confidence=dialogue.confidence,
+                evidence=dialogue.evidence.model_dump(mode="json"),
+            )
+            self.session.add(row)
+            existing_keys.add(dialogue.candidate_key)
+            rows.append(row)
+        self.session.flush()
+        return rows
+
+    def find_by_candidate_key(self, run_id: str, candidate_key: str) -> DialogueRecord | None:
+        """2026-08-11 用于按系统候选键定位对话记录"""
+        return self.session.execute(
+            select(DialogueRecord).where(
+                DialogueRecord.run_id == run_id,
+                DialogueRecord.candidate_key == candidate_key,
+            )
+        ).scalar_one_or_none()
+
+    def apply_resolution(
+        self,
+        record: DialogueRecord,
+        *,
+        speaker: str | None,
+        tone: str | None,
+        description: str | None,
+        is_inner_monologue: bool | None,
+        reason: str,
+        evidence_chunk_id: int,
+    ) -> None:
+        """2026-08-11 用于把 dialogue 动作解决结果直接改到对话记录表"""
+        evidence_payload = list(record.evidence)
+        evidence_payload.append(
+            {"reason": reason, "chunk_id": evidence_chunk_id}
+        )
+        record.evidence = evidence_payload
+        if speaker is not None:
+            record.speaker = speaker
+        if tone is not None:
+            record.tone = tone
+        if description is not None:
+            record.description = description
+        if is_inner_monologue is not None:
+            record.is_inner_monologue = is_inner_monologue
+        record.updated_at = datetime.now(UTC)
+        self.session.flush()
+
+
 class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
     """2026-08-07 用于从系统绑定标注写入或续接伏笔线程"""
 
@@ -455,7 +537,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
 
 
 class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
-    """2026-08-07 用于保存案例到历史事实修订的解决映射"""
+    """2026-08-11 用于保存案例动作解决结果和实际目标（对话/线程/事实版本）"""
 
     def add_mapping(
         self,
@@ -463,9 +545,38 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
         run_id: str,
         annotation_id: str,
         resolved_case: ResolvedCase,
-        target_fact: GraphFact,
+        target_fact: GraphFact | None,
+        target_dialogue_id: str | None,
+        target_setup_id: str | None,
     ) -> CaseResolutionMapping:
-        """2026-08-07 用于写入严格案例类型解决结果和实际目标事实版本"""
+        """2026-08-11 用于按 action 写入解决结果和对应目标标识"""
+        resolution = {
+            "action": resolved_case.action,
+            "reason": resolved_case.reason,
+        }
+        if resolved_case.action == "dialogue":
+            for field_name in ("speaker", "tone", "description", "is_inner_monologue"):
+                value = getattr(resolved_case, field_name)
+                if value is not None:
+                    resolution[field_name] = value
+        elif resolved_case.action == "fact":
+            for field_name in ("from_entity", "to_entity", "relation_type", "change_kind"):
+                value = getattr(resolved_case, field_name)
+                if value is not None:
+                    resolution[field_name] = value
+        elif resolved_case.action == "foreshadowing":
+            for field_name in (
+                "setup_summary",
+                "setup_kind",
+                "expected_payoff_family",
+                "payoff_likelihood",
+                "setup_status",
+                "confidence",
+                "strength",
+            ):
+                value = getattr(resolved_case, field_name)
+                if value is not None:
+                    resolution[field_name] = value
         row = CaseResolutionMapping(
             mapping_id=str(uuid4()),
             run_id=run_id,
@@ -473,13 +584,12 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             case_id=resolved_case.case_id,
             case_type=resolved_case.type,
             target_ref=dict(resolved_case.target_ref),
-            resolution={
-                "speaker": resolved_case.speaker,
-                "reason": resolved_case.reason,
-            },
+            resolution=resolution,
             evidence_chunk_id=resolved_case.evidence_chunk_id,
-            target_fact_id=target_fact.fact_id,
-            target_fact_revision=target_fact.fact_revision,
+            target_fact_id=target_fact.fact_id if target_fact is not None else None,
+            target_fact_revision=target_fact.fact_revision if target_fact is not None else None,
+            target_dialogue_id=target_dialogue_id,
+            target_setup_id=target_setup_id,
         )
         self.session.add(row)
         self.session.flush()

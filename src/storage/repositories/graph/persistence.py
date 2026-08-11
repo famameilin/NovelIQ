@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -24,7 +25,9 @@ from src.agents.annotation.schema import (
 from src.storage.models import (
     ChapterAnnotationRecord,
     Chunk,
+    DialogueRecord,
     EntityStateVersion,
+    ForeshadowingThread,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -35,11 +38,10 @@ from src.storage.models import (
 
 @dataclass(slots=True)
 class PersistedGraphResult:
-    """2026-08-07 用于返回图版本和系统目标事实映射"""
+    """2026-08-11 用于返回图版本和案例解决目标映射（对话/线程/关系事实）"""
 
     graph_version: GraphVersion
-    dialogue_facts_by_candidate_key: dict[str, GraphFact]
-    resolved_facts_by_case_id: dict[str, GraphFact]
+    resolved_targets_by_case_id: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -210,8 +212,10 @@ def _resolve_entities(
                 )
             entity.first_seen_chunk = min(entity.first_seen_chunk, min(chunk_ids))
             entity.last_seen_chunk = max(entity.last_seen_chunk, max(chunk_ids))
+            # 2026-08-09 属性覆盖式更新：本次提交的字段替换旧值，未提交字段沿用
             entity.attributes = {**dict(entity.attributes or {}), **attributes}
-            entity.tags = list(dict.fromkeys([*list(entity.tags or []), *tags]))
+            if tags:
+                entity.tags = list(dict.fromkeys(tags))
         else:
             entity = GraphEntity(
                 run_id=annotation.run_id,
@@ -226,6 +230,9 @@ def _resolve_entities(
             session.flush()
             existing_by_key[key] = [entity]
         resolved[key] = entity
+    for key, entities in existing_by_key.items():
+        if key not in resolved and len(entities) == 1:
+            resolved[key] = entities[0]
     return resolved
 
 
@@ -364,10 +371,9 @@ def _persist_annotation_facts(
     graph_version: GraphVersion,
     chapter_order: int,
     entities_by_name: dict[str, GraphEntity],
-) -> tuple[list[GraphFact], dict[str, GraphFact]]:
-    """2026-08-07 用于按 chunk 和领域顺序写入全部正式语义事实"""
+) -> list[GraphFact]:
+    """2026-08-11 用于按 chunk 和领域顺序写入正式语义事实（对话单独落 dialogue_records）"""
     facts: list[GraphFact] = []
-    dialogue_by_candidate: dict[str, GraphFact] = {}
     active_relations = _active_relation_keys(
         session,
         run_id=annotation.run_id,
@@ -411,54 +417,6 @@ def _persist_annotation_facts(
             )
             session.add(fact)
             facts.append(fact)
-
-        for ordinal, dialogue in enumerate(chunk.dialogues):
-            speaker = _entity(entities_by_name, dialogue.speaker)
-            speaker_descriptor = _entity_descriptor(speaker)
-            content = {
-                "kind": "dialogue",
-                "chunk_id": chunk_id,
-                "candidate_key": dialogue.candidate_key,
-                "content": dialogue.content,
-                "start": dialogue.start,
-                "end": dialogue.end,
-                "description": dialogue.description,
-                "speaker": speaker_descriptor,
-                "tone": dialogue.tone,
-                "is_inner_monologue": dialogue.is_inner_monologue,
-                "reason": dialogue.reason,
-            }
-            fact = _new_graph_fact(
-                graph_version=graph_version,
-                annotation=annotation,
-                chunk_id=chunk_id,
-                domain="dialogue",
-                ordinal=ordinal,
-                subject=speaker,
-                predicate="spoke",
-                object_value=None,
-                value={
-                    "content": dialogue.content,
-                    "start": dialogue.start,
-                    "end": dialogue.end,
-                    "description": dialogue.description,
-                    "tone": dialogue.tone,
-                    "is_inner_monologue": dialogue.is_inner_monologue,
-                },
-                participants=(
-                    [{"role": "speaker", "entity": speaker_descriptor}]
-                    if speaker_descriptor is not None
-                    else []
-                ),
-                story_time=None,
-                assertion="affirmed",
-                confidence=str(dialogue.confidence),
-                content=content,
-                evidence=dialogue.evidence,
-            )
-            session.add(fact)
-            facts.append(fact)
-            dialogue_by_candidate[dialogue.candidate_key] = fact
 
         for ordinal, event_item in enumerate(chunk.events):
             participants: list[dict[str, Any]] = []
@@ -651,7 +609,7 @@ def _persist_annotation_facts(
             facts.append(fact)
 
     session.flush()
-    return facts, dialogue_by_candidate
+    return facts
 
 
 def _previous_entity_state(
@@ -916,19 +874,24 @@ def _persist_relation_versions(
         )
 
 
-def _resolution_speaker_entity(
+def _resolve_case_entity(
     session: Session,
     *,
     run_id: str,
-    resolved_case: ResolvedCase,
+    name: str,
     entities_by_name: dict[str, GraphEntity],
+    allowed_types: tuple[str, ...],
+    evidence_chunk_id: int,
 ) -> GraphEntity:
-    """2026-08-07 用于把案例语义说话人解析为人物图节点"""
-    key = _normalized_name(resolved_case.speaker)
+    """2026-08-11 用于把案例端点名称解析为图实体节点"""
+    key = _normalized_name(name)
     current = entities_by_name.get(key)
     if current is not None:
-        if current.entity_type != "character":
-            raise ValueError("resolve_case speaker 必须解析为人物实体")
+        if current.entity_type not in allowed_types:
+            raise ValueError(
+                f"案例端点实体类型不属于 {list(allowed_types)}: "
+                f"{name}（实际 {current.entity_type}）"
+            )
         return current
     matches = [
         entity
@@ -938,23 +901,30 @@ def _resolution_speaker_entity(
         if _normalized_name(entity.canonical_name) == key
     ]
     if len(matches) > 1:
-        raise ValueError(f"resolve_case speaker 匹配到多个实体: {resolved_case.speaker}")
+        raise ValueError(f"案例端点匹配到多个实体: {name}")
     if matches:
         entity = matches[0]
-        if entity.entity_type != "character":
-            raise ValueError("resolve_case speaker 名称已属于非人物实体")
+        if entity.entity_type not in allowed_types:
+            raise ValueError(
+                f"案例端点名称已属于其他大类: {name} "
+                f"expected={list(allowed_types)} actual={entity.entity_type}"
+            )
         entity.last_seen_chunk = max(
             entity.last_seen_chunk,
-            resolved_case.evidence_chunk_id,
+            evidence_chunk_id,
         )
         return entity
+    if len(allowed_types) != 1:
+        raise ValueError(
+            f"案例端点实体未登记且大类不唯一，请先登记再解决: {name}"
+        )
     entity = GraphEntity(
         run_id=run_id,
-        canonical_name=resolved_case.speaker,
-        entity_type="character",
+        canonical_name=name,
+        entity_type=allowed_types[0],
         attributes={},
-        first_seen_chunk=resolved_case.evidence_chunk_id,
-        last_seen_chunk=resolved_case.evidence_chunk_id,
+        first_seen_chunk=evidence_chunk_id,
+        last_seen_chunk=evidence_chunk_id,
     )
     session.add(entity)
     session.flush()
@@ -972,26 +942,285 @@ def _next_fact_revision(session: Session, run_id: str, fact_id: str) -> int:
     return int(revision or 0) + 1
 
 
-def _validate_case_target(target: GraphFact, resolved_case: ResolvedCase) -> None:
-    """2026-08-07 用于核对案例内部目标仍指向同一未确认对话"""
-    content = dict(target.content)
-    if target.fact_type != "dialogue" or content.get("kind") != "dialogue":
-        raise ValueError(f"案例目标不是对话事实: {resolved_case.case_id}")
+def _validate_dialogue_target(record: DialogueRecord, resolved_case: ResolvedCase) -> None:
+    """2026-08-11 用于核对案例内部目标仍指向同一对话记录"""
     expected = {
-        "candidate_key": content.get("candidate_key"),
-        "chunk_id": target.effective_chunk_id,
-        "start": content.get("start"),
-        "end": content.get("end"),
-        "text": content.get("content"),
+        "chunk_id": int(record.chunk_id),
+        "start": int(record.start),
+        "end": int(record.end),
+        "content": str(record.content),
     }
     for field_name, expected_value in expected.items():
-        if resolved_case.target_ref.get(field_name) != expected_value:
+        actual = resolved_case.target_ref.get(field_name)
+        if actual is not None and actual != expected_value:
             raise ValueError(
-                f"案例目标字段与历史对话不一致: "
+                f"案例目标与对话记录不一致: "
                 f"case_id={resolved_case.case_id} field={field_name}"
             )
-    if content.get("speaker") is not None:
-        raise ValueError(f"案例目标对话已经具有说话人: {resolved_case.case_id}")
+
+
+def _persist_dialogue_resolution(
+    session: Session,
+    *,
+    run_id: str,
+    resolved_case: ResolvedCase,
+) -> DialogueRecord:
+    """2026-08-11 用于把 dialogue 动作解决结果直接更新对话记录表"""
+    candidate_key = resolved_case.target_ref.get("dialogue_id")
+    if not candidate_key:
+        raise ValueError(f"dialogue 动作案例缺少对话目标: {resolved_case.case_id}")
+    record = session.execute(
+        select(DialogueRecord).where(
+            DialogueRecord.run_id == run_id,
+            DialogueRecord.candidate_key == str(candidate_key),
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        raise ValueError(f"案例目标对话记录不存在或跨 run: {resolved_case.case_id}")
+    _validate_dialogue_target(record, resolved_case)
+    evidence_payload = list(record.evidence)
+    evidence_payload.append(
+        {"reason": resolved_case.reason, "chunk_id": resolved_case.evidence_chunk_id}
+    )
+    record.evidence = evidence_payload
+    if resolved_case.speaker is not None:
+        record.speaker = resolved_case.speaker
+    if resolved_case.tone is not None:
+        record.tone = resolved_case.tone
+    if resolved_case.description is not None:
+        record.description = resolved_case.description
+    if resolved_case.is_inner_monologue is not None:
+        record.is_inner_monologue = resolved_case.is_inner_monologue
+    record.updated_at = datetime.now(UTC)
+    session.flush()
+    return record
+
+
+def _latest_relation_draft(
+    session: Session,
+    *,
+    run_id: str,
+    relation: GraphRelation,
+    relation_type: str,
+    attributes: dict[str, Any],
+) -> _RelationDraft:
+    """2026-08-11 用于读取稳定关系最近版本状态构造变化草稿"""
+    latest = session.execute(
+        select(GraphRelationVersion)
+        .where(
+            GraphRelationVersion.run_id == run_id,
+            GraphRelationVersion.relation_id == relation.relation_id,
+        )
+        .order_by(GraphRelationVersion.relation_revision.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None:
+        return _RelationDraft(
+            relation=relation,
+            previous_revision=0,
+            relation_type=relation_type,
+            attributes=dict(attributes),
+            is_active=False,
+            changes=[],
+        )
+    return _RelationDraft(
+        relation=relation,
+        previous_revision=int(latest.relation_revision),
+        relation_type=str(latest.relation_type),
+        attributes=dict(latest.attributes),
+        is_active=bool(latest.is_active),
+        changes=[],
+    )
+
+
+def _persist_fact_resolution(
+    session: Session,
+    *,
+    annotation: ChapterAnnotationRecord,
+    graph_version: GraphVersion,
+    resolved_case: ResolvedCase,
+    entities_by_name: dict[str, GraphEntity],
+) -> GraphFact:
+    """2026-08-11 用于把 fact 动作案例写成关系事实版本（change_kind 表达建改删）"""
+    relation_type = str(resolved_case.relation_type)
+    definition = RELATION_DEFINITIONS[relation_type]
+    change_kind = str(resolved_case.change_kind)
+    directionality = str(definition["directionality"])
+    semantics = str(definition["semantics"])
+    from_entity = _resolve_case_entity(
+        session,
+        run_id=annotation.run_id,
+        name=resolved_case.from_entity or "",
+        entities_by_name=entities_by_name,
+        allowed_types=tuple(definition["from_types"]),
+        evidence_chunk_id=resolved_case.evidence_chunk_id,
+    )
+    to_entity = _resolve_case_entity(
+        session,
+        run_id=annotation.run_id,
+        name=resolved_case.to_entity or "",
+        entities_by_name=entities_by_name,
+        allowed_types=tuple(definition["to_types"]),
+        evidence_chunk_id=resolved_case.evidence_chunk_id,
+    )
+    if int(from_entity.entity_id) == int(to_entity.entity_id):
+        raise ValueError(f"fact 动作两端解析为同一实体: {resolved_case.case_id}")
+    from_id = int(from_entity.entity_id)
+    to_id = int(to_entity.entity_id)
+    representative_id = min(from_id, to_id) if semantics == "same_character" else None
+    relation_id = _relation_id(
+        annotation.run_id,
+        from_id,
+        to_id,
+        relation_type,
+        directionality,
+    )
+    existing = session.get(GraphRelation, relation_id)
+    if existing is None:
+        if change_kind != "assert":
+            raise ValueError(
+                "fact 动作变化未匹配到已有关系: "
+                f"{resolved_case.from_entity} {relation_type} {resolved_case.to_entity}"
+            )
+        session.add(
+            GraphRelation(
+                relation_id=relation_id,
+                run_id=annotation.run_id,
+                from_entity_id=from_id,
+                to_entity_id=to_id,
+                directionality=directionality,
+                relation_semantics=semantics,
+            )
+        )
+        session.flush()
+        relation = session.get(GraphRelation, relation_id)
+        if relation is None:
+            raise ValueError(f"关系创建失败: {relation_id}")
+        draft = _latest_relation_draft(
+            session,
+            run_id=annotation.run_id,
+            relation=relation,
+            relation_type=relation_type,
+            attributes=(
+                {"representative_entity_id": representative_id}
+                if representative_id is not None
+                else {}
+            ),
+        )
+    else:
+        draft = _latest_relation_draft(
+            session,
+            run_id=annotation.run_id,
+            relation=existing,
+            relation_type=relation_type,
+            attributes={},
+        )
+    content = {
+        "kind": "relation",
+        "chunk_id": resolved_case.evidence_chunk_id,
+        "from_entity": _entity_descriptor(from_entity),
+        "to_entity": _entity_descriptor(to_entity),
+        "relation_type": relation_type,
+        "change_kind": change_kind,
+        "relation_id": relation_id,
+        "directionality": directionality,
+        "relation_semantics": semantics,
+        "representative_entity_id": representative_id,
+        "reason": resolved_case.reason,
+    }
+    evidence = EvidenceList.model_validate(
+        [
+            TextEvidence(
+                reason=resolved_case.reason,
+                chunk_id=resolved_case.evidence_chunk_id,
+            ).model_dump(mode="json")
+        ]
+    )
+    fact_id = str(
+        uuid5(NAMESPACE_URL, f"noveliq:case-resolution:{annotation.run_id}:{relation_id}")
+    )
+    fact = GraphFact(
+        graph_version_id=graph_version.graph_version_id,
+        run_id=annotation.run_id,
+        chapter_id=annotation.chapter_id,
+        fact_id=fact_id,
+        fact_revision=_next_fact_revision(session, annotation.run_id, fact_id),
+        fact_type="relation",
+        subject_entity_id=from_id,
+        predicate=relation_type,
+        object=_entity_descriptor(to_entity),
+        value=None,
+        participants=[
+            {"role": "from", "entity": _entity_descriptor(from_entity)},
+            {"role": "to", "entity": _entity_descriptor(to_entity)},
+        ],
+        story_time=None,
+        assertion="affirmed",
+        confidence="high",
+        content=content,
+        evidence=evidence.model_dump(mode="json"),
+        scope=(
+            f"chapter:{annotation.chapter_id}:chunk:{resolved_case.evidence_chunk_id}"
+        ),
+        effective_chunk_id=resolved_case.evidence_chunk_id,
+        source_kind="case_resolution",
+        annotation_id=annotation.annotation_id,
+        payload_path=f"case_resolution/{resolved_case.case_id}",
+    )
+    session.add(fact)
+    session.flush()
+    _apply_relation_change(
+        draft=draft,
+        fact=fact,
+        change_kind=change_kind,
+        relation_type=relation_type,
+    )
+    session.add(
+        GraphRelationVersion(
+            graph_version_id=graph_version.graph_version_id,
+            run_id=annotation.run_id,
+            chapter_id=graph_version.chapter_id,
+            relation_id=relation_id,
+            relation_revision=draft.previous_revision + 1,
+            relation_type=draft.relation_type,
+            attributes=draft.attributes,
+            is_active=draft.is_active,
+            changes=draft.changes,
+        )
+    )
+    session.flush()
+    return fact
+
+
+def _persist_foreshadowing_resolution(
+    session: Session,
+    *,
+    run_id: str,
+    resolved_case: ResolvedCase,
+) -> ForeshadowingThread:
+    """2026-08-11 用于把 foreshadowing 动作解决结果更新到伏笔线程（setup_id 定位）"""
+    setup_id = resolved_case.target_ref.get("setup_id")
+    if not setup_id:
+        raise ValueError(f"foreshadowing 动作案例缺少伏笔线程目标: {resolved_case.case_id}")
+    thread = session.get(ForeshadowingThread, str(setup_id))
+    if thread is None or thread.run_id != run_id:
+        raise ValueError(f"案例目标伏笔线程不存在或跨 run: {resolved_case.case_id}")
+    for field_name in (
+        "setup_summary",
+        "setup_kind",
+        "expected_payoff_family",
+        "payoff_likelihood",
+        "confidence",
+        "strength",
+    ):
+        value = getattr(resolved_case, field_name)
+        if value is not None:
+            setattr(thread, field_name, value)
+    if resolved_case.setup_status is not None:
+        thread.status = resolved_case.setup_status
+    thread.updated_at = datetime.now(UTC)
+    session.flush()
+    return thread
 
 
 def _persist_resolved_cases(
@@ -1002,80 +1231,42 @@ def _persist_resolved_cases(
     resolved_cases: list[ResolvedCase],
     authorized_text_chunk_ids: set[int],
     entities_by_name: dict[str, GraphEntity],
-) -> dict[str, GraphFact]:
-    """2026-08-07 用于把案例解决写成历史对话事实新修订"""
-    rows_by_case_id: dict[str, GraphFact] = {}
+) -> dict[str, Any]:
+    """2026-08-11 用于按案例动作分派解决（dialogue 改对话表 / fact 改图 / foreshadowing 写线程 / close 无目标）"""
+    targets_by_case_id: dict[str, Any] = {}
     for resolved_case in resolved_cases:
         if resolved_case.evidence_chunk_id not in authorized_text_chunk_ids:
             raise ValueError(
                 "resolve_case 使用了未经系统读取授权的原文: "
                 f"{resolved_case.evidence_chunk_id}"
             )
-        target_fact_id = str(resolved_case.target_ref.get("fact_id") or "")
-        target_fact_revision = resolved_case.target_ref.get("fact_revision")
-        if not target_fact_id or not isinstance(target_fact_revision, int):
-            raise ValueError(f"案例缺少历史事实目标: {resolved_case.case_id}")
-        target = session.execute(
-            select(GraphFact).where(
-                GraphFact.run_id == annotation.run_id,
-                GraphFact.fact_id == target_fact_id,
-                GraphFact.fact_revision == target_fact_revision,
-                GraphFact.source_kind == "annotation",
-            )
-        ).scalar_one_or_none()
-        if target is None:
-            raise ValueError(f"案例目标事实不存在或跨 run: {resolved_case.case_id}")
-        _validate_case_target(target, resolved_case)
-        speaker = _resolution_speaker_entity(
-            session,
-            run_id=annotation.run_id,
-            resolved_case=resolved_case,
-            entities_by_name=entities_by_name,
-        )
-        speaker_descriptor = _entity_descriptor(speaker)
-        content = dict(target.content)
-        content["speaker"] = speaker_descriptor
-        content["resolved_by_case_id"] = resolved_case.case_id
-        evidence = EvidenceList.model_validate(
-            [
-                *list(target.evidence),
-                TextEvidence(
-                    reason=resolved_case.reason,
-                    chunk_id=resolved_case.evidence_chunk_id,
-                ).model_dump(mode="json"),
-            ]
-        )
-        row = GraphFact(
-            graph_version_id=graph_version.graph_version_id,
-            run_id=annotation.run_id,
-            chapter_id=annotation.chapter_id,
-            fact_id=target.fact_id,
-            fact_revision=_next_fact_revision(
+        target: Any = None
+        if resolved_case.action == "dialogue":
+            target = _persist_dialogue_resolution(
                 session,
-                annotation.run_id,
-                target.fact_id,
-            ),
-            fact_type=target.fact_type,
-            subject_entity_id=speaker.entity_id,
-            predicate=target.predicate,
-            object=target.object,
-            value=target.value,
-            participants=[{"role": "speaker", "entity": speaker_descriptor}],
-            scope=target.scope,
-            story_time=target.story_time,
-            assertion=target.assertion,
-            confidence=target.confidence,
-            content=content,
-            evidence=evidence.model_dump(mode="json"),
-            effective_chunk_id=target.effective_chunk_id,
-            source_kind="case_resolution",
-            annotation_id=annotation.annotation_id,
-            payload_path=f"case_resolution/{resolved_case.case_id}",
-        )
-        session.add(row)
-        session.flush()
-        rows_by_case_id[resolved_case.case_id] = row
-    return rows_by_case_id
+                run_id=annotation.run_id,
+                resolved_case=resolved_case,
+            )
+        elif resolved_case.action == "fact":
+            target = _persist_fact_resolution(
+                session,
+                annotation=annotation,
+                graph_version=graph_version,
+                resolved_case=resolved_case,
+                entities_by_name=entities_by_name,
+            )
+        elif resolved_case.action == "foreshadowing":
+            target = _persist_foreshadowing_resolution(
+                session,
+                run_id=annotation.run_id,
+                resolved_case=resolved_case,
+            )
+        elif resolved_case.action == "close":
+            target = None
+        else:
+            raise ValueError(f"未知案例动作: {resolved_case.action}")
+        targets_by_case_id[resolved_case.case_id] = target
+    return targets_by_case_id
 
 
 def persist_completion_graph(
@@ -1114,7 +1305,7 @@ def persist_completion_graph(
         annotation=annotation,
         payload=payload,
     )
-    facts, dialogue_by_candidate = _persist_annotation_facts(
+    facts = _persist_annotation_facts(
         session,
         annotation=annotation,
         payload=payload,
@@ -1134,7 +1325,7 @@ def persist_completion_graph(
         chapter_order=chapter_order,
         facts=facts,
     )
-    resolved_facts = _persist_resolved_cases(
+    resolved_targets = _persist_resolved_cases(
         session,
         annotation=annotation,
         graph_version=graph_version,
@@ -1145,6 +1336,5 @@ def persist_completion_graph(
     session.flush()
     return PersistedGraphResult(
         graph_version=graph_version,
-        dialogue_facts_by_candidate_key=dialogue_by_candidate,
-        resolved_facts_by_case_id=resolved_facts,
+        resolved_targets_by_case_id=resolved_targets,
     )

@@ -6,9 +6,11 @@ from .annotation import (
     CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
     DatabaseAnnotationQueryService,
+    DialogueRecordRepository,
     ForeshadowingRepository,
 )
 from .base import BaseRepository, T
+from .chapter_repository import ChapterRepository
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
 from .graph import EntitySnapshotRow, GraphChangeRow, GraphRepository, GraphSnapshotRow, RelationSnapshotRow
@@ -25,10 +27,12 @@ from .stats import StatsRepository
 __all__ = [
     "BaseRepository",
     "T",
+    "ChapterRepository",
     "RunRepository",
     "AnnotationRepository",
     "ChapterAnnotationRepository",
     "CasePoolRepository",
+    "DialogueRecordRepository",
     "ForeshadowingRepository",
     "CaseResolutionMappingRepository",
     "DatabaseAnnotationQueryService",

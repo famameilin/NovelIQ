@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from unittest.mock import patch
 
 import pytest
@@ -21,16 +20,13 @@ from src.agents.annotation.schema import (
     ChunkMetricsInput,
     PendingCase,
     ResolvedCase,
-    SuccessAudit,
 )
 from src.storage.models import (
     CasePoolCase,
     CaseResolutionMapping,
     ChapterAnnotationRecord,
-    GraphFact,
+    DialogueRecord,
     GraphVersion,
-    ModelInteraction,
-    TokenUsage,
 )
 from src.workflows.annotate_helpers.storage import complete_annotation_run, load_completion_result
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, evidence
@@ -105,55 +101,32 @@ def _audit(
     *,
     authorized_chunk_ids: list[int],
 ) -> AgentRunAudit:
-    """2026-08-07 用于构造完成事务审计和可信 Token 记录"""
+    """2026-08-10 用于构造完成事务审计（完整工具审计由 AgentAuditRecorder 独立写入）"""
     return AgentRunAudit(
         allow_future_context=False,
         write_revisions=[],
         rotation_case_ids=[],
         authorized_text_chunk_ids=authorized_chunk_ids,
-        success=SuccessAudit(
-            attempt_number=1,
-            messages=[{"role": "ai", "content": "done"}],
-            tool_calls=[],
-            model_name="test-model",
-            model_provider="local",
-            duration_ms=10,
-        ),
-        token_usage=[
-            {
-                "model": "test-model",
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-        ],
     )
 
 
-def _pending_cases_for(annotation: BoundChapterAnnotation) -> list[PendingCase]:
-    """2026-08-07 用于从 speaker 为空的系统对话构造自动案例"""
+def _pushed_case_for(annotation: BoundChapterAnnotation) -> list[PendingCase]:
+    """2026-08-11 用于构造模型 push 登记的对话疑点案例（携带 dialogue_id）"""
     pending: list[PendingCase] = []
     for chunk in annotation.chunks:
         for dialogue in chunk.dialogues:
-            if dialogue.speaker is not None:
-                continue
-            target_key = hashlib.sha256(
-                f"{chunk.chunk_id}:{dialogue.start}:{dialogue.end}".encode()
-            ).hexdigest()
             pending.append(
                 PendingCase(
                     type="dialogue_speaker",
                     chunk_id=chunk.chunk_id,
                     keys=[dialogue.content, "说话人"],
                     description=f"确认对话“{dialogue.content[:40]}”的说话人",
-                    target_key=target_key,
+                    target_key="pushed-target-key",
                     target_ref={
-                        "kind": "dialogue",
-                        "candidate_key": dialogue.candidate_key,
+                        "kind": "dialogue_speaker",
+                        "dialogue_id": dialogue.candidate_key,
                         "chunk_id": chunk.chunk_id,
-                        "start": dialogue.start,
-                        "end": dialogue.end,
-                        "text": dialogue.content,
+                        "keys": [dialogue.content, "说话人"],
                     },
                     evidence=dialogue.evidence,
                 )
@@ -167,7 +140,7 @@ def _result(
     chapter_id: int,
     annotation: BoundChapterAnnotation,
     resolved_cases: list[ResolvedCase] | None = None,
-    pending_cases: list[PendingCase] | None = None,
+    pushed_cases: list[PendingCase] | None = None,
     authorized_chunk_ids: list[int] | None = None,
 ) -> AgentRunResult:
     """2026-08-07 用于构造新合同 AgentRunResult"""
@@ -176,7 +149,7 @@ def _result(
         chapter_id=chapter_id,
         annotation=annotation,
         resolved_cases=resolved_cases or [],
-        pending_cases=pending_cases or _pending_cases_for(annotation),
+        pushed_cases=pushed_cases or _pushed_case_for(annotation),
         audit=_audit(
             authorized_chunk_ids=authorized_chunk_ids
             or [annotation.chunks[0].chunk_id],
@@ -194,7 +167,7 @@ def _count(session, model, run_id: str) -> int:
 
 
 def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> None:
-    """2026-08-07 用于验证标注与自动案例同时提交且重复完成保持幂等"""
+    """2026-08-11 用于验证 push 案例与对话记录同时提交且重复完成保持幂等"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["“住手”回荡"],
@@ -224,28 +197,24 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
         select(CasePoolCase).where(CasePoolCase.run_id == run_id)
     ).scalar_one()
     dialogue = db_session.execute(
-        select(GraphFact).where(
-            GraphFact.run_id == run_id,
-            GraphFact.fact_type == "dialogue",
-        )
+        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
     ).scalar_one()
 
     assert first == second
     assert first.created_cases[0].id == case.id
     assert case.case_type == "dialogue_speaker"
     assert case.chunk_id == 0
-    assert case.target_ref["fact_id"] == dialogue.fact_id
-    assert case.target_ref["fact_revision"] == 1
+    assert case.target_ref["dialogue_id"] == dialogue.candidate_key
+    assert dialogue.speaker is None
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
     assert _count(db_session, GraphVersion, run_id) == 1
-    assert _count(db_session, ModelInteraction, run_id) == 1
-    assert _count(db_session, TokenUsage, run_id) == 1
+    assert _count(db_session, DialogueRecord, run_id) == 1
 
 
-def test_case_resolution_revises_historical_dialogue_in_same_new_graph_version(
+def test_dialogue_resolution_updates_dialogue_record(
     db_session,
 ) -> None:
-    """2026-08-07 用于验证后文解决案例修订历史对话并保持正式 speaker=null"""
+    """2026-08-11 用于验证后文 dialogue 动作解决直接更新对话记录表"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["“住手”回荡", "顾霜喝道"],
@@ -272,7 +241,8 @@ def test_case_resolution_revises_historical_dialogue_in_same_new_graph_version(
     assert case is not None
     resolved = ResolvedCase(
         case_id=case.id,
-        type="dialogue_speaker",
+        action="dialogue",
+        type=case.case_type,
         speaker="顾霜",
         reason="后文点明顾霜",
         evidence_chunk_id=1,
@@ -297,16 +267,9 @@ def test_case_resolution_revises_historical_dialogue_in_same_new_graph_version(
     )
 
     db_session.rollback()
-    revisions = list(
-        db_session.execute(
-            select(GraphFact)
-            .where(
-                GraphFact.run_id == run_id,
-                GraphFact.fact_id == case.target_ref["fact_id"],
-            )
-            .order_by(GraphFact.fact_revision)
-        ).scalars()
-    )
+    dialogue = db_session.execute(
+        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
+    ).scalar_one()
     resolved_case = db_session.get(CasePoolCase, case.id)
     mapping = db_session.execute(
         select(CaseResolutionMapping).where(
@@ -315,18 +278,17 @@ def test_case_resolution_revises_historical_dialogue_in_same_new_graph_version(
         )
     ).scalar_one()
 
-    assert [row.fact_revision for row in revisions] == [1, 2]
-    assert revisions[0].content["speaker"] is None
-    assert revisions[1].content["speaker"]["name"] == "顾霜"
-    assert revisions[1].source_kind == "case_resolution"
-    assert revisions[1].graph_version_id == second.graph_version_id
+    assert dialogue.candidate_key == case.target_ref["dialogue_id"]
+    assert dialogue.speaker == "顾霜"
     assert resolved_case is not None and resolved_case.state == "resolved"
-    assert mapping.target_fact_revision == 2
+    assert mapping.target_dialogue_id == dialogue.dialogue_id
+    assert mapping.resolution["action"] == "dialogue"
     assert second.resolved_cases[0].case_id == case.id
+    assert second.resolved_cases[0].action == "dialogue"
 
 
-def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_session) -> None:
-    """2026-08-07 用于验证完成事务任一步失败时全部结果同时回滚"""
+def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_session) -> None:
+    """2026-08-10 用于验证完成事务任一步失败时全部章节结果同时回滚（审计独立不受影响）"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["“住手”回荡"],
@@ -336,10 +298,10 @@ def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_sessi
     annotation = _annotation(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
 
     with patch(
-        "src.workflows.annotate_helpers.storage._save_success_audit",
-        side_effect=RuntimeError("audit failed"),
+        "src.workflows.annotate_helpers.storage._persist_foreshadowing",
+        side_effect=RuntimeError("persist failed"),
     ):
-        with pytest.raises(RuntimeError, match="audit failed"):
+        with pytest.raises(RuntimeError, match="persist failed"):
             complete_annotation_run(
                 result=_result(
                     run_id=run_id,
@@ -355,10 +317,8 @@ def test_complete_annotation_run_rolls_back_everything_when_audit_fails(db_sessi
         ChapterAnnotationRecord,
         CasePoolCase,
         CaseResolutionMapping,
+        DialogueRecord,
         GraphVersion,
-        GraphFact,
-        ModelInteraction,
-        TokenUsage,
     ):
         assert _count(db_session, model, run_id) == 0
 
@@ -397,20 +357,15 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
     annotation = _annotation(chunk_id=0, text="顾霜喝道", speaker_entity=True)
     missing = ResolvedCase(
         case_id="missing-case",
+        action="close",
         type="dialogue_speaker",
-        speaker="顾霜",
-        reason="后文点明",
+        reason="无法确认",
         evidence_chunk_id=0,
         target_key="missing-target",
         target_ref={
-            "kind": "dialogue",
-            "candidate_key": "candidate-1",
+            "kind": "dialogue_speaker",
+            "dialogue_id": "dlg_missing",
             "chunk_id": 0,
-            "start": 0,
-            "end": 2,
-            "text": "住手",
-            "fact_id": "missing-fact",
-            "fact_revision": 1,
         },
     )
 
