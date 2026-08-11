@@ -355,15 +355,6 @@ export function GraphWorkspaceSection({
                       </p>
                     </div>
                   </div>
-
-                  <div className="rounded-xl border border-border bg-surface p-4">
-                    <p className="text-xs uppercase tracking-wide text-text-muted">证据摘录</p>
-                    <div className="mt-3 space-y-2 text-sm leading-6 text-text">
-                      {selectedChange.evidence.map((evidence, index) => (
-                        <p key={`${selectedChange.change_id}-evidence-${index}`}>{evidence.reason}</p>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-text-muted">

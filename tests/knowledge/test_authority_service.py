@@ -74,7 +74,7 @@ def test_authority_views_project_chapter_versions_and_graph_changes(db_session) 
     ]
     assert {row.change_kind for row in timeline.graph_changes} == {"state", "relation"}
     assert all(row.fact_id and row.fact_revision == 1 for row in timeline.graph_changes)
-    assert all(row.evidence for row in graph_view.graph_changes)
+    assert all(row.changes for row in graph_view.graph_changes)
     assert {row.name for row in graph_view.participant_states} == {"林渡", "顾霜"}
     assert export_view.current_relations[0].relation_id
     assert export_view.current_relations[0].source == "graph_relation_versions"
@@ -121,7 +121,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
-                change_kind="break",
+                state="ended",
             )
         ],
     )

@@ -107,7 +107,6 @@ function createRelationGraphChange(changeId: string, relationChangeKind: "assert
     fact_revision: 1,
     effective_chunk_id: chunkId,
     changes: [{ change_kind: relationChangeKind }],
-    evidence: [{ reason: "关系变化证据", chunk_id: chunkId }],
     relation_id: `relation:${changeId}`,
     relation_version_id: Number(changeId.split(":")[1]),
     relation_revision: 1,

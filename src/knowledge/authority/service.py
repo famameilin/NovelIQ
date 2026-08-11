@@ -205,9 +205,8 @@ class KnowledgeGraphAuthorityService:
         relations: Iterable[RelationSnapshotRow],
         entities: Iterable[EntitySnapshotRow],
     ) -> AliasResolution:
-        """2026-08-09 用于从同一人物关系构建别名归并映射"""
-        entity_names = {int(entity.entity_id): str(entity.name) for entity in entities}
-        return build_alias_resolution(list(relations), entity_names=entity_names)
+        """2026-08-11 用于从同一人物关系与实体属性构建别名归并映射"""
+        return build_alias_resolution(list(relations), entities=list(entities))
 
     def _build_canonical_entities(
         self,
@@ -320,7 +319,7 @@ class KnowledgeGraphAuthorityService:
         self,
         rows: Iterable[GraphChangeRow],
     ) -> list[GraphChange]:
-        """2026-08-07 用于把 Repository 章节变化转换为共享双源 Evidence 合同"""
+        """2026-08-07 用于把 Repository 章节变化转换为共享双源合同"""
         return [
             GraphChange(
                 change_id=row.change_id,
@@ -333,7 +332,6 @@ class KnowledgeGraphAuthorityService:
                 effective_chunk_id=row.effective_chunk_id,
                 confidence=row.confidence,
                 changes=list(row.changes),
-                evidence=row.evidence.model_dump(mode="json"),
                 entity_id=row.entity_id,
                 entity_name=row.entity_name,
                 entity_type=row.entity_type,

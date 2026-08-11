@@ -77,7 +77,7 @@ class ConfirmedRelation:
 
 @dataclass(slots=True)
 class GraphChange:
-    """2026-08-07 用于向章节版本消费者传递事实原因与双源 Evidence"""
+    """2026-08-11 用于向章节版本消费者传递事实原因与变化"""
 
     change_id: str
     change_kind: str
@@ -89,7 +89,6 @@ class GraphChange:
     effective_chunk_id: int
     confidence: str
     changes: list[dict]
-    evidence: list[dict]
     entity_id: int | None = None
     entity_name: str | None = None
     entity_type: str | None = None
@@ -200,7 +199,6 @@ TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "fact_revision",
         "effective_chunk_id",
         "changes",
-        "evidence",
         "entity_id",
         "entity_name",
         "from_entity_id",
@@ -264,7 +262,6 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "fact_id",
         "fact_revision",
         "changes",
-        "evidence",
     ),
 }
 
@@ -474,7 +471,6 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "fact_id",
         "fact_revision",
         "changes",
-        "evidence",
     ),
 }
 

@@ -9,8 +9,8 @@ from src.api.models.graph import GraphSnapshotResponse
 from src.api.services.results_queries.graph import _fetch_graph_snapshot
 
 
-def _entity(entity_id: int, name: str) -> SimpleNamespace:
-    """2026-08-09 用于构造实体快照桩"""
+def _entity(entity_id: int, name: str, *, representative: bool = False) -> SimpleNamespace:
+    """2026-08-11 用于构造实体快照桩（含规范名标记属性）"""
     return SimpleNamespace(
         entity_id=entity_id,
         name=name,
@@ -20,6 +20,7 @@ def _entity(entity_id: int, name: str) -> SimpleNamespace:
         last_seen_chunk=3,
         state_revision=1,
         state={"status": "active"},
+        attributes={"is_representative": True} if representative else {},
     )
 
 
@@ -64,7 +65,7 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
     snapshot = SimpleNamespace(
         graph_version=version,
         entities=[
-            _entity(67, "伯安"),
+            _entity(67, "伯安", representative=True),
             _entity(97, "贺重明"),
             _entity(38, "贺伯安"),
         ],
@@ -77,7 +78,6 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
                 to_name="贺重明",
                 relation_type="同一人物",
                 relation_semantics="same_character",
-                attributes={"representative_entity_id": 67},
             ),
             _relation(
                 relation_id="r-2",

@@ -13,7 +13,6 @@ def _relation(
     is_active: bool = True,
     from_entity_id: int,
     to_entity_id: int,
-    attributes: dict | None = None,
 ) -> SimpleNamespace:
     """2026-08-09 用于构造 alias 解析所需的稳定关系快照桩"""
     return SimpleNamespace(
@@ -21,18 +20,30 @@ def _relation(
         is_active=is_active,
         from_entity_id=from_entity_id,
         to_entity_id=to_entity_id,
-        attributes=attributes or {},
+    )
+
+
+def _entity(entity_id: int, name: str, *, representative: bool = False) -> SimpleNamespace:
+    """2026-08-11 用于构造带 is_representative 属性的实体快照桩"""
+    return SimpleNamespace(
+        entity_id=entity_id,
+        name=name,
+        attributes={"is_representative": True} if representative else {},
     )
 
 
 def test_build_alias_resolution_merges_direct_aliases() -> None:
-    """2026-08-09 用于验证同一人物关系直接把别名归一到代表实体"""
+    """2026-08-11 用于验证同一人物关系直接把别名归一到代表实体"""
     relations = [
-        _relation(from_entity_id=67, to_entity_id=97, attributes={"representative_entity_id": 67}),
+        _relation(from_entity_id=67, to_entity_id=97),
     ]
-    entity_names = {38: "贺伯安", 67: "伯安", 97: "贺重明"}
+    entities = [
+        _entity(38, "贺伯安"),
+        _entity(67, "伯安", representative=True),
+        _entity(97, "贺重明"),
+    ]
 
-    resolution = build_alias_resolution(relations, entity_names=entity_names)
+    resolution = build_alias_resolution(relations, entities=entities)
 
     assert resolution.resolve_entity_id(67) == 67
     assert resolution.resolve_entity_id(97) == 67
@@ -43,14 +54,18 @@ def test_build_alias_resolution_merges_direct_aliases() -> None:
 
 
 def test_build_alias_resolution_resolves_transitive_chain() -> None:
-    """2026-08-09 用于验证别名链 A→B、B→C 收敛到同一代表"""
+    """2026-08-11 用于验证别名链 A→B、B→C 收敛到同一代表"""
     relations = [
-        _relation(from_entity_id=80, to_entity_id=70, attributes={"representative_entity_id": 70}),
-        _relation(from_entity_id=90, to_entity_id=80, attributes={"representative_entity_id": 80}),
+        _relation(from_entity_id=80, to_entity_id=70),
+        _relation(from_entity_id=90, to_entity_id=80),
     ]
-    entity_names = {70: "老李", 80: "李哥", 90: "李爷"}
+    entities = [
+        _entity(70, "老李", representative=True),
+        _entity(80, "李哥"),
+        _entity(90, "李爷"),
+    ]
 
-    resolution = build_alias_resolution(relations, entity_names=entity_names)
+    resolution = build_alias_resolution(relations, entities=entities)
 
     assert resolution.resolve_entity_id(90) == 70
     assert resolution.resolve_entity_id(80) == 70
@@ -60,36 +75,35 @@ def test_build_alias_resolution_resolves_transitive_chain() -> None:
 
 
 def test_build_alias_resolution_ignores_ordinary_and_inactive_relations() -> None:
-    """2026-08-09 用于验证普通关系与非活动同一人物关系不参与归并"""
+    """2026-08-11 用于验证普通关系与非活动同一人物关系不参与归并"""
     relations = [
-        _relation(
-            relation_semantics="ordinary",
-            from_entity_id=10,
-            to_entity_id=20,
-        ),
-        _relation(
-            from_entity_id=30,
-            to_entity_id=40,
-            is_active=False,
-            attributes={"representative_entity_id": 30},
-        ),
+        _relation(relation_semantics="ordinary", from_entity_id=10, to_entity_id=20),
+        _relation(from_entity_id=30, to_entity_id=40, is_active=False),
     ]
-    entity_names = {10: "甲", 20: "乙", 30: "丙", 40: "丁"}
+    entities = [
+        _entity(10, "甲"),
+        _entity(20, "乙"),
+        _entity(30, "丙"),
+        _entity(40, "丁"),
+    ]
 
-    resolution = build_alias_resolution(relations, entity_names=entity_names)
+    resolution = build_alias_resolution(relations, entities=entities)
 
     assert resolution.representative_by_alias == {}
     assert resolution.name_to_representative == {}
 
 
 def test_build_alias_resolution_falls_back_to_min_entity_id() -> None:
-    """2026-08-09 用于验证缺失代表 ID 时回退到端点较小实体 ID"""
+    """2026-08-11 用于验证缺失代表标记时回退到端点较小实体 ID"""
     relations = [
         _relation(from_entity_id=88, to_entity_id=55),
     ]
-    entity_names = {55: "小五", 88: "老八"}
+    entities = [
+        _entity(55, "小五"),
+        _entity(88, "老八"),
+    ]
 
-    resolution = build_alias_resolution(relations, entity_names=entity_names)
+    resolution = build_alias_resolution(relations, entities=entities)
 
     assert resolution.resolve_entity_id(88) == 55
     assert resolution.resolve_name("老八") == "小五"

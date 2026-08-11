@@ -8,8 +8,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from src.agents.annotation.schema import GraphEvidence, TextEvidence
-
 
 class TimelineMeta(BaseModel):
     """时间轴元信息"""
@@ -47,7 +45,6 @@ class GraphTimelineChange(BaseModel):
     fact_revision: int = Field(gt=0)
     effective_chunk_id: int = Field(ge=0)
     changes: list[dict[str, Any]] = Field(min_length=1)
-    evidence: list[GraphEvidence | TextEvidence] = Field(min_length=1)
     entity_id: int | None = None
     entity_name: str | None = None
     relation_id: str | None = None

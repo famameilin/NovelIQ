@@ -50,7 +50,6 @@ function createRelationGraphChange(changeId = "relation:9002") {
     fact_revision: 1,
     effective_chunk_id: 12,
     changes: [{ change_kind: "break" }],
-    evidence: [{ reason: "二人决裂", chunk_id: 12 }],
     relation_id: "relation:88",
     relation_version_id: 88,
     relation_revision: 1,
@@ -126,7 +125,6 @@ function createStateNode(): TimelineNode {
         fact_revision: 1,
         effective_chunk_id: 9,
         changes: [{ field: "status", value: "结盟" }],
-        evidence: [{ reason: "顾承渊明确放下戒备", chunk_id: 9 }],
         entity_id: 12,
         entity_name: "顾承渊",
       },
@@ -244,7 +242,6 @@ describe("TimelineNodeDetail", () => {
 
     expect(screen.getByText("变化 relation:9002")).toBeInTheDocument();
     expect(screen.getByText("directed")).toBeInTheDocument();
-    expect(screen.getByText("二人决裂")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 

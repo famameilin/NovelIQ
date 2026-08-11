@@ -143,7 +143,6 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 from_name=hero_name,
                 to_name=rival_name,
                 relation_type="盟友",
-                evidence_reason="二人正式结盟",
                 chapter_id=3,
             ),
             relation_fact(
@@ -152,7 +151,6 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 to_name=organization_name,
                 to_entity_type="organization",
                 relation_type="隶属",
-                evidence_reason="顾承渊受天衡宗招揽",
                 chapter_id=3,
             ),
         ],
@@ -193,9 +191,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 from_name=hero_name,
                 to_name=rival_name,
                 relation_type="盟友",
-                evidence_reason="两人最终决裂",
-                change_kind="break",
-                confidence="medium",
+                state="ended",
                 chapter_id=5,
             )
         ],
