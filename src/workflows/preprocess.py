@@ -18,15 +18,16 @@ from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
-from src.chunking.chunker import Chunk, chunk_documents
+from src.chunking.chunker import Chunk, chunk_documents_with_chapters
 from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
-from src.storage.repositories import ChunkRepository, ChunkStyleData
+from src.storage.repositories import ChapterRepository, ChunkRepository, ChunkStyleData
 from src.storage.vector_schema import (
     ensure_paragraph_embeddings_schema,
 )
@@ -80,7 +81,7 @@ async def run_preprocess(
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
 
-    all_chunks = await chunk_documents(
+    all_chunks, all_chapters = await chunk_documents_with_chapters(
         normalized_texts,
         emitter=emitter,
     )
@@ -88,6 +89,11 @@ async def run_preprocess(
     total_chunks = len(all_chunks)
     total_chars = sum(len(chunk.text) for chunk in all_chunks)
     logger.info(f"chunked {total_chunks} chunks total_chars={total_chars}")
+
+    chapter_repo = ChapterRepository(session)
+    chapter_repo.insert_chapters(run_id, all_chapters)
+    _commit_preprocess_writes(session, step="insert_chapters")
+    logger.info(f"inserted {len(all_chapters)} chapters into db (run_id={run_id})")
 
     chunk_repo.insert_chunks(run_id, all_chunks)
     _commit_preprocess_writes(session, step="insert_chunks")
@@ -165,14 +171,22 @@ async def _generate_paragraph_embeddings(
     Returns:
         生成的 embedding 数量
     """
+    from src.agents.usage import build_token_usage_callback
     from src.models.local.embedding import EmbeddingClient
+    from src.storage.models import AnalysisRun
     from src.storage.repositories.chunk import (
         ParagraphEmbeddingRow,
         insert_paragraph_embeddings,
     )
 
     try:
-        embedding_client = EmbeddingClient()
+        novel_id = session.execute(
+            select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id)
+        ).scalar_one_or_none()
+        embedding_client = EmbeddingClient(
+            novel_id=novel_id if isinstance(novel_id, str) and novel_id else "unknown",
+            token_usage_callback=build_token_usage_callback(session=session, run_id=run_id),
+        )
     except ValueError as e:
         raise RuntimeError(
             "embedding client initialization failed during preprocess: "

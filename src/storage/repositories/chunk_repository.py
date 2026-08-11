@@ -70,34 +70,15 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
         将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象
 
-        chapter_id 按章节出现序号落库，重复标题不会被合并
+        chapter_id 直接取解析器分配的章节编号（chunk.chapter_id），与 chapters 表一一对应
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
-        chapter_id_by_index: dict[int, int] = {}
-        next_chapter_id = 1
-        previous_legacy_title: object | str | None = object()
-        previous_legacy_chapter_id: int | None = None
         models = []
         for chunk in chunks:
-            if chunk.chapter_index is not None:
-                chapter_id = chapter_id_by_index.get(chunk.chapter_index)
-                if chapter_id is None:
-                    chapter_id = next_chapter_id
-                    chapter_id_by_index[chunk.chapter_index] = chapter_id
-                    next_chapter_id += 1
-                previous_legacy_title = object()
-                previous_legacy_chapter_id = None
-            elif chunk.chapter_title == previous_legacy_title and previous_legacy_chapter_id is not None:
-                chapter_id = previous_legacy_chapter_id
-            else:
-                chapter_id = next_chapter_id
-                next_chapter_id += 1
-                previous_legacy_title = chunk.chapter_title
-                previous_legacy_chapter_id = chapter_id
             models.append(
                 ChunkModel(
                     chunk_id=chunk.index,
-                    chapter_id=chapter_id,
+                    chapter_id=chunk.chapter_id,
                     char_offset=chunk.start,
                     char_end_offset=chunk.end,
                     text=chunk.text,

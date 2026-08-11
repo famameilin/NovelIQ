@@ -64,7 +64,7 @@ class TestAggregate:
     def _create_chunks_with_style(self, chunk_count: int) -> None:
         chunk_repo = ChunkRepository(self.db_session)
         chunks = [
-            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本。包含快乐和悲伤的词语。")
+            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本。包含快乐和悲伤的词语。", chapter_id=i + 1)
             for i in range(chunk_count)
         ]
         chunk_repo.insert_chunks(self.run_id, chunks)
@@ -168,7 +168,7 @@ class TestAggregate:
     @pytest.mark.asyncio()
     async def test_aggregate_with_annotations(self) -> None:
         chunk_repo = ChunkRepository(self.db_session)
-        test_chunks = [Chunk(index=i, start=0, end=100, text=f"测试文本{i}") for i in range(3)]
+        test_chunks = [Chunk(index=i, start=0, end=100, text=f"测试文本{i}", chapter_id=i + 1) for i in range(3)]
         chunk_repo.insert_chunks(self.run_id, test_chunks)
 
         style_rows = [

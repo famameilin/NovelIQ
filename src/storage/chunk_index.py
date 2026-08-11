@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.chunking.chunker import Chunk
 from src.chunking.index import ChunkIndex, build_chunk_index
 
 
@@ -14,7 +13,7 @@ def write_chunk_index(index: ChunkIndex, path: Path) -> None:
             "text": chunk.text,
             "start": chunk.start,
             "end": chunk.end,
-            "chapter_title": chunk.chapter_title,
+            "chapter_id": chunk.chapter_id,
         }
         for chunk in index.chunks
     ]
@@ -22,6 +21,8 @@ def write_chunk_index(index: ChunkIndex, path: Path) -> None:
 
 
 def read_chunk_index(path: Path) -> ChunkIndex:
+    from src.chunking.chunker import Chunk
+
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError("chunk index must be a list")
@@ -33,7 +34,7 @@ def read_chunk_index(path: Path) -> ChunkIndex:
                 text=str(item["text"]),
                 start=int(item["start"]),
                 end=int(item["end"]),
-                chapter_title=item.get("chapter_title"),
+                chapter_id=int(item["chapter_id"]),
             )
         )
     return build_chunk_index(chunks)

@@ -87,6 +87,7 @@ class TestTopicModel:
                 start=0,
                 end=100,
                 text=test_texts[i % len(test_texts)],
+                chapter_id=i + 1,
             )
             for i in range(chunk_count)
         ]
