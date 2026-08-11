@@ -155,8 +155,7 @@ def _fetch_graph_snapshot(
     if snapshot is None:
         raise LookupError("当前 run 尚无匹配的章节图版本")
     version = snapshot.graph_version
-    entity_names = {entity.entity_id: entity.name for entity in snapshot.entities}
-    resolution = build_alias_resolution(snapshot.relations, entity_names=entity_names)
+    resolution = build_alias_resolution(snapshot.relations, entities=snapshot.entities)
     nodes = [
         {
             "entity_id": entity.entity_id,
@@ -237,7 +236,6 @@ def _fetch_graph_changes_page(
                 "fact_revision": row.fact_revision,
                 "effective_chunk_id": row.effective_chunk_id,
                 "changes": row.changes,
-                "evidence": row.evidence.model_dump(mode="json"),
                 "entity_id": row.entity_id,
                 "entity_name": row.entity_name,
                 "relation_id": row.relation_id,

@@ -45,7 +45,6 @@ def create_relation_graph_change(
         fact_revision=1,
         effective_chunk_id=relation_version_id,
         changes=[{"change_kind": relation_change_kind, "fact_id": f"fact-{relation_version_id}"}],
-        evidence=[{"reason": "关系变化", "chunk_id": relation_version_id}],
         relation_id=f"relation-id-{relation_version_id}",
         relation_version_id=relation_version_id,
         relation_revision=1,

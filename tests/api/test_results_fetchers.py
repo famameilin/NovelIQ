@@ -956,7 +956,6 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
                         "chunk_id": 3,
                     }
                 ],
-                evidence=[{"reason": "贺铮与伯安确认父子关系", "chunk_id": 3}],
                 from_entity_id=1,
                 to_entity_id=2,
                 from_name="贺铮",

@@ -132,7 +132,6 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
         "fact_revision",
         "effective_chunk_id",
         "changes",
-        "evidence",
         "entity_id",
         "entity_name",
         "relation_id",
@@ -148,7 +147,7 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
     assert graph_change["to_char"] == scenario.rival_name
     assert graph_change["relation_type"] == "盟友"
     assert graph_change["relation_change_kind"] == "assert"
-    assert graph_change["evidence"] == [{"reason": "二人正式结盟", "chunk_id": 2}]
+    assert graph_change["changes"][0]["change_kind"] == "assert"
 
     composite_relation_node = next(node for node in payload["composite_nodes"] if node["node_type"] == "relation")
     assert set(composite_relation_node) == {

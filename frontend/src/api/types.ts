@@ -250,19 +250,6 @@ export interface GraphEdge {
   changes: Array<Record<string, unknown>>;
 }
 
-export interface GraphTextEvidence {
-  reason: string;
-  chunk_id: number;
-}
-
-export interface GraphFactEvidence {
-  fact_id: string;
-  fact_revision: number;
-  reason: string;
-}
-
-export type GraphEvidence = GraphTextEvidence | GraphFactEvidence;
-
 export interface GraphChange {
   change_id: string;
   change_kind: "state" | "relation";
@@ -273,7 +260,6 @@ export interface GraphChange {
   fact_revision: number;
   effective_chunk_id: number;
   changes: Array<Record<string, unknown>>;
-  evidence: GraphEvidence[];
   entity_id?: number | null;
   entity_name?: string | null;
   relation_id?: string | null;
@@ -344,7 +330,6 @@ export interface TimelineGraphChange {
   fact_revision: number;
   effective_chunk_id: number;
   changes: Array<Record<string, unknown>>;
-  evidence: GraphEvidence[];
   entity_id?: number | null;
   entity_name?: string | null;
   relation_id?: string | null;

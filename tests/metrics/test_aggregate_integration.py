@@ -65,7 +65,7 @@ class TestAggregateAllMetrics:
                     chunk_id=0,
                     content="退下",
                     speaker="主角",
-                    tone="强硬",
+                    tone="愤怒",
                 )
             ],
             relations=[
@@ -151,7 +151,7 @@ class TestAggregateAllMetrics:
         stats_repo = StatsRepository(self.db_session)
         result = aggregate_all_metrics(self.run_id, ann_repo, chunk_repo, stats_repo)
         assert "vocab_breadth" in result.language_style
-        assert result.language_style["tone_distribution"] == {"强硬": 1.0}
+        assert result.language_style["tone_distribution"] == {"愤怒": 1.0}
 
     def test_aggregate_traditional_culture(self) -> None:
         ann_repo = AnnotationRepository(self.db_session)

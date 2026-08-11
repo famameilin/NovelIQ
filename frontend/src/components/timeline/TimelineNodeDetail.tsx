@@ -304,9 +304,6 @@ export function TimelineNodeDetail({
                           </Badge>
                         ) : null}
                       </div>
-                      {change.evidence[0]?.reason ? (
-                        <p className="mt-2 leading-5 text-text-muted">{change.evidence[0].reason}</p>
-                      ) : null}
                     </div>
                   ))}
                 </div>

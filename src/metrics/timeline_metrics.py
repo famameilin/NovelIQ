@@ -75,7 +75,6 @@ class GraphChangeDTO:
     fact_revision: int
     effective_chunk_id: int
     changes: list[dict[str, Any]]
-    evidence: list[dict[str, Any]]
     entity_id: int | None = None
     entity_name: str | None = None
     relation_id: str | None = None
@@ -713,7 +712,6 @@ def build_timeline_atoms(
                     fact_revision=graph_change.fact_revision,
                     effective_chunk_id=graph_change.effective_chunk_id,
                     changes=list(graph_change.changes),
-                    evidence=list(graph_change.evidence),
                     entity_id=graph_change.entity_id,
                     entity_name=entity_name,
                 ),
@@ -755,7 +753,6 @@ def build_timeline_atoms(
             fact_revision=graph_change.fact_revision,
             effective_chunk_id=graph_change.effective_chunk_id,
             changes=list(graph_change.changes),
-            evidence=list(graph_change.evidence),
             relation_id=graph_change.relation_id,
             relation_version_id=graph_change.relation_version_id,
             relation_revision=graph_change.relation_revision,
@@ -1280,7 +1277,6 @@ def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
                 "fact_revision": change.fact_revision,
                 "effective_chunk_id": change.effective_chunk_id,
                 "changes": change.changes,
-                "evidence": change.evidence,
                 "entity_id": change.entity_id,
                 "entity_name": change.entity_name,
                 "relation_id": change.relation_id,
