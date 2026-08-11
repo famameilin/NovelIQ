@@ -12,7 +12,7 @@ from hashlib import sha256
 
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.schema import EvidenceList, PendingCase, TextEvidence
+from src.agents.annotation.schema import PendingCase
 from src.storage.models import GraphVersion
 from src.storage.repositories.graph import GraphRepository
 
@@ -140,14 +140,6 @@ def build_alias_pending_cases(
                     "name_a": suspicion.name_a,
                     "name_b": suspicion.name_b,
                 },
-                evidence=EvidenceList.model_validate(
-                    [
-                        TextEvidence(
-                            reason="图验证器孤儿别名检测",
-                            chunk_id=suspicion.anchor_chunk_id,
-                        )
-                    ]
-                ),
             )
         )
     return pending_cases

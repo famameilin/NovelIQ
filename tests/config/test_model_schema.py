@@ -46,7 +46,6 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
             "structured_output": "json_object",
             "max_iterations": 20,
             "total_attempts": 3,
-            "retry_backoff_seconds": 5000,
             "allow_future_context": True,
         }
     )
@@ -58,7 +57,6 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
     assert settings.structured_output == "json_object"
     assert settings.max_iterations == 20
     assert settings.total_attempts == 3
-    assert settings.retry_backoff_ms == 5000
     assert settings.allow_future_context is True
 
 
@@ -73,7 +71,6 @@ def test_parse_task_model_settings_defaults() -> None:
     assert settings.structured_output == "json_schema"
     assert settings.max_iterations == 10
     assert settings.total_attempts == 3
-    assert settings.retry_backoff_ms == 5000
     assert settings.allow_future_context is False
 
 
