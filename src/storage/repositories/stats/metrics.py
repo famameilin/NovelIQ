@@ -11,7 +11,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, ModelInteraction, TokenUsage
+from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, TokenUsage
+from src.storage.models.agent_audit import AgentInvocation, AgentTurn
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -92,6 +93,11 @@ def insert_token_usage(
     total_tokens: int,
     completion_tokens: int | None = None,
     chunk_id: int | None = None,
+    cache_read_tokens: int | None = None,
+    cost: float | None = None,
+    accounting_source: str = "reported",
+    reasoning_tokens: int | None = None,
+    agent_turn_id: int | None = None,
 ) -> int | None:
     """
     插入 token 使用记录
@@ -107,6 +113,11 @@ def insert_token_usage(
         total_tokens: 总 token 数
         completion_tokens: 完成 token 数（可选）
         chunk_id: 分块ID（可选）
+        cache_read_tokens: 缓存命中 token 数，缺失记 0（无缓存证据 = 全量计费）
+        cost: 网关返回的费用，不估算
+        accounting_source: 记账来源（reported=实报 / estimated=tiktoken 估算）
+        reasoning_tokens: 推理 token 数（可选）
+        agent_turn_id: 关联 agent_turns.id（Agent 回合行一对一，可选）
 
     Returns:
         插入记录的ID
@@ -123,8 +134,13 @@ def insert_token_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+        cache_read_tokens=cache_read_tokens if cache_read_tokens is not None else 0,
+        reasoning_tokens=reasoning_tokens,
+        cost=cost,
+        accounting_source=accounting_source,
         created_at=now,
         run_id=run_id,
+        agent_turn_id=agent_turn_id,
     )
     session.add(token_usage)
     session.flush()
@@ -225,6 +241,15 @@ def _normalize_token_usage_task_type(task_type: str) -> str:
     return task_type
 
 
+def _agent_call_type(task_type: str) -> str:
+    """2026-08-10 用于把 Agent 审计任务类型映射到 token_usage 的调用桶 call_type"""
+    if task_type == "annotation":
+        return "agent"
+    if task_type == "diagnosis":
+        return "diagnosis"
+    return task_type
+
+
 def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
     """按 task_type + call_type 获取使用量"""
     stmt = (
@@ -277,55 +302,18 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
     }
 
 
-def _normalize_model_interaction_call_key(interaction_type: str, phase: str | None) -> str:
-    """将 model_interactions 的类型映射到 token_usage 使用的调用桶 key"""
-    normalized_phase = phase or "unknown"
-    if interaction_type == "annotate":
-        return _build_call_type_key("annotation", normalized_phase)
-    if interaction_type == "dialogue_attribution":
-        return _build_call_type_key("annotation", "phase3")
-    if interaction_type == "relation_extraction":
-        return _build_call_type_key("annotation", "phase4")
-    if interaction_type == "diagnose":
-        return _build_call_type_key("diagnosis", "diagnosis")
-    if interaction_type == "stage_summary":
-        return _build_call_type_key("incremental_disambig", "stage_summary")
-    if interaction_type == "level3_query_planner":
-        # 修改时间: 2026-04-30
-        # 任务: fix-level3-query-example-review-findings
-        # 修改原因: query planner 当前仍复用 mention_extraction transport/task bucket 做 token 记账，
-        #           coverage 归桶必须同步映射，否则会把真实已记账调用误报成 unknown gap。
-        return _build_call_type_key("mention_extraction", normalized_phase)
-    if interaction_type == "disambiguate":
-        if normalized_phase in {"incremental_disambiguation", "incremental"}:
-            return _build_call_type_key("incremental_disambig", "disambiguate_characters")
-        if normalized_phase in {"final_disambiguation", "full_disambiguation"}:
-            return _build_call_type_key("full_disambig", "disambiguate_characters")
-        if normalized_phase in {"reselect_canonicals", "final_canonical_reselect", "canonical_reselect"}:
-            return _build_call_type_key("full_disambig", "reselect_canonicals")
-        return _build_call_type_key("unknown_disambiguate", normalized_phase)
-    return _build_call_type_key(f"unknown_{interaction_type}", normalized_phase)
-
-
-def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[str, int]:
-    """统计真实成功的模型调用次数，供 token coverage 对比使用"""
+def _fetch_agent_turn_call_counts(session: Session, run_id: str) -> dict[str, int]:
+    """2026-08-10 用于统计新审计表中真实成功的 Agent 模型回合数"""
     stmt = (
-        select(
-            ModelInteraction.interaction_type,
-            ModelInteraction.phase,
-            ModelInteraction.status,
-            func.count().label("call_count"),
-        )
-        .where(ModelInteraction.run_id == run_id)
-        .group_by(ModelInteraction.interaction_type, ModelInteraction.phase, ModelInteraction.status)
+        select(AgentInvocation.task_type, func.count().label("turn_count"))
+        .join(AgentTurn, AgentTurn.invocation_id == AgentInvocation.id)
+        .where(AgentInvocation.run_id == run_id, AgentTurn.status == "success")
+        .group_by(AgentInvocation.task_type)
     )
-    result = session.execute(stmt).fetchall()
     aggregated: dict[str, int] = {}
-    for row in result:
-        if row.status != "success":
-            continue
-        key = _normalize_model_interaction_call_key(row.interaction_type, row.phase)
-        aggregated[key] = aggregated.get(key, 0) + int(row.call_count or 0)
+    for row in session.execute(stmt).fetchall():
+        key = _build_call_type_key(row.task_type, _agent_call_type(row.task_type))
+        aggregated[key] = aggregated.get(key, 0) + int(row.turn_count or 0)
     return aggregated
 
 
@@ -334,13 +322,13 @@ def _detect_token_coverage_gaps(
     run_id: str,
     by_call_type: dict[str, Any],
 ) -> list[str]:
-    """比较真实调用与已记账调用，找出 token 覆盖缺口"""
-    interaction_counts = _fetch_model_interaction_call_counts(session, run_id)
+    """比较真实 Agent 回合与已记账调用，找出 token 覆盖缺口"""
+    agent_turn_counts = _fetch_agent_turn_call_counts(session, run_id)
     gaps: list[str] = []
-    for call_key in sorted(interaction_counts.keys()):
-        interaction_call_count = int(interaction_counts.get(call_key, 0) or 0)
+    for call_key in sorted(agent_turn_counts.keys()):
+        agent_call_count = int(agent_turn_counts.get(call_key, 0) or 0)
         token_call_count = int(by_call_type.get(call_key, {}).get("call_count", 0) or 0)
-        if token_call_count < interaction_call_count:
+        if token_call_count < agent_call_count:
             gaps.append(call_key)
     return gaps
 

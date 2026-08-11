@@ -428,8 +428,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         return
 
     statements = [
-        "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
-        "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
@@ -652,6 +650,62 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
                 )
 
 
+def _assert_agent_audit_contract_schema(engine: Engine) -> None:
+    """
+    2026-08-10 用于阻止旧审计库直接启动
+
+    说明: 本次审计重构不兼容旧库：model_interactions 必须已删除、
+    agent_invocations/agent_turns/agent_tool_calls 必须存在、
+    token_usage 必须已按新结构重建。不增加运行时兼容建表分支，
+    旧库未执行新 DDL 时直接启动失败。
+    """
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    required_tables = {
+        "agent_invocations": {"id", "run_id", "task_type", "attempt_number", "status"},
+        "agent_turns": {
+            "id",
+            "invocation_id",
+            "turn_index",
+            "raw_response",
+            "context_summary",
+            "model_ms",
+            "request_messages",
+            "timing_notes",
+        },
+        "agent_tool_calls": {"id", "turn_id", "tool_name", "request_args", "status"},
+    }
+    with engine.begin() as connection:
+        if _table_exists(connection, "model_interactions"):
+            raise RuntimeError(
+                "model_interactions 仍存在，请先执行 scripts/db/migrate_agent_audit.py "
+                "删除旧审计表后启动服务"
+            )
+        for table_name, required in required_tables.items():
+            if not _table_exists(connection, table_name):
+                raise RuntimeError(
+                    f"{table_name} 表不存在，请先执行 scripts/db/migrate_agent_audit.py "
+                    "创建新审计表后启动服务"
+                )
+            actual = _get_table_columns(connection, table_name)
+            missing = sorted(required - actual)
+            if missing:
+                raise RuntimeError(
+                    f"{table_name} is missing agent audit contract columns: {missing}. "
+                    "请先执行 scripts/db/migrate_agent_audit.py 重建审计表后启动服务"
+                )
+        if _table_exists(connection, "token_usage"):
+            actual = _get_table_columns(connection, "token_usage")
+            missing = sorted({"agent_turn_id", "reasoning_tokens"} - actual)
+            if missing:
+                raise RuntimeError(
+                    "token_usage 仍是旧结构，缺少 agent_turn_id/reasoning_tokens: "
+                    f"{missing}. 请先执行 scripts/db/migrate_agent_audit.py 重建 token_usage"
+                )
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
@@ -706,6 +760,7 @@ def init_db() -> None:
     _ensure_runtime_schema(engine)
     _assert_focus_contract_schema(engine)
     _assert_annotation_contract_schema(engine)
+    _assert_agent_audit_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 

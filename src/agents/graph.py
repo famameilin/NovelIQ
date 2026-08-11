@@ -9,9 +9,10 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Collection, Mapping
 from functools import partial
-from typing import Annotated, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 from langchain_core.messages import (
     AIMessage,
@@ -22,9 +23,11 @@ from langchain_core.messages import (
 )
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
 
 from src.agents.stream import AgentStream, emit_tool_results, run_model_call
+
+if TYPE_CHECKING:
+    from src.agents.audit.observer import AgentTurnObserver
 
 
 class AgentLoopState(TypedDict):
@@ -157,19 +160,51 @@ def _build_finalize_node(
     revision_response_model: type[Any] | None = None,
     revision_payload_field: str | None = None,
     stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
 ):
-    """构造 finalize 节点：提取 finish 工具参数并校验结构化输出"""
+    """构造 finalize 节点：提取 finish 工具参数并校验结构化输出，审计提交工具调用并闭合回合"""
 
     async def finalize_node(state: AgentLoopState) -> dict[str, Any]:
         """2026-08-02 用于只校验最新 Agent 消息中的唯一 finish 调用并阻止旧调用复用"""
         if stream is not None:
             await stream.thinking("校验最终结构化输出...")
+        node_started_ns = time.perf_counter_ns()
         last_message = state["messages"][-1]
         tool_calls = last_message.tool_calls if isinstance(last_message, AIMessage) else []
         submission_tool_names = {tool_name}
         if revision_tool_name is not None:
             submission_tool_names.add(revision_tool_name)
         finish_calls = [call for call in tool_calls if call.get("name") in submission_tool_names]
+
+        def close_submission_audit(
+            *,
+            call: Mapping[str, Any] | None,
+            status: str = "success",
+            error: str | None = None,
+        ) -> None:
+            """2026-08-11 用于记录提交工具调用审计并在任何收口路径闭合回合计时"""
+            if observer is None:
+                return
+            if call is not None:
+                observer.record_tool_call(
+                    call_index=0,
+                    tool_name=str(call.get("name")),
+                    request_args=dict(call.get("args") or {}),
+                    response=(
+                        {"accepted": True}
+                        if status == "success"
+                        else {"accepted": False, "error": error}
+                    ),
+                    receipt=None,
+                    status=status,
+                    error=error,
+                    tool_duration_ms=max(
+                        0,
+                        round((time.perf_counter_ns() - node_started_ns) / 1_000_000),
+                    ),
+                    started_ns=node_started_ns,
+                )
+            observer.close_turn()
 
         if len(finish_calls) != 1 or len(tool_calls) != 1:
             error_msg = (
@@ -178,6 +213,11 @@ def _build_finalize_node(
                 else f"agent 未调用 {tool_name} 工具提交结果"
             )
             attempts = int(state.get("attempts") or 0) + 1
+            close_submission_audit(
+                call=finish_calls[0] if finish_calls else None,
+                status="error",
+                error=error_msg,
+            )
             if attempts >= max_attempts:
                 return {"attempts": attempts, "error": error_msg}
             can_revise = state.get("candidate") is not None and revision_tool_name is not None
@@ -226,6 +266,11 @@ def _build_finalize_node(
         except Exception as exc:  # noqa: BLE001
             error_msg = f"finish 输出校验失败: {exc}"
             attempts = int(state.get("attempts") or 0) + 1
+            close_submission_audit(
+                call=submission_call,
+                status="error",
+                error=error_msg,
+            )
             if attempts >= max_attempts:
                 return {"attempts": attempts, "error": error_msg}
             can_revise = candidate_for_state is not None and revision_tool_name is not None
@@ -246,6 +291,7 @@ def _build_finalize_node(
                 update["candidate"] = candidate_for_state
             return update
 
+        close_submission_audit(call=submission_call, status="success")
         if stream is not None:
             await stream.output("最终结果已生成并通过校验")
         return {"output": parsed.model_dump(mode="json"), "error": None}
@@ -253,8 +299,15 @@ def _build_finalize_node(
     return finalize_node
 
 
-def _build_agent_node(llm: Any, tools: list[Any], first_hint: str, stream: AgentStream | None = None):
-    """构造 agent 节点：绑定工具后调用 LLM（支持流式过程推送）"""
+def _build_agent_node(
+    llm: Any,
+    tools: list[Any],
+    first_hint: str,
+    stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
+    context_summary: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+):
+    """构造 agent 节点：绑定工具后调用 LLM（支持流式过程推送与回合审计）"""
 
     async def agent_node(state: AgentLoopState) -> dict[str, Any]:
         model_with_tools = llm.bind_tools(tools)
@@ -263,36 +316,124 @@ def _build_agent_node(llm: Any, tools: list[Any], first_hint: str, stream: Agent
             messages = [HumanMessage(content=first_hint)] + messages
         if stream is not None:
             await stream.thinking("正在推理，规划下一步动作...")
-        response = await run_model_call(model_with_tools, messages, stream)
+        turn_started_ns = time.perf_counter_ns()
+        summary = (
+            context_summary(state) if context_summary is not None else {"phase": "agent_loop"}
+        )
+
+        def on_turn_complete(message: AIMessage, timing: Any) -> None:
+            """2026-08-10 用于在模型流结束后写入回合审计"""
+            if observer is None:
+                return
+            observer.record_turn(
+                context_summary=summary,
+                request_messages=messages,
+                response_message=message,
+                timing=timing,
+                started_ns=turn_started_ns,
+            )
+
+        try:
+            response = await run_model_call(
+                model_with_tools,
+                messages,
+                stream,
+                on_turn_complete=on_turn_complete,
+            )
+        except Exception as exc:  # noqa: BLE001
+            if observer is not None:
+                observer.record_failed_turn(
+                    context_summary=summary,
+                    error=str(exc),
+                    started_ns=turn_started_ns,
+                    request_messages=messages,
+                )
+            raise
         return {"messages": [response]}
 
     return agent_node
 
 
-def _build_tools_node(tool_node: ToolNode, stream: AgentStream | None = None):
+def _invoke_tool(tool_map: dict[str, Any], call: Any) -> Any:
+    """2026-08-10 用于按模型工具调用执行同步或异步 LangChain 工具"""
+    name = str(call.get("name"))
+    candidate = tool_map.get(name)
+    if candidate is None:
+        raise ValueError(f"未知 agent 工具: {name}")
+    return candidate.ainvoke(dict(call.get("args") or {}))
+
+
+def _build_tools_node(
+    tool_map: dict[str, Any],
+    *,
+    observer: AgentTurnObserver | None = None,
+    stream: AgentStream | None = None,
+):
     """
-    2026-08-04 用于在执行普通工具后累计真实工具调用次数
+    2026-08-10 用于执行工具并累计真实工具调用次数；启用审计时逐调用独立记录耗时
     """
 
     async def run_tools(state: AgentLoopState) -> dict[str, Any]:
-        """
-        2026-08-04 用于执行 LangGraph ToolNode 并更新工具循环计数
-        """
-        update = await tool_node.ainvoke(state)
+        """2026-08-10 用于按调用顺序执行工具并更新工具循环计数"""
         last_message = state["messages"][-1]
-        call_count = len(last_message.tool_calls) if isinstance(last_message, AIMessage) else 0
+        calls = list(last_message.tool_calls) if isinstance(last_message, AIMessage) else []
+        messages: list[ToolMessage] = []
+        for call_index, call in enumerate(calls):
+            name = str(call.get("name"))
+            started_ns = time.perf_counter_ns()
+            if call.get("truncated"):
+                result = (
+                    f"Error: 工具 {name} 参数不完整（流传输截断，参数 JSON 在对象中间被切断），"
+                    "本次未执行工具，请重新提交完整参数。"
+                )
+                status = "error"
+                error: str | None = result
+            else:
+                try:
+                    result = await _invoke_tool(tool_map, call)
+                    status = "success"
+                    error = None
+                except Exception as exc:  # noqa: BLE001
+                    result = f"Error: {exc}"
+                    status = "error"
+                    error = str(exc)
+            tool_duration_ms = max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000))
+            if observer is not None:
+                observer.record_tool_call(
+                    call_index=call_index,
+                    tool_name=name,
+                    request_args=dict(call.get("args") or {}),
+                    response={"result": str(result)[:2000]},
+                    receipt=None,
+                    status=status,
+                    error=error,
+                    tool_duration_ms=tool_duration_ms,
+                    started_ns=started_ns,
+                )
+            messages.append(
+                ToolMessage(
+                    content=str(result),
+                    tool_call_id=str(call.get("id", "")),
+                    name=name,
+                )
+            )
+        if observer is not None:
+            observer.close_turn()
         if stream is not None:
-            tool_messages = update.get("messages") or []
-            await emit_tool_results(stream, tool_messages)
+            await emit_tool_results(stream, messages)
         return {
-            **dict(update),
-            "tool_iterations": int(state.get("tool_iterations") or 0) + call_count,
+            "messages": messages,
+            "tool_iterations": int(state.get("tool_iterations") or 0) + len(calls),
         }
 
     return run_tools
 
 
-def _build_tool_limit_node(max_tool_iterations: int):
+def _build_tool_limit_node(
+    max_tool_iterations: int,
+    *,
+    observer: AgentTurnObserver | None = None,
+):
     """
     2026-08-04 用于在工具调用达到配置上限前终止 Agent 循环
     """
@@ -301,6 +442,8 @@ def _build_tool_limit_node(max_tool_iterations: int):
         """
         2026-08-04 用于返回包含已执行次数的可审计循环上限错误
         """
+        if observer is not None:
+            observer.close_turn()
         return {
             "error": (
                 f"agent 工具调用超过上限 {max_tool_iterations}，"
@@ -325,6 +468,8 @@ def build_agent_graph(
     revision_response_model: type[Any] | None = None,
     max_tool_iterations: int | None = None,
     stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
+    context_summary: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
 ) -> Any:
     """构建通用工具循环 agent 图"""
     graph = StateGraph(AgentLoopState)
@@ -341,13 +486,27 @@ def build_agent_graph(
         {finish_tool_name, revision_tool_name} if revision_tool_name is not None else {finish_tool_name}
     )
 
-    graph.add_node("agent", _build_agent_node(llm, tools, first_hint, stream=stream))
-    raw_tool_node = ToolNode(tools) if handle_tool_errors is None else ToolNode(
-        tools,
-        handle_tool_errors=handle_tool_errors,
+    graph.add_node(
+        "agent",
+        _build_agent_node(
+            llm,
+            tools,
+            first_hint,
+            stream=stream,
+            observer=observer,
+            context_summary=context_summary,
+        ),
     )
-    graph.add_node("tools", _build_tools_node(raw_tool_node, stream=stream))
-    graph.add_node("tool_limit", _build_tool_limit_node(resolved_max_tool_iterations))
+    tool_map = {candidate.name: candidate for candidate in tools}
+    graph.add_node(
+        "tools",
+        _build_tools_node(
+            tool_map,
+            observer=observer,
+            stream=stream,
+        ),
+    )
+    graph.add_node("tool_limit", _build_tool_limit_node(resolved_max_tool_iterations, observer=observer))
     graph.add_node(
         "finalize",
         _build_finalize_node(
@@ -360,6 +519,7 @@ def build_agent_graph(
             revision_response_model,
             revision_payload_field,
             stream=stream,
+            observer=observer,
         ),
     )
 

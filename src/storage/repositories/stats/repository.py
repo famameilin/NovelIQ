@@ -60,6 +60,11 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         total_tokens: int,
         completion_tokens: int | None = None,
         chunk_id: int | None = None,
+        cache_read_tokens: int | None = None,
+        cost: float | None = None,
+        accounting_source: str = "reported",
+        reasoning_tokens: int | None = None,
+        agent_turn_id: int | None = None,
     ) -> int | None:
         """插入 token 使用记录"""
         return metrics.insert_token_usage(
@@ -73,6 +78,11 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
             total_tokens,
             completion_tokens,
             chunk_id,
+            cache_read_tokens,
+            cost,
+            accounting_source,
+            reasoning_tokens,
+            agent_turn_id,
         )
 
     def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> dict[str, Any]:

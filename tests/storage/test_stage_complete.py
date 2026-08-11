@@ -43,7 +43,7 @@ def _create_chunks(count: int = 3) -> list[Chunk]:
             text=f"测试文本{i}" * 100,
             start=i * 100,
             end=(i + 1) * 100,
-            chapter_index=i,
+            chapter_id=i + 1,
         )
         for i in range(count)
     ]

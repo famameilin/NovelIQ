@@ -1,18 +1,20 @@
 """
 诊断 Agent 运行入口（LangGraph 工具化自主取证）
+
+审计: 每次诊断运行开启 agent_invocations 行，模型回合与工具调用通过
+AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计记录。
 """
 
 from __future__ import annotations
 
-import json
 import time
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.agents.stream import AgentStream
-from src.agents.usage import record_agent_token_usage
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
@@ -23,6 +25,20 @@ from .tools import build_diagnosis_tools
 
 class DiagnosisAgentRunError(RuntimeError):
     """诊断 agent 运行失败"""
+
+
+def _model_provider(llm: Any) -> str:
+    """2026-08-10 用于从模型地址稳定区分本地与云端审计来源"""
+    raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
+    base_url = str(raw_base_url)
+    if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url:
+        return "cloud"
+    return "local"
+
+
+def _model_name(llm: Any) -> str | None:
+    """2026-08-10 用于从模型对象稳定读取审计用模型名"""
+    return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
 def _validate_topic_label_count(
@@ -71,94 +87,16 @@ def _validate_diagnosis_submission(
     evidence_ledger.require_evidence()
 
 
-def _serialize_diagnosis_messages(messages: list[Any]) -> list[dict[str, str]]:
-    """
-    2026-08-04 用于将诊断 Agent 消息与工具调用转为稳定审计文本
-    """
-    serialized: list[dict[str, str]] = []
-    for message in messages:
-        payload: dict[str, Any] = {"content": getattr(message, "content", "")}
-        tool_calls = getattr(message, "tool_calls", None)
-        if tool_calls:
-            payload["tool_calls"] = tool_calls
-        tool_name = getattr(message, "name", None)
-        if tool_name:
-            payload["tool_name"] = tool_name
-        serialized.append(
-            {
-                "role": str(getattr(message, "type", "unknown")),
-                "content": json.dumps(payload, ensure_ascii=False, default=str),
-            }
-        )
-    return serialized
-
-
-def _record_diagnosis_interactions(
-    *,
-    session: Session,
-    run_id: str,
-    novel_id: str,
-    llm: Any,
-    messages: list[Any],
-    raw_output: dict[str, Any],
+def _context_summary(
     evidence_ledger: DiagnosisEvidenceLedger,
-    elapsed: float,
-    status: str = "success",
-    error_message: str | None = None,
-) -> None:
-    """
-    2026-08-04 用于逐次记录诊断 Agent 模型响应、证据来源与 Provider Token 用量
-    """
-    try:
-        from src.models.interactions import record_model_interaction
-
-        serialized_messages = _serialize_diagnosis_messages(messages)
-        serialized_messages.append(
-            {
-                "role": "evidence_audit",
-                "content": json.dumps(evidence_ledger.to_dict(), ensure_ascii=False),
-            }
-        )
-        model_responses = [message for message in messages if getattr(message, "type", None) == "ai"]
-        record_count = max(1, len(model_responses))
-        raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
-        base_url = str(raw_base_url)
-        provider = "cloud" if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url else "local"
-        for attempt_number in range(1, record_count + 1):
-            response_text = json.dumps(raw_output, ensure_ascii=False)
-            if model_responses and attempt_number < record_count:
-                response_text = json.dumps(
-                    _serialize_diagnosis_messages([model_responses[attempt_number - 1]]),
-                    ensure_ascii=False,
-                )
-            record_model_interaction(
-                run_id=run_id,
-                chunk_id=None,
-                interaction_type="diagnose",
-                phase="diagnosis",
-                attempt_number=attempt_number,
-                messages=serialized_messages,
-                response_text=response_text,
-                thinking_content=None,
-                duration_ms=int(elapsed * 1000),
-                model_name=getattr(llm, "model_name", None),
-                model_provider=provider,
-                status="success" if model_responses else status,
-                error_message=error_message,
-                session=session,
-            )
-        record_agent_token_usage(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            task_type="diagnosis",
-            call_type="diagnosis",
-            chunk_id=None,
-            llm=llm,
-            messages=messages,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("failed to record diagnosis agent interactions: {}", exc)
+) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
+    """2026-08-10 用于生成诊断回合的确定性上下文摘要"""
+    return lambda state: {
+        "phase": "diagnosis",
+        "attempts": int(state.get("attempts") or 0),
+        "tool_iterations": int(state.get("tool_iterations") or 0),
+        "evidence": evidence_ledger.to_dict(),
+    }
 
 
 async def run_diagnosis_agent(
@@ -169,6 +107,7 @@ async def run_diagnosis_agent(
     novel_title: str | None = None,
     llm: Any | None = None,
     stream: AgentStream | None = None,
+    audit_recorder: Any | None = None,
 ) -> CloudAnalysis:
     """
     运行诊断 agent（工具化自主取证）
@@ -176,8 +115,11 @@ async def run_diagnosis_agent(
     从数据库按需查询证据（聚合指标/转折素材/人物/主题/图谱信号），
     自主决定查看哪些证据，最终输出 CloudAnalysis
     """
+    from src.agents.audit.observer import AgentTurnObserver
+    from src.agents.audit.recorder import AgentAuditRecorder
     from src.agents.graph import build_agent_graph
     from src.config import settings
+    from src.storage.db import get_session_factory
 
     start_time = time.time()
 
@@ -199,6 +141,27 @@ async def run_diagnosis_agent(
     evidence_ledger = DiagnosisEvidenceLedger()
     tools = build_diagnosis_tools(session, run_id, evidence_ledger=evidence_ledger)
     max_attempts = max(1, settings.models.diagnosis.max_iterations)
+    recorder = audit_recorder or AgentAuditRecorder(get_session_factory())
+    model_name = _model_name(llm)
+    model_provider = _model_provider(llm)
+    invocation_id = recorder.start_invocation(
+        run_id=run_id,
+        task_type="diagnosis",
+        chapter_id=None,
+        attempt_number=1,
+        model_name=model_name,
+        model_provider=model_provider,
+    )
+    observer = AgentTurnObserver(
+        recorder,
+        invocation_id=invocation_id,
+        run_id=run_id,
+        novel_id=novel_id,
+        task_type="diagnosis",
+        call_type="diagnosis",
+        model_name=model_name or "unknown",
+        model_provider=model_provider,
+    )
     graph = build_agent_graph(
         llm,
         tools,
@@ -211,6 +174,8 @@ async def run_diagnosis_agent(
             evidence_ledger=evidence_ledger,
         ),
         stream=stream,
+        observer=observer,
+        context_summary=_context_summary(evidence_ledger),
     )
 
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -233,55 +198,19 @@ async def run_diagnosis_agent(
         result_state = cast(dict[str, Any], await graph.ainvoke(initial_state))
     except Exception as exc:  # noqa: BLE001
         logger.error("diagnosis agent graph failed: run_id={} error={}", run_id, exc)
-        _record_diagnosis_interactions(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            llm=llm,
-            messages=initial_messages,
-            raw_output={"error": str(exc)},
-            evidence_ledger=evidence_ledger,
-            elapsed=time.time() - start_time,
-            status="error",
-            error_message=str(exc),
-        )
+        recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise DiagnosisAgentRunError(f"诊断 agent 运行失败: {exc}") from exc
-
-    result_messages = result_state.get("messages")
-    messages = result_messages if isinstance(result_messages, list) else initial_messages
 
     if result_state.get("error"):
         error = str(result_state["error"])
         logger.error("diagnosis agent finalize error: run_id={} error={}", run_id, error)
-        _record_diagnosis_interactions(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            llm=llm,
-            messages=messages,
-            raw_output={"error": error},
-            evidence_ledger=evidence_ledger,
-            elapsed=time.time() - start_time,
-            status="error",
-            error_message=error,
-        )
+        recorder.finish_invocation(invocation_id, status="error", final_error=error)
         raise DiagnosisAgentRunError(error)
 
     raw_output = result_state.get("output")
     if raw_output is None:
         error = "诊断 agent 未产出结果"
-        _record_diagnosis_interactions(
-            session=session,
-            run_id=run_id,
-            novel_id=novel_id,
-            llm=llm,
-            messages=messages,
-            raw_output={"error": error},
-            evidence_ledger=evidence_ledger,
-            elapsed=time.time() - start_time,
-            status="error",
-            error_message=error,
-        )
+        recorder.finish_invocation(invocation_id, status="error", final_error=error)
         raise DiagnosisAgentRunError(error)
 
     analysis = _finalize_diagnosis_result(
@@ -290,16 +219,7 @@ async def run_diagnosis_agent(
         foreshadow_expectation=foreshadow_expectation,
     )
     elapsed = time.time() - start_time
-    _record_diagnosis_interactions(
-        session=session,
-        run_id=run_id,
-        novel_id=novel_id,
-        llm=llm,
-        messages=messages,
-        raw_output=raw_output,
-        evidence_ledger=evidence_ledger,
-        elapsed=elapsed,
-    )
+    recorder.finish_invocation(invocation_id, status="success")
     logger.info(
         "diagnosis agent complete: run_id={} genre_labels={} style_labels={} elapsed={:.2f}s",
         run_id,

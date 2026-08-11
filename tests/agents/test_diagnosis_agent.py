@@ -15,7 +15,6 @@ from langchain_core.messages import AIMessage
 from src.agents.diagnosis.runner import (
     DiagnosisAgentRunError,
     _finalize_diagnosis_result,
-    _record_diagnosis_interactions,
     _validate_topic_label_count,
     run_diagnosis_agent,
 )
@@ -218,6 +217,85 @@ async def test_retry_answers_every_pending_tool_call_with_tool_message() -> None
 
 
 @pytest.mark.asyncio
+async def test_truncated_tool_call_skips_invoke_and_returns_error_tool_message() -> None:
+    """
+    2026-08-11 用于验证通用图对截断标记调用不执行业务工具，
+    直接生成错误 ToolMessage 回喂模型，模型修正后正常完成。
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    tool = MagicMock()
+    tool.name = "get_aggregate_signals"
+    tool.ainvoke = AsyncMock()
+
+    class _TruncatedThenFinishLLM(_FinishOnlyLLM):
+        def __init__(self, payload: dict) -> None:
+            super().__init__(payload)
+            self.captured_messages: list[list] = []
+
+        async def ainvoke(self, messages):
+            self.calls += 1
+            self.captured_messages.append(list(messages))
+            if self.calls == 1:
+                # 聚合器在运行时以属性赋值挂载截断标记（绕过 create_tool_call 重建）
+                message = AIMessage(content="")
+                message.tool_calls = [
+                    {
+                        "name": "get_aggregate_signals",
+                        "args": {},
+                        "id": "get-signals",
+                        "type": "tool_call",
+                        "truncated": True,
+                        "truncated_args": '{"metric": "sig',
+                    }
+                ]
+                return message
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "finish",
+                        "args": {"analysis": self.payload},
+                        "id": "finish",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+
+    llm = _TruncatedThenFinishLLM(_analysis_payload())
+    graph = build_agent_graph(
+        llm,
+        [tool],
+        max_attempts=5,
+        response_model=CloudAnalysis,
+        first_hint="完成诊断",
+    )
+
+    result = await graph.ainvoke(
+        {
+            "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
+            "attempts": 0,
+            "output": None,
+            "error": None,
+        }
+    )
+
+    assert result.get("error") is None
+    assert llm.calls == 2
+    tool.ainvoke.assert_not_awaited()
+    second_round = llm.captured_messages[1]
+    error_messages = [
+        str(message.content)
+        for message in second_round
+        if getattr(message, "type", "") == "tool" and "Error" in str(message.content)
+    ]
+    assert len(error_messages) == 1
+    assert "截断" in error_messages[0]
+
+
+@pytest.mark.asyncio
 async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
     """run_diagnosis_agent 装配诊断工具并输出 CloudAnalysis"""
     mock_session = MagicMock()
@@ -238,6 +316,7 @@ async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
             run_id="run-1",
             novel_id="n1",
             llm=llm,
+            audit_recorder=MagicMock(),
         )
 
     assert isinstance(analysis, CloudAnalysis)
@@ -263,6 +342,7 @@ async def test_run_diagnosis_agent_rejects_finish_without_evidence_tool() -> Non
                 run_id="run-1",
                 novel_id="n1",
                 llm=_FinishOnlyLLM(_analysis_payload()),
+                audit_recorder=MagicMock(),
             )
 
 
@@ -294,31 +374,22 @@ def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> Non
     assert finalized.foreshadow_expectation == 0.41
 
 
-def test_record_diagnosis_interactions_records_each_model_response() -> None:
+def test_diagnosis_context_summary_carries_evidence_keys() -> None:
     """
-    2026-08-04 用于保证诊断多轮取证与 finish 都形成独立模型交互审计
+    2026-08-10 用于保证诊断回合的确定性上下文摘要携带证据工具键
     """
     from src.agents.diagnosis.evidence import DiagnosisEvidenceLedger
+    from src.agents.diagnosis.runner import _context_summary
 
     ledger = DiagnosisEvidenceLedger(tool_calls=["get_aggregate_signals"])
-    llm = MagicMock(model_name="diagnosis-test")
-    llm.base_url = "http://localhost:1234/v1"
-    messages = [AIMessage(content="取证"), AIMessage(content="完成")]
+    summary = _context_summary(ledger)(
+        {"attempts": 2, "tool_iterations": 3, "output": None, "error": None}
+    )
 
-    with patch("src.models.interactions.record_model_interaction") as record_interaction:
-        _record_diagnosis_interactions(
-            session=MagicMock(),
-            run_id="run-1",
-            novel_id="n1",
-            llm=llm,
-            messages=messages,
-            raw_output=_analysis_payload(),
-            evidence_ledger=ledger,
-            elapsed=0.1,
-        )
-
-    assert record_interaction.call_count == 2
-    assert [call.kwargs["attempt_number"] for call in record_interaction.call_args_list] == [1, 2]
+    assert summary["phase"] == "diagnosis"
+    assert summary["attempts"] == 2
+    assert summary["tool_iterations"] == 3
+    assert summary["evidence"] == {"tool_calls": ["get_aggregate_signals"]}
 
 
 def test_diagnosis_prompt_matches_current_schema_semantics() -> None:
