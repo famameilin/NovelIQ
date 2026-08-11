@@ -11,6 +11,7 @@ from src.storage.models import GraphRelation
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
+    identity_relation_output,
     persist_chapter_annotation,
     relation_fact,
 )
@@ -139,3 +140,50 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
     assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [
         (relation_id, False)
     ]
+
+
+def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
+    """2026-08-09 用于验证同一人物关系在 authority 视图中归并别名实体"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["伯安与猴子同游"],
+        title="authority 消歧合并",
+    )
+    _persist_authority_chapter(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[
+            character_fact(chunk_id=0, name="伯安", action="同游"),
+            character_fact(chunk_id=0, name="贺重明", action="同游"),
+            character_fact(chunk_id=0, name="猴子", action="同游"),
+            character_fact(chunk_id=0, name="侯飞白", action="同游"),
+        ],
+        relations=[
+            relation_fact(
+                chunk_id=0,
+                from_name="伯安",
+                to_name="猴子",
+                relation_type="友情",
+            ),
+            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chunk_id=0),
+            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chunk_id=0),
+        ],
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    level1 = service.build_level1_snapshot(run_id)
+    graph_view = service.build_graph_view(run_id)
+    representative = service.build_representative_graph_view(run_id)
+
+    canonical_names = {row.name for row in level1.canonical_entities}
+    assert canonical_names == {"伯安", "猴子"}
+    by_name = {row.name: row for row in level1.canonical_entities}
+    assert by_name["伯安"].aliases == ["贺重明"]
+    assert by_name["猴子"].aliases == ["侯飞白"]
+    assert [(row.from_name, row.to_name, row.relation_type) for row in level1.confirmed_relations] == [
+        ("伯安", "猴子", "友情")
+    ]
+    assert {row.name for row in graph_view.participant_states} == {"伯安", "猴子"}
+    assert {row.name for row in representative.canonical_entities} == {"伯安", "猴子"}

@@ -15,6 +15,7 @@ LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "primary_role_function",
         "status",
         "source_confidence",
+        "aliases",
     ),
     "confirmed_relations": (
         "from_name",
@@ -52,6 +53,7 @@ class CanonicalEntity:
     status: str = "active"
     source_confidence: float | None = None
     source: str = "graph_entities"
+    aliases: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -452,6 +454,7 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "primary_role_function",
         "status",
         "source_confidence",
+        "aliases",
     ),
     "current_relations": (
         "relation_id",

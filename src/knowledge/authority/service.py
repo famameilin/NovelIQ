@@ -7,6 +7,7 @@ from src.models.local.character_reference_policy import is_global_character_surf
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
 
+from .alias import AliasResolution, build_alias_resolution
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from .types import (
     ActiveEntityContext,
@@ -42,12 +43,14 @@ class KnowledgeGraphAuthorityService:
         """2026-08-07 用于提供最新章节实体与有效关系的最小只读视图"""
         entities = self._graph_repo.fetch_latest_entities(run_id)
         relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
+        resolution = self._build_alias_resolution(relations, entities)
         return Level1AuthoritySnapshot(
-            canonical_entities=self._build_canonical_entities(entities),
-            confirmed_relations=self._build_confirmed_relations(relations),
+            canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
+            confirmed_relations=self._build_confirmed_relations(relations, resolution=resolution),
             entity_types=[
                 EntityTypeFact(name=entity.name, entity_type=entity.entity_type)
                 for entity in entities
+                if int(entity.entity_id) not in resolution.representative_by_alias
             ],
         )
 
@@ -55,7 +58,13 @@ class KnowledgeGraphAuthorityService:
         """2026-08-07 用于提供章节关系版本变化与角色状态生命周期"""
         self.assert_graph_ready(run_id)
         characters = self._graph_repo.fetch_latest_entities(run_id, entity_type="character")
-        character_ids = {entity.entity_id for entity in characters}
+        relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
+        resolution = self._build_alias_resolution(relations, characters)
+        character_ids = {
+            int(entity.entity_id)
+            for entity in characters
+            if int(entity.entity_id) not in resolution.representative_by_alias
+        }
         changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
         graph_changes = [
             change
@@ -71,7 +80,7 @@ class KnowledgeGraphAuthorityService:
                 and change.relation_semantics != "same_character"
             )
         ]
-        canonical_entities = self._build_canonical_entities(characters)
+        canonical_entities = self._build_canonical_entities(characters, resolution=resolution)
         return TimelineAuthorityView(
             character_entities=canonical_entities,
             entity_lifecycles=[
@@ -84,6 +93,7 @@ class KnowledgeGraphAuthorityService:
                     status=str(entity.state.get("status") or "active"),
                 )
                 for entity in characters
+                if int(entity.entity_id) not in resolution.representative_by_alias
             ],
             graph_changes=self._build_graph_changes(graph_changes),
         )
@@ -131,8 +141,9 @@ class KnowledgeGraphAuthorityService:
         entities = self._graph_repo.fetch_latest_entities(run_id)
         current_relations = self._graph_repo.fetch_latest_relations(run_id, active_only=False)
         changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
+        resolution = self._build_alias_resolution(current_relations, entities)
         return ExportGraphAuthorityView(
-            canonical_entities=self._build_canonical_entities(entities),
+            canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
             current_relations=self._build_export_relation_snapshots(current_relations),
             graph_changes=self._build_graph_changes(changes),
         )
@@ -143,11 +154,12 @@ class KnowledgeGraphAuthorityService:
         entities = self._graph_repo.fetch_latest_entities(run_id)
         relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
         changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
+        resolution = self._build_alias_resolution(relations, entities)
         return GraphAuthorityView(
-            canonical_entities=self._build_canonical_entities(entities),
-            confirmed_relations=self._build_confirmed_relations(relations),
+            canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
+            confirmed_relations=self._build_confirmed_relations(relations, resolution=resolution),
             graph_changes=self._build_graph_changes(changes),
-            participant_states=self._build_participant_states(entities),
+            participant_states=self._build_participant_states(entities, resolution=resolution),
         )
 
     def build_representative_graph_view(self, run_id: str) -> GraphAuthorityView:
@@ -175,11 +187,12 @@ class KnowledgeGraphAuthorityService:
             if change.change_kind != "relation"
             or change.relation_semantics != "same_character"
         ]
+        resolution = self._build_alias_resolution(relations, entities)
         return GraphAuthorityView(
-            canonical_entities=self._build_canonical_entities(entities),
-            confirmed_relations=self._build_confirmed_relations(relations),
+            canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
+            confirmed_relations=self._build_confirmed_relations(relations, resolution=resolution),
             graph_changes=self._build_graph_changes(graph_changes),
-            participant_states=self._build_participant_states(entities),
+            participant_states=self._build_participant_states(entities, resolution=resolution),
         )
 
     def assert_graph_ready(self, run_id: str) -> None:
@@ -187,48 +200,102 @@ class KnowledgeGraphAuthorityService:
         if self._graph_repo.resolve_graph_version(run_id) is None:
             raise ValueError(f"run 尚无已完成章节图版本: {run_id}")
 
-    def _build_canonical_entities(self, entities: Iterable[EntitySnapshotRow]) -> list[CanonicalEntity]:
+    def _build_alias_resolution(
+        self,
+        relations: Iterable[RelationSnapshotRow],
+        entities: Iterable[EntitySnapshotRow],
+    ) -> AliasResolution:
+        """2026-08-09 用于从同一人物关系构建别名归并映射"""
+        entity_names = {int(entity.entity_id): str(entity.name) for entity in entities}
+        return build_alias_resolution(list(relations), entity_names=entity_names)
+
+    def _build_canonical_entities(
+        self,
+        entities: Iterable[EntitySnapshotRow],
+        resolution: AliasResolution | None = None,
+    ) -> list[CanonicalEntity]:
         """2026-08-07 用于把实体状态快照转换为规范实体合同"""
-        return [
-            CanonicalEntity(
-                name=entity.name,
-                entity_type=entity.entity_type,
-                entity_id=entity.entity_id,
-                first_seen_chunk=entity.first_seen_chunk,
-                last_seen_chunk=entity.last_seen_chunk,
-                primary_role_function=str(entity.state.get("role_function") or "") or None,
-                status=str(entity.state.get("status") or "active"),
-                source_confidence=None,
+        rows = sorted(entities, key=lambda row: row.name)
+        if resolution is not None:
+            rows = [
+                row
+                for row in rows
+                if int(row.entity_id) not in resolution.representative_by_alias
+            ]
+        result: list[CanonicalEntity] = []
+        for entity in rows:
+            if not is_global_character_surface_name(entity.name):
+                continue
+            aliases = (
+                resolution.aliases_by_representative.get(int(entity.entity_id), [])
+                if resolution is not None
+                else []
             )
-            for entity in sorted(entities, key=lambda row: row.name)
-            if is_global_character_surface_name(entity.name)
-        ]
+            result.append(
+                CanonicalEntity(
+                    name=entity.name,
+                    entity_type=entity.entity_type,
+                    entity_id=entity.entity_id,
+                    first_seen_chunk=entity.first_seen_chunk,
+                    last_seen_chunk=entity.last_seen_chunk,
+                    primary_role_function=str(entity.state.get("role_function") or "") or None,
+                    status=str(entity.state.get("status") or "active"),
+                    source_confidence=None,
+                    aliases=aliases,
+                )
+            )
+        return result
 
     def _build_confirmed_relations(
         self,
         relations: Iterable[RelationSnapshotRow],
+        resolution: AliasResolution | None = None,
     ) -> list[ConfirmedRelation]:
         """2026-08-07 用于把稳定关系最新版本转换为当前关系合同"""
-        return [
-            ConfirmedRelation(
-                from_name=relation.from_name,
-                to_name=relation.to_name,
-                relation_type=relation.relation_type,
-                from_entity_id=relation.from_entity_id,
-                to_entity_id=relation.to_entity_id,
-                is_active=relation.is_active,
-                first_seen_chunk=relation.first_seen_chunk,
-                last_seen_chunk=relation.last_seen_chunk,
-                change_count=len(relation.changes),
-                support_count=int(relation.attributes.get("support_count", 1)),
-                latest_relation_version_id=relation.relation_version_id,
-                tension_index=float(relation.attributes.get("tension_index", 0.0)),
+        result: list[ConfirmedRelation] = []
+        for relation in sorted(
+            relations,
+            key=lambda row: (row.from_name, row.to_name, row.relation_type),
+        ):
+            if relation.relation_semantics == "same_character":
+                continue
+            from_name = (
+                resolution.resolve_name(relation.from_name)
+                if resolution is not None
+                else relation.from_name
             )
-            for relation in sorted(
-                relations,
-                key=lambda row: (row.from_name, row.to_name, row.relation_type),
+            to_name = (
+                resolution.resolve_name(relation.to_name)
+                if resolution is not None
+                else relation.to_name
             )
-        ]
+            from_entity_id = (
+                resolution.resolve_entity_id(relation.from_entity_id)
+                if resolution is not None
+                else relation.from_entity_id
+            )
+            to_entity_id = (
+                resolution.resolve_entity_id(relation.to_entity_id)
+                if resolution is not None
+                else relation.to_entity_id
+            )
+            result.append(
+                ConfirmedRelation(
+                    from_name=from_name or "",
+                    to_name=to_name or "",
+                    relation_type=relation.relation_type,
+                    from_entity_id=from_entity_id,
+                    to_entity_id=to_entity_id,
+                    is_active=relation.is_active,
+                    first_seen_chunk=relation.first_seen_chunk,
+                    last_seen_chunk=relation.last_seen_chunk,
+                    change_count=len(relation.changes),
+                    support_count=int(relation.attributes.get("support_count", 1)),
+                    latest_relation_version_id=relation.relation_version_id,
+                    tension_index=float(relation.attributes.get("tension_index", 0.0)),
+                )
+            )
+        return result
 
     def _build_export_relation_snapshots(
         self,
@@ -287,6 +354,7 @@ class KnowledgeGraphAuthorityService:
     def _build_participant_states(
         self,
         entities: Iterable[EntitySnapshotRow],
+        resolution: AliasResolution | None = None,
     ) -> list[ParticipantState]:
         """2026-08-07 用于把实体状态快照转换为图参与者合同"""
         return [
@@ -299,8 +367,15 @@ class KnowledgeGraphAuthorityService:
                 first_seen_chunk=entity.first_seen_chunk,
                 last_seen_chunk=entity.last_seen_chunk,
                 source_confidence=None,
-                is_representative=True,
+                is_representative=(
+                    resolution is None
+                    or int(entity.entity_id) not in resolution.representative_by_alias
+                ),
             )
             for entity in entities
             if is_global_character_surface_name(entity.name)
+            and (
+                resolution is None
+                or int(entity.entity_id) not in resolution.representative_by_alias
+            )
         ]

@@ -16,6 +16,7 @@ class GraphNode(BaseModel):
     name: str
     entity_type: Literal["character", "location", "item", "organization"]
     tags: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
     first_seen_chunk: int = Field(ge=0)
     last_seen_chunk: int = Field(ge=0)
     state_revision: int = Field(ge=0)
