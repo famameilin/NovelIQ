@@ -171,13 +171,14 @@ class AgentAuditRecorder:
         call_index: int,
         tool_name: str,
         request_args: dict[str, Any],
+        raw_args: str | None = None,
         response: dict[str, Any] | None = None,
         receipt: dict[str, Any] | None = None,
         status: str = "success",
         error: str | None = None,
         tool_duration_ms: int | None = None,
     ) -> None:
-        """2026-08-10 用于在独立短事务中写入单次工具调用审计"""
+        """2026-08-11 用于在独立短事务中写入单次工具调用审计（含原始参数片段）"""
         session = self._session_factory()
         session.add(
             AgentToolCall(
@@ -185,6 +186,7 @@ class AgentAuditRecorder:
                 tool_name=tool_name,
                 call_index=call_index,
                 request_args=request_args,
+                raw_args=raw_args,
                 response=response,
                 receipt=receipt,
                 status=status,

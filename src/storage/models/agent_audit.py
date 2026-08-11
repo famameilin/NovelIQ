@@ -101,6 +101,7 @@ class AgentToolCall(Base):
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
     call_index: Mapped[int] = mapped_column(Integer, nullable=False)
     request_args: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    raw_args: Mapped[str | None] = mapped_column(Text, nullable=True)
     response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     receipt: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)

@@ -193,6 +193,7 @@ class AgentTurnObserver:
         call_index: int,
         tool_name: str,
         request_args: Mapping[str, Any],
+        raw_args: str | None = None,
         response: dict[str, Any] | None,
         receipt: dict[str, Any] | None,
         status: str,
@@ -200,7 +201,7 @@ class AgentTurnObserver:
         tool_duration_ms: int | None,
         started_ns: int,
     ) -> None:
-        """2026-08-10 用于写入单次工具调用审计并累计工具墙钟区间"""
+        """2026-08-11 用于写入单次工具调用审计并累计工具墙钟区间"""
         if self._active_turn_id is None:
             raise RuntimeError("工具审计必须先于模型回合写入 turn 行")
         self._recorder.record_tool_call(
@@ -208,6 +209,7 @@ class AgentTurnObserver:
             call_index=call_index,
             tool_name=tool_name,
             request_args=dict(request_args),
+            raw_args=raw_args,
             response=response,
             receipt=receipt,
             status=status,

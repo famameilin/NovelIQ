@@ -15,9 +15,12 @@ from src.agents.audit.recorder import AgentAuditRecorder
 from src.storage.models import TokenUsage
 from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from tests.agents.test_annotation_agent import (
+    _dialogues_call,
     _empty_domain_calls,
+    _entities_call,
     _events_call,
-    _full_write_calls,
+    _metrics_call,
+    _observations_call,
     _QueryService,
     _SequenceLLM,
     _tool_message,
@@ -186,34 +189,29 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         model_name="test-model",
         model_provider="local",
     )
-    invalid_states = _write_call(
-        "write_states",
+    invalid_metrics = _write_call(
+        "write_metrics",
         {
-            "items": [
-                {
-                    "entity": "顾霜",
-                    "predicate": "状态",
-                    "object": None,
-                    "value": None,
-                    "confidence": "high",
-                    "reason": "缺少 object 与 value",
-                }
-            ]
+            "summary": " ",
+            "emotional_valence": "neutral",
+            "narrative_function": "铺垫",
         },
-        call_id="call-states",
+        call_id="call-metrics-bad",
     )
     llm = _SequenceLLM(
         [
-            _tool_message(
-                [
-                    *_full_write_calls()[:4],
-                    _events_call(),
-                    _write_call("write_relations", {"items": []}, call_id="call-relations"),
-                    invalid_states,
-                    *_empty_domain_calls()[-1:],
-                ]
-            ),
-            _tool_message([_write_call("write_states", {"items": []}, call_id="call-states-2")]),
+                _tool_message(
+                    [
+                        _entities_call(),
+                        _observations_call(),
+                        _dialogues_call(),
+                        _events_call(),
+                        _write_call("write_relations", {"items": []}, call_id="call-relations"),
+                        invalid_metrics,
+                        *_empty_domain_calls()[-1:],
+                    ]
+                ),
+            _tool_message([_metrics_call(call_id="call-metrics-fixed")]),
         ]
     )
     ledger = AnnotationToolLedger(
@@ -281,17 +279,17 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
             .order_by(AgentToolCall.call_index, AgentToolCall.id)
         ).scalars()
     )
-    assert len(tool_rows) == 9
+    assert len(tool_rows) == 8
     failed_rows = [row for row in tool_rows if row.status == "error"]
     assert len(failed_rows) == 1
-    assert failed_rows[0].tool_name == "write_states"
+    assert failed_rows[0].tool_name == "write_metrics"
     assert failed_rows[0].receipt["accepted"] is False
     assert failed_rows[0].error is not None
     for tool in tool_rows:
         assert tool.tool_duration_ms is not None and tool.tool_duration_ms >= 0
         assert tool.request_args is not None
     accepted_rows = [row for row in tool_rows if row.status == "success"]
-    assert len(accepted_rows) == 8
+    assert len(accepted_rows) == 7
     write_rows = [row for row in accepted_rows if row.tool_name.startswith("write_")]
     assert all(row.receipt["accepted"] is True for row in write_rows)
     assert all(row.receipt["state_digest"].startswith("sha256:") for row in write_rows)
