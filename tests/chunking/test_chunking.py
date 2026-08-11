@@ -8,7 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from loguru import logger
 
-from src.chunking.chunker import chunk_documents, chunk_text, split_by_chapters
+from src.chunking.chunker import chunk_documents, chunk_text
 
 
 class TestChunking(unittest.IsolatedAsyncioTestCase):
@@ -19,7 +19,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0].start, 0)
         self.assertTrue(all(c.text for c in chunks))
         self.assertEqual(
-            [chunk.chapter_index for chunk in chunks],
+            [chunk.chapter_id for chunk in chunks],
             list(range(1, len(chunks) + 1)),
         )
 
@@ -60,11 +60,14 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[1].start, 6)
         self.assertEqual(chunks[1].end, 10)
 
-    def test_split_by_chapters(self) -> None:
-        text = "第1章 开始\n内容\n第2章 继续\n内容"
-        chapters = split_by_chapters(text)
-        self.assertEqual(len(chapters), 2)
-        self.assertTrue(chapters[0][0].startswith("第1章"))
+    async def test_chunk_documents_accumulates_chapter_ids(self) -> None:
+        """
+        多文档分块时，后续文档的 chapter_id 应在 run 级全局章节编号中累加
+        """
+        chunks = await chunk_documents(
+            ["第一章 甲\n内容。\n第二章 乙\n内容。", "第三章 丙\n内容。"],
+        )
+        self.assertEqual([chunk.chapter_id for chunk in chunks], [1, 2, 3])
 
     async def test_duplicate_chapter_titles_keep_distinct_occurrence_indices(self) -> None:
         """
@@ -74,8 +77,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
 
         chunks = await chunk_text(text)
 
-        self.assertEqual([chunk.chapter_index for chunk in chunks], [1, 2, 3])
-        self.assertEqual(chunks[0].chapter_title, chunks[2].chapter_title)
+        self.assertEqual([chunk.chapter_id for chunk in chunks], [1, 2, 3])
 
     async def test_chapter_never_split_however_long(self) -> None:
         """
@@ -85,12 +87,12 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         chunks = await chunk_text(text)
 
         self.assertEqual(len(chunks), 1)
-        self.assertEqual(chunks[0].chapter_title, "第1章 长章")
+        self.assertEqual(chunks[0].chapter_id, 1)
         self.assertGreater(len(chunks[0].text), 2000)
 
     def test_empty_chapter_with_title_is_skipped_and_logged(self) -> None:
         """
-        2026-08-08 用于验证仅有标题无正文的章节被跳过且记录警告
+        2026-08-08 用于验证仅有标题无正文的章节不生成 chunk（目录中仍保留）且记录警告
         """
         text = "第七章\nxxxx\n第八章\n第九章\nyyyy"
         sink = io.StringIO()
@@ -100,7 +102,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         finally:
             logger.remove(handler_id)
 
-        self.assertEqual([chunk.chapter_title for chunk in chunks], ["第七章", "第九章"])
+        self.assertEqual([chunk.chapter_id for chunk in chunks], [1, 3])
         self.assertIn("第八章", sink.getvalue())
         self.assertIn("已跳过", sink.getvalue())
 

@@ -1,7 +1,6 @@
 
 from . import bootstrap
 from .constants import (
-    CHAPTER_PATTERN,
     CLASSICAL_PATTERNS,
     EVENT_TYPE_SCORES,
     PARAGRAPH_SPLIT,
@@ -32,7 +31,6 @@ from .schemas import (
 from .settings import Settings, settings
 
 __all__ = [
-    "CHAPTER_PATTERN",
     "CLASSICAL_PATTERNS",
     "EmbeddingModelSettings",
     "EVENT_TYPE_SCORES",

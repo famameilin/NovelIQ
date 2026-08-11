@@ -81,7 +81,8 @@ class TestDiagnosisRoutes:
     def _create_full_data(self, chunk_count: int = 5) -> None:
         chunk_repo = ChunkRepository(self.db_session)
         chunks = [
-            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。") for i in range(chunk_count)
+            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。", chapter_id=1)
+            for i in range(chunk_count)
         ]
         chunk_repo.insert_chunks(self.run_id, chunks)
         chunk_repo.insert_chunk_topics(self.run_id, [(i, 0, 1.0) for i in range(chunk_count)])

@@ -1,9 +1,10 @@
 """
 文本分块模块
 
-本模块包含文本分块相关的功能，分章策略：
-1. 优先按原始章节分割（CHAPTER_PATTERN 正则捕捉章节标题）
-2. 无法捕捉原始章节时，回退到固定字数段落分割（_chunk_simple）
+分章策略：
+1. 优先按章节结构解析（src.chapters）分割：每个章节为一个 chunk，
+   保留 chapter_id，无论多长不再切
+2. 无法捕捉原始章节时，章节解析器内部回退到固定字数段落分割（自动分章）
 
 不再使用向量相似度（语义分块）作为分块依据。
 """
@@ -13,11 +14,14 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from loguru import logger
+from src.chapters.models import ChapterData
+from src.chapters.parser import parse_chapters
+from src.chapters.preprocess import preprocess_text
 
-from src.api.models.events import StreamEvent
-from src.config import CHAPTER_PATTERN
+if TYPE_CHECKING:
+    from src.api.models.events import StreamEvent
 
 # =============================================================================
 # 数据类型
@@ -32,8 +36,7 @@ class Chunk:
     text: str
     start: int
     end: int
-    chapter_title: str | None = None
-    chapter_index: int | None = None
+    chapter_id: int
 
 
 def _reindex(chunks: list[Chunk]) -> list[Chunk]:
@@ -44,8 +47,7 @@ def _reindex(chunks: list[Chunk]) -> list[Chunk]:
             text=chunk.text,
             start=chunk.start,
             end=chunk.end,
-            chapter_title=chunk.chapter_title,
-            chapter_index=chunk.chapter_index,
+            chapter_id=chunk.chapter_id,
         )
         for idx, chunk in enumerate(chunks)
     ]
@@ -68,171 +70,44 @@ def _resolve_trimmed_span(text: str, start: int, end: int) -> tuple[int, int, st
     return start + leading_ws, start + trimmed_end, stripped_text
 
 
-def _split_by_chapters_with_offsets(text: str) -> list[tuple[str | None, str, int, int]]:
-    """
-    按章节分割文本，并保留章节正文在全文中的字符范围
-
-    返回的章节标题来自原文匹配到的标题文本；未匹配到任何章节标题时，
-    返回单条 `(None, text, 0, len(text))` 表示“无法捕捉原始章节”
-    """
-    chapters: list[tuple[str | None, str, int, int]] = []
-    last_end = 0
-    last_title: str | None = None
-
-    for match in CHAPTER_PATTERN.finditer(text):
-        if last_end < match.start():
-            chapter_text = text[last_end : match.start()]
-            if chapter_text.strip():
-                chapters.append((last_title, chapter_text, last_end, match.start()))
-            elif last_title is not None:
-                logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
-        elif last_title is not None:
-            logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
-        last_title = match.group(0).strip()
-        last_end = match.end()
-
-    if last_end < len(text):
-        chapter_text = text[last_end:]
-        if chapter_text.strip():
-            chapters.append((last_title, chapter_text, last_end, len(text)))
-        elif last_title is not None:
-            logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
-    elif last_title is not None:
-        logger.warning("章节「{}」无正文，已跳过该空章节", last_title)
-
-    if chapters:
-        return chapters
-    return [(None, text, 0, len(text))]
-
-
-def _chapters_detected(chapters: list[tuple[str | None, str, int, int]]) -> bool:
-    """
-    判断是否成功捕捉到原始章节
-
-    只要存在一个非空章节标题，就视为捕捉到章节结构；
-    否则说明整本都没有可识别的章节标题，需要回退固定字数分割
-    """
-    return any(title is not None and title.strip() for title, _, _, _ in chapters)
-
-
-# =============================================================================
-# 章节分割
-# =============================================================================
-
-
-def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
-    """
-    按章节分割文本
-    """
-    return [
-        (chapter_title, chapter_text)
-        for chapter_title, chapter_text, _, _ in _split_by_chapters_with_offsets(text)
-    ]
-
-
 async def chunk_text(
     text: str,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
+    """将文本分割成块（async 版本），保留章节信息；无章节结构时自动分章兜底"""
+    chunks, _ = await chunk_text_with_chapters(text, emitter=emitter)
+    return chunks
+
+
+async def chunk_text_with_chapters(
+    text: str,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+) -> tuple[list[Chunk], list[ChapterData]]:
     """
-    将文本分割成块（async 版本）
+    将文本分割成块并返回章节目录（async 版本）
 
-    分章策略：
-    - 优先按原始章节分割：每个章节为一个 chunk（保留 chapter_title/chapter_index，无论多长不再切）
-    - 无法捕捉原始章节时，回退到固定字数段落分割（_chunk_simple）
-
-    Args:
-        text: 输入文本
-
-    Returns:
-        Chunk对象列表
+    返回的 chunk/chapter 偏移均相对 preprocess_text 的输出，两者共用同一坐标空间。
     """
     if not text.strip():
-        return []
+        return [], []
 
-    chapters = _split_by_chapters_with_offsets(text)
-    if _chapters_detected(chapters):
-        return _chunk_by_chapters(text, chapters)
-
-    return _chunk_simple(text)
-
-
-def _chunk_simple(text: str, max_chars: int = 2000) -> list[Chunk]:
-    """
-    固定字数段落分割（章节不可用时回退策略）
-
-    文本不超过 max_chars 时整段一个 chunk；超过时在段落/句子边界按 max_chars 切分，无重叠。
-
-    生成的 `Chunk.start/end` 为最终保留文本的真实全文范围
-    """
-    if len(text) <= max_chars:
-        span = _resolve_trimmed_span(text, 0, len(text))
-        if span is None:
-            return []
-        chunk_start, chunk_end, chunk_text_content = span
-        return [
-            Chunk(
-                index=0,
-                text=chunk_text_content,
-                start=chunk_start,
-                end=chunk_end,
-                chapter_index=1,
-            )
-        ]
-
-    chunks = []
-    start = 0
-    idx = 0
-
-    while start < len(text):
-        end = start + max_chars
-        if end < len(text):
-            # 尝试在段落边界分割
-            paragraph_end = text.rfind("\n\n", start, end)
-            if paragraph_end > start + max_chars * 0.5:
-                end = paragraph_end
-            else:
-                # 尝试在句子边界分割
-                sentence_end = text.rfind("。", start, end)
-                if sentence_end > start + max_chars * 0.5:
-                    end = sentence_end + 1
-
-        span = _resolve_trimmed_span(text, start, end)
-        if span is not None:
-            chunk_start, chunk_end, chunk_text_content = span
-            chunks.append(
-                Chunk(
-                    index=idx,
-                    text=chunk_text_content,
-                    start=chunk_start,
-                    end=chunk_end,
-                    chapter_index=idx + 1,
-                )
-            )
-            idx += 1
-
-        start = end
-
-    return chunks
+    normalized = preprocess_text(text)
+    chapters = parse_chapters(normalized)
+    return _chunk_by_chapters(normalized, chapters), chapters
 
 
 def _chunk_by_chapters(
     text: str,
-    chapters: list[tuple[str | None, str, int, int]],
+    chapters: list[ChapterData],
 ) -> list[Chunk]:
-    """
-    按章节分块
-
-    每个章节为一个 chunk（保留 chapter_title），不再按字数切分章节。
-    章节内局部切片写回 Chunk 时统一折算为整本全文的真实 offset
-    """
+    """按章节分块：每个有正文的章节为一个 chunk，空章节跳过"""
     chunks: list[Chunk] = []
 
-    for chapter_index, (chapter_title, chapter_text, chapter_start_offset, _) in enumerate(chapters, start=1):
-        if not chapter_text.strip():
+    for chapter in chapters:
+        if not text[chapter.start_char : chapter.end_char].strip():
             continue
 
-        span = _resolve_trimmed_span(chapter_text, 0, len(chapter_text))
+        span = _resolve_trimmed_span(text, chapter.start_char, chapter.end_char)
         if span is None:
             continue
         local_start, local_end, chunk_text_content = span
@@ -240,10 +115,9 @@ def _chunk_by_chapters(
             Chunk(
                 index=len(chunks),
                 text=chunk_text_content,
-                start=chapter_start_offset + local_start,
-                end=chapter_start_offset + local_end,
-                chapter_title=chapter_title,
-                chapter_index=chapter_index,
+                start=local_start,
+                end=local_end,
+                chapter_id=chapter.chapter_id,
             )
         )
 
@@ -259,29 +133,29 @@ async def chunk_documents(
     texts: Iterable[str],
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
-    """
-    分块多个文档（async 版本）
+    """分块多个文档（async 版本），仅返回 chunks"""
+    chunks, _ = await chunk_documents_with_chapters(texts, emitter=emitter)
+    return chunks
 
-    多文档场景下将每个文档的 chunk offset 折算为 run 级连续全文坐标；
-    run-global offset 口径定义为“按输入顺序直接拼接的规范化文档文本”
+
+async def chunk_documents_with_chapters(
+    texts: Iterable[str],
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+) -> tuple[list[Chunk], list[ChapterData]]:
     """
-    all_chunks = []
+    分块多个文档并聚合章节目录（async 版本）
+
+    多文档场景下将每个文档的 chunk/chapter offset 折算为 run 级连续全文坐标；
+    run-global offset 口径定义为“按输入顺序直接拼接的 preprocess_text 输出”。
+    """
+    all_chunks: list[Chunk] = []
+    all_chapters: list[ChapterData] = []
     chunk_index_offset = 0
     chapter_index_offset = 0
     document_char_offset = 0
 
     for text in texts:
-        chunks = await chunk_text(
-            text,
-            emitter=emitter,
-        )
-        chapter_indices = sorted(
-            {
-                chunk.chapter_index
-                for chunk in chunks
-                if chunk.chapter_index is not None
-            }
-        )
+        chunks, chapters = await chunk_text_with_chapters(text, emitter=emitter)
         for chunk in chunks:
             all_chunks.append(
                 Chunk(
@@ -289,20 +163,29 @@ async def chunk_documents(
                     text=chunk.text,
                     start=chunk.start + document_char_offset,
                     end=chunk.end + document_char_offset,
-                    chapter_title=chunk.chapter_title,
-                    chapter_index=(
-                        chunk.chapter_index + chapter_index_offset
-                        if chunk.chapter_index is not None
-                        else None
-                    ),
+                    chapter_id=chunk.chapter_id + chapter_index_offset,
+                )
+            )
+        for chapter in chapters:
+            all_chapters.append(
+                ChapterData(
+                    chapter_id=chapter.chapter_id + chapter_index_offset,
+                    sequence=chapter.sequence + chapter_index_offset,
+                    level=chapter.level,
+                    title=chapter.title,
+                    display_title=chapter.display_title,
+                    display_index_label=chapter.display_index_label,
+                    number=chapter.number,
+                    start_char=chapter.start_char + document_char_offset,
+                    end_char=chapter.end_char + document_char_offset,
                 )
             )
         chunk_index_offset += len(chunks)
-        if chapter_indices:
-            chapter_index_offset += chapter_indices[-1]
+        if chapters:
+            chapter_index_offset += len(chapters)
         document_char_offset += len(text)
 
-    return _reindex(all_chunks)
+    return _reindex(all_chunks), all_chapters
 
 
 # =============================================================================

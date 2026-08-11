@@ -71,7 +71,6 @@ SEMANTIC_CATEGORY_MAPPING: dict[str, str] = {
     "色彩形容词类": "color",
 }
 
-CHAPTER_PATTERN = re.compile(r"(^|[\r\n])\s*第.{1,9}章[^\r\n]*")
 PARAGRAPH_SPLIT = re.compile(r"(?:\r\n|\r|\n)+")
 
 __all__ = [
@@ -80,7 +79,6 @@ __all__ = [
     "PROPP_FUNCTIONS",
     "CLASSICAL_PATTERNS",
     "SEMANTIC_CATEGORY_MAPPING",
-    "CHAPTER_PATTERN",
     "PARAGRAPH_SPLIT",
     "TITLE_ALIAS_SUFFIXES",
     "ALLOWED_PREV_CJK_CHARS",
