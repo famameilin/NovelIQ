@@ -30,7 +30,6 @@ class TaskModelSettings:
     structured_output: str = "json_schema"
     max_iterations: int = 10
     total_attempts: int = 3
-    retry_backoff_ms: int = 5000
     allow_future_context: bool = False
 
 
@@ -159,8 +158,6 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         ),
         max_iterations=json_data.get("max_iterations", 10),
         total_attempts=json_data.get("total_attempts", 3),
-        # 键名沿用 retry_backoff_seconds，值统一按毫秒处理（默认 5000ms = 5s）
-        retry_backoff_ms=json_data.get("retry_backoff_seconds", 5000),
         allow_future_context=json_data.get("allow_future_context", False),
     )
 

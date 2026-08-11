@@ -9,7 +9,6 @@
       "structured_output": "json_object",
       "max_iterations": 20,
       "total_attempts": 3,
-      "retry_backoff_seconds": 5000,
       "allow_future_context": true
     },
     "paragraph_embedding": {
@@ -27,8 +26,7 @@
       "streaming": true,
       "structured_output": "json_object",
       "max_iterations": 30,
-      "total_attempts": 3,
-      "retry_backoff_seconds": 5000
+      "total_attempts": 3
     }
   },
   "logging": {

@@ -187,8 +187,9 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
         entry = merged[index]
         if not entry["name"]:
             continue
+        raw_args = entry["args"]
         try:
-            parsed_args = json.loads(entry["args"]) if entry["args"] else {}
+            parsed_args = json.loads(raw_args) if raw_args else {}
         except json.JSONDecodeError:
             logger.warning(
                 "工具调用参数 JSON 截断（流未完整收尾）: name=%s args=%r",
@@ -199,10 +200,11 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
                 {
                     "name": entry["name"],
                     "args": {},
+                    "raw_args": raw_args,
                     "id": entry["id"] or f"call_{index}",
                     "type": "tool_call",
                     "truncated": True,
-                    "truncated_args": entry["args"],
+                    "truncated_args": raw_args,
                 }
             )
             continue
@@ -210,6 +212,7 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
             {
                 "name": entry["name"],
                 "args": parsed_args,
+                "raw_args": raw_args,
                 "id": entry["id"] or f"call_{index}",
                 "type": "tool_call",
             }
@@ -375,6 +378,9 @@ async def run_model_call(
 
     无论是否开启 SSE 都优先走 Provider 流式接口，否则无法得到真实 TTFT；
     非流式 Provider 的 TTFT 与推理时间记录为 NULL，不会用总耗时冒充。
+    流式输出中途断流（astream 抛异常）时用同一 messages 重发当前模型请求，
+    重试次数对齐 settings.models.annotation.total_attempts（默认 3 次），
+    重试期间推送 thinking 事件；耗尽后抛出最后一次异常。
     on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
     """
     started_ns = perf_counter_ns()
@@ -392,13 +398,33 @@ async def run_model_call(
             on_turn_complete(response, timing)
         return response
 
-    aggregator = StreamChunkAggregator(stream, started_ns=started_ns)
-    async for chunk in model.astream(messages):
-        await aggregator.add_chunk(chunk)
-    response = aggregator.finish()
-    if on_turn_complete is not None:
-        on_turn_complete(response, aggregator.timing())
-    return response
+    from src.config import settings
+
+    retries_remaining = max(1, settings.models.annotation.total_attempts)
+    while True:
+        aggregator = StreamChunkAggregator(stream, started_ns=started_ns)
+        try:
+            async for chunk in model.astream(messages):
+                await aggregator.add_chunk(chunk)
+        except Exception as exc:  # noqa: BLE001
+            if retries_remaining <= 0:
+                logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
+                raise
+            retries_remaining -= 1
+            logger.warning(
+                "模型输出流中断，重发当前模型请求: error=%s retries_remaining=%s",
+                exc,
+                retries_remaining,
+            )
+            if stream is not None:
+                await stream.thinking(
+                    f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）"
+                )
+            continue
+        response = aggregator.finish()
+        if on_turn_complete is not None:
+            on_turn_complete(response, aggregator.timing())
+        return response
 
 
 async def emit_tool_results(stream: AgentStream, tool_messages: list[Any]) -> None:

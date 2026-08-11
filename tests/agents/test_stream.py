@@ -57,6 +57,27 @@ class _NonStreamingLLM:
         return self.response
 
 
+class _FlakyStreamingLLM:
+    """2026-08-11 用于模拟流式输出中途断流的测试模型（前 fail_count 次调用抛异常）"""
+
+    def __init__(self, chunks: list[AIMessageChunk], fail_count: int) -> None:
+        self.chunks = chunks
+        self.fail_count = fail_count
+        self.captured_messages: list[list] = []
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        if self.fail_count > 0:
+            self.fail_count -= 1
+            raise ConnectionError("stream interrupted mid-way")
+        for chunk in self.chunks:
+            yield chunk
+
+
 @pytest.mark.asyncio
 async def test_agent_stream_emits_thinking_and_output_events() -> None:
     events, emitter = _collect_events()
@@ -121,6 +142,7 @@ async def test_aggregator_merges_text_and_reasoning_and_tool_calls() -> None:
         {
             "name": "resolve_case",
             "args": {"case_id": "c1"},
+            "raw_args": '{"case_id": "c1"}',
             "id": "call_1",
             "type": "tool_call",
         }
@@ -152,6 +174,38 @@ async def test_run_model_call_streams_chunks_to_events() -> None:
         ("output", "你好", ""),
         ("output", "世界", ""),
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_retries_current_request_on_stream_interruption() -> None:
+    """2026-08-11 用于验证断流时用同一 messages 重发当前模型请求"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _FlakyStreamingLLM([AIMessageChunk(content="你好世界")], fail_count=1)
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream)
+
+    assert response.content == "你好世界"
+    assert len(model.captured_messages) == 2
+    assert model.captured_messages[0] == [AIMessage(content="问")]
+    assert model.captured_messages[1] == [AIMessage(content="问")]
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
+    """2026-08-11 用于验证重试次数对齐 total_attempts=3，耗尽后抛出最后一次异常"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _FlakyStreamingLLM([], fail_count=99)
+
+    with pytest.raises(ConnectionError, match="stream interrupted"):
+        await run_model_call(model, [AIMessage(content="问")], stream)
+
+    assert len(model.captured_messages) == 4
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 3
 
 
 @pytest.mark.asyncio
@@ -558,5 +612,20 @@ async def test_merge_truncated_args_marks_call_instead_of_raw_wrap() -> None:
     assert call["name"] == "write_metrics"
     assert call["truncated"] is True
     assert call["args"] == {}
+    assert call["raw_args"] == '{"summary": "主角入门", "emotional_valence": "pos'
     assert call["truncated_args"] == '{"summary": "主角入门", "emotional_valence": "pos'
     assert "_raw" not in call
+
+
+def test_merge_tool_call_chunks_carries_raw_args() -> None:
+    """2026-08-11 用于验证合并后的工具调用保留原始参数片段供审计"""
+    from src.agents.stream import _merge_tool_call_chunks
+
+    chunks = [
+        {"index": 0, "name": "push_case", "args": '{"description": "', "id": "call_1"},
+        {"index": 0, "name": "", "args": '关键词"}', "id": ""},
+    ]
+    calls = _merge_tool_call_chunks(chunks)
+    assert calls[0]["name"] == "push_case"
+    assert calls[0]["args"] == {"description": "关键词"}
+    assert calls[0]["raw_args"] == '{"description": "关键词"}'
