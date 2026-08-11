@@ -45,6 +45,49 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
         logger.info(f"\nDiagnosis:\n{result.diagnosis}")
 
 
+def _persist_main_character_attributes(
+    session: Session,
+    *,
+    run_id: str,
+    main_characters: list[str],
+) -> None:
+    """2026-08-09 用于把诊断主角名单固化为图节点属性"""
+    from sqlalchemy import select
+
+    from src.knowledge.authority import KnowledgeGraphAuthorityService
+    from src.storage.models import GraphEntity
+
+    if not main_characters:
+        return
+    try:
+        view = KnowledgeGraphAuthorityService.from_session(session).build_export_view(run_id)
+    except ValueError:
+        return
+    preferred = set(main_characters)
+    representative_ids: set[int] = set()
+    for item in view.canonical_entities:
+        if item.entity_id is None:
+            continue
+        aliases = set(item.aliases)
+        if item.name in preferred or (aliases & preferred):
+            representative_ids.add(int(item.entity_id))
+    if not representative_ids:
+        return
+    graph_entities = list(
+        session.execute(
+            select(GraphEntity).where(
+                GraphEntity.run_id == run_id,
+                GraphEntity.entity_id.in_(representative_ids),
+            )
+        ).scalars()
+    )
+    for graph_entity in graph_entities:
+        attributes = dict(graph_entity.attributes or {})
+        attributes["is_main_character"] = True
+        graph_entity.attributes = attributes
+    session.flush()
+
+
 async def run_diagnose(
     run_id: str,
     session: Session,
@@ -85,6 +128,11 @@ async def run_diagnose(
 
     stats_repo = StatsRepository(session)
     stats_repo.insert_cloud_analysis(run_id, result)
+    _persist_main_character_attributes(
+        session,
+        run_id=run_id,
+        main_characters=list(result.main_characters),
+    )
     logger.debug(f"diagnosis persisted run_id={run_id}")
 
     _log_diagnosis_results(result)

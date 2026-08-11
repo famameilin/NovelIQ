@@ -11,6 +11,7 @@ from loguru import logger
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
 from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
+from src.knowledge.authority.alias import build_alias_resolution
 from src.storage.repositories import AnnotationRepository, GraphRepository
 
 GRAPH_CHANGE_LIMIT = 200
@@ -154,34 +155,38 @@ def _fetch_graph_snapshot(
     if snapshot is None:
         raise LookupError("当前 run 尚无匹配的章节图版本")
     version = snapshot.graph_version
-    return {
-        "graph_version_id": version.graph_version_id,
-        "chapter_id": version.chapter_id,
-        "chapter_order": version.chapter_order,
-        "first_chunk_id": version.first_chunk_id,
-        "last_chunk_id": version.last_chunk_id,
-        "nodes": [
-            {
-                "entity_id": entity.entity_id,
-                "name": entity.name,
-                "entity_type": entity.entity_type,
-                "tags": entity.tags,
-                "first_seen_chunk": entity.first_seen_chunk,
-                "last_seen_chunk": entity.last_seen_chunk,
-                "state_revision": entity.state_revision,
-                "state": entity.state,
-            }
-            for entity in snapshot.entities
-        ],
-        "edges": [
+    entity_names = {entity.entity_id: entity.name for entity in snapshot.entities}
+    resolution = build_alias_resolution(snapshot.relations, entity_names=entity_names)
+    nodes = [
+        {
+            "entity_id": entity.entity_id,
+            "name": entity.name,
+            "entity_type": entity.entity_type,
+            "tags": entity.tags,
+            "aliases": resolution.aliases_by_representative.get(entity.entity_id, []),
+            "first_seen_chunk": entity.first_seen_chunk,
+            "last_seen_chunk": entity.last_seen_chunk,
+            "state_revision": entity.state_revision,
+            "state": entity.state,
+        }
+        for entity in snapshot.entities
+        if entity.entity_id not in resolution.representative_by_alias
+    ]
+    edges: list[dict[str, Any]] = []
+    for relation in snapshot.relations:
+        if relation.relation_semantics == "same_character":
+            continue
+        from_entity_id = resolution.resolve_entity_id(relation.from_entity_id)
+        to_entity_id = resolution.resolve_entity_id(relation.to_entity_id)
+        edges.append(
             {
                 "relation_id": relation.relation_id,
                 "relation_version_id": relation.relation_version_id,
                 "relation_revision": relation.relation_revision,
-                "source_entity_id": relation.from_entity_id,
-                "target_entity_id": relation.to_entity_id,
-                "source_name": relation.from_name,
-                "target_name": relation.to_name,
+                "source_entity_id": from_entity_id,
+                "target_entity_id": to_entity_id,
+                "source_name": resolution.resolve_name(relation.from_name),
+                "target_name": resolution.resolve_name(relation.to_name),
                 "relation_type": relation.relation_type,
                 "directionality": relation.directionality,
                 "relation_semantics": relation.relation_semantics,
@@ -189,8 +194,15 @@ def _fetch_graph_snapshot(
                 "is_active": relation.is_active,
                 "changes": relation.changes,
             }
-            for relation in snapshot.relations
-        ],
+        )
+    return {
+        "graph_version_id": version.graph_version_id,
+        "chapter_id": version.chapter_id,
+        "chapter_order": version.chapter_order,
+        "first_chunk_id": version.first_chunk_id,
+        "last_chunk_id": version.last_chunk_id,
+        "nodes": nodes,
+        "edges": edges,
     }
 
 

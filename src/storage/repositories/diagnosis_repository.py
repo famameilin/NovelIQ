@@ -139,12 +139,29 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         ]
 
     def fetch_known_characters(self, run_id: str) -> list[str]:
-        """2026-08-07 用于从最新章节实体状态读取诊断人物名单"""
-        graph_repo = GraphRepository(self.session)
-        return sorted(
-            entity.name
-            for entity in graph_repo.fetch_latest_entities(run_id, entity_type="character")
-        )
+        """2026-08-09 用于从消歧后的规范人物视图读取诊断人物名单"""
+        from src.knowledge.authority import KnowledgeGraphAuthorityService
+
+        authority = KnowledgeGraphAuthorityService.from_session(self.session)
+        try:
+            view = authority.build_export_view(run_id)
+        except ValueError:
+            graph_repo = GraphRepository(self.session)
+            return sorted(
+                entity.name
+                for entity in graph_repo.fetch_latest_entities(run_id, entity_type="character")
+            )
+        rows: list[str] = []
+        for entity in view.canonical_entities:
+            if entity.entity_type != "character":
+                continue
+            if not entity.name or not entity.name.strip() or entity.name == "null":
+                continue
+            if not entity.aliases:
+                rows.append(entity.name)
+                continue
+            rows.append(f"{entity.name}（别名：{'、'.join(entity.aliases)}）")
+        return rows
 
     def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
         """2026-08-05 用于读取仍由诊断消费的阶段摘要记录"""
