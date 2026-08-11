@@ -99,7 +99,6 @@ export function useAnalysisStatus(
   const llmOutputBufferRef = useRef<Map<string, StreamEventData>>(new Map());
   const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasConnectedOnceRef = useRef(false);
-  const lastForegroundSyncAtRef = useRef(0);
   const hasHydratedTaskStatusRef = useRef(false);
   const [stableTaskId, setStableTaskId] = useState<string | null>(null);
   const sseReceivedMessageRef = useRef(false);
@@ -266,6 +265,7 @@ export function useAnalysisStatus(
           sub_percent: eventData.sub_percent,
           content: existing.content + eventData.content,
           message: eventData.message,
+          status: eventData.status ?? existing.status,
         });
       } else {
         llmOutputBufferRef.current.set(bufferKey, { ...eventData });
@@ -303,6 +303,7 @@ export function useAnalysisStatus(
 
         case "llm_output":
         case "llm_thinking":
+        case "tool_call":
           bufferLLMOutput({
             action: eventData.action,
             stage: eventData.stage,
@@ -315,6 +316,7 @@ export function useAnalysisStatus(
             sub_percent: eventData.sub_percent,
             content: eventData.content,
             message: eventData.message,
+            status: eventData.status ?? null,
           });
           break;
 
@@ -381,7 +383,8 @@ export function useAnalysisStatus(
             (message.type === "stage_start" ||
               message.type === "stage_progress" ||
               message.type === "llm_output" ||
-              message.type === "llm_thinking")
+              message.type === "llm_thinking" ||
+              message.type === "tool_call")
           ) {
             sseReceivedMessageRef.current = true;
             setStableTaskId(taskId);
@@ -394,7 +397,8 @@ export function useAnalysisStatus(
           (eventType === "stage_start" ||
             eventType === "stage_progress" ||
             eventType === "llm_output" ||
-            eventType === "llm_thinking")
+            eventType === "llm_thinking" ||
+            eventType === "tool_call")
         ) {
           sseReceivedMessageRef.current = true;
           setStableTaskId(taskId);
@@ -444,34 +448,6 @@ export function useAnalysisStatus(
       reset();
     }
   }, [taskId, novelId, setTaskId, reset, syncTaskStatus]);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    const handleForegroundResume = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastForegroundSyncAtRef.current < 300) {
-        return;
-      }
-      lastForegroundSyncAtRef.current = now;
-
-      flushBufferedLLMOutputs();
-      void syncTaskStatus();
-    };
-
-    document.addEventListener("visibilitychange", handleForegroundResume);
-    window.addEventListener("focus", handleForegroundResume);
-    return () => {
-      document.removeEventListener("visibilitychange", handleForegroundResume);
-      window.removeEventListener("focus", handleForegroundResume);
-    };
-  }, [enabled, flushBufferedLLMOutputs, syncTaskStatus]);
 
   useEffect(() => {
     return () => {

@@ -229,6 +229,9 @@ export function NodeDetailPanel({
                           </span>
                         </div>
                       )}
+                      {Array.isArray(node.aliases) && node.aliases.length > 0 && (
+                        <InfoRow label="别名" value={node.aliases.join(" / ")} />
+                      )}
                       {node.first_seen_chunk !== undefined && node.last_seen_chunk !== undefined && (
                         <InfoRow
                           label="出场"
