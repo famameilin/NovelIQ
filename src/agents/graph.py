@@ -190,6 +190,11 @@ def _build_finalize_node(
                     call_index=0,
                     tool_name=str(call.get("name")),
                     request_args=dict(call.get("args") or {}),
+                    raw_args=(
+                        str(call.get("raw_args"))
+                        if call.get("raw_args") is not None
+                        else None
+                    ),
                     response=(
                         {"accepted": True}
                         if status == "success"
@@ -403,6 +408,11 @@ def _build_tools_node(
                     call_index=call_index,
                     tool_name=name,
                     request_args=dict(call.get("args") or {}),
+                    raw_args=(
+                        str(call.get("raw_args"))
+                        if call.get("raw_args") is not None
+                        else None
+                    ),
                     response={"result": str(result)[:2000]},
                     receipt=None,
                     status=status,

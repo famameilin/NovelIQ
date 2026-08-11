@@ -197,6 +197,51 @@ def test_record_tool_call_persists_full_args_result_and_duration(db_session) -> 
     assert row.tool_duration_ms == 42
 
 
+def test_record_tool_call_persists_raw_args(db_session) -> None:
+    """2026-08-11 用于验证工具调用行保存原始参数片段"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
+    recorder = AgentAuditRecorder(_session_factory(db_session))
+    invocation_id = recorder.start_invocation(
+        run_id=run_id,
+        task_type="annotation",
+        chapter_id=1,
+        attempt_number=1,
+        model_name="test-model",
+        model_provider="local",
+    )
+    turn_id = recorder.record_turn(
+        invocation_id=invocation_id,
+        turn_index=1,
+        context_summary={},
+        raw_response={"role": "ai", "content": ""},
+        run_id=run_id,
+        novel_id=novel_id,
+        task_type="annotation",
+        call_type="agent",
+        model="test-model",
+    )
+    raw = '{"description": "神秘仪式", "keys": ["住手"]}'
+    recorder.record_tool_call(
+        turn_id=turn_id,
+        call_index=0,
+        tool_name="push_case",
+        request_args={"description": "神秘仪式", "keys": ["住手"]},
+        raw_args=raw,
+        response={"accepted": True},
+        receipt={"accepted": True},
+        status="success",
+        error=None,
+        tool_duration_ms=10,
+    )
+
+    db_session.rollback()
+    row = db_session.execute(
+        select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)
+    ).scalar_one()
+    assert row.raw_args == raw
+    assert row.request_args["description"] == "神秘仪式"
+
+
 def test_failed_tool_call_recorded_with_error(db_session) -> None:
     """2026-08-10 用于验证失败工具调用同样落库并保留错误与失败回执"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
