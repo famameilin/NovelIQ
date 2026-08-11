@@ -45,7 +45,6 @@ export function TopBar() {
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     retry: 2,
-    refetchOnWindowFocus: false,
   });
 
   // 缓存优先，API 结果作为 fallback

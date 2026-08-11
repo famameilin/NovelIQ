@@ -35,6 +35,7 @@ class StreamMessageType(StrEnum):
     stage_complete = "stage_complete"
     llm_output = "llm_output"
     llm_thinking = "llm_thinking"
+    tool_call = "tool_call"
     task_complete = "task_complete"
     task_error = "task_error"
     task_cancelled = "task_cancelled"
@@ -44,7 +45,7 @@ class StreamMessageType(StrEnum):
 #  StreamEvent — 统一事件格式                                         #
 # ------------------------------------------------------------------ #
 
-StreamEventAction = Literal["start", "progress", "complete", "output", "thinking"]
+StreamEventAction = Literal["start", "progress", "complete", "output", "thinking", "tool_call"]
 """StreamEvent.action 的合法值"""
 
 
@@ -64,7 +65,7 @@ class StreamEvent:
         thinking — LLM 思考过程输出
     """
 
-    action: StreamEventAction  # 开始 / 进度 / 完成 / 输出 / 思考
+    action: StreamEventAction  # 开始 / 进度 / 完成 / 输出 / 思考 / 工具调用
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None
@@ -75,6 +76,7 @@ class StreamEvent:
     sub_percent: float | None = None  # 子阶段进度（phase 级别，如 chunk 内的 phase1→4）
     content: str = ""
     message: str = ""
+    status: str | None = None  # 工具调用状态（tool_call 事件专用: started/success/failed）
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +91,7 @@ class StreamEvent:
             "sub_percent": self.sub_percent or 0.0,
             "content": self.content,
             "message": self.message,
+            "status": self.status or "",
         }
 
 
@@ -114,6 +117,7 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "complete": StreamMessageType.stage_complete.value,
     "output": StreamMessageType.llm_output.value,
     "thinking": StreamMessageType.llm_thinking.value,
+    "tool_call": StreamMessageType.tool_call.value,
 }
 
 # preprocess 的 paragraph embedding 子阶段按 embedding batch 高频发 progress 事件；
@@ -229,11 +233,11 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        # LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
+        # LLM 流式正文/思考片段/工具调用，以及 embedding batch 这类高频 progress，
         # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO
         log_level = (
             logger.debug
-            if resolved_event.action in {"output", "thinking"}
+            if resolved_event.action in {"output", "thinking", "tool_call"}
             or (
                 resolved_event.action == "progress"
                 and resolved_event.sub_stage in _DEBUG_PROGRESS_SUB_STAGES

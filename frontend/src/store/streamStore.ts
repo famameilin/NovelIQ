@@ -1,7 +1,25 @@
 /** 管理任务进度与多流 LLM 输出状态 */
 import { create } from "zustand";
-import type { StreamEventData } from "@/api/streamTypes";
+import type { StreamEventData, ToolCallStatus } from "@/api/streamTypes";
 import { appConfig } from "@/config";
+
+/** 工具调用条目：工具名 + 状态 + 描述 */
+export interface ToolCallEntry {
+  name: string;
+  status: ToolCallStatus;
+  detail: string;
+}
+
+/**
+ * 顺序区块：按事件到达顺序组织 LLM 展示
+ * - thinking 块 = "模型思考中"，内容为工具调用列表
+ * - output 块 = "模型输出"，内容为模型文本
+ */
+export interface StreamBlock {
+  kind: "thinking" | "output";
+  tools: ToolCallEntry[];
+  text: string;
+}
 
 export interface LLMStreamGroup {
   groupKey: string;
@@ -13,8 +31,13 @@ export interface LLMStreamGroup {
   thinkingText: string;
   outputTotalChars: number;
   thinkingTotalChars: number;
+  toolTotalChars: number;
+  blocks: StreamBlock[];
   lastUpdatedAt: number;
 }
+
+/** 单个 group 内允许保留的最大区块数，超出时丢弃最旧区块 */
+const _MAX_BLOCKS_PER_GROUP = 100;
 
 interface StreamState {
   isConnected: boolean;
@@ -75,24 +98,79 @@ function _appendBoundedLLMOutput(
   group: LLMStreamGroup,
   action: StreamEventData["action"],
   content: string,
+  status?: ToolCallStatus | null,
+  message?: string,
 ): LLMStreamGroup {
-  if (!content) {
+  if (!content && action !== "tool_call") {
     return group;
   }
 
+  const blocks = group.blocks;
+  const lastBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+
   if (action === "thinking") {
+    // 思考信号：新一轮思考开始（内容不展示，仅作区块分隔信号）
+    const nextBlocks =
+      lastBlock?.kind === "thinking" ? blocks : [...blocks, { kind: "thinking" as const, tools: [], text: "" }];
     return {
       ...group,
+      blocks: _trimBlocks(nextBlocks),
       thinkingText: _trimLLMOutputText(group.thinkingText + content),
       thinkingTotalChars: group.thinkingTotalChars + content.length,
     };
   }
 
+  if (action === "tool_call") {
+    const name = content || "unknown";
+    const toolStatus: ToolCallStatus = status ?? "started";
+    const detail = message || "";
+    // 若无思考块则先建一个（工具调用属于思考过程）
+    const baseBlocks =
+      lastBlock?.kind === "thinking"
+        ? blocks
+        : [...blocks, { kind: "thinking" as const, tools: [], text: "" }];
+    const thinkingBlock = baseBlocks[baseBlocks.length - 1];
+    // 同一工具的 started 状态条目原地更新为 success/failed，保持一行
+    const existingIndex = thinkingBlock.tools.findIndex(
+      (tool) => tool.name === name && tool.status === "started",
+    );
+    let tools: ToolCallEntry[];
+    if (existingIndex >= 0) {
+      tools = thinkingBlock.tools.map((tool, index) =>
+        index === existingIndex ? { name, status: toolStatus, detail } : tool,
+      );
+    } else {
+      tools = [...thinkingBlock.tools, { name, status: toolStatus, detail }];
+    }
+    const nextBlocks = [...baseBlocks.slice(0, -1), { ...thinkingBlock, tools }];
+    return {
+      ...group,
+      blocks: _trimBlocks(nextBlocks),
+      toolTotalChars: group.toolTotalChars + name.length,
+      thinkingTotalChars: group.thinkingTotalChars + detail.length,
+    };
+  }
+
+  // output：连续输出合并进同一块
+  const outputText = _trimLLMOutputText(group.outputText + content);
+  const nextBlocks =
+    lastBlock?.kind === "output"
+      ? [...blocks.slice(0, -1), { ...lastBlock, text: _trimLLMOutputText(lastBlock.text + content) }]
+      : [...blocks, { kind: "output" as const, tools: [], text: _trimLLMOutputText(content) }];
   return {
     ...group,
-    outputText: _trimLLMOutputText(group.outputText + content),
+    blocks: _trimBlocks(nextBlocks),
+    outputText,
     outputTotalChars: group.outputTotalChars + content.length,
   };
+}
+
+/** 裁剪区块数量上限，丢弃最旧区块 */
+function _trimBlocks(blocks: StreamBlock[]): StreamBlock[] {
+  if (blocks.length <= _MAX_BLOCKS_PER_GROUP) {
+    return blocks;
+  }
+  return blocks.slice(-_MAX_BLOCKS_PER_GROUP);
 }
 
 /** 找到某个 scope 下最近更新的流 */
@@ -232,9 +310,14 @@ export const useStreamStore = create<StreamState>()((set) => ({
         thinkingText: existing?.thinkingText ?? "",
         outputTotalChars: existing?.outputTotalChars ?? 0,
         thinkingTotalChars: existing?.thinkingTotalChars ?? 0,
+        toolTotalChars: existing?.toolTotalChars ?? 0,
+        blocks: existing?.blocks ?? [],
         lastUpdatedAt: now,
       };
-      newOutputs.set(groupKey, _appendBoundedLLMOutput(nextGroup, data.action, data.content));
+      newOutputs.set(
+        groupKey,
+        _appendBoundedLLMOutput(nextGroup, data.action, data.content, data.status, data.message),
+      );
 
       const nextSelections = new Map(state.activeStreamSelections);
       const nextSelectionModes = new Map(state.streamSelectionModes);
