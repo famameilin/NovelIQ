@@ -17,6 +17,7 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
     case_columns = Base.metadata.tables["case_pool_cases"].columns
     fact_columns = Base.metadata.tables["graph_facts"].columns
     entity_columns = Base.metadata.tables["graph_entities"].columns
+    dialogue_columns = Base.metadata.tables["dialogue_records"].columns
     assert {
         "case_id",
         "type",
@@ -25,10 +26,28 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
         "evidence_chunk_id",
         "target_fact_id",
         "target_fact_revision",
+        "target_dialogue_id",
+        "target_setup_id",
     } <= set(mapping_columns.keys())
     assert {"type", "chunk_id", "target_key", "target_ref"} <= set(case_columns.keys())
     assert {"graph_version_id", "source_kind", "annotation_id", "payload_path", "evidence"} <= set(fact_columns.keys())
     assert "attributes" in entity_columns
+    assert {
+        "dialogue_id",
+        "run_id",
+        "chunk_id",
+        "chapter_id",
+        "candidate_key",
+        "content",
+        "start",
+        "end",
+        "speaker",
+        "tone",
+        "is_inner_monologue",
+        "description",
+        "confidence",
+        "evidence",
+    } <= set(dialogue_columns.keys())
 
 
 def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() -> None:
@@ -39,6 +58,7 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
         patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
         patch("src.storage.db._assert_focus_contract_schema"),
         patch("src.storage.db._assert_annotation_contract_schema"),
+        patch("src.storage.db._assert_agent_audit_contract_schema"),
     ):
         init_db()
 
@@ -50,6 +70,11 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
         "entity_state_versions",
         "graph_relations",
         "graph_relation_versions",
+        "dialogue_records",
+        "agent_invocations",
+        "agent_turns",
+        "agent_tool_calls",
+        "token_usage",
     } <= set(table_names)
     mock_create_graph_read_views.assert_called_once()
     mock_ensure_runtime_schema.assert_called_once()
@@ -76,12 +101,39 @@ def test_init_db_runs_focus_contract_guard_after_runtime_schema() -> None:
         patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
         patch("src.storage.db._assert_focus_contract_schema") as mock_assert_focus_contract_schema,
         patch("src.storage.db._assert_annotation_contract_schema") as mock_assert_annotation_contract_schema,
+        patch("src.storage.db._assert_agent_audit_contract_schema") as mock_assert_agent_audit_contract_schema,
     ):
         init_db()
 
     mock_ensure_runtime_schema.assert_called_once_with(fake_engine)
     mock_assert_focus_contract_schema.assert_called_once_with(fake_engine)
     mock_assert_annotation_contract_schema.assert_called_once_with(fake_engine)
+    mock_assert_agent_audit_contract_schema.assert_called_once_with(fake_engine)
+
+
+def test_agent_audit_contract_guard_rejects_legacy_model_interactions(db_session) -> None:
+    """2026-08-10 用于验证旧库残留 model_interactions 时启动直接失败（不做运行时兼容建表）"""
+    from sqlalchemy import text as sql_text
+
+    from src.storage.db import _assert_agent_audit_contract_schema
+
+    db_session.execute(sql_text("CREATE TABLE model_interactions (id SERIAL PRIMARY KEY)"))
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="model_interactions 仍存在"):
+        _assert_agent_audit_contract_schema(db_session.get_bind())
+
+
+def test_agent_audit_contract_guard_rejects_missing_audit_tables(db_session) -> None:
+    """2026-08-10 用于验证缺少新审计表时启动直接失败"""
+    from src.storage.db import _assert_agent_audit_contract_schema
+
+    db_session.execute(text("DROP TABLE IF EXISTS model_interactions CASCADE"))
+    db_session.execute(text("DROP TABLE IF EXISTS agent_invocations CASCADE"))
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="agent_invocations 表不存在"):
+        _assert_agent_audit_contract_schema(db_session.get_bind())
 
 
 def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> None:
@@ -111,6 +163,14 @@ def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> Non
     assert any(expected_foreshadow_sql in sql for sql in executed_sql)
     assert any(expected_thread_confidence_sql in sql for sql in executed_sql)
     assert any("ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS attributes" in sql for sql in executed_sql)
+    assert any(
+        "ALTER TABLE case_resolution_mappings ADD COLUMN IF NOT EXISTS target_dialogue_id" in sql
+        for sql in executed_sql
+    )
+    assert any(
+        "ALTER TABLE case_resolution_mappings ADD COLUMN IF NOT EXISTS target_setup_id" in sql
+        for sql in executed_sql
+    )
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist" in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters" in sql for sql in executed_sql)
     assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast" in sql for sql in executed_sql)
