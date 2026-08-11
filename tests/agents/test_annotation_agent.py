@@ -11,7 +11,6 @@ from src.agents.annotation.errors import AnnotationAuthorizationError, Annotatio
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
 from src.agents.annotation.runner import (
-    AnnotationAgentRunError,
     run_annotation_agent,
     validate_bound_annotation,
 )
@@ -102,9 +101,6 @@ def _metrics_call(call_id: str = "call-metrics") -> dict:
             "summary": "住手回荡",
             "emotional_valence": "neutral",
             "narrative_function": "铺垫",
-            "confidence": "high",
-            "reason": "本章开端",
-            "chapter_summary": "住手回荡",
         },
         call_id=call_id,
     )
@@ -119,8 +115,6 @@ def _entities_call(call_id: str = "call-entities") -> dict:
                 {
                     "name": "顾霜",
                     "entity_type": "character",
-                    "confidence": "high",
-                    "reason": "人物出现",
                 }
             ]
         },
@@ -138,10 +132,7 @@ def _observations_call(call_id: str = "call-observations") -> dict:
                     "character": "顾霜",
                     "role_function": "主体",
                     "action": "喝止",
-                    "action_type": "对话",
                     "emotion": "mild_negative",
-                    "confidence": "high",
-                    "reason": "顾霜喝止",
                 }
             ]
         },
@@ -150,17 +141,16 @@ def _observations_call(call_id: str = "call-observations") -> dict:
 
 
 def _dialogues_call(call_id: str = "call-dialogues") -> dict:
-    """2026-08-07 用于构造按候选顺序的 write_dialogues 调用"""
+    """2026-08-07 用于构造按候选序号的 write_dialogues 调用（完整覆盖 1..N）"""
     return _write_call(
         "write_dialogues",
         {
             "items": [
                 {
-                    "is_dialogue": True,
-                    "description": "喝止住手",
+                    "candidate_index": 1,
+                    "verdict": "dialogue",
                     "speaker": None,
-                    "confidence": "high",
-                    "reason": "原文双引号",
+                    "tone": "平静",
                 }
             ]
         },
@@ -176,9 +166,7 @@ def _events_call(call_id: str = "call-events") -> dict:
             "items": [
                 {
                     "description": "顾霜喝止众人",
-                    "participants": [{"entity": "顾霜", "participation": "主体"}],
-                    "confidence": "high",
-                    "reason": "喝止事件",
+                    "participants": [{"entity": "顾霜", "role": "行动者"}],
                 }
             ]
         },
@@ -187,10 +175,9 @@ def _events_call(call_id: str = "call-events") -> dict:
 
 
 def _empty_domain_calls() -> list[dict]:
-    """2026-08-07 用于构造剩余三个空领域的写入调用"""
+    """2026-08-07 用于构造剩余两个空领域的写入调用"""
     return [
         _write_call("write_relations", {"items": []}, call_id="call-relations"),
-        _write_call("write_states", {"items": []}, call_id="call-states"),
         _write_call("write_foreshadowings", {"items": []}, call_id="call-foreshadowings"),
     ]
 
@@ -199,7 +186,7 @@ def _full_write_calls(
     *,
     dialogues: dict | None = None,
 ) -> list[dict]:
-    """2026-08-07 用于构造同一回复的全部八个领域写入调用"""
+    """2026-08-07 用于构造同一回复的全部七个领域写入调用"""
     resolved_dialogues = dialogues if dialogues is not None else _dialogues_call()
     return [
         _metrics_call(),
@@ -255,11 +242,6 @@ async def _invoke_graph(
     )
 
 
-def evidence(reason: str, chunk_id: int) -> list[dict]:
-    """2026-08-07 用于构造系统文本依据"""
-    return [{"reason": reason, "chunk_id": chunk_id}]
-
-
 def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnnotation:
     """2026-08-07 用于构造 Runner 重试测试的最小章节标注"""
     return BoundChapterAnnotation(
@@ -271,15 +253,12 @@ def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnn
                     summary="顾霜进入山门",
                     emotional_valence="neutral",
                     narrative_function="铺垫",
-                    confidence="high",
-                    reason="进入",
                 ),
                 entities=BoundEntityDirectory(),
                 character_observations=[],
                 dialogues=[],
                 events=[],
                 relations=[],
-                states=[],
                 foreshadowings=[],
             )
         ],
@@ -328,8 +307,8 @@ async def test_single_chunk_chapter_completes_via_write_and_auto_finalize() -> N
 
 
 @pytest.mark.asyncio
-async def test_eight_writes_make_auto_finalize_always_succeed() -> None:
-    """2026-08-10 用于验证八个 write 全部成功后系统自动冻结并完成章节"""
+async def test_seven_writes_make_auto_finalize_always_succeed() -> None:
+    """2026-08-10 用于验证七个 write 全部成功后系统自动冻结并完成章节"""
     llm = _SequenceLLM(
         [
             _tool_message(_full_write_calls()),
@@ -342,32 +321,27 @@ async def test_eight_writes_make_auto_finalize_always_succeed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_seven_success_one_failure_keeps_seven_receipts() -> None:
-    """2026-08-10 用于验证一个 write 失败只回滚该调用，其余七个 receipt 全部保留"""
-    invalid_states = _write_call(
-        "write_states",
+async def test_six_success_one_failure_keeps_six_receipts() -> None:
+    """2026-08-10 用于验证一个 write 失败只回滚该调用，其余六个 receipt 全部保留"""
+    invalid_metrics = _write_call(
+        "write_metrics",
         {
-            "items": [
-                {
-                    "entity": "顾霜",
-                    "predicate": "状态",
-                    "object": None,
-                    "value": None,
-                    "confidence": "high",
-                    "reason": "缺少 object 与 value",
-                }
-            ]
+            "summary": " ",
+            "emotional_valence": "neutral",
+            "narrative_function": "铺垫",
         },
-        call_id="call-states",
+        call_id="call-metrics-bad",
     )
     llm = _SequenceLLM(
         [
             _tool_message(
                 [
-                    *_full_write_calls()[:4],
+                    _entities_call(),
+                    _observations_call(),
+                    _dialogues_call(),
                     _events_call(),
                     _write_call("write_relations", {"items": []}, call_id="call-relations"),
-                    invalid_states,
+                    invalid_metrics,
                     _write_call(
                         "write_foreshadowings",
                         {"items": []},
@@ -377,11 +351,7 @@ async def test_seven_success_one_failure_keeps_seven_receipts() -> None:
             ),
             _tool_message(
                 [
-                    _write_call(
-                        "write_states",
-                        {"items": []},
-                        call_id="call-states-fixed",
-                    ),
+                    _metrics_call(call_id="call-metrics-fixed"),
                 ]
             ),
         ]
@@ -393,9 +363,9 @@ async def test_seven_success_one_failure_keeps_seven_receipts() -> None:
     receipts = _tool_receipts(llm.captured_messages[1])
     accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
-    assert len(accepted) == 7
+    assert len(accepted) == 6
     assert len(rejected) == 1
-    assert '"tool": "write_states"' in rejected[0]
+    assert '"tool": "write_metrics"' in rejected[0]
 
 
 @pytest.mark.asyncio
@@ -404,11 +374,9 @@ async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
     invalid_metrics = _write_call(
         "write_metrics",
         {
-            "summary": "坏指标",
+            "summary": " ",
             "emotional_valence": "neutral",
             "narrative_function": "铺垫",
-            "confidence": "high",
-            "reason": "",
         },
         call_id="call-metrics-bad",
     )
@@ -519,7 +487,7 @@ async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
     )
 
     class _BrokenLedger(AnnotationToolLedger):
-        """2026-08-10 用于模拟 8 个 receipt 齐全但 ready_chunk 被破坏"""
+        """2026-08-10 用于模拟 7 个 receipt 齐全但 ready_chunk 被破坏"""
 
         def _rebuild_ready_chunk_if_complete(self) -> None:
             super()._rebuild_ready_chunk_if_complete()
@@ -581,14 +549,11 @@ def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
     chunk = annotation.chunks[0]
     chunk.dialogues = [
         BoundDialogue(
+            candidate_index=1,
             candidate_key="dlg_1",
             content="住手",
             start=0,
             end=2,
-            description="喝止",
-            confidence="high",
-            reason="原文",
-            evidence=evidence("原文", 1),
         )
     ]
     with pytest.raises(ValueError, match="系统对话原文绑定不一致"):
@@ -600,28 +565,24 @@ def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_stops_after_third_retryable_failure() -> None:
-    """2026-08-10 用于验证第三次失败后终止且每次使用全新只读 Session"""
-    sessions = [MagicMock(), MagicMock(), MagicMock()]
-    with (
-        patch(
-            "src.agents.annotation.runner._run_single_attempt",
-            new=AsyncMock(side_effect=RuntimeError("model failed")),
-        ) as run_attempt,
-        patch("src.agents.annotation.runner.asyncio.sleep", new=AsyncMock()) as sleep,
-    ):
-        with pytest.raises(AnnotationAgentRunError, match="连续 3 次失败"):
+async def test_runner_single_failure_raises_without_chapter_retry() -> None:
+    """2026-08-11 用于验证章节不再整章重试：单次失败直接抛异常且只使用一个只读 Session"""
+    session = MagicMock()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(side_effect=RuntimeError("model failed")),
+    ) as run_attempt:
+        with pytest.raises(RuntimeError, match="model failed"):
             await run_annotation_agent(
                 run_id="run-1",
                 chapter_id=1,
                 current_chunks=[(1, "顾霜进入山门")],
                 query_service_factory=lambda session: _QueryService(),
-                session_factory=lambda: sessions.pop(0),
+                session_factory=lambda: session,
                 llm=MagicMock(),
                 audit_recorder=MagicMock(),
             )
-    assert run_attempt.await_count == 3
-    assert sleep.await_count == 2
+    assert run_attempt.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -650,58 +611,51 @@ async def test_runner_does_not_retry_authorization_errors() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_records_error_invocations_for_all_failed_attempts() -> None:
-    """2026-08-10 用于验证每次失败尝试都开启并收口 error 审计 invocation"""
-    sessions = [MagicMock(), MagicMock(), MagicMock()]
+async def test_runner_records_single_error_invocation() -> None:
+    """2026-08-11 用于验证单次失败开启并收口一条 error 审计 invocation"""
+    session = MagicMock()
     recorder = MagicMock()
-    with (
-        patch(
-            "src.agents.annotation.runner._run_single_attempt",
-            new=AsyncMock(side_effect=RuntimeError("boom")),
-        ),
-        patch("src.agents.annotation.runner.asyncio.sleep", new=AsyncMock()),
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(side_effect=RuntimeError("boom")),
     ):
-        with pytest.raises(AnnotationAgentRunError):
+        with pytest.raises(RuntimeError, match="boom"):
             await run_annotation_agent(
                 run_id="run-1",
                 chapter_id=1,
                 current_chunks=[(1, "顾霜进入山门")],
                 query_service_factory=lambda session: _QueryService(),
-                session_factory=lambda: sessions.pop(0),
+                session_factory=lambda: session,
                 llm=MagicMock(),
                 audit_recorder=recorder,
             )
-    assert recorder.start_invocation.call_count == 3
-    assert recorder.start_invocation.call_args_list[0].kwargs["attempt_number"] == 1
+    assert recorder.start_invocation.call_count == 1
+    assert recorder.start_invocation.call_args.kwargs["attempt_number"] == 1
     finish_calls = recorder.finish_invocation.call_args_list
-    assert len(finish_calls) == 3
-    assert all(call.kwargs["status"] == "error" for call in finish_calls)
-    assert all("boom" in str(call.kwargs.get("final_error", "")) for call in finish_calls)
+    assert len(finish_calls) == 1
+    assert finish_calls[0].kwargs["status"] == "error"
+    assert "boom" in str(finish_calls[0].kwargs.get("final_error", ""))
 
 
 @pytest.mark.asyncio
-async def test_runner_retries_then_returns_successful_third_attempt() -> None:
-    """2026-08-10 用于验证可重试错误后返回第三次成功结果且成功尝试收口 success"""
+async def test_runner_returns_result_from_single_attempt() -> None:
+    """2026-08-11 用于验证单次尝试成功即返回并收口 success 审计"""
     result = _agent_result()
-    sessions = [MagicMock(), MagicMock(), MagicMock()]
+    session = MagicMock()
     recorder = MagicMock()
-    llm = MagicMock()
-    with (
-        patch(
-            "src.agents.annotation.runner._run_single_attempt",
-            new=AsyncMock(side_effect=[RuntimeError("one"), RuntimeError("two"), result]),
-        ) as run_attempt,
-        patch("src.agents.annotation.runner.asyncio.sleep", new=AsyncMock()),
-    ):
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=result),
+    ) as run_attempt:
         actual = await run_annotation_agent(
             run_id="run-1",
             chapter_id=1,
             current_chunks=[(1, "顾霜进入山门")],
             query_service_factory=lambda session: _QueryService(),
-            session_factory=lambda: sessions.pop(0),
-            llm=llm,
+            session_factory=lambda: session,
+            llm=MagicMock(),
             audit_recorder=recorder,
         )
     assert actual == result
-    assert run_attempt.await_count == 3
-    assert recorder.finish_invocation.call_args_list[-1].kwargs["status"] == "success"
+    assert run_attempt.await_count == 1
+    assert recorder.finish_invocation.call_args.kwargs["status"] == "success"

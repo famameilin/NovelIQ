@@ -1,28 +1,23 @@
 """
-章节标注 Agent 逐 chunk 运行入口与三次重试
+章节标注 Agent 逐 chunk 运行入口
 
-审计: 每次尝试开启 agent_invocations 行，模型回合与工具调用通过
-AgentTurnObserver 写入独立短事务；失败尝试同样保留完整审计记录。
+审计: 每次运行开启 agent_invocations 行，模型回合与工具调用通过
+AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计记录。
+断流重试已下沉到 stream.py 当前模型请求层，章节不再整章重试。
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .errors import (
     AnnotationAgentError,
-    AnnotationAuthorizationError,
-    AnnotationConfigurationError,
     AnnotationInputError,
-    AnnotationInvariantError,
     AnnotationRetryableError,
 )
 from .fact_graph import FactGraph
@@ -35,10 +30,6 @@ if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
     from src.agents.stream import AgentStream
-
-
-class AnnotationAgentRunError(AnnotationRetryableError):
-    """2026-08-05 用于表示同一模型三次章节尝试均未成功"""
 
 
 def _validate_chapter_identity(
@@ -116,14 +107,6 @@ def _close_read_session(session: Session) -> None:
         session.rollback()
     finally:
         session.close()
-
-
-def _retry_backoff_seconds(attempt_index: int) -> float:
-    """2026-08-05 用于读取三次章节尝试之间固定的退避时间"""
-    from src.config import settings
-
-    del attempt_index
-    return max(0.0, settings.models.annotation.retry_backoff_ms / 1000.0)
 
 
 async def _run_single_attempt(
@@ -236,22 +219,14 @@ async def run_annotation_agent(
     graph_state: FactGraph | None = None,
     audit_recorder: AgentAuditRecorder | None = None,
 ) -> AgentRunResult:
-    """2026-08-10 用于按同一模型最多三次运行逐 chunk 章节 Agent，每次尝试独立审计"""
+    """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出"""
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
-    from src.config import settings
 
     _validate_chapter_identity(
         chapter_id=chapter_id,
         current_chunks=current_chunks,
     )
-    configured_attempts = settings.models.annotation.total_attempts
-    if configured_attempts != 3:
-        raise AnnotationConfigurationError("章节 Agent total_attempts 必须固定为 3")
-    if int(settings.models.annotation.retry_backoff_ms) != 5000:
-        raise AnnotationConfigurationError(
-            "章节 Agent retry_backoff_seconds 必须固定为 5000（毫秒）"
-        )
     if llm is None:
         from src.agents.llm import build_chat_model
 
@@ -262,90 +237,54 @@ async def run_annotation_agent(
     model_provider = _model_provider(llm)
     if graph_state is not None:
         graph_state.begin_chapter()
-    baseline_snapshot = graph_state.snapshot() if graph_state is not None else None
-    failures: list[str] = []
-    for attempt_number in range(1, configured_attempts + 1):
-        read_session = session_factory()
-        invocation_id = recorder.start_invocation(
-            run_id=run_id,
-            task_type="annotation",
-            chapter_id=chapter_id,
-            attempt_number=attempt_number,
-            model_name=model_name,
-            model_provider=model_provider,
-        )
-        observer = AgentTurnObserver(
-            recorder,
-            invocation_id=invocation_id,
-            run_id=run_id,
-            novel_id=novel_id,
-            task_type="annotation",
-            call_type="agent",
-            model_name=model_name or "unknown",
-            model_provider=model_provider,
-        )
-        if stream is not None:
-            await stream.thinking(f"章节 {chapter_id} 标注尝试 {attempt_number}/{configured_attempts} 开始")
-        try:
-            result = await _run_single_attempt(
-                run_id=run_id,
-                chapter_id=chapter_id,
-                attempt_number=attempt_number,
-                current_chunks=current_chunks,
-                novel_title=novel_title,
-                llm=llm,
-                session=read_session,
-                query_service_factory=query_service_factory,
-                stream=stream,
-                graph_state=graph_state,
-                observer=observer,
-            )
-        except (
-            AnnotationInputError,
-            AnnotationAuthorizationError,
-            AnnotationConfigurationError,
-            AnnotationInvariantError,
-        ) as exc:
-            if baseline_snapshot is not None:
-                graph_state.restore(baseline_snapshot)  # type: ignore[union-attr]
-            _close_read_session(read_session)
-            recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
-            raise
-        except Exception as exc:  # noqa: BLE001
-            if baseline_snapshot is not None:
-                graph_state.restore(baseline_snapshot)  # type: ignore[union-attr]
-            _close_read_session(read_session)
-            failures.append(str(exc))
-            recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
-            if stream is not None:
-                await stream.tool_call_failed("章节标注", str(exc))
-            logger.warning(
-                "annotation chapter attempt failed run_id={} chapter_id={} attempt={}/{} error={}",
-                run_id,
-                chapter_id,
-                attempt_number,
-                configured_attempts,
-                exc,
-            )
-            if attempt_number >= configured_attempts:
-                break
-            await asyncio.sleep(_retry_backoff_seconds(attempt_number - 1))
-            continue
-        _close_read_session(read_session)
-        recorder.finish_invocation(invocation_id, status="success")
-        if stream is not None:
-            await stream.output(f"章节 {chapter_id} 标注完成（第 {attempt_number} 次尝试）")
-        return result
-
-    raise AnnotationAgentRunError(
-        f"章节 Agent 连续 {configured_attempts} 次失败: "
-        + json.dumps(failures, ensure_ascii=False)
+    read_session = session_factory()
+    invocation_id = recorder.start_invocation(
+        run_id=run_id,
+        task_type="annotation",
+        chapter_id=chapter_id,
+        attempt_number=1,
+        model_name=model_name,
+        model_provider=model_provider,
     )
+    observer = AgentTurnObserver(
+        recorder,
+        invocation_id=invocation_id,
+        run_id=run_id,
+        novel_id=novel_id,
+        task_type="annotation",
+        call_type="agent",
+        model_name=model_name or "unknown",
+        model_provider=model_provider,
+    )
+    if stream is not None:
+        await stream.thinking(f"章节 {chapter_id} 标注开始")
+    try:
+        result = await _run_single_attempt(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            attempt_number=1,
+            current_chunks=current_chunks,
+            novel_title=novel_title,
+            llm=llm,
+            session=read_session,
+            query_service_factory=query_service_factory,
+            stream=stream,
+            graph_state=graph_state,
+            observer=observer,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _close_read_session(read_session)
+        recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
+        raise
+    _close_read_session(read_session)
+    recorder.finish_invocation(invocation_id, status="success")
+    if stream is not None:
+        await stream.output(f"章节 {chapter_id} 标注完成")
+    return result
 
 
 __all__ = [
     "AnnotationAgentError",
-    "AnnotationAgentRunError",
     "AgentRunResult",
     "run_annotation_agent",
     "validate_bound_annotation",

@@ -35,7 +35,7 @@ class TestAnnotationConstants(unittest.TestCase):
 
     def test_valid_relation_types(self) -> None:
         """测试关系类型常量"""
-        expected = {"家族", "师徒", "主从", "敌对", "盟友", "友情", "爱慕", "利益", "同一人物", "隶属", "位于"}
+        expected = {"家族", "师徒", "主从", "敌对", "盟友", "友情", "爱慕", "利益", "同一人物", "隶属", "位于", "领导"}
         self.assertEqual(set(VALID_RELATION_TYPES), expected)
 
     def test_symmetric_relation_types(self) -> None:
