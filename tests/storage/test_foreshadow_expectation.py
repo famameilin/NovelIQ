@@ -42,11 +42,9 @@ def _create_thread_with_hit(
             setup_kind="异常物件",
             expected_payoff_family="主线",
             payoff_likelihood=payoff_likelihood,
-            confidence=strength,
             strength=strength,
             status=status,
             active=True,
-            evidence=[{"reason": "测试", "chunk_id": chunk_id}],
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -57,9 +55,6 @@ def _create_thread_with_hit(
             run_id=run_id,
             chunk_id=chunk_id,
             anchor_text="测试锚点",
-            anchor_reason="测试命中",
-            why_unresolved_now="尚未回收",
-            evidence=[{"reason": "测试", "chunk_id": chunk_id}],
             is_new_setup=True,
             created_at=datetime.now(UTC),
         )

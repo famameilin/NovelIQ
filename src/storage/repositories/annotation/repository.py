@@ -154,7 +154,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 "setup_kind": thread.setup_kind,
                 "foreshadowing_desc": thread.setup_summary,
                 "setup_summary": thread.setup_summary,
-                "why_unresolved_now": hit.why_unresolved_now,
+                "why_unresolved_now": "",
                 "expected_payoff_family": thread.expected_payoff_family,
                 "payoff_likelihood": thread.payoff_likelihood,
                 "linked_setup_id": None if hit.is_new_setup else thread.setup_id,
@@ -302,8 +302,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     strength=thread.strength,
                     status=thread.status,
                     active=bool(thread.active),
-                    latest_reason=latest.anchor_reason if latest else "",
-                    latest_why_unresolved_now=latest.why_unresolved_now if latest else "",
+                    latest_reason=latest.anchor_text if latest else "",
+                    latest_why_unresolved_now="",
                 )
             )
         return views

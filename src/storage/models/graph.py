@@ -141,7 +141,6 @@ class GraphFact(Base):
     assertion: Mapped[str] = mapped_column(String(20), nullable=False)
     confidence: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     effective_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
     annotation_id: Mapped[str] = mapped_column(
@@ -160,7 +159,6 @@ class GraphFact(Base):
             name="graph_facts_effective_chunk_run_fkey",
         ),
         CheckConstraint("fact_revision > 0", name="ck_graph_facts_revision_positive"),
-        CheckConstraint("jsonb_array_length(evidence) > 0", name="ck_graph_facts_evidence_non_empty"),
         UniqueConstraint("run_id", "fact_id", "fact_revision", name="uq_graph_facts_run_fact_revision"),
         UniqueConstraint("graph_version_id", "payload_path", name="uq_graph_facts_version_payload_path"),
         Index("idx_graph_facts_run_chunk", "run_id", "effective_chunk_id"),

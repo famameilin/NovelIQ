@@ -29,7 +29,7 @@ from src.storage.models import (
     GraphVersion,
 )
 from src.workflows.annotate_helpers.storage import complete_annotation_run, load_completion_result
-from tests.support.chapter_annotation_helpers import create_run_with_chunks, evidence
+from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
 def _annotation(
@@ -46,9 +46,6 @@ def _annotation(
             BoundEntity(
                 name="顾霜",
                 entity_type="character",
-                confidence="high",
-                reason="顾霜出现",
-                evidence=evidence("顾霜出现", chunk_id),
             )
         )
     dialogues: list[BoundDialogue] = []
@@ -58,17 +55,14 @@ def _annotation(
         )
         dialogues.append(
             BoundDialogue(
+                candidate_index=1,
                 candidate_key=candidate.candidate_key,
                 content=candidate.content,
                 start=candidate.start,
                 end=candidate.end,
-                description="喝止住手",
                 speaker=None,
-                tone="急切",
+                tone="紧张",
                 is_inner_monologue=False,
-                confidence="high",
-                reason="双引号",
-                evidence=evidence("住手出现", chunk_id),
             )
         )
     return BoundChapterAnnotation(
@@ -80,8 +74,6 @@ def _annotation(
                     summary=text,
                     emotional_valence="neutral",
                     narrative_function="铺垫",
-                    confidence="high",
-                    reason="摘要",
                 ),
                 entities=BoundEntityDirectory(
                     entities=characters,
@@ -90,7 +82,6 @@ def _annotation(
                 dialogues=dialogues,
                 events=[],
                 relations=[],
-                states=[],
                 foreshadowings=[],
             )
         ],
@@ -128,7 +119,6 @@ def _pushed_case_for(annotation: BoundChapterAnnotation) -> list[PendingCase]:
                         "chunk_id": chunk.chunk_id,
                         "keys": [dialogue.content, "说话人"],
                     },
-                    evidence=dialogue.evidence,
                 )
             )
     return pending
@@ -206,6 +196,8 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
     assert case.chunk_id == 0
     assert case.target_ref["dialogue_id"] == dialogue.candidate_key
     assert dialogue.speaker is None
+    assert dialogue.confidence == "medium"
+    assert dialogue.is_inner_monologue is False
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
     assert _count(db_session, GraphVersion, run_id) == 1
     assert _count(db_session, DialogueRecord, run_id) == 1
@@ -245,7 +237,6 @@ def test_dialogue_resolution_updates_dialogue_record(
         type=case.case_type,
         speaker="顾霜",
         reason="后文点明顾霜",
-        evidence_chunk_id=1,
         target_key=case.target_key,
         target_ref=dict(case.target_ref),
     )
@@ -260,7 +251,7 @@ def test_dialogue_resolution_updates_dialogue_record(
             chapter_id=2,
             annotation=second_annotation,
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1],
+            authorized_chunk_ids=[0, 1],
         ),
         novel_id=novel_id,
         session_factory=factory,
@@ -360,7 +351,6 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         action="close",
         type="dialogue_speaker",
         reason="无法确认",
-        evidence_chunk_id=0,
         target_key="missing-target",
         target_ref={
             "kind": "dialogue_speaker",

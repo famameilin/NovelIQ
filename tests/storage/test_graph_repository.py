@@ -56,7 +56,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
-                change_kind="break",
+                state="ended",
             )
         ],
     )
@@ -87,7 +87,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         (1, relation_id, 1),
     ]
     assert relation_changes[0].changes[0]["change_kind"] == "break"
-    assert relation_changes[0].evidence[0].chunk_id == 1
+    assert relation_changes[0].effective_chunk_id == 1
 
 
 def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(db_session) -> None:

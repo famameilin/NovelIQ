@@ -88,7 +88,7 @@ class FactGraph:
         return _stable_relation_key(from_name, to_name, relation_type)
 
     def register_entities(self, entities: list) -> None:
-        """2026-08-09 用于把当前 chunk 实体目录应用到实时事实图（完整替换）"""
+        """2026-08-11 用于把当前 chunk 实体目录应用到实时事实图（完整替换，attributes 走 JSON Merge Patch）"""
         self._reset_chapter_entities()
         for entity in entities:
             key = _norm(entity.name)
@@ -111,6 +111,15 @@ class FactGraph:
                     **(self.entity_attributes.get(key) or {}),
                     "description": description,
                 }
+            patch = dict(getattr(entity, "attributes", None) or {})
+            if patch:
+                merged = dict(self.entity_attributes.get(key) or {})
+                for field_name, value in patch.items():
+                    if value is None:
+                        merged.pop(field_name, None)
+                    else:
+                        merged[field_name] = value
+                self.entity_attributes[key] = merged
             self.chapter_registered_entities[key] = entity.entity_type
 
     def _reset_chapter_entities(self) -> None:
@@ -125,15 +134,18 @@ class FactGraph:
         self.chapter_registered_entities.clear()
 
     def apply_relation(self, item: RelationInput) -> None:
-        """2026-08-09 用于按闭合变化类型校验并更新实时关系集合"""
+        """2026-08-11 用于按闭合状态校验并更新实时关系集合（present 自动选择 assert/reinforce）"""
         from_name = str(item.from_entity)
         to_name = str(item.to_entity)
         relation_type = str(item.relation_type)
         key = self._relation_key(from_name, to_name, relation_type)
-        change_kind = str(item.change_kind)
-        if change_kind == "assert":
-            self.active_relations.add(key)
-            self.chapter_added_relations.add(key)
+        state = str(item.state)
+        if state == "present":
+            if key not in self.active_relations:
+                self.active_relations.add(key)
+                self.chapter_added_relations.add(key)
+                self._bump_support_count(key)
+                return
             self._bump_support_count(key)
             return
         if key not in self.active_relations:
@@ -143,18 +155,15 @@ class FactGraph:
                 hint_text = "；图中现有相近关系: " + "、".join(hints[:3])
             raise ValueError(
                 f"关系变化未匹配到已存在活动关系: {from_name} "
-                f"{relation_type} {to_name}（{change_kind} 要求边已存在，"
-                f"请改为 assert，或核对端点是否使用了图上的登记名称{hint_text}）"
+                f"{relation_type} {to_name}（{state} 要求边已存在，"
+                f"请改为 present，或核对端点是否使用了图上的登记名称{hint_text}）"
             )
-        if change_kind in {"break", "retract"}:
+        if state == "ended":
             self.active_relations.discard(key)
             self.relation_attributes.pop(key, None)
             return
-        if change_kind == "weaken":
+        if state == "weakened":
             self._bump_strength(key)
-            return
-        if change_kind in {"reinforce", "refine", "supersede"}:
-            self._bump_support_count(key)
             return
 
     def _bump_support_count(self, key: tuple[str, str, str]) -> None:
@@ -235,6 +244,50 @@ class FactGraph:
     def relation_exists(self, from_name: str, to_name: str, relation_type: str) -> bool:
         """2026-08-09 用于判断活动关系是否已存在"""
         return self._relation_key(from_name, to_name, relation_type) in self.active_relations
+
+    def resolve_name(self, name: str) -> str:
+        """2026-08-11 用于沿"同一人物"连通分量把别名解析为规范名（标记优先）"""
+        key = _norm(name)
+        representative_key = self._representative_key(key)
+        if representative_key is None:
+            return name
+        return self.entity_names.get(representative_key, name)
+
+    def _representative_key(self, key: str) -> str | None:
+        """2026-08-11 用于沿同一人物边找分量代表：is_representative 标记优先，无标记兜底"""
+        parent: dict[str, str] = {}
+
+        def find(node: str) -> str:
+            if parent.get(node, node) != node:
+                parent[node] = find(parent[node])
+            return parent[node]
+
+        for from_key, to_key, relation_type in self.active_relations:
+            if relation_type != "同一人物":
+                continue
+            parent.setdefault(from_key, from_key)
+            parent.setdefault(to_key, to_key)
+            root_a, root_b = find(from_key), find(to_key)
+            if root_a != root_b:
+                parent[root_b] = root_a
+        if key not in parent:
+            return None
+        root = find(key)
+        members = [node for node in parent if find(node) == root]
+        registered_order = {
+            node: index for index, node in enumerate(self.entity_names)
+        }
+        members.sort(key=lambda node: registered_order.get(node, len(registered_order)))
+        flagged = [
+            node for node in members
+            if bool((self.entity_attributes.get(node) or {}).get("is_representative"))
+        ]
+        if flagged:
+            return flagged[0]
+        history_members = [node for node in members if node in self.history_entity_types]
+        if history_members:
+            return history_members[0]
+        return members[0]
 
 
 __all__ = ["FactGraph"]

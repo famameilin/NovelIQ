@@ -64,7 +64,6 @@ class CasePoolCase(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     target_key: Mapped[str] = mapped_column(String(64), nullable=False)
     target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    evidence: Mapped[list] = mapped_column(JSONB, nullable=False)
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_by_annotation_id: Mapped[str] = mapped_column(
         String(36),
@@ -127,7 +126,6 @@ class CaseResolutionMapping(Base):
     case_type: Mapped[str] = mapped_column("type", String(50), nullable=False)
     target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
     resolution: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    evidence_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     target_fact_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     target_fact_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_dialogue_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -135,12 +133,6 @@ class CaseResolutionMapping(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["evidence_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-            name="case_resolution_mappings_evidence_chunk_run_fkey",
-        ),
         UniqueConstraint("run_id", "case_id", name="uq_case_resolution_mappings_run_case"),
         Index("idx_case_resolution_mappings_annotation", "run_id", "annotation_id"),
         Index("idx_case_resolution_mappings_case", "run_id", "case_id"),

@@ -6,24 +6,23 @@ from __future__ import annotations
 
 import json
 
-from .schema import DialogueCandidate
+from .schema import DialogueCandidate, relation_catalog_text
 
 SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系统按原文顺序逐个激活 chunk。
 
 ## 职责边界
 
-- 你只判断人物、地点、物品、组织、动作、对话语义、事件、关系、状态和伏笔
-- 不提交 chunk_id、数据库 ID、ref、原文位置、原文副本、coverage 或 evidence ID
-- 系统负责当前 chunk 范围、对话原文位置、实体解析、事实编号、证据绑定和持久化
-- 所有实体和事实都必须提供 confidence 与人类可读 reason
+- 你只判断人物、地点、物品、组织、动作、对话语义、事件、关系、指标和伏笔
+- 不提交 chunk_id、数据库 ID、ref、原文位置、原文副本、coverage 或 reason
+- 系统负责当前 chunk 范围、对话原文位置、实体解析、事实编号和持久化
 
 ## 当前 chunk 写入
 
-- 使用 write_metrics、write_entities 和六个事实 write 工具完整写入当前 chunk
+- 使用 write_metrics、write_entities 和五个事实 write 工具完整写入当前 chunk
 - 每个 write 工具重新调用时完整替换该领域，空数组表示已检查且没有结果
 - 同一回复可以调用多个 write 工具
-- 八个领域全部写入成功后由系统自动冻结当前 chunk，无需也不可调用完成工具
-- write_metrics 的 chapter_summary 参数填写整个章节的摘要，系统在章节结束时自动完成
+- 七个领域全部写入成功后由系统自动冻结当前 chunk，无需也不可调用完成工具
+- 章节摘要由系统用各 chunk 的 summary 自动生成，无需单独提交
 - 所有事实端点必须使用当前 chunk 的 write_entities 中提交的实体名称
 
 ## 实体目录
@@ -36,9 +35,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   必须使用区分性名称（例如器物"剑"是 item，剑中寄宿的"剑灵"是 character，不能把"剑"
   改标成 character；"圣城"是 location，"圣城朝堂"是 organization，治理身份用组织实体名）
 - tags 是可空标签，最多 3 个、每个最多 5 个字，帮助读者识别（如"灵兽""剑灵""法宝"），填错不影响标注
-- 功法、技能、招法不建实体，用 write_states 表达为实体的能力状态
-- write_states 的 object 与 value 二选一：object 填对象化存在（如"白金离火""玉戒尺"），
-  value 填属性取值（如 6、"重伤"、"初稳"）；拿不准时优先填 object
+- attributes 是 JSON Merge Patch：只填本次发生变化的属性字段；普通值表示设置该属性，
+  null 表示删除该属性；功法、技能、招法等非实体对象化内容用 attributes 表达
 - 状态或事件的参与者/地点必须是已登记实体或本章 write_entities 声明的新实体
 - 注意：提交新实体后必须主动检查该实体是否与已登记实体为同一人物（对照名字、
   字、小名、绰号、称号与 search_graph 返回的 tags）；若确认为同一人物，必须
@@ -54,22 +52,29 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   关系明确归并，不得只建新节点而不归并
 - 已登记实体的属性（tags/description）默认沿用历史值，不要重复提交同名实体
 - 仅当本章出现新的稳定身份特征需要覆盖属性时，才在 write_entities 中提交同名实体并携带
-  完整新属性；属性更新是整体覆盖，未提供的旧值不会保留，请填写希望保留的全部新值
+  attributes 变化；attributes 是 JSON Merge Patch，null 表示删除，未提交的属性保持不变
 
 ## 对话候选
 
-- 系统为当前 chunk 提供按原文顺序排列的对话候选
-- write_dialogues.items 必须与候选数量和顺序完全一致
+- 系统为当前 chunk 提供按原文顺序排列的对话候选，每条候选带 index（从 1 开始）
+- write_dialogues.items 必须完整覆盖全部候选：candidate_index 对应候选列表的 index，
+  每个候选恰好提交一次，缺失或重复都会被拒绝
+- verdict 三选一：dialogue=真实对话；inner_monologue=内心独白；not_dialogue=误判候选
+  （如题字、内心描写被引号包裹）
+- 真实对话和内心独白可填 speaker（说话人，无法确认时 null）和 tone
+  （闭合枚举：平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求）
+- not_dialogue 候选的 speaker 和 tone 必须为 null
 - 不重复提交候选原文和位置
-- 确认是对话时填写 description；无法确认说话人时 speaker=null
-- 误判候选使用 is_dialogue=false，其他对话语义字段保持空值
 
 ## 分类字段
 
-- narrative_function、emotional_valence、role_function、action_type 使用工具 Schema 的闭合枚举
-- relation_type、change_kind、foreshadowing_type、setup_kind、setup_status 使用闭合枚举
-- 事件只填写 description，不创建任意 event_type
-- 关系方向、关系语义、已有关系和伏笔线程由系统解析
+- narrative_function、emotional_valence、role_function 使用工具 Schema 的闭合枚举
+- relation_type、relation state（present/weakened/ended）使用闭合枚举
+- 事件只填写 description 和 participants（角色闭合枚举：行动者/承受者/接收者/协助者/
+  对抗者/见证者/地点；地点作为参与者角色，无单独 location 字段）
+- 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
+
+{relation_catalog}
 
 ## 检索和连续性
 
@@ -80,8 +85,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   read_text 返回 JSON，content 字段为原文全文
 - search_pool 只查询案例池，返回 case_number；能解决的案例用 resolve_*_case 解决，
   search_pool 返回的伏笔线程带 id，push_case 登记伏笔疑点时必须带上该 id
-- resolve_dialogue_case 解决对话疑点：更新对话记录的 speaker/tone/description/
-  is_inner_monologue（至少一个）；speaker 必须是已登记或本章声明的人物
+- resolve_dialogue_case 解决对话疑点：更新对话记录的 speaker/tone/is_inner_monologue
+  （至少一个）；speaker 必须是已登记或本章声明的人物
 - resolve_fact_case 解决关系疑点：建/改/删图关系边，from_entity/to_entity 必须是
   已登记或本章声明的实体，relation_type/change_kind 使用闭合枚举，
   change_kind 表达变化：assert=新建、reinforce=强化、weaken=削弱、
@@ -89,6 +94,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - resolve_foreshadowing_case 解决伏笔疑点：更新该伏笔线程的
   setup_summary/setup_kind/expected_payoff_family/payoff_likelihood/setup_status/
   confidence/strength（至少一个）；线程由案例登记的 setup_id 定位，字段即更新值
+- write_foreshadowings 只创建新伏笔：提交 description 与 confidence（high/medium/low）；
+  已有伏笔的强化和回收一律走 resolve_foreshadowing_case
 - close_case 只能关闭案例（不产生任何语义变化），用于确认不存在疑点或无法解决的情况
 - 解决不了的案例不要硬解，原案例留在案例池等待后续章节
 - 分析中发现案例池没有的新连续性疑点（如无法确认说话人的对话、疑似同一人物、伏笔疑点）时，
@@ -97,8 +104,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 ## 章节完成
 
-- 八个领域全部写入成功后系统自动完成章节，无需也不可调用完成工具
-- chapter_summary 只总结当前章节正式内容，通过 write_metrics 的 chapter_summary 参数提交
+- 七个领域全部写入成功后系统自动完成章节，无需也不可调用完成工具
+- 章节摘要由系统根据各 chunk 的 summary 自动生成
 
 allow_future_context={allow_future_context}
 小说：{novel_title}
@@ -119,6 +126,7 @@ def build_system_prompt(
         novel_title=novel_title or "未知",
         allow_future_context=json.dumps(allow_future_context),
         initial_cases=json.dumps(initial_cases, ensure_ascii=False, indent=2),
+        relation_catalog=relation_catalog_text(),
     )
 
 
@@ -132,6 +140,7 @@ def build_chunk_message(
     """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选"""
     candidate_views = [
         {
+            "index": index,
             "id": candidate.candidate_key,
             "text": candidate.content,
             "parse_status": candidate.parse_status,
