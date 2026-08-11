@@ -8,6 +8,7 @@ export type SSEEventType =
   | "stage_complete"
   | "llm_output"
   | "llm_thinking"
+  | "tool_call"
   | "task_complete"
   | "task_error"
   | "task_cancelled"

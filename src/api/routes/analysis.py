@@ -108,6 +108,8 @@ def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
         message=run.get("message"),
         llm_outputs=None,  # DB 中不存储 llm_outputs
         error=run.get("error"),
+        started_at=run.get("started_at"),
+        completed_at=run.get("completed_at"),
     )
 
 
