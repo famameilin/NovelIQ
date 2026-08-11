@@ -27,6 +27,11 @@ SYSTEM_PROMPT = """你是专业的网络小说整体诊断 Agent，负责对已�
 - diagnosis：综合诊断，包含结构、节奏、人物、主题、价值观的整体评价
 - power_stance_score / common_people_dignity / cultural_depth_score：1-5 分
 - focus_structure / focus_characters / main_characters / core_cast：重点结构与核心阵容
+- 合同约束（违反将被拒绝）：style_labels 最多 3 个；main_characters 最多 5 个；
+  focus_characters/main_characters/core_cast 中的每个人名必须同时出现在 arc_scores 中；
+  focus_structure=single 时焦点人物必须恰好 1 个，dual 恰好 2 个，ensemble 至少 3 个；
+  topic_labels 数量必须与工具返回的主题词数量一致
+- 校验被拒后，请用 revise_finish 只提交需要修改的字段，不要重复提交完整结果
 - 命名规则：别名映射提供的称呼一律改写为规范名后再推理输出
 """
 
