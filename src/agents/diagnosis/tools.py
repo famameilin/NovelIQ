@@ -14,7 +14,23 @@ from sqlalchemy.orm import Session
 
 from src.models.cloud.schema import CloudAnalysis
 
+from .contract import CloudAnalysisPatch
 from .evidence import DiagnosisEvidenceLedger
+
+
+def _format_topic_rows(rows: list[dict[str, Any]]) -> str:
+    """2026-08-11 用于渲染主题词工具输出（含主题词与标签）"""
+    parts: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        words = "、".join(row.get("words") or [])
+        label = row.get("label")
+        head = f"{index}. [topic {row['topic_id']}，权重 {row['weight']}]"
+        if words:
+            head += f" 主题词：{words}"
+        if label:
+            head += f"，标签：{label}"
+        parts.append(head)
+    return "\n".join(parts)
 
 
 def build_diagnosis_tools(
@@ -122,18 +138,18 @@ def build_diagnosis_tools(
     @tool
     def get_topic_data() -> str:
         """
-        查询主题词与主题分布。
+        查询主题词与主题分布（返回 topic_id、累计权重、主题词与标签）。
         用于判断全书主题方向与话题覆盖。
         """
-        from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+        from src.storage.repositories import DiagnosisRepository
 
         ledger.record_tool_call("get_topic_data")
 
         repo = DiagnosisRepository(session)
-        topic_words = repo.fetch_topic_words(run_id, top_n=10)
-        if not topic_words:
+        topic_rows = repo.fetch_topic_words(run_id, top_n=10)
+        if not topic_rows:
             return "（无主题数据）"
-        return "\n".join(f"{index}. {words}" for index, words in enumerate(topic_words, start=1))
+        return _format_topic_rows(topic_rows)
 
     @tool
     def get_graph_signals() -> str:
@@ -163,6 +179,14 @@ def build_diagnosis_tools(
         """
         return "OK"
 
+    @tool
+    def revise_finish(patch: CloudAnalysisPatch) -> str:
+        """
+        局部修正上一次提交的 CloudAnalysis：只提交需要修改的字段，
+        未提交字段沿用上一次完整结果。校验仍被拒时继续修正，不要重复提交完整结果。
+        """
+        return "OK"
+
     return [
         get_aggregate_signals,
         get_pivot_materials,
@@ -171,4 +195,5 @@ def build_diagnosis_tools(
         get_topic_data,
         get_graph_signals,
         finish,
+        revise_finish,
     ]

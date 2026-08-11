@@ -18,6 +18,7 @@ from src.agents.stream import AgentStream
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
+from .contract import CloudAnalysisPatch
 from .evidence import DiagnosisEvidenceLedger
 from .prompts import build_diagnosis_system_prompt
 from .tools import build_diagnosis_tools
@@ -173,6 +174,8 @@ async def run_diagnosis_agent(
             expected_topic_label_count=expected_topic_label_count,
             evidence_ledger=evidence_ledger,
         ),
+        revision_tool_name="revise_finish",
+        revision_response_model=CloudAnalysisPatch,
         stream=stream,
         observer=observer,
         context_summary=_context_summary(evidence_ledger),

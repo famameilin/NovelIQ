@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import and_, func, select
@@ -13,6 +14,28 @@ from src.storage.models import Chunk, ChunkCurve, ChunkTopic, StageSummary
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph import GraphRepository
+
+
+def _topic_words_from_model_dir(model_dir: Path) -> dict[int, tuple[list[str], str | None]]:
+    """2026-08-11 用于从 LDA 模型目录读取主题词与标签，模型缺失或损坏时返回空映射"""
+    if not model_dir.exists():
+        return {}
+    try:
+        from src.topic import LDAConfig, LDATrainer
+
+        topic_model = LDATrainer(LDAConfig()).load_model(model_dir)
+    except (FileNotFoundError, ImportError, OSError, ValueError):
+        return {}
+    result: dict[int, tuple[list[str], str | None]] = {}
+    labels = getattr(topic_model, "labels", None) or {}
+    for topic_id in range(topic_model.num_topics):
+        words = [
+            word.word
+            for word in topic_model.get_topic_words(topic_id, top_n=10)
+        ]
+        label = labels.get(topic_id)
+        result[topic_id] = (words, label if isinstance(label, str) else None)
+    return result
 
 
 class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
@@ -119,7 +142,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         ]
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
-        """2026-08-05 用于读取按累计权重排序的主题词"""
+        """2026-08-11 用于读取按累计权重排序的主题词（含主题词与标签，模型缺失时仅 id/weight）"""
         row_limit = top_n if top_n is not None else 10
         stmt = (
             select(
@@ -130,13 +153,19 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .group_by(ChunkTopic.topic_id)
             .order_by(func.sum(ChunkTopic.topic_weight).desc())
         )
-        return [
+        rows = [
             {
                 "topic_id": row.topic_id,
                 "weight": round(row.total_weight, 4) if row.total_weight else 0.0,
             }
             for row in self.session.execute(stmt).all()[:row_limit]
         ]
+        words_by_topic = _topic_words_from_model_dir(Path("models") / "topic" / run_id)
+        for row in rows:
+            words, label = words_by_topic.get(int(row["topic_id"]), ([], None))
+            row["words"] = words
+            row["label"] = label
+        return rows
 
     def fetch_known_characters(self, run_id: str) -> list[str]:
         """2026-08-09 用于从消歧后的规范人物视图读取诊断人物名单"""
