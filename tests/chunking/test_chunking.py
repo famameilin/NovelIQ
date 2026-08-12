@@ -8,6 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from loguru import logger
 
+from src.chapters.preprocess import preprocess_text
 from src.chunking.chunker import chunk_documents, chunk_text
 
 
@@ -58,7 +59,23 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0].start, 1)
         self.assertEqual(chunks[0].end, 5)
         self.assertEqual(chunks[1].start, 6)
-        self.assertEqual(chunks[1].end, 10)
+
+    async def test_chunk_documents_offsets_use_preprocessed_length(self) -> None:
+        """
+        2026-08-12 用于验证多文档 offset 累加基于预处理后长度：
+        前序文档含零宽字符/多余空行（preprocess 会缩短文本）时，
+        后续文档的坐标不漂移。
+        """
+        first = "第一段\u200b。\n\n\n第二段。"  # 零宽字符 + 双空行，preprocess 后变短
+        second = "林渡与顾霜相见。"  # 纯正文，避免被章节模式解析
+
+        chunks = await chunk_documents([first, second])
+
+        normalized_first_len = len(preprocess_text(first))
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[1].start, normalized_first_len)
+        # chunk 偏移相对各自文档的预处理后文本，全 run 坐标 = 前序归一化长度累加
+        self.assertEqual(chunks[1].end, normalized_first_len + len(second))
 
     async def test_chunk_documents_accumulates_chapter_ids(self) -> None:
         """

@@ -45,8 +45,6 @@ def _score_basic(candidate: ChapterCandidate, config: ChapterConfig) -> None:
     else:
         confidence *= config.score_normal_title
 
-    confidence *= config.score_line_start
-
     if candidate.level in _STRICTNESS_LEVELS:
         label = candidate.label
         if _CN_NUMERAL_RE.search(label) and "第" not in label:

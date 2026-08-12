@@ -155,6 +155,9 @@ async def chunk_documents_with_chapters(
     document_char_offset = 0
 
     for text in texts:
+        # chunk/chapter 偏移均相对 preprocess_text 输出，offset 累加必须用预处理后长度，
+        # 否则多文档 run 中第 2 个文档起的坐标会系统性漂移
+        normalized_len = len(preprocess_text(text))
         chunks, chapters = await chunk_text_with_chapters(text, emitter=emitter)
         for chunk in chunks:
             all_chunks.append(
@@ -183,7 +186,7 @@ async def chunk_documents_with_chapters(
         chunk_index_offset += len(chunks)
         if chapters:
             chapter_index_offset += len(chapters)
-        document_char_offset += len(text)
+        document_char_offset += normalized_len
 
     return _reindex(all_chunks), all_chapters
 

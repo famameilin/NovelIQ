@@ -52,3 +52,30 @@ def test_disabled_toc() -> None:
 
 def test_empty_text() -> None:
     assert detect_toc_range("") is None
+
+
+def test_toc_without_blank_line_does_not_swallow_real_chapter_title() -> None:
+    """
+    2026-08-12 用于验证目录与正文之间无空行时：
+    正文首个真实章节标题（与目录条目同名）不被吞进目录范围。
+    """
+    text = "目录\n第一章 起点 1\n第二章 入城 5\n第一章 起点\n林渡走在街头。"
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    # 目录范围只覆盖前两条目录条目，正文真实标题行保留在范围内外
+    assert text[start:end].count("第一章") == 1
+    assert "林渡走在街头" not in text[start:end]
+
+
+def test_toc_without_blank_line_keeps_entries_with_page_numbers() -> None:
+    """
+    2026-08-12 用于验证带页码的目录条目去页码归一化后
+    与正文同名标题区分：正文标题行作为目录页结束边界。
+    """
+    text = "目录\n第一章 起点 1\n第二章 入城 5\n第三章 拜师 9\n第一章 起点\n林渡走在街头。"
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    assert text[start:end].count("第三章") == 1
+    assert "林渡走在街头" not in text[start:end]

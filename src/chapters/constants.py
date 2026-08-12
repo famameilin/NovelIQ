@@ -99,7 +99,6 @@ class ChapterConfig:
     score_short_title: float = 0.8
     score_long_title: float = 0.9
     score_normal_title: float = 1.1
-    score_line_start: float = 1.1
     score_no_leading_word: float = 0.5
     score_filler_prefix: float = 0.4
     score_number_increment: float = 1.1
