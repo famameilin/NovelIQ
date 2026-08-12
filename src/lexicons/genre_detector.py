@@ -12,13 +12,11 @@
   但在 diagnosis 正式合同里不再落到 `genre_labels`，而是作为第二标签提示参与 `style_labels` 生成
 
 
-
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -26,11 +24,6 @@ from src.lexicons.genre_detector_rules import (
     DOMAIN_KEYWORDS,
     INDICATOR_WEIGHT,
     MIN_CONFIDENCE,
-    get_recommended_lexicons,
-)
-from src.lexicons.genre_detector_sampling import (
-    build_text_segments,
-    read_text_with_fallback,
 )
 from src.lexicons.genre_detector_weighted import (
     WeightedGenreResult,
@@ -38,14 +31,8 @@ from src.lexicons.genre_detector_weighted import (
 from src.lexicons.genre_detector_weighted import (
     detect_genre_weighted as detect_genre_weighted_impl,
 )
-from src.lexicons.genre_detector_weighted import (
-    get_weighted_lexicon_config as get_weighted_lexicon_config_impl,
-)
 from src.lexicons.registry import LexiconRegistry
 from src.utils.text_utils import tokenize_words
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass
@@ -157,206 +144,6 @@ def detect_genre(
     )
 
 
-def detect_genre_from_file(
-    file_path: Path,
-    sample_size: int = 5000,
-    registry: LexiconRegistry | None = None,
-) -> GenreDetectionResult:
-    """
-    从文件检测小说类型
-
-    Args:
-        file_path: 小说文件路径
-        sample_size: 采样字数
-        registry: 词表注册中心
-
-    Returns:
-        类型检测结果
-    """
-    content = read_text_with_fallback(file_path, limit=sample_size)
-    if content is None:
-        return GenreDetectionResult(
-            genre="general",
-            confidence=0.0,
-            scores={},
-            top_indicators=[],
-        )
-
-    return detect_genre(content, registry)
-
-
-def detect_genre_sequence(
-    text: str,
-    segment_size: int = 5000,
-    overlap: int = 500,
-    registry: LexiconRegistry | None = None,
-) -> GenreSequenceResult:
-    """
-    分段检测小说类型，输出类型序列
-
-    用于处理"前期都市后期修仙"等类型变化的场景
-
-    Args:
-        text: 完整文本
-        segment_size: 每段字数
-        overlap: 段间重叠字数
-        registry: 词表注册中心
-
-    Returns:
-        类型序列检测结果
-    """
-    if registry is None:
-        registry = LexiconRegistry()
-        registry.load()
-
-    segments: list[SegmentGenreResult] = []
-    for idx, (start, end, segment_text) in enumerate(build_text_segments(text, segment_size, overlap)):
-        result = detect_genre(segment_text, registry)
-
-        segments.append(
-            SegmentGenreResult(
-                segment_index=idx,
-                start_char=start,
-                end_char=end,
-                genre=result.genre,
-                confidence=result.confidence,
-                scores=result.scores,
-                top_indicators=result.top_indicators,
-            )
-        )
-
-    genre_counts: dict[str, int] = {}
-    for seg in segments:
-        genre_counts[seg.genre] = genre_counts.get(seg.genre, 0) + 1
-
-    total_segments = len(segments)
-    genre_distribution = {g: c / total_segments for g, c in genre_counts.items() if total_segments > 0}
-
-    dominant_genre = max(genre_distribution.keys(), key=lambda k: genre_distribution[k])
-
-    transitions: list[tuple[int, str, str]] = []
-    for i in range(1, len(segments)):
-        prev_genre = segments[i - 1].genre
-        curr_genre = segments[i].genre
-        if prev_genre != curr_genre:
-            transitions.append((segments[i].start_char, prev_genre, curr_genre))
-
-    return GenreSequenceResult(
-        segments=segments,
-        genre_distribution=genre_distribution,
-        dominant_genre=dominant_genre,
-        genre_transitions=transitions,
-    )
-
-
-def detect_genre_sequence_from_file(
-    file_path: Path,
-    segment_size: int = 5000,
-    overlap: int = 500,
-    registry: LexiconRegistry | None = None,
-) -> GenreSequenceResult:
-    """
-    从文件分段检测小说类型
-
-    Args:
-        file_path: 小说文件路径
-        segment_size: 每段字数
-        overlap: 段间重叠字数
-        registry: 词表注册中心
-
-    Returns:
-        类型序列检测结果
-    """
-    content = read_text_with_fallback(file_path)
-    if content is None:
-        return GenreSequenceResult(
-            segments=[],
-            genre_distribution={},
-            dominant_genre="general",
-            genre_transitions=[],
-        )
-
-    return detect_genre_sequence(content, segment_size, overlap, registry)
-
-
-def get_dynamic_lexicons(
-    text: str,
-    registry: LexiconRegistry | None = None,
-) -> dict[str, set[str]]:
-    """
-    根据文本内容动态检测类型并加载对应词表
-
-    用于处理"前期都市后期修仙"等类型变化的场景
-
-    Args:
-        text: 待分析文本
-        registry: 词表注册中心
-
-    Returns:
-        动态加载的词表集合
-    """
-    if registry is None:
-        registry = LexiconRegistry()
-        registry.load()
-
-    result = detect_genre(text, registry)
-    config = get_recommended_lexicons(result.genre)
-
-    lexicons: dict[str, set[str]] = {
-        "pos_terms": set(),
-        "neg_terms": set(),
-        "fight_terms": set(),
-    }
-
-    for domain in config.get("pos_domains", []):
-        terms = registry.get_with_domains("emotion.positive", [domain])
-        lexicons["pos_terms"].update(terms)
-
-    for domain in config.get("neg_domains", []):
-        terms = registry.get_with_domains("emotion.negative", [domain])
-        lexicons["neg_terms"].update(terms)
-
-    for domain in config.get("fight_domains", []):
-        terms = registry.get_with_domains("tension.action_terms", [domain])
-        lexicons["fight_terms"].update(terms)
-
-    base_pos = registry.get("emotion.positive")
-    base_neg = registry.get("emotion.negative")
-    base_fight = registry.get("tension.action_terms")
-
-    lexicons["pos_terms"].update(base_pos)
-    lexicons["neg_terms"].update(base_neg)
-    lexicons["fight_terms"].update(base_fight)
-
-    return lexicons
-
-
-def get_dynamic_lexicons_for_chunk(
-    chunk_text: str,
-    chunk_index: int,
-    registry: LexiconRegistry | None = None,
-) -> tuple[dict[str, set[str]], str]:
-    """
-    为单个 chunk 动态加载词表
-
-    Args:
-        chunk_text: chunk 文本
-        chunk_index: chunk 索引
-        registry: 词表注册中心
-
-    Returns:
-        (词表集合, 检测到的类型)
-    """
-    if registry is None:
-        registry = LexiconRegistry()
-        registry.load()
-
-    result = detect_genre(chunk_text, registry)
-    lexicons = get_dynamic_lexicons(chunk_text, registry)
-
-    return lexicons, result.genre
-
-
 def detect_genre_weighted(
     chunk_texts: list[tuple[int, str]],
     sample_ratio: float = 0.1,
@@ -392,52 +179,3 @@ def detect_genre_weighted(
         sample_ratio=sample_ratio,
         min_samples=min_samples,
     )
-
-
-def get_weighted_lexicon_config(
-    genre_weights: list[tuple[str, float]],
-) -> list[tuple[str, dict[str, list[str]], float]]:
-    """
-    根据加权类型列表获取词表配置
-
-    Args:
-        genre_weights: 类型权重列表，格式 [(genre, weight), ...]
-
-    Returns:
-        词表配置列表，格式 [(genre, lexicon_config, weight), ...]
-
-    """
-    return get_weighted_lexicon_config_impl(genre_weights)
-
-
-if __name__ == "__main__":
-    from pathlib import Path
-
-    novel_dir = Path("data/novel")
-    novel_files = list(novel_dir.glob("*.txt"))
-
-    print("=" * 60)
-    print("小说类型自动检测（增强版）")
-    print("=" * 60)
-
-    for novel_file in novel_files[:2]:
-        print(f"\n{'=' * 40}")
-        print(f"文件: {novel_file.name}")
-        print("=" * 40)
-
-        result = detect_genre_from_file(novel_file, sample_size=5000)
-        print("\n[整体检测]")
-        print(f"  类型: {result.genre}")
-        print(f"  置信度: {result.confidence:.2%}")
-        print(f"  各类型得分: {result.scores}")
-        if result.top_indicators:
-            print(f"  关键指标: {result.top_indicators}")
-
-        seq_result = detect_genre_sequence_from_file(novel_file, segment_size=5000, overlap=500)
-        print(f"\n[分段检测] 共 {len(seq_result.segments)} 段")
-        print(f"  类型分布: {seq_result.genre_distribution}")
-        print(f"  主导类型: {seq_result.dominant_genre}")
-        if seq_result.genre_transitions:
-            print(f"  类型转变: {seq_result.genre_transitions}")
-        else:
-            print("  类型转变: 无")

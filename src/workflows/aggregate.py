@@ -1,9 +1,7 @@
 """
 聚合流程核心业务逻辑
 
-从 src/cli/aggregate.py 提取的核心业务逻辑，用于 workflows 模块
-
-
+供 workflows 模块使用。
 """
 
 from __future__ import annotations
@@ -327,10 +325,8 @@ async def run_aggregate(
     registry.load()
 
     # 多类型加权检测：均匀采样 10% chunk
-    from src.lexicons.genre_detector import (
-        detect_genre_weighted,
-        get_recommended_lexicons,
-    )
+    from src.lexicons.genre_detector import detect_genre_weighted
+    from src.lexicons.genre_detector_rules import get_recommended_lexicons
     from src.lexicons.registry import get_weighted_lexicon_set
     from src.workflows.curve_metrics import WeightedLexiconSet, compute_emotion_curve_weighted
 

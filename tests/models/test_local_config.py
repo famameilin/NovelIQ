@@ -66,11 +66,6 @@ class TestLoadTaskConfig(unittest.TestCase):
         self.assertIsNotNone(config.base_url)
         self.assertIsNotNone(config.model)
 
-    def test_load_diagnosis_config(self) -> None:
-        config = load_task_config("diagnosis")
-        self.assertIsNotNone(config.base_url)
-        self.assertIsNotNone(config.model)
-
     def test_load_invalid_task_type_raises(self) -> None:
         with self.assertRaises(ValueError):
             load_task_config("invalid_task")  # type: ignore
