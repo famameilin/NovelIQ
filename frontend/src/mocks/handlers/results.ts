@@ -35,6 +35,7 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
         detail: `分析未完成，当前状态: ${task.status}`,
         error_type: "AnalysisNotCompleteError",
         status_code: 400,
+        run_status: task.status,
       },
       { status: 400 }
     );
