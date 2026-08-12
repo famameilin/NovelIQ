@@ -542,6 +542,50 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
     }
 
 
+def test_attribute_patch_generated_once_for_multi_chunk_chapter(db_session) -> None:
+    """2026-08-12 用于验证同一章节含多个 chunk 时属性变化事实只生成一次：
+    属性 patch 与 chunk 循环无关，不能随本章 chunk 数重复写入"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["玄剑寒光凛冽。", "玄剑鸣啸", "玄剑低鸣", "玄剑归鞘"],
+        chapter_ids=[1, 1, 2, 2],
+        title="多 chunk 属性",
+    )
+    # 章1（两个 chunk）首次声明实体，不产生属性 patch
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        entity_attributes={(0, "玄剑"): {"status": "active"}},
+    )
+    db_session.commit()
+    # 章2（两个 chunk）更新属性：跨章已存在实体产生 patch，
+    # 若在 chunk 循环内生成会随 2 个 chunk 重复写入
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        entity_attributes={
+            (2, "玄剑"): {"grade": "灵品"},
+            (3, "玄剑"): {"status": "dormant"},
+        },
+    )
+    db_session.commit()
+
+    attribute_facts = list(
+        db_session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_type == "entity_attribute",
+            )
+        ).scalars()
+    )
+    # 章2 两个字段变化各生成一条事实：grade 与 status，共 2 条
+    assert len(attribute_facts) == 2
+    fields = sorted(str(fact.content["field"]) for fact in attribute_facts)
+    assert fields == ["grade", "status"]
+
+
 def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
     """2026-08-07 用于验证事实端点未在实体目录声明时直接失败"""
     text = "顾霜在山门修炼，“住手”回荡。"
