@@ -7,8 +7,9 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from src.api.models.responses import TaskStatus
 from src.api.services.analysis.environment_initializer import EnvironmentInitializer
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.analysis.stage_executor import StageExecutor
+from src.api.services.event_manager import event_manager
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.config import settings
@@ -35,6 +37,10 @@ class CancellationStateCheckError(RuntimeError):
 
 TASK_KIND_ANALYSIS = "analysis"
 TASK_KIND_REANALYSIS = "reanalysis"
+
+# 任务 claim 时判定"刚被 resume 重置"的竞态窗口：resume 重置后旧 worker 的延迟取消
+# 写回可能把状态覆盖回 cancelled，只有在该窗口内的重置才允许 claim 侧重新激活
+_RESUME_RESET_WINDOW_SECONDS = 30
 
 
 class AnalysisService:
@@ -390,19 +396,22 @@ class AnalysisService:
                         # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义
                         run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
+                    return self._claim_pending_run(run_repo, run_id)
 
-                    claimed = run_repo.claim_pending_run(
-                        run_id,
-                        worker_id=self.task_manager.get_worker_id(),
-                        heartbeat_at=datetime.now(UTC),
-                    )
-                    if claimed:
-                        return "claimed"
-
+                if status == "cancelled" and self._is_recent_resume_reset(run):
+                    # resume 竞态恢复：resume 先把 DB 重置为 pending，旧 worker 的延迟取消
+                    # 写回（handle_cancel 的 commit）可能随后把状态覆盖回 cancelled，导致新 worker
+                    # 看到 cancelled 静默退出、resume 返回 200 但任务停住。该状态的特征是
+                    # worker_id=None 且 heartbeat_at 为最近的 resume 重置时间；真实取消
+                    # （取消未领取任务 / 执行中取消）都不会同时满足。重新激活为 pending 后走正常领取。
+                    run_repo.update_run_task_fields(run_id, status="pending", completed_at=None)
                     refreshed = run_repo.get_run(run_id)
-                    if refreshed and refreshed.get("status") == "cancelled":
+                    if refreshed is None or refreshed.get("status") != "pending":
+                        return "skipped"
+                    if refreshed.get("cancel_requested", False):
+                        run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
-                    return "skipped"
+                    return self._claim_pending_run(run_repo, run_id)
 
                 if status == "cancelling" and cancel_requested:
                     # 这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
@@ -435,6 +444,51 @@ class AnalysisService:
         except Exception as exc:
             logger.error(f"Failed to prepare execution claim for task {task_id}: {exc}")
             raise AnalysisError(f"任务 {task_id} 执行领取失败") from exc
+
+    def _claim_pending_run(self, run_repo: Any, run_id: str) -> str:
+        """
+        领取 pending 任务：原子 claim，失败时按最新状态判定取消/跳过
+
+        Returns:
+            claimed: 当前 worker 已成功领取任务，可继续执行
+            cancelled: 任务在真正执行前已被取消，调用方应直接结束
+            skipped: 当前 worker 未获得执行权，调用方应静默退出
+        """
+        claimed = run_repo.claim_pending_run(
+            run_id,
+            worker_id=self.task_manager.get_worker_id(),
+            heartbeat_at=datetime.now(UTC),
+        )
+        if claimed:
+            return "claimed"
+
+        refreshed = run_repo.get_run(run_id)
+        if refreshed and refreshed.get("status") == "cancelled":
+            return "cancelled"
+        return "skipped"
+
+    def _is_recent_resume_reset(self, run: dict) -> bool:
+        """
+        判定 run 是否处于"刚被 resume 重置"的竞态窗口
+
+        resume 重置会写入 worker_id=None 且 pending 状态写回自动刷新 heartbeat_at=now；
+        若随后被旧 worker 的延迟取消写回覆盖为 cancelled，这两个字段保持不变。据此区分
+        "resume 后的陈旧取消写回"与"真实用户取消"（后者 heartbeat_at 为 None 或早已陈旧）。
+        """
+        if run.get("worker_id") is not None:
+            return False
+        heartbeat_at = run.get("heartbeat_at")
+        if not heartbeat_at:
+            return False
+        try:
+            heartbeat_dt = datetime.fromisoformat(heartbeat_at)
+        except (TypeError, ValueError):
+            return False
+        # analysis_runs 的 DateTime 列不带时区：写入时 tz 会被剥离，读回为 naive 挂钟，
+        # 与 psycopg2 TIMESTAMP WITHOUT TIME ZONE 的落库语义一致（main.py 的孤儿回收
+        # 同样按此约定比较心跳时间），这里统一与本地挂钟比较
+        cutoff = datetime.now() - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS)
+        return heartbeat_dt >= cutoff
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
         """
@@ -567,6 +621,10 @@ class AnalysisService:
             llm_outputs=[],
             completed_at=None,
         )
+
+        # 清空上一轮 SSE 终态事件缓冲，避免重连客户端先回放 task_cancelled/task_error/
+        # task_complete 再收新一轮 stage_start（resume 启动的是全新一轮，旧终态不应再出现）
+        event_manager.clear_buffer(task_id)
 
         task_kind, execution_request = self._restore_execution_request(task)
         self._schedule_task_execution(task_id, novel, task_kind, execution_request)
