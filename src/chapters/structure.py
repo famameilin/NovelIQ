@@ -32,6 +32,9 @@ def decide_structure(
         body_start = candidate.body_start_char
         body_end = qualifying[index + 1].start_char if index + 1 < len(qualifying) else len(text)
         if not text[body_start:body_end].strip():
+            # 相邻候选紧贴时正文区间为空（零长章节），与空章节同策略：
+            # 保留目录条目但不产出正文；分块侧按 strip 跳过，不生成 chunk。
+            # 下游如需按 end-start 计算区间长度，应先过滤空章节。
             logger.warning(
                 "章节「{}」无正文，已跳过该空章节（目录中仍保留）",
                 candidate.title,

@@ -27,6 +27,7 @@ def detect_toc_range(text: str, config: ChapterConfig | None = None) -> tuple[in
     max_pos = int(len(text) * config.toc_max_ratio)
     toc_start: int | None = None
     entry_count = 0
+    seen_entries: set[str] = set()
     pos = 0
 
     for line in text.splitlines():
@@ -47,6 +48,15 @@ def detect_toc_range(text: str, config: ChapterConfig | None = None) -> tuple[in
                 return (toc_start, line_start)
             return None
         if _TOC_ENTRY_RE.match(line):
+            # 目录条目通常不重复；若出现与已收集条目同名的行（忽略行尾页码），
+            # 说明已进入正文（正文首个真实标题与目录首条同名），提前结束目录页，
+            # 避免吞掉正文真实章节标题
+            normalized_line = re.sub(r"[ \t]*\d+[ \t]*$", "", line)
+            if normalized_line in seen_entries:
+                if entry_count >= config.toc_min_entries:
+                    return (toc_start, line_start)
+                return None
+            seen_entries.add(normalized_line)
             entry_count += 1
             continue
         if entry_count >= config.toc_min_entries:
