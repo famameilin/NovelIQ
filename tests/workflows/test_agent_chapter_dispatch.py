@@ -20,7 +20,8 @@ from src.agents.annotation.schema import (
     PendingCase,
 )
 from src.agents.stream import AgentStream
-from src.storage.models import ChapterAnnotationRecord
+from src.api.models.events import StreamEvent
+from src.storage.models import Chapter, ChapterAnnotationRecord
 from src.workflows.annotate import _group_chunks_by_chapter, run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
 
@@ -286,6 +287,82 @@ async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
     assert isinstance(seen_streams[0], AgentStream)
     # 章节开始 thinking 事件已通过 AgentStream 到达 emitter
     assert ("thinking", "章节 1 标注 Agent 开始处理") in emitted
+
+
+@pytest.mark.asyncio
+async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_session) -> None:
+    """2026-08-12 用于验证卷标题占用编号导致 chapter_id 偏移时，消息展示真实章节序号"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["第一章"],
+        chapter_ids=[2],
+        title="编号偏移展示",
+    )
+    db_session.add_all(
+        [
+            Chapter(
+                chapter_id=1,
+                sequence=1,
+                title="少年篇",
+                display_title="少年篇",
+                display_index_label=None,
+                level="volume",
+                start_pos=0,
+                end_pos=10,
+                run_id=run_id,
+            ),
+            Chapter(
+                chapter_id=2,
+                sequence=2,
+                title="第一章 贺院三尺有顽童",
+                display_title="第一章 贺院三尺有顽童",
+                display_index_label="第1章",
+                level="chapter",
+                start_pos=10,
+                end_pos=20,
+                run_id=run_id,
+            ),
+        ]
+    )
+    db_session.commit()
+    emitted: list[StreamEvent] = []
+    seen_labels: list[str | None] = []
+
+    async def fake_agent(**kwargs):
+        """2026-08-12 用于捕获 chapter_label 参数并返回合法章节结果"""
+        seen_labels.append(kwargs.get("chapter_label"))
+        chunk_text = kwargs["current_chunks"][0][1]
+        return _agent_result(
+            run_id=run_id,
+            chapter_id=2,
+            chunk_id=0,
+            chunk_text=chunk_text,
+        )
+
+    async def emitter(event: StreamEvent) -> None:
+        """2026-08-12 用于记录 workflow 级完整事件"""
+        emitted.append(event)
+
+    with (
+        patch("src.agents.annotation.run_annotation_agent", new=fake_agent),
+        patch("src.agents.llm.build_chat_model", return_value=MagicMock()),
+    ):
+        result = await run_annotate(
+            run_id=run_id,
+            session=db_session,
+            novel_id=novel_id,
+            emitter=emitter,
+        )
+
+    assert result == (1, 0, 1)
+    assert seen_labels == ["第1章"]
+    # chapter_id=2 的展示标签为"第1章"，而非内部编号 2
+    assert ("thinking", "章节 第1章 标注 Agent 开始处理") in [
+        (event.action, event.content) for event in emitted
+    ]
+    messages = [event.message for event in emitted if event.action == "progress"]
+    assert "章节 第1章 标注 Agent 运行中" in messages
+    assert "章节 第1章 已完成" in messages
 
 
 @pytest.mark.asyncio

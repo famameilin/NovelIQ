@@ -18,7 +18,11 @@ from src.agents.stream import AgentStream
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
 from src.storage.db import get_session_factory
-from src.storage.repositories import ChunkRepository, DatabaseAnnotationQueryService
+from src.storage.repositories import (
+    ChapterRepository,
+    ChunkRepository,
+    DatabaseAnnotationQueryService,
+)
 
 if TYPE_CHECKING:
     from src.agents.annotation.fact_graph import FactGraph
@@ -36,6 +40,21 @@ def _group_chunks_by_chapter(
             )
         chapters.setdefault(chapter_id, []).append((chunk_id, chunk_text))
     return list(chapters.items())
+
+
+def _load_chapter_labels(session: Session, run_id: str) -> dict[int, str]:
+    """2026-08-12 用于加载 chapter_id → 展示标签映射，避免卷标题占用编号导致展示错位
+
+    卷标题（如"少年篇"）会占用 chapter_id 导致真实章节编号整体偏移，
+    进度消息必须以 chapters.display_index_label（如"第1章"）展示而非原始 chapter_id。
+    """
+    labels: dict[int, str] = {}
+    for chapter in ChapterRepository(session).fetch_chapters(run_id):
+        if chapter.display_index_label:
+            labels[chapter.chapter_id] = chapter.display_index_label
+        else:
+            labels[chapter.chapter_id] = f"第{chapter.sequence}章"
+    return labels
 
 
 def _load_existing_completion(
@@ -137,6 +156,7 @@ async def run_annotate(
 
     chapter_groups = _group_chunks_by_chapter(chunk_rows)
     total_chapters = len(chapter_groups)
+    chapter_labels = _load_chapter_labels(session, run_id)
     sql_session_factory = get_session_factory()
     llm = build_chat_model("annotation")
     embedding_client = EmbeddingClient(
@@ -197,7 +217,7 @@ async def run_annotate(
                         total=total_chapters,
                         percent=10 + (chapter_index / total_chapters) * 70,
                         sub_percent=(chapter_index / total_chapters) * 100,
-                        message=f"章节 {chapter_id} 标注 Agent 运行中",
+                        message=f"章节 {chapter_labels.get(chapter_id, chapter_id)} 标注 Agent 运行中",
                     )
                 )
 
@@ -211,7 +231,9 @@ async def run_annotate(
                 else None
             )
             if agent_stream is not None:
-                await agent_stream.thinking(f"章节 {chapter_id} 标注 Agent 开始处理")
+                await agent_stream.thinking(
+                    f"章节 {chapter_labels.get(chapter_id, chapter_id)} 标注 Agent 开始处理"
+                )
 
             agent_result = await run_annotation_agent(
                 run_id=run_id,
@@ -231,6 +253,7 @@ async def run_annotate(
                 ),
                 stream=agent_stream,
                 graph_state=graph_state,
+                chapter_label=chapter_labels.get(chapter_id),
             )
             complete_annotation_run(
                 result=agent_result,
@@ -250,7 +273,7 @@ async def run_annotate(
                     total=total_chapters,
                     percent=10 + (success_count / total_chapters) * 70,
                     sub_percent=(success_count / total_chapters) * 100,
-                    message=f"章节 {chapter_id} 已完成",
+                    message=f"章节 {chapter_labels.get(chapter_id, chapter_id)} 已完成",
                 )
             )
 
