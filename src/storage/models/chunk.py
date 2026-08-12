@@ -41,7 +41,16 @@ class Chunk(Base):
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, primary_key=True
     )
 
-    __table_args__ = (Index("idx_chunks_run_id", "run_id"),)
+    __table_args__ = (
+        Index("idx_chunks_run_id", "run_id"),
+        # pg_trgm GIN 索引支撑章节内关键词检索（LIKE '%kw%' 全表扫描兜底）
+        Index(
+            "idx_chunks_text_trgm",
+            "text",
+            postgresql_using="gin",
+            postgresql_ops={"text": "gin_trgm_ops"},
+        ),
+    )
 
     def __repr__(self) -> str:
         return f"<Chunk(chunk_id={self.chunk_id}, run_id={self.run_id})>"

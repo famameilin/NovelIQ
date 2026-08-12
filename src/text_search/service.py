@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -14,6 +15,32 @@ from sqlalchemy.orm import Session
 from src.models.local.embedding import EmbeddingClient
 from src.storage.models import Chunk
 from src.storage.repositories.chunk import search_paragraphs_by_keywords, search_similar_paragraphs
+
+_WHOLE_QUERY_MAX_CHARS = 20
+
+
+def extract_query_terms(query: str, *, max_whole_query_chars: int = _WHOLE_QUERY_MAX_CHARS) -> list[str]:
+    """2026-08-12 用于从中英文查询中提取稳定关键词（NFC 归一化 + 小写 + 去重）
+
+    整句原文仅在前缀长度受限时保留为词项；长句只保留拆分词项，
+    避免产生一次必然不命中的整句全表 LIKE 扫描。
+    """
+    normalized = (
+        unicodedata.normalize("NFC", query)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+        .lower()
+    )
+    terms = [
+        term
+        for term in re.split(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+", normalized)
+        if term
+    ]
+    candidates = [normalized, *terms]
+    if len(normalized) > max_whole_query_chars:
+        candidates = terms
+    return list(dict.fromkeys(candidates))
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,16 +60,6 @@ class _MergedCandidate(TypedDict):
     excerpt: str
     keyword_score: float
     semantic_score: float | None
-
-
-def _query_terms(query: str) -> list[str]:
-    """2026-08-07 用于从中英文查询中提取稳定关键词"""
-    terms = [
-        term
-        for term in re.split(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+", query.strip())
-        if term
-    ]
-    return list(dict.fromkeys([query.strip(), *terms]))
 
 
 class TextSearchService:
@@ -79,7 +96,7 @@ class TextSearchService:
         keyword_rows = search_paragraphs_by_keywords(
             self._session,
             self._run_id,
-            _query_terms(normalized_query),
+            extract_query_terms(normalized_query),
             top_k=max(limit * 2, 10),
             min_chunk_id=min_chunk_id,
             max_chunk_id=max_chunk_id,

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import re
 import unicodedata
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -38,7 +37,7 @@ from src.storage.models import (
     GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
-from src.text_search import TextSearchService
+from src.text_search import TextSearchService, extract_query_terms
 
 
 def normalize_text(value: str) -> str:
@@ -46,21 +45,10 @@ def normalize_text(value: str) -> str:
     return unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def _query_terms(query: str) -> list[str]:
-    """2026-08-05 用于把检索问题拆成可同时匹配中英文的规范化词项"""
-    normalized = normalize_text(query).lower()
-    terms = [
-        term
-        for term in re.split(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+", normalized)
-        if term
-    ]
-    return list(dict.fromkeys([normalized, *terms]))
-
-
 def _text_matches(query: str, *values: str) -> bool:
     """2026-08-05 用于判断 query 或拆分词项是否命中任一文本字段"""
     haystack = "\n".join(normalize_text(value).lower() for value in values if value)
-    return any(term in haystack for term in _query_terms(query))
+    return any(term in haystack for term in extract_query_terms(query))
 
 
 def _case_view(row: CasePoolCase) -> CaseSearchResult:

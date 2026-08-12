@@ -135,7 +135,9 @@ def search_paragraphs_by_keywords(
         )
 
     results.sort(key=lambda item: (-item.match_count, item.chunk_id, item.paragraph_index))
-    return results[: max(1, top_k)]
+    if top_k <= 0:
+        return []
+    return results[:top_k]
 
 
 def fetch_chunk_text(session: Session, run_id: str, chunk_id: int) -> str | None:
