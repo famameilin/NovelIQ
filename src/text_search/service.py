@@ -17,13 +17,14 @@ from src.storage.models import Chunk
 from src.storage.repositories.chunk import search_paragraphs_by_keywords, search_similar_paragraphs
 
 _WHOLE_QUERY_MAX_CHARS = 20
+_SPLIT_RE = re.compile(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+")
 
 
 def extract_query_terms(query: str, *, max_whole_query_chars: int = _WHOLE_QUERY_MAX_CHARS) -> list[str]:
     """2026-08-12 用于从中英文查询中提取稳定关键词（NFC 归一化 + 小写 + 去重）
 
-    整句原文仅在前缀长度受限时保留为词项；长句只保留拆分词项，
-    避免产生一次必然不命中的整句全表 LIKE 扫描。
+    整句原文仅在前缀长度受限时保留为词项；长句只保留拆分词项；
+    长句无分隔符时返回空列表（不产生必然不命中的整句全表 LIKE 扫描）。
     """
     normalized = (
         unicodedata.normalize("NFC", query)
@@ -32,15 +33,15 @@ def extract_query_terms(query: str, *, max_whole_query_chars: int = _WHOLE_QUERY
         .strip()
         .lower()
     )
-    terms = [
-        term
-        for term in re.split(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+", normalized)
-        if term
-    ]
-    candidates = [normalized, *terms]
+    if not normalized:
+        return []
+    terms = [term for term in _SPLIT_RE.split(normalized) if term]
     if len(normalized) > max_whole_query_chars:
-        candidates = terms
-    return list(dict.fromkeys(candidates))
+        if not _SPLIT_RE.search(normalized):
+            # 无分隔符时 re.split 退化为整句本身，必须丢弃避免整句 LIKE 扫描
+            return []
+        return list(dict.fromkeys(terms))
+    return list(dict.fromkeys([normalized, *terms]))
 
 
 @dataclass(frozen=True, slots=True)
