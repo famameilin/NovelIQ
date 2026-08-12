@@ -58,6 +58,7 @@ const RELATION_CSS_VAR_NAMES: Record<string, string> = {
   "友情": "--chart-positive",
   "爱慕": "--chart-positive",
   "利益": "--chart-neutral",
+  "领导": "--chart-neutral",
   "同一人物": "--chart-neutral",
   "隶属": "--chart-neutral",
   "位于": "--chart-neutral",

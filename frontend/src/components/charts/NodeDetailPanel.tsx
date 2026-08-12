@@ -61,6 +61,7 @@ const relationTypeColors: Record<string, string> = {
   友情: "bg-chart-positive/20 text-chart-positive",
   爱慕: "bg-chart-positive/20 text-chart-positive",
   利益: "bg-chart-neutral/20 text-chart-neutral",
+  领导: "bg-chart-neutral/20 text-chart-neutral",
   同一人物: "bg-chart-neutral/20 text-chart-neutral",
   隶属: "bg-chart-neutral/20 text-chart-neutral",
   位于: "bg-chart-neutral/20 text-chart-neutral",
