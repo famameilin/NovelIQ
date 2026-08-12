@@ -153,6 +153,7 @@ async def _run_single_attempt(
         max_iterations=total_iteration_limit,
         stream=stream,
         observer=observer,
+        retries=max(1, settings.models.annotation.total_attempts),
     )
     initial_messages = [
         SystemMessage(

@@ -101,7 +101,8 @@ def _usage_for_turn(request_messages: list[Any], response_message: Any) -> dict[
     usage = extract_agent_token_usage(response_message)
     if usage is None:
         estimates = estimate_agent_token_usage([*request_messages, response_message])
-        usage = estimates[0] if estimates else None
+        # 估算列表按消息链中的 AI 消息顺序排列，本回合响应是链上最后一个 AI 消息
+        usage = estimates[-1] if estimates else None
     if usage is None:
         return None
     return {
