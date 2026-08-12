@@ -73,7 +73,7 @@ class StreamEvent:
     current: int | None = None
     total: int | None = None
     percent: float | None = None  # 全局进度（stage 级别）
-    sub_percent: float | None = None  # 子阶段进度（phase 级别，如 chunk 内的 phase1→4）
+    sub_percent: float | None = None  # 子阶段进度（如 Agent 单章节内的领域写入进度）
     content: str = ""
     message: str = ""
     status: str | None = None  # 工具调用状态（tool_call 事件专用: started/success/failed）
@@ -222,6 +222,7 @@ class AnalysisEventBus:
             sub_percent=resolved_sub_percent,
             content=event.content,
             message=event.message,
+            status=event.status,
         )
 
         # 翻译 action → SSE event type

@@ -74,11 +74,11 @@ class EventManager:
             except ValueError:
                 pass
             # 如果该 task_id 已无任何连接，清理连接级资源；
-            # 消息缓冲保留给晚到/重连的客户端回放，由 idle cleanup 统一回收
+            # 消息缓冲保留给晚到/重连的客户端回放，_last_activity 也保留，
+            # 由 idle cleanup 在超时后统一回收（disconnect_all 会清理缓冲）
             if not self._connections[task_id]:
                 del self._connections[task_id]
                 del self._locks[task_id]
-                del self._last_activity[task_id]
 
     async def disconnect_all(self, task_id: str) -> None:
         """断开 task_id 的所有 SSE 连接"""

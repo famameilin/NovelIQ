@@ -37,8 +37,6 @@ const ENTITY_CSS_VAR_NAMES: Record<string, string> = {
   organization: "--chart-3",
   location: "--chart-4",
   item: "--chart-5",
-  event: "--chart-neutral",
-  concept: "--chart-neutral",
 };
 
 /** 实体类型显示名称 */
@@ -48,9 +46,6 @@ const ENTITY_LABELS: Record<string, string> = {
   organization: "组织",
   location: "地点",
   item: "物品",
-  event: "事件",
-  concept: "概念",
-  object: "物品",
 };
 
 /** 关系类型 → CSS 变量名映射（与 ForceGraph.getRelationColorsFromCSS 一致） */

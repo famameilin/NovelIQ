@@ -122,7 +122,9 @@ function _appendBoundedLLMOutput(
 
   if (action === "tool_call") {
     const name = content || "unknown";
-    const toolStatus: ToolCallStatus = status ?? "started";
+    // 后端可能下发空串（老版本 emit 丢 status），统一按 started 处理
+    const toolStatus: ToolCallStatus =
+      status === "success" || status === "failed" ? status : "started";
     const detail = message || "";
     // 若无思考块则先建一个（工具调用属于思考过程）
     const baseBlocks =

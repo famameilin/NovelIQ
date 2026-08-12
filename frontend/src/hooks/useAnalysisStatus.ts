@@ -100,6 +100,7 @@ export function useAnalysisStatus(
   const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasConnectedOnceRef = useRef(false);
   const hasHydratedTaskStatusRef = useRef(false);
+  const lastForegroundSyncAtRef = useRef(0);
   const [stableTaskId, setStableTaskId] = useState<string | null>(null);
   const sseReceivedMessageRef = useRef(false);
   const wsStable = !!taskId && stableTaskId === taskId;
@@ -248,6 +249,12 @@ export function useAnalysisStatus(
 
   const bufferLLMOutput = useCallback(
     (eventData: StreamEventData) => {
+      // tool_call 事件按工具独立成行，且需要 started→success/failed 状态转移；
+      // 不参与按内容拼接的批处理缓冲（同窗口多个工具会拼成假工具名），直接刷入 store
+      if (eventData.action === "tool_call") {
+        appendLLMOutput({ ...eventData, status: eventData.status ?? "started" });
+        return;
+      }
       const bufferKey = buildLLMOutputBufferKey({
         action: eventData.action,
         stage: eventData.stage,
@@ -273,7 +280,7 @@ export function useAnalysisStatus(
 
       scheduleBufferedLLMFlush();
     },
-    [scheduleBufferedLLMFlush],
+    [appendLLMOutput, scheduleBufferedLLMFlush],
   );
 
   const handleMessage = useCallback(
@@ -448,6 +455,36 @@ export function useAnalysisStatus(
       reset();
     }
   }, [taskId, novelId, setTaskId, reset, syncTaskStatus]);
+
+  // 浏览器后台期间 EventSource 可能保持连接（不触发重连），
+  // 前台恢复时主动 flush 缓冲并做一次 HTTP 状态回填，避免进度/终态陈旧
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const handleForegroundResume = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastForegroundSyncAtRef.current < 300) {
+        return;
+      }
+      lastForegroundSyncAtRef.current = now;
+
+      flushBufferedLLMOutputs();
+      void syncTaskStatus();
+    };
+
+    document.addEventListener("visibilitychange", handleForegroundResume);
+    window.addEventListener("focus", handleForegroundResume);
+    return () => {
+      document.removeEventListener("visibilitychange", handleForegroundResume);
+      window.removeEventListener("focus", handleForegroundResume);
+    };
+  }, [enabled, flushBufferedLLMOutputs, syncTaskStatus]);
 
   useEffect(() => {
     return () => {

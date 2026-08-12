@@ -26,7 +26,6 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
 const PHASE_CONFIG: Record<string, { label: string }> = {
   agent: { label: "标注 Agent" },
   sub_agent: { label: "子代理" },
-  level3: { label: "Level3 段落证据准备" },
 };
 
 const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];
