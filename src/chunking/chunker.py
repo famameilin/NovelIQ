@@ -179,6 +179,7 @@ async def chunk_documents_with_chapters(
                     display_title=chapter.display_title,
                     display_index_label=chapter.display_index_label,
                     number=chapter.number,
+                    title_start_char=chapter.title_start_char + document_char_offset,
                     start_char=chapter.start_char + document_char_offset,
                     end_char=chapter.end_char + document_char_offset,
                 )

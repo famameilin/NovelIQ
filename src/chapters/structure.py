@@ -48,6 +48,7 @@ def decide_structure(
                 display_title=candidate.display_title,
                 display_index_label=candidate.display_index_label,
                 number=candidate.number,
+                title_start_char=candidate.start_char,
                 start_char=body_start,
                 end_char=body_end,
             )
@@ -79,11 +80,14 @@ def _insert_prologue(
     prologue_start: int,
     config: ChapterConfig,
 ) -> None:
-    """开篇正文超过阈值时插入自动命名（楔子/序言）的前置章节"""
+    """开篇正文超过阈值时插入自动命名（楔子/序言）的前置章节
+
+    序言区间截止于第一章标题行之前，标题行不属于任何 chunk（与正文切分约定一致）。
+    """
     first = chapters[0]
-    if prologue_start >= first.start_char:
+    if prologue_start >= first.title_start_char:
         return
-    prologue_text = text[prologue_start:first.start_char]
+    prologue_text = text[prologue_start : first.title_start_char]
     if len(prologue_text.strip()) <= config.prologue_min_chars:
         return
     title = guess_preliminary_title(prologue_text) or config.prologue_default_title
@@ -97,8 +101,9 @@ def _insert_prologue(
             display_title=title,
             display_index_label=None,
             number=None,
+            title_start_char=prologue_start,
             start_char=prologue_start,
-            end_char=first.start_char,
+            end_char=first.title_start_char,
         ),
     )
 
@@ -152,6 +157,7 @@ def _make_auto_chapter(
         display_title=config.fallback_title,
         display_index_label=None,
         number=None,
+        title_start_char=start,
         start_char=start,
         end_char=end,
     )
@@ -161,7 +167,8 @@ def finalize(text: str, chapters: list[ChapterData]) -> list[ChapterData]:
     """边界安全钳制 + 按出现顺序分配 chapter_id/sequence"""
     result: list[ChapterData] = []
     for index, chapter in enumerate(chapters, start=1):
-        start = max(0, min(chapter.start_char, len(text)))
+        title_start = max(0, min(chapter.title_start_char, len(text)))
+        start = max(title_start, min(chapter.start_char, len(text)))
         end = max(start, min(chapter.end_char, len(text)))
         result.append(
             ChapterData(
@@ -172,6 +179,7 @@ def finalize(text: str, chapters: list[ChapterData]) -> list[ChapterData]:
                 display_title=chapter.display_title,
                 display_index_label=chapter.display_index_label,
                 number=chapter.number,
+                title_start_char=title_start,
                 start_char=start,
                 end_char=end,
             )

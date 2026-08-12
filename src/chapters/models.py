@@ -46,5 +46,6 @@ class ChapterData:
     display_title: str
     display_index_label: str | None
     number: int | None
+    title_start_char: int
     start_char: int
     end_char: int

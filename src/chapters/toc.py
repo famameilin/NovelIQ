@@ -12,9 +12,18 @@ import re
 from src.chapters.constants import _CN_NUMERALS_CLASS, ChapterConfig
 
 _TOC_TITLE_RE = re.compile(r"^[ \t]*目[ \t]*录[ \t]*[:：]?[ \t]*$")
-# 目录条目：与章节标题格式相近的行（第一章 XXX / 第1章 XXX / 卷一 等）
+# 目录条目：与章节标题格式相近的行（第一章 XXX / 第1章 XXX / 卷一 风起 / Chapter 1 等），
+# 编号形态与 candidates.py 的 VOLUME_RE/CHAPTER_RE 对齐
 _TOC_ENTRY_RE = re.compile(
-    rf"^[ \t]*第?{_CN_NUMERALS_CLASS}+[章节回卷篇][ \t]*.*$",
+    rf"^[ \t]*(?:"
+    rf"第?{_CN_NUMERALS_CLASS}+[章节回卷篇]"  # 第一章/第1章/第2卷
+    rf"|卷{_CN_NUMERALS_CLASS}+"  # 卷一/卷2
+    rf"|卷[上中下]"  # 卷上/卷中/卷下
+    rf"|[Cc]hapter[ \t]*\d+"  # Chapter 1
+    rf"|[Uu]nit[ \t]*\d+"  # Unit 1
+    rf"|[Vv]olume[ \t]*\d+"  # Volume 1
+    rf"|[Pp]art[ \t]*\d+"  # Part 1
+    rf")[ \t]*.*$",
 )
 
 
