@@ -33,32 +33,14 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import chunk_text
 from src.models.cloud.schema import CloudAnalysis
-from src.storage.models import Novel
 from src.storage.repositories import (
     ChunkRepository,
     ChunkStyleData,
     RunRepository,
     StatsRepository,
 )
+from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
-
-
-def _insert_test_novel(db_session, novel_id: str) -> None:
-    """
-    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
-
-    创建时间: 2026-04-23
-    任务: 修复 pytest ForeignKeyViolation
-    """
-    db_session.add(
-        Novel(
-            novel_id=novel_id,
-            filename=f"{novel_id}.txt",
-            file_path=f"data/uploads/{novel_id}.txt",
-            file_size=128,
-        )
-    )
-    db_session.commit()
 
 
 def test_create_and_insert(db_session) -> None:
@@ -66,7 +48,7 @@ def test_create_and_insert(db_session) -> None:
     chunks = asyncio.run(chunk_text(text_content))
 
     novel_id = uuid.uuid4().hex[:8]
-    _insert_test_novel(db_session, novel_id)
+    insert_test_novel(novel_id, session=db_session)
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
@@ -136,7 +118,7 @@ def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> No
     chunks = asyncio.run(chunk_text(text_content))
 
     novel_id = uuid.uuid4().hex[:8]
-    _insert_test_novel(db_session, novel_id)
+    insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
@@ -152,7 +134,7 @@ def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> No
 
 def test_insert_cloud_analysis(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
-    _insert_test_novel(db_session, novel_id)
+    insert_test_novel(novel_id, session=db_session)
     analysis = CloudAnalysis(
         novel_id=novel_id,
         foreshadow_expectation=0.5,
@@ -184,7 +166,7 @@ def test_insert_cloud_analysis(db_session) -> None:
 
 def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
-    _insert_test_novel(db_session, novel_id)
+    insert_test_novel(novel_id, session=db_session)
 
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")

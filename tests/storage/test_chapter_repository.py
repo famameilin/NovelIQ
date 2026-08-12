@@ -6,7 +6,7 @@ import uuid
 
 from src.chapters.models import ChapterData, ChapterLevel
 from src.storage.repositories import ChapterRepository, RunRepository
-from tests.storage.test_db_operations import _insert_test_novel
+from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
 
 def _make_chapters() -> list[ChapterData]:
@@ -38,7 +38,7 @@ def _make_chapters() -> list[ChapterData]:
 
 def _create_run(db_session) -> str:
     novel_id = uuid.uuid4().hex[:8]
-    _insert_test_novel(db_session, novel_id)
+    _insert_test_novel(novel_id, session=db_session)
     return RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",

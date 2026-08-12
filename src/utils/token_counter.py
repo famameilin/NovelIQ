@@ -60,8 +60,8 @@ def _get_encoding_for_model(model_name: str) -> str:
     if model_name_lower in MODEL_ENCODING_MAP:
         return MODEL_ENCODING_MAP[model_name_lower]
 
-    # 前缀匹配
-    for model_prefix, encoding in MODEL_ENCODING_MAP.items():
+    # 前缀匹配：按前缀长度降序，避免 "gpt-4" 抢先匹配 "gpt-4o-*" 系列
+    for model_prefix, encoding in sorted(MODEL_ENCODING_MAP.items(), key=lambda item: len(item[0]), reverse=True):
         if model_prefix in model_name_lower:
             return encoding
 
