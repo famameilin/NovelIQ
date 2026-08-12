@@ -218,6 +218,7 @@ async def run_annotation_agent(
     stream: AgentStream | None = None,
     graph_state: FactGraph | None = None,
     audit_recorder: AgentAuditRecorder | None = None,
+    chapter_label: str | None = None,
 ) -> AgentRunResult:
     """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出"""
     from src.agents.audit.observer import AgentTurnObserver
@@ -257,7 +258,7 @@ async def run_annotation_agent(
         model_provider=model_provider,
     )
     if stream is not None:
-        await stream.thinking(f"章节 {chapter_id} 标注开始")
+        await stream.thinking(f"章节 {chapter_label or chapter_id} 标注开始")
     try:
         result = await _run_single_attempt(
             run_id=run_id,
@@ -279,7 +280,7 @@ async def run_annotation_agent(
     _close_read_session(read_session)
     recorder.finish_invocation(invocation_id, status="success")
     if stream is not None:
-        await stream.output(f"章节 {chapter_id} 标注完成")
+        await stream.output(f"章节 {chapter_label or chapter_id} 标注完成")
     return result
 
 
