@@ -89,8 +89,10 @@ def build_alias_resolution(
     for alias_id, representative_id in representative_by_alias.items():
         alias_name = entity_names.get(alias_id)
         representative_name = entity_names.get(representative_id)
-        if not alias_name or not representative_name or alias_name == representative_name:
+        if not alias_name or not representative_name:
             continue
+        # 别名与代表同名时也必须建映射（恒等映射），保证每个进 representative_by_alias
+        # 的别名 id 都有对应的 name 映射条目，避免边端点的 id 已归并而 name 未归并的不一致
         name_to_representative[alias_name] = representative_name
         aliases_by_representative.setdefault(representative_id, [])
         if alias_name not in aliases_by_representative[representative_id]:

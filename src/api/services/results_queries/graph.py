@@ -36,6 +36,10 @@ def _decode_graph_changes_cursor(cursor: str | None) -> int:
         payload = json.loads(urlsafe_b64decode(padded_cursor.encode("ascii")).decode("utf-8"))
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
         raise ValueError("invalid graph changes cursor") from exc
+    if type(payload) is not dict:
+        # 非 dict JSON（list/str/int 等）调用 .get 会抛 AttributeError（→500），
+        # 这里统一按非法游标处理（→400）
+        raise ValueError("invalid graph changes cursor")
     offset = payload.get("offset")
     if type(offset) is not int or offset < 0:
         raise ValueError("invalid graph changes cursor")

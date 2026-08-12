@@ -107,3 +107,25 @@ def test_build_alias_resolution_falls_back_to_min_entity_id() -> None:
 
     assert resolution.resolve_entity_id(88) == 55
     assert resolution.resolve_name("老八") == "小五"
+
+
+def test_build_alias_resolution_maps_same_name_alias_to_representative() -> None:
+    """2026-08-12 用于验证别名与代表同名时 name 映射与别名注册不丢失
+
+    别名 id 归并到代表 id 的同时，name 映射必须保留（恒等映射），
+    否则边端点的 id 已归并而 name 未归并，造成 id/name 不一致。
+    """
+    relations = [
+        _relation(from_entity_id=67, to_entity_id=99),
+    ]
+    entities = [
+        _entity(67, "伯安", representative=True),
+        _entity(99, "伯安"),
+    ]
+
+    resolution = build_alias_resolution(relations, entities=entities)
+
+    assert resolution.resolve_entity_id(99) == 67
+    assert resolution.resolve_entity_id(67) == 67
+    assert resolution.name_to_representative["伯安"] == "伯安"
+    assert "伯安" in resolution.aliases_by_representative[67]

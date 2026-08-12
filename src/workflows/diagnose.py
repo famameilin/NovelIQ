@@ -13,6 +13,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.agents.stream import AgentStream
+from src.api.exceptions import GraphReadinessError
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud.schema import CloudAnalysis
@@ -61,7 +62,8 @@ def _persist_main_character_attributes(
         return
     try:
         view = KnowledgeGraphAuthorityService.from_session(session).build_export_view(run_id)
-    except ValueError:
+    except (ValueError, GraphReadinessError):
+        # 图未就绪或数据异常时静默跳过主角属性固化（后续图版本补写）
         return
     preferred = set(main_characters)
     representative_ids: set[int] = set()
@@ -114,7 +116,8 @@ async def run_diagnose(
     novel_id = str(run.get("novel_id", "")).strip() or ""
     if not novel_id:
         raise ValueError(f"run {run_id} is missing novel_id, cannot build diagnosis payload")
-    novel_title = str(run.get("novel_title", "")).strip() or None
+    # RunRepository._to_dict 的键是 "title"（非 "novel_title"）
+    novel_title = str(run.get("title", "")).strip() or None
 
     agent_stream = AgentStream(emitter, sub_stage="diagnosis") if emitter is not None else None
 
