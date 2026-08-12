@@ -9,13 +9,14 @@ API 分析任务列表、删除、运行态写回测试
 import asyncio
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.routes import analysis as analysis_mod
@@ -274,6 +275,114 @@ class TestRunRepository:
         assert run is not None
         assert run["status"] == "running"
         assert run["worker_id"] == "worker-a"
+
+
+class _ClaimSessionAdapter:
+    """把 db_session fixture 包装为 AnalysisService 需要的会话工厂接口"""
+
+    def __init__(self, session: Session):
+        self.connection = session
+
+    def __enter__(self) -> "_ClaimSessionAdapter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _ClaimSessionFactory:
+    def __init__(self, session: Session):
+        self._session = session
+
+    def get_session(self) -> _ClaimSessionAdapter:
+        return _ClaimSessionAdapter(self._session)
+
+
+class TestExecutionClaimResumeRace:
+    """测试 resume 与在途取消收尾竞态：claim 恢复被延迟取消写回覆盖的重置"""
+
+    @staticmethod
+    def _make_service(db_session: Session) -> AnalysisService:
+        return AnalysisService(
+            novel_service=MagicMock(),
+            task_manager=TaskManager(worker_id="worker-new"),
+            session_factory=_ClaimSessionFactory(db_session),
+        )
+
+    def test_claim_reactivates_run_reset_by_recent_resume(self, db_session):
+        """resume 重置 pending 后旧 worker 延迟写回 cancelled，claim 应重新激活并领取"""
+        _insert_test_novel("claimr1", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="claimr1")
+        task_id = run_id[:8]
+
+        # 模拟 resume 重置 pending：worker_id=None + heartbeat_at=now（pending 写回自动刷新心跳）
+        run_repo.update_run_task_fields(
+            run_id,
+            status="pending",
+            cancel_requested=False,
+            worker_id=None,
+            heartbeat_at=datetime.now(UTC),
+            completed_at=None,
+        )
+        # 模拟旧 worker 的延迟取消写回（不触碰 worker_id/heartbeat_at）
+        run_repo.update_run_task_fields(
+            run_id,
+            status="cancelled",
+            cancel_requested=False,
+            completed_at=datetime.now(UTC),
+        )
+
+        claim_result = self._make_service(db_session)._prepare_task_execution_claim(task_id)
+
+        assert claim_result == "claimed"
+        run = run_repo.get_run(run_id)
+        assert run is not None
+        assert run["status"] == "running"
+        assert run["worker_id"] == "worker-new"
+
+    def test_claim_does_not_reactivate_genuine_cancel_of_pending_run(self, db_session):
+        """真实取消（无 resume 重置痕迹：heartbeat_at 为 None）不得被 claim 复活"""
+        _insert_test_novel("claimr2", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="claimr2")
+        task_id = run_id[:8]
+
+        run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
+
+        claim_result = self._make_service(db_session)._prepare_task_execution_claim(task_id)
+
+        assert claim_result == "skipped"
+        run = run_repo.get_run(run_id)
+        assert run is not None
+        assert run["status"] == "cancelled"
+
+    def test_claim_does_not_reactivate_cancel_outside_resume_window(self, db_session):
+        """resume 重置痕迹超出窗口（heartbeat_at 陈旧）时不复活，保持 skipped"""
+        _insert_test_novel("claimr3", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="claimr3")
+        task_id = run_id[:8]
+
+        stale = datetime.now(UTC) - timedelta(hours=1)
+        run_repo.update_run_task_fields(
+            run_id,
+            status="pending",
+            cancel_requested=False,
+            worker_id=None,
+            heartbeat_at=stale,
+            completed_at=None,
+        )
+        run_repo.update_run_task_fields(
+            run_id,
+            status="cancelled",
+            cancel_requested=False,
+            completed_at=datetime.now(UTC),
+        )
+
+        claim_result = self._make_service(db_session)._prepare_task_execution_claim(task_id)
+
+        assert claim_result == "skipped"
 
 
 class TestCancellationStateCheck:
