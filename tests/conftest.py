@@ -266,31 +266,6 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def insert_test_novel(db_session) -> callable:
-    """
-    插入测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
-
-    创建时间: 2026-04-23
-    任务: 修复 pytest ForeignKeyViolation
-    """
-
-    def _insert(novel_id: str) -> None:
-        from src.storage.models import Novel
-
-        db_session.add(
-            Novel(
-                novel_id=novel_id,
-                filename=f"{novel_id}.txt",
-                file_path=f"data/uploads/{novel_id}.txt",
-                file_size=128,
-            )
-        )
-        db_session.commit()
-
-    return _insert
-
-
-@pytest.fixture
 def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
     """
     API 测试客户端 fixture

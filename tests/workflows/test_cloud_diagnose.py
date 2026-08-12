@@ -15,24 +15,9 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.cloud.schema import CloudAnalysis
-from src.storage.models import Novel
 from src.storage.repositories import RunRepository
 from src.workflows.diagnose import run_diagnose
-
-
-def _insert_test_novel(db_session, novel_id: str) -> None:
-    """
-    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation
-    """
-    db_session.add(
-        Novel(
-            novel_id=novel_id,
-            filename=f"{novel_id}.txt",
-            file_path=f"data/uploads/{novel_id}.txt",
-            file_size=128,
-        )
-    )
-    db_session.commit()
+from tests.support.analysis_factories import insert_test_novel
 
 
 def _fake_analysis(novel_id: str) -> CloudAnalysis:
@@ -58,7 +43,7 @@ class TestCli:
         self.db_session = db_session
         self.tmp_path = tmp_path
         self.novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, self.novel_id)
+        insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")

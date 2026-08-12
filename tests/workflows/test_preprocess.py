@@ -22,27 +22,9 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.storage.models import Novel
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.workflows.preprocess import run_preprocess
-
-
-def _insert_test_novel(db_session, novel_id: str) -> None:
-    """
-    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
-
-    创建时间: 2026-04-23
-    任务: 修复 pytest ForeignKeyViolation
-    """
-    db_session.add(
-        Novel(
-            novel_id=novel_id,
-            filename=f"{novel_id}.txt",
-            file_path=f"data/uploads/{novel_id}.txt",
-            file_size=128,
-        )
-    )
-    db_session.commit()
+from tests.support.analysis_factories import insert_test_novel
 
 
 class MockEmbeddingClient:
@@ -124,7 +106,7 @@ class TestPreprocess:
 
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, novel_id)
+        insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
             source_path=str(source_path),
@@ -152,7 +134,7 @@ class TestPreprocess:
 
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, novel_id)
+        insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
             source_path=str(source_path),
@@ -175,7 +157,7 @@ class TestPreprocess:
 
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, novel_id)
+        insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
             source_path=str(source_path),
@@ -196,7 +178,7 @@ class TestPreprocess:
 
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, novel_id)
+        insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
             source_path=str(source_path),

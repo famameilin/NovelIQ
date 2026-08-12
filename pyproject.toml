@@ -48,10 +48,26 @@ python_functions = ["test_*"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+exclude_lines = [
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "pragma: no cover",
+]
+
+# 注: coverage 使用模块名 source（如 --cov=src.api.routes.sse）会注册模块级 import 钩子，
+# 与 numpy 2.4 的扩展模块二次加载检查冲突（cannot load module more than once per process）。
+# 请使用路径 source（--cov=src）或整包名。dev.ps1 test 已按路径模式接入。
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["deprecated", "scripts/legacy", "scripts/manual"]
+extend-exclude = ["deprecated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "UP"]

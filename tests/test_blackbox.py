@@ -9,11 +9,19 @@
 测试对象：NovelIQ 小说智能分析系统 API
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
+# 模块级 client 在收集期创建会绕过 api_client fixture 的单例重置，
+# 这里改为 autouse fixture 在每个测试前注入隔离客户端（测试方法引用全局 client 名字）。
+client: TestClient | None = None
 
-client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def _use_isolated_api_client(api_client) -> None:
+    global client
+    client = api_client
+    yield
 
 
 # ============================================================================

@@ -98,7 +98,7 @@ switch ($Command.ToLowerInvariant()) {
     "test" {
         Ensure-Setup
         if ($CommandArgs.Count -eq 0) {
-            Run-VenvPython -CommandArgs @("-m", "pytest", "tests/", "-v")
+            Run-VenvPython -CommandArgs @("-m", "pytest", "tests/", "-v", "--cov=src", "--cov-report=term-missing")
         } else {
             $commandArgs = @("-m", "pytest") + $CommandArgs
             Run-VenvPython -CommandArgs $commandArgs

@@ -27,24 +27,8 @@ from src.storage.repositories import (
     StatsRepository,
 )
 from src.workflows.diagnose import run_diagnose
+from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
-
-
-def _insert_test_novel(session, novel_id: str) -> None:
-    """
-    为诊断测试补小说主表记录
-    """
-    from src.storage.models import Novel
-
-    session.add(
-        Novel(
-            novel_id=novel_id,
-            filename=f"{novel_id}.txt",
-            file_path=f"data/uploads/{novel_id}.txt",
-            file_size=128,
-        )
-    )
-    session.commit()
 
 
 def _fake_analysis(novel_id: str) -> CloudAnalysis:
@@ -69,7 +53,7 @@ class TestDiagnosisRoutes:
     def setup(self, db_session):
         self.db_session = db_session
         self.novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, self.novel_id)
+        insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
