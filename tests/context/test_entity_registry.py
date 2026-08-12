@@ -145,6 +145,57 @@ class TestEntityRegistry(unittest.TestCase):
         self.assertIn("张三", names)
         self.assertIn("李四", names)
 
+    def test_get_active_entities_filters_inactive_status(self) -> None:
+        """2026-08-12 用于验证 status 非 active（显式写入 state）的实体被过滤"""
+        mock_repo = MagicMock()
+        mock_repo.fetch_latest_entities.return_value = [
+            SimpleNamespace(
+                last_seen_chunk=1,
+                name="张三",
+                state={
+                    "role_function": "主角",
+                    "action": "走进房间",
+                    "emotion": "平静",
+                    "emotion_score": 0,
+                },
+            ),
+            SimpleNamespace(
+                last_seen_chunk=2,
+                name="李四",
+                state={
+                    "role_function": "配角",
+                    "action": "退场",
+                    "emotion": "平静",
+                    "emotion_score": 0,
+                    "status": "inactive",
+                },
+            ),
+        ]
+
+        result = get_active_entities(mock_repo, run_id="test-run", current_chunk_id=5, lookback=10)
+
+        self.assertEqual([e["name"] for e in result], ["张三"])
+
+    def test_get_active_entities_status_defaults_to_active(self) -> None:
+        """2026-08-12 用于验证 state 未写 status 的实体按 active 处理（与 authority 口径一致）"""
+        mock_repo = MagicMock()
+        mock_repo.fetch_latest_entities.return_value = [
+            SimpleNamespace(
+                last_seen_chunk=3,
+                name="王五",
+                state={
+                    "role_function": "主角",
+                    "action": "登场",
+                    "emotion": "平静",
+                    "emotion_score": 0,
+                },
+            ),
+        ]
+
+        result = get_active_entities(mock_repo, run_id="test-run", current_chunk_id=5, lookback=10)
+
+        self.assertEqual([e["name"] for e in result], ["王五"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,7 +82,10 @@ def get_active_entities(
     current_chunk_id: int,
     lookback: int = 10,
 ) -> list[dict[str, Any]]:
-    """获取活跃实体列表（按名称去重，保留最新）"""
+    """获取活跃实体列表（按名称去重，保留最新；仅保留 status 为 active 的实体）
+
+    状态存于实体 state 字典，缺省视为 active（与 authority 服务口径一致）。
+    """
     minimum_chunk_id = max(0, current_chunk_id - lookback)
     rows = [
         {
@@ -95,6 +98,7 @@ def get_active_entities(
         }
         for row in graph_repo.fetch_latest_entities(run_id)
         if minimum_chunk_id <= row.last_seen_chunk <= current_chunk_id
+        and (row.state.get("status") or "active") == "active"
     ]
 
     seen: dict[str, dict[str, Any]] = {}
