@@ -8,6 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src.agents.annotation.errors import AnnotationAuthorizationError, AnnotationInvariantError
+from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
 from src.agents.annotation.runner import (
@@ -15,13 +16,16 @@ from src.agents.annotation.runner import (
     validate_bound_annotation,
 )
 from src.agents.annotation.schema import (
+    ActiveCaseDetails,
     AgentRunAudit,
     AgentRunResult,
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEntityDirectory,
+    CaseSearchResult,
     ChunkMetricsInput,
+    RelationInput,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -650,3 +654,144 @@ async def test_runner_returns_result_from_single_attempt() -> None:
     assert actual == result
     assert run_attempt.await_count == 1
     assert recorder.finish_invocation.call_args.kwargs["status"] == "success"
+
+
+class _AliasCaseQueryService(_QueryService):
+    """2026-08-12 用于提供 entity_alias 活动案例的图级测试查询桩"""
+
+    def _alias_case(self) -> CaseSearchResult:
+        return CaseSearchResult(
+            id="alias-1",
+            type="entity_alias",
+            chunk_id=1,
+            keys=["同一人物", "顾霜", "顾老"],
+            description="疑似同一人物：顾霜 与 顾老",
+        )
+
+    def find_initial_case_candidates(
+        self,
+        current_text,
+        *,
+        semantic_limit=50,
+        rotation_limit=50,
+    ):
+        del current_text, semantic_limit, rotation_limit
+        return [self._alias_case()], ["alias-1"]
+
+    def fetch_active_case_details(self, case_id):
+        del case_id
+        return ActiveCaseDetails(
+            **self._alias_case().model_dump(mode="python"),
+            target_key="target-alias-1",
+            target_ref={"kind": "alias", "name_a": "顾霜", "name_b": "顾老", "chunk_id": 1},
+        )
+
+
+def _resolve_fact_case_call(call_id: str = "call-fact") -> dict:
+    """2026-08-12 用于构造带非法 change_kind 的 resolve_fact_case 调用"""
+    return _write_call(
+        "resolve_fact_case",
+        {
+            "case_number": 1,
+            "from_entity": "顾霜",
+            "to_entity": "顾老",
+            "relation_type": "同一人物",
+            "change_kind": "强化关系",
+            "reason": "指向同一人",
+        },
+        call_id=call_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() -> None:
+    """
+    2026-08-12 用于验证非法 change_kind 以失败回执回到模型继续对话，
+    而不是抛出让整章失败（下游持久化只认闭合枚举）。
+    """
+    ledger = AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text="“住手”回荡",
+        allow_future_context=False,
+        graph=FactGraph(
+            history_entity_types={"顾霜": "character", "顾老": "character"},
+            history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
+        ),
+    )
+    ledger.graph_queried = True
+    service = _AliasCaseQueryService()
+    initial_cases, rotation_ids = service.find_initial_case_candidates("当前")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = build_annotation_tools(service, ledger)
+    llm = _SequenceLLM(
+        [
+            _tool_message([_resolve_fact_case_call()]),
+            _tool_message(_full_write_calls()),
+        ]
+    )
+    graph = build_annotation_graph(
+        llm,
+        tools,
+        ledger=ledger,
+        max_iterations=30,
+    )
+    result = await graph.ainvoke(
+        {
+            "messages": [
+                SystemMessage(content="test"),
+                HumanMessage(
+                    content=build_chunk_message(
+                        chunk_index=1,
+                        chunk_total=1,
+                        chunk_text="“住手”回荡",
+                        candidates=ledger.dialogue_candidates,
+                    )
+                ),
+            ],
+            "phase": "chunk_open",
+            "iterations": 0,
+            "error": None,
+        }
+    )
+
+    assert result["phase"] == "completed"
+    assert result.get("error") is None
+    assert llm.calls == 2
+    receipts = _tool_receipts(llm.captured_messages[1])
+    rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
+    assert len(rejected) == 1
+    assert '"tool": "resolve_fact_case"' in rejected[0]
+    assert "change_kind" in rejected[0]
+    assert ledger.resolved_cases == []
+
+
+@pytest.mark.asyncio
+async def test_runner_resets_fact_graph_chapter_state_on_failure() -> None:
+    """2026-08-12 用于验证章节失败路径恢复 FactGraph 历史快照，不残留当章脏状态"""
+    graph_state = FactGraph()
+    graph_state.apply_relation(
+        RelationInput(from_entity="顾霜", to_entity="顾老", relation_type="同一人物")
+    )
+    assert graph_state.active_relations
+    session = MagicMock()
+    recorder = MagicMock()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(side_effect=RuntimeError("model failed")),
+    ):
+        with pytest.raises(RuntimeError, match="model failed"):
+            await run_annotation_agent(
+                run_id="run-1",
+                chapter_id=1,
+                current_chunks=[(1, "顾霜进入山门")],
+                query_service_factory=lambda session: _QueryService(),
+                session_factory=lambda: session,
+                llm=MagicMock(),
+                audit_recorder=recorder,
+                graph_state=graph_state,
+            )
+    assert graph_state.active_relations == set()
+    assert graph_state.chapter_added_relations == set()
+    assert graph_state.entity_types == {}

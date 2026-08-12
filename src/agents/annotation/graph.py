@@ -91,7 +91,7 @@ def _build_agent_node(
                 request_messages,
                 stream,
                 on_turn_complete=on_turn_complete,
-                retries=retries,
+                total_attempts=retries,
             )
         except Exception as exc:  # noqa: BLE001
             if observer is not None:
@@ -163,14 +163,27 @@ def _build_tool_batch_node(
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
         """2026-08-10 用于按调用顺序执行工具；失败只恢复该调用前的 Ledger 与 FactGraph"""
+
+        async def _emit_tool_status(name: str, status: str, message: str) -> None:
+            """2026-08-12 用于推送工具结果状态事件；SSE 推送失败时先闭合回合审计计时再上抛"""
+            if stream is None:
+                return
+            try:
+                if status == "success":
+                    await stream.tool_call_succeeded(name, message)
+                else:
+                    await stream.tool_call_failed(name, message)
+            except Exception:
+                if observer is not None:
+                    observer.close_turn()
+                raise
+
         calls = _tool_calls(state)
         messages: list[ToolMessage] = []
         for call_index, call in enumerate(calls):
             name = str(call.get("name"))
             if call.get("truncated"):
                 error_text = _truncated_error(name)
-                if stream is not None:
-                    await stream.tool_call_failed(name, "参数不完整（流传输截断）")
                 result = _failed_receipt(name, error_text)
                 if observer is not None:
                     observer.record_tool_call(
@@ -189,6 +202,7 @@ def _build_tool_batch_node(
                         tool_duration_ms=0,
                         started_ns=time.perf_counter_ns(),
                     )
+                await _emit_tool_status(name, "error", "参数不完整（流传输截断）")
                 messages.append(
                     ToolMessage(
                         content=result,
@@ -219,8 +233,6 @@ def _build_tool_batch_node(
                 if graph_snapshot is not None and ledger.graph is not None:
                     ledger.graph.restore(graph_snapshot)
                 ledger.errors.append(str(exc))
-                if stream is not None:
-                    await stream.tool_call_failed(name, str(exc))
                 result = _failed_receipt(name, str(exc))
                 status = "error"
                 error = str(exc)
@@ -245,8 +257,10 @@ def _build_tool_batch_node(
                     tool_duration_ms=tool_duration_ms,
                     started_ns=started_ns,
                 )
-            if stream is not None and status == "success":
-                await stream.tool_call_succeeded(name, result)
+            if status == "success":
+                await _emit_tool_status(name, "success", result)
+            else:
+                await _emit_tool_status(name, "error", error or "")
             messages.append(
                 ToolMessage(
                     content=result,

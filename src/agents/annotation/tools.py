@@ -54,11 +54,14 @@ from .schema import (
     NarrativeFunction,
     PayoffLikelihood,
     PendingCase,
+    RelationChangeKind,
     RelationInput,
     ResolvedCase,
     SearchResult,
     SetupStatus,
     TextSearchResult,
+    Tone,
+    normalize_semantic_text,
 )
 
 _DOMAIN_NAMES = (
@@ -1299,6 +1302,14 @@ def build_annotation_tools(
                 expected_types=("character",),
                 label="resolve_dialogue_case.speaker",
             )
+        if tone is not None:
+            tone = normalize_semantic_text(tone, label="resolve_dialogue_case.tone")
+            if tone not in Tone:
+                raise AnnotationInputError(
+                    f"resolve_dialogue_case.tone 必须是闭合语气枚举: {tone}，"
+                    f"合法值: {[member.value for member in Tone]}"
+                )
+        resolved_tone: Tone | None = Tone(tone) if tone is not None else None
         resolved = ResolvedCase(
             case_id=details.id,
             action="dialogue",
@@ -1307,7 +1318,7 @@ def build_annotation_tools(
             target_key=details.target_key,
             target_ref=details.target_ref,
             speaker=speaker,
-            tone=tone,
+            tone=resolved_tone,
             description=description,
             is_inner_monologue=is_inner_monologue,
         )
@@ -1333,6 +1344,11 @@ def build_annotation_tools(
             raise AnnotationInputError(
                 f"resolve_fact_case.relation_type 必须是闭合关系类型: {relation_type}"
             )
+        if change_kind not in RelationChangeKind:
+            raise AnnotationInputError(
+                f"resolve_fact_case.change_kind 必须是闭合关系变化类型: {change_kind}，"
+                f"合法值: {[member.value for member in RelationChangeKind]}"
+            )
         _require_action_entity(
             ledger,
             from_entity,
@@ -1355,7 +1371,7 @@ def build_annotation_tools(
             from_entity=from_entity,
             to_entity=to_entity,
             relation_type=relation_type,
-            change_kind=change_kind,
+            change_kind=RelationChangeKind(change_kind),
         )
         return _append_resolved(ledger, details, resolved)
 

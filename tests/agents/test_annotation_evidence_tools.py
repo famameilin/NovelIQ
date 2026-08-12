@@ -1405,3 +1405,76 @@ def test_finish_chapter_generates_summary_from_chunk_summaries() -> None:
     annotation = ledger.finish()
     assert annotation.chapter_summary == "住手回荡"
     assert annotation.contract_version == "agent-semantic-v1"
+
+
+def test_resolve_fact_case_rejects_foreign_change_kind() -> None:
+    """2026-08-12 用于验证 fact 解决的 change_kind 必须是闭合关系变化枚举（避免下游整章回滚）"""
+    service = _AliasQueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
+    ledger.graph_queried = True
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["alias-1"]
+    with pytest.raises(AnnotationInputError, match="change_kind"):
+        _find_tool(tools, "resolve_fact_case").invoke(
+            {
+                "case_number": case_number,
+                "from_entity": "顾霜",
+                "to_entity": "顾老",
+                "relation_type": "同一人物",
+                "change_kind": "强化关系",
+                "reason": "指向同一人",
+            }
+        )
+    assert ledger.resolved_cases == []
+
+
+def test_resolve_dialogue_case_rejects_foreign_tone() -> None:
+    """2026-08-12 用于验证对话解决的 tone 必须是闭合语气枚举（避免绕过 write_dialogues 的 Tone 约束）"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    ledger.graph_queried = True
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["case-1"]
+    with pytest.raises(AnnotationInputError, match="tone"):
+        _find_tool(tools, "resolve_dialogue_case").invoke(
+            {
+                "case_number": case_number,
+                "speaker": "顾霜",
+                "tone": "强化关系",
+                "reason": "语气判断",
+            }
+        )
+    assert ledger.resolved_cases == []
+
+
+def test_resolve_dialogue_case_accepts_closed_tone_enum() -> None:
+    """2026-08-12 用于验证闭合枚举内的 tone 正常登记为对话解决结果"""
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character"})
+    ledger.graph_queried = True
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["case-1"]
+    response = json.loads(
+        _find_tool(tools, "resolve_dialogue_case").invoke(
+            {
+                "case_number": case_number,
+                "speaker": "顾霜",
+                "tone": "愤怒",
+                "reason": "语气判断",
+            }
+        )
+    )
+    assert response["accepted"] is True
+    assert ledger.resolved_cases[0].tone == "愤怒"
