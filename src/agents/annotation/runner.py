@@ -153,7 +153,7 @@ async def _run_single_attempt(
         max_iterations=total_iteration_limit,
         stream=stream,
         observer=observer,
-        retries=max(1, settings.models.annotation.total_attempts),
+        retries=settings.models.annotation.total_attempts,
     )
     initial_messages = [
         SystemMessage(
@@ -276,6 +276,9 @@ async def run_annotation_agent(
         )
     except Exception as exc:  # noqa: BLE001
         _close_read_session(read_session)
+        if graph_state is not None:
+            # 章节失败时恢复事实图历史快照，避免当章脏状态残留到后续章节
+            graph_state.reset_chapter_changes()
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise
     _close_read_session(read_session)

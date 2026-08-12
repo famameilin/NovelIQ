@@ -673,14 +673,14 @@ class ResolvedCase(StrictModel):
     target_ref: dict[str, Any] = Field(default_factory=dict)
     # dialogue 动作：改 dialogue_records
     speaker: str | None = None
-    tone: str | None = None
+    tone: Tone | None = None
     description: str | None = None
     is_inner_monologue: bool | None = None
     # fact 动作：建/改/删图关系（change_kind 表达变化）
     from_entity: str | None = None
     to_entity: str | None = None
     relation_type: str | None = None
-    change_kind: str | None = None
+    change_kind: RelationChangeKind | None = None
     # foreshadowing 动作：改伏笔线程（setup_id 定位，字段即更新值）
     setup_summary: str | None = None
     setup_kind: str | None = None
@@ -697,7 +697,7 @@ class ResolvedCase(StrictModel):
             if self.speaker is not None:
                 self.speaker = normalize_semantic_text(self.speaker, label="resolve.speaker")
             if self.tone is not None:
-                self.tone = normalize_semantic_text(self.tone, label="resolve.tone")
+                self.tone = Tone(normalize_semantic_text(self.tone, label="resolve.tone"))
             if self.description is not None:
                 self.description = normalize_semantic_text(
                     self.description,

@@ -167,7 +167,13 @@ def _build_finalize_node(
     async def finalize_node(state: AgentLoopState) -> dict[str, Any]:
         """2026-08-02 用于只校验最新 Agent 消息中的唯一 finish 调用并阻止旧调用复用"""
         if stream is not None:
-            await stream.thinking("校验最终结构化输出...")
+            try:
+                await stream.thinking("校验最终结构化输出...")
+            except Exception:
+                # SSE 推送失败时先闭合上一条回合审计计时再上抛，避免 agent_turns 行耗时字段永久为空
+                if observer is not None:
+                    observer.close_turn()
+                raise
         node_started_ns = time.perf_counter_ns()
         last_message = state["messages"][-1]
         tool_calls = last_message.tool_calls if isinstance(last_message, AIMessage) else []
@@ -345,7 +351,7 @@ def _build_agent_node(
                 messages,
                 stream,
                 on_turn_complete=on_turn_complete,
-                retries=retries,
+                total_attempts=retries,
             )
         except Exception as exc:  # noqa: BLE001
             if observer is not None:
