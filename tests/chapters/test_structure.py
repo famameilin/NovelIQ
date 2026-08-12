@@ -142,6 +142,30 @@ def test_prologue_guesses_preliminary_title() -> None:
     assert chapters[0].title == "楔子"
 
 
+def test_prologue_does_not_swallow_first_chapter_title_line() -> None:
+    """2026-08-12 用于验证序言区间截止于第一章标题行之前，标题行不属于任何 chunk"""
+    text = "楔子 命运\n这段开篇正文足够长，超过了最小阈值。\n第一章 起点\n内容甲。"
+    first_title_start = text.index("第一章 起点")
+    body_start = text.index("内容甲。")
+    candidates = [
+        _candidate(start_char=first_title_start, body_start_char=body_start)
+    ]
+    chapters = _decide(text, candidates)
+    assert len(chapters) == 2
+    prologue, first = chapters
+    assert prologue.level == ChapterLevel.PREFACE
+    assert prologue.title == "楔子"
+    # 序言 chunk 止于第一章标题行之前，不含标题
+    assert prologue.end_char == first_title_start
+    assert text[prologue.start_char : prologue.end_char].strip().startswith("楔子")
+    assert "第一章" not in text[prologue.start_char : prologue.end_char]
+    # 第一章 chunk 从正文起点开始，含正文且不含标题行
+    assert first.title_start_char == first_title_start
+    assert first.start_char == body_start
+    assert text[first.start_char : first.end_char].strip() == "内容甲。"
+    assert "第一章" not in text[first.start_char : first.end_char]
+
+
 def test_prologue_not_inserted_when_too_short() -> None:
     text = "序\n第一章 起点\n内容甲。"
     candidates = [_candidate(start_char=2)]

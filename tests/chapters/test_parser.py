@@ -46,7 +46,8 @@ def test_extra_types_standalone() -> None:
 
 
 def test_prologue_inserted_when_leading_body_exists() -> None:
-    text = "这个开篇故事足够长。\n第一章 起点\n内容甲。\n第二章 入城\n内容乙。"
+    # 开篇正文须严格超过 prologue_min_chars（标题行不参与序言长度计算）
+    text = "这个开篇故事足够长了。\n第一章 起点\n内容甲。\n第二章 入城\n内容乙。"
     chapters = parse_chapters(text)
     assert chapters[0].level == ChapterLevel.PREFACE
     assert chapters[0].title == "序言"

@@ -79,3 +79,29 @@ def test_toc_without_blank_line_keeps_entries_with_page_numbers() -> None:
     start, end = toc
     assert text[start:end].count("第三章") == 1
     assert "林渡走在街头" not in text[start:end]
+
+
+def test_toc_with_volume_entries_after_number() -> None:
+    """2026-08-12 用于验证「卷一/第2卷」形态的卷条目被目录识别（假章节带页码不进入正文）"""
+    text = "目录\n卷一 风起 1\n卷二 云涌 9\n第三章 入城 1\n\n正文内容。"
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    assert text[start:end].count("卷一") == 1
+    assert "正文内容" not in text[start:end]
+
+
+def test_toc_with_chinese_volume_numerals() -> None:
+    """2026-08-12 用于验证「卷上/卷中」形态的卷条目被目录识别"""
+    text = "目录\n卷上 少年 1\n卷中 江湖 5\n卷下 风云 9\n\n正文内容。"
+    assert detect_toc_range(text) is not None
+
+
+def test_toc_with_english_entries() -> None:
+    """2026-08-12 用于验证 Chapter/Unit/Volume/Part 英文编号条目被目录识别"""
+    text = "目录\nChapter 1 起点 1\nChapter 2 入城 5\nUnit 1 风起 1\n\n正文内容。"
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    assert text[start:end].count("Chapter 1") == 1
+    assert "正文内容" not in text[start:end]

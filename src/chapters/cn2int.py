@@ -33,20 +33,37 @@ def chinese_to_int(text: str) -> int | None:
     total = 0
     section = 0
     number = 0
+    has_zero = False
+    last_unit = 1
     for ch in text:
         if ch in _DIGITS:
             number = _DIGITS[ch]
+            if number == 0:
+                # 零/〇/○ 之后的末位数字按显式个位处理（二百零五 = 205）
+                has_zero = True
         else:
             unit = _UNITS[ch]
             if unit == 10000:
-                section = (section + number) * unit
+                # 万 单独出现（section/number 均为 0）时按 10000 兜底；
+                # 十万/两万等组合仍按 (section + number) * 万 计算
+                section = (section + (number if section or number else 1)) * unit
                 total += section
                 section = 0
                 number = 0
+                has_zero = False
+                last_unit = unit
             else:
                 section += (number if number else 1) * unit
                 number = 0
-    return total + section + number
+                has_zero = False
+                last_unit = unit
+    if number:
+        if not has_zero and last_unit > 10:
+            # 隐含十位/百位/千位：二百五 = 250、一千二 = 1200、一万二 = 12000
+            section += number * (last_unit // 10)
+        else:
+            section += number
+    return total + section
 
 
 def extract_number(label: str) -> int | None:
