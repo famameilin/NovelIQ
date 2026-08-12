@@ -37,32 +37,28 @@
     "retention": "7 days",
     "compression": "zip",
     "modules": {
-      "api": {
+      "src.api": {
         "file": "api.log",
         "level": "DEBUG"
       },
-      "chunking": {
-        "file": "chunking.log",
-        "level": "WARNING"
-      },
-      "workflow": {
+      "src.workflows": {
         "file": "workflow.log",
         "level": "INFO"
       },
-      "model": {
+      "src.models": {
         "file": "model.log",
         "level": "DEBUG"
       },
-      "metrics": {
+      "src.metrics": {
         "file": "metrics.log",
         "level": "INFO"
       },
-      "knowledge": {
-        "file": "knowledge.log",
-        "level": "DEBUG"
+      "src.storage": {
+        "file": "storage.log",
+        "level": "INFO"
       },
-      "rag": {
-        "file": "rag.log",
+      "src.agents": {
+        "file": "agents.log",
         "level": "DEBUG"
       }
     },
