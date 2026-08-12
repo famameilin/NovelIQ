@@ -3,7 +3,6 @@ from . import bootstrap
 from .constants import (
     CLASSICAL_PATTERNS,
     EVENT_TYPE_SCORES,
-    PARAGRAPH_SPLIT,
     PROPP_FUNCTIONS,
     SEMANTIC_CATEGORY_MAPPING,
     THREE_ACT_MAPPING,
@@ -40,7 +39,6 @@ __all__ = [
     "LoggingSettings",
     "MetricsSettings",
     "ModelsSettings",
-    "PARAGRAPH_SPLIT",
     "PROPP_FUNCTIONS",
     "PathSettings",
     "ProgressSettings",

@@ -34,7 +34,6 @@ class TaskModelConfig:
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
     stream_enabled: bool = False
-    stream_cloud_only: bool = True
 
     def validate(self) -> None:
         if self.timeout_s is not None and self.timeout_s <= 0:
@@ -61,7 +60,6 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
 
     thinking_enabled = getattr(task_settings, "thinking", False)
     stream_enabled = getattr(task_settings, "streaming", False)
-    stream_cloud_only = getattr(task_settings, "stream_cloud_only", False)
 
     return TaskModelConfig(
         base_url=task_settings.base_url,
@@ -73,5 +71,4 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
         stream_enabled=stream_enabled,
-        stream_cloud_only=stream_cloud_only,
     )

@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
+from loguru import logger
+
 DatabaseEnvironmentName = Literal["DATABASE", "TEST_DATABASE"]
 ModelEnvironmentName = Literal["MODEL", "EMBEDDING_MODEL"]
 
@@ -112,17 +114,43 @@ def load_database_environment(
     )
 
 
-def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironment:
-    """加载模型平铺环境变量。"""
+def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironment | None:
+    """
+    加载模型平铺环境变量。
+
+    2026-08-12 模型变量整组缺失或部分缺失时不再抛 RuntimeError：
+    返回 None 并记录 warning，由装配层（Settings.from_env）降级使用 settings.json 的值；
+    字段存在但为空白时仍视为格式错误抛 ValueError。
+    """
 
     if env_var_name not in _MODEL_ENVIRONMENT_NAMES:
         raise ValueError(f"不支持的模型环境变量: {env_var_name}")
 
-    values = _load_flat_fields(env_var_name, _MODEL_FIELD_NAMES[env_var_name], required=True)
-    if values is None:
-        raise RuntimeError(f"{env_var_name} 环境变量未配置")
+    raw_values = {
+        field_name: os.environ.get(environment_name)
+        for field_name, environment_name in _MODEL_FIELD_NAMES[env_var_name]
+    }
+    blank_variables: list[str] = []
+    for field_name, environment_name in _MODEL_FIELD_NAMES[env_var_name]:
+        value = raw_values[field_name]
+        if value is not None and not value.strip():
+            blank_variables.append(environment_name)
+    if blank_variables:
+        raise ValueError(f"{', '.join(blank_variables)} 不能为空")
+
+    missing_variables: list[str] = []
+    for field_name, environment_name in _MODEL_FIELD_NAMES[env_var_name]:
+        if raw_values[field_name] is None:
+            missing_variables.append(environment_name)
+    if missing_variables:
+        logger.warning(
+            f"{env_var_name} 环境变量缺失（{', '.join(missing_variables)}），模型配置降级使用 settings.json 值"
+        )
+        return None
+
+    validated_values = {field_name: value for field_name, value in raw_values.items() if value is not None}
     return ModelEnvironment(
-        base_url=_get_value(values, "base_url"),
-        model=_get_value(values, "model"),
-        api_key=_get_value(values, "api_key", preserve_whitespace=True),
+        base_url=_get_value(validated_values, "base_url"),
+        model=_get_value(validated_values, "model"),
+        api_key=_get_value(validated_values, "api_key", preserve_whitespace=True),
     )

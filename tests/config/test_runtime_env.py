@@ -1,5 +1,7 @@
 import pytest
+from loguru import logger
 
+from src.config.settings import Settings
 from src.runtime_env import load_database_environment, load_model_environment
 
 
@@ -79,9 +81,9 @@ def test_load_flat_environment_fields(monkeypatch) -> None:
     assert embedding_model.model == "embedding-model"
 
 
-def test_load_model_environment_requires_each_flat_field(monkeypatch) -> None:
+def test_load_model_environment_degrades_when_flat_field_missing(monkeypatch) -> None:
     """
-    2026-08-08 用于验证部分模型配置报告缺失的平铺字段
+    2026-08-12 用于验证部分模型字段缺失时降级为 None 并记录 warning
     """
 
     _set_model_environment(
@@ -93,8 +95,14 @@ def test_load_model_environment_requires_each_flat_field(monkeypatch) -> None:
     )
     monkeypatch.delenv("MODEL_ID")
 
-    with pytest.raises(RuntimeError, match="MODEL_ID"):
-        load_model_environment("MODEL")
+    messages: list[str] = []
+    handler_id = logger.add(messages.append, format="{message}", level="WARNING")
+    try:
+        assert load_model_environment("MODEL") is None
+    finally:
+        logger.remove(handler_id)
+
+    assert any("MODEL_ID" in message for message in messages)
 
 
 def test_load_model_environment_rejects_blank_key(monkeypatch) -> None:
@@ -114,9 +122,9 @@ def test_load_model_environment_rejects_blank_key(monkeypatch) -> None:
         load_model_environment("MODEL")
 
 
-def test_load_model_environment_ignores_legacy_json_value(monkeypatch) -> None:
+def test_load_model_environment_degrades_when_group_fully_missing(monkeypatch) -> None:
     """
-    2026-08-08 用于确认旧 JSON 变量不能替代平铺模型变量
+    2026-08-12 用于确认整组缺失（含旧 JSON 变量）时降级为 None 并记录 warning
     """
 
     monkeypatch.delenv("MODEL_BASE_URL", raising=False)
@@ -124,8 +132,14 @@ def test_load_model_environment_ignores_legacy_json_value(monkeypatch) -> None:
     monkeypatch.delenv("MODEL_KEY", raising=False)
     monkeypatch.setenv("MODEL", '{"base_url":"https://api.example.com/v1","model":"legacy-model"}')
 
-    with pytest.raises(RuntimeError, match="MODEL"):
-        load_model_environment("MODEL")
+    messages: list[str] = []
+    handler_id = logger.add(messages.append, format="{message}", level="WARNING")
+    try:
+        assert load_model_environment("MODEL") is None
+    finally:
+        logger.remove(handler_id)
+
+    assert any("MODEL" in message for message in messages)
 
 
 def test_load_optional_database_environment_returns_none_when_flat_fields_are_absent(monkeypatch) -> None:
@@ -138,3 +152,28 @@ def test_load_optional_database_environment_returns_none_when_flat_fields_are_ab
     monkeypatch.setenv("TEST_DATABASE", '{"url":"legacy"}')
 
     assert load_database_environment("TEST_DATABASE", required=False) is None
+
+
+def test_settings_from_env_degrades_to_json_when_model_environment_missing(monkeypatch) -> None:
+    """
+    2026-08-12 用于验证模型环境变量缺失时配置装配不再抛 RuntimeError：
+    模型身份字段保持 settings.json 的默认值，行为参数继续来自 settings.json
+    """
+
+    for variable in (
+        "MODEL_BASE_URL",
+        "MODEL_ID",
+        "MODEL_KEY",
+        "EMBEDDING_MODEL_BASE_URL",
+        "EMBEDDING_MODEL_ID",
+        "EMBEDDING_MODEL_KEY",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.models.annotation.base_url is None
+    assert settings.models.annotation.model is None
+    assert settings.models.paragraph_embedding.base_url is None
+    assert settings.models.annotation.streaming is True
+    assert settings.models.annotation.timeout_s == 180
