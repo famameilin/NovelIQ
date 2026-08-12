@@ -26,7 +26,6 @@ class TaskModelSettings:
     top_p: float = 0.8
     thinking: bool = False
     streaming: bool = False
-    stream_cloud_only: bool = False
     structured_output: str = "json_schema"
     max_iterations: int = 10
     total_attempts: int = 3
@@ -150,7 +149,6 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         top_p=json_data.get("top_p", 0.8),
         thinking=json_data.get("thinking", False),
         streaming=json_data.get("streaming", False),
-        stream_cloud_only=json_data.get("cloud_only", False),
         structured_output=_parse_structured_output_mode(
             json_data,
             "structured_output",
@@ -193,13 +191,16 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
 
 def apply_model_environment(
     settings: ModelsSettings,
-    model_environment: ModelEnvironment,
-    embedding_environment: ModelEnvironment,
+    model_environment: ModelEnvironment | None,
+    embedding_environment: ModelEnvironment | None,
 ) -> None:
     """
     2026-08-03 用于把两个模型环境对象映射到当前任务配置
+    2026-08-12 环境变量缺失降级：None 表示该组未配置，保留 settings.json 的对应值
     """
 
+    if model_environment is None:
+        return
     model_base_url = _normalize_model_base_url_for_docker(model_environment.base_url)
     for task_settings in (
         settings.annotation,
@@ -209,6 +210,8 @@ def apply_model_environment(
         task_settings.model = model_environment.model
         task_settings.api_key = model_environment.api_key
 
+    if embedding_environment is None:
+        return
     settings.paragraph_embedding.base_url = _normalize_model_base_url_for_docker(
         embedding_environment.base_url
     )

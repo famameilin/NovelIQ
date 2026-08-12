@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from src.config.constants.annotation import EMOTION_SCORE_MAPPING
 from src.config.constants.text_normalization import (
     ALLOWED_PREV_CJK_CHARS,
@@ -59,15 +57,12 @@ SEMANTIC_CATEGORY_MAPPING: dict[str, str] = {
     "色彩形容词类": "color",
 }
 
-PARAGRAPH_SPLIT = re.compile(r"(?:\r\n|\r|\n)+")
-
 __all__ = [
     "EVENT_TYPE_SCORES",
     "THREE_ACT_MAPPING",
     "PROPP_FUNCTIONS",
     "CLASSICAL_PATTERNS",
     "SEMANTIC_CATEGORY_MAPPING",
-    "PARAGRAPH_SPLIT",
     "TITLE_ALIAS_SUFFIXES",
     "ALLOWED_PREV_CJK_CHARS",
     "LIKELY_NAME_PREFIX_CHARS",

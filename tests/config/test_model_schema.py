@@ -42,7 +42,6 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
             "top_p": 0.7,
             "thinking": True,
             "streaming": True,
-            "cloud_only": False,
             "structured_output": "json_object",
             "max_iterations": 20,
             "total_attempts": 3,
@@ -53,7 +52,6 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
     assert settings.timeout_s == 180
     assert settings.thinking is True
     assert settings.streaming is True
-    assert settings.stream_cloud_only is False
     assert settings.structured_output == "json_object"
     assert settings.max_iterations == 20
     assert settings.total_attempts == 3
@@ -163,3 +161,22 @@ def test_apply_model_environment_rewrites_loopback_for_docker(monkeypatch) -> No
 
     assert settings.annotation.base_url == "http://host.docker.internal:8111/v1"
     assert settings.paragraph_embedding.base_url == "http://host.docker.internal:8080/v1"
+
+
+def test_apply_model_environment_keeps_json_values_when_environment_missing() -> None:
+    """
+    2026-08-12 用于验证环境缺失降级：None 环境不覆盖 settings.json 的值
+    """
+
+    settings = _parse_models_settings({"annotation": {"timeout_s": 180}})
+    settings.annotation.base_url = "https://json.example.com/v1"
+    settings.annotation.model = "json-model"
+    settings.paragraph_embedding.base_url = "http://json-embedding.example.com/v1"
+    settings.paragraph_embedding.model = "json-embedding-model"
+
+    apply_model_environment(settings, None, None)
+
+    assert settings.annotation.base_url == "https://json.example.com/v1"
+    assert settings.annotation.model == "json-model"
+    assert settings.paragraph_embedding.base_url == "http://json-embedding.example.com/v1"
+    assert settings.paragraph_embedding.model == "json-embedding-model"
