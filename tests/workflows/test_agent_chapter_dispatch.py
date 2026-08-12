@@ -366,18 +366,64 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
 
 
 @pytest.mark.asyncio
-async def test_run_annotate_stops_entire_stage_on_agent_failure(db_session) -> None:
-    """2026-08-11 用于验证章节 Agent 单次失败后不启动任何后续章节"""
+async def test_run_annotate_isolates_failed_chapter_and_continues(db_session) -> None:
+    """2026-08-12 用于验证第二章 Agent 失败时第一章结果仍被保存、失败不中断后续章节"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["第一章", "第二章"],
         chapter_ids=[1, 2],
-        title="章节失败终止",
+        title="章节失败隔离",
+    )
+    calls: list[int] = []
+
+    async def fake_agent(**kwargs):
+        """2026-08-12 用于让第二章 Agent 失败并记录执行顺序"""
+        chapter_id = kwargs["chapter_id"]
+        calls.append(chapter_id)
+        chunk_text = kwargs["current_chunks"][0][1]
+        if chapter_id == 2:
+            raise RuntimeError("第二章标注失败")
+        return _agent_result(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            chunk_id=chapter_id - 1,
+            chunk_text=chunk_text,
+        )
+
+    with (
+        patch("src.agents.annotation.run_annotation_agent", new=fake_agent),
+        patch("src.agents.llm.build_chat_model", return_value=MagicMock()),
+    ):
+        result = await run_annotate(
+            run_id=run_id,
+            session=db_session,
+            novel_id=novel_id,
+        )
+
+    assert result == (1, 0, 2)
+    assert calls == [1, 2]
+    db_session.rollback()
+    count = db_session.execute(
+        select(func.count())
+        .select_from(ChapterAnnotationRecord)
+        .where(ChapterAnnotationRecord.run_id == run_id)
+    ).scalar_one()
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_annotate_raises_when_all_chapters_fail(db_session) -> None:
+    """2026-08-12 用于验证所有章节均失败时整个 run 抛出首个异常"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["第一章", "第二章"],
+        chapter_ids=[1, 2],
+        title="章节全部失败",
     )
     agent = MagicMock(side_effect=RuntimeError("标注失败"))
 
     async def failing_agent(**kwargs):
-        """2026-08-11 用于模拟首章 Agent 失败"""
+        """2026-08-12 用于模拟所有章节 Agent 失败"""
         return agent(**kwargs)
 
     with (
@@ -391,7 +437,7 @@ async def test_run_annotate_stops_entire_stage_on_agent_failure(db_session) -> N
                 novel_id=novel_id,
             )
 
-    assert agent.call_count == 1
+    assert agent.call_count == 2
     db_session.rollback()
     count = db_session.execute(
         select(func.count())
