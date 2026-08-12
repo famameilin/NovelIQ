@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
 from src.agents.annotation.schema import (
+    BoundForeshadowing,
     CaseSearchResult,
     PendingCase,
 )
 from src.config import settings
+from src.storage.models import ForeshadowingThread
+from src.storage.repositories import ForeshadowingRepository
 from src.storage.repositories.annotation.continuity import (
     CasePoolRepository,
     DatabaseAnnotationQueryService,
@@ -103,3 +107,34 @@ async def test_text_search_returns_only_matching_later_chunks(db_session, monkey
     assert service.read_text(2) == "第三章顾霜身份揭晓"
     with pytest.raises(ValueError, match="原文 chunk 不存在或跨 run"):
         service.read_text(999)
+
+
+def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session) -> None:
+    """2026-08-12 用于验证 setup_summary 大小写变体按 casefold 去重，不重复建伏笔线程"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜持 Sword 现身"],
+        title="伏笔大小写去重",
+    )
+    repository = ForeshadowingRepository(db_session)
+    first_thread, first_hit = repository.sync(
+        run_id=run_id,
+        chunk_id=0,
+        foreshadowing=BoundForeshadowing(description="顾霜持 Sword", confidence="high"),
+    )
+    second_thread, second_hit = repository.sync(
+        run_id=run_id,
+        chunk_id=0,
+        foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high"),
+    )
+    db_session.commit()
+
+    assert second_thread.setup_id == first_thread.setup_id
+    assert first_hit is not None
+    assert second_hit is None
+    threads = list(
+        db_session.execute(
+            select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
+        ).scalars()
+    )
+    assert len(threads) == 1
