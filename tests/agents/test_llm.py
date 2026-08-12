@@ -6,9 +6,9 @@ from src.agents.llm import build_chat_model
 from src.config import TaskModelConfig
 
 
-def test_build_chat_model_passes_top_p_and_cloud_streaming() -> None:
+def test_build_chat_model_passes_top_p_and_streaming_config() -> None:
     """
-    2026-08-04 用于验证云端 Agent 模型接收 top_p 与流式配置
+    2026-08-04 用于验证模型构建透传 top_p 与 stream_enabled 流式开关
     """
     config = TaskModelConfig(
         base_url="https://api.example.com/v1",
@@ -16,7 +16,6 @@ def test_build_chat_model_passes_top_p_and_cloud_streaming() -> None:
         api_key="test-key",
         top_p=0.42,
         stream_enabled=True,
-        stream_cloud_only=True,
     )
 
     with patch("src.agents.llm.ChatOpenAI") as chat_openai:
@@ -25,18 +24,35 @@ def test_build_chat_model_passes_top_p_and_cloud_streaming() -> None:
     kwargs = chat_openai.call_args.kwargs
     assert kwargs["top_p"] == 0.42
     assert kwargs["streaming"] is True
+    assert kwargs["max_retries"] == 0
 
 
-def test_build_chat_model_disables_cloud_only_streaming_for_local_endpoint() -> None:
+def test_build_chat_model_streaming_follows_stream_enabled_for_local_endpoint() -> None:
     """
-    2026-08-04 用于验证 cloud_only 配置不会对本地服务错误开启流式调用
+    2026-08-12 用于验证本地端点同样遵循 stream_enabled（产品已决策不再区分本地/云端）
     """
     config = TaskModelConfig(
         base_url="http://localhost:8000/v1",
         model="test-model",
         api_key="test-key",
         stream_enabled=True,
-        stream_cloud_only=True,
+    )
+
+    with patch("src.agents.llm.ChatOpenAI") as chat_openai:
+        build_chat_model(config=config)
+
+    assert chat_openai.call_args.kwargs["streaming"] is True
+
+
+def test_build_chat_model_disables_streaming_when_stream_enabled_false() -> None:
+    """
+    2026-08-12 用于验证 stream_enabled=False 时关闭流式调用
+    """
+    config = TaskModelConfig(
+        base_url="https://api.example.com/v1",
+        model="test-model",
+        api_key="test-key",
+        stream_enabled=False,
     )
 
     with patch("src.agents.llm.ChatOpenAI") as chat_openai:

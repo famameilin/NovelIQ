@@ -4,8 +4,9 @@ Agent 流式事件封装
 将 Agent 循环中的模型推理/工具调用过程翻译为统一 StreamEvent 并发送到 SSE，
 Agent 层只需持有 AgentStream 即可获得完整过程可见性。
 
-计时说明: 无论是否开启 SSE 都优先走 Provider 流式接口以得到真实 TTFT；
-非流式 Provider 的 TTFT 与推理时间记录为 NULL，不会用总耗时冒充。
+计时说明: 流式与否由模型实例的 streaming 配置（stream_enabled）决定；
+流式 Provider 得到真实 TTFT，非流式 Provider 的 TTFT 与推理时间记录为 NULL，
+不会用总耗时冒充。
 """
 
 from __future__ import annotations
@@ -394,24 +395,32 @@ async def run_model_call(
     stream: AgentStream | None,
     *,
     on_turn_complete: Callable[[AIMessage, ModelCallTiming], None] | None = None,
-    retries: int | None = None,
+    total_attempts: int | None = None,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
 
-    无论是否开启 SSE 都优先走 Provider 流式接口，否则无法得到真实 TTFT；
-    非流式 Provider 的 TTFT 与推理时间记录为 NULL，不会用总耗时冒充。
+    是否走流式由模型实例的 streaming 配置决定（ChatOpenAI(streaming=...)）：
+    开启时用 astream 聚合分片并推送事件；关闭或 Provider 不支持流式时
+    直接 ainvoke 单次调用，TTFT 与推理时间记录为 NULL。
     流式输出中途断流（astream 抛异常）时用同一 messages 重发当前模型请求，
-    重试次数由 retries 显式传入（由调用方按任务模型配置决定），
-    缺省时对齐 settings.models.annotation.total_attempts（默认 3 次）；
+    total_attempts 表示总调用次数（重试次数 = total_attempts - 1），
+    total_attempts=1 时关闭重试；缺省对齐 settings.models.annotation.total_attempts
+    （默认 3 次，即最多重试 2 次）；
     重试期间推送 thinking 事件，并跳过与上次已推送内容重叠的前缀，避免重复输出；
+    已失败尝试的用量（如有）与最终用量合并记账，避免重试丢弃已消耗的 token。
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
     on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
     """
     started_ns = perf_counter_ns()
-    if not hasattr(model, "astream"):
+    if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
         if stream is not None:
-            await stream.thinking("模型不支持流式输出，等待完整回复...")
+            hint = (
+                "模型不支持流式输出，等待完整回复..."
+                if not hasattr(model, "astream")
+                else "模型未启用流式输出，等待完整回复..."
+            )
+            await stream.thinking(hint)
         response = await model.ainvoke(messages)
         timing = ModelCallTiming(
             model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
@@ -425,9 +434,15 @@ async def run_model_call(
 
     from src.config import settings
 
-    retries_remaining = max(1, retries if retries is not None else settings.models.annotation.total_attempts)
+    total_attempts = (
+        total_attempts
+        if total_attempts is not None
+        else settings.models.annotation.total_attempts
+    )
+    retries_remaining = max(0, total_attempts - 1)
     skip_output_chars = 0
     announced_tools: set[int] = set()
+    retried_usage: dict[str, Any] = {}
     while True:
         aggregator = StreamChunkAggregator(
             stream,
@@ -455,10 +470,16 @@ async def run_model_call(
                 await stream.thinking(
                     f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）"
                 )
+            if aggregator._usage_metadata:
+                _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
             skip_output_chars = len("".join(aggregator._content_parts))
             announced_tools = set(aggregator._announced_tools)
             continue
         response = aggregator.finish()
+        if retried_usage:
+            # 已失败尝试的用量与最终成功尝试的用量合并，避免断流重试丢弃已消耗 token
+            _accumulate_usage_metadata(retried_usage, dict(response.usage_metadata or {}))
+            response.usage_metadata = cast(UsageMetadata, retried_usage)
         if on_turn_complete is not None:
             on_turn_complete(response, aggregator.timing())
         return response

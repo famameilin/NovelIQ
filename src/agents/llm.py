@@ -69,9 +69,7 @@ def build_chat_model(
     if cfg.thinking_enabled:
         extra_body = {"think": True}
 
-    base_url = (cfg.base_url or "").lower()
-    is_local_endpoint = any(host in base_url for host in ("localhost", "127.0.0.1", "host.docker.internal"))
-    streaming = cfg.stream_enabled and (not cfg.stream_cloud_only or not is_local_endpoint)
+    streaming = cfg.stream_enabled
 
     return ChatOpenAI(
         model=cfg.model or "",
@@ -81,6 +79,9 @@ def build_chat_model(
         top_p=cfg.top_p,
         timeout=cfg.timeout_s if cfg.timeout_s is not None else 120,
         streaming=streaming,
-        max_retries=1,
+        # 2026-08-12 断流重试由 stream.py 按 total_attempts 统一负责；
+        # SDK 层再叠加 max_retries 会让最坏请求次数成倍膨胀（流式中断时叠加后最多 8 次）。
+        # 关闭 SDK 层重试，重试次数只由 total_attempts 一处配置决定。
+        max_retries=0,
         extra_body=extra_body,
     )
