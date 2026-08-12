@@ -382,22 +382,22 @@ export function useAnalysisStatus(
 
   const { isConnected, disconnect } = useSSEListener(sseUrl, {
     onEvent: (eventType, data) => {
+      // 2026-08-12: 后端 SSE 消息格式为 { type, data }，不含 task_id 字段；
+      // 移除恒为 false 的 task_id 过滤，message 事件直接按内部类型分发
       if (eventType === "message") {
-        const message = data as { type: SSEEventType; task_id: string; data: unknown };
-        if (message.task_id === taskId) {
-          if (
-            !sseReceivedMessageRef.current &&
-            (message.type === "stage_start" ||
-              message.type === "stage_progress" ||
-              message.type === "llm_output" ||
-              message.type === "llm_thinking" ||
-              message.type === "tool_call")
-          ) {
-            sseReceivedMessageRef.current = true;
-            setStableTaskId(taskId);
-          }
-          handleMessage(message.type, message.data);
+        const message = data as { type: SSEEventType; data: unknown };
+        if (
+          !sseReceivedMessageRef.current &&
+          (message.type === "stage_start" ||
+            message.type === "stage_progress" ||
+            message.type === "llm_output" ||
+            message.type === "llm_thinking" ||
+            message.type === "tool_call")
+        ) {
+          sseReceivedMessageRef.current = true;
+          setStableTaskId(taskId);
         }
+        handleMessage(message.type, message.data);
       } else {
         if (
           !sseReceivedMessageRef.current &&

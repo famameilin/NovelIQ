@@ -232,4 +232,65 @@ describe("streamStore 顺序区块（模型思考中/模型输出）", () => {
     expect(group.blocks.map((block) => block.kind)).toEqual(["output", "thinking"]);
     expect(group.blocks[1].tools[0].name).toBe("finish");
   });
+
+  it("started 之后 output 先刷入、success 后到时，应在原 thinking 块内原地更新且不产生重复行", () => {
+    const store = useStreamStore.getState();
+
+    // 真实时序：tool_call 即时刷入 store，llm_output 延迟 120ms 批量刷入，
+    // 因此 started 之后 output 块先于 success 到达
+    store.appendLLMOutput(
+      createLLMEvent({
+        action: "tool_call",
+        content: "resolve_case",
+        message: "正在调用工具 resolve_case",
+        status: "started",
+      }),
+    );
+    store.appendLLMOutput(createLLMEvent({ action: "output", content: "文本输出" }));
+    store.appendLLMOutput(
+      createLLMEvent({
+        action: "tool_call",
+        content: "resolve_case",
+        message: "工具 resolve_case 执行成功",
+        status: "success",
+      }),
+    );
+
+    const [group] = Array.from(useStreamStore.getState().llmOutputs.values());
+    expect(group.blocks.map((block) => block.kind)).toEqual(["thinking", "output"]);
+    expect(group.blocks[0].tools).toEqual([
+      { name: "resolve_case", status: "success", detail: "工具 resolve_case 执行成功" },
+    ]);
+    expect(group.blocks[1].text).toBe("文本输出");
+  });
+
+  it("success 到达时末尾已是新的 thinking 块，也应回扫旧 thinking 块原地更新", () => {
+    const store = useStreamStore.getState();
+
+    store.appendLLMOutput(
+      createLLMEvent({
+        action: "tool_call",
+        content: "search_pool",
+        message: "正在调用工具 search_pool",
+        status: "started",
+      }),
+    );
+    store.appendLLMOutput(createLLMEvent({ action: "output", content: "文本" }));
+    store.appendLLMOutput(createLLMEvent({ action: "thinking", content: "新一轮思考" }));
+    store.appendLLMOutput(
+      createLLMEvent({
+        action: "tool_call",
+        content: "search_pool",
+        message: "工具 search_pool 执行成功",
+        status: "success",
+      }),
+    );
+
+    const [group] = Array.from(useStreamStore.getState().llmOutputs.values());
+    expect(group.blocks.map((block) => block.kind)).toEqual(["thinking", "output", "thinking"]);
+    expect(group.blocks[0].tools).toEqual([
+      { name: "search_pool", status: "success", detail: "工具 search_pool 执行成功" },
+    ]);
+    expect(group.blocks[2].tools).toEqual([]);
+  });
 });

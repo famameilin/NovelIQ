@@ -126,6 +126,48 @@ function _appendBoundedLLMOutput(
     const toolStatus: ToolCallStatus =
       status === "success" || status === "failed" ? status : "started";
     const detail = message || "";
+    // 2026-08-12: llm_output 延迟 120ms 批量刷入，started 之后 success/failed 到达时
+    // 末尾块可能已被 output 块占据，started 条目落在更早的 thinking 块；
+    // 因此从末尾向前扫描全部 thinking 块寻找 started 条目并原地更新，
+    // 避免旧 started 行永久滞留"进行中"、同一工具显示两行。
+    if (toolStatus !== "started") {
+      let foundBlockIndex = -1;
+      let foundToolIndex = -1;
+      for (let index = blocks.length - 1; index >= 0; index -= 1) {
+        const block = blocks[index];
+        if (block.kind !== "thinking") {
+          continue;
+        }
+        const toolIndex = block.tools.findIndex(
+          (tool) => tool.name === name && tool.status === "started",
+        );
+        if (toolIndex >= 0) {
+          foundBlockIndex = index;
+          foundToolIndex = toolIndex;
+          break;
+        }
+      }
+      if (foundBlockIndex >= 0) {
+        // 命中历史 started 条目：原地更新该 thinking 块的 tools，块顺序保持不变
+        const nextBlocks = blocks.map((block, index) =>
+          index === foundBlockIndex
+            ? {
+                ...block,
+                tools: block.tools.map((tool, index2) =>
+                  index2 === foundToolIndex ? { name, status: toolStatus, detail } : tool,
+                ),
+              }
+            : block,
+        );
+        return {
+          ...group,
+          blocks: _trimBlocks(nextBlocks),
+          toolTotalChars: group.toolTotalChars + name.length,
+          thinkingTotalChars: group.thinkingTotalChars + detail.length,
+        };
+      }
+    }
+    // 未命中历史 started 条目（新工具或纯 started 信号）：维持原追加逻辑
     // 若无思考块则先建一个（工具调用属于思考过程）
     const baseBlocks =
       lastBlock?.kind === "thinking"

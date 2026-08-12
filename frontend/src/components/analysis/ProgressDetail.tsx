@@ -19,13 +19,13 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   diagnose: { label: "诊断报告", range: [95, 100] },
 };
 
-// 修改时间: 2026-08-02
-// 任务: agent 化改造
-// 原因: 阶段 1-4 已合并为标注 Agent 任务，消歧集成进 agent 循环；
-//       前端子阶段只展示 agent / sub_agent 两种粒度。
+// 修改时间: 2026-08-12
+// 任务: agent 化改造（sub_stage 合同对齐）
+// 原因: 后端实际下发的标注/诊断子阶段为 chapter_agent / diagnosis；
+//       phase1-4 与 agent/sub_agent 均已不再下发，展示配置对齐真实枚举值。
 const PHASE_CONFIG: Record<string, { label: string }> = {
-  agent: { label: "标注 Agent" },
-  sub_agent: { label: "子代理" },
+  chapter_agent: { label: "标注 Agent" },
+  diagnosis: { label: "诊断" },
 };
 
 const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];
