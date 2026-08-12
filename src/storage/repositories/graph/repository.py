@@ -361,7 +361,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         chapter_filter = ""
         parameters: dict[str, Any] = {"run_id": run_id, "offset": offset}
         if chapter_id is not None:
-            chapter_filter = "AND gv.chapter_id = :chapter_id"
+            chapter_filter = "AND graph_version.chapter_id = :chapter_id"
             parameters["chapter_id"] = chapter_id
         limit_clause = ""
         if page_limit is not None:
