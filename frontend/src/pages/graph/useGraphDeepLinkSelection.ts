@@ -129,7 +129,9 @@ export function useGraphDeepLinkSelection({
       if (matchedChange) {
         return null;
       }
-      return "未在当前图谱变化窗口定位到指定变化。";
+      // 2026-08-12: change_id 可能落在当前分页窗口之外（后页），
+      // 提示用户可继续加载更多；加载更多合并进新变化后，上方 effect 会自动补选中
+      return "未在当前图谱变化窗口定位到指定变化，可能在后页，点击加载更多可继续查找。";
     }
     if (initialSelectedChunk != null) {
       const chunkMatchedChanges = sortedChanges.filter((change) => change.effective_chunk_id === initialSelectedChunk);
