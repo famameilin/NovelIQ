@@ -1,10 +1,7 @@
 """
 主题建模工作流模块
 
-本文件包含主题建模的核心业务逻辑，从 src/cli/topic.py 提取而来，
-      供 CLI 和其他模块复用
-
-
+本文件包含主题建模的核心业务逻辑，供多个入口复用。
 """
 
 from __future__ import annotations

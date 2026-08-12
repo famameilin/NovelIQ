@@ -1,10 +1,7 @@
 """
 预处理辅助函数模块 (workflows层)
 
-此文件从 src/cli/preprocess_helpers.py 复制而来，包含预处理的核心业务逻辑函数
-      这些函数是纯业务逻辑，不依赖CLI层，可被多个入口点复用
-原始文件: src/cli/preprocess_helpers.py
-
+包含预处理的核心业务逻辑函数，纯业务逻辑、不依赖入口层，可被多个入口点复用。
 """
 
 from __future__ import annotations

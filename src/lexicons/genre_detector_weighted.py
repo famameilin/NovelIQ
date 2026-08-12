@@ -10,7 +10,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from src.lexicons.genre_detector_rules import get_recommended_lexicons
 from src.lexicons.genre_detector_sampling import sample_weighted_chunk_indices
 
 
@@ -86,15 +85,3 @@ def detect_genre_weighted(
     )
 
 
-def get_weighted_lexicon_config(
-    genre_weights: list[tuple[str, float]],
-) -> list[tuple[str, dict[str, list[str]], float]]:
-    """
-    根据加权类型列表获取词表配置
-
-    将 weighted config 组装独立出来，供主模块与其他调用方复用
-    """
-    result: list[tuple[str, dict[str, list[str]], float]] = []
-    for genre, weight in genre_weights:
-        result.append((genre, get_recommended_lexicons(genre), weight))
-    return result

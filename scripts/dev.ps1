@@ -73,7 +73,6 @@ Usage:
 Commands:
   setup                Create .venv if missing and sync dependencies (uv sync --all-groups)
   api [args...]        Run API via uv run python -m src.api.main [args...]
-  cli [args...]        Run CLI via uv run python -m src.cli.main [args...]
   test [args...]       Run tests via .venv\Scripts\python.exe -m pytest [args...]
   lint [args...]       Run ruff via uv run ruff check [args...]
   typecheck [args...]  Run mypy for src via uv run mypy [args...]
@@ -82,7 +81,6 @@ Commands:
 Examples:
   scripts/dev.ps1 setup
   scripts/dev.ps1 api --reload --port 8000
-  scripts/dev.ps1 cli preprocess --source data\novel.txt --db novel_analysis.db
   scripts/dev.ps1 test tests/test_e2e_integration.py -v
 "@
 }
@@ -95,14 +93,6 @@ switch ($Command.ToLowerInvariant()) {
     "api" {
         Ensure-Setup
         $commandArgs = @("python", "-m", "src.api.main") + $CommandArgs
-        Run-Uv -CommandArgs $commandArgs
-    }
-    "cli" {
-        Ensure-Setup
-        if ($CommandArgs.Count -eq 0) {
-            throw "Missing CLI arguments. Example: scripts/dev.ps1 cli preprocess --source <file> --db <db_path>"
-        }
-        $commandArgs = @("python", "-m", "src.cli.main") + $CommandArgs
         Run-Uv -CommandArgs $commandArgs
     }
     "test" {
