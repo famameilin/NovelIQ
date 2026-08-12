@@ -29,7 +29,6 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
             "EMBEDDING_MODEL_BASE_URL": "http://localhost:8080/v1",
             "EMBEDDING_MODEL_ID": "embedding-model",
             "EMBEDDING_MODEL_KEY": "sk-no-key-required",
-            "ANNOTATION_MODEL": "legacy-model",
         }
         with patch.dict(os.environ, env_vars, clear=False):
             new_settings = Settings.from_env()
