@@ -1081,8 +1081,8 @@ def _latest_relation_draft(
     relation: GraphRelation,
     relation_type: str,
     attributes: dict[str, Any],
-) -> _RelationDraft:
-    """2026-08-11 用于读取稳定关系最近版本状态构造变化草稿"""
+) -> tuple[_RelationDraft, GraphRelationVersion | None]:
+    """2026-08-11 用于读取稳定关系最近版本状态构造变化草稿，并返回最新版本行"""
     latest = session.execute(
         select(GraphRelationVersion)
         .where(
@@ -1093,21 +1093,27 @@ def _latest_relation_draft(
         .limit(1)
     ).scalar_one_or_none()
     if latest is None:
-        return _RelationDraft(
-            relation=relation,
-            previous_revision=0,
-            relation_type=relation_type,
-            attributes=dict(attributes),
-            is_active=False,
-            changes=[],
+        return (
+            _RelationDraft(
+                relation=relation,
+                previous_revision=0,
+                relation_type=relation_type,
+                attributes=dict(attributes),
+                is_active=False,
+                changes=[],
+            ),
+            None,
         )
-    return _RelationDraft(
-        relation=relation,
-        previous_revision=int(latest.relation_revision),
-        relation_type=str(latest.relation_type),
-        attributes=dict(latest.attributes),
-        is_active=bool(latest.is_active),
-        changes=[],
+    return (
+        _RelationDraft(
+            relation=relation,
+            previous_revision=int(latest.relation_revision),
+            relation_type=str(latest.relation_type),
+            attributes=dict(latest.attributes),
+            is_active=bool(latest.is_active),
+            changes=[],
+        ),
+        latest,
     )
 
 
@@ -1174,7 +1180,7 @@ def _persist_fact_resolution(
         relation = session.get(GraphRelation, relation_id)
         if relation is None:
             raise ValueError(f"关系创建失败: {relation_id}")
-        draft = _latest_relation_draft(
+        draft, current_version = _latest_relation_draft(
             session,
             run_id=annotation.run_id,
             relation=relation,
@@ -1182,7 +1188,7 @@ def _persist_fact_resolution(
             attributes={},
         )
     else:
-        draft = _latest_relation_draft(
+        draft, current_version = _latest_relation_draft(
             session,
             run_id=annotation.run_id,
             relation=existing,
@@ -1237,19 +1243,28 @@ def _persist_fact_resolution(
         change_kind=change_kind,
         relation_type=relation_type,
     )
-    session.add(
-        GraphRelationVersion(
-            graph_version_id=graph_version.graph_version_id,
-            run_id=annotation.run_id,
-            chapter_id=graph_version.chapter_id,
-            relation_id=relation_id,
-            relation_revision=draft.previous_revision + 1,
-            relation_type=draft.relation_type,
-            attributes=draft.attributes,
-            is_active=draft.is_active,
-            changes=draft.changes,
+    if current_version is not None and current_version.graph_version_id == graph_version.graph_version_id:
+        # 2026-08-12 同一章内 chunk relations 已断言该边（或更早的案例已解决）：
+        # 最新版本行已属于当前 graph_version，(graph_version_id, relation_id) 唯一约束
+        # 禁止再插一行，这里直接折叠本次变化进现有版本行（同一 session 对象原地更新）
+        current_version.relation_type = draft.relation_type
+        current_version.attributes = draft.attributes
+        current_version.is_active = draft.is_active
+        current_version.changes = [*current_version.changes, *draft.changes]
+    else:
+        session.add(
+            GraphRelationVersion(
+                graph_version_id=graph_version.graph_version_id,
+                run_id=annotation.run_id,
+                chapter_id=graph_version.chapter_id,
+                relation_id=relation_id,
+                relation_revision=draft.previous_revision + 1,
+                relation_type=draft.relation_type,
+                attributes=draft.attributes,
+                is_active=draft.is_active,
+                changes=draft.changes,
+            )
         )
-    )
     session.flush()
     return fact
 

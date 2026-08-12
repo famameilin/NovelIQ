@@ -17,6 +17,7 @@ from src.agents.annotation.schema import (
     BoundForeshadowing,
     BoundRelation,
     ChunkMetricsInput,
+    ResolvedCase,
 )
 from src.storage.models import (
     DialogueRecord,
@@ -670,3 +671,69 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
     assert len(versions) == 1
     assert versions[0].is_active is True
     assert versions[0].changes[0]["change_kind"] == "assert"
+
+
+def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -> None:
+    """2026-08-12 用于验证本章 chunk relations 首次断言后案例 fact 解决同一边时，
+    变化折叠进现有关系版本行，不再插入 (graph_version_id, relation_id) 重复行
+    触发唯一约束冲突"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌"],
+        title="同章断言加案例解决",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[
+            character_fact(chunk_id=0, name="林渡", action="迎敌"),
+            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+        ],
+        relations=[
+            relation_fact(
+                chunk_id=0,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="盟友",
+            )
+        ],
+        resolved_cases=[
+            ResolvedCase(
+                case_id="case-alias-same-person",
+                action="fact",
+                type="relation_change",
+                reason="同一人物归并",
+                target_key="target-alias",
+                target_ref={"kind": "relation_change", "chunk_id": 0},
+                from_entity="林渡",
+                to_entity="顾霜",
+                relation_type="盟友",
+                change_kind="assert",
+            )
+        ],
+    )
+    db_session.commit()
+
+    versions = list(
+        db_session.execute(
+            select(GraphRelationVersion)
+            .where(GraphRelationVersion.run_id == run_id)
+            .order_by(GraphRelationVersion.relation_revision)
+        ).scalars()
+    )
+    assert len(versions) == 1
+    assert versions[0].relation_revision == 1
+    assert versions[0].is_active is True
+    assert versions[0].attributes["support_count"] == 2
+    assert [change["change_kind"] for change in versions[0].changes] == [
+        "assert",
+        "assert",
+    ]
+    resolution_fact = db_session.execute(
+        select(GraphFact).where(
+            GraphFact.run_id == run_id,
+            GraphFact.source_kind == "case_resolution",
+        )
+    ).scalar_one()
+    assert versions[0].changes[1]["fact_id"] == resolution_fact.fact_id

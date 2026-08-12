@@ -134,3 +134,56 @@ def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(d
     assert len({row.relation_id for row in snapshot.relations}) == 2
     assert {row.relation_type for row in snapshot.relations} == {"盟友", "师徒"}
     assert all(row.relation_revision == 1 for row in snapshot.relations)
+
+
+def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> None:
+    """2026-08-12 用于验证带 chapter_id 的 fetch_changes 在 PostgreSQL 上按章节过滤，
+    不因 CTE 表别名错误（gv.chapter_id）报 missing FROM-clause entry"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
+        chapter_ids=[1, 2],
+        title="章节过滤变化",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        relations=[
+            relation_fact(
+                chunk_id=0,
+                from_name="林渡",
+                to_name="顾霜",
+                relation_type="盟友",
+            )
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        characters=[character_fact(chunk_id=1, name="林渡", action="离开")],
+        resolved_cases=[
+            ResolvedCase(
+                case_id="case-break",
+                action="fact",
+                type="relation_change",
+                reason="分道扬镳",
+                target_key="target-break",
+                target_ref={"kind": "relation_change", "chunk_id": 1},
+                from_entity="林渡",
+                to_entity="顾霜",
+                relation_type="盟友",
+                change_kind="break",
+            )
+        ],
+    )
+    db_session.commit()
+
+    repository = GraphRepository(db_session)
+    changes, total = repository.fetch_changes(run_id, chapter_id=2)
+
+    assert total == 2
+    assert len(changes) == 2
+    assert {row.change_kind for row in changes} == {"state", "relation"}
+    assert all(row.chapter_id == 2 for row in changes)
