@@ -72,7 +72,11 @@ class FactGraph:
             for key, attributes in self.history_entity_attributes.items()
         }
         self.entity_state = {key: dict(state) for key, state in self.history_entity_state.items()}
-        self.active_relations = set(self.history_relations)
+        # 2026-08-12 历史关系按稳定键归一化加载，避免双向边端点顺序不一致导致匹配失败
+        self.active_relations = {
+            _stable_relation_key(from_name, to_name, relation_type)
+            for (from_name, to_name, relation_type) in self.history_relations
+        }
         self.relation_attributes = {
             key: dict(attributes)
             for key, attributes in self.history_relation_attributes.items()
@@ -133,68 +137,28 @@ class FactGraph:
                 self.entity_state.pop(key, None)
         self.chapter_registered_entities.clear()
 
-    def apply_relation(self, item: RelationInput) -> None:
-        """2026-08-11 用于按闭合状态校验并更新实时关系集合（present 自动选择 assert/reinforce）"""
+    def apply_relation(self, item: RelationInput) -> bool:
+        """2026-08-12 用于登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
+
+        返回 True 表示新边（assert），False 表示已存在（skipped_existing）。
+        强化/削弱/解除一律走 resolve_fact_case，不通过本条边提交。
+        """
         from_name = str(item.from_entity)
         to_name = str(item.to_entity)
         relation_type = str(item.relation_type)
         key = self._relation_key(from_name, to_name, relation_type)
-        state = str(item.state)
-        if state == "present":
-            if key not in self.active_relations:
-                self.active_relations.add(key)
-                self.chapter_added_relations.add(key)
-                self._bump_support_count(key)
-                return
-            self._bump_support_count(key)
-            return
-        if key not in self.active_relations:
-            hints = self._similar_active_relations(from_name, to_name, relation_type)
-            hint_text = ""
-            if hints:
-                hint_text = "；图中现有相近关系: " + "、".join(hints[:3])
-            raise ValueError(
-                f"关系变化未匹配到已存在活动关系: {from_name} "
-                f"{relation_type} {to_name}（{state} 要求边已存在，"
-                f"请改为 present，或核对端点是否使用了图上的登记名称{hint_text}）"
-            )
-        if state == "ended":
-            self.active_relations.discard(key)
-            self.relation_attributes.pop(key, None)
-            return
-        if state == "weakened":
-            self._bump_strength(key)
-            return
+        if key in self.active_relations:
+            return False
+        self.active_relations.add(key)
+        self.chapter_added_relations.add(key)
+        self._bump_support_count(key)
+        return True
 
     def _bump_support_count(self, key: tuple[str, str, str]) -> None:
         """2026-08-11 用于按落库语义累加活动关系支持度"""
         attributes = dict(self.relation_attributes.get(key) or {})
         attributes["support_count"] = int(attributes.get("support_count", 0)) + 1
         self.relation_attributes[key] = attributes
-
-    def _bump_strength(self, key: tuple[str, str, str]) -> None:
-        """2026-08-11 用于按落库语义削弱活动关系强度"""
-        attributes = dict(self.relation_attributes.get(key) or {})
-        attributes["strength"] = int(attributes.get("strength", 0)) - 1
-        self.relation_attributes[key] = attributes
-
-    def _similar_active_relations(
-        self,
-        from_name: str,
-        to_name: str,
-        relation_type: str,
-    ) -> list[str]:
-        """2026-08-09 用于在 reinforce 失败时列出与目标端点相关的现存关系提示改名"""
-        from_key = _norm(from_name)
-        to_key = _norm(to_name)
-        matches: list[str] = []
-        for (a, b, rel_type) in sorted(self.active_relations):
-            shares_endpoint = (
-                a == from_key or a == to_key or b == from_key or b == to_key
-            )
-            if shares_endpoint:
-                matches.append(f"{a} {rel_type} {b}")
-        return matches
 
     def reset_chapter_relations(self) -> None:
         """2026-08-09 用于在完整替换语义下撤销当章 assert 的关系"""

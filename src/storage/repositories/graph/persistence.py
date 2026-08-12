@@ -524,14 +524,8 @@ def _persist_annotation_facts(
                 relation_semantics=semantics,
                 relation_type=relation_type,
             )
-            relation_state = str(relation_item.state)
             relation_id = active_relations.get(key)
             if relation_id is None:
-                if relation_state != "present":
-                    raise ValueError(
-                        "关系变化未匹配到已有活动关系: "
-                        f"{relation_item.from_entity} {relation_type} {relation_item.to_entity}"
-                    )
                 relation_id = _relation_id(
                     annotation.run_id,
                     int(from_entity.entity_id),
@@ -542,18 +536,15 @@ def _persist_annotation_facts(
                 active_relations[key] = relation_id
                 change_kind = "assert"
             else:
-                change_kind = {
-                    "present": "reinforce",
-                    "weakened": "weaken",
-                    "ended": "break",
-                }[relation_state]
+                # 已存在的同一条边：接受为 no-op，只更新 last_seen 与证据事实，
+                # 不产生关系版本；真正强化/削弱/解除走 resolve_fact_case
+                change_kind = "noop"
             content = {
                 "kind": "relation",
                 "chunk_id": chunk_id,
                 "from_entity": _entity_descriptor(from_entity),
                 "to_entity": _entity_descriptor(to_entity),
                 "relation_type": relation_type,
-                "state": relation_state,
                 "change_kind": change_kind,
                 "relation_id": relation_id,
                 "directionality": directionality,
@@ -900,6 +891,10 @@ def _persist_relation_versions(
             continue
         if fact.subject_entity_id is None or not isinstance(fact.object, dict):
             raise ValueError(f"relation 事实缺少已解析端点: {fact.fact_id}")
+        change_kind = str(content["change_kind"])
+        if change_kind == "noop":
+            # 已存在同一条边的重复提交：接受为 no-op，不产生关系版本
+            continue
         relation_id = str(content["relation_id"])
         draft = drafts.get(relation_id)
         if draft is None:
@@ -934,7 +929,7 @@ def _persist_relation_versions(
         _apply_relation_change(
             draft=draft,
             fact=fact,
-            change_kind=str(content["change_kind"]),
+            change_kind=change_kind,
             relation_type=str(content["relation_type"]),
         )
 
@@ -1298,10 +1293,14 @@ def _persist_resolved_cases(
     entities_by_name: dict[str, GraphEntity],
 ) -> dict[str, Any]:
     """2026-08-11 用于按案例动作分派解决（dialogue 改对话表 / fact 改图 / foreshadowing 写线程 / close 无目标）"""
+    payload = BoundChapterAnnotation.model_validate(annotation.payload)
+    allowed_chunk_ids = authorized_text_chunk_ids | {
+        chunk.chunk_id for chunk in payload.chunks
+    }
     targets_by_case_id: dict[str, Any] = {}
     for resolved_case in resolved_cases:
         target_chunk_id = _target_chunk_id(resolved_case)
-        if target_chunk_id not in authorized_text_chunk_ids:
+        if target_chunk_id not in allowed_chunk_ids:
             raise ValueError(
                 "resolve_case 使用了未经系统读取授权的原文: "
                 f"{target_chunk_id}"

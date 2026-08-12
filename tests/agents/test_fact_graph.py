@@ -12,14 +12,12 @@ def _relation(
     from_entity: str,
     to_entity: str,
     relation_type: str,
-    state: str,
 ) -> RelationInput:
-    """2026-08-11 用于构造闭合状态关系输入"""
+    """2026-08-12 用于构造三字段关系边输入（本章确认存在的边）"""
     return RelationInput(
         from_entity=from_entity,
         to_entity=to_entity,
         relation_type=relation_type,
-        state=state,
     )
 
 
@@ -36,38 +34,30 @@ def test_fact_graph_registers_entities_and_applies_assert() -> None:
     graph = FactGraph()
     graph.register_entities([_Entity("贺伯安", "character"), _Entity("猴子", "character")])
     assert graph.entity_type("贺伯安") == "character"
-    graph.apply_relation(_relation("贺伯安", "猴子", "友情", "present"))
+    assert graph.apply_relation(_relation("贺伯安", "猴子", "友情")) is True
     assert graph.relation_exists("贺伯安", "猴子", "友情")
     assert graph.relation_exists("猴子", "贺伯安", "友情")
 
 
-def test_fact_graph_rejects_weakened_of_missing_edge() -> None:
-    """2026-08-11 用于验证对不存在的边 weaken/end 变化当场报错"""
+def test_fact_graph_existing_edge_is_noop_not_reinforce() -> None:
+    """2026-08-12 用于验证已存在边的再次提交是 skipped_existing，不累计支持度"""
     graph = FactGraph()
     graph.register_entities([_Entity("算盘", "character"), _Entity("猴子", "character")])
-    with pytest.raises(ValueError, match="关系变化未匹配到已存在活动关系"):
-        graph.apply_relation(_relation("算盘", "猴子", "友情", "weakened"))
-
-
-def test_fact_graph_present_reinforces_after_first_assert() -> None:
-    """2026-08-11 用于验证已存在边的 present 自动选择 reinforce 并正常通过"""
-    graph = FactGraph()
-    graph.register_entities([_Entity("算盘", "character"), _Entity("猴子", "character")])
-    graph.apply_relation(_relation("算盘", "猴子", "友情", "present"))
-    graph.apply_relation(_relation("算盘", "猴子", "友情", "present"))
+    assert graph.apply_relation(_relation("算盘", "猴子", "友情")) is True
+    assert graph.apply_relation(_relation("算盘", "猴子", "友情")) is False
     assert graph.relation_exists("算盘", "猴子", "友情")
+    assert list(graph.relation_attributes.values())[0]["support_count"] == 1
 
 
-def test_fact_graph_loads_history_and_retracts() -> None:
-    """2026-08-09 用于验证历史关系加载与 break 移除"""
+def test_fact_graph_loads_history_relations() -> None:
+    """2026-08-09 用于验证历史关系加载；已存在边再次提交为 no-op"""
     graph = FactGraph(
         history_entity_types={"贺伯安": "character", "赵兰英": "character"},
         history_entity_names={"贺伯安": "贺伯安", "赵兰英": "赵兰英"},
         history_relations={("贺伯安", "赵兰英", "家族")},
     )
     assert graph.relation_exists("赵兰英", "贺伯安", "家族")
-    graph.apply_relation(_relation("贺伯安", "赵兰英", "家族", "ended"))
-    assert not graph.relation_exists("贺伯安", "赵兰英", "家族")
+    assert graph.apply_relation(_relation("贺伯安", "赵兰英", "家族")) is False
 
 
 def test_fact_graph_entity_replacement_removes_chapter_entities() -> None:
@@ -88,7 +78,7 @@ def test_fact_graph_snapshot_restore_rolls_back_chapter_changes() -> None:
     )
     baseline = graph.snapshot()
     graph.register_entities([_Entity("算盘", "character")])
-    graph.apply_relation(_relation("算盘", "贺伯安", "友情", "present"))
+    graph.apply_relation(_relation("算盘", "贺伯安", "友情"))
     graph.restore(baseline)
     assert graph.entity_type("算盘") is None
     assert not graph.relation_exists("算盘", "贺伯安", "友情")
@@ -108,13 +98,13 @@ def test_begin_chapter_keeps_previous_chapter_edges_and_clears_tracking() -> Non
     graph.register_entities(
         [_Entity("算盘", "character"), _Entity("猴子", "character")]
     )
-    graph.apply_relation(_relation("算盘", "猴子", "友情", "present"))
+    graph.apply_relation(_relation("算盘", "猴子", "友情"))
     assert graph.relation_exists("算盘", "猴子", "友情")
 
     graph.begin_chapter()
 
     assert graph.relation_exists("算盘", "猴子", "友情")
-    graph.apply_relation(_relation("算盘", "猴子", "友情", "present"))
+    graph.apply_relation(_relation("算盘", "猴子", "友情"))
     assert graph.relation_exists("算盘", "猴子", "友情")
 
 
@@ -124,12 +114,12 @@ def test_reset_chapter_relations_after_begin_chapter_keeps_previous_chapter_edge
     graph.register_entities(
         [_Entity("算盘", "character"), _Entity("猴子", "character")]
     )
-    graph.apply_relation(_relation("算盘", "猴子", "友情", "present"))
+    graph.apply_relation(_relation("算盘", "猴子", "友情"))
     graph.begin_chapter()
     graph.register_entities([_Entity("顾霜", "character")])
 
     graph.reset_chapter_relations()
-    graph.apply_relation(_relation("顾霜", "猴子", "盟友", "present"))
+    graph.apply_relation(_relation("顾霜", "猴子", "盟友"))
 
     assert graph.relation_exists("算盘", "猴子", "友情")
     assert graph.relation_exists("顾霜", "猴子", "盟友")
@@ -183,17 +173,14 @@ def test_fact_graph_loads_history_properties_and_relation_attributes() -> None:
 
 
 def test_fact_graph_apply_relation_maintains_relation_attributes() -> None:
-    """2026-08-11 用于验证 present 累加支持度，ended 移除关系属性"""
+    """2026-08-12 用于验证新边 assert 累计支持度，已存在边 no-op 不重复累计"""
     graph = FactGraph()
-    graph.apply_relation(_relation("顾霜", "顾老", "同一人物", "present"))
+    graph.apply_relation(_relation("顾霜", "顾老", "同一人物"))
     key = ("顾老", "顾霜", "同一人物")
     assert graph.relation_attributes[key]["support_count"] == 1
 
-    graph.apply_relation(_relation("顾霜", "顾老", "同一人物", "present"))
-    assert graph.relation_attributes[key]["support_count"] == 2
-
-    graph.apply_relation(_relation("顾霜", "顾老", "同一人物", "ended"))
-    assert key not in graph.relation_attributes
+    graph.apply_relation(_relation("顾霜", "顾老", "同一人物"))
+    assert graph.relation_attributes[key]["support_count"] == 1
 
 
 def test_fact_graph_register_entities_updates_tags_and_description() -> None:
@@ -241,7 +228,7 @@ def _alias_graph(*, flagged: bool = True) -> FactGraph:
             else {}
         ),
     )
-    graph.apply_relation(_relation("石轩", "小石头", "同一人物", "present"))
+    graph.apply_relation(_relation("石轩", "小石头", "同一人物"))
     return graph
 
 
@@ -258,8 +245,8 @@ def test_resolve_name_fallback_when_no_flag() -> None:
     assert graph.resolve_name("小石头") == "石轩"
 
 
-def test_resolve_name_after_edge_removed() -> None:
-    """2026-08-11 用于验证同一人物边 break 后别名不再解析"""
+def test_resolve_name_after_duplicate_relation_submission() -> None:
+    """2026-08-12 用于验证已存在同一人物边再次提交为 no-op，别名解析不受影响"""
     graph = _alias_graph()
-    graph.apply_relation(_relation("石轩", "小石头", "同一人物", "ended"))
-    assert graph.resolve_name("小石头") == "小石头"
+    assert graph.apply_relation(_relation("石轩", "小石头", "同一人物")) is False
+    assert graph.resolve_name("小石头") == "石轩"

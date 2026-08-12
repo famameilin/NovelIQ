@@ -99,7 +99,7 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                     BoundEvent(
                         description="顾霜进入山门",
                         participants=[
-                            {"entity": "顾霜", "role": "行动者"},
+                            {"entity": "顾霜", "role": "主体"},
                             {"entity": "山门", "role": "地点"},
                         ],
                     )
@@ -109,7 +109,6 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                         from_entity="顾霜",
                         to_entity="山门",
                         relation_type="位于",
-                        state="present",
                         directionality="directed",
                         relation_semantics="ordinary",
                     )
@@ -577,8 +576,8 @@ def test_persist_completion_graph_only_flushes_caller_transaction(db_session) ->
     ).scalars().all() == []
 
 
-def test_relation_break_resolves_same_stable_relation_in_later_chapter(db_session) -> None:
-    """2026-08-11 用于验证后文 ended 状态按端点类型解析同一稳定关系"""
+def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session) -> None:
+    """2026-08-12 用于验证后文再次提交同一关系边为 no-op，不产生新版本"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
@@ -612,7 +611,6 @@ def test_relation_break_resolves_same_stable_relation_in_later_chapter(db_sessio
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
-                state="ended",
             )
         ],
     )
@@ -625,8 +623,6 @@ def test_relation_break_resolves_same_stable_relation_in_later_chapter(db_sessio
             .order_by(GraphRelationVersion.relation_revision)
         ).scalars()
     )
-    assert len(versions) == 2
-    assert [version.relation_revision for version in versions] == [1, 2]
+    assert len(versions) == 1
     assert versions[0].is_active is True
-    assert versions[1].is_active is False
-    assert versions[1].changes[0]["change_kind"] == "break"
+    assert versions[0].changes[0]["change_kind"] == "assert"

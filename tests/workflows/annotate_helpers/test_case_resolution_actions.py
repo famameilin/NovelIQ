@@ -100,6 +100,7 @@ def _alias_case(
     annotation_id: str,
     name_a: str,
     name_b: str,
+    chunk_id: int = 0,
 ) -> CasePoolCase:
     """2026-08-11 用于直接登记疑似同一人物案例"""
     return CasePoolRepository(db_session).create_case(
@@ -107,7 +108,7 @@ def _alias_case(
         annotation_id=annotation_id,
         pending_case=PendingCase(
             type="entity_alias",
-            chunk_id=0,
+            chunk_id=chunk_id,
             keys=[name_a, name_b, "同一人物"],
             description=f"疑似同一人物：{name_a} 与 {name_b}",
             target_key=f"alias-{name_a}-{name_b}",
@@ -115,7 +116,7 @@ def _alias_case(
                 "kind": "entity_alias",
                 "name_a": name_a,
                 "name_b": name_b,
-                "chunk_id": 0,
+                "chunk_id": chunk_id,
             },
         ),
     )
@@ -261,6 +262,119 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
     assert mapping.target_setup_id is None
     assert mapping.resolution["action"] == "close"
     assert second.resolved_cases[0].action == "close"
+
+
+def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_session) -> None:
+    """2026-08-11 用于验证本章 chunk 案例解决无需显式读取授权（原文在本章上下文）"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜与顾老同时出现", "顾霜自称顾老"],
+        chapter_ids=[1, 2],
+        title="本章案例免授权",
+    )
+    first = complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+        ),
+        novel_id=novel_id,
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    db_session.rollback()
+    case = _alias_case(
+        db_session,
+        run_id=run_id,
+        annotation_id=first.annotation_id,
+        name_a="顾霜",
+        name_b="顾老",
+        chunk_id=1,
+    )
+    db_session.commit()
+    resolved = ResolvedCase(
+        case_id=case.id,
+        action="fact",
+        type=case.case_type,
+        from_entity="顾霜",
+        to_entity="顾老",
+        relation_type="同一人物",
+        change_kind="assert",
+        reason="姓名指向同一人",
+        target_key=case.target_key,
+        target_ref=dict(case.target_ref),
+    )
+    complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=2,
+            annotation=_annotation(chunk_id=1, text="顾霜自称顾老", entity_names=["顾霜"]),
+            resolved_cases=[resolved],
+            authorized_chunk_ids=[0],
+        ),
+        novel_id=novel_id,
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    db_session.rollback()
+    fact = db_session.execute(
+        select(GraphFact).where(
+            GraphFact.run_id == run_id,
+            GraphFact.source_kind == "case_resolution",
+        )
+    ).scalar_one()
+    assert fact.content["kind"] == "relation"
+
+
+def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
+    """2026-08-11 用于验证既非本章也未经读取授权的旧 chunk 案例解决仍被拒绝"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜与顾老同时出现", "顾霜自称顾老"],
+        chapter_ids=[1, 2],
+        title="旧章案例需授权",
+    )
+    first = complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+        ),
+        novel_id=novel_id,
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    db_session.rollback()
+    case = _alias_case(
+        db_session,
+        run_id=run_id,
+        annotation_id=first.annotation_id,
+        name_a="顾霜",
+        name_b="顾老",
+    )
+    db_session.commit()
+    resolved = ResolvedCase(
+        case_id=case.id,
+        action="fact",
+        type=case.case_type,
+        from_entity="顾霜",
+        to_entity="顾老",
+        relation_type="同一人物",
+        change_kind="assert",
+        reason="姓名指向同一人",
+        target_key=case.target_key,
+        target_ref=dict(case.target_ref),
+    )
+    with pytest.raises(ValueError, match="未经系统读取授权"):
+        complete_annotation_run(
+            result=_result(
+                run_id=run_id,
+                chapter_id=2,
+                annotation=_annotation(chunk_id=1, text="顾霜自称顾老", entity_names=["顾霜"]),
+                resolved_cases=[resolved],
+                authorized_chunk_ids=[1],
+            ),
+            novel_id=novel_id,
+            session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+        )
+    db_session.rollback()
 
 
 def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:

@@ -8,13 +8,27 @@ import unicodedata
 from enum import StrEnum
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 
 class StrictModel(BaseModel):
     """2026-08-07 用于统一拒绝标注合同中的额外字段"""
 
     model_config = ConfigDict(extra="forbid", use_enum_values=True)
+
+
+# 2026-08-12 事件参与者专属角色词：模型常误写进人物观察的 role_function
+_EVENT_ONLY_ROLE_WORDS = frozenset({"见证者", "地点", "行动者", "承受者", "协助者", "对抗者"})
+
+# 2026-08-12 对话 tone 中文枚举：模型常误写进 emotional_valence（该字段是英文枚举）
+_TONE_CHINESE_WORDS = frozenset({"平静", "愤怒", "悲伤", "喜悦", "恐惧", "紧张", "嘲讽", "恳求"})
 
 
 class EmotionalValence(StrEnum):
@@ -75,22 +89,14 @@ class Tone(StrEnum):
     PLEADING = "恳求"
 
 
-class RelationState(StrEnum):
-    """2026-08-11 用于约束关系写入时的存在状态（present 由系统自动选择 assert 或 reinforce）"""
-
-    PRESENT = "present"
-    WEAKENED = "weakened"
-    ENDED = "ended"
-
-
 class EventParticipantRole(StrEnum):
-    """2026-08-11 用于约束事件参与者的闭合角色（地点作为参与者角色，不单独设字段）"""
+    """2026-08-12 用于约束事件参与者的闭合角色（与人物观察共用格雷马斯词表；地点作为参与者角色，不单独设字段）"""
 
-    ACTOR = "行动者"
-    SUFFERER = "承受者"
+    SUBJECT = "主体"
+    OBJECT = "客体"
     RECEIVER = "接收者"
-    HELPER = "协助者"
-    OPPONENT = "对抗者"
+    HELPER = "帮助者"
+    OPPONENT = "反对者"
     WITNESS = "见证者"
     LOCATION = "地点"
 
@@ -374,7 +380,31 @@ class CharacterObservationInput(StrictModel):
     character: str = Field(min_length=1, description="人物名称（已登记实体用登记名）")
     role_function: RoleFunction = Field(description="人物在本动作中的功能角色：主体/客体/发送者/接收者/帮助者/反对者")
     action: str = Field(min_length=1, description="动作描述，一句话概括人物做了什么")
-    emotion: EmotionalValence = Field(description="动作伴随的情绪方向与强度")
+    emotion: EmotionalValence = Field(description="动作伴随的情绪方向与强度（英文枚举）")
+
+    @field_validator("role_function", mode="before")
+    @classmethod
+    def _reject_event_role_words(cls, value: object) -> object:
+        """2026-08-12 用于给事件角色词写进 role_function 的错误附加纠正引导"""
+        if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
+            raise ValueError(
+                "role_function 不接受 "
+                f"{value.strip()}：见证者、地点等只用于事件参与者的 role 字段；"
+                "人物观察 role_function 使用 主体/客体/发送者/接收者/帮助者/反对者"
+            )
+        return value
+
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def _reject_tone_words_in_emotion(cls, value: object) -> object:
+        """2026-08-12 用于给 tone 中文词写进 emotional_valence 的错误附加纠正引导"""
+        if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
+            raise ValueError(
+                f"emotional_valence 不接受 {value.strip()}：该字段使用英文枚举"
+                "（strong_positive/mild_positive/neutral/mild_negative/strong_negative），"
+                "中文枚举（平静/愤怒/喜悦等）是对话 tone 字段的取值"
+            )
+        return value
 
     @model_validator(mode="after")
     def normalize_character_observation(self) -> CharacterObservationInput:
@@ -415,21 +445,9 @@ class DialogueInput(StrictModel):
         return self
 
 
-class DialogueSubmissionItem(BaseModel):
-    """2026-08-09 用于宽容接收模型提交的对话判断（多余字段直接忽略）"""
-
-    model_config = ConfigDict(extra="ignore", use_enum_values=True)
-
-    candidate_index: int = Field(gt=0, description="候选序号，从 1 开始，与系统候选列表的 index 一致")
-    verdict: DialogueVerdict = Field(
-        description="判断结果：dialogue=真实对话；inner_monologue=内心独白；"
-        "not_dialogue=误判候选（如题字/描写被引号包裹）"
-    )
-    speaker: str | None = Field(
-        default=None,
-        description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
-    )
-    tone: Tone | None = Field(default=None, description="对话语气闭合枚举：平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求")
+# 2026-08-12 数组格式对话提交：位置 [candidate_index, verdict, speaker, tone]，
+# speaker/tone 未知时 null；比对象格式省去字段名 token，且未提交候选默认 not_dialogue
+DialogueSubmissionItem = tuple[int, DialogueVerdict, str | None, Tone | None]
 
 
 class EventParticipantInput(StrictModel):
@@ -437,7 +455,7 @@ class EventParticipantInput(StrictModel):
 
     entity: str = Field(min_length=1)
     role: EventParticipantRole = Field(
-        description="参与角色：行动者/承受者/接收者/协助者/对抗者/见证者/地点（地点作为参与者角色）"
+        description="参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点作为参与者角色）"
     )
 
     @model_validator(mode="after")
@@ -464,14 +482,13 @@ class EventInput(StrictModel):
 
 
 class RelationInput(StrictModel):
-    """2026-08-11 用于通过实体名称提交闭合类型关系状态"""
+    """2026-08-12 用于通过实体名称提交本章确认存在的闭合类型关系边"""
 
     from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
     to_entity: str = Field(min_length=1, description="关系终点实体（图上的登记名称）")
     relation_type: RelationType = Field(
         description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text()
     )
-    state: RelationState = RelationState.PRESENT
 
     @model_validator(mode="after")
     def normalize_relation(self) -> RelationInput:

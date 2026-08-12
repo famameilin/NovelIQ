@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from src.agents.annotation.schema import ResolvedCase
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.storage.models import GraphRelation
 from tests.support.chapter_annotation_helpers import (
@@ -24,6 +25,7 @@ def _persist_authority_chapter(
     chapter_id: int,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
+    resolved_cases: list[Any] | None = None,
 ) -> None:
     """2026-08-07 用于为 authority 视图写入章节版本图数据"""
     persist_chapter_annotation(
@@ -32,6 +34,7 @@ def _persist_authority_chapter(
         chapter_id=chapter_id,
         characters=characters,
         relations=relations,
+        resolved_cases=resolved_cases,
     )
 
 
@@ -115,13 +118,18 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         db_session,
         run_id=run_id,
         chapter_id=2,
-        relations=[
-            relation_fact(
-                chunk_id=1,
-                from_name="林渡",
-                to_name="顾霜",
+        resolved_cases=[
+            ResolvedCase(
+                case_id="case-break",
+                action="fact",
+                type="relation_change",
+                reason="分道扬镳",
+                target_key="target-break",
+                target_ref={"kind": "relation_change", "chunk_id": 1},
+                from_entity="林渡",
+                to_entity="顾霜",
                 relation_type="盟友",
-                state="ended",
+                change_kind="break",
             )
         ],
     )

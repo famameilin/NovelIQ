@@ -265,6 +265,7 @@ def test_fresh_schema_uses_chapter_graph_versions_without_legacy_event_table() -
 
 def test_graph_read_views_project_latest_state_active_relations_and_participants(db_session) -> None:
     """2026-08-07 用于验证当前图三个 SQL View 选择最新章节版本并过滤失效关系"""
+    from src.agents.annotation.schema import ResolvedCase
     from tests.support.chapter_annotation_helpers import (
         character_fact,
         create_run_with_chunks,
@@ -301,13 +302,18 @@ def test_graph_read_views_project_latest_state_active_relations_and_participants
         run_id=run_id,
         chapter_id=2,
         characters=[character_fact(chunk_id=1, name="林渡", action="受伤")],
-        relations=[
-            relation_fact(
-                chunk_id=1,
-                from_name="林渡",
-                to_name="顾霜",
+        resolved_cases=[
+            ResolvedCase(
+                case_id="case-break",
+                action="fact",
+                type="relation_change",
+                reason="关系断裂",
+                target_key="target-break",
+                target_ref={"kind": "relation_change", "chunk_id": 1},
+                from_entity="林渡",
+                to_entity="顾霜",
                 relation_type="盟友",
-                state="ended",
+                change_kind="break",
             )
         ],
     )

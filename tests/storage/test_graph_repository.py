@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from src.agents.annotation.schema import ResolvedCase
 from src.storage.models import GraphRelation
 from src.storage.repositories import GraphRepository
 from tests.support.chapter_annotation_helpers import (
@@ -50,13 +51,18 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         db_session,
         run_id=run_id,
         chapter_id=2,
-        relations=[
-            relation_fact(
-                chunk_id=1,
-                from_name="林渡",
-                to_name="顾霜",
+        resolved_cases=[
+            ResolvedCase(
+                case_id="case-break",
+                action="fact",
+                type="relation_change",
+                reason="分道扬镳",
+                target_key="target-break",
+                target_ref={"kind": "relation_change", "chunk_id": 1},
+                from_entity="林渡",
+                to_entity="顾霜",
                 relation_type="盟友",
-                state="ended",
+                change_kind="break",
             )
         ],
     )

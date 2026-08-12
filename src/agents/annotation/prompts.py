@@ -57,21 +57,28 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 ## 对话候选
 
 - 系统为当前 chunk 提供按原文顺序排列的对话候选，每条候选带 index（从 1 开始）
-- write_dialogues.items 必须完整覆盖全部候选：candidate_index 对应候选列表的 index，
-  每个候选恰好提交一次，缺失或重复都会被拒绝
+- write_dialogues.items 使用数组格式：[candidate_index, verdict, speaker, tone]，
+  speaker/tone 无法确认时填 null
+- 只提交判定为 dialogue 与 inner_monologue 的候选；未提交的候选系统默认按
+  not_dialogue 处理，回执会列出被默认处理的候选序号，如有遗漏可再次调用补充
 - verdict 三选一：dialogue=真实对话；inner_monologue=内心独白；not_dialogue=误判候选
-  （如题字、内心描写被引号包裹）
+  （如题字、内心描写被引号包裹）——not_dialogue 候选无需提交
 - 真实对话和内心独白可填 speaker（说话人，无法确认时 null）和 tone
   （闭合枚举：平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求）
-- not_dialogue 候选的 speaker 和 tone 必须为 null
 - 不重复提交候选原文和位置
 
 ## 分类字段
 
-- narrative_function、emotional_valence、role_function 使用工具 Schema 的闭合枚举
-- relation_type、relation state（present/weakened/ended）使用闭合枚举
-- 事件只填写 description 和 participants（角色闭合枚举：行动者/承受者/接收者/协助者/
-  对抗者/见证者/地点；地点作为参与者角色，无单独 location 字段）
+- narrative_function、emotional_valence、role_function 使用工具 Schema 的闭合枚举；
+  emotional_valence 是英文枚举（strong_positive/mild_positive/neutral/mild_negative/
+  strong_negative），不要使用 tone 的中文枚举词（平静/愤怒/喜悦等）；
+  role_function 不接受 见证者/地点（这些词只用于事件参与者的 role 字段）
+- relation_type 使用闭合枚举；write_relations 只提交本章确认存在的边（三字段
+  from_entity/to_entity/relation_type），新边建图 assert，已存在的同一条边自动接受为
+  skipped_existing；关系强化/削弱/解除一律走 resolve_fact_case，不用 state 字段表达变化
+- 事件只填写 description 和 participants（角色闭合枚举：主体/客体/接收者/帮助者/
+  反对者/见证者/地点；见证者、地点只用于事件参与者，不用于人物观察的 role_function；
+  地点作为参与者角色，无单独 location 字段）
 - 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
 
 {relation_catalog}
