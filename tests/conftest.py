@@ -156,6 +156,7 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
 
     with _test_engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         conn.execute(text(f"DROP SCHEMA IF EXISTS {safe_schema} CASCADE"))
         conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
