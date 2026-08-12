@@ -94,38 +94,35 @@ describe("StreamOutput 区块流展示", () => {
   });
 
   /**
-   * phase1/2/3/4 都属于标注阶段的稳定子阶段边界；
-   * 即便当前 phase 还没收到任何事件，主面板也必须先立住 pending 骨架，避免阶段切换闪断
+   * chapter_agent 是标注阶段唯一的子阶段边界（后端不再下发 phase1-4）；
+   * 即便当前 chapter_agent 还没收到任何事件，主面板也必须先立住 pending 骨架，避免阶段切换闪断
    */
-  it.each(["phase1", "phase2", "phase3", "phase4"])(
-    "%s 尚未收到流事件时也应保持 pending 骨架",
-    (phase) => {
-      act(() => {
-        useStreamStore.getState().setTaskId(`task-pending-${phase}`);
-        useStreamStore.getState().updateProgress(
-          createLLMEvent({
-            action: "start",
-            sub_stage: phase,
-            chunk_id: 1,
-            current: 1,
-            total: 10,
-            percent: 17,
-            sub_percent: phase === "phase1" ? 0 : phase === "phase2" ? 25 : phase === "phase3" ? 50 : 75,
-            content: "",
-            message: `开始 ${phase}`,
-          }),
-        );
-      });
+  it("chapter_agent 尚未收到流事件时也应保持 pending 骨架", () => {
+    act(() => {
+      useStreamStore.getState().setTaskId("task-pending-chapter-agent");
+      useStreamStore.getState().updateProgress(
+        createLLMEvent({
+          action: "start",
+          sub_stage: "chapter_agent",
+          chunk_id: 1,
+          current: 1,
+          total: 10,
+          percent: 17,
+          sub_percent: 0,
+          content: "",
+          message: "开始 chapter_agent",
+        }),
+      );
+    });
 
-      render(<StreamOutput taskId={`task-pending-${phase}`} />);
+    render(<StreamOutput taskId="task-pending-chapter-agent" />);
 
-      expect(screen.getByText(`开始 ${phase}`)).toBeInTheDocument();
-      expect(screen.getByText(/模型输出尚未到达/)).toBeInTheDocument();
-      expect(screen.queryByText("LLM 输出将在模型推理阶段显示...")).not.toBeInTheDocument();
-      expect(screen.queryByText("模型思考中")).not.toBeInTheDocument();
-      expect(screen.queryByText("模型输出")).not.toBeInTheDocument();
-    },
-  );
+    expect(screen.getByText("开始 chapter_agent")).toBeInTheDocument();
+    expect(screen.getByText(/模型输出尚未到达/)).toBeInTheDocument();
+    expect(screen.queryByText("LLM 输出将在模型推理阶段显示...")).not.toBeInTheDocument();
+    expect(screen.queryByText("模型思考中")).not.toBeInTheDocument();
+    expect(screen.queryByText("模型输出")).not.toBeInTheDocument();
+  });
 
   it("单流输出时展示模型输出区块且不显示多流入口", () => {
     seedTaskContext("task-1");
@@ -201,22 +198,23 @@ describe("StreamOutput 区块流展示", () => {
     expect(screen.getByText("成功")).toBeInTheDocument();
   });
 
-  it("当前 phase 尚无新流时应回退展示同 chunk 最近输出", () => {
+  it("标注 Agent 进入新 chunk 尚无新流时应回退展示同 chunk 最近输出", () => {
     act(() => {
       useStreamStore.getState().setTaskId("task-phase-fallback");
       useStreamStore.getState().updateProgress(
         createLLMEvent({
           action: "start",
-          sub_stage: "phase4",
+          sub_stage: "chapter_agent",
           chunk_id: 244,
           current: 244,
           total: 255,
           percent: 77,
           sub_percent: 75,
           content: "",
-          message: "开始 phase4",
+          message: "开始 chapter_agent",
         }),
       );
+      // 旧合同（phase2）留下的同 chunk 输出：仅用于在 chapter_agent 契约下验证回退链仍可用
       useStreamStore.getState().appendLLMOutput(
         createLLMEvent({
           action: "output",
@@ -237,20 +235,20 @@ describe("StreamOutput 区块流展示", () => {
     expect(screen.queryByText(/模型输出尚未到达/)).not.toBeInTheDocument();
   });
 
-  it("同 chunk 的工具调用落在其他 phase 时也应在思考区块回退展示", () => {
+  it("同 chunk 的工具调用落在旧合同 sub_stage 时也应在思考区块回退展示", () => {
     act(() => {
       useStreamStore.getState().setTaskId("task-thinking-fallback");
       useStreamStore.getState().updateProgress(
         createLLMEvent({
           action: "start",
-          sub_stage: "phase4",
+          sub_stage: "chapter_agent",
           chunk_id: 244,
           current: 244,
           total: 255,
           percent: 77,
           sub_percent: 75,
           content: "",
-          message: "开始 phase4",
+          message: "开始 chapter_agent",
         }),
       );
       useStreamStore.getState().appendLLMOutput(
@@ -280,21 +278,21 @@ describe("StreamOutput 区块流展示", () => {
     expect(screen.getByText("进行中")).toBeInTheDocument();
   });
 
-  it("phase4 首段文本到达后应停止回退 phase3 旧事件，避免旧输出和旧思考串进新阶段", async () => {
+  it("chapter_agent 首段文本到达后应停止回退旧 sub_stage 事件，避免旧输出和旧思考串进新阶段", async () => {
     const user = userEvent.setup();
     act(() => {
       useStreamStore.getState().setTaskId("task-phase3-phase4-boundary");
       useStreamStore.getState().updateProgress(
         createLLMEvent({
           action: "start",
-          sub_stage: "phase4",
+          sub_stage: "chapter_agent",
           chunk_id: 244,
           current: 244,
           total: 255,
           percent: 77,
           sub_percent: 75,
           content: "",
-          message: "开始 phase4",
+          message: "开始 chapter_agent",
         }),
       );
       useStreamStore.getState().appendLLMOutput(
@@ -326,14 +324,14 @@ describe("StreamOutput 区块流展示", () => {
       useStreamStore.getState().appendLLMOutput(
         createLLMEvent({
           action: "output",
-          sub_stage: "phase4",
+          sub_stage: "chapter_agent",
           chunk_id: 244,
-          content: "phase4 输出",
+          content: "chapter_agent 输出",
         }),
       );
     });
 
-    expect(screen.getByText("phase4 输出")).toBeInTheDocument();
+    expect(screen.getByText("chapter_agent 输出")).toBeInTheDocument();
     expect(screen.queryByText("phase3 输出")).not.toBeInTheDocument();
     expect(screen.queryByText("search_pool")).not.toBeInTheDocument();
 
@@ -341,7 +339,7 @@ describe("StreamOutput 区块流展示", () => {
       useStreamStore.getState().appendLLMOutput(
         createLLMEvent({
           action: "tool_call",
-          sub_stage: "phase4",
+          sub_stage: "chapter_agent",
           chunk_id: 244,
           content: "resolve_case",
           message: "正在调用工具 resolve_case",

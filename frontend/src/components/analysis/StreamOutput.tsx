@@ -44,7 +44,13 @@ const STAGE_LABELS: Record<string, string> = {
   diagnose: "诊断报告",
 };
 
-const ANNOTATION_PHASE_TAB_SUBSTAGES = new Set(["phase1", "phase2", "phase3", "phase4"]);
+/**
+ * 2026-08-12: 标注阶段 agent 化后，后端 sub_stage 固定为 chapter_agent（不再下发 phase1-4）。
+ * 该集合仅用于判定标注 Agent 运行期是否启用"同 chunk 回退 + pending 骨架"的稳定化逻辑；
+ * chunkFallbackGroups / pendingGroup / displayGroup 回退链在单枚举值下基本不再触发，
+ * 保留它们以兜住"进度先到、流事件后到"的窗口期，避免阶段切换闪断。
+ */
+const ANNOTATION_PHASE_TAB_SUBSTAGES = new Set(["chapter_agent"]);
 
 /**
  * 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长
