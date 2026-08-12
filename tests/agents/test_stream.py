@@ -78,6 +78,56 @@ class _FlakyStreamingLLM:
             yield chunk
 
 
+class _RetryWithUsageLLM:
+    """2026-08-12 用于模拟断流重试且两次尝试各自上报用量的测试模型（首次尝试产出后断流）"""
+
+    def __init__(
+        self,
+        failing_chunks: list[AIMessageChunk],
+        success_chunks: list[AIMessageChunk],
+    ) -> None:
+        self.failing_chunks = failing_chunks
+        self.success_chunks = success_chunks
+        self.captured_messages: list[list] = []
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        if len(self.captured_messages) == 1:
+            for chunk in self.failing_chunks:
+                yield chunk
+            raise ConnectionError("stream interrupted mid-way")
+        for chunk in self.success_chunks:
+            yield chunk
+
+
+class _ConfigDisabledStreamingLLM:
+    """2026-08-12 用于模拟 stream_enabled=False 的模型（有 astream 但 streaming 配置关闭）"""
+
+    def __init__(self, response: AIMessage) -> None:
+        self.response = response
+        self.streaming = False
+        self.ainvoke_calls = 0
+        self.astream_calls = 0
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def ainvoke(self, messages):
+        del messages
+        self.ainvoke_calls += 1
+        return self.response
+
+    async def astream(self, messages):
+        del messages
+        self.astream_calls += 1
+        yield AIMessageChunk(content="不应流出")
+
+
 @pytest.mark.asyncio
 async def test_agent_stream_emits_thinking_and_output_events() -> None:
     events, emitter = _collect_events()
@@ -195,7 +245,7 @@ async def test_run_model_call_retries_current_request_on_stream_interruption() -
 
 @pytest.mark.asyncio
 async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
-    """2026-08-11 用于验证重试次数对齐 total_attempts=3，耗尽后抛出最后一次异常"""
+    """2026-08-11 用于验证 total_attempts=3 语义（总调用 3 次、重试 2 次），耗尽后抛出最后一次异常"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM([], fail_count=99)
@@ -203,9 +253,77 @@ async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
     with pytest.raises(ConnectionError, match="stream interrupted"):
         await run_model_call(model, [AIMessage(content="问")], stream)
 
-    assert len(model.captured_messages) == 4
+    assert len(model.captured_messages) == 3
     retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
-    assert len(retry_events) == 3
+    assert len(retry_events) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_total_attempts_one_disables_retries() -> None:
+    """2026-08-12 用于验证 total_attempts=1 时关闭断流重试，只调用一次即失败"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _FlakyStreamingLLM([], fail_count=99)
+
+    with pytest.raises(ConnectionError, match="stream interrupted"):
+        await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=1)
+
+    assert len(model.captured_messages) == 1
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 0
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
+    """
+    2026-08-12 用于验证断流重试时已失败尝试的 token 用量与最终用量合并记账，
+    避免重试丢弃已消耗的 token。
+    """
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _RetryWithUsageLLM(
+        failing_chunks=[
+            AIMessageChunk(
+                content="",
+                usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            )
+        ],
+        success_chunks=[
+            AIMessageChunk(
+                content="你好",
+                usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
+            ),
+            AIMessageChunk(content="世界"),
+        ],
+    )
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
+
+    assert response.content == "你好世界"
+    assert len(model.captured_messages) == 2
+    assert response.usage_metadata == {
+        "input_tokens": 22,
+        "output_tokens": 10,
+        "total_tokens": 32,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_uses_ainvoke_when_streaming_disabled() -> None:
+    """2026-08-12 用于验证 stream_enabled=False（模型 streaming 配置关闭）时走 ainvoke 非流式路径"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _ConfigDisabledStreamingLLM(AIMessage(content="完整回复"))
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream)
+
+    assert response.content == "完整回复"
+    assert model.ainvoke_calls == 1
+    assert model.astream_calls == 0
+    assert events == [
+        ("thinking", "模型未启用流式输出，等待完整回复...", ""),
+        ("output", "完整回复", ""),
+    ]
 
 
 @pytest.mark.asyncio

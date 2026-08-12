@@ -217,11 +217,16 @@ async def run_diagnosis_agent(
         recorder.finish_invocation(invocation_id, status="error", final_error=error)
         raise DiagnosisAgentRunError(error)
 
-    analysis = _finalize_diagnosis_result(
-        CloudAnalysis.model_validate(raw_output),
-        novel_id=novel_id,
-        foreshadow_expectation=foreshadow_expectation,
-    )
+    try:
+        analysis = _finalize_diagnosis_result(
+            CloudAnalysis.model_validate(raw_output),
+            novel_id=novel_id,
+            foreshadow_expectation=foreshadow_expectation,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("diagnosis finalize failed: run_id={} error={}", run_id, exc)
+        recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
+        raise DiagnosisAgentRunError(f"诊断结果终态校验失败: {exc}") from exc
     elapsed = time.time() - start_time
     recorder.finish_invocation(invocation_id, status="success")
     logger.info(
