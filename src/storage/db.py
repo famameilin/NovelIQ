@@ -225,30 +225,6 @@ def get_session_factory() -> sessionmaker:
 SessionLocal = get_session_factory
 
 
-def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
-    """
-    检查当前 schema 下是否已存在指定约束
-
-    说明: 运行时补约束前必须先做显式存在性检查，
-          避免旧库增量迁移与新库 create_all 在启动时互相撞重复 DDL
-    """
-    return bool(
-        connection.execute(
-            text(
-                """
-                SELECT 1
-                FROM information_schema.table_constraints
-                WHERE table_schema = current_schema()
-                  AND table_name = :table_name
-                  AND constraint_name = :constraint_name
-                LIMIT 1
-                """
-            ),
-            {"table_name": table_name, "constraint_name": constraint_name},
-        ).scalar_one_or_none()
-    )
-
-
 def _table_exists(connection: Connection, table_name: str) -> bool:
     """
     检查当前 schema 下是否存在指定表
@@ -288,175 +264,6 @@ def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
         {"table_name": table_name},
     ).fetchall()
     return {str(row.column_name) for row in rows}
-
-
-def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
-    """
-    在补外键前校验目标子表没有孤儿数据
-
-    说明: 当前仓库不接受“发现脏数据但继续跳过”的静默策略；
-          若仍有孤儿行，直接抛错阻止把不一致状态带入更深处
-    """
-    orphan_count = int(connection.execute(text(sql)).scalar_one())
-    if orphan_count > 0:
-        raise RuntimeError(f"Cannot add foreign key for {context}: found {orphan_count} orphan row(s)")
-
-
-def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
-    """
-    基于 analysis_runs 回填历史表里漂移的 novel_id
-
-    说明: `cloud_analysis` / `token_usage` 的 novel_id
-          实际是 run 侧信息的冗余镜像；补外键前先对齐到 analysis_runs，
-          可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据
-    """
-    statements = [
-        """
-        UPDATE cloud_analysis AS child
-        SET novel_id = parent.novel_id
-        FROM analysis_runs AS parent
-        WHERE child.run_id = parent.run_id
-          AND child.novel_id IS DISTINCT FROM parent.novel_id
-        """,
-        """
-        UPDATE token_usage AS child
-        SET novel_id = parent.novel_id
-        FROM analysis_runs AS parent
-        WHERE child.run_id = parent.run_id
-          AND child.novel_id IS DISTINCT FROM parent.novel_id
-        """,
-    ]
-
-    for statement in statements:
-        connection.execute(text(statement))
-
-
-def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
-    """
-    为历史 PostgreSQL 表补齐分析链路缺失的外键约束
-
-    说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项
-          先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束
-          其中 analysis_runs.novel_id 是整条分析链路的父约束，必须一并补齐，
-          否则旧库仍能继续写入悬空 novel_id
-    """
-    _normalize_analysis_related_novel_ids(connection)
-
-    constraint_specs = [
-        {
-            "table": "analysis_runs",
-            "name": "analysis_runs_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE analysis_runs "
-                "ADD CONSTRAINT analysis_runs_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM analysis_runs child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "analysis_runs.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "cloud_analysis",
-            "name": "cloud_analysis_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE cloud_analysis "
-                "ADD CONSTRAINT cloud_analysis_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM cloud_analysis child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE child.novel_id IS NOT NULL AND parent.novel_id IS NULL"
-            ),
-            "context": "cloud_analysis.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "global_context",
-            "name": "global_context_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE global_context "
-                "ADD CONSTRAINT global_context_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM global_context child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "global_context.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "token_usage",
-            "name": "token_usage_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE token_usage "
-                "ADD CONSTRAINT token_usage_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM token_usage child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "token_usage.novel_id -> novels.novel_id",
-        },
-    ]
-
-    for spec in constraint_specs:
-        if _constraint_exists(connection, spec["table"], spec["name"]):
-            continue
-        _assert_no_orphans(connection, spec["orphan_check"], context=spec["context"])
-        connection.execute(text(spec["ddl"]))
-
-
-def _ensure_runtime_schema(engine: Engine) -> None:
-    """
-    修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: `cloud_analysis` 不再依赖 reference_contract_version 补列；启动期只补仍在使用的业务列。
-
-    为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema
-
-    说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进
-          这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束
-    """
-    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
-    if dialect_name != "postgresql":
-        return
-
-    statements = [
-        "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
-        "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
-        "ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb",
-        (
-            "ALTER TABLE case_resolution_mappings "
-            "ADD COLUMN IF NOT EXISTS target_dialogue_id VARCHAR(64)"
-        ),
-        (
-            "ALTER TABLE case_resolution_mappings "
-            "ADD COLUMN IF NOT EXISTS target_setup_id VARCHAR(36)"
-        ),
-        "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
-        (
-            "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
-            "ON foreshadowing_threads (run_id, active, last_chunk_id)"
-        ),
-        (
-            "CREATE INDEX IF NOT EXISTS idx_foreshadowing_thread_hits_run_chunk "
-            "ON foreshadowing_thread_hits (run_id, chunk_id)"
-        ),
-    ]
-
-    with engine.begin() as conn:
-        for statement in statements:
-            conn.execute(text(statement))
-        _ensure_analysis_related_foreign_keys(conn)
 
 
 def _create_graph_read_views(engine: Engine) -> None:
@@ -548,8 +355,8 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
     任务: diagnosis-latest-only-reference-contract
     修改原因: latest-only 之后只校验真实焦点合同列，不再把 reference_contract_version 当成启动前置条件。
 
-    说明: 本次主角合同重构明确不兼容旧库，因此启动时必须显式检查
-    `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动
+    说明: 启动时显式检查 `cloud_analysis` 是否具备完整焦点合同列；
+    缺失即阻断启动（当前只有最新口径，不再检查旧结构残留）
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -574,20 +381,6 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
                 "cloud_analysis is missing focus contract columns: "
                 f"{missing_columns}. Please recreate or manually migrate the current database schema "
                 "so that `cloud_analysis` includes the full focus-contract column set before starting the service."
-            )
-
-        if "protagonist" in actual_columns:
-            raise RuntimeError(
-                "cloud_analysis still contains legacy column `protagonist`. "
-                "Please recreate or manually migrate the current database schema "
-                "to remove legacy protagonist-contract columns before starting the service."
-            )
-
-        if "narrative_type" in actual_columns:
-            raise RuntimeError(
-                "cloud_analysis still contains legacy column `narrative_type`. "
-                "Please recreate or manually migrate the current database schema "
-                "to remove legacy narrative type columns before starting the service."
             )
 
 
@@ -645,12 +438,6 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "target_setup_id",
         },
     }
-    legacy_columns = {
-        "chapter_annotations": {
-            "initial_finish_payload",
-            "revision_payload",
-        },
-    }
     with engine.begin() as connection:
         for table_name, required in required_columns.items():
             if not _table_exists(connection, table_name):
@@ -662,24 +449,14 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
                     f"{table_name} is missing annotation contract columns: {missing}. "
                     "Please recreate or explicitly migrate the continuity tables before starting the service."
                 )
-            leftover = sorted(
-                legacy_columns.get(table_name, set()) & actual
-            )
-            if leftover:
-                raise RuntimeError(
-                    f"{table_name} still contains legacy annotation contract columns: {leftover}. "
-                    "Please drop the legacy columns or recreate the tables before starting the service."
-                )
 
 
 def _assert_agent_audit_contract_schema(engine: Engine) -> None:
     """
-    2026-08-10 用于阻止旧审计库直接启动
+    2026-08-10 用于校验 Agent 审计三表与 token_usage 新结构就绪
 
-    说明: 本次审计重构不兼容旧库：model_interactions 必须已删除、
-    agent_invocations/agent_turns/agent_tool_calls 必须存在、
-    token_usage 必须已按新结构重建。不增加运行时兼容建表分支，
-    旧库未执行新 DDL 时直接启动失败。
+    说明: 当前只有最新口径（create_all 直接建出新库），
+    启动时校验审计表与 token_usage 合同列齐备；缺失即阻断启动。
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -700,23 +477,15 @@ def _assert_agent_audit_contract_schema(engine: Engine) -> None:
         "agent_tool_calls": {"id", "turn_id", "tool_name", "request_args", "status"},
     }
     with engine.begin() as connection:
-        if _table_exists(connection, "model_interactions"):
-            raise RuntimeError(
-                "model_interactions 仍存在，请先执行 scripts/db/migrate_agent_audit.py "
-                "删除旧审计表后启动服务"
-            )
         for table_name, required in required_tables.items():
             if not _table_exists(connection, table_name):
-                raise RuntimeError(
-                    f"{table_name} 表不存在，请先执行 scripts/db/migrate_agent_audit.py "
-                    "创建新审计表后启动服务"
-                )
+                raise RuntimeError(f"{table_name} 表不存在，请先执行 init_db 建表后启动服务")
             actual = _get_table_columns(connection, table_name)
             missing = sorted(required - actual)
             if missing:
                 raise RuntimeError(
                     f"{table_name} is missing agent audit contract columns: {missing}. "
-                    "请先执行 scripts/db/migrate_agent_audit.py 重建审计表后启动服务"
+                    "请先执行 init_db 重建审计表后启动服务"
                 )
         if _table_exists(connection, "token_usage"):
             actual = _get_table_columns(connection, "token_usage")
@@ -724,7 +493,7 @@ def _assert_agent_audit_contract_schema(engine: Engine) -> None:
             if missing:
                 raise RuntimeError(
                     "token_usage 仍是旧结构，缺少 agent_turn_id/reasoning_tokens: "
-                    f"{missing}. 请先执行 scripts/db/migrate_agent_audit.py 重建 token_usage"
+                    f"{missing}. 请先执行 init_db 重建 token_usage"
                 )
 
 
@@ -779,7 +548,6 @@ def init_db() -> None:
     ]
     Base.metadata.create_all(bind=engine, tables=tables)
     _create_graph_read_views(engine)
-    _ensure_runtime_schema(engine)
     _assert_focus_contract_schema(engine)
     _assert_annotation_contract_schema(engine)
     _assert_agent_audit_contract_schema(engine)

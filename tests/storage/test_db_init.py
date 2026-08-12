@@ -1,9 +1,9 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
 
-from src.storage.db import _create_graph_read_views, _ensure_runtime_schema, get_session_factory, init_db
+from src.storage.db import _create_graph_read_views, get_session_factory, init_db
 from src.storage.models import Base
 
 
@@ -58,7 +58,6 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
         patch("src.storage.db.get_engine", return_value=object()),
         patch("src.storage.models.Base.metadata.create_all") as mock_create_all,
         patch("src.storage.db._create_graph_read_views") as mock_create_graph_read_views,
-        patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
         patch("src.storage.db._assert_focus_contract_schema"),
         patch("src.storage.db._assert_annotation_contract_schema"),
         patch("src.storage.db._assert_agent_audit_contract_schema"),
@@ -80,7 +79,6 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
         "token_usage",
     } <= set(table_names)
     mock_create_graph_read_views.assert_called_once()
-    mock_ensure_runtime_schema.assert_called_once()
 
 
 def test_init_db_rejects_removed_level3_parameter() -> None:
@@ -89,49 +87,35 @@ def test_init_db_rejects_removed_level3_parameter() -> None:
         init_db(include_level3_tables=True)
 
 
-def test_init_db_runs_focus_contract_guard_after_runtime_schema() -> None:
+def test_init_db_runs_contract_guards_after_view_creation() -> None:
     """
-    验证 init_db() 主链路会在 create_all 和 runtime schema 之后执行 focus-contract fail-closed 校验。
+    验证 init_db() 主链路会在 create_all 和视图创建之后执行 fail-closed 合同校验。
 
     创建时间: 2026-04-27
     任务: fix-focus-contract-runtime-schema-conflict
-    说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把 focus-contract 校验从主链路上绕开。
+    说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把合同校验从主链路上绕开。
     """
     fake_engine = object()
     with (
         patch("src.storage.db.get_engine", return_value=fake_engine),
         patch("src.storage.models.Base.metadata.create_all"),
-        patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
+        patch("src.storage.db._create_graph_read_views") as mock_create_graph_read_views,
         patch("src.storage.db._assert_focus_contract_schema") as mock_assert_focus_contract_schema,
         patch("src.storage.db._assert_annotation_contract_schema") as mock_assert_annotation_contract_schema,
         patch("src.storage.db._assert_agent_audit_contract_schema") as mock_assert_agent_audit_contract_schema,
     ):
         init_db()
 
-    mock_ensure_runtime_schema.assert_called_once_with(fake_engine)
+    mock_create_graph_read_views.assert_called_once_with(fake_engine)
     mock_assert_focus_contract_schema.assert_called_once_with(fake_engine)
     mock_assert_annotation_contract_schema.assert_called_once_with(fake_engine)
     mock_assert_agent_audit_contract_schema.assert_called_once_with(fake_engine)
-
-
-def test_agent_audit_contract_guard_rejects_legacy_model_interactions(db_session) -> None:
-    """2026-08-10 用于验证旧库残留 model_interactions 时启动直接失败（不做运行时兼容建表）"""
-    from sqlalchemy import text as sql_text
-
-    from src.storage.db import _assert_agent_audit_contract_schema
-
-    db_session.execute(sql_text("CREATE TABLE model_interactions (id SERIAL PRIMARY KEY)"))
-    db_session.commit()
-
-    with pytest.raises(RuntimeError, match="model_interactions 仍存在"):
-        _assert_agent_audit_contract_schema(db_session.get_bind())
 
 
 def test_agent_audit_contract_guard_rejects_missing_audit_tables(db_session) -> None:
     """2026-08-10 用于验证缺少新审计表时启动直接失败"""
     from src.storage.db import _assert_agent_audit_contract_schema
 
-    db_session.execute(text("DROP TABLE IF EXISTS model_interactions CASCADE"))
     db_session.execute(text("DROP TABLE IF EXISTS agent_invocations CASCADE"))
     db_session.commit()
 
@@ -139,45 +123,21 @@ def test_agent_audit_contract_guard_rejects_missing_audit_tables(db_session) -> 
         _assert_agent_audit_contract_schema(db_session.get_bind())
 
 
-def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> None:
+def test_no_legacy_runtime_schema_compat_path_remains() -> None:
     """
-    验证 PostgreSQL runtime schema 不会再补旧 protagonist-contract 列。
-
-    创建时间: 2026-04-27
-    任务: fix-focus-contract-runtime-schema-conflict
-    说明: 当前主线以 focus-contract fail-closed 为准；
-          若 runtime schema 仍偷偷补 `protagonist/main_characters/core_cast/theme_color`，就会和启动校验自相矛盾。
+    2026-08-12 用于验证旧库兼容路径已彻底移除（只有最新口径）：
+    init_db 不再补列/补外键/拒绝旧结构，schema 完全由 create_all 表达。
     """
-    fake_engine = MagicMock()
-    fake_engine.dialect.name = "postgresql"
-    fake_conn = MagicMock()
-    fake_engine.begin.return_value.__enter__.return_value = fake_conn
+    import src.storage.db as db_module
 
-    with (
-        patch("src.storage.db._table_exists", return_value=False),
-        patch("src.storage.db._ensure_analysis_related_foreign_keys"),
+    for legacy_name in (
+        "_ensure_runtime_schema",
+        "_ensure_analysis_related_foreign_keys",
+        "_normalize_analysis_related_novel_ids",
+        "_assert_no_orphans",
+        "_constraint_exists",
     ):
-        _ensure_runtime_schema(fake_engine)
-
-    executed_sql = [str(call.args[0]) for call in fake_conn.execute.call_args_list]
-
-    expected_foreshadow_sql = "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation"
-    expected_thread_confidence_sql = "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence"
-    assert any(expected_foreshadow_sql in sql for sql in executed_sql)
-    assert any(expected_thread_confidence_sql in sql for sql in executed_sql)
-    assert any("ALTER TABLE graph_entities ADD COLUMN IF NOT EXISTS attributes" in sql for sql in executed_sql)
-    assert any(
-        "ALTER TABLE case_resolution_mappings ADD COLUMN IF NOT EXISTS target_dialogue_id" in sql
-        for sql in executed_sql
-    )
-    assert any(
-        "ALTER TABLE case_resolution_mappings ADD COLUMN IF NOT EXISTS target_setup_id" in sql
-        for sql in executed_sql
-    )
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist" in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters" in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast" in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS theme_color" in sql for sql in executed_sql)
+        assert not hasattr(db_module, legacy_name), f"旧兼容代码 {legacy_name} 不应存在"
 
 
 def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
