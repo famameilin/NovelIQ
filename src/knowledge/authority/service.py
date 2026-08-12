@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from src.api.exceptions import GraphReadinessError
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
@@ -198,7 +199,9 @@ class KnowledgeGraphAuthorityService:
     def assert_graph_ready(self, run_id: str) -> None:
         """2026-08-07 用于确认当前 run 至少存在一个成功章节图版本"""
         if self._graph_repo.resolve_graph_version(run_id) is None:
-            raise ValueError(f"run 尚无已完成章节图版本: {run_id}")
+            # GraphReadinessError 是全局唯一 raise 站点，中间件将其映射为 409；
+            # 不能降级为 ValueError（会落入 generic handler 变成 500）
+            raise GraphReadinessError(f"run 尚无已完成章节图版本: {run_id}")
 
     def _build_alias_resolution(
         self,

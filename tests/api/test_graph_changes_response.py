@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from base64 import urlsafe_b64encode
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from src.api.models.graph import GraphChangesResponse
-from src.api.services.results_queries.graph import _fetch_graph_changes_page
+from src.api.services.results_queries.graph import (
+    _decode_graph_changes_cursor,
+    _encode_graph_changes_cursor,
+    _fetch_graph_changes_page,
+)
 
 
 def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
@@ -51,3 +58,19 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
     assert change.to_name == "司夜"
     assert change.relation_change_kind == "新建"
     assert change.directionality == "bidirectional"
+
+
+def test_graph_changes_cursor_round_trip() -> None:
+    """2026-08-12 用于验证合法游标可往返解析"""
+    assert _decode_graph_changes_cursor(_encode_graph_changes_cursor(12)) == 12
+    assert _decode_graph_changes_cursor(None) == 0
+    assert _decode_graph_changes_cursor("") == 0
+
+
+@pytest.mark.parametrize("raw_payload", ["[1, 2, 3]", '"not-a-dict"', "42", "null"])
+def test_graph_changes_cursor_rejects_non_dict_payload(raw_payload: str) -> None:
+    """2026-08-12 用于验证非 dict JSON 载荷按非法游标处理（→400）而非 AttributeError（→500）"""
+    encoded = urlsafe_b64encode(raw_payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+    with pytest.raises(ValueError, match="invalid graph changes cursor"):
+        _decode_graph_changes_cursor(encoded)
