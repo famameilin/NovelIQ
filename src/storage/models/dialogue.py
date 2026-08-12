@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -52,7 +62,13 @@ class DialogueRecord(Base):
             name="dialogue_records_chunk_run_fkey",
         ),
         Index("idx_dialogue_records_run_chunk", "run_id", "chunk_id"),
-        Index("idx_dialogue_records_run_candidate", "run_id", "candidate_key"),
+        # 2026-08-12 唯一约束兜底 (run_id, candidate_key)：案例解决按该键 scalar_one_or_none 定位，
+        # 唯一性此前仅靠应用层保证，防止重复候选键导致定位歧义
+        UniqueConstraint(
+            "run_id",
+            "candidate_key",
+            name="uq_dialogue_records_run_candidate",
+        ),
     )
 
     def __repr__(self) -> str:

@@ -448,10 +448,11 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
     ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit | None]:
         """2026-08-11 用于只创建新伏笔线程（description 相同视为同一伏笔，已存在时不再重复创建）"""
         normalized = normalize_text(foreshadowing.description)
+        # 2026-08-12 大小写变体按 casefold 视为同一伏笔，避免重复建线程
         thread = self.session.execute(
             select(ForeshadowingThread).where(
                 ForeshadowingThread.run_id == run_id,
-                ForeshadowingThread.setup_summary == normalized,
+                func.lower(ForeshadowingThread.setup_summary) == normalized.casefold(),
             )
         ).scalar_one_or_none()
         if thread is not None:
