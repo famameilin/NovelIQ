@@ -44,6 +44,7 @@ function getEntityColorsFromCSS(): EntityColors {
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
 // 统一关系类型颜色来源，保证图例和图谱主图后续可以复用同一套调色规则
+// 2026-08-12：补全「领导」关系类型，与 schema.py RELATION_DEFINITIONS 12 词全表对齐
 function getRelationColorsFromCSS(): RelationColors {
   return {
     家族: getCSSColorVar("--chart-neutral"),
@@ -54,6 +55,7 @@ function getRelationColorsFromCSS(): RelationColors {
     友情: getCSSColorVar("--chart-positive"),
     爱慕: getCSSColorVar("--chart-positive"),
     利益: getCSSColorVar("--chart-neutral"),
+    领导: getCSSColorVar("--chart-neutral"),
     同一人物: getCSSColorVar("--chart-neutral"),
     隶属: getCSSColorVar("--chart-neutral"),
     位于: getCSSColorVar("--chart-neutral"),
