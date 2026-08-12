@@ -14,8 +14,13 @@ from .settings import settings
 
 def _record_belongs_to_third_party(record) -> bool:
     """2026-08-08 用于识别非本仓库命名空间的第三方日志"""
+    return not _record_belongs_to_project(record)
+
+
+def _record_belongs_to_project(record) -> bool:
+    """2026-08-08 用于识别本仓库命名空间的日志（src.*）"""
     name = str(record["name"])
-    return not (name == "src" or name.startswith("src."))
+    return name == "src" or name.startswith("src.")
 
 
 def _module_filter(module_name: str):
@@ -48,7 +53,7 @@ def setup_logging(config: LoggingSettings | None = None) -> None:
         sys.stderr,
         level=cfg.console_level.upper(),
         format=console_format,
-        filter=_record_belongs_to_third_party,
+        filter=_record_belongs_to_project,
     )
     logger.add(
         sys.stderr,
