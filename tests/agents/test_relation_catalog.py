@@ -3,7 +3,6 @@
 from src.agents.annotation.schema import (
     RELATION_DEFINITIONS,
     RelationInput,
-    RelationState,
     relation_catalog_text,
 )
 
@@ -35,17 +34,18 @@ def test_relation_input_description_embeds_catalog() -> None:
     assert "位于" in description
 
 
-def test_relation_input_state_contract() -> None:
-    state_field = RelationInput.model_fields["state"]
-    assert state_field.default == RelationState.PRESENT
-    assert set(RelationState) == {
-        RelationState.PRESENT,
-        RelationState.WEAKENED,
-        RelationState.ENDED,
+def test_relation_input_is_three_field_edge_contract() -> None:
+    """2026-08-12 用于验证关系合同只提交本章确认存在的边（无 state 字段）"""
+    assert set(RelationInput.model_fields) == {
+        "from_entity",
+        "to_entity",
+        "relation_type",
     }
 
 
-def test_system_prompt_relation_state_aligned() -> None:
+def test_system_prompt_relation_semantics_aligned() -> None:
     from src.agents.annotation.prompts import SYSTEM_PROMPT_TEMPLATE
 
-    assert "relation state（present/weakened/ended）" in SYSTEM_PROMPT_TEMPLATE
+    assert "relation state（present/weakened/ended）" not in SYSTEM_PROMPT_TEMPLATE
+    assert "write_relations 只提交本章确认存在的边" in SYSTEM_PROMPT_TEMPLATE
+    assert "skipped_existing" in SYSTEM_PROMPT_TEMPLATE

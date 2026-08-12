@@ -40,6 +40,7 @@ from .schema import (
     CaseSearchResult,
     CharacterObservationInput,
     ChunkMetricsInput,
+    Confidence,
     DialogueCandidate,
     DialogueInput,
     DialogueSubmissionItem,
@@ -51,10 +52,12 @@ from .schema import (
     EventInput,
     ForeshadowingInput,
     NarrativeFunction,
+    PayoffLikelihood,
     PendingCase,
     RelationInput,
     ResolvedCase,
     SearchResult,
+    SetupStatus,
     TextSearchResult,
 )
 
@@ -156,6 +159,8 @@ class AnnotationToolLedger:
     resolved_cases: list[ResolvedCase] = field(default_factory=list)
     pushed_cases: list[PendingCase] = field(default_factory=list)
     authorized_text_chunk_ids: set[int] = field(default_factory=set)
+    # 2026-08-12 最近一次 write_dialogues 未提交候选序号（系统默认按 not_dialogue 处理）
+    dialogue_missing_indexes: list[int] = field(default_factory=list)
     annotation: BoundChapterAnnotation | None = None
     errors: list[str] = field(default_factory=list)
     search_log: list[dict[str, Any]] = field(default_factory=list)
@@ -201,6 +206,7 @@ class AnnotationToolLedger:
                 "resolved_cases": self.resolved_cases,
                 "pushed_cases": self.pushed_cases,
                 "authorized_text_chunk_ids": self.authorized_text_chunk_ids,
+                "dialogue_missing_indexes": self.dialogue_missing_indexes,
                 "annotation": self.annotation,
                 "search_log": self.search_log,
             }
@@ -216,11 +222,12 @@ class AnnotationToolLedger:
         cases: list[CaseSearchResult],
         rotation_case_ids: list[str],
     ) -> None:
-        """2026-08-07 用于登记初始案例并分配运行内临时编号"""
+        """2026-08-12 用于登记初始案例并分配运行内临时编号（案例展示即授权其源 chunk）"""
         self.initial_cases = {case.id: case for case in cases}
         self.rotation_case_ids = list(dict.fromkeys(rotation_case_ids))
         for case in cases:
             self.register_case_number(case.id)
+            self.authorized_text_chunk_ids.add(case.chunk_id)
 
     def register_case_number(self, case_id: str) -> int:
         """2026-08-07 用于为真实案例 ID 分配稳定运行内编号"""
@@ -256,6 +263,7 @@ class AnnotationToolLedger:
         if domain not in _DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
         bound = self._bind_domain(domain, payload)
+        relation_outcomes: list[dict[str, Any]] = []
         if self.graph is not None:
             if domain == "entities":
                 self.graph.register_entities(list(payload.entities))
@@ -267,7 +275,15 @@ class AnnotationToolLedger:
                     dumped = item.model_dump(mode="python")
                     dumped["from_entity"] = resolved_from
                     dumped["to_entity"] = resolved_to
-                    self.graph.apply_relation(RelationInput(**dumped))
+                    added = self.graph.apply_relation(RelationInput(**dumped))
+                    relation_outcomes.append(
+                        {
+                            "from": resolved_from,
+                            "to": resolved_to,
+                            "relation_type": str(item.relation_type),
+                            "outcome": "assert" if added else "skipped_existing",
+                        }
+                    )
         chunk_id = self.current_chunk_id
         revision = self.domain_revision_counts.get(domain, 0) + 1
         self.domain_revision_counts[domain] = revision
@@ -288,7 +304,13 @@ class AnnotationToolLedger:
             }
         )
         self._rebuild_ready_chunk_if_complete()
-        return self._receipt(tool_name=tool_name, domain=domain, payload=payload, revision=revision)
+        return self._receipt(
+            tool_name=tool_name,
+            domain=domain,
+            payload=payload,
+            revision=revision,
+            relation_outcomes=relation_outcomes or None,
+        )
 
     def _receipt(
         self,
@@ -297,6 +319,7 @@ class AnnotationToolLedger:
         domain: str,
         payload: Any,
         revision: int,
+        relation_outcomes: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """2026-08-10 用于生成模型可见的固定压缩回执"""
         if domain == "metrics":
@@ -310,7 +333,7 @@ class AnnotationToolLedger:
             if hasattr(payload, "model_dump")
             else [item.model_dump(mode="json") for item in payload]
         )
-        return {
+        receipt: dict[str, Any] = {
             "accepted": True,
             "tool": tool_name,
             "domain": domain,
@@ -318,6 +341,11 @@ class AnnotationToolLedger:
             "item_count": item_count,
             "state_digest": f"sha256:{_content_digest(dumped)}",
         }
+        if relation_outcomes is not None:
+            receipt["relations"] = relation_outcomes
+        if domain == "dialogues":
+            receipt["defaulted_not_dialogue"] = list(self.dialogue_missing_indexes)
+        return receipt
 
     # ------------------------------------------------------------------
     # 领域绑定与校验
@@ -496,7 +524,6 @@ class AnnotationToolLedger:
                     item.from_entity,
                     item.to_entity,
                     str(item.relation_type),
-                    str(item.state),
                 )
                 for item in payloads["relations"]
             ],
@@ -599,12 +626,9 @@ class AnnotationToolLedger:
                         f"write_dialogues.candidate_index 重复: {item.candidate_index}"
                     )
                 seen_indexes.add(item.candidate_index)
-            missing_indexes = sorted(set(candidate_by_index) - seen_indexes)
-            if missing_indexes:
-                raise ValueError(
-                    "write_dialogues 必须完整覆盖全部候选，缺失候选序号: "
-                    + ", ".join(str(index) for index in missing_indexes)
-                )
+            # 2026-08-12 软覆盖：未提交候选默认按 not_dialogue 处理（不再硬拒绝），
+            # 缺失序号记入回执供模型补充提交
+            self.dialogue_missing_indexes = sorted(set(candidate_by_index) - seen_indexes)
             bound_dialogues: list[BoundDialogue] = []
             for item in sorted(payload, key=lambda entry: entry.candidate_index):
                 if item.verdict == DialogueVerdict.NOT_DIALOGUE:
@@ -782,7 +806,6 @@ class AnnotationToolLedger:
                     "from": item.from_entity,
                     "to": item.to_entity,
                     "relation_type": str(item.relation_type),
-                    "state": str(item.state),
                 }
                 for item in payloads["relations"]
             ]
@@ -1014,8 +1037,19 @@ def build_annotation_tools(
 
     @tool
     def write_dialogues(items: list[DialogueSubmissionItem]) -> str:
-        """2026-08-07 用于按系统候选顺序完整替换当前 chunk 对话判断"""
-        payload = [DialogueInput.model_validate(item.model_dump()) for item in items]
+        """2026-08-12 用于按系统候选序号提交对话三态判断（数组格式）
+        （items 每条为 [candidate_index, verdict, speaker, tone]，speaker/tone 未知时 null；
+        只提交 dialogue 与 inner_monologue 候选，未提交的候选系统默认按 not_dialogue
+        处理，回执会列出被默认处理的候选序号，可再次调用补充）"""
+        payload = [
+            DialogueInput(
+                candidate_index=index,
+                verdict=verdict,
+                speaker=speaker,
+                tone=tone,
+            )
+            for (index, verdict, speaker, tone) in items
+        ]
         return json.dumps(
             ledger.write_domain("dialogues", payload, tool_name="write_dialogues"),
             ensure_ascii=False,
@@ -1031,7 +1065,9 @@ def build_annotation_tools(
 
     @tool
     def write_relations(items: list[RelationInput]) -> str:
-        """2026-08-07 用于完整替换当前 chunk 闭合类型关系变化"""
+        """2026-08-12 用于完整替换当前 chunk 确认存在的闭合类型关系边
+        （新边建图 assert，已存在的同一条边自动接受为 skipped_existing；
+        强化/削弱/解除一律走 resolve_fact_case，不通过本工具表达变化）"""
         return json.dumps(
             ledger.write_domain("relations", items, tool_name="write_relations"),
             ensure_ascii=False,
@@ -1155,6 +1191,8 @@ def build_annotation_tools(
         for item in result.results:
             if isinstance(item, CaseSearchResult):
                 case_number = ledger.register_case_number(item.id)
+                # 案例展示即授权其源 chunk，解决时不再因原文未读取被拒
+                ledger.authorized_text_chunk_ids.add(item.chunk_id)
                 case_numbers.append(case_number)
                 views.append(
                     {
@@ -1202,6 +1240,12 @@ def build_annotation_tools(
         details = query_service.fetch_active_case_details(case_id)
         if details is None:
             raise AnnotationInputError(f"案例不存在或已不再 active: {case_number}")
+        allowed_chunk_ids = ledger.authorized_text_chunk_ids | {ledger.current_chunk_id}
+        if details.chunk_id not in allowed_chunk_ids:
+            raise AnnotationAuthorizationError(
+                f"案例 {details.id} 原文所在 chunk {details.chunk_id} 未经本轮读取授权，"
+                "请先 search_text + read_text 读取原文后再解决"
+            )
         return details
 
     def _append_resolved(
@@ -1322,10 +1366,10 @@ def build_annotation_tools(
         setup_summary: str | None = None,
         setup_kind: str | None = None,
         expected_payoff_family: str | None = None,
-        payoff_likelihood: str | None = None,
-        setup_status: str | None = None,
-        confidence: str | None = None,
-        strength: str | None = None,
+        payoff_likelihood: PayoffLikelihood | None = None,
+        setup_status: SetupStatus | None = None,
+        confidence: Confidence | None = None,
+        strength: Confidence | None = None,
     ) -> str:
         """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）"""
         details = _resolve_case_details(

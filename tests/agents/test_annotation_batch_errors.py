@@ -5,7 +5,7 @@ import pytest
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import (
     CharacterObservationInput,
-    DialogueSubmissionItem,
+    DialogueInput,
     DialogueVerdict,
     EmotionalValence,
     RelationInput,
@@ -83,7 +83,7 @@ def test_dialogue_speaker_error_collected_with_index() -> None:
         graph=FactGraph(),
     )
     payload = [
-        DialogueSubmissionItem(
+        DialogueInput(
             candidate_index=1,
             verdict=DialogueVerdict.DIALOGUE,
             speaker="甲",
@@ -97,7 +97,7 @@ def test_dialogue_speaker_error_collected_with_index() -> None:
     assert "[0] dialogue.speaker 未在当前 chunk 的 write_entities 中声明: 甲" in message
 
 
-def test_dialogue_coverage_missing_candidates() -> None:
+def test_dialogue_coverage_missing_candidates_defaults_to_not_dialogue() -> None:
     ledger = AnnotationToolLedger(
         run_scope="r",
         current_chapter_id=1,
@@ -106,7 +106,8 @@ def test_dialogue_coverage_missing_candidates() -> None:
         allow_future_context=False,
         graph=FactGraph(),
     )
-    with pytest.raises(ValueError) as excinfo:
-        ledger.write_domain("dialogues", [], tool_name="write_dialogues")
-    message = str(excinfo.value)
-    assert "write_dialogues 必须完整覆盖全部候选，缺失候选序号: 1" in message
+    result = ledger.write_domain("dialogues", [], tool_name="write_dialogues")
+    assert result["accepted"] is True
+    assert result["defaulted_not_dialogue"] == [1]
+    assert ledger.dialogue_missing_indexes == [1]
+    assert ledger.bound_payloads["dialogues"] == []

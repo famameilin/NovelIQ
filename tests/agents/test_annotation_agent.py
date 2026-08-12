@@ -141,19 +141,10 @@ def _observations_call(call_id: str = "call-observations") -> dict:
 
 
 def _dialogues_call(call_id: str = "call-dialogues") -> dict:
-    """2026-08-07 用于构造按候选序号的 write_dialogues 调用（完整覆盖 1..N）"""
+    """2026-08-12 用于构造数组格式的 write_dialogues 调用（[序号, 三态, 说话人, 语气]）"""
     return _write_call(
         "write_dialogues",
-        {
-            "items": [
-                {
-                    "candidate_index": 1,
-                    "verdict": "dialogue",
-                    "speaker": None,
-                    "tone": "平静",
-                }
-            ]
-        },
+        {"items": [[1, "dialogue", None, "平静"]]},
         call_id=call_id,
     )
 
@@ -166,7 +157,7 @@ def _events_call(call_id: str = "call-events") -> dict:
             "items": [
                 {
                     "description": "顾霜喝止众人",
-                    "participants": [{"entity": "顾霜", "role": "行动者"}],
+                    "participants": [{"entity": "顾霜", "role": "主体"}],
                 }
             ]
         },

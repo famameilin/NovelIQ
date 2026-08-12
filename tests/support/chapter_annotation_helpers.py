@@ -116,17 +116,15 @@ def relation_fact(
     relation_type: str,
     from_entity_type: EntityType = "character",
     to_entity_type: EntityType = "character",
-    state: str = "present",
     chapter_id: int = 1,
 ) -> dict[str, Any]:
-    """2026-08-11 用于构造逐 chunk 闭合类型关系输入测试值（state 缺省 present）"""
+    """2026-08-12 用于构造逐 chunk 三字段关系边输入测试值（本章确认存在的边）"""
     del chapter_id
     return {
         "chunk_id": chunk_id,
         "from_entity": from_name,
         "to_entity": to_name,
         "relation_type": relation_type,
-        "state": state,
         "_entity_specs": [
             _entity_spec(from_name, from_entity_type),
             _entity_spec(to_name, to_entity_type),
@@ -203,8 +201,9 @@ def persist_chapter_annotation(
     dialogues: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
     entity_attributes: dict[tuple[int, str], dict[str, Any]] | None = None,
+    resolved_cases: list[Any] | None = None,
 ) -> str:
-    """2026-08-11 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化"""
+    """2026-08-12 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化"""
     chunk_rows = list(
         session.execute(
             select(Chunk)
@@ -273,7 +272,6 @@ def persist_chapter_annotation(
                 from_entity=fact["from_entity"],
                 to_entity=fact["to_entity"],
                 relation_type=fact["relation_type"],
-                state=fact.get("state", "present"),
                 directionality=definition["directionality"],
                 relation_semantics=definition["semantics"],
             )
@@ -359,7 +357,7 @@ def persist_chapter_annotation(
     persist_completion_graph(
         session=session,
         annotation=row,
-        resolved_cases=[],
+        resolved_cases=resolved_cases or [],
         authorized_text_chunk_ids=set(chunk_text_by_id),
     )
     for chunk in annotation.chunks:

@@ -137,6 +137,7 @@ def build_alias_pending_cases(
                 target_key=target_key,
                 target_ref={
                     "kind": "entity_alias",
+                    "chunk_id": suspicion.anchor_chunk_id,
                     "name_a": suspicion.name_a,
                     "name_b": suspicion.name_b,
                 },

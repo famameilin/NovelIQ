@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.api.models.graph import GraphChangesResponse
 from src.api.services.results_queries.graph import _fetch_graph_changes_page
@@ -11,13 +11,6 @@ from src.api.services.results_queries.graph import _fetch_graph_changes_page
 
 def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
     """2026-08-07 用于验证图变化分页直接返回页面展示与定位字段"""
-    evidence = MagicMock()
-    evidence.model_dump.return_value = [
-        {
-            "reason": "顾霜在本段正式加入天衡宗",
-            "chunk_id": 12,
-        }
-    ]
     row = SimpleNamespace(
         change_id="relation:12:4",
         change_kind="relation",
@@ -28,7 +21,6 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
         fact_revision=4,
         effective_chunk_id=12,
         changes=[{"change_kind": "新建", "field": "relation_type"}],
-        evidence=evidence,
         entity_id=None,
         entity_name=None,
         relation_id="relation-7",

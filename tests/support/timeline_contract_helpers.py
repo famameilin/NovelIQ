@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from src.agents.annotation.schema import ResolvedCase
 from src.storage.repositories import GraphRepository, RunRepository, StatsRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -35,6 +36,7 @@ def persist_timeline_chapter(
     cliffhanger_chunks: set[int] | None = None,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
+    resolved_cases: list[Any] | None = None,
 ) -> str:
     """2026-08-07 用于写入当前章节标注与唯一章节图版本"""
     return persist_chapter_annotation(
@@ -47,6 +49,7 @@ def persist_timeline_chapter(
         cliffhanger_chunks=cliffhanger_chunks,
         characters=characters,
         relations=relations,
+        resolved_cases=resolved_cases,
     )
 
 
@@ -185,14 +188,18 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         run_id=run_id,
         chapter_id=5,
         characters=[character_fact(chunk_id=4, name=hero_name, action="独行", chapter_id=5)],
-        relations=[
-            relation_fact(
-                chunk_id=4,
-                from_name=hero_name,
-                to_name=rival_name,
+        resolved_cases=[
+            ResolvedCase(
+                case_id="case-break",
+                action="fact",
+                type="relation_change",
+                reason="决裂",
+                target_key="target-break",
+                target_ref={"kind": "relation_change", "chunk_id": 4},
+                from_entity=hero_name,
+                to_entity=rival_name,
                 relation_type="盟友",
-                state="ended",
-                chapter_id=5,
+                change_kind="break",
             )
         ],
     )
