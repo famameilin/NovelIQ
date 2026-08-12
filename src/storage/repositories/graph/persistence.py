@@ -601,46 +601,48 @@ def _persist_annotation_facts(
             session.add(fact)
             facts.append(fact)
 
-        for entity_id, patches in attribute_patches.items():
-            entity = entity_by_id.get(entity_id)
-            if entity is None:
-                raise ValueError(f"属性变化事实缺少已解析实体: {entity_id}")
-            for patch in patches:
-                attribute_ordinal += 1
-                fact = _new_graph_fact(
-                    graph_version=graph_version,
-                    annotation=annotation,
-                    chunk_id=int(patch["chunk_id"]),
-                    domain="entity_attribute",
-                    ordinal=attribute_ordinal,
-                    subject=entity,
-                    predicate=str(patch["field"]),
-                    object_value=None,
-                    value=patch["after"],
-                    participants=[],
-                    story_time=None,
-                    assertion="affirmed",
-                    confidence="medium",
-                    content={
-                        "kind": "entity_attribute",
-                        "field": patch["field"],
-                        "before": patch["before"],
-                        "after": patch["after"],
-                        "chunk_id": patch["chunk_id"],
-                    },
-                )
-                session.add(fact)
-                facts.append(fact)
-                attribute_changes_by_entity.setdefault(entity_id, []).append(
-                    {
-                        "field": patch["field"],
-                        "before": patch["before"],
-                        "after": patch["after"],
-                        "fact_id": fact.fact_id,
-                        "fact_revision": fact.fact_revision,
-                        "chunk_id": patch["chunk_id"],
-                    }
-                )
+    # 属性变化事实与 chunk 循环无关（chunk_id 取自 patch 自身），
+    # 统一在 chunk 循环后生成，避免多 chunk 章节对同一 patch 重复写入
+    for entity_id, patches in attribute_patches.items():
+        entity = entity_by_id.get(entity_id)
+        if entity is None:
+            raise ValueError(f"属性变化事实缺少已解析实体: {entity_id}")
+        for patch in patches:
+            attribute_ordinal += 1
+            fact = _new_graph_fact(
+                graph_version=graph_version,
+                annotation=annotation,
+                chunk_id=int(patch["chunk_id"]),
+                domain="entity_attribute",
+                ordinal=attribute_ordinal,
+                subject=entity,
+                predicate=str(patch["field"]),
+                object_value=None,
+                value=patch["after"],
+                participants=[],
+                story_time=None,
+                assertion="affirmed",
+                confidence="medium",
+                content={
+                    "kind": "entity_attribute",
+                    "field": patch["field"],
+                    "before": patch["before"],
+                    "after": patch["after"],
+                    "chunk_id": patch["chunk_id"],
+                },
+            )
+            session.add(fact)
+            facts.append(fact)
+            attribute_changes_by_entity.setdefault(entity_id, []).append(
+                {
+                    "field": patch["field"],
+                    "before": patch["before"],
+                    "after": patch["after"],
+                    "fact_id": fact.fact_id,
+                    "fact_revision": fact.fact_revision,
+                    "chunk_id": patch["chunk_id"],
+                }
+            )
 
     session.flush()
     return facts, attribute_changes_by_entity
