@@ -168,6 +168,8 @@ async def run_annotate(
         run_id=run_id,
     )
     success_count = 0
+    failed_count = 0
+    first_failure: Exception | None = None
 
     if emitter:
         await emitter(
@@ -235,32 +237,47 @@ async def run_annotate(
                     f"章节 {chapter_labels.get(chapter_id, chapter_id)} 标注 Agent 开始处理"
                 )
 
-            agent_result = await run_annotation_agent(
-                run_id=run_id,
-                chapter_id=chapter_id,
-                current_chunks=current_chunks,
-                novel_title=novel_title,
-                novel_id=novel_id,
-                llm=llm,
-                session_factory=sql_session_factory,
-                query_service_factory=partial(
-                    DatabaseAnnotationQueryService,
+            try:
+                agent_result = await run_annotation_agent(
                     run_id=run_id,
-                    current_chapter_id=chapter_id,
-                    current_first_chunk_id=current_chunks[0][0],
-                    current_last_chunk_id=current_chunks[-1][0],
-                    embedding_client=embedding_client,
-                ),
-                stream=agent_stream,
-                graph_state=graph_state,
-                chapter_label=chapter_labels.get(chapter_id),
-            )
-            complete_annotation_run(
-                result=agent_result,
-                novel_id=novel_id,
-                session_factory=sql_session_factory,
-            )
-            success_count += 1
+                    chapter_id=chapter_id,
+                    current_chunks=current_chunks,
+                    novel_title=novel_title,
+                    novel_id=novel_id,
+                    llm=llm,
+                    session_factory=sql_session_factory,
+                    query_service_factory=partial(
+                        DatabaseAnnotationQueryService,
+                        run_id=run_id,
+                        current_chapter_id=chapter_id,
+                        current_first_chunk_id=current_chunks[0][0],
+                        current_last_chunk_id=current_chunks[-1][0],
+                        embedding_client=embedding_client,
+                    ),
+                    stream=agent_stream,
+                    graph_state=graph_state,
+                    chapter_label=chapter_labels.get(chapter_id),
+                )
+                complete_annotation_run(
+                    result=agent_result,
+                    novel_id=novel_id,
+                    session_factory=sql_session_factory,
+                )
+                success_count += 1
+            except Exception as exc:  # noqa: BLE001 单章失败不中断后续章节
+                if first_failure is None:
+                    first_failure = exc
+                failed_count += 1
+                logger.error(
+                    "annotation chapter failed run_id={} chapter_id={} label={} error={!r}",
+                    run_id,
+                    chapter_id,
+                    chapter_labels.get(chapter_id, chapter_id),
+                    exc,
+                )
+                # 失败章未提交 annotation，不产生图版本；审计 invocation 收口由
+                # runner 内 finish_invocation(status="error") 完成，此处仅跳过本章继续。
+                continue
 
         if emitter:
             await emitter(
@@ -279,10 +296,14 @@ async def run_annotate(
 
     elapsed = time.perf_counter() - started_at
     logger.info(
-        "annotate completed run_id={} chapters={}/{} elapsed={:.2f}s",
+        "annotate completed run_id={} chapters={}/{} failed={} elapsed={:.2f}s",
         run_id,
         success_count,
         total_chapters,
+        failed_count,
         elapsed,
     )
+    if first_failure is not None and success_count == 0:
+        # 所有章节均失败时按原失败语义抛出首个异常，交由调用方收口 run 状态
+        raise first_failure
     return success_count, 0, total_chapters
