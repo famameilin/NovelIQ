@@ -179,6 +179,7 @@ async def run_diagnosis_agent(
         stream=stream,
         observer=observer,
         context_summary=_context_summary(evidence_ledger),
+        model_retries=max(1, settings.models.diagnosis.total_attempts),
     )
 
     from langchain_core.messages import HumanMessage, SystemMessage

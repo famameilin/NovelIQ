@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 perf_counter_ns = time.perf_counter_ns
 
 
+class StreamEmitError(RuntimeError):
+    """2026-08-12 用于区分 SSE 推送失败与模型输出流中断：推送失败不触发模型请求重试"""
+
+
 def _truncate(text: str, limit: int = _MAX_TOOL_SUMMARY_CHARS) -> str:
     """截断过长摘要，避免工具结果刷爆事件负载"""
     if len(text) <= limit:
@@ -154,7 +158,7 @@ def _accumulate_usage_metadata(target: dict[str, Any], source: Mapping[str, Any]
         if isinstance(value, Mapping):
             nested = target.setdefault(key, {})
             _accumulate_usage_metadata(nested, value)
-        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        elif isinstance(value, int | float) and not isinstance(value, bool):
             target[key] = target.get(key, 0) + value
         else:
             target[key] = value
@@ -234,13 +238,16 @@ class StreamChunkAggregator:
         stream: AgentStream | None,
         *,
         started_ns: int | None = None,
+        skip_output_chars: int = 0,
+        announced_tools: set[int] | None = None,
     ) -> None:
         self._stream = stream
         self._started_ns = started_ns if started_ns is not None else perf_counter_ns()
         self._content_parts: list[str] = []
         self._reasoning_parts: list[str] = []
         self._tool_call_chunks: list[dict[str, Any]] = []
-        self._announced_tools: set[int] = set()
+        self._announced_tools: set[int] = set(announced_tools or ())
+        self._skip_output_chars = max(0, skip_output_chars)
         self._usage_metadata: dict[str, Any] = {}
         self._finish_reason: str | None = None
         self._ttft_ns: int | None = None
@@ -253,9 +260,21 @@ class StreamChunkAggregator:
         now_ns = perf_counter_ns()
         content = getattr(chunk, "content", "")
         if isinstance(content, str) and content:
-            self._content_parts.append(content)
-            if self._stream is not None:
-                await self._stream.output(content)
+            # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出
+            if self._skip_output_chars > 0:
+                if len(content) <= self._skip_output_chars:
+                    self._skip_output_chars -= len(content)
+                    content = ""
+                else:
+                    content = content[self._skip_output_chars :]
+                    self._skip_output_chars = 0
+            if content:
+                self._content_parts.append(content)
+                if self._stream is not None:
+                    try:
+                        await self._stream.output(content)
+                    except Exception as exc:
+                        raise StreamEmitError(f"SSE 推送输出失败: {exc}") from exc
 
         reasoning = _extract_reasoning_token(chunk)
         if reasoning:
@@ -270,7 +289,10 @@ class StreamChunkAggregator:
                 self._announced_tools.add(index)
                 announced_name = name
                 if self._stream is not None:
-                    await self._stream.tool_call_started(name)
+                    try:
+                        await self._stream.tool_call_started(name)
+                    except Exception as exc:
+                        raise StreamEmitError(f"SSE 推送工具调用失败: {exc}") from exc
         if raw_tool_chunks:
             self._tool_call_chunks.extend(raw_tool_chunks)
 
@@ -372,6 +394,7 @@ async def run_model_call(
     stream: AgentStream | None,
     *,
     on_turn_complete: Callable[[AIMessage, ModelCallTiming], None] | None = None,
+    retries: int | None = None,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
@@ -379,8 +402,10 @@ async def run_model_call(
     无论是否开启 SSE 都优先走 Provider 流式接口，否则无法得到真实 TTFT；
     非流式 Provider 的 TTFT 与推理时间记录为 NULL，不会用总耗时冒充。
     流式输出中途断流（astream 抛异常）时用同一 messages 重发当前模型请求，
-    重试次数对齐 settings.models.annotation.total_attempts（默认 3 次），
-    重试期间推送 thinking 事件；耗尽后抛出最后一次异常。
+    重试次数由 retries 显式传入（由调用方按任务模型配置决定），
+    缺省时对齐 settings.models.annotation.total_attempts（默认 3 次）；
+    重试期间推送 thinking 事件，并跳过与上次已推送内容重叠的前缀，避免重复输出；
+    耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
     on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
     """
     started_ns = perf_counter_ns()
@@ -400,12 +425,22 @@ async def run_model_call(
 
     from src.config import settings
 
-    retries_remaining = max(1, settings.models.annotation.total_attempts)
+    retries_remaining = max(1, retries if retries is not None else settings.models.annotation.total_attempts)
+    skip_output_chars = 0
+    announced_tools: set[int] = set()
     while True:
-        aggregator = StreamChunkAggregator(stream, started_ns=started_ns)
+        aggregator = StreamChunkAggregator(
+            stream,
+            started_ns=started_ns,
+            skip_output_chars=skip_output_chars,
+            announced_tools=announced_tools,
+        )
         try:
             async for chunk in model.astream(messages):
                 await aggregator.add_chunk(chunk)
+        except StreamEmitError:
+            # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
+            raise
         except Exception as exc:  # noqa: BLE001
             if retries_remaining <= 0:
                 logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
@@ -420,6 +455,8 @@ async def run_model_call(
                 await stream.thinking(
                     f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）"
                 )
+            skip_output_chars = len("".join(aggregator._content_parts))
+            announced_tools = set(aggregator._announced_tools)
             continue
         response = aggregator.finish()
         if on_turn_complete is not None:

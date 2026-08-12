@@ -311,6 +311,7 @@ def _build_agent_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     context_summary: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+    retries: int | None = None,
 ):
     """构造 agent 节点：绑定工具后调用 LLM（支持流式过程推送与回合审计）"""
 
@@ -344,6 +345,7 @@ def _build_agent_node(
                 messages,
                 stream,
                 on_turn_complete=on_turn_complete,
+                retries=retries,
             )
         except Exception as exc:  # noqa: BLE001
             if observer is not None:
@@ -473,13 +475,13 @@ def build_agent_graph(
     first_hint: str,
     finish_tool_name: str = _FINISH_TOOL_NAME,
     response_validator: Callable[[Any], None] | None = None,
-    handle_tool_errors: bool | None = None,
     revision_tool_name: str | None = None,
     revision_response_model: type[Any] | None = None,
     max_tool_iterations: int | None = None,
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     context_summary: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+    model_retries: int | None = None,
 ) -> Any:
     """构建通用工具循环 agent 图"""
     graph = StateGraph(AgentLoopState)
@@ -505,6 +507,7 @@ def build_agent_graph(
             stream=stream,
             observer=observer,
             context_summary=context_summary,
+            retries=model_retries,
         ),
     )
     tool_map = {candidate.name: candidate for candidate in tools}

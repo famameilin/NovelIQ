@@ -150,56 +150,6 @@ def estimate_agent_token_usage(messages: list[Any]) -> list[AgentTokenUsage]:
     return estimated
 
 
-def record_agent_token_usage(
-    *,
-    session: Any,
-    run_id: str | None,
-    novel_id: str,
-    task_type: str,
-    call_type: str,
-    chunk_id: int | None,
-    llm: Any,
-    messages: list[Any],
-) -> None:
-    """
-    2026-08-04 用于将每次 Agent 模型响应的 Token 用量写入 token_usage
-
-    2026-08-10 Provider 无用量时按本地估算兜底，并标记 accounting_source=estimated
-    """
-    if session is None or not run_id:
-        return
-
-    from src.storage.repositories import StatsRepository
-
-    stats_repo = StatsRepository(session)
-    ai_entries = [(index, message) for index, message in enumerate(messages) if getattr(message, "type", None) == "ai"]
-    estimates = estimate_agent_token_usage(messages)
-    for (_, message), estimate in zip(ai_entries, estimates, strict=True):
-        usage = extract_agent_token_usage(message)
-        if usage is None:
-            usage = estimate
-        response_metadata = getattr(message, "response_metadata", None)
-        response_model = response_metadata.get("model_name") if isinstance(response_metadata, Mapping) else None
-        model_name = str(response_model or getattr(llm, "model_name", None) or getattr(llm, "model", "unknown"))
-        try:
-            stats_repo.insert_token_usage(
-                run_id=run_id,
-                novel_id=novel_id,
-                task_type=task_type,
-                call_type=call_type,
-                model=model_name,
-                prompt_tokens=usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens,
-                total_tokens=usage.total_tokens,
-                chunk_id=chunk_id,
-                cache_read_tokens=usage.cache_read_tokens,
-                cost=usage.cost,
-                accounting_source="estimated" if usage.estimated else "reported",
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("failed to record agent token usage: {}", exc)
-
-
 def build_token_usage_callback(*, session: Any, run_id: str) -> TokenUsageCallback:
     """
     2026-08-10 用于构造 EmbeddingClient 可用的 token 用量回调，逐笔落入 token_usage

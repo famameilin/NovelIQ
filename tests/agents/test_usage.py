@@ -8,7 +8,6 @@ from src.agents.usage import (
     build_token_usage_callback,
     estimate_agent_token_usage,
     extract_agent_token_usage,
-    record_agent_token_usage,
 )
 from src.utils.token_counter import count_tokens
 
@@ -28,68 +27,6 @@ def test_extract_agent_token_usage_reads_langchain_usage_metadata() -> None:
     assert usage.prompt_tokens == 12
     assert usage.completion_tokens == 8
     assert usage.total_tokens == 20
-
-
-def test_record_agent_token_usage_estimates_missing_or_zero_provider_usage() -> None:
-    """
-    2026-08-10 用于验证无 Provider 用量的 Agent 响应按本地估算入账并标记 estimated
-    """
-    session = MagicMock()
-    llm = MagicMock(model_name="agent-model")
-    messages = [
-        AIMessage(content="无用量"),
-        AIMessage(content="零用量", usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}),
-    ]
-
-    with patch("src.storage.repositories.StatsRepository") as stats_repository:
-        record_agent_token_usage(
-            session=session,
-            run_id="run-1",
-            novel_id="novel-1",
-            task_type="annotation",
-            call_type="agent",
-            chunk_id=3,
-            llm=llm,
-            messages=messages,
-        )
-
-    assert stats_repository.return_value.insert_token_usage.call_count == 2
-    for call in stats_repository.return_value.insert_token_usage.call_args_list:
-        assert call.kwargs["accounting_source"] == "estimated"
-        assert call.kwargs["cache_read_tokens"] == 0
-        assert call.kwargs["cost"] is None
-
-
-def test_record_agent_token_usage_persists_each_response_with_provider_usage() -> None:
-    """
-    2026-08-04 用于验证多轮 Agent 调用逐条落入 annotation Token 账本
-    """
-    session = MagicMock()
-    llm = MagicMock(model_name="agent-model")
-    messages = [
-        AIMessage(content="取证", usage_metadata={"input_tokens": 9, "output_tokens": 3, "total_tokens": 12}),
-        AIMessage(content="完成", usage_metadata={"input_tokens": 11, "output_tokens": 5, "total_tokens": 16}),
-    ]
-
-    with patch("src.storage.repositories.StatsRepository") as stats_repository:
-        record_agent_token_usage(
-            session=session,
-            run_id="run-1",
-            novel_id="novel-1",
-            task_type="annotation",
-            call_type="agent",
-            chunk_id=3,
-            llm=llm,
-            messages=messages,
-        )
-
-    assert stats_repository.return_value.insert_token_usage.call_count == 2
-    first_call = stats_repository.return_value.insert_token_usage.call_args_list[0].kwargs
-    assert first_call["prompt_tokens"] == 9
-    assert first_call["completion_tokens"] == 3
-    assert first_call["total_tokens"] == 12
-
-
 def test_extract_agent_token_usage_reads_deepseek_raw_usage() -> None:
     """
     2026-08-10 用于验证 DeepSeek 原始 usage 结构被解析为统一用量
@@ -249,45 +186,6 @@ def test_estimate_agent_token_usage_returns_empty_without_ai_messages() -> None:
     2026-08-10 用于验证没有 AI 响应时估算列表为空
     """
     assert estimate_agent_token_usage([HumanMessage(content="hi")]) == []
-
-
-def test_record_agent_token_usage_passes_cache_cost_and_source() -> None:
-    """
-    2026-08-10 用于验证实报路径把缓存命中、费用和来源一起写入账本
-    """
-    session = MagicMock()
-    llm = MagicMock(model_name="agent-model")
-    messages = [
-        AIMessage(
-            content="完成",
-            usage_metadata={
-                "input_tokens": 100,
-                "output_tokens": 20,
-                "total_tokens": 120,
-                "input_token_details": {"cache_read": 30},
-                "cost": "0.42",
-            },
-        )
-    ]
-
-    with patch("src.storage.repositories.StatsRepository") as stats_repository:
-        record_agent_token_usage(
-            session=session,
-            run_id="run-1",
-            novel_id="novel-1",
-            task_type="annotation",
-            call_type="agent",
-            chunk_id=3,
-            llm=llm,
-            messages=messages,
-        )
-
-    call_kwargs = stats_repository.return_value.insert_token_usage.call_args_list[0].kwargs
-    assert call_kwargs["cache_read_tokens"] == 30
-    assert call_kwargs["cost"] == 0.42
-    assert call_kwargs["accounting_source"] == "reported"
-
-
 def test_build_token_usage_callback_records_embedding_usage() -> None:
     """
     2026-08-10 用于验证 EmbeddingClient 的 token 用量回调逐笔落入账本

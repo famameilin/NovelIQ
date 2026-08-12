@@ -732,7 +732,7 @@ class AnnotationToolLedger:
             raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
         if self.ready_chunk is None:
             raise AnnotationInvariantError(
-                "八个领域均已写入但 ready_chunk 缺失，系统不变量被破坏"
+                "七个领域均已写入但 ready_chunk 缺失，系统不变量被破坏"
             )
         chunk = self.ready_chunk
         self.completed_chunks.append(chunk)

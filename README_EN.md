@@ -173,10 +173,10 @@ The system follows a four-layer architecture with unidirectional dependencies:
 │  Workflow Layer (src/workflows)                         │
 │  Core business logic: preprocessing, annotation,        │
 │  aggregation, topic modeling, diagnosis                 │
-│  HTTP-agnostic, callable from both API and CLI          │
+│  HTTP-agnostic, orchestrated by the API layer           │
 ├─────────────────────────────────────────────────────────┤
-│  Domain + Storage Layer (src/storage, rag, models, ...) │
-│  Data persistence, LLM interaction, metric computation, │
+│  Domain + Storage Layer (src/storage, agents, chapters, ...) │
+│  Data persistence, Agent interaction, metric computation, │
 │  evidence retrieval, knowledge graph                    │
 └─────────────────────────────────────────────────────────┘
 ```

@@ -2,7 +2,7 @@
 章节标注逐 chunk 语义写入 LangGraph
 
 消息链采用 messages + add_messages 累积；每次模型请求携带完整历史消息。
-complete_chunk 与 finish_chapter 由程序自动执行：八个领域全部写入成功后
+complete_chunk 与 finish_chapter 由程序自动执行：七个领域全部写入成功后
 图节点自动冻结 chunk 并完成章节，模型不需要调用完成工具。
 """
 
@@ -55,6 +55,7 @@ def _build_agent_node(
     max_iterations: int,
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
+    retries: int | None = None,
 ):
     """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点"""
 
@@ -90,6 +91,7 @@ def _build_agent_node(
                 request_messages,
                 stream,
                 on_turn_complete=on_turn_complete,
+                retries=retries,
             )
         except Exception as exc:  # noqa: BLE001
             if observer is not None:
@@ -208,6 +210,9 @@ def _build_tool_batch_node(
                 error: str | None = None
                 receipt = json.loads(result)
             except AnnotationInvariantError:
+                # 合同违反属不可恢复错误：先闭合回合审计计时再上抛，避免 agent_turns 行耗时字段永久为空
+                if observer is not None:
+                    observer.close_turn()
                 raise
             except Exception as exc:  # noqa: BLE001
                 ledger.restore(ledger_snapshot)
@@ -260,24 +265,31 @@ def _build_auto_finalize_node(
     ledger: AnnotationToolLedger,
     *,
     stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
 ):
-    """2026-08-10 用于八个领域写入成功后自动 complete_chunk 并 finish_chapter"""
+    """2026-08-10 用于七领域写入成功后自动 complete_chunk 并 finish_chapter"""
 
     async def auto_finalize(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-10 用于在八个领域 receipt 齐全时程序冻结 chunk 并完成章节"""
+        """2026-08-10 用于在七领域 receipt 齐全时程序冻结 chunk 并完成章节"""
         if ledger.phase != "chunk_open":
             return {"phase": ledger.phase}
         if not _DOMAIN_NAMES_SET <= ledger.domain_receipts:
             return {"phase": ledger.phase}
-        if stream is not None:
-            await stream.tool_call_started("complete_chunk")
-        ledger.complete_active_chunk()
-        if stream is not None:
-            await stream.tool_call_succeeded("complete_chunk", "chunk frozen")
-            await stream.tool_call_started("finish_chapter")
-        ledger.finish()
-        if stream is not None:
-            await stream.tool_call_succeeded("finish_chapter", "chapter completed")
+        try:
+            if stream is not None:
+                await stream.tool_call_started("complete_chunk")
+            ledger.complete_active_chunk()
+            if stream is not None:
+                await stream.tool_call_succeeded("complete_chunk", "chunk frozen")
+                await stream.tool_call_started("finish_chapter")
+            ledger.finish()
+            if stream is not None:
+                await stream.tool_call_succeeded("finish_chapter", "chapter completed")
+        except Exception:
+            # 章节完成写入失败时同样闭合审计计时，避免该回合耗时字段永久为空
+            if observer is not None:
+                observer.close_turn()
+            raise
         return {"phase": ledger.phase}
 
     return auto_finalize
@@ -315,6 +327,7 @@ def build_annotation_graph(
     max_iterations: int,
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
+    retries: int | None = None,
 ) -> Any:
     """2026-08-10 用于构建逐 chunk 领域写入和章节自动完成状态机（消息链累积）"""
     graph = StateGraph(AnnotationGraphState)
@@ -327,6 +340,7 @@ def build_annotation_graph(
             max_iterations=max_iterations,
             stream=stream,
             observer=observer,
+            retries=retries,
         ),
     )
     graph.add_node(
@@ -343,6 +357,7 @@ def build_annotation_graph(
         _build_auto_finalize_node(
             ledger,
             stream=stream,
+            observer=observer,
         ),
     )
     graph.add_node(
