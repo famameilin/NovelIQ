@@ -28,6 +28,9 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
   const [changesLoadError, setChangesLoadError] = useState<string | null>(null);
   const changesRequestVersionRef = useRef(0);
   const currentTaskScopeIdRef = useRef<string | null>(null);
+  // 2026-08-12: 快速双击"加载更多"时第二次调用可能仍处于同一渲染闭包（读到旧的
+  // isChangesLoading=false）；用 in-flight 游标引用兜底，同游标重复请求直接丢弃
+  const inFlightLoadMoreCursorRef = useRef<string | null>(null);
 
   useEffect(() => {
     currentTaskScopeIdRef.current = taskScopeId;
@@ -36,6 +39,7 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
   useEffect(() => {
     const requestVersion = changesRequestVersionRef.current + 1;
     changesRequestVersionRef.current = requestVersion;
+    inFlightLoadMoreCursorRef.current = null;
     setLoadedChanges([]);
     setChangesPageInfo(null);
     setChangesLoadError(null);
@@ -87,11 +91,16 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
     if (!novelId || !taskScopeId || !changesPageInfo?.next_cursor || isChangesLoading) {
       return;
     }
+    // 同一游标的请求已在途时直接丢弃，避免快速双击产生重复请求
+    if (inFlightLoadMoreCursorRef.current !== null) {
+      return;
+    }
 
     const requestTaskId = taskScopeId;
     const requestCursor = changesPageInfo.next_cursor;
     const requestVersion = changesRequestVersionRef.current + 1;
     changesRequestVersionRef.current = requestVersion;
+    inFlightLoadMoreCursorRef.current = requestCursor;
 
     setIsChangesLoading(true);
     setChangesLoadError(null);
@@ -112,6 +121,7 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
       const message = error instanceof Error ? error.message : "加载更多图谱变化失败";
       setChangesLoadError(message);
     } finally {
+      inFlightLoadMoreCursorRef.current = null;
       if (changesRequestVersionRef.current === requestVersion && currentTaskScopeIdRef.current === requestTaskId) {
         setIsChangesLoading(false);
       }
