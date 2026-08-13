@@ -125,6 +125,25 @@ def test_reset_chapter_relations_after_begin_chapter_keeps_previous_chapter_edge
     assert graph.relation_exists("顾霜", "猴子", "盟友")
 
 
+def test_reset_chapter_changes_after_begin_chapter_keeps_previous_chapter_state() -> None:
+    """2026-08-13 P1-1 用于验证失败回滚恢复到上一章结束快照而非 run 启动快照
+
+    begin_chapter 把本章增量并入 history_*，reset_chapter_changes 回滚时
+    上一章登记的实体与 assert 的边保留，仅撤销本章增量。
+    """
+    graph = FactGraph()
+    graph.register_entities([_Entity("算盘", "character")])
+    graph.apply_relation(_relation("算盘", "猴子", "友情"))
+    graph.begin_chapter()
+
+    graph.register_entities([_Entity("顾霜", "character")])
+    graph.reset_chapter_changes()
+
+    assert graph.entity_type("算盘") == "character"
+    assert graph.relation_exists("算盘", "猴子", "友情")
+    assert graph.entity_type("顾霜") is None
+
+
 def test_begin_chapter_clears_chapter_registered_entities_only() -> None:
     """2026-08-11 用于验证章节边界只撤销本章登记实体，上一章登记的实体保留"""
     graph = FactGraph()
@@ -181,6 +200,43 @@ def test_fact_graph_apply_relation_maintains_relation_attributes() -> None:
 
     graph.apply_relation(_relation("顾霜", "顾老", "同一人物"))
     assert graph.relation_attributes[key]["support_count"] == 1
+
+
+def test_reset_chapter_relations_rolls_back_support_count() -> None:
+    """2026-08-13 P2-9 write_relations 完整替换：reset 回退本章新增边的 support_count，
+    重新提交已 assert 边不重复 +1（修复前每次替换 +1 导致支持度虚高）"""
+    graph = FactGraph()
+    graph.register_entities(
+        [_Entity("顾霜", "character"), _Entity("顾老", "character")]
+    )
+    graph.apply_relation(_relation("顾霜", "顾老", "同一人物"))
+    key = ("顾老", "顾霜", "同一人物")
+    assert graph.relation_attributes[key]["support_count"] == 1
+
+    # 同一章节内第二次 write_relations 完整替换：先 reset 再重新 apply 同一条边
+    graph.reset_chapter_relations()
+    assert key not in graph.relation_attributes
+    assert not graph.relation_exists("顾霜", "顾老", "同一人物")
+
+    graph.apply_relation(_relation("顾霜", "顾老", "同一人物"))
+
+    assert graph.relation_attributes[key]["support_count"] == 1
+
+
+def test_reset_chapter_relations_rolls_back_support_count_only_for_chapter_edges() -> None:
+    """2026-08-13 P2-9 reset 只回退本章新增边的计数，历史边的 support_count 不受影响"""
+    graph = FactGraph(
+        history_entity_types={"贺伯安": "character", "赵兰英": "character"},
+        history_entity_names={"贺伯安": "贺伯安", "赵兰英": "赵兰英"},
+        history_relations={("贺伯安", "赵兰英", "家族")},
+        history_relation_attributes={("贺伯安", "赵兰英", "家族"): {"support_count": 2}},
+    )
+    graph.register_entities([_Entity("顾霜", "character")])
+    graph.apply_relation(_relation("顾霜", "贺伯安", "友情"))
+    graph.reset_chapter_relations()
+
+    assert graph.relation_attributes[("贺伯安", "赵兰英", "家族")] == {"support_count": 2}
+    assert graph.relation_exists("贺伯安", "赵兰英", "家族")
 
 
 def test_fact_graph_register_entities_updates_tags_and_description() -> None:

@@ -336,21 +336,42 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             hit_count = hit_counts.get(thread.setup_id, 0)
             if hit_count < 1:
                 raise ValueError(f"伏笔线程缺少命中记录: {thread.setup_id}")
-            base = _EXPECTATION_BASE_SCORE_BY_PAYOFF[thread.payoff_likelihood]
+            # 2026-08-13 P1-2：schema 侧对枚举字段非法值降级为 "unknown"，
+            # 这里按最保守档位兜底，避免任意字符串直接索引常量字典抛 KeyError
+            base = _EXPECTATION_BASE_SCORE_BY_PAYOFF.get(
+                thread.payoff_likelihood,
+                _EXPECTATION_BASE_SCORE_BY_PAYOFF["medium"],
+            )
+            status_bonus = _EXPECTATION_STATUS_BONUS.get(
+                thread.status,
+                _EXPECTATION_STATUS_BONUS["open"],
+            )
+            strength_bonus = _EXPECTATION_STRENGTH_BONUS.get(
+                thread.strength,
+                _EXPECTATION_STRENGTH_BONUS["low"],
+            )
             score = min(
                 1.0,
                 max(
                     0.0,
                     base
-                    + _EXPECTATION_STATUS_BONUS[thread.status]
-                    + _EXPECTATION_STRENGTH_BONUS[thread.strength]
+                    + status_bonus
+                    + strength_bonus
                     + (0.08 if hit_count >= 3 else 0.04 if hit_count == 2 else 0.0),
                 ),
             )
+            status_weight = _EXPECTATION_STATUS_WEIGHT.get(
+                thread.status,
+                _EXPECTATION_STATUS_WEIGHT["open"],
+            )
+            strength_weight = _EXPECTATION_STRENGTH_WEIGHT.get(
+                thread.strength,
+                _EXPECTATION_STRENGTH_WEIGHT["low"],
+            )
             weight = (
-                _EXPECTATION_STATUS_WEIGHT[thread.status]
+                status_weight
                 + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0)
-                + _EXPECTATION_STRENGTH_WEIGHT[thread.strength]
+                + strength_weight
             )
             weighted_total += score * weight
             total_weight += weight

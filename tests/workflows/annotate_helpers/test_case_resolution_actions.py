@@ -136,7 +136,6 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
             chapter_id=1,
             annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -168,7 +167,6 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
             resolved_cases=[resolved],
             authorized_chunk_ids=[0, 1],
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
 
@@ -216,7 +214,6 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
             chapter_id=1,
             annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -244,7 +241,6 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
             resolved_cases=[resolved],
             authorized_chunk_ids=[0, 1],
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
 
@@ -278,7 +274,6 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
             chapter_id=1,
             annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -311,7 +306,6 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
             resolved_cases=[resolved],
             authorized_chunk_ids=[0],
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -338,7 +332,6 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
             chapter_id=1,
             annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -371,7 +364,6 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
                 resolved_cases=[resolved],
                 authorized_chunk_ids=[1],
             ),
-            novel_id=novel_id,
             session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
         )
     db_session.rollback()
@@ -391,7 +383,6 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
             chapter_id=1,
             annotation=_annotation(chunk_id=0, text="顾霜喝道", entity_names=["顾霜"]),
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -428,7 +419,6 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
                 resolved_cases=[resolved],
                 authorized_chunk_ids=[0, 1],
             ),
-            novel_id=novel_id,
             session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
         )
     db_session.rollback()
@@ -458,7 +448,6 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
                 foreshadowing=foreshadowing,
             ),
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
@@ -510,7 +499,6 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
             resolved_cases=[resolved],
             authorized_chunk_ids=[0, 1],
         ),
-        novel_id=novel_id,
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
 
@@ -556,7 +544,6 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
                     foreshadowing=foreshadowing,
                 ),
             ),
-            novel_id=novel_id,
             session_factory=factory,
         )
         db_session.rollback()
@@ -568,11 +555,16 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
     )
     hits = list(
         db_session.execute(
-            select(ForeshadowingThreadHit).where(ForeshadowingThreadHit.run_id == run_id)
+            select(ForeshadowingThreadHit)
+            .where(ForeshadowingThreadHit.run_id == run_id)
+            .order_by(ForeshadowingThreadHit.chunk_id)
         ).scalars()
     )
     assert len(threads) == 1
-    assert len(hits) == 1
+    # 2026-08-13 P1-3：每个新 chunk 的 Phase2 命中都落一条 hit（合同），
+    # 第二章在 chunk 1 续接命中后 last_chunk_id 推进到 1
+    assert len(hits) == 2
+    assert [hit.chunk_id for hit in hits] == [0, 1]
     assert threads[0].setup_summary == "顾霜承诺护佑山门"
     assert threads[0].foreshadowing_type == "其他"
     assert threads[0].status == "open"

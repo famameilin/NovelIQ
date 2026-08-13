@@ -492,8 +492,10 @@ def test_load_core_results_keeps_export_on_raw_chunk_curves(monkeypatch: pytest.
         "src.api.services.results_export_service._fetch_raw_chunk_curves",
         lambda *_args, **_kwargs: [raw_curve],
     )
+    # 2026-08-13 P2：results_fetchers 转发层死代码已删除，防御 patch 指向
+    # 真实实现模块（若 load_core_results 误用展示层融合曲线会触发异常）
     monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers._fetch_chunk_curves",
+        "src.api.services.results_queries._fetch_chunk_curves",
         _raise_if_display_curve_is_used,
     )
 

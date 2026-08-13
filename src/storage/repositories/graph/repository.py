@@ -373,7 +373,9 @@ class GraphRepository(BaseRepository[GraphFact]):
             f"""
             WITH state_causes AS (
                 SELECT
-                    'state:' || state_version.state_version_id::text AS change_id,
+                    'state:' || state_version.state_version_id::text
+                        || ':' || (cause.change ->> 'fact_id')
+                        || ':' || ((cause.change ->> 'fact_revision')::integer)::text AS change_id,
                     'state'::text AS change_kind,
                     graph_version.graph_version_id,
                     graph_version.chapter_id,
@@ -420,7 +422,9 @@ class GraphRepository(BaseRepository[GraphFact]):
             ),
             relation_causes AS (
                 SELECT
-                    'relation:' || relation_version.relation_version_id::text AS change_id,
+                    'relation:' || relation_version.relation_version_id::text
+                        || ':' || (cause.change ->> 'fact_id')
+                        || ':' || ((cause.change ->> 'fact_revision')::integer)::text AS change_id,
                     'relation'::text AS change_kind,
                     graph_version.graph_version_id,
                     graph_version.chapter_id,

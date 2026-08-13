@@ -161,12 +161,48 @@ class FactGraph:
         self.relation_attributes[key] = attributes
 
     def reset_chapter_relations(self) -> None:
-        """2026-08-09 用于在完整替换语义下撤销当章 assert 的关系"""
+        """2026-08-09 用于在完整替换语义下撤销当章 assert 的关系
+
+        2026-08-13 P2-9：同步回退本章新增边累加的 support_count——同一章节内
+        write_relations 完整替换会先 reset 再重新 apply，若不回退，重新提交
+        已 assert 边会重复 +1（每次替换 +1），落库后支持度虚高。
+        """
+        for key in self.chapter_added_relations:
+            attributes = dict(self.relation_attributes.get(key) or {})
+            support = int(attributes.get("support_count", 0)) - 1
+            if support > 0:
+                attributes["support_count"] = support
+            else:
+                attributes.pop("support_count", None)
+            if attributes:
+                self.relation_attributes[key] = attributes
+            else:
+                self.relation_attributes.pop(key, None)
         self.active_relations -= self.chapter_added_relations
         self.chapter_added_relations.clear()
 
     def begin_chapter(self) -> None:
-        """2026-08-11 用于在章节边界把本章增量并入历史并清空章内追踪状态"""
+        """2026-08-11 用于在章节边界把本章增量并入历史并清空章内追踪状态
+
+        2026-08-13 P1-1 防御：把本章实时状态并入 history_* 快照，使章节失败
+        回滚（reset_chapter_changes）恢复到上一章结束状态而非 run 启动状态，
+        避免重试时丢失已成功章节的内存增量（正常路径 resume 从库重载兜底）。
+        """
+        self.history_entity_types = dict(self.entity_types)
+        self.history_entity_names = dict(self.entity_names)
+        self.history_entity_tags = {
+            key: list(tags) for key, tags in self.entity_tags.items()
+        }
+        self.history_entity_attributes = {
+            key: dict(attributes) for key, attributes in self.entity_attributes.items()
+        }
+        self.history_entity_state = {
+            key: dict(state) for key, state in self.entity_state.items()
+        }
+        self.history_relations = set(self.active_relations)
+        self.history_relation_attributes = {
+            key: dict(attributes) for key, attributes in self.relation_attributes.items()
+        }
         self.chapter_added_relations.clear()
         self.chapter_registered_entities.clear()
 

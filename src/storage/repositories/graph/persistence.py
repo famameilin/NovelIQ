@@ -1410,6 +1410,11 @@ def persist_completion_graph(
         chapter_order=chapter_order,
         facts=facts,
     )
+    # 2026-08-13 P1-1: db.py 配置 autoflush=False，这里必须显式 flush 关系版本，
+    # 否则 _persist_resolved_cases → _latest_relation_draft 读不到同章已断言的
+    # 关系草稿（当前章节 pending 行），会把同一关系按 revision=1 双写，
+    # 撞 uq_graph_relation_versions_run_revision 唯一约束
+    session.flush()
     resolved_targets = _persist_resolved_cases(
         session,
         annotation=annotation,

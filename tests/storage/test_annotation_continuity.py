@@ -6,16 +6,18 @@ import pytest
 from sqlalchemy import select
 
 from src.agents.annotation.schema import (
+    BoundDialogue,
     BoundForeshadowing,
     CaseSearchResult,
     PendingCase,
 )
 from src.config import settings
-from src.storage.models import ForeshadowingThread
+from src.storage.models import DialogueRecord, ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.repositories import ForeshadowingRepository
 from src.storage.repositories.annotation.continuity import (
     CasePoolRepository,
     DatabaseAnnotationQueryService,
+    DialogueRecordRepository,
 )
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
@@ -131,6 +133,7 @@ def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session)
 
     assert second_thread.setup_id == first_thread.setup_id
     assert first_hit is not None
+    # 同 chunk 同 thread 的重复 sync 是纯 no-op：不重复写 hit、不制造假命中
     assert second_hit is None
     threads = list(
         db_session.execute(
@@ -138,3 +141,129 @@ def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session)
         ).scalars()
     )
     assert len(threads) == 1
+    hits = list(
+        db_session.execute(
+            select(ForeshadowingThreadHit).where(ForeshadowingThreadHit.run_id == run_id)
+        ).scalars()
+    )
+    assert len(hits) == 1
+
+
+def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chunk(db_session) -> None:
+    """2026-08-13 P1-3 用于验证已存在 thread 在更大 chunk 再次命中时补写 hit 并推进 last_chunk_id"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜立誓", "顾霜再誓"],
+        chapter_ids=[1, 2],
+        title="伏笔续接命中",
+    )
+    repository = ForeshadowingRepository(db_session)
+    first_thread, first_hit = repository.sync(
+        run_id=run_id,
+        chunk_id=0,
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+    )
+    assert first_thread.last_chunk_id == 0
+    assert first_hit is not None and first_hit.is_new_setup is True
+
+    second_thread, second_hit = repository.sync(
+        run_id=run_id,
+        chunk_id=1,
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+    )
+    db_session.commit()
+
+    assert second_thread.setup_id == first_thread.setup_id
+    assert second_hit is not None
+    assert second_hit.is_new_setup is False
+    assert second_hit.chunk_id == 1
+    # 新 chunk 更大时推进 last_chunk_id
+    assert second_thread.last_chunk_id == 1
+    hits = list(
+        db_session.execute(
+            select(ForeshadowingThreadHit)
+            .where(ForeshadowingThreadHit.run_id == run_id)
+            .order_by(ForeshadowingThreadHit.chunk_id)
+        ).scalars()
+    )
+    assert [hit.chunk_id for hit in hits] == [0, 1]
+    assert all(hit.setup_id == first_thread.setup_id for hit in hits)
+
+
+def test_foreshadowing_sync_existing_thread_noop_on_same_chunk(db_session) -> None:
+    """2026-08-13 P1-3 用于验证同 chunk 重复 sync 不推进 last_chunk_id 也不重复写 hit"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜立誓", "顾霜再誓", "顾霜三誓"],
+        title="伏笔 no-op",
+    )
+    repository = ForeshadowingRepository(db_session)
+    first_thread, _first_hit = repository.sync(
+        run_id=run_id,
+        chunk_id=1,
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+    )
+    # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chunk_id
+    thread, hit = repository.sync(
+        run_id=run_id,
+        chunk_id=0,
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+    )
+    db_session.commit()
+
+    assert hit is not None
+    assert thread.last_chunk_id == 1
+    hits = list(
+        db_session.execute(
+            select(ForeshadowingThreadHit)
+            .where(ForeshadowingThreadHit.run_id == run_id)
+            .order_by(ForeshadowingThreadHit.chunk_id)
+        ).scalars()
+    )
+    assert [hit.chunk_id for hit in hits] == [0, 1]
+
+
+def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> None:
+    """2026-08-13 P2-4 用于验证幂等键为 (run_id, candidate_key)：跨章重复台词不再撞唯一约束"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["“住手”回荡。", "“住手”再次响起。"],
+        chapter_ids=[1, 2],
+        title="对话跨章去重",
+    )
+    repository = DialogueRecordRepository(db_session)
+    dialogue = BoundDialogue(
+        candidate_index=1,
+        candidate_key="dlg_001",
+        content="“住手”",
+        start=0,
+        end=3,
+        speaker="顾霜",
+        tone="平静",
+    )
+    first_rows = repository.sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        chunk_id=0,
+        dialogues=[dialogue],
+    )
+    # 第二章重复台词：按 (run_id, chunk_id) 查不到，但唯一约束是 (run_id, candidate_key)，
+    # 修复后按 candidate_key 幂等，不重复写
+    second_rows = repository.sync_dialogues(
+        run_id=run_id,
+        chapter_id=2,
+        chunk_id=1,
+        dialogues=[dialogue],
+    )
+    db_session.commit()
+
+    assert len(first_rows) == 1
+    assert second_rows == []
+    rows = list(
+        db_session.execute(
+            select(DialogueRecord).where(DialogueRecord.run_id == run_id)
+        ).scalars()
+    )
+    assert len(rows) == 1
+    assert rows[0].candidate_key == "dlg_001"
+    assert rows[0].chunk_id == 0

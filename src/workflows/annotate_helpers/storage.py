@@ -285,6 +285,8 @@ def _reelect_representatives(
     run_id: str,
 ) -> None:
     """2026-08-11 用于每章完成后全量清空并重选规范名标记写入实体属性"""
+    from sqlalchemy import func
+
     from src.storage.models.graph import GraphEntity, GraphRelation, GraphRelationVersion
     from src.storage.repositories.graph.election import elect_representatives
 
@@ -293,12 +295,29 @@ def _reelect_representatives(
             select(GraphEntity).where(GraphEntity.run_id == run_id)
         ).scalars()
     )
+    latest_revision = (
+        select(
+            GraphRelationVersion.relation_id,
+            func.max(GraphRelationVersion.relation_revision).label("max_revision"),
+        )
+        .where(GraphRelationVersion.run_id == run_id)
+        .group_by(GraphRelationVersion.relation_id)
+        .subquery()
+    )
     relation_rows = (
         session.execute(
             select(GraphRelation.from_entity_id, GraphRelation.to_entity_id)
             .join(
                 GraphRelationVersion,
                 GraphRelationVersion.relation_id == GraphRelation.relation_id,
+            )
+            # 2026-08-13 P1-3 防御：只取每关系最新版本参与选举，历史残留的
+            # active 版本（关系已被后续章节 break/retract）混入会让已解绑的
+            # 实体对被错误选为代表
+            .join(
+                latest_revision,
+                (latest_revision.c.relation_id == GraphRelationVersion.relation_id)
+                & (latest_revision.c.max_revision == GraphRelationVersion.relation_revision),
             )
             .where(
                 GraphRelation.run_id == run_id,
@@ -322,11 +341,12 @@ def _reelect_representatives(
 def complete_annotation_run(
     *,
     result: AgentRunResult,
-    novel_id: str,
     session_factory: Callable[[], Session],
 ) -> CompletionResult:
-    """2026-08-10 用于原子提交正式标注图版本与连续性（审计由 AgentAuditRecorder 独立写入）"""
-    del novel_id
+    """2026-08-10 用于原子提交正式标注图版本与连续性（审计由 AgentAuditRecorder 独立写入）
+
+    2026-08-13 P2-5: 移除从未使用的 novel_id 参数（原实现立即 del，无任何消费点）。
+    """
     session = session_factory()
     try:
         with session.begin():
