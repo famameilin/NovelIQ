@@ -52,6 +52,18 @@ class ForeshadowingThread(Base):
     )
 
     __table_args__ = (
+        # 2026-08-13 P2：与 ForeshadowingThreadHit 对齐，补齐指向 chunks 的复合 FK，
+        # 防止孤儿 chunk 引用污染伏笔池排序（last_chunk_id 参与查询排序）
+        ForeignKeyConstraint(
+            ["first_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["last_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_foreshadowing_threads_run_active_last_chunk", "run_id", "active", "last_chunk_id"),
         Index("idx_foreshadowing_threads_run_status", "run_id", "status"),
     )

@@ -366,18 +366,23 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
 
 
 @pytest.mark.asyncio
-async def test_run_annotate_isolates_failed_chapter_and_continues(db_session) -> None:
-    """2026-08-12 用于验证第二章 Agent 失败时第一章结果仍被保存、失败不中断后续章节"""
+async def test_run_annotate_interrupts_after_failed_chapter_preserving_committed(db_session) -> None:
+    """2026-08-13 用于验证第二章 Agent 失败时中断后续章节并抛出异常，第一章结果仍被保存
+
+    中断语义：失败章未提交图版本，若后续章节继续提交会产生修订号空洞，
+    resume 补跑失败章时与后续章节修订号冲突（uq_*_run_revision）且重试必败。
+    中断后 run 收口 failed，resume 跳过已成功章节、仅重跑失败章及后续章节。
+    """
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["第一章", "第二章"],
-        chapter_ids=[1, 2],
-        title="章节失败隔离",
+        texts=["第一章", "第二章", "第三章"],
+        chapter_ids=[1, 2, 3],
+        title="章节失败中断",
     )
     calls: list[int] = []
 
     async def fake_agent(**kwargs):
-        """2026-08-12 用于让第二章 Agent 失败并记录执行顺序"""
+        """2026-08-13 用于让第二章 Agent 失败并记录执行顺序"""
         chapter_id = kwargs["chapter_id"]
         calls.append(chapter_id)
         chunk_text = kwargs["current_chunks"][0][1]
@@ -394,13 +399,14 @@ async def test_run_annotate_isolates_failed_chapter_and_continues(db_session) ->
         patch("src.agents.annotation.run_annotation_agent", new=fake_agent),
         patch("src.agents.llm.build_chat_model", return_value=MagicMock()),
     ):
-        result = await run_annotate(
-            run_id=run_id,
-            session=db_session,
-            novel_id=novel_id,
-        )
+        with pytest.raises(RuntimeError, match="第二章标注失败"):
+            await run_annotate(
+                run_id=run_id,
+                session=db_session,
+                novel_id=novel_id,
+            )
 
-    assert result == (1, 0, 2)
+    # 失败章后不再执行后续章节（第三章未被调用），已成功章节保留提交
     assert calls == [1, 2]
     db_session.rollback()
     count = db_session.execute(
@@ -437,7 +443,7 @@ async def test_run_annotate_raises_when_all_chapters_fail(db_session) -> None:
                 novel_id=novel_id,
             )
 
-    assert agent.call_count == 2
+    assert agent.call_count == 1
     db_session.rollback()
     count = db_session.execute(
         select(func.count())

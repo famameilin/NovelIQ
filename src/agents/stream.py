@@ -11,6 +11,7 @@ Agent 层只需持有 AgentStream 即可获得完整过程可见性。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -28,9 +29,40 @@ logger = logging.getLogger(__name__)
 
 perf_counter_ns = time.perf_counter_ns
 
+# 2026-08-13 P2-6 瞬态错误类型名标记：openai/httpx 网络与限流异常按类名匹配
+_TRANSIENT_ERROR_MARKERS = (
+    "timeout",
+    "connection",
+    "connect",
+    "ratelimit",
+    "rate_limit",
+    "429",
+)
+
 
 class StreamEmitError(RuntimeError):
     """2026-08-12 用于区分 SSE 推送失败与模型输出流中断：推送失败不触发模型请求重试"""
+
+
+def _is_transient_model_error(exc: BaseException) -> bool:
+    """2026-08-13 P2-6 用于判定网络/限流类瞬态错误：仅这类错误值得重发模型请求
+
+    覆盖内置 ConnectionError/TimeoutError 以及 openai/httpx 异常类型
+    （APIConnectionError/APITimeoutError/RateLimitError/ConnectError/ReadTimeout 等）。
+    """
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    name = type(exc).__name__.lower()
+    return any(marker in name for marker in _TRANSIENT_ERROR_MARKERS)
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    """2026-08-13 P2-12 用于计算重试前退避时长：0.5s × 2^attempt 指数退避，上限 3s
+
+    attempt 从 1 起计（第一次重试前等待 1s，第二次 2s，第三次 3s 封顶）。
+    仅对 429/连接类瞬态错误生效，其余错误不额外等待。
+    """
+    return min(0.5 * (2 ** max(attempt, 1)), 3.0)
 
 
 def _truncate(text: str, limit: int = _MAX_TOOL_SUMMARY_CHARS) -> str:
@@ -239,16 +271,18 @@ class StreamChunkAggregator:
         stream: AgentStream | None,
         *,
         started_ns: int | None = None,
-        skip_output_chars: int = 0,
-        announced_tools: set[int] | None = None,
+        skip_output_prefix: str = "",
+        announced_tools: set[str] | None = None,
     ) -> None:
         self._stream = stream
         self._started_ns = started_ns if started_ns is not None else perf_counter_ns()
         self._content_parts: list[str] = []
         self._reasoning_parts: list[str] = []
         self._tool_call_chunks: list[dict[str, Any]] = []
-        self._announced_tools: set[int] = set(announced_tools or ())
-        self._skip_output_chars = max(0, skip_output_chars)
+        # 2026-08-13 P2-8 按工具名记录已推送 started 事件（原按 index 记录会导致
+        # 断流重试后 index 相同但工具名不同时客户端看不到 started 事件）
+        self._announced_tools: set[str] = set(announced_tools or ())
+        self._skip_output_prefix = skip_output_prefix
         self._usage_metadata: dict[str, Any] = {}
         self._finish_reason: str | None = None
         self._ttft_ns: int | None = None
@@ -256,19 +290,38 @@ class StreamChunkAggregator:
         self._first_reasoning_ns: int | None = None
         self._last_reasoning_ns: int | None = None
 
+    @staticmethod
+    def _split_overlap(content: str, skip_prefix: str) -> tuple[str, str, str]:
+        """2026-08-13 拆分与上次已推送内容的重叠部分，返回（重叠部分, 非重叠部分, 剩余跳过前缀）
+
+        断流重试时客户端已看到失败尝试推送的全文。重叠部分进入消息链（重试
+        输出的完整内容必须保留，否则后续回合上下文缺失）但不推 SSE；非重叠
+        部分正常推送。重试输出整体是失败输出的前缀（非确定性 LLM 输出更短）
+        时，全部落入重叠区，消息链仍保留全文，仅 SSE 不重复推送。
+        """
+        if not skip_prefix:
+            return "", content, ""
+        common = 0
+        max_common = min(len(content), len(skip_prefix))
+        while common < max_common and content[common] == skip_prefix[common]:
+            common += 1
+        if common == len(content):
+            # 整个 chunk 是已推送内容的前缀：保留跳过前缀供后续 chunk 继续比对
+            return content, "", skip_prefix
+        return content[:common], content[common:], ""
+
     async def add_chunk(self, chunk: Any) -> None:
         """处理单个流式 chunk：提取并推送文本/工具调用增量，累积用量与计时"""
         now_ns = perf_counter_ns()
         content = getattr(chunk, "content", "")
         if isinstance(content, str) and content:
-            # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出
-            if self._skip_output_chars > 0:
-                if len(content) <= self._skip_output_chars:
-                    self._skip_output_chars -= len(content)
-                    content = ""
-                else:
-                    content = content[self._skip_output_chars :]
-                    self._skip_output_chars = 0
+            # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出。
+            # 重叠部分进消息链（保留重试输出全文）但不推 SSE，非重叠部分正常推送。
+            overlap, content, self._skip_output_prefix = self._split_overlap(
+                content, self._skip_output_prefix
+            )
+            if overlap:
+                self._content_parts.append(overlap)
             if content:
                 self._content_parts.append(content)
                 if self._stream is not None:
@@ -284,10 +337,9 @@ class StreamChunkAggregator:
         raw_tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
         announced_name: str | None = None
         for raw in raw_tool_chunks:
-            index = int(raw.get("index", len(self._tool_call_chunks)))
             name = raw.get("name") or ""
-            if name and index not in self._announced_tools:
-                self._announced_tools.add(index)
+            if name and name not in self._announced_tools:
+                self._announced_tools.add(name)
                 announced_name = name
                 if self._stream is not None:
                     try:
@@ -311,7 +363,14 @@ class StreamChunkAggregator:
 
         usage_metadata = getattr(chunk, "usage_metadata", None)
         if isinstance(usage_metadata, Mapping):
+            # 2026-08-13 P1-3 防御：同一 chunk 可能同时携带 LangChain 标准
+            # usage_metadata 与 provider 原始 usage（response_metadata/
+            # additional_kwargs），双源累加会把用量翻倍。以标准字段为准，
+            # 原始字段仅作为标准字段缺失时的回退（真实网关每 turn 恰好 1 条）。
+            has_usage_metadata = True
             _accumulate_usage_metadata(self._usage_metadata, usage_metadata)
+        else:
+            has_usage_metadata = False
         raw_usage = None
         response_metadata = getattr(chunk, "response_metadata", None)
         if isinstance(response_metadata, Mapping):
@@ -324,7 +383,7 @@ class StreamChunkAggregator:
         additional_kwargs = getattr(chunk, "additional_kwargs", None)
         if raw_usage is None and isinstance(additional_kwargs, Mapping):
             raw_usage = additional_kwargs.get("usage") or additional_kwargs.get("token_usage")
-        if isinstance(raw_usage, Mapping):
+        if not has_usage_metadata and isinstance(raw_usage, Mapping):
             _accumulate_usage_metadata(self._usage_metadata, raw_usage)
 
     def finish(self) -> AIMessage:
@@ -370,10 +429,6 @@ class StreamChunkAggregator:
             timing_notes=tuple(notes),
         )
 
-    def has_tool_calls(self) -> bool:
-        """判断本轮流式响应是否包含工具调用"""
-        return bool(self._announced_tools) or bool(self._tool_call_chunks)
-
 
 async def emit_completed_model_call(stream: AgentStream, response: Any) -> None:
     """
@@ -410,10 +465,20 @@ async def run_model_call(
     重试期间推送 thinking 事件，并跳过与上次已推送内容重叠的前缀，避免重复输出；
     已失败尝试的用量（如有）与最终用量合并记账，避免重试丢弃已消耗的 token。
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
+    非流式路径同样遵守 total_attempts 重试语义，但只对网络/限流等瞬态错误
+    （_is_transient_model_error）重发请求，其余错误直接失败。
     on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
     """
+    from src.config import settings
+
     started_ns = perf_counter_ns()
+    total_attempts = (
+        total_attempts
+        if total_attempts is not None
+        else settings.models.annotation.total_attempts
+    )
     if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
+        retries_remaining = max(0, total_attempts - 1)
         if stream is not None:
             hint = (
                 "模型不支持流式输出，等待完整回复..."
@@ -421,7 +486,31 @@ async def run_model_call(
                 else "模型未启用流式输出，等待完整回复..."
             )
             await stream.thinking(hint)
-        response = await model.ainvoke(messages)
+        while True:
+            try:
+                response = await model.ainvoke(messages)
+                break
+            except StreamEmitError:
+                # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
+                raise
+            except Exception as exc:  # noqa: BLE001
+                # 2026-08-13 P2-6 非流式路径只对网络/限流瞬态错误重试，
+                # 参数/鉴权等确定性错误重试无意义
+                if retries_remaining <= 0 or not _is_transient_model_error(exc):
+                    raise
+                failed_attempt = total_attempts - retries_remaining
+                retries_remaining -= 1
+                logger.warning(
+                    "模型调用失败，重发当前模型请求: error=%s retries_remaining=%s",
+                    exc,
+                    retries_remaining,
+                )
+                if stream is not None:
+                    await stream.thinking(
+                        f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）"
+                    )
+                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+                continue
         timing = ModelCallTiming(
             model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
             timing_notes=("provider_non_streaming",),
@@ -432,22 +521,15 @@ async def run_model_call(
             on_turn_complete(response, timing)
         return response
 
-    from src.config import settings
-
-    total_attempts = (
-        total_attempts
-        if total_attempts is not None
-        else settings.models.annotation.total_attempts
-    )
     retries_remaining = max(0, total_attempts - 1)
-    skip_output_chars = 0
-    announced_tools: set[int] = set()
+    skip_output_prefix = ""
+    announced_tools: set[str] = set()
     retried_usage: dict[str, Any] = {}
     while True:
         aggregator = StreamChunkAggregator(
             stream,
             started_ns=started_ns,
-            skip_output_chars=skip_output_chars,
+            skip_output_prefix=skip_output_prefix,
             announced_tools=announced_tools,
         )
         try:
@@ -460,6 +542,7 @@ async def run_model_call(
             if retries_remaining <= 0:
                 logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
                 raise
+            failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
             logger.warning(
                 "模型输出流中断，重发当前模型请求: error=%s retries_remaining=%s",
@@ -472,8 +555,11 @@ async def run_model_call(
                 )
             if aggregator._usage_metadata:
                 _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
-            skip_output_chars = len("".join(aggregator._content_parts))
+            skip_output_prefix = "".join(aggregator._content_parts)
             announced_tools = set(aggregator._announced_tools)
+            # 2026-08-13 P2-12 仅 429/连接类瞬态错误在重试前退避，避免压垮网关
+            if _is_transient_model_error(exc):
+                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
             continue
         response = aggregator.finish()
         if retried_usage:

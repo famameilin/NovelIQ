@@ -5,7 +5,6 @@
 from .errors import (
     AnnotationAgentError,
     AnnotationAuthorizationError,
-    AnnotationConfigurationError,
     AnnotationInputError,
     AnnotationProtocolError,
     AnnotationRetryableError,
@@ -23,7 +22,6 @@ __all__ = [
     "AgentRunResult",
     "AnnotationAgentError",
     "AnnotationAuthorizationError",
-    "AnnotationConfigurationError",
     "AnnotationInputError",
     "AnnotationProtocolError",
     "AnnotationQueryService",

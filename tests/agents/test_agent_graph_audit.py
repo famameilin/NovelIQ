@@ -361,3 +361,34 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
     assert {"system", "human"} == {m["role"] for m in turn.request_messages}
     assert turn.request_messages[-1]["content"] == "诊断"
     assert turn.timing_notes == ["provider_call_failed"]
+
+
+async def test_graph_finish_emits_tool_call_succeeded_event() -> None:
+    """2026-08-13 P2-7 finish 走 finalize 路径时补发 tool_call succeeded 终态事件，
+    前端 finish 状态不再永久停留在"进行中"""
+    from src.agents.stream import AgentStream
+
+    events: list[tuple[str, str, str]] = []
+
+    async def emitter(event) -> None:
+        events.append((event.action, event.content, event.status or ""))
+
+    llm = _SequencedLLM(
+        [AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])]
+    )
+    graph = build_agent_graph(
+        llm,
+        [],
+        max_attempts=5,
+        response_model=CloudAnalysis,
+        first_hint="完成诊断",
+        stream=AgentStream(emitter),
+    )
+
+    result = await graph.ainvoke(_initial_state())
+
+    assert result.get("error") is None
+    # started 由非流式降级路径补发，succeeded 由 finalize 补发（修复前缺失）
+    assert ("tool_call", "finish", "started") in events
+    assert ("tool_call", "finish", "success") in events
+    assert ("output", "最终结果已生成并通过校验", "") in events

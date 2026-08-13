@@ -25,7 +25,6 @@ from src.agents.annotation.schema import (
     BoundEntityDirectory,
     CaseSearchResult,
     ChunkMetricsInput,
-    RelationInput,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -769,10 +768,15 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
 
 @pytest.mark.asyncio
 async def test_runner_resets_fact_graph_chapter_state_on_failure() -> None:
-    """2026-08-12 用于验证章节失败路径恢复 FactGraph 历史快照，不残留当章脏状态"""
-    graph_state = FactGraph()
-    graph_state.apply_relation(
-        RelationInput(from_entity="顾霜", to_entity="顾老", relation_type="同一人物")
+    """2026-08-12 用于验证章节失败路径恢复 FactGraph 历史快照，不残留当章脏状态
+
+    2026-08-13 P1-1：begin_chapter 把章前状态并入 history_*，失败回滚恢复到
+    「本章开始前」快照（上一章提交结果），而非 run 启动空状态。
+    """
+    graph_state = FactGraph(
+        history_entity_types={"顾霜": "character"},
+        history_entity_names={"顾霜": "顾霜"},
+        history_relations={("顾霜", "顾老", "同一人物")},
     )
     assert graph_state.active_relations
     session = MagicMock()
@@ -792,6 +796,8 @@ async def test_runner_resets_fact_graph_chapter_state_on_failure() -> None:
                 audit_recorder=recorder,
                 graph_state=graph_state,
             )
-    assert graph_state.active_relations == set()
+    # 失败后恢复到本章开始前快照：上一章提交的边与实体保留，章内追踪清空
+    # （active_relations 按稳定键归一化，端点按字典序）
+    assert graph_state.active_relations == {("顾老", "顾霜", "同一人物")}
     assert graph_state.chapter_added_relations == set()
-    assert graph_state.entity_types == {}
+    assert graph_state.entity_types == {"顾霜": "character"}

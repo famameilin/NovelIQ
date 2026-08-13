@@ -52,7 +52,6 @@ class StageExecutor:
         await run_annotate(
             run_id=run_id,
             session=session,
-            resume=True,
             analysis_logger=analysis_logger,
             novel_id=novel_id,
             novel_title=novel_title,

@@ -80,8 +80,7 @@ def _extract_paired_quotes(text: str) -> list[_CandidateSpan]:
             )
         ascii_start = None
 
-    for opener, starts in stacks.items():
-        del opener
+    for _opener, starts in stacks.items():
         for open_index in starts:
             content = text[open_index + 1 :]
             if content.strip():

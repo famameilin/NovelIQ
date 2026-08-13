@@ -128,6 +128,33 @@ class _ConfigDisabledStreamingLLM:
         yield AIMessageChunk(content="不应流出")
 
 
+class _FlakyNonStreamingLLM:
+    """2026-08-13 用于模拟非流式路径前 fail_count 次调用抛异常的测试模型"""
+
+    def __init__(
+        self,
+        response: AIMessage,
+        fail_count: int,
+        error: Exception | None = None,
+    ) -> None:
+        self.response = response
+        self.fail_count = fail_count
+        self.error = error or ConnectionError("network down")
+        self.ainvoke_calls = 0
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def ainvoke(self, messages):
+        del messages
+        self.ainvoke_calls += 1
+        if self.fail_count > 0:
+            self.fail_count -= 1
+            raise self.error
+        return self.response
+
+
 @pytest.mark.asyncio
 async def test_agent_stream_emits_thinking_and_output_events() -> None:
     events, emitter = _collect_events()
@@ -197,7 +224,7 @@ async def test_aggregator_merges_text_and_reasoning_and_tool_calls() -> None:
             "type": "tool_call",
         }
     ]
-    assert aggregator.has_tool_calls()
+    assert len(message.tool_calls) == 1
     # 推理 token 只聚合不推送；工具调用以 tool_call 事件推送
     assert events == [
         ("output", "章节", ""),
@@ -309,6 +336,45 @@ async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_model_call_keeps_retry_output_when_shorter_than_failed_attempt() -> None:
+    """2026-08-13 用于验证重试输出比失败尝试已推送内容短时不再整段丢弃
+
+    修复前按字符数跳过（skip_output_chars），重试输出更短（非确定性 LLM）时
+    全部内容被清零，消息链正文凭空消失；修复后按公共前缀逐字符比对，
+    重试全文保留在消息链中。
+    """
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _RetryWithUsageLLM(
+        failing_chunks=[AIMessageChunk(content="你好好好")],
+        success_chunks=[AIMessageChunk(content="你好")],
+    )
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
+
+    assert response.content == "你好"
+    assert len(model.captured_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_skips_only_overlapping_prefix_on_retry() -> None:
+    """2026-08-13 用于验证重试仅跳过与失败尝试重叠的前缀，非重叠内容完整推送"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _RetryWithUsageLLM(
+        failing_chunks=[AIMessageChunk(content="你好好好")],
+        success_chunks=[AIMessageChunk(content="你好世界")],
+    )
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
+
+    assert response.content == "你好世界"
+    # SSE 事件：失败尝试推送"你好好好"，重试跳过重叠"你好"后推送"世界"
+    output_text = "".join(text for kind, text, _extra in events if kind == "output")
+    assert output_text == "你好好好世界"
+
+
+@pytest.mark.asyncio
 async def test_run_model_call_uses_ainvoke_when_streaming_disabled() -> None:
     """2026-08-12 用于验证 stream_enabled=False（模型 streaming 配置关闭）时走 ainvoke 非流式路径"""
     events, emitter = _collect_events()
@@ -324,6 +390,113 @@ async def test_run_model_call_uses_ainvoke_when_streaming_disabled() -> None:
         ("thinking", "模型未启用流式输出，等待完整回复...", ""),
         ("output", "完整回复", ""),
     ]
+
+
+def _noop_sleep(monkeypatch) -> list[float]:
+    """2026-08-13 用于把 asyncio.sleep 替换为 no-op 并记录退避时长"""
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", fake_sleep)
+    return sleeps
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_non_streaming_retries_transient_error(monkeypatch) -> None:
+    """2026-08-13 P2-6 非流式路径对网络/限流瞬态错误按 total_attempts 重试"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _FlakyNonStreamingLLM(AIMessage(content="完整回复"), fail_count=1)
+    sleeps = _noop_sleep(monkeypatch)
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream)
+
+    assert response.content == "完整回复"
+    assert model.ainvoke_calls == 2
+    assert len(sleeps) == 1
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_non_streaming_does_not_retry_non_transient(monkeypatch) -> None:
+    """2026-08-13 P2-6 非流式路径对确定性错误（非网络/限流）不重试"""
+    model = _FlakyNonStreamingLLM(
+        AIMessage(content=""),
+        fail_count=99,
+        error=RuntimeError("bad request"),
+    )
+    sleeps = _noop_sleep(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="bad request"):
+        await run_model_call(model, [AIMessage(content="问")], None)
+
+    assert model.ainvoke_calls == 1
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_non_streaming_exhausts_transient_retries(monkeypatch) -> None:
+    """2026-08-13 P2-6 非流式路径重试耗尽后抛出最后一次异常（次数 = total_attempts - 1）"""
+    model = _FlakyNonStreamingLLM(AIMessage(content=""), fail_count=99)
+    sleeps = _noop_sleep(monkeypatch)
+
+    with pytest.raises(ConnectionError, match="network down"):
+        await run_model_call(model, [AIMessage(content="问")], None, total_attempts=2)
+
+    assert model.ainvoke_calls == 2
+    assert len(sleeps) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_retry_backoff_is_exponential_and_capped(monkeypatch) -> None:
+    """2026-08-13 P2-12 重试退避指数递增（1s/2s）且上限 3s，仅对瞬态错误生效"""
+    model = _FlakyStreamingLLM([], fail_count=99)
+    sleeps = _noop_sleep(monkeypatch)
+
+    with pytest.raises(ConnectionError, match="stream interrupted"):
+        await run_model_call(model, [AIMessage(content="问")], None, total_attempts=3)
+
+    assert model.captured_messages == [[AIMessage(content="问")] for _ in range(3)]
+    assert sleeps == [1.0, 2.0]
+
+
+def test_retry_backoff_seconds_exponential_with_cap() -> None:
+    """2026-08-13 P2-12 退避公式：0.5s × 2^attempt，attempt≥1，上限 3s"""
+    from src.agents.stream import _retry_backoff_seconds
+
+    assert _retry_backoff_seconds(1) == 1.0
+    assert _retry_backoff_seconds(2) == 2.0
+    assert _retry_backoff_seconds(3) == 3.0
+    assert _retry_backoff_seconds(10) == 3.0
+
+
+@pytest.mark.asyncio
+async def test_aggregator_announces_tool_by_name_across_retries() -> None:
+    """2026-08-13 P2-8 重试后 index 相同但工具名不同时补发 started 事件（按名抑制）"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    # 首次尝试已宣布 write_metrics（index 0），重试改调 finish（同一 index）
+    aggregator = StreamChunkAggregator(stream, announced_tools={"write_metrics"})
+    await aggregator.add_chunk(
+        AIMessageChunk(
+            content="",
+            tool_call_chunks=[{"name": "finish", "args": "{}", "id": "c1", "index": 0}],
+        )
+    )
+    assert events == [("tool_call", "finish", "started")]
+
+    # 同一工具名不再重复宣布（无论 index 是否变化）
+    aggregator2 = StreamChunkAggregator(stream, announced_tools={"finish"})
+    await aggregator2.add_chunk(
+        AIMessageChunk(
+            content="",
+            tool_call_chunks=[{"name": "finish", "args": "{}", "id": "c2", "index": 1}],
+        )
+    )
+    assert events == [("tool_call", "finish", "started")]
 
 
 @pytest.mark.asyncio
@@ -393,6 +566,54 @@ async def test_aggregator_accumulates_raw_gateway_usage_from_metadata() -> None:
         "completion_tokens": 20,
         "total_tokens": 120,
         "prompt_cache_hit_tokens": 30,
+    }
+
+
+@pytest.mark.asyncio
+async def test_aggregator_prefers_standard_usage_metadata_over_raw_gateway_usage() -> None:
+    """
+    2026-08-13 P1-3 用于验证同一 chunk 双源（标准 usage_metadata + provider 原始
+    token_usage）时只累计标准字段，避免用量翻倍；原始字段仅在标准字段缺失时回退
+    """
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    aggregator = StreamChunkAggregator(stream)
+
+    await aggregator.add_chunk(
+        AIMessageChunk(
+            content="你好",
+            usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            response_metadata={
+                "token_usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                }
+            },
+        )
+    )
+    # 标准字段缺失的 chunk 仍走原始字段回退
+    await aggregator.add_chunk(
+        AIMessageChunk(
+            content="世界",
+            response_metadata={
+                "token_usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 10,
+                    "total_tokens": 60,
+                }
+            },
+        )
+    )
+
+    message = aggregator.finish()
+
+    assert message.usage_metadata == {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "total_tokens": 72,
+        "prompt_tokens": 50,
+        "completion_tokens": 10,
     }
 
 

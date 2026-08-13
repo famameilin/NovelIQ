@@ -737,3 +737,71 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
         )
     ).scalar_one()
     assert versions[0].changes[1]["fact_id"] == resolution_fact.fact_id
+
+
+def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_session) -> None:
+    """2026-08-13 P1-1 用于验证生产配置（autoflush=False）下同章断言+案例解决同一
+    关系不再双写关系版本
+
+    测试 db_session fixture 的 sessionmaker 默认 autoflush=True，SELECT 前会隐式
+    flush，掩盖了 persist_completion_graph 内部读不到同章 pending 关系版本的问题。
+    这里用同一引擎另建 autoflush=False 会话复现生产路径：修复前 _latest_relation_draft
+    读不到草稿 → 按 revision=1 再插一行 → commit 撞 uq_graph_relation_versions_run_revision。
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    engine = db_session.get_bind()
+    session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
+    try:
+        _novel_id, run_id = create_run_with_chunks(
+            session,
+            texts=["林渡与顾霜并肩迎敌"],
+            title="同章断言加案例解决-autoflush-off",
+        )
+        persist_chapter_annotation(
+            session,
+            run_id=run_id,
+            chapter_id=1,
+            characters=[
+                character_fact(chunk_id=0, name="林渡", action="迎敌"),
+                character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            ],
+            relations=[
+                relation_fact(
+                    chunk_id=0,
+                    from_name="林渡",
+                    to_name="顾霜",
+                    relation_type="盟友",
+                )
+            ],
+            resolved_cases=[
+                ResolvedCase(
+                    case_id="case-autoflush-off",
+                    action="fact",
+                    type="relation_change",
+                    reason="同一人物归并",
+                    target_key="target-alias",
+                    target_ref={"kind": "relation_change", "chunk_id": 0},
+                    from_entity="林渡",
+                    to_entity="顾霜",
+                    relation_type="盟友",
+                    change_kind="assert",
+                )
+            ],
+        )
+        # persist_chapter_annotation 已 commit；此处再确认无唯一约束冲突提交成功
+        session.commit()
+
+        versions = list(
+            session.execute(
+                select(GraphRelationVersion).where(GraphRelationVersion.run_id == run_id)
+            ).scalars()
+        )
+        assert len(versions) == 1
+        assert versions[0].relation_revision == 1
+        assert [change["change_kind"] for change in versions[0].changes] == [
+            "assert",
+            "assert",
+        ]
+    finally:
+        session.close()

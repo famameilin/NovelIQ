@@ -173,12 +173,10 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
 
     first = complete_annotation_run(
         result=result,
-        novel_id=novel_id,
         session_factory=factory,
     )
     second = complete_annotation_run(
         result=result,
-        novel_id=novel_id,
         session_factory=factory,
     )
 
@@ -225,7 +223,6 @@ def test_dialogue_resolution_updates_dialogue_record(
             chapter_id=1,
             annotation=first_annotation,
         ),
-        novel_id=novel_id,
         session_factory=factory,
     )
     db_session.rollback()
@@ -253,7 +250,6 @@ def test_dialogue_resolution_updates_dialogue_record(
             resolved_cases=[resolved],
             authorized_chunk_ids=[0, 1],
         ),
-        novel_id=novel_id,
         session_factory=factory,
     )
 
@@ -299,7 +295,6 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
                     chapter_id=1,
                     annotation=annotation,
                 ),
-                novel_id=novel_id,
                 session_factory=factory,
             )
 
@@ -325,7 +320,6 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
     annotation = _annotation(chunk_id=0, text="顾霜喝道", speaker_entity=True)
     expected = complete_annotation_run(
         result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
-        novel_id=novel_id,
         session_factory=factory,
     )
 
@@ -367,7 +361,6 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
                 annotation=annotation,
                 resolved_cases=[missing],
             ),
-            novel_id=novel_id,
             session_factory=factory,
         )
 

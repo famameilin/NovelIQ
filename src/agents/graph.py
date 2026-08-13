@@ -304,6 +304,11 @@ def _build_finalize_node(
 
         close_submission_audit(call=submission_call, status="success")
         if stream is not None:
+            # 2026-08-13 P2-7 补发 finish 工具终态事件：通用图路由把含 finish 的
+            # 响应直接送 finalize、tools 节点不执行 finish，若不补发 succeeded，
+            # 前端 finish 状态永远停在"进行中"（参照 annotation 图 auto_finalize
+            # 对合成工具补发 started+succeeded 的写法；started 已由模型流推送）
+            await stream.tool_call_succeeded(str(submission_name))
             await stream.output("最终结果已生成并通过校验")
         return {"output": parsed.model_dump(mode="json"), "error": None}
 

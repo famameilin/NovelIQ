@@ -76,7 +76,7 @@ const MOCK_GRAPH_CHARACTERS = [
 
 const MOCK_GRAPH_RELATION_CHANGES = [
   {
-    change_id: "relation:101",
+    change_id: "relation:101:fact-12:1",
     chunk_id: 12,
     from_entity_id: 1,
     to_entity_id: 2,
@@ -89,7 +89,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:102",
+    change_id: "relation:102:fact-24:1",
     chunk_id: 24,
     from_entity_id: 1,
     to_entity_id: 3,
@@ -102,7 +102,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:103",
+    change_id: "relation:103:fact-39:1",
     chunk_id: 39,
     from_entity_id: 1,
     to_entity_id: 8,
@@ -115,7 +115,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:104",
+    change_id: "relation:104:fact-56:1",
     chunk_id: 56,
     from_entity_id: 1,
     to_entity_id: 4,
@@ -128,7 +128,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:105",
+    change_id: "relation:105:fact-72:1",
     chunk_id: 72,
     from_entity_id: 1,
     to_entity_id: 7,
@@ -141,7 +141,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:106",
+    change_id: "relation:106:fact-90:1",
     chunk_id: 90,
     from_entity_id: 1,
     to_entity_id: 5,
@@ -154,7 +154,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:107",
+    change_id: "relation:107:fact-104:1",
     chunk_id: 104,
     from_entity_id: 1,
     to_entity_id: 6,
@@ -167,7 +167,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
     directionality: "directed",
   },
   {
-    change_id: "relation:108",
+    change_id: "relation:108:fact-116:1",
     chunk_id: 116,
     from_entity_id: 1,
     to_entity_id: 3,

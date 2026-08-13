@@ -19,10 +19,6 @@ class AnnotationAuthorizationError(AnnotationAgentError):
     """2026-08-05 用于标记检索读取授权不合法的直接失败"""
 
 
-class AnnotationConfigurationError(AnnotationAgentError):
-    """2026-08-05 用于标记配置不合法的直接失败"""
-
-
 class AnnotationProtocolError(AnnotationRetryableError):
     """2026-08-05 用于标记 Agent 违反当前阶段工具时序的运行失败"""
 

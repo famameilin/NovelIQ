@@ -131,7 +131,6 @@ def _build_fact_graph(
 async def run_annotate(
     run_id: str,
     session: Session,
-    resume: bool = False,
     analysis_logger: AnalysisLogger | None = None,
     novel_id: str = "default",
     novel_title: str | None = None,
@@ -140,7 +139,7 @@ async def run_annotate(
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """2026-08-05 用于严格串行执行每章一次 Agent 并在成功后完成唯一事务"""
-    del resume, analysis_logger, use_context_enhancement
+    del analysis_logger, use_context_enhancement
 
     from src.agents.annotation import run_annotation_agent
     from src.agents.llm import build_chat_model
@@ -260,11 +259,10 @@ async def run_annotate(
                 )
                 complete_annotation_run(
                     result=agent_result,
-                    novel_id=novel_id,
                     session_factory=sql_session_factory,
                 )
                 success_count += 1
-            except Exception as exc:  # noqa: BLE001 单章失败不中断后续章节
+            except Exception as exc:  # noqa: BLE001 单章失败即中断，run 收口 failed 后可 resume 补跑
                 if first_failure is None:
                     first_failure = exc
                 failed_count += 1
@@ -276,8 +274,9 @@ async def run_annotate(
                     exc,
                 )
                 # 失败章未提交 annotation，不产生图版本；审计 invocation 收口由
-                # runner 内 finish_invocation(status="error") 完成，此处仅跳过本章继续。
-                continue
+                # runner 内 finish_invocation(status="error") 完成。中断后续章节，
+                # 避免先提交的后续章节与 resume 补跑的失败章产生修订号冲突。
+                break
 
         if emitter:
             await emitter(
@@ -303,7 +302,10 @@ async def run_annotate(
         failed_count,
         elapsed,
     )
-    if first_failure is not None and success_count == 0:
-        # 所有章节均失败时按原失败语义抛出首个异常，交由调用方收口 run 状态
+    if first_failure is not None:
+        # 2026-08-13 章节失败即中断（不再继续后续章节）：失败章未提交图版本，
+        # 若后续章节先提交会造成修订号空洞，resume 补跑失败章时与后续章节
+        # 修订号冲突（uq_*_run_revision）且重试必败。中断后 run 收口 failed，
+        # resume 跳过已成功章节、仅重跑失败章及后续未完成章节，顺序补写无空洞。
         raise first_failure
     return success_count, 0, total_chapters

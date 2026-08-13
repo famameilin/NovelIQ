@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.schema import Confidence, PayoffLikelihood, SetupStatus
+from src.agents.annotation.schema import Confidence, PayoffLikelihood, ResolvedCase, SetupStatus
 from src.storage.models import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.repositories.annotation.repository import (
     _EXPECTATION_BASE_SCORE_BY_PAYOFF,
@@ -30,7 +30,7 @@ def _create_thread_with_hit(
     chunk_id: int = 0,
 ) -> str:
     """2026-08-09 用于插入带命中记录的伏笔线程并返回 setup_id"""
-    setup_id = f"setup-{strength}-{status}-{payoff_likelihood}-{uuid.uuid4().hex[:8]}"
+    setup_id = f"setup-{strength}-{status}-{payoff_likelihood}-{uuid.uuid4().hex[:8]}"[:36]
     session.add(
         ForeshadowingThread(
             setup_id=setup_id,
@@ -98,3 +98,58 @@ def test_expectation_mappings_cover_enum_domains() -> None:
     assert set(_EXPECTATION_STATUS_WEIGHT) == {item.value for item in SetupStatus}
     assert set(_EXPECTATION_STRENGTH_BONUS) == {item.value for item in Confidence}
     assert set(_EXPECTATION_STRENGTH_WEIGHT) == {item.value for item in Confidence}
+
+
+def test_resolved_case_degrades_invalid_foreshadowing_enums_to_unknown() -> None:
+    """2026-08-13 P1-2 用于验证伏笔枚举字段非法值降级为 "unknown" 而非报错或透传"""
+    resolved = ResolvedCase(
+        case_id="case-1",
+        action="foreshadowing",
+        type="foreshadowing_suspect",
+        reason="任意字符串不应让诊断 KeyError",
+        target_key="target-1",
+        target_ref={"setup_id": "setup-1", "chunk_id": 0},
+        setup_status="已回收",  # 非法
+        payoff_likelihood="certain",  # 非法
+        strength="mega",  # 非法
+    )
+
+    assert resolved.setup_status == "unknown"
+    assert resolved.payoff_likelihood == "unknown"
+    assert resolved.strength == "unknown"
+
+
+def test_resolved_case_keeps_valid_foreshadowing_enums() -> None:
+    """2026-08-13 P1-2 用于验证合法枚举值原样保留"""
+    resolved = ResolvedCase(
+        case_id="case-1",
+        action="foreshadowing",
+        type="foreshadowing_suspect",
+        reason="合法枚举",
+        target_key="target-1",
+        target_ref={"setup_id": "setup-1", "chunk_id": 0},
+        setup_status="reinforced",
+        payoff_likelihood="high",
+        strength="low",
+    )
+
+    assert resolved.setup_status == "reinforced"
+    assert resolved.payoff_likelihood == "high"
+    assert resolved.strength == "low"
+
+
+def test_calculate_expectation_degrades_unknown_enum_values(db_session) -> None:
+    """2026-08-13 P1-2 用于验证 status/payoff_likelihood/strength 为 "unknown" 时不抛 KeyError"""
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
+    _create_thread_with_hit(
+        db_session,
+        run_id=run_id,
+        strength="unknown",
+        status="unknown",
+        payoff_likelihood="unknown",
+    )
+    db_session.commit()
+
+    result = AnnotationRepository(db_session).calculate_foreshadow_expectation(run_id)
+    assert result is not None
+    assert 0.0 <= result <= 1.0

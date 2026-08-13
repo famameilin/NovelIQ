@@ -149,6 +149,49 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     assert token_count == 1
 
 
+def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> None:
+    """2026-08-13 P2-10 回合结束时刻随工具批处理结束更新，而非恒为插入时刻"""
+    from datetime import UTC, datetime
+
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
+    recorder = AgentAuditRecorder(_session_factory(db_session))
+    invocation_id = recorder.start_invocation(
+        run_id=run_id,
+        task_type="annotation",
+        chapter_id=1,
+        attempt_number=1,
+        model_name="test-model",
+        model_provider="local",
+    )
+    inserted_at = datetime(2026, 8, 13, 1, 0, 0, tzinfo=UTC)
+    updated_at = datetime(2026, 8, 13, 1, 0, 2, tzinfo=UTC)
+    times = iter([inserted_at, updated_at])
+    monkeypatch.setattr(recorder, "_utcnow", lambda: next(times))
+
+    turn_id = recorder.record_turn(
+        invocation_id=invocation_id,
+        turn_index=1,
+        context_summary={},
+        raw_response={"role": "ai", "content": "输出"},
+        run_id=run_id,
+        novel_id=novel_id,
+        task_type="annotation",
+        call_type="agent",
+        model="test-model",
+    )
+    recorder.update_turn_timings(turn_id, tool_wall_ms=250, turn_ms=1200)
+
+    db_session.rollback()
+    turn = db_session.get(AgentTurn, turn_id)
+    # DB 会话按本地时区（UTC+8）回读，因此断言相对差值而非绝对值
+    assert turn.started_at is not None
+    assert turn.finished_at is not None
+    assert (turn.finished_at - turn.started_at).total_seconds() == (
+        updated_at - inserted_at
+    ).total_seconds()
+    assert turn.finished_at > turn.started_at
+
+
 def test_record_tool_call_persists_full_args_result_and_duration(db_session) -> None:
     """2026-08-10 用于验证工具调用行保存完整参数、结果、回执与独立耗时"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])

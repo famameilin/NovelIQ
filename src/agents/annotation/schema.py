@@ -130,16 +130,6 @@ class RelationType(StrEnum):
     LEADER = "领导"
 
 
-class ForeshadowingType(StrEnum):
-    """2026-08-07 用于约束伏笔载体类别（系统内部默认值使用）"""
-
-    OBJECT = "物件"
-    DIALOGUE = "对话"
-    SCENE = "场景"
-    CHARACTER_ACTION = "人物行为"
-    OTHER = "其他"
-
-
 class SetupKind(StrEnum):
     """2026-08-07 用于约束伏笔 setup 的宽口径类别（系统内部默认值使用）"""
 
@@ -180,11 +170,6 @@ DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 _ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = ("character", "organization")
 _CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = ("character",)
 _LOCATION_ENTITY_TYPES: tuple[EntityType, ...] = ("location",)
-_MOBILE_ENTITY_TYPES: tuple[EntityType, ...] = (
-    "character",
-    "item",
-    "organization",
-)
 _POSITIONED_ENTITY_TYPES: tuple[EntityType, ...] = (
     "character",
     "item",
@@ -748,6 +733,27 @@ class ResolvedCase(StrictModel):
                         field_name,
                         normalize_semantic_text(value, label=f"resolve.{field_name}"),
                     )
+            # 2026-08-13 P1-2：枚举字段非法值降级为 "unknown" 而非报错，
+            # 避免诊断阶段 calculate_foreshadow_expectation 用常量字典索引直接 KeyError。
+            # 合法键集合与 repository.py 的 _EXPECTATION_* 字典一致
+            # （test_expectation_mappings_cover_enum_domains 已锁定该对应关系）。
+            for field_name, valid_values in (
+                (
+                    "setup_status",
+                    {status.value for status in SetupStatus},
+                ),
+                (
+                    "payoff_likelihood",
+                    {likelihood.value for likelihood in PayoffLikelihood},
+                ),
+                (
+                    "strength",
+                    {confidence.value for confidence in Confidence},
+                ),
+            ):
+                value = getattr(self, field_name)
+                if value is not None and value not in valid_values:
+                    setattr(self, field_name, "unknown")
             return self
         if self.action == "close":
             return self

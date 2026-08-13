@@ -163,6 +163,9 @@ class AgentAuditRecorder:
             raise RuntimeError(f"agent turn 审计行不存在: {turn_id}")
         row.tool_wall_ms = tool_wall_ms
         row.turn_ms = turn_ms
+        # 2026-08-13 P2-10 回合在工具批处理结束后才算真正结束：同步更新
+        # finished_at，避免 finished_at 恒等于插入时刻（模型输出结束时间）
+        row.finished_at = self._utcnow()
         self._commit(session)
 
     def record_tool_call(

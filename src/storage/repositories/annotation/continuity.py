@@ -377,11 +377,15 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
     ) -> list[DialogueRecord]:
         """2026-08-11 用于把最终系统绑定对话投影到对话记录表（幂等按 candidate_key 去重）"""
         rows: list[DialogueRecord] = []
+        # 2026-08-13 P2-4：幂等键与唯一约束 uq_dialogue_records_run_candidate 对齐为
+        # (run_id, candidate_key)。此前按 (run_id, chunk_id) 查 existing，跨章重复台词
+        # 会撞唯一约束抛 IntegrityError。
+        candidate_keys = [dialogue.candidate_key for dialogue in dialogues]
         existing_keys = set(
             self.session.execute(
                 select(DialogueRecord.candidate_key).where(
                     DialogueRecord.run_id == run_id,
-                    DialogueRecord.chunk_id == chunk_id,
+                    DialogueRecord.candidate_key.in_(candidate_keys),
                 )
             ).scalars()
         )
@@ -446,7 +450,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         chunk_id: int,
         foreshadowing: BoundForeshadowing,
     ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit | None]:
-        """2026-08-11 用于只创建新伏笔线程（description 相同视为同一伏笔，已存在时不再重复创建）"""
+        """2026-08-11 用于创建或续接伏笔线程（description 相同视为同一伏笔，不重复建线程）"""
         normalized = normalize_text(foreshadowing.description)
         # 2026-08-12 大小写变体按 casefold 视为同一伏笔，避免重复建线程
         thread = self.session.execute(
@@ -456,7 +460,33 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
             )
         ).scalar_one_or_none()
         if thread is not None:
-            return thread, None
+            # 2026-08-13 P1-3：已存在 thread 时本次 sync 也是新的 Phase2 命中，
+            # 按合同（foreshadowing.py 注释“每次命中都落一条 hit”）补写 hit 行；
+            # 幂等：同 chunk 同 thread 已有 hit 时视为纯 no-op，不重复写、不制造假命中。
+            existing_hit = self.session.execute(
+                select(ForeshadowingThreadHit.hit_id).where(
+                    ForeshadowingThreadHit.setup_id == thread.setup_id,
+                    ForeshadowingThreadHit.run_id == run_id,
+                    ForeshadowingThreadHit.chunk_id == chunk_id,
+                )
+            ).scalar_one_or_none()
+            if existing_hit is not None:
+                return thread, None
+            now = datetime.now(UTC)
+            hit = ForeshadowingThreadHit(
+                setup_id=thread.setup_id,
+                run_id=run_id,
+                chunk_id=chunk_id,
+                anchor_text=normalized,
+                is_new_setup=False,
+                created_at=now,
+            )
+            self.session.add(hit)
+            if chunk_id > thread.last_chunk_id:
+                thread.last_chunk_id = chunk_id
+                thread.updated_at = now
+            self.session.flush()
+            return thread, hit
         now = datetime.now(UTC)
         thread = ForeshadowingThread(
             setup_id=str(uuid4()),
