@@ -73,62 +73,6 @@ def insert_paragraph_embeddings(
     return len(insert_rows)
 
 
-def search_similar_paragraphs_within_chunks(
-    session: Session,
-    run_id: str,
-    query_embedding: list[float],
-    chunk_ids: Sequence[int],
-    top_k: int = 5,
-    similarity_threshold: float = 0.7,
-) -> list[SimilarParagraphRow]:
-    """2026-08-07 用于在指定候选 chunk 内选取每个 chunk 最佳语义自然段"""
-    scoped_chunk_ids = list(dict.fromkeys(int(chunk_id) for chunk_id in chunk_ids))
-    if not scoped_chunk_ids:
-        return []
-    similarity_expr = 1 - ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
-    ranked_candidates = (
-        select(
-            ParagraphEmbedding.chunk_id,
-            ParagraphEmbedding.paragraph_index,
-            ParagraphEmbedding.paragraph_text,
-            ParagraphEmbedding.local_start_char,
-            ParagraphEmbedding.local_end_char,
-            ParagraphEmbedding.global_start_char,
-            ParagraphEmbedding.global_end_char,
-            similarity_expr.label("similarity"),
-            func.row_number()
-            .over(
-                partition_by=ParagraphEmbedding.chunk_id,
-                order_by=(similarity_expr.desc(), ParagraphEmbedding.paragraph_index.asc()),
-            )
-            .label("paragraph_rank"),
-        )
-        .where(
-            ParagraphEmbedding.run_id == run_id,
-            ParagraphEmbedding.chunk_id.in_(scoped_chunk_ids),
-            ParagraphEmbedding.embedding_vector.is_not(None),
-            similarity_expr >= similarity_threshold,
-        )
-        .subquery()
-    )
-    statement = (
-        select(
-            ranked_candidates.c.chunk_id,
-            ranked_candidates.c.paragraph_index,
-            ranked_candidates.c.paragraph_text,
-            ranked_candidates.c.local_start_char,
-            ranked_candidates.c.local_end_char,
-            ranked_candidates.c.global_start_char,
-            ranked_candidates.c.global_end_char,
-            ranked_candidates.c.similarity,
-        )
-        .where(ranked_candidates.c.paragraph_rank == 1)
-        .order_by(ranked_candidates.c.similarity.desc(), ranked_candidates.c.chunk_id.asc())
-        .limit(top_k)
-    )
-    return [_similar_paragraph_row(row) for row in session.execute(statement).all()]
-
-
 def search_similar_paragraphs(
     session: Session,
     run_id: str,
@@ -139,8 +83,17 @@ def search_similar_paragraphs(
     min_chunk_id: int | None = None,
     max_chunk_id: int | None = None,
 ) -> list[SimilarParagraphRow]:
-    """2026-08-07 用于在同 run 原文自然段中执行有位置边界的 pgvector 检索"""
-    similarity_expr = 1 - ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
+    """2026-08-07 用于在同 run 原文自然段中执行有位置边界的 pgvector 检索
+
+    2026-08-13 P1-1：ORDER BY 与阈值 WHERE 都改用裸余弦距离算子
+    ``embedding_vector <=> :query``（cos 距离，升序），不再包裹成
+    ``1 - (embedding_vector <=> :query)``，否则 pgvector 无法命中 HNSW ANN 索引。
+    阈值语义等价：similarity >= threshold 即 distance <= 1 - threshold。
+    """
+    distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
+    similarity_expr = 1 - distance_expr
+    # round 避免 1 - 0.7 = 0.30000000000000004 的浮点噪声进入 SQL 字面量
+    max_distance = round(1.0 - similarity_threshold, 6)
     statement = select(
         ParagraphEmbedding.chunk_id,
         ParagraphEmbedding.paragraph_index,
@@ -153,7 +106,7 @@ def search_similar_paragraphs(
     ).where(
         ParagraphEmbedding.run_id == run_id,
         ParagraphEmbedding.embedding_vector.is_not(None),
-        similarity_expr >= similarity_threshold,
+        distance_expr <= max_distance,
     )
     if exclude_chunk_ids:
         statement = statement.where(ParagraphEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
@@ -162,7 +115,7 @@ def search_similar_paragraphs(
     if max_chunk_id is not None:
         statement = statement.where(ParagraphEmbedding.chunk_id <= max_chunk_id)
     statement = statement.order_by(
-        similarity_expr.desc(),
+        distance_expr.asc(),
         ParagraphEmbedding.chunk_id.asc(),
         ParagraphEmbedding.paragraph_index.asc(),
     ).limit(top_k)
@@ -200,7 +153,9 @@ def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) 
     missing_statement = (
         select(Chunk.chunk_id)
         .where(Chunk.run_id == run_id)
-        .where(Chunk.text.is_not(None))
+        # 2026-08-13 P2-10：空文本 chunk 永远无法产出自然段向量，
+        # 用 length(text) > 0 排除空串，避免空文本 chunk 被永久判为缺失
+        .where(func.length(Chunk.text) > 0)
         .where(~paragraph_exists)
     )
     missing_chunk_ids = {

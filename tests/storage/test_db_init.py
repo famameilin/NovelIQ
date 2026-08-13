@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 
-from src.storage.db import _create_graph_read_views, get_session_factory, init_db
+from src.storage.db import get_session_factory, init_db
 from src.storage.models import Base
 
 
@@ -57,7 +57,6 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
     with (
         patch("src.storage.db.get_engine", return_value=object()),
         patch("src.storage.models.Base.metadata.create_all") as mock_create_all,
-        patch("src.storage.db._create_graph_read_views") as mock_create_graph_read_views,
         patch("src.storage.db._assert_focus_contract_schema"),
         patch("src.storage.db._assert_annotation_contract_schema"),
         patch("src.storage.db._assert_agent_audit_contract_schema"),
@@ -78,7 +77,6 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
         "agent_tool_calls",
         "token_usage",
     } <= set(table_names)
-    mock_create_graph_read_views.assert_called_once()
 
 
 def test_init_db_rejects_removed_level3_parameter() -> None:
@@ -87,9 +85,9 @@ def test_init_db_rejects_removed_level3_parameter() -> None:
         init_db(include_level3_tables=True)
 
 
-def test_init_db_runs_contract_guards_after_view_creation() -> None:
+def test_init_db_runs_contract_guards_after_create_all() -> None:
     """
-    验证 init_db() 主链路会在 create_all 和视图创建之后执行 fail-closed 合同校验。
+    验证 init_db() 主链路会在 create_all 之后执行 fail-closed 合同校验。
 
     创建时间: 2026-04-27
     任务: fix-focus-contract-runtime-schema-conflict
@@ -99,14 +97,12 @@ def test_init_db_runs_contract_guards_after_view_creation() -> None:
     with (
         patch("src.storage.db.get_engine", return_value=fake_engine),
         patch("src.storage.models.Base.metadata.create_all"),
-        patch("src.storage.db._create_graph_read_views") as mock_create_graph_read_views,
         patch("src.storage.db._assert_focus_contract_schema") as mock_assert_focus_contract_schema,
         patch("src.storage.db._assert_annotation_contract_schema") as mock_assert_annotation_contract_schema,
         patch("src.storage.db._assert_agent_audit_contract_schema") as mock_assert_agent_audit_contract_schema,
     ):
         init_db()
 
-    mock_create_graph_read_views.assert_called_once_with(fake_engine)
     mock_assert_focus_contract_schema.assert_called_once_with(fake_engine)
     mock_assert_annotation_contract_schema.assert_called_once_with(fake_engine)
     mock_assert_agent_audit_contract_schema.assert_called_once_with(fake_engine)
@@ -223,101 +219,6 @@ def test_fresh_schema_uses_chapter_graph_versions_without_legacy_event_table() -
     } <= constraints
 
 
-def test_graph_read_views_project_latest_state_active_relations_and_participants(db_session) -> None:
-    """2026-08-07 用于验证当前图三个 SQL View 选择最新章节版本并过滤失效关系"""
-    from src.agents.annotation.schema import ResolvedCase
-    from tests.support.chapter_annotation_helpers import (
-        character_fact,
-        create_run_with_chunks,
-        persist_chapter_annotation,
-        relation_fact,
-    )
-
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["林渡与顾霜结盟", "林渡受伤且关系断裂"],
-        chapter_ids=[1, 2],
-        title="当前图 SQL View",
-    )
-    persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="林渡", action="结盟"),
-            character_fact(chunk_id=0, name="顾霜", action="结盟"),
-        ],
-        relations=[
-            relation_fact(
-                chunk_id=0,
-                from_name="林渡",
-                to_name="顾霜",
-                relation_type="盟友",
-            )
-        ],
-    )
-    db_session.commit()
-    persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=2,
-        characters=[character_fact(chunk_id=1, name="林渡", action="受伤")],
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-break",
-                action="fact",
-                type="relation_change",
-                reason="关系断裂",
-                target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
-                from_entity="林渡",
-                to_entity="顾霜",
-                relation_type="盟友",
-                change_kind="break",
-            )
-        ],
-    )
-    db_session.commit()
-    _create_graph_read_views(db_session.get_bind())
-
-    current_states = db_session.execute(
-        text(
-            """
-            SELECT entity.canonical_name, current_state.state_revision, current_state.state
-            FROM entity_state_current AS current_state
-            JOIN graph_entities AS entity ON entity.entity_id = current_state.entity_id
-            WHERE current_state.run_id = :run_id
-            ORDER BY entity.canonical_name
-            """
-        ),
-        {"run_id": run_id},
-    ).mappings().all()
-    active_relations = db_session.execute(
-        text("SELECT relation_id FROM graph_relations_current WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).scalars().all()
-    participants = db_session.execute(
-        text(
-            """
-            SELECT entity.canonical_name, participant.current_degree
-            FROM graph_entity_participants AS participant
-            JOIN graph_entities AS entity ON entity.entity_id = participant.entity_id
-            WHERE participant.run_id = :run_id
-            ORDER BY entity.canonical_name
-            """
-        ),
-        {"run_id": run_id},
-    ).all()
-
-    assert {
-        row["canonical_name"]: row["state_revision"]
-        for row in current_states
-    } == {"林渡": 2, "顾霜": 1}
-    assert next(row["state"] for row in current_states if row["canonical_name"] == "林渡")["action"] == "受伤"
-    assert active_relations == []
-    assert dict(participants) == {"林渡": 0, "顾霜": 0}
-
-
 def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
     """
     创建时间: 2026-04-27
@@ -337,5 +238,9 @@ def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
     )
 
     assert foreign_keys == [
+        # 2026-08-13 P2：补齐指向 chunks 的复合 FK（run_id 仍只声明一次）；
+        # 列表按 (列名, 引用表, 引用列, ondelete) 字母序排序
+        (("end_chunk_id", "run_id"), ("chunks", "chunks"), ("chunk_id", "run_id"), "CASCADE"),
         (("run_id",), ("analysis_runs",), ("run_id",), "CASCADE"),
+        (("start_chunk_id", "run_id"), ("chunks", "chunks"), ("chunk_id", "run_id"), "CASCADE"),
     ]

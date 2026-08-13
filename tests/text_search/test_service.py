@@ -73,3 +73,27 @@ async def test_search_with_no_terms_skips_keyword_scan() -> None:
     mock_keyword.assert_called_once()
     assert mock_keyword.call_args.args[2] == []
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_search_excerpt_keeps_highest_match_paragraph(db_session) -> None:
+    """2026-08-13 P1-4 用于验证同一 chunk 多段落命中时 excerpt 取 match_count 最高的段落
+
+    修复前 rows 已按 match_count 降序，但 service 按 chunk_id 后写覆盖，
+    同 chunk 内弱匹配段（段落 2）会盖掉强匹配段（段落 1）成为 excerpt。
+    """
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"],
+        title="excerpt 择优",
+    )
+    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=False)
+
+    result = await service.search("林渡 顾霜")
+
+    assert len(result) == 1
+    candidate = result[0]
+    assert candidate.excerpt == "林渡与顾霜并肩迎敌，携手入城。"
+    assert candidate.keyword_score == 2.0

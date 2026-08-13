@@ -104,11 +104,19 @@ class TextSearchService:
         )
         merged: dict[int, _MergedCandidate] = {}
         for keyword_row in keyword_rows:
-            merged[keyword_row.chunk_id] = {
-                "excerpt": keyword_row.paragraph_text,
-                "keyword_score": float(keyword_row.match_count),
-                "semantic_score": None,
-            }
+            row_score = float(keyword_row.match_count)
+            existing = merged.get(keyword_row.chunk_id)
+            if existing is None:
+                merged[keyword_row.chunk_id] = {
+                    "excerpt": keyword_row.paragraph_text,
+                    "keyword_score": row_score,
+                    "semantic_score": None,
+                }
+            elif row_score > existing["keyword_score"]:
+                # 2026-08-13 P1-4: 同一 chunk 多个段落命中时保留 match_count 最高
+                # 的段落作 excerpt（rows 已按 match_count 降序，但后写覆盖会丢掉最优段）
+                existing["keyword_score"] = row_score
+                existing["excerpt"] = keyword_row.paragraph_text
 
         if self._semantic_enabled:
             if self._embedding_client is None:

@@ -127,6 +127,35 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
             f"ON {schema}.paragraph_embeddings USING btree (run_id, chunk_id)"
         )
     )
+    # 2026-08-13 P2：章节 Agent 语义检索（search_similar_paragraphs）此前对同 run 全量
+    # 向量做余弦全表扫描，加 HNSW ANN 索引（需 pgvector ≥ 0.5）；查询按向量距离检索后
+    # 再叠加 run_id 边界过滤即可命中
+    session.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
+            f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
+        )
+    )
+
+
+def _hnsw_index_exists(session: Session, schema: str) -> bool:
+    """2026-08-13 用于校验 paragraph_embeddings 是否已建 HNSW 向量索引"""
+    return (
+        session.execute(
+            text(
+                """
+                SELECT 1
+                FROM pg_indexes
+                WHERE schemaname = :schema_name
+                  AND tablename = 'paragraph_embeddings'
+                  AND indexdef ILIKE '%USING hnsw%embedding_vector%'
+                LIMIT 1
+                """
+            ),
+            {"schema_name": schema},
+        ).scalar_one_or_none()
+        is not None
+    )
 
 
 def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
@@ -165,3 +194,6 @@ def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -
             "paragraph_embeddings.embedding_vector type mismatch: "
             f"expected {expected_type}, got {vector_type or 'unknown'}"
         )
+    if not _hnsw_index_exists(session, schema):
+        # 2026-08-13 P2：索引缺失时不再静默通过，避免语义检索继续全表扫描
+        raise ValueError("paragraph_embeddings missing HNSW index on embedding_vector")

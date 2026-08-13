@@ -184,9 +184,17 @@ def get_engine():
             logger.debug(f"Pool checkout: active={_engine.pool.status()}")
 
     @event.listens_for(_engine, "checkin")
-    def on_checkin(dbapi_conn, conn_record):
+    def on_checkin(dbapi_conn, connection_record):
         if _engine is not None:
             logger.debug(f"Pool checkin: active={_engine.pool.status()}")
+
+    # 2026-08-13 P2：启动期合同校验——引擎创建后立即验证连接可达与数据库版本，
+    # 避免 URL/schema/服务未起等配置错误延迟到首次查询才暴露（pool_pre_ping 只处理
+    # 失效连接，不验证首次连接）；连接失败按原始异常抛出，由调用方决定启动策略
+    with _engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+        server_version_num = conn.execute(text("SHOW server_version_num")).scalar_one()
+    logger.info(f"Database connection verified (server_version_num={server_version_num})")
 
     logger.info(
         f"Created SQLAlchemy engine for {database_url.split(':')[0]} "
@@ -264,89 +272,6 @@ def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
         {"table_name": table_name},
     ).fetchall()
     return {str(row.column_name) for row in rows}
-
-
-def _create_graph_read_views(engine: Engine) -> None:
-    """2026-08-07 用于创建章节版本图的当前状态关系与参与统计只读视图"""
-    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
-    if dialect_name != "postgresql":
-        return
-
-    statements = [
-        """
-        CREATE OR REPLACE VIEW entity_state_current AS
-        SELECT DISTINCT ON (state_row.run_id, state_row.entity_id)
-            state_row.state_version_id,
-            state_row.graph_version_id,
-            state_row.run_id,
-            state_row.chapter_id,
-            state_row.entity_id,
-            state_row.state_revision,
-            state_row.state,
-            state_row.changes,
-            state_row.created_at
-        FROM entity_state_versions AS state_row
-        JOIN graph_versions AS version_row
-          ON version_row.graph_version_id = state_row.graph_version_id
-        ORDER BY
-            state_row.run_id,
-            state_row.entity_id,
-            version_row.chapter_order DESC,
-            state_row.state_revision DESC
-        """,
-        """
-        CREATE OR REPLACE VIEW graph_relations_current AS
-        SELECT latest.*
-        FROM (
-            SELECT DISTINCT ON (version_row.run_id, version_row.relation_id)
-                version_row.relation_version_id,
-                version_row.graph_version_id,
-                version_row.run_id,
-                version_row.chapter_id,
-                version_row.relation_id,
-                version_row.relation_revision,
-                version_row.relation_type,
-                version_row.attributes,
-                version_row.is_active,
-                version_row.changes,
-                version_row.created_at
-            FROM graph_relation_versions AS version_row
-            JOIN graph_versions AS graph_version
-              ON graph_version.graph_version_id = version_row.graph_version_id
-            ORDER BY
-                version_row.run_id,
-                version_row.relation_id,
-                graph_version.chapter_order DESC,
-                version_row.relation_revision DESC
-        ) AS latest
-        WHERE latest.is_active
-        """,
-        """
-        CREATE OR REPLACE VIEW graph_entity_participants AS
-        SELECT
-            entity_row.run_id,
-            entity_row.entity_id,
-            COUNT(current_relation.relation_id)::INTEGER AS current_degree,
-            MIN(version_row.chapter_order) AS first_relation_chapter_order,
-            MAX(version_row.chapter_order) AS last_relation_chapter_order
-        FROM graph_entities AS entity_row
-        LEFT JOIN graph_relations AS relation_row
-          ON relation_row.run_id = entity_row.run_id
-         AND (
-             relation_row.from_entity_id = entity_row.entity_id
-             OR relation_row.to_entity_id = entity_row.entity_id
-         )
-        LEFT JOIN graph_relations_current AS current_relation
-          ON current_relation.run_id = relation_row.run_id
-         AND current_relation.relation_id = relation_row.relation_id
-        LEFT JOIN graph_versions AS version_row
-          ON version_row.graph_version_id = current_relation.graph_version_id
-        GROUP BY entity_row.run_id, entity_row.entity_id
-        """,
-    ]
-    with engine.begin() as connection:
-        for statement in statements:
-            connection.execute(text(statement))
 
 
 def _assert_focus_contract_schema(engine: Engine) -> None:
@@ -547,7 +472,6 @@ def init_db() -> None:
         if table.name != "paragraph_embeddings"
     ]
     Base.metadata.create_all(bind=engine, tables=tables)
-    _create_graph_read_views(engine)
     _assert_focus_contract_schema(engine)
     _assert_annotation_contract_schema(engine)
     _assert_agent_audit_contract_schema(engine)
