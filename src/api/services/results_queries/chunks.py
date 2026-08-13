@@ -169,7 +169,10 @@ def _fetch_chunk_annotations(
                 resolved_to_global_name=to_char,
                 reference_skip_reason=None,
                 type=graph_change.relation_type or "",
-                change=str(graph_change.changes[0].get("change_kind") or "refine"),
+                # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
+                change=str(graph_change.changes[0].get("change_kind") or "refine")
+                if graph_change.changes
+                else "refine",
             )
         )
 

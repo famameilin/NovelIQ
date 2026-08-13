@@ -599,7 +599,7 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     )
 
     with patch(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -642,7 +642,7 @@ def test_fetch_character_relations_skips_inactive_current_relations():
     )
 
     with patch(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -725,7 +725,7 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
     )
 
     with patch(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -742,7 +742,7 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(
             assert_graph_ready=lambda _run_id: (_ for _ in ()).throw(
                 GraphReadinessError(
@@ -762,7 +762,7 @@ def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(

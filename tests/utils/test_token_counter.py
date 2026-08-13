@@ -3,10 +3,11 @@ Token 计数工具测试
 
 覆盖 src/utils/token_counter.py：
 - 编码器选择（精确/前缀/默认）
-- count_tokens / count_messages_tokens 正常与异常回退路径
-- 估算与格式化
+- count_tokens 正常与异常回退路径
 
 2026-08-12 创建，补齐该模块 38% 的低覆盖率（mock tiktoken 保证离线可跑）。
+2026-08-13 P2-5 移除 count_messages_tokens/estimate_completion_tokens/format_token_count
+（无调用方死代码）后，同步删除对应测试。
 """
 
 from __future__ import annotations
@@ -18,10 +19,7 @@ from src.utils.token_counter import (
     _encoding_cache,
     _get_encoding,
     _get_encoding_for_model,
-    count_messages_tokens,
     count_tokens,
-    estimate_completion_tokens,
-    format_token_count,
 )
 
 
@@ -82,48 +80,3 @@ def test_count_tokens_falls_back_on_error() -> None:
         assert count_tokens("abc", model="gpt-4") == 3
         # 中文每字符 2 token
         assert count_tokens("你好", model="gpt-4") == 4
-
-
-# ============================================================================
-# count_messages_tokens
-# ============================================================================
-
-
-def test_count_messages_tokens_empty() -> None:
-    assert count_messages_tokens([]) == 0
-
-
-def test_count_messages_tokens_accounting() -> None:
-    with patch("src.utils.token_counter.tiktoken.get_encoding", return_value=_fake_encoding()) as mock_get:
-        # 每条消息 4 + role(3) + content(3)，最后 +2
-        assert count_messages_tokens([{"role": "user", "content": "hi"}]) == 4 + 3 + 3 + 2
-        two_messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-        assert count_messages_tokens(two_messages) == 2 * (4 + 3 + 3) + 2
-        mock_get.assert_called()
-
-
-def test_count_messages_tokens_missing_fields() -> None:
-    with patch("src.utils.token_counter.tiktoken.get_encoding", return_value=_fake_encoding()):
-        # 缺 role/content 时只计基础 4 token
-        assert count_messages_tokens([{}]) == 4 + 2
-
-
-def test_count_messages_tokens_falls_back_on_error() -> None:
-    with patch("src.utils.token_counter.tiktoken.get_encoding", side_effect=RuntimeError("boom")):
-        assert count_messages_tokens([{"role": "user", "content": "x"}, {"role": "user", "content": "y"}]) == 200
-
-
-# ============================================================================
-# 估算与格式化
-# ============================================================================
-
-
-def test_estimate_completion_tokens() -> None:
-    assert estimate_completion_tokens(100) == 150
-    assert estimate_completion_tokens(100, ratio=2.0) == 200
-
-
-def test_format_token_count() -> None:
-    assert format_token_count(999) == "999"
-    assert format_token_count(1_500) == "1.5K"
-    assert format_token_count(2_000_000) == "2.00M"

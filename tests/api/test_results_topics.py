@@ -89,3 +89,24 @@ def test_fetch_topics_model_load_failure_degrades() -> None:
 def test_fetch_topics_empty_rows_returns_empty() -> None:
     repo = _make_repo([])
     assert _fetch_topics("run-empty", repo) == []
+
+
+def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
+    """
+    2026-08-13 P2：模型目录必须基于项目根推导（以 config/settings.json 为锚点），
+    而不是相对 CWD 解析，避免服务启动目录不同导致词表/标签加载静默降级。
+    """
+    from src.api.services.results_queries.topics import _PROJECT_ROOT
+
+    repo = _make_repo([_make_row(0, 100.0)])
+    trainer = _make_trainer_with_model()
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("src.topic.LDATrainer", return_value=trainer),
+    ):
+        result = _fetch_topics("run-anchored", repo)
+
+    assert len(result) == 1
+    loaded_dir = trainer.load_model.call_args.args[0]
+    assert loaded_dir == _PROJECT_ROOT / "models" / "topic" / "run-anchored"

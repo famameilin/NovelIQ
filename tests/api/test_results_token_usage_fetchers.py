@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.api.routes.results_fetchers.fetchers import _fetch_token_usage_stats
+from src.api.services.results_queries import _fetch_token_usage_stats
 
 
 class _StatsRepoStub:
