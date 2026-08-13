@@ -8,9 +8,10 @@ AnalysisService 服务级状态机测试。
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import text
 
 from src.api.services.analysis_service import AnalysisService
 from src.api.services.task_manager import TaskManager
@@ -152,6 +153,41 @@ def test_prepare_task_execution_claim_skips_already_running_run(db_session) -> N
     assert refreshed["worker_id"] == "other-worker"
 
 
+@pytest.mark.asyncio
+async def test_run_analysis_core_skipped_claim_cleans_memory_task(db_session) -> None:
+    """
+    2026-08-13 P2：claim 返回 skipped（其他执行方持有 DB 真相）时，
+    _run_analysis_core 必须清理本进程的内存执行缓存（停心跳），
+    防止残留 TaskInfo 的心跳写回覆盖真实 owner 的 worker_id/heartbeat_at。
+    """
+    _insert_novel(db_session, "svcskip2")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcskip2")
+    run_repo.update_run_task_fields(run_id, status="running", worker_id="other-worker")
+    service = _make_service(db_session)
+    service.task_manager.create_task(run_id[:8], "svcskip2")
+    service.env_initializer.init_analysis_environment = MagicMock()
+
+    with patch.object(
+        service.task_manager,
+        "cancel_completed_task",
+        wraps=service.task_manager.cancel_completed_task,
+    ) as mock_cleanup:
+        await service._run_analysis_core(
+            task_id=run_id[:8],
+            novel={"novel_id": "svcskip2"},
+            skip_stages_builder=MagicMock(),
+            num_topics=25,
+        )
+
+    mock_cleanup.assert_called_once_with(run_id[:8])
+    service.env_initializer.init_analysis_environment.assert_not_called()
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "running"
+    assert refreshed["worker_id"] == "other-worker"
+
+
 def test_write_failure_to_db_persists_failed_terminal_state(db_session) -> None:
     """环境初始化前失败时，兜底写库应把任务持久化为 failed。"""
     _insert_novel(db_session, "svcfail1")
@@ -165,6 +201,82 @@ def test_write_failure_to_db_persists_failed_terminal_state(db_session) -> None:
     assert refreshed is not None
     assert refreshed["status"] == "failed"
     assert refreshed["error"] == "初始化失败"
+    assert refreshed["completed_at"] is not None
+
+
+def test_claim_pending_run_closes_cancelling_window_to_cancelled(db_session) -> None:
+    """
+    2026-08-13 修复 P1：取消信号落在「worker 读 pending」与「原子 claim」之间时，
+    claim 的 UPDATE 不命中且状态已变 cancelling。此前返回 skipped 静默退出，
+    任务永久卡在无 owner 的 cancelling；修复后应直接收口为 cancelled 终态。
+    """
+    _insert_novel(db_session, "svccnc2")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svccnc2")
+    # 模拟用户 cancel 原子地把 pending -> cancelling（无 worker 归属）
+    run_repo.request_task_cancellation(run_id)
+    service = _make_service(db_session)
+
+    result = service._claim_pending_run(run_repo, run_id)
+    refreshed = run_repo.get_run(run_id)
+
+    assert result == "cancelled"
+    assert refreshed is not None
+    assert refreshed["status"] == "cancelled"
+    assert refreshed["cancel_requested"] is False
+    assert refreshed["worker_id"] is None
+    assert refreshed["completed_at"] is not None
+
+
+def test_claim_pending_run_skips_cancelling_with_owner(db_session) -> None:
+    """有 worker 归属的 cancelling 由该 worker 收尾，其他 worker 应跳过而非收口。"""
+    _insert_novel(db_session, "svccnc3")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svccnc3")
+    run_repo.request_task_cancellation(run_id)
+    run_repo.update_run_task_fields(run_id, worker_id="owner-worker")
+    service = _make_service(db_session)
+
+    result = service._claim_pending_run(run_repo, run_id)
+    refreshed = run_repo.get_run(run_id)
+
+    assert result == "skipped"
+    assert refreshed is not None
+    assert refreshed["status"] == "cancelling"
+    assert refreshed["worker_id"] == "owner-worker"
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(db_session) -> None:
+    """
+    2026-08-13 修复 P1：环境初始化失败（session/run_id 均未建立）时，
+    通用异常分支此前只改内存任务状态，DB 停留在 running 无终态；
+    修复后必须通过兜底路径把 failed + error 写入 DB。
+    """
+
+
+    _insert_novel(db_session, "svcfail3")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcfail3")
+    service = _make_service(db_session)
+
+    # 注意：不预先 claim——_run_analysis_core 内部会自行领取（首次 claim 必成功）；
+    # 预 claim 会让内部第二次 claim 失败返回 skipped、提前 return 测不到失败路径
+    service.env_initializer.init_analysis_environment = MagicMock(
+        side_effect=RuntimeError("db 连接失败")
+    )
+
+    await service._run_analysis_core(
+        task_id=run_id[:8],
+        novel={"novel_id": "svcfail3"},
+        skip_stages_builder=MagicMock(),
+        num_topics=25,
+    )
+
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "failed"
+    assert refreshed["error"] == "db 连接失败"
     assert refreshed["completed_at"] is not None
 
 
@@ -229,3 +341,50 @@ async def test_recover_pending_tasks_continues_after_unexpected_resume_failure(d
     assert scheduled_count == 2
     assert cancelled_count == 0
     assert service.resume_task.await_count == 3
+
+
+def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
+    """
+    2026-08-13 P2: 写入端与孤儿回收均以 UTC 落库（DateTime 列无时区，tz 被剥离），
+    _is_recent_resume_reset 必须按 UTC 挂钟比较；本地时区（如 UTC+8）下若按
+    本地挂钟比较，会把新鲜心跳误判为陈旧，导致真实取消被当作 resume 后陈旧取消。
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from src.api.services.analysis_service import _RESUME_RESET_WINDOW_SECONDS
+
+    _insert_novel(db_session, "svchb01")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svchb01")
+    service = _make_service(db_session)
+    fresh_utc = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS - 5)
+
+    # 写入端落库剥离 tz（naive UTC），读回补 UTC 后仍判定为新鲜
+    db_session.execute(
+        text(
+            "UPDATE analysis_runs SET worker_id = NULL, heartbeat_at = :hb WHERE run_id = :rid"
+        ),
+        {"hb": fresh_utc.replace(tzinfo=None), "rid": run_id},
+    )
+    db_session.commit()
+
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert service._is_recent_resume_reset(refreshed) is True
+
+    # 陈旧心跳（超过窗口）判定为不新鲜
+    stale_utc = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS + 3600)
+    db_session.execute(
+        text(
+            "UPDATE analysis_runs SET heartbeat_at = :hb WHERE run_id = :rid"
+        ),
+        {"hb": stale_utc.replace(tzinfo=None), "rid": run_id},
+    )
+    db_session.commit()
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert service._is_recent_resume_reset(refreshed) is False
+
+    # worker_id 非空时不进入竞态窗口判断
+    refreshed["worker_id"] = "worker-other"
+    assert service._is_recent_resume_reset(refreshed) is False

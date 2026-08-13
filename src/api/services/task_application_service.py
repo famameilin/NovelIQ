@@ -195,7 +195,13 @@ class TaskApplicationService:
         latest_status = persist_task_cancellation_request(task_id)
         if latest_status != "cancelling":
             raise_cancel_not_allowed(latest_status)
-            raise HTTPException(status_code=400, detail=f"任务状态为 {latest_status}，无法取消")
+            # 走到这里说明 latest_status 仍为 pending/running：
+            # 原子取消请求未命中（并发竞态），任务本身仍然可取消，
+            # 文案必须说“未生效”而不是“无法取消”
+            raise HTTPException(
+                status_code=400,
+                detail=f"任务状态为 {latest_status}，取消请求未生效，请重试",
+            )
 
         cancelled = self.task_manager.cancel_task(task_id)
         if cancelled:

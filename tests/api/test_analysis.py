@@ -282,7 +282,8 @@ class TestAnalysis:
                 task_id,
                 status="running",
                 worker_id="worker-running",
-                heartbeat_at=datetime.now(),
+                # 2026-08-13 P2：heartbeat_at 列无时区，统一落 naive UTC 挂钟
+                heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
             )
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
@@ -501,7 +502,10 @@ class TestAnalysis:
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
-        stale_heartbeat = datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
+        # 2026-08-13 P2：heartbeat_at 列无时区，落库统一为 naive UTC 挂钟
+        stale_heartbeat = (
+            datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
+        ).replace(tzinfo=None)
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = uuid.uuid4().hex[:8]
         cancelling_novel_id = uuid.uuid4().hex[:8]
@@ -708,3 +712,72 @@ class TestAnalysis:
         ):
             result = analysis_mod._get_task_detail_from_db("deadbeef")
         assert result is None
+
+    def test_status_map_covers_legacy_readable_states(self):
+        """
+        2026-08-13 P2：/status 状态映射必须覆盖 aggregated/diagnosed 可读状态。
+
+        说明: results/timeline 路由仍把这两个历史状态当可读状态放行，
+              /status 此前落入 PENDING 兜底误报“未开始”；修复后给出确定映射。
+        """
+        assert analysis_mod._map_status_to_task_status("aggregated") == analysis_mod.TaskStatus.COMPLETED
+        assert analysis_mod._map_status_to_task_status("diagnosed") == analysis_mod.TaskStatus.COMPLETED
+        assert analysis_mod._map_status_to_task_status("pending") == analysis_mod.TaskStatus.PENDING
+        assert analysis_mod._map_status_to_task_status("unknown-state") == analysis_mod.TaskStatus.PENDING
+
+    def test_get_task_status_maps_legacy_aggregated_status(self, api_client: TestClient):
+        """测试 DB 中历史 aggregated 状态的 run 经 /status 返回 completed 而非 pending"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("legacy_aggregated_status.txt", file, "text/plain")}
+                )
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+        with get_session_factory()() as session:
+            RunRepository(session).update_run_task_fields(task_id, status="aggregated", progress=90.0)
+
+        response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["progress"] == 90.0
+
+    def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):
+        """
+        2026-08-13 P2：cancel 竞态中持久化返回 pending/running 时，
+        文案必须说“取消请求未生效”，不能说“无法取消”。
+        """
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("cancel_miss_race_test.txt", file, "text/plain")}
+                )
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        with (
+            patch.object(task_application_mod, "cancel_unclaimed_pending_task", return_value=False),
+            patch.object(task_application_mod, "persist_task_cancellation_request", return_value="running"),
+        ):
+            response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "running" in detail
+        assert "未生效" in detail
+        assert "无法取消" not in detail

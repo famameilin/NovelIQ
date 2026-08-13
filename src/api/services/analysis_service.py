@@ -293,15 +293,19 @@ class AnalysisService:
             db_session = sf.get_session()
             with db_session:
                 sql_session = db_session.connection
-                with sql_session.begin():
-                    run_repo = RunRepository(sql_session)
-                    run_id = task_id_to_run_id(task_id, sql_session)
-                    run_repo.update_run_task_fields(
-                        run_id,
-                        status="failed",
-                        error=error_message,
-                        completed_at=datetime.now(UTC),
-                    )
+                run_repo = RunRepository(sql_session)
+                run_id = task_id_to_run_id(task_id, sql_session)
+                # 2026-08-13 修复：不用 `with sql_session.begin():` 包裹——兜底路径可能在
+                # _is_cancelled 等查询已开启隐式事务后进入，begin() 会抛
+                # "A transaction is already begun on this Session" 并被内部 except 吞掉，
+                # 导致 DB 终态实际未写入。update_run_task_fields 内部自带 commit，
+                # 无论 session 是否已有事务都能正确提交。
+                run_repo.update_run_task_fields(
+                    run_id,
+                    status="failed",
+                    error=error_message,
+                    completed_at=datetime.now(UTC),
+                )
         except TaskIDNotFoundError:
             logger.warning(f"Task {task_id} not found in id_mapping during failure DB write, skipping")
         except Exception as e:
@@ -457,13 +461,36 @@ class AnalysisService:
         claimed = run_repo.claim_pending_run(
             run_id,
             worker_id=self.task_manager.get_worker_id(),
-            heartbeat_at=datetime.now(UTC),
+            # 2026-08-13 P2：heartbeat_at 列无时区，落 naive UTC 挂钟（避免会话时区转换错位）
+            heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
         )
         if claimed:
             return "claimed"
 
         refreshed = run_repo.get_run(run_id)
-        if refreshed and refreshed.get("status") == "cancelled":
+        if refreshed is None:
+            return "skipped"
+
+        refreshed_status = refreshed.get("status")
+        if refreshed_status == "cancelled":
+            return "cancelled"
+        if refreshed_status == "cancelling" and refreshed.get("cancel_requested"):
+            # 2026-08-13 修复：取消信号落在「读 pending」与「原子 claim」之间的窗口时，
+            # claim 的 UPDATE 不命中（status 已变 cancelling），此前直接返回 skipped 静默退出，
+            # 任务会永久卡在无 owner 的 cancelling（再 cancel 400、resume 拒绝）。
+            # 与 _prepare_task_execution_claim 的 cancelling 收口同口径：
+            # 有 worker 的 cancelling 由该 worker 收尾，无 worker 的在此直接落 cancelled 终态。
+            if refreshed.get("worker_id"):
+                return "skipped"
+            run_repo.update_run_task_fields(
+                run_id,
+                status="cancelled",
+                cancel_requested=False,
+                completed_at=datetime.now(UTC),
+                message=refreshed.get("message") or "任务在启动前已取消",
+                worker_id=None,
+                heartbeat_at=None,
+            )
             return "cancelled"
         return "skipped"
 
@@ -484,10 +511,13 @@ class AnalysisService:
             heartbeat_dt = datetime.fromisoformat(heartbeat_at)
         except (TypeError, ValueError):
             return False
-        # analysis_runs 的 DateTime 列不带时区：写入时 tz 会被剥离，读回为 naive 挂钟，
-        # 与 psycopg2 TIMESTAMP WITHOUT TIME ZONE 的落库语义一致（main.py 的孤儿回收
-        # 同样按此约定比较心跳时间），这里统一与本地挂钟比较
-        cutoff = datetime.now() - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS)
+        # 2026-08-13 P2：写入端与孤儿回收（main.py）均以 UTC 生成/比较心跳时间。
+        # analysis_runs 的 DateTime 列不带时区，写入时 tz 被剥离、读回为 naive UTC
+        # 挂钟；这里统一补 UTC 后与 UTC 挂钟比较，避免服务器本地时区偏移
+        # （如 UTC+8）把真实取消误判为「resume 后的陈旧取消写回」
+        if heartbeat_dt.tzinfo is None:
+            heartbeat_dt = heartbeat_dt.replace(tzinfo=UTC)
+        cutoff = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS)
         return heartbeat_dt >= cutoff
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
@@ -753,6 +783,9 @@ class AnalysisService:
                 return
             if claim_result == "skipped":
                 logger.info(f"Task {task_id} execution claim skipped because another state transition won the DB truth")
+                # 2026-08-13 P2：skipped 也要清掉本进程的内存执行缓存（停心跳），
+                # 否则残留 TaskInfo 的心跳写回会覆盖真实 owner 的 worker_id/heartbeat_at
+                self.task_manager.cancel_completed_task(task_id)
                 return
 
             (
@@ -844,8 +877,12 @@ class AnalysisService:
                     log_prefix=log_prefix,
                 )
             else:
+                # 2026-08-13 修复：与 CancellationStateCheckError 分支同口径，
+                # 环境初始化失败（session/run_id 均缺失）时也必须把 DB 终态写下去，
+                # 否则 run 永远停在 running/pending，只能等重启心跳超时兜底
                 self.novel_service.update_task_status(task_id, "failed")
                 self.task_manager.complete_task(task_id, success=False, error=str(e))
+                self._write_failure_to_db(task_id, str(e))
         finally:
             if analysis_logger:
                 analysis_logger.close()

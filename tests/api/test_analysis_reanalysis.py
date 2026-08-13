@@ -100,6 +100,43 @@ class TestReanalysis:
         assert "task_id" in data
         assert data["status"] == "pending"
 
+    def test_reanalyze_request_default_num_topics_matches_settings(self) -> None:
+        """
+        2026-08-13 P2：ReanalyzeRequest 默认 num_topics 必须与
+        settings.topic_model.num_topics 一致，无 body 与空 body 行为对齐。
+        """
+        from src.config import settings
+
+        assert settings.topic_model.num_topics == 25
+        assert ReanalyzeRequest().num_topics == settings.topic_model.num_topics
+
+    def test_reanalyze_empty_body_persists_default_num_topics(self, api_client: TestClient) -> None:
+        """空 body 的 reanalyze 应持久化默认 num_topics=25 的请求载荷"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("reanalyze_empty_body_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
+            reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={})
+
+        assert reanalyze_response.status_code == 200
+        task_id = reanalyze_response.json()["task_id"]
+
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+
+        assert run is not None
+        assert run["request_payload"] is not None
+        assert run["request_payload"]["num_topics"] == 25
+
     def test_resume_failed_reanalysis_restores_original_request(self, api_client: TestClient):
         """测试 failed 的重分析任务 resume 时会恢复原始 force 参数与主题数"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
