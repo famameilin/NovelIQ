@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -353,3 +354,55 @@ class TestStageCompleteChecks:
 
         stats_repo = StatsRepository(db_session)
         assert not stats_repo.has_diagnosis_data(run_id)
+
+
+class TestChunkTopicsIdempotency:
+    """2026-08-13 修复 P1：chunk_topics 此前无唯一约束且重跑不清理旧行，
+    重分析后数据翻倍、SUM 双倍计数；修复后写入幂等且唯一约束兜底。"""
+
+    def _setup_run(self, db_session):
+        novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(novel_id, session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+        chunk_repo = ChunkRepository(db_session)
+        chunk_repo.insert_chunks(run_id, _create_chunks(1))
+        return run_id, chunk_repo
+
+    def test_reinsert_same_run_does_not_duplicate_rows(self, db_session):
+        run_id, chunk_repo = self._setup_run(db_session)
+        chunk_repo.insert_chunk_topics(run_id, [(0, 1, 0.5), (0, 2, 0.3)])
+        # 重跑主题建模（非 force 路径）：同 run 再次插入不应翻倍
+        chunk_repo.insert_chunk_topics(run_id, [(0, 1, 0.5), (0, 2, 0.3)])
+
+        rows = db_session.execute(
+            text("SELECT chunk_id, topic_id, topic_weight FROM chunk_topics WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        ).fetchall()
+        assert len(rows) == 2
+
+    def test_unique_constraint_rejects_duplicate_triple(self, db_session):
+        from sqlalchemy.exc import IntegrityError
+
+        from src.storage.models import ChunkTopic
+
+        run_id, chunk_repo = self._setup_run(db_session)
+        chunk_repo.insert_chunk_topics(run_id, [(0, 1, 0.5)])
+        # 绕过幂等写入路径直接 ORM 插入同 (run_id, chunk_id, topic_id)：唯一约束必须拒绝
+        db_session.add(ChunkTopic(chunk_id=0, topic_id=1, topic_weight=0.9, run_id=run_id))
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+
+    def test_aggregate_sum_not_doubled_after_rerun(self, db_session):
+        run_id, chunk_repo = self._setup_run(db_session)
+        chunk_repo.insert_chunk_topics(run_id, [(0, 1, 0.5)])
+        chunk_repo.insert_chunk_topics(run_id, [(0, 1, 0.5)])
+
+        total = chunk_repo.fetch_chunk_topics_agg(run_id)
+        assert len(total) == 1
+        assert total[0].total_weight == pytest.approx(0.5)

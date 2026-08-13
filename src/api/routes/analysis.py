@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,6 +34,10 @@ _STATUS_MAP: dict[str, TaskStatus] = {
     "failed": TaskStatus.FAILED,
     "cancelling": TaskStatus.CANCELLING,
     "cancelled": TaskStatus.CANCELLED,
+    # 历史/外部写入的可读中间态：results/timeline 路由仍允许读取这类 run，
+    # /status 必须给出确定映射而不是落入 PENDING 兜底，避免误报“未开始”
+    "aggregated": TaskStatus.COMPLETED,
+    "diagnosed": TaskStatus.COMPLETED,
 }
 
 
@@ -111,103 +114,6 @@ def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
     )
-
-
-def _raise_cancel_not_allowed(task_status: str) -> None:
-    """
-    统一校验任务是否允许进入取消流程
-    """
-    if task_status in ("completed", "cancelled", "cancelling"):
-        raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
-    if task_status == "failed":
-        raise HTTPException(status_code=400, detail="任务已失败，无法取消")
-
-
-def _persist_task_cancellation_request(task_id: str) -> str:
-    """
-    将取消请求可靠写入数据库
-    """
-    session_factory = get_session_factory()
-    try:
-        with session_factory() as session:
-            run_id = task_id_to_run_id(task_id, session.connection())
-            run_repo = RunRepository(session)
-            latest_status = run_repo.request_task_cancellation(run_id)
-            if latest_status is None:
-                raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试")
-            return latest_status
-    except (TaskIDNotFoundError, ValueError) as exc:
-        logger.error(f"Task {task_id} run_id not found when persisting cancellation request: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
-    except Exception as exc:
-        logger.error(f"Failed to persist cancellation request for task {task_id}: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
-
-
-def _cancel_unclaimed_pending_task(task_id: str) -> bool:
-    """
-    直接终结尚未被任何 worker 领取的 pending 任务
-    """
-    session_factory = get_session_factory()
-    try:
-        with session_factory() as session:
-            run_id = task_id_to_run_id(task_id, session.connection())
-            run_repo = RunRepository(session)
-            cancelled = run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
-            session.commit()
-            return cancelled
-    except (TaskIDNotFoundError, ValueError) as exc:
-        logger.error(f"Task {task_id} run_id not found when cancelling unclaimed pending task: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
-    except Exception as exc:
-        logger.error(f"Failed to cancel unclaimed pending task {task_id}: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
-
-
-async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
-    """
-    删除任务前清理运行态缓存与后台协程
-
-    说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态
-    """
-    task_info = task_manager.get_task(task_id)
-    if task_info is None:
-        return
-
-    # 设置内存取消信号
-    task_manager.cancel_task(task_id)
-
-    # 这里只是删除前的运行态清理，DB 真相必须仍然遵守同一套状态机护栏
-    # 如果 DB 已经是 completed/failed/cancelled，原子取消操作会返回最新终态，不会破坏 DB 状态
-    session_factory = get_session_factory()
-    try:
-        with session_factory() as session:
-            run_id = task_id_to_run_id(task_id, session.connection())
-            run_repo = RunRepository(session)
-            latest_status = run_repo.request_task_cancellation(run_id)
-            if latest_status is None:
-                logger.warning(f"Task {task_id} missing from DB during delete cleanup, skipping cancel persistence")
-            elif latest_status != "cancelling":
-                logger.info(
-                    f"Task {task_id} DB already in terminal state {latest_status} during delete cleanup; "
-                    "skipping cancel persistence"
-                )
-    except (TaskIDNotFoundError, ValueError):
-        logger.warning(f"Task {task_id} run_id not found, skipping run table cancel_requested update")
-    except Exception as e:
-        logger.warning(f"Failed to update cancel_requested for task {task_id}: {e}")
-
-    if task_info.asyncio_task and not task_info.asyncio_task.done():
-        task_info.asyncio_task.cancel()
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(task_info.asyncio_task, return_exceptions=True),
-                timeout=5.0,
-            )
-        except TimeoutError:
-            logger.warning(f"Delete task: task {task_id} cancel timed out, background coroutine may still be running")
-        except Exception as e:
-            logger.warning(f"Delete task: unexpected error cancelling task {task_id}: {e}")
 
 
 @router.post("/{novel_id}/tasks", response_model=CreateTaskResponse)

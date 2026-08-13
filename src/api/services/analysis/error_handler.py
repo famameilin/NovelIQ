@@ -58,7 +58,14 @@ class AnalysisErrorHandler:
         self.task_manager.complete_task(task_id, success=True)
 
         run_repo = RunRepository(session)
-        run_repo.update_run_status(run_id, "completed")
+        # 2026-08-13 P2：成功收口必须把 progress 归一为 100.0，
+        # 避免 DB 中完成任务的进度停留在最后阶段区间（如 95.x）而 /status 误报未完成
+        run_repo.update_run_task_fields(
+            run_id,
+            status="completed",
+            progress=100.0,
+            completed_at=datetime.now(UTC),
+        )
         session.commit()
 
         # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
@@ -111,7 +118,15 @@ class AnalysisErrorHandler:
         # 再写 run 状态；否则后续 commit 会把半成品业务数据一并刷进数据库
         session.rollback()
         run_repo = RunRepository(session)
-        run_repo.update_run_status(run_id, "failed")
+        # 2026-08-13 修复：update_run_status 只写 status 不写 error 列，
+        # 导致 DB 中 failed 任务 error 恒为 NULL、/status 接口 error 永远 None，
+        # 前端重连后只能显示兜底「分析失败」文案。改为 update_run_task_fields 一并落 error。
+        run_repo.update_run_task_fields(
+            run_id,
+            status="failed",
+            error=str(error),
+            completed_at=datetime.now(UTC),
+        )
         session.commit()
 
         if bus:

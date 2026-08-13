@@ -317,7 +317,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = heartbeat_at or datetime.now(UTC)
+        # 2026-08-13 P2：heartbeat_at 列无时区，默认值统一落 naive UTC 挂钟
+        # （避免 aware UTC 被 PG 按会话时区转换，导致 resume 窗口/孤儿回收误判）
+        now = heartbeat_at or datetime.now(UTC).replace(tzinfo=None)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -456,9 +458,13 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
         使用 limit(1) 避免多记录时抛出异常
         """
+        # 2026-08-13 P2-9：前缀中的 %/_/\\ 按字面字符匹配，避免被 LIKE 当作通配符
+        escaped_prefix = (
+            run_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
         stmt = (
             select(AnalysisRun)
-            .where(AnalysisRun.run_id.like(f"{run_id_prefix}%"))
+            .where(AnalysisRun.run_id.like(f"{escaped_prefix}%", escape="\\"))
             .order_by(AnalysisRun.created_at.asc())
             .limit(1)
         )
