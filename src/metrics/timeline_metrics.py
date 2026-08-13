@@ -306,6 +306,17 @@ def compute_four_phases(
         boundary_1 = max(1, min(int(total * 0.15), total - 3))
         boundary_2 = max(boundary_1 + 1, min(int(total * 0.50), total - 2))
         boundary_3 = max(boundary_2 + 1, min(int(total * 0.80), total - 2))
+        if total < 5:
+            # 2026-08-13 极端短输入（1~4 chunk）时 boundary 计算会越界
+            # （收束期取 chunk_ids[boundary_3 + 1]），单相位兜底避免时间轴 500
+            return [
+                NarrativePhase(
+                    "引入期",
+                    chunk_ids[0],
+                    chunk_ids[-1],
+                    1.0,
+                )
+            ]
         return [
             NarrativePhase("引入期", chunk_ids[0], chunk_ids[boundary_1], (boundary_1 + 1) / total),
             NarrativePhase(
@@ -347,6 +358,14 @@ def compute_four_phases(
     climax_start = max(valley_idx + min_phase_length, peak_idx - climax_radius)
     climax_end = min(total - 1 - min_phase_length, peak_idx + climax_radius)
 
+    # 2026-08-13 修复：峰值贴边（张力单调递减/平曲线时 global peak 落在首 chunk，
+    # 或峰值落在末 chunk 邻域）会产出 climax_start > climax_end 的倒置高潮期，
+    # 负 ratio 直接序列化给前端、区间内 chunk 全被误归收束期。
+    # 倒置时把高潮期钳制为谷底之后的合法单点区间。
+    if climax_start > climax_end:
+        climax_start = min(valley_idx + min_phase_length, total - 1)
+        climax_end = climax_start
+
     valley_idx = min(valley_idx, climax_start - min_phase_length)
     valley_idx = max(valley_idx, min_phase_length)
 
@@ -386,7 +405,17 @@ def compute_four_phases(
             )
         )
     else:
-        phases.append(NarrativePhase("收束期", chunk_ids[climax_end], chunk_ids[climax_end], 0.0))
+        # 2026-08-13 修复：高潮期贴尾时此前收束期退化为 [climax_end..climax_end] 的
+        # 0.0 空区间，真正的尾部 chunk（含峰值末章）不入任何阶段、ratio 总和 < 1。
+        # climax_end <= total-2（min_phase_length=1），故此处区间恒非空且不重叠。
+        phases.append(
+            NarrativePhase(
+                "收束期",
+                chunk_ids[climax_end + 1],
+                chunk_ids[-1],
+                (total - climax_end - 1) / total,
+            )
+        )
 
     return phases
 
@@ -743,7 +772,12 @@ def build_timeline_atoms(
             graph_change.to_entity_id,
             graph_change.to_name or str(graph_change.to_entity_id),
         )
-        relation_change_kind = str(graph_change.changes[0].get("change_kind") or "refine")
+        # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
+        relation_change_kind = (
+            str(graph_change.changes[0].get("change_kind") or "refine")
+            if graph_change.changes
+            else "refine"
+        )
         graph_change_dto = GraphChangeDTO(
             change_id=graph_change.change_id,
             change_kind="relation",

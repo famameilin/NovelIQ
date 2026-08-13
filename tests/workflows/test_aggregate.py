@@ -208,3 +208,98 @@ class TestAggregate:
         chunks, chunk_curves_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 0
         assert chunk_curves_count == 0
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_metrics_graph_not_ready_degrades_gracefully(self, monkeypatch) -> None:
+        """2026-08-13 P2-3 用于验证 aggregate_all_metrics 抛 GraphReadinessError 时
+        保留降级（chunk_curves/global_stats 正常写入）且记录 error 级别日志"""
+        from unittest.mock import patch
+
+        from src.api.exceptions import GraphReadinessError
+
+        self._create_chunks_with_style(3)
+        messages: list[str] = []
+
+        def _capture(message: str) -> None:
+            messages.append(str(message))
+
+        monkeypatch.setattr("src.workflows.aggregate.logger.error", _capture)
+        with patch(
+            "src.workflows.aggregate.aggregate_all_metrics",
+            side_effect=GraphReadinessError("graph not ready yet"),
+        ):
+            chunks, chunk_curves_count, _ = await run_aggregate(
+                run_id=self.run_id,
+                session=self.db_session,
+            )
+
+        assert chunks == 3
+        assert chunk_curves_count == 3
+        assert any("graph not ready yet" in message for message in messages)
+
+
+class TestGlobalStatsRunIsolation:
+    """2026-08-13 修复 P1：compute_global_stats 此前查询 chunk_style 缺 run_id 过滤，
+    跨 run 累积的数据会污染当前 run 的 global_avg_* 指标。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, db_session):
+        self.db_session = db_session
+        self.novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(self.novel_id, session=db_session)
+        run_repo = RunRepository(db_session)
+        self.run_a = run_repo.create_run(novel_id=self.novel_id)
+        self.run_b = run_repo.create_run(novel_id=self.novel_id)
+
+    def _insert_style_for_run(self, run_id: str, mtld: float) -> None:
+        chunk_repo = ChunkRepository(self.db_session)
+        chunk_repo.insert_chunks(
+            run_id,
+            [Chunk(index=0, start=0, end=100, text="测试文本内容。", chapter_id=1)],
+        )
+        chunk_repo.insert_chunk_style(
+            run_id,
+            [
+                ChunkStyleData(
+                    chunk_id=0,
+                    mtld=mtld,
+                    ttr=0.5,
+                    avg_sent_len=20.0,
+                    sent_len_std=5.0,
+                    d_value=5.0,
+                    pause_density=0.1,
+                    fight_density=0.0,
+                    exclaim_density=0.0,
+                    dialogue_ratio=0.2,
+                    question_density=0.0,
+                    sensory_density=0.0,
+                    metaphor_density=0.0,
+                    function_word_vector="{}",
+                    category_density_combat=0.0,
+                    category_density_body=0.0,
+                    category_density_relation=0.0,
+                    category_density_faction=0.0,
+                    category_density_command=0.0,
+                    category_density_action=0.0,
+                    category_density_psychology=0.0,
+                    category_density_measure=0.0,
+                    category_density_emotion=0.0,
+                    category_density_color=0.0,
+                )
+            ],
+        )
+
+    def test_global_stats_only_aggregates_own_run(self) -> None:
+        from src.workflows.curve_metrics import compute_global_stats
+
+        self._insert_style_for_run(self.run_a, mtld=10.0)
+        self._insert_style_for_run(self.run_b, mtld=100.0)
+
+        stats_a = dict(compute_global_stats(self.db_session, self.run_a, [], [], []))
+        stats_b = dict(compute_global_stats(self.db_session, self.run_b, [], [], []))
+
+        # run_b 的 mtld=100 不得污染 run_a 的均值
+        assert stats_a["global_avg_mtld"] == pytest.approx(10.0)
+        assert stats_b["global_avg_mtld"] == pytest.approx(100.0)
+        assert stats_a["global_avg_ttr"] == pytest.approx(0.5)
+        assert stats_a["global_avg_sent_len"] == pytest.approx(20.0)

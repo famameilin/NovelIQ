@@ -108,6 +108,7 @@ async def run_preprocess(
             cast(list[str], lexicons.get("function_words", [])),
             cast(dict, lexicons.get("semantic_categories", {})),
             cast(list[str], lexicons.get("imagery", [])),
+            cast(dict, lexicons.get("fight_terms", {})),
         )
         style_rows.append(style_data)
 

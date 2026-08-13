@@ -142,6 +142,16 @@ def test_prologue_guesses_preliminary_title() -> None:
     assert chapters[0].title == "楔子"
 
 
+def test_preliminary_title_rejects_body_paragraph_lines() -> None:
+    """2026-08-13 P2 用于验证正文段落首行以开篇词开头（如「引言：本书讲述了……」）
+    不再被误判为开篇标题（标题形态约束：剩余内容含句末标点即拒绝）"""
+    assert guess_preliminary_title("引言：本书讲述了整个故事。\n正文继续……") is None
+    assert guess_preliminary_title("尾声临近，众人收拾行装。") is None
+    # 纯标题形态仍可识别（含短标题内容或为空）
+    assert guess_preliminary_title("楔子\n正文开始。") == "楔子"
+    assert guess_preliminary_title("序章 命运的开端\n正文开始。") == "序章"
+
+
 def test_prologue_does_not_swallow_first_chapter_title_line() -> None:
     """2026-08-12 用于验证序言区间截止于第一章标题行之前，标题行不属于任何 chunk"""
     text = "楔子 命运\n这段开篇正文足够长，超过了最小阈值。\n第一章 起点\n内容甲。"

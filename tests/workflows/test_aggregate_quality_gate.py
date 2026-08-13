@@ -48,6 +48,20 @@ def test_build_quality_gate_report_does_not_flag_zero_density_chunks() -> None:
     assert report["imagery_lexicon_null_chunk_ids"] == []
 
 
+def test_build_quality_gate_report_no_rows_is_not_a_pass() -> None:
+    """2026-08-13 P2-3 无 imagery 数据行时质量门不通过（保守：缺数据=缺陷）"""
+    agg_result = AggregateResult(
+        language_style={"tone_distribution": {"neutral": 1.0}},
+        traditional_culture={"imagery_density": 0.2},
+    )
+    chunk_repo = _StubChunkRepo([])
+
+    report = _build_quality_gate_report("run-n", agg_result, chunk_repo)
+
+    assert report["imagery_lexicon_null_chunk_ratio"] == 1.0
+    assert report["imagery_lexicon_null_chunk_ids"] == []
+
+
 def test_build_quality_gate_report_handles_missing_fields() -> None:
     agg_result = AggregateResult(language_style={}, traditional_culture={})
     chunk_repo = _StubChunkRepo([])
@@ -56,7 +70,8 @@ def test_build_quality_gate_report_handles_missing_fields() -> None:
 
     assert report["tone_distribution_non_empty_rate"] == 0.0
     assert report["imagery_density_non_null_rate"] == 0.0
-    assert report["imagery_lexicon_null_chunk_ratio"] == 0.0
+    # 2026-08-13 P2-3 无 imagery 数据按"不通过"处理（保守）：0/0 不等于达标
+    assert report["imagery_lexicon_null_chunk_ratio"] == 1.0
     assert report["imagery_lexicon_null_chunk_ids"] == []
 
 

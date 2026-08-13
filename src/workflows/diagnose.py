@@ -79,11 +79,19 @@ def _persist_main_character_attributes(
         session.execute(
             select(GraphEntity).where(
                 GraphEntity.run_id == run_id,
-                GraphEntity.entity_id.in_(representative_ids),
             )
         ).scalars()
     )
+    # 2026-08-13 P2-2 重跑诊断先清除该 run 全部实体的 is_main_character 标记，
+    # 避免旧名单残留（只置位不清理会让已下榜角色仍显示为主角）。
+    # attributes 是 JSON 列，这里读改写后整体写回，与下文置位共用同一批实体。
     for graph_entity in graph_entities:
+        attributes = dict(graph_entity.attributes or {})
+        if attributes.pop("is_main_character", None) is not None:
+            graph_entity.attributes = attributes
+    for graph_entity in graph_entities:
+        if graph_entity.entity_id not in representative_ids:
+            continue
         attributes = dict(graph_entity.attributes or {})
         attributes["is_main_character"] = True
         graph_entity.attributes = attributes
