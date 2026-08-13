@@ -42,6 +42,7 @@ from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
 from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
+from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
 from src.config import settings
 from src.storage.repositories import (
     AnnotationRepository,
@@ -51,7 +52,6 @@ from src.storage.repositories import (
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-GRAPH_CHANGE_LIMIT = 200
 READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
 
 

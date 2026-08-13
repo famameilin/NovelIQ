@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from src.config import settings as BOOTSTRAP_SETTINGS
 from src.config.logging_setup import setup_logging
 
 # API 入口需要先完成配置加载和日志初始化，再导入 routes / middleware，
@@ -22,7 +21,6 @@ timeline_router = _routes_module.timeline_router
 sse_router = _sse_module.router
 
 __all__ = [
-    "BOOTSTRAP_SETTINGS",
     "analysis_router",
     "novels_router",
     "register_exception_handlers",

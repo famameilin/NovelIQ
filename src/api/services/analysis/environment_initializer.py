@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -17,9 +16,6 @@ from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.storage.repositories import RunRepository, StatsRepository
 from src.storage.session import SessionFactory
-
-if TYPE_CHECKING:
-    pass
 
 
 class EnvironmentInitializer:
