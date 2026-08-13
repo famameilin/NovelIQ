@@ -24,6 +24,7 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
 // 原因: 后端实际下发的标注/诊断子阶段为 chapter_agent / diagnosis；
 //       phase1-4 与 agent/sub_agent 均已不再下发，展示配置对齐真实枚举值。
 const PHASE_CONFIG: Record<string, { label: string }> = {
+  paragraph_embedding: { label: "段落向量" },
   chapter_agent: { label: "标注 Agent" },
   diagnosis: { label: "诊断" },
 };
@@ -155,7 +156,7 @@ function ProgressBar({ stage, phase, current, total, percent, message }: Progres
             chunk {current}/{total}
           </span>
           <span className="text-xs font-medium tabular-nums text-primary">
-            {percent.toFixed(1)}%
+            {(percent ?? 0).toFixed(1)}%
           </span>
         </div>
       </div>

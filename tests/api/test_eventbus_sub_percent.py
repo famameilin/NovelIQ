@@ -347,3 +347,41 @@ async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100(
 
     assert preprocess_update["progress"] == 10.0
     assert annotate_update["progress"] == 80.0
+
+
+@pytest.mark.asyncio
+async def test_emit_stage_start_resets_progress_context_and_never_writes_total_zero() -> None:
+    """
+    2026-08-13 P2: stage_start 是阶段边界，必须作废旧阶段的 current/total/percent
+    上下文；新阶段内不带进度字段的事件不得沿用旧阶段数值套新阶段区间算错 percent。
+    同时 total 缺省（0）不得写回数据库（曾把 analysis_runs.total 从 100 清成 0）。
+    """
+    task_manager = MagicMock()
+    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
+
+    with patch("src.api.services.event_manager.event_manager") as mock_em:
+        mock_em.send = AsyncMock()
+
+        # annotate 阶段携带章节进度上下文（current/total/percent）
+        await bus.emit_stage_start("annotate", message="开始标注分析", percent=10.0, total=37)
+        # 新阶段开始（不传进度字段）
+        await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=80.0)
+        # 新阶段内无进度字段的普通事件
+        await bus.emit(StreamEvent(action="progress", stage="aggregate", message="聚合中"))
+
+    # stage_start(annotate) 写 total=37；后续调用不得再写 total（缺省 0 视为未提供）
+    total_written = [
+        kwargs.get("total")
+        for call in task_manager.update_task.call_args_list
+        for kwargs in [call.kwargs]
+    ]
+    assert total_written == [37, None, None]
+    # percent：annotate 起点 10.0 → aggregate 起点 80.0 → 无进度事件回退 80.0
+    aggregate_percent = [
+        kwargs.get("progress") for call in task_manager.update_task.call_args_list for kwargs in [call.kwargs]
+    ]
+    assert aggregate_percent == [10.0, 80.0, 80.0]
+    # SSE 数据同样不带旧阶段 current/total
+    send_data = [call.kwargs["data"] for call in mock_em.send.call_args_list]
+    assert send_data[1]["total"] == 0
+    assert send_data[2]["percent"] == 80.0

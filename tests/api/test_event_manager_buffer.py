@@ -10,6 +10,28 @@ from src.api.services.event_manager import EventManager
 
 
 @pytest.mark.asyncio
+async def test_default_buffer_holds_recent_256_messages() -> None:
+    """2026-08-13 P2：默认缓冲从 64 提升到 256，断线窗口期消息更不易被淘汰"""
+    manager = EventManager()
+    try:
+        assert manager._buffer_size == 256
+        for index in range(300):
+            await manager.send("task-1", "message", {"content": f"msg-{index}"})
+
+        queue = await manager.connect("task-1")
+        messages = []
+        while not queue.empty():
+            messages.append(await queue.get())
+        await manager.disconnect("task-1", queue)
+
+        assert len(messages) == 256
+        assert messages[0]["data"]["content"] == "msg-44"
+        assert messages[-1]["data"]["content"] == "msg-299"
+    finally:
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
 async def test_send_before_connect_is_buffered_and_replayed() -> None:
     """连接建立前发送的事件必须入缓冲，late-joiner 可回放"""
     manager = EventManager()

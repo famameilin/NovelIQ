@@ -273,8 +273,10 @@ class AnalysisEventBus:
             # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库
             if resolved_event.current is not None:
                 task_update_kwargs["current"] = resolved_event.current
-            if resolved_event.total is not None:
-                task_update_kwargs["total"] = resolved_event.total
+            # 2026-08-13 P2：total=0 是「未提供」的非法值（默认 0 曾把 analysis_runs.total
+            # 从 100 清成 0），只有 >0 才写回数据库
+            if resolved_total is not None and resolved_total > 0:
+                task_update_kwargs["total"] = resolved_total
             if resolved_event.percent is not None:
                 task_update_kwargs["progress"] = resolved_event.percent
 
@@ -310,12 +312,24 @@ class AnalysisEventBus:
     #  便捷方法：阶段级事件
     # ------------------------------------------------------------------
 
-    async def emit_stage_start(self, stage: str, message: str = "", percent: float = 0.0, total: int = 0) -> None:
+    async def emit_stage_start(
+        self,
+        stage: str,
+        message: str = "",
+        percent: float | None = None,
+        total: int | None = None,
+    ) -> None:
         """发送阶段开始事件"""
         self._stage = stage
         self._sub_stage = ""
         self._chunk_id = 0
         self._sub_percent = 0.0
+        # 2026-08-13 P2：阶段边界作废旧阶段的 current/total/percent 上下文，
+        # 否则新阶段内不带进度字段的事件会沿用旧阶段数值套新阶段区间算错 percent，
+        # 且 complete 事件会把 stale current/total 写回数据库
+        self._current = None
+        self._total = None
+        self._percent = percent
         await self.emit(
             StreamEvent(
                 action="start",
@@ -330,6 +344,10 @@ class AnalysisEventBus:
     async def emit_stage_complete(self, stage: str) -> None:
         """发送阶段完成事件"""
         self._sub_percent = 100.0
+        # 2026-08-13 P2：完成事件显式带 percent，旧阶段的 current/total 上下文
+        # 不得随事件写回数据库（complete 事件本身不含进度数值）
+        self._current = None
+        self._total = None
         _, stage_end_percent = _STAGE_PERCENT_RANGES.get(stage, (0.0, 100.0))
         await self.emit(
             StreamEvent(

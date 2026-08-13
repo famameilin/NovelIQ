@@ -37,12 +37,14 @@ interface SimulatedTask {
 
 const simulatedTasks = new Map<string, SimulatedTask>();
 
+// sub_stage 与后端契约枚举对齐（paragraph_embedding/chapter_agent/diagnosis），
+// 使 PHASE_CONFIG 映射链路在 mock 模式下同样被覆盖
 const STAGES = [
-  { key: "preprocess", label: "预处理", weight: 0.08, steps: ["文本清洗", "分块处理"] },
-  { key: "annotate", label: "标注分析", weight: 0.55, steps: ["角色识别", "对话抽取", "关系分析"] },
+  { key: "preprocess", label: "预处理", weight: 0.08, steps: ["paragraph_embedding"] },
+  { key: "annotate", label: "标注分析", weight: 0.55, steps: ["chapter_agent"] },
   { key: "aggregate", label: "数据聚合", weight: 0.15, steps: ["指标计算", "曲线生成"] },
   { key: "topic-model", label: "主题建模", weight: 0.1, steps: ["LDA训练", "主题提取"] },
-  { key: "diagnose", label: "诊断报告", weight: 0.12, steps: ["综合诊断", "报告生成"] },
+  { key: "diagnose", label: "诊断报告", weight: 0.12, steps: ["diagnosis"] },
 ];
 
 const TOTAL_ANALYSIS_MS = 18_000;
@@ -85,7 +87,7 @@ function startSimulation(novelId: string, taskId: string) {
     progress: 0,
     currentStep: "等待开始",
     stage: "preprocess",
-    subStage: "初始化",
+    subStage: "paragraph_embedding",
     current: 0,
     total: 100,
     startedAt: Date.now(),

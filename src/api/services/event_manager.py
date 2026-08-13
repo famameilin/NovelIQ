@@ -11,7 +11,7 @@ import time
 from collections import deque
 from typing import Any
 
-_MAX_BUFFER_SIZE = 64
+_MAX_BUFFER_SIZE = 256
 
 
 class EventManager:

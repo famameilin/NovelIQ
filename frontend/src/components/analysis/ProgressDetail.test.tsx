@@ -65,5 +65,7 @@ describe("ProgressDetail", () => {
 
     expect(screen.getByTestId("stage-item-preprocess")).toHaveAttribute("data-status", "current");
     expect(screen.getByTestId("stage-item-annotate")).toHaveAttribute("data-status", "pending");
+    // 2026-08-13 P2：paragraph_embedding 子阶段应展示中文标签而非原始英文串
+    expect(screen.getByText("段落向量")).toBeInTheDocument();
   });
 });
