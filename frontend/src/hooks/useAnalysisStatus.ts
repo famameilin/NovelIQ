@@ -1,6 +1,6 @@
 /** 通过 SSE 和 HTTP backfill 同步分析任务状态 */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useSSEListener } from "./useEventSource";
 import { useStreamStore } from "@/store/streamStore";
 import { appConfig } from "@/config";
@@ -101,9 +101,6 @@ export function useAnalysisStatus(
   const hasConnectedOnceRef = useRef(false);
   const hasHydratedTaskStatusRef = useRef(false);
   const lastForegroundSyncAtRef = useRef(0);
-  const [stableTaskId, setStableTaskId] = useState<string | null>(null);
-  const sseReceivedMessageRef = useRef(false);
-  const wsStable = !!taskId && stableTaskId === taskId;
 
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -386,37 +383,13 @@ export function useAnalysisStatus(
       // 移除恒为 false 的 task_id 过滤，message 事件直接按内部类型分发
       if (eventType === "message") {
         const message = data as { type: SSEEventType; data: unknown };
-        if (
-          !sseReceivedMessageRef.current &&
-          (message.type === "stage_start" ||
-            message.type === "stage_progress" ||
-            message.type === "llm_output" ||
-            message.type === "llm_thinking" ||
-            message.type === "tool_call")
-        ) {
-          sseReceivedMessageRef.current = true;
-          setStableTaskId(taskId);
-        }
         handleMessage(message.type, message.data);
       } else {
-        if (
-          !sseReceivedMessageRef.current &&
-          (eventType === "stage_start" ||
-            eventType === "stage_progress" ||
-            eventType === "llm_output" ||
-            eventType === "llm_thinking" ||
-            eventType === "tool_call")
-        ) {
-          sseReceivedMessageRef.current = true;
-          setStableTaskId(taskId);
-        }
         handleMessage(eventType as SSEEventType, data);
       }
     },
     onError: () => {
       setConnected(false);
-      setStableTaskId(null);
-      sseReceivedMessageRef.current = false;
     },
   });
 
@@ -436,7 +409,6 @@ export function useAnalysisStatus(
       setTaskId(taskId);
       prevStatusRef.current = null;
       hasHydratedTaskStatusRef.current = false;
-      sseReceivedMessageRef.current = false;
       stageStartTimeRef.current = null;
       hasConnectedOnceRef.current = false;
       llmOutputBufferRef.current.clear();
@@ -495,6 +467,5 @@ export function useAnalysisStatus(
 
   return {
     isConnected,
-    wsStable,
   };
 }

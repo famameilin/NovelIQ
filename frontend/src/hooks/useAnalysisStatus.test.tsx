@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
@@ -60,7 +60,6 @@ function HookHarness(props: {
     <div
       data-testid="analysis-status"
       data-connected={String(status.isConnected)}
-      data-stable={String(status.wsStable)}
     />
   );
 }
@@ -308,7 +307,7 @@ describe("useAnalysisStatus", () => {
     });
   });
 
-  it("SSE 断开后会重置稳定态并显式标记连接中断", async () => {
+  it("SSE 断开后会显式标记连接中断", async () => {
     getTaskStatusMock.mockResolvedValue(createRunningStatus("task-disconnect"));
 
     render(<HookHarness novelId="novel-1" taskId="task-disconnect" />);
@@ -330,15 +329,10 @@ describe("useAnalysisStatus", () => {
       message: "phase1 进行中",
     });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "true");
-    });
-
     emitSSEError();
 
     await waitFor(() => {
       expect(streamStoreState.setConnected).toHaveBeenCalledWith(false);
-      expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "false");
     });
   });
 
