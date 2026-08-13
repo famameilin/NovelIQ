@@ -233,7 +233,7 @@ export function NodeDetailPanel({
                       {Array.isArray(node.aliases) && node.aliases.length > 0 && (
                         <InfoRow label="别名" value={node.aliases.join(" / ")} />
                       )}
-                      {node.first_seen_chunk !== undefined && node.last_seen_chunk !== undefined && (
+                      {node.first_seen_chunk != null && node.last_seen_chunk != null && (
                         <InfoRow
                           label="出场"
                           value={`第 ${node.first_seen_chunk} 段 - 第 ${node.last_seen_chunk} 段`}

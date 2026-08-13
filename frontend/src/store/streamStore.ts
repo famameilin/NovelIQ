@@ -372,14 +372,27 @@ export const useStreamStore = create<StreamState>()((set) => ({
         nextSelectionModes.set(scopeKey, "auto");
       }
 
-      // LRU 淘汰：超出上限时删除最早插入的 key
+      // LRU 淘汰：超出上限时按 lastUpdatedAt 找最旧条目删除（O(n) 遍历）。
+      // 2026-08-13 P2-4: 原实现按插入序（Map 首项）删除实为 FIFO，正在持续写入的
+      // 活跃流会因插入早而被误淘汰；按 lastUpdatedAt 淘汰则活跃流每次写入都会
+      // 刷新时间戳，天然不会被误伤。
       while (newOutputs.size > appConfig.maxLLMOutputKeys) {
-        const oldestEntry = newOutputs.entries().next().value as [string, LLMStreamGroup] | undefined;
-        if (!oldestEntry) {
+        let oldestKey: string | null = null;
+        let oldestUpdatedAt = Infinity;
+        newOutputs.forEach((group, key) => {
+          if (group.lastUpdatedAt < oldestUpdatedAt) {
+            oldestUpdatedAt = group.lastUpdatedAt;
+            oldestKey = key;
+          }
+        });
+        if (!oldestKey) {
           break;
         }
-        const [oldestKey, deletedGroup] = oldestEntry;
+        const deletedGroup = newOutputs.get(oldestKey);
         newOutputs.delete(oldestKey);
+        if (!deletedGroup) {
+          break;
+        }
         const repaired = _repairActiveSelectionAfterDeletion(
           nextSelections,
           nextSelectionModes,

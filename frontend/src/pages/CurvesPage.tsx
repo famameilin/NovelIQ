@@ -6,7 +6,7 @@ import ReactEChartsCore from "echarts-for-react";
 import { getChunkCurves, getNarrativeStructure } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { useNovelStore } from "@/store/novelStore";
+import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
@@ -34,9 +34,12 @@ export function CurvesPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
+
+  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 不得用于新小说的查询，也不得回写固化成新小说 URL（模式同 GraphPage）
+  const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
 
   const emotionChartRef = useRef<ReactEChartsCore>(null);
   const rhythmChartRef = useRef<ReactEChartsCore>(null);
@@ -49,32 +52,23 @@ export function CurvesPage() {
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
 
   useEffect(() => {
-    if (novelId) {
-      setNovel(novelId);
-      if (urlTaskId) {
-        setTask(urlTaskId);
-      }
-    }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+    if (!novelId || !storeTaskId) return;
+    if (!shouldWriteBackTaskUrl(urlTaskId, storeTaskId, urlTaskSyncRef)) return;
+    navigate(`/novels/${novelId}/curves?task_id=${storeTaskId}`, { replace: true });
+  }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
 
-  useEffect(() => {
-    if (currentTaskId && searchParams.get("task_id") !== currentTaskId) {
-      navigate(`/novels/${novelId}/curves?task_id=${currentTaskId}`, { replace: true });
-    }
-  }, [currentTaskId, novelId, navigate, searchParams]);
-
-  const enabled = !!novelId && !!currentTaskId;
+  const enabled = !!novelId && !!storeTaskId;
 
   const curvesQuery = useQuery({
-    queryKey: ["chunk-curves", novelId, currentTaskId],
-    queryFn: () => getChunkCurves(novelId!, currentTaskId!),
+    queryKey: ["chunk-curves", novelId, storeTaskId],
+    queryFn: () => getChunkCurves(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
   const narrativeQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "narrative"],
-    queryFn: () => getNarrativeStructure(novelId!, currentTaskId!),
+    queryKey: ["metrics", novelId, storeTaskId, "narrative"],
+    queryFn: () => getNarrativeStructure(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -185,7 +179,7 @@ export function CurvesPage() {
     getAnalysisNotCompleteRunStatus(narrativeQuery.error) === "failed";
   const isError = (curvesQuery.isError || narrativeQuery.isError) && !isAnalysisNotComplete;
 
-  if (!currentTaskId) {
+  if (!storeTaskId) {
     return (
       <AnalysisWorkspace title={novelTitle}>
         <div className="flex h-96 flex-col items-center justify-center gap-4">

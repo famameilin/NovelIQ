@@ -58,7 +58,7 @@ function createPhases(): TimelinePhase[] {
 
 describe("TimelineTrack", () => {
   it("没有节点时会展示空态", () => {
-    render(<TimelineTrack nodes={[]} showTension={false} totalChunks={20} />);
+    render(<TimelineTrack nodes={[]} totalChunks={20} />);
 
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();

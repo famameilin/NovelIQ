@@ -97,13 +97,12 @@ export function calculateNodeAnchorY(
   progress: number,
   lane: number,
   options: {
-    showTension: boolean;
     tensionCurve?: number[];
     totalChunks: number;
   }
 ): number {
-  const { showTension, tensionCurve, totalChunks } = options;
-  if (showTension && tensionCurve && tensionCurve.length > 0) {
+  const { tensionCurve, totalChunks } = options;
+  if (tensionCurve && tensionCurve.length > 0) {
     return getCurveNodeYPx(progress, tensionCurve, totalChunks);
   }
   return TRACK_BASELINE_Y + lane * LANE_GAP_PX;
