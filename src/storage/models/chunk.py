@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -125,8 +125,8 @@ class ChunkTopic(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     topic_id: Mapped[int] = mapped_column(Integer, nullable=False)
     topic_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
-    run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
     )
 
     __table_args__ = (
@@ -135,6 +135,9 @@ class ChunkTopic(Base):
             ["chunks.chunk_id", "chunks.run_id"],
             ondelete="CASCADE",
         ),
+        # 2026-08-13 修复：此前无 (run_id, chunk_id, topic_id) 唯一约束，
+        # 重分析（默认全阶段重跑）后 chunk_topics 翻倍、聚合 SUM 双倍计数
+        UniqueConstraint("run_id", "chunk_id", "topic_id", name="uq_chunk_topics_run_chunk_topic"),
         Index("idx_chunk_topics_chunk_id", "chunk_id"),
         Index("idx_chunk_topics_topic_id", "topic_id"),
         Index("idx_chunk_topics_run_id", "run_id"),

@@ -7,7 +7,6 @@ from .embedding_ops import (
     has_paragraph_embeddings,
     insert_paragraph_embeddings,
     search_similar_paragraphs,
-    search_similar_paragraphs_within_chunks,
 )
 from .keyword_ops import KeywordMatchRow, fetch_chunk_text, search_paragraphs_by_keywords
 from .style_data import ChunkStyleData
@@ -34,7 +33,6 @@ __all__ = [
     "insert_paragraph_embeddings",
     "get_incomplete_paragraph_embedding_chunk_ids",
     "search_similar_paragraphs",
-    "search_similar_paragraphs_within_chunks",
     "has_paragraph_embeddings",
     "SimilarParagraphRow",
     "ParagraphEmbeddingRow",

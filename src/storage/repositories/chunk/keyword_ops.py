@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from src.chunking.chunker import split_paragraphs
@@ -45,12 +45,18 @@ def search_paragraphs_by_keywords(
     2026-08-03 用于以 chunks.text 为原文真相按关键词字面匹配历史自然段
     返回按命中关键词数与原文顺序稳定排序的段落 DTO
     """
-    normalized = list(dict.fromkeys(kw.strip() for kw in keywords if kw and kw.strip()))
+    # 2026-08-13 P2-6：词项统一小写（与 extract_query_terms 口径一致），
+    # SQL 与 Python 两侧都以小写对比，避免英文词大小写不一致漏命中
+    normalized = list(
+        dict.fromkeys(kw.strip().lower() for kw in keywords if kw and kw.strip())
+    )
     if not normalized:
         return []
 
+    # 2026-08-13 P2-6：查询词项已由 extract_query_terms 统一小写，
+    # SQL 侧对原文做 lower() 归一，避免 LIKE 大小写敏感导致英文词漏命中
     match_expressions = [
-        Chunk.text.contains(keyword, autoescape=True)
+        func.lower(Chunk.text).contains(keyword, autoescape=True)
         for keyword in normalized
     ]
     stmt = (
@@ -112,7 +118,10 @@ def search_paragraphs_by_keywords(
         for paragraph_index, (local_start_char, local_end_char, paragraph_text) in enumerate(
             split_paragraphs(chunk_text)
         ):
-            matched = tuple(keyword for keyword in normalized if keyword in paragraph_text)
+            # 2026-08-13 P2-6：与 SQL 侧一致，Python 侧匹配也做 lower 归一
+            matched = tuple(
+                keyword for keyword in normalized if keyword in paragraph_text.lower()
+            )
             if not matched:
                 continue
             results.append(

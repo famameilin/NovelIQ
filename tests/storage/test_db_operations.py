@@ -132,6 +132,26 @@ def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> No
     assert [row[1] for row in rows] == [1, 2, 3]
 
 
+def test_get_run_by_run_id_prefix_escapes_like_wildcards(db_session) -> None:
+    """
+    2026-08-13 P2-9 用于验证 run_id 前缀查询对 % 与 _ 做字面转义，
+    前缀里的通配符不再误匹配其他 run。
+    """
+    novel_id = uuid.uuid4().hex[:8]
+    insert_test_novel(novel_id, session=db_session)
+    run_repo = RunRepository(db_session)
+    run_repo.create_run(novel_id=novel_id, source_path="test", title="A", run_id="pre_1%fix")
+    run_repo.create_run(novel_id=novel_id, source_path="test", title="B", run_id="pre_1Xfix")
+    run_repo.create_run(novel_id=novel_id, source_path="test", title="C", run_id="pre_2Xfix")
+    db_session.commit()
+
+    # 前缀含 %：未转义时 pre_1%fix% 会通配匹配 pre_1Xfix，转义后只命中字面 run
+    assert run_repo.get_run_by_run_id_prefix("pre_1%fix")["run_id"] == "pre_1%fix"
+    # 前缀含 _：未转义时 pre_1X% 会通配匹配 pre_2Xfix，转义后只命中字面 run
+    assert run_repo.get_run_by_run_id_prefix("pre_1X")["run_id"] == "pre_1Xfix"
+    assert run_repo.get_run_by_run_id_prefix("pre_2X")["run_id"] == "pre_2Xfix"
+
+
 def test_insert_cloud_analysis(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)

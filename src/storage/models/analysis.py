@@ -220,7 +220,20 @@ class StageSummary(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    __table_args__ = (Index("idx_stage_summaries_run_id", "run_id"),)
+    __table_args__ = (
+        # 2026-08-13 P2：补齐指向 chunks 的复合 FK，防止孤儿 chunk 引用
+        ForeignKeyConstraint(
+            ["start_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["end_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        Index("idx_stage_summaries_run_id", "run_id"),
+    )
 
     def __repr__(self) -> str:
         return f"<StageSummary(stage_id={self.stage_id}, run_id={self.run_id})>"

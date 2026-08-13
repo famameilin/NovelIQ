@@ -44,3 +44,19 @@ def test_ensure_paragraph_embeddings_schema_creates_table_in_runtime_schema(db_s
     assert {"local_start_char", "local_end_char", "global_start_char", "global_end_char"} <= columns
     assert "start_char" not in columns
     assert "end_char" not in columns
+
+    # 2026-08-13 P2：HNSW 向量索引已创建（语义检索不再全表扫描）
+    hnsw_index = db_session.execute(
+        text(
+            """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = :schema_name
+              AND tablename = 'paragraph_embeddings'
+              AND indexdef ILIKE '%USING hnsw%embedding_vector%'
+            """
+        ),
+        {"schema_name": runtime_schema},
+    ).scalar_one_or_none()
+    assert hnsw_index is not None
+    assert "vector_cosine_ops" in hnsw_index

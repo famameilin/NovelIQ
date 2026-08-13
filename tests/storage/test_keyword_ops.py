@@ -118,7 +118,8 @@ def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() 
     compiled_sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "ESCAPE" in compiled_sql
     assert len(results) == 1
-    assert results[0].matched_keywords == ("100%", "A_B")
+    # 2026-08-13 P2-6：词项统一小写归一后 matched_keywords 保留小写形式
+    assert results[0].matched_keywords == ("100%", "a_b")
     assert results[0].match_count == 2
 
 
@@ -169,6 +170,35 @@ def test_fetch_chunk_text_returns_none_when_missing() -> None:
     text = fetch_chunk_text(session, run_id="run-1", chunk_id=99)
 
     assert text is None
+
+
+def test_search_paragraphs_by_keywords_matches_case_insensitively() -> None:
+    """
+    2026-08-13 P2-6 用于验证查询词项（已小写）能命中大小写混合的原文，
+    SQL LIKE 与 Python 侧子串匹配都做 lower 归一，英文词不再因大小写漏命中。
+    """
+    session = MagicMock()
+    session.execute.return_value.all.return_value = [
+        SimpleNamespace(
+            chunk_id=2,
+            char_offset=50,
+            text="顾霜持 Sword 现身，Sword 寒光凛冽。",
+        ),
+    ]
+
+    results = search_paragraphs_by_keywords(
+        session,
+        run_id="run-1",
+        keywords=["sword"],
+        top_k=5,
+    )
+
+    stmt = session.execute.call_args.args[0]
+    compiled_sql = str(stmt.compile())
+    assert "lower(chunks.text) LIKE" in compiled_sql
+    assert len(results) == 1
+    assert results[0].matched_keywords == ("sword",)
+    assert results[0].match_count == 1
 
 
 def test_keyword_match_row_is_frozen_dataclass() -> None:
