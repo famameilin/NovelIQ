@@ -184,7 +184,8 @@ export function useGraphDeepLinkSelection({
   }, [initialSelectedChunk, navigate, selectedChange, timelineUrl]);
 
   const handleOpenTimelineChunk = useCallback(
-    (chunkId?: number, changeId?: string | null, selectedNodeId?: string | null) => {
+    // 2026-08-13 P2-5: chunkId 放宽为 number | null，兼容生命周期字段缺失的节点
+    (chunkId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => {
       if (!timelineUrl || chunkId == null) return;
       navigate(
         buildTimelineSelectionUrl(timelineUrl, {

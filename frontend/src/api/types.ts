@@ -228,8 +228,9 @@ export interface GraphNode {
   entity_type: "character" | "location" | "item" | "organization";
   tags?: string[] | null;
   aliases?: string[] | null;
-  first_seen_chunk: number;
-  last_seen_chunk: number;
+  // 2026-08-13 P2-5: 后端可能下发 null（生命周期数据缺失），放宽为可空
+  first_seen_chunk: number | null;
+  last_seen_chunk: number | null;
   state_revision: number;
   state: Record<string, unknown>;
 }

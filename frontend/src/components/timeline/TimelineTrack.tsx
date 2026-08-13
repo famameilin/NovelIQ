@@ -72,7 +72,6 @@ export interface TimelineTrackProps {
   className?: string;
   tensionCurve?: number[];
   totalChunks?: number;
-  showTension?: boolean;
 }
 
 const PHASE_SURFACE_CLASS_MAP: Record<string, string> = {
@@ -91,7 +90,6 @@ export function TimelineTrack({
   className,
   tensionCurve,
   totalChunks = 0,
-  showTension = true,
 }: TimelineTrackProps) {
   const highlightedRange = useMemo(() => {
     if (!activePhase || !phases) return null;
@@ -112,11 +110,11 @@ export function TimelineTrack({
   const layoutNodes = useMemo(() => createTimelineLayoutNodes(sortedNodes, canvasMinWidth), [canvasMinWidth, sortedNodes]);
 
   const tensionPath = useMemo(() => {
-    if (!showTension || !tensionCurve || tensionCurve.length === 0) {
+    if (!tensionCurve || tensionCurve.length === 0) {
       return null;
     }
     return buildTensionAreaPath(tensionCurve, totalChunks, canvasMinWidth);
-  }, [canvasMinWidth, showTension, tensionCurve, totalChunks]);
+  }, [canvasMinWidth, tensionCurve, totalChunks]);
 
   const phaseLayouts = useMemo(() => {
     if (!phases || phases.length === 0) return [];
@@ -194,7 +192,6 @@ export function TimelineTrack({
                   const { node, lane, labelWidth } = layoutNode;
                   const anchorX = calculateNodeAnchorX(node.progress, canvasMinWidth);
                   const anchorY = calculateNodeAnchorY(node.progress, lane, {
-                    showTension,
                     tensionCurve,
                     totalChunks,
                   });

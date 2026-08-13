@@ -43,7 +43,7 @@ interface GraphWorkspaceSectionProps {
   onGoTimeline: () => void;
   timelineUrl: string | null;
   selectedNode: GraphNode | null;
-  onOpenTimelineChunk: (chunkId?: number, changeId?: string | null, selectedNodeId?: string | null) => void;
+  onOpenTimelineChunk: (chunkId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => void;
   selectedChange: GraphChange | null;
   pageSectionVariants: {
     hidden: { opacity: number; y: number };

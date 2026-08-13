@@ -604,7 +604,10 @@ export function StreamOutput({
                 </div>
               </div>
               <div className="min-h-0 p-4">
-                <StreamGroupDetail group={activeGroup} maxLines={maxLines} className="h-full" />
+                {/* 2026-08-13 P2-8: 与主面板保持一致，Dialog 同样渲染 displayGroup
+                    （chunk 回退模式下是合并了各流最新内容的聚合组），
+                    避免弹窗与主面板内容不一致 */}
+                <StreamGroupDetail group={displayGroup ?? activeGroup} maxLines={maxLines} className="h-full" />
               </div>            </div>
           </DialogContent>
         </Dialog>

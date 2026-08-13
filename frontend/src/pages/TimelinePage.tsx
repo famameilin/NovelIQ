@@ -96,7 +96,6 @@ export function TimelinePage() {
   const viewMode = useMemo<TimelineViewMode>(() => {
     return urlView === "atomic" ? "atomic" : "composite";
   }, [urlView]);
-  const showTension = true;
   const [activePhase, setActivePhase] = useState<string | undefined>();
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
@@ -529,7 +528,6 @@ export function TimelinePage() {
                     onNodeClick={handleNodeClick}
                     tensionCurve={tensionCurve}
                     totalChunks={totalChunks}
-                    showTension={showTension}
                     className="flex-1 min-h-0"
                   />
                 </div>

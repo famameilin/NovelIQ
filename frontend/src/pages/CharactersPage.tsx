@@ -1,10 +1,9 @@
-import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getCharacters, getDiagnosis } from "@/api/results";
-import { useNovelStore } from "@/store/novelStore";
+import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -113,26 +112,19 @@ function EmptyDiagnosisState() {
 export function CharactersPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
 
-  // 组件挂载时把 novelId 同步到 store；如果 URL 带 task_id 就一并初始化任务
-  useEffect(() => {
-    if (novelId) {
-      setNovel(novelId);
-      if (urlTaskId) {
-        setTask(urlTaskId);
-      }
-    }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 不得用于新小说的查询/SSE（模式同 GraphPage）
+  const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
 
   // 数据获取
-  const enabled = !!novelId && !!currentTaskId;
+  const enabled = !!novelId && !!storeTaskId;
 
   const diagnosisQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "diagnosis"],
-    queryFn: () => getDiagnosis(novelId!, currentTaskId!),
+    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
+    queryFn: () => getDiagnosis(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -144,8 +136,8 @@ export function CharactersPage() {
   const shouldFetchCharacters = enabled && diagnosisQuery.isSuccess && diagnosis !== null && !isDiagnosisRerunRequired;
 
   const charactersQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "characters"],
-    queryFn: () => getCharacters(novelId!, currentTaskId!),
+    queryKey: ["results", novelId, storeTaskId, "characters"],
+    queryFn: () => getCharacters(novelId!, storeTaskId!),
     enabled: shouldFetchCharacters,
     staleTime: STALE_TIME,
   });
@@ -193,7 +185,7 @@ export function CharactersPage() {
   return (
     <AnalysisWorkspace title="角色分析">
       {/* 未选择任务提示 */}
-      {!currentTaskId && (
+      {!storeTaskId && (
         <DashboardCardShell
           title="角色分析"
           icon={<Users className="h-4 w-4" />}

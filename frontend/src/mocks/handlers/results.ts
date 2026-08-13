@@ -145,10 +145,13 @@ export const graphChangesHandler = http.get(
     if (err) return err;
 
     await delay(200);
+    // 2026-08-13 P2 防御：limit 为 0/非数字时钳制到 1，避免空页死循环
+    // （createGraphChangesPage 的 next_cursor 与入参相同会无限翻页）
+    const limit = Math.max(1, Number(url.searchParams.get("changes_limit")) || 8);
     return HttpResponse.json(
       createGraphChangesPage(
         url.searchParams.get("changes_cursor"),
-        Number(url.searchParams.get("changes_limit") ?? "8")
+        limit
       )
     );
   }

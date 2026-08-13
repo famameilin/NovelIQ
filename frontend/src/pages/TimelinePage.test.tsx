@@ -112,14 +112,11 @@ vi.mock("@/components/timeline", () => ({
   TimelineTrack: ({
     nodes,
     onNodeClick,
-    showTension,
   }: {
     nodes: TimelineDisplayNode[];
     onNodeClick: (node: TimelineDisplayNode) => void;
-    showTension?: boolean;
   }) => (
     <div data-testid="timeline-track">
-      <span>{showTension ? "tension-on" : "tension-off"}</span>
       {nodes.map((node) => (
         <button key={node.node_id} type="button" onClick={() => onNodeClick(node)}>
           节点 {node.anchor_chunk_id}
@@ -658,7 +655,6 @@ describe("TimelinePage deep links", () => {
     const view = renderPage();
 
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
-    expect(screen.getByText("tension-on")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledTimes(1);
 
     currentTimelineSearchParams = "task_id=task-a&max_level=3&view=atomic&selected_node_id=relation%3A9001&selected_chunk=8";
@@ -672,6 +668,5 @@ describe("TimelinePage deep links", () => {
       expect(getTimelineMock).toHaveBeenCalledTimes(1);
     });
     expect(await screen.findByText("selected-relation:9001")).toBeInTheDocument();
-    expect(screen.getByText("tension-on")).toBeInTheDocument();
   });
 });
