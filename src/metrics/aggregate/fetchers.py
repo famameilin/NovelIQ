@@ -192,7 +192,10 @@ def fetch_relation_data(
                 change.from_name or "",
                 change.to_name or "",
                 change.relation_type or "",
-                str(change.changes[0].get("change_kind") or "refine"),
+                # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
+                str(change.changes[0].get("change_kind") or "refine")
+                if change.changes
+                else "refine",
             )
             for change in relation_changes
         ],

@@ -137,6 +137,28 @@ class TestComputeFourPhases:
         assert len(phases) == 4
         assert [phase.name for phase in phases] == ["引入期", "发展期", "高潮期", "收束期"]
 
+    def test_ultra_short_novel_single_phase_fallback(self):
+        """2026-08-13 用于验证 1~4 个 chunk 时不会越界（此前收束期取 chunk_ids[boundary_3+1] 直接 IndexError）"""
+        for total in range(1, 5):
+            chunk_ids = list(range(1, total + 1))
+            phases = compute_four_phases([0.1] * total, chunk_ids)
+            assert len(phases) == 1
+            assert phases[0].name == "引入期"
+            assert phases[0].start == chunk_ids[0]
+            assert phases[0].end == chunk_ids[-1]
+            assert phases[0].ratio == pytest.approx(1.0)
+
+    def test_short_novel_boundaries_stay_in_range(self):
+        """2026-08-13 用于验证 5~19 个 chunk 时四阶段边界均不越界"""
+        for total in range(5, 20):
+            chunk_ids = list(range(1, total + 1))
+            phases = compute_four_phases([0.1] * total, chunk_ids)
+            assert len(phases) == 4
+            for phase in phases:
+                assert 1 <= phase.start <= total
+                assert 1 <= phase.end <= total
+                assert phase.start <= phase.end
+
     def test_long_novel_uses_peak_based_split(self):
         tension_scores = [0.1] * 40 + [0.9] + [0.1] * 59
         chunk_ids = list(range(1, 101))
@@ -145,6 +167,37 @@ class TestComputeFourPhases:
 
         climax_phase = next(phase for phase in phases if phase.name == "高潮期")
         assert 30 <= chunk_ids.index(climax_phase.start) <= 50
+
+    def test_monotonic_decreasing_peak_at_start_no_inverted_climax(self):
+        """2026-08-13 修复 P1：张力单调递减（global peak 落在首 chunk）时，
+        此前高潮期 climax_start > climax_end 倒置、ratio 为负；修复后区间合法不重叠。"""
+        tension_scores = [0.9] + [0.8 - i * 0.01 for i in range(99)]
+        chunk_ids = list(range(1, 101))
+
+        phases = compute_four_phases(tension_scores, chunk_ids)
+
+        assert [phase.name for phase in phases] == ["引入期", "发展期", "高潮期", "收束期"]
+        for phase in phases:
+            assert phase.start <= phase.end
+            assert phase.ratio >= 0.0
+        # 四阶段覆盖全书且不重叠：ratio 总和为 1
+        assert sum(phase.ratio for phase in phases) == pytest.approx(1.0)
+
+    def test_peak_at_last_chunk_still_covered_by_final_phase(self):
+        """2026-08-13 修复 P1：峰值落在末 chunk 时，收束期此前退化为 0.0 空区间、
+        末章不入任何阶段；修复后收束期覆盖剩余区间。"""
+        tension_scores = [0.1] * 99 + [0.9]
+        chunk_ids = list(range(1, 101))
+
+        phases = compute_four_phases(tension_scores, chunk_ids)
+
+        assert [phase.name for phase in phases] == ["引入期", "发展期", "高潮期", "收束期"]
+        for phase in phases:
+            assert phase.start <= phase.end
+            assert phase.ratio >= 0.0
+        assert sum(phase.ratio for phase in phases) == pytest.approx(1.0)
+        # 末 chunk（峰值）必须落在某个阶段区间内
+        assert any(phase.start <= chunk_ids[-1] <= phase.end for phase in phases)
 
 
 class TestCalculateTensionPercentile:
