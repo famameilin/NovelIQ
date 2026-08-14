@@ -24,6 +24,7 @@ dependencies = [
     "numpy>=1.24.0",
     "pyahocorasick>=2.0.0",
     "sse-starlette>=2.0.0",
+    "jinja2>=3.0",
     # 2026-08-13 加上界：langgraph/langchain-openai 无上界时 uv lock --upgrade
     # 可能拉到不兼容版本（此前 openai 一次跨 23 个 minor）；1.x 内锁定
     "langgraph>=1.2.10,<2",
@@ -75,7 +76,7 @@ select = ["E", "F", "I", "B", "C4", "UP"]
 ignore = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src"]
+known-first-party = ["src", "tools"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -90,3 +91,4 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 module = ["aiofiles.*"]
 ignore_missing_imports = true
+
