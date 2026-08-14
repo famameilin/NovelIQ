@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -77,27 +76,27 @@ class TestAggregateAllMetrics:
                 )
             ],
         )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_curves "
-                "("
-                "chunk_id, pos_density, neg_density, net_density, "
-                "smoothed_density, tension_proxy, tension_composite, run_id"
-                ") "
-                "VALUES (0, 0.1, 0.05, 0.05, 0.05, 0.3, 0.25, :run_id)"
-            ),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_curves "
-                "("
-                "chunk_id, pos_density, neg_density, net_density, "
-                "smoothed_density, tension_proxy, tension_composite, run_id"
-                ") "
-                "VALUES (1, 0.02, 0.1, -0.08, -0.06, 0.7, 0.65, :run_id)"
-            ),
-            {"run_id": self.run_id},
+        # 2026-08-14 M8b 段落化：章张力源改为段落曲线（章 = 段内 surface_tension 均值）；
+        # 每章 1 段，按段落写入与旧 chunk_curves 等值的密度与张力
+        from src.storage.repositories.paragraph_repository import ParagraphCurveRow, ParagraphRepository
+
+        paragraph_repo = ParagraphRepository(self.db_session)
+        tension_by_chunk = {0: 0.25, 1: 0.65}
+        density_by_chunk = {0: 0.05, 1: -0.08}
+        paragraph_repo.insert_paragraph_curves(
+            self.run_id,
+            [
+                ParagraphCurveRow(
+                    paragraph_id=row.paragraph_id,
+                    pos_density=0.1 if int(row.chunk_id) == 0 else 0.02,
+                    neg_density=0.05 if int(row.chunk_id) == 0 else 0.1,
+                    net_density=density_by_chunk[int(row.chunk_id)],
+                    smoothed_net_density=density_by_chunk[int(row.chunk_id)],
+                    surface_tension=tension_by_chunk[int(row.chunk_id)],
+                    smoothed_surface_tension=tension_by_chunk[int(row.chunk_id)],
+                )
+                for row in paragraph_repo.fetch_paragraph_rows(self.run_id)
+            ],
         )
         self.db_session.commit()
 

@@ -565,25 +565,18 @@ def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> Time
     )
 
 
-# 2026-04-27，任务：时间轴合同重构
-    # 把张力曲线长度校正逻辑独立出来，确保 timeline atom 计算只面对与 chunk 对齐的张力数组
-def _normalize_tension_scores(
-    chunk_curves: list[Any] | None,
-    total_chunks: int,
+# 2026-08-14 M8b 段落化：章张力 = 章内段落 surface_tension 均值；
+    # 无张力数据的章兜底 0.5（与旧 chunk_curves 缺失时的兜底一致）
+def _load_chapter_tension_scores(
+    stats_repo: Any,
+    run_id: str,
+    chunk_ids: list[int],
 ) -> list[float]:
-    if chunk_curves:
-        tension_scores = [
-            row.tension_composite if row and row.tension_composite is not None else 0.5 for row in chunk_curves
-        ]
-    else:
-        tension_scores = [0.5] * total_chunks
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    if len(tension_scores) < total_chunks:
-        tension_scores.extend([0.5] * (total_chunks - len(tension_scores)))
-    elif len(tension_scores) > total_chunks:
-        tension_scores = tension_scores[:total_chunks]
-
-    return tension_scores
+    rows = ParagraphRepository(stats_repo.session).fetch_chunk_tension_scores(run_id)
+    tension_by_chunk = dict(rows)
+    return [tension_by_chunk.get(chunk_id, 0.5) for chunk_id in chunk_ids]
 
 
 # 2026-04-27，任务：时间轴合同重构
@@ -620,8 +613,7 @@ def _load_timeline_source_data(
     total_chunks = len(chunk_ids)
     chunk_id_to_idx = {chunk_id: idx for idx, chunk_id in enumerate(chunk_ids)}
 
-    chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
-    tension_scores = _normalize_tension_scores(chunk_curves, total_chunks)
+    tension_scores = _load_chapter_tension_scores(stats_repo, run_id, chunk_ids)
     summary_map = {row.chunk_id: row.summary for row in chunk_repo.fetch_chunk_summaries(run_id)}
     annotation_map = _build_timeline_annotation_map(annotation_repo.fetch_chunk_annotations_full(run_id))
 

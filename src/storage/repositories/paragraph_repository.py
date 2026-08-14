@@ -508,6 +508,65 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         )
         return self.session.execute(statement).all()
 
+    def fetch_chunk_metric_aggregates(self, run_id: str) -> list[tuple[int, dict[str, float]]]:
+        """
+        按 chunk 聚合段落指标充分统计量（§9.1 分子/分母守恒）
+
+        每行返回 (chunk_id, 字段名 → 数值) 的聚合结果，供聚合 fetchers 与
+        质量门使用：密度类比率一律在目标粒度上重新求分子之和/分母之和，
+        不做等权平均。
+        """
+        statement = (
+            select(
+                Paragraph.chunk_id.label("chunk_id"),
+                func.sum(ParagraphMetric.token_count).label("token_count"),
+                func.sum(ParagraphMetric.char_count).label("char_count"),
+                func.sum(ParagraphMetric.sentence_count).label("sentence_count"),
+                func.sum(ParagraphMetric.sentence_char_sum).label("sentence_char_sum"),
+                func.sum(ParagraphMetric.positive_weight_sum).label("positive_weight_sum"),
+                func.sum(ParagraphMetric.negative_weight_sum).label("negative_weight_sum"),
+                func.sum(ParagraphMetric.dialogue_char_count).label("dialogue_char_count"),
+                func.sum(ParagraphMetric.imagery_hit_count).label("imagery_hit_count"),
+            )
+            .join(
+                Paragraph,
+                (Paragraph.run_id == ParagraphMetric.run_id)
+                & (Paragraph.paragraph_id == ParagraphMetric.paragraph_id),
+            )
+            .where(ParagraphMetric.run_id == run_id)
+            .group_by(Paragraph.chunk_id)
+            .order_by(Paragraph.chunk_id)
+        )
+        rows = self.session.execute(statement).all()
+        return [(int(row.chunk_id), {key: float(value) for key, value in row._mapping.items()}) for row in rows]
+
+    def fetch_chunk_tension_scores(self, run_id: str) -> list[tuple[int, float]]:
+        """
+        每章（chunk）张力 = 章内段落 surface_tension 均值（供 timeline/聚合使用）
+
+        段落表面张力已是 run 内稳健标准化 + sigmoid 后的 [0,1] 值，
+        章节值取段落均值（缺失张力数据的章由调用方兜底）。
+        """
+        statement = (
+            select(
+                Paragraph.chunk_id.label("chunk_id"),
+                func.avg(ParagraphCurve.surface_tension).label("avg_tension"),
+            )
+            .join(
+                ParagraphCurve,
+                (ParagraphCurve.run_id == Paragraph.run_id)
+                & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
+            )
+            .where(
+                Paragraph.run_id == run_id,
+                ParagraphCurve.surface_tension.is_not(None),
+            )
+            .group_by(Paragraph.chunk_id)
+            .order_by(Paragraph.chunk_id)
+        )
+        rows = self.session.execute(statement).all()
+        return [(int(row.chunk_id), float(row.avg_tension)) for row in rows]
+
     def has_paragraph_curves(self, run_id: str) -> bool:
         """run 是否存在段落曲线行"""
         statement = (

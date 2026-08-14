@@ -8,12 +8,6 @@
 
 from __future__ import annotations
 
-from .chunks import (
-    fetch_chunk_culture,
-    fetch_chunk_curves_full,
-    fetch_emotion_densities,
-    insert_chunk_curve,
-)
 from .metrics import (
     fetch_cloud_analysis,
     fetch_global_context,
@@ -59,11 +53,6 @@ __all__ = [
     "has_topic_data",
     "has_diagnosis_data",
     "is_aggregate_complete",
-    # chunk 相关仓储
-    "insert_chunk_curve",
-    "fetch_chunk_culture",
-    "fetch_chunk_curves_full",
-    "fetch_emotion_densities",
     # 汇总仓储
     "insert_chunk_summary",
     "insert_stage_summary",

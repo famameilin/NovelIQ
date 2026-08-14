@@ -271,7 +271,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.is_aggregate_complete(run_id)
 
     def test_is_aggregate_complete_partial_data(self, db_session):
-        """只有部分chunk_curves时aggregate未完成"""
+        """只有chunks、无global_stats时aggregate未完成（M8b 后以 global_stats 为准）"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -284,7 +284,6 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(3)
         chunk_repo.insert_chunks(run_id, chunks)
-        stats_repo.insert_chunk_curve(run_id, [(0, 0.1, 0.2, 0.0, 0.1, 0.5, 0.3)])
         assert not stats_repo.is_aggregate_complete(run_id)
 
     def test_is_topic_model_complete_no_data(self, db_session):

@@ -8,16 +8,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any
-
-from sqlalchemy.engine import Row
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
-from . import chunks, metrics, runs, summaries
+from . import metrics, runs, summaries
 
 
 class StatsRepository(BaseRepository[dict[str, Any]]):
@@ -106,36 +104,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     def is_aggregate_complete(self, run_id: str) -> bool:
         """检查聚合阶段是否完成"""
         return runs.is_aggregate_complete(self.session, run_id)
-
-    # ==================== chunks 模块方法 ====================
-
-    def insert_chunk_curve(
-        self,
-        run_id: str,
-        rows: Iterable[tuple[int, float, float, float, float, float, float]],
-    ) -> None:
-        """插入分块曲线数据（情绪 + 节奏）"""
-        return chunks.insert_chunk_curve(self.session, run_id, rows)
-
-    def fetch_chunk_culture(self, run_id: str) -> Sequence[Row]:
-        """获取分块文化数据"""
-        return chunks.fetch_chunk_culture(self.session, run_id)
-
-    def fetch_chunk_curves_full(self, run_id: str) -> Sequence[Row]:
-        """
-        获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）
-
-        返回 Sequence[Row] 支持字段名访问， 替代元组列表
-        """
-        return chunks.fetch_chunk_curves_full(self.session, run_id)
-
-    def fetch_emotion_densities(self, run_id: str) -> Sequence[Row]:
-        """
-        获取情绪密度数据
-
-        返回 Sequence[Row] 支持字段名访问， 替代元组列表
-        """
-        return chunks.fetch_emotion_densities(self.session, run_id)
 
     # ==================== metrics 模块补充方法 ====================
 

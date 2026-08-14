@@ -58,7 +58,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
 
     assert timeline_data is not None
     assert timeline_data["total_chunks"] == 5
-    assert timeline_data["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
+    assert timeline_data["tension_curve"] == [0.6, 0.7, 0.9, 0.5, 0.4]
     assert len(timeline_data["phases"]) == 4
 
     relation_node = next(

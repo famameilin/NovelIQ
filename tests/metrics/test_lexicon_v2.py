@@ -19,7 +19,6 @@ import pytest
 
 from src.lexicons.registry import LexiconRegistry, get_registry, reset_registry
 from src.metrics.matching import _edit_distance, count_token_hits_enhanced
-from src.workflows.aggregate import TENSION_COMPOSITE_WEIGHTS, _compute_tension_composite
 
 # ====================================================================
 # 测试夹具
@@ -264,96 +263,6 @@ class TestEditDistance:
 
 # ====================================================================
 # 7. tension_composite v2 加权模型
-# ====================================================================
-
-
-class TestTensionCompositeV2:
-    def _make_signals(self) -> list[dict]:
-        """构造测试用的张力信号数据"""
-        return [
-            {
-                "emotion_intensity": 0.001,
-                "dialogue_ratio": 0.2,
-                "sent_len_std": 8,
-                "event_score": 0.2,
-                "cliffhanger_score": 0,
-            },  # 低张力 chunk
-            {
-                "emotion_intensity": 0.005,
-                "dialogue_ratio": 0.35,
-                "sent_len_std": 15,
-                "event_score": 0.6,
-                "cliffhanger_score": 0,
-            },  # 中等事件
-            {
-                "emotion_intensity": 0.01,
-                "dialogue_ratio": 0.45,
-                "sent_len_std": 25,
-                "event_score": 0.8,
-                "cliffhanger_score": 1,
-            },  # 高潮 chunk
-            {
-                "emotion_intensity": 0.002,
-                "dialogue_ratio": 0.18,
-                "sent_len_std": 33,
-                "event_score": 0.2,
-                "cliffhanger_score": 0,
-            },  # 高 sent_len_std 但低语义
-        ]
-
-    def test_weights_are_defined(self):
-        expected_keys = {"emotion_intensity", "dialogue_ratio", "sent_len_std", "event_score", "cliffhanger_score"}
-        assert set(TENSION_COMPOSITE_WEIGHTS.keys()) == expected_keys
-
-    def test_event_score_has_highest_weight(self):
-        """LLM 语义判断权重最高"""
-        assert TENSION_COMPOSITE_WEIGHTS["event_score"] == max(TENSION_COMPOSITE_WEIGHTS.values())
-
-    def test_sent_len_std_has_lowest_weight(self):
-        """句长标准差权重最低"""
-        assert TENSION_COMPOSITE_WEIGHTS["sent_len_std"] == min(TENSION_COMPOSITE_WEIGHTS.values())
-
-    def test_output_range_normalized(self):
-        composites = _compute_tension_composite(self._make_signals())
-        for c in composites:
-            assert 0.0 <= c <= 1.0
-
-    def test_high_event_chunk_scores_higher(self):
-        """高 event_score 的 chunk 应获得更高 composite"""
-        composites = _compute_tension_composite(self._make_signals())
-        # index=2 有 event=0.8 + cliffhanger=1，应该是峰值
-        peak_idx = max(range(len(composites)), key=lambda i: composites[i])
-        assert peak_idx == 2
-
-    def test_sent_len_std_no_longer_dominates(self):
-        """sent_len_std 最大(index=3)但语义弱 → composite 不应是最高"""
-        composites = _compute_tension_composite(self._make_signals())
-        # index=3 的 sent_len_std=33 是最大值
-        # 但 event_score=0.2 很低，加权后不应主导
-        assert composites[3] < composites[2]
-
-    def test_empty_input(self):
-        assert _compute_tension_composite([]) == []
-
-    def test_single_signal(self):
-        signals = [
-            {
-                "emotion_intensity": 0.5,
-                "dialogue_ratio": 0.5,
-                "sent_len_std": 10,
-                "event_score": 0.5,
-                "cliffhanger_score": 0.5,
-            }
-        ]
-        result = _compute_tension_composite(signals)
-        assert len(result) == 1
-        # 单信号归一化后所有维度都是 0 或 1（min=max 时归一化为 0）
-        # 所以结果取决于 min==max 的处理 → normalized=0
-        assert result[0] == 0.0
-
-
-# ====================================================================
-# 8. 全局单例管理
 # ====================================================================
 
 

@@ -1,102 +1,116 @@
 """
-§19.6 与 §19.14 修复测试
+§19.14 修复测试（2026-08-14 M8b 段落化重写）
 
-- §19.6: tension_proxy 各分量先 clip 到 [0,1] 再等权平均（_proxy_score）
-- §19.14: emotion_peak/min_chunk_id 并列极值取最后出现的索引（rindex）；
+- §19.14: emotion_peak/min_chunk_id 并列极值取最后出现的段落（rindex）；
   tension 侧对称输出 rhythm_max_chunk / rhythm_min_chunk
 - 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id，
   emotion_min_chunk → emotion_min_chunk_id
+- M8b：compute_global_stats 数据源从 chunk_style/chunk_curves 改为段落事实源
+  （paragraphs + paragraph_metrics + paragraph_curves），极值定位取极值段落
+  所在 chunk_id
 """
 
 from __future__ import annotations
 
-import pytest
+import uuid
 
-from src.workflows.curve_metrics import (
-    _proxy_score,
-    compute_global_stats,
-    compute_rhythm_curve,
+from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories.paragraph_repository import (
+    ParagraphCurveRow,
+    ParagraphMetricRow,
+    ParagraphRepository,
 )
+from src.workflows.curve_metrics import compute_global_stats
+from tests.support.analysis_factories import insert_test_novel
 
 
-class TestProxyScore:
-    """§19.6：量纲统一后再等权平均"""
+def _insert_paragraph_curves(
+    db_session,
+    *,
+    net_densities: list[float | None],
+    surface_tensions: list[float | None],
+) -> str:
+    """构造 4 章 4 段的 run（chunk_id = 10..13），写入段落曲线与基础指标。"""
+    from dataclasses import replace
 
-    def test_empty_proxy_returns_zero(self) -> None:
-        assert _proxy_score({}) == 0.0
+    from src.chunking.chunker import Chunk, split_chunk_paragraphs
 
-    def test_densities_are_clipped_to_unit_range(self) -> None:
-        proxy = {
-            "fight_density": 2.0,
-            "exclaim_density": 0.5,
-            "question_density": 0.0,
-            "dialogue_ratio": 1.0,
-            "avg_sent_len": 25.0,
-        }
-        # clip 后: 1.0, 0.5, 0.0, 1.0, min(25/50,1)=0.5 → 3.0/5
-        assert _proxy_score(proxy) == pytest.approx(0.6)
+    novel_id = uuid.uuid4().hex[:8]
+    insert_test_novel(novel_id, session=db_session)
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id, source_path="test", title="Global Stats"
+    )
 
-    def test_avg_sent_len_capped_at_50(self) -> None:
-        proxy = {
-            "fight_density": 0.0,
-            "exclaim_density": 0.0,
-            "question_density": 0.0,
-            "dialogue_ratio": 0.0,
-            "avg_sent_len": 200.0,
-        }
-        # min(200/50, 1) = 1.0 → 1.0/5
-        assert _proxy_score(proxy) == pytest.approx(0.2)
+    texts = ["甲。", "乙。", "丙。", "丁。"]
+    chunks: list[Chunk] = []
+    offset = 0
+    for i, text in enumerate(texts):
+        chunks.append(Chunk(index=10 + i, start=offset, end=offset + len(text), text=text, chapter_id=1 + i))
+        offset += len(text)
+    ChunkRepository(db_session).insert_chunks(run_id, chunks)
 
-    def test_sent_len_no_longer_dominates(self) -> None:
-        """
-        修复前 avg_sent_len 量纲远大于密度，会主导结果（如 100 字句长
-        把等权均值抬到 20+）；修复后两种文本的 proxy 分数都在 [0,1] 内
-        且差距大幅缩小
-        """
-        short = {
-            "fight_density": 0.1,
-            "exclaim_density": 0.1,
-            "question_density": 0.1,
-            "dialogue_ratio": 0.1,
-            "avg_sent_len": 10.0,
-        }
-        long = {
-            "fight_density": 0.1,
-            "exclaim_density": 0.1,
-            "question_density": 0.1,
-            "dialogue_ratio": 0.1,
-            "avg_sent_len": 100.0,
-        }
-        assert _proxy_score(short) == pytest.approx(0.12)
-        assert _proxy_score(long) == pytest.approx(0.28)
-        assert 0.0 <= _proxy_score(long) <= 1.0
+    spans = [
+        replace(span, token_count=2)
+        for span in split_chunk_paragraphs(chunks, max_chars=1500)
+    ]
+    assert len(spans) == 4
+    paragraph_repo = ParagraphRepository(db_session)
+    paragraph_repo.insert_paragraphs(run_id, spans)
 
-
-class TestRhythmCurveProxyScore:
-    """§19.6 集成：compute_rhythm_curve 使用 _proxy_score"""
-
-    def test_rhythm_curve_proxy_score_in_unit_range(self) -> None:
-        # 战斗密度可 >1（多次命中），avg_sent_len 可远大于密度量纲
-        rows = compute_rhythm_curve(
-            [(0, "刀光剑影！刀光剑影！" * 10), (1, "平静的叙述")],
-            fight_terms={"刀光": 1.0, "剑影": 1.0},
-            tension_composite_values=[0.5, 0.5],
+    metric_rows = [
+        ParagraphMetricRow(
+            paragraph_id=span.paragraph_id,
+            token_count=2,
+            char_count=span.char_count,
+            sentence_count=1,
+            sentence_char_sum=2.0,
+            sentence_char_sum_sq=4.0,
+            positive_weight_sum=0.0,
+            negative_weight_sum=0.0,
+            fight_weight_sum=0.0,
+            exclaim_count=0,
+            question_count=0,
+            pause_count=0,
+            dialogue_char_count=0,
+            sensory_hit_count=0,
+            imagery_hit_count=0,
+            metaphor_sentence_count=0,
+            function_word_counts={},
+            semantic_category_counts={},
         )
-        assert len(rows) == 2
-        for _chunk_id, proxy_score, _composite in rows:
-            assert 0.0 <= proxy_score <= 1.0
+        for span in spans
+    ]
+    paragraph_repo.insert_paragraph_metrics(run_id, metric_rows)
+
+    curve_rows = [
+        ParagraphCurveRow(
+            paragraph_id=span.paragraph_id,
+            pos_density=0.0,
+            neg_density=0.0,
+            net_density=net_densities[index],
+            smoothed_net_density=net_densities[index],
+            surface_tension=surface_tensions[index],
+            smoothed_surface_tension=surface_tensions[index],
+        )
+        for index, span in enumerate(spans)
+    ]
+    paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
+    db_session.commit()
+    return run_id
 
 
 class TestGlobalStatsExtremes:
-    """§19.14：并列极值取最后出现的索引 + tension 侧对称输出"""
+    """§19.14：并列极值取最后出现的段落（rindex）+ tension 侧对称输出"""
 
     def test_emotion_extremes_use_last_occurrence(self, db_session) -> None:
-        raw_densities = [1.0, 5.0, 5.0, 2.0]  # max 并列于 1、2 → 取 2
-        chunk_texts = [(10, "a"), (11, "b"), (12, "c"), (13, "d")]
-
-        stats = dict(
-            compute_global_stats(db_session, "run-x", raw_densities, [], chunk_texts)
+        # max 并列于段落 1、2 → 取段落 2（chunk_id=12）
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[1.0, 5.0, 5.0, 2.0],
+            surface_tensions=[None, None, None, None],
         )
+
+        stats = dict(compute_global_stats(db_session, run_id))
 
         assert stats["emotion_max"] == 5.0
         # 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id
@@ -104,12 +118,14 @@ class TestGlobalStatsExtremes:
         assert stats["emotion_min_chunk_id"] == 10.0
 
     def test_emotion_min_uses_last_occurrence(self, db_session) -> None:
-        raw_densities = [0.0, 0.0, 3.0, 3.0]  # min 并列于 0、1 → 取 1
-        chunk_texts = [(10, "a"), (11, "b"), (12, "c"), (13, "d")]
-
-        stats = dict(
-            compute_global_stats(db_session, "run-x", raw_densities, [], chunk_texts)
+        # min 并列于段落 0、1 → 取段落 1（chunk_id=11）
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[0.0, 0.0, 3.0, 3.0],
+            surface_tensions=[None, None, None, None],
         )
+
+        stats = dict(compute_global_stats(db_session, run_id))
 
         assert stats["emotion_min"] == 0.0
         assert stats["emotion_min_chunk_id"] == 11.0
@@ -117,21 +133,28 @@ class TestGlobalStatsExtremes:
 
     def test_rhythm_extremes_symmetric_output(self, db_session) -> None:
         """§19.14 不对称修复：tension 侧新增 rhythm_max_chunk/rhythm_min_chunk"""
-        tension_values = [2.0, 2.0, 4.0, 4.0]
-        chunk_texts = [(10, "a"), (11, "b"), (12, "c"), (13, "d")]
-
-        stats = dict(
-            compute_global_stats(db_session, "run-x", [], tension_values, chunk_texts)
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[None, None, None, None],
+            surface_tensions=[2.0, 2.0, 4.0, 4.0],
         )
+
+        stats = dict(compute_global_stats(db_session, run_id))
 
         assert stats["rhythm_max"] == 4.0
         assert stats["rhythm_max_chunk"] == 13.0
         assert stats["rhythm_min"] == 2.0
         assert stats["rhythm_min_chunk"] == 11.0
 
-    def test_rhythm_extremes_guarded_when_chunk_texts_absent(self, db_session) -> None:
-        """tension 有值但 chunk_texts 为空时不越界崩溃，也不伪造 chunk 输出"""
-        stats = dict(compute_global_stats(db_session, "run-x", [], [1.0, 2.0], []))
+    def test_rhythm_extremes_guarded_when_no_curve_rows(self, db_session) -> None:
+        """无段落曲线数据时输出张力分布统计，也不伪造极值定位"""
+        novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(novel_id, session=db_session)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id, source_path="test", title="Global Stats"
+        )
 
-        assert stats["rhythm_max"] == 2.0
+        stats = dict(compute_global_stats(db_session, run_id))
+
+        assert "rhythm_max" not in stats
         assert "rhythm_max_chunk" not in stats

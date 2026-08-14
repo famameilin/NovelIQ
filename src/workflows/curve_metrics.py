@@ -3,9 +3,10 @@
 
 聚合与预处理都会用到的通用计算放在这里，减少模块间交叉依赖
 
-
-
-
+2026-08-14 M8b：chunk 级曲线计算（compute_emotion_curve / compute_tension_signals /
+compute_rhythm_curve / compute_emotion_curve_weighted）已删除——曲线事实源
+改为 paragraph_curves（预处理阶段落库），聚合侧按章节从段落充分统计量重算；
+本模块仅保留 WeightedLexiconSet 与段落化的 compute_global_stats。
 """
 
 from __future__ import annotations
@@ -14,9 +15,11 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from sqlalchemy import text as sql_text
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from src.config.constants import EVENT_TYPE_SCORES
+from src.metrics.style_metrics import mtld, ttr
+from src.preprocess.tokenize import tokenize
 
 
 @dataclass
@@ -30,264 +33,95 @@ class WeightedLexiconSet:
     genre: str = ""
 
 
-def _compute_emotion_curve_raw(
-    chunk_texts: list[tuple[int, str]],
-    pos_terms: Mapping[str, float],
-    neg_terms: Mapping[str, float],
-) -> tuple[list[tuple[int, float, float, float]], list[float]]:
-    """
-    计算未平滑的情感密度序列
+def _last_extreme_index(values: list[float], *, want_max: bool) -> int:
+    """§19.14 并列极值取最后出现的索引（rindex 语义）"""
+    extreme = max(values) if want_max else min(values)
+    return len(values) - 1 - values[::-1].index(extreme)
 
-    """
-    from src.metrics.emotion_metrics import lexical_sentiment_density
 
-    emotion_rows: list[tuple[int, float, float, float]] = []
-    raw_densities: list[float] = []
-    for chunk_id, text in chunk_texts:
-        result = lexical_sentiment_density(text, pos_terms, neg_terms)
-        emotion_rows.append(
-            (
-                chunk_id,
-                result["pos_density"],
-                result["neg_density"],
-                result["net_density"],
-            )
+def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
+    """
+    计算全局统计（§9.1 聚合守恒，2026-08-14 M8b 段落化重写）
+
+    数据源从 chunk_style/chunk_curves 切换为段落事实源：
+    - TTR/MTLD 在全文字符序列上直接计算，不再取各章均值
+    - global_avg_sent_len 从句子充分统计量恢复（Σ句长 / Σ句数）
+    - emotion_avg 为全书分子/分母守恒密度（Σpos − Σneg）/ Σtoken
+    - emotion/rhythm 的 std/max/min 与峰值定位基于段落密度序列，
+      并列极值取最后出现的段落（rindex 语义）
+    """
+    from src.storage.models import Paragraph, ParagraphCurve, ParagraphMetric
+
+    rows = conn.execute(
+        select(
+            Paragraph.chunk_id,
+            Paragraph.text,
+            ParagraphMetric.token_count,
+            ParagraphMetric.sentence_count,
+            ParagraphMetric.sentence_char_sum,
+            ParagraphMetric.positive_weight_sum,
+            ParagraphMetric.negative_weight_sum,
+            ParagraphCurve.net_density,
+            ParagraphCurve.surface_tension,
         )
-        raw_densities.append(result["net_density"])
-    return emotion_rows, raw_densities
-
-
-def compute_emotion_curve(
-    chunk_texts: list[tuple[int, str]],
-    pos_terms: Mapping[str, float],
-    neg_terms: Mapping[str, float],
-) -> tuple[list[tuple[int, float, float, float, float]], list[float]]:
-    """
-    计算情感曲线
-
-
-
-
-    """
-    from src.metrics.robust_smooth import smooth_series
-
-    raw_rows, raw_densities = _compute_emotion_curve_raw(chunk_texts, pos_terms, neg_terms)
-    emotion_rows = [(chunk_id, pos_d, neg_d, net_d, 0.0) for chunk_id, pos_d, neg_d, net_d in raw_rows]
-    smoothed = smooth_series(raw_densities)
-    for idx, (chunk_id, pos_d, neg_d, net_d, _) in enumerate(emotion_rows):
-        emotion_rows[idx] = (chunk_id, pos_d, neg_d, net_d, smoothed[idx])
-    return emotion_rows, raw_densities
-
-
-def compute_emotion_curve_weighted(
-    chunk_texts: list[tuple[int, str]],
-    weighted_lexicons: list[WeightedLexiconSet],
-) -> tuple[list[tuple[int, float, float, float, float]], list[float]]:
-    """
-    计算加权情感曲线（多类型词表混合）
-
-    优化策略：合并所有类型的词典，一次计算，避免重复匹配
-
-    Args:
-        chunk_texts: chunk 列表，格式 [(chunk_id, text), ...]
-        weighted_lexicons: 加权词表列表，格式 [WeightedLexiconSet(...), ...]
-
-    Returns:
-        (emotion_rows, raw_densities): 情感曲线行和原始密度
-
-
-
-
-    """
-    from src.metrics.robust_smooth import smooth_series
-
-    if not weighted_lexicons:
-        return compute_emotion_curve(chunk_texts, {}, {})
-
-    active_lexicons = [lex for lex in weighted_lexicons if lex.weight > 0]
-    if not active_lexicons:
-        return compute_emotion_curve(chunk_texts, {}, {})
-
-    if len(active_lexicons) == 1:
-        lex = active_lexicons[0]
-        return compute_emotion_curve(chunk_texts, lex.pos_terms, lex.neg_terms)
-
-    per_genre_rows: list[tuple[float, list[tuple[int, float, float, float]]]] = []
-    for lex_set in active_lexicons:
-        raw_rows, _ = _compute_emotion_curve_raw(chunk_texts, lex_set.pos_terms, lex_set.neg_terms)
-        per_genre_rows.append((lex_set.weight, raw_rows))
-
-    combined_rows: list[tuple[int, float, float, float, float]] = []
-    raw_densities: list[float] = []
-
-    # 这里必须先按 genre 各自完成词表命中，再在 chunk 结果层做加权
-    # 否则像 0.25 这类低权重词条在总词表阶段就会被压成 0，命中了也不再贡献任何情绪值
-    for chunk_index, (chunk_id, _text) in enumerate(chunk_texts):
-        pos_density = 0.0
-        neg_density = 0.0
-        net_density = 0.0
-        for genre_weight, raw_rows in per_genre_rows:
-            _row_chunk_id, pos_d, neg_d, net_d = raw_rows[chunk_index]
-            pos_density += pos_d * genre_weight
-            neg_density += neg_d * genre_weight
-            net_density += net_d * genre_weight
-        combined_rows.append((chunk_id, pos_density, neg_density, net_density, 0.0))
-        raw_densities.append(net_density)
-
-    smoothed = smooth_series(raw_densities)
-    for idx, (chunk_id, pos_d, neg_d, net_d, _) in enumerate(combined_rows):
-        combined_rows[idx] = (chunk_id, pos_d, neg_d, net_d, smoothed[idx])
-
-    return combined_rows, raw_densities
-
-
-def compute_tension_signals(
-    chunk_texts: list[tuple[int, str]],
-    fight_terms: dict[str, float],
-    style_map: dict[int, dict[str, float | None]],
-    annotation_map: dict[int, dict[str, str | int | None]],
-    raw_densities: list[float],
-) -> list[dict]:
-    """
-    计算张力信号
-
-
-
-    """
-    tension_signals: list[dict] = []
-    for idx, (chunk_id, _text) in enumerate(chunk_texts):
-        dialogue_val = 0.0
-        sent_len_std = 0.0
-        style_info = style_map.get(chunk_id)
-        if style_info:
-            dialogue_val = float(style_info.get("dialogue_ratio") or 0.0)
-            sent_len_std = float(style_info.get("sent_len_std") or 0.0)
-        event_type = ""
-        cliffhanger = 0
-        annotation_info = annotation_map.get(chunk_id)
-        if annotation_info:
-            event_type = str(annotation_info.get("event_type") or "")
-            cliffhanger = int(annotation_info.get("cliffhanger") or 0)
-        event_score = EVENT_TYPE_SCORES.get(event_type, 0.0)
-        cliffhanger_score = 1.0 if cliffhanger else 0.0
-        emotion_intensity = abs(raw_densities[idx] if idx < len(raw_densities) else 0.0)
-        tension_signals.append(
-            {
-                "emotion_intensity": emotion_intensity,
-                "dialogue_ratio": dialogue_val,
-                "sent_len_std": sent_len_std,
-                "event_score": event_score,
-                "cliffhanger_score": cliffhanger_score,
-            }
+        .join(
+            ParagraphMetric,
+            (ParagraphMetric.run_id == Paragraph.run_id)
+            & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+            isouter=True,
         )
-    return tension_signals
-
-
-def _proxy_score(proxy: dict[str, float]) -> float:
-    """
-    §19.6 修复：各分量先统一量纲（clip 到 [0,1]）再等权平均
-
-    此前直接平均不同量纲字段（fight/exclaim/question/dialogue 密度与
-    avg_sent_len 混算），平均句长量纲会主导结果。修复后：
-    - fight/exclaim/question/dialogue 密度：clip(x, 0, 1)
-    - avg_sent_len：min(x / 50, 1)（50 字为句长上限归一）
-    """
-    if not proxy:
-        return 0.0
-    total = 0.0
-    for key, value in proxy.items():
-        if key == "avg_sent_len":
-            total += max(0.0, min(value / 50.0, 1.0))
-        else:
-            total += max(0.0, min(value, 1.0))
-    return total / len(proxy)
-
-
-def compute_rhythm_curve(
-    chunk_texts: list[tuple[int, str]],
-    fight_terms: dict[str, float],
-    tension_composite_values: list[float],
-) -> list[tuple[int, float, float]]:
-    """
-    计算节奏曲线
-
-
-    """
-    from src.metrics.rhythm_metrics import tension_proxy
-
-    rhythm_rows: list[tuple[int, float, float]] = []
-    for idx, (chunk_id, text) in enumerate(chunk_texts):
-        proxy = tension_proxy(text, fight_terms)
-        proxy_score = _proxy_score(proxy)
-        rhythm_rows.append((chunk_id, proxy_score, tension_composite_values[idx]))
-    return rhythm_rows
-
-
-def compute_global_stats(
-    conn,
-    run_id: str,
-    raw_densities: list[float],
-    tension_composite_values: list[float],
-    chunk_texts: list[tuple[int, str]],
-) -> list[tuple[str, float]]:
-    """
-    计算全局统计
-
-
-    """
-    global_stats: list[tuple[str, float]] = []
-    # 2026-08-13 修复：chunk_style 是跨 run 累积的表，此前缺 run_id 过滤，
-    # 多 run 后 global_avg_* 被其他 run 的行污染
-    style_rows = conn.execute(
-        sql_text("SELECT mtld, ttr, avg_sent_len FROM chunk_style WHERE run_id = :run_id"),
-        {"run_id": run_id},
+        .join(
+            ParagraphCurve,
+            (ParagraphCurve.run_id == Paragraph.run_id)
+            & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
+            isouter=True,
+        )
+        .where(Paragraph.run_id == run_id)
+        .order_by(Paragraph.global_start_char, Paragraph.paragraph_id)
     ).fetchall()
-    if style_rows:
-        mtld_vals = [row.mtld for row in style_rows if row.mtld is not None]
-        ttr_vals = [row.ttr for row in style_rows if row.ttr is not None]
-        sent_len_vals = [row.avg_sent_len for row in style_rows if row.avg_sent_len is not None]
-        if mtld_vals:
-            global_stats.append(("global_avg_mtld", sum(mtld_vals) / len(mtld_vals)))
-        if ttr_vals:
-            global_stats.append(("global_avg_ttr", sum(ttr_vals) / len(ttr_vals)))
-        if sent_len_vals:
-            global_stats.append(("global_avg_sent_len", sum(sent_len_vals) / len(sent_len_vals)))
-    if raw_densities:
-        global_stats.append(("emotion_avg", sum(raw_densities) / len(raw_densities)))
-        variance = sum((d - sum(raw_densities) / len(raw_densities)) ** 2 for d in raw_densities) / len(raw_densities)
+
+    global_stats: list[tuple[str, float]] = []
+
+    token_total = sum(int(row.token_count or 0) for row in rows)
+    pos_total = sum(float(row.positive_weight_sum or 0.0) for row in rows)
+    neg_total = sum(float(row.negative_weight_sum or 0.0) for row in rows)
+    sentence_count = sum(int(row.sentence_count or 0) for row in rows)
+    sentence_char_sum = sum(float(row.sentence_char_sum or 0.0) for row in rows)
+
+    book_text = "".join(str(row.text) for row in rows if row.text)
+    book_tokens = tokenize(book_text) if book_text else []
+    if book_tokens:
+        global_stats.append(("global_avg_mtld", float(mtld(book_tokens) or 0.0)))
+        global_stats.append(("global_avg_ttr", float(ttr(book_tokens))))
+    if sentence_count > 0:
+        global_stats.append(("global_avg_sent_len", sentence_char_sum / sentence_count))
+
+    if token_total > 0:
+        global_stats.append(("emotion_avg", (pos_total - neg_total) / token_total))
+
+    emotion_values = [float(row.net_density) for row in rows if row.net_density is not None]
+    if emotion_values:
+        mean = sum(emotion_values) / len(emotion_values)
+        variance = sum((d - mean) ** 2 for d in emotion_values) / len(emotion_values)
         global_stats.append(("emotion_std", math.sqrt(variance)))
-        global_stats.append(("emotion_max", max(raw_densities)))
-        global_stats.append(("emotion_min", min(raw_densities)))
-        # §19.14 修复：并列极值取最后出现的索引（rindex 语义），不再用 list.index 取首次
-        max_idx = len(raw_densities) - 1 - raw_densities[::-1].index(max(raw_densities))
-        min_idx = len(raw_densities) - 1 - raw_densities[::-1].index(min(raw_densities))
-        max_chunk_id, _max_text = chunk_texts[max_idx]
-        min_chunk_id, _min_text = chunk_texts[min_idx]
-        # 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id，
-        # emotion_min_chunk → emotion_min_chunk_id（值语义不变）
-        global_stats.append(("emotion_peak_chunk_id", float(max_chunk_id)))
-        global_stats.append(("emotion_min_chunk_id", float(min_chunk_id)))
-    if tension_composite_values:
-        global_stats.append(("rhythm_avg", sum(tension_composite_values) / len(tension_composite_values)))
-        variance = sum(
-            (v - sum(tension_composite_values) / len(tension_composite_values)) ** 2 for v in tension_composite_values
-        ) / len(tension_composite_values)
+        global_stats.append(("emotion_max", max(emotion_values)))
+        global_stats.append(("emotion_min", min(emotion_values)))
+        max_idx = _last_extreme_index(emotion_values, want_max=True)
+        min_idx = _last_extreme_index(emotion_values, want_max=False)
+        global_stats.append(("emotion_peak_chunk_id", float(rows[max_idx].chunk_id)))
+        global_stats.append(("emotion_min_chunk_id", float(rows[min_idx].chunk_id)))
+
+    tension_values = [float(row.surface_tension) for row in rows if row.surface_tension is not None]
+    if tension_values:
+        mean = sum(tension_values) / len(tension_values)
+        variance = sum((v - mean) ** 2 for v in tension_values) / len(tension_values)
+        global_stats.append(("rhythm_avg", mean))
         global_stats.append(("rhythm_std", math.sqrt(variance)))
-        global_stats.append(("rhythm_max", max(tension_composite_values)))
-        global_stats.append(("rhythm_min", min(tension_composite_values)))
-        # §19.14 修复：张力侧对称输出（此前只有 emotion 侧有 chunk 定位，不对称）；
-        # 并列极值同样取最后出现的索引，tension_composite_values 与 chunk_texts 索引对应
-        tension_max_idx = (
-            len(tension_composite_values)
-            - 1
-            - tension_composite_values[::-1].index(max(tension_composite_values))
-        )
-        tension_min_idx = (
-            len(tension_composite_values)
-            - 1
-            - tension_composite_values[::-1].index(min(tension_composite_values))
-        )
-        if tension_max_idx < len(chunk_texts) and tension_min_idx < len(chunk_texts):
-            global_stats.append(("rhythm_max_chunk", float(chunk_texts[tension_max_idx][0])))
-            global_stats.append(("rhythm_min_chunk", float(chunk_texts[tension_min_idx][0])))
+        global_stats.append(("rhythm_max", max(tension_values)))
+        global_stats.append(("rhythm_min", min(tension_values)))
+        tension_max_idx = _last_extreme_index(tension_values, want_max=True)
+        tension_min_idx = _last_extreme_index(tension_values, want_max=False)
+        global_stats.append(("rhythm_max_chunk", float(rows[tension_max_idx].chunk_id)))
+        global_stats.append(("rhythm_min_chunk", float(rows[tension_min_idx].chunk_id)))
+
     return global_stats

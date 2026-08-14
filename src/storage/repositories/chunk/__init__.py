@@ -1,4 +1,8 @@
-"""导出 chunk 相关的样式与 embedding 访问函数"""
+"""导出段落检索与 embedding 访问函数
+
+2026-08-14 M8b：style_data/style_ops（chunk_style 链）已删除——风格指标以
+paragraph_metrics 的充分统计量为事实源。
+"""
 
 from .embedding_ops import (
     ParagraphEmbeddingRow,
@@ -9,23 +13,11 @@ from .embedding_ops import (
     search_similar_paragraphs,
 )
 from .keyword_ops import KeywordMatchRow, fetch_chunk_text, search_paragraphs_by_keywords
-from .style_data import ChunkStyleData
-from .style_ops import (
-    fetch_chunk_imagery_lexicon_densities,
-    fetch_chunk_styles,
-    fetch_chunk_styles_full,
-    insert_chunk_style,
-)
 
 __all__ = [
-    "ChunkStyleData",
     "KeywordMatchRow",
     "fetch_chunk_text",
     "search_paragraphs_by_keywords",
-    "fetch_chunk_styles",
-    "insert_chunk_style",
-    "fetch_chunk_styles_full",
-    "fetch_chunk_imagery_lexicon_densities",
     "insert_paragraph_embeddings",
     "get_incomplete_paragraph_embedding_paragraph_ids",
     "search_similar_paragraphs",

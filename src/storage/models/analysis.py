@@ -3,12 +3,12 @@
 
 本模块定义分析结果相关的数据表：
 - CloudAnalysis: 云端分析结果表
-- ChunkCurve: 分块曲线表（情绪 + 节奏）
 - GlobalStats: 全局统计表
 - GlobalContext: 全局上下文表
 - ChunkSummary: 分块摘要表
 
-将 EmotionCurve, RhythmCurve, ChunkSummary 的主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+2026-08-14 M8b：ChunkCurve（chunk_curves 表）已下线——曲线事实源改为
+paragraph_curves，聚合侧按章节从段落曲线重算，不再落 chunk 级曲线表。
 """
 
 from __future__ import annotations
@@ -74,42 +74,6 @@ class CloudAnalysis(Base):
 
     def __repr__(self) -> str:
         return f"<CloudAnalysis(id={self.id}, novel_id={self.novel_id})>"
-
-
-class ChunkCurve(Base):
-    """
-    分块曲线表（合并情绪曲线 + 节奏曲线）
-
-    将 emotion_curve 和 rhythm_curve 合并为 chunk_curves，统一管理所有分块级曲线数据
-    """
-
-    __tablename__ = "chunk_curves"
-
-    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    pos_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    neg_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    smoothed_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    tension_proxy: Mapped[float | None] = mapped_column(Float, nullable=True)
-    tension_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["analysis_runs.run_id"],
-            ondelete="CASCADE",
-        ),
-        Index("idx_chunk_curves_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ChunkCurve(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
 class GlobalStats(Base):

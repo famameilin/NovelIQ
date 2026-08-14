@@ -85,18 +85,9 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     ):
         stats_repo.insert_chunk_summary(run_id, chunk_id, summary)
 
-    stats_repo.insert_chunk_curve(
-        run_id,
-        [
-            (0, 0.10, 0.02, 0.08, 0.08, 0.20, 0.15),
-            (1, 0.08, 0.05, 0.03, 0.03, 0.35, 0.30),
-            (2, 0.03, 0.22, -0.19, -0.17, 0.95, 0.95),
-            (3, 0.04, 0.12, -0.08, -0.07, 0.55, 0.45),
-            (4, 0.02, 0.05, -0.03, -0.03, 0.10, 0.10),
-        ],
-    )
-
     # 2026-08-14 段落化：导出核心结果走段落曲线，场景同步插入段落曲线行
+    # （每段一行，与 5 个 chunk 一一对应；章张力 = 段内 surface_tension 均值，
+    # 时间轴测试据此断言 tension_curve）
     # （每段一行，与 5 个 chunk 一一对应）
     from src.storage.repositories.paragraph_repository import (
         ParagraphCurveRow,

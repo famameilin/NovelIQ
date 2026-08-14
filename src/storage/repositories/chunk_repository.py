@@ -17,8 +17,7 @@ fetch_chunk_styles_full 返回 Sequence[Row] 支持字段名访问
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Sequence
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.engine import Row
@@ -30,13 +29,8 @@ from src.storage.models import Chunk as ChunkModel
 from src.storage.models import ChunkSummary
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.chunk import (
-    ChunkStyleData,
-    fetch_chunk_imagery_lexicon_densities,
-    fetch_chunk_styles,
-    fetch_chunk_styles_full,
     get_incomplete_paragraph_embedding_paragraph_ids,
     has_paragraph_embeddings,
-    insert_chunk_style,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.storage.vector_schema import validate_paragraph_embeddings_schema
@@ -123,18 +117,6 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         )
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text) for row in result.fetchall()]
-
-    def fetch_chunk_styles(self, run_id: str) -> Sequence[Row]:
-        return fetch_chunk_styles(self.session, run_id)
-
-    def insert_chunk_style(self, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:
-        insert_chunk_style(self.session, run_id, rows)
-
-    def fetch_chunk_styles_full(self, run_id: str) -> Sequence[Row]:
-        return fetch_chunk_styles_full(self.session, run_id)
-
-    def fetch_chunk_imagery_lexicon_densities(self, run_id: str) -> list[tuple[int, float | None]]:
-        return fetch_chunk_imagery_lexicon_densities(self.session, run_id)
 
     def fetch_chunk_counts(self, run_id: str) -> tuple[int, int]:
         """

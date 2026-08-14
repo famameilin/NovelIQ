@@ -2,7 +2,6 @@
 
 from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from src.storage.models.analysis import (
-    ChunkCurve,
     ChunkSummary,
     CloudAnalysis,
     GlobalContext,
@@ -11,7 +10,7 @@ from src.storage.models.analysis import (
 )
 from src.storage.models.base import Base
 from src.storage.models.chapter import Chapter
-from src.storage.models.chunk import Chunk, ChunkStyle
+from src.storage.models.chunk import Chunk
 from src.storage.models.chunk_embedding import EMBEDDING_DIM, ParagraphEmbedding
 from src.storage.models.continuity import (
     CasePoolCase,
@@ -46,7 +45,6 @@ __all__ = [
     "ForeshadowingThreadHit",
     "Chapter",
     "Chunk",
-    "ChunkStyle",
     "Paragraph",
     "ParagraphEmbedding",
     "ParagraphMetric",
@@ -64,7 +62,6 @@ __all__ = [
     "GraphRelation",
     "GraphRelationVersion",
     "CloudAnalysis",
-    "ChunkCurve",
     "GlobalStats",
     "GlobalContext",
     "ChunkSummary",

@@ -11,7 +11,7 @@ from .annotation import (
 )
 from .base import BaseRepository, T
 from .chapter_repository import ChapterRepository
-from .chunk_repository import ChunkRepository, ChunkStyleData
+from .chunk_repository import ChunkRepository
 from .diagnosis_repository import DiagnosisRepository
 from .graph import EntitySnapshotRow, GraphChangeRow, GraphRepository, GraphSnapshotRow, RelationSnapshotRow
 from .paragraph_repository import ParagraphRepository
@@ -38,7 +38,6 @@ __all__ = [
     "CaseResolutionMappingRepository",
     "DatabaseAnnotationQueryService",
     "ChunkRepository",
-    "ChunkStyleData",
     "RunRepositoryProtocol",
     "ChunkRepositoryProtocol",
     "AnnotationRepositoryProtocol",

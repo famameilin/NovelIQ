@@ -2,28 +2,18 @@
 预处理辅助函数模块 (workflows层)
 
 包含预处理的核心业务逻辑函数，纯业务逻辑、不依赖入口层，可被多个入口点复用。
+
+2026-08-14 M8b：_compute_chunk_style_metrics（chunk_style 链）已删除——
+风格指标以 paragraph_metrics 的充分统计量为事实源。
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
-from src.chunking.chunker import Chunk
 from src.lexicons.registry import LexiconRegistry
-from src.metrics.style_metrics import (
-    dialogue_ratio,
-    function_word_distribution,
-    metaphor_density,
-    mtld,
-    parse_semantic_category_lexicon,
-    pause_density,
-    semantic_category_densities,
-    sentence_length_stats,
-    ttr,
-)
-from src.storage.repositories import ChunkStyleData
+from src.metrics.style_metrics import parse_semantic_category_lexicon
 
 
 def _load_all_lexicons_for_preprocess(
@@ -67,74 +57,3 @@ def _load_all_lexicons_for_preprocess(
         lexicons["semantic_categories"] = {}
 
     return lexicons
-
-
-def _compute_chunk_style_metrics(
-    chunk: Chunk,
-    tokens: list[str],
-    sensory_terms: list[str],
-    function_words: list[str],
-    semantic_categories: dict,
-    imagery_terms: list[str],
-    fight_terms: dict[str, float] | None = None,
-) -> ChunkStyleData:
-    """
-    计算单个chunk的风格指标
-
-    从 run_preprocess 中提取，负责计算chunk的风格指标
-
-    """
-    from src.metrics.rhythm_metrics import tension_proxy
-    from src.metrics.style_metrics import imagery_density, sensory_density
-
-    mtld_val = mtld(tokens)
-    ttr_val = ttr(tokens)
-    sent_stats = sentence_length_stats(chunk.text)
-    pause_val = pause_density(chunk.text)
-    dialogue_val = dialogue_ratio(chunk.text)
-    metaphor_val = metaphor_density(chunk.text)
-
-    # 2026-08-13 P2-4 战斗/感叹/问句密度接入 rhythm_metrics.tension_proxy，
-    # 替换原先硬编码 0.0（无战斗词条时 fight_density 自然为 0）
-    proxy = tension_proxy(chunk.text, fight_terms or {})
-
-    sensory_val = 0.0
-    if sensory_terms:
-        sensory_val = sensory_density(chunk.text, sensory_terms)
-    imagery_lexicon_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else None
-
-    fw_dist = {}
-    if function_words:
-        fw_dist = function_word_distribution(tokens, function_words)
-    fw_vector_json = json.dumps(fw_dist, ensure_ascii=False) if fw_dist else "{}"
-
-    cat_densities = {}
-    if semantic_categories:
-        cat_densities = semantic_category_densities(chunk.text, semantic_categories)
-
-    return ChunkStyleData(
-        chunk_id=chunk.index,
-        mtld=mtld_val,
-        ttr=ttr_val,
-        avg_sent_len=sent_stats["avg_sent_len"],
-        sent_len_std=sent_stats["sent_len_std"],
-        pause_density=pause_val,
-        fight_density=proxy["fight_density"],
-        exclaim_density=proxy["exclaim_density"],
-        dialogue_ratio=dialogue_val,
-        question_density=proxy["question_density"],
-        sensory_density=sensory_val,
-        metaphor_density=metaphor_val,
-        function_word_vector=fw_vector_json,
-        category_density_combat=cat_densities.get("combat", 0.0),
-        category_density_body=cat_densities.get("body", 0.0),
-        category_density_relation=cat_densities.get("relation", 0.0),
-        category_density_faction=cat_densities.get("faction", 0.0),
-        category_density_command=cat_densities.get("command", 0.0),
-        category_density_action=cat_densities.get("action", 0.0),
-        category_density_psychology=cat_densities.get("psychology", 0.0),
-        category_density_measure=cat_densities.get("measure", 0.0),
-        category_density_emotion=cat_densities.get("emotion", 0.0),
-        category_density_color=cat_densities.get("color", 0.0),
-        imagery_lexicon_density=imagery_lexicon_val,
-    )

@@ -12,7 +12,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import select
@@ -28,7 +28,6 @@ from src.preprocess.tokenize import tokenize
 from src.storage.repositories import (
     ChapterRepository,
     ChunkRepository,
-    ChunkStyleData,
 )
 from src.storage.repositories.paragraph_repository import (
     ParagraphMetricRow,
@@ -58,10 +57,7 @@ async def run_preprocess(
     Returns:
         Tuple[int, int, float]: (总块数, 总字符数, 耗时)
     """
-    from src.workflows.preprocess_helpers import (
-        _compute_chunk_style_metrics,
-        _load_all_lexicons_for_preprocess,
-    )
+    from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 
     start_time = time.time()
 
@@ -123,26 +119,8 @@ async def run_preprocess(
         metric_rows = _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
         _insert_paragraph_curves(session, run_id, spans, metric_rows)
 
-    style_rows: list[ChunkStyleData] = []
-    for idx, chunk in enumerate(all_chunks):
-        if total_chunks > 1:
-            logger.info(f"Processing chunk {idx + 1}/{total_chunks}")
-        tokens = tokenize(chunk.text)
-
-        style_data = _compute_chunk_style_metrics(
-            chunk,
-            tokens,
-            cast(list[str], lexicons.get("sensory", [])),
-            cast(list[str], lexicons.get("function_words", [])),
-            cast(dict, lexicons.get("semantic_categories", {})),
-            cast(list[str], lexicons.get("imagery", [])),
-            cast(dict, lexicons.get("fight_terms", {})),
-        )
-        style_rows.append(style_data)
-
-    chunk_repo.insert_chunk_style(run_id, style_rows)
-    _commit_preprocess_writes(session, step="insert_chunk_style")
-
+    # 2026-08-14 M8b：chunk_style 链已删除——风格指标以 paragraph_metrics
+    # 的充分统计量（sentence_count/sum/sum_sq、dialogue_char_count 等）为事实源。
     if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
         await _generate_paragraph_embeddings(session, run_id, emitter=emitter)

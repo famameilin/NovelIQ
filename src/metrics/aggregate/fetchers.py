@@ -91,15 +91,26 @@ def fetch_emotion_data(
     run_id: str,
 ) -> EmotionData:
     """
-    提取 chunk_curves 表数据
+    提取每章（chunk）情绪密度（§9.1 守恒聚合，2026-08-14 M8b 段落化）
 
+    章情绪密度 = 章内段落分子之和 / 分母之和（Σpos/Σtoken、Σneg/Σtoken、
+    (Σpos − Σneg)/Σtoken）；token 为 0 的章无有效密度，直接跳过。
     """
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
-    emotion_values = [row.net_density for row in rows]
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    density_rows = stats_repo.fetch_emotion_densities(run_id)
-    pos_densities = [row.pos_density for row in density_rows if row.pos_density is not None]
-    neg_densities = [row.neg_density for row in density_rows if row.neg_density is not None]
+    aggregates = ParagraphRepository(stats_repo.session).fetch_chunk_metric_aggregates(run_id)
+    emotion_values: list[float] = []
+    pos_densities: list[float] = []
+    neg_densities: list[float] = []
+    for _chunk_id, totals in aggregates:
+        token_count = totals.get("token_count", 0.0)
+        if token_count <= 0:
+            continue
+        pos_total = totals.get("positive_weight_sum", 0.0)
+        neg_total = totals.get("negative_weight_sum", 0.0)
+        pos_densities.append(pos_total / token_count)
+        neg_densities.append(neg_total / token_count)
+        emotion_values.append((pos_total - neg_total) / token_count)
 
     return EmotionData(
         emotion_values=emotion_values,
@@ -223,11 +234,19 @@ def fetch_culture_data(
     run_id: str,
 ) -> CultureData:
     """
-    提取 chunk_culture 表数据
+    提取每章（chunk）意象密度（§9.1 守恒聚合，2026-08-14 M8b 段落化）
 
+    章意象密度 = Σimagery_hit_count / Σtoken_count；token 为 0 的章跳过。
     """
-    culture_rows = stats_repo.fetch_chunk_culture(run_id)
-    imagery_densities = [row.imagery_lexicon_density for row in culture_rows if row.imagery_lexicon_density is not None]
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
+
+    aggregates = ParagraphRepository(stats_repo.session).fetch_chunk_metric_aggregates(run_id)
+    imagery_densities: list[float] = []
+    for _chunk_id, totals in aggregates:
+        token_count = totals.get("token_count", 0.0)
+        if token_count <= 0:
+            continue
+        imagery_densities.append(totals.get("imagery_hit_count", 0.0) / token_count)
 
     return CultureData(
         imagery_densities=imagery_densities,
@@ -239,13 +258,17 @@ def fetch_tension_data(
     run_id: str,
 ) -> TensionData:
     """
-    提取 chunk_curves 表的 tension_composite 数据
+    提取每章（chunk）张力（2026-08-14 M8b 段落化）
 
+    章张力 = 章内段落 surface_tension 均值（段落值已为 run 内稳健标准化 +
+    sigmoid 的 [0,1] 值，直接取均值；无张力数据的章不输出，由调用方兜底）。
     """
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
+
+    rows = ParagraphRepository(stats_repo.session).fetch_chunk_tension_scores(run_id)
     return TensionData(
-        chunk_ids=[row.chunk_id for row in rows],
-        tension_composite_scores=[row.tension_composite for row in rows],
+        chunk_ids=[chunk_id for chunk_id, _tension in rows],
+        tension_composite_scores=[tension for _chunk_id, tension in rows],
     )
 
 
@@ -269,11 +292,20 @@ def fetch_style_data(
     run_id: str,
 ) -> StyleData:
     """
-    提取 chunk_styles 表的风格指标数据
+    提取全书风格指标（§9.1 守恒聚合，2026-08-14 M8b 段落化）
 
-    从 chunk_styles 表获取 dialogue_ratio 和 avg_sent_len 数据用于聚合计算
+    从段落充分统计量计算全书守恒值：dialogue_ratio = Σdialogue_char_count /
+    Σchar_count；avg_sent_len = Σsentence_char_sum / Σsentence_count。
     """
-    rows = chunk_repo.fetch_chunk_styles(run_id)
-    dialogue_ratios = [row.dialogue_ratio for row in rows if row.dialogue_ratio is not None]
-    avg_sent_lens = [row.avg_sent_len for row in rows if row.avg_sent_len is not None]
-    return StyleData(dialogue_ratios=dialogue_ratios, avg_sent_lens=avg_sent_lens)
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
+
+    aggregates = ParagraphRepository(chunk_repo.session).fetch_chunk_metric_aggregates(run_id)
+    dialogue_char_total = sum(item.get("dialogue_char_count", 0.0) for _cid, item in aggregates)
+    char_total = sum(item.get("char_count", 0.0) for _cid, item in aggregates)
+    sentence_char_total = sum(item.get("sentence_char_sum", 0.0) for _cid, item in aggregates)
+    sentence_total = sum(item.get("sentence_count", 0.0) for _cid, item in aggregates)
+
+    return StyleData(
+        dialogue_ratio=(dialogue_char_total / char_total) if char_total > 0 else None,
+        avg_sent_len=(sentence_char_total / sentence_total) if sentence_total > 0 else None,
+    )

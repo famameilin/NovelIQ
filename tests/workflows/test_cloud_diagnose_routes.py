@@ -24,7 +24,6 @@ from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     ChunkRepository,
-    ChunkStyleData,
     DiagnosisRepository,
     ForeshadowingRepository,
     ParagraphRepository,
@@ -101,56 +100,6 @@ class TestDiagnosisRoutes:
                 for span in spans
             ],
         )
-
-        style_rows = [
-            ChunkStyleData(
-                chunk_id=i,
-                mtld=50.0 + i,
-                ttr=0.5,
-                avg_sent_len=20.0 + i,
-                sent_len_std=5.0,
-                pause_density=0.1,
-                fight_density=0.0,
-                exclaim_density=0.0,
-                dialogue_ratio=0.2,
-                question_density=0.0,
-                sensory_density=0.0,
-                metaphor_density=0.0,
-                function_word_vector="{}",
-                category_density_combat=0.0,
-                category_density_body=0.0,
-                category_density_relation=0.0,
-                category_density_faction=0.0,
-                category_density_command=0.0,
-                category_density_action=0.0,
-                category_density_psychology=0.0,
-                category_density_measure=0.0,
-                category_density_emotion=0.0,
-                category_density_color=0.0,
-            )
-            for i in range(chunk_count)
-        ]
-        chunk_repo.insert_chunk_style(self.run_id, style_rows)
-
-        for i in range(chunk_count):
-            self.db_session.execute(
-                text(
-                    "INSERT INTO chunk_curves ("
-                    "chunk_id, pos_density, neg_density, net_density, smoothed_density, "
-                    "tension_proxy, tension_composite, run_id"
-                    ") VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :proxy, :composite, :run_id)"
-                ),
-                {
-                    "chunk_id": i,
-                    "pos": 0.1,
-                    "neg": 0.05,
-                    "net": 0.05 + i * 0.01,
-                    "smoothed": 0.05,
-                    "proxy": 0.5,
-                    "composite": 0.5,
-                    "run_id": self.run_id,
-                },
-            )
 
         persist_chapter_annotation(
             self.db_session,
