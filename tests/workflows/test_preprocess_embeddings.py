@@ -300,9 +300,10 @@ async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
 
     assert inserted == 1
     # 修改说明: 2026-08-14 段落事实源新增 insert_paragraphs 与段落指标
-    # （insert_paragraph_metrics）分段提交，embedding 阶段前的提交数由 3 变为 5
-    # （chapters/chunks/paragraphs/paragraph_metrics/style）
-    assert embedding_stage_commit_counts == [5]
+    # （insert_paragraph_metrics）、段落曲线（insert_paragraph_curves）分段提交，
+    # embedding 阶段前的提交数为 6（chapters/chunks/paragraphs/paragraph_metrics/
+    # paragraph_curves/style）
+    assert embedding_stage_commit_counts == [6]
 
 
 @pytest.mark.asyncio

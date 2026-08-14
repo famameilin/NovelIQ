@@ -61,11 +61,12 @@ def aggregate_all_metrics(
     dialogue_data = fetch_dialogue_data(annotation_repo, run_id)
     style_data = fetch_style_data(chunk_repo, run_id)
 
-    total_chunks = chunk_repo.count_chunks(run_id) or 1
+    # 2026-08-14 修复（§19.10）：关系变化频率分母从章节数改为全书总字数。
+    _, total_chars = chunk_repo.fetch_chunk_counts(run_id)
 
     result.narrative_structure = compute_narrative_structure_metrics(annotation_data, tension_data)
     result.emotion_curve = compute_emotion_curve_metrics(emotion_data, annotation_data, char_data)
-    result.character_relations = compute_character_relation_metrics(relation_data, char_data, total_chunks)
+    result.character_relations = compute_character_relation_metrics(relation_data, char_data, total_chars)
     result.language_style = compute_language_style_metrics(text_data, dialogue_data.tones, style_data)
     result.traditional_culture = compute_traditional_culture_metrics(culture_data, text_data.texts)
 

@@ -15,10 +15,9 @@ from sqlalchemy.orm import Session
 
 from src.api.exceptions import GraphReadinessError
 from src.api.models.events import StreamEvent
-from src.config import settings
 from src.lexicons.registry import LexiconRegistry
 from src.metrics.aggregate import aggregate_all_metrics
-from src.metrics.fourier_filter import fourier_smooth
+from src.metrics.robust_smooth import smooth_series
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from src.workflows.curve_metrics import (
     compute_global_stats,
@@ -62,7 +61,7 @@ def _compute_tension_composite(signals: list[dict]) -> list[float]:
     - 使用语义加权替代等权平均，避免 sent_len_std 主导结果
     - LLM 标注维度 (event_score / cliffhanger_score) 获得更高权重
     - 句长标准差权重降低（句长变化 ≠ 叙事张力）
-    - 傅里叶平滑消除单点噪声
+    - LOWESS 等间距平滑消除单点噪声（§9.3，替代傅里叶滤波）
 
     权重设计依据:
       event_score:       3.0  — LLM 语义判断，最直接反映"叙事张力"
@@ -102,7 +101,7 @@ def _compute_tension_composite(signals: list[dict]) -> list[float]:
             weighted_total += normalized * w
         composites.append(weighted_total / total_weight)
 
-    return fourier_smooth(composites, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
+    return smooth_series(composites)
 
 
 def _log_aggregate_results(agg_result) -> None:

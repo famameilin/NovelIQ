@@ -8,6 +8,7 @@ preprocess 段落事实源测试
 
 from __future__ import annotations
 
+import math
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from src.chapters.preprocess import preprocess_text
 from src.config import settings
 from src.preprocess.cleaning import normalize_text
-from src.storage.models import Paragraph, ParagraphEmbedding, ParagraphMetric
+from src.storage.models import Paragraph, ParagraphCurve, ParagraphEmbedding, ParagraphMetric
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.preprocess import run_preprocess
@@ -322,3 +323,57 @@ class TestPreprocessParagraphs:
                     metric.sentence_char_sum_sq / metric.sentence_count - mean * mean,
                 )
                 assert variance >= 0.0
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_preprocess_generates_paragraph_curves(self, db_session, tmp_path) -> None:
+        """
+        2026-08-14 用于验证段落曲线（§5.5）随 preprocess 无条件生成：
+        行数等于段落数、net_density 与手工分子/分母一致、smoothed 无 NaN、
+        surface_tension 与 paragraph_metrics 一致、curve_version 落库
+        """
+        source_path = self._create_source_file(str(tmp_path))
+        run_id = self._create_run(db_session, source_path, "Curves Novel")
+
+        await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_count = paragraph_repo.count_paragraphs(run_id)
+        assert paragraph_count > 0
+
+        curve_rows = db_session.scalars(
+            select(ParagraphCurve).where(ParagraphCurve.run_id == run_id)
+        ).all()
+        metric_rows = db_session.scalars(
+            select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)
+        ).all()
+        assert len(curve_rows) == paragraph_count
+        metric_by_paragraph = {row.paragraph_id: row for row in metric_rows}
+
+        for row in curve_rows:
+            metric = metric_by_paragraph[row.paragraph_id]
+            assert row.curve_version == "1"
+            if metric.token_count > 0:
+                assert row.pos_density == pytest.approx(
+                    metric.positive_weight_sum / metric.token_count
+                )
+                assert row.neg_density == pytest.approx(
+                    metric.negative_weight_sum / metric.token_count
+                )
+                assert row.net_density == pytest.approx(
+                    metric.positive_weight_sum / metric.token_count
+                    - metric.negative_weight_sum / metric.token_count
+                )
+                assert row.smoothed_net_density is not None
+                assert math.isfinite(row.smoothed_net_density)
+            else:
+                assert row.net_density is None
+                assert row.smoothed_net_density is None
+            assert row.surface_tension == pytest.approx(metric.surface_tension)
+            if metric.surface_tension is not None:
+                assert row.smoothed_surface_tension is not None
+                assert math.isfinite(row.smoothed_surface_tension)

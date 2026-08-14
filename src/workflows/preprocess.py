@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -30,7 +30,10 @@ from src.storage.repositories import (
     ChunkRepository,
     ChunkStyleData,
 )
-from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage.repositories.paragraph_repository import (
+    ParagraphMetricRow,
+    ParagraphRepository,
+)
 from src.storage.vector_schema import (
     ensure_paragraph_embeddings_schema,
 )
@@ -117,7 +120,8 @@ async def run_preprocess(
 
     # 段落指标（§5.3）：原始计数与充分统计量；surface_tension 在 run 内稳健标准化后写入
     if spans:
-        _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
+        metric_rows = _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
+        _insert_paragraph_curves(session, run_id, spans, metric_rows)
 
     style_rows: list[ChunkStyleData] = []
     for idx, chunk in enumerate(all_chunks):
@@ -178,13 +182,17 @@ def _insert_paragraph_metrics(
     spans: list[ParagraphSpan],
     tokenized: list[list[str]],
     lexicons: dict[str, Any],
-) -> int:
+) -> list[ParagraphMetricRow]:
     """
     计算并落库段落指标（§5.3 原始计数与充分统计量）
 
     表面张力（§9.2）在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
     再做稳健标准化（median/MAD）得到 z，sigmoid 后与 z 一并写入
     paragraph_metrics 行。
+
+    Returns:
+        写入的 ParagraphMetricRow 列表，供段落曲线（§5.5）复用内存数据
+        （避免再次查询，行内容与刚落库的数据一致）
     """
     from src.metrics.paragraph_metrics import compute_paragraph_metric_counts
     from src.metrics.paragraph_surface_tension import (
@@ -192,10 +200,6 @@ def _insert_paragraph_metrics(
         surface_tension_components,
         surface_tension_sigmoid,
         surface_tension_z_value,
-    )
-    from src.storage.repositories.paragraph_repository import (
-        ParagraphMetricRow,
-        ParagraphRepository,
     )
 
     counts_list = [
@@ -245,7 +249,37 @@ def _insert_paragraph_metrics(
     paragraph_repo.insert_paragraph_metrics(run_id, rows)
     _commit_preprocess_writes(session, step="insert_paragraph_metrics")
     logger.info(f"inserted {len(rows)} paragraph metrics into db (run_id={run_id})")
-    return len(rows)
+    return rows
+
+
+def _insert_paragraph_curves(
+    session: Session,
+    run_id: str,
+    spans: list[ParagraphSpan],
+    metric_rows: Sequence[ParagraphMetricRow],
+) -> int:
+    """
+    计算并落库段落曲线（§5.5 / §9）
+
+    段落坐标与字符权重从段落事实源读取（fetch_paragraph_rows），指标分子/分母
+    复用 _insert_paragraph_metrics 的内存行（同一 run 刚写入，内容与库中一致）；
+    total_chars 取段落 span 字符数之和。LOWESS 参数默认取 settings.metrics
+    的 lowess_bandwidth / lowess_min_points（§9.3）。
+    """
+    from src.workflows.paragraph_curves import compute_paragraph_curves
+
+    paragraph_repo = ParagraphRepository(session)
+    paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
+    total_chars = sum(span.char_count for span in spans)
+    curve_rows = compute_paragraph_curves(
+        paragraphs=paragraph_rows,
+        metric_rows=metric_rows,
+        total_chars=total_chars,
+    )
+    paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
+    _commit_preprocess_writes(session, step="insert_paragraph_curves")
+    logger.info(f"inserted {len(curve_rows)} paragraph curves into db (run_id={run_id})")
+    return len(curve_rows)
 
 
 async def _generate_paragraph_embeddings(

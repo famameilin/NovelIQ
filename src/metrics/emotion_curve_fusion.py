@@ -18,9 +18,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from src.config import settings
 from src.config.constants.annotation import EMOTION_SCORE_MAPPING
-from src.metrics.fourier_filter import fourier_smooth
+from src.metrics.robust_smooth import smooth_series
 
 _ANNOTATION_SIGNAL_MAP: dict[str, float] = {
     "strong_positive": 0.78,
@@ -229,10 +228,7 @@ def build_display_emotion_curve(
             )
         )
 
-    smoothed_values = fourier_smooth(
-        fused_net_values,
-        keep_ratio=settings.metrics.fourier_smooth_keep_ratio,
-    )
+    smoothed_values = smooth_series(fused_net_values)
 
     return [
         DisplayEmotionCurvePoint(
