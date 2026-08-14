@@ -82,9 +82,9 @@ def build_diagnosis_tools(
         high_tension = repo.fetch_high_tension_chunks(run_id, limit=10)
         if high_tension:
             parts.append("<高张力>")
-            for chunk_id, chunk_text, tension in high_tension:
-                preview = (chunk_text or "")[:300]
-                parts.append(f"[chunk {chunk_id}] (tension={tension:.4f}) {preview}")
+            for paragraph_id, paragraph_text, tension in high_tension:
+                preview = (paragraph_text or "")[:300]
+                parts.append(f"[paragraph {paragraph_id}] (tension={tension:.4f}) {preview}")
             parts.append("</高张力>")
 
         foreshadowing_threads = repo.fetch_foreshadowing_threads(run_id)

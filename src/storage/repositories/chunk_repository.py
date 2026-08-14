@@ -1,12 +1,12 @@
 """
 实现 ChunkRepository 类，管理文本分块的存储和检索
 
-添加查询方法 fetch_chunk_styles_full, fetch_chunk_cultures_full, fetch_chunk_topics_agg, fetch_chunk_counts
+添加查询方法 fetch_chunk_styles_full, fetch_chunk_counts
 
 从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
 
 将 ChunkStyleData 数据类移至 chunk/style_data.py
-将 style/culture/topic 操作移至子模块
+将 style/culture 操作移至子模块
 
 修复 fetch_chunk_cultures_full 返回类型为 List[Tuple[int, float]]
 
@@ -31,15 +31,12 @@ from src.storage.models import ChunkSummary
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.chunk import (
     ChunkStyleData,
-    clear_chunk_topics,
     fetch_chunk_imagery_lexicon_densities,
     fetch_chunk_styles,
     fetch_chunk_styles_full,
-    fetch_chunk_topics_agg,
     get_incomplete_paragraph_embedding_paragraph_ids,
     has_paragraph_embeddings,
     insert_chunk_style,
-    insert_chunk_topics,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.storage.vector_schema import validate_paragraph_embeddings_schema
@@ -133,25 +130,11 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def insert_chunk_style(self, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:
         insert_chunk_style(self.session, run_id, rows)
 
-    def insert_chunk_topics(self, run_id: str, rows: Iterable[tuple[int, int, float]]) -> None:
-        insert_chunk_topics(self.session, run_id, rows)
-
-    def clear_chunk_topics(self, run_id: str) -> None:
-        clear_chunk_topics(self.session, run_id)
-
     def fetch_chunk_styles_full(self, run_id: str) -> Sequence[Row]:
         return fetch_chunk_styles_full(self.session, run_id)
 
     def fetch_chunk_imagery_lexicon_densities(self, run_id: str) -> list[tuple[int, float | None]]:
         return fetch_chunk_imagery_lexicon_densities(self.session, run_id)
-
-    def fetch_chunk_topics_agg(self, run_id: str) -> Sequence[Row]:
-        """
-        获取聚合后的分块主题数据（每个分块的平均主题权重）
-
-        返回 Sequence[Row] 支持字段名访问， 替代元组列表
-        """
-        return fetch_chunk_topics_agg(self.session, run_id)
 
     def fetch_chunk_counts(self, run_id: str) -> tuple[int, int]:
         """

@@ -69,7 +69,6 @@ class MetricsSettings:
     mtld_threshold: float = 0.72
     middle_collapse_min_chunks: int = 10
     character_max_iter: int = 100
-    fourier_smooth_keep_ratio: float = 0.1
     # 段落指标版本标识（§5.3 metric_version）
     metric_version: str = "1"
     # 段落曲线版本标识（§5.5 curve_version）
@@ -160,7 +159,6 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         mtld_threshold=data.get("mtld_threshold", 0.72),
         middle_collapse_min_chunks=data.get("middle_collapse_min_chunks", 10),
         character_max_iter=data.get("character_max_iter", 100),
-        fourier_smooth_keep_ratio=data.get("fourier_smooth_keep_ratio", 0.1),
         metric_version=data.get("metric_version", "1"),
         curve_version=data.get("curve_version", "1"),
         lowess_bandwidth=data.get("lowess_bandwidth", 0.02),

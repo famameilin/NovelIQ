@@ -68,17 +68,6 @@ class StatusResponse(BaseModel):
     completed_at: datetime | None = None
 
 
-class ChunkCurvePoint(BaseModel):
-    chunk_id: int
-    pos_density: float | None = None
-    neg_density: float | None = None
-    net_density: float | None = None
-    smoothed_density: float | None = None
-    tension_proxy: float | None = None
-    tension_composite: float | None = None
-    surface_tension: float | None = None
-
-
 class CharacterStats(BaseModel):
     """
     角色统计模型
@@ -174,20 +163,6 @@ class ChapterMetricsResponse(BaseModel):
 
     chapters: list[ChapterMetricSummary] = Field(default_factory=list)
     book: BookAggregateStats
-
-
-class ChunkStyle(BaseModel):
-    chunk_id: int
-    mtld: float | None = None
-    ttr: float | None = None
-    avg_sent_len: float | None = None
-    d_value: float | None = None
-    pause_density: float | None = None
-    fight_density: float | None = None
-    dialogue_ratio: float | None = None
-    sensory_density: float | None = None
-    metaphor_density: float | None = None
-    imagery_lexicon_density: float | None = None
 
 
 class ChunkCharacter(BaseModel):
@@ -403,11 +378,9 @@ class DiagnosisResult(BaseModel):
 class NovelResultsResponse(BaseModel):
     novel_id: str
     novel_info: dict[str, Any]
-    chunk_curves: list[ChunkCurvePoint] = []
     characters: list[CharacterStats]
     topics: list[TopicInfo]
     diagnosis: DiagnosisResult | None = None
-    chunk_styles: list[ChunkStyle] = []
     chunk_annotations: list[ChunkAnnotation] = []
     character_relations: list[CharacterRelation] = []
     global_stats: GlobalStats | None = None

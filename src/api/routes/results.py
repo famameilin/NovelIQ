@@ -33,7 +33,6 @@ from src.api.models.responses import (
 from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_chunk_annotations,
-    _fetch_chunk_curves,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_graph_changes_page,
@@ -179,7 +178,7 @@ def _fetch_and_require_valid_diagnosis(
 - 数据完整性检查结果（缺失字段列表）
 
 **生产环境数据获取请使用专用接口：**
-- `GET /{novel_id}/chunk-curves` - 获取分块曲线（情绪 + 节奏）
+- `GET /{novel_id}/paragraph-curves` - 获取段落曲线（情绪 + 张力）
 - `GET /{novel_id}/chunk-annotations` - 获取分块标注与伏笔详情
 - `GET /{novel_id}/characters` - 获取人物统计
 - `GET /{novel_id}/topics` - 获取主题分布
@@ -214,7 +213,7 @@ def _fetch_and_require_valid_diagnosis(
                         "novel_id": "10960c77",
                         "novel_name": None,
                         "task_id": "a1b2c3d4",
-                        "missing_fields": ["chunk_curves"],
+                        "missing_fields": ["paragraph_curves"],
                     }
                 }
             },
@@ -286,23 +285,6 @@ def _write_results_to_file(task_id: str, data: dict[str, Any]) -> str:
 
     logger.info(f"Results written to {file_path}")
     return str(file_path)
-
-
-@router.get("/{novel_id}/chunk-curves")
-async def get_chunk_curves(
-    novel_id: str,
-    run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
-) -> list:
-    """
-    获取分块曲线数据（情绪 + 节奏）
-    """
-    run = _require_run_for_novel(session, novel_id, run_id)
-    _require_readable_run_status(run)
-    stats_repo = StatsRepository(session)
-    annotation_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
-    return _fetch_chunk_curves(run_id, stats_repo, annotation_repo, chunk_repo)
 
 
 @router.get(

@@ -11,7 +11,7 @@ from src.storage.models.analysis import (
 )
 from src.storage.models.base import Base
 from src.storage.models.chapter import Chapter
-from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
+from src.storage.models.chunk import Chunk, ChunkStyle
 from src.storage.models.chunk_embedding import EMBEDDING_DIM, ParagraphEmbedding
 from src.storage.models.continuity import (
     CasePoolCase,
@@ -47,7 +47,6 @@ __all__ = [
     "Chapter",
     "Chunk",
     "ChunkStyle",
-    "ChunkTopic",
     "Paragraph",
     "ParagraphEmbedding",
     "ParagraphMetric",

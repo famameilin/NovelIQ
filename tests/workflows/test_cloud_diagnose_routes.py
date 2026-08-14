@@ -3,10 +3,14 @@
 
 说明: 诊断已 agent 化（工具化自主取证），payload 构建与 DiagnosisClient 已移除；
      本文件保留数据层取证测试，并通过 patch run_diagnosis_agent 验证工作流落库
+
+2026-08-14 M8a：取证事实源段落化——测试数据改为写入 paragraphs/paragraph_topics/
+paragraph_curves（chunk_topics 已删除），高张力素材来自段落曲线 surface_tension。
 """
 
 import sys
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -16,16 +20,18 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.agents.annotation.schema import BoundForeshadowing
-from src.chunking.chunker import Chunk
+from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     ChunkRepository,
     ChunkStyleData,
     DiagnosisRepository,
     ForeshadowingRepository,
+    ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
+from src.storage.repositories.paragraph_repository import ParagraphCurveRow
 from src.workflows.diagnose import run_diagnose
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
@@ -60,12 +66,41 @@ class TestDiagnosisRoutes:
 
     def _create_full_data(self, chunk_count: int = 5) -> None:
         chunk_repo = ChunkRepository(self.db_session)
+        # 段落坐标校验要求 global 坐标严格单调不重叠：chunk 偏移随序号递增
         chunks = [
-            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。", chapter_id=1)
+            Chunk(
+                index=i,
+                start=i * 100,
+                end=(i + 1) * 100,
+                text=f"这是第{i}个测试文本，包含一些内容。",
+                chapter_id=1,
+            )
             for i in range(chunk_count)
         ]
         chunk_repo.insert_chunks(self.run_id, chunks)
-        chunk_repo.insert_chunk_topics(self.run_id, [(i, 0, 1.0) for i in range(chunk_count)])
+
+        paragraph_repo = ParagraphRepository(self.db_session)
+        spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
+        paragraph_repo.insert_paragraphs(self.run_id, spans)
+        paragraph_repo.insert_paragraph_topics(
+            self.run_id,
+            [(span.paragraph_id, 0, 1.0, 1) for span in spans],
+        )
+        paragraph_repo.insert_paragraph_curves(
+            self.run_id,
+            [
+                ParagraphCurveRow(
+                    paragraph_id=span.paragraph_id,
+                    pos_density=0.1,
+                    neg_density=0.05,
+                    net_density=0.05 + span.paragraph_id * 0.01,
+                    smoothed_net_density=0.05,
+                    surface_tension=0.5,
+                    smoothed_surface_tension=0.5,
+                )
+                for span in spans
+            ],
+        )
 
         style_rows = [
             ChunkStyleData(

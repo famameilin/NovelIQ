@@ -286,7 +286,6 @@ class TestResults:
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/novels/{novel_id}/chunk-curves",
         "/api/novels/{novel_id}/chunk-annotations",
         "/api/novels/{novel_id}/paragraph-curves",
         "/api/novels/{novel_id}/chapter-metrics",

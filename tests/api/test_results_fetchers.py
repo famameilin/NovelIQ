@@ -8,7 +8,6 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
-    _fetch_chunk_curves,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_hierarchical_relations,
@@ -66,15 +65,6 @@ class _DummyStatsRepo:
         return self.payload
 
 
-class _DummyCurveStatsRepo:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def fetch_chunk_curves_full(self, run_id):
-        assert run_id == "run-1"
-        return self._rows
-
-
 class _DummyAnnotationRepo:
     def __init__(self, rows):
         self._rows = rows
@@ -96,14 +86,6 @@ class _DummyAnnotationRepo:
     def calculate_foreshadow_expectation(self, run_id):
         assert run_id == "run-1"
         return self.foreshadow_expectation
-
-class _DummyChunkRepo:
-    def __init__(self, style_rows):
-        self._style_rows = style_rows
-
-    def fetch_chunk_styles_full(self, run_id):
-        assert run_id == "run-1"
-        return self._style_rows
 
 
 def test_normalize_name_list_deduplicates_graph_names():
@@ -652,68 +634,6 @@ def test_fetch_character_relations_skips_inactive_current_relations():
         )
 
     assert [(item.from_char, item.to_char) for item in result] == [("贺伯安", "林立果")]
-
-
-def test_fetch_chunk_curves_adds_surface_tension_without_rewriting_raw_proxy():
-    stats_repo = _DummyCurveStatsRepo(
-        [
-            _DummyRow(
-                chunk_id=1,
-                pos_density=0.0,
-                neg_density=0.0,
-                net_density=0.0,
-                smoothed_density=0.0,
-                tension_proxy=0.9,
-                tension_composite=0.2,
-            ),
-            _DummyRow(
-                chunk_id=2,
-                pos_density=0.0,
-                neg_density=0.0,
-                net_density=0.0,
-                smoothed_density=0.0,
-                tension_proxy=0.1,
-                tension_composite=0.7,
-            ),
-        ]
-    )
-    annotation_repo = _DummyAnnotationRepo(rows=[])
-    chunk_repo = _DummyChunkRepo(
-        [
-            _DummyRow(
-                chunk_id=1,
-                fight_density=0.0,
-                exclaim_density=0.0,
-                question_density=0.0,
-                dialogue_ratio=0.0,
-                sent_len_std=0.0,
-                sensory_density=0.0,
-            ),
-            _DummyRow(
-                chunk_id=2,
-                fight_density=0.6,
-                exclaim_density=0.2,
-                question_density=0.2,
-                dialogue_ratio=0.5,
-                sent_len_std=0.4,
-                sensory_density=0.3,
-            ),
-        ]
-    )
-
-    result = _fetch_chunk_curves(
-        run_id="run-1",
-        stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        chunk_repo=chunk_repo,
-    )
-
-    assert len(result) == 2
-    assert result[0].tension_proxy == 0.9
-    assert result[1].tension_proxy == 0.1
-    assert result[0].surface_tension is not None
-    assert result[1].surface_tension is not None
-    assert result[1].surface_tension > result[0].surface_tension
 
 
 def test_fetch_character_relations_uses_last_seen_chunk_id():

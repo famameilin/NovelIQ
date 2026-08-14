@@ -8,7 +8,6 @@
 本模块定义分块相关的数据表：
 - Chunk: 文本分块表
 - ChunkStyle: 分块风格指标表
-- ChunkTopic: 分块主题表
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy import (
     text as sql_text,
@@ -126,38 +124,3 @@ class ChunkStyle(Base):
 
     def __repr__(self) -> str:
         return f"<ChunkStyle(chunk_id={self.chunk_id}, run_id={self.run_id})>"
-
-
-class ChunkTopic(Base):
-    """
-    分块主题表
-
-    存储分块与主题的关联关系
-    """
-
-    __tablename__ = "chunk_topics"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    topic_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    topic_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
-    run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
-    )
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-        ),
-        # 2026-08-13 修复：此前无 (run_id, chunk_id, topic_id) 唯一约束，
-        # 重分析（默认全阶段重跑）后 chunk_topics 翻倍、聚合 SUM 双倍计数
-        UniqueConstraint("run_id", "chunk_id", "topic_id", name="uq_chunk_topics_run_chunk_topic"),
-        Index("idx_chunk_topics_chunk_id", "chunk_id"),
-        Index("idx_chunk_topics_topic_id", "topic_id"),
-        Index("idx_chunk_topics_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ChunkTopic(chunk_id={self.chunk_id}, topic_id={self.topic_id})>"
