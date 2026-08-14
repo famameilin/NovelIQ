@@ -24,7 +24,11 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         super().__init__(session)
 
     def insert_chapters(self, run_id: str, chapters: Sequence[ChapterData]) -> None:
-        """批量插入章节目录，插入前先删除该 run_id 的旧数据"""
+        """批量插入章节目录，插入前先删除该 run_id 的旧数据
+
+        2026-08-14 D8 契约：与 insert_chunks 同口径，同 run 不允许重跑前序阶段；
+        重分析必须使用新 run_id（详见 chunk_repository.insert_chunks 注释）。
+        """
         self.session.execute(delete(ChapterModel).where(ChapterModel.run_id == run_id))
         models = [
             ChapterModel(

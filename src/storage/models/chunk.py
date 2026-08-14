@@ -13,10 +13,25 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy import (
+    text as sql_text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+
+# 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Chunk.text 列属性，
+# 类体内 __table_args__ 直接引用 text 会解析到列对象而非函数
 
 
 class Chunk(Base):
@@ -43,12 +58,13 @@ class Chunk(Base):
 
     __table_args__ = (
         Index("idx_chunks_run_id", "run_id"),
-        # pg_trgm GIN 索引支撑章节内关键词检索（LIKE '%kw%' 全表扫描兜底）
+        # 2026-08-14 P1：keyword_ops 的查询是 lower(text) LIKE '%kw%'，
+        # 索引必须建在同一个表达式上（lower(text) gin_trgm_ops），
+        # 裸 text 列上的 trgm 索引无法被规划器命中，等于死索引
         Index(
             "idx_chunks_text_trgm",
-            "text",
+            sql_text("lower(text) gin_trgm_ops"),
             postgresql_using="gin",
-            postgresql_ops={"text": "gin_trgm_ops"},
         ),
     )
 

@@ -141,7 +141,9 @@ def get_engine():
     pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
     pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "1800"))
     connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))
-    statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "30000"))
+    # 2026-08-14 D9：默认 120s（原 30s 会误杀 HNSW 建索引与十万级段落批量插入）；
+    # 仍可经 DB_STATEMENT_TIMEOUT 覆盖
+    statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "120000"))
     echo = os.environ.get("DB_ECHO", "false").lower() == "true"
     database_schema = get_database_schema()
 
@@ -466,6 +468,13 @@ def init_db() -> None:
 
     ensure_database_exists()
     engine = get_engine()
+    # 2026-08-14 P1：chunks 的 idx_chunks_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
+    # 全新数据库必须先建扩展再 create_all，否则 CREATE INDEX 直接失败阻断启动；
+    # 与 vector 扩展（vector_schema.ensure_paragraph_embeddings_schema）同口径按需创建
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
     tables = [
         table
         for table in Base.metadata.sorted_tables
