@@ -103,52 +103,55 @@ export function CurvesPage() {
     setZoomRange(range);
   }, []);
 
-  const handleZoomIn = useCallback(() => {
-    const chart = emotionChartRef.current?.getEchartsInstance();
-    if (!chart) return;
-    const option = chart.getOption() as { dataZoom: Array<{ start: number; end: number }> };
-    if (!option.dataZoom?.[0]) return;
-    const { start, end } = option.dataZoom[0];
-    const range = end - start;
-    const newRange = Math.max(range * 0.8, 5);
-    const center = (start + end) / 2;
-    const newStart = Math.max(0, center - newRange / 2);
-    const newEnd = Math.min(100, center + newRange / 2);
-    chart.dispatchAction({
-      type: "dataZoom",
-      start: newStart,
-      end: newEnd,
-    });
-  }, []);
+  // 2026-08-14 P2-23：缩放/重置必须按 chartType 分流到当前可见图表。
+  // 此前硬编码 emotionChartRef，节奏 tab 的按钮实际作用于隐藏的情绪图，
+  // 可见的节奏图完全无响应（dispatchAction 不会触发 dataZoom 事件，
+  // 共享 zoomRange 状态也不会更新）
+  const _zoomByChartType = useCallback(
+    (chartType: "emotion" | "rhythm", factor: number) => {
+      const chart =
+        chartType === "emotion"
+          ? emotionChartRef.current?.getEchartsInstance()
+          : rhythmChartRef.current?.getEchartsInstance();
+      if (!chart) return;
+      const option = chart.getOption() as { dataZoom: Array<{ start: number; end: number }> };
+      if (!option.dataZoom?.[0]) return;
+      const { start, end } = option.dataZoom[0];
+      const range = end - start;
+      const newRange = factor < 1 ? Math.max(range * factor, 5) : Math.min(range * factor, 100);
+      const center = (start + end) / 2;
+      const newStart = Math.max(0, center - newRange / 2);
+      const newEnd = Math.min(100, center + newRange / 2);
+      chart.dispatchAction({
+        type: "dataZoom",
+        start: newStart,
+        end: newEnd,
+      });
+    },
+    []
+  );
 
-  const handleZoomOut = useCallback(() => {
-    const chart = emotionChartRef.current?.getEchartsInstance();
-    if (!chart) return;
-    const option = chart.getOption() as { dataZoom: Array<{ start: number; end: number }> };
-    if (!option.dataZoom?.[0]) return;
-    const { start, end } = option.dataZoom[0];
-    const range = end - start;
-    const newRange = Math.min(range * 1.25, 100);
-    const center = (start + end) / 2;
-    const newStart = Math.max(0, center - newRange / 2);
-    const newEnd = Math.min(100, center + newRange / 2);
-    chart.dispatchAction({
-      type: "dataZoom",
-      start: newStart,
-      end: newEnd,
-    });
-  }, []);
+  const handleZoomIn = useCallback(
+    (chartType: "emotion" | "rhythm") => {
+      _zoomByChartType(chartType, 0.8);
+    },
+    [_zoomByChartType]
+  );
 
-  const handleReset = useCallback(() => {
+  const handleZoomOut = useCallback(
+    (chartType: "emotion" | "rhythm") => {
+      _zoomByChartType(chartType, 1.25);
+    },
+    [_zoomByChartType]
+  );
+
+  const handleReset = useCallback((chartType: "emotion" | "rhythm") => {
     setZoomRange(null);
-    const emotionChart = emotionChartRef.current?.getEchartsInstance();
-    const rhythmChart = rhythmChartRef.current?.getEchartsInstance();
-    emotionChart?.dispatchAction({
-      type: "dataZoom",
-      start: 0,
-      end: 100,
-    });
-    rhythmChart?.dispatchAction({
+    const chart =
+      chartType === "emotion"
+        ? emotionChartRef.current?.getEchartsInstance()
+        : rhythmChartRef.current?.getEchartsInstance();
+    chart?.dispatchAction({
       type: "dataZoom",
       start: 0,
       end: 100,
@@ -212,9 +215,9 @@ export function CurvesPage() {
             bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
               <CurveToolbar
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                onReset={handleReset}
+                onZoomIn={() => handleZoomIn("emotion")}
+                onZoomOut={() => handleZoomOut("emotion")}
+                onReset={() => handleReset("emotion")}
                 onFullscreen={() => handleFullscreen("emotion")}
                 disabled={isLoading || isError || curvesData.length === 0}
               />
@@ -268,9 +271,9 @@ export function CurvesPage() {
             bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
               <CurveToolbar
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                onReset={handleReset}
+                onZoomIn={() => handleZoomIn("rhythm")}
+                onZoomOut={() => handleZoomOut("rhythm")}
+                onReset={() => handleReset("rhythm")}
                 onFullscreen={() => handleFullscreen("rhythm")}
                 disabled={isLoading || isError || curvesData.length === 0}
               />
