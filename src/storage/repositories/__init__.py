@@ -14,6 +14,7 @@ from .chapter_repository import ChapterRepository
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
 from .graph import EntitySnapshotRow, GraphChangeRow, GraphRepository, GraphSnapshotRow, RelationSnapshotRow
+from .paragraph_repository import ParagraphRepository
 from .protocols import (
     AnnotationRepositoryProtocol,
     ChunkRepositoryProtocol,
@@ -49,5 +50,6 @@ __all__ = [
     "GraphSnapshotRow",
     "GraphChangeRow",
     "DiagnosisRepository",
+    "ParagraphRepository",
     "StatsRepository",
 ]

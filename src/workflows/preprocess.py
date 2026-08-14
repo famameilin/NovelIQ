@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,12 +19,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
-from src.chunking.chunker import Chunk, chunk_documents_with_chapters
+from src.chunking.chunker import chunk_documents_with_chapters, split_chunk_paragraphs
 from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
-from src.storage.repositories import ChapterRepository, ChunkRepository, ChunkStyleData
+from src.storage.repositories import (
+    ChapterRepository,
+    ChunkRepository,
+    ChunkStyleData,
+)
+from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.storage.vector_schema import (
     ensure_paragraph_embeddings_schema,
 )
@@ -95,6 +101,15 @@ async def run_preprocess(
     _commit_preprocess_writes(session, step="insert_chunks")
     logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
 
+    # 段落事实源：chunks 落库后无条件生成段落行（语义检索开关不影响 paragraphs 的生成和内容），
+    # 段落身份以 paragraphs 表为准，embedding/检索/指标均从该表读取，保证与段落严格对齐
+    spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
+    spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]
+    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo.insert_paragraphs(run_id, spans)
+    _commit_preprocess_writes(session, step="insert_paragraphs")
+    logger.info(f"inserted {len(spans)} paragraphs into db (run_id={run_id})")
+
     style_rows: list[ChunkStyleData] = []
     for idx, chunk in enumerate(all_chunks):
         if total_chunks > 1:
@@ -117,7 +132,7 @@ async def run_preprocess(
 
     if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
-        await _generate_paragraph_embeddings(session, run_id, all_chunks, emitter=emitter)
+        await _generate_paragraph_embeddings(session, run_id, emitter=emitter)
 
     elapsed = time.time() - start_time
     logger.info(f"preprocess completed chunks={total_chunks} chars={total_chars} time={elapsed:.2f}s")
@@ -151,18 +166,19 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
 async def _generate_paragraph_embeddings(
     session: Session,
     run_id: str,
-    all_chunks: list[Chunk],
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> int:
     """
-    为所有 chunk 内的自然段生成 embedding 并存入数据库
+    为段落事实源中的全部段落生成 embedding 并存入数据库
+
+    段落身份以 paragraphs 表为准：embedding 数据从段落事实源读取（不再在 embedding
+    阶段重新切段），保证与段落严格对齐；行数 > 0 才继续，空 run 直接跳过
 
     RAG 检索粒度固定为一个自然段，只生成 paragraph embedding，不再生成 chunk embedding
 
     Args:
         session: 数据库连接
         run_id: 运行ID
-        all_chunks: chunk 列表
         emitter: 事件发射器
 
     Returns:
@@ -175,6 +191,11 @@ async def _generate_paragraph_embeddings(
         ParagraphEmbeddingRow,
         insert_paragraph_embeddings,
     )
+
+    paragraph_refs = ParagraphRepository(session).fetch_paragraph_rows(run_id)
+    if not paragraph_refs:
+        logger.info("no paragraphs found for run_id={}, skip paragraph embeddings", run_id)
+        return 0
 
     try:
         novel_id = session.execute(
@@ -204,7 +225,6 @@ async def _generate_paragraph_embeddings(
     paragraph_rows = await _generate_paragraph_embedding_rows(
         embedding_client,
         run_id,
-        all_chunks,
         ParagraphEmbeddingRow,
         emitter=emitter,
     )
@@ -233,15 +253,15 @@ async def _generate_paragraph_embeddings(
 async def _generate_paragraph_embedding_rows(
     embedding_client: Any,
     run_id: str,
-    all_chunks: list[Chunk],
     row_factory: Any,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Any]:
     """
     生成 paragraph embedding 写入 DTO
 
-    RAG 检索粒度固定为一个自然段：段落分割统一走 chunker.split_paragraphs，
-    不再按行（\n）切分，避免把同一自然段拆成多条证据
+    段落身份以 paragraphs 表为准：embedding 数据从段落事实源读取（不再在 embedding
+    阶段重新切段），保证与段落严格对齐——同一 run 内每条 embedding 的
+    chunk_id/paragraph_index/local/global 坐标与 paragraphs 行一一对应
 
     复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求
 
@@ -252,24 +272,21 @@ async def _generate_paragraph_embedding_rows(
 
     修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进
     """
-    from src.chunking.chunker import split_paragraphs
+    from src.storage.db import get_session_factory
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
-    for chunk in all_chunks:
-        for paragraph_index, (
-            local_start_char,
-            local_end_char,
-            paragraph_text,
-        ) in enumerate(split_paragraphs(chunk.text)):
+    with get_session_factory()() as session:
+        paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
+        for row in ParagraphRepository(session).fetch_paragraph_rows(run_id):
             paragraph_refs.append(
                 (
-                    chunk.index,
-                    paragraph_index,
-                    local_start_char,
-                    local_end_char,
-                    chunk.start + local_start_char,
-                    chunk.start + local_end_char,
-                    paragraph_text,
+                    row.chunk_id,
+                    row.paragraph_index,
+                    row.local_start_char,
+                    row.local_end_char,
+                    row.global_start_char,
+                    row.global_end_char,
+                    row.text,
                 )
             )
 

@@ -424,6 +424,45 @@ def _assert_agent_audit_contract_schema(engine: Engine) -> None:
                 )
 
 
+def _assert_paragraph_contract_schema(engine: Engine) -> None:
+    """2026-08-14 用于校验 paragraphs 段落事实源表合同列齐备"""
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    required_columns = {
+        "run_id",
+        "paragraph_id",
+        "chunk_id",
+        "chapter_id",
+        "paragraph_index",
+        "source_paragraph_index",
+        "fragment_index",
+        "local_start_char",
+        "local_end_char",
+        "global_start_char",
+        "global_end_char",
+        "char_count",
+        "token_count",
+        "text",
+        "content_hash",
+        "splitter_version",
+        "tokenizer_version",
+        "created_at",
+    }
+    with engine.begin() as connection:
+        if not _table_exists(connection, "paragraphs"):
+            return
+        actual = _get_table_columns(connection, "paragraphs")
+        missing = sorted(required_columns - actual)
+        if missing:
+            raise RuntimeError(
+                "paragraphs is missing paragraph contract columns: "
+                f"{missing}. Please recreate or explicitly migrate the paragraphs table "
+                "so that it includes the full paragraph contract column set before starting the service."
+            )
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
@@ -484,6 +523,7 @@ def init_db() -> None:
     _assert_focus_contract_schema(engine)
     _assert_annotation_contract_schema(engine)
     _assert_agent_audit_contract_schema(engine)
+    _assert_paragraph_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 

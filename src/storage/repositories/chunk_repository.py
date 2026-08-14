@@ -41,6 +41,7 @@ from src.storage.repositories.chunk import (
     insert_chunk_style,
     insert_chunk_topics,
 )
+from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.storage.vector_schema import validate_paragraph_embeddings_schema
 
 
@@ -266,6 +267,11 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         RAG 粒度固定为一个自然段：只检查 paragraph embeddings，不再检查 chunk embeddings
         """
         if not self.has_chunks(run_id):
+            return False
+
+        # 段落事实源完整性：paragraphs 是 run 内段落身份的唯一事实源（设计文档 §5.1），
+        # 无段落行的 run 一律视为 preprocess 未完成，避免旧 run 缺段落仍被判定为可跳过
+        if not ParagraphRepository(self.session).has_paragraphs(run_id):
             return False
 
         if not settings.models.paragraph_embedding.semantic_enabled:
