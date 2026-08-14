@@ -107,7 +107,10 @@ def get_active_entities(
         if normalized is None:
             continue
         name = normalized["name"]
-        if name not in seen:
+        # 2026-08-14 D9：保留 last_seen_chunk 最新者。此前 fetch_latest_entities
+        # 按 entity_id 升序，首个同名行被保留，与"保留最新"注释承诺相反
+        existing = seen.get(name)
+        if existing is None or (normalized.get("chunk_id") or 0) > (existing.get("chunk_id") or 0):
             seen[name] = normalized
 
     return list(seen.values())

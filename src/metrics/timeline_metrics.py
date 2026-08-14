@@ -32,7 +32,10 @@ TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 ImportanceLevel = Literal[1, 2, 3]
 LifecycleType = Literal["entry", "exit"]
 
+# 2026-08-14 D9：补齐"高潮"权重（此前漏配导致最高权重的剧情事件在
+# timeline 张力计算中得 0.0，与 EVENT_TYPE_SCORES 的 高潮>冲突>转折>铺垫 排序一致）
 PLOT_EVENT_TYPE_WEIGHTS: dict[str, float] = {
+    "高潮": 1.4,
     "冲突": 1.2,
     "转折": 1.0,
     "铺垫": 0.4,
