@@ -180,3 +180,33 @@ def test_apply_model_environment_keeps_json_values_when_environment_missing() ->
     assert settings.annotation.model == "json-model"
     assert settings.paragraph_embedding.base_url == "http://json-embedding.example.com/v1"
     assert settings.paragraph_embedding.model == "json-embedding-model"
+
+
+def test_apply_model_environment_embedding_only_still_applies() -> None:
+    """
+    2026-08-14 用于验证 MODEL_* 缺失时 EMBEDDING_MODEL_* 仍独立生效
+    （此前 model_environment is None 提前 return 会连带跳过 embedding 组）
+    """
+
+    settings = _parse_models_settings({})
+    settings.annotation.base_url = "https://json.example.com/v1"
+    settings.annotation.model = "json-model"
+    settings.paragraph_embedding.base_url = "http://json-embedding.example.com/v1"
+    settings.paragraph_embedding.model = "json-embedding-model"
+
+    apply_model_environment(
+        settings,
+        None,
+        ModelEnvironment(
+            base_url="http://localhost:8080/v1",
+            model="embedding-model",
+            api_key="embedding-key",
+        ),
+    )
+
+    # 文本组保留 settings.json 值
+    assert settings.annotation.base_url == "https://json.example.com/v1"
+    assert settings.annotation.model == "json-model"
+    # 嵌入组已应用环境值
+    assert settings.paragraph_embedding.model == "embedding-model"
+    assert settings.paragraph_embedding.api_key == "embedding-key"
