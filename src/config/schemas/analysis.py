@@ -53,6 +53,10 @@ class TopicModelSettings:
     num_topics: int = 25
     passes: int = 10
     iterations: int = 500
+    # 段落 LDA 训练排除的短段 token 阈值（设计 §11.1，待标定）
+    min_paragraph_train_tokens: int = 5
+    # 段落主题推断写入时的模型版本标识（§5.4）
+    topic_model_version: str = "1"
     lda: LdaSettings = field(default_factory=LdaSettings)
 
 
@@ -66,6 +70,18 @@ class MetricsSettings:
     middle_collapse_min_chunks: int = 10
     character_max_iter: int = 100
     fourier_smooth_keep_ratio: float = 0.1
+    # 段落指标版本标识（§5.3 metric_version）
+    metric_version: str = "1"
+    # 段落表层张力分量权重（§9.2，初始等权；键：fight/exclaim/question/dialogue/pause）
+    surface_tension_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "fight": 0.2,
+            "exclaim": 0.2,
+            "question": 0.2,
+            "dialogue": 0.2,
+            "pause": 0.2,
+        }
+    )
 
 
 def _parse_stage_progress_range(
@@ -122,6 +138,8 @@ def _parse_topic_model_settings(data: dict[str, Any] | None) -> TopicModelSettin
         num_topics=data.get("num_topics", 25),
         passes=data.get("passes", 10),
         iterations=data.get("iterations", 500),
+        min_paragraph_train_tokens=data.get("min_paragraph_train_tokens", 5),
+        topic_model_version=data.get("topic_model_version", "1"),
         lda=_parse_lda_settings(data.get("lda")),
     )
 
@@ -132,11 +150,17 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
     """
     if not data:
         return MetricsSettings()
+    surface_tension_weights = data.get("surface_tension_weights")
     return MetricsSettings(
         mtld_threshold=data.get("mtld_threshold", 0.72),
         middle_collapse_min_chunks=data.get("middle_collapse_min_chunks", 10),
         character_max_iter=data.get("character_max_iter", 100),
         fourier_smooth_keep_ratio=data.get("fourier_smooth_keep_ratio", 0.1),
+        metric_version=data.get("metric_version", "1"),
+        surface_tension_weights=(
+            surface_tension_weights if isinstance(surface_tension_weights, dict) else None
+        )
+        or MetricsSettings().surface_tension_weights,
     )
 
 

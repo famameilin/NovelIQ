@@ -76,7 +76,6 @@ def test_create_and_insert(db_session) -> None:
                 ttr=0.5,
                 avg_sent_len=12.0,
                 sent_len_std=3.0,
-                d_value=0.8,
                 pause_density=0.2,
                 fight_density=0.1,
                 exclaim_density=0.05,

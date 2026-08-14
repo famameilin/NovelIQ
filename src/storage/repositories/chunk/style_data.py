@@ -24,11 +24,10 @@ class ChunkStyleData:
     """
 
     chunk_id: int
-    mtld: float
+    mtld: float | None
     ttr: float
     avg_sent_len: float
     sent_len_std: float
-    d_value: float
     pause_density: float
     fight_density: float
     exclaim_density: float
@@ -53,8 +52,7 @@ class ChunkStyleData:
         self,
     ) -> tuple[
         int,
-        float,
-        float,
+        float | None,
         float,
         float,
         float,
@@ -84,7 +82,6 @@ class ChunkStyleData:
             self.ttr,
             self.avg_sent_len,
             self.sent_len_std,
-            self.d_value,
             self.pause_density,
             self.fight_density,
             self.exclaim_density,
@@ -114,7 +111,6 @@ class ChunkStyleData:
             "ttr": self.ttr,
             "avg_sent_len": self.avg_sent_len,
             "sent_len_std": self.sent_len_std,
-            "d_value": self.d_value,
             "pause_density": self.pause_density,
             "fight_density": self.fight_density,
             "exclaim_density": self.exclaim_density,

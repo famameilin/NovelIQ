@@ -2,21 +2,52 @@
 段落事实源存储与检索
 
 paragraphs 是全文唯一的段落事实源（设计文档《章节粒度分析指标重设计》§5.1），
-本仓储负责段落行的写入（先删后插）、完整性检查与按 run 读取。
+本仓储负责段落行的写入（先删后插）、完整性检查与按 run 读取，
+并管理段落级派生数据表：paragraph_metrics（原始计数与充分统计量，§5.3）
+与 paragraph_topics（段落 LDA 主题，§5.4）。
 """
 
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
 from sqlalchemy import delete, exists, func, insert, or_, select
 from sqlalchemy.engine import Row
+from sqlalchemy.orm import Mapper
 
 from src.chunking.spans import ParagraphSpan
 from src.config import settings
-from src.storage.models import Chunk, Paragraph
+from src.storage.models import Chunk, Paragraph, ParagraphMetric, ParagraphTopic
 from src.storage.repositories.base import BaseRepository
+
+
+@dataclass(frozen=True)
+class ParagraphMetricRow:
+    """2026-08-14 用于批量写入段落原始计数与充分统计量"""
+
+    paragraph_id: int
+    token_count: int
+    char_count: int
+    sentence_count: int
+    sentence_char_sum: float
+    sentence_char_sum_sq: float
+    positive_weight_sum: float
+    negative_weight_sum: float
+    fight_weight_sum: float
+    exclaim_count: int
+    question_count: int
+    pause_count: int
+    dialogue_char_count: int
+    sensory_hit_count: int
+    imagery_hit_count: int
+    metaphor_sentence_count: int
+    function_word_counts: dict[str, int]
+    semantic_category_counts: dict[str, int]
+    surface_tension_z: float | None = None
+    surface_tension: float | None = None
 
 
 class ParagraphRepository(BaseRepository[Paragraph]):
@@ -236,3 +267,173 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             for row in self.session.execute(null_statement).all()
         }
         return sorted(missing_chunk_ids | gapped_chunk_ids | null_chunk_ids)
+
+    # ------------------------------------------------------------------
+    # paragraph_metrics（§5.3 原始计数与充分统计量）
+    # ------------------------------------------------------------------
+
+    def insert_paragraph_metrics(
+        self, run_id: str, rows: Sequence[ParagraphMetricRow]
+    ) -> int:
+        """
+        先删后插写入 run 的段落指标行（同 run 不可重跑前序阶段的语义）
+
+        metric_version 从 settings.metrics 读取；surface_tension 系列由
+        计算阶段（run 内稳健标准化后）填充，可为 None。
+        """
+        metric_version = str(getattr(settings.metrics, "metric_version", None) or "1")
+        self.session.execute(delete(ParagraphMetric).where(ParagraphMetric.run_id == run_id))
+        if not rows:
+            return 0
+        insert_rows = [
+            {
+                "run_id": run_id,
+                "paragraph_id": row.paragraph_id,
+                "metric_version": metric_version,
+                "token_count": row.token_count,
+                "char_count": row.char_count,
+                "sentence_count": row.sentence_count,
+                "sentence_char_sum": row.sentence_char_sum,
+                "sentence_char_sum_sq": row.sentence_char_sum_sq,
+                "positive_weight_sum": row.positive_weight_sum,
+                "negative_weight_sum": row.negative_weight_sum,
+                "fight_weight_sum": row.fight_weight_sum,
+                "exclaim_count": row.exclaim_count,
+                "question_count": row.question_count,
+                "pause_count": row.pause_count,
+                "dialogue_char_count": row.dialogue_char_count,
+                "sensory_hit_count": row.sensory_hit_count,
+                "imagery_hit_count": row.imagery_hit_count,
+                "metaphor_sentence_count": row.metaphor_sentence_count,
+                "function_word_counts": row.function_word_counts,
+                "semantic_category_counts": row.semantic_category_counts,
+                "surface_tension_z": row.surface_tension_z,
+                "surface_tension": row.surface_tension,
+            }
+            for row in rows
+        ]
+        self.session.execute(insert(ParagraphMetric), insert_rows)
+        return len(insert_rows)
+
+    def fetch_paragraph_metrics(self, run_id: str) -> Sequence[Row]:
+        """读取 run 的全部段落指标行，按 paragraph_id 升序"""
+        statement = (
+            select(
+                ParagraphMetric.paragraph_id,
+                ParagraphMetric.token_count,
+                ParagraphMetric.char_count,
+                ParagraphMetric.sentence_count,
+                ParagraphMetric.sentence_char_sum,
+                ParagraphMetric.sentence_char_sum_sq,
+                ParagraphMetric.positive_weight_sum,
+                ParagraphMetric.negative_weight_sum,
+                ParagraphMetric.fight_weight_sum,
+                ParagraphMetric.exclaim_count,
+                ParagraphMetric.question_count,
+                ParagraphMetric.pause_count,
+                ParagraphMetric.dialogue_char_count,
+                ParagraphMetric.sensory_hit_count,
+                ParagraphMetric.imagery_hit_count,
+                ParagraphMetric.metaphor_sentence_count,
+                ParagraphMetric.surface_tension_z,
+                ParagraphMetric.surface_tension,
+            )
+            .where(ParagraphMetric.run_id == run_id)
+            .order_by(ParagraphMetric.paragraph_id)
+        )
+        return self.session.execute(statement).all()
+
+    def has_paragraph_metrics(self, run_id: str) -> bool:
+        """run 是否存在段落指标行"""
+        statement = (
+            select(ParagraphMetric.paragraph_id)
+            .where(ParagraphMetric.run_id == run_id)
+            .limit(1)
+        )
+        return self.session.execute(statement).scalar_one_or_none() is not None
+
+    # ------------------------------------------------------------------
+    # paragraph_topics（§5.4 段落 LDA 主题）
+    # ------------------------------------------------------------------
+
+    def insert_paragraph_topics(
+        self,
+        run_id: str,
+        rows: Sequence[tuple[int, int, float, int]],
+    ) -> int:
+        """
+        先清后插写入 run 的段落主题行（同 run 重跑语义是"重新计算"）
+
+        rows: (paragraph_id, topic_id, topic_weight, inference_token_count)
+
+        topic_model_version 从 settings.topic_model 读取。
+        """
+        topic_model_version = str(
+            getattr(settings.topic_model, "topic_model_version", None) or "1"
+        )
+        topic_rows = [
+            {
+                "run_id": run_id,
+                "paragraph_id": paragraph_id,
+                "topic_id": topic_id,
+                "topic_weight": topic_weight,
+                "inference_token_count": inference_token_count,
+                "topic_model_version": topic_model_version,
+            }
+            for paragraph_id, topic_id, topic_weight, inference_token_count in rows
+        ]
+        if not topic_rows:
+            return 0
+        self.session.execute(delete(ParagraphTopic).where(ParagraphTopic.run_id == run_id))
+        self.session.bulk_insert_mappings(
+            cast(Mapper[Any], ParagraphTopic), topic_rows
+        )
+        return len(topic_rows)
+
+    def clear_paragraph_topics(self, run_id: str) -> None:
+        """清空 run 的段落主题行"""
+        self.session.execute(delete(ParagraphTopic).where(ParagraphTopic.run_id == run_id))
+
+    def has_paragraph_topics(self, run_id: str) -> bool:
+        """run 是否存在段落主题行"""
+        statement = (
+            select(ParagraphTopic.id)
+            .where(ParagraphTopic.run_id == run_id)
+            .limit(1)
+        )
+        return self.session.execute(statement).scalar_one_or_none() is not None
+
+    def fetch_paragraph_topics(self, run_id: str) -> Sequence[Row]:
+        """读取 run 的全部段落主题行（按段落与主题排序）"""
+        statement = (
+            select(
+                ParagraphTopic.paragraph_id,
+                ParagraphTopic.topic_id,
+                ParagraphTopic.topic_weight,
+                ParagraphTopic.inference_token_count,
+            )
+            .where(ParagraphTopic.run_id == run_id)
+            .order_by(ParagraphTopic.paragraph_id, ParagraphTopic.topic_id)
+        )
+        return self.session.execute(statement).all()
+
+    def fetch_paragraph_topics_agg(self, run_id: str) -> Sequence[Row]:
+        """
+        按推断 token 数加权聚合全书主题（设计 §11.1）
+
+        禁止对段落等权求和：total_weight 按 inference_token_count 加权，
+        归一化在调用方完成
+        """
+        stmt = (
+            select(
+                ParagraphTopic.topic_id,
+                func.sum(
+                    ParagraphTopic.topic_weight
+                    * ParagraphTopic.inference_token_count
+                ).label("weighted_total"),
+                func.sum(ParagraphTopic.inference_token_count).label("inference_total"),
+            )
+            .where(ParagraphTopic.run_id == run_id)
+            .group_by(ParagraphTopic.topic_id)
+        )
+        return self.session.execute(stmt).all()

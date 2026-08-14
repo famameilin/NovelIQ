@@ -271,7 +271,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.is_aggregate_complete(run_id)
 
     def test_is_topic_model_complete_no_data(self, db_session):
-        """无chunk_topics时topic_model未完成"""
+        """无paragraph_topics时topic_model未完成"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -284,7 +284,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.has_topic_data(run_id)
 
     def test_is_topic_model_complete_with_data(self, db_session):
-        """有chunk_topics时topic_model完成"""
+        """有paragraph_topics时topic_model完成（§11.1 主题判定改查段落主题）"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -297,7 +297,8 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(1)
         chunk_repo.insert_chunks(run_id, chunks)
-        chunk_repo.insert_chunk_topics(run_id, [(0, 1, 0.5)])
+        _insert_paragraphs(db_session, run_id, chunks)
+        ParagraphRepository(db_session).insert_paragraph_topics(run_id, [(0, 1, 0.5, 10)])
         assert stats_repo.has_topic_data(run_id)
 
     def test_is_diagnose_complete_no_data(self, db_session):
