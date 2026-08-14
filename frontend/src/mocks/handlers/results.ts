@@ -4,7 +4,8 @@
 import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
-  createChunkCurves,
+  createParagraphCurves,
+  createChapterMetrics,
   createForeshadowingThreads,
   createTopics,
   createDiagnosis,
@@ -59,9 +60,27 @@ export const charactersHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/chunk-curves
-export const chunkCurvesHandler = http.get(
-  `${BASE}/api/novels/:novelId/chunk-curves`,
+// 获取 /api/novels/:novelId/paragraph-curves（M4：段落粒度曲线，支持 max_points 抽稀）
+export const paragraphCurvesHandler = http.get(
+  `${BASE}/api/novels/:novelId/paragraph-curves`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("task_id") ?? "";
+
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(400);
+    const maxPoints = Number(url.searchParams.get("max_points"));
+    const count = Number.isFinite(maxPoints) && maxPoints > 0 ? Math.min(maxPoints, 5000) : 300;
+    return HttpResponse.json(createParagraphCurves(count));
+  }
+);
+
+// 获取 /api/novels/:novelId/chapter-metrics（M4：章节指标汇总）
+export const chapterMetricsHandler = http.get(
+  `${BASE}/api/novels/:novelId/chapter-metrics`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
@@ -70,7 +89,7 @@ export const chunkCurvesHandler = http.get(
     if (err) return err;
 
     await delay(400);
-    return HttpResponse.json(createChunkCurves());
+    return HttpResponse.json(createChapterMetrics());
   }
 );
 

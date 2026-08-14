@@ -33,6 +33,7 @@ from .metadata import (
     _fetch_novel_name,
     _fetch_token_usage_stats,
 )
+from .paragraphs import _fetch_chapter_metrics, _fetch_paragraph_curves
 from .topics import _fetch_topics
 
 __all__ = [
@@ -58,4 +59,6 @@ __all__ = [
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
     "_fetch_known_characters",
+    "_fetch_paragraph_curves",
+    "_fetch_chapter_metrics",
 ]

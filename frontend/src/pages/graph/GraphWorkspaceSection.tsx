@@ -215,7 +215,7 @@ export function GraphWorkspaceSection({
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium text-text">
-                              第 {change.effective_chunk_id} 段 ·{" "}
+                              第 {change.effective_chunk_id} 章 ·{" "}
                               {change.change_kind === "relation"
                                 ? `${change.from_name ?? "未知实体"} → ${change.to_name ?? "未知实体"}`
                                 : change.entity_name ?? "未知实体"}
@@ -263,7 +263,7 @@ export function GraphWorkspaceSection({
                 <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
                   当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
                   {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
-                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 段到第 ${selectedNode.last_seen_chunk} 段。`
+                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 章到第 ${selectedNode.last_seen_chunk} 章。`
                     : "，可继续跳到时间轴查看稳定生命周期节点。"}
                 </div>
                 <div className="flex flex-wrap gap-3">
@@ -325,7 +325,7 @@ export function GraphWorkspaceSection({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                           <p className="text-sm font-medium text-text">
-                           第 {selectedChange.effective_chunk_id} 段 ·{" "}
+                           第 {selectedChange.effective_chunk_id} 章 ·{" "}
                            {selectedChange.change_kind === "relation"
                              ? `${selectedChange.from_name ?? "未知实体"} → ${selectedChange.to_name ?? "未知实体"}`
                              : selectedChange.entity_name ?? "未知实体"}

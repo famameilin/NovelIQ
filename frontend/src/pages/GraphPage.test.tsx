@@ -251,8 +251,8 @@ describe("GraphPage", () => {
   it("读取章节快照并独立加载实体与关系变化", async () => {
     renderPage();
 
-    expect((await screen.findAllByText(/第 13 段 · 顾霜/)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/第 12 段 · 顾霜 → 司夜/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/第 13 章 · 顾霜/)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/第 12 章 · 顾霜 → 司夜/)).toBeInTheDocument();
     expect(screen.getByText("盟友 · 建立")).toBeInTheDocument();
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
   });
@@ -261,7 +261,7 @@ describe("GraphPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    const relationChange = await screen.findByText(/第 12 段 · 顾霜 → 司夜/);
+    const relationChange = await screen.findByText(/第 12 章 · 顾霜 → 司夜/);
     await user.click(relationChange.closest("button")!);
 
     expect(navigateMock).toHaveBeenCalledWith(

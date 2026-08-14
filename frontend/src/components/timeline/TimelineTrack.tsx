@@ -208,8 +208,8 @@ export function TimelineTrack({
                   const isHighlighted = isNodeInHighlight(node);
                   const chunkLabel =
                     "start_chunk_id" in node && node.start_chunk_id !== node.end_chunk_id
-                      ? `Chunk ${node.start_chunk_id}-${node.end_chunk_id}`
-                      : `Chunk ${node.anchor_chunk_id}`;
+                      ? `第 ${node.start_chunk_id}-${node.end_chunk_id} 章`
+                      : `第 ${node.anchor_chunk_id} 章`;
 
                   return (
                     <div key={node.node_id}>

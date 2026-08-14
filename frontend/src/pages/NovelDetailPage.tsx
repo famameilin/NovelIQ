@@ -11,7 +11,7 @@ import {
   getStyleStats,
   getTopics,
   getDiagnosis,
-  getChunkCurves,
+  getParagraphCurves,
 } from "@/api/results";
 import { isDiagnosisRerunRequiredError, isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
@@ -340,7 +340,8 @@ export function NovelDetailPage() {
 
   const curvesQuery = useQuery({
     queryKey: ["results", novelId, storeTaskId, "curves"],
-    queryFn: () => getChunkCurves(novelId!, storeTaskId!),
+    // M4：段落粒度曲线，maxPoints 200 供仪表盘迷你预览抽稀
+    queryFn: () => getParagraphCurves(novelId!, storeTaskId!, { maxPoints: 200 }),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
@@ -534,7 +535,7 @@ export function NovelDetailPage() {
                   act1Ratio={narrativeQuery.data?.act1_ratio}
                   act2Ratio={narrativeQuery.data?.act2_ratio}
                   act3Ratio={narrativeQuery.data?.act3_ratio}
-                  eventDensity={narrativeQuery.data?.event_density}
+                  chapterNarrativeFunctionShare={narrativeQuery.data?.chapter_narrative_function_share}
                   novelId={novelId!}
                   className="h-full min-h-0"
                 />

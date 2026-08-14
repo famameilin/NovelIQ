@@ -20,7 +20,8 @@ import {
 } from "./handlers/analysis";
 import {
   charactersHandler,
-  chunkCurvesHandler,
+  paragraphCurvesHandler,
+  chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
@@ -52,7 +53,8 @@ export const worker = setupWorker(
   cancelTaskHandler,
   // 结果
   charactersHandler,
-  chunkCurvesHandler,
+  paragraphCurvesHandler,
+  chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,

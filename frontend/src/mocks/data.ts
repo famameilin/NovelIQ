@@ -8,7 +8,8 @@ import type {
   Novel,
   AnalysisTask,
   Character,
-  ChunkCurvePoint,
+  ParagraphCurvePoint,
+  ChapterMetricsResponse,
   Topic,
   DiagnosisResult,
   ForeshadowingThread,
@@ -270,26 +271,119 @@ export function createCharacters(count = 15): Character[] {
 }
 
 /* ------------------------------------------------------------------ */
-/*  情绪曲线                                                           */
+/*  情绪曲线（M4：段落粒度，x 坐标统一为 0-1 position 值域）           */
 /* ------------------------------------------------------------------ */
 
-export function createChunkCurves(count = 120): ChunkCurvePoint[] {
+// 每章段数（与 createParagraphCurves 的 chapter 切分保持一致）
+const MOCK_PARAGRAPHS_PER_CHAPTER = 40;
+
+export function createParagraphCurves(count = 300): ParagraphCurvePoint[] {
   return Array.from({ length: count }, (_, i) => {
-    const t = i / count;
+    const t = count > 1 ? i / (count - 1) : 0;
     // 模拟: 开头平稳、中段波动上升、结尾回落
     const base = 0.3 + 0.3 * Math.sin(t * Math.PI) + 0.15 * Math.sin(t * 6 * Math.PI);
     const pos = base + (Math.random() - 0.4) * 0.15;
     const neg = 0.2 - base * 0.3 + (Math.random() - 0.5) * 0.1;
+    const net = pos - neg;
+    const surface = 0.2 + 0.5 * Math.abs(Math.sin(t * 4 * Math.PI)) + Math.random() * 0.1;
+    const charCount = 40 + Math.floor(Math.random() * 41);
     return {
-      chunk_id: i + 1,
+      paragraph_id: i + 1,
+      chapter_id: Math.floor(i / MOCK_PARAGRAPHS_PER_CHAPTER) + 1,
+      paragraph_index: i % MOCK_PARAGRAPHS_PER_CHAPTER,
+      global_start_char: i * 60,
+      global_end_char: i * 60 + charCount,
+      position: +t.toFixed(4),
+      char_count: charCount,
+      token_count: Math.round(charCount / 1.6),
       pos_density: +pos.toFixed(4),
       neg_density: +Math.max(0, neg).toFixed(4),
-      net_density: +(pos - neg).toFixed(4),
-      smoothed_density: +(pos * 0.7 + neg * 0.3).toFixed(4),
-      tension_proxy: +(0.2 + 0.5 * Math.abs(Math.sin(t * 4 * Math.PI)) + Math.random() * 0.1).toFixed(4),
-      tension_composite: +(0.3 + 0.4 * Math.sin(t * 3 * Math.PI) + Math.random() * 0.1).toFixed(4),
+      net_density: +net.toFixed(4),
+      smoothed_net_density: +(net * 0.7 + pos * 0.3).toFixed(4),
+      surface_tension: +Math.min(1, surface).toFixed(4),
+      smoothed_surface_tension: +(Math.min(1, surface * 0.8 + 0.1)).toFixed(4),
     };
   });
+}
+
+/* ------------------------------------------------------------------ */
+/*  章节指标汇总（M4）                                                 */
+/* ------------------------------------------------------------------ */
+
+export function createChapterMetrics(): ChapterMetricsResponse {
+  const totalParagraphs = 300;
+  const totalChapters = Math.ceil(totalParagraphs / MOCK_PARAGRAPHS_PER_CHAPTER);
+  const chapters = Array.from({ length: totalChapters }, (_, chapterIdx) => {
+    const chapterId = chapterIdx + 1;
+    const paragraphCount =
+      chapterIdx === totalChapters - 1
+        ? totalParagraphs - chapterIdx * MOCK_PARAGRAPHS_PER_CHAPTER
+        : MOCK_PARAGRAPHS_PER_CHAPTER;
+    const totalChars = paragraphCount * 60;
+    const progress = chapterId / totalChapters;
+    const base = 0.3 + 0.3 * Math.sin(progress * Math.PI) + 0.15 * Math.sin(progress * 6 * Math.PI);
+    const narrativeFunctions = ["引入", "发展", "高潮", "收束"] as const;
+    return {
+      chapter_id: chapterId,
+      paragraph_count: paragraphCount,
+      total_chars: totalChars,
+      total_tokens: Math.round(totalChars / 1.6),
+      pos_density: +(base + 0.05).toFixed(4),
+      neg_density: +Math.max(0, 0.2 - base * 0.3).toFixed(4),
+      net_density: +(base * 0.7).toFixed(4),
+      fight_density: +(0.05 + 0.1 * Math.abs(Math.sin(progress * 3 * Math.PI))).toFixed(4),
+      exclaim_per_100_chars: +(2 + Math.random() * 4).toFixed(2),
+      question_per_100_chars: +(1 + Math.random() * 3).toFixed(2),
+      pause_per_100_chars: +(1.5 + Math.random() * 2).toFixed(2),
+      dialogue_ratio: +(0.3 + Math.random() * 0.3).toFixed(3),
+      avg_sent_len: +(16 + Math.random() * 8).toFixed(2),
+      sent_len_std: +(5 + Math.random() * 4).toFixed(2),
+      ttr: +(0.5 + Math.random() * 0.25).toFixed(3),
+      mtld: +(45 + Math.random() * 30).toFixed(2),
+      narrative_function: narrativeFunctions[chapterIdx % narrativeFunctions.length] ?? null,
+      pivot_moment: chapterIdx === 2 || chapterIdx === 5,
+      cliffhanger: chapterIdx === 3 || chapterIdx === 6,
+      emotional_valence: base > 0.5 ? "积极" : base < 0.25 ? "消极" : "中性",
+    };
+  });
+  return {
+    chapters,
+    book: {
+      total_chapters: totalChapters,
+      total_paragraphs: totalParagraphs,
+      total_chars: 300 * 60,
+      total_tokens: Math.round((300 * 60) / 1.6),
+      pos_density: 0.52,
+      neg_density: 0.31,
+      net_density: 0.21,
+      fight_density: 0.12,
+      exclaim_per_100_chars: 3.2,
+      question_per_100_chars: 2.1,
+      pause_per_100_chars: 2.4,
+      dialogue_ratio: 0.45,
+      avg_sent_len: 18.5,
+      sent_len_std: 7.1,
+      ttr: 0.62,
+      mtld: 58.4,
+      chapter_narrative_function_share: {
+        引入: 0.15,
+        发展: 0.55,
+        高潮: 0.2,
+        收束: 0.1,
+      },
+      chapter_pivot_rate: 0.25,
+      chapter_cliffhanger_rate: 0.25,
+      chapter_emotional_valence_share: {
+        积极: 0.4,
+        中性: 0.35,
+        消极: 0.25,
+      },
+      analysis_contract_version: "2.0",
+      paragraph_splitter_version: "1.0",
+      metric_version: "1.0",
+      curve_version: "1.0",
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -680,7 +774,7 @@ export function createNarrativeStructure(): NarrativeStructureMetrics {
     act3_ratio: 0.30,
     climax_spacing: 0.35,
     middle_collapse_index: 0.2,
-    event_density: {
+    chapter_narrative_function_share: {
       "引入期": 0.15,
       "发展期": 0.55,
       "高潮期": 0.85,
@@ -688,7 +782,8 @@ export function createNarrativeStructure(): NarrativeStructureMetrics {
     },
     cliffhanger_rate: 0.12,
     climax_count: 4,
-    climax_positions: [30, 55, 78, 95],
+    // M4：climax_positions 与曲线 position 同域（0-1 比例），直接作为高潮 markPoint 的 x 坐标
+    climax_positions: [0.25, 0.45, 0.65, 0.8],
     climax_heights: [0.7, 0.85, 0.92, 0.88],
     peak_escalation: "递进式",
     dominant_climax_pos: 0.65,
@@ -702,7 +797,7 @@ export function createEmotionStats(): EmotionStatsMetrics {
     negative_ratio: 0.31,
     neutral_ratio: 0.17,
     recovery_speed: 0.73,
-    pivot_moment_density: 0.15,
+    chapter_pivot_rate: 0.15,
     lexical_emotion_trend: "前低后高",
   };
 }
@@ -717,7 +812,7 @@ export function createCharacterStats(): CharacterStatsMetrics {
       发送者: 0.12,
     },
     antagonist_strength_gap: 0.27,
-    relation_change_freq: 0.14,
+    relation_change_per_10k_chars: 0.14,
     degree_centrality: {
       萧炎: 0.62,
       药老: 0.51,

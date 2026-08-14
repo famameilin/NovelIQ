@@ -2,7 +2,8 @@ import { apiClient } from "./client";
 import type {
   Character,
   ChunkAnnotation,
-  ChunkCurvePoint,
+  ParagraphCurvePoint,
+  ChapterMetricsResponse,
   Topic,
   DiagnosisResult,
   ForeshadowingThread,
@@ -33,20 +34,32 @@ export async function getCharacters(
   return data;
 }
 
-export async function getChunkCurves(
+// 段落粒度曲线：x 轴使用 0-1 position 数字坐标，max_points 用于 LTTB 抽稀
+export async function getParagraphCurves(
   novelId: string,
   taskId: string,
-  options?: { page?: number; page_size?: number }
-): Promise<ChunkCurvePoint[]> {
-  const { data } = await apiClient.get<ChunkCurvePoint[]>(
-    `/api/novels/${novelId}/chunk-curves`,
+  options?: { maxPoints?: number }
+): Promise<ParagraphCurvePoint[]> {
+  const { data } = await apiClient.get<ParagraphCurvePoint[]>(
+    `/api/novels/${novelId}/paragraph-curves`,
     {
       params: {
         task_id: taskId,
-        ...(options?.page != null && { page: options.page }),
-        ...(options?.page_size != null && { page_size: options.page_size }),
+        ...(options?.maxPoints != null && { max_points: options.maxPoints }),
       },
     }
+  );
+  return data;
+}
+
+// 章节指标汇总（由段落充分统计量聚合）
+export async function getChapterMetrics(
+  novelId: string,
+  taskId: string
+): Promise<ChapterMetricsResponse> {
+  const { data } = await apiClient.get<ChapterMetricsResponse>(
+    `/api/novels/${novelId}/chapter-metrics`,
+    { params: { task_id: taskId } }
   );
   return data;
 }

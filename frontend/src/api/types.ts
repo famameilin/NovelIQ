@@ -82,17 +82,80 @@ export interface Character {
   avg_emotion_score?: number | null;
 }
 
-// 分块曲线
+// 段落曲线（M4：从分块粒度迁移到段落粒度，x 坐标统一使用 0-1 position 值域）
 
-export interface ChunkCurvePoint {
-  chunk_id: number;
+export interface ParagraphCurvePoint {
+  paragraph_id: number;
+  chapter_id: number;
+  paragraph_index: number;
+  global_start_char: number;
+  global_end_char: number;
+  position: number; // 0-1 数字坐标
+  char_count: number;
+  token_count: number;
   pos_density: number | null;
   neg_density: number | null;
   net_density: number | null;
-  smoothed_density: number | null;
-  tension_proxy: number | null;
-  tension_composite?: number | null;
-  surface_tension?: number | null;
+  smoothed_net_density: number | null;
+  surface_tension: number | null;
+  smoothed_surface_tension: number | null;
+}
+
+// 章节指标汇总（M4）
+
+export interface ChapterMetricSummary {
+  chapter_id: number;
+  paragraph_count: number;
+  total_chars: number;
+  total_tokens: number;
+  pos_density: number | null;
+  neg_density: number | null;
+  net_density: number | null;
+  fight_density: number | null;
+  exclaim_per_100_chars: number | null;
+  question_per_100_chars: number | null;
+  pause_per_100_chars: number | null;
+  dialogue_ratio: number | null;
+  avg_sent_len: number | null;
+  sent_len_std: number | null;
+  ttr: number | null;
+  mtld: number | null;
+  narrative_function: string | null;
+  pivot_moment: boolean | null;
+  cliffhanger: boolean | null;
+  emotional_valence: string | null;
+}
+
+export interface BookAggregateStats {
+  total_chapters: number;
+  total_paragraphs: number;
+  total_chars: number;
+  total_tokens: number;
+  pos_density: number | null;
+  neg_density: number | null;
+  net_density: number | null;
+  fight_density: number | null;
+  exclaim_per_100_chars: number | null;
+  question_per_100_chars: number | null;
+  pause_per_100_chars: number | null;
+  dialogue_ratio: number | null;
+  avg_sent_len: number | null;
+  sent_len_std: number | null;
+  ttr: number | null;
+  mtld: number | null;
+  chapter_narrative_function_share: Record<string, number>;
+  chapter_pivot_rate: number | null;
+  chapter_cliffhanger_rate: number | null;
+  chapter_emotional_valence_share: Record<string, number>;
+  analysis_contract_version: string;
+  paragraph_splitter_version: string;
+  metric_version: string;
+  curve_version: string;
+}
+
+export interface ChapterMetricsResponse {
+  chapters: ChapterMetricSummary[];
+  book: BookAggregateStats;
 }
 
 export interface ChunkCharacter {
@@ -401,7 +464,7 @@ export interface NarrativeStructureMetrics {
   act3_ratio?: number;
   climax_spacing?: number;
   middle_collapse_index?: number;
-  event_density?: Record<string, number>;
+  chapter_narrative_function_share?: Record<string, number>;
   cliffhanger_rate?: number;
   climax_count?: number;
   climax_positions?: number[];
@@ -416,7 +479,7 @@ export interface EmotionStatsMetrics {
   negative_ratio?: number;
   neutral_ratio?: number;
   recovery_speed?: number;
-  pivot_moment_density?: number;
+  chapter_pivot_rate?: number;
   lexical_emotion_trend?: string;
 }
 
@@ -425,7 +488,7 @@ export interface CharacterStatsMetrics {
   greimas_coverage?: number | null;
   function_coverage_distribution?: Record<string, number> | null;
   antagonist_strength_gap?: number | null;
-  relation_change_freq?: number | null;
+  relation_change_per_10k_chars?: number | null;
   degree_centrality?: Record<string, number> | null;
 }
 

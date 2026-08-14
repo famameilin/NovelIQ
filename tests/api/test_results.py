@@ -288,6 +288,8 @@ class TestResults:
     [
         "/api/novels/{novel_id}/chunk-curves",
         "/api/novels/{novel_id}/chunk-annotations",
+        "/api/novels/{novel_id}/paragraph-curves",
+        "/api/novels/{novel_id}/chapter-metrics",
         "/api/novels/{novel_id}/topics",
         "/api/novels/{novel_id}/foreshadowing-threads",
         "/api/novels/{novel_id}/metrics/narrative-structure",

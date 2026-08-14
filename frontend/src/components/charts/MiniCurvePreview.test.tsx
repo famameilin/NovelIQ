@@ -51,12 +51,20 @@ describe("MiniCurvePreview", () => {
         novelId="novel-1"
         data={[
           {
-            chunk_id: 0,
+            paragraph_id: 1,
+            chapter_id: 1,
+            paragraph_index: 0,
+            global_start_char: 0,
+            global_end_char: 60,
+            position: 0,
+            char_count: 60,
+            token_count: 38,
             pos_density: 0.1,
             neg_density: 0.2,
             net_density: 0.0,
-            smoothed_density: 0.05,
-            tension_proxy: null,
+            smoothed_net_density: 0.05,
+            surface_tension: 0.4,
+            smoothed_surface_tension: 0.35,
           },
         ]}
       />,

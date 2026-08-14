@@ -2,8 +2,10 @@
 §19.6 与 §19.14 修复测试
 
 - §19.6: tension_proxy 各分量先 clip 到 [0,1] 再等权平均（_proxy_score）
-- §19.14: emotion_max/min_chunk 并列极值取最后出现的索引（rindex）；
+- §19.14: emotion_peak/min_chunk_id 并列极值取最后出现的索引（rindex）；
   tension 侧对称输出 rhythm_max_chunk / rhythm_min_chunk
+- 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id，
+  emotion_min_chunk → emotion_min_chunk_id
 """
 
 from __future__ import annotations
@@ -97,8 +99,9 @@ class TestGlobalStatsExtremes:
         )
 
         assert stats["emotion_max"] == 5.0
-        assert stats["emotion_max_chunk"] == 12.0
-        assert stats["emotion_min_chunk"] == 10.0
+        # 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id
+        assert stats["emotion_peak_chunk_id"] == 12.0
+        assert stats["emotion_min_chunk_id"] == 10.0
 
     def test_emotion_min_uses_last_occurrence(self, db_session) -> None:
         raw_densities = [0.0, 0.0, 3.0, 3.0]  # min 并列于 0、1 → 取 1
@@ -109,8 +112,8 @@ class TestGlobalStatsExtremes:
         )
 
         assert stats["emotion_min"] == 0.0
-        assert stats["emotion_min_chunk"] == 11.0
-        assert stats["emotion_max_chunk"] == 13.0
+        assert stats["emotion_min_chunk_id"] == 11.0
+        assert stats["emotion_peak_chunk_id"] == 13.0
 
     def test_rhythm_extremes_symmetric_output(self, db_session) -> None:
         """§19.14 不对称修复：tension 侧新增 rhythm_max_chunk/rhythm_min_chunk"""

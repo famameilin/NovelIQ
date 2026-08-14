@@ -2,11 +2,14 @@
 主题查询组装器测试
 
 覆盖 src/api/services/results_queries/topics.py 的 _fetch_topics：
+- 聚合源为 ParagraphRepository.fetch_paragraph_topics_agg（token 加权，§11.1），
+  归一化使用 weighted_total
 - 无模型文件时降级（words 为空则过滤）
 - 模型文件存在时填充词表/标签并归一化权重
 - 模型加载异常时降级为警告
 
 2026-08-12 创建，补齐该模块 17% 的低覆盖率。
+2026-08-14 切换段落：fetch_chunk_topics_agg → fetch_paragraph_topics_agg（weighted_total）。
 """
 
 from __future__ import annotations
@@ -18,13 +21,13 @@ from unittest.mock import MagicMock, patch
 from src.api.services.results_queries.topics import _fetch_topics
 
 
-def _make_row(topic_id: int, total_weight: float) -> SimpleNamespace:
-    return SimpleNamespace(topic_id=topic_id, total_weight=total_weight)
+def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
+    return SimpleNamespace(topic_id=topic_id, weighted_total=weighted_total)
 
 
 def _make_repo(rows: list[SimpleNamespace]) -> MagicMock:
     repo = MagicMock()
-    repo.fetch_chunk_topics_agg.return_value = rows
+    repo.fetch_paragraph_topics_agg.return_value = rows
     return repo
 
 
@@ -64,11 +67,18 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
     assert first.topic_id == 0
     assert list(first.words) == ["修炼", "境界"]
     assert first.label == "修炼主题"
-    # 权重归一化：100 / (100 + 50)
+    # 权重归一化：weighted_total / sum(weighted_total) = 100 / (100 + 50)
     assert first.weight == round(100.0 / 150.0, 6)
     assert second.topic_id == 1
     assert second.label == "成长主题"
     assert second.weight == round(50.0 / 150.0, 6)
+
+
+def test_fetch_topics_uses_paragraph_aggregation_source() -> None:
+    """2026-08-14 切换段落：必须调用 fetch_paragraph_topics_agg 而非 chunk 版本"""
+    repo = _make_repo([])
+    _fetch_topics("run-source", repo)
+    repo.fetch_paragraph_topics_agg.assert_called_once_with("run-source")
 
 
 def test_fetch_topics_model_load_failure_degrades() -> None:

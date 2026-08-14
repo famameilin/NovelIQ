@@ -168,7 +168,11 @@ def compute_narrative_structure_metrics(
             aligned_inputs.tension_scores,
         ),
         "cliffhanger_rate": compute_cliffhanger_rate(aligned_inputs.cliffhangers),
-        **{f"event_density_{k}": v for k, v in compute_event_density(aligned_inputs.event_types).items()},
+        # 2026-08-14 重命名（§13.3）：event_density_{k} → chapter_narrative_function_share_{k}
+        **{
+            f"chapter_narrative_function_share_{k}": v
+            for k, v in compute_event_density(aligned_inputs.event_types).items()
+        },
         "climax_count": climax_profile["climax_count"],
         "climax_positions": climax_profile["climax_positions"],
         "climax_heights": climax_profile["climax_heights"],
@@ -188,7 +192,8 @@ def compute_emotion_curve_metrics(
     """
     return {
         "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),
-        "pivot_moment_density": compute_pivot_moment_density(annotation_data.pivot_moments),
+        # 2026-08-14 重命名（§13.3）：pivot_moment_density → chapter_pivot_rate
+        "chapter_pivot_rate": compute_pivot_moment_density(annotation_data.pivot_moments),
         **compute_emotion_polarity_distribution(annotation_data.emotional_valences),
         "pos_neg_ratio": compute_pos_neg_ratio(emotion_data.pos_densities, emotion_data.neg_densities),
         "arc_delta": compute_arc_delta(char_data.char_emotion_scores),

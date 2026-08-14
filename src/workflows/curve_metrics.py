@@ -263,8 +263,10 @@ def compute_global_stats(
         min_idx = len(raw_densities) - 1 - raw_densities[::-1].index(min(raw_densities))
         max_chunk_id, _max_text = chunk_texts[max_idx]
         min_chunk_id, _min_text = chunk_texts[min_idx]
-        global_stats.append(("emotion_max_chunk", float(max_chunk_id)))
-        global_stats.append(("emotion_min_chunk", float(min_chunk_id)))
+        # 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id，
+        # emotion_min_chunk → emotion_min_chunk_id（值语义不变）
+        global_stats.append(("emotion_peak_chunk_id", float(max_chunk_id)))
+        global_stats.append(("emotion_min_chunk_id", float(min_chunk_id)))
     if tension_composite_values:
         global_stats.append(("rhythm_avg", sum(tension_composite_values) / len(tension_composite_values)))
         variance = sum(

@@ -562,7 +562,7 @@ export function StreamOutput({
             <DialogHeader className="border-b border-border p-6 pb-4">
               <DialogTitle>Phase3 多流输出</DialogTitle>
               <DialogDescription>
-                当前 chunk 的并行推理流会按独立 stream 分组展示，避免不同 batch 文本继续混流。
+                当前章的并行推理流会按独立 stream 分组展示，避免不同 batch 文本继续混流。
               </DialogDescription>
             </DialogHeader>
             <div className="grid h-[70vh] min-h-0 grid-cols-1 gap-0 md:grid-cols-[280px_minmax(0,1fr)]">
@@ -605,7 +605,7 @@ export function StreamOutput({
               </div>
               <div className="min-h-0 p-4">
                 {/* 2026-08-13 P2-8: 与主面板保持一致，Dialog 同样渲染 displayGroup
-                    （chunk 回退模式下是合并了各流最新内容的聚合组），
+                    （章节回退模式下是合并了各流最新内容的聚合组），
                     避免弹窗与主面板内容不一致 */}
                 <StreamGroupDetail group={displayGroup ?? activeGroup} maxLines={maxLines} className="h-full" />
               </div>            </div>

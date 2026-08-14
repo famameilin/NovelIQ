@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
-import type { ChunkCurvePoint } from "@/api/types";
+import type { ParagraphCurvePoint } from "@/api/types";
 
 echarts.use([
   GridComponent,
@@ -26,7 +26,7 @@ echarts.use([
 /* ------------------------------------------------------------------ */
 
 export interface MiniCurvePreviewProps {
-  data: ChunkCurvePoint[];
+  data: ParagraphCurvePoint[];
   novelId: string;
   className?: string;
 }
@@ -51,11 +51,10 @@ export function MiniCurvePreview({
   const option = useMemo(() => {
     if (!data.length) return {};
 
-    const xData = data.map((d) => d.chunk_id);
-    const posData = data.map((d) => d.pos_density ?? null);
-    const negData = data.map((d) => d.neg_density ?? null);
-    const netData = data.map((d) => d.net_density ?? null);
-    const smoothedData = data.map((d) => d.smoothed_density ?? null);
+    const posData = data.map((d) => [d.position, d.pos_density] as [number, number | null]);
+    const negData = data.map((d) => [d.position, d.neg_density] as [number, number | null]);
+    const netData = data.map((d) => [d.position, d.net_density] as [number, number | null]);
+    const smoothedData = data.map((d) => [d.position, d.smoothed_net_density] as [number, number | null]);
 
     return {
       grid: { top: 10, right: 10, bottom: 10, left: 10, containLabel: false },
@@ -65,17 +64,19 @@ export function MiniCurvePreview({
         backgroundColor: "hsl(var(--surface))",
         borderColor: "hsl(var(--border))",
         textStyle: { color: "hsl(var(--text))", fontSize: 11 },
-        formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; axisValue?: string }>) => {
+        formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; dataIndex?: number }>) => {
           if (!Array.isArray(params)) return "";
-          return `分块 ${params[0]?.axisValue ?? ""}<br/>`
+          const point = data[params[0]?.dataIndex ?? -1];
+          if (!point) return "";
+          return `第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段<br/>`
             + params.map((p) => `${p.marker} ${p.seriesName}: ${typeof p.value === "number" ? p.value.toFixed(4) : "-"}`).join("<br/>");
         },
       },
       xAxis: {
-        type: "category",
-        data: xData,
+        type: "value",
+        min: 0,
+        max: 1,
         show: false,
-        boundaryGap: false,
       },
       yAxis: { type: "value", show: false, min: -1, max: 1 },
       series: [
