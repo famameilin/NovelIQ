@@ -13,9 +13,7 @@ from .analysis import (
 )
 from .api import (
     PathSettings,
-    PromptSettings,
     _parse_path_settings,
-    _parse_prompt_settings,
 )
 from .logging import (
     LoggingModuleSettings,
@@ -40,7 +38,6 @@ __all__ = [
     "ModelsSettings",
     "PathSettings",
     "ProgressSettings",
-    "PromptSettings",
     "TaskModelSettings",
     "TopicModelSettings",
     "_parse_embedding_model_settings",
@@ -49,7 +46,6 @@ __all__ = [
     "_parse_models_settings",
     "_parse_path_settings",
     "_parse_progress_settings",
-    "_parse_prompt_settings",
     "_parse_task_model_settings",
     "_parse_topic_model_settings",
 ]
