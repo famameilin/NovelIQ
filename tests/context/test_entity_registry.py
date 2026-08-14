@@ -144,6 +144,10 @@ class TestEntityRegistry(unittest.TestCase):
         names = [e["name"] for e in result]
         self.assertIn("张三", names)
         self.assertIn("李四", names)
+        # 2026-08-14 D9：同名实体保留 last_seen_chunk 最新者（动作/情绪取最新行）
+        zhang = next(e for e in result if e["name"] == "张三")
+        self.assertEqual(zhang["last_action"], "动作2")
+        self.assertEqual(zhang["emotion_score"], 1)
 
     def test_get_active_entities_filters_inactive_status(self) -> None:
         """2026-08-12 用于验证 status 非 active（显式写入 state）的实体被过滤"""
