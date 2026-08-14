@@ -97,7 +97,8 @@ def _audit(
         allow_future_context=False,
         write_revisions=[],
         rotation_case_ids=[],
-        authorized_text_chunk_ids=authorized_chunk_ids,
+        authorized_chapter_ids=authorized_chunk_ids,
+        authorized_text_paragraph_ids=[],
     )
 
 

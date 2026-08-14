@@ -37,16 +37,18 @@ def _validate_chapter_identity(
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
 ) -> None:
-    """2026-08-07 用于在模型调用前校验章节身份和唯一真实 chunk 输入"""
+    """2026-08-07 用于在模型调用前校验章节身份和 chunk/子块输入
+
+    2026-08-14 M7（§20）：放开恰好一个 chunk 的限制为至少一个；
+    负 chunk_id 是运行时子块 ID（子 chunk 协议），允许；逐条校验原文非空。
+    """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须是真实非空正整数")
-    if len(current_chunks) != 1:
-        raise AnnotationInputError("章节 Agent 每章必须恰好一个 chunk（分组恒为 1 个）")
-    chunk_id, chunk_text = current_chunks[0]
-    if chunk_id < 0:
-        raise AnnotationInputError("current chunk_id 不允许为负数")
-    if not chunk_text:
-        raise AnnotationInputError("current chunk 原文不能为空")
+    if not current_chunks:
+        raise AnnotationInputError("章节 Agent 至少需要一个 chunk 或子块")
+    for _chunk_id, chunk_text in current_chunks:
+        if not chunk_text.strip():
+            raise AnnotationInputError("current chunk 原文不能为空")
 
 
 def validate_bound_annotation(
@@ -122,8 +124,12 @@ async def _run_single_attempt(
     stream: AgentStream | None = None,
     graph_state: FactGraph | None = None,
     observer: AgentTurnObserver | None = None,
+    sub_chunk_index: int = 0,
 ) -> AgentRunResult:
-    """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试"""
+    """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试
+
+    2026-08-14 M7：sub_chunk_index 记录子块协议运行序号（§20 审计合同）。
+    """
     from src.config import settings
 
     _set_session_read_only(session)
@@ -202,7 +208,9 @@ async def _run_single_attempt(
             allow_future_context=allow_future_context,
             write_revisions=list(ledger.write_revisions),
             rotation_case_ids=ledger.rotation_case_ids,
-            authorized_text_chunk_ids=sorted(ledger.authorized_text_chunk_ids),
+            authorized_chapter_ids=sorted(ledger.authorized_chapter_ids),
+            authorized_text_paragraph_ids=sorted(ledger.authorized_text_paragraph_ids),
+            sub_chunk_index=sub_chunk_index,
         ),
     )
 
@@ -221,8 +229,12 @@ async def run_annotation_agent(
     graph_state: FactGraph | None = None,
     audit_recorder: AgentAuditRecorder | None = None,
     chapter_label: str | None = None,
+    sub_chunk_index: int = 0,
 ) -> AgentRunResult:
-    """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出"""
+    """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出
+
+    2026-08-14 M7（§20）：sub_chunk_index 标记子块协议运行序号，写入 AgentRunAudit。
+    """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
 
@@ -274,6 +286,7 @@ async def run_annotation_agent(
             stream=stream,
             graph_state=graph_state,
             observer=observer,
+            sub_chunk_index=sub_chunk_index,
         )
     except Exception as exc:  # noqa: BLE001
         _close_read_session(read_session)

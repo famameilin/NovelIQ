@@ -9,32 +9,28 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, exists, func, or_, select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, ParagraphEmbedding
+from src.config import settings
+from src.storage.models import Paragraph, ParagraphEmbedding
 
 
 @dataclass(frozen=True)
 class ParagraphEmbeddingRow:
-    """2026-08-07 用于批量写入自然段文本定位与向量"""
+    """2026-08-14 用于批量写入自然段向量（二期段落化：段落身份 + 向量）"""
 
-    chunk_id: int
-    paragraph_index: int
-    paragraph_text: str
-    local_start_char: int
-    local_end_char: int
-    global_start_char: int
-    global_end_char: int
+    paragraph_id: int
     embedding_vector: list[float]
 
 
 @dataclass(frozen=True)
 class SimilarParagraphRow:
-    """2026-08-07 用于返回自然段语义定位结果与明确字符坐标"""
+    """2026-08-14 用于返回自然段语义定位结果（JOIN paragraphs 取身份与坐标）"""
 
+    paragraph_id: int
+    chapter_id: int
     chunk_id: int
-    paragraph_index: int
     paragraph_text: str
     local_start_char: int
     local_end_char: int
@@ -48,28 +44,42 @@ def insert_paragraph_embeddings(
     run_id: str,
     rows: Iterable[ParagraphEmbeddingRow],
 ) -> int:
-    """2026-08-07 用于重新生成当前 run 的全部自然段向量"""
+    """2026-08-14 用于重新生成当前 run 的全部自然段向量
+
+    先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key /
+    embedding_dimension 从 settings.models.paragraph_embedding 读取；
+    source_content_hash 对照 paragraphs 表按 paragraph_id 一次性查询，
+    缺失段落返回 None（不伪造溯源）。
+    """
+    materialized = list(rows)
     session.execute(delete(ParagraphEmbedding).where(ParagraphEmbedding.run_id == run_id))
+    if not materialized:
+        return 0
+    paragraph_ids = [row.paragraph_id for row in materialized]
+    hash_rows = session.execute(
+        select(Paragraph.paragraph_id, Paragraph.content_hash).where(
+            Paragraph.run_id == run_id,
+            Paragraph.paragraph_id.in_(paragraph_ids),
+        )
+    ).all()
+    content_hash_by_paragraph = {
+        int(row.paragraph_id): str(row.content_hash) for row in hash_rows
+    }
+    model_settings = settings.models.paragraph_embedding
     created_at = datetime.now().isoformat()
     insert_rows = [
         {
             "run_id": run_id,
-            "chunk_id": row.chunk_id,
-            "paragraph_index": row.paragraph_index,
-            "paragraph_text": row.paragraph_text,
-            "local_start_char": row.local_start_char,
-            "local_end_char": row.local_end_char,
-            "global_start_char": row.global_start_char,
-            "global_end_char": row.global_end_char,
+            "paragraph_id": row.paragraph_id,
             "embedding_vector": row.embedding_vector,
+            "embedding_model_key": getattr(model_settings, "model", None),
+            "embedding_dimension": getattr(model_settings, "embedding_dim", None),
+            "source_content_hash": content_hash_by_paragraph.get(row.paragraph_id),
             "created_at": created_at,
         }
-        for row in rows
+        for row in materialized
     ]
-    if insert_rows:
-        from sqlalchemy import insert
-
-        session.execute(insert(ParagraphEmbedding), insert_rows)
+    session.execute(insert(ParagraphEmbedding), insert_rows)
     return len(insert_rows)
 
 
@@ -79,54 +89,67 @@ def search_similar_paragraphs(
     query_embedding: list[float],
     top_k: int = 5,
     similarity_threshold: float = 0.7,
-    exclude_chunk_ids: Sequence[int] | None = None,
-    min_chunk_id: int | None = None,
-    max_chunk_id: int | None = None,
+    exclude_paragraph_ids: Sequence[int] | None = None,
+    min_paragraph_id: int | None = None,
+    max_paragraph_id: int | None = None,
 ) -> list[SimilarParagraphRow]:
-    """2026-08-07 用于在同 run 原文自然段中执行有位置边界的 pgvector 检索
+    """2026-08-14 用于在同 run 原文自然段中执行有段落边界的 pgvector 检索
 
     2026-08-13 P1-1：ORDER BY 与阈值 WHERE 都改用裸余弦距离算子
     ``embedding_vector <=> :query``（cos 距离，升序），不再包裹成
     ``1 - (embedding_vector <=> :query)``，否则 pgvector 无法命中 HNSW ANN 索引。
     阈值语义等价：similarity >= threshold 即 distance <= 1 - threshold。
+
+    2026-08-14 二期段落化：SELECT 从 paragraph_embeddings JOIN paragraphs
+    （run_id 对齐），段落身份/章节/坐标全部以 paragraphs 事实源为准；
+    边界参数改为 paragraph_id。
     """
     distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
     similarity_expr = 1 - distance_expr
     # round 避免 1 - 0.7 = 0.30000000000000004 的浮点噪声进入 SQL 字面量
     max_distance = round(1.0 - similarity_threshold, 6)
-    statement = select(
-        ParagraphEmbedding.chunk_id,
-        ParagraphEmbedding.paragraph_index,
-        ParagraphEmbedding.paragraph_text,
-        ParagraphEmbedding.local_start_char,
-        ParagraphEmbedding.local_end_char,
-        ParagraphEmbedding.global_start_char,
-        ParagraphEmbedding.global_end_char,
-        similarity_expr.label("similarity"),
-    ).where(
-        ParagraphEmbedding.run_id == run_id,
-        ParagraphEmbedding.embedding_vector.is_not(None),
-        distance_expr <= max_distance,
+    statement = (
+        select(
+            Paragraph.paragraph_id,
+            Paragraph.chapter_id,
+            Paragraph.chunk_id,
+            Paragraph.text.label("paragraph_text"),
+            Paragraph.local_start_char,
+            Paragraph.local_end_char,
+            Paragraph.global_start_char,
+            Paragraph.global_end_char,
+            similarity_expr.label("similarity"),
+        )
+        .join(
+            Paragraph,
+            (ParagraphEmbedding.run_id == Paragraph.run_id)
+            & (ParagraphEmbedding.paragraph_id == Paragraph.paragraph_id),
+        )
+        .where(
+            ParagraphEmbedding.run_id == run_id,
+            ParagraphEmbedding.embedding_vector.is_not(None),
+            distance_expr <= max_distance,
+        )
     )
-    if exclude_chunk_ids:
-        statement = statement.where(ParagraphEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
-    if min_chunk_id is not None:
-        statement = statement.where(ParagraphEmbedding.chunk_id >= min_chunk_id)
-    if max_chunk_id is not None:
-        statement = statement.where(ParagraphEmbedding.chunk_id <= max_chunk_id)
+    if exclude_paragraph_ids:
+        statement = statement.where(Paragraph.paragraph_id.not_in(list(exclude_paragraph_ids)))
+    if min_paragraph_id is not None:
+        statement = statement.where(Paragraph.paragraph_id >= min_paragraph_id)
+    if max_paragraph_id is not None:
+        statement = statement.where(Paragraph.paragraph_id <= max_paragraph_id)
     statement = statement.order_by(
         distance_expr.asc(),
-        ParagraphEmbedding.chunk_id.asc(),
-        ParagraphEmbedding.paragraph_index.asc(),
+        Paragraph.paragraph_id.asc(),
     ).limit(top_k)
     return [_similar_paragraph_row(row) for row in session.execute(statement).all()]
 
 
 def _similar_paragraph_row(row: Any) -> SimilarParagraphRow:
-    """2026-08-07 用于把 SQLAlchemy 结果行转换为自然段语义 DTO"""
+    """2026-08-14 用于把 SQLAlchemy 结果行转换为自然段语义 DTO"""
     return SimilarParagraphRow(
+        paragraph_id=int(row.paragraph_id),
+        chapter_id=int(row.chapter_id),
         chunk_id=int(row.chunk_id),
-        paragraph_index=int(row.paragraph_index),
         paragraph_text=str(row.paragraph_text),
         local_start_char=int(row.local_start_char),
         local_end_char=int(row.local_end_char),
@@ -138,59 +161,49 @@ def _similar_paragraph_row(row: Any) -> SimilarParagraphRow:
 
 def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
     """2026-08-07 用于检查指定 run 是否存在自然段向量"""
-    statement = select(ParagraphEmbedding.chunk_id).where(
+    statement = select(ParagraphEmbedding.paragraph_id).where(
         ParagraphEmbedding.run_id == run_id
     ).limit(1)
     return session.execute(statement).scalar_one_or_none() is not None
 
 
-def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) -> list[int]:
-    """2026-08-07 用于发现缺失不连续空向量或坐标不完整的自然段数据"""
-    paragraph_exists = exists().where(
-        (ParagraphEmbedding.run_id == Chunk.run_id)
-        & (ParagraphEmbedding.chunk_id == Chunk.chunk_id)
-    )
+def get_incomplete_paragraph_embedding_paragraph_ids(
+    session: Session, run_id: str
+) -> list[int]:
+    """2026-08-14 用于发现"有段落但无可用向量"的缺口段落 ID 列表
+
+    二期段落化：段落身份以 paragraphs 表为准，不再按 chunk 聚合判定。
+    缺口包含两类：
+    1. 段落存在但没有 embedding 行（paragraphs LEFT JOIN paragraph_embeddings）；
+    2. embedding 行存在但向量为空（embedding_vector IS NULL）。
+
+    chunk 级缺口（某 chunk 完全无向量）由上述段落级缺口自然覆盖
+    （该 chunk 的每个段落都会出现在结果中）。返回排序后的段落 ID 列表。
+    """
     missing_statement = (
-        select(Chunk.chunk_id)
-        .where(Chunk.run_id == run_id)
-        # 2026-08-13 P2-10：空文本 chunk 永远无法产出自然段向量，
-        # 用 length(text) > 0 排除空串，避免空文本 chunk 被永久判为缺失
-        .where(func.length(Chunk.text) > 0)
-        .where(~paragraph_exists)
-    )
-    missing_chunk_ids = {
-        int(row.chunk_id)
-        for row in session.execute(missing_statement).all()
-    }
-    count_label = func.count(ParagraphEmbedding.paragraph_index)
-    max_index_label = func.max(ParagraphEmbedding.paragraph_index)
-    min_index_label = func.min(ParagraphEmbedding.paragraph_index)
-    gapped_statement = (
-        select(ParagraphEmbedding.chunk_id)
-        .where(ParagraphEmbedding.run_id == run_id)
-        .group_by(ParagraphEmbedding.chunk_id)
-        .having(or_(min_index_label != 0, count_label != max_index_label + 1))
-    )
-    gapped_chunk_ids = {
-        int(row.chunk_id)
-        for row in session.execute(gapped_statement).all()
-    }
-    null_statement = (
-        select(ParagraphEmbedding.chunk_id)
-        .where(ParagraphEmbedding.run_id == run_id)
-        .where(
-            or_(
-                ParagraphEmbedding.embedding_vector.is_(None),
-                ParagraphEmbedding.local_start_char.is_(None),
-                ParagraphEmbedding.local_end_char.is_(None),
-                ParagraphEmbedding.global_start_char.is_(None),
-                ParagraphEmbedding.global_end_char.is_(None),
-            )
+        select(Paragraph.paragraph_id)
+        .outerjoin(
+            ParagraphEmbedding,
+            (ParagraphEmbedding.run_id == Paragraph.run_id)
+            & (ParagraphEmbedding.paragraph_id == Paragraph.paragraph_id),
         )
-        .group_by(ParagraphEmbedding.chunk_id)
+        .where(
+            Paragraph.run_id == run_id,
+            ParagraphEmbedding.run_id.is_(None),
+        )
     )
-    null_chunk_ids = {
-        int(row.chunk_id)
-        for row in session.execute(null_statement).all()
+    missing_paragraph_ids = {
+        int(row.paragraph_id) for row in session.execute(missing_statement).all()
     }
-    return sorted(missing_chunk_ids | gapped_chunk_ids | null_chunk_ids)
+    null_vector_statement = (
+        select(ParagraphEmbedding.paragraph_id)
+        .where(
+            ParagraphEmbedding.run_id == run_id,
+            ParagraphEmbedding.embedding_vector.is_(None),
+        )
+    )
+    null_vector_paragraph_ids = {
+        int(row.paragraph_id)
+        for row in session.execute(null_vector_statement).all()
+    }
+    return sorted(missing_paragraph_ids | null_vector_paragraph_ids)

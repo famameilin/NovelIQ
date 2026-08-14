@@ -379,7 +379,8 @@ def complete_annotation_run(
                 session,
                 annotation=annotation,
                 resolved_cases=result.resolved_cases,
-                authorized_text_chunk_ids=set(result.audit.authorized_text_chunk_ids),
+                # 2026-08-14 M6：案例源是章级定位（§12.3），落库复查沿用章级授权集合
+                authorized_text_chunk_ids=set(result.audit.authorized_chapter_ids),
             )
             _reelect_representatives(session, run_id=result.run_id)
             resolved_completion = _persist_resolution_mappings(

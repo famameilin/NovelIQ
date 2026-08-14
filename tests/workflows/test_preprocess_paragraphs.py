@@ -179,9 +179,9 @@ class TestPreprocessParagraphs:
     @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_embeddings_aligned_with_paragraphs(self, db_session, tmp_path) -> None:
         """
-        2026-08-14 用于验证 embedding 从段落事实源读取后与 paragraphs 严格对齐：
-        paragraph_embeddings 行数与 paragraphs 一致，且每条 embedding 的
-        chunk_id/paragraph_index/local/global 坐标与 paragraphs 对应行一致
+        2026-08-14 二期段落化：embedding 从段落事实源读取后按 paragraph_id 严格对齐：
+        paragraph_embeddings 行数与 paragraphs 一致，向量非空、维度与配置一致、
+        source_content_hash 对照 paragraphs.content_hash
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Embedding Align")
@@ -198,29 +198,23 @@ class TestPreprocessParagraphs:
         embedding_rows = db_session.execute(
             select(
                 ParagraphEmbedding.run_id,
-                ParagraphEmbedding.chunk_id,
-                ParagraphEmbedding.paragraph_index,
-                ParagraphEmbedding.paragraph_text,
-                ParagraphEmbedding.local_start_char,
-                ParagraphEmbedding.local_end_char,
-                ParagraphEmbedding.global_start_char,
-                ParagraphEmbedding.global_end_char,
+                ParagraphEmbedding.paragraph_id,
+                ParagraphEmbedding.embedding_vector,
+                ParagraphEmbedding.embedding_model_key,
+                ParagraphEmbedding.embedding_dimension,
+                ParagraphEmbedding.source_content_hash,
             ).where(ParagraphEmbedding.run_id == run_id)
         ).all()
-        embedding_by_key = {
-            (row.chunk_id, row.paragraph_index): row for row in embedding_rows
-        }
+        embedding_by_id = {row.paragraph_id: row for row in embedding_rows}
 
         assert len(embedding_rows) == len(paragraph_rows)
         for paragraph_row in paragraph_rows:
-            key = (paragraph_row.chunk_id, paragraph_row.paragraph_index)
-            assert key in embedding_by_key
-            embedding_row = embedding_by_key[key]
-            assert embedding_row.paragraph_text == paragraph_row.text
-            assert embedding_row.local_start_char == paragraph_row.local_start_char
-            assert embedding_row.local_end_char == paragraph_row.local_end_char
-            assert embedding_row.global_start_char == paragraph_row.global_start_char
-            assert embedding_row.global_end_char == paragraph_row.global_end_char
+            embedding_row = embedding_by_id[paragraph_row.paragraph_id]
+            assert embedding_row.embedding_vector is not None
+            assert len(embedding_row.embedding_vector) == 1024
+            assert embedding_row.embedding_dimension == 1024
+            # 溯源：source_content_hash 与段落事实源 content_hash 一致
+            assert embedding_row.source_content_hash == paragraph_row.content_hash
 
     @pytest.mark.asyncio()
     @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)

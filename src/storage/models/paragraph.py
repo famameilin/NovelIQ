@@ -21,9 +21,15 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import (
+    text as sql_text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+
+# 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Paragraph.text 列属性，
+# 类体内 __table_args__ 直接引用 text 会解析到列对象而非函数（与 chunk.py 同口径）
 
 
 def _utcnow() -> datetime:
@@ -92,6 +98,15 @@ class Paragraph(Base):
         Index("idx_paragraphs_run_chapter_index", "run_id", "chapter_id", "paragraph_index"),
         Index("idx_paragraphs_run_global_start", "run_id", "global_start_char"),
         Index("idx_paragraphs_run_chunk_local_start", "run_id", "chunk_id", "local_start_char"),
+        # 2026-08-14 二期段落化：keyword_ops 直接扫 paragraphs 表的查询是
+        # lower(text) LIKE '%kw%'，索引必须建在同一个表达式上（lower(text) gin_trgm_ops），
+        # 裸 text 列上的 trgm 索引无法被规划器命中，等于死索引（与 chunks 的
+        # idx_chunks_text_trgm 同口径；pg_trgm 扩展由 init_db 按需创建）
+        Index(
+            "idx_paragraphs_text_trgm",
+            sql_text("lower(text) gin_trgm_ops"),
+            postgresql_using="gin",
+        ),
     )
 
     def __repr__(self) -> str:

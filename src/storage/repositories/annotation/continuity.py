@@ -73,16 +73,20 @@ class DatabaseAnnotationQueryService:
         session: Session,
         run_id: str,
         current_chapter_id: int,
-        current_first_chunk_id: int,
-        current_last_chunk_id: int,
+        current_first_paragraph_id: int,
+        current_last_paragraph_id: int,
         embedding_client: EmbeddingClient | None = None,
     ):
-        """2026-08-07 用于绑定单次尝试的 run 章节边界与原文检索服务"""
+        """2026-08-14 用于绑定单次尝试的 run 章节边界与原文检索服务
+
+        二期段落化：边界为当前章的段落事实源边界（paragraph_id，§5.2）；
+        M7 子 chunk 场景由调用方传章的段落边界，不是子块的边界。
+        """
         self.session = session
         self.run_id = run_id
         self.current_chapter_id = current_chapter_id
-        self.current_first_chunk_id = current_first_chunk_id
-        self.current_last_chunk_id = current_last_chunk_id
+        self.current_first_paragraph_id = current_first_paragraph_id
+        self.current_last_paragraph_id = current_last_paragraph_id
         chapter_ids = list(
             self.session.execute(
                 select(Chunk.chapter_id)
@@ -199,28 +203,28 @@ class DatabaseAnnotationQueryService:
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchResult]:
-        """2026-08-14 用于按 previous/future/all 范围联合定位原文候选"""
+        """2026-08-14 用于按 previous/future/all 范围联合定位原文候选（段落边界）"""
         if range_name == "previous":
-            min_chunk_id = None
-            max_chunk_id = self.current_first_chunk_id - 1
+            min_paragraph_id = None
+            max_paragraph_id = self.current_first_paragraph_id - 1
         elif range_name == "future":
-            min_chunk_id = self.current_last_chunk_id + 1
-            max_chunk_id = None
+            min_paragraph_id = self.current_last_paragraph_id + 1
+            max_paragraph_id = None
         elif range_name == "all":
-            min_chunk_id = None
-            max_chunk_id = None
+            min_paragraph_id = None
+            max_paragraph_id = None
         else:
             raise ValueError("search_text.range 只能是 previous、future 或 all")
         candidates = await self.text_search_service.search(
             query,
-            min_chunk_id=min_chunk_id,
-            max_chunk_id=max_chunk_id,
+            min_paragraph_id=min_paragraph_id,
+            max_paragraph_id=max_paragraph_id,
             limit=limit,
         )
         return [
             TextSearchResult(
                 chapter_id=row.chapter_id,
-                chunk_id=row.chunk_id,
+                paragraph_id=row.paragraph_id,
                 excerpt=row.excerpt,
                 keyword_score=row.keyword_score,
                 semantic_score=row.semantic_score,
@@ -228,9 +232,9 @@ class DatabaseAnnotationQueryService:
             for row in candidates
         ]
 
-    def read_text(self, chunk_id: int) -> str:
-        """2026-08-07 用于读取本轮文本搜索候选的同 run 完整原文"""
-        return self.text_search_service.read(chunk_id)
+    def read_text(self, paragraph_id: int) -> str:
+        """2026-08-14 用于读取本轮文本搜索候选段落的同 run 原文（带默认上下文）"""
+        return self.text_search_service.read(paragraph_id)
 
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于回读 active 案例并恢复系统稳定目标"""

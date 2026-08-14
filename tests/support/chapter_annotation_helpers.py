@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import select
@@ -20,6 +21,8 @@ from src.agents.annotation.schema import (
     ChunkMetricsInput,
     EntityType,
 )
+from src.chunking.chunker import Chunk as ChunkerChunk
+from src.chunking.chunker import split_chunk_paragraphs
 from src.storage.models import Chunk, Novel
 from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository, RunRepository
 from src.storage.repositories.graph import persist_completion_graph
@@ -72,6 +75,32 @@ def create_run_with_chunks(
         offset += len(text_value)
     session.add_all(rows)
     session.commit()
+    # 2026-08-14 二期：annotate 阶段要求段落事实源存在（章节段落边界查询），
+    # helper 同步插入段落行（一次传入全部 chunk，paragraph_id 全局连续），
+    # token_count 用简单切分填充
+    from src.storage.repositories import ParagraphRepository
+
+    chunk_models = session.scalars(
+        select(Chunk).where(Chunk.run_id == run_id).order_by(Chunk.chunk_id)
+    ).all()
+    spans = [
+        replace(span, token_count=max(1, len(span.text) // 2))
+        for span in split_chunk_paragraphs(
+            [
+                ChunkerChunk(
+                    index=chunk.chunk_id,
+                    text=chunk.text,
+                    start=chunk.char_offset or 0,
+                    end=chunk.char_end_offset or 0,
+                    chapter_id=chunk.chapter_id,
+                )
+                for chunk in chunk_models
+            ]
+        )
+    ]
+    if spans:
+        ParagraphRepository(session).insert_paragraphs(run_id, spans)
+        session.commit()
     return novel_id, run_id
 
 

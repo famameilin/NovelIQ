@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from src.agents.annotation.errors import AnnotationAuthorizationError, AnnotationInvariantError
+from src.agents.annotation.errors import (
+    AnnotationAuthorizationError,
+    AnnotationInputError,
+    AnnotationInvariantError,
+)
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
@@ -272,7 +276,8 @@ def _agent_result() -> AgentRunResult:
             allow_future_context=False,
             write_revisions=[],
             rotation_case_ids=[],
-            authorized_text_chunk_ids=[1],
+            authorized_chapter_ids=[1],
+            authorized_text_paragraph_ids=[],
         ),
     )
 
@@ -676,6 +681,134 @@ async def test_runner_returns_result_from_single_attempt() -> None:
     assert actual == result
     assert run_attempt.await_count == 1
     assert recorder.finish_invocation.call_args.kwargs["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_runner_accepts_multiple_sub_chunk_entries_and_negative_ids() -> None:
+    """2026-08-14 M7（§20）用于验证多 chunk 输入与负子块 ID 通过章节身份校验"""
+    session = MagicMock()
+    result = _agent_result()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=result),
+    ) as run_attempt:
+        actual = await run_annotation_agent(
+            run_id="run-1",
+            chapter_id=1,
+            current_chunks=[(-1, "第一个子块"), (-2, "第二个子块")],
+            query_service_factory=lambda session: _QueryService(),
+            session_factory=lambda: session,
+            llm=MagicMock(),
+            audit_recorder=MagicMock(),
+        )
+    assert actual == result
+    assert run_attempt.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_empty_chunk_text_entry() -> None:
+    """2026-08-14 M7 用于验证逐条校验子块原文非空"""
+    session = MagicMock()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=_agent_result()),
+    ) as run_attempt:
+        with pytest.raises(AnnotationInputError, match="原文不能为空"):
+            await run_annotation_agent(
+                run_id="run-1",
+                chapter_id=1,
+                current_chunks=[(-1, "   ")],
+                query_service_factory=lambda session: _QueryService(),
+                session_factory=lambda: session,
+                llm=MagicMock(),
+                audit_recorder=MagicMock(),
+            )
+    assert run_attempt.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_forwards_sub_chunk_index_to_attempt() -> None:
+    """2026-08-14 M7（§20）用于验证 sub_chunk_index 透传到底层尝试"""
+    session = MagicMock()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=_agent_result()),
+    ) as run_attempt:
+        await run_annotation_agent(
+            run_id="run-1",
+            chapter_id=1,
+            current_chunks=[(-2, "第二个子块")],
+            sub_chunk_index=1,
+            query_service_factory=lambda session: _QueryService(),
+            session_factory=lambda: session,
+            llm=MagicMock(),
+            audit_recorder=MagicMock(),
+        )
+    assert run_attempt.call_args.kwargs["sub_chunk_index"] == 1
+
+
+def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
+    """2026-08-14 M7 用于验证多条目 current 按子块 ID 精确覆盖且对话按各自原文绑定"""
+    first = BoundChunkAnnotation(
+        chunk_id=-1,
+        metrics=ChunkMetricsInput(
+            summary="第一子块",
+            emotional_valence="neutral",
+            narrative_function="铺垫",
+        ),
+        entities=BoundEntityDirectory(),
+        character_observations=[],
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_1",
+                content="住手",
+                start=0,
+                end=2,
+            )
+        ],
+        events=[],
+        relations=[],
+        foreshadowings=[],
+    )
+    second = BoundChunkAnnotation(
+        chunk_id=-2,
+        metrics=ChunkMetricsInput(
+            summary="第二子块",
+            emotional_valence="neutral",
+            narrative_function="铺垫",
+        ),
+        entities=BoundEntityDirectory(),
+        character_observations=[],
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_2",
+                content="退下",
+                start=0,
+                end=2,
+            )
+        ],
+        events=[],
+        relations=[],
+        foreshadowings=[],
+    )
+    annotation = BoundChapterAnnotation(
+        chapter_summary="子块合并摘要",
+        chunks=[first, second],
+    )
+    validate_bound_annotation(
+        annotation,
+        chapter_id=1,
+        current_chunks=[(-1, "住手喝止"), (-2, "退下众人")],
+    )
+    # 顺序错位仍被拒绝
+    with pytest.raises(ValueError, match="必须按原文顺序精确覆盖"):
+        validate_bound_annotation(
+            annotation,
+            chapter_id=1,
+            current_chunks=[(-2, "退下众人"), (-1, "住手喝止")],
+        )
 
 
 class _AliasCaseQueryService(_QueryService):
