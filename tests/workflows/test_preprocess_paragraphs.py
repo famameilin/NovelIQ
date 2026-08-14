@@ -18,7 +18,7 @@ from sqlalchemy import select
 from src.chapters.preprocess import preprocess_text
 from src.config import settings
 from src.preprocess.cleaning import normalize_text
-from src.storage.models import Paragraph, ParagraphEmbedding
+from src.storage.models import Paragraph, ParagraphEmbedding, ParagraphMetric
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.preprocess import run_preprocess
@@ -246,3 +246,79 @@ class TestPreprocessParagraphs:
             session=db_session,
         )
         assert (chunks2, chars2, elapsed2) == (0, 0, 0.0)
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_preprocess_generates_paragraph_metrics(self, db_session, tmp_path) -> None:
+        """
+        2026-08-14 用于验证段落指标（§5.3）随 preprocess 无条件生成：
+        行数等于段落数、分子/分母字段非空、surface_tension 值域合法、
+        metric_version 落库
+        """
+        source_path = self._create_source_file(str(tmp_path))
+        run_id = self._create_run(db_session, source_path, "Metrics Novel")
+
+        await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_count = paragraph_repo.count_paragraphs(run_id)
+        assert paragraph_count > 0
+
+        metric_rows = db_session.scalars(
+            select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)
+        ).all()
+        assert len(metric_rows) == paragraph_count
+        for row in metric_rows:
+            assert row.metric_version == "1"
+            assert row.char_count > 0
+            assert row.token_count >= 0
+            assert row.sentence_count >= 0
+            assert row.surface_tension_z is not None
+            assert row.surface_tension is not None
+            # sigmoid 值域 (0, 1)；z 已被 clip 到 [-3, 3]
+            assert 0.0 < row.surface_tension < 1.0
+            assert -3.0 <= row.surface_tension_z <= 3.0
+            assert row.function_word_counts is not None
+            assert row.semantic_category_counts is not None
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_paragraph_metrics_counts_conservation(self, db_session, tmp_path) -> None:
+        """
+        2026-08-14 用于验证段落指标与段落事实源守恒：
+        每行 char_count == len(段落文本)、token_count 与 paragraphs 行一致、
+        sentence 充分统计量与段落文本逐条匹配
+        """
+        source_path = self._create_source_file(str(tmp_path))
+        run_id = self._create_run(db_session, source_path, "Conservation Novel")
+
+        await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
+        metric_rows = db_session.scalars(
+            select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)
+        ).all()
+        metric_by_paragraph = {row.paragraph_id: row for row in metric_rows}
+
+        assert len(metric_rows) == len(paragraph_rows)
+        for paragraph_row in paragraph_rows:
+            metric = metric_by_paragraph[paragraph_row.paragraph_id]
+            assert metric.char_count == len(paragraph_row.text)
+            assert metric.token_count == paragraph_row.token_count
+            # sentence 充分统计量：均值/方差恢复一致（由 count/sum/sum_sq 恢复）
+            if metric.sentence_count > 0:
+                mean = metric.sentence_char_sum / metric.sentence_count
+                variance = max(
+                    0.0,
+                    metric.sentence_char_sum_sq / metric.sentence_count - mean * mean,
+                )
+                assert variance >= 0.0

@@ -463,6 +463,65 @@ def _assert_paragraph_contract_schema(engine: Engine) -> None:
             )
 
 
+def _assert_paragraph_metrics_contract_schema(engine: Engine) -> None:
+    """
+    2026-08-14 用于校验段落指标/主题派生表合同列齐备
+
+    缺失即阻断启动；表不存在时跳过（旧库未升级前不强制建表）
+    """
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    required_tables = {
+        "paragraph_metrics": {
+            "run_id",
+            "paragraph_id",
+            "metric_version",
+            "token_count",
+            "char_count",
+            "sentence_count",
+            "sentence_char_sum",
+            "sentence_char_sum_sq",
+            "positive_weight_sum",
+            "negative_weight_sum",
+            "fight_weight_sum",
+            "exclaim_count",
+            "question_count",
+            "pause_count",
+            "dialogue_char_count",
+            "sensory_hit_count",
+            "imagery_hit_count",
+            "metaphor_sentence_count",
+            "function_word_counts",
+            "semantic_category_counts",
+            "surface_tension_z",
+            "surface_tension",
+            "created_at",
+        },
+        "paragraph_topics": {
+            "id",
+            "run_id",
+            "paragraph_id",
+            "topic_id",
+            "topic_weight",
+            "inference_token_count",
+            "topic_model_version",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, required in required_tables.items():
+            if not _table_exists(connection, table_name):
+                continue
+            actual = _get_table_columns(connection, table_name)
+            missing = sorted(required - actual)
+            if missing:
+                raise RuntimeError(
+                    f"{table_name} is missing paragraph contract columns: {missing}. "
+                    "Please recreate or explicitly migrate the table before starting the service."
+                )
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
@@ -524,6 +583,7 @@ def init_db() -> None:
     _assert_annotation_contract_schema(engine)
     _assert_agent_audit_contract_schema(engine)
     _assert_paragraph_contract_schema(engine)
+    _assert_paragraph_metrics_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 

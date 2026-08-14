@@ -74,7 +74,6 @@ class TestDiagnosisRoutes:
                 ttr=0.5,
                 avg_sent_len=20.0 + i,
                 sent_len_std=5.0,
-                d_value=5.0,
                 pause_density=0.1,
                 fight_density=0.0,
                 exclaim_density=0.0,

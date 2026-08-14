@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import Chunk, ChunkCurve, ChunkTopic, CloudAnalysis
+from src.storage.models import Chunk, ChunkCurve, CloudAnalysis, ParagraphTopic
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -125,7 +125,9 @@ def has_aggregated_data(session: Session, run_id: str) -> bool:
 
 def has_topic_data(session: Session, run_id: str) -> bool:
     """
-    检查指定运行是否有主题数据
+    检查指定运行是否有主题数据（段落粒度，设计 §11.1）
+
+    主题建模已段落化，chunk_topics 不再写入；完成判定改查 paragraph_topics。
 
     Args:
         session: 数据库会话
@@ -135,7 +137,10 @@ def has_topic_data(session: Session, run_id: str) -> bool:
         是否有主题数据
     """
     count = (
-        session.execute(select(func.count()).select_from(ChunkTopic).where(ChunkTopic.run_id == run_id)).scalar() or 0
+        session.execute(
+            select(func.count()).select_from(ParagraphTopic).where(ParagraphTopic.run_id == run_id)
+        ).scalar()
+        or 0
     )
     return count > 0
 

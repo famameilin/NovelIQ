@@ -45,6 +45,18 @@ def _load_all_lexicons_for_preprocess(
     # 2026-08-13 P2-4 战斗词条用于 fight_density（tension_proxy 只取词条键，
     # 权重不参与密度计算，统一按 1.0 登记）
     lexicons["fight_terms"] = dict.fromkeys(registry.get("tension.action_terms"), 1.0)
+    # 2026-08-14 段落情绪分子（§5.3 positive/negative_weight_sum）：
+    # 使用带权重的正负情感词表，权重参与加权求和
+    from src.utils.lexicon_parser import load_weighted_lexicon
+
+    positive_file = lexicon_dir / "positive.txt"
+    negative_file = lexicon_dir / "negative.txt"
+    lexicons["pos_terms"] = (
+        load_weighted_lexicon(str(positive_file)) if positive_file.exists() else {}
+    )
+    lexicons["neg_terms"] = (
+        load_weighted_lexicon(str(negative_file)) if negative_file.exists() else {}
+    )
 
     # semantic_category 需要解析为分类字典
 
@@ -106,7 +118,6 @@ def _compute_chunk_style_metrics(
         ttr=ttr_val,
         avg_sent_len=sent_stats["avg_sent_len"],
         sent_len_std=sent_stats["sent_len_std"],
-        d_value=sent_stats["d_value"],
         pause_density=pause_val,
         fight_density=proxy["fight_density"],
         exclaim_density=proxy["exclaim_density"],

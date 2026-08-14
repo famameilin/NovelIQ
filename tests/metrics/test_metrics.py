@@ -129,10 +129,33 @@ class TestStyleMetrics(unittest.TestCase):
     def test_sentence_length_stats(self) -> None:
         stats = sentence_length_stats("你好。再见。")
         self.assertGreater(stats["avg_sent_len"], 0)
+        # §19.5: d_value 与 sent_len_std 完全重复，已移除
+        self.assertNotIn("d_value", stats)
+        self.assertIn("sent_len_std", stats)
+        self.assertEqual(
+            stats["sent_len_std"],
+            sentence_length_stats("你好。再见。")["sent_len_std"],
+        )
+
+    def test_sentence_length_stats_empty(self) -> None:
+        stats = sentence_length_stats("")
+        self.assertEqual(stats["avg_sent_len"], 0.0)
+        self.assertEqual(stats["sent_len_std"], 0.0)
+        self.assertNotIn("d_value", stats)
 
     def test_pause_density(self) -> None:
         text = "你好，世界；再见。"
         self.assertGreater(pause_density(text), 0)
+
+    def test_pause_density_per_hundred_chars(self) -> None:
+        # §19.4: 每百字停顿频率，随长度线性增长而非二次增长
+        text_short = "你，你。"
+        text_long = text_short * 10
+        self.assertAlmostEqual(pause_density(text_short), pause_density(text_long), places=6)
+        text_empty = ""
+        self.assertEqual(pause_density(text_empty), 0.0)
+        text_no_pause = "你好世界"
+        self.assertEqual(pause_density(text_no_pause), 0.0)
 
     def test_metaphor_density(self) -> None:
         text = "她像风一样。"
@@ -144,6 +167,14 @@ class TestStyleMetrics(unittest.TestCase):
         self.assertGreater(mtld(tokens), 0)
         self.assertGreater(average_word_length(tokens), 0)
         self.assertGreaterEqual(word_frequency_breadth(tokens, 0.8), 0)
+
+    def test_mtld_factors_zero_returns_none(self) -> None:
+        # §19.12: 全唯一词（TTR 未跌破阈值）时 MTLD 数学上无定义，返回 None
+        tokens = ["我", "爱", "你"]
+        self.assertIsNone(mtld(tokens))
+
+    def test_mtld_empty_tokens(self) -> None:
+        self.assertEqual(mtld([]), 0.0)
 
     def test_function_word_distribution(self) -> None:
         tokens = ["的", "是", "我", "的"]

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.chunking.chunker import chunk_documents_with_chapters, split_chunk_paragraphs
+from src.chunking.spans import ParagraphSpan
 from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
@@ -104,11 +105,19 @@ async def run_preprocess(
     # 段落事实源：chunks 落库后无条件生成段落行（语义检索开关不影响 paragraphs 的生成和内容），
     # 段落身份以 paragraphs 表为准，embedding/检索/指标均从该表读取，保证与段落严格对齐
     spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
-    spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]
+    tokenized: list[list[str]] = [tokenize(span.text) for span in spans]
+    spans = [
+        replace(span, token_count=len(tokens))
+        for span, tokens in zip(spans, tokenized, strict=True)
+    ]
     paragraph_repo = ParagraphRepository(session)
     paragraph_repo.insert_paragraphs(run_id, spans)
     _commit_preprocess_writes(session, step="insert_paragraphs")
     logger.info(f"inserted {len(spans)} paragraphs into db (run_id={run_id})")
+
+    # 段落指标（§5.3）：原始计数与充分统计量；surface_tension 在 run 内稳健标准化后写入
+    if spans:
+        _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
 
     style_rows: list[ChunkStyleData] = []
     for idx, chunk in enumerate(all_chunks):
@@ -161,6 +170,82 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
     # preprocess 本身已是可恢复阶段，分段提交比让状态写回超时更符合当前系统语义
     session.commit()
     logger.debug(f"Committed preprocess writes after step={step}")
+
+
+def _insert_paragraph_metrics(
+    session: Session,
+    run_id: str,
+    spans: list[ParagraphSpan],
+    tokenized: list[list[str]],
+    lexicons: dict[str, Any],
+) -> int:
+    """
+    计算并落库段落指标（§5.3 原始计数与充分统计量）
+
+    表面张力（§9.2）在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
+    再做稳健标准化（median/MAD）得到 z，sigmoid 后与 z 一并写入
+    paragraph_metrics 行。
+    """
+    from src.metrics.paragraph_metrics import compute_paragraph_metric_counts
+    from src.metrics.paragraph_surface_tension import (
+        robust_standardize_components,
+        surface_tension_components,
+        surface_tension_sigmoid,
+        surface_tension_z_value,
+    )
+    from src.storage.repositories.paragraph_repository import (
+        ParagraphMetricRow,
+        ParagraphRepository,
+    )
+
+    counts_list = [
+        compute_paragraph_metric_counts(span.text, tokens, lexicons)
+        for span, tokens in zip(spans, tokenized, strict=True)
+    ]
+    z_components = robust_standardize_components(
+        [surface_tension_components(counts) for counts in counts_list]
+    )
+    weights = settings.metrics.surface_tension_weights
+
+    rows: list[ParagraphMetricRow] = []
+    for span, counts, z_comp in zip(spans, counts_list, z_components, strict=True):
+        paragraph_id = span.paragraph_id
+        if paragraph_id is None:
+            # insert_paragraphs 已校验段落身份完整，此处仅为类型收窄
+            raise ValueError(
+                f"段落指标写入失败：paragraph_id 未分配，paragraph_index={span.paragraph_index}"
+            )
+        z_value = surface_tension_z_value(z_comp, weights)
+        rows.append(
+            ParagraphMetricRow(
+                paragraph_id=paragraph_id,
+                token_count=counts.token_count,
+                char_count=counts.char_count,
+                sentence_count=counts.sentence_count,
+                sentence_char_sum=counts.sentence_char_sum,
+                sentence_char_sum_sq=counts.sentence_char_sum_sq,
+                positive_weight_sum=counts.positive_weight_sum,
+                negative_weight_sum=counts.negative_weight_sum,
+                fight_weight_sum=counts.fight_weight_sum,
+                exclaim_count=counts.exclaim_count,
+                question_count=counts.question_count,
+                pause_count=counts.pause_count,
+                dialogue_char_count=counts.dialogue_char_count,
+                sensory_hit_count=counts.sensory_hit_count,
+                imagery_hit_count=counts.imagery_hit_count,
+                metaphor_sentence_count=counts.metaphor_sentence_count,
+                function_word_counts=counts.function_word_counts,
+                semantic_category_counts=counts.semantic_category_counts,
+                surface_tension_z=z_value,
+                surface_tension=surface_tension_sigmoid(z_value),
+            )
+        )
+
+    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo.insert_paragraph_metrics(run_id, rows)
+    _commit_preprocess_writes(session, step="insert_paragraph_metrics")
+    logger.info(f"inserted {len(rows)} paragraph metrics into db (run_id={run_id})")
+    return len(rows)
 
 
 async def _generate_paragraph_embeddings(
