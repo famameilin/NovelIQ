@@ -36,7 +36,7 @@ def test_build_timeline_plan_consumes_authority_character_subgraph_only(db_sessi
     )
 
     assert timeline_plan.total_chunks == 5
-    assert timeline_plan.tension_curve == [0.15, 0.3, 0.95, 0.45, 0.1]
+    assert timeline_plan.tension_curve == [0.6, 0.7, 0.9, 0.5, 0.4]
     assert len(timeline_plan.phases) == 4
 
     atomic_node_payloads = [

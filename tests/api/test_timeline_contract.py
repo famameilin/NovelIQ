@@ -28,7 +28,7 @@ def test_get_timeline_returns_atomic_and_composite_nodes(api_client: TestClient,
     assert payload["meta"]["novel_id"] == scenario.novel_id
     assert payload["meta"]["total_chunks"] == 5
     assert len(payload["phases"]) == 4
-    assert payload["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
+    assert payload["tension_curve"] == [0.6, 0.7, 0.9, 0.5, 0.4]
     assert [node["progress"] for node in payload["atomic_nodes"]] == sorted(
         node["progress"] for node in payload["atomic_nodes"]
     )
@@ -80,7 +80,7 @@ def test_get_timeline_include_curve_only_controls_tension_curve_field(
     with_curve_payload = with_curve_response.json()
     without_curve_payload = without_curve_response.json()
 
-    assert with_curve_payload["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
+    assert with_curve_payload["tension_curve"] == [0.6, 0.7, 0.9, 0.5, 0.4]
     assert without_curve_payload["tension_curve"] is None
     assert without_curve_payload["atomic_nodes"] == with_curve_payload["atomic_nodes"]
     assert without_curve_payload["composite_nodes"] == with_curve_payload["composite_nodes"]

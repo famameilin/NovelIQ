@@ -11,8 +11,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
-
 from ..character_metrics import (
     build_character_graph,
     compute_antagonist_strength_gap,
@@ -258,8 +256,9 @@ def compute_language_style_metrics(
     }
 
     if style_data:
-        result["dialogue_ratio"] = float(np.mean(style_data.dialogue_ratios)) if style_data.dialogue_ratios else None
-        result["avg_sent_len"] = float(np.mean(style_data.avg_sent_lens)) if style_data.avg_sent_lens else None
+        # §9.1 守恒：全书比率 = 分子之和 / 分母之和，禁止对章节比值等权平均
+        result["dialogue_ratio"] = style_data.dialogue_ratio
+        result["avg_sent_len"] = style_data.avg_sent_len
     else:
         result["dialogue_ratio"] = None
         result["avg_sent_len"] = None

@@ -61,19 +61,6 @@ class ChunkCounts:
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkCurveRow:
-    """分块曲线写入行"""
-
-    chunk_id: int
-    pos_density: float
-    neg_density: float
-    net_density: float
-    smoothed_density: float
-    tension_proxy: float
-    tension_composite: float
-
-
-@dataclass(frozen=True, slots=True)
 class GlobalStatValue:
     """全局统计写入/读取行"""
 

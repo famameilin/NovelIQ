@@ -14,7 +14,6 @@ from .stats import StatsRepositoryProtocol
 from .types import (
     AnnotationRecord,
     ChunkCounts,
-    ChunkCurveRow,
     ChunkTextRow,
     CloudAnalysisRecord,
     ForeshadowingChunk,
@@ -39,7 +38,6 @@ __all__ = [
     "StatsRepositoryProtocol",
     "AnnotationRecord",
     "ChunkCounts",
-    "ChunkCurveRow",
     "ChunkTextRow",
     "CloudAnalysisRecord",
     "ForeshadowingChunk",

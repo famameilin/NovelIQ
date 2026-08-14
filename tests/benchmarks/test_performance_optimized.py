@@ -23,9 +23,6 @@ from src.metrics.lexicon_metrics import (
     get_emotion_spans_fast,
 )
 from src.metrics.text_utils import tokenize_words
-from src.workflows.curve_metrics import (
-    compute_emotion_curve_weighted,
-)
 
 
 def generate_test_text(length: int = 1000) -> str:
@@ -101,15 +98,19 @@ def test_multi_type_merge_optimization():
     print(f"\nChunk数量: {len(chunk_texts)}")
     print("每个Chunk长度: 500字")
 
-    print("\n1. 优化版（词典合并）:")
+    print("\n1. 优化版（Aho-Corasick 单遍匹配）:")
+    merged_pos: dict[str, float] = {}
+    merged_neg: dict[str, float] = {}
+    for lex in weighted_lexicons:
+        merged_pos.update(lex.pos_terms)
+        merged_neg.update(lex.neg_terms)
+    automaton = build_automaton(merged_pos.keys())
     start = time.time()
     for _ in range(10):
-        compute_emotion_curve_weighted(chunk_texts, weighted_lexicons)
+        for _chunk_id, text in chunk_texts:
+            get_emotion_spans_fast(text, automaton)
     elapsed_new = time.time() - start
     print(f"   耗时: {elapsed_new / 10 * 1000:.2f}毫秒/次")
-
-    print("\n✅ 预期性能提升: 3倍")
-    print(f"   预期耗时: ~{elapsed_new * 3:.2f}毫秒（优化前）")
 
 
 def test_end_to_end_optimization():

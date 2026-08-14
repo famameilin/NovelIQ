@@ -3,7 +3,8 @@
 
 运行状态、完成度检查等操作
 
-合并 EmotionCurve + RhythmCurve 引用为 ChunkCurve
+2026-08-14 M8b：ChunkCurve 引用移除——聚合完成度改按 global_stats 判定
+（曲线事实源为 paragraph_curves）。
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import Chunk, ChunkCurve, CloudAnalysis, ParagraphTopic
+from src.storage.models import Chunk, CloudAnalysis, GlobalStats, ParagraphTopic
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -116,11 +117,13 @@ def has_aggregated_data(session: Session, run_id: str) -> bool:
     Returns:
         是否有聚合数据
     """
-    curve_count = (
-        session.execute(select(func.count()).select_from(ChunkCurve).where(ChunkCurve.run_id == run_id)).scalar() or 0
+    # 2026-08-14 M8b：聚合唯一落库产物为 global_stats（chunk_curves 已下线）
+    stats_count = (
+        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar()
+        or 0
     )
 
-    return curve_count > 0
+    return stats_count > 0
 
 
 def has_topic_data(session: Session, run_id: str) -> bool:
@@ -177,8 +180,11 @@ def is_aggregate_complete(session: Session, run_id: str) -> bool:
     """
     chunks_count = session.execute(select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)).scalar() or 0
 
-    curve_count = (
-        session.execute(select(func.count()).select_from(ChunkCurve).where(ChunkCurve.run_id == run_id)).scalar() or 0
+    # 2026-08-14 M8b：聚合阶段唯一落库产物是 global_stats（chunk_curves 已下线），
+    # 完成判定改以 global_stats 存在为准
+    stats_count = (
+        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar()
+        or 0
     )
 
-    return chunks_count > 0 and curve_count >= chunks_count
+    return chunks_count > 0 and stats_count > 0

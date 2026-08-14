@@ -9,10 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Protocol, runtime_checkable
 
-from sqlalchemy.engine import Row
-
 from .types import (
-    ChunkCurveRow,
     CloudAnalysisRecord,
     GlobalContextRecord,
     GlobalStatValue,
@@ -183,10 +180,6 @@ class StatsRepositoryProtocol(Protocol):
         """获取全局统计数据字典"""
         ...
 
-    def insert_chunk_curve(self, run_id: str, rows: Iterable[ChunkCurveRow]) -> None:
-        """插入分块曲线数据"""
-        ...
-
     def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> TokenUsageStatsRecord:
         """获取 token 使用统计"""
         ...
@@ -203,6 +196,4 @@ class StatsRepositoryProtocol(Protocol):
         """更新全局上下文"""
         ...
 
-    def fetch_chunk_curves_full(self, run_id: str) -> Sequence[Row]:
-        """获取分块曲线完整数据"""
-        ...
+

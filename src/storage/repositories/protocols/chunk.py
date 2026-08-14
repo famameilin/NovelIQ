@@ -10,17 +10,12 @@ ChunkStyleData 仅用于类型检查时导入，避免协议模块增加运行�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-from sqlalchemy.engine import Row
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from src.chunking.chunker import Chunk
 
 from .types import ChunkCounts, ChunkTextRow
-
-if TYPE_CHECKING:
-    from src.storage.repositories.chunk import ChunkStyleData
 
 
 @runtime_checkable
@@ -46,24 +41,6 @@ class ChunkRepositoryProtocol(Protocol):
 
         Returns:
             分块文本行列表
-        """
-        ...
-
-    def fetch_chunk_styles(self, run_id: str) -> Sequence[Row]:
-        """
-        获取分块风格数据
-
-        Returns:
-            Row 对象序列，支持 row.chunk_id / row.dialogue_ratio 等字段名访问
-        """
-        ...
-
-    def insert_chunk_style(self, run_id: str, rows: Iterable[ChunkStyleData | dict[str, object]]) -> None:
-        """
-        插入分块风格数据
-
-        Args:
-            rows: 风格数据行
         """
         ...
 

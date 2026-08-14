@@ -35,7 +35,6 @@ from src.chunking.chunker import chunk_text
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     ChunkRepository,
-    ChunkStyleData,
     RunRepository,
     StatsRepository,
 )
@@ -64,36 +63,6 @@ def test_create_and_insert(db_session) -> None:
                 chunk_id=chunks[0].index,
                 name="张三",
                 action="走",
-            )
-        ],
-    )
-    chunk_repo.insert_chunk_style(
-        run_id,
-        [
-            ChunkStyleData(
-                chunk_id=chunks[0].index,
-                mtld=1.0,
-                ttr=0.5,
-                avg_sent_len=12.0,
-                sent_len_std=3.0,
-                pause_density=0.2,
-                fight_density=0.1,
-                exclaim_density=0.05,
-                dialogue_ratio=0.3,
-                question_density=0.02,
-                sensory_density=0.04,
-                metaphor_density=0.01,
-                function_word_vector="{}",
-                category_density_combat=0.0,
-                category_density_body=0.0,
-                category_density_relation=0.0,
-                category_density_faction=0.0,
-                category_density_command=0.0,
-                category_density_action=0.0,
-                category_density_psychology=0.0,
-                category_density_measure=0.0,
-                category_density_emotion=0.0,
-                category_density_color=0.0,
             )
         ],
     )

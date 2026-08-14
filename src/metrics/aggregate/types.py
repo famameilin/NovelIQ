@@ -99,13 +99,15 @@ class DialogueData:
 
 @dataclass
 class StyleData:
-    """风格指标数据
+    """风格指标数据（全书守恒聚合，§9.1）
 
-    存储风格指标数据用于聚合计算
+    2026-08-14 M8b：由每章比值列表改为全书分子/分母守恒值——
+    dialogue_ratio = Σdialogue_char_count / Σchar_count，
+    avg_sent_len = Σsentence_char_sum / Σsentence_count。
     """
 
-    dialogue_ratios: list[float]
-    avg_sent_lens: list[float]
+    dialogue_ratio: float | None
+    avg_sent_len: float | None
 
 
 def map_emotion_score(score_raw: str | None) -> int:
