@@ -538,7 +538,14 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             .where(AnalysisRun.worker_id.is_not(None))
             .where(AnalysisRun.heartbeat_at.is_not(None))
             .where(AnalysisRun.heartbeat_at < stale_before)
-            .values(status="failed", updated_at=now)
+            # 2026-08-14 P2-12：孤儿回收同时落 error/completed_at，
+            # 前端 failed 不再缺错误原因与完成时间
+            .values(
+                status="failed",
+                error="孤儿任务回收（worker 心跳超时）",
+                completed_at=now,
+                updated_at=now,
+            )
         )
         result = self.session.execute(stmt)
         self.session.commit()

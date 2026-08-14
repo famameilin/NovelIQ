@@ -388,3 +388,121 @@ def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
     # worker_id 非空时不进入竞态窗口判断
     refreshed["worker_id"] = "worker-other"
     assert service._is_recent_resume_reset(refreshed) is False
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_core_emits_cancelled_event_when_claim_cancelled(db_session, monkeypatch) -> None:
+    """
+    2026-08-14 P2-10：claim 前取消必须补发 SSE task_cancelled 终态事件，
+    否则已连接的客户端永远等不到取消信号
+    """
+    _insert_novel(db_session, "svcevt1")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcevt1")
+    run_repo.update_run_task_fields(run_id, cancel_requested=True)
+    service = _make_service(db_session, worker_id="worker-evt1")
+    service.task_manager.create_task(run_id[:8], "svcevt1")
+
+    sent: list[tuple[str, str, dict]] = []
+
+    async def fake_send(task_id: str, event_type: str, data: dict) -> None:
+        sent.append((task_id, event_type, data))
+
+    monkeypatch.setattr("src.api.services.analysis_service.event_manager.send", fake_send)
+
+    await service._run_analysis_core(
+        task_id=run_id[:8],
+        novel={"novel_id": "svcevt1"},
+        skip_stages_builder=MagicMock(),
+        num_topics=25,
+    )
+
+    assert sent == [(run_id[:8], "task_cancelled", {"stage": "cancelled", "message": "任务已取消"})]
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_session, monkeypatch) -> None:
+    """
+    2026-08-14 P2-13：所有阶段完成但成功收口前收到取消时，必须落 cancelled 终态
+    （此前直接 return，run 卡在 running 直到重启孤儿回收）
+    """
+    from src.api.services.analysis.error_handler import AnalysisErrorHandler
+
+    _insert_novel(db_session, "svcevt2")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcevt2")
+    service = _make_service(db_session, worker_id="worker-evt2")
+    service.task_manager.create_task(run_id[:8], "svcevt2")
+    service.error_handler = AnalysisErrorHandler(
+        novel_service=service.novel_service,
+        task_manager=service.task_manager,
+    )
+
+    monkeypatch.setattr(service, "_prepare_task_execution_claim", lambda task_id: "claimed")
+    monkeypatch.setattr(service, "_is_cancelled", lambda task_id: True)
+    monkeypatch.setattr(
+        service.env_initializer,
+        "init_analysis_environment",
+        lambda task_id, novel: ("svcevt2", None, None, db_session, None, run_id),
+    )
+
+    async def _noop(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_call_execute_analysis_stages", _noop)
+
+    await service._run_analysis_core(
+        task_id=run_id[:8],
+        novel={"novel_id": "svcevt2"},
+        skip_stages_builder=MagicMock(),
+        num_topics=25,
+    )
+
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "cancelled"
+    assert refreshed["completed_at"] is not None
+    assert refreshed["cancel_requested"] is False
+
+
+@pytest.mark.asyncio
+async def test_error_handler_skips_terminal_write_when_run_reclaimed(db_session) -> None:
+    """
+    2026-08-14 P2-13：旧 worker 的延迟取消写回在 run 已被新 worker（resume 后）
+    接管时被归属守卫跳过，不得覆写新轮 running 状态
+    """
+    from datetime import UTC, datetime
+
+    from src.api.services.analysis.error_handler import AnalysisErrorHandler
+
+    _insert_novel(db_session, "svcgrd1")
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="svcgrd1")
+    # 模拟 resume 后新 worker 已接管
+    run_repo.update_run_task_fields(
+        run_id,
+        status="running",
+        worker_id="worker-new",
+        heartbeat_at=datetime.now(UTC),
+    )
+    handler = AnalysisErrorHandler(
+        novel_service=MagicMock(),
+        task_manager=TaskManager(worker_id="worker-old"),
+    )
+
+    await handler.handle_cancel(
+        task_id=run_id[:8],
+        novel_id="svcgrd1",
+        session=db_session,
+        run_id=run_id,
+        analysis_logger=None,
+        bus=None,
+    )
+
+    refreshed = run_repo.get_run(run_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "running"
+    assert refreshed["worker_id"] == "worker-new"
