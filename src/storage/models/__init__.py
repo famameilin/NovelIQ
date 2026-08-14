@@ -31,6 +31,7 @@ from src.storage.models.graph import (
 )
 from src.storage.models.novel import Novel
 from src.storage.models.paragraph import Paragraph
+from src.storage.models.paragraph_curves import ParagraphCurve
 from src.storage.models.paragraph_metrics import ParagraphMetric
 from src.storage.models.paragraph_topics import ParagraphTopic
 from src.storage.models.rag import TokenUsage
@@ -51,6 +52,7 @@ __all__ = [
     "ParagraphEmbedding",
     "ParagraphMetric",
     "ParagraphTopic",
+    "ParagraphCurve",
     "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
     "CasePoolCase",

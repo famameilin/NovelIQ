@@ -16,7 +16,6 @@ from dataclasses import dataclass
 
 from sqlalchemy import text as sql_text
 
-from src.config import settings
 from src.config.constants import EVENT_TYPE_SCORES
 
 
@@ -70,11 +69,11 @@ def compute_emotion_curve(
 
 
     """
-    from src.metrics.fourier_filter import fourier_smooth
+    from src.metrics.robust_smooth import smooth_series
 
     raw_rows, raw_densities = _compute_emotion_curve_raw(chunk_texts, pos_terms, neg_terms)
     emotion_rows = [(chunk_id, pos_d, neg_d, net_d, 0.0) for chunk_id, pos_d, neg_d, net_d in raw_rows]
-    smoothed = fourier_smooth(raw_densities, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
+    smoothed = smooth_series(raw_densities)
     for idx, (chunk_id, pos_d, neg_d, net_d, _) in enumerate(emotion_rows):
         emotion_rows[idx] = (chunk_id, pos_d, neg_d, net_d, smoothed[idx])
     return emotion_rows, raw_densities
@@ -100,7 +99,7 @@ def compute_emotion_curve_weighted(
 
 
     """
-    from src.metrics.fourier_filter import fourier_smooth
+    from src.metrics.robust_smooth import smooth_series
 
     if not weighted_lexicons:
         return compute_emotion_curve(chunk_texts, {}, {})
@@ -135,7 +134,7 @@ def compute_emotion_curve_weighted(
         combined_rows.append((chunk_id, pos_density, neg_density, net_density, 0.0))
         raw_densities.append(net_density)
 
-    smoothed = fourier_smooth(raw_densities, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
+    smoothed = smooth_series(raw_densities)
     for idx, (chunk_id, pos_d, neg_d, net_d, _) in enumerate(combined_rows):
         combined_rows[idx] = (chunk_id, pos_d, neg_d, net_d, smoothed[idx])
 
@@ -184,6 +183,26 @@ def compute_tension_signals(
     return tension_signals
 
 
+def _proxy_score(proxy: dict[str, float]) -> float:
+    """
+    §19.6 修复：各分量先统一量纲（clip 到 [0,1]）再等权平均
+
+    此前直接平均不同量纲字段（fight/exclaim/question/dialogue 密度与
+    avg_sent_len 混算），平均句长量纲会主导结果。修复后：
+    - fight/exclaim/question/dialogue 密度：clip(x, 0, 1)
+    - avg_sent_len：min(x / 50, 1)（50 字为句长上限归一）
+    """
+    if not proxy:
+        return 0.0
+    total = 0.0
+    for key, value in proxy.items():
+        if key == "avg_sent_len":
+            total += max(0.0, min(value / 50.0, 1.0))
+        else:
+            total += max(0.0, min(value, 1.0))
+    return total / len(proxy)
+
+
 def compute_rhythm_curve(
     chunk_texts: list[tuple[int, str]],
     fight_terms: dict[str, float],
@@ -199,7 +218,7 @@ def compute_rhythm_curve(
     rhythm_rows: list[tuple[int, float, float]] = []
     for idx, (chunk_id, text) in enumerate(chunk_texts):
         proxy = tension_proxy(text, fight_terms)
-        proxy_score = sum(proxy.values()) / len(proxy) if proxy else 0.0
+        proxy_score = _proxy_score(proxy)
         rhythm_rows.append((chunk_id, proxy_score, tension_composite_values[idx]))
     return rhythm_rows
 
@@ -239,8 +258,9 @@ def compute_global_stats(
         global_stats.append(("emotion_std", math.sqrt(variance)))
         global_stats.append(("emotion_max", max(raw_densities)))
         global_stats.append(("emotion_min", min(raw_densities)))
-        max_idx = raw_densities.index(max(raw_densities))
-        min_idx = raw_densities.index(min(raw_densities))
+        # §19.14 修复：并列极值取最后出现的索引（rindex 语义），不再用 list.index 取首次
+        max_idx = len(raw_densities) - 1 - raw_densities[::-1].index(max(raw_densities))
+        min_idx = len(raw_densities) - 1 - raw_densities[::-1].index(min(raw_densities))
         max_chunk_id, _max_text = chunk_texts[max_idx]
         min_chunk_id, _min_text = chunk_texts[min_idx]
         global_stats.append(("emotion_max_chunk", float(max_chunk_id)))
@@ -253,4 +273,19 @@ def compute_global_stats(
         global_stats.append(("rhythm_std", math.sqrt(variance)))
         global_stats.append(("rhythm_max", max(tension_composite_values)))
         global_stats.append(("rhythm_min", min(tension_composite_values)))
+        # §19.14 修复：张力侧对称输出（此前只有 emotion 侧有 chunk 定位，不对称）；
+        # 并列极值同样取最后出现的索引，tension_composite_values 与 chunk_texts 索引对应
+        tension_max_idx = (
+            len(tension_composite_values)
+            - 1
+            - tension_composite_values[::-1].index(max(tension_composite_values))
+        )
+        tension_min_idx = (
+            len(tension_composite_values)
+            - 1
+            - tension_composite_values[::-1].index(min(tension_composite_values))
+        )
+        if tension_max_idx < len(chunk_texts) and tension_min_idx < len(chunk_texts):
+            global_stats.append(("rhythm_max_chunk", float(chunk_texts[tension_max_idx][0])))
+            global_stats.append(("rhythm_min_chunk", float(chunk_texts[tension_min_idx][0])))
     return global_stats

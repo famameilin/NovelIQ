@@ -3,8 +3,8 @@
 
 paragraphs 是全文唯一的段落事实源（设计文档《章节粒度分析指标重设计》§5.1），
 本仓储负责段落行的写入（先删后插）、完整性检查与按 run 读取，
-并管理段落级派生数据表：paragraph_metrics（原始计数与充分统计量，§5.3）
-与 paragraph_topics（段落 LDA 主题，§5.4）。
+并管理段落级派生数据表：paragraph_metrics（原始计数与充分统计量，§5.3）、
+paragraph_topics（段落 LDA 主题，§5.4）与 paragraph_curves（段落曲线，§5.5）。
 """
 
 from __future__ import annotations
@@ -20,8 +20,27 @@ from sqlalchemy.orm import Mapper
 
 from src.chunking.spans import ParagraphSpan
 from src.config import settings
-from src.storage.models import Chunk, Paragraph, ParagraphMetric, ParagraphTopic
+from src.storage.models import (
+    Chunk,
+    Paragraph,
+    ParagraphCurve,
+    ParagraphMetric,
+    ParagraphTopic,
+)
 from src.storage.repositories.base import BaseRepository
+
+
+@dataclass(frozen=True)
+class ParagraphCurveRow:
+    """2026-08-14 用于批量写入段落曲线（密度 + 平滑值）"""
+
+    paragraph_id: int
+    pos_density: float | None
+    neg_density: float | None
+    net_density: float | None
+    smoothed_net_density: float | None
+    surface_tension: float | None
+    smoothed_surface_tension: float | None
 
 
 @dataclass(frozen=True)
@@ -437,3 +456,63 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             .group_by(ParagraphTopic.topic_id)
         )
         return self.session.execute(stmt).all()
+
+    # ------------------------------------------------------------------
+    # paragraph_curves（§5.5 段落曲线）
+    # ------------------------------------------------------------------
+
+    def insert_paragraph_curves(
+        self, run_id: str, rows: Sequence[ParagraphCurveRow]
+    ) -> int:
+        """
+        先删后插写入 run 的段落曲线行
+
+        curve_version 从 settings.metrics 读取；密度列在分母为 0 时为 None
+        （合法观测，不伪造为零）。
+        """
+        curve_version = str(getattr(settings.metrics, "curve_version", None) or "1")
+        self.session.execute(delete(ParagraphCurve).where(ParagraphCurve.run_id == run_id))
+        if not rows:
+            return 0
+        insert_rows = [
+            {
+                "run_id": run_id,
+                "paragraph_id": row.paragraph_id,
+                "curve_version": curve_version,
+                "pos_density": row.pos_density,
+                "neg_density": row.neg_density,
+                "net_density": row.net_density,
+                "smoothed_net_density": row.smoothed_net_density,
+                "surface_tension": row.surface_tension,
+                "smoothed_surface_tension": row.smoothed_surface_tension,
+            }
+            for row in rows
+        ]
+        self.session.execute(insert(ParagraphCurve), insert_rows)
+        return len(insert_rows)
+
+    def fetch_paragraph_curves(self, run_id: str) -> Sequence[Row]:
+        """读取 run 的全部段落曲线行，按 paragraph_id 升序"""
+        statement = (
+            select(
+                ParagraphCurve.paragraph_id,
+                ParagraphCurve.pos_density,
+                ParagraphCurve.neg_density,
+                ParagraphCurve.net_density,
+                ParagraphCurve.smoothed_net_density,
+                ParagraphCurve.surface_tension,
+                ParagraphCurve.smoothed_surface_tension,
+            )
+            .where(ParagraphCurve.run_id == run_id)
+            .order_by(ParagraphCurve.paragraph_id)
+        )
+        return self.session.execute(statement).all()
+
+    def has_paragraph_curves(self, run_id: str) -> bool:
+        """run 是否存在段落曲线行"""
+        statement = (
+            select(ParagraphCurve.paragraph_id)
+            .where(ParagraphCurve.run_id == run_id)
+            .limit(1)
+        )
+        return self.session.execute(statement).scalar_one_or_none() is not None

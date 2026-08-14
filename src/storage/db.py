@@ -508,6 +508,18 @@ def _assert_paragraph_metrics_contract_schema(engine: Engine) -> None:
             "inference_token_count",
             "topic_model_version",
         },
+        "paragraph_curves": {
+            "run_id",
+            "paragraph_id",
+            "curve_version",
+            "pos_density",
+            "neg_density",
+            "net_density",
+            "smoothed_net_density",
+            "surface_tension",
+            "smoothed_surface_tension",
+            "created_at",
+        },
     }
     with engine.begin() as connection:
         for table_name, required in required_tables.items():

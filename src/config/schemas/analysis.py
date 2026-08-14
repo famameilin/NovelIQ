@@ -72,6 +72,11 @@ class MetricsSettings:
     fourier_smooth_keep_ratio: float = 0.1
     # 段落指标版本标识（§5.3 metric_version）
     metric_version: str = "1"
+    # 段落曲线版本标识（§5.5 curve_version）
+    curve_version: str = "1"
+    # LOWESS 平滑参数（§9.3，默认 2% 带宽/最少 7 点，待真实小说标定）
+    lowess_bandwidth: float = 0.02
+    lowess_min_points: int = 7
     # 段落表层张力分量权重（§9.2，初始等权；键：fight/exclaim/question/dialogue/pause）
     surface_tension_weights: dict[str, float] = field(
         default_factory=lambda: {
@@ -157,6 +162,9 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         character_max_iter=data.get("character_max_iter", 100),
         fourier_smooth_keep_ratio=data.get("fourier_smooth_keep_ratio", 0.1),
         metric_version=data.get("metric_version", "1"),
+        curve_version=data.get("curve_version", "1"),
+        lowess_bandwidth=data.get("lowess_bandwidth", 0.02),
+        lowess_min_points=data.get("lowess_min_points", 7),
         surface_tension_weights=(
             surface_tension_weights if isinstance(surface_tension_weights, dict) else None
         )

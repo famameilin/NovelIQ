@@ -3,17 +3,18 @@
 
 创建时间: 2026-04-06
 任务: 情绪曲线算法增强单元测试
-说明: 测试否定词翻转、加权密度计算、傅里叶滤波、jieba用户词典等功能
+说明: 测试否定词翻转、加权密度计算、LOWESS 平滑（§9.3 替代傅里叶滤波）、jieba用户词典等功能
 
 测试覆盖:
 - 否定词翻转逻辑：单重否定、双重否定、无否定
 - 加权密度计算：权重贡献、向后兼容
-- 傅里叶滤波：基本功能、降噪效果、无滞后
+- LOWESS 平滑：基本功能、降噪效果、无滞后、n<min_points 返回原始序列
 - jieba用户词典：分词效果验证
 """
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -27,12 +28,12 @@ from src.metrics.emotion_metrics import (
     lexical_sentiment_density,
     load_negation_words,
 )
-from src.metrics.fourier_filter import fourier_smooth
 from src.metrics.lexicon_metrics import (
     count_weighted_hits,
     load_weighted_lexicon,
     term_weighted_counts,
 )
+from src.metrics.robust_smooth import smooth_series
 from src.preprocess.tokenize import get_tokenizer
 
 
@@ -313,112 +314,113 @@ class TestWeightedDensity:
         assert result["心花怒放"] == 3
 
 
-class TestFourierSmooth:
+class TestSmoothSeries:
     """
-    傅里叶滤波测试
+    LOWESS 等间距平滑测试（替代傅里叶滤波，§9.3）
 
-    创建时间: 2026-04-06
-    任务: 情绪曲线算法增强单元测试
+    创建时间: 2026-04-06（傅里叶滤波用例）
+    修改时间: 2026-08-14
+    修改内容: fourier_smooth 已随 §9.3 移除，用例按 LOWESS 语义重写：
+    空输入、单值、n<min_points 返回原始序列、均值保持、无 NaN、降噪
     """
 
-    def test_fourier_smooth_basic(self) -> None:
+    def test_smooth_series_basic(self) -> None:
         """
-        傅里叶滤波基本功能
+        平滑基本功能
 
         场景: 输入任意数值序列
-        期望: 输出长度与输入一致
+        期望: 输出长度与输入一致、全部为 float 且无 NaN
         """
-        values = [1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
-        result = fourier_smooth(values, keep_ratio=0.1)
+        values = [1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0]
+        result = smooth_series(values)
 
         assert len(result) == len(values)
         assert all(isinstance(v, float) for v in result)
+        assert all(math.isfinite(v) for v in result)
 
-    def test_fourier_smooth_empty_input(self) -> None:
+    def test_smooth_series_empty_input(self) -> None:
         """
-        傅里叶滤波空输入
+        平滑空输入
 
         场景: 输入空列表
         期望: 返回空列表
         """
-        result = fourier_smooth([])
-        assert result == []
+        assert smooth_series([]) == []
 
-    def test_fourier_smooth_single_value(self) -> None:
+    def test_smooth_series_single_value(self) -> None:
         """
-        傅里叶滤波单值输入
+        平滑单值输入
 
         场景: 输入只有一个值
         期望: 返回相同的值
         """
-        result = fourier_smooth([5.0])
-        assert result == [5.0]
+        assert smooth_series([5.0]) == [5.0]
 
-    def test_fourier_smooth_noise_reduction(self) -> None:
+    def test_smooth_series_fewer_than_min_points_returns_original(self) -> None:
         """
-        傅里叶滤波降噪效果
+        n < min_points 返回原始序列（§9.3 第 4 条）
 
-        场景: 输入包含高频噪声的信号
-        期望: 高频噪声被过滤，保留低频趋势
+        场景: 点数少于最少有效点（默认 7）
+        期望: 不生成常数线，原样返回
         """
-        import math
+        values = [1.0, 2.0, 3.0, 4.0, 5.0]
+        assert smooth_series(values) == values
 
+    def test_smooth_series_constant_input_outputs_constant(self) -> None:
+        """
+        常数输入输出常数且无 NaN
+
+        场景: 全部取值相同
+        期望: 平滑后仍为相同常数
+        """
+        values = [7.0] * 30
+        result = smooth_series(values)
+        assert all(math.isfinite(v) for v in result)
+        assert all(abs(v - 7.0) < 1e-9 for v in result)
+
+    def test_smooth_series_noise_reduction(self) -> None:
+        """
+        平滑降噪效果
+
+        场景: 输入包含高频交替噪声的信号，带宽取 20% 使窗口覆盖足够点数
+        期望: 平滑后更接近低频基准信号
+        """
         base_signal = [math.sin(i * 0.1) for i in range(100)]
         noise = [0.3 * ((-1) ** i) for i in range(100)]
         noisy_signal = [b + n for b, n in zip(base_signal, noise, strict=True)]
 
-        smoothed = fourier_smooth(noisy_signal, keep_ratio=0.05)
+        smoothed = smooth_series(noisy_signal, bandwidth=0.2)
 
         diff_noisy = sum(abs(n - b) for n, b in zip(noisy_signal, base_signal, strict=True))
         diff_smoothed = sum(abs(s - b) for s, b in zip(smoothed, base_signal, strict=True))
 
         assert diff_smoothed < diff_noisy
 
-    def test_fourier_smooth_no_lag(self) -> None:
+    def test_smooth_series_no_lag(self) -> None:
         """
-        傅里叶滤波无滞后
+        平滑无滞后
 
-        场景: 输入信号有转折点
-        期望: 转折点位置不延迟（与滑动平均对比）
+        场景: 信号在中段发生阶跃
+        期望: 阶跃位置前后取值保持单调（不提前、不滞后到末尾）
         """
-        values = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        values = [0.0] * 15 + [1.0] * 15
 
-        smoothed = fourier_smooth(values, keep_ratio=0.3)
+        smoothed = smooth_series(values, bandwidth=0.2)
 
-        transition_idx = 3
-        smoothed_at_transition = smoothed[transition_idx]
+        transition_idx = 15
+        assert smoothed[transition_idx] > smoothed[0]
+        assert smoothed[-1] > smoothed[transition_idx]
 
-        assert smoothed_at_transition > smoothed[0]
-
-    def test_fourier_smooth_keep_ratio_effect(self) -> None:
+    def test_smooth_series_preserves_mean(self) -> None:
         """
-        傅里叶滤波 keep_ratio 参数效果
-
-        场景: 使用不同的 keep_ratio 值
-        期望: keep_ratio 越大，平滑后信号越接近原始信号
-        """
-        import math
-
-        values = [math.sin(i * 0.3) + 0.5 * math.sin(i * 2.0) for i in range(50)]
-
-        smoothed_low = fourier_smooth(values, keep_ratio=0.1)
-        smoothed_high = fourier_smooth(values, keep_ratio=0.5)
-
-        diff_low = sum(abs(s - v) for s, v in zip(smoothed_low, values, strict=True))
-        diff_high = sum(abs(s - v) for s, v in zip(smoothed_high, values, strict=True))
-
-        assert diff_high < diff_low
-
-    def test_fourier_smooth_preserves_mean(self) -> None:
-        """
-        傅里叶滤波保持均值
+        平滑保持均值
 
         场景: 输入任意信号
-        期望: 平滑后均值基本不变
+        期望: 平滑后均值与原始均值接近（对称 tricube 核加权局部拟合）
         """
         values = [1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0]
 
-        smoothed = fourier_smooth(values, keep_ratio=0.2)
+        smoothed = smooth_series(values, bandwidth=0.3)
 
         original_mean = sum(values) / len(values)
         smoothed_mean = sum(smoothed) / len(smoothed)
@@ -566,7 +568,7 @@ class TestIntegration:
             )
             densities.append(result["net_density"])
 
-        smoothed = fourier_smooth(densities, keep_ratio=0.5)
+        smoothed = smooth_series(densities)
 
         assert len(smoothed) == len(densities)
 

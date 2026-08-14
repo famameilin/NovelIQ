@@ -202,9 +202,9 @@ def compute_emotion_curve_metrics(
 def compute_character_relation_metrics(
     relation_data: RelationData,
     char_data: CharacterData,
-    total_chunks: int,
+    total_chars: int,
 ) -> dict[str, Any]:
-    """计算人物关系聚合指标"""
+    """计算人物关系聚合指标（total_chars 为全书总字符数，用于每万字关系变化频率，§19.10）"""
     relation_input = relation_data.relations
     relation_graph = build_character_graph(relation_input) if relation_input else None
     result: dict[str, Any] = {
@@ -216,7 +216,7 @@ def compute_character_relation_metrics(
         "average_clustering": compute_average_clustering(relation_input, graph=relation_graph),
         "num_connected_components": float(compute_number_of_connected_components(relation_input, graph=relation_graph)),
         "largest_component_size": float(compute_largest_component_size(relation_input, graph=relation_graph)),
-        **compute_relation_change_frequency(relation_data.full_relations, total_chunks),
+        **compute_relation_change_frequency(relation_data.full_relations, total_chars),
     }
 
     degree_centrality = compute_character_degree_centrality(relation_input, graph=relation_graph)

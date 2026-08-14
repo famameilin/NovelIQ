@@ -53,3 +53,26 @@ def test_fetch_known_characters_uses_canonical_view_with_aliases() -> None:
 
     assert known == ["贺伯安（别名：贺重明、伯安）"]
 
+
+def test_fetch_high_tension_chunks_orders_by_tension_composite_not_net_density() -> None:
+    """2026-08-14 修复 §19.7：高张力诊断按张力复合指数 tension_composite 排序，
+    不再按情绪强度 abs(net_density) 排序；NULL 处理保持原行为（> 0.01 过滤排除）。"""
+    session = MagicMock()
+    rows = [
+        SimpleNamespace(chunk_id=1, text="情绪强但张力弱", tension=0.1),
+        SimpleNamespace(chunk_id=2, text="张力强", tension=0.9),
+        SimpleNamespace(chunk_id=3, text="中等", tension=0.5),
+    ]
+    session.execute.return_value = rows
+
+    result = DiagnosisRepository(session).fetch_high_tension_chunks("run-1", limit=10)
+
+    # 返回结构不变：(chunk_id, text, tension)
+    assert result == [(1, "情绪强但张力弱", 0.1), (2, "张力强", 0.9), (3, "中等", 0.5)]
+
+    # 排序与过滤表达式必须基于 tension_composite，而不是 net_density。
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "tension_composite" in sql
+    assert "net_density" not in sql
+

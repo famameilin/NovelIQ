@@ -13,8 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from src.config import settings
-from src.metrics.fourier_filter import fourier_smooth
+from src.metrics.robust_smooth import smooth_series
 
 _SURFACE_TENSION_WEIGHTS: dict[str, float] = {
     "fight_density": 0.35,
@@ -59,7 +58,7 @@ def build_display_surface_tension(
     融合策略：
     - 以 chunk_style 的表层信号为主，按 chunk 级做归一化后加权
     - raw tension_proxy 只做弱回退，避免 style 缺失时整条展示线塌成 0
-    - 最终曲线做傅里叶平滑，保持和综合张力的视觉节奏一致
+    - 最终曲线做 LOWESS 等间距平滑（§9.3，替代傅里叶），保持和综合张力的视觉节奏一致
     """
     if not curve_rows:
         return {}
@@ -98,8 +97,5 @@ def build_display_surface_tension(
         chunk_ids.append(chunk_id)
         raw_scores.append(score)
 
-    smoothed_scores = fourier_smooth(
-        raw_scores,
-        keep_ratio=settings.metrics.fourier_smooth_keep_ratio,
-    )
+    smoothed_scores = smooth_series(raw_scores)
     return {chunk_id: _clamp(smoothed_scores[index]) for index, chunk_id in enumerate(chunk_ids)}

@@ -62,9 +62,12 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         return rows[:row_limit]
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
-        """2026-08-05 用于读取高张力 chunk 原文与曲线值"""
+        """2026-08-14 用于读取高张力 chunk 原文与曲线值（按张力复合指数排序，§19.7 修复）"""
+        # 2026-08-14 修复（§19.7）：此前按 abs(net_density)（情绪强度）排序，
+        # 高张力诊断实际应表达叙事张力，现改为按 tension_composite 排序。
+        # NULL 处理保持原有行为：abs(NULL) 为 NULL，被 > 0.01 过滤条件排除。
         row_limit = limit if limit is not None else 10
-        tension_expr = func.abs(ChunkCurve.net_density).label("tension")
+        tension_expr = func.abs(ChunkCurve.tension_composite).label("tension")
         stmt = (
             select(Chunk.chunk_id, Chunk.text, tension_expr)
             .select_from(Chunk)
@@ -76,7 +79,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 ),
             )
             .where(
-                func.abs(ChunkCurve.net_density) > 0.01,
+                func.abs(ChunkCurve.tension_composite) > 0.01,
                 ChunkCurve.run_id == run_id,
                 Chunk.run_id == run_id,
             )

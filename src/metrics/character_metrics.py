@@ -240,9 +240,17 @@ _CHANGE_KIND_TO_RATE_KEY = {
 
 def compute_relation_change_frequency(
     relations: list[tuple[str, str, str, str]],
-    total_chunks: int,
+    total_chars: int,
 ) -> dict[str, float]:
-    if not relations or total_chunks == 0:
+    """
+    计算关系变化频率（每万字变化次数，设计 §8.5 relation_change_per_10k_chars）。
+
+    2026-08-14 修复（§19.10）：分母从章节数改为全书总字数，
+    change_rate = len(relations) / total_chars * 10000。
+    返回键名保持不变以兼容调用方，change_rate 语义变为每万字频率；
+    total_chars 为 0 时 change_rate 返回 0.0。
+    """
+    if not relations or total_chars == 0:
         return {
             "total_changes": 0.0,
             "change_rate": 0.0,
@@ -257,6 +265,6 @@ def compute_relation_change_frequency(
 
     return {
         "total_changes": float(len(relations)),
-        "change_rate": len(relations) / total_chunks,
+        "change_rate": round(len(relations) / total_chars * 10000, 6),
         **{key: rate_counts.get(key, 0) / len(relations) for key in _RATE_KEYS},
     }
