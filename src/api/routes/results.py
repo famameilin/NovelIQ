@@ -52,7 +52,10 @@ from src.storage.repositories import (
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
+# 2026-08-14 D3：新管线只写 completed/running/pending/failed/cancelling/cancelled，
+# aggregated/diagnosed 是旧合同状态，不再视为可读；无图 run 由图就绪 409 兜底
+# （GraphReadinessError），状态可读与数据可读在此对齐
+READABLE_RUN_STATUSES = ("completed",)
 
 
 def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:

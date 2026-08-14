@@ -19,7 +19,8 @@ import {
 } from "../data";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
-const READABLE_TASK_STATUSES = new Set(["completed", "aggregated", "diagnosed"]);
+// 2026-08-14 D3：新管线只写 completed，aggregated/diagnosed 为旧合同状态（与后端 READABLE_RUN_STATUSES 对齐）
+const READABLE_TASK_STATUSES = new Set(["completed"]);
 
 /** 检查任务是否已进入可读终态；未完成时模拟真实后端的 AnalysisNotCompleteError */
 async function checkTaskReady(novelId: string, taskId: string): Promise<Response | null> {
