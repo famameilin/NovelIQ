@@ -2,12 +2,14 @@
 分块查询组装器
 
 说明: 承载 chunks 相关查询组装逻辑
+
+2026-08-14 M8a：chunk 曲线/风格查询已删除（前端 M4 已切换段落端点，导出走
+paragraph_curves）；本模块仅保留 chunk 标注展开（chunk_annotations）。
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
 from typing import Any
 
 from loguru import logger
@@ -15,81 +17,12 @@ from loguru import logger
 from src.api.models.responses import (
     ChunkAnnotation,
     ChunkCharacter,
-    ChunkCurvePoint,
     ChunkDialogue,
     ChunkRelation,
-    ChunkStyle,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
-from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
-
-
-def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
-    """统一构建 chunk curve DTO"""
-    return [
-        ChunkCurvePoint(
-            chunk_id=row.chunk_id,
-            pos_density=row.pos_density,
-            neg_density=row.neg_density,
-            net_density=row.net_density,
-            smoothed_density=row.smoothed_density,
-            tension_proxy=row.tension_proxy,
-            tension_composite=row.tension_composite,
-            surface_tension=getattr(row, "surface_tension", None),
-        )
-        for row in rows
-    ]
-
-
-def _fetch_raw_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list[ChunkCurvePoint]:
-    """获取数据库中持久化的原始 chunk_curves"""
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
-    return _build_chunk_curve_points(rows)
-
-
-def _fetch_chunk_curves(
-    run_id: str,
-    stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    chunk_repo: ChunkRepository,
-) -> list:
-    """获取分块曲线数据（情绪 + 节奏）"""
-    from src.metrics.emotion_curve_fusion import build_display_emotion_curve
-    from src.metrics.rhythm_curve_fusion import build_display_surface_tension
-
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
-    style_rows = chunk_repo.fetch_chunk_styles_full(run_id)
-    surface_tension_by_chunk = build_display_surface_tension(rows, style_rows)
-    fused_rows = build_display_emotion_curve(
-        curve_rows=rows,
-        annotation_rows=annotation_repo.fetch_chunk_annotations_full(run_id),
-        style_rows=style_rows,
-        dialogue_rows=annotation_repo.fetch_chunk_dialogues_full(run_id),
-        surface_tension_by_chunk=surface_tension_by_chunk,
-    )
-    return _build_chunk_curve_points(fused_rows)
-
-
-def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
-    """获取分块风格数据"""
-    rows = chunk_repo.fetch_chunk_styles_full(run_id)
-    return [
-        ChunkStyle(
-            chunk_id=row.chunk_id,
-            mtld=row.mtld,
-            ttr=row.ttr,
-            avg_sent_len=row.avg_sent_len,
-            d_value=row.d_value,
-            pause_density=row.pause_density,
-            fight_density=row.fight_density,
-            dialogue_ratio=row.dialogue_ratio,
-            sensory_density=row.sensory_density,
-            metaphor_density=row.metaphor_density,
-            imagery_lexicon_density=row.imagery_lexicon_density,
-        )
-        for row in rows
-    ]
+from src.storage.repositories import AnnotationRepository
 
 
 def _fetch_chunk_annotations(

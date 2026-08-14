@@ -110,7 +110,6 @@
   "metrics": {
     "mtld_threshold": 0.72,
     "middle_collapse_min_chunks": 10,
-    "character_max_iter": 100,
-    "fourier_smooth_keep_ratio": 0.1
+    "character_max_iter": 100
   }
 }

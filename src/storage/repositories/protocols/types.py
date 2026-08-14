@@ -61,15 +61,6 @@ class ChunkCounts:
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkTopicWeight:
-    """分块主题权重写入行"""
-
-    chunk_id: int
-    topic_id: int
-    topic_weight: float
-
-
-@dataclass(frozen=True, slots=True)
 class ChunkCurveRow:
     """分块曲线写入行"""
 
@@ -111,9 +102,9 @@ class PivotBlock:
 
 @dataclass(frozen=True, slots=True)
 class HighTensionChunk:
-    """高张力分块"""
+    """高张力段落（2026-08-14 M8a：事实源切换为段落曲线）"""
 
-    chunk_id: int
+    paragraph_id: int
     text: str
     tension: float
 

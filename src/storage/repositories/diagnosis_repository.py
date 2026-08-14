@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, ChunkCurve, ChunkTopic, StageSummary
+from src.storage.models import Chunk, Paragraph, ParagraphCurve, ParagraphTopic, StageSummary
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph import GraphRepository
@@ -62,32 +62,34 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         return rows[:row_limit]
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
-        """2026-08-14 用于读取高张力 chunk 原文与曲线值（按张力复合指数排序，§19.7 修复）"""
-        # 2026-08-14 修复（§19.7）：此前按 abs(net_density)（情绪强度）排序，
-        # 高张力诊断实际应表达叙事张力，现改为按 tension_composite 排序。
-        # NULL 处理保持原有行为：abs(NULL) 为 NULL，被 > 0.01 过滤条件排除。
+        """2026-08-14 M8a：高张力诊断数据源切换为段落曲线（§12.3 事实定位段落化）。
+
+        按 paragraph_curves.surface_tension 原始值排序（run 内稳健标准化 + sigmoid，
+        非 chunk 时代的 tension_composite 复合指数）；text 取 paragraphs.text。
+        NULL 处理保持原有行为：NULL 参与比较结果为 NULL，被 > 0.01 过滤条件排除。
+        """
         row_limit = limit if limit is not None else 10
-        tension_expr = func.abs(ChunkCurve.tension_composite).label("tension")
+        tension_expr = ParagraphCurve.surface_tension.label("tension")
         stmt = (
-            select(Chunk.chunk_id, Chunk.text, tension_expr)
-            .select_from(Chunk)
+            select(Paragraph.paragraph_id, Paragraph.text, tension_expr)
+            .select_from(Paragraph)
             .join(
-                ChunkCurve,
+                ParagraphCurve,
                 and_(
-                    Chunk.chunk_id == ChunkCurve.chunk_id,
-                    Chunk.run_id == ChunkCurve.run_id,
+                    Paragraph.paragraph_id == ParagraphCurve.paragraph_id,
+                    Paragraph.run_id == ParagraphCurve.run_id,
                 ),
             )
             .where(
-                func.abs(ChunkCurve.tension_composite) > 0.01,
-                ChunkCurve.run_id == run_id,
-                Chunk.run_id == run_id,
+                ParagraphCurve.surface_tension > 0.01,
+                ParagraphCurve.run_id == run_id,
+                Paragraph.run_id == run_id,
             )
             .order_by(tension_expr.desc())
             .limit(row_limit)
         )
         return [
-            (int(row.chunk_id), str(row.text), float(row.tension))
+            (int(row.paragraph_id), str(row.text), float(row.tension))
             for row in self.session.execute(stmt)
         ]
 
@@ -145,21 +147,29 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         ]
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
-        """2026-08-11 用于读取按累计权重排序的主题词（含主题词与标签，模型缺失时仅 id/weight）"""
+        """2026-08-11 用于读取按累计权重排序的主题词（含主题词与标签，模型缺失时仅 id/weight）。
+
+        2026-08-14 M8a：聚合源从 chunk_topics 切换为 paragraph_topics，
+        按推断 token 数加权（SUM(topic_weight * inference_token_count)，§11.1），
+        与 /topics 端点及 export 的聚合口径一致。
+        """
         row_limit = top_n if top_n is not None else 10
+        weighted_sum = func.sum(
+            ParagraphTopic.topic_weight * ParagraphTopic.inference_token_count
+        )
         stmt = (
             select(
-                ChunkTopic.topic_id,
-                func.sum(ChunkTopic.topic_weight).label("total_weight"),
+                ParagraphTopic.topic_id,
+                weighted_sum.label("weighted_total"),
             )
-            .where(ChunkTopic.run_id == run_id)
-            .group_by(ChunkTopic.topic_id)
-            .order_by(func.sum(ChunkTopic.topic_weight).desc())
+            .where(ParagraphTopic.run_id == run_id)
+            .group_by(ParagraphTopic.topic_id)
+            .order_by(weighted_sum.desc())
         )
         rows = [
             {
                 "topic_id": row.topic_id,
-                "weight": round(row.total_weight, 4) if row.total_weight else 0.0,
+                "weight": round(row.weighted_total, 4) if row.weighted_total else 0.0,
             }
             for row in self.session.execute(stmt).all()[:row_limit]
         ]

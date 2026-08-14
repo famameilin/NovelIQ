@@ -1,4 +1,4 @@
-"""导出 chunk 相关的样式、主题与 embedding 访问函数"""
+"""导出 chunk 相关的样式与 embedding 访问函数"""
 
 from .embedding_ops import (
     ParagraphEmbeddingRow,
@@ -16,7 +16,6 @@ from .style_ops import (
     fetch_chunk_styles_full,
     insert_chunk_style,
 )
-from .topic_ops import clear_chunk_topics, fetch_chunk_topics_agg, insert_chunk_topics
 
 __all__ = [
     "ChunkStyleData",
@@ -27,9 +26,6 @@ __all__ = [
     "insert_chunk_style",
     "fetch_chunk_styles_full",
     "fetch_chunk_imagery_lexicon_densities",
-    "insert_chunk_topics",
-    "clear_chunk_topics",
-    "fetch_chunk_topics_agg",
     "insert_paragraph_embeddings",
     "get_incomplete_paragraph_embedding_paragraph_ids",
     "search_similar_paragraphs",

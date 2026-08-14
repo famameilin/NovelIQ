@@ -96,6 +96,64 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         ],
     )
 
+    # 2026-08-14 段落化：导出核心结果走段落曲线，场景同步插入段落曲线行
+    # （每段一行，与 5 个 chunk 一一对应）
+    from src.storage.repositories.paragraph_repository import (
+        ParagraphCurveRow,
+        ParagraphRepository,
+    )
+
+    ParagraphRepository(db_session).insert_paragraph_curves(
+        run_id,
+        [
+            ParagraphCurveRow(
+                paragraph_id=0,
+                pos_density=0.10,
+                neg_density=0.02,
+                net_density=0.08,
+                smoothed_net_density=0.08,
+                surface_tension=0.6,
+                smoothed_surface_tension=0.6,
+            ),
+            ParagraphCurveRow(
+                paragraph_id=1,
+                pos_density=0.08,
+                neg_density=0.05,
+                net_density=0.03,
+                smoothed_net_density=0.03,
+                surface_tension=0.7,
+                smoothed_surface_tension=0.7,
+            ),
+            ParagraphCurveRow(
+                paragraph_id=2,
+                pos_density=0.03,
+                neg_density=0.22,
+                net_density=-0.19,
+                smoothed_net_density=-0.17,
+                surface_tension=0.9,
+                smoothed_surface_tension=0.9,
+            ),
+            ParagraphCurveRow(
+                paragraph_id=3,
+                pos_density=0.04,
+                neg_density=0.12,
+                net_density=-0.08,
+                smoothed_net_density=-0.07,
+                surface_tension=0.5,
+                smoothed_surface_tension=0.5,
+            ),
+            ParagraphCurveRow(
+                paragraph_id=4,
+                pos_density=0.02,
+                neg_density=0.05,
+                net_density=-0.03,
+                smoothed_net_density=-0.03,
+                surface_tension=0.4,
+                smoothed_surface_tension=0.4,
+            ),
+        ],
+    )
+
     persist_timeline_chapter(
         db_session,
         run_id=run_id,

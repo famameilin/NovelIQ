@@ -115,7 +115,7 @@ def test_get_pivot_materials_with_all_sections() -> None:
         out = _invoke(tools[1])
 
     assert "<转折块>" in out and "[chunk 1] (高潮)" in out
-    assert "<高张力>" in out and "(tension=0.9500)" in out
+    assert "<高张力>" in out and "[paragraph 2] (tension=0.9500)" in out
     assert "<伏笔线程>" in out and '{"thread": 1}' in out
     assert "伏笔兑现预期: 35.00%" in out
 

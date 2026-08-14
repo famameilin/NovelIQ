@@ -17,7 +17,7 @@ from sqlalchemy.engine import Row
 
 from src.chunking.chunker import Chunk
 
-from .types import ChunkCounts, ChunkTextRow, ChunkTopicWeight
+from .types import ChunkCounts, ChunkTextRow
 
 if TYPE_CHECKING:
     from src.storage.repositories.chunk import ChunkStyleData
@@ -65,19 +65,6 @@ class ChunkRepositoryProtocol(Protocol):
         Args:
             rows: 风格数据行
         """
-        ...
-
-    def insert_chunk_topics(self, run_id: str, rows: Iterable[ChunkTopicWeight]) -> None:
-        """
-        插入分块主题数据
-
-        Args:
-            rows: 主题数据行
-        """
-        ...
-
-    def clear_chunk_topics(self, run_id: str) -> None:
-        """清空分块主题数据"""
         ...
 
     def fetch_chunk_counts(self, run_id: str) -> ChunkCounts:

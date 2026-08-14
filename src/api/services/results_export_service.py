@@ -18,13 +18,12 @@ from src.api.services.results_queries import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
-    _fetch_chunk_styles,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_global_stats,
     _fetch_hierarchical_relations,
     _fetch_novel_name,
-    _fetch_raw_chunk_curves,
+    _fetch_paragraph_curves,
     _fetch_token_usage_stats,
     _fetch_topics,
 )
@@ -59,22 +58,23 @@ def load_core_results(
     chunk_repo: ChunkRepository,
 ) -> tuple[list, list[str]]:
     """
-    加载核心结果数据：chunk_curves、缺失字段
+    加载核心结果数据：paragraph_curves、缺失字段
 
-    说明: 合并 emotion_curve + rhythm_curve 为 chunk_curves
+    2026-08-14 M8a：results export 是复盘/比对用 payload，必须返回段落事实源
+    持久化原值（fetch_paragraph_rows + fetch_paragraph_curves 按 paragraph_id
+    对齐，max_points 不限制），不经过展示层降采样。
 
     Returns:
-        (chunk_curves, missing_fields)
+        (paragraph_curves, missing_fields)
     """
     missing_fields: list[str] = []
 
-    # results export 是复盘/比对用 payload，这里必须返回数据库中持久化的
-    # chunk_curves 原值，不能复用展示层融合后的单曲线，否则字段名不变但语义会被静默替换
-    chunk_curves = _fetch_raw_chunk_curves(run_id, stats_repo)
-    if not chunk_curves:
-        missing_fields.append("chunk_curves")
+    paragraph_repo = ParagraphRepository(annotation_repo.session)
+    paragraph_curves = _fetch_paragraph_curves(run_id, paragraph_repo, None)
+    if not paragraph_curves:
+        missing_fields.append("paragraph_curves")
 
-    return chunk_curves, missing_fields
+    return paragraph_curves, missing_fields
 
 
 def load_character_bundle(
@@ -125,25 +125,23 @@ def load_character_bundle(
 def load_chunk_bundle(
     run_id: str,
     annotation_repo: AnnotationRepository,
-    chunk_repo: ChunkRepository,
     valid_character_names: set[str],
     export_graph_view: ExportGraphAuthorityView,
-) -> tuple[list, list, list, list[str]]:
+) -> tuple[list, list, list[str]]:
     """
     加载分块相关数据
 
+    2026-08-14 M8a：chunk_styles 已从 export 移除（前端 M4 已切换段落端点，
+    风格消费在 M8b 段落化切换后再处理）。
+
     Returns:
-        (topics, chunk_styles, chunk_annotations, missing_fields)
+        (topics, chunk_annotations, missing_fields)
     """
     missing_fields: list[str] = []
 
     # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
     paragraph_repo = ParagraphRepository(annotation_repo.session)
     topics = _fetch_topics(run_id, paragraph_repo)
-
-    chunk_styles = _fetch_chunk_styles(run_id, chunk_repo)
-    if not chunk_styles:
-        missing_fields.append("chunk_styles")
 
     chunk_annotations = _fetch_chunk_annotations(
         run_id,
@@ -154,7 +152,7 @@ def load_chunk_bundle(
     if not chunk_annotations:
         missing_fields.append("chunk_annotations")
 
-    return topics, chunk_styles, chunk_annotations, missing_fields
+    return topics, chunk_annotations, missing_fields
 
 
 def load_graph_signal_bundle(
@@ -295,11 +293,10 @@ def build_export_payload(
     task_id: str,
     novel_id: str,
     novel_name: str | None,
-    chunk_curves: list,
+    paragraph_curves: list,
     characters: list,
     topics: list,
     diagnosis: Any,
-    chunk_styles: list,
     chunk_annotations: list,
     character_relations: list,
     hierarchical_relations: list,
@@ -323,11 +320,10 @@ def build_export_payload(
         "novel_name": novel_name,
         "generated_at": datetime.now().isoformat(),
         "total_chunks": global_stats.total_chunks if global_stats else 0,
-        "chunk_curves": [c.model_dump(exclude_none=True) for c in chunk_curves],
+        "paragraph_curves": [c.model_dump(exclude_none=True) for c in paragraph_curves],
         "characters": [c.model_dump(exclude_none=True) for c in characters],
         "topics": [t.model_dump(exclude_none=True) for t in topics],
         "diagnosis": diagnosis.model_dump(exclude_none=True) if diagnosis else None,
-        "chunk_styles": [s.model_dump(exclude_none=True) for s in chunk_styles],
         "chunk_annotations": [a.model_dump(exclude_none=True) for a in chunk_annotations],
         "foreshadowing_threads": [
             thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])
@@ -364,7 +360,7 @@ def fetch_all_results_data(
     graph_report = graph_authority_service.build_graph_report(run_id)
     timeline_view = graph_authority_service.build_timeline_view(run_id)
 
-    chunk_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
+    paragraph_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
         run_id, novel_id, stats_repo, annotation_repo, export_graph_view, diagnosis=diagnosis
@@ -375,10 +371,9 @@ def fetch_all_results_data(
         missing_fields.append("diagnosis")
         diagnosis = None
 
-    topics, chunk_styles, chunk_annotations, chunk_missing = load_chunk_bundle(
+    topics, chunk_annotations, chunk_missing = load_chunk_bundle(
         run_id,
         annotation_repo,
-        chunk_repo,
         valid_character_names,
         export_graph_view,
     )
@@ -425,11 +420,10 @@ def fetch_all_results_data(
         task_id=task_id,
         novel_id=novel_id,
         novel_name=novel_name,
-        chunk_curves=chunk_curves,
+        paragraph_curves=paragraph_curves,
         characters=characters,
         topics=topics,
         diagnosis=diagnosis,
-        chunk_styles=chunk_styles,
         chunk_annotations=chunk_annotations,
         foreshadowing_threads=foreshadowing_threads,
         character_relations=character_relations,

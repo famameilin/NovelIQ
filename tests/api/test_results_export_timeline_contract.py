@@ -125,11 +125,10 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
         task_id="task-1",
         novel_id="novel-1",
         novel_name="Test Novel",
-        chunk_curves=[],
+        paragraph_curves=[],
         characters=[],
         topics=[],
         diagnosis=None,
-        chunk_styles=[],
         chunk_annotations=[],
         character_relations=[],
         hierarchical_relations=[],
@@ -316,7 +315,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     )
     monkeypatch.setattr(
         "src.api.services.results_export_service.load_chunk_bundle",
-        lambda *_args, **_kwargs: ([], [], [], []),
+        lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_foreshadowing_threads",
@@ -474,44 +473,44 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
     assert valid_character_names == {"沈砚"}
 
 
-def test_load_core_results_keeps_export_on_raw_chunk_curves(monkeypatch: pytest.MonkeyPatch) -> None:
-    raw_curve = SimpleNamespace(
-        chunk_id=7,
+def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-08-14 M8a：load_core_results 从段落事实源导出原始曲线（不降采样、
+    不复用 chunk 展示层融合曲线），缺失字段语义同步为 paragraph_curves。"""
+    paragraph_point = SimpleNamespace(
+        paragraph_id=7,
+        chapter_id=1,
+        paragraph_index=0,
+        global_start_char=100,
+        global_end_char=200,
+        position=0.1,
+        char_count=100,
+        token_count=50,
         pos_density=0.12,
         neg_density=0.03,
         net_density=0.09,
-        smoothed_density=0.08,
-        tension_proxy=0.41,
-        tension_composite=0.39,
+        smoothed_net_density=0.08,
+        surface_tension=0.41,
+        smoothed_surface_tension=0.39,
     )
-
-    def _raise_if_display_curve_is_used(*_args, **_kwargs):
-        raise AssertionError("load_core_results should not reuse display-layer fused chunk curves")
 
     monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_raw_chunk_curves",
-        lambda *_args, **_kwargs: [raw_curve],
-    )
-    # 2026-08-13 P2：results_fetchers 转发层死代码已删除，防御 patch 指向
-    # 真实实现模块（若 load_core_results 误用展示层融合曲线会触发异常）
-    monkeypatch.setattr(
-        "src.api.services.results_queries._fetch_chunk_curves",
-        _raise_if_display_curve_is_used,
+        "src.api.services.results_export_service._fetch_paragraph_curves",
+        lambda *_args, **_kwargs: [paragraph_point],
     )
 
-    chunk_curves, missing_fields = load_core_results(
+    paragraph_curves, missing_fields = load_core_results(
         run_id="run-export-curves",
         stats_repo=MagicMock(),
-        annotation_repo=MagicMock(),
+        annotation_repo=MagicMock(session=MagicMock()),
         chunk_repo=MagicMock(),
     )
 
     assert missing_fields == []
-    assert len(chunk_curves) == 1
-    assert chunk_curves[0].chunk_id == 7
-    assert chunk_curves[0].pos_density == pytest.approx(0.12)
-    assert chunk_curves[0].net_density == pytest.approx(0.09)
-    assert chunk_curves[0].smoothed_density == pytest.approx(0.08)
+    assert len(paragraph_curves) == 1
+    assert paragraph_curves[0].paragraph_id == 7
+    assert paragraph_curves[0].pos_density == pytest.approx(0.12)
+    assert paragraph_curves[0].net_density == pytest.approx(0.09)
+    assert paragraph_curves[0].smoothed_net_density == pytest.approx(0.08)
 
 
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -677,11 +676,10 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
             task_id="task-1",
             novel_id="novel-1",
             novel_name="Test Novel",
-            chunk_curves=[],
+            paragraph_curves=[],
             characters=[],
             topics=[],
             diagnosis=None,
-            chunk_styles=[],
             chunk_annotations=[],
             character_relations=[],
             hierarchical_relations=[],

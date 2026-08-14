@@ -60,14 +60,12 @@ def test_parse_metrics_settings_reads_thresholds() -> None:
             "mtld_threshold": 0.7,
             "middle_collapse_min_chunks": 8,
             "character_max_iter": 50,
-            "fourier_smooth_keep_ratio": 0.2,
         }
     )
 
     assert settings.mtld_threshold == 0.7
     assert settings.middle_collapse_min_chunks == 8
     assert settings.character_max_iter == 50
-    assert settings.fourier_smooth_keep_ratio == 0.2
 
 
 def test_parse_metrics_settings_defaults() -> None:
@@ -76,4 +74,3 @@ def test_parse_metrics_settings_defaults() -> None:
     assert settings.mtld_threshold == 0.72
     assert settings.middle_collapse_min_chunks == 10
     assert settings.character_max_iter == 100
-    assert settings.fourier_smooth_keep_ratio == 0.1
