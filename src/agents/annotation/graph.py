@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import json
 import time
-from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -24,7 +23,8 @@ if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.stream import AgentStream
 
-AnnotationPhase = Literal["chunk_open", "continuity_open", "completed"]
+# 2026-08-14 D1：无 continuity_open 阶段，chunk_open -> completed 两态
+AnnotationPhase = Literal["chunk_open", "completed"]
 
 _DOMAIN_NAMES = (
     "metrics",
@@ -44,6 +44,7 @@ class AnnotationGraphState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     phase: AnnotationPhase
     iterations: int
+    protocol_errors: int
     error: str | None
 
 
@@ -309,21 +310,47 @@ def _build_auto_finalize_node(
     return auto_finalize
 
 
-def _protocol_error(
-    state: AnnotationGraphState,
+def _build_protocol_error_node(
     *,
+    max_retries: int,
     observer: AgentTurnObserver | None = None,
-) -> dict[str, Any]:
-    """2026-08-10 用于拒绝无工具回复并闭合当前回合审计计时"""
-    if observer is not None:
-        observer.close_turn()
-    names = [str(call.get("name")) for call in _tool_calls(state)]
-    return {
-        "error": (
-            "annotation 工具协议错误：必须调用工具，"
-            f"实际={names}"
-        )
-    }
+):
+    """2026-08-14 用于拒绝无工具回复：预算内回灌提示重试，超预算才收口失败
+
+    2026-08-14 P1-4：此前一次无工具回复直接 protocol_error -> END，
+    单次模型输出漂移即整章失败、run 中断需 resume；与诊断图（finalize 按
+    attempts 重试）对齐，改为预算内重试。重试必须闭合当前回合审计计时
+    （下一回合会开启新 turn），失败回复不回灌悬空 ToolMessage（OpenAI
+    兼容网关会因 tool_call_id 不匹配 400），改用 SystemMessage 说明。
+    """
+
+    def protocol_error(state: AnnotationGraphState) -> dict[str, Any]:
+        if observer is not None:
+            observer.close_turn()
+        names = [str(call.get("name")) for call in _tool_calls(state)]
+        attempts = int(state.get("protocol_errors") or 0)
+        if attempts < max_retries:
+            return {
+                "messages": [
+                    SystemMessage(
+                        content=(
+                            "模型回复未包含任何工具调用"
+                            f"（实际输出: {names or '无内容'}）。"
+                            "本轮必须调用至少一个工具完成标注语义写入，"
+                            "请参考工具说明重新回复。"
+                        )
+                    )
+                ],
+                "protocol_errors": attempts + 1,
+            }
+        return {
+            "error": (
+                "annotation 工具协议错误：连续无工具调用达到上限 "
+                f"{max_retries + 1} 次，必须调用工具"
+            )
+        }
+
+    return protocol_error
 
 
 def _route_after_work(state: AnnotationGraphState) -> str:
@@ -342,6 +369,7 @@ def build_annotation_graph(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
+    protocol_retries: int = 2,
 ) -> Any:
     """2026-08-10 用于构建逐 chunk 领域写入和章节自动完成状态机（消息链累积）"""
     graph = StateGraph(AnnotationGraphState)
@@ -376,7 +404,7 @@ def build_annotation_graph(
     )
     graph.add_node(
         "protocol_error",
-        partial(_protocol_error, observer=observer),
+        _build_protocol_error_node(max_retries=protocol_retries, observer=observer),
     )
     graph.add_edge(START, "agent")
     graph.add_conditional_edges(

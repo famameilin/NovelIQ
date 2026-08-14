@@ -177,6 +177,7 @@ async def _run_single_attempt(
             "messages": initial_messages,
             "phase": "chunk_open",
             "iterations": 0,
+            "protocol_errors": 0,
             "error": None,
         }
     )

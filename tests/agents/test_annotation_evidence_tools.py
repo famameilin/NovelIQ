@@ -532,7 +532,7 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     assert chunk.chunk_id == 10
 
     assert ledger.completed_chunks[0].chunk_id == 10
-    assert ledger.phase == "continuity_open"
+    assert ledger.phase == "completed"
     dialogue = chunk.dialogues[0]
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.content == "住手"
@@ -828,8 +828,8 @@ def test_write_foreshadowings_only_accepts_description_and_confidence() -> None:
         )
 
 
-def test_future_disabled_rejects_future_search_and_read() -> None:
-    """2026-08-07 用于验证关闭开关时 future 搜索与读取都不可用"""
+def test_future_disabled_limits_search_to_previous() -> None:
+    """2026-08-14 用于验证关闭开关时 search_text 仅检索前文范围"""
     import asyncio
 
     service = _QueryService()
@@ -840,23 +840,21 @@ def test_future_disabled_rejects_future_search_and_read() -> None:
         asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
     )
     assert payload[0]["result_number"] == 1
-    ledger.set_phase("continuity_open")
-    with pytest.raises(AnnotationAuthorizationError, match="allow_future_context=false"):
-        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
+    assert service.text_queries == [("顾霜", "previous")]
 
 
-def test_search_text_numbering_and_read_authorization() -> None:
-    """2026-08-07 用于验证运行内编号读取真实原文且编号不可复用"""
+def test_future_enabled_searches_all_and_read_permission_follows_config() -> None:
+    """2026-08-14 用于验证开启开关时 search_text 检索前后文，read_text 授权随配置收放"""
     import asyncio
 
     service = _QueryService()
     ledger = _ledger(allow_future_context=True)
-    ledger.set_phase("continuity_open")
     tools = _tools(service, ledger)
 
     payload = json.loads(
         asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
     )
+    assert service.text_queries == [("顾霜", "all")]
     assert payload[0]["result_number"] == 1
     assert "chunk_id" not in payload[0]
     read_receipt = json.loads(
@@ -865,9 +863,11 @@ def test_search_text_numbering_and_read_authorization() -> None:
     assert read_receipt == {"content": "顾霜喝道"}
     assert service.reads == [20]
 
-    ledger.set_phase("chunk_open")
-    with pytest.raises(AnnotationAuthorizationError, match="不属于当前"):
+    # 关闭开关后，已检索的后文结果不再可读（权限随配置收放）
+    ledger.allow_future_context = False
+    with pytest.raises(AnnotationAuthorizationError, match="超出当前权限范围"):
         _find_tool(tools, "read_text").invoke({"result_number": 1})
+    # 未授权的编号依旧被拒
     with pytest.raises(AnnotationAuthorizationError, match="未由本轮 search_text 返回"):
         _find_tool(tools, "read_text").invoke({"result_number": 99})
 
