@@ -4,7 +4,6 @@ from src.models.local.character_reference_policy import (
     filter_global_character_names,
     is_global_character_surface_name,
     is_reference_slot_name,
-    resolve_global_character_name,
 )
 
 
@@ -35,21 +34,11 @@ def test_reference_policy_allows_explicit_global_name() -> None:
     assert decision.resolved_global_name == "汪淼"
 
 
-def test_reference_policy_resolves_alias_only_when_target_is_global() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: alias 表不能把实名映射回代词，防止旧污染反向进入主链。
-    """
-    assert resolve_global_character_name("大史", alias_map={"大史": "史强"}) == "史强"
-    assert resolve_global_character_name("汪淼", alias_map={"汪淼": "我"}) is None
-
-
 def test_reference_policy_allows_resolved_pronoun_as_global_target_only() -> None:
     """
     创建时间: 2026-04-29
     任务: 角色引用分层重构
-    新建原因: 已解析代词只能用 resolved_global_name 进入主链，surface 本身不能变成 alias。
+    新建原因: 已解析代词只能用 resolved_global_name 进入主链，surface 本身不能变成全局实体。
     """
     decision = decide_character_reference("我", resolved_global_name="汪淼")
 
@@ -63,9 +52,9 @@ def test_filter_global_character_names_dedupes_and_filters_references() -> None:
     """
     创建时间: 2026-04-29
     任务: 角色引用分层重构
-    新建原因: 各读侧共享 helper 需要同时覆盖去重、alias 合并和代词过滤。
+    新建原因: 各读侧共享 helper 需要同时覆盖去重和代词过滤。
     """
-    result = filter_global_character_names(["我", "文洁", "叶文洁", "大史"], alias_map={"文洁": "叶文洁"})
+    result = filter_global_character_names(["我", "叶文洁", "叶文洁", "大史"])
 
     assert result == ["叶文洁", "大史"]
 

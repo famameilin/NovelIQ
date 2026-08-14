@@ -18,12 +18,23 @@ class TestTaskModelConfigFromFile(unittest.TestCase):
 
 class TestTaskModelConfigFromEnv(unittest.TestCase):
     def test_from_env_with_all_values(self) -> None:
+        """
+        2026-08-08 用于验证 Settings 从平铺模型变量加载连接信息
+        """
+
         env_vars = {
-            "DISAMBIG_INTERVAL": "20",
+            "MODEL_BASE_URL": "https://api.example.com/v1",
+            "MODEL_ID": "shared-text-model",
+            "MODEL_KEY": "text-key",
+            "EMBEDDING_MODEL_BASE_URL": "http://localhost:8080/v1",
+            "EMBEDDING_MODEL_ID": "embedding-model",
+            "EMBEDDING_MODEL_KEY": "sk-no-key-required",
         }
         with patch.dict(os.environ, env_vars, clear=False):
             new_settings = Settings.from_env()
-            self.assertEqual(new_settings.analysis.incremental_disambig_interval, 20)
+            self.assertEqual(new_settings.models.annotation.model, "shared-text-model")
+            self.assertEqual(new_settings.models.diagnosis.model, "shared-text-model")
+            self.assertEqual(new_settings.models.paragraph_embedding.model, "embedding-model")
 
 
 class TestTaskModelConfigValidate(unittest.TestCase):
@@ -51,11 +62,6 @@ class TestTaskModelConfigValidate(unittest.TestCase):
 class TestLoadTaskConfig(unittest.TestCase):
     def test_load_annotation_config(self) -> None:
         config = load_task_config("annotation")
-        self.assertIsNotNone(config.base_url)
-        self.assertIsNotNone(config.model)
-
-    def test_load_diagnosis_config(self) -> None:
-        config = load_task_config("diagnosis")
         self.assertIsNotNone(config.base_url)
         self.assertIsNotNone(config.model)
 

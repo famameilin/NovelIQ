@@ -18,7 +18,8 @@ export interface TimelineLegendProps {
 export function TimelineLegend({ className }: TimelineLegendProps) {
   const presentations = [
     { key: "plot", nodeType: "plot", nodeSubtype: "plot" },
-    { key: "relation", nodeType: "relation", nodeSubtype: "新建" },
+    { key: "state", nodeType: "state", nodeSubtype: "state" },
+    { key: "relation", nodeType: "relation", nodeSubtype: "assert" },
     { key: "entry", nodeType: "lifecycle", nodeSubtype: "entry" },
     { key: "exit", nodeType: "lifecycle", nodeSubtype: "exit" },
   ] as const;

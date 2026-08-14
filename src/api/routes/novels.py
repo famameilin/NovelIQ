@@ -54,6 +54,17 @@ async def list_novels(
     }
 
 
+@router.get("/{novel_id}")
+async def get_novel(
+    novel_id: str,
+    service: NovelService = Depends(get_novel_service),  # noqa: B008
+):
+    try:
+        return service.get_novel(novel_id)
+    except NovelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"小说不存在: {novel_id}") from exc
+
+
 @router.delete("/{novel_id}")
 async def delete_novel(
     novel_id: str,

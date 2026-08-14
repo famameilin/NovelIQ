@@ -21,7 +21,7 @@ class LoggingSettings:
     """日志配置"""
 
     console_level: str = "INFO"
-    file_level: str = "DEBUG"
+    file_level: str = "DEBUG"  # deprecated: 全仓无读取方，仅为兼容旧配置文件保留
     log_dir: str = "logs"
     rotation: str = "10 MB"
     retention: str = "7 days"

@@ -60,6 +60,11 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         total_tokens: int,
         completion_tokens: int | None = None,
         chunk_id: int | None = None,
+        cache_read_tokens: int | None = None,
+        cost: float | None = None,
+        accounting_source: str = "reported",
+        reasoning_tokens: int | None = None,
+        agent_turn_id: int | None = None,
     ) -> int | None:
         """插入 token 使用记录"""
         return metrics.insert_token_usage(
@@ -73,6 +78,11 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
             total_tokens,
             completion_tokens,
             chunk_id,
+            cache_read_tokens,
+            cost,
+            accounting_source,
+            reasoning_tokens,
+            agent_turn_id,
         )
 
     def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> dict[str, Any]:
@@ -162,19 +172,15 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """获取小说标题"""
         return metrics.fetch_novel_title(self.session, novel_id, run_id)
 
-    def has_global_context(self, run_id: str) -> bool:
+    def has_global_context(self, run_id: str, novel_id: str) -> bool:
         """
         检查是否已存在 global_context 记录
 
         """
-        return metrics.has_global_context(self.session, run_id)
+        return metrics.has_global_context(self.session, run_id, novel_id)
 
     # ==================== summaries 模块方法 ====================
 
     def insert_chunk_summary(self, run_id: str, chunk_id: int, summary: str, *, commit: bool = True) -> None:
         """插入分块摘要"""
         return summaries.insert_chunk_summary(self.session, run_id, chunk_id, summary, commit=commit)
-
-    def insert_character_appearances(self, run_id: str, chunk_id: int, appearances: Sequence[Any]) -> None:
-        """插入角色出场信息"""
-        return summaries.insert_character_appearances(self.session, run_id, chunk_id, appearances)

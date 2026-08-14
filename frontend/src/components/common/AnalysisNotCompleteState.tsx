@@ -1,10 +1,15 @@
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, AlertTriangle } from "lucide-react";
 
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 
 type AnalysisNotCompleteStateProps = {
   title?: string;
   description: string;
+  /**
+   * 2026-08-08 用于区分“仍在分析中”（等待态）与“任务已失败”（失败态），
+   * 失败态用红色警示视觉，避免用户误以为任务还在正常推进
+   */
+  failed?: boolean;
 };
 
 /**
@@ -14,16 +19,21 @@ type AnalysisNotCompleteStateProps = {
 export function AnalysisNotCompleteState({
   title = "分析尚未完成",
   description,
+  failed = false,
 }: AnalysisNotCompleteStateProps) {
   return (
     <DashboardCardShell
       title={title}
-      icon={<AlertCircle className="h-4 w-4" />}
+      icon={failed ? <AlertTriangle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
       accent="chart-4"
       className="min-h-[240px]"
       bodyClassName="items-center justify-center gap-3 text-center"
     >
-      <AlertCircle className="h-12 w-12 text-text-muted" />
+      {failed ? (
+        <AlertTriangle className="h-12 w-12 text-chart-negative" />
+      ) : (
+        <AlertCircle className="h-12 w-12 text-text-muted" />
+      )}
       <p className="text-sm text-text-muted">{description}</p>
     </DashboardCardShell>
   );

@@ -9,12 +9,36 @@ from __future__ import annotations
 from typing import Any
 
 from src.api.models.responses import CharacterStats
-from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
-from src.storage.repositories import AnnotationRepository, GraphRepository
+from src.storage.repositories import AnnotationRepository
 
 from .common import _calculate_narrative_focus_scores
+
+
+def _build_name_resolution(
+    annotation_repo: AnnotationRepository,
+    run_id: str,
+    preferred_names: list[str] | None = None,
+) -> dict[str, str]:
+    """2026-08-09 用于把别名角色名归一到代表角色名"""
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    entities = authority_service.build_export_view(run_id).canonical_entities
+    preferred = set(preferred_names or [])
+    name_resolution: dict[str, str] = {}
+    for entity in entities:
+        aliases = [alias for alias in entity.aliases if alias and alias != entity.name]
+        representative = entity.name
+        if preferred:
+            chosen = next((alias for alias in aliases if alias in preferred), None)
+            if chosen is not None:
+                representative = chosen
+        for alias in aliases:
+            name_resolution[alias] = representative
+        if representative != entity.name:
+            name_resolution[entity.name] = representative
+    return name_resolution
 
 
 def _fetch_characters(
@@ -23,28 +47,40 @@ def _fetch_characters(
     arc_scores: dict[str, float] | None = None,
     focus_characters: list[str] | None = None,
     main_characters: list[str] | None = None,
-    limit: int | None = settings.api.query_limit,
+    limit: int | None = 50,
 ) -> list:
     """
     修改时间: 2026-04-29
     任务: 角色引用分层重构
     修改原因: 角色榜只聚合 global-character 准入后的名字，未解析代词或泛称不能进入 results。
+
+    修改时间: 2026-08-09
+    任务: 消歧读侧消费
+    修改原因: 同一人物关系产生的别名（如 贺重明=伯安）需要在角色榜归一到代表名，
+              否则同一角色会拆成多行。
+    修改时间: 2026-08-09
+    任务: 诊断命名对齐
+    修改原因: 诊断输出的 main_characters/focus_characters/arc_scores 使用别名名
+              （如 贺重明），必须归一到代表名后才能参与聚焦评分匹配。
     """
-    graph_repo = GraphRepository(annotation_repo.session)
-    alias_map = graph_repo.fetch_alias_map(run_id)
     rows = annotation_repo.fetch_characters_with_scores(run_id)
+    name_resolution = _build_name_resolution(
+        annotation_repo,
+        run_id,
+        preferred_names=main_characters,
+    )
 
     merged: dict[str, dict[str, Any]] = {}
     for row in rows:
         name: str = str(getattr(row, "surface_name", None) or row.name)
         decision = decide_character_reference(
             name,
-            alias_map=alias_map,
             resolved_global_name=getattr(row, "resolved_global_name", None),
         )
         canonical = decision.resolved_global_name
         if canonical is None:
             continue
+        canonical = name_resolution.get(canonical, canonical)
         role_function: str = str(row.role_function) if row.role_function else "unknown"
         emotion_raw: str | None = str(row.emotion_score) if row.emotion_score else None
         emotion_score = EMOTION_SCORE_MAPPING.get(emotion_raw, 0) if emotion_raw else 0
@@ -85,7 +121,18 @@ def _fetch_characters(
 
     result.sort(key=lambda item: item.appearance_count, reverse=True)
     if arc_scores is not None and main_characters is not None and focus_characters is not None:
-        result = _calculate_narrative_focus_scores(result, arc_scores, focus_characters, main_characters)
+        main_resolved = [name_resolution.get(name, name) for name in main_characters]
+        focus_resolved = [name_resolution.get(name, name) for name in focus_characters]
+        arc_resolved = {
+            name_resolution.get(name, name): score
+            for name, score in arc_scores.items()
+        }
+        result = _calculate_narrative_focus_scores(
+            result,
+            arc_resolved,
+            focus_resolved,
+            main_resolved,
+        )
 
     if limit is None:
         return result

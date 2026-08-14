@@ -6,14 +6,32 @@
 
 from __future__ import annotations
 
-from . import characters, foreshadowing_threads, inserts, locations, queries
-from .repository import AnnotationRepository
+from .continuity import (
+    CasePoolRepository,
+    CaseResolutionMappingRepository,
+    ChapterAnnotationRepository,
+    DatabaseAnnotationQueryService,
+    DialogueRecordRepository,
+    ForeshadowingRepository,
+)
+from .repository import (
+    AnnotationRepository,
+    CharacterFactRow,
+    ChunkAnnotationRow,
+    DialogueFactRow,
+    ForeshadowingThreadView,
+)
 
 __all__ = [
     "AnnotationRepository",
-    "characters",
-    "foreshadowing_threads",
-    "inserts",
-    "locations",
-    "queries",
+    "CharacterFactRow",
+    "ChunkAnnotationRow",
+    "DialogueFactRow",
+    "ForeshadowingThreadView",
+    "CasePoolRepository",
+    "CaseResolutionMappingRepository",
+    "ChapterAnnotationRepository",
+    "DatabaseAnnotationQueryService",
+    "DialogueRecordRepository",
+    "ForeshadowingRepository",
 ]

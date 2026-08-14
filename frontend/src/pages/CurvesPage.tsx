@@ -5,9 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react";
 import { getChunkCurves, getNarrativeStructure } from "@/api/results";
 import { getNovel } from "@/api/novels";
-import { useNovelStore } from "@/store/novelStore";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
+import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
 import { CurveToolbar } from "@/components/charts/CurveToolbar";
 import { EmotionCurveChart } from "@/components/charts/EmotionCurveChart";
@@ -32,9 +34,12 @@ export function CurvesPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
+
+  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 不得用于新小说的查询，也不得回写固化成新小说 URL（模式同 GraphPage）
+  const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
 
   const emotionChartRef = useRef<ReactEChartsCore>(null);
   const rhythmChartRef = useRef<ReactEChartsCore>(null);
@@ -47,32 +52,23 @@ export function CurvesPage() {
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
 
   useEffect(() => {
-    if (novelId) {
-      setNovel(novelId);
-      if (urlTaskId) {
-        setTask(urlTaskId);
-      }
-    }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+    if (!novelId || !storeTaskId) return;
+    if (!shouldWriteBackTaskUrl(urlTaskId, storeTaskId, urlTaskSyncRef)) return;
+    navigate(`/novels/${novelId}/curves?task_id=${storeTaskId}`, { replace: true });
+  }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
 
-  useEffect(() => {
-    if (currentTaskId && searchParams.get("task_id") !== currentTaskId) {
-      navigate(`/novels/${novelId}/curves?task_id=${currentTaskId}`, { replace: true });
-    }
-  }, [currentTaskId, novelId, navigate, searchParams]);
-
-  const enabled = !!novelId && !!currentTaskId;
+  const enabled = !!novelId && !!storeTaskId;
 
   const curvesQuery = useQuery({
-    queryKey: ["chunk-curves", novelId, currentTaskId],
-    queryFn: () => getChunkCurves(novelId!, currentTaskId!),
+    queryKey: ["chunk-curves", novelId, storeTaskId],
+    queryFn: () => getChunkCurves(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
   const narrativeQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "narrative"],
-    queryFn: () => getNarrativeStructure(novelId!, currentTaskId!),
+    queryKey: ["metrics", novelId, storeTaskId, "narrative"],
+    queryFn: () => getNarrativeStructure(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -107,52 +103,55 @@ export function CurvesPage() {
     setZoomRange(range);
   }, []);
 
-  const handleZoomIn = useCallback(() => {
-    const chart = emotionChartRef.current?.getEchartsInstance();
-    if (!chart) return;
-    const option = chart.getOption() as { dataZoom: Array<{ start: number; end: number }> };
-    if (!option.dataZoom?.[0]) return;
-    const { start, end } = option.dataZoom[0];
-    const range = end - start;
-    const newRange = Math.max(range * 0.8, 5);
-    const center = (start + end) / 2;
-    const newStart = Math.max(0, center - newRange / 2);
-    const newEnd = Math.min(100, center + newRange / 2);
-    chart.dispatchAction({
-      type: "dataZoom",
-      start: newStart,
-      end: newEnd,
-    });
-  }, []);
+  // 2026-08-14 P2-23：缩放/重置必须按 chartType 分流到当前可见图表。
+  // 此前硬编码 emotionChartRef，节奏 tab 的按钮实际作用于隐藏的情绪图，
+  // 可见的节奏图完全无响应（dispatchAction 不会触发 dataZoom 事件，
+  // 共享 zoomRange 状态也不会更新）
+  const _zoomByChartType = useCallback(
+    (chartType: "emotion" | "rhythm", factor: number) => {
+      const chart =
+        chartType === "emotion"
+          ? emotionChartRef.current?.getEchartsInstance()
+          : rhythmChartRef.current?.getEchartsInstance();
+      if (!chart) return;
+      const option = chart.getOption() as { dataZoom: Array<{ start: number; end: number }> };
+      if (!option.dataZoom?.[0]) return;
+      const { start, end } = option.dataZoom[0];
+      const range = end - start;
+      const newRange = factor < 1 ? Math.max(range * factor, 5) : Math.min(range * factor, 100);
+      const center = (start + end) / 2;
+      const newStart = Math.max(0, center - newRange / 2);
+      const newEnd = Math.min(100, center + newRange / 2);
+      chart.dispatchAction({
+        type: "dataZoom",
+        start: newStart,
+        end: newEnd,
+      });
+    },
+    []
+  );
 
-  const handleZoomOut = useCallback(() => {
-    const chart = emotionChartRef.current?.getEchartsInstance();
-    if (!chart) return;
-    const option = chart.getOption() as { dataZoom: Array<{ start: number; end: number }> };
-    if (!option.dataZoom?.[0]) return;
-    const { start, end } = option.dataZoom[0];
-    const range = end - start;
-    const newRange = Math.min(range * 1.25, 100);
-    const center = (start + end) / 2;
-    const newStart = Math.max(0, center - newRange / 2);
-    const newEnd = Math.min(100, center + newRange / 2);
-    chart.dispatchAction({
-      type: "dataZoom",
-      start: newStart,
-      end: newEnd,
-    });
-  }, []);
+  const handleZoomIn = useCallback(
+    (chartType: "emotion" | "rhythm") => {
+      _zoomByChartType(chartType, 0.8);
+    },
+    [_zoomByChartType]
+  );
 
-  const handleReset = useCallback(() => {
+  const handleZoomOut = useCallback(
+    (chartType: "emotion" | "rhythm") => {
+      _zoomByChartType(chartType, 1.25);
+    },
+    [_zoomByChartType]
+  );
+
+  const handleReset = useCallback((chartType: "emotion" | "rhythm") => {
     setZoomRange(null);
-    const emotionChart = emotionChartRef.current?.getEchartsInstance();
-    const rhythmChart = rhythmChartRef.current?.getEchartsInstance();
-    emotionChart?.dispatchAction({
-      type: "dataZoom",
-      start: 0,
-      end: 100,
-    });
-    rhythmChart?.dispatchAction({
+    const chart =
+      chartType === "emotion"
+        ? emotionChartRef.current?.getEchartsInstance()
+        : rhythmChartRef.current?.getEchartsInstance();
+    chart?.dispatchAction({
       type: "dataZoom",
       start: 0,
       end: 100,
@@ -176,9 +175,14 @@ export function CurvesPage() {
   }, [curvesQuery, narrativeQuery]);
 
   const isLoading = curvesQuery.isLoading || narrativeQuery.isLoading;
-  const isError = curvesQuery.isError || narrativeQuery.isError;
+  const isAnalysisNotComplete =
+    isAnalysisNotCompleteError(curvesQuery.error) || isAnalysisNotCompleteError(narrativeQuery.error);
+  const analysisFailed =
+    getAnalysisNotCompleteRunStatus(curvesQuery.error) === "failed" ||
+    getAnalysisNotCompleteRunStatus(narrativeQuery.error) === "failed";
+  const isError = (curvesQuery.isError || narrativeQuery.isError) && !isAnalysisNotComplete;
 
-  if (!currentTaskId) {
+  if (!storeTaskId) {
     return (
       <AnalysisWorkspace title={novelTitle}>
         <div className="flex h-96 flex-col items-center justify-center gap-4">
@@ -211,9 +215,9 @@ export function CurvesPage() {
             bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
               <CurveToolbar
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                onReset={handleReset}
+                onZoomIn={() => handleZoomIn("emotion")}
+                onZoomOut={() => handleZoomOut("emotion")}
+                onReset={() => handleReset("emotion")}
                 onFullscreen={() => handleFullscreen("emotion")}
                 disabled={isLoading || isError || curvesData.length === 0}
               />
@@ -222,6 +226,16 @@ export function CurvesPage() {
             <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-full w-full animate-pulse rounded bg-surface-hover" />
+              ) : isAnalysisNotComplete ? (
+                <AnalysisNotCompleteState
+                  title={analysisFailed ? "曲线分析任务已失败" : "曲线结果尚未完成"}
+                  description={
+                    analysisFailed
+                      ? "该分析任务已失败，曲线数据无法读取，请重新发起分析后再查看。"
+                      : "当前任务仍在分析中，曲线数据暂时不可读，请等待任务进入完成态后再查看。"
+                  }
+                  failed={analysisFailed}
+                />
               ) : isError ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted">
                   <span>加载失败</span>
@@ -257,9 +271,9 @@ export function CurvesPage() {
             bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
               <CurveToolbar
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                onReset={handleReset}
+                onZoomIn={() => handleZoomIn("rhythm")}
+                onZoomOut={() => handleZoomOut("rhythm")}
+                onReset={() => handleReset("rhythm")}
                 onFullscreen={() => handleFullscreen("rhythm")}
                 disabled={isLoading || isError || curvesData.length === 0}
               />
@@ -268,6 +282,16 @@ export function CurvesPage() {
             <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-full w-full animate-pulse rounded bg-surface-hover" />
+              ) : isAnalysisNotComplete ? (
+                <AnalysisNotCompleteState
+                  title={analysisFailed ? "曲线分析任务已失败" : "曲线结果尚未完成"}
+                  description={
+                    analysisFailed
+                      ? "该分析任务已失败，曲线数据无法读取，请重新发起分析后再查看。"
+                      : "当前任务仍在分析中，曲线数据暂时不可读，请等待任务进入完成态后再查看。"
+                  }
+                  failed={analysisFailed}
+                />
               ) : isError ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted">
                   <span>加载失败</span>

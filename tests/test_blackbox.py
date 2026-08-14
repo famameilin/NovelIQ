@@ -9,13 +9,19 @@
 测试对象：NovelIQ 小说智能分析系统 API
 """
 
-import io
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
+# 模块级 client 在收集期创建会绕过 api_client fixture 的单例重置，
+# 这里改为 autouse fixture 在每个测试前注入隔离客户端（测试方法引用全局 client 名字）。
+client: TestClient | None = None
 
-client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def _use_isolated_api_client(api_client) -> None:
+    global client
+    client = api_client
+    yield
 
 
 # ============================================================================
@@ -127,6 +133,33 @@ class TestPaginationBoundaryValue:
         response = client.get("/api/novels/?page=1&page_size=101")
         # 期望：422 Unprocessable Entity
         assert response.status_code == 422
+
+
+# ============================================================================
+# 场景法 - 单条小说查询
+# ============================================================================
+
+class TestGetNovel:
+    """
+    2026-08-08 用于验证单条小说端点 /api/novels/{novel_id}
+    """
+
+    def test_get_novel_existing(self):
+        """已存在小说返回 200 与完整字段"""
+        content = "单条小说测试内容" * 50
+        files = {"file": ("single_novel.txt", content.encode("utf-8"), "text/plain")}
+        upload_response = client.post("/api/novels/upload", files=files)
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+        response = client.get(f"/api/novels/{novel_id}")
+        assert response.status_code == 200
+        assert response.json()["novel_id"] == novel_id
+        assert response.json()["filename"] == "single_novel.txt"
+
+    def test_get_novel_missing(self):
+        """不存在小说返回 404"""
+        response = client.get("/api/novels/nonexistent-id")
+        assert response.status_code == 404
 
 
 # ============================================================================

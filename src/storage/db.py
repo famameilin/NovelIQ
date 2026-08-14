@@ -14,11 +14,14 @@ import os
 import re
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import Connection, Engine, create_engine, event, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool, QueuePool
 
 from src.storage.database_url import resolve_database_url_from_env
 
@@ -31,13 +34,13 @@ def get_database_url() -> str:
     获取数据库连接 URL
 
     优先级：
-    1. DATABASE_URL 环境变量
+    1. DATABASE JSON 环境对象
     2. 抛出异常
 
     Returns:
         数据库连接 URL 字符串
     """
-    return resolve_database_url_from_env("DATABASE_URL")
+    return resolve_database_url_from_env("DATABASE")
 
 
 def get_database_schema() -> str | None:
@@ -56,6 +59,65 @@ def get_database_schema() -> str | None:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized):
         raise RuntimeError(f"Invalid DATABASE_SCHEMA: {schema}")
     return normalized
+
+
+def _database_name_from_url(database_url: str) -> str | None:
+    """2026-08-08 用于从 SQLAlchemy URL 解析目标数据库名称"""
+    if not database_url.startswith("postgresql"):
+        return None
+    url = make_url(database_url)
+    database = url.database
+    if not database:
+        return None
+    return database
+
+
+def _admin_database_url(database_url: str) -> str:
+    """2026-08-08 用于把目标库 URL 指向默认 postgres 库以执行建库 DDL"""
+    return make_url(database_url).set(database="postgres").render_as_string(
+        hide_password=False
+    )
+
+
+def _safe_identifier(name: str) -> bool:
+    """2026-08-08 用于限制自动建库标识符为 PostgreSQL 安全格式"""
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", name))
+
+
+def ensure_database_exists() -> None:
+    """2026-08-08 用于首次启动时自动创建缺失的目标数据库"""
+    if os.environ.get("DB_AUTO_CREATE_DATABASE", "true").lower() != "true":
+        return
+    database_url = get_database_url()
+    database_name = _database_name_from_url(database_url)
+    if database_name is None or not _safe_identifier(database_name):
+        return
+    admin_engine: Any = None
+    try:
+        admin_engine = create_engine(
+            _admin_database_url(database_url),
+            poolclass=NullPool,
+            isolation_level="AUTOCOMMIT",
+            connect_args={"connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))},
+        )
+        with admin_engine.connect() as connection:
+            exists = connection.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": database_name},
+            ).scalar_one_or_none()
+            if exists:
+                return
+            connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+            logger.info("Auto-created missing database: {}", database_name)
+    except OperationalError as exc:
+        logger.warning(
+            "Failed to auto-create database {}: {}; startup will retry direct connection",
+            database_name,
+            exc,
+        )
+    finally:
+        if admin_engine is not None:
+            admin_engine.dispose()
 
 
 def get_engine():
@@ -79,7 +141,9 @@ def get_engine():
     pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
     pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "1800"))
     connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))
-    statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "30000"))
+    # 2026-08-14 D9：默认 120s（原 30s 会误杀 HNSW 建索引与十万级段落批量插入）；
+    # 仍可经 DB_STATEMENT_TIMEOUT 覆盖
+    statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "120000"))
     echo = os.environ.get("DB_ECHO", "false").lower() == "true"
     database_schema = get_database_schema()
 
@@ -122,9 +186,17 @@ def get_engine():
             logger.debug(f"Pool checkout: active={_engine.pool.status()}")
 
     @event.listens_for(_engine, "checkin")
-    def on_checkin(dbapi_conn, conn_record):
+    def on_checkin(dbapi_conn, connection_record):
         if _engine is not None:
             logger.debug(f"Pool checkin: active={_engine.pool.status()}")
+
+    # 2026-08-13 P2：启动期合同校验——引擎创建后立即验证连接可达与数据库版本，
+    # 避免 URL/schema/服务未起等配置错误延迟到首次查询才暴露（pool_pre_ping 只处理
+    # 失效连接，不验证首次连接）；连接失败按原始异常抛出，由调用方决定启动策略
+    with _engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+        server_version_num = conn.execute(text("SHOW server_version_num")).scalar_one()
+    logger.info(f"Database connection verified (server_version_num={server_version_num})")
 
     logger.info(
         f"Created SQLAlchemy engine for {database_url.split(':')[0]} "
@@ -161,30 +233,6 @@ def get_session_factory() -> sessionmaker:
 
 
 SessionLocal = get_session_factory
-
-
-def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
-    """
-    检查当前 schema 下是否已存在指定约束
-
-    说明: 运行时补约束前必须先做显式存在性检查，
-          避免旧库增量迁移与新库 create_all 在启动时互相撞重复 DDL
-    """
-    return bool(
-        connection.execute(
-            text(
-                """
-                SELECT 1
-                FROM information_schema.table_constraints
-                WHERE table_schema = current_schema()
-                  AND table_name = :table_name
-                  AND constraint_name = :constraint_name
-                LIMIT 1
-                """
-            ),
-            {"table_name": table_name, "constraint_name": constraint_name},
-        ).scalar_one_or_none()
-    )
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:
@@ -228,266 +276,14 @@ def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
     return {str(row.column_name) for row in rows}
 
 
-def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
-    """
-    在补外键前校验目标子表没有孤儿数据
-
-    说明: 当前仓库不接受“发现脏数据但继续跳过”的静默策略；
-          若仍有孤儿行，直接抛错阻止把不一致状态带入更深处
-    """
-    orphan_count = int(connection.execute(text(sql)).scalar_one())
-    if orphan_count > 0:
-        raise RuntimeError(f"Cannot add foreign key for {context}: found {orphan_count} orphan row(s)")
-
-
-def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
-    """
-    基于 analysis_runs 回填历史表里漂移的 novel_id
-
-    说明: `cloud_analysis` / `token_usage` / `chunk_locations` 的 novel_id
-          实际是 run 侧信息的冗余镜像；补外键前先对齐到 analysis_runs，
-          可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据
-    """
-    statements = [
-        """
-        UPDATE cloud_analysis AS child
-        SET novel_id = parent.novel_id
-        FROM analysis_runs AS parent
-        WHERE child.run_id = parent.run_id
-          AND child.novel_id IS DISTINCT FROM parent.novel_id
-        """,
-        """
-        UPDATE token_usage AS child
-        SET novel_id = parent.novel_id
-        FROM analysis_runs AS parent
-        WHERE child.run_id = parent.run_id
-          AND child.novel_id IS DISTINCT FROM parent.novel_id
-        """,
-        """
-        UPDATE chunk_locations AS child
-        SET novel_id = parent.novel_id
-        FROM analysis_runs AS parent
-        WHERE child.run_id = parent.run_id
-          AND child.novel_id IS DISTINCT FROM parent.novel_id
-        """,
-    ]
-
-    for statement in statements:
-        connection.execute(text(statement))
-
-
-def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
-    """
-    为历史 PostgreSQL 表补齐分析链路缺失的外键约束
-
-    说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项
-          先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束
-          其中 analysis_runs.novel_id 是整条分析链路的父约束，必须一并补齐，
-          否则旧库仍能继续写入悬空 novel_id
-    """
-    _normalize_analysis_related_novel_ids(connection)
-
-    constraint_specs = [
-        {
-            "table": "analysis_runs",
-            "name": "analysis_runs_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE analysis_runs "
-                "ADD CONSTRAINT analysis_runs_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM analysis_runs child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "analysis_runs.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "disambig_checkpoint",
-            "name": "disambig_checkpoint_run_id_fkey",
-            "ddl": (
-                "ALTER TABLE disambig_checkpoint "
-                "ADD CONSTRAINT disambig_checkpoint_run_id_fkey "
-                "FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id) ON DELETE CASCADE"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM disambig_checkpoint child "
-                "LEFT JOIN analysis_runs parent ON parent.run_id = child.run_id "
-                "WHERE parent.run_id IS NULL"
-            ),
-            "context": "disambig_checkpoint.run_id -> analysis_runs.run_id",
-        },
-        {
-            "table": "chunk_locations",
-            "name": "chunk_locations_chunk_id_run_id_fkey",
-            "ddl": (
-                "ALTER TABLE chunk_locations "
-                "ADD CONSTRAINT chunk_locations_chunk_id_run_id_fkey "
-                "FOREIGN KEY (chunk_id, run_id) REFERENCES chunks(chunk_id, run_id) ON DELETE CASCADE"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM chunk_locations child "
-                "LEFT JOIN chunks parent "
-                "ON parent.chunk_id = child.chunk_id AND parent.run_id = child.run_id "
-                "WHERE parent.run_id IS NULL"
-            ),
-            "context": "chunk_locations.(chunk_id, run_id) -> chunks.(chunk_id, run_id)",
-        },
-        {
-            "table": "chunk_locations",
-            "name": "chunk_locations_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE chunk_locations "
-                "ADD CONSTRAINT chunk_locations_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM chunk_locations child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "chunk_locations.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "cloud_analysis",
-            "name": "cloud_analysis_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE cloud_analysis "
-                "ADD CONSTRAINT cloud_analysis_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM cloud_analysis child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE child.novel_id IS NOT NULL AND parent.novel_id IS NULL"
-            ),
-            "context": "cloud_analysis.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "global_context",
-            "name": "global_context_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE global_context "
-                "ADD CONSTRAINT global_context_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM global_context child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "global_context.novel_id -> novels.novel_id",
-        },
-        {
-            "table": "graph_relation_events",
-            "name": "graph_relation_events_chunk_id_run_id_fkey",
-            "ddl": (
-                "ALTER TABLE graph_relation_events "
-                "ADD CONSTRAINT graph_relation_events_chunk_id_run_id_fkey "
-                "FOREIGN KEY (chunk_id, run_id) REFERENCES chunks(chunk_id, run_id) ON DELETE CASCADE"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM graph_relation_events child "
-                "LEFT JOIN chunks parent "
-                "ON parent.chunk_id = child.chunk_id AND parent.run_id = child.run_id "
-                "WHERE parent.run_id IS NULL"
-            ),
-            "context": "graph_relation_events.(chunk_id, run_id) -> chunks.(chunk_id, run_id)",
-        },
-        {
-            "table": "token_usage",
-            "name": "token_usage_novel_id_fkey",
-            "ddl": (
-                "ALTER TABLE token_usage "
-                "ADD CONSTRAINT token_usage_novel_id_fkey "
-                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
-            ),
-            "orphan_check": (
-                "SELECT COUNT(*) FROM token_usage child "
-                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
-                "WHERE parent.novel_id IS NULL"
-            ),
-            "context": "token_usage.novel_id -> novels.novel_id",
-        },
-    ]
-
-    for spec in constraint_specs:
-        if _constraint_exists(connection, spec["table"], spec["name"]):
-            continue
-        _assert_no_orphans(connection, spec["orphan_check"], context=spec["context"])
-        connection.execute(text(spec["ddl"]))
-
-
-def _ensure_runtime_schema(engine: Engine) -> None:
-    """
-    修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: `cloud_analysis` 不再依赖 reference_contract_version 补列；启动期只补仍在使用的业务列。
-
-    为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema
-
-    说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进
-          这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束
-    """
-    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
-    if dialect_name != "postgresql":
-        return
-
-    statements = [
-        "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
-        "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
-        "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS genre_labels TEXT",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS style_labels TEXT",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS surface_name VARCHAR(255)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_kind VARCHAR(50)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS reference_slot VARCHAR(100)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS resolved_global_name VARCHAR(255)",
-        "ALTER TABLE chunk_characters ADD COLUMN IF NOT EXISTS global_skip_reason TEXT",
-        "ALTER TABLE chunk_dialogues ADD COLUMN IF NOT EXISTS speaker_references JSONB",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS from_reference_kind VARCHAR(50)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS to_reference_kind VARCHAR(50)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS resolved_from_global_name VARCHAR(255)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS resolved_to_global_name VARCHAR(255)",
-        "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS reference_skip_reason TEXT",
-        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
-        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
-        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_summary TEXT",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS is_new_setup INTEGER",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
-        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_status VARCHAR(30)",
-        "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence VARCHAR(20) NOT NULL DEFAULT 'high'",
-        "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
-        (
-            "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
-            "ON foreshadowing_threads (run_id, active, last_chunk_id)"
-        ),
-        (
-            "CREATE INDEX IF NOT EXISTS idx_foreshadowing_thread_hits_run_chunk "
-            "ON foreshadowing_thread_hits (run_id, chunk_id)"
-        ),
-    ]
-
-    with engine.begin() as conn:
-        for statement in statements:
-            conn.execute(text(statement))
-        if _table_exists(conn, "chunk_embeddings"):
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)"))
-        _ensure_analysis_related_foreign_keys(conn)
-
-
 def _assert_focus_contract_schema(engine: Engine) -> None:
     """
     修改时间: 2026-04-30
     任务: diagnosis-latest-only-reference-contract
     修改原因: latest-only 之后只校验真实焦点合同列，不再把 reference_contract_version 当成启动前置条件。
 
-    说明: 本次主角合同重构明确不兼容旧库，因此启动时必须显式检查
-    `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动
+    说明: 启动时显式检查 `cloud_analysis` 是否具备完整焦点合同列；
+    缺失即阻断启动（当前只有最新口径，不再检查旧结构残留）
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -514,19 +310,118 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
                 "so that `cloud_analysis` includes the full focus-contract column set before starting the service."
             )
 
-        if "protagonist" in actual_columns:
-            raise RuntimeError(
-                "cloud_analysis still contains legacy column `protagonist`. "
-                "Please recreate or manually migrate the current database schema "
-                "to remove legacy protagonist-contract columns before starting the service."
-            )
 
-        if "narrative_type" in actual_columns:
-            raise RuntimeError(
-                "cloud_analysis still contains legacy column `narrative_type`. "
-                "Please recreate or manually migrate the current database schema "
-                "to remove legacy narrative type columns before starting the service."
-            )
+def _assert_annotation_contract_schema(engine: Engine) -> None:
+    """2026-08-07 用于阻止旧合同列继续承载新语义写入标注"""
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    required_columns = {
+        "chapter_annotations": {
+            "annotation_id",
+            "run_id",
+            "chapter_id",
+            "payload",
+            "created_at",
+        },
+        "dialogue_records": {
+            "dialogue_id",
+            "run_id",
+            "chunk_id",
+            "chapter_id",
+            "candidate_key",
+            "content",
+            "start",
+            "end",
+            "speaker",
+            "tone",
+            "is_inner_monologue",
+            "confidence",
+        },
+        "case_pool_cases": {
+            "id",
+            "run_id",
+            "type",
+            "chunk_id",
+            "keys",
+            "description",
+            "target_key",
+            "target_ref",
+            "state",
+            "created_by_annotation_id",
+        },
+        "case_resolution_mappings": {
+            "mapping_id",
+            "run_id",
+            "annotation_id",
+            "case_id",
+            "type",
+            "target_ref",
+            "resolution",
+            "target_fact_id",
+            "target_fact_revision",
+            "target_dialogue_id",
+            "target_setup_id",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, required in required_columns.items():
+            if not _table_exists(connection, table_name):
+                continue
+            actual = _get_table_columns(connection, table_name)
+            missing = sorted(required - actual)
+            if missing:
+                raise RuntimeError(
+                    f"{table_name} is missing annotation contract columns: {missing}. "
+                    "Please recreate or explicitly migrate the continuity tables before starting the service."
+                )
+
+
+def _assert_agent_audit_contract_schema(engine: Engine) -> None:
+    """
+    2026-08-10 用于校验 Agent 审计三表与 token_usage 新结构就绪
+
+    说明: 当前只有最新口径（create_all 直接建出新库），
+    启动时校验审计表与 token_usage 合同列齐备；缺失即阻断启动。
+    """
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    required_tables = {
+        "agent_invocations": {"id", "run_id", "task_type", "attempt_number", "status"},
+        "agent_turns": {
+            "id",
+            "invocation_id",
+            "turn_index",
+            "raw_response",
+            "context_summary",
+            "model_ms",
+            "request_messages",
+            "timing_notes",
+        },
+        "agent_tool_calls": {"id", "turn_id", "tool_name", "request_args", "status"},
+    }
+    with engine.begin() as connection:
+        for table_name, required in required_tables.items():
+            if not _table_exists(connection, table_name):
+                raise RuntimeError(f"{table_name} 表不存在，请先执行 init_db 建表后启动服务")
+            actual = _get_table_columns(connection, table_name)
+            missing = sorted(required - actual)
+            if missing:
+                raise RuntimeError(
+                    f"{table_name} is missing agent audit contract columns: {missing}. "
+                    "请先执行 init_db 重建审计表后启动服务"
+                )
+        if _table_exists(connection, "token_usage"):
+            actual = _get_table_columns(connection, "token_usage")
+            missing = sorted({"agent_turn_id", "reasoning_tokens"} - actual)
+            if missing:
+                raise RuntimeError(
+                    "token_usage 仍是旧结构，缺少 agent_turn_id/reasoning_tokens: "
+                    f"{missing}. 请先执行 init_db 重建 token_usage"
+                )
 
 
 @contextmanager
@@ -561,25 +456,34 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db(include_level3_tables: bool = False) -> None:
+def init_db() -> None:
     """
     初始化数据库（创建所有表）
 
-    说明: 使用 ORM 模型创建所有数据库表
+    说明: 使用 ORM 模型创建所有数据库表；目标数据库缺失时先自动创建
 
     注意：生产环境推荐使用 Alembic 迁移
     """
     from src.storage.models import Base
 
+    ensure_database_exists()
     engine = get_engine()
-    tables = list(Base.metadata.sorted_tables)
-    if not include_level3_tables:
-        # Level3 的 pgvector 表由 preprocess 按需 ensure；
-        # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连
-        tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
+    # 2026-08-14 P1：chunks 的 idx_chunks_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
+    # 全新数据库必须先建扩展再 create_all，否则 CREATE INDEX 直接失败阻断启动；
+    # 与 vector 扩展（vector_schema.ensure_paragraph_embeddings_schema）同口径按需创建
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+    tables = [
+        table
+        for table in Base.metadata.sorted_tables
+        if table.name != "paragraph_embeddings"
+    ]
     Base.metadata.create_all(bind=engine, tables=tables)
-    _ensure_runtime_schema(engine)
     _assert_focus_contract_schema(engine)
+    _assert_annotation_contract_schema(engine)
+    _assert_agent_audit_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 

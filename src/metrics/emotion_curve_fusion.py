@@ -2,9 +2,9 @@
 为结果展示层构建 AI 主导、词汇/语气/风格辅助的情绪曲线
 
 本模块不改写 chunk_curves 表中的词汇曲线存储，只负责把已有的：
-- chunk_annotation.emotional_valence
+- chapter_annotations.payload.chunks[].metrics 中的 emotional_valence
 - chunk_curves 词汇情绪密度
-- chunk_dialogues.tone
+- graph_facts 对话事实中的 tone
 - chunk_style 风格信号
 
 融合为面向前端单曲线展示的最终情绪走势
@@ -30,14 +30,17 @@ _ANNOTATION_SIGNAL_MAP: dict[str, float] = {
     "strong_negative": -0.78,
 }
 
+# 2026-08-12 与新 Tone 闭合枚举（平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求）对齐；
+# 旧词表（温和/强硬/讽刺/命令/惊慌）已不再由对话合同产出
 _TONE_SIGNAL_MAP: dict[str, float] = {
-    "温和": 0.15,
-    "强硬": -0.25,
-    "讽刺": -0.2,
-    "恳求": -0.15,
-    "命令": -0.25,
+    "平静": 0.05,
+    "愤怒": -0.4,
+    "悲伤": -0.35,
+    "喜悦": 0.35,
     "恐惧": -0.45,
-    "惊慌": -0.4,
+    "紧张": -0.3,
+    "嘲讽": -0.2,
+    "恳求": -0.15,
 }
 
 _LEXICAL_DENSITY_SCALE = 0.02

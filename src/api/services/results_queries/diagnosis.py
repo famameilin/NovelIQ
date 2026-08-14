@@ -13,12 +13,11 @@ from loguru import logger
 from src.api.models.responses import DiagnosisResult
 from src.models.cloud.schema import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
 from src.models.local.character_reference_policy import filter_global_character_names
-from src.storage.repositories import AnnotationRepository, StatsRepository
+from src.storage.repositories import StatsRepository
 
 from .common import (
     _normalize_arc_scores,
     _normalize_name_list,
-    _normalize_text_by_alias_map,
     _parse_int_field,
     _parse_json_field,
 )
@@ -33,9 +32,8 @@ def _filter_character_list_against_arc_scores(
     任务: 角色引用分层重构
     修改原因: 过滤 arc_scores 时先排除未解析代词，避免旧 diagnosis 把局部引用当成焦点角色。
 
-    说明: alias 归一化会把别名和规范名折叠到同一个角色名上；
-    结果读取层必须在归一化后再次按 `arc_scores` 收口，避免焦点人物、
-    主要人物、核心角色继续携带失效名称
+    说明: 结果读取层按 `arc_scores` 收口焦点人物、主要人物和核心角色，
+    避免诊断名单继续携带不属于当前角色合同的名称
     """
     if values is None:
         return None
@@ -61,8 +59,8 @@ def _derive_focus_structure_from_characters(
     focus_characters: list[str] | None,
 ) -> Literal["single", "dual", "ensemble"] | None:
     """
-    说明: alias 归一化后，焦点人物数量可能发生折叠；此时必须按归一化后的
-    最终名单重新推导 focus_structure，不能把 `dual` + 单人列表这种矛盾合同继续对外暴露
+    说明: 角色名单过滤后必须重新推导 focus_structure，
+    避免把 `dual` 与单人列表这样的矛盾合同继续对外暴露
     """
     if not focus_characters:
         return None
@@ -164,8 +162,6 @@ def _fetch_diagnosis(
     run_id: str,
     novel_id: str,
     stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository | None = None,
-    alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult | None:
     """
     修改时间: 2026-04-30
@@ -184,29 +180,29 @@ def _fetch_diagnosis(
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (
-        _normalize_name_list(focus_characters_raw, alias_map)
+        _normalize_name_list(focus_characters_raw)
         if isinstance(focus_characters_raw, list)
         else focus_characters_raw
     )
 
     main_characters_raw = _parse_json_field(data.get("main_characters")) if data else None
     main_characters_normalized = (
-        _normalize_name_list(main_characters_raw, alias_map)
+        _normalize_name_list(main_characters_raw)
         if isinstance(main_characters_raw, list)
         else main_characters_raw
     )
 
     core_cast_raw = _parse_json_field(data.get("core_cast")) if data else None
     core_cast_normalized = (
-        _normalize_name_list(core_cast_raw, alias_map) if isinstance(core_cast_raw, list) else core_cast_raw
+        _normalize_name_list(core_cast_raw) if isinstance(core_cast_raw, list) else core_cast_raw
     )
 
     arc_scores_raw = _parse_json_field(data.get("arc_scores")) if data else None
-    arc_scores_normalized = _filter_global_arc_scores(_normalize_arc_scores(arc_scores_raw, alias_map))
+    arc_scores_normalized = _filter_global_arc_scores(_normalize_arc_scores(arc_scores_raw))
 
     topic_labels_raw = _parse_json_field(data.get("topic_labels")) if data else None
     topic_labels_normalized = (
-        _normalize_name_list(topic_labels_raw, alias_map) if isinstance(topic_labels_raw, list) else topic_labels_raw
+        _normalize_name_list(topic_labels_raw) if isinstance(topic_labels_raw, list) else topic_labels_raw
     )
     genre_labels_raw = _parse_json_field(data.get("genre_labels")) if data else None
     style_labels_raw = _parse_json_field(data.get("style_labels")) if data else None
@@ -242,7 +238,7 @@ def _fetch_diagnosis(
     normalized_focus_structure = _derive_focus_structure_from_characters(focus_characters_filtered)
     if focus_structure != normalized_focus_structure:
         logger.warning(
-            "diagnosis focus contract changed after alias normalization: run_id={} novel_id={} raw_structure={} "
+            "diagnosis focus contract changed after graph-name validation: run_id={} novel_id={} raw_structure={} "
             "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
             run_id,
             novel_id,
@@ -263,7 +259,7 @@ def _fetch_diagnosis(
         style_labels_normalized,
     ):
         logger.warning(
-            "diagnosis focus contract incomplete after normalization: run_id={} novel_id={} raw_structure={} "
+            "diagnosis focus contract incomplete after graph-name validation: run_id={} novel_id={} raw_structure={} "
             "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
             run_id,
             novel_id,
@@ -283,18 +279,15 @@ def _fetch_diagnosis(
         genre_labels=genre_labels_normalized,
         style_labels=style_labels_normalized,
         topic_labels=topic_labels_normalized,
-        diagnosis=_normalize_text_by_alias_map(data.get("diagnosis") if data else None, alias_map),
+        diagnosis=data.get("diagnosis") if data else None,
         value_logic_type=data.get("value_logic_type") if data else None,
-        value_logic_reason=_normalize_text_by_alias_map(data.get("value_logic_reason") if data else None, alias_map),
+        value_logic_reason=data.get("value_logic_reason") if data else None,
         power_stance_score=_parse_int_field(data.get("power_stance_score") if data else None),
-        power_stance_reason=_normalize_text_by_alias_map(data.get("power_stance_reason") if data else None, alias_map),
+        power_stance_reason=data.get("power_stance_reason") if data else None,
         common_people_dignity=_parse_int_field(data.get("common_people_dignity") if data else None),
-        dignity_reason=_normalize_text_by_alias_map(data.get("dignity_reason") if data else None, alias_map),
+        dignity_reason=data.get("dignity_reason") if data else None,
         cultural_depth_score=data.get("cultural_depth_score") if data else None,
-        cultural_depth_reason=_normalize_text_by_alias_map(
-            data.get("cultural_depth_reason") if data else None,
-            alias_map,
-        ),
+        cultural_depth_reason=data.get("cultural_depth_reason") if data else None,
         narrative_arc_type=data.get("narrative_arc_type") if data else None,
         focus_structure=normalized_focus_structure,
         focus_characters=focus_characters_filtered,

@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from loguru import logger
 
-from src.config.logging_config import LoggingConfig, setup_logging  # noqa: E402
+from src.config.logging_setup import setup_logging  # noqa: E402
 
 ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -65,7 +65,12 @@ def main() -> None:
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
-    parser.add_argument("--app", type=str, default="src.api.main:app", help="FastAPI app import path (default: src.api.main:app)")
+    parser.add_argument(
+        "--app",
+        type=str,
+        default="src.api.main:app",
+        help="FastAPI app import path (default: src.api.main:app)",
+    )
     args = parser.parse_args()
 
     if is_port_in_use(args.port):
@@ -90,15 +95,7 @@ def main() -> None:
     sys.stdout = tee_stdout
     sys.stderr = tee_stderr
     
-    config = LoggingConfig(
-        level="DEBUG",
-        log_file=all_log_file,
-        max_bytes=5_000_000,
-        backup_count=3,
-        console=True,
-        console_log_file=None,
-    )
-    setup_logging(config=config, verbose=True, debug=False)
+    setup_logging()
     
     logger.info(f"终端日志文件: {console_log_file}")
     logger.info(f"完整日志文件: {all_log_file}")

@@ -1,109 +1,156 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+import pytest
 from sqlalchemy import text
 
-from src.storage.db import _ensure_runtime_schema, get_session_factory, init_db
+from src.storage.db import get_session_factory, init_db
 from src.storage.models import Base
 
 
-def test_init_db_excludes_level3_tables_by_default() -> None:
+def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
+    """2026-08-07 用于验证 ORM 直接表达章节图版本与事实版本来源"""
+    assert "continuity_facts" not in Base.metadata.tables
+    assert "graph_fact_versions" not in Base.metadata.tables
+    assert "graph_relation_events" not in Base.metadata.tables
+
+    mapping_columns = Base.metadata.tables["case_resolution_mappings"].columns
+    case_columns = Base.metadata.tables["case_pool_cases"].columns
+    fact_columns = Base.metadata.tables["graph_facts"].columns
+    entity_columns = Base.metadata.tables["graph_entities"].columns
+    dialogue_columns = Base.metadata.tables["dialogue_records"].columns
+    assert {
+        "case_id",
+        "type",
+        "target_ref",
+        "resolution",
+        "target_fact_id",
+        "target_fact_revision",
+        "target_dialogue_id",
+        "target_setup_id",
+    } <= set(mapping_columns.keys())
+    assert {"type", "chunk_id", "target_key", "target_ref"} <= set(case_columns.keys())
+    assert {
+        "graph_version_id",
+        "source_kind",
+        "annotation_id",
+        "payload_path",
+        "fact_revision",
+    } <= set(fact_columns.keys())
+    assert "attributes" in entity_columns
+    assert {
+        "dialogue_id",
+        "run_id",
+        "chunk_id",
+        "chapter_id",
+        "candidate_key",
+        "content",
+        "start",
+        "end",
+        "speaker",
+        "tone",
+        "is_inner_monologue",
+        "confidence",
+    } <= set(dialogue_columns.keys())
+
+
+def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() -> None:
     with (
         patch("src.storage.db.get_engine", return_value=object()),
         patch("src.storage.models.Base.metadata.create_all") as mock_create_all,
-        patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
+        patch("src.storage.db._assert_focus_contract_schema"),
+        patch("src.storage.db._assert_annotation_contract_schema"),
+        patch("src.storage.db._assert_agent_audit_contract_schema"),
     ):
         init_db()
 
     table_names = [table.name for table in mock_create_all.call_args.kwargs["tables"]]
-    assert "chunk_embeddings" not in table_names
     assert "paragraph_embeddings" not in table_names
-    mock_ensure_runtime_schema.assert_called_once()
+    assert {
+        "graph_versions",
+        "graph_facts",
+        "entity_state_versions",
+        "graph_relations",
+        "graph_relation_versions",
+        "dialogue_records",
+        "agent_invocations",
+        "agent_turns",
+        "agent_tool_calls",
+        "token_usage",
+    } <= set(table_names)
 
 
-def test_init_db_can_include_level3_tables() -> None:
-    with (
-        patch("src.storage.db.get_engine", return_value=object()),
-        patch("src.storage.models.Base.metadata.create_all") as mock_create_all,
-        patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
-    ):
+def test_init_db_rejects_removed_level3_parameter() -> None:
+    """2026-08-07 用于验证数据库初始化不再保留旧 Level3 分支参数"""
+    with pytest.raises(TypeError, match="include_level3_tables"):
         init_db(include_level3_tables=True)
 
-    table_names = [table.name for table in mock_create_all.call_args.kwargs["tables"]]
-    assert "chunk_embeddings" in table_names
-    assert "paragraph_embeddings" in table_names
-    mock_ensure_runtime_schema.assert_called_once()
 
-
-def test_init_db_runs_focus_contract_guard_after_runtime_schema() -> None:
+def test_init_db_runs_contract_guards_after_create_all() -> None:
     """
-    验证 init_db() 主链路会在 create_all 和 runtime schema 之后执行 focus-contract fail-closed 校验。
+    验证 init_db() 主链路会在 create_all 之后执行 fail-closed 合同校验。
 
     创建时间: 2026-04-27
     任务: fix-focus-contract-runtime-schema-conflict
-    说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把 focus-contract 校验从主链路上绕开。
+    说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把合同校验从主链路上绕开。
     """
     fake_engine = object()
     with (
         patch("src.storage.db.get_engine", return_value=fake_engine),
         patch("src.storage.models.Base.metadata.create_all"),
-        patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
         patch("src.storage.db._assert_focus_contract_schema") as mock_assert_focus_contract_schema,
+        patch("src.storage.db._assert_annotation_contract_schema") as mock_assert_annotation_contract_schema,
+        patch("src.storage.db._assert_agent_audit_contract_schema") as mock_assert_agent_audit_contract_schema,
     ):
         init_db()
 
-    mock_ensure_runtime_schema.assert_called_once_with(fake_engine)
     mock_assert_focus_contract_schema.assert_called_once_with(fake_engine)
+    mock_assert_annotation_contract_schema.assert_called_once_with(fake_engine)
+    mock_assert_agent_audit_contract_schema.assert_called_once_with(fake_engine)
 
 
-def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> None:
+def test_agent_audit_contract_guard_rejects_missing_audit_tables(db_session) -> None:
+    """2026-08-10 用于验证缺少新审计表时启动直接失败"""
+    from src.storage.db import _assert_agent_audit_contract_schema
+
+    db_session.execute(text("DROP TABLE IF EXISTS agent_invocations CASCADE"))
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="agent_invocations 表不存在"):
+        _assert_agent_audit_contract_schema(db_session.get_bind())
+
+
+def test_no_legacy_runtime_schema_compat_path_remains() -> None:
     """
-    验证 PostgreSQL runtime schema 不会再补旧 protagonist-contract 列。
-
-    创建时间: 2026-04-27
-    任务: fix-focus-contract-runtime-schema-conflict
-    说明: 当前主线以 focus-contract fail-closed 为准；
-          若 runtime schema 仍偷偷补 `protagonist/main_characters/core_cast/theme_color`，就会和启动校验自相矛盾。
+    2026-08-12 用于验证旧库兼容路径已彻底移除（只有最新口径）：
+    init_db 不再补列/补外键/拒绝旧结构，schema 完全由 create_all 表达。
     """
-    fake_engine = MagicMock()
-    fake_engine.dialect.name = "postgresql"
-    fake_conn = MagicMock()
-    fake_engine.begin.return_value.__enter__.return_value = fake_conn
+    import src.storage.db as db_module
 
-    with (
-        patch("src.storage.db._table_exists", return_value=False),
-        patch("src.storage.db._ensure_analysis_related_foreign_keys"),
+    for legacy_name in (
+        "_ensure_runtime_schema",
+        "_ensure_analysis_related_foreign_keys",
+        "_normalize_analysis_related_novel_ids",
+        "_assert_no_orphans",
+        "_constraint_exists",
     ):
-        _ensure_runtime_schema(fake_engine)
-
-    executed_sql = [str(call.args[0]) for call in fake_conn.execute.call_args_list]
-
-    expected_foreshadow_sql = "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation"
-    expected_thread_confidence_sql = "ALTER TABLE foreshadowing_threads ADD COLUMN IF NOT EXISTS confidence"
-
-    assert any(expected_foreshadow_sql in sql for sql in executed_sql)
-    assert any(expected_thread_confidence_sql in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist" in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters" in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast" in sql for sql in executed_sql)
-    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS theme_color" in sql for sql in executed_sql)
+        assert not hasattr(db_module, legacy_name), f"旧兼容代码 {legacy_name} 不应存在"
 
 
 def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     """
-    验证测试库初始化后已具备新增的分析链路外键。
-
-    创建时间: 2026-04-22
-    任务: fix-analysis-related-foreign-keys
-    说明: 这里直接查当前测试 schema 的 pg 元数据，确保缺失的 8 条外键已经真正落到数据库。
+    2026-08-05 用于验证测试库已具备章节标注连续性与数据库图主链外键
     """
     expected_constraints = {
         "analysis_runs_novel_id_fkey",
-        "disambig_checkpoint_run_id_fkey",
-        "chunk_locations_chunk_id_run_id_fkey",
-        "chunk_locations_novel_id_fkey",
+        "chapter_annotations_run_id_fkey",
+        "case_pool_cases_run_id_fkey",
+        "graph_versions_first_chunk_run_fkey",
+        "graph_versions_last_chunk_run_fkey",
+        "graph_facts_run_id_fkey",
+        "graph_facts_effective_chunk_run_fkey",
+        "graph_relation_versions_relation_id_fkey",
         "cloud_analysis_novel_id_fkey",
         "global_context_novel_id_fkey",
-        "graph_relation_events_chunk_id_run_id_fkey",
         "token_usage_novel_id_fkey",
     }
 
@@ -124,7 +171,7 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     assert set(rows) == expected_constraints
 
 
-def test_timeline_contract_runtime_schema_no_longer_creates_version_columns() -> None:
+def test_fresh_schema_uses_chapter_graph_versions_without_legacy_event_table() -> None:
     """
     验证 pytest fresh schema 不再创建 timeline / graph projection 版本列。
 
@@ -146,20 +193,30 @@ def test_timeline_contract_runtime_schema_no_longer_creates_version_columns() ->
                 """
             )
         ).all()
-        constraints = session.execute(
+        legacy_table = session.execute(
+            text("SELECT to_regclass('graph_relation_events')")
+        ).scalar_one_or_none()
+        constraints = set(
+            session.execute(
             text(
                 """
                 SELECT constraint_name
                 FROM information_schema.table_constraints
                 WHERE table_schema = current_schema()
-                  AND table_name = 'graph_relation_events'
-                  AND constraint_name = 'ck_graph_relation_events_change_type_v2'
+                  AND table_name = 'graph_versions'
+                  AND constraint_type = 'UNIQUE'
                 """
             )
-        ).scalars().all()
+            ).scalars()
+        )
 
     assert column_rows == []
-    assert constraints == ["ck_graph_relation_events_change_type_v2"]
+    assert legacy_table is None
+    assert {
+        "uq_graph_versions_run_chapter",
+        "uq_graph_versions_run_order",
+        "uq_graph_versions_annotation",
+    } <= constraints
 
 
 def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
@@ -181,5 +238,9 @@ def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
     )
 
     assert foreign_keys == [
+        # 2026-08-13 P2：补齐指向 chunks 的复合 FK（run_id 仍只声明一次）；
+        # 列表按 (列名, 引用表, 引用列, ondelete) 字母序排序
+        (("end_chunk_id", "run_id"), ("chunks", "chunks"), ("chunk_id", "run_id"), "CASCADE"),
         (("run_id",), ("analysis_runs",), ("run_id",), "CASCADE"),
+        (("start_chunk_id", "run_id"), ("chunks", "chunks"), ("chunk_id", "run_id"), "CASCADE"),
     ]

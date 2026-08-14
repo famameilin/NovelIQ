@@ -7,7 +7,6 @@
 
 from src.lexicons.genre_detector import (
     detect_genre_weighted,
-    get_weighted_lexicon_config,
 )
 
 
@@ -93,31 +92,3 @@ class TestDetectGenreWeighted:
             accumulated += w
         assert accumulated >= 1.0 or len(result.genre_weights) == 1
 
-
-class TestGetWeightedLexiconConfig:
-    """加权词表配置测试"""
-
-    def test_single_genre(self):
-        """单个类型配置"""
-        genre_weights = [("xianxia", 1.0)]
-        config = get_weighted_lexicon_config(genre_weights)
-        assert len(config) == 1
-        assert config[0][0] == "xianxia"
-        assert config[0][2] == 1.0
-
-    def test_multiple_genres(self):
-        """多个类型配置"""
-        genre_weights = [("xianxia", 0.7), ("urban", 0.3)]
-        config = get_weighted_lexicon_config(genre_weights)
-        assert len(config) == 2
-        assert config[0][0] == "xianxia"
-        assert config[0][2] == 0.7
-        assert config[1][0] == "urban"
-        assert config[1][2] == 0.3
-
-    def test_general_genre(self):
-        """general 类型配置"""
-        genre_weights = [("general", 1.0)]
-        config = get_weighted_lexicon_config(genre_weights)
-        assert len(config) == 1
-        assert config[0][0] == "general"

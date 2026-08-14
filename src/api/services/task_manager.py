@@ -283,7 +283,12 @@ class TaskManager:
 
             try:
                 # heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”
-                self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now(UTC))
+                # 2026-08-13 P2：列无时区，统一落 naive UTC 挂钟（避免 PG 会话时区转换错位）
+                self._update_db(
+                    task_id,
+                    worker_id=self._worker_id,
+                    heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
+                )
             except Exception as exc:
                 logger.error(f"Failed to refresh runtime heartbeat for task {task_id}: {exc}")
 

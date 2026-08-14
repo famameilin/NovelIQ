@@ -87,8 +87,12 @@ async def get_timeline(
         raise NovelNotFoundError(f"任务 {task_id} 不属于小说 {novel_id}")
 
     run_id = run_data["run_id"]
-    if run_data["status"] not in ("completed", "aggregated", "diagnosed"):
-        raise AnalysisNotCompleteError(f"分析尚未完成，当前状态: {run_data['status']}")
+    # 2026-08-14 D3：新管线只写 completed；aggregated/diagnosed 为旧合同状态不再可读
+    if run_data["status"] not in ("completed",):
+        raise AnalysisNotCompleteError(
+            f"分析尚未完成，当前状态: {run_data['status']}",
+            run_status=run_data["status"],
+        )
 
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)

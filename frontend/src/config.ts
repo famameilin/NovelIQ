@@ -21,21 +21,6 @@ export const appConfig = {
   /** 数据预加载：hover 后缓存的 staleTime（ms） */
   prefetchStaleTime: 5 * 60 * 1000, // 5 分钟
 
-  /** WebSocket 心跳间隔（ms） */
-  wsHeartbeatInterval: 30 * 1000, // 30 秒
-
-  /** WebSocket pong 超时（ms） */
-  wsPongTimeout: 10 * 1000, // 10 秒
-
-  /** WebSocket 指数退避：初始延迟（ms） */
-  wsReconnectBaseDelay: 1000,
-
-  /** WebSocket 指数退避：最大延迟（ms） */
-  wsReconnectMaxDelay: 30 * 1000,
-
-  /** WebSocket 最大重连次数 */
-  wsMaxReconnectAttempts: 10,
-
   /** LLM 输出缓冲区最大 chunk key 数量（LRU 上限） */
   maxLLMOutputKeys: 500,
 

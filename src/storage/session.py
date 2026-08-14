@@ -110,6 +110,10 @@ class DatabaseSession:
         """退出上下文管理器，自动提交或回滚"""
         if exc_type is not None:
             self.rollback()
+        else:
+            # 2026-08-14 D9：正常退出时提交未提交的写操作。此前直接 close() 会
+            # 隐式回滚未提交修改，with 块内的写操作被静默丢弃（与 db.get_session 语义对齐）
+            self.commit()
         if self._auto_close:
             self.close()
 

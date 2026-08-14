@@ -6,8 +6,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from src.models.cloud.schema import CloudAnalysis
-from src.workflows.diagnose import _log_diagnosis_results
+from src.storage.models import GraphEntity
+from src.workflows.diagnose import _log_diagnosis_results, _persist_main_character_attributes
+from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
 def test_log_diagnosis_results_labels_expectation(monkeypatch) -> None:
@@ -45,3 +49,60 @@ def test_log_diagnosis_results_labels_expectation(monkeypatch) -> None:
     )
 
     assert any("Foreshadow Expectation: 35.00%" in message for message in messages)
+
+
+def test_persist_main_character_attributes_clears_previous_run_flags(db_session, monkeypatch) -> None:
+    """2026-08-13 P2-2 重跑诊断先清除该 run 全部实体的 is_main_character 标记，
+    避免只置位不清理导致已下榜角色残留主角标记"""
+    from src.knowledge.authority import KnowledgeGraphAuthorityService
+
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
+    former = GraphEntity(
+        run_id=run_id,
+        canonical_name="旧主角",
+        entity_type="character",
+        attributes={"is_main_character": True},
+        first_seen_chunk=0,
+        last_seen_chunk=0,
+    )
+    current = GraphEntity(
+        run_id=run_id,
+        canonical_name="新主角",
+        entity_type="character",
+        attributes={},
+        first_seen_chunk=0,
+        last_seen_chunk=0,
+    )
+    db_session.add_all([former, current])
+    db_session.flush()
+
+    class _Item:
+        def __init__(self, entity_id: int, name: str) -> None:
+            self.entity_id = entity_id
+            self.name = name
+            self.aliases: list[str] = []
+
+    class _FakeView:
+        canonical_entities = [_Item(current.entity_id, "新主角")]
+
+    fake_service = MagicMock()
+    fake_service.build_export_view.return_value = _FakeView()
+    monkeypatch.setattr(
+        KnowledgeGraphAuthorityService,
+        "from_session",
+        lambda session: fake_service,
+    )
+
+    _persist_main_character_attributes(
+        db_session,
+        run_id=run_id,
+        main_characters=["新主角"],
+    )
+
+    db_session.flush()
+    rows = {
+        row.canonical_name: dict(row.attributes or {})
+        for row in db_session.query(GraphEntity).filter(GraphEntity.run_id == run_id)
+    }
+    assert "is_main_character" not in rows["旧主角"]
+    assert rows["新主角"].get("is_main_character") is True

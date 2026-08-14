@@ -68,6 +68,9 @@ logs/
 # Uploads - 用户上传的文件
 data/uploads/
 
+# Novels - 本地样例小说（不入库）
+data/novel/
+
 # Outputs - 分析输出结果
 outputs/
 
@@ -210,7 +213,7 @@ tests/jmeter/test_files.csv
 tests/jmeter/test_novel.txt
 
 # 生成的分析结果
-results/
+tests/jmeter/results/archive/
 
 AGENTS.md
 
@@ -219,13 +222,14 @@ skills/
 .codex-runtime/ 
 .playwright-mcp/
 .pytest-tmp/
-output/
 tmp/
 scripts/tools/build_competition_report.py
 
 # 未跟踪的本地素材与调试工具(移除 git 跟踪)
 noveliq-creative-proposal*.png
 scripts/db/
-scripts/manual/
-scripts/legacy/
 scripts/tools/
+scripts/experiments/
+
+# ZCode 会话内部计划
+.zcode/

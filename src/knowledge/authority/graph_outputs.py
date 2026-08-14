@@ -4,6 +4,7 @@ from src.relation_network_metrics import summarize_relation_network
 
 from .types import (
     ConfirmedRelation,
+    GraphChange,
     GraphConflictSample,
     GraphKeyRelationHighlight,
     GraphLowConfidenceSample,
@@ -12,7 +13,6 @@ from .types import (
     GraphQualitySignals,
     GraphSharedSummary,
     ParticipantState,
-    RelationEvent,
 )
 
 LOW_CONFIDENCE_REPORT_LIMIT = 20
@@ -88,11 +88,15 @@ def build_graph_page_summary(
 
 def build_graph_quality_signals(
     confirmed_relations: list[ConfirmedRelation],
-    relation_events: list[RelationEvent],
+    graph_changes: list[GraphChange],
 ) -> GraphQualitySignals:
     """为共享下游消费者计算仅聚合级的图谱质量计数器"""
 
-    low_confidence_count = sum(1 for event in relation_events if event.confidence is None or event.confidence < 0.6)
+    low_confidence_count = sum(
+        1
+        for change in graph_changes
+        if change.change_kind == "relation" and change.confidence == "low"
+    )
     relation_conflicts = _detect_relation_conflicts(confirmed_relations)
     return GraphQualitySignals(
         conflict_count=len(relation_conflicts),
@@ -102,14 +106,13 @@ def build_graph_quality_signals(
 
 def build_graph_quality_report(
     confirmed_relations: list[ConfirmedRelation],
-    relation_events: list[RelationEvent],
+    graph_changes: list[GraphChange],
 ) -> GraphQualitySignals:
     """把图谱质量明细收口为仅聚合级的报告计数器"""
 
-    shared_quality = build_graph_quality_signals(confirmed_relations, relation_events)
-    # graph page 继续暴露全历史低置信事件计数；但 export/diagnosis
-    # 复用的 report 必须保持旧 summary contract，避免长篇作品把 low_confidence_count
-    # 悄悄放大成“全历史事件总数”
+    shared_quality = build_graph_quality_signals(confirmed_relations, graph_changes)
+    # graph page 继续暴露全历史低置信事件计数；export/diagnosis
+    # 复用的 report 保持稳定上限，避免长篇作品把低置信事件放大成全历史总数
     return GraphQualitySignals(
         conflict_count=shared_quality.conflict_count,
         low_confidence_count=min(shared_quality.low_confidence_count, LOW_CONFIDENCE_REPORT_LIMIT),
@@ -118,30 +121,39 @@ def build_graph_quality_report(
 
 def build_graph_page_quality(
     confirmed_relations: list[ConfirmedRelation],
-    relation_events: list[RelationEvent],
+    graph_changes: list[GraphChange],
 ) -> GraphPageQualityDetails:
     """根据稳定 authority 事实计算仅供图谱页面使用的质量明细"""
 
-    shared_quality = build_graph_quality_signals(confirmed_relations, relation_events)
+    shared_quality = build_graph_quality_signals(confirmed_relations, graph_changes)
     relation_conflicts = _detect_relation_conflicts(confirmed_relations)
-    low_confidence_events = [
+    low_confidence_changes = [
         GraphLowConfidenceSample(
-            relation_event_id=event.relation_event_id,
-            chunk_id=event.chunk_id,
-            from_name=event.from_name,
-            to_name=event.to_name,
-            relation_type=event.relation_type,
-            change_type=event.change_type,
-            confidence=event.confidence,
+            change_id=change.change_id,
+            graph_version_id=change.graph_version_id,
+            chapter_id=change.chapter_id,
+            fact_id=change.fact_id,
+            fact_revision=change.fact_revision,
+            effective_chunk_id=change.effective_chunk_id,
+            relation_id=change.relation_id,
+            from_name=change.from_name or "",
+            to_name=change.to_name or "",
+            relation_type=change.relation_type,
+            change_kind=(
+                str(change.changes[0].get("change_kind"))
+                if change.changes
+                else None
+            ),
+            confidence=change.confidence,
         )
-        for event in relation_events
-        if event.confidence is None or event.confidence < 0.6
+        for change in graph_changes
+        if change.change_kind == "relation" and change.confidence == "low"
     ]
     return GraphPageQualityDetails(
         conflict_count=shared_quality.conflict_count,
         low_confidence_count=shared_quality.low_confidence_count,
         conflicts=relation_conflicts[:GRAPH_PAGE_CONFLICT_SAMPLE_LIMIT],
-        low_confidence_samples=low_confidence_events[:GRAPH_PAGE_LOW_CONFIDENCE_SAMPLE_LIMIT],
+        low_confidence_samples=low_confidence_changes[:GRAPH_PAGE_LOW_CONFIDENCE_SAMPLE_LIMIT],
     )
 
 
@@ -171,7 +183,11 @@ def _detect_relation_conflicts(confirmed_relations: list[ConfirmedRelation]) -> 
                 entity_names=sorted({pair_key[0][1], pair_key[1][1]}),
                 relation_types=sorted(relation_types),
                 relation_count=len(relations),
-                latest_event_ids=[relation.latest_event_id for relation in relations if relation.latest_event_id],
+                latest_relation_version_ids=[
+                    relation.latest_relation_version_id
+                    for relation in relations
+                    if relation.latest_relation_version_id
+                ],
             )
         )
     return conflicts

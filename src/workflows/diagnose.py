@@ -1,10 +1,8 @@
 """
-诊断工作流模块
+诊断工作流模块（LangGraph 诊断 Agent）
 
-本文件从 src/cli/diagnose.py 提取核心业务逻辑，作为 workflows 模块的诊断工作流实现
-
-
-
+诊断 agent 通过工具化自主取证（聚合指标/转折素材/人物/主题/图谱信号），
+最终输出 CloudAnalysis，不再预构建一次性大 payload
 """
 
 from __future__ import annotations
@@ -14,62 +12,17 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.agents.stream import AgentStream
+from src.api.exceptions import GraphReadinessError
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
-from src.models.cloud import build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
-from src.models.diagnosis import DiagnosisClient
 from src.storage.repositories import RunRepository, StatsRepository
-
-
-def _setup_diagnose_callback(
-    cloud_client: DiagnosisClient,
-    session: Session,
-    novel_id: str,
-    run_id: str,
-) -> None:
-    """
-    设置诊断token回调
-
-    从 run_diagnose 中提取，负责设置token使用记录回调
-    """
-
-    def _token_usage_callback(
-        cb_novel_id: str,
-        task_type: str,
-        call_type: str,
-        model: str,
-        prompt_tokens: int,
-        total_tokens: int,
-        completion_tokens,
-        chunk_id,
-    ) -> None:
-        try:
-            resolved_novel_id = cb_novel_id if cb_novel_id and cb_novel_id != "unknown" else novel_id
-            stats_repo = StatsRepository(session)
-            stats_repo.insert_token_usage(
-                run_id,
-                resolved_novel_id,
-                task_type,
-                call_type,
-                model,
-                prompt_tokens,
-                total_tokens,
-                completion_tokens,
-                chunk_id,
-            )
-        except Exception as e:
-            logger.warning(f"failed to record token usage: {e}")
-
-    cloud_client._token_usage_callback = _token_usage_callback
-    cloud_client._novel_id = novel_id
 
 
 def _log_diagnosis_results(result: CloudAnalysis) -> None:
     """
     输出诊断结果日志
-
-    从 run_diagnose 中提取，负责输出诊断结果日志
     """
     logger.info("\n=== Diagnosis Summary ===")
     logger.info(f"Novel ID: {result.novel_id}")
@@ -93,49 +46,104 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
         logger.info(f"\nDiagnosis:\n{result.diagnosis}")
 
 
+def _persist_main_character_attributes(
+    session: Session,
+    *,
+    run_id: str,
+    main_characters: list[str],
+) -> None:
+    """2026-08-09 用于把诊断主角名单固化为图节点属性"""
+    from sqlalchemy import select
+
+    from src.knowledge.authority import KnowledgeGraphAuthorityService
+    from src.storage.models import GraphEntity
+
+    if not main_characters:
+        return
+    try:
+        view = KnowledgeGraphAuthorityService.from_session(session).build_export_view(run_id)
+    except (ValueError, GraphReadinessError):
+        # 图未就绪或数据异常时静默跳过主角属性固化（后续图版本补写）
+        return
+    preferred = set(main_characters)
+    representative_ids: set[int] = set()
+    for item in view.canonical_entities:
+        if item.entity_id is None:
+            continue
+        aliases = set(item.aliases)
+        if item.name in preferred or (aliases & preferred):
+            representative_ids.add(int(item.entity_id))
+    if not representative_ids:
+        return
+    graph_entities = list(
+        session.execute(
+            select(GraphEntity).where(
+                GraphEntity.run_id == run_id,
+            )
+        ).scalars()
+    )
+    # 2026-08-13 P2-2 重跑诊断先清除该 run 全部实体的 is_main_character 标记，
+    # 避免旧名单残留（只置位不清理会让已下榜角色仍显示为主角）。
+    # attributes 是 JSON 列，这里读改写后整体写回，与下文置位共用同一批实体。
+    for graph_entity in graph_entities:
+        attributes = dict(graph_entity.attributes or {})
+        if attributes.pop("is_main_character", None) is not None:
+            graph_entity.attributes = attributes
+    for graph_entity in graph_entities:
+        if graph_entity.entity_id not in representative_ids:
+            continue
+        attributes = dict(graph_entity.attributes or {})
+        attributes["is_main_character"] = True
+        graph_entity.attributes = attributes
+    session.flush()
+
+
 async def run_diagnose(
     run_id: str,
     session: Session,
-    client: DiagnosisClient | None = None,
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> CloudAnalysis:
     """
-    执行诊断流程
-
-
-
-
+    执行诊断流程（诊断 Agent 工具化自主取证）
 
     Args:
         run_id: 运行ID
         session: 数据库连接
-        client: 诊断客户端
         analysis_logger: 分析日志器
 
     Returns:
         CloudAnalysis: 诊断分析结果
     """
+    from src.agents import run_diagnosis_agent
+
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)
-    novel_id = str(run.get("novel_id", "")).strip() if run else ""
+    if not run:
+        raise ValueError(f"run {run_id} not found")
+    novel_id = str(run.get("novel_id", "")).strip() or ""
     if not novel_id:
         raise ValueError(f"run {run_id} is missing novel_id, cannot build diagnosis payload")
+    # RunRepository._to_dict 的键是 "title"（非 "novel_title"）
+    novel_title = str(run.get("title", "")).strip() or None
+
+    agent_stream = AgentStream(emitter, sub_stage="diagnosis") if emitter is not None else None
+
+    result = await run_diagnosis_agent(
+        session=session,
+        run_id=run_id,
+        novel_id=novel_id,
+        novel_title=novel_title,
+        stream=agent_stream,
+    )
 
     stats_repo = StatsRepository(session)
-    payload = build_diagnosis_payload(session, novel_id, run_id)
-
-    logger.debug(f"built diagnosis payload with keys={sorted(payload.keys())}")
-
-    cloud_client = client or DiagnosisClient(analysis_logger=analysis_logger)
-
-    _setup_diagnose_callback(cloud_client, session, novel_id, run_id=run_id)
-    if isinstance(cloud_client, DiagnosisClient):
-        result = await cloud_client.diagnose(payload, run_id=run_id)
-    else:
-        result = await cloud_client.diagnose(payload)
-
     stats_repo.insert_cloud_analysis(run_id, result)
+    _persist_main_character_attributes(
+        session,
+        run_id=run_id,
+        main_characters=list(result.main_characters),
+    )
     logger.debug(f"diagnosis persisted run_id={run_id}")
 
     _log_diagnosis_results(result)

@@ -22,10 +22,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   buildLLMOutputScopeKey,
   type LLMStreamGroup,
+  type StreamBlock,
   useStreamStore,
 } from "@/store/streamStore";
 import { cn } from "@/lib/cn";
@@ -44,7 +44,13 @@ const STAGE_LABELS: Record<string, string> = {
   diagnose: "诊断报告",
 };
 
-const ANNOTATION_PHASE_TAB_SUBSTAGES = new Set(["phase1", "phase2", "phase3", "phase4"]);
+/**
+ * 2026-08-12: 标注阶段 agent 化后，后端 sub_stage 固定为 chapter_agent（不再下发 phase1-4）。
+ * 该集合仅用于判定标注 Agent 运行期是否启用"同 chunk 回退 + pending 骨架"的稳定化逻辑；
+ * chunkFallbackGroups / pendingGroup / displayGroup 回退链在单枚举值下基本不再触发，
+ * 保留它们以兜住"进度先到、流事件后到"的窗口期，避免阶段切换闪断。
+ */
+const ANNOTATION_PHASE_TAB_SUBSTAGES = new Set(["chapter_agent"]);
 
 /**
  * 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长
@@ -122,55 +128,170 @@ function StreamMarkdownPanel({
   );
 }
 
+/** 工具调用状态徽标 */
+function ToolStatusBadge({ status }: { status: "started" | "success" | "failed" }) {
+  if (status === "started") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+        进行中
+      </span>
+    );
+  }
+  if (status === "success") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-600">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        成功
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-600">
+      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+      失败
+    </span>
+  );
+}
+
 /**
- * 单条流在主面板和弹窗详情里都要以相同方式呈现 output/thinking 双视图
+ * "模型思考中"折叠块：内容为工具调用列表
+ * 默认展开条件：该块是最后一块且其后还没有输出块（当前轮仍在思考）
+ */
+function ThinkingBlockCard({
+  block,
+  defaultExpanded,
+}: {
+  block: StreamBlock;
+  defaultExpanded: boolean;
+}) {
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const expanded = manualExpanded ?? defaultExpanded;
+  const lastTool = block.tools[block.tools.length - 1];
+  const hasTools = block.tools.length > 0;
+  const statusText =
+    !hasTools || lastTool.status === "started"
+      ? "推理中"
+      : lastTool.status === "success"
+        ? "已完成"
+        : "失败";
+
+  return (
+    <div className="shrink-0 rounded-lg border border-border bg-surface-secondary">
+      <button
+        type="button"
+        onClick={() => setManualExpanded((prev) => (prev === null ? !defaultExpanded : !prev))}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        aria-expanded={expanded}
+      >
+        <span
+          className={cn(
+            "text-xs text-text-muted transition-transform duration-200",
+            expanded && "rotate-90",
+          )}
+        >
+          ▶
+        </span>
+        <span className="text-sm font-medium text-text">模型思考中</span>
+        <span
+          className={cn(
+            "ml-1 inline-flex items-center gap-1 text-[11px]",
+            lastTool?.status === "failed"
+              ? "text-red-600"
+              : lastTool?.status === "success"
+                ? "text-text-muted"
+                : "text-primary",
+          )}
+        >
+          {lastTool?.status === "started" || !hasTools ? (
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+          ) : null}
+          {statusText}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2">
+          {hasTools ? (
+            <ul className="space-y-1.5">
+              {block.tools.map((tool, index) => (
+                <li key={`${tool.name}-${index}`} className="flex items-center justify-between gap-3">
+                  <span className="truncate font-mono text-xs text-text-secondary">{tool.name}</span>
+                  <ToolStatusBadge status={tool.status} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-text-muted">模型正在思考下一步动作…</p>
+          )}
+          {lastTool && lastTool.detail && lastTool.status !== "started" && (
+            <p className="mt-2 line-clamp-3 text-[11px] text-text-muted">{lastTool.detail}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "模型输出"区块：模型文本 markdown */
+function OutputBlockCard({ text, maxLines }: { text: string; maxLines: number }) {
+  const content = _limitMarkdownLines(text, maxLines);
+  return (
+    <div className="shrink-0 rounded-lg border border-border bg-surface-secondary">
+      <div className="border-b border-border px-3 py-2 text-sm font-medium text-text">
+        模型输出
+      </div>
+      <div className="overflow-auto p-3">
+        <div className="whitespace-pre-wrap break-words font-mono text-sm text-text-secondary">
+          <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 单条流在主面板和弹窗详情里都以相同方式呈现顺序区块：
+ * "模型思考中"（可折叠，内容=工具调用）→ "模型输出"（模型文本）循环
  */
 function StreamGroupDetail({
   group,
   maxLines,
   className,
-  forceTabs = false,
   emptyOutputMessage = "暂无输出",
-  emptyThinkingMessage = "暂无思考内容",
 }: {
   group: LLMStreamGroup;
   maxLines: number;
   className?: string;
-  forceTabs?: boolean;
   emptyOutputMessage?: string;
-  emptyThinkingMessage?: string;
 }) {
-  const outputContent = useMemo(
-    () => _limitMarkdownLines(group.outputText, maxLines),
-    [group.outputText, maxLines],
-  );
-  const thinkingContent = useMemo(
-    () => _limitMarkdownLines(group.thinkingText, maxLines),
-    [group.thinkingText, maxLines],
-  );
-  const hasOutput = outputContent.trim().length > 0;
-  const hasThinking = thinkingContent.trim().length > 0;
-  const showTabs = forceTabs || hasThinking;
-  const resolvedOutputContent = hasOutput ? outputContent : emptyOutputMessage;
-  const resolvedThinkingContent = hasThinking ? thinkingContent : emptyThinkingMessage;
+  const blocks = group.blocks;
+  const hasOutput = group.outputText.trim().length > 0;
 
-  if (!showTabs) {
-    return <StreamMarkdownPanel content={resolvedOutputContent} className={className} />;
+  if (blocks.length === 0) {
+    return (
+      <StreamMarkdownPanel
+        content={hasOutput ? _limitMarkdownLines(group.outputText, maxLines) : emptyOutputMessage}
+        className={className}
+      />
+    );
   }
 
   return (
-    <Tabs defaultValue="output" className={cn("flex h-full flex-col", className)}>
-      <TabsList className="mb-3 shrink-0 self-start">
-        <TabsTrigger value="output">输出</TabsTrigger>
-        <TabsTrigger value="thinking">思考</TabsTrigger>
-      </TabsList>
-      <TabsContent value="output" className="mt-0 min-h-0 flex-1">
-        <StreamMarkdownPanel content={resolvedOutputContent} className="h-full" />
-      </TabsContent>
-      <TabsContent value="thinking" className="mt-0 min-h-0 flex-1">
-        <StreamMarkdownPanel content={resolvedThinkingContent} className="h-full" />
-      </TabsContent>
-    </Tabs>
+    <div className={cn("h-full min-h-0 space-y-3 overflow-y-auto pr-1", className)}>
+      {blocks.map((block, index) => {
+        const hasOutputAfter = blocks.slice(index + 1).some((item) => item.kind === "output");
+        if (block.kind === "thinking") {
+          return (
+            <ThinkingBlockCard
+              key={`thinking-${index}`}
+              block={block}
+              defaultExpanded={index === blocks.length - 1 && !hasOutputAfter}
+            />
+          );
+        }
+        return <OutputBlockCard key={`output-${index}`} text={block.text} maxLines={maxLines} />;
+      })}
+    </div>
   );
 }
 
@@ -311,6 +432,8 @@ export function StreamOutput({
         thinkingText: "",
         outputTotalChars: 0,
         thinkingTotalChars: 0,
+        toolTotalChars: 0,
+        blocks: [],
         lastUpdatedAt: 0,
       };
 
@@ -342,9 +465,7 @@ export function StreamOutput({
                 group={pendingGroup}
                 maxLines={maxLines}
                 className="h-full"
-                forceTabs
                 emptyOutputMessage="模型输出尚未到达，面板会在收到首段输出后继续填充。"
-                emptyThinkingMessage="模型思考尚未到达；若当前 provider 不返回 thinking，这里会保持为空。"
               />
             </div>
           </motion.div>
@@ -432,9 +553,7 @@ export function StreamOutput({
             group={displayGroup ?? activeGroup}
             maxLines={maxLines}
             className="h-full"
-            forceTabs={shouldStabilizePhaseTabs}
             emptyOutputMessage="模型输出尚未到达，面板会在收到首段输出后继续填充。"
-            emptyThinkingMessage="模型思考尚未到达；若当前 provider 不返回 thinking，这里会保持为空。"
           />
         </div>
 
@@ -485,9 +604,11 @@ export function StreamOutput({
                 </div>
               </div>
               <div className="min-h-0 p-4">
-                <StreamGroupDetail group={activeGroup} maxLines={maxLines} className="h-full" />
-              </div>
-            </div>
+                {/* 2026-08-13 P2-8: 与主面板保持一致，Dialog 同样渲染 displayGroup
+                    （chunk 回退模式下是合并了各流最新内容的聚合组），
+                    避免弹窗与主面板内容不一致 */}
+                <StreamGroupDetail group={displayGroup ?? activeGroup} maxLines={maxLines} className="h-full" />
+              </div>            </div>
           </DialogContent>
         </Dialog>
       </motion.div>

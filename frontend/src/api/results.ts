@@ -7,7 +7,7 @@ import type {
   DiagnosisResult,
   ForeshadowingThread,
   GraphData,
-  GraphEventsPageResponse,
+  GraphChangesPageResponse,
   TimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
@@ -95,30 +95,39 @@ export async function getForeshadowingThreads(
   return data;
 }
 
-// 获取人物关系图谱数据，包含节点、边、事件等信息
+// 获取指定章节边界的图谱快照
 export async function getGraph(
   novelId: string,
-  taskId: string
+  taskId: string,
+  options?: { chapterId?: number; graphVersionId?: string }
 ): Promise<GraphData> {
   const { data } = await apiClient.get<GraphData>(
     `/api/novels/${novelId}/graph`,
-    { params: { task_id: taskId } }
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.chapterId != null ? { chapter_id: options.chapterId } : {}),
+        ...(options?.graphVersionId ? { graph_version_id: options.graphVersionId } : {}),
+      },
+    }
   );
   return data;
 }
 
-export async function getGraphEvents(
+// 按章节倒序获取实体状态与关系变化
+export async function getGraphChanges(
   novelId: string,
   taskId: string,
-  options?: { eventsCursor?: string | null; eventsLimit?: number }
-): Promise<GraphEventsPageResponse> {
-  const { data } = await apiClient.get<GraphEventsPageResponse>(
-    `/api/novels/${novelId}/graph/events`,
+  options?: { chapterId?: number; changesCursor?: string | null; changesLimit?: number }
+): Promise<GraphChangesPageResponse> {
+  const { data } = await apiClient.get<GraphChangesPageResponse>(
+    `/api/novels/${novelId}/graph/changes`,
     {
       params: {
         task_id: taskId,
-        ...(options?.eventsCursor ? { events_cursor: options.eventsCursor } : {}),
-        ...(options?.eventsLimit != null ? { events_limit: options.eventsLimit } : {}),
+        ...(options?.chapterId != null ? { chapter_id: options.chapterId } : {}),
+        ...(options?.changesCursor ? { changes_cursor: options.changesCursor } : {}),
+        ...(options?.changesLimit != null ? { changes_limit: options.changesLimit } : {}),
       },
     }
   );

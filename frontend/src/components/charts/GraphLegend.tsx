@@ -37,8 +37,6 @@ const ENTITY_CSS_VAR_NAMES: Record<string, string> = {
   organization: "--chart-3",
   location: "--chart-4",
   item: "--chart-5",
-  event: "--chart-neutral",
-  concept: "--chart-neutral",
 };
 
 /** 实体类型显示名称 */
@@ -48,21 +46,22 @@ const ENTITY_LABELS: Record<string, string> = {
   organization: "组织",
   location: "地点",
   item: "物品",
-  event: "事件",
-  concept: "概念",
 };
 
 /** 关系类型 → CSS 变量名映射（与 ForceGraph.getRelationColorsFromCSS 一致） */
 const RELATION_CSS_VAR_NAMES: Record<string, string> = {
-  "友好": "--chart-positive",
-  "敌对": "--chart-negative",
-  "从属": "--chart-neutral",
-  "合作": "--chart-2",
-  "亲情": "--chart-positive",
-  "爱情": "--chart-4",
-  "师徒": "--chart-5",
-  "爱慕": "--chart-positive",
   "家族": "--chart-neutral",
+  "师徒": "--chart-neutral",
+  "主从": "--chart-neutral",
+  "敌对": "--chart-negative",
+  "盟友": "--chart-positive",
+  "友情": "--chart-positive",
+  "爱慕": "--chart-positive",
+  "利益": "--chart-neutral",
+  "领导": "--chart-neutral",
+  "同一人物": "--chart-neutral",
+  "隶属": "--chart-neutral",
+  "位于": "--chart-neutral",
 };
 
 function getEntityColor(entityType: string): string {

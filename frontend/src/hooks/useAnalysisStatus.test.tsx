@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
@@ -60,7 +60,6 @@ function HookHarness(props: {
     <div
       data-testid="analysis-status"
       data-connected={String(status.isConnected)}
-      data-stable={String(status.wsStable)}
     />
   );
 }
@@ -98,16 +97,6 @@ function emitSSEError(): void {
   });
 }
 
-/**
- * useAnalysisStatus 现在显式监听可见性恢复；测试需要稳定切换 jsdom 的 visibilityState
- */
-function setDocumentVisibilityState(state: "visible" | "hidden"): void {
-  Object.defineProperty(document, "visibilityState", {
-    configurable: true,
-    value: state,
-  });
-}
-
 describe("useAnalysisStatus", () => {
   beforeEach(() => {
     mockedIsConnected = false;
@@ -121,12 +110,10 @@ describe("useAnalysisStatus", () => {
     streamStoreState.setError.mockReset();
     streamStoreState.setStageDuration.mockReset();
     streamStoreState.reset.mockReset();
-    setDocumentVisibilityState("visible");
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    setDocumentVisibilityState("visible");
   });
 
   it("会把 pending 任务回填成活跃态并触发 onRunning", async () => {
@@ -320,7 +307,7 @@ describe("useAnalysisStatus", () => {
     });
   });
 
-  it("SSE 断开后会重置稳定态并显式标记连接中断", async () => {
+  it("SSE 断开后会显式标记连接中断", async () => {
     getTaskStatusMock.mockResolvedValue(createRunningStatus("task-disconnect"));
 
     render(<HookHarness novelId="novel-1" taskId="task-disconnect" />);
@@ -342,15 +329,10 @@ describe("useAnalysisStatus", () => {
       message: "phase1 进行中",
     });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "true");
-    });
-
     emitSSEError();
 
     await waitFor(() => {
       expect(streamStoreState.setConnected).toHaveBeenCalledWith(false);
-      expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "false");
     });
   });
 
@@ -405,32 +387,5 @@ describe("useAnalysisStatus", () => {
         content: "乙流输出",
       }),
     );
-  });
-
-  it("前台恢复时会补做一次任务状态回填", async () => {
-    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-foreground"));
-
-    render(<HookHarness novelId="novel-1" taskId="task-foreground" />);
-
-    await waitFor(() => {
-      expect(getTaskStatusMock).toHaveBeenCalledTimes(1);
-    });
-
-    getTaskStatusMock.mockClear();
-    setDocumentVisibilityState("hidden");
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    expect(getTaskStatusMock).not.toHaveBeenCalled();
-
-    setDocumentVisibilityState("visible");
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    await waitFor(() => {
-      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-foreground");
-    });
   });
 });

@@ -12,10 +12,10 @@ def test_compute_language_style_metrics_tone_distribution_sums_to_one() -> None:
         all_tokens=["\u7b80\u5355", "\u6587\u672c"],
     )
     dialogue_tones = [
-        "\u5f3a\u786c",
-        "\u6e29\u548c",
-        "\u5f3a\u786c",
-        "\u8bbd\u523a",
+        "愤怒",
+        "平静",
+        "愤怒",
+        "嘲讽",
     ]
 
     result = compute_language_style_metrics(text_data, dialogue_tones)
@@ -25,9 +25,9 @@ def test_compute_language_style_metrics_tone_distribution_sums_to_one() -> None:
     assert tone_distribution
     assert abs(sum(tone_distribution.values()) - 1.0) < 1e-9
     assert tone_distribution == {
-        "\u5f3a\u786c": 0.5,
-        "\u6e29\u548c": 0.25,
-        "\u8bbd\u523a": 0.25,
+        "愤怒": 0.5,
+        "平静": 0.25,
+        "嘲讽": 0.25,
     }
 
 

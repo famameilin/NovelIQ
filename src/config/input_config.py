@@ -34,7 +34,6 @@ class TaskModelConfig:
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
     stream_enabled: bool = False
-    stream_cloud_only: bool = True
 
     def validate(self) -> None:
         if self.timeout_s is not None and self.timeout_s <= 0:
@@ -47,11 +46,6 @@ class TaskModelConfig:
 
 TaskType = Literal[
     "annotation",
-    "annotation_fallback",
-    "incremental_disambig",
-    "mention_extraction",
-    "full_disambig",
-    "level3_rerank",
     "diagnosis",
 ]
 
@@ -64,10 +58,8 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
     if task_settings is None:
         raise ValueError(f"未知的任务类型: {task_type}")
 
-    thinking_enabled = getattr(settings.thinking, task_type, False)
-    stream_enabled = getattr(settings.streaming, task_type, False) if hasattr(settings, "streaming") else False
-
-    stream_cloud_only = getattr(settings.streaming, "cloud_only", True) if hasattr(settings, "streaming") else True
+    thinking_enabled = getattr(task_settings, "thinking", False)
+    stream_enabled = getattr(task_settings, "streaming", False)
 
     return TaskModelConfig(
         base_url=task_settings.base_url,
@@ -79,5 +71,4 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
         stream_enabled=stream_enabled,
-        stream_cloud_only=stream_cloud_only,
     )

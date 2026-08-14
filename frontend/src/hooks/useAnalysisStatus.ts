@@ -1,6 +1,6 @@
 /** 通过 SSE 和 HTTP backfill 同步分析任务状态 */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useSSEListener } from "./useEventSource";
 import { useStreamStore } from "@/store/streamStore";
 import { appConfig } from "@/config";
@@ -91,6 +91,7 @@ export function useAnalysisStatus(
     setError,
     setStageDuration,
     reset,
+    resumeEpoch,
   } = useStreamStore();
 
   const enabled = !!novelId && !!taskId && (options?.enabled ?? true);
@@ -99,11 +100,8 @@ export function useAnalysisStatus(
   const llmOutputBufferRef = useRef<Map<string, StreamEventData>>(new Map());
   const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasConnectedOnceRef = useRef(false);
-  const lastForegroundSyncAtRef = useRef(0);
   const hasHydratedTaskStatusRef = useRef(false);
-  const [stableTaskId, setStableTaskId] = useState<string | null>(null);
-  const sseReceivedMessageRef = useRef(false);
-  const wsStable = !!taskId && stableTaskId === taskId;
+  const lastForegroundSyncAtRef = useRef(0);
 
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -249,6 +247,12 @@ export function useAnalysisStatus(
 
   const bufferLLMOutput = useCallback(
     (eventData: StreamEventData) => {
+      // tool_call 事件按工具独立成行，且需要 started→success/failed 状态转移；
+      // 不参与按内容拼接的批处理缓冲（同窗口多个工具会拼成假工具名），直接刷入 store
+      if (eventData.action === "tool_call") {
+        appendLLMOutput({ ...eventData, status: eventData.status ?? "started" });
+        return;
+      }
       const bufferKey = buildLLMOutputBufferKey({
         action: eventData.action,
         stage: eventData.stage,
@@ -266,6 +270,7 @@ export function useAnalysisStatus(
           sub_percent: eventData.sub_percent,
           content: existing.content + eventData.content,
           message: eventData.message,
+          status: eventData.status ?? existing.status,
         });
       } else {
         llmOutputBufferRef.current.set(bufferKey, { ...eventData });
@@ -273,7 +278,7 @@ export function useAnalysisStatus(
 
       scheduleBufferedLLMFlush();
     },
-    [scheduleBufferedLLMFlush],
+    [appendLLMOutput, scheduleBufferedLLMFlush],
   );
 
   const handleMessage = useCallback(
@@ -303,6 +308,7 @@ export function useAnalysisStatus(
 
         case "llm_output":
         case "llm_thinking":
+        case "tool_call":
           bufferLLMOutput({
             action: eventData.action,
             stage: eventData.stage,
@@ -315,6 +321,7 @@ export function useAnalysisStatus(
             sub_percent: eventData.sub_percent,
             content: eventData.content,
             message: eventData.message,
+            status: eventData.status ?? null,
           });
           break;
 
@@ -373,39 +380,17 @@ export function useAnalysisStatus(
 
   const { isConnected, disconnect } = useSSEListener(sseUrl, {
     onEvent: (eventType, data) => {
+      // 2026-08-12: 后端 SSE 消息格式为 { type, data }，不含 task_id 字段；
+      // 移除恒为 false 的 task_id 过滤，message 事件直接按内部类型分发
       if (eventType === "message") {
-        const message = data as { type: SSEEventType; task_id: string; data: unknown };
-        if (message.task_id === taskId) {
-          if (
-            !sseReceivedMessageRef.current &&
-            (message.type === "stage_start" ||
-              message.type === "stage_progress" ||
-              message.type === "llm_output" ||
-              message.type === "llm_thinking")
-          ) {
-            sseReceivedMessageRef.current = true;
-            setStableTaskId(taskId);
-          }
-          handleMessage(message.type, message.data);
-        }
+        const message = data as { type: SSEEventType; data: unknown };
+        handleMessage(message.type, message.data);
       } else {
-        if (
-          !sseReceivedMessageRef.current &&
-          (eventType === "stage_start" ||
-            eventType === "stage_progress" ||
-            eventType === "llm_output" ||
-            eventType === "llm_thinking")
-        ) {
-          sseReceivedMessageRef.current = true;
-          setStableTaskId(taskId);
-        }
         handleMessage(eventType as SSEEventType, data);
       }
     },
     onError: () => {
       setConnected(false);
-      setStableTaskId(null);
-      sseReceivedMessageRef.current = false;
     },
   });
 
@@ -425,7 +410,6 @@ export function useAnalysisStatus(
       setTaskId(taskId);
       prevStatusRef.current = null;
       hasHydratedTaskStatusRef.current = false;
-      sseReceivedMessageRef.current = false;
       stageStartTimeRef.current = null;
       hasConnectedOnceRef.current = false;
       llmOutputBufferRef.current.clear();
@@ -443,8 +427,12 @@ export function useAnalysisStatus(
       }
       reset();
     }
-  }, [taskId, novelId, setTaskId, reset, syncTaskStatus]);
+    // 2026-08-14 D5：resumeEpoch 变化（同 task_id resume 开新轮）时同样重置
+    // 内部缓冲，避免旧轮 LLM 输出/进度状态与新轮混叠
+  }, [taskId, novelId, setTaskId, reset, syncTaskStatus, resumeEpoch]);
 
+  // 浏览器后台期间 EventSource 可能保持连接（不触发重连），
+  // 前台恢复时主动 flush 缓冲并做一次 HTTP 状态回填，避免进度/终态陈旧
   useEffect(() => {
     if (!enabled) {
       return;
@@ -482,6 +470,5 @@ export function useAnalysisStatus(
 
   return {
     isConnected,
-    wsStable,
   };
 }

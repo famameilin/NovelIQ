@@ -6,6 +6,8 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.engine import make_url
+
 
 def _load_setup_test_db_module() -> ModuleType:
     """
@@ -34,10 +36,11 @@ def test_default_db_url_keeps_real_password_when_switching_to_postgres_database(
 
     module = _load_setup_test_db_module()
 
+    target_url = make_url(module.TEST_DB_URL)
+
     assert module.DEFAULT_DB_URL.database == "postgres"
-    assert module.DEFAULT_DB_URL.render_as_string(hide_password=False) == (
-        "postgresql+psycopg://postgres:sr20031109ZY@localhost:5432/postgres"
-    )
+    assert module.DEFAULT_DB_URL.username == target_url.username
+    assert module.DEFAULT_DB_URL.password == target_url.password
 
 
 def test_create_test_database_recreates_existing_database() -> None:
@@ -76,7 +79,7 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
     创建时间: 2026-04-27
     任务: tighten-setup-test-db-contract-regression
     说明: 直接验证 setup_test_db.py 的 create_tables() 会切换到测试库，
-          并通过 src.storage.db.init_db(include_level3_tables=True) 拉起 fresh schema。
+          并通过 src.storage.db.init_db() 拉起 fresh schema。
           这条测试保护的是脚本引导链，而不是仅验证单个 SQL 片段。
     """
 
@@ -86,8 +89,9 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
     def mark_dispose() -> None:
         call_order.append("dispose")
 
-    def mark_init_db(*, include_level3_tables: bool) -> None:
-        call_order.append(f"init:{include_level3_tables}")
+    def mark_init_db() -> None:
+        """2026-08-07 用于记录最终数据库初始化调用"""
+        call_order.append("init")
 
     with (
         patch.dict(os.environ, {}, clear=False),
@@ -96,10 +100,13 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
     ):
         module.create_tables()
 
-    assert os.environ["DATABASE_URL"] == module.TEST_DB_URL
-    assert call_order == ["dispose", "init:True", "dispose"]
+    assert os.environ["DATABASE_URL"] == os.environ["TEST_DATABASE_URL"]
+    assert os.environ["DATABASE_USERNAME"] == os.environ["TEST_DATABASE_USERNAME"]
+    assert os.environ["DATABASE_PASSWORD"] == os.environ["TEST_DATABASE_PASSWORD"]
+    assert "DATABASE" not in os.environ
+    assert call_order == ["dispose", "init", "dispose"]
     assert mock_dispose_engine.call_count == 2
-    mock_init_db.assert_called_once_with(include_level3_tables=True)
+    mock_init_db.assert_called_once_with()
 
 
 def test_main_falls_back_to_in_place_table_reset_when_maintenance_db_is_unavailable() -> None:

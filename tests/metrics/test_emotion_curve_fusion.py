@@ -79,7 +79,7 @@ def test_build_display_emotion_curve_preserves_true_neutral_gap() -> None:
 def test_build_display_emotion_curve_keeps_conflict_signal_without_reversing_ai_direction() -> None:
     curve_rows = [_curve_row(1, pos_density=0.0, neg_density=0.04, net_density=-0.04)]
     annotation_rows = [SimpleNamespace(chunk_id=1, emotional_valence="mild_positive")]
-    dialogue_rows = [SimpleNamespace(chunk_id=1, tone="强硬")]
+    dialogue_rows = [SimpleNamespace(chunk_id=1, tone="愤怒")]
 
     result = build_display_emotion_curve(
         curve_rows=curve_rows,

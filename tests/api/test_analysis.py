@@ -44,7 +44,7 @@ class TestTestDatabaseIsolation:
         任务: fix-test-db-isolation
         说明: 这是此前污染开发库的直接入口，必须有回归测试锁住。
         """
-        expected_url = resolve_database_url_from_env("TEST_DATABASE_URL")
+        expected_url = resolve_database_url_from_env("TEST_DATABASE")
         with get_session_factory()() as session:
             actual_url = session.get_bind().engine.url.render_as_string(hide_password=False)
         assert actual_url == expected_url
@@ -282,7 +282,8 @@ class TestAnalysis:
                 task_id,
                 status="running",
                 worker_id="worker-running",
-                heartbeat_at=datetime.now(),
+                # 2026-08-13 P2：heartbeat_at 列无时区，统一落 naive UTC 挂钟
+                heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
             )
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
@@ -417,6 +418,49 @@ class TestAnalysis:
         assert run["cancel_requested"] is False
         assert run["completed_at"] is None
 
+    def test_resume_cancelled_task_allowed(self, api_client: TestClient):
+        """2026-08-08 用于验证 cancelled 任务可以继续分析并重置运行态"""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("resume_cancelled_test.txt", file, "text/plain")}
+                )
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                task_id,
+                status="cancelled",
+                progress=45.0,
+                stage="annotate",
+                sub_stage="chapter_agent",
+                current=3,
+                total=8,
+                message="用户取消",
+                error=None,
+                cancel_requested=True,
+                completed_at=None,
+            )
+        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+            resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
+        assert resume_response.status_code == 200
+        status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+        assert status_response.status_code == 200
+        data = status_response.json()
+        assert data["status"] == "pending"
+        assert data["progress"] == 0.0
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+        assert run is not None
+        assert run["cancel_requested"] is False
+
     def test_legacy_analyze_route_is_removed(self, api_client: TestClient):
         """测试旧 /analyze 兼容入口已删除"""
         response = api_client.post("/api/novels/nonexistent/analyze", json={"task_id": "resume-me"})
@@ -458,7 +502,10 @@ class TestAnalysis:
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
-        stale_heartbeat = datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
+        # 2026-08-13 P2：heartbeat_at 列无时区，落库统一为 naive UTC 挂钟
+        stale_heartbeat = (
+            datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
+        ).replace(tzinfo=None)
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = uuid.uuid4().hex[:8]
         cancelling_novel_id = uuid.uuid4().hex[:8]
@@ -665,3 +712,71 @@ class TestAnalysis:
         ):
             result = analysis_mod._get_task_detail_from_db("deadbeef")
         assert result is None
+
+    def test_status_map_covers_known_states_only(self):
+        """
+        2026-08-14 D3：/status 只映射新管线六态；aggregated/diagnosed 为旧合同
+        状态（新管线不再写入），与未知状态一样落入 PENDING 兜底，不再误报 COMPLETED。
+        """
+        assert analysis_mod._map_status_to_task_status("aggregated") == analysis_mod.TaskStatus.PENDING
+        assert analysis_mod._map_status_to_task_status("diagnosed") == analysis_mod.TaskStatus.PENDING
+        assert analysis_mod._map_status_to_task_status("completed") == analysis_mod.TaskStatus.COMPLETED
+        assert analysis_mod._map_status_to_task_status("pending") == analysis_mod.TaskStatus.PENDING
+        assert analysis_mod._map_status_to_task_status("unknown-state") == analysis_mod.TaskStatus.PENDING
+
+    def test_get_task_status_falls_back_for_legacy_aggregated_status(self, api_client: TestClient):
+        """2026-08-14 D3：历史 aggregated 状态的 run 不再映射为 completed（旧合同已退役）"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("legacy_aggregated_status.txt", file, "text/plain")}
+                )
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+        with get_session_factory()() as session:
+            RunRepository(session).update_run_task_fields(task_id, status="aggregated", progress=90.0)
+
+        response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "pending"
+        assert data["progress"] == 90.0
+
+    def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):
+        """
+        2026-08-13 P2：cancel 竞态中持久化返回 pending/running 时，
+        文案必须说“取消请求未生效”，不能说“无法取消”。
+        """
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("cancel_miss_race_test.txt", file, "text/plain")}
+                )
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        with (
+            patch.object(task_application_mod, "cancel_unclaimed_pending_task", return_value=False),
+            patch.object(task_application_mod, "persist_task_cancellation_request", return_value="running"),
+        ):
+            response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "running" in detail
+        assert "未生效" in detail
+        assert "无法取消" not in detail

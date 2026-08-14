@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, History, Link2, Users } from "lucide-react";
 
-import type { GraphData, GraphEvent, GraphNode } from "@/api/types";
+import type { GraphChange, GraphData, GraphNode } from "@/api/types";
 import type { ForceGraphHandle, GraphNodeObject } from "@/components/charts/forceGraphTypes";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { ForceGraph } from "@/components/charts/ForceGraph";
@@ -15,7 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { cn } from "@/lib/cn";
 
 interface GraphWorkspaceSectionProps {
-  view?: "full" | "graph" | "events";
+  view?: "full" | "graph" | "changes";
   graphData: GraphData;
   forceGraphRef: RefObject<ForceGraphHandle | null>;
   onNodeClick: (node: GraphNodeObject) => void;
@@ -30,21 +30,21 @@ interface GraphWorkspaceSectionProps {
   onCenter: () => void;
   onRelationTypeChange: (types: Set<string>) => void;
   onSearchChange: (query: string) => void;
-  totalEventCount: number;
-  loadedEventCount: number;
-  hasMoreEvents: boolean;
-  isEventsLoading: boolean;
-  eventsLoadError: string | null;
+  totalChangeCount: number;
+  loadedChangeCount: number;
+  hasMoreChanges: boolean;
+  isChangesLoading: boolean;
+  changesLoadError: string | null;
   graphSelectionHint: string | null;
-  sortedEvents: GraphEvent[];
-  activeSelectedEventId: number | null;
-  onSelectEvent: (event: GraphEvent) => void;
-  onLoadMoreEvents: () => void;
+  sortedChanges: GraphChange[];
+  activeSelectedChangeId: string | null;
+  onSelectChange: (change: GraphChange) => void;
+  onLoadMoreChanges: () => void;
   onGoTimeline: () => void;
   timelineUrl: string | null;
   selectedNode: GraphNode | null;
-  onOpenTimelineChunk: (chunkId?: number, relationEventId?: number | null, selectedNodeId?: string | null) => void;
-  selectedEvent: GraphEvent | null;
+  onOpenTimelineChunk: (chunkId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => void;
+  selectedChange: GraphChange | null;
   pageSectionVariants: {
     hidden: { opacity: number; y: number };
     visible: { opacity: number; y: number };
@@ -74,21 +74,21 @@ export function GraphWorkspaceSection({
   onCenter,
   onRelationTypeChange,
   onSearchChange,
-  totalEventCount,
-  loadedEventCount,
-  hasMoreEvents,
-  isEventsLoading,
-  eventsLoadError,
+  totalChangeCount,
+  loadedChangeCount,
+  hasMoreChanges,
+  isChangesLoading,
+  changesLoadError,
   graphSelectionHint,
-  sortedEvents,
-  activeSelectedEventId,
-  onSelectEvent,
-  onLoadMoreEvents,
+  sortedChanges,
+  activeSelectedChangeId,
+  onSelectChange,
+  onLoadMoreChanges,
   onGoTimeline,
   timelineUrl,
   selectedNode,
   onOpenTimelineChunk,
-  selectedEvent,
+  selectedChange,
   pageSectionVariants,
   getChangeTypeLabel,
 }: GraphWorkspaceSectionProps) {
@@ -104,7 +104,7 @@ export function GraphWorkspaceSection({
         view !== "full" && "block overflow-hidden"
       )}
     >
-      {view !== "events" && (
+      {view !== "changes" && (
       <Card id="graph-workspace" variant="elevated" className="flex h-full min-h-[420px] flex-col rounded-2xl">
         <CardHeader className="shrink-0 gap-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -157,20 +157,20 @@ export function GraphWorkspaceSection({
       <div
         className={cn(
           "space-y-4",
-          view === "events"
+          view === "changes"
             ? "grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(340px,0.82fr)]"
             : "max-h-full overflow-y-auto pr-1 xl:self-start",
         )}
       >
         <DashboardCardShell
-          title="关系变化记录"
+          title="图谱变化记录"
           icon={<History className="h-4 w-4" />}
           accent="chart-4"
-          className={cn(view === "events" && "flex h-full min-h-[420px] flex-col")}
-          contentClassName={cn(view === "events" && "flex h-full flex-col")}
+          className={cn(view === "changes" && "flex h-full min-h-[420px] flex-col")}
+          contentClassName={cn(view === "changes" && "flex h-full flex-col")}
           headerRight={
             <Badge variant="outline">
-              {loadedEventCount < totalEventCount ? `${loadedEventCount} / ${totalEventCount}` : totalEventCount}
+              {loadedChangeCount < totalChangeCount ? `${loadedChangeCount} / ${totalChangeCount}` : totalChangeCount}
             </Badge>
           }
           footer={
@@ -179,34 +179,34 @@ export function GraphWorkspaceSection({
               <ArrowRight className="h-4 w-4" />
             </Button>
           }
-          bodyClassName={cn(view === "events" ? "min-h-0 flex-1 gap-3" : "gap-3")}
+          bodyClassName={cn(view === "changes" ? "min-h-0 flex-1 gap-3" : "gap-3")}
         >
           <p className="text-sm text-text-muted">
-            按剧情推进查看关系的建立、强化、弱化和断裂。
-            {hasMoreEvents ? " 当前先展示一部分记录，可继续展开查看更多变化。" : ""}
+            按剧情推进查看实体状态和关系的稳定变化。
+            {hasMoreChanges ? " 当前先展示一部分记录，可继续展开查看更多变化。" : ""}
           </p>
           <div className={cn(
             "space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4",
-            view === "events" && "flex min-h-0 flex-1 flex-col"
+            view === "changes" && "flex min-h-0 flex-1 flex-col"
           )}>
             {graphSelectionHint ? (
               <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
                 {graphSelectionHint}
               </div>
             ) : null}
-            {sortedEvents.length ? (
+            {sortedChanges.length ? (
               <>
                 <div className={cn(
                   "space-y-3 pr-1",
-                  view === "events" ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[420px] overflow-y-auto"
+                  view === "changes" ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[420px] overflow-y-auto"
                 )}>
-                  {sortedEvents.map((event) => {
-                    const isSelected = activeSelectedEventId === event.relation_event_id;
+                  {sortedChanges.map((change) => {
+                    const isSelected = activeSelectedChangeId === change.change_id;
                     return (
                       <button
-                        key={event.relation_event_id}
+                        key={change.change_id}
                         type="button"
-                        onClick={() => onSelectEvent(event)}
+                        onClick={() => onSelectChange(change)}
                         className={cn(
                           "w-full rounded-xl border p-4 text-left transition-colors",
                           isSelected ? "border-primary/40 bg-primary/5" : "border-border bg-surface hover:bg-surface-hover"
@@ -215,10 +215,15 @@ export function GraphWorkspaceSection({
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium text-text">
-                              第 {event.chunk_id} 段 · {event.from_name} → {event.to_name}
+                              第 {change.effective_chunk_id} 段 ·{" "}
+                              {change.change_kind === "relation"
+                                ? `${change.from_name ?? "未知实体"} → ${change.to_name ?? "未知实体"}`
+                                : change.entity_name ?? "未知实体"}
                             </p>
                             <p className="mt-1 text-xs leading-5 text-text-muted">
-                              {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
+                              {change.change_kind === "relation"
+                                ? `${change.relation_type ?? "未标注关系"} · ${getChangeTypeLabel(change.relation_change_kind)}`
+                                : `状态更新 · ${change.changes.length} 项变化`}
                             </p>
                           </div>
                         </div>
@@ -227,19 +232,19 @@ export function GraphWorkspaceSection({
                   })}
                 </div>
 
-                {(hasMoreEvents || isEventsLoading || eventsLoadError) && (
+                {(hasMoreChanges || isChangesLoading || changesLoadError) && (
                   <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs leading-5 text-text-muted">
-                        {hasMoreEvents
-                          ? `已加载 ${loadedEventCount} 条，仍有 ${Math.max(totalEventCount - loadedEventCount, 0)} 条变化可继续查看。`
+                        {hasMoreChanges
+                          ? `已加载 ${loadedChangeCount} 条，仍有 ${Math.max(totalChangeCount - loadedChangeCount, 0)} 条变化可继续查看。`
                           : "变化记录已全部加载。"}
                       </p>
-                      <Button variant="outline" size="sm" onClick={onLoadMoreEvents} disabled={!hasMoreEvents || isEventsLoading}>
-                        {isEventsLoading ? "加载中..." : "加载更多"}
+                      <Button variant="outline" size="sm" onClick={onLoadMoreChanges} disabled={!hasMoreChanges || isChangesLoading}>
+                        {isChangesLoading ? "加载中..." : "加载更多"}
                       </Button>
                     </div>
-                    {eventsLoadError ? <p className="mt-2 text-xs text-chart-negative">{eventsLoadError}</p> : null}
+                    {changesLoadError ? <p className="mt-2 text-xs text-chart-negative">{changesLoadError}</p> : null}
                   </div>
                 )}
               </>
@@ -249,7 +254,7 @@ export function GraphWorkspaceSection({
           </div>
         </DashboardCardShell>
 
-        <div className={cn(view === "events" ? "flex min-h-0 flex-col gap-4 overflow-hidden" : "space-y-4")}>
+          <div className={cn(view === "changes" ? "flex min-h-0 flex-col gap-4 overflow-hidden" : "space-y-4")}>
           {selectedNode?.entity_type === "character" &&
           (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
             <DashboardCardShell title="角色生命周期联动" icon={<Users className="h-4 w-4" />} accent="chart-3" bodyClassName="gap-4">
@@ -305,25 +310,30 @@ export function GraphWorkspaceSection({
             title="关系变化详情"
             icon={<Link2 className="h-4 w-4" />}
             accent="chart-2"
-            className={cn(view === "events" && "flex min-h-0 flex-1 flex-col")}
-            contentClassName={cn(view === "events" && "flex h-full flex-col")}
-            bodyClassName={cn(view === "events" ? "min-h-0 flex-1 gap-3" : "gap-3")}
+            className={cn(view === "changes" && "flex min-h-0 flex-1 flex-col")}
+            contentClassName={cn(view === "changes" && "flex h-full flex-col")}
+            bodyClassName={cn(view === "changes" ? "min-h-0 flex-1 gap-3" : "gap-3")}
           >
             <p className="text-sm text-text-muted">查看当前选中关系变化的上下文说明和原文摘录。</p>
             <div className={cn(
               "rounded-2xl border border-border/60 bg-surface/70 p-4",
-              view === "events" && "min-h-0 flex-1 overflow-y-auto"
+              view === "changes" && "min-h-0 flex-1 overflow-y-auto"
             )}>
-              {selectedEvent ? (
+              {selectedChange ? (
                 <div className="space-y-4">
                   <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-medium text-text">
-                          第 {selectedEvent.chunk_id} 段 · {selectedEvent.from_name} → {selectedEvent.to_name}
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-text-muted">
-                          {selectedEvent.relation_type ?? "未标注关系"} · {getChangeTypeLabel(selectedEvent.change_type)}
+                          <p className="text-sm font-medium text-text">
+                           第 {selectedChange.effective_chunk_id} 段 ·{" "}
+                           {selectedChange.change_kind === "relation"
+                             ? `${selectedChange.from_name ?? "未知实体"} → ${selectedChange.to_name ?? "未知实体"}`
+                             : selectedChange.entity_name ?? "未知实体"}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-text-muted">
+                           {selectedChange.change_kind === "relation"
+                             ? `${selectedChange.relation_type ?? "未标注关系"} · ${getChangeTypeLabel(selectedChange.relation_change_kind)}`
+                             : `状态更新 · ${selectedChange.changes.length} 项变化`}
                         </p>
                       </div>
                     </div>
@@ -332,19 +342,18 @@ export function GraphWorkspaceSection({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl border border-border bg-surface p-4">
                       <p className="text-xs uppercase tracking-wide text-text-muted">变化类型</p>
-                      <p className="mt-2 text-sm font-medium text-text">{getChangeTypeLabel(selectedEvent.change_type)}</p>
+                      <p className="mt-2 text-sm font-medium text-text">
+                        {selectedChange.change_kind === "relation"
+                          ? getChangeTypeLabel(selectedChange.relation_change_kind)
+                          : "状态更新"}
+                      </p>
                     </div>
                     <div className="rounded-xl border border-border bg-surface p-4">
                       <p className="text-xs uppercase tracking-wide text-text-muted">关系方向</p>
-                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.directionality ?? "未声明"}</p>
+                      <p className="mt-2 text-sm font-medium text-text">
+                        {selectedChange.change_kind === "relation" ? selectedChange.directionality ?? "未声明" : "实体状态"}
+                      </p>
                     </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-surface p-4">
-                    <p className="text-xs uppercase tracking-wide text-text-muted">证据摘录</p>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">
-                      {selectedEvent.evidence?.trim() || "当前事件没有附带 evidence 文本。"}
-                    </p>
                   </div>
                 </div>
               ) : (

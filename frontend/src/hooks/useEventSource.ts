@@ -8,6 +8,7 @@ export type SSEEventType =
   | "stage_complete"
   | "llm_output"
   | "llm_thinking"
+  | "tool_call"
   | "task_complete"
   | "task_error"
   | "task_cancelled"
@@ -19,12 +20,44 @@ interface SSEEventListenerOptions {
   eventTypes?: SSEEventType[];
 }
 
+/**
+ * 从 url 中提取 task_id：优先匹配后端 SSE 路由 `/api/events/tasks/{taskId}` 的路径段，
+ * 兼容把 task_id 放在 query 上的调用方（测试/其他宿主）。
+ */
+function extractTaskIdFromUrl(url: string): string | null {
+  const pathMatch = url.match(/\/tasks\/([^/?#]+)/);
+  if (pathMatch) {
+    return decodeURIComponent(pathMatch[1]);
+  }
+  const queryIndex = url.indexOf("?");
+  if (queryIndex >= 0) {
+    return new URLSearchParams(url.slice(queryIndex)).get("task_id");
+  }
+  return null;
+}
+
+// 2026-08-14 P1-6：每 task 最近一条 SSE 消息 id（seq）的持久化。
+// 用模块级 Map 而非 useRef/sessionStorage：
+// - 模块级生命周期 = SPA 存活期：路由卸载/重挂载（store 仍在）时重建 EventSource
+//   携带 last_seq 只回放增量，避免 LLM 输出重复拼接、进度回退与终态事件重放；
+// - 整页刷新后模块级状态随 JS 上下文销毁（store 同步清空）：重连不带 last_seq
+//   走全量回放（后端 ≤256 条缓冲），正好用于重建页面历史，与 store 生命周期一致；
+// - 不用 sessionStorage：它会跨整页刷新存活，导致刷新后历史无法重建。
+const lastSeqByTask = new Map<string, string>();
+
+/** 测试辅助：清空持久化的 last_seq 状态 */
+export function resetSSELastSeqForTesting(): void {
+  lastSeqByTask.clear();
+}
+
 export function useSSEListener(
   url: string | null,
   options: SSEEventListenerOptions = {}
 ) {
   const { eventTypes } = options;
   const eventSourceRef = useRef<EventSource | null>(null);
+  // 2026-08-14 P1-6: 去重状态提升到模块级 lastSeqByTask（按 task_id 分键），
+  // 见文件顶部注释；useRef 随组件实例销毁的缺陷导致重挂载后全量回放。
   const [isConnected, setIsConnected] = useState(false);
 
   const emitEvent = useEffectEvent((eventType: SSEEventType, data: unknown) => {
@@ -40,12 +73,23 @@ export function useSSEListener(
       eventSourceRef.current = null;
     }
     setIsConnected(false);
+    // lastSeqByTask 有意不清空：跨重建保留，供下次连接去重回放
   }, []);
 
   useEffect(() => {
     if (!url) return;
 
-    const eventSource = new EventSource(url);
+    // 2026-08-14 P1-6: 按 task_id 从模块级 Map 读取最近 seq（无则全量回放）。
+    // 每 task_id 的 seq 单调递增，跨任务自然分键，无跨任务串流问题；浏览器原生
+    // 自动重连（同一 EventSource 对象）携带 Last-Event-ID 头，后端已改为头优先，
+    // 不受 query 中冻结 last_seq 的压制。
+    const taskId = extractTaskIdFromUrl(url);
+    // 读取 Map 而非放进依赖：last_seq 更新不应重建连接
+    const lastEventId = taskId ? (lastSeqByTask.get(taskId) ?? "") : "";
+    const separator = url.includes("?") ? "&" : "?";
+    const sseUrl = lastEventId ? `${url}${separator}last_seq=${encodeURIComponent(lastEventId)}` : url;
+
+    const eventSource = new EventSource(sseUrl);
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
@@ -64,6 +108,7 @@ export function useSSEListener(
       "stage_complete",
       "llm_output",
       "llm_thinking",
+      "tool_call",
       "task_complete",
       "task_error",
       "task_cancelled",
@@ -74,6 +119,10 @@ export function useSSEListener(
 
     for (const eventType of typesToListen) {
       eventSource.addEventListener(eventType, (event: MessageEvent) => {
+        // 只记录非空的 lastEventId（后端按序发送 id: 字段）
+        if (event.lastEventId && taskId) {
+          lastSeqByTask.set(taskId, event.lastEventId);
+        }
         let data: unknown;
         try {
           data = JSON.parse(event.data as string);

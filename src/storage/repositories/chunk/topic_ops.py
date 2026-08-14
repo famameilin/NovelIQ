@@ -16,7 +16,7 @@ from src.storage.models import ChunkTopic
 
 def insert_chunk_topics(session: Session, run_id: str, rows: Iterable[tuple[int, int, float]]) -> None:
     """
-    插入分块主题数据
+    插入分块主题数据（幂等：先清空该 run 的旧行再插入）
 
     Args:
         session: SQLAlchemy Session 实例
@@ -32,8 +32,12 @@ def insert_chunk_topics(session: Session, run_id: str, rows: Iterable[tuple[int,
         }
         for chunk_id, topic_id, topic_weight in rows
     ]
-    if topic_rows:
-        session.bulk_insert_mappings(cast(Mapper[Any], ChunkTopic), topic_rows)
+    if not topic_rows:
+        return
+    # 2026-08-13 修复：重分析默认路径从不传 force，此前旧行不清理导致
+    # chunk_topics 翻倍、SUM 双倍计数；同 run 重跑语义是"重新计算"，先清后插。
+    session.execute(delete(ChunkTopic).where(ChunkTopic.run_id == run_id))
+    session.bulk_insert_mappings(cast(Mapper[Any], ChunkTopic), topic_rows)
 
 
 def clear_chunk_topics(session: Session, run_id: str) -> None:

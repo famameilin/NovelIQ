@@ -38,7 +38,10 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
     from src.storage.db import get_session
     from src.storage.repositories import RunRepository
 
-    stale_before = datetime.now(UTC) - ORPHAN_TASK_HEARTBEAT_TIMEOUT
+    # 2026-08-13 P2：heartbeat_at 列为无时区 DateTime，落库值统一为 naive UTC 挂钟
+    # （见 task_runtime_persistence_service 写入端），比较参数必须同为 naive UTC，
+    # 避免 aware 参数被 PG 按会话时区转换造成孤儿判定偏移
+    stale_before = (datetime.now(UTC) - ORPHAN_TASK_HEARTBEAT_TIMEOUT).replace(tzinfo=None)
     with get_session() as session:
         repo = RunRepository(session)
         failed_count = repo.mark_running_as_failed(stale_before=stale_before)
@@ -148,6 +151,8 @@ async def health_check():
             "pool": pool_status,
         }
     except Exception as e:
+        # 2026-08-13 P2：503 body 不得透传内部异常原文（可能包含连接串/堆栈细节），
+        # 错误详情只写日志，对外返回通用文案
         logger.error(f"Health check failed: {e}")
         return JSONResponse(
             status_code=503,
@@ -155,7 +160,7 @@ async def health_check():
                 "status": "unhealthy",
                 "service": "novel-qa-api",
                 "version": "0.1.0",
-                "error": str(e),
+                "error": "服务暂不可用，请稍后重试",
             },
         )
 

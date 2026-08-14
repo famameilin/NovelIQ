@@ -206,6 +206,7 @@ def compute_rhythm_curve(
 
 def compute_global_stats(
     conn,
+    run_id: str,
     raw_densities: list[float],
     tension_composite_values: list[float],
     chunk_texts: list[tuple[int, str]],
@@ -216,7 +217,12 @@ def compute_global_stats(
 
     """
     global_stats: list[tuple[str, float]] = []
-    style_rows = conn.execute(sql_text("SELECT mtld, ttr, avg_sent_len FROM chunk_style")).fetchall()
+    # 2026-08-13 修复：chunk_style 是跨 run 累积的表，此前缺 run_id 过滤，
+    # 多 run 后 global_avg_* 被其他 run 的行污染
+    style_rows = conn.execute(
+        sql_text("SELECT mtld, ttr, avg_sent_len FROM chunk_style WHERE run_id = :run_id"),
+        {"run_id": run_id},
+    ).fetchall()
     if style_rows:
         mtld_vals = [row.mtld for row in style_rows if row.mtld is not None]
         ttr_vals = [row.ttr for row in style_rows if row.ttr is not None]

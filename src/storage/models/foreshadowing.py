@@ -8,7 +8,7 @@ Phase2 setup 池与全量台账 ORM 模型定义
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -35,6 +35,7 @@ class ForeshadowingThread(Base):
     first_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     last_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     setup_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    foreshadowing_type: Mapped[str] = mapped_column(String(50), nullable=False)
     setup_kind: Mapped[str] = mapped_column(String(50), nullable=False)
     expected_payoff_family: Mapped[str] = mapped_column(String(100), nullable=False)
     payoff_likelihood: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -42,15 +43,32 @@ class ForeshadowingThread(Base):
     strength: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC（与 agent_audit 等表一致）
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     __table_args__ = (
+        # 2026-08-13 P2：与 ForeshadowingThreadHit 对齐，补齐指向 chunks 的复合 FK，
+        # 防止孤儿 chunk 引用污染伏笔池排序（last_chunk_id 参与查询排序）
+        ForeignKeyConstraint(
+            ["first_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["last_chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_foreshadowing_threads_run_active_last_chunk", "run_id", "active", "last_chunk_id"),
         Index("idx_foreshadowing_threads_run_status", "run_id", "status"),
     )
@@ -85,10 +103,13 @@ class ForeshadowingThreadHit(Base):
     )
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
-    anchor_reason: Mapped[str] = mapped_column(Text, nullable=False)
-    why_unresolved_now: Mapped[str] = mapped_column(Text, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
 
     __table_args__ = (
         ForeignKeyConstraint(

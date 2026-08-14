@@ -1,993 +1,693 @@
+"""
+章节级事实图版本查询仓储
+"""
+
 from __future__ import annotations
 
-from collections.abc import Iterable
+import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from typing import Any, Literal
+from typing import cast as type_cast
 
-from sqlalchemy import and_, delete, func, or_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import String, func, or_, select, text
+from sqlalchemy import cast as sql_cast
 
-from src.models.local.character_reference_policy import is_global_character_surface_name, is_reference_surface_name
+from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
-    ChunkRelation,
+    EntityStateVersion,
     GraphEntity,
-    GraphEntityAlias,
-    GraphEntityParticipant,
-    GraphRelationCurrent,
-    GraphRelationEvent,
+    GraphFact,
+    GraphRelation,
+    GraphRelationVersion,
+    GraphVersion,
 )
 from src.storage.repositories.base import BaseRepository
 
 
-@dataclass(frozen=True)
-class ActiveEntityRow:
-    """GraphRepository 活跃实体查询 DTO
-
-    替代 raw dict 返回值，让下游通过具名字段消费 graph repository 边界
-    """
-
-    entity_id: int | None
-    name: str
-    role: str | None
-    entity_type: str
-    status: str
-    last_action: str
-    last_emotion: str
-    emotion_score: str | None
-    chunk_id: int | None
-
-
-@dataclass(frozen=True)
-class CurrentRelationRow:
-    """GraphRepository 当前关系查询 DTO
-
-    明确当前关系快照的字段集合，避免下游依赖 dict[str, Any] 形状
-    """
-
-    relation_id: int | None
-    from_entity_id: int
-    to_entity_id: int
-    from_name: str
-    to_name: str
-    relation_type: str
-    first_seen_chunk: int | None
-    last_seen_chunk: int | None
-    change_count: int
-    support_count: int
-    latest_event_id: int | None
-    tension_index: float | None
-    is_active: bool
-
-
-@dataclass(frozen=True)
-class RelationEventRow:
-    """GraphRepository 关系事件查询 DTO
-
-    让关系事件历史以具名字段跨 repository 边界传递
-    """
-
-    relation_event_id: int
-    chunk_id: int
-    from_entity_id: int
-    to_entity_id: int
-    from_name: str
-    to_name: str
-    relation_type: str
-    change_type: str
-    evidence: str | None
-    confidence: float | None
-    source_relation_row_id: int | None
-    directionality: str | None
-
-
-@dataclass(frozen=True)
-class LowConfidenceRelationEventRow:
-    """GraphRepository 低置信度关系事件 DTO"""
-
-    relation_event_id: int
-    chunk_id: int
-    from_entity_id: int
-    to_entity_id: int
-    from_name: str
-    to_name: str
-    relation_type: str
-    change_type: str
-    evidence: str | None
-    confidence: float | None
-    source_relation_row_id: int | None
-    directionality: str | None
-
-
-@dataclass(frozen=True)
-class RelationConflictRow:
-    """GraphRepository 关系冲突 DTO"""
-
-    entity_pair: tuple[int, int]
-    entity_names: list[str]
-    relation_types: list[str]
-    relation_count: int
-    relation_ids: list[int | None]
-
-
-@dataclass(frozen=True)
-class ParticipantEntityRow:
-    """GraphRepository 图谱参与者查询 DTO"""
+@dataclass(frozen=True, slots=True)
+class EntitySnapshotRow:
+    """2026-08-08 用于返回目标章节边界的实体身份与完整状态"""
 
     entity_id: int
     name: str
     entity_type: str
-    status: str
-    primary_role_function: str | None
-    first_seen_chunk: int | None
-    last_seen_chunk: int | None
-    source_confidence: float | None
-    relation_event_count: int
-    current_degree: int
-    historical_degree: int
-    first_relation_chunk: int | None
-    last_relation_chunk: int | None
-    latest_relation_event_id: int | None
+    tags: list[str]
+    attributes: dict[str, Any]
+    first_seen_chunk: int
+    last_seen_chunk: int
+    state_revision: int
+    state: dict[str, Any]
 
 
-class GraphRepository(BaseRepository["GraphRepository"]):
-    _EXCLUDED_HISTORY_SOURCE_MODELS = frozenset({"final_disambiguation"})
+@dataclass(frozen=True, slots=True)
+class RelationSnapshotRow:
+    """2026-08-07 用于返回目标章节边界的稳定关系最新版本"""
 
-    def _relation_history_stmt(self, run_id: str):
-        """
-        修改时间: 2026-04-29
-        任务: graph history 过滤回归
-        修改原因: `source_model IS NULL` 的普通 ChunkRelation 仍然是有效 history，不能被 `NOT IN` 的三值逻辑误伤。
+    relation_version_id: int
+    graph_version_id: str
+    chapter_id: int
+    relation_id: str
+    relation_revision: int
+    from_entity_id: int
+    to_entity_id: int
+    from_name: str
+    to_name: str
+    relation_type: str
+    directionality: str
+    relation_semantics: str
+    attributes: dict[str, Any]
+    is_active: bool
+    changes: list[dict[str, Any]]
+    first_seen_chunk: int
+    last_seen_chunk: int
 
-        2026-04-27，任务：graph final-disambiguation history semantics fixes
-        终消歧补关系需要影响 current relation，但不能伪造成 chunk 级历史事件；
-        因此 graph history surface 要排除特定 source_model 的 synthetic relation rows
-        """
-        return (
-            select(GraphRelationEvent)
-            .outerjoin(
-                ChunkRelation,
-                and_(
-                    ChunkRelation.run_id == GraphRelationEvent.run_id,
-                    ChunkRelation.id == GraphRelationEvent.source_relation_row_id,
-                ),
-            )
-            .where(GraphRelationEvent.run_id == run_id)
-            .where(
-                or_(
-                    ChunkRelation.id.is_(None),
-                    ChunkRelation.source_model.is_(None),
-                    ChunkRelation.source_model.not_in(self._EXCLUDED_HISTORY_SOURCE_MODELS),
-                )
-            )
-        )
 
-    def reset_graph_tables(self, run_id: str) -> None:
-        """
-        清空指定 run 的 graph_* 权威表数据
+@dataclass(frozen=True, slots=True)
+class GraphChangeRow:
+    """2026-08-07 用于返回按原因事实拆分的实体或关系章节变化"""
 
-        用于在别名归一化规则发生显著变化后执行全量重建，避免旧投影残留
-        """
-        self.session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id))
-        self.session.execute(delete(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id))
-        self.session.execute(delete(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id))
-        self.session.execute(delete(GraphEntityAlias).where(GraphEntityAlias.run_id == run_id))
-        self.session.execute(delete(GraphEntity).where(GraphEntity.run_id == run_id))
-        self.session.flush()
+    change_id: str
+    change_kind: Literal["state", "relation"]
+    graph_version_id: str
+    chapter_id: int
+    chapter_order: int
+    fact_id: str
+    fact_revision: int
+    effective_chunk_id: int
+    confidence: str
+    changes: list[dict[str, Any]]
+    entity_id: int | None = None
+    entity_name: str | None = None
+    entity_type: str | None = None
+    relation_id: str | None = None
+    relation_version_id: int | None = None
+    relation_revision: int | None = None
+    from_entity_id: int | None = None
+    to_entity_id: int | None = None
+    from_name: str | None = None
+    to_name: str | None = None
+    relation_type: str | None = None
+    directionality: str | None = None
+    relation_semantics: str | None = None
 
-    def get_entity_by_canonical(self, run_id: str, canonical_name: str) -> GraphEntity | None:
-        stmt = select(GraphEntity).where(
-            GraphEntity.run_id == run_id,
-            GraphEntity.canonical_name == canonical_name,
-        )
+
+@dataclass(frozen=True, slots=True)
+class GraphSnapshotRow:
+    """2026-08-07 用于承载一个章节图版本的实体与有效关系"""
+
+    graph_version: GraphVersion
+    entities: list[EntitySnapshotRow]
+    relations: list[RelationSnapshotRow]
+
+
+class GraphRepository(BaseRepository[GraphFact]):
+    """2026-08-07 用于按章节图版本直接查询事实实体状态和关系版本"""
+
+    def resolve_graph_version(
+        self,
+        run_id: str,
+        *,
+        chapter_id: int | None = None,
+        graph_version_id: str | None = None,
+    ) -> GraphVersion | None:
+        """2026-08-07 用于解析显式章节图版本或当前 run 最新章节版本"""
+        if chapter_id is not None and graph_version_id is not None:
+            raise ValueError("chapter_id 与 graph_version_id 只能选择一个")
+        stmt = select(GraphVersion).where(GraphVersion.run_id == run_id)
+        if graph_version_id is not None:
+            stmt = stmt.where(GraphVersion.graph_version_id == graph_version_id)
+        elif chapter_id is not None:
+            stmt = stmt.where(GraphVersion.chapter_id == chapter_id)
+        else:
+            stmt = stmt.order_by(GraphVersion.chapter_order.desc()).limit(1)
         return self.session.execute(stmt).scalar_one_or_none()
 
-    def upsert_entity(
+    def previous_graph_version(
         self,
         run_id: str,
-        canonical_name: str,
-        entity_type: str = "character",
-        first_seen_chunk: int | None = None,
-        last_seen_chunk: int | None = None,
-        primary_role_function: str | None = None,
-        last_emotion_score: str | None = None,
-        last_action: str | None = None,
-        source_confidence: float | None = None,
-        status: str | None = None,
-    ) -> GraphEntity:
-        entity = self.get_entity_by_canonical(run_id, canonical_name)
-        if entity is None:
-            entity = GraphEntity(
-                run_id=run_id,
-                canonical_name=canonical_name,
-                entity_type=entity_type,
-                first_seen_chunk=first_seen_chunk,
-                last_seen_chunk=last_seen_chunk,
-                primary_role_function=primary_role_function,
-                last_emotion_score=last_emotion_score,
-                last_action=last_action,
-                source_confidence=source_confidence,
-                status=status or "active",
-            )
-            self.session.add(entity)
-            self.session.flush()
-            return entity
-
-        if first_seen_chunk is not None:
-            entity.first_seen_chunk = min(entity.first_seen_chunk or first_seen_chunk, first_seen_chunk)
-        if last_seen_chunk is not None:
-            entity.last_seen_chunk = max(entity.last_seen_chunk or last_seen_chunk, last_seen_chunk)
-        # 仅在新值不同且不是通用默认值时更新 entity_type
-        if entity_type and entity_type != "character" and entity.entity_type != entity_type:
-            from loguru import logger
-
-            logger.info(
-                "Updating entity_type for '{}': {} -> {}",
-                canonical_name,
-                entity.entity_type,
-                entity_type,
-            )
-            entity.entity_type = entity_type
-        if primary_role_function is not None:
-            entity.primary_role_function = primary_role_function
-        if last_emotion_score is not None:
-            entity.last_emotion_score = last_emotion_score
-        if last_action is not None:
-            entity.last_action = last_action
-        if source_confidence is not None:
-            entity.source_confidence = source_confidence
-        if status is not None:
-            entity.status = status
-        entity.updated_at = datetime.now(UTC)
-        self.session.flush()
-        return entity
-
-    def upsert_alias(
-        self,
-        run_id: str,
-        entity_id: int,
-        alias: str,
-        source_chunk_id: int | None,
-        evidence: str | None,
-        confidence: float | None,
-        source_type: str,
-        is_primary: bool = False,
-    ) -> None:
-        stmt = (
-            insert(GraphEntityAlias)
-            .values(
-                run_id=run_id,
-                entity_id=entity_id,
-                alias=alias,
-                source_chunk_id=source_chunk_id,
-                evidence=evidence,
-                confidence=confidence,
-                source_type=source_type,
-                is_primary=is_primary,
-            )
-            .on_conflict_do_update(
-                constraint="uq_graph_entity_aliases_entity_alias",
-                set_={
-                    "source_chunk_id": source_chunk_id,
-                    "evidence": evidence,
-                    "confidence": confidence,
-                    "source_type": source_type,
-                    "is_primary": is_primary,
-                },
-            )
-        )
-        self.session.execute(stmt)
-
-    def insert_relation_event(
-        self,
-        run_id: str,
-        from_entity_id: int,
-        to_entity_id: int,
-        relation_type: str,
-        change_type: str,
-        chunk_id: int,
-        evidence: str | None,
-        confidence: float | None,
-        source_relation_row_id: int | None,
-        directionality: str | None,
-    ) -> GraphRelationEvent | None:
-        stmt = (
-            insert(GraphRelationEvent)
-            .values(
-                run_id=run_id,
-                from_entity_id=from_entity_id,
-                to_entity_id=to_entity_id,
-                relation_type=relation_type,
-                change_type=change_type,
-                chunk_id=chunk_id,
-                evidence=evidence,
-                confidence=confidence,
-                source_relation_row_id=source_relation_row_id,
-                directionality=directionality,
-            )
-            .on_conflict_do_nothing(constraint="uq_graph_relation_events_source_row")
-            .returning(GraphRelationEvent)
-        )
-        event = self.session.execute(stmt).scalar_one_or_none()
-        if event:
-            return event
-        if source_relation_row_id is None:
-            return None
+        *,
+        chapter_order: int,
+    ) -> GraphVersion | None:
+        """2026-08-07 用于按章节顺序读取最近已完成的上一章节图版本"""
         return self.session.execute(
-            select(GraphRelationEvent).where(
-                GraphRelationEvent.run_id == run_id,
-                GraphRelationEvent.source_relation_row_id == source_relation_row_id,
-            )
-        ).scalar_one_or_none()
-
-    def delete_relation_event_by_source_row_id(
-        self,
-        run_id: str,
-        source_relation_row_id: int,
-    ) -> tuple[int, int] | None:
-        """
-        2026-04-27，任务：fix-graph-projection-no-change-refresh
-        当某条 ChunkRelation 被修正为“无变化”时，必须显式删除旧的 graph relation event，
-        并把受影响的实体 pair 回刷给 current relation / participant projection
-        """
-        event = self.session.execute(
-            select(GraphRelationEvent).where(
-                GraphRelationEvent.run_id == run_id,
-                GraphRelationEvent.source_relation_row_id == source_relation_row_id,
-            )
-        ).scalar_one_or_none()
-        if event is None:
-            return None
-
-        affected_pair = (event.from_entity_id, event.to_entity_id)
-        self.session.delete(event)
-        self.session.flush()
-        return affected_pair
-
-    def refresh_current_relation(self, run_id: str, from_entity_id: int, to_entity_id: int) -> None:
-        """
-        2026-04-27，任务：fix-graph-projection-no-change-refresh
-        当关系历史被删空时，current relation 也必须同步删除；
-        否则 graph / authority / timeline 会继续读到已经失效的旧关系快照
-        """
-        events = list(
-            self.session.execute(
-                select(GraphRelationEvent)
-                .where(
-                    GraphRelationEvent.run_id == run_id,
-                    GraphRelationEvent.from_entity_id == from_entity_id,
-                    GraphRelationEvent.to_entity_id == to_entity_id,
-                )
-                .order_by(GraphRelationEvent.chunk_id, GraphRelationEvent.relation_event_id)
-            )
-            .scalars()
-            .all()
-        )
-        if not events:
-            existing_without_events = self.session.execute(
-                select(GraphRelationCurrent).where(
-                    GraphRelationCurrent.run_id == run_id,
-                    GraphRelationCurrent.from_entity_id == from_entity_id,
-                    GraphRelationCurrent.to_entity_id == to_entity_id,
-                )
-            ).scalar_one_or_none()
-            if existing_without_events is not None:
-                self.session.delete(existing_without_events)
-                self.session.flush()
-            return
-
-        latest = events[-1]
-        first = events[0]
-        change_count = sum(1 for event in events if event.change_type and event.change_type != "无变化")
-        tension_index = 0.0
-        for event in events:
-            if event.relation_type == "敌对":
-                tension_index += event.confidence or 0.5
-            elif event.relation_type in {"盟友", "友情"}:
-                tension_index -= (event.confidence or 0.5) * 0.5
-
-        existing = self.session.execute(
-            select(GraphRelationCurrent).where(
-                GraphRelationCurrent.run_id == run_id,
-                GraphRelationCurrent.from_entity_id == from_entity_id,
-                GraphRelationCurrent.to_entity_id == to_entity_id,
-            )
-        ).scalar_one_or_none()
-
-        if existing is None:
-            existing = GraphRelationCurrent(
-                run_id=run_id,
-                from_entity_id=from_entity_id,
-                to_entity_id=to_entity_id,
-                current_type=latest.relation_type,
-                first_seen_chunk=first.chunk_id,
-                last_seen_chunk=latest.chunk_id,
-                change_count=change_count,
-                support_count=len(events),
-                latest_event_id=latest.relation_event_id,
-                tension_index=tension_index,
-                is_active=latest.change_type != "断裂",
-            )
-            self.session.add(existing)
-        else:
-            existing.current_type = latest.relation_type
-            existing.first_seen_chunk = first.chunk_id
-            existing.last_seen_chunk = latest.chunk_id
-            existing.change_count = change_count
-            existing.support_count = len(events)
-            existing.latest_event_id = latest.relation_event_id
-            existing.tension_index = tension_index
-            existing.is_active = latest.change_type != "断裂"
-            existing.updated_at = datetime.now(UTC)
-        self.session.flush()
-
-    def refresh_relation_projections(
-        self,
-        run_id: str,
-        entity_pairs: Iterable[tuple[int, int]],
-    ) -> None:
-        """
-        2026-04-27，任务：graph participant projection consistency fixes
-        关系写入后必须把 current relation 和 participant projection 一起刷新，
-        避免调用方只补其中一层导致图谱节点与关系历史失配
-        """
-        normalized_pairs = sorted(
-            {
-                (int(from_entity_id), int(to_entity_id))
-                for from_entity_id, to_entity_id in entity_pairs
-                if from_entity_id is not None and to_entity_id is not None
-            }
-        )
-        if not normalized_pairs:
-            return
-
-        affected_entity_ids: set[int] = set()
-        for from_entity_id, to_entity_id in normalized_pairs:
-            self.refresh_current_relation(run_id, from_entity_id, to_entity_id)
-            affected_entity_ids.add(from_entity_id)
-            affected_entity_ids.add(to_entity_id)
-
-        self.refresh_entity_participants(run_id, affected_entity_ids)
-
-    def refresh_entity_participants(self, run_id: str, entity_ids: Iterable[int]) -> None:
-        """
-        2026-04-26，任务：图谱参与者层落地
-        图谱参与者表是最终人物图谱节点资格的持久投影，必须在关系投影后按受影响实体增量刷新
-        """
-        normalized_entity_ids = sorted({int(entity_id) for entity_id in entity_ids if entity_id is not None})
-        if not normalized_entity_ids:
-            return
-
-        for entity_id in normalized_entity_ids:
-            event_rows = list(
-                self.session.execute(
-                    select(GraphRelationEvent)
-                    .where(
-                        GraphRelationEvent.run_id == run_id,
-                        or_(
-                            GraphRelationEvent.from_entity_id == entity_id,
-                            GraphRelationEvent.to_entity_id == entity_id,
-                        ),
-                    )
-                    .order_by(GraphRelationEvent.chunk_id.asc(), GraphRelationEvent.relation_event_id.asc())
-                )
-                .scalars()
-                .all()
-            )
-            current_rows = list(
-                self.session.execute(
-                    select(GraphRelationCurrent)
-                    .where(
-                        GraphRelationCurrent.run_id == run_id,
-                        GraphRelationCurrent.is_active.is_(True),
-                        or_(
-                            GraphRelationCurrent.from_entity_id == entity_id,
-                            GraphRelationCurrent.to_entity_id == entity_id,
-                        ),
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
-            if not event_rows and not current_rows:
-                self.session.execute(
-                    delete(GraphEntityParticipant).where(
-                        GraphEntityParticipant.run_id == run_id,
-                        GraphEntityParticipant.entity_id == entity_id,
-                    )
-                )
-                continue
-
-            historical_counterpart_ids = {
-                event.to_entity_id if event.from_entity_id == entity_id else event.from_entity_id
-                for event in event_rows
-            }
-            current_counterpart_ids = {
-                relation.to_entity_id if relation.from_entity_id == entity_id else relation.from_entity_id
-                for relation in current_rows
-            }
-            first_relation_chunk = min(
-                [event.chunk_id for event in event_rows]
-                + [relation.first_seen_chunk for relation in current_rows if relation.first_seen_chunk is not None],
-                default=None,
-            )
-            last_relation_chunk = max(
-                [event.chunk_id for event in event_rows]
-                + [relation.last_seen_chunk for relation in current_rows if relation.last_seen_chunk is not None],
-                default=None,
-            )
-            latest_event_candidates = [event.relation_event_id for event in event_rows] + [
-                relation.latest_event_id for relation in current_rows if relation.latest_event_id is not None
-            ]
-            latest_relation_event_id = max(latest_event_candidates, default=None)
-
-            stmt = (
-                insert(GraphEntityParticipant)
-                .values(
-                    run_id=run_id,
-                    entity_id=entity_id,
-                    relation_event_count=len(event_rows),
-                    current_degree=len(current_counterpart_ids),
-                    historical_degree=len(historical_counterpart_ids),
-                    first_relation_chunk=first_relation_chunk,
-                    last_relation_chunk=last_relation_chunk,
-                    latest_relation_event_id=latest_relation_event_id,
-                )
-                .on_conflict_do_update(
-                    constraint="uq_graph_entity_participants_run_entity",
-                    set_={
-                        "relation_event_count": len(event_rows),
-                        "current_degree": len(current_counterpart_ids),
-                        "historical_degree": len(historical_counterpart_ids),
-                        "first_relation_chunk": first_relation_chunk,
-                        "last_relation_chunk": last_relation_chunk,
-                        "latest_relation_event_id": latest_relation_event_id,
-                        "updated_at": datetime.now(UTC),
-                    },
-                )
-            )
-            self.session.execute(stmt)
-
-        self.session.flush()
-
-    def fetch_alias_map(self, run_id: str) -> dict[str, str]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: graph_aliases 读取出口过滤历史代词 alias，避免“我 -> 汪淼”被误当全局别名复用。
-        """
-        rows = self.session.execute(
-            select(GraphEntityAlias.alias, GraphEntity.canonical_name)
-            .join(GraphEntity, GraphEntityAlias.entity_id == GraphEntity.entity_id)
-            .where(GraphEntityAlias.run_id == run_id)
-        ).fetchall()
-        alias_pairs: list[tuple[str, str]] = [
-            (row.alias, row.canonical_name)
-            for row in rows
-            if not is_reference_surface_name(row.alias) and is_global_character_surface_name(row.canonical_name)
-        ]
-        alias_map: dict[str, str] = dict(alias_pairs)
-        canonical_names = {
-            row.canonical_name
-            for row in rows
-            if is_global_character_surface_name(row.canonical_name)
-        }
-        for canonical in canonical_names | set(alias_map.values()):
-            alias_map.setdefault(canonical, canonical)
-        return alias_map
-
-    def fetch_active_entities(
-        self,
-        current_chunk_id: int,
-        lookback: int = 10,
-        run_id: str | None = None,
-    ) -> list[ActiveEntityRow]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: active_entities 是 prompt/authority 入口，必须防御性过滤未解析代词节点。
-
-        查询近期活跃实体
-
-        返回 ActiveEntityRow DTO，替代 raw dict[str, Any]
-        """
-        if run_id is None:
-            return []
-        start_chunk = max(0, current_chunk_id - lookback)
-        rows = (
-            self.session.execute(
-                select(GraphEntity)
-                .where(
-                    GraphEntity.run_id == run_id,
-                    GraphEntity.last_seen_chunk.is_not(None),
-                    GraphEntity.last_seen_chunk >= start_chunk,
-                    GraphEntity.last_seen_chunk <= current_chunk_id,
-                    GraphEntity.status == "active",
-                )
-                .order_by(GraphEntity.last_seen_chunk.desc(), GraphEntity.entity_id.asc())
-            )
-            .scalars()
-            .all()
-        )
-        return [
-            ActiveEntityRow(
-                entity_id=row.entity_id,
-                name=row.canonical_name,
-                role=row.primary_role_function,
-                entity_type=row.entity_type,
-                status=row.status,
-                last_action=row.last_action or "",
-                last_emotion=row.last_emotion_score or "",
-                emotion_score=row.last_emotion_score,
-                chunk_id=row.last_seen_chunk,
-            )
-            for row in rows
-            if is_global_character_surface_name(row.canonical_name)
-        ]
-
-    def fetch_current_relations(
-        self,
-        run_id: str,
-        active_only: bool = True,
-    ) -> list[CurrentRelationRow]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: 当前关系快照读取时过滤含未解析代词端点的旧图谱边，避免 authority view 误报为缺参与者。
-
-        查询当前关系快照
-
-        返回 CurrentRelationRow DTO，替代 raw dict[str, Any]
-        """
-        stmt = select(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
-        if active_only:
-            stmt = stmt.where(GraphRelationCurrent.is_active.is_(True))
-        current_rows = self.session.execute(stmt).scalars().all()
-
-        entity_names = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-            if is_global_character_surface_name(row.canonical_name)
-        }
-
-        result: list[CurrentRelationRow] = []
-        for current in current_rows:
-            if current.from_entity_id not in entity_names or current.to_entity_id not in entity_names:
-                continue
-            result.append(
-                CurrentRelationRow(
-                    relation_id=current.relation_id,
-                    from_entity_id=current.from_entity_id,
-                    to_entity_id=current.to_entity_id,
-                    from_name=entity_names.get(current.from_entity_id, str(current.from_entity_id)),
-                    to_name=entity_names.get(current.to_entity_id, str(current.to_entity_id)),
-                    relation_type=current.current_type,
-                    first_seen_chunk=current.first_seen_chunk,
-                    last_seen_chunk=current.last_seen_chunk,
-                    change_count=current.change_count,
-                    support_count=current.support_count,
-                    latest_event_id=current.latest_event_id,
-                    tension_index=current.tension_index,
-                    is_active=current.is_active,
-                )
-            )
-        return result
-
-    def count_current_relations(self, run_id: str, active_only: bool | None = None) -> int:
-        """返回指定运行的当前关系总数"""
-        stmt = select(func.count()).select_from(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
-        if active_only is True:
-            stmt = stmt.where(GraphRelationCurrent.is_active.is_(True))
-        elif active_only is False:
-            stmt = stmt.where(GraphRelationCurrent.is_active.is_(False))
-        return int(self.session.execute(stmt).scalar() or 0)
-
-    def count_entity_participants(self, run_id: str) -> int:
-        """返回指定运行的图谱参与者总数"""
-        return int(
-            self.session.execute(
-                select(func.count()).select_from(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id)
-            ).scalar()
-            or 0
-        )
-
-    def fetch_relation_endpoint_entity_ids(self, run_id: str) -> set[int]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: participant 一致性检查只统计 global-character 准入后的端点，且 history 端点必须复用
-                 `_relation_history_stmt()` 的过滤语义，避免已被隐藏的 synthetic history 继续误伤 `/graph/events`。
-        """
-        entity_names = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-            if is_global_character_surface_name(row.canonical_name)
-        }
-        if not entity_names:
-            return set()
-
-        valid_entity_ids = tuple(sorted(entity_names))
-        history_rows = self.session.execute(
-            self._relation_history_stmt(run_id).where(
-                GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
-                GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
-            )
-        ).scalars().all()
-        event_ids = {
-            int(entity_id)
-            for row in history_rows
-            for entity_id in (row.from_entity_id, row.to_entity_id)
-            if entity_id is not None
-        }
-        current_ids = {
-            int(entity_id)
-            for entity_id in self.session.execute(
-                select(GraphRelationCurrent.from_entity_id).where(
-                    GraphRelationCurrent.run_id == run_id,
-                    GraphRelationCurrent.from_entity_id.in_(valid_entity_ids),
-                    GraphRelationCurrent.to_entity_id.in_(valid_entity_ids),
-                )
-            ).scalars()
-            if entity_id is not None
-        } | {
-            int(entity_id)
-            for entity_id in self.session.execute(
-                select(GraphRelationCurrent.to_entity_id).where(
-                    GraphRelationCurrent.run_id == run_id,
-                    GraphRelationCurrent.from_entity_id.in_(valid_entity_ids),
-                    GraphRelationCurrent.to_entity_id.in_(valid_entity_ids),
-                )
-            ).scalars()
-            if entity_id is not None
-        }
-        return event_ids | current_ids
-
-    def count_relation_events(self, run_id: str) -> int:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: relation event 计数必须与过滤后的 authority 事件列表一致，并且要在 SQL 层先排除旧 pronoun 端点，
-                 避免 `/graph/events` 先切分页再过滤时出现空页但 cursor 不前进。
-        """
-        entity_names = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-            if is_global_character_surface_name(row.canonical_name)
-        }
-        if not entity_names:
-            return 0
-
-        valid_entity_ids = tuple(sorted(entity_names))
-        stmt = self._relation_history_stmt(run_id).where(
-            GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
-            GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
-        )
-        return int(self.session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0)
-
-    def fetch_relation_events(
-        self,
-        run_id: str,
-        limit: int | None = None,
-        offset: int = 0,
-    ) -> list[RelationEventRow]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: 关系事件读侧必须先在 SQL 层排除含未解析代词端点的旧事件，
-                 否则 `/graph/events` 会先被脏行吃掉 offset/limit，再在 Python 层过滤出空页。
-
-        查询关系事件历史
-
-        返回 RelationEventRow DTO，替代 raw dict[str, Any]
-        """
-        entity_names = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-            if is_global_character_surface_name(row.canonical_name)
-        }
-        if not entity_names:
-            return []
-
-        valid_entity_ids = tuple(sorted(entity_names))
-        stmt = self._relation_history_stmt(run_id).order_by(
-            GraphRelationEvent.chunk_id.desc(),
-            GraphRelationEvent.relation_event_id.desc(),
-        )
-        stmt = stmt.where(
-            GraphRelationEvent.from_entity_id.in_(valid_entity_ids),
-            GraphRelationEvent.to_entity_id.in_(valid_entity_ids),
-        )
-        if offset > 0:
-            stmt = stmt.offset(offset)
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        rows = self.session.execute(stmt).scalars().all()
-        return [
-            RelationEventRow(
-                relation_event_id=row.relation_event_id,
-                chunk_id=row.chunk_id,
-                from_entity_id=row.from_entity_id,
-                to_entity_id=row.to_entity_id,
-                from_name=entity_names.get(row.from_entity_id, str(row.from_entity_id)),
-                to_name=entity_names.get(row.to_entity_id, str(row.to_entity_id)),
-                relation_type=row.relation_type,
-                change_type=row.change_type,
-                evidence=row.evidence,
-                confidence=row.confidence,
-                source_relation_row_id=row.source_relation_row_id,
-                directionality=row.directionality,
-            )
-            for row in rows
-        ]
-
-    def fetch_low_confidence_relation_events(
-        self,
-        run_id: str,
-        threshold: float = 0.6,
-        limit: int = 100,
-    ) -> list[LowConfidenceRelationEventRow]:
-        events = self.fetch_relation_events(run_id)
-        low_confidence = [event for event in events if event.confidence is None or float(event.confidence) < threshold]
-        selected_events = low_confidence[:limit] if limit > 0 else low_confidence
-        return [
-            LowConfidenceRelationEventRow(
-                relation_event_id=event.relation_event_id,
-                chunk_id=event.chunk_id,
-                from_entity_id=event.from_entity_id,
-                to_entity_id=event.to_entity_id,
-                from_name=event.from_name,
-                to_name=event.to_name,
-                relation_type=event.relation_type,
-                change_type=event.change_type,
-                evidence=event.evidence,
-                confidence=event.confidence,
-                source_relation_row_id=event.source_relation_row_id,
-                directionality=event.directionality,
-            )
-            for event in selected_events
-        ]
-
-    def detect_relation_conflicts(
-        self,
-        run_id: str,
-        active_only: bool = True,
-    ) -> list[RelationConflictRow]:
-        current_relations = self.fetch_current_relations(run_id, active_only=active_only)
-        pair_map: dict[tuple[int, int], list[CurrentRelationRow]] = {}
-        for rel in current_relations:
-            left_id = rel.from_entity_id
-            right_id = rel.to_entity_id
-            key = (left_id, right_id) if left_id <= right_id else (right_id, left_id)
-            pair_map.setdefault(key, []).append(rel)
-
-        conflicts: list[RelationConflictRow] = []
-        for (left_id, right_id), relations in pair_map.items():
-            relation_types = {str(item.relation_type) for item in relations if item.relation_type}
-            if len(relation_types) < 2:
-                continue
-            conflicts.append(
-                RelationConflictRow(
-                    entity_pair=(left_id, right_id),
-                    entity_names=sorted(
-                        {str(rel_item.from_name or left_id) for rel_item in relations}
-                        | {str(rel_item.to_name or right_id) for rel_item in relations}
-                    ),
-                    relation_types=sorted(relation_types),
-                    relation_count=len(relations),
-                    relation_ids=[item.relation_id for item in relations],
-                )
-            )
-        return conflicts
-
-    def fetch_entities(
-        self,
-        run_id: str,
-        entity_type: str | None = None,
-        status: str | None = None,
-    ) -> list[GraphEntity]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: authority view 的实体入口需要过滤未解析代词节点，防止旧投影残留污染读侧。
-
-        获取指定运行的图谱实体（ORM 对象）
-
-        新增 status 参数支持按状态过滤
-
-        Args:
-            run_id: 运行ID
-            entity_type: 可选的实体类型过滤（如 "character"）
-            status: 可选的状态过滤（如 "active"）
-
-        Returns:
-            GraphEntity ORM 对象列表
-        """
-        stmt = select(GraphEntity).where(GraphEntity.run_id == run_id)
-        if entity_type is not None:
-            stmt = stmt.where(GraphEntity.entity_type == entity_type)
-        if status is not None:
-            stmt = stmt.where(GraphEntity.status == status)
-        return [
-            entity
-            for entity in self.session.execute(stmt).scalars().all()
-            if is_global_character_surface_name(entity.canonical_name)
-        ]
-
-    def fetch_participant_entities(
-        self,
-        run_id: str,
-        entity_type: str | None = None,
-        status: str | None = None,
-    ) -> list[ParticipantEntityRow]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: participant authority surface 只允许已准入的全局角色或实体，旧 pronoun 节点必须被读侧挡住。
-
-        2026-04-26，任务：图谱参与者层落地
-        最终人物图谱、graph authority report 等 consumer
-        需要稳定读取“有关系资格”的参与者集合，而不是全量人物
-        """
-        stmt = (
-            select(GraphEntityParticipant, GraphEntity)
-            .join(GraphEntity, GraphEntityParticipant.entity_id == GraphEntity.entity_id)
+            select(GraphVersion)
             .where(
-                GraphEntityParticipant.run_id == run_id,
-                GraphEntity.run_id == run_id,
+                GraphVersion.run_id == run_id,
+                GraphVersion.chapter_order < chapter_order,
             )
-            .order_by(GraphEntity.canonical_name.asc(), GraphEntity.entity_id.asc())
-        )
-        if entity_type is not None:
-            stmt = stmt.where(GraphEntity.entity_type == entity_type)
-        if status is not None:
-            stmt = stmt.where(GraphEntity.status == status)
+            .order_by(GraphVersion.chapter_order.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-        rows = self.session.execute(stmt).all()
-        return [
-            ParticipantEntityRow(
-                entity_id=entity.entity_id,
-                name=entity.canonical_name,
-                entity_type=entity.entity_type,
-                status=entity.status,
-                primary_role_function=entity.primary_role_function,
-                first_seen_chunk=entity.first_seen_chunk,
-                last_seen_chunk=entity.last_seen_chunk,
-                source_confidence=entity.source_confidence,
-                relation_event_count=participant.relation_event_count,
-                current_degree=participant.current_degree,
-                historical_degree=participant.historical_degree,
-                first_relation_chunk=participant.first_relation_chunk,
-                last_relation_chunk=participant.last_relation_chunk,
-                latest_relation_event_id=participant.latest_relation_event_id,
+    def fetch_fact_version(
+        self,
+        run_id: str,
+        fact_id: str,
+        fact_revision: int,
+    ) -> GraphFact | None:
+        """2026-08-07 用于按同 run 事实 ID 与修订号读取不可变事实版本"""
+        return self.session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_id == fact_id,
+                GraphFact.fact_revision == fact_revision,
             )
-            for participant, entity in rows
-            if is_global_character_surface_name(entity.canonical_name)
+        ).scalar_one_or_none()
+
+    def _latest_state_rows(self, boundary: GraphVersion) -> dict[int, EntityStateVersion]:
+        """2026-08-07 用于读取目标章节及以前每个实体最近的状态版本"""
+        rows = self.session.execute(
+            select(EntityStateVersion)
+            .join(GraphVersion, GraphVersion.graph_version_id == EntityStateVersion.graph_version_id)
+            .where(
+                EntityStateVersion.run_id == boundary.run_id,
+                GraphVersion.chapter_order <= boundary.chapter_order,
+            )
+            .distinct(EntityStateVersion.entity_id)
+            .order_by(
+                EntityStateVersion.entity_id,
+                GraphVersion.chapter_order.desc(),
+                EntityStateVersion.state_revision.desc(),
+            )
+        ).scalars()
+        return {int(row.entity_id): row for row in rows}
+
+    def fetch_entity_snapshots(self, boundary: GraphVersion) -> list[EntitySnapshotRow]:
+        """2026-08-07 用于选择目标章节及以前最近状态并继承无变化实体"""
+        latest_states = self._latest_state_rows(boundary)
+        entities = self.session.execute(
+            select(GraphEntity)
+            .where(
+                GraphEntity.run_id == boundary.run_id,
+                GraphEntity.first_seen_chunk <= boundary.last_chunk_id,
+            )
+            .order_by(GraphEntity.entity_id)
+        ).scalars()
+        return [
+            EntitySnapshotRow(
+                entity_id=int(entity.entity_id),
+                name=str(entity.canonical_name),
+                entity_type=str(entity.entity_type),
+                tags=list(entity.tags or []),
+                attributes=dict(entity.attributes or {}),
+                first_seen_chunk=int(entity.first_seen_chunk),
+                last_seen_chunk=min(int(entity.last_seen_chunk), int(boundary.last_chunk_id)),
+                state_revision=(
+                    int(latest_states[entity.entity_id].state_revision)
+                    if entity.entity_id in latest_states
+                    else 0
+                ),
+                state=(
+                    dict(latest_states[entity.entity_id].state)
+                    if entity.entity_id in latest_states
+                    else {}
+                ),
+            )
+            for entity in entities
         ]
 
-    def fetch_relation_event_models(self, run_id: str) -> list[GraphRelationEvent]:
-        """
-        获取指定运行的关系事件（ORM 对象）
+    def _latest_relation_versions(
+        self,
+        boundary: GraphVersion,
+    ) -> list[tuple[GraphRelationVersion, GraphRelation, GraphVersion]]:
+        """2026-08-07 用于读取目标章节及以前每条稳定关系最近的关系版本"""
+        statement = (
+            select(GraphRelationVersion, GraphRelation, GraphVersion)
+            .join(GraphRelation, GraphRelation.relation_id == GraphRelationVersion.relation_id)
+            .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
+            .where(
+                GraphRelationVersion.run_id == boundary.run_id,
+                GraphVersion.chapter_order <= boundary.chapter_order,
+            )
+            .distinct(GraphRelationVersion.relation_id)
+            .order_by(
+                GraphRelationVersion.relation_id,
+                GraphVersion.chapter_order.desc(),
+                GraphRelationVersion.relation_revision.desc(),
+            )
+        )
+        return list(self.session.execute(statement).tuples().all())
 
-        与 fetch_relation_events() 不同，本方法返回 ORM 对象而非 dict，
-        适用于需要访问原始属性（如 chunk_id、from_entity_id）的场景
+    def fetch_relation_snapshots(
+        self,
+        boundary: GraphVersion,
+        *,
+        active_only: bool = True,
+    ) -> list[RelationSnapshotRow]:
+        """2026-08-07 用于选择目标章节及以前最近关系版本并过滤活动状态"""
+        entity_names = {
+            int(row.entity_id): str(row.canonical_name)
+            for row in self.session.execute(
+                select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)
+            ).scalars()
+        }
+        first_seen_by_relation = {
+            str(row.relation_id): int(row.first_seen_chunk)
+            for row in self.session.execute(
+                select(
+                    GraphRelationVersion.relation_id,
+                    func.min(GraphVersion.first_chunk_id).label("first_seen_chunk"),
+                )
+                .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
+                .where(
+                    GraphRelationVersion.run_id == boundary.run_id,
+                    GraphVersion.chapter_order <= boundary.chapter_order,
+                )
+                .group_by(GraphRelationVersion.relation_id)
+            ).all()
+        }
+        rows: list[RelationSnapshotRow] = []
+        for version, relation, graph_version in self._latest_relation_versions(boundary):
+            if active_only and not version.is_active:
+                continue
+            rows.append(
+                RelationSnapshotRow(
+                    relation_version_id=int(version.relation_version_id),
+                    graph_version_id=str(version.graph_version_id),
+                    chapter_id=int(version.chapter_id),
+                    relation_id=str(relation.relation_id),
+                    relation_revision=int(version.relation_revision),
+                    from_entity_id=int(relation.from_entity_id),
+                    to_entity_id=int(relation.to_entity_id),
+                    from_name=entity_names[int(relation.from_entity_id)],
+                    to_name=entity_names[int(relation.to_entity_id)],
+                    relation_type=str(version.relation_type),
+                    directionality=str(relation.directionality),
+                    relation_semantics=str(relation.relation_semantics),
+                    attributes=dict(version.attributes),
+                    is_active=bool(version.is_active),
+                    changes=list(version.changes),
+                    first_seen_chunk=first_seen_by_relation[str(relation.relation_id)],
+                    last_seen_chunk=int(graph_version.last_chunk_id),
+                )
+            )
+        return rows
 
-        Args:
-            run_id: 运行ID
+    def fetch_snapshot(
+        self,
+        run_id: str,
+        *,
+        chapter_id: int | None = None,
+        graph_version_id: str | None = None,
+    ) -> GraphSnapshotRow | None:
+        """2026-08-07 用于返回目标章节边界的实体状态与有效关系快照"""
+        boundary = self.resolve_graph_version(
+            run_id,
+            chapter_id=chapter_id,
+            graph_version_id=graph_version_id,
+        )
+        if boundary is None:
+            return None
+        return GraphSnapshotRow(
+            graph_version=boundary,
+            entities=self.fetch_entity_snapshots(boundary),
+            relations=self.fetch_relation_snapshots(boundary, active_only=True),
+        )
 
-        Returns:
-            GraphRelationEvent ORM 对象列表
-        """
+    def fetch_visible_facts(
+        self,
+        boundary: GraphVersion,
+        *,
+        query: str | None = None,
+        limit: int = 50,
+    ) -> list[GraphFact]:
+        """2026-08-07 用于读取目标章节边界可见的每个事实最新修订"""
         stmt = (
-            select(GraphRelationEvent)
-            .where(GraphRelationEvent.run_id == run_id)
-            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
+            select(GraphFact)
+            .join(GraphVersion, GraphVersion.graph_version_id == GraphFact.graph_version_id)
+            .where(
+                GraphFact.run_id == boundary.run_id,
+                GraphVersion.chapter_order <= boundary.chapter_order,
+            )
+        )
+        normalized_query = (query or "").strip()
+        if normalized_query:
+            tokens = [token for token in re.split(r"[\s,，、；;]+", normalized_query) if token]
+            if tokens:
+                stmt = stmt.where(
+                    or_(
+                        *[
+                            or_(
+                                GraphFact.predicate.ilike(f"%{token}%"),
+                                sql_cast(GraphFact.content, String).ilike(f"%{token}%"),
+                            )
+                            for token in tokens
+                        ]
+                    )
+                )
+        stmt = (
+            stmt.distinct(GraphFact.fact_id)
+            .order_by(
+                GraphFact.fact_id,
+                GraphFact.fact_revision.desc(),
+                GraphVersion.chapter_order.desc(),
+            )
+            .limit(max(1, limit))
         )
         return list(self.session.execute(stmt).scalars().all())
+
+    def fetch_changes(
+        self,
+        run_id: str,
+        *,
+        chapter_id: int | None = None,
+        offset: int = 0,
+        limit: int | None = 200,
+    ) -> tuple[list[GraphChangeRow], int]:
+        """2026-08-07 用于在 PostgreSQL 中按章节倒序分页返回变化及根事实"""
+        if offset < 0:
+            raise ValueError("graph changes offset 不能小于 0")
+        page_limit = None if limit is None else max(1, min(limit, 200))
+        chapter_filter = ""
+        parameters: dict[str, Any] = {"run_id": run_id, "offset": offset}
+        if chapter_id is not None:
+            chapter_filter = "AND graph_version.chapter_id = :chapter_id"
+            parameters["chapter_id"] = chapter_id
+        limit_clause = ""
+        if page_limit is not None:
+            limit_clause = "AND numbered_rows.row_number <= :page_end"
+            parameters["page_end"] = offset + page_limit
+
+        # 变化原因直接在数据库中按事实版本聚合，避免先装载完整历史再在 Python 中切页
+        statement = text(
+            f"""
+            WITH state_causes AS (
+                SELECT
+                    'state:' || state_version.state_version_id::text
+                        || ':' || (cause.change ->> 'fact_id')
+                        || ':' || ((cause.change ->> 'fact_revision')::integer)::text AS change_id,
+                    'state'::text AS change_kind,
+                    graph_version.graph_version_id,
+                    graph_version.chapter_id,
+                    graph_version.chapter_order,
+                    cause.change ->> 'fact_id' AS fact_id,
+                    (cause.change ->> 'fact_revision')::integer AS fact_revision,
+                    MIN(cause.ordinality) AS cause_order,
+                    jsonb_agg(cause.change ORDER BY cause.ordinality) AS changes,
+                    0 AS kind_order,
+                    state_version.state_version_id AS version_row_id,
+                    entity.entity_id,
+                    entity.canonical_name AS entity_name,
+                    entity.entity_type,
+                    NULL::varchar AS relation_id,
+                    NULL::integer AS relation_version_id,
+                    NULL::integer AS relation_revision,
+                    NULL::integer AS from_entity_id,
+                    NULL::integer AS to_entity_id,
+                    NULL::varchar AS from_name,
+                    NULL::varchar AS to_name,
+                    NULL::varchar AS relation_type,
+                    NULL::varchar AS directionality,
+                    NULL::varchar AS relation_semantics
+                FROM graph_versions AS graph_version
+                JOIN entity_state_versions AS state_version
+                  ON state_version.graph_version_id = graph_version.graph_version_id
+                JOIN graph_entities AS entity
+                  ON entity.entity_id = state_version.entity_id
+                 AND entity.run_id = graph_version.run_id
+                CROSS JOIN LATERAL jsonb_array_elements(state_version.changes)
+                    WITH ORDINALITY AS cause(change, ordinality)
+                WHERE graph_version.run_id = :run_id
+                {chapter_filter}
+                GROUP BY
+                    state_version.state_version_id,
+                    graph_version.graph_version_id,
+                    graph_version.chapter_id,
+                    graph_version.chapter_order,
+                    cause.change ->> 'fact_id',
+                    (cause.change ->> 'fact_revision')::integer,
+                    entity.entity_id,
+                    entity.canonical_name,
+                    entity.entity_type
+            ),
+            relation_causes AS (
+                SELECT
+                    'relation:' || relation_version.relation_version_id::text
+                        || ':' || (cause.change ->> 'fact_id')
+                        || ':' || ((cause.change ->> 'fact_revision')::integer)::text AS change_id,
+                    'relation'::text AS change_kind,
+                    graph_version.graph_version_id,
+                    graph_version.chapter_id,
+                    graph_version.chapter_order,
+                    cause.change ->> 'fact_id' AS fact_id,
+                    (cause.change ->> 'fact_revision')::integer AS fact_revision,
+                    MIN(cause.ordinality) AS cause_order,
+                    jsonb_agg(cause.change ORDER BY cause.ordinality) AS changes,
+                    1 AS kind_order,
+                    relation_version.relation_version_id AS version_row_id,
+                    NULL::integer AS entity_id,
+                    NULL::varchar AS entity_name,
+                    NULL::varchar AS entity_type,
+                    relation.relation_id,
+                    relation_version.relation_version_id,
+                    relation_version.relation_revision,
+                    relation.from_entity_id,
+                    relation.to_entity_id,
+                    from_entity.canonical_name AS from_name,
+                    to_entity.canonical_name AS to_name,
+                    relation_version.relation_type,
+                    relation.directionality,
+                    relation.relation_semantics
+                FROM graph_versions AS graph_version
+                JOIN graph_relation_versions AS relation_version
+                  ON relation_version.graph_version_id = graph_version.graph_version_id
+                JOIN graph_relations AS relation
+                  ON relation.relation_id = relation_version.relation_id
+                 AND relation.run_id = graph_version.run_id
+                JOIN graph_entities AS from_entity
+                  ON from_entity.entity_id = relation.from_entity_id
+                 AND from_entity.run_id = graph_version.run_id
+                JOIN graph_entities AS to_entity
+                  ON to_entity.entity_id = relation.to_entity_id
+                 AND to_entity.run_id = graph_version.run_id
+                CROSS JOIN LATERAL jsonb_array_elements(relation_version.changes)
+                    WITH ORDINALITY AS cause(change, ordinality)
+                WHERE graph_version.run_id = :run_id
+                {chapter_filter}
+                GROUP BY
+                    relation_version.relation_version_id,
+                    graph_version.graph_version_id,
+                    graph_version.chapter_id,
+                    graph_version.chapter_order,
+                    cause.change ->> 'fact_id',
+                    (cause.change ->> 'fact_revision')::integer,
+                    relation.relation_id,
+                    relation_version.relation_revision,
+                    relation.from_entity_id,
+                    relation.to_entity_id,
+                    from_entity.canonical_name,
+                    to_entity.canonical_name,
+                    relation_version.relation_type,
+                    relation.directionality,
+                    relation.relation_semantics
+            ),
+            cause_rows AS (
+                SELECT * FROM state_causes
+                UNION ALL
+                SELECT * FROM relation_causes
+            ),
+            enriched_rows AS (
+                SELECT
+                    cause_rows.*,
+                    fact.effective_chunk_id,
+                    fact.confidence
+                FROM cause_rows
+                LEFT JOIN graph_facts AS fact
+                  ON fact.run_id = :run_id
+                 AND fact.fact_id = cause_rows.fact_id
+                 AND fact.fact_revision = cause_rows.fact_revision
+            ),
+            numbered_rows AS (
+                SELECT
+                    enriched_rows.*,
+                    row_number() OVER (
+                        ORDER BY
+                            chapter_order DESC,
+                            kind_order,
+                            version_row_id,
+                            cause_order
+                    ) AS row_number
+                FROM enriched_rows
+            ),
+            total_row AS (
+                SELECT count(*)::integer AS total
+                FROM enriched_rows
+            ),
+            page_rows AS (
+                SELECT *
+                FROM numbered_rows
+                WHERE numbered_rows.row_number > :offset
+                {limit_clause}
+            )
+            SELECT page_rows.*, total_row.total
+            FROM total_row
+            LEFT JOIN page_rows ON TRUE
+            ORDER BY page_rows.row_number
+            """
+        )
+        result_rows = list(self.session.execute(statement, parameters).mappings())
+        total = int(result_rows[0]["total"]) if result_rows else 0
+        rows: list[GraphChangeRow] = []
+        for result in result_rows:
+            if result["change_id"] is None:
+                continue
+            if result["effective_chunk_id"] is None:
+                reference = (str(result["fact_id"]), int(result["fact_revision"]))
+                raise ValueError(f"图变化引用了不存在的事实版本: {reference}")
+            rows.append(
+                GraphChangeRow(
+                    change_id=str(result["change_id"]),
+                    change_kind=type_cast(Literal["state", "relation"], str(result["change_kind"])),
+                    graph_version_id=str(result["graph_version_id"]),
+                    chapter_id=int(result["chapter_id"]),
+                    chapter_order=int(result["chapter_order"]),
+                    fact_id=str(result["fact_id"]),
+                    fact_revision=int(result["fact_revision"]),
+                    effective_chunk_id=int(result["effective_chunk_id"]),
+                    confidence=str(result["confidence"]),
+                    changes=list(result["changes"]),
+                    entity_id=int(result["entity_id"]) if result["entity_id"] is not None else None,
+                    entity_name=str(result["entity_name"]) if result["entity_name"] is not None else None,
+                    entity_type=str(result["entity_type"]) if result["entity_type"] is not None else None,
+                    relation_id=str(result["relation_id"]) if result["relation_id"] is not None else None,
+                    relation_version_id=(
+                        int(result["relation_version_id"])
+                        if result["relation_version_id"] is not None
+                        else None
+                    ),
+                    relation_revision=(
+                        int(result["relation_revision"])
+                        if result["relation_revision"] is not None
+                        else None
+                    ),
+                    from_entity_id=(
+                        int(result["from_entity_id"])
+                        if result["from_entity_id"] is not None
+                        else None
+                    ),
+                    to_entity_id=(
+                        int(result["to_entity_id"])
+                        if result["to_entity_id"] is not None
+                        else None
+                    ),
+                    from_name=str(result["from_name"]) if result["from_name"] is not None else None,
+                    to_name=str(result["to_name"]) if result["to_name"] is not None else None,
+                    relation_type=(
+                        str(result["relation_type"])
+                        if result["relation_type"] is not None
+                        else None
+                    ),
+                    directionality=(
+                        str(result["directionality"])
+                        if result["directionality"] is not None
+                        else None
+                    ),
+                    relation_semantics=(
+                        str(result["relation_semantics"])
+                        if result["relation_semantics"] is not None
+                        else None
+                    ),
+                )
+            )
+        return rows, total
+
+    def fetch_latest_entities(
+        self,
+        run_id: str,
+        *,
+        entity_type: str | None = None,
+    ) -> list[EntitySnapshotRow]:
+        """2026-08-07 用于读取最新章节图版本中的实体状态"""
+        boundary = self.resolve_graph_version(run_id)
+        if boundary is None:
+            return []
+        rows = self.fetch_entity_snapshots(boundary)
+        return [
+            row
+            for row in rows
+            if (entity_type is None or row.entity_type == entity_type)
+            and (
+                row.entity_type != "character"
+                or is_global_character_surface_name(row.name)
+            )
+        ]
+
+    def fetch_latest_relations(
+        self,
+        run_id: str,
+        *,
+        active_only: bool = True,
+    ) -> list[RelationSnapshotRow]:
+        """2026-08-07 用于读取最新章节图版本中的关系快照"""
+        boundary = self.resolve_graph_version(run_id)
+        if boundary is None:
+            return []
+        return self.fetch_relation_snapshots(boundary, active_only=active_only)
+
+    def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:
+        """2026-08-07 用于按章节顺序读取全部不可变关系版本"""
+        entity_names = {
+            int(row.entity_id): str(row.canonical_name)
+            for row in self.session.execute(
+                select(GraphEntity).where(GraphEntity.run_id == run_id)
+            ).scalars()
+        }
+        first_seen_by_relation: dict[str, int] = {}
+        rows: list[RelationSnapshotRow] = []
+        statement = (
+            select(GraphRelationVersion, GraphRelation, GraphVersion)
+            .join(GraphRelation, GraphRelation.relation_id == GraphRelationVersion.relation_id)
+            .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
+            .where(GraphRelationVersion.run_id == run_id)
+            .order_by(
+                GraphVersion.chapter_order,
+                GraphRelationVersion.relation_version_id,
+            )
+        )
+        for version, relation, graph_version in self.session.execute(statement).all():
+            relation_id = str(relation.relation_id)
+            first_seen_by_relation.setdefault(relation_id, int(graph_version.first_chunk_id))
+            rows.append(
+                RelationSnapshotRow(
+                    relation_version_id=int(version.relation_version_id),
+                    graph_version_id=str(version.graph_version_id),
+                    chapter_id=int(version.chapter_id),
+                    relation_id=relation_id,
+                    relation_revision=int(version.relation_revision),
+                    from_entity_id=int(relation.from_entity_id),
+                    to_entity_id=int(relation.to_entity_id),
+                    from_name=entity_names[int(relation.from_entity_id)],
+                    to_name=entity_names[int(relation.to_entity_id)],
+                    relation_type=str(version.relation_type),
+                    directionality=str(relation.directionality),
+                    relation_semantics=str(relation.relation_semantics),
+                    attributes=dict(version.attributes),
+                    is_active=bool(version.is_active),
+                    changes=list(version.changes),
+                    first_seen_chunk=first_seen_by_relation[relation_id],
+                    last_seen_chunk=int(graph_version.last_chunk_id),
+                )
+            )
+        return rows
+
+    def fetch_relation_changes(
+        self,
+        run_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[GraphChangeRow]:
+        """2026-08-07 用于读取诊断时间轴需要的关系变化事实"""
+        rows, _total = self.fetch_changes(run_id, limit=None)
+        relation_rows = [row for row in rows if row.change_kind == "relation"]
+        return relation_rows if limit is None else relation_rows[:limit]
+
+    def count_graph_versions(self, run_id: str) -> int:
+        """2026-08-07 用于统计当前 run 已成功提交的章节图版本数量"""
+        return int(
+            self.session.execute(
+                select(func.count())
+                .select_from(GraphVersion)
+                .where(GraphVersion.run_id == run_id)
+            ).scalar_one()
+            or 0
+        )

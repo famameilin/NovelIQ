@@ -22,7 +22,6 @@ export interface ForceGraphModel {
   };
   nodeDegrees: Map<string, number>;
   degreeRange: { min: number; max: number };
-  weightRange: { min: number; max: number };
   getNodeSize: (node: GraphNode) => number;
 }
 
@@ -56,10 +55,12 @@ export function getConfiguredNodeSize(nodeCfg: unknown, fallback: number = NODE_
 
 function buildNodeDegrees(data: GraphData): Map<string, number> {
   const degrees = new Map<string, number>();
-  data.nodes.forEach((node) => degrees.set(node.entity_id, 0));
+  data.nodes.forEach((node) => degrees.set(String(node.entity_id), 0));
   data.edges.forEach((edge: GraphEdge) => {
-    degrees.set(edge.source, (degrees.get(edge.source) || 0) + 1);
-    degrees.set(edge.target, (degrees.get(edge.target) || 0) + 1);
+    const sourceId = String(edge.source_entity_id);
+    const targetId = String(edge.target_entity_id);
+    degrees.set(sourceId, (degrees.get(sourceId) || 0) + 1);
+    degrees.set(targetId, (degrees.get(targetId) || 0) + 1);
   });
   return degrees;
 }
@@ -70,12 +71,6 @@ function buildDegreeRange(nodeDegrees: Map<string, number>) {
   return { min: Math.min(...values), max: Math.max(...values) };
 }
 
-function buildWeightRange(edges: GraphEdge[]) {
-  const weights = edges.map((edge) => edge.weight ?? 1).filter((weight): weight is number => weight !== undefined);
-  if (weights.length === 0) return { min: 1, max: 1 };
-  return { min: Math.min(...weights), max: Math.max(...weights) };
-}
-
 function buildNodeSizeResolver(
   nodeDegrees: Map<string, number>,
   degreeRange: { min: number; max: number },
@@ -83,7 +78,7 @@ function buildNodeSizeResolver(
 ) {
   return (node: GraphNode): number => {
     if (appearanceCountMap && appearanceCountMap.size > 0) {
-      let count = appearanceCountMap.get(node.entity_id);
+      let count = appearanceCountMap.get(String(node.entity_id));
       if (count === undefined) {
         count = appearanceCountMap.get(node.name);
       }
@@ -96,33 +91,37 @@ function buildNodeSizeResolver(
       return mapValue(finalCount, minCount, maxCount, NODE_SIZE_MIN, NODE_SIZE_MAX);
     }
 
-    const degree = nodeDegrees.get(node.entity_id) || 0;
+    const degree = nodeDegrees.get(String(node.entity_id)) || 0;
     if (degreeRange.max === degreeRange.min) return (NODE_SIZE_MIN + NODE_SIZE_MAX) / 2;
     return mapValue(degree, degreeRange.min, degreeRange.max, NODE_SIZE_MIN, NODE_SIZE_MAX);
   };
 }
 
 function adaptGraphData(data: GraphData, relationFilter: Set<string>) {
-  const rawData = data as unknown as Record<string, unknown>;
-  const links = (rawData.links || rawData.edges || []) as Record<string, unknown>[];
+  const edges = data.edges.map((edge) => ({
+    source: String(edge.source_entity_id),
+    target: String(edge.target_entity_id),
+    relation_id: edge.relation_id,
+    relation_type: edge.relation_type,
+    directionality: edge.directionality,
+    is_active: edge.is_active,
+  }));
   if (relationFilter.size === 0) {
     return {
-      nodes: data.nodes.map((node) => ({ ...node, id: node.entity_id })),
-      edges: links,
+      nodes: data.nodes.map((node) => ({ ...node, id: String(node.entity_id) })),
+      edges,
     };
   }
 
-  const filteredLinks = links.filter(
-    (link: Record<string, unknown>) => !link.relation_type || relationFilter.has(String(link.relation_type))
-  );
+  const filteredLinks = edges.filter((edge) => relationFilter.has(edge.relation_type));
   const connectedIds = new Set<string>();
-  filteredLinks.forEach((link) => {
-    connectedIds.add(String(link.source));
-    connectedIds.add(String(link.target));
+  filteredLinks.forEach((edge) => {
+    connectedIds.add(edge.source);
+    connectedIds.add(edge.target);
   });
   const filteredNodes = data.nodes
-    .filter((node) => connectedIds.has(node.entity_id))
-    .map((node) => ({ ...node, id: node.entity_id }));
+    .filter((node) => connectedIds.has(String(node.entity_id)))
+    .map((node) => ({ ...node, id: String(node.entity_id) }));
 
   return {
     nodes: filteredNodes,
@@ -132,7 +131,7 @@ function adaptGraphData(data: GraphData, relationFilter: Set<string>) {
 
 function buildOrderedLayoutNodes(nodes: ForceGraphNodeData[], edges: Record<string, unknown>[]) {
   const layoutDegrees = new Map<string, number>();
-  nodes.forEach((node) => layoutDegrees.set(node.entity_id, 0));
+  nodes.forEach((node) => layoutDegrees.set(String(node.entity_id), 0));
   edges.forEach((edge) => {
     const source = String(edge.source ?? "");
     const target = String(edge.target ?? "");
@@ -146,17 +145,18 @@ function buildOrderedLayoutNodes(nodes: ForceGraphNodeData[], edges: Record<stri
 
   const sortedByName = (left: ForceGraphNodeData, right: ForceGraphNodeData) => left.name.localeCompare(right.name, "zh-CN");
   const connectedNodes = [...nodes]
-    .filter((node) => (layoutDegrees.get(node.entity_id) || 0) > 1)
+    .filter((node) => (layoutDegrees.get(String(node.entity_id)) || 0) > 1)
     .sort((left, right) => {
-      const degreeDiff = (layoutDegrees.get(right.entity_id) || 0) - (layoutDegrees.get(left.entity_id) || 0);
+      const degreeDiff =
+        (layoutDegrees.get(String(right.entity_id)) || 0) - (layoutDegrees.get(String(left.entity_id)) || 0);
       if (degreeDiff !== 0) return degreeDiff;
       return sortedByName(left, right);
     });
   const peripheralNodes = [...nodes]
-    .filter((node) => (layoutDegrees.get(node.entity_id) || 0) === 1)
+    .filter((node) => (layoutDegrees.get(String(node.entity_id)) || 0) === 1)
     .sort(sortedByName);
   const isolatedNodes = [...nodes]
-    .filter((node) => (layoutDegrees.get(node.entity_id) || 0) === 0)
+    .filter((node) => (layoutDegrees.get(String(node.entity_id)) || 0) === 0)
     .sort(sortedByName);
 
   return { connectedNodes, peripheralNodes, isolatedNodes };
@@ -171,7 +171,6 @@ export function buildForceGraphModel({
 }: BuildForceGraphModelOptions): ForceGraphModel {
   const nodeDegrees = buildNodeDegrees(data);
   const degreeRange = buildDegreeRange(nodeDegrees);
-  const weightRange = buildWeightRange(data.edges);
   const g6Data = adaptGraphData(data, relationFilter);
   const orderedLayoutNodes = buildOrderedLayoutNodes(g6Data.nodes, g6Data.edges);
 
@@ -180,7 +179,6 @@ export function buildForceGraphModel({
     orderedLayoutNodes,
     nodeDegrees,
     degreeRange,
-    weightRange,
     getNodeSize: buildNodeSizeResolver(nodeDegrees, degreeRange, appearanceCountMap),
   };
 }
