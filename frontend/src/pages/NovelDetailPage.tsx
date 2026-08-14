@@ -23,6 +23,7 @@ import {
   getTaskStatus,
 } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
+import { useStreamStore } from "@/store/streamStore";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
@@ -245,6 +246,9 @@ export function NovelDetailPage() {
       const result = await resumeAnalysisTask(novelId, normalizedTaskId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
       queryClient.invalidateQueries({ queryKey: ["task-status", novelId, normalizedTaskId] });
+      // 2026-08-14 D5：resume 是同 task_id 开新轮，必须清空旧轮 SSE 数据
+      // （setTask 对同 id 幂等，store 不会自动重置）
+      useStreamStore.getState().resetStreamForTask(result.task_id);
       setTask(result.task_id);
       toast.info("继续分析任务已启动...");
     } catch {

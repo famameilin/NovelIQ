@@ -6,7 +6,7 @@ import { act, render } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSSEListener } from "@/hooks/useEventSource";
+import { resetSSELastSeqForTesting, useSSEListener } from "@/hooks/useEventSource";
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -50,6 +50,7 @@ function Harness({ url }: { url: string | null }) {
 describe("useSSEListener", () => {
   beforeEach(() => {
     MockEventSource.reset();
+    resetSSELastSeqForTesting();
     vi.stubGlobal("EventSource", MockEventSource);
   });
 
@@ -228,6 +229,26 @@ describe("useSSEListener", () => {
     expect(MockEventSource.instances).toHaveLength(2);
     expect(MockEventSource.instances[1].url).toBe(
       "http://test/stream?task_id=task-a&last_seq=64"
+    );
+  });
+
+  it("组件真正卸载后重挂载同一任务仍保留 last_seq（P1-6 修复：此前 useRef 随实例销毁导致全量回放）", () => {
+    const view = render(<Harness url="http://test/stream?task_id=task-a" />);
+
+    MockEventSource.fire("llm_output", {
+      lastEventId: "42",
+      data: JSON.stringify({ action: "output", content: "带 seq" }),
+    });
+
+    // 模拟路由离开：组件卸载，EventSource 关闭
+    view.unmount();
+    expect(MockEventSource.instances[0].closed).toBe(true);
+
+    // 模拟返回页面：重挂载同一任务，必须携带 last_seq 只回放增量，
+    // 避免 LLM 输出重复拼接、终态事件重放
+    render(<Harness url="http://test/stream?task_id=task-a" />);
+    expect(MockEventSource.instances[1].url).toBe(
+      "http://test/stream?task_id=task-a&last_seq=42"
     );
   });
 });
