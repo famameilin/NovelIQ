@@ -492,6 +492,9 @@ def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[
     Returns:
         (novel_title, core_characters, world_setting, updated_at) 元组，不存在则返回 None
     """
+    # 2026-08-14 D15：insert 按 novel_id upsert 并覆写 run_id（全局上下文只保留
+    # 最新 run），读侧若再按 run_id 过滤，旧 run 会读不到上下文而视图不一致；
+    # 统一只按 novel_id 读取（run_id 参数保留仅为调用方兼容）
     stmt = select(
         GlobalContext.novel_title,
         GlobalContext.core_characters,
@@ -499,7 +502,6 @@ def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[
         GlobalContext.updated_at,
     ).where(
         GlobalContext.novel_id == novel_id,
-        GlobalContext.run_id == run_id,
     )
     result = session.execute(stmt).fetchone()
     if result is None:
@@ -528,7 +530,8 @@ def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs
 
     stmt = (
         update(GlobalContext)
-        .where(GlobalContext.novel_id == novel_id, GlobalContext.run_id == run_id)
+        # 2026-08-14 D15：与 fetch_global_context 同口径，只按 novel_id 定位最新行
+        .where(GlobalContext.novel_id == novel_id)
         .values(**update_data)
     )
     session.execute(stmt)
@@ -549,9 +552,9 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | Non
     """
     stmt = (
         select(GlobalContext.novel_title)
+        # 2026-08-14 D15：只按 novel_id 读取最新行
         .where(
             GlobalContext.novel_id == novel_id,
-            GlobalContext.run_id == run_id,
         )
         .limit(1)
     )
@@ -560,8 +563,12 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | Non
     return result.novel_title if result else None
 
 
-def has_global_context(session: Session, run_id: str) -> bool:
-    """检查是否已存在 global_context 记录"""
-    stmt = select(GlobalContext).where(GlobalContext.run_id == run_id).limit(1)
+def has_global_context(session: Session, run_id: str, novel_id: str) -> bool:
+    """检查某小说是否已存在 global_context 记录
+
+    2026-08-14 D15：表内每 novel 至多一行（upsert 覆写 run_id），
+    旧 run 的 run_id 已被最新 run 覆盖，故按 novel_id 判断（run_id 仅兼容保留）
+    """
+    stmt = select(GlobalContext).where(GlobalContext.novel_id == novel_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()
     return result is not None

@@ -172,12 +172,12 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """获取小说标题"""
         return metrics.fetch_novel_title(self.session, novel_id, run_id)
 
-    def has_global_context(self, run_id: str) -> bool:
+    def has_global_context(self, run_id: str, novel_id: str) -> bool:
         """
         检查是否已存在 global_context 记录
 
         """
-        return metrics.has_global_context(self.session, run_id)
+        return metrics.has_global_context(self.session, run_id, novel_id)
 
     # ==================== summaries 模块方法 ====================
 
