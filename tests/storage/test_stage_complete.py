@@ -20,11 +20,12 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk
+from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
+    ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
@@ -39,16 +40,27 @@ from tests.support.chapter_annotation_helpers import persist_chapter_annotation
 
 def _create_chunks(count: int = 3) -> list[Chunk]:
     """创建测试用的chunks"""
+    # 文本长度固定 500 字符（f"测试文本{i}" 恒为 5 字符 × 100），
+    # 坐标区间必须与文本长度一致，否则 insert_paragraphs 的坐标单调校验失败
+    text_len = 500
     return [
         Chunk(
             index=i,
             text=f"测试文本{i}" * 100,
-            start=i * 100,
-            end=(i + 1) * 100,
+            start=i * text_len,
+            end=(i + 1) * text_len,
             chapter_id=i + 1,
         )
         for i in range(count)
     ]
+
+
+def _insert_paragraphs(db_session, run_id: str, chunks: list[Chunk]) -> None:
+    """生成并插入段落事实源（token_count 由调用方填充，reposiotry 校验非 None）"""
+    from dataclasses import replace
+
+    spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
+    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
 
@@ -82,6 +94,8 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         chunks = _create_chunks(1)
         chunk_repo.insert_chunks(run_id, chunks)
+        # 段落事实源是 preprocess 完成的前置条件（与语义检索开关无关）
+        _insert_paragraphs(db_session, run_id, chunks)
         with patch(
             "src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.semantic_enabled",
             False,
@@ -134,6 +148,7 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         chunks = _create_chunks(2)
         chunk_repo.insert_chunks(run_id, chunks)
+        _insert_paragraphs(db_session, run_id, chunks)
         ensure_paragraph_embeddings_schema(db_session, 1024)
         insert_paragraph_embeddings(
             db_session,

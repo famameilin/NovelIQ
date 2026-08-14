@@ -138,3 +138,30 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         character_max_iter=data.get("character_max_iter", 100),
         fourier_smooth_keep_ratio=data.get("fourier_smooth_keep_ratio", 0.1),
     )
+
+
+@dataclass
+class ParagraphSettings:
+    """
+    段落事实源配置
+
+    说明: paragraphs 是 run 内段落身份的唯一事实源（设计文档《段落分析原子与章节汇总重设计方案》§5.1），
+    段落切分参数与切分/分词版本号在此统一管理，版本号写入 paragraphs 行用于后续无效化判断
+    """
+
+    max_chars: int = 1500
+    splitter_version: str = "1"
+    tokenizer_version: str = "1"
+
+
+def _parse_paragraph_settings(data: dict[str, Any] | None) -> ParagraphSettings:
+    """
+    解析段落事实源配置
+    """
+    if not data:
+        return ParagraphSettings()
+    return ParagraphSettings(
+        max_chars=data.get("max_chars", 1500),
+        splitter_version=data.get("splitter_version", "1"),
+        tokenizer_version=data.get("tokenizer_version", "1"),
+    )

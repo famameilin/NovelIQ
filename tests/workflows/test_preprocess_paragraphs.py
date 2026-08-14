@@ -1,0 +1,248 @@
+"""
+preprocess 段落事实源测试
+
+验证 run_preprocess 无条件生成 paragraphs（语义检索开关不影响段落事实源），
+段落身份（paragraph_id/坐标/版本号）符合设计文档《段落分析原子与章节汇总重设计方案》§5.1，
+且 paragraph embedding 与段落事实源严格对齐
+"""
+
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from sqlalchemy import select
+
+from src.chapters.preprocess import preprocess_text
+from src.config import settings
+from src.preprocess.cleaning import normalize_text
+from src.storage.models import Paragraph, ParagraphEmbedding
+from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.workflows.preprocess import run_preprocess
+from tests.support.analysis_factories import insert_test_novel
+
+
+class MockEmbeddingClientPreprocess:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def get_embedding(self, text: str, chunk_id: int | None = None):
+        import random
+
+        return [random.random() for _ in range(1024)]
+
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        progress_callback=None,
+    ) -> list[list[float]]:
+        import random
+
+        return [[random.random() for _ in range(1024)] for _ in texts]
+
+    async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
+        return 1024
+
+    @staticmethod
+    def compute_similarity(vec1, vec2):
+        return 0.5
+
+
+# 章节标题 + 三个自然段：段落边界为单换行，方便验证坐标/文本与全文切片逐字匹配
+_NOVEL_CONTENT = "第一章 测试\n第一段内容。\n第二段内容。\n第三段内容。"
+
+
+class TestPreprocessParagraphs:
+    def _create_source_file(self, tmp: str, content: str = _NOVEL_CONTENT) -> Path:
+        source_path = Path(tmp) / f"novel_{uuid.uuid4().hex[:8]}.txt"
+        source_path.write_text(content, encoding="utf-8")
+        return source_path
+
+    def _create_run(self, db_session, source_path: Path, title: str) -> str:
+        run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(novel_id, session=db_session)
+        return run_repo.create_run(
+            novel_id=novel_id,
+            source_path=str(source_path),
+            title=title,
+        )
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_preprocess_generates_paragraphs(self, db_session, tmp_path) -> None:
+        """
+        2026-08-14 用于验证 preprocess 无条件生成段落事实源：
+        paragraph_id 从 0 连续、global 坐标单调不重叠、char_count == len(text)、
+        文本与 run 级规范化全文切片逐字匹配、content_hash 非空、splitter_version 落库
+        """
+        source_path = self._create_source_file(str(tmp_path))
+        run_id = self._create_run(db_session, source_path, "Paragraphs Novel")
+
+        chunks_inserted, _, _ = await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+        assert chunks_inserted > 0
+
+        paragraph_repo = ParagraphRepository(db_session)
+        assert paragraph_repo.count_paragraphs(run_id) > 0
+
+        rows = paragraph_repo.fetch_paragraph_rows(run_id)
+        # paragraph_id 从 0 全局连续
+        assert [row.paragraph_id for row in rows] == list(range(len(rows)))
+        # global 坐标单调不重叠
+        prev_end = -1
+        for row in rows:
+            assert row.global_start_char >= prev_end
+            assert row.global_start_char < row.global_end_char
+            assert row.local_start_char < row.local_end_char
+            prev_end = row.global_end_char
+        # char_count == len(text)（从 DB 行 text 列验证）
+        assert all(row.char_count == len(row.text) for row in rows)
+        # 文本与章节切片逐字匹配（global 坐标相对 run 级规范化全文）
+        raw_text = source_path.read_text(encoding="utf-8")
+        full_text = preprocess_text(normalize_text(raw_text))
+        for row in rows:
+            assert row.text == full_text[row.global_start_char : row.global_end_char]
+        # content_hash 非空；splitter_version/tokenizer_version 从 settings.paragraphs 落库
+        # （fetch_paragraph_rows 未投影版本列，直接查 Paragraph 模型验证）
+        assert all(row.content_hash for row in rows)
+        version_rows = db_session.execute(
+            select(Paragraph.splitter_version, Paragraph.tokenizer_version).where(
+                Paragraph.run_id == run_id
+            )
+        ).all()
+        assert version_rows
+        assert all(row.splitter_version == "1" for row in version_rows)
+        assert all(row.tokenizer_version == "1" for row in version_rows)
+        # run_preprocess 填充 token_count
+        assert all(row.token_count is not None for row in rows)
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_preprocess_paragraphs_identical_when_semantic_disabled(
+        self,
+        db_session,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """
+        2026-08-14 用于证明语义检索开关不影响段落事实源：
+        semantic_enabled 开/关两个 run 的 paragraphs 行数一致且坐标/文本完全一致
+        """
+        source_path = self._create_source_file(str(tmp_path))
+
+        run_id_semantic = self._create_run(db_session, source_path, "Semantic On")
+        await run_preprocess(
+            source_path=source_path,
+            run_id=run_id_semantic,
+            session=db_session,
+        )
+
+        monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
+        run_id_plain = self._create_run(db_session, source_path, "Semantic Off")
+        await run_preprocess(
+            source_path=source_path,
+            run_id=run_id_plain,
+            session=db_session,
+        )
+
+        paragraph_repo = ParagraphRepository(db_session)
+        rows_semantic = paragraph_repo.fetch_paragraph_rows(run_id_semantic)
+        rows_plain = paragraph_repo.fetch_paragraph_rows(run_id_plain)
+        assert len(rows_semantic) == len(rows_plain)
+        identity_fields = (
+            "paragraph_id",
+            "chunk_id",
+            "chapter_id",
+            "paragraph_index",
+            "local_start_char",
+            "local_end_char",
+            "global_start_char",
+            "global_end_char",
+            "text",
+        )
+        assert [
+            tuple(getattr(row, field) for field in identity_fields) for row in rows_semantic
+        ] == [
+            tuple(getattr(row, field) for field in identity_fields) for row in rows_plain
+        ]
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_preprocess_embeddings_aligned_with_paragraphs(self, db_session, tmp_path) -> None:
+        """
+        2026-08-14 用于验证 embedding 从段落事实源读取后与 paragraphs 严格对齐：
+        paragraph_embeddings 行数与 paragraphs 一致，且每条 embedding 的
+        chunk_id/paragraph_index/local/global 坐标与 paragraphs 对应行一致
+        """
+        source_path = self._create_source_file(str(tmp_path))
+        run_id = self._create_run(db_session, source_path, "Embedding Align")
+
+        await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+
+        paragraph_rows = ParagraphRepository(db_session).fetch_paragraph_rows(run_id)
+        assert paragraph_rows
+
+        embedding_rows = db_session.execute(
+            select(
+                ParagraphEmbedding.run_id,
+                ParagraphEmbedding.chunk_id,
+                ParagraphEmbedding.paragraph_index,
+                ParagraphEmbedding.paragraph_text,
+                ParagraphEmbedding.local_start_char,
+                ParagraphEmbedding.local_end_char,
+                ParagraphEmbedding.global_start_char,
+                ParagraphEmbedding.global_end_char,
+            ).where(ParagraphEmbedding.run_id == run_id)
+        ).all()
+        embedding_by_key = {
+            (row.chunk_id, row.paragraph_index): row for row in embedding_rows
+        }
+
+        assert len(embedding_rows) == len(paragraph_rows)
+        for paragraph_row in paragraph_rows:
+            key = (paragraph_row.chunk_id, paragraph_row.paragraph_index)
+            assert key in embedding_by_key
+            embedding_row = embedding_by_key[key]
+            assert embedding_row.paragraph_text == paragraph_row.text
+            assert embedding_row.local_start_char == paragraph_row.local_start_char
+            assert embedding_row.local_end_char == paragraph_row.local_end_char
+            assert embedding_row.global_start_char == paragraph_row.global_start_char
+            assert embedding_row.global_end_char == paragraph_row.global_end_char
+
+    @pytest.mark.asyncio()
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    async def test_preprocess_resume_skips_when_paragraphs_exist(self, db_session, tmp_path) -> None:
+        """
+        2026-08-14 用于验证 is_preprocess_complete 要求段落事实源存在：
+        第一次跑完后 paragraphs 已落库，第二次跑直接返回 (0, 0, 0)
+        """
+        source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
+        run_id = self._create_run(db_session, source_path, "Resume Novel")
+
+        chunks1, _, _ = await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+        assert chunks1 > 0
+        assert ParagraphRepository(db_session).count_paragraphs(run_id) > 0
+        assert ChunkRepository(db_session).is_preprocess_complete(run_id)
+
+        chunks2, chars2, elapsed2 = await run_preprocess(
+            source_path=source_path,
+            run_id=run_id,
+            session=db_session,
+        )
+        assert (chunks2, chars2, elapsed2) == (0, 0, 0.0)

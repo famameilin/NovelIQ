@@ -115,24 +115,22 @@ def search_paragraphs_by_keywords(
             if raw_chunk_offset is not None
             else fallback_global_offset
         )
-        for paragraph_index, (local_start_char, local_end_char, paragraph_text) in enumerate(
-            split_paragraphs(chunk_text)
-        ):
+        for span in split_paragraphs(chunk_text):
             # 2026-08-13 P2-6：与 SQL 侧一致，Python 侧匹配也做 lower 归一
             matched = tuple(
-                keyword for keyword in normalized if keyword in paragraph_text.lower()
+                keyword for keyword in normalized if keyword in span.text.lower()
             )
             if not matched:
                 continue
             results.append(
                 KeywordMatchRow(
                     chunk_id=chunk_id,
-                    paragraph_index=paragraph_index,
-                    paragraph_text=paragraph_text,
-                    local_start_char=local_start_char,
-                    local_end_char=local_end_char,
-                    global_start_char=chunk_offset + local_start_char,
-                    global_end_char=chunk_offset + local_end_char,
+                    paragraph_index=span.paragraph_index,
+                    paragraph_text=span.text,
+                    local_start_char=span.local_start_char,
+                    local_end_char=span.local_end_char,
+                    global_start_char=chunk_offset + span.local_start_char,
+                    global_end_char=chunk_offset + span.local_end_char,
                     matched_keywords=matched,
                     match_count=len(matched),
                 )

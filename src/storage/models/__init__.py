@@ -30,6 +30,7 @@ from src.storage.models.graph import (
     GraphVersion,
 )
 from src.storage.models.novel import Novel
+from src.storage.models.paragraph import Paragraph
 from src.storage.models.rag import TokenUsage
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "Chunk",
     "ChunkStyle",
     "ChunkTopic",
+    "Paragraph",
     "ParagraphEmbedding",
     "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
