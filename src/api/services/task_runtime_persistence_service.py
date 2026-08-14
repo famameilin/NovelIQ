@@ -47,7 +47,9 @@ class TaskRuntimePersistenceService:
             # 只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
             # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”
             update_params.setdefault("worker_id", self._worker_id)
-            update_params["heartbeat_at"] = datetime.now(UTC)
+            # 2026-08-13 P2：heartbeat_at 列为无时区 DateTime，aware UTC 写入会被 PG
+            # 按会话时区转换（UTC+8 错位 8h），统一落 naive UTC 挂钟，比较端按 UTC 补时区
+            update_params["heartbeat_at"] = datetime.now(UTC).replace(tzinfo=None)
 
         if not update_params:
             return

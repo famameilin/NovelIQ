@@ -9,18 +9,20 @@ API 分析任务列表、删除、运行态写回测试
 import asyncio
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.routes import analysis as analysis_mod
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
+from src.api.services.task_application_service import cleanup_task_runtime_before_delete
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
@@ -78,7 +80,7 @@ class TestDeleteAnalysis:
         background_task = asyncio.create_task(_never_finish())
         task_manager.store_asyncio_task("task-running", background_task)
 
-        await analysis_mod._cleanup_task_runtime_before_delete("task-running", task_manager)
+        await cleanup_task_runtime_before_delete("task-running", task_manager)
 
         assert background_task.done()
         assert background_task.cancelled()
@@ -112,7 +114,7 @@ class TestDeleteAnalysis:
         background_task = asyncio.create_task(_never_finish())
         task_manager.store_asyncio_task(run_id, background_task)
 
-        await analysis_mod._cleanup_task_runtime_before_delete(run_id, task_manager)
+        await cleanup_task_runtime_before_delete(run_id, task_manager)
 
         assert background_task.done()
         assert background_task.cancelled()
@@ -172,8 +174,11 @@ class TestDeleteAnalysis:
             run_repo.create_run(novel_id=novel_id, run_id=run_id)
             run_repo.update_run_task_fields(run_id, status="completed")
             session.execute(
-                text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (:chunk_id, :text, :run_id)"),
-                {"chunk_id": 0, "text": "待删除分块", "run_id": run_id},
+                text(
+                    "INSERT INTO chunks (chunk_id, chapter_id, text, run_id) "
+                    "VALUES (:chunk_id, :chapter_id, :text, :run_id)"
+                ),
+                {"chunk_id": 0, "chapter_id": 1, "text": "待删除分块", "run_id": run_id},
             )
             session.execute(
                 text(
@@ -273,6 +278,116 @@ class TestRunRepository:
         assert run["worker_id"] == "worker-a"
 
 
+class _ClaimSessionAdapter:
+    """把 db_session fixture 包装为 AnalysisService 需要的会话工厂接口"""
+
+    def __init__(self, session: Session):
+        self.connection = session
+
+    def __enter__(self) -> "_ClaimSessionAdapter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _ClaimSessionFactory:
+    def __init__(self, session: Session):
+        self._session = session
+
+    def get_session(self) -> _ClaimSessionAdapter:
+        return _ClaimSessionAdapter(self._session)
+
+
+class TestExecutionClaimResumeRace:
+    """测试 resume 与在途取消收尾竞态：claim 恢复被延迟取消写回覆盖的重置"""
+
+    @staticmethod
+    def _make_service(db_session: Session) -> AnalysisService:
+        return AnalysisService(
+            novel_service=MagicMock(),
+            task_manager=TaskManager(worker_id="worker-new"),
+            session_factory=_ClaimSessionFactory(db_session),
+        )
+
+    def test_claim_reactivates_run_reset_by_recent_resume(self, db_session):
+        """resume 重置 pending 后旧 worker 延迟写回 cancelled，claim 应重新激活并领取"""
+        _insert_test_novel("claimr1", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="claimr1")
+        task_id = run_id[:8]
+
+        # 模拟 resume 重置 pending：worker_id=None + heartbeat_at=now（pending 写回自动刷新心跳）
+        # 2026-08-13 P2：heartbeat_at 列无时区，落库值统一为 naive UTC 挂钟
+        run_repo.update_run_task_fields(
+            run_id,
+            status="pending",
+            cancel_requested=False,
+            worker_id=None,
+            heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
+            completed_at=None,
+        )
+        # 模拟旧 worker 的延迟取消写回（不触碰 worker_id/heartbeat_at）
+        run_repo.update_run_task_fields(
+            run_id,
+            status="cancelled",
+            cancel_requested=False,
+            completed_at=datetime.now(UTC),
+        )
+
+        claim_result = self._make_service(db_session)._prepare_task_execution_claim(task_id)
+
+        assert claim_result == "claimed"
+        run = run_repo.get_run(run_id)
+        assert run is not None
+        assert run["status"] == "running"
+        assert run["worker_id"] == "worker-new"
+
+    def test_claim_does_not_reactivate_genuine_cancel_of_pending_run(self, db_session):
+        """真实取消（无 resume 重置痕迹：heartbeat_at 为 None）不得被 claim 复活"""
+        _insert_test_novel("claimr2", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="claimr2")
+        task_id = run_id[:8]
+
+        run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
+
+        claim_result = self._make_service(db_session)._prepare_task_execution_claim(task_id)
+
+        assert claim_result == "skipped"
+        run = run_repo.get_run(run_id)
+        assert run is not None
+        assert run["status"] == "cancelled"
+
+    def test_claim_does_not_reactivate_cancel_outside_resume_window(self, db_session):
+        """resume 重置痕迹超出窗口（heartbeat_at 陈旧）时不复活，保持 skipped"""
+        _insert_test_novel("claimr3", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="claimr3")
+        task_id = run_id[:8]
+
+        # 2026-08-13 P2：heartbeat_at 列无时区，落库值统一为 naive UTC 挂钟
+        stale = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+        run_repo.update_run_task_fields(
+            run_id,
+            status="pending",
+            cancel_requested=False,
+            worker_id=None,
+            heartbeat_at=stale,
+            completed_at=None,
+        )
+        run_repo.update_run_task_fields(
+            run_id,
+            status="cancelled",
+            cancel_requested=False,
+            completed_at=datetime.now(UTC),
+        )
+
+        claim_result = self._make_service(db_session)._prepare_task_execution_claim(task_id)
+
+        assert claim_result == "skipped"
+
+
 class TestCancellationStateCheck:
     """测试取消状态检查失败时不会静默继续执行"""
 
@@ -321,6 +436,8 @@ class TestAnalysisErrorHandler:
         )
 
         with patch("src.api.services.analysis.error_handler.RunRepository") as mock_run_repo_cls:
+            # 2026-08-14 P2-13：归属守卫读取 run.worker_id（无归属放行）
+            mock_run_repo_cls.return_value.get_run.return_value = {"worker_id": None}
             await handler.handle_failure(
                 task_id="task-1",
                 novel_id="novel001",
@@ -333,7 +450,45 @@ class TestAnalysisErrorHandler:
             )
 
         assert session.method_calls[:2] == [call.rollback(), call.commit()]
-        mock_run_repo_cls.return_value.update_run_status.assert_called_once_with("run-1", "failed")
+        # 2026-08-13：失败收口改用 update_run_task_fields 一并持久化 error 列
+        # （completed_at 用 ANY：断言时刻的 now 与调用时刻的 now 存在微秒差）
+        mock_run_repo_cls.return_value.update_run_task_fields.assert_called_once_with(
+            "run-1",
+            status="failed",
+            error="boom",
+            completed_at=ANY,
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_failure_persists_error_message_in_db(self, db_session) -> None:
+        """
+        2026-08-13 修复 P1：失败路径必须把异常信息持久化到 error 列，
+        DB 中 failed 任务 error 恒为 NULL 会让 /status 接口 error 永远 None。
+        """
+        _insert_test_novel("novel001", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="novel001")
+        handler = AnalysisErrorHandler(
+            novel_service=MagicMock(),
+            task_manager=MagicMock(),
+        )
+
+        await handler.handle_failure(
+            task_id=run_id[:8],
+            novel_id="novel001",
+            elapsed=1.0,
+            error=RuntimeError("boom"),
+            analysis_logger=None,
+            session=db_session,
+            run_id=run_id,
+            bus=None,
+        )
+
+        refreshed = run_repo.get_run(run_id)
+        assert refreshed is not None
+        assert refreshed["status"] == "failed"
+        assert refreshed["error"] == "boom"
+        assert refreshed["completed_at"] is not None
 
     @pytest.mark.asyncio
     async def test_handle_cancel_clears_cancel_requested_in_db(self, db_session):
@@ -378,6 +533,8 @@ class TestAnalysisErrorHandler:
         )
 
         with patch("src.api.services.analysis.error_handler.RunRepository") as mock_run_repo_cls:
+            # 2026-08-14 P2-13：归属守卫读取 run.worker_id（无归属放行）
+            mock_run_repo_cls.return_value.get_run.return_value = {"worker_id": None}
             await handler.handle_cancel(
                 task_id="task-1",
                 novel_id="novel001",
@@ -420,6 +577,40 @@ class TestAnalysisErrorHandler:
         )
 
         assert metrics_service._get_from_cache(run_id) is None
+
+    @pytest.mark.asyncio
+    async def test_handle_success_persists_progress_100_and_completed_at(self, db_session):
+        """
+        2026-08-13 P2：成功收口必须把 progress 归一为 100.0 并落 completed_at，
+        避免完成任务的进度停留在最后阶段区间（如 95.x）而 /status 误报未完成。
+        """
+        _insert_test_novel("novel001", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="novel001")
+        run_repo.update_run_task_fields(run_id, progress=95.0)
+
+        task_manager = TaskManager()
+        task_manager.create_task(run_id[:8], "novel001")
+        handler = AnalysisErrorHandler(
+            novel_service=MagicMock(),
+            task_manager=task_manager,
+        )
+
+        await handler.handle_success(
+            task_id=run_id[:8],
+            novel_id="novel001",
+            elapsed=1.0,
+            analysis_logger=None,
+            session=db_session,
+            run_id=run_id,
+            bus=None,
+        )
+
+        refreshed = run_repo.get_run(run_id)
+        assert refreshed is not None
+        assert refreshed["status"] == "completed"
+        assert refreshed["progress"] == 100.0
+        assert refreshed["completed_at"] is not None
 
 
 class TestTaskManagerDbWrite:

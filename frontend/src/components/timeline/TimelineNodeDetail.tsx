@@ -4,8 +4,8 @@
  * 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
  *
  *   - 详情面板改为消费 node_id / anchor_chunk_id 新合同
- *   - 展示 score_breakdown、relation_events 与 lifecycle_events 新结构
- *   - 图谱回跳仅在 relation 节点具备稳定 relation_event_id 时附带图谱选择参数
+ *   - 展示 score_breakdown、graph_changes 与 lifecycle_events 新结构
+ *   - 图谱回跳仅在原子节点具备稳定 change_id 时附带图谱选择参数
  *
  *   - 支持复合节点详情与原子节点详情双模式
  *   - 复合节点只提供稳定 child atomic node 入口，不再构造模糊 graph deep-link
@@ -26,12 +26,22 @@ import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 type TimelineDetailNode = TimelineNodeType | TimelineCompositeNode;
 
+const relationChangeKindLabels: Record<string, string> = {
+  assert: "建立",
+  reinforce: "强化",
+  weaken: "弱化",
+  break: "断裂",
+  refine: "修订",
+  supersede: "替代",
+  retract: "撤回",
+};
+
 export interface TimelineNodeDetailProps {
   node: TimelineDetailNode | null;
   atomicNodes: TimelineNodeType[];
   novelId: string;
   taskId: string;
-  selectedRelationEventId?: number | null;
+  selectedGraphChangeId?: string | null;
   onSelectAtomicNode?: (node: TimelineNodeType) => void;
   onClose?: () => void;
   className?: string;
@@ -42,29 +52,23 @@ function isAtomicTimelineNode(node: TimelineDetailNode | null): node is Timeline
 }
 
 /**
- *   - 外部传入的 selectedRelationEventId 只有在确实属于当前节点时才可信
- *   - 若外部值不属于当前节点，则回退到节点自身唯一 relation event，避免生成不可能成立的 graph deep-link
+ *   - 外部传入的 selectedGraphChangeId 只有在确实属于当前节点时才可信
+ *   - 若外部值不属于当前节点，则回退到节点自身唯一图谱变化，避免生成不可能成立的 graph deep-link
  */
-function resolveNodeGraphRelationEventId(
+function resolveNodeGraphChangeId(
   node: TimelineNodeType | null,
-  selectedRelationEventId: number | null,
-): number | null {
-  if (node?.node_type !== "relation") {
+  selectedGraphChangeId: string | null,
+): string | null {
+  if (!node) {
     return null;
   }
 
-  const nodeRelationEventIds = Array.from(
-    new Set(
-      (node.relation_events ?? [])
-        .map((relationEvent) => relationEvent.relation_event_id)
-        .filter((relationEventId): relationEventId is number => relationEventId != null),
-    ),
-  );
+  const nodeGraphChangeIds = Array.from(new Set((node.graph_changes ?? []).map((change) => change.change_id)));
 
-  if (selectedRelationEventId != null && nodeRelationEventIds.includes(selectedRelationEventId)) {
-    return selectedRelationEventId;
+  if (selectedGraphChangeId != null && nodeGraphChangeIds.includes(selectedGraphChangeId)) {
+    return selectedGraphChangeId;
   }
-  return nodeRelationEventIds.length === 1 ? nodeRelationEventIds[0] : null;
+  return nodeGraphChangeIds.length === 1 ? nodeGraphChangeIds[0] ?? null : null;
 }
 
 export function TimelineNodeDetail({
@@ -72,7 +76,7 @@ export function TimelineNodeDetail({
   atomicNodes,
   novelId,
   taskId,
-  selectedRelationEventId = null,
+  selectedGraphChangeId = null,
   onSelectAtomicNode,
   onClose,
   className,
@@ -91,11 +95,11 @@ export function TimelineNodeDetail({
     [navigate, novelId],
   );
 
-  const graphRelationEventId = useMemo(() => {
-    return resolveNodeGraphRelationEventId(isAtomicTimelineNode(node) ? node : null, selectedRelationEventId);
-  }, [node, selectedRelationEventId]);
+  const graphChangeId = useMemo(() => {
+    return resolveNodeGraphChangeId(isAtomicTimelineNode(node) ? node : null, selectedGraphChangeId);
+  }, [node, selectedGraphChangeId]);
 
-  const shouldSelectGraphEvent = isAtomicTimelineNode(node) && node.node_type === "relation" && graphRelationEventId != null;
+  const shouldSelectGraphChange = isAtomicTimelineNode(node) && graphChangeId != null;
 
   const childAtomicNodes = useMemo(() => {
     if (node == null || isAtomicTimelineNode(node)) {
@@ -110,12 +114,12 @@ export function TimelineNodeDetail({
   const handleBackToGraph = useCallback(() => {
     if (!node) return;
     const params = new URLSearchParams({ task_id: taskId });
-    if (shouldSelectGraphEvent) {
+    if (shouldSelectGraphChange) {
       params.set("selected_chunk", String(node.anchor_chunk_id));
-      params.set("relation_event_id", String(graphRelationEventId));
+      params.set("change_id", graphChangeId);
     }
     navigate(`/novels/${novelId}/graph?${params.toString()}`);
-  }, [graphRelationEventId, navigate, node, novelId, shouldSelectGraphEvent, taskId]);
+  }, [graphChangeId, navigate, node, novelId, shouldSelectGraphChange, taskId]);
 
   return (
     <AnimatePresence mode="wait">
@@ -254,48 +258,52 @@ export function TimelineNodeDetail({
               </div>
             ) : null}
 
-            {isAtomicTimelineNode(node) && node.relation_events && node.relation_events.length > 0 ? (
+            {isAtomicTimelineNode(node) && node.graph_changes && node.graph_changes.length > 0 ? (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-chart-2">
                   <Link2 className="h-3.5 w-3.5" />
-                  <span>关系变化</span>
+                  <span>图谱变化</span>
                 </div>
                 <div className="space-y-2">
-                  {node.relation_events.map((event) => (
+                  {node.graph_changes.map((change) => (
                     <div
-                      key={event.relation_event_id}
+                      key={change.change_id}
                       className={cn(
                         "rounded-md p-3 text-xs",
-                        event.relation_event_id === selectedRelationEventId
+                        change.change_id === selectedGraphChangeId
                           ? "border border-primary/30 bg-primary/5"
                           : "bg-surface-hover",
                       )}
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{event.from_char}</span>
-                        <ArrowRight className="h-3 w-3 text-text-muted" />
-                        <span className="font-medium">{event.to_char}</span>
-                        <Badge variant="outline" className="text-[10px]">
-                          {event.relation_type}
-                        </Badge>
+                        {change.change_kind === "relation" ? (
+                          <>
+                            <span className="font-medium">{change.from_char ?? "未知实体"}</span>
+                            <ArrowRight className="h-3 w-3 text-text-muted" />
+                            <span className="font-medium">{change.to_char ?? "未知实体"}</span>
+                            {change.relation_type ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                {change.relation_type}
+                              </Badge>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="font-medium">{change.entity_name ?? "未知实体"}状态更新</span>
+                        )}
                         <Badge variant="secondary" className="text-[10px]">
-                          {event.change_type}
+                          {change.change_kind === "relation"
+                            ? relationChangeKindLabels[change.relation_change_kind ?? ""] ?? "关系更新"
+                            : "状态更新"}
                         </Badge>
                         <Badge variant="outline" className="text-[10px]">
-                          事件 #{event.relation_event_id}
+                          变化 {change.change_id}
                         </Badge>
-                        {event.directionality ? (
+                        {change.directionality ? (
                           <Badge variant="outline" className="text-[10px]">
-                            {event.directionality}
-                          </Badge>
-                        ) : null}
-                        {event.confidence != null ? (
-                          <Badge variant="outline" className="text-[10px]">
-                            置信 {Math.round(event.confidence * 100)}%
+                            {change.directionality}
                           </Badge>
                         ) : null}
                       </div>
-                      {event.evidence ? <p className="mt-2 leading-5 text-text-muted">{event.evidence}</p> : null}
                     </div>
                   ))}
                 </div>

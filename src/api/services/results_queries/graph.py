@@ -1,8 +1,4 @@
-"""
-图谱查询组装器
-
-说明: 承载 graph 相关查询组装逻辑
-"""
+"""章节级动态图查询组装器"""
 
 from __future__ import annotations
 
@@ -14,176 +10,52 @@ from typing import Any
 from loguru import logger
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
-from src.config import settings
-from src.knowledge.authority import (
-    GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
-    ExportGraphAuthorityView,
-    GraphPageQualityDetails,
-    GraphPageSummary,
-    KnowledgeGraphAuthorityService,
-)
-from src.knowledge.authority.graph_outputs import build_graph_page_quality, build_graph_page_summary
-from src.storage.repositories import AnnotationRepository
+from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
+from src.knowledge.authority.alias import build_alias_resolution
+from src.storage.repositories import AnnotationRepository, GraphRepository
 
-from .common import _normalize_name
+GRAPH_CHANGE_LIMIT = 200
 
-GRAPH_PAGE_EVENT_LIMIT = 200
+HIERARCHICAL_RELATION_TYPES = {
+    "隶属",
+}
 
 
-def _encode_graph_events_cursor(offset: int) -> str:
+def _encode_graph_changes_cursor(offset: int) -> str:
+    """2026-08-07 用于把图变化分页偏移编码为稳定游标"""
     payload = json.dumps({"offset": offset}, separators=(",", ":")).encode("utf-8")
     return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
-def _decode_graph_events_cursor(cursor: str | None) -> int:
+def _decode_graph_changes_cursor(cursor: str | None) -> int:
+    """2026-08-07 用于校验并解析图变化分页游标"""
     if not cursor:
         return 0
-
     padded_cursor = cursor + ("=" * (-len(cursor) % 4))
     try:
         payload = json.loads(urlsafe_b64decode(padded_cursor.encode("ascii")).decode("utf-8"))
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
-        raise ValueError("invalid graph events cursor") from exc
-
+        raise ValueError("invalid graph changes cursor") from exc
+    if type(payload) is not dict:
+        # 非 dict JSON（list/str/int 等）调用 .get 会抛 AttributeError（→500），
+        # 这里统一按非法游标处理（→400）
+        raise ValueError("invalid graph changes cursor")
     offset = payload.get("offset")
     if type(offset) is not int or offset < 0:
-        raise ValueError("invalid graph events cursor")
+        raise ValueError("invalid graph changes cursor")
     return offset
 
 
-def _serialize_graph_event(event: Any) -> dict[str, Any]:
-    return {
-        "relation_event_id": event.relation_event_id,
-        "chunk_id": event.chunk_id,
-        "from_entity_id": event.from_entity_id,
-        "to_entity_id": event.to_entity_id,
-        "from_name": event.from_name,
-        "to_name": event.to_name,
-        "relation_type": event.relation_type,
-        "change_type": event.change_type,
-        "evidence": event.evidence,
-        "confidence": event.confidence,
-        "source_relation_row_id": event.source_relation_row_id,
-        "directionality": event.directionality,
-    }
-
-
-def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
-    """把图谱页摘要事实转换为对外 DTO"""
-    return {
-        "node_count": summary.node_count,
-        "edge_count": summary.edge_count,
-        "density": summary.density,
-        "core_characters": list(summary.core_characters),
-        "key_relations": [
-            {
-                "from": relation.from_name,
-                "to": relation.to_name,
-                "type": relation.relation_type,
-                "support_count": relation.support_count,
-            }
-            for relation in summary.key_relations
-        ],
-    }
-
-
-def _serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str, Any]:
-    """把图谱页质量事实转换为对外 DTO"""
-    return {
-        "conflict_count": quality.conflict_count,
-        "low_confidence_count": quality.low_confidence_count,
-        "conflicts": [
-            {
-                "entity_pair": list(conflict.entity_pair),
-                "entity_names": list(conflict.entity_names),
-                "relation_types": list(conflict.relation_types),
-                "relation_count": conflict.relation_count,
-                "latest_event_ids": list(conflict.latest_event_ids),
-            }
-            for conflict in quality.conflicts
-        ],
-        "low_confidence_samples": [
-            {
-                "relation_event_id": event.relation_event_id,
-                "chunk_id": event.chunk_id,
-                "from_name": event.from_name,
-                "to_name": event.to_name,
-                "relation_type": event.relation_type,
-                "change_type": event.change_type,
-                "confidence": event.confidence,
-            }
-            for event in quality.low_confidence_samples
-        ],
-    }
-
-
-def _validate_authority_dependency_items(
-    items: list[Any],
-    required_fields: tuple[str, ...],
-    *,
-    contract_name: str,
-) -> None:
-    for item in items:
-        missing_fields = [field_name for field_name in required_fields if not hasattr(item, field_name)]
-        if missing_fields:
-            raise RuntimeError(f"{contract_name} is missing required authority fields: {', '.join(missing_fields)}")
-
-
-def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], list[Any], list[Any]]:
-    participant_states = list(getattr(graph_view, "participant_states", []))
-    confirmed_relations = list(getattr(graph_view, "confirmed_relations", []))
-    relation_events = list(getattr(graph_view, "relation_events", []))
-
-    required_slices = {
-        "participant_states": participant_states,
-        "confirmed_relations": confirmed_relations,
-        "relation_events": relation_events,
-    }
-    for slice_name, slice_items in required_slices.items():
-        if not hasattr(graph_view, slice_name):
-            raise RuntimeError(f"graph page authority contract is missing required slice: {slice_name}")
-        _validate_authority_dependency_items(
-            slice_items,
-            GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS[slice_name],
-            contract_name=f"graph page authority contract.{slice_name}",
-        )
-
-    return participant_states, confirmed_relations, relation_events
-
-
-def _paginate_graph_relation_events(
-    relation_events: list[Any],
-    *,
-    cursor: str | None = None,
-    limit: int = GRAPH_PAGE_EVENT_LIMIT,
-) -> tuple[list[Any], dict[str, Any]]:
-    page_limit = max(1, min(limit, GRAPH_PAGE_EVENT_LIMIT))
-    start = _decode_graph_events_cursor(cursor)
-    total = len(relation_events)
-    if start > total:
-        raise ValueError("graph events cursor is out of range")
-
-    end = min(start + page_limit, total)
-    next_cursor = _encode_graph_events_cursor(end) if end < total else None
-    page_info = {
-        "limit": page_limit,
-        "returned_count": end - start,
-        "total": total,
-        "has_more": next_cursor is not None,
-        "next_cursor": next_cursor,
-    }
-    return relation_events[start:end], page_info
-
-
-def _build_graph_events_page_info(
+def _build_graph_changes_page_info(
     *,
     start: int,
     page_limit: int,
     returned_count: int,
     total: int,
 ) -> dict[str, Any]:
+    """2026-08-07 用于组装图变化分页状态"""
     end = start + returned_count
-    next_cursor = _encode_graph_events_cursor(end) if end < total else None
+    next_cursor = _encode_graph_changes_cursor(end) if end < total else None
     return {
         "limit": page_limit,
         "returned_count": returned_count,
@@ -196,13 +68,12 @@ def _build_graph_events_page_info(
 def _fetch_character_relations(
     run_id: str,
     annotation_repo: AnnotationRepository,
-    alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
-) -> list:
-    """获取角色关系数据"""
+) -> list[CharacterRelation]:
+    """2026-08-07 用于从最新章节关系版本生成角色关系导出数据"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    authority_service.assert_graph_projection_ready(run_id)
+    authority_service.assert_graph_ready(run_id)
     if export_graph_view is None:
         export_graph_view = authority_service.build_export_view(run_id)
 
@@ -210,8 +81,8 @@ def _fetch_character_relations(
     for relation in export_graph_view.current_relations:
         if not relation.is_active:
             continue
-        from_char = _normalize_name(relation.from_name, alias_map) or relation.from_name
-        to_char = _normalize_name(relation.to_name, alias_map) or relation.to_name
+        from_char = relation.from_name
+        to_char = relation.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -234,48 +105,39 @@ def _fetch_character_relations(
                 change="汇总",
             )
         )
-
     return result
 
 
 def _fetch_hierarchical_relations(
     run_id: str,
     export_graph_view: ExportGraphAuthorityView,
-    alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
-) -> list:
-    """获取层级关系数据"""
-    hierarchical_types = set(settings.analysis.valid_hierarchical_relation_types)
+) -> list[HierarchicalRelation]:
+    """2026-08-07 用于从最新章节关系版本生成层级关系导出数据"""
+    del run_id
+    hierarchical_types = HIERARCHICAL_RELATION_TYPES
     valid_entity_names = {
-        entity.name for entity in export_graph_view.canonical_entities if getattr(entity, "name", None)
+        entity.name for entity in export_graph_view.canonical_entities if entity.name
     }
-    result = []
+    result: list[HierarchicalRelation] = []
     for relation in export_graph_view.current_relations:
-        if not relation.is_active:
+        if not relation.is_active or relation.relation_type not in hierarchical_types:
             continue
-        rel_type = relation.relation_type
-        if rel_type not in hierarchical_types:
-            continue
-        from_name_raw = relation.from_name
-        to_name_raw = relation.to_name
-        from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
-        to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
         allowed_names = valid_entity_names or valid_character_names
         if allowed_names is not None and (
-            from_entity not in allowed_names or to_entity not in allowed_names
+            relation.from_name not in allowed_names or relation.to_name not in allowed_names
         ):
             continue
-        rel_id = relation.relation_id
-        if rel_id is None:
-            continue
+        if relation.relation_id is None:
+            raise ValueError("章节关系快照缺少稳定 relation_id")
         result.append(
             HierarchicalRelation(
-                rel_id=rel_id,
-                rel_type=rel_type,
+                rel_id=relation.relation_id,
+                rel_type=relation.relation_type,
                 first_chunk=relation.first_seen_chunk,
                 last_chunk=relation.last_seen_chunk,
-                from_entity=from_entity,
-                to_entity=to_entity,
+                from_entity=relation.from_name,
+                to_entity=relation.to_name,
             )
         )
     return result
@@ -285,96 +147,132 @@ def _fetch_graph_snapshot(
     run_id: str,
     annotation_repo: AnnotationRepository,
     *,
-    events_cursor: str | None = None,
-    events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
+    chapter_id: int | None = None,
+    graph_version_id: str | None = None,
 ) -> dict[str, Any]:
-    """获取知识图谱快照（nodes/edges/events/summary）"""
-    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    graph_view = authority_service.build_graph_view(run_id)
-    participant_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
-
+    """2026-08-07 用于直接返回目标章节图版本的实体状态和有效关系"""
+    snapshot = GraphRepository(annotation_repo.session).fetch_snapshot(
+        run_id,
+        chapter_id=chapter_id,
+        graph_version_id=graph_version_id,
+    )
+    if snapshot is None:
+        raise LookupError("当前 run 尚无匹配的章节图版本")
+    version = snapshot.graph_version
+    resolution = build_alias_resolution(snapshot.relations, entities=snapshot.entities)
     nodes = [
         {
-            "entity_id": str(row.entity_id),
-            "name": row.name,
-            "entity_type": row.entity_type,
-            "first_seen_chunk": row.first_seen_chunk,
-            "last_seen_chunk": row.last_seen_chunk,
-            "role": row.primary_role_function,
-            "status": row.status,
+            "entity_id": entity.entity_id,
+            "name": entity.name,
+            "entity_type": entity.entity_type,
+            "tags": entity.tags,
+            "aliases": resolution.aliases_by_representative.get(entity.entity_id, []),
+            "first_seen_chunk": entity.first_seen_chunk,
+            "last_seen_chunk": entity.last_seen_chunk,
+            "state_revision": entity.state_revision,
+            "state": entity.state,
         }
-        for row in participant_states
+        for entity in snapshot.entities
+        if entity.entity_id not in resolution.representative_by_alias
     ]
-    edges = [
-        {
-            "source": str(edge.from_entity_id) if edge.from_entity_id is not None else edge.from_name,
-            "target": str(edge.to_entity_id) if edge.to_entity_id is not None else edge.to_name,
-            "relation_type": edge.relation_type,
-            "weight": edge.support_count or 1,
-            "from_name": edge.from_name,
-            "to_name": edge.to_name,
-            "change_count": edge.change_count,
-            "tension_index": edge.tension_index,
-            "is_active": edge.is_active,
-        }
-        for edge in confirmed_relations
-    ]
-    paged_relation_events, events_page = _paginate_graph_relation_events(
-        relation_events,
-        cursor=events_cursor,
-        limit=events_limit,
-    )
-    events = [_serialize_graph_event(event) for event in paged_relation_events]
-    summary = _serialize_graph_page_summary(build_graph_page_summary(participant_states, confirmed_relations))
-    quality = _serialize_graph_page_quality(build_graph_page_quality(confirmed_relations, relation_events))
-
+    edges: list[dict[str, Any]] = []
+    for relation in snapshot.relations:
+        if relation.relation_semantics == "same_character":
+            continue
+        from_entity_id = resolution.resolve_entity_id(relation.from_entity_id)
+        to_entity_id = resolution.resolve_entity_id(relation.to_entity_id)
+        edges.append(
+            {
+                "relation_id": relation.relation_id,
+                "relation_version_id": relation.relation_version_id,
+                "relation_revision": relation.relation_revision,
+                "source_entity_id": from_entity_id,
+                "target_entity_id": to_entity_id,
+                "source_name": resolution.resolve_name(relation.from_name),
+                "target_name": resolution.resolve_name(relation.to_name),
+                "relation_type": relation.relation_type,
+                "directionality": relation.directionality,
+                "relation_semantics": relation.relation_semantics,
+                "attributes": relation.attributes,
+                "is_active": relation.is_active,
+                "changes": relation.changes,
+            }
+        )
     return {
+        "graph_version_id": version.graph_version_id,
+        "chapter_id": version.chapter_id,
+        "chapter_order": version.chapter_order,
+        "first_chunk_id": version.first_chunk_id,
+        "last_chunk_id": version.last_chunk_id,
         "nodes": nodes,
         "edges": edges,
-        "events": events,
-        "events_page": events_page,
-        "summary": summary,
-        "quality": quality,
     }
 
 
-def _fetch_graph_events_page(
+def _fetch_graph_changes_page(
     run_id: str,
     annotation_repo: AnnotationRepository,
     *,
-    events_cursor: str | None = None,
-    events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
+    chapter_id: int | None = None,
+    changes_cursor: str | None = None,
+    changes_limit: int = GRAPH_CHANGE_LIMIT,
 ) -> dict[str, Any]:
-    """获取 graph page relation events 的增量分页结果"""
-    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    start = _decode_graph_events_cursor(events_cursor)
-    page_limit = max(1, min(events_limit, GRAPH_PAGE_EVENT_LIMIT))
-    paged_relation_events, total = authority_service.build_graph_relation_event_page(
+    """2026-08-07 用于按章节倒序分页返回实体与关系版本变化"""
+    start = _decode_graph_changes_cursor(changes_cursor)
+    page_limit = max(1, min(changes_limit, GRAPH_CHANGE_LIMIT))
+    rows, total = GraphRepository(annotation_repo.session).fetch_changes(
         run_id,
+        chapter_id=chapter_id,
         offset=start,
         limit=page_limit,
     )
     if start > total:
-        raise ValueError("graph events cursor is out of range")
-    page_info = _build_graph_events_page_info(
-        start=start,
-        page_limit=page_limit,
-        returned_count=len(paged_relation_events),
-        total=total,
-    )
-
+        raise ValueError("graph changes cursor is out of range")
     return {
-        "events": [_serialize_graph_event(event) for event in paged_relation_events],
-        "page_info": page_info,
+        "changes": [
+            {
+                "change_id": row.change_id,
+                "change_kind": row.change_kind,
+                "graph_version_id": row.graph_version_id,
+                "chapter_id": row.chapter_id,
+                "chapter_order": row.chapter_order,
+                "fact_id": row.fact_id,
+                "fact_revision": row.fact_revision,
+                "effective_chunk_id": row.effective_chunk_id,
+                "changes": row.changes,
+                "entity_id": row.entity_id,
+                "entity_name": row.entity_name,
+                "relation_id": row.relation_id,
+                "relation_version_id": row.relation_version_id,
+                "relation_revision": row.relation_revision,
+                "from_entity_id": row.from_entity_id,
+                "to_entity_id": row.to_entity_id,
+                "from_name": row.from_name,
+                "to_name": row.to_name,
+                "relation_type": row.relation_type,
+                "relation_change_kind": (
+                    str(row.changes[0].get("change_kind"))
+                    if row.change_kind == "relation" and row.changes and row.changes[0].get("change_kind") is not None
+                    else None
+                ),
+                "directionality": row.directionality,
+                "relation_semantics": row.relation_semantics,
+            }
+            for row in rows
+        ],
+        "page_info": _build_graph_changes_page_info(
+            start=start,
+            page_limit=page_limit,
+            returned_count=len(rows),
+            total=total,
+        ),
     }
 
 
 __all__ = [
-    "GRAPH_PAGE_EVENT_LIMIT",
+    "GRAPH_CHANGE_LIMIT",
     "_fetch_character_relations",
-    "_fetch_graph_events_page",
+    "_fetch_graph_changes_page",
     "_fetch_graph_snapshot",
     "_fetch_hierarchical_relations",
-    "_serialize_graph_page_quality",
-    "_serialize_graph_page_summary",
 ]

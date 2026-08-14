@@ -4,15 +4,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
 
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
-from src.storage.models import ChunkRelation, GraphEntityParticipant
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
+    graph_change_names,
+    graph_change_tuples,
     nodes_for_anchor_chunk,
-    relation_event_names,
-    relation_event_tuples,
 )
 
 
@@ -49,10 +47,10 @@ def test_get_timeline_returns_atomic_and_composite_nodes(api_client: TestClient,
     )
     assert any(node["node_type"] == "plot" for node in anchor_chunk_two_nodes)
     relation_node = next(node for node in anchor_chunk_two_nodes if node["node_type"] == "relation")
-    assert relation_event_tuples(relation_node["relation_events"]) == {
-        (scenario.hero_name, scenario.rival_name, "新建")
+    assert graph_change_tuples(relation_node["graph_changes"]) == {
+        (scenario.hero_name, scenario.rival_name, "assert")
     }
-    assert scenario.organization_name not in relation_event_names(relation_node["relation_events"])
+    assert scenario.organization_name not in graph_change_names(relation_node["graph_changes"])
     assert any(node["node_type"] == "plot" for node in anchor_chunk_four_nodes)
     assert any(node["node_type"] == "relation" for node in composite_anchor_chunk_two_nodes)
     assert any(
@@ -102,12 +100,12 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
     assert response.status_code == 200
     payload = response.json()
     relation_node = next(node for node in payload["atomic_nodes"] if node["node_type"] == "relation")
-    relation_event = relation_node["relation_events"][0]
+    graph_change = relation_node["graph_changes"][0]
 
     assert set(payload) == {"meta", "phases", "composite_nodes", "atomic_nodes", "tension_curve"}
     assert "character_entities" not in payload
     assert "entity_lifecycles" not in payload
-    assert "relation_events" not in payload
+    assert "graph_changes" not in payload
 
     assert set(relation_node) == {
         "node_id",
@@ -122,24 +120,34 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
         "node_subtype",
         "score_breakdown",
         "plot_flags",
-        "relation_events",
+        "graph_changes",
         "lifecycle_events",
     }
-    assert set(relation_event) == {
-        "relation_event_id",
+    assert set(graph_change) == {
+        "change_id",
+        "change_kind",
+        "graph_version_id",
+        "chapter_id",
+        "fact_id",
+        "fact_revision",
+        "effective_chunk_id",
+        "changes",
+        "entity_id",
+        "entity_name",
+        "relation_id",
+        "relation_version_id",
+        "relation_revision",
         "from_char",
         "to_char",
         "relation_type",
-        "change_type",
-        "evidence",
-        "confidence",
+        "relation_change_kind",
         "directionality",
     }
-    assert relation_event["from_char"] == scenario.hero_name
-    assert relation_event["to_char"] == scenario.rival_name
-    assert relation_event["relation_type"] == "盟友"
-    assert relation_event["change_type"] == "新建"
-    assert relation_event["evidence"] == "二人正式结盟"
+    assert graph_change["from_char"] == scenario.hero_name
+    assert graph_change["to_char"] == scenario.rival_name
+    assert graph_change["relation_type"] == "盟友"
+    assert graph_change["relation_change_kind"] == "assert"
+    assert graph_change["changes"][0]["change_kind"] == "assert"
 
     composite_relation_node = next(node for node in payload["composite_nodes"] if node["node_type"] == "relation")
     assert set(composite_relation_node) == {
@@ -186,43 +194,3 @@ def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_pa
 
     assert response.status_code == 500
     assert response.json()["error_type"] == "InternalServerError"
-
-
-def test_get_timeline_stale_participant_projection_returns_409(api_client: TestClient, db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
-    db_session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == scenario.run_id))
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{scenario.novel_id}/timeline",
-        params={"task_id": scenario.task_id, "include_curve": "true"},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["error_type"] == "GraphReadinessError"
-
-
-def test_get_timeline_pending_partial_graph_returns_409(api_client: TestClient, db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
-    db_session.add(
-        ChunkRelation(
-            chunk_id=4,
-            run_id=scenario.run_id,
-            from_char=scenario.hero_name,
-            to_char=scenario.rival_name,
-            type="盟友",
-            change="强化",
-            evidence="尚未投影的新关系变化",
-            confidence=0.66,
-            projection_status="pending",
-        )
-    )
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{scenario.novel_id}/timeline",
-        params={"task_id": scenario.task_id, "include_curve": "true"},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["error_type"] == "GraphReadinessError"

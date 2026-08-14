@@ -7,10 +7,10 @@ import { useEffect, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { isAnalysisNotCompleteError } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getTopics, getDiagnosis } from "@/api/results";
 import type { Topic } from "@/api/types";
-import { useNovelStore } from "@/store/novelStore";
+import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -48,38 +48,32 @@ export function TopicsPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
 
-  useEffect(() => {
-    if (novelId) {
-      setNovel(novelId);
-      if (urlTaskId) {
-        setTask(urlTaskId);
-      }
-    }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 不得用于新小说的查询，也不得回写固化成新小说 URL（模式同 GraphPage）
+  const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
 
   useEffect(() => {
-    if (currentTaskId && urlTaskId !== currentTaskId) {
-      navigate(`/novels/${novelId}/topics?task_id=${currentTaskId}`, { replace: true });
-    }
-  }, [currentTaskId, novelId, navigate, urlTaskId]);
+    if (!novelId || !storeTaskId) return;
+    if (!shouldWriteBackTaskUrl(urlTaskId, storeTaskId, urlTaskSyncRef)) return;
+    navigate(`/novels/${novelId}/topics?task_id=${storeTaskId}`, { replace: true });
+  }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
 
-  const enabled = !!novelId && !!currentTaskId;
+  const enabled = !!novelId && !!storeTaskId;
 
   const topicsQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "topics"],
-    queryFn: () => getTopics(novelId!, currentTaskId!),
+    queryKey: ["results", novelId, storeTaskId, "topics"],
+    queryFn: () => getTopics(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
   // 获取诊断数据以融合 LLM 生成的主题命名（topic_labels）
   const diagnosisQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "diagnosis"],
-    queryFn: () => getDiagnosis(novelId!, currentTaskId!),
+    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
+    queryFn: () => getDiagnosis(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -109,6 +103,9 @@ export function TopicsPage() {
   const isLoading = topicsQuery.isLoading || diagnosisQuery.isLoading;
   const isAnalysisNotComplete =
     isAnalysisNotCompleteError(topicsQuery.error) || isAnalysisNotCompleteError(diagnosisQuery.error);
+  const analysisFailed =
+    getAnalysisNotCompleteRunStatus(topicsQuery.error) === "failed" ||
+    getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed";
   const isError = (topicsQuery.isError || diagnosisQuery.isError) && !diagnosisRequiresRerun && !isAnalysisNotComplete;
   const errors = [topicsQuery.error, diagnosisQuery.error].filter(Boolean);
   const error = errors[0];
@@ -119,7 +116,7 @@ export function TopicsPage() {
   };
 
   const renderContent = () => {
-    if (!currentTaskId) {
+    if (!storeTaskId) {
       return (
         <motion.div variants={itemVariants}>
           <DashboardCardShell
@@ -197,8 +194,13 @@ export function TopicsPage() {
       return (
         <motion.div variants={itemVariants}>
           <AnalysisNotCompleteState
-            title="主题结果尚未完成"
-            description="当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。"
+            title={analysisFailed ? "主题分析任务已失败" : "主题结果尚未完成"}
+            description={
+              analysisFailed
+                ? "该分析任务已失败，主题结果无法读取，请重新发起分析后再查看。"
+                : "当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。"
+            }
+            failed={analysisFailed}
           />
         </motion.div>
       );

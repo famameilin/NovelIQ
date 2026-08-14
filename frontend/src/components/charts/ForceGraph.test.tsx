@@ -30,7 +30,6 @@ const model = {
   orderedLayoutNodes: [],
   nodeDegrees: new Map(),
   degreeRange: { min: 0, max: 0 },
-  weightRange: { min: 0, max: 0 },
 };
 
 const buildForceGraphModelMock = vi.fn((args: unknown) => {
@@ -57,12 +56,23 @@ vi.mock("./forceGraph/useG6ForceGraph", () => ({
 
 function createGraphData(): GraphData {
   return {
-    nodes: [{ entity_id: "node-1", name: "白芷", entity_type: "character" }],
+    graph_version_id: "graph-version-1",
+    chapter_id: 1,
+    chapter_order: 1,
+    first_chunk_id: 1,
+    last_chunk_id: 1,
+    nodes: [
+      {
+        entity_id: 1,
+        name: "白芷",
+        entity_type: "character",
+        first_seen_chunk: 1,
+        last_seen_chunk: 1,
+        state_revision: 1,
+        state: {},
+      },
+    ],
     edges: [],
-    events: [],
-    events_page: { limit: 20, returned_count: 0, total: 0, has_more: false, next_cursor: null },
-    summary: { node_count: 1, edge_count: 0, density: 0, core_characters: ["白芷"], key_relations: [] },
-    quality: { conflict_count: 0, low_confidence_count: 0, conflicts: [], low_confidence_samples: [] },
   };
 }
 
@@ -71,7 +81,7 @@ describe("ForceGraph", () => {
     const ref = createRef<ForceGraphHandle>();
     const onNodeClick = vi.fn();
     const relationFilter = new Set(["盟友"]);
-    const appearanceCountMap = new Map([["node-1", 3]]);
+    const appearanceCountMap = new Map([["1", 3]]);
     const data = createGraphData();
 
     const { container } = render(

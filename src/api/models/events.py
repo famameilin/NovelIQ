@@ -35,6 +35,7 @@ class StreamMessageType(StrEnum):
     stage_complete = "stage_complete"
     llm_output = "llm_output"
     llm_thinking = "llm_thinking"
+    tool_call = "tool_call"
     task_complete = "task_complete"
     task_error = "task_error"
     task_cancelled = "task_cancelled"
@@ -44,7 +45,7 @@ class StreamMessageType(StrEnum):
 #  StreamEvent — 统一事件格式                                         #
 # ------------------------------------------------------------------ #
 
-StreamEventAction = Literal["start", "progress", "complete", "output", "thinking"]
+StreamEventAction = Literal["start", "progress", "complete", "output", "thinking", "tool_call"]
 """StreamEvent.action 的合法值"""
 
 
@@ -64,7 +65,7 @@ class StreamEvent:
         thinking — LLM 思考过程输出
     """
 
-    action: StreamEventAction  # 开始 / 进度 / 完成 / 输出 / 思考
+    action: StreamEventAction  # 开始 / 进度 / 完成 / 输出 / 思考 / 工具调用
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None
@@ -72,9 +73,10 @@ class StreamEvent:
     current: int | None = None
     total: int | None = None
     percent: float | None = None  # 全局进度（stage 级别）
-    sub_percent: float | None = None  # 子阶段进度（phase 级别，如 chunk 内的 phase1→4）
+    sub_percent: float | None = None  # 子阶段进度（如 Agent 单章节内的领域写入进度）
     content: str = ""
     message: str = ""
+    status: str | None = None  # 工具调用状态（tool_call 事件专用: started/success/failed）
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +91,7 @@ class StreamEvent:
             "sub_percent": self.sub_percent or 0.0,
             "content": self.content,
             "message": self.message,
+            "status": self.status or "",
         }
 
 
@@ -114,12 +117,12 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "complete": StreamMessageType.stage_complete.value,
     "output": StreamMessageType.llm_output.value,
     "thinking": StreamMessageType.llm_thinking.value,
+    "tool_call": StreamMessageType.tool_call.value,
 }
 
-# 这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
+# preprocess 的 paragraph embedding 子阶段按 embedding batch 高频发 progress 事件；
 # 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志
 _DEBUG_PROGRESS_SUB_STAGES = {
-    "semantic_chunking_embedding",
     "paragraph_embedding",
 }
 
@@ -219,6 +222,7 @@ class AnalysisEventBus:
             sub_percent=resolved_sub_percent,
             content=event.content,
             message=event.message,
+            status=event.status,
         )
 
         # 翻译 action → SSE event type
@@ -230,11 +234,11 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        # LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
+        # LLM 流式正文/思考片段/工具调用，以及 embedding batch 这类高频 progress，
         # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO
         log_level = (
             logger.debug
-            if resolved_event.action in {"output", "thinking"}
+            if resolved_event.action in {"output", "thinking", "tool_call"}
             or (
                 resolved_event.action == "progress"
                 and resolved_event.sub_stage in _DEBUG_PROGRESS_SUB_STAGES
@@ -269,8 +273,10 @@ class AnalysisEventBus:
             # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库
             if resolved_event.current is not None:
                 task_update_kwargs["current"] = resolved_event.current
-            if resolved_event.total is not None:
-                task_update_kwargs["total"] = resolved_event.total
+            # 2026-08-13 P2：total=0 是「未提供」的非法值（默认 0 曾把 analysis_runs.total
+            # 从 100 清成 0），只有 >0 才写回数据库
+            if resolved_total is not None and resolved_total > 0:
+                task_update_kwargs["total"] = resolved_total
             if resolved_event.percent is not None:
                 task_update_kwargs["progress"] = resolved_event.percent
 
@@ -306,12 +312,24 @@ class AnalysisEventBus:
     #  便捷方法：阶段级事件
     # ------------------------------------------------------------------
 
-    async def emit_stage_start(self, stage: str, message: str = "", percent: float = 0.0, total: int = 0) -> None:
+    async def emit_stage_start(
+        self,
+        stage: str,
+        message: str = "",
+        percent: float | None = None,
+        total: int | None = None,
+    ) -> None:
         """发送阶段开始事件"""
         self._stage = stage
         self._sub_stage = ""
         self._chunk_id = 0
         self._sub_percent = 0.0
+        # 2026-08-13 P2：阶段边界作废旧阶段的 current/total/percent 上下文，
+        # 否则新阶段内不带进度字段的事件会沿用旧阶段数值套新阶段区间算错 percent，
+        # 且 complete 事件会把 stale current/total 写回数据库
+        self._current = None
+        self._total = None
+        self._percent = percent
         await self.emit(
             StreamEvent(
                 action="start",
@@ -326,6 +344,10 @@ class AnalysisEventBus:
     async def emit_stage_complete(self, stage: str) -> None:
         """发送阶段完成事件"""
         self._sub_percent = 100.0
+        # 2026-08-13 P2：完成事件显式带 percent，旧阶段的 current/total 上下文
+        # 不得随事件写回数据库（complete 事件本身不含进度数值）
+        self._current = None
+        self._total = None
         _, stage_end_percent = _STAGE_PERCENT_RANGES.get(stage, (0.0, 100.0))
         await self.emit(
             StreamEvent(

@@ -2,21 +2,7 @@
 
 from __future__ import annotations
 
-import re
-
-from src.config.constants.annotation import (
-    EMOTION_SCORE_MAPPING,
-    SYMMETRIC_RELATION_TYPES,
-    VALID_ACTION_TYPES,
-    VALID_CHANGE_TYPES,
-    VALID_CLUE_TYPES,
-    VALID_EMOTION_SCORES,
-    VALID_ENTITY_TYPES,
-    VALID_EVENT_TYPES,
-    VALID_FORESHADOWING_TYPES,
-    VALID_RELATION_TYPES,
-    VALID_ROLE_FUNCTIONS,
-)
+from src.config.constants.annotation import EMOTION_SCORE_MAPPING
 from src.config.constants.text_normalization import (
     ALLOWED_PREV_CJK_CHARS,
     LIKELY_NAME_PREFIX_CHARS,
@@ -71,29 +57,14 @@ SEMANTIC_CATEGORY_MAPPING: dict[str, str] = {
     "色彩形容词类": "color",
 }
 
-CHAPTER_PATTERN = re.compile(r"(^|[\r\n])\s*第.{1,9}章[^\r\n]*")
-PARAGRAPH_SPLIT = re.compile(r"(?:\r\n|\r|\n)+")
-
 __all__ = [
     "EVENT_TYPE_SCORES",
     "THREE_ACT_MAPPING",
     "PROPP_FUNCTIONS",
     "CLASSICAL_PATTERNS",
     "SEMANTIC_CATEGORY_MAPPING",
-    "CHAPTER_PATTERN",
-    "PARAGRAPH_SPLIT",
     "TITLE_ALIAS_SUFFIXES",
     "ALLOWED_PREV_CJK_CHARS",
     "LIKELY_NAME_PREFIX_CHARS",
     "EMOTION_SCORE_MAPPING",
-    "VALID_ROLE_FUNCTIONS",
-    "VALID_ACTION_TYPES",
-    "VALID_EMOTION_SCORES",
-    "VALID_ENTITY_TYPES",
-    "VALID_CLUE_TYPES",
-    "VALID_EVENT_TYPES",
-    "VALID_FORESHADOWING_TYPES",
-    "SYMMETRIC_RELATION_TYPES",
-    "VALID_RELATION_TYPES",
-    "VALID_CHANGE_TYPES",
 ]

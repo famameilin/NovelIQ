@@ -139,17 +139,18 @@ class TestResults:
         assert payload["reason"] == "focus_contract_incomplete"
 
     @pytest.mark.parametrize(
-        "path",
+        ("path", "expected_status"),
         [
-            "/api/novels/{novel_id}/graph",
-            "/api/novels/{novel_id}/graph/events",
+            ("/api/novels/{novel_id}/graph", 404),
+            ("/api/novels/{novel_id}/graph/changes", 200),
         ],
     )
-    def test_graph_routes_reject_incomplete_focus_contract(
+    def test_graph_routes_do_not_require_diagnosis_focus_contract(
         self,
         api_client: TestClient,
         db_session,
         path: str,
+        expected_status: int,
     ) -> None:
         novel_id = "g" + uuid.uuid4().hex[:7]
         insert_graph_test_novel(db_session, novel_id)
@@ -178,10 +179,9 @@ class TestResults:
 
         response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
 
-        assert response.status_code == 409
-        payload = response.json()["detail"]
-        assert payload["code"] == "diagnosis_rerun_required"
-        assert payload["reason"] == "focus_contract_incomplete"
+        assert response.status_code == expected_status
+        if expected_status == 200:
+            assert response.json()["changes"] == []
 
     def test_get_results_rejects_incomplete_focus_contract(
         self,

@@ -1,16 +1,14 @@
 """
 预处理辅助函数模块 (workflows层)
 
-此文件从 src/cli/preprocess_helpers.py 复制而来，包含预处理的核心业务逻辑函数
-      这些函数是纯业务逻辑，不依赖CLI层，可被多个入口点复用
-原始文件: src/cli/preprocess_helpers.py
-
+包含预处理的核心业务逻辑函数，纯业务逻辑、不依赖入口层，可被多个入口点复用。
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from src.chunking.chunker import Chunk
 from src.lexicons.registry import LexiconRegistry
@@ -28,7 +26,9 @@ from src.metrics.style_metrics import (
 from src.storage.repositories import ChunkStyleData
 
 
-def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> dict[str, list[str] | dict[str, list[str]]]:
+def _load_all_lexicons_for_preprocess(
+    lexicon_dir: Path,
+) -> dict[str, list[str] | dict[str, Any]]:
     """
     加载所有词典用于预处理
 
@@ -38,10 +38,13 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> dict[str, list[str] 
     registry = LexiconRegistry(base_dir=lexicon_dir)
     registry.load()
 
-    lexicons: dict[str, list[str] | dict[str, list[str]]] = {}
+    lexicons: dict[str, list[str] | dict[str, Any]] = {}
     lexicons["sensory"] = registry.get("style.sensory_5sense")
     lexicons["function_words"] = registry.get("style.function_words")
     lexicons["imagery"] = registry.get("culture.imagery")
+    # 2026-08-13 P2-4 战斗词条用于 fight_density（tension_proxy 只取词条键，
+    # 权重不参与密度计算，统一按 1.0 登记）
+    lexicons["fight_terms"] = dict.fromkeys(registry.get("tension.action_terms"), 1.0)
 
     # semantic_category 需要解析为分类字典
 
@@ -61,6 +64,7 @@ def _compute_chunk_style_metrics(
     function_words: list[str],
     semantic_categories: dict,
     imagery_terms: list[str],
+    fight_terms: dict[str, float] | None = None,
 ) -> ChunkStyleData:
     """
     计算单个chunk的风格指标
@@ -68,6 +72,7 @@ def _compute_chunk_style_metrics(
     从 run_preprocess 中提取，负责计算chunk的风格指标
 
     """
+    from src.metrics.rhythm_metrics import tension_proxy
     from src.metrics.style_metrics import imagery_density, sensory_density
 
     mtld_val = mtld(tokens)
@@ -76,6 +81,10 @@ def _compute_chunk_style_metrics(
     pause_val = pause_density(chunk.text)
     dialogue_val = dialogue_ratio(chunk.text)
     metaphor_val = metaphor_density(chunk.text)
+
+    # 2026-08-13 P2-4 战斗/感叹/问句密度接入 rhythm_metrics.tension_proxy，
+    # 替换原先硬编码 0.0（无战斗词条时 fight_density 自然为 0）
+    proxy = tension_proxy(chunk.text, fight_terms or {})
 
     sensory_val = 0.0
     if sensory_terms:
@@ -99,10 +108,10 @@ def _compute_chunk_style_metrics(
         sent_len_std=sent_stats["sent_len_std"],
         d_value=sent_stats["d_value"],
         pause_density=pause_val,
-        fight_density=0.0,
-        exclaim_density=0.0,
+        fight_density=proxy["fight_density"],
+        exclaim_density=proxy["exclaim_density"],
         dialogue_ratio=dialogue_val,
-        question_density=0.0,
+        question_density=proxy["question_density"],
         sensory_density=sensory_val,
         metaphor_density=metaphor_val,
         function_word_vector=fw_vector_json,

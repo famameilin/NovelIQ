@@ -27,7 +27,6 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from src.knowledge.authority.types import Level1AuthoritySnapshot
     from src.storage.repositories import (
         AnnotationRepository,
         ChunkRepository,
@@ -47,35 +46,14 @@ def _build_aggregate_graph_view(
     """
 
     service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    service.assert_graph_projection_ready(run_id)
-    return service.build_graph_view(run_id)
-
-
-def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str, str]:
-    """
-    构建 aggregate 可复用的 alias -> canonical 映射
-
-    chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
-    Level1 规范实体消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
-    和情绪序列时因为名称漂移被静默归零
-    """
-
-    return {
-        mapping.alias: mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias and mapping.canonical
-    }
-
-
-def _canonicalize_aggregate_character_name(name: str, alias_lookup: dict[str, str]) -> str:
-    """将 chunk 侧角色名折叠到 authority 规范名"""
-
-    return alias_lookup.get(name, name)
+    service.assert_graph_ready(run_id)
+    return service.build_representative_graph_view(run_id)
 
 
 def _resolve_aggregate_character_name(
     *,
     surface_name: str | None,
     resolved_global_name: str | None,
-    alias_lookup: dict[str, str],
 ) -> str | None:
     """
     创建时间: 2026-04-29
@@ -84,7 +62,6 @@ def _resolve_aggregate_character_name(
     """
     decision = decide_character_reference(
         surface_name,
-        alias_map=alias_lookup,
         resolved_global_name=resolved_global_name,
     )
     return decision.resolved_global_name
@@ -95,7 +72,7 @@ def fetch_annotation_data(
     run_id: str,
 ) -> AnnotationData:
     """
-    提取 chunk_annotation 表数据
+    从章节正式标注的 chunks metrics 提取 chunk 粒度指标数据
 
     """
     rows = annotation_repo.fetch_full_annotations(run_id)
@@ -142,41 +119,38 @@ def fetch_character_data(
     """
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     snapshot = authority_service.build_level1_snapshot(run_id)
-    alias_lookup = _build_aggregate_alias_lookup(snapshot)
     active_characters = [
         entity
         for entity in snapshot.canonical_entities
         if entity.entity_type == "character" and entity.status == "active"
     ]
 
-    # 2. 从 chunk_characters 聚合情感分数（用于补充）
+    # 2. 从数据库图人物事实聚合情感分数
     rows = annotation_repo.fetch_characters_with_scores(run_id)
     emotion_map: dict[str, int] = {}
     for row in rows:
         canonical_name = _resolve_aggregate_character_name(
             surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
             resolved_global_name=getattr(row, "resolved_global_name", None),
-            alias_lookup=alias_lookup,
         )
         if canonical_name is None:
             continue
         emotion_score_raw = getattr(row, "emotion_score", None)
         emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
 
-    # 3. 构建角色列表（使用 Level1 canonical entity 作为完整角色种子）
+    # 3. 构建角色列表（使用共享 canonical entity 作为完整角色种子）
     characters = []
     for entity in active_characters:
         emotion_score = emotion_map.get(entity.name, 0)
         characters.append((entity.name, entity.primary_role_function or "其他", emotion_score))
 
-    # 4. 构建情感序列（仍从 chunk_characters 获取）
+    # 4. 从数据库图人物事实构建情感序列
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
     char_emotion_map: dict[str, list[float]] = {}
     for row in char_emotion_rows:
         canonical_name = _resolve_aggregate_character_name(
             surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
             resolved_global_name=getattr(row, "resolved_global_name", None),
-            alias_lookup=alias_lookup,
         )
         if canonical_name is None:
             continue
@@ -202,12 +176,28 @@ def fetch_relation_data(
     """提取 graph_* 关系数据（权威来源）"""
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
     current_relations = list(graph_view.confirmed_relations)
-    relation_events = list(graph_view.relation_events)
+    relation_changes = [
+        change
+        for change in graph_view.graph_changes
+        if change.change_kind == "relation"
+        and change.from_name
+        and change.to_name
+        and change.relation_type
+    ]
 
     return RelationData(
         relations=[(relation.from_name, relation.to_name) for relation in current_relations],
         full_relations=[
-            (event.from_name, event.to_name, event.relation_type, event.change_type) for event in relation_events
+            (
+                change.from_name or "",
+                change.to_name or "",
+                change.relation_type or "",
+                # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
+                str(change.changes[0].get("change_kind") or "refine")
+                if change.changes
+                else "refine",
+            )
+            for change in relation_changes
         ],
         participant_names=[state.name for state in graph_view.participant_states if state.name],
     )
@@ -264,9 +254,9 @@ def fetch_dialogue_data(
     run_id: str,
 ) -> DialogueData:
     """
-    提取 chunk_dialogues 表的 tone 数据
+    从数据库图对话事实提取 tone 数据
 
-    从对话表获取语气类型数据用于聚合计算
+    按事实中的 chunk_id 展开语气类型用于聚合计算
 
     """
     rows = annotation_repo.fetch_chunk_dialogues_full(run_id)

@@ -222,92 +222,61 @@ export interface ForeshadowingThread {
 
 // 知识图谱
 
-// 更新图谱节点类型，添加实体详细信息字段
-
 export interface GraphNode {
-  entity_id: string;
+  entity_id: number;
   name: string;
-  entity_type: string;
-  first_seen_chunk?: number;
-  last_seen_chunk?: number;
-  role?: string;
-  status?: string;
+  entity_type: "character" | "location" | "item" | "organization";
+  tags?: string[] | null;
+  aliases?: string[] | null;
+  // 2026-08-13 P2-5: 后端可能下发 null（生命周期数据缺失），放宽为可空
+  first_seen_chunk: number | null;
+  last_seen_chunk: number | null;
+  state_revision: number;
+  state: Record<string, unknown>;
 }
-
-// 更新图谱边类型，relation_type 改为可选
 
 export interface GraphEdge {
-  source: string;
-  target: string;
-  relation_type?: string;
-  weight?: number;
-  from_name?: string;
-  to_name?: string;
-  change_count?: number;
-  tension_index?: number;
-  is_active?: boolean;
+  relation_id: string;
+  relation_version_id: number;
+  relation_revision: number;
+  source_entity_id: number;
+  target_entity_id: number;
+  source_name: string;
+  target_name: string;
+  relation_type: string;
+  directionality: "directed" | "bidirectional";
+  relation_semantics: "ordinary" | "same_character";
+  attributes: Record<string, unknown>;
+  is_active: boolean;
+  changes: Array<Record<string, unknown>>;
 }
 
-// 添加图谱事件类型定义
-
-export interface GraphEvent {
-  relation_event_id: number;
-  chunk_id: number;
+export interface GraphChange {
+  change_id: string;
+  change_kind: "state" | "relation";
+  graph_version_id: string;
+  chapter_id: number;
+  chapter_order: number;
+  fact_id: string;
+  fact_revision: number;
+  effective_chunk_id: number;
+  changes: Array<Record<string, unknown>>;
+  entity_id?: number | null;
+  entity_name?: string | null;
+  relation_id?: string | null;
+  relation_version_id?: number | null;
+  relation_revision?: number | null;
   from_entity_id?: number | null;
   to_entity_id?: number | null;
-  from_name: string;
-  to_name: string;
-  relation_type?: string;
-  change_type?: string;
-  evidence?: string;
-  confidence?: number | null;
-  source_relation_row_id?: number | null;
-  directionality?: string | null;
-}
-
-export interface GraphKeyRelation {
-  from: string;
-  to: string;
-  type?: string | null;
-  support_count: number;
-}
-
-// 这些展示摘要由图谱页独占；
-// diagnosis / export 在后端只复用更窄的聚合图谱报告，不应共用这一数据形状
-export interface GraphPageSummary {
-  node_count: number;
-  edge_count: number;
-  density: number;
-  core_characters: string[];
-  key_relations: GraphKeyRelation[];
-}
-
-export interface GraphConflictSample {
-  entity_pair: Array<number | null>;
-  entity_names: string[];
-  relation_types: string[];
-  relation_count: number;
-  latest_event_ids: number[];
-}
-
-export interface GraphLowConfidenceSample {
-  relation_event_id: number;
-  chunk_id: number;
-  from_name: string;
-  to_name: string;
+  from_name?: string | null;
+  to_name?: string | null;
   relation_type?: string | null;
-  change_type?: string | null;
-  confidence?: number | null;
+  relation_change_kind?: string | null;
+  directionality?: "directed" | "bidirectional" | null;
+  relation_semantics?: "ordinary" | "same_character" | null;
 }
 
-export interface GraphPageQualityReport {
-  conflict_count: number;
-  low_confidence_count: number;
-  conflicts: GraphConflictSample[];
-  low_confidence_samples: GraphLowConfidenceSample[];
-}
-
-export interface GraphEventsPageInfo {
+export interface GraphChangesPageInfo {
   limit: number;
   returned_count: number;
   total: number;
@@ -315,20 +284,19 @@ export interface GraphEventsPageInfo {
   next_cursor?: string | null;
 }
 
-// 更新图谱数据类型，添加 events, summary, quality 字段
-
 export interface GraphData {
+  graph_version_id: string;
+  chapter_id: number;
+  chapter_order: number;
+  first_chunk_id: number;
+  last_chunk_id: number;
   nodes: GraphNode[];
   edges: GraphEdge[];
-  events: GraphEvent[];
-  events_page: GraphEventsPageInfo;
-  summary: GraphPageSummary;
-  quality: GraphPageQualityReport;
 }
 
-export interface GraphEventsPageResponse {
-  events: GraphEvent[];
-  page_info: GraphEventsPageInfo;
+export interface GraphChangesPageResponse {
+  changes: GraphChange[];
+  page_info: GraphChangesPageInfo;
 }
 
 // 时间轴
@@ -354,15 +322,25 @@ export interface PlotFlags {
   tension_percentile: number;
 }
 
-export interface RelationTimelineEvent {
-  relation_event_id: number;
-  from_char: string;
-  to_char: string;
-  relation_type: string;
-  change_type: "新建" | "强化" | "弱化" | "断裂";
-  evidence?: string;
-  confidence?: number | null | undefined;
-  directionality?: string | null | undefined;
+export interface TimelineGraphChange {
+  change_id: string;
+  change_kind: "state" | "relation";
+  graph_version_id: string;
+  chapter_id: number;
+  fact_id: string;
+  fact_revision: number;
+  effective_chunk_id: number;
+  changes: Array<Record<string, unknown>>;
+  entity_id?: number | null;
+  entity_name?: string | null;
+  relation_id?: string | null;
+  relation_version_id?: number | null;
+  relation_revision?: number | null;
+  from_char?: string | null;
+  to_char?: string | null;
+  relation_type?: string | null;
+  relation_change_kind?: string | null;
+  directionality?: "directed" | "bidirectional" | null;
 }
 
 export interface LifecycleTimelineEvent {
@@ -380,11 +358,11 @@ export interface TimelineNode {
   summary: string;
   characters: string[];
   phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "relation" | "lifecycle";
-  node_subtype: "plot" | "entry" | "exit" | "新建" | "强化" | "弱化" | "断裂";
+  node_type: "plot" | "state" | "relation" | "lifecycle";
+  node_subtype: "plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract";
   score_breakdown: Record<string, number>;
   plot_flags?: PlotFlags | null;
-  relation_events?: RelationTimelineEvent[] | null;
+  graph_changes?: TimelineGraphChange[] | null;
   lifecycle_events?: LifecycleTimelineEvent[] | null;
 }
 
@@ -401,8 +379,8 @@ export interface TimelineCompositeNode {
   summary: string;
   characters: string[];
   phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "relation" | "lifecycle";
-  node_subtypes: ("plot" | "entry" | "exit" | "新建" | "强化" | "弱化" | "断裂")[];
+  node_type: "plot" | "state" | "relation" | "lifecycle";
+  node_subtypes: ("plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract")[];
   representative_node_id: string;
   child_node_ids: string[];
 }

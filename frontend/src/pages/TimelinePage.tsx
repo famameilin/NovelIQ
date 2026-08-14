@@ -6,9 +6,11 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, GitBranch, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelStore } from "@/store/novelStore";
 import { MetricCard } from "@/components/common/MetricCard";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
 import {
   TimelineLegend,
@@ -31,7 +33,7 @@ function buildTimelinePageUrl(
     viewMode: TimelineViewMode;
     selectedNodeId?: string | null;
     selectedChunk?: number | null;
-    relationEventId?: number | null;
+    changeId?: string | null;
   }
 ): string {
   const params = new URLSearchParams({
@@ -45,8 +47,8 @@ function buildTimelinePageUrl(
   if (options.selectedChunk != null) {
     params.set("selected_chunk", String(options.selectedChunk));
   }
-  if (options.relationEventId != null) {
-    params.set("relation_event_id", String(options.relationEventId));
+  if (options.changeId) {
+    params.set("change_id", options.changeId);
   }
   return `/novels/${novelId}/timeline?${params.toString()}`;
 }
@@ -59,14 +61,14 @@ function isCompositeTimelineNode(node: TimelineDisplayNode | null): node is Time
   return node != null && "child_node_ids" in node;
 }
 
-/** 只有当 relation_event_id 真正属于当前节点时，才继续保留它 */
-function getSelectedNodeRelationEventId(node: TimelineDisplayNode | null, relationEventId: number | null): number | null {
-  if (!isAtomicTimelineNode(node) || relationEventId == null) {
+/** 只有当 change_id 真正属于当前节点时，才继续保留它 */
+function getSelectedNodeGraphChangeId(node: TimelineDisplayNode | null, changeId: string | null): string | null {
+  if (!isAtomicTimelineNode(node) || changeId == null) {
     return null;
   }
   const belongsToSelectedNode =
-    node.relation_events?.some((relationEvent) => relationEvent.relation_event_id === relationEventId) ?? false;
-  return belongsToSelectedNode ? relationEventId : null;
+    node.graph_changes?.some((change) => change.change_id === changeId) ?? false;
+  return belongsToSelectedNode ? changeId : null;
 }
 
 /**
@@ -84,7 +86,7 @@ export function TimelinePage() {
   const urlView = searchParams.get("view");
   const urlSelectedNodeId = searchParams.get("selected_node_id");
   const urlSelectedChunk = searchParams.get("selected_chunk");
-  const urlRelationEventId = searchParams.get("relation_event_id");
+  const urlChangeId = searchParams.get("change_id");
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
 
   const maxLevel = useMemo<1 | 2 | 3>(() => {
@@ -94,7 +96,6 @@ export function TimelinePage() {
   const viewMode = useMemo<TimelineViewMode>(() => {
     return urlView === "atomic" ? "atomic" : "composite";
   }, [urlView]);
-  const showTension = true;
   const [activePhase, setActivePhase] = useState<string | undefined>();
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
@@ -105,11 +106,7 @@ export function TimelinePage() {
     return Number.isFinite(parsed) ? parsed : null;
   }, [urlSelectedChunk]);
 
-  const relationEventIdFromUrl = useMemo(() => {
-    if (!urlRelationEventId) return null;
-    const parsed = Number(urlRelationEventId);
-    return Number.isInteger(parsed) ? parsed : null;
-  }, [urlRelationEventId]);
+  const changeIdFromUrl = useMemo(() => urlChangeId?.trim() || null, [urlChangeId]);
 
   useEffect(() => {
     if (novelId) {
@@ -144,10 +141,10 @@ export function TimelinePage() {
         maxLevel,
         viewMode,
         // 时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
-        // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮
+        // 否则旧任务的 change_id / chunk 会污染新任务高亮
         selectedNodeId: null,
         selectedChunk: null,
-        relationEventId: null,
+        changeId: null,
       }), { replace: true });
   }, [maxLevel, navigate, novelId, storeTaskId, urlTaskId, viewMode]);
 
@@ -207,14 +204,14 @@ export function TimelinePage() {
     });
     return parentMap;
   }, [compositeNodes]);
-  const matchedRelationEventNode = useMemo(() => {
-    if (relationEventIdFromUrl == null) return null;
+  const matchedGraphChangeNode = useMemo(() => {
+    if (changeIdFromUrl == null) return null;
     return (
       atomicNodes.find((node) =>
-        node.relation_events?.some((relationEvent) => relationEvent.relation_event_id === relationEventIdFromUrl)
+        node.graph_changes?.some((change) => change.change_id === changeIdFromUrl)
       ) ?? null
     );
-  }, [atomicNodes, relationEventIdFromUrl]);
+  }, [atomicNodes, changeIdFromUrl]);
   const selectedNodeById = useMemo<TimelineDisplayNode | null>(() => {
     if (!urlSelectedNodeId) return null;
     return compositeNodeById.get(urlSelectedNodeId) ?? atomicNodeById.get(urlSelectedNodeId) ?? null;
@@ -228,17 +225,17 @@ export function TimelinePage() {
     if (selectedNodeById) {
       return selectedNodeById;
     }
-    if (matchedRelationEventNode) {
-      return matchedRelationEventNode;
+    if (matchedGraphChangeNode) {
+      return matchedGraphChangeNode;
     }
     if (selectedChunkFromUrl != null) {
       return selectedChunkCandidates.length === 1 ? selectedChunkCandidates[0] ?? null : null;
     }
     return null;
-  }, [atomicNodes.length, compositeNodes.length, matchedRelationEventNode, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
-  const resolvedRelationEventId = useMemo(
-    () => getSelectedNodeRelationEventId(selectedDetailNode, relationEventIdFromUrl),
-    [relationEventIdFromUrl, selectedDetailNode]
+  }, [atomicNodes.length, compositeNodes.length, matchedGraphChangeNode, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
+  const resolvedGraphChangeId = useMemo(
+    () => getSelectedNodeGraphChangeId(selectedDetailNode, changeIdFromUrl),
+    [changeIdFromUrl, selectedDetailNode]
   );
   const pivotCount = useMemo(
     () => visibleAtomicNodes.filter((node) => node.plot_flags?.is_pivot).length,
@@ -249,15 +246,15 @@ export function TimelinePage() {
     [visibleAtomicNodes]
   );
   const selectionHint = useMemo(() => {
-    if (relationEventIdFromUrl == null) return null;
-    if (matchedRelationEventNode) return null;
+    if (changeIdFromUrl == null) return null;
+    if (matchedGraphChangeNode) return null;
     if (selectedChunkFromUrl != null && selectedDetailNode) {
-      return "未定位到指定关系事件，已回退到对应时间节点。";
+      return "未定位到指定图谱变化，已回退到对应时间节点。";
     }
-    return "未定位到对应事件。";
-  }, [matchedRelationEventNode, relationEventIdFromUrl, selectedChunkFromUrl, selectedDetailNode]);
+    return "未定位到对应图谱变化。";
+  }, [changeIdFromUrl, matchedGraphChangeNode, selectedChunkFromUrl, selectedDetailNode]);
   const chunkSelectionHint = useMemo(() => {
-    if (relationEventIdFromUrl != null || selectedChunkFromUrl == null) {
+    if (changeIdFromUrl != null || selectedChunkFromUrl == null) {
       return null;
     }
     if (selectedDetailNode != null) {
@@ -270,7 +267,7 @@ export function TimelinePage() {
       return "未定位到对应时间节点。";
     }
     return null;
-  }, [relationEventIdFromUrl, selectedChunkCandidates, selectedChunkFromUrl, selectedDetailNode]);
+  }, [changeIdFromUrl, selectedChunkCandidates, selectedChunkFromUrl, selectedDetailNode]);
   const selectedTrackNodeId = useMemo(() => {
     if (selectedDetailNode == null) {
       return undefined;
@@ -296,11 +293,11 @@ export function TimelinePage() {
         selectedNodeId: selectedDetailNode?.node_id ?? null,
         selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
         // 控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link
-        // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择
-        relationEventId: resolvedRelationEventId,
+        // 一旦 change_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择
+        changeId: resolvedGraphChangeId,
       }), { replace: true });
     },
-    [novelId, taskScopeId, navigate, resolvedRelationEventId, selectedDetailNode, selectedChunkFromUrl, viewMode]
+    [novelId, taskScopeId, navigate, resolvedGraphChangeId, selectedDetailNode, selectedChunkFromUrl, viewMode]
   );
 
   const handleViewModeChange = useCallback(
@@ -312,12 +309,12 @@ export function TimelinePage() {
           viewMode: nextViewMode,
           selectedNodeId: selectedDetailNode?.node_id ?? null,
           selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
-          relationEventId: resolvedRelationEventId,
+          changeId: resolvedGraphChangeId,
         }),
         { replace: true }
       );
     },
-    [maxLevel, navigate, novelId, resolvedRelationEventId, selectedDetailNode, selectedChunkFromUrl, taskScopeId]
+    [maxLevel, navigate, novelId, resolvedGraphChangeId, selectedDetailNode, selectedChunkFromUrl, taskScopeId]
   );
 
   const handleNodeClick = useCallback((node: TimelineDisplayNode) => {
@@ -329,7 +326,7 @@ export function TimelinePage() {
         viewMode,
         selectedNodeId: isSameNode ? null : node.node_id,
         selectedChunk: isSameNode ? null : node.anchor_chunk_id,
-        relationEventId: null,
+        changeId: null,
       }),
       { replace: true }
     );
@@ -338,9 +335,9 @@ export function TimelinePage() {
   const handleSelectAtomicNode = useCallback(
     (node: TimelineNode) => {
       if (!novelId || !taskScopeId) return;
-      const relationEventId =
-        node.node_type === "relation" && (node.relation_events?.length ?? 0) === 1
-          ? node.relation_events?.[0]?.relation_event_id ?? null
+      const changeId =
+        (node.graph_changes?.length ?? 0) === 1
+          ? node.graph_changes?.[0]?.change_id ?? null
           : null;
       navigate(
         buildTimelinePageUrl(novelId, taskScopeId, {
@@ -348,7 +345,7 @@ export function TimelinePage() {
           viewMode: "atomic",
           selectedNodeId: node.node_id,
           selectedChunk: node.anchor_chunk_id,
-          relationEventId,
+          changeId,
         }),
         { replace: true }
       );
@@ -365,7 +362,9 @@ export function TimelinePage() {
   }, [timelineQuery]);
 
   const isLoading = timelineQuery.isLoading || novelQuery.isLoading;
-  const isError = timelineQuery.isError || novelQuery.isError;
+  const isAnalysisNotComplete = isAnalysisNotCompleteError(timelineQuery.error);
+  const analysisFailed = getAnalysisNotCompleteRunStatus(timelineQuery.error) === "failed";
+  const isError = (timelineQuery.isError || novelQuery.isError) && !isAnalysisNotComplete;
 
   if (!novelId) {
     return (
@@ -455,6 +454,18 @@ export function TimelinePage() {
             <div className="mt-2 flex-1 min-h-0">
               {isLoading ? (
                 <div className="h-[360px] w-full animate-pulse rounded-[28px] border border-border/60 bg-surface-hover" />
+              ) : isAnalysisNotComplete ? (
+                <div className="h-[360px] rounded-[28px] border border-border/60 bg-surface/70">
+                  <AnalysisNotCompleteState
+                    title={analysisFailed ? "时间轴分析任务已失败" : "时间轴结果尚未完成"}
+                    description={
+                      analysisFailed
+                        ? "该分析任务已失败，时间轴数据无法读取，请重新发起分析后再查看。"
+                        : "当前任务仍在分析中，时间轴数据暂时不可读，请等待任务进入完成态后再查看。"
+                    }
+                    failed={analysisFailed}
+                  />
+                </div>
               ) : isError ? (
                 <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
                   <span>加载失败</span>
@@ -517,7 +528,6 @@ export function TimelinePage() {
                     onNodeClick={handleNodeClick}
                     tensionCurve={tensionCurve}
                     totalChunks={totalChunks}
-                    showTension={showTension}
                     className="flex-1 min-h-0"
                   />
                 </div>
@@ -533,7 +543,7 @@ export function TimelinePage() {
                 atomicNodes={atomicNodes}
                 novelId={novelId}
                 taskId={taskScopeId}
-                selectedRelationEventId={resolvedRelationEventId}
+                selectedGraphChangeId={resolvedGraphChangeId}
                 onSelectAtomicNode={handleSelectAtomicNode}
                 onClose={() => {
                   navigate(
@@ -542,7 +552,7 @@ export function TimelinePage() {
                       viewMode,
                       selectedNodeId: null,
                       selectedChunk: null,
-                      relationEventId: null,
+                      changeId: null,
                     }),
                     { replace: true }
                   );

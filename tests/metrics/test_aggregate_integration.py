@@ -3,7 +3,6 @@
 """
 
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
@@ -14,95 +13,69 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.metrics.aggregate import AggregateResult, aggregate_all_metrics
 from src.metrics.aggregate.computers import compute_narrative_structure_metrics
 from src.metrics.aggregate.types import AnnotationData, TensionData
-from src.storage.models import Novel
-from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
-
-
-def _insert_test_novel(db_session, novel_id: str) -> None:
-    """
-    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
-
-    创建时间: 2026-04-23
-    任务: 修复 pytest ForeignKeyViolation
-    """
-    db_session.add(
-        Novel(
-            novel_id=novel_id,
-            filename=f"{novel_id}.txt",
-            file_path=f"data/uploads/{novel_id}.txt",
-            file_size=128,
-        )
-    )
-    db_session.commit()
+from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
+from tests.support.chapter_annotation_helpers import (
+    character_fact,
+    create_run_with_chunks,
+    dialogue_fact,
+    persist_chapter_annotation,
+    relation_fact,
+)
 
 
 class TestAggregateAllMetrics:
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
-        _insert_test_novel(db_session, self.novel_id)
-
-        run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
-
+        self.novel_id, self.run_id = create_run_with_chunks(
+            db_session,
+            texts=["测试文本“退下”一心一意", "此乃天意也。"],
+            chapter_ids=[1, 1],
+            title="聚合指标测试",
+        )
         self._populate_test_data()
 
     def _populate_test_data(self) -> None:
-        self.db_session.execute(
-            text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (0, '测试文本一心一意', :run_id)"),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (1, '此乃天意也。', :run_id)"),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_annotation "
-                "(chunk_id, event_type, cliffhanger, pivot_moment, emotional_valence, run_id) "
-                "VALUES (0, '铺垫', 1, 0, 'mild_positive', :run_id)"
-            ),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_annotation "
-                "(chunk_id, event_type, cliffhanger, pivot_moment, emotional_valence, run_id) "
-                "VALUES (1, '冲突', 0, 1, 'mild_negative', :run_id)"
-            ),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_characters "
-                "(chunk_id, name, role_function, action_type, emotion_score, run_id) "
-                "VALUES (0, '主角', '主体', '对话', 'mild_positive', :run_id)"
-            ),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_characters "
-                "(chunk_id, name, role_function, action_type, emotion_score, run_id) "
-                "VALUES (0, '反派', '反对者', '战斗', 'mild_negative', :run_id)"
-            ),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_relations "
-                "(chunk_id, from_char, to_char, type, change, run_id) "
-                "VALUES (0, '主角', '反派', '敌对', '强化', :run_id)"
-            ),
-            {"run_id": self.run_id},
-        )
-        self.db_session.execute(
-            text(
-                "INSERT INTO chunk_dialogues (chunk_id, speaker, tone, run_id) "
-                "VALUES (0, ARRAY['主角']::TEXT[], '强硬', :run_id)"
-            ),
-            {"run_id": self.run_id},
+        persist_chapter_annotation(
+            self.db_session,
+            run_id=self.run_id,
+            chapter_id=1,
+            emotional_valences={0: "mild_positive", 1: "mild_negative"},
+            event_types={0: "铺垫", 1: "冲突"},
+            pivot_chunks={1},
+            cliffhanger_chunks={0},
+            characters=[
+                character_fact(
+                    chunk_id=0,
+                    name="主角",
+                    action="与反派对峙",
+                    role_function="主体",
+                    emotion="mild_positive",
+                ),
+                character_fact(
+                    chunk_id=0,
+                    name="反派",
+                    action="阻拦主角",
+                    role_function="反对者",
+                    emotion="mild_negative",
+                ),
+            ],
+            dialogues=[
+                dialogue_fact(
+                    chunk_id=0,
+                    content="退下",
+                    speaker="主角",
+                    tone="愤怒",
+                )
+            ],
+            relations=[
+                relation_fact(
+                    chunk_id=0,
+                    from_name="主角",
+                    to_name="反派",
+                    relation_type="敌对",
+                )
+            ],
         )
         self.db_session.execute(
             text(
@@ -178,7 +151,7 @@ class TestAggregateAllMetrics:
         stats_repo = StatsRepository(self.db_session)
         result = aggregate_all_metrics(self.run_id, ann_repo, chunk_repo, stats_repo)
         assert "vocab_breadth" in result.language_style
-        assert result.language_style["tone_distribution"] == {"强硬": 1.0}
+        assert result.language_style["tone_distribution"] == {"愤怒": 1.0}
 
     def test_aggregate_traditional_culture(self) -> None:
         ann_repo = AnnotationRepository(self.db_session)

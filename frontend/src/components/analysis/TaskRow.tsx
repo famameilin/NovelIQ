@@ -86,7 +86,7 @@ function canCancelStatus(status: TaskStatus): boolean {
 }
 
 function canResumeStatus(status: TaskStatus): boolean {
-  return ["pending", "failed"].includes(status);
+  return ["pending", "failed", "cancelled"].includes(status);
 }
 
 export function TaskRow({

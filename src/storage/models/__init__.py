@@ -1,5 +1,6 @@
 """统一导出 ORM 模型与 Base"""
 
+from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from src.storage.models.analysis import (
     ChunkCurve,
     ChunkSummary,
@@ -8,54 +9,53 @@ from src.storage.models.analysis import (
     GlobalStats,
     StageSummary,
 )
-from src.storage.models.annotation import (
-    CharacterAppearance,
-    ChunkAnnotation,
-    ChunkCharacter,
-    ChunkDialogue,
-    ChunkForeshadowing,
-    ChunkRelation,
-)
 from src.storage.models.base import Base
+from src.storage.models.chapter import Chapter
 from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
-from src.storage.models.chunk_embedding import EMBEDDING_DIM, ChunkEmbedding, ParagraphEmbedding
-from src.storage.models.core import AnalysisRun, DisambigCheckpoint
+from src.storage.models.chunk_embedding import EMBEDDING_DIM, ParagraphEmbedding
+from src.storage.models.continuity import (
+    CasePoolCase,
+    CaseResolutionMapping,
+    ChapterAnnotationRecord,
+)
+from src.storage.models.core import AnalysisRun
+from src.storage.models.dialogue import DialogueRecord
 from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
+    EntityStateVersion,
     GraphEntity,
-    GraphEntityAlias,
-    GraphEntityParticipant,
-    GraphRelationCurrent,
-    GraphRelationEvent,
+    GraphFact,
+    GraphRelation,
+    GraphRelationVersion,
+    GraphVersion,
 )
-from src.storage.models.location import ChunkLocation
-from src.storage.models.model_interaction import ModelInteraction
 from src.storage.models.novel import Novel
 from src.storage.models.rag import TokenUsage
 
 __all__ = [
     "Base",
     "AnalysisRun",
-    "DisambigCheckpoint",
+    "AgentInvocation",
+    "AgentTurn",
+    "AgentToolCall",
     "ForeshadowingThread",
     "ForeshadowingThreadHit",
+    "Chapter",
     "Chunk",
     "ChunkStyle",
     "ChunkTopic",
-    "ChunkEmbedding",
     "ParagraphEmbedding",
     "EMBEDDING_DIM",
-    "ChunkAnnotation",
-    "ChunkCharacter",
-    "ChunkRelation",
-    "ChunkDialogue",
-    "ChunkForeshadowing",
-    "CharacterAppearance",
+    "ChapterAnnotationRecord",
+    "CasePoolCase",
+    "CaseResolutionMapping",
+    "DialogueRecord",
+    "GraphVersion",
     "GraphEntity",
-    "GraphEntityAlias",
-    "GraphEntityParticipant",
-    "GraphRelationEvent",
-    "GraphRelationCurrent",
+    "GraphFact",
+    "EntityStateVersion",
+    "GraphRelation",
+    "GraphRelationVersion",
     "CloudAnalysis",
     "ChunkCurve",
     "GlobalStats",
@@ -63,7 +63,5 @@ __all__ = [
     "ChunkSummary",
     "StageSummary",
     "TokenUsage",
-    "ModelInteraction",
-    "ChunkLocation",
     "Novel",
 ]

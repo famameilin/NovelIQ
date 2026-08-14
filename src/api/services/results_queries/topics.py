@@ -13,14 +13,28 @@ from loguru import logger
 from src.api.models.responses import TopicInfo
 from src.storage.repositories import ChunkRepository
 
-from .common import _normalize_name_list
+
+def _resolve_project_root() -> Path:
+    """
+    从模块位置逐级向上查找项目根目录（以 config/settings.json 为锚点）
+
+    说明: 避免 Path("models") 相对 CWD 解析导致的服务启动目录漂移
+    """
+    current = Path(__file__).resolve().parent
+    for candidate in (current, *current.parents):
+        if (candidate / "config" / "settings.json").exists():
+            return candidate
+    return current
 
 
-def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str, str] | None = None) -> list:
+_PROJECT_ROOT = _resolve_project_root()
+
+
+def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
     """获取主题数据"""
     rows = chunk_repo.fetch_chunk_topics_agg(run_id)
 
-    model_dir = Path("models") / "topic" / run_id
+    model_dir = _PROJECT_ROOT / "models" / "topic" / run_id
     topic_words_map: dict[int, list[str]] = {}
     topic_labels_map: dict[int, str] = {}
 
@@ -44,7 +58,6 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str,
     for row in rows:
         topic_id = row.topic_id
         words: list[str] = topic_words_map.get(topic_id, [])
-        words = _normalize_name_list(words, alias_map) or []
         label = topic_labels_map.get(topic_id)
         if words:
             result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.total_weight, label=label))

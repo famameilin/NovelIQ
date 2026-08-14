@@ -60,8 +60,8 @@ def _get_encoding_for_model(model_name: str) -> str:
     if model_name_lower in MODEL_ENCODING_MAP:
         return MODEL_ENCODING_MAP[model_name_lower]
 
-    # 前缀匹配
-    for model_prefix, encoding in MODEL_ENCODING_MAP.items():
+    # 前缀匹配：按前缀长度降序，避免 "gpt-4" 抢先匹配 "gpt-4o-*" 系列
+    for model_prefix, encoding in sorted(MODEL_ENCODING_MAP.items(), key=lambda item: len(item[0]), reverse=True):
         if model_prefix in model_name_lower:
             return encoding
 
@@ -97,82 +97,3 @@ def count_tokens(text: str, model: str | None = None) -> int:
         logger.warning(f"Failed to count tokens: {e}, falling back to character count estimation")
         # 回退方案：中文字符按2个token估算，其他按1个token估算
         return sum(2 if ord(char) > 127 else 1 for char in text)
-
-
-def count_messages_tokens(messages: list[dict[str, str]], model: str | None = None) -> int:
-    """
-    计算消息列表的token数量
-
-    按照OpenAI的格式计算：
-    - 每条消息有4个额外token（角色标记等）
-    - 最后加上2个token
-
-    Args:
-        messages: 消息列表，格式为[{"role": "user", "content": "..."}, ...]
-        model: 模型名称
-
-    Returns:
-        int: token数量
-    """
-    if not messages:
-        return 0
-
-    try:
-        encoding_name = _get_encoding_for_model(model) if model else DEFAULT_ENCODING
-        encoding = _get_encoding(encoding_name)
-
-        total_tokens = 0
-        for message in messages:
-            # 每条消息的基础token开销
-            total_tokens += 4
-
-            # 角色token
-            role = message.get("role", "")
-            if role:
-                total_tokens += len(encoding.encode(role))
-
-            # 内容token
-            content = message.get("content", "")
-            if content:
-                total_tokens += len(encoding.encode(content))
-
-        # 最后加上2个token
-        total_tokens += 2
-
-        return total_tokens
-    except Exception as e:
-        logger.warning(f"Failed to count message tokens: {e}, using simple estimation")
-        # 简单估算：每条消息100个token
-        return len(messages) * 100
-
-
-def estimate_completion_tokens(prompt_tokens: int, ratio: float = 1.5) -> int:
-    """
-    估算完成token数量
-
-    Args:
-        prompt_tokens: 提示token数量
-        ratio: 完成token与提示token的比例，默认为1.5
-
-    Returns:
-        int: 估算的完成token数量
-    """
-    return int(prompt_tokens * ratio)
-
-
-def format_token_count(count: int) -> str:
-    """
-    格式化token数量为易读字符串
-
-    Args:
-        count: token数量
-
-    Returns:
-        str: 格式化后的字符串
-    """
-    if count >= 1_000_000:
-        return f"{count / 1_000_000:.2f}M"
-    elif count >= 1_000:
-        return f"{count / 1_000:.1f}K"
-    else:
-        return str(count)

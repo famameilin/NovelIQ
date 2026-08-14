@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import Awaitable, Callable
 
 import numpy as np
@@ -33,32 +32,25 @@ class EmbeddingClient:
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
     ) -> None:
+        semantic_config = settings.models.paragraph_embedding
         if base_url is None or model is None:
-            semantic_config = settings.models.semantic_chunking
             self._base_url = base_url or semantic_config.base_url
             self._model = model or semantic_config.model
-            self._api_key = api_key or semantic_config.api_key or os.environ.get("OPENAI_API_KEY", "")
-            if not self._api_key:
-                raise ValueError(
-                    "API key is required: provide api_key parameter or set OPENAI_API_KEY environment variable"
-                )
             self._timeout_s = timeout_s if timeout_s is not None else semantic_config.timeout_s
             self._embedding_dim = embedding_dim if embedding_dim is not None else semantic_config.embedding_dim
             self._batch_size = semantic_config.batch_size
         else:
             self._base_url = base_url
             self._model = model
-            self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-            if not self._api_key:
-                raise ValueError(
-                    "API key is required: provide api_key parameter or set OPENAI_API_KEY environment variable"
-                )
             self._timeout_s = timeout_s
             self._embedding_dim = (
-                embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
+                embedding_dim if embedding_dim is not None else settings.models.paragraph_embedding.embedding_dim
             )
-            self._batch_size = settings.models.semantic_chunking.batch_size
+            self._batch_size = settings.models.paragraph_embedding.batch_size
 
+        self._api_key = api_key if api_key is not None else semantic_config.api_key
+        if not self._api_key:
+            raise ValueError("EMBEDDING_MODEL_KEY 不能为空")
         if self._embedding_dim <= 0:
             raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")
         if self._batch_size <= 0:

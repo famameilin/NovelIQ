@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 import { Graph } from "@antv/g6";
 import type { IG6GraphEvent, INode } from "@antv/g6";
@@ -9,7 +9,6 @@ import {
   getConfiguredNodeSize,
   LINK_WIDTH_MAX,
   LINK_WIDTH_MIN,
-  mapValue,
   normalizeToRange,
   type ForceGraphModel,
 } from "./forceGraphDataAdapter";
@@ -42,6 +41,20 @@ export function useG6ForceGraph({
   onNodeClick,
   onGraphReady,
 }: UseG6ForceGraphOptions) {
+  // 2026-08-13 P2-7: 搜索词防抖 300ms。G6 力导向图没有轻量的节点过滤 API，
+  // 搜索高亮依赖 graph.node() 映射函数，逐键重建整个图实例代价高；
+  // 这里把 searchQuery 从主 effect 依赖中隔离出来，改为防抖后的值触发重建，
+  // 输入停顿 300ms 后才全量重建一次，连续输入期间不再逐键销毁/重建。
+  // 说明：防抖期间搜索高亮会短暂滞后（输入框本身即时反馈），
+  // 相比逐键重建整图的卡顿是可接受的折中；不改主 effect 语义（数据/布局不变）。
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -101,7 +114,7 @@ export function useG6ForceGraph({
     graph.data(graphDataPayload as unknown as Parameters<typeof graph.data>[0]);
 
     const isSearchMatched = (nodeName: string) =>
-      searchQuery ? nodeName.toLowerCase().includes(searchQuery.toLowerCase()) : false;
+      debouncedSearchQuery ? nodeName.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) : false;
 
     graph.node((nodeCfg: Record<string, unknown>) => {
       const rawName = String(nodeCfg.name || "");
@@ -157,10 +170,7 @@ export function useG6ForceGraph({
     graph.edge((edgeCfg: Record<string, unknown>) => {
       const relationType = String(edgeCfg.relation_type || "");
       const color = palette.relationColors[relationType] || palette.auxColors.text;
-      const width =
-        typeof edgeCfg.weight === "number"
-          ? mapValue(edgeCfg.weight, model.weightRange.min, model.weightRange.max, LINK_WIDTH_MIN, LINK_WIDTH_MAX)
-          : (LINK_WIDTH_MIN + LINK_WIDTH_MAX) / 2;
+      const width = (LINK_WIDTH_MIN + LINK_WIDTH_MAX) / 2;
 
       return {
         style: {
@@ -216,7 +226,7 @@ export function useG6ForceGraph({
       graph.destroy();
       onGraphReady(null);
     };
-  }, [appearanceCountMap, containerRef, model, onGraphReady, onNodeClick, palette, searchQuery]);
+  }, [appearanceCountMap, containerRef, debouncedSearchQuery, model, onGraphReady, onNodeClick, palette]);
 }
 
 function adjustColorDepth(cssColor: string, depth: number): string {

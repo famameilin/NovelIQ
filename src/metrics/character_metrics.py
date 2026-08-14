@@ -219,20 +219,44 @@ def compute_antagonist_strength_gap(
     return abs(avg_protagonist - avg_antagonist)
 
 
+# 2026-08-13 修复：数据源 fetch_relation_data 的 change_kind 是英文枚举
+# （assert/reinforce/weaken/break/retract/refine/supersede，见 RelationChangeKind），
+# 此前用中文键（"强化"等）计数导致四个 *_rate 恒为 0。此处同时兼容英文枚举与旧中文键。
+_RATE_KEYS = ("新建_rate", "强化_rate", "弱化_rate", "断裂_rate")
+_CHANGE_KIND_TO_RATE_KEY = {
+    "assert": "新建_rate",
+    "reinforce": "强化_rate",
+    "weaken": "弱化_rate",
+    "break": "断裂_rate",
+    "retract": "断裂_rate",
+    # 旧数据/旧调用方兼容
+    "新建": "新建_rate",
+    "强化": "强化_rate",
+    "弱化": "弱化_rate",
+    "断裂": "断裂_rate",
+}
+# refine/supersede（类型修正/替换）不归入四类变化率，仅计入 total_changes
+
+
 def compute_relation_change_frequency(
     relations: list[tuple[str, str, str, str]],
     total_chunks: int,
 ) -> dict[str, float]:
     if not relations or total_chunks == 0:
-        return {"total_changes": 0.0, "change_rate": 0.0}
+        return {
+            "total_changes": 0.0,
+            "change_rate": 0.0,
+            **dict.fromkeys(_RATE_KEYS, 0.0),
+        }
 
-    change_types = Counter(change for _, _, _, change in relations)
+    rate_counts = Counter(
+        _CHANGE_KIND_TO_RATE_KEY.get(change_kind)
+        for _, _, _, change_kind in relations
+        if _CHANGE_KIND_TO_RATE_KEY.get(change_kind) is not None
+    )
 
     return {
         "total_changes": float(len(relations)),
         "change_rate": len(relations) / total_chunks,
-        "强化_rate": change_types.get("强化", 0) / len(relations) if relations else 0.0,
-        "弱化_rate": change_types.get("弱化", 0) / len(relations) if relations else 0.0,
-        "新建_rate": change_types.get("新建", 0) / len(relations) if relations else 0.0,
-        "断裂_rate": change_types.get("断裂", 0) / len(relations) if relations else 0.0,
+        **{key: rate_counts.get(key, 0) / len(relations) for key in _RATE_KEYS},
     }

@@ -19,16 +19,14 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   diagnose: { label: "诊断报告", range: [95, 100] },
 };
 
-// 修改时间: 2026-05-01
-// 任务: 修复 phase1/phase2 进度文案错位
-// 原因: 后端真实语义是 phase1 产出人物识别主结果、phase2 才是伏笔分析，
-//       前端展示层此前把两者写反，导致进度说明与实际执行阶段不一致。
+// 修改时间: 2026-08-12
+// 任务: agent 化改造（sub_stage 合同对齐）
+// 原因: 后端实际下发的标注/诊断子阶段为 chapter_agent / diagnosis；
+//       phase1-4 与 agent/sub_agent 均已不再下发，展示配置对齐真实枚举值。
 const PHASE_CONFIG: Record<string, { label: string }> = {
-  phase1: { label: "人物识别" },
-  phase2: { label: "伏笔分析" },
-  phase3: { label: "对话归因" },
-  phase4: { label: "关系识别" },
-  level3: { label: "Level3 证据准备" },
+  paragraph_embedding: { label: "段落向量" },
+  chapter_agent: { label: "标注 Agent" },
+  diagnosis: { label: "诊断" },
 };
 
 const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];
@@ -158,7 +156,7 @@ function ProgressBar({ stage, phase, current, total, percent, message }: Progres
             chunk {current}/{total}
           </span>
           <span className="text-xs font-medium tabular-nums text-primary">
-            {percent.toFixed(1)}%
+            {(percent ?? 0).toFixed(1)}%
           </span>
         </div>
       </div>

@@ -9,7 +9,7 @@ import {
   createTopics,
   createDiagnosis,
   createGraph,
-  createGraphEventsPage,
+  createGraphChangesPage,
   createTimeline,
   createNarrativeStructure,
   createEmotionStats,
@@ -19,7 +19,8 @@ import {
 } from "../data";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
-const READABLE_TASK_STATUSES = new Set(["completed", "aggregated", "diagnosed"]);
+// 2026-08-14 D3：新管线只写 completed，aggregated/diagnosed 为旧合同状态（与后端 READABLE_RUN_STATUSES 对齐）
+const READABLE_TASK_STATUSES = new Set(["completed"]);
 
 /** 检查任务是否已进入可读终态；未完成时模拟真实后端的 AnalysisNotCompleteError */
 async function checkTaskReady(novelId: string, taskId: string): Promise<Response | null> {
@@ -35,6 +36,7 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
         detail: `分析未完成，当前状态: ${task.status}`,
         error_type: "AnalysisNotCompleteError",
         status_code: 400,
+        run_status: task.status,
       },
       { status: 400 }
     );
@@ -132,9 +134,9 @@ export const graphHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/graph/events
-export const graphEventsHandler = http.get(
-  `${BASE}/api/novels/:novelId/graph/events`,
+// 获取 /api/novels/:novelId/graph/changes
+export const graphChangesHandler = http.get(
+  `${BASE}/api/novels/:novelId/graph/changes`,
   async ({ request, params }) => {
     const { novelId } = params;
     const url = new URL(request.url);
@@ -144,10 +146,13 @@ export const graphEventsHandler = http.get(
     if (err) return err;
 
     await delay(200);
+    // 2026-08-13 P2 防御：limit 为 0/非数字时钳制到 1，避免空页死循环
+    // （createGraphChangesPage 的 next_cursor 与入参相同会无限翻页）
+    const limit = Math.max(1, Number(url.searchParams.get("changes_limit")) || 8);
     return HttpResponse.json(
-      createGraphEventsPage(
-        url.searchParams.get("events_cursor"),
-        Number(url.searchParams.get("events_limit") ?? "8")
+      createGraphChangesPage(
+        url.searchParams.get("changes_cursor"),
+        limit
       )
     );
   }

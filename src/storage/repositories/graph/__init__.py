@@ -1,19 +1,23 @@
+from .persistence import (
+    PersistedGraphResult,
+    persist_completion_graph,
+    stable_annotation_fact_id,
+)
 from .repository import (
-    ActiveEntityRow,
-    CurrentRelationRow,
+    EntitySnapshotRow,
+    GraphChangeRow,
     GraphRepository,
-    LowConfidenceRelationEventRow,
-    ParticipantEntityRow,
-    RelationConflictRow,
-    RelationEventRow,
+    GraphSnapshotRow,
+    RelationSnapshotRow,
 )
 
 __all__ = [
-    "ActiveEntityRow",
-    "CurrentRelationRow",
+    "EntitySnapshotRow",
+    "GraphChangeRow",
     "GraphRepository",
-    "LowConfidenceRelationEventRow",
-    "ParticipantEntityRow",
-    "RelationConflictRow",
-    "RelationEventRow",
+    "GraphSnapshotRow",
+    "RelationSnapshotRow",
+    "PersistedGraphResult",
+    "persist_completion_graph",
+    "stable_annotation_fact_id",
 ]

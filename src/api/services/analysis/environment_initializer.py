@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -17,9 +16,6 @@ from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.storage.repositories import RunRepository, StatsRepository
 from src.storage.session import SessionFactory
-
-if TYPE_CHECKING:
-    pass
 
 
 class EnvironmentInitializer:
@@ -111,7 +107,7 @@ class EnvironmentInitializer:
     ) -> None:
         """确保全局上下文存在"""
         stats_repo = StatsRepository(conn)
-        if not stats_repo.has_global_context(run_id):
+        if not stats_repo.has_global_context(run_id, novel_id):
             stats_repo.insert_global_context(
                 run_id=run_id,
                 novel_id=novel_id,

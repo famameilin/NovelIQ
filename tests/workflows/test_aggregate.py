@@ -1,0 +1,305 @@
+"""
+CLI aggregate 模块测试
+
+创建时间: 2025-03-11
+任务: 测试聚合流程
+
+修改时间: 2026-03-15
+任务: storage-layer-decoupling
+修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
+
+修改时间: 2026-03-15
+任务: postgresql-migration
+修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
+
+修改时间: 2026-03-15
+任务: postgresql-migration-cleanup
+修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
+"""
+
+import sys
+import uuid
+from pathlib import Path
+
+import pytest
+from sqlalchemy import text
+
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+from src.chunking.chunker import Chunk
+from src.storage.repositories import ChunkRepository, ChunkStyleData, RunRepository
+from src.workflows.aggregate import run_aggregate
+from tests.support.analysis_factories import insert_test_novel
+from tests.support.chapter_annotation_helpers import persist_chapter_annotation
+
+
+class TestAggregate:
+    @pytest.fixture(autouse=True)
+    def setup(self, db_session):
+        self.db_session = db_session
+        self.novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(self.novel_id, session=db_session)
+
+        run_repo = RunRepository(db_session)
+        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+
+    def _create_chunks_with_style(self, chunk_count: int) -> None:
+        chunk_repo = ChunkRepository(self.db_session)
+        chunks = [
+            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本。包含快乐和悲伤的词语。", chapter_id=i + 1)
+            for i in range(chunk_count)
+        ]
+        chunk_repo.insert_chunks(self.run_id, chunks)
+
+        style_rows = [
+            ChunkStyleData(
+                chunk_id=i,
+                mtld=50.0 + i,
+                ttr=0.5,
+                avg_sent_len=20.0 + i,
+                sent_len_std=5.0,
+                d_value=5.0,
+                pause_density=0.1,
+                fight_density=0.0,
+                exclaim_density=0.0,
+                dialogue_ratio=0.2,
+                question_density=0.0,
+                sensory_density=0.0,
+                metaphor_density=0.0,
+                function_word_vector="{}",
+                category_density_combat=0.0,
+                category_density_body=0.0,
+                category_density_relation=0.0,
+                category_density_faction=0.0,
+                category_density_command=0.0,
+                category_density_action=0.0,
+                category_density_psychology=0.0,
+                category_density_measure=0.0,
+                category_density_emotion=0.0,
+                category_density_color=0.0,
+            )
+            for i in range(chunk_count)
+        ]
+        chunk_repo.insert_chunk_style(self.run_id, style_rows)
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_basic(self) -> None:
+        self._create_chunks_with_style(5)
+
+        chunks, chunk_curves_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
+        assert chunks == 5
+        assert chunk_curves_count == 5
+
+        chunk_curves_count = self.db_session.execute(
+            text("SELECT COUNT(*) FROM chunk_curves WHERE run_id = :run_id"),
+            {"run_id": self.run_id},
+        ).scalar()
+        stats_count = self.db_session.execute(
+            text("SELECT COUNT(*) FROM global_stats WHERE run_id = :run_id"),
+            {"run_id": self.run_id},
+        ).scalar()
+
+        assert chunk_curves_count == 5
+        assert stats_count > 0
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_chunk_curves(self) -> None:
+        self._create_chunks_with_style(3)
+
+        await run_aggregate(run_id=self.run_id, session=self.db_session)
+
+        rows = self.db_session.execute(
+            text(
+                "SELECT chunk_id, pos_density, neg_density, net_density, "
+                "smoothed_density, tension_proxy, tension_composite "
+                "FROM chunk_curves WHERE run_id = :run_id ORDER BY chunk_id"
+            ),
+            {"run_id": self.run_id},
+        ).fetchall()
+        assert len(rows) == 3
+        for row in rows:
+            assert row[0] is not None
+            assert isinstance(row[1], float)
+            assert isinstance(row[2], float)
+            assert isinstance(row[3], float)
+            assert isinstance(row[4], float)
+            assert isinstance(row[5], float)
+            assert isinstance(row[6], float)
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_global_stats(self) -> None:
+        self._create_chunks_with_style(5)
+
+        await run_aggregate(run_id=self.run_id, session=self.db_session)
+
+        stats = self.db_session.execute(
+            text("SELECT stat_name, stat_value FROM global_stats WHERE run_id = :run_id"),
+            {"run_id": self.run_id},
+        ).fetchall()
+        stat_names = [s[0] for s in stats]
+        assert "global_avg_mtld" in stat_names
+        assert "global_avg_ttr" in stat_names
+        assert "global_avg_sent_len" in stat_names
+        assert "emotion_avg" in stat_names
+        assert "emotion_std" in stat_names
+        assert "emotion_max" in stat_names
+        assert "emotion_min" in stat_names
+        assert "rhythm_avg" in stat_names
+        assert "rhythm_std" in stat_names
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_with_annotations(self) -> None:
+        chunk_repo = ChunkRepository(self.db_session)
+        test_chunks = [Chunk(index=i, start=0, end=100, text=f"测试文本{i}", chapter_id=i + 1) for i in range(3)]
+        chunk_repo.insert_chunks(self.run_id, test_chunks)
+
+        style_rows = [
+            ChunkStyleData(
+                chunk_id=i,
+                mtld=50.0,
+                ttr=0.5,
+                avg_sent_len=20.0,
+                sent_len_std=5.0,
+                d_value=5.0,
+                pause_density=0.1,
+                fight_density=0.0,
+                exclaim_density=0.0,
+                dialogue_ratio=0.2,
+                question_density=0.0,
+                sensory_density=0.0,
+                metaphor_density=0.0,
+                function_word_vector="{}",
+                category_density_combat=0.0,
+                category_density_body=0.0,
+                category_density_relation=0.0,
+                category_density_faction=0.0,
+                category_density_command=0.0,
+                category_density_action=0.0,
+                category_density_psychology=0.0,
+                category_density_measure=0.0,
+                category_density_emotion=0.0,
+                category_density_color=0.0,
+            )
+            for i in range(3)
+        ]
+        chunk_repo.insert_chunk_style(self.run_id, style_rows)
+
+        persist_chapter_annotation(
+            self.db_session,
+            run_id=self.run_id,
+            chapter_id=1,
+            emotional_valences={0: "strong_positive", 1: "mild_positive", 2: "mild_positive"},
+            event_types={0: "冲突", 1: "铺垫", 2: "铺垫"},
+            pivot_chunks={0},
+            cliffhanger_chunks={2},
+        )
+
+        chunks, chunk_curves_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
+        assert chunks == 3
+
+        curve_data = self.db_session.execute(
+            text("SELECT tension_composite FROM chunk_curves WHERE run_id = :run_id"),
+            {"run_id": self.run_id},
+        ).fetchall()
+        assert len(curve_data) == 3
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_empty_db(self) -> None:
+        chunks, chunk_curves_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
+        assert chunks == 0
+        assert chunk_curves_count == 0
+
+    @pytest.mark.asyncio()
+    async def test_aggregate_metrics_graph_not_ready_degrades_gracefully(self, monkeypatch) -> None:
+        """2026-08-13 P2-3 用于验证 aggregate_all_metrics 抛 GraphReadinessError 时
+        保留降级（chunk_curves/global_stats 正常写入）且记录 error 级别日志"""
+        from unittest.mock import patch
+
+        from src.api.exceptions import GraphReadinessError
+
+        self._create_chunks_with_style(3)
+        messages: list[str] = []
+
+        def _capture(message: str) -> None:
+            messages.append(str(message))
+
+        monkeypatch.setattr("src.workflows.aggregate.logger.error", _capture)
+        with patch(
+            "src.workflows.aggregate.aggregate_all_metrics",
+            side_effect=GraphReadinessError("graph not ready yet"),
+        ):
+            chunks, chunk_curves_count, _ = await run_aggregate(
+                run_id=self.run_id,
+                session=self.db_session,
+            )
+
+        assert chunks == 3
+        assert chunk_curves_count == 3
+        assert any("graph not ready yet" in message for message in messages)
+
+
+class TestGlobalStatsRunIsolation:
+    """2026-08-13 修复 P1：compute_global_stats 此前查询 chunk_style 缺 run_id 过滤，
+    跨 run 累积的数据会污染当前 run 的 global_avg_* 指标。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, db_session):
+        self.db_session = db_session
+        self.novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(self.novel_id, session=db_session)
+        run_repo = RunRepository(db_session)
+        self.run_a = run_repo.create_run(novel_id=self.novel_id)
+        self.run_b = run_repo.create_run(novel_id=self.novel_id)
+
+    def _insert_style_for_run(self, run_id: str, mtld: float) -> None:
+        chunk_repo = ChunkRepository(self.db_session)
+        chunk_repo.insert_chunks(
+            run_id,
+            [Chunk(index=0, start=0, end=100, text="测试文本内容。", chapter_id=1)],
+        )
+        chunk_repo.insert_chunk_style(
+            run_id,
+            [
+                ChunkStyleData(
+                    chunk_id=0,
+                    mtld=mtld,
+                    ttr=0.5,
+                    avg_sent_len=20.0,
+                    sent_len_std=5.0,
+                    d_value=5.0,
+                    pause_density=0.1,
+                    fight_density=0.0,
+                    exclaim_density=0.0,
+                    dialogue_ratio=0.2,
+                    question_density=0.0,
+                    sensory_density=0.0,
+                    metaphor_density=0.0,
+                    function_word_vector="{}",
+                    category_density_combat=0.0,
+                    category_density_body=0.0,
+                    category_density_relation=0.0,
+                    category_density_faction=0.0,
+                    category_density_command=0.0,
+                    category_density_action=0.0,
+                    category_density_psychology=0.0,
+                    category_density_measure=0.0,
+                    category_density_emotion=0.0,
+                    category_density_color=0.0,
+                )
+            ],
+        )
+
+    def test_global_stats_only_aggregates_own_run(self) -> None:
+        from src.workflows.curve_metrics import compute_global_stats
+
+        self._insert_style_for_run(self.run_a, mtld=10.0)
+        self._insert_style_for_run(self.run_b, mtld=100.0)
+
+        stats_a = dict(compute_global_stats(self.db_session, self.run_a, [], [], []))
+        stats_b = dict(compute_global_stats(self.db_session, self.run_b, [], [], []))
+
+        # run_b 的 mtld=100 不得污染 run_a 的均值
+        assert stats_a["global_avg_mtld"] == pytest.approx(10.0)
+        assert stats_b["global_avg_mtld"] == pytest.approx(100.0)
+        assert stats_a["global_avg_ttr"] == pytest.approx(0.5)
+        assert stats_a["global_avg_sent_len"] == pytest.approx(20.0)

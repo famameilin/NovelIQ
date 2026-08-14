@@ -12,7 +12,7 @@ import type { GraphNode } from "@/api/types";
 export interface RelatedNodeInfo {
   node: GraphNode;
   relationType: string;
-  weight: number;
+  relationRevision: number;
 }
 
 export interface NodeDetailPanelProps {
@@ -53,31 +53,22 @@ const overlayVariants = {
 /* ------------------------------------------------------------------ */
 
 const relationTypeColors: Record<string, string> = {
-  友好: "bg-chart-positive/20 text-chart-positive",
+  家族: "bg-chart-neutral/20 text-chart-neutral",
+  师徒: "bg-chart-neutral/20 text-chart-neutral",
+  主从: "bg-chart-neutral/20 text-chart-neutral",
   敌对: "bg-chart-negative/20 text-chart-negative",
-  从属: "bg-chart-neutral/20 text-chart-neutral",
-  合作: "bg-chart-2/20 text-chart-2",
-  亲情: "bg-chart-positive/20 text-chart-positive",
-  爱情: "bg-chart-4/20 text-chart-4",
-  师徒: "bg-chart-5/20 text-chart-5",
-};
-
-const relationTypeBarColors: Record<string, string> = {
-  友好: "bg-chart-positive",
-  敌对: "bg-chart-negative",
-  从属: "bg-chart-neutral",
-  合作: "bg-chart-2",
-  亲情: "bg-chart-positive",
-  爱情: "bg-chart-4",
-  师徒: "bg-chart-5",
+  盟友: "bg-chart-positive/20 text-chart-positive",
+  友情: "bg-chart-positive/20 text-chart-positive",
+  爱慕: "bg-chart-positive/20 text-chart-positive",
+  利益: "bg-chart-neutral/20 text-chart-neutral",
+  领导: "bg-chart-neutral/20 text-chart-neutral",
+  同一人物: "bg-chart-neutral/20 text-chart-neutral",
+  隶属: "bg-chart-neutral/20 text-chart-neutral",
+  位于: "bg-chart-neutral/20 text-chart-neutral",
 };
 
 function getRelationTypeColor(relationType: string): string {
   return relationTypeColors[relationType] || "bg-primary-subtle text-primary";
-}
-
-function getRelationTypeBarColor(relationType: string): string {
-  return relationTypeBarColors[relationType] || "bg-primary";
 }
 
 /* ------------------------------------------------------------------ */
@@ -88,8 +79,8 @@ const entityTypeDisplayNames: Record<string, string> = {
   character: "角色",
   location: "地点",
   item: "物品",
-  event: "事件",
-  concept: "概念",
+  organization: "组织",
+  object: "物品",
 };
 
 function getEntityTypeDisplayName(entityType: string): string {
@@ -120,9 +111,7 @@ interface RelatedNodeItemProps {
 }
 
 function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
-  const { node, relationType, weight } = relatedNode;
-  const maxWeight = 10;
-  const barWidth = Math.min((weight / maxWeight) * 100, 100);
+  const { node, relationType, relationRevision } = relatedNode;
 
   return (
     <motion.button
@@ -142,15 +131,7 @@ function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
             {relationType}
           </Badge>
         </div>
-        <span className="text-xs text-text-muted">{weight.toFixed(1)}</span>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${barWidth}%` }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className={cn("h-full rounded-full", getRelationTypeBarColor(relationType))}
-        />
+        <span className="text-xs text-text-muted">版本 {relationRevision}</span>
       </div>
     </motion.button>
   );
@@ -172,6 +153,10 @@ export function NodeDetailPanel({
   onClose,
   className,
 }: NodeDetailPanelProps) {
+  const primaryRole =
+    typeof node?.state.primary_role_function === "string" ? node.state.primary_role_function : null;
+  const stateStatus = typeof node?.state.status === "string" ? node.state.status : null;
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -233,16 +218,38 @@ export function NodeDetailPanel({
                         label="类型"
                         value={getEntityTypeDisplayName(node.entity_type)}
                       />
-                      {node.first_seen_chunk !== undefined && node.last_seen_chunk !== undefined && (
+                      {Array.isArray(node.tags) && node.tags.length > 0 && (
+                        <div className="flex items-center justify-between gap-3 py-2">
+                          <span className="text-sm text-text-muted">标签</span>
+                          <span className="flex flex-wrap justify-end gap-1">
+                            {node.tags.map((tag) => (
+                              <Badge key={tag} variant="outline" className="text-[10px]">
+                                {tag}
+                              </Badge>
+                            ))}
+                          </span>
+                        </div>
+                      )}
+                      {Array.isArray(node.aliases) && node.aliases.length > 0 && (
+                        <InfoRow label="别名" value={node.aliases.join(" / ")} />
+                      )}
+                      {node.first_seen_chunk != null && node.last_seen_chunk != null && (
                         <InfoRow
                           label="出场"
-                          value={`第${node.first_seen_chunk}章 - 第${node.last_seen_chunk}章`}
+                          value={`第 ${node.first_seen_chunk} 段 - 第 ${node.last_seen_chunk} 段`}
                         />
                       )}
-                      {node.role && (
+                      <InfoRow label="状态版本" value={`第 ${node.state_revision} 版`} />
+                      {primaryRole && (
                         <InfoRow
-                          label="角色"
-                          value={node.role}
+                          label="叙事职责"
+                          value={primaryRole}
+                        />
+                      )}
+                      {stateStatus && (
+                        <InfoRow
+                          label="当前状态"
+                          value={stateStatus}
                         />
                       )}
                     </div>

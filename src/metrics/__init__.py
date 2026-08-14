@@ -80,10 +80,10 @@ from .style_metrics_extra import (
 )
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 from .timeline_metrics import (
+    GraphChangeDTO,
     LifecycleEventDTO,
     NarrativePhase,
     PlotFlagsDTO,
-    RelationEventDTO,
     TimelineCompositeNodeDTO,
     TimelineNodeDTO,
     calculate_tension_percentile,
@@ -99,10 +99,10 @@ from .timeline_metrics import (
 __all__ = [
     "AggregateResult",
     "aggregate_all_metrics",
+    "GraphChangeDTO",
     "LifecycleEventDTO",
     "NarrativePhase",
     "PlotFlagsDTO",
-    "RelationEventDTO",
     "TimelineCompositeNodeDTO",
     "TimelineNodeDTO",
     "calculate_tension_percentile",

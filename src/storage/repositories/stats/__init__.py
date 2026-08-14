@@ -36,7 +36,6 @@ from .runs import (
 )
 from .summaries import (
     fetch_chunk_summaries_by_range,
-    insert_character_appearances,
     insert_chunk_summary,
     insert_stage_summary,
 )
@@ -67,7 +66,6 @@ __all__ = [
     "fetch_emotion_densities",
     # 汇总仓储
     "insert_chunk_summary",
-    "insert_character_appearances",
     "insert_stage_summary",
     "fetch_chunk_summaries_by_range",
 ]

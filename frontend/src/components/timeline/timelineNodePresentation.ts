@@ -7,7 +7,7 @@
  *   - lifecycle 的 entry / exit 与 relation 的不同变化类型统一走同一选择器
  */
 
-import { Link2, User, UserMinus, Zap, type LucideIcon } from "lucide-react";
+import { Activity, Link2, User, UserMinus, Zap, type LucideIcon } from "lucide-react";
 
 export interface TimelineNodePresentation {
   icon: LucideIcon;
@@ -15,7 +15,7 @@ export interface TimelineNodePresentation {
   description: string;
   dotClassName: string;
   iconClassName: string;
-  accent: "primary" | "chart-2" | "chart-3" | "chart-5";
+  accent: "primary" | "chart-2" | "chart-3" | "chart-4" | "chart-5";
 }
 
 const DEFAULT_PLOT_PRESENTATION: TimelineNodePresentation = {
@@ -36,6 +36,14 @@ const PRESENTATION_MAP: Record<string, TimelineNodePresentation> = {
     dotClassName: "border-chart-2/30 bg-chart-2/15",
     iconClassName: "text-chart-2",
     accent: "chart-2",
+  },
+  state: {
+    icon: Activity,
+    label: "状态变化",
+    description: "角色当前状态或叙事职责发生可追溯更新",
+    dotClassName: "border-chart-4/30 bg-chart-4/15",
+    iconClassName: "text-chart-4",
+    accent: "chart-4",
   },
   "lifecycle:entry": {
     icon: User,
@@ -61,7 +69,7 @@ const PRESENTATION_MAP: Record<string, TimelineNodePresentation> = {
  * 必须避免前端继续把 lifecycle 与 relation 节点硬压回旧的单字符串类型
  */
 export function getTimelineNodePresentation(
-  nodeType: "plot" | "relation" | "lifecycle",
+  nodeType: "plot" | "state" | "relation" | "lifecycle",
   nodeSubtype: string,
 ): TimelineNodePresentation {
   if (nodeType === "lifecycle") {

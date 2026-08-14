@@ -18,6 +18,7 @@ from src.api.dependencies import (
     resolve_run_id,
 )
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
+from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
 from src.api.models.responses import (
     CharacterStats,
     DiagnosisResult,
@@ -33,7 +34,7 @@ from src.api.routes.results_fetchers import (
     _fetch_chunk_curves,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
-    _fetch_graph_events_page,
+    _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_topics,
 )
@@ -41,6 +42,7 @@ from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
 from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
+from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
 from src.config import settings
 from src.storage.repositories import (
     AnnotationRepository,
@@ -50,8 +52,10 @@ from src.storage.repositories import (
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-GRAPH_PAGE_EVENT_LIMIT = 200
-READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
+# 2026-08-14 D3：新管线只写 completed/running/pending/failed/cancelling/cancelled，
+# aggregated/diagnosed 是旧合同状态，不再视为可读；无图 run 由图就绪 409 兜底
+# （GraphReadinessError），状态可读与数据可读在此对齐
+READABLE_RUN_STATUSES = ("completed",)
 
 
 def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
@@ -75,7 +79,10 @@ def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict
 
 def _require_readable_run_status(run: dict[str, Any]) -> None:
     if run["status"] not in READABLE_RUN_STATUSES:
-        raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
+        raise AnalysisNotCompleteError(
+            f"分析未完成，当前状态: {run['status']}",
+            run_status=run["status"],
+        )
 
 
 def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> NoReturn:
@@ -101,8 +108,6 @@ def _fetch_and_require_valid_diagnosis(
     run_id: str,
     novel_id: str,
     stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult:
     """
     说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
@@ -115,8 +120,6 @@ def _fetch_and_require_valid_diagnosis(
         run_id,
         novel_id,
         stats_repo,
-        annotation_repo,
-        alias_map,
     )
     if diagnosis is None:
         _raise_rerun_required_for_focus_contract(
@@ -292,12 +295,9 @@ async def get_chunk_annotations(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
     return _fetch_chunk_annotations(
         run_id,
         annotation_repo,
-        alias_map,
-        require_graph_projection=False,
     )
 
 
@@ -315,8 +315,7 @@ async def get_characters(
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     if diagnosis is not None and diagnosis.rerun_required:
         _raise_rerun_required_for_focus_contract(diagnosis)
 
@@ -341,17 +340,13 @@ async def get_topics(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     chunk_repo = ChunkRepository(session)
-    annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
     stats_repo = StatsRepository(session)
     _fetch_and_require_valid_diagnosis(
         run_id=run_id,
         novel_id=novel_id,
         stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map=alias_map,
     )
-    return _fetch_topics(run_id, chunk_repo, alias_map)
+    return _fetch_topics(run_id, chunk_repo)
 
 
 @router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult)
@@ -370,9 +365,7 @@ async def get_diagnosis(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
-    annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     if diagnosis is None:
         return DiagnosisResult(
             rerun_required=True,
@@ -401,62 +394,56 @@ async def get_foreshadowing_threads(
     return _fetch_foreshadowing_threads(run_id, annotation_repo)
 
 
-@router.get("/{novel_id}/graph")
+@router.get("/{novel_id}/graph", response_model=GraphSnapshotResponse)
 async def get_graph(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
-    """
-    获取知识图谱快照
-    """
+    chapter_id: Annotated[int | None, Query(gt=0)] = None,
+    graph_version_id: Annotated[str | None, Query(min_length=1)] = None,
+) -> GraphSnapshotResponse:
+    """2026-08-07 用于读取指定章节边界或最新章节的动态图快照"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    stats_repo = StatsRepository(session)
-    _fetch_and_require_valid_diagnosis(
-        run_id=run_id,
-        novel_id=novel_id,
-        stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map=alias_map,
-    )
-    return _fetch_graph_snapshot(run_id, annotation_repo)
-
-
-@router.get("/{novel_id}/graph/events")
-async def get_graph_events(
-    novel_id: str,
-    run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
-    events_cursor: Annotated[str | None, Query(description="graph relation events 分页 cursor")] = None,
-    events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
-) -> dict:
-    """
-    获取 graph page relation events 的增量分页结果
-    """
-    run = _require_run_for_novel(session, novel_id, run_id)
-    _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
-    alias_map = annotation_repo.fetch_alias_map(run_id)
-    stats_repo = StatsRepository(session)
-    _fetch_and_require_valid_diagnosis(
-        run_id=run_id,
-        novel_id=novel_id,
-        stats_repo=stats_repo,
-        annotation_repo=annotation_repo,
-        alias_map=alias_map,
-    )
     try:
-        return _fetch_graph_events_page(
+        payload = _fetch_graph_snapshot(
             run_id,
             annotation_repo,
-            events_cursor=events_cursor,
-            events_limit=events_limit,
+            chapter_id=chapter_id,
+            graph_version_id=graph_version_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return GraphSnapshotResponse.model_validate(payload)
+
+
+@router.get("/{novel_id}/graph/changes", response_model=GraphChangesResponse)
+async def get_graph_changes(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    chapter_id: Annotated[int | None, Query(gt=0)] = None,
+    changes_cursor: Annotated[str | None, Query(description="章节图变化分页 cursor")] = None,
+    changes_limit: Annotated[int, Query(ge=1, le=GRAPH_CHANGE_LIMIT)] = GRAPH_CHANGE_LIMIT,
+) -> GraphChangesResponse:
+    """2026-08-07 用于按章节分页读取实体状态与稳定关系变化"""
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    annotation_repo = AnnotationRepository(session)
+    try:
+        payload = _fetch_graph_changes_page(
+            run_id,
+            annotation_repo,
+            chapter_id=chapter_id,
+            changes_cursor=changes_cursor,
+            changes_limit=changes_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GraphChangesResponse.model_validate(payload)
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")

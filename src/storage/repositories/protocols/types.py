@@ -101,14 +101,6 @@ class GlobalContextRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class CharacterDisambigData:
-    """角色消歧 checkpoint 读取结果"""
-
-    known_characters: list[str]
-    alias_merges: dict[str, str]
-
-
-@dataclass(frozen=True, slots=True)
 class PivotBlock:
     """诊断转折点分块"""
 

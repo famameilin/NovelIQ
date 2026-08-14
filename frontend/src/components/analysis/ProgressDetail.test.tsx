@@ -9,61 +9,63 @@ describe("ProgressDetail", () => {
     useStreamStore.getState().reset();
   });
 
-  it("应按后端真实语义展示 phase1 和 phase2 的中文标签", () => {
+  it("应按后端实际 sub_stage（chapter_agent/diagnosis）展示中文标签", () => {
     useStreamStore.getState().updateProgress({
       action: "start",
       stage: "annotate",
-      sub_stage: "phase1",
+      sub_stage: "chapter_agent",
       chunk_id: 12,
       current: 12,
       total: 100,
       percent: 24,
       sub_percent: 0,
       content: "",
-      message: "开始 phase1",
+      message: "章节标注 Agent 开始",
     });
 
     const { rerender } = render(<ProgressDetail />);
 
-    expect(screen.getByText("标注分析 - 人物识别")).toBeInTheDocument();
-    expect(screen.getByText("人物识别")).toBeInTheDocument();
+    expect(screen.getByText("标注分析 - 标注 Agent")).toBeInTheDocument();
+    expect(screen.getByText("标注 Agent")).toBeInTheDocument();
 
     useStreamStore.getState().updateProgress({
-      action: "start",
-      stage: "annotate",
-      sub_stage: "phase2",
+      action: "progress",
+      stage: "diagnose",
+      sub_stage: "diagnosis",
       chunk_id: 12,
       current: 12,
       total: 100,
-      percent: 36,
+      percent: 96,
       sub_percent: 25,
       content: "",
-      message: "开始 phase2",
+      message: "诊断进行中",
     });
 
     rerender(<ProgressDetail />);
 
-    expect(screen.getByText("标注分析 - 伏笔分析")).toBeInTheDocument();
-    expect(screen.getByText("伏笔分析")).toBeInTheDocument();
+    expect(screen.getByText("诊断报告 - 诊断")).toBeInTheDocument();
+    expect(screen.getByText("诊断")).toBeInTheDocument();
   });
 
   it("应优先使用显式 stage，而不是仅凭 percent 推断当前阶段", () => {
     useStreamStore.getState().updateProgress({
       action: "progress",
       stage: "preprocess",
-      sub_stage: "semantic_chunking_embedding",
+      sub_stage: "paragraph_embedding",
       chunk_id: 0,
       current: 658,
       total: 658,
       percent: 10,
       sub_percent: 100,
       content: "",
-      message: "语义分块段落向量计算完成",
+      message: "段落向量计算完成",
     });
 
     render(<ProgressDetail />);
 
     expect(screen.getByTestId("stage-item-preprocess")).toHaveAttribute("data-status", "current");
     expect(screen.getByTestId("stage-item-annotate")).toHaveAttribute("data-status", "pending");
+    // 2026-08-13 P2：paragraph_embedding 子阶段应展示中文标签而非原始英文串
+    expect(screen.getByText("段落向量")).toBeInTheDocument();
   });
 });

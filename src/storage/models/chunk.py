@@ -13,10 +13,25 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import (
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy import (
+    text as sql_text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+
+# 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Chunk.text 列属性，
+# 类体内 __table_args__ 直接引用 text 会解析到列对象而非函数
 
 
 class Chunk(Base):
@@ -33,7 +48,7 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     char_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     char_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -41,7 +56,17 @@ class Chunk(Base):
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, primary_key=True
     )
 
-    __table_args__ = (Index("idx_chunks_run_id", "run_id"),)
+    __table_args__ = (
+        Index("idx_chunks_run_id", "run_id"),
+        # 2026-08-14 P1：keyword_ops 的查询是 lower(text) LIKE '%kw%'，
+        # 索引必须建在同一个表达式上（lower(text) gin_trgm_ops），
+        # 裸 text 列上的 trgm 索引无法被规划器命中，等于死索引
+        Index(
+            "idx_chunks_text_trgm",
+            sql_text("lower(text) gin_trgm_ops"),
+            postgresql_using="gin",
+        ),
+    )
 
     def __repr__(self) -> str:
         return f"<Chunk(chunk_id={self.chunk_id}, run_id={self.run_id})>"
@@ -116,8 +141,8 @@ class ChunkTopic(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     topic_id: Mapped[int] = mapped_column(Integer, nullable=False)
     topic_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
-    run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
     )
 
     __table_args__ = (
@@ -126,6 +151,9 @@ class ChunkTopic(Base):
             ["chunks.chunk_id", "chunks.run_id"],
             ondelete="CASCADE",
         ),
+        # 2026-08-13 修复：此前无 (run_id, chunk_id, topic_id) 唯一约束，
+        # 重分析（默认全阶段重跑）后 chunk_topics 翻倍、聚合 SUM 双倍计数
+        UniqueConstraint("run_id", "chunk_id", "topic_id", name="uq_chunk_topics_run_chunk_topic"),
         Index("idx_chunk_topics_chunk_id", "chunk_id"),
         Index("idx_chunk_topics_topic_id", "topic_id"),
         Index("idx_chunk_topics_run_id", "run_id"),

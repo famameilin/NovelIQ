@@ -27,13 +27,26 @@ const MOCK_NOVEL_RESPONSE = {
 
 test.describe('分析任务', () => {
   test.beforeEach(async ({ page }) => {
-    // Mock小说列表（含 getNovel 的 page_size=1000 请求）
+    // Mock小说列表（getNovels 的列表请求）
     await page.route('**/api/novels/?**', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify(MOCK_NOVEL_RESPONSE),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    // Mock单条小说（getNovel 的单条端点请求）
+    await page.route(`**/api/novels/${NOVEL_ID}`, async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_NOVEL_RESPONSE.items[0]),
         });
       } else {
         await route.continue();

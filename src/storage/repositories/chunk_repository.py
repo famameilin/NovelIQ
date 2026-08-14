@@ -37,13 +37,11 @@ from src.storage.repositories.chunk import (
     fetch_chunk_styles_full,
     fetch_chunk_topics_agg,
     get_incomplete_paragraph_embedding_chunk_ids,
-    get_missing_embedding_chunk_ids,
-    has_embeddings,
     has_paragraph_embeddings,
     insert_chunk_style,
     insert_chunk_topics,
 )
-from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
+from src.storage.vector_schema import validate_paragraph_embeddings_schema
 
 
 class ChunkRepository(BaseRepository["ChunkModel"]):
@@ -71,20 +69,44 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         插入前先删除该 run_id 的旧数据
 
         将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象
+
+        chapter_id 直接取解析器分配的章节编号（chunk.chapter_id），与 chapters 表一一对应
+
+        2026-08-14 D8 契约：chunks 是 graph_facts/entity_state_versions/dialogue_records/
+        case_pool_cases/foreshadowing_threads 等下游表的 FK 父表（ON DELETE CASCADE），
+        先删后插会级联清空同 run 的全部下游数据。**同 run 不允许重跑前序阶段**——
+        重分析必须使用新 run_id（reanalysis 每次创建新 run）；若确需重建，应先显式
+        delete_run 清理整个 run。
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
-        models = [
-            ChunkModel(
-                chunk_id=chunk.index,
-                chapter_id=None,
-                char_offset=chunk.start,
-                char_end_offset=chunk.end,
-                text=chunk.text,
-                run_id=run_id,
+        models = []
+        for chunk in chunks:
+            models.append(
+                ChunkModel(
+                    chunk_id=chunk.index,
+                    chapter_id=chunk.chapter_id,
+                    char_offset=chunk.start,
+                    char_end_offset=chunk.end,
+                    text=chunk.text,
+                    run_id=run_id,
+                )
             )
-            for chunk in chunks
-        ]
         self.session.bulk_save_objects(models)
+
+    def fetch_chunks_with_chapter(self, run_id: str) -> list[tuple[int, int, str]]:
+        """
+        2026-08-02 用于按原始顺序读取标注 dispatcher 所需的 chunk 章节与文本
+        """
+        stmt = (
+            select(ChunkModel.chunk_id, ChunkModel.chapter_id, ChunkModel.text)
+            .where(ChunkModel.run_id == run_id)
+            .order_by(ChunkModel.chunk_id)
+        )
+        rows = self.session.execute(stmt).all()
+        return [
+            (row.chunk_id, row.chapter_id, row.text)
+            for row in rows
+        ]
 
     def fetch_chunk_texts(self, run_id: str) -> list[tuple[int, str]]:
         """
@@ -237,37 +259,26 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         检查预处理阶段是否完成
 
-        新增方法替代 operations.completeness.is_preprocess_complete
+        当当前配置要求语义原文定位时，完成判定不再只看 chunks，
+        而是要求 paragraph embedding schema 与数据完整就绪，
+        避免半成品 run 被误判为 preprocess 已完成
 
-        当当前配置要求 Level3 chunk/paragraph embeddings 时，完成判定不再只看 chunks，
-                  而是要求向量 schema、chunk embeddings 与 paragraph embeddings 一并完整就绪，
-                  避免半成品 run 被误判为 preprocess 已完成
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            预处理是否完成
+        RAG 粒度固定为一个自然段：只检查 paragraph embeddings，不再检查 chunk embeddings
         """
         if not self.has_chunks(run_id):
             return False
 
-        if not (settings.rag.embedding_enabled and settings.rag.level3_enabled):
+        if not settings.models.paragraph_embedding.semantic_enabled:
             return True
 
-        expected_dim = settings.models.semantic_chunking.embedding_dim
+        expected_dim = settings.models.paragraph_embedding.embedding_dim
         try:
-            validate_chunk_embeddings_schema(self.session, expected_dim)
             validate_paragraph_embeddings_schema(self.session, expected_dim)
         except ValueError:
-            # 只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
+            # 只要当前运行环境要求语义原文定位，而 schema 尚未就绪，就不能跳过 preprocess；
             # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness
             return False
 
-        if not has_embeddings(self.session, run_id):
-            return False
-        if get_missing_embedding_chunk_ids(self.session, run_id):
-            return False
         if not has_paragraph_embeddings(self.session, run_id):
             return False
         if get_incomplete_paragraph_embedding_chunk_ids(self.session, run_id):

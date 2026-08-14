@@ -1,10 +1,19 @@
 """导出仓库实现与协议接口"""
 
-from .annotation import AnnotationRepository
+from .annotation import (
+    AnnotationRepository,
+    CasePoolRepository,
+    CaseResolutionMappingRepository,
+    ChapterAnnotationRepository,
+    DatabaseAnnotationQueryService,
+    DialogueRecordRepository,
+    ForeshadowingRepository,
+)
 from .base import BaseRepository, T
+from .chapter_repository import ChapterRepository
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
-from .graph import ActiveEntityRow, CurrentRelationRow, GraphRepository, ParticipantEntityRow, RelationEventRow
+from .graph import EntitySnapshotRow, GraphChangeRow, GraphRepository, GraphSnapshotRow, RelationSnapshotRow
 from .protocols import (
     AnnotationRepositoryProtocol,
     ChunkRepositoryProtocol,
@@ -18,8 +27,15 @@ from .stats import StatsRepository
 __all__ = [
     "BaseRepository",
     "T",
+    "ChapterRepository",
     "RunRepository",
     "AnnotationRepository",
+    "ChapterAnnotationRepository",
+    "CasePoolRepository",
+    "DialogueRecordRepository",
+    "ForeshadowingRepository",
+    "CaseResolutionMappingRepository",
+    "DatabaseAnnotationQueryService",
     "ChunkRepository",
     "ChunkStyleData",
     "RunRepositoryProtocol",
@@ -28,10 +44,10 @@ __all__ = [
     "StatsRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "GraphRepository",
-    "ActiveEntityRow",
-    "CurrentRelationRow",
-    "ParticipantEntityRow",
-    "RelationEventRow",
+    "EntitySnapshotRow",
+    "RelationSnapshotRow",
+    "GraphSnapshotRow",
+    "GraphChangeRow",
     "DiagnosisRepository",
     "StatsRepository",
 ]

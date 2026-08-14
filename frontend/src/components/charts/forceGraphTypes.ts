@@ -2,34 +2,15 @@
 
 import type {
   GraphData,
-  GraphEvent,
-  GraphEventsPageInfo,
   GraphNode,
-  GraphPageQualityReport,
-  GraphPageSummary,
 } from "@/api/types";
 
 export interface GraphNodeObject extends GraphNode {
+  id: string;
   x?: number;
   y?: number;
   vx?: number;
   vy?: number;
-}
-
-export interface GraphLinkObject {
-  source: string | GraphNodeObject;
-  target: string | GraphNodeObject;
-  relation_type?: string;
-  weight?: number;
-}
-
-export interface ForceGraphData {
-  nodes: GraphNodeObject[];
-  links: GraphLinkObject[];
-  events: GraphEvent[];
-  events_page: GraphEventsPageInfo;
-  summary: GraphPageSummary;
-  quality: GraphPageQualityReport;
 }
 
 export interface ForceGraphProps {

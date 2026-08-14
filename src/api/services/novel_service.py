@@ -43,10 +43,6 @@ class NovelService:
         self.outputs_dir = Path("outputs")
         self._artifact_gc_service = ArtifactGcService(self.logs_dir, self.outputs_dir)
 
-    def _scan_existing_novels(self) -> None:
-        """从数据库加载小说列表（保留用于初始化）"""
-        pass
-
     @contextmanager
     def _get_session(self, session: Session | None = None) -> Generator[Session, None, None]:
         """获取数据库会话，支持外部传入或内部创建"""
@@ -199,26 +195,6 @@ class NovelService:
                 }
                 for run in runs
             ]
-
-    def get_latest_completed_task(self, novel_id: str, session: Session | None = None) -> dict | None:
-        """获取小说的最新已完成任务"""
-        tasks = self.get_tasks_by_novel(novel_id, session)
-        completed_tasks = [t for t in tasks if t.get("status") == "completed"]
-        if not completed_tasks:
-            return None
-        return completed_tasks[-1]
-
-    def get_latest_task(self, novel_id: str, session: Session | None = None) -> dict | None:
-        """获取小说的最新任务"""
-        tasks = self.get_tasks_by_novel(novel_id, session)
-        if not tasks:
-            return None
-
-        priority_order = {"completed": 4, "running": 3, "pending": 2, "failed": 1}
-        sorted_tasks = sorted(
-            tasks, key=lambda t: (priority_order.get(t.get("status", ""), 0), t.get("task_id", "")), reverse=True
-        )
-        return sorted_tasks[0] if sorted_tasks else None
 
     def get_task_counts_by_status(self, novel_id: str, session: Session | None = None) -> dict[str, int]:
         """获取各状态的任务数量"""

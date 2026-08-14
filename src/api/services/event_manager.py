@@ -11,7 +11,7 @@ import time
 from collections import deque
 from typing import Any
 
-_MAX_BUFFER_SIZE = 64
+_MAX_BUFFER_SIZE = 256
 
 
 class EventManager:
@@ -28,22 +28,38 @@ class EventManager:
         self._idle_timeout = idle_timeout
         self._buffer_size = buffer_size
         self._buffers: dict[str, deque[dict[str, Any]]] = {}
+        self._seq_counters: dict[str, int] = {}
         self._cleanup_task: asyncio.Task[None] | None = None
 
-    async def connect(self, task_id: str) -> asyncio.Queue[dict[str, Any]]:
-        """建立 SSE 连接，返回独立的 Queue，并回放缓冲消息"""
+    async def connect(
+        self,
+        task_id: str,
+        last_seq: int | None = None,
+    ) -> asyncio.Queue[dict[str, Any]]:
+        """建立 SSE 连接，返回独立的 Queue，并按 last_seq 增量回放缓冲消息"""
         if task_id not in self._connections:
             self._connections[task_id] = []
             self._locks[task_id] = asyncio.Lock()
-            self._buffers[task_id] = deque(maxlen=self._buffer_size)
             self._start_cleanup_task()
+        # 缓冲可能已在 send() 阶段创建（连接建立前的事件），此处只补建不覆盖
+        if task_id not in self._buffers:
+            self._buffers[task_id] = deque(maxlen=self._buffer_size)
 
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self._connections[task_id].append(queue)
-        self._last_activity[task_id] = time.monotonic()
+        # 注册 queue 与快照缓冲必须在同一把锁内完成，与 send() 的"append + 收集推送目标"互斥：
+        # 1) 避免并发 append 使迭代中的 deque 被修改（RuntimeError: deque mutated during iteration）
+        # 2) 保证"先入缓冲后注册"或"先注册后实时推送"的严格时序，杜绝同一消息回放+实时双投
+        async with self._locks[task_id]:
+            self._connections[task_id].append(queue)
+            self._last_activity[task_id] = time.monotonic()
+            buffered = [
+                msg
+                for msg in self._buffers.get(task_id, ())
+                if last_seq is None or msg.get("seq", 0) > last_seq
+            ]
 
-        # 回放缓冲消息，让 late-joiner 不丢失关键事件
-        for msg in self._buffers.get(task_id, []):
+        # 锁外回放：asyncio.Queue 无界 put 不会真正阻塞，但避免在锁内 await
+        for msg in buffered:
             await queue.put(msg)
 
         return queue
@@ -65,19 +81,18 @@ class EventManager:
                 await self.disconnect_all(task_id)
 
     async def disconnect(self, task_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
-        """断开指定的 SSE 连接（只移除自己的 Queue）"""
+        """断开指定的 SSE 连接（只移除自己的 Queue，保留消息缓冲供重连回放）"""
         if task_id in self._connections:
             try:
                 self._connections[task_id].remove(queue)
             except ValueError:
                 pass
-            # 如果该 task_id 已无任何连接，清理全部资源
+            # 如果该 task_id 已无任何连接，清理连接级资源；
+            # 消息缓冲保留给晚到/重连的客户端回放，_last_activity 也保留，
+            # 由 idle cleanup 在超时后统一回收（disconnect_all 会清理缓冲）
             if not self._connections[task_id]:
                 del self._connections[task_id]
                 del self._locks[task_id]
-                del self._last_activity[task_id]
-                if task_id in self._buffers:
-                    del self._buffers[task_id]
 
     async def disconnect_all(self, task_id: str) -> None:
         """断开 task_id 的所有 SSE 连接"""
@@ -89,21 +104,34 @@ class EventManager:
             del self._last_activity[task_id]
         if task_id in self._buffers:
             del self._buffers[task_id]
+        if task_id in self._seq_counters:
+            del self._seq_counters[task_id]
+
+    def clear_buffer(self, task_id: str) -> None:
+        """清空指定任务的缓冲（保留连接），用于 resume 新轮次前丢弃上一轮终态事件"""
+        if task_id in self._buffers:
+            self._buffers[task_id].clear()
 
     async def send(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
-        """发送消息到该 task_id 的所有 SSE 连接，并写入缓冲"""
-        if task_id not in self._connections:
-            return
-
+        """发送消息到该 task_id 的所有 SSE 连接，并写入缓冲（无连接也缓冲）"""
         self._last_activity[task_id] = time.monotonic()
+        if task_id not in self._buffers:
+            self._buffers[task_id] = deque(maxlen=self._buffer_size)
+            # 纯 API 任务（从未 connect 过、无 SSE 连接）也会产生缓冲条目，
+            # 必须在此确保 idle cleanup 协程在运行，否则该条目永不回收
+            self._start_cleanup_task()
+
         message: dict[str, Any] = {"type": event_type, "data": data}
-
-        # 写入环形缓冲
-        if task_id in self._buffers:
+        # 锁内完成"编号 + 入缓冲 + 快照推送目标"，锁外 await put：
+        # 与 connect 的"注册 + 快照"互斥（见 connect 注释），且不阻塞其它连接操作
+        async with self._locks.setdefault(task_id, asyncio.Lock()):
+            seq = self._seq_counters.get(task_id, 0) + 1
+            self._seq_counters[task_id] = seq
+            message["seq"] = seq
             self._buffers[task_id].append(message)
+            targets = list(self._connections.get(task_id, ()))
 
-        # 推送到所有活跃连接
-        for queue in self._connections[task_id]:
+        for queue in targets:
             await queue.put(message)
 
     async def shutdown(self) -> None:
@@ -124,6 +152,7 @@ class EventManager:
         self._locks.clear()
         self._last_activity.clear()
         self._buffers.clear()
+        self._seq_counters.clear()
 
     def reset_for_testing(self) -> None:
         """
@@ -139,6 +168,7 @@ class EventManager:
         self._locks.clear()
         self._last_activity.clear()
         self._buffers.clear()
+        self._seq_counters.clear()
 
 
 event_manager = EventManager()

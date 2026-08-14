@@ -82,8 +82,24 @@ def get_active_entities(
     current_chunk_id: int,
     lookback: int = 10,
 ) -> list[dict[str, Any]]:
-    """获取活跃实体列表（按名称去重，保留最新）"""
-    rows = graph_repo.fetch_active_entities(current_chunk_id, lookback, run_id)
+    """获取活跃实体列表（按名称去重，保留最新；仅保留 status 为 active 的实体）
+
+    状态存于实体 state 字典，缺省视为 active（与 authority 服务口径一致）。
+    """
+    minimum_chunk_id = max(0, current_chunk_id - lookback)
+    rows = [
+        {
+            "chunk_id": row.last_seen_chunk,
+            "name": row.name,
+            "role": row.state.get("role_function", ""),
+            "last_action": row.state.get("action", ""),
+            "last_emotion": row.state.get("emotion", ""),
+            "emotion_score": row.state.get("emotion_score", 0),
+        }
+        for row in graph_repo.fetch_latest_entities(run_id)
+        if minimum_chunk_id <= row.last_seen_chunk <= current_chunk_id
+        and (row.state.get("status") or "active") == "active"
+    ]
 
     seen: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -91,7 +107,10 @@ def get_active_entities(
         if normalized is None:
             continue
         name = normalized["name"]
-        if name not in seen:
+        # 2026-08-14 D9：保留 last_seen_chunk 最新者。此前 fetch_latest_entities
+        # 按 entity_id 升序，首个同名行被保留，与"保留最新"注释承诺相反
+        existing = seen.get(name)
+        if existing is None or (normalized.get("chunk_id") or 0) > (existing.get("chunk_id") or 0):
             seen[name] = normalized
 
     return list(seen.values())

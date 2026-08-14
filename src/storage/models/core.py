@@ -3,9 +3,6 @@
 
 本模块定义核心业务表：
 - AnalysisRun: 分析运行记录表
-- DisambigCheckpoint: 消歧检查点表
-
-新增 DisambigCheckpoint 模型用于保存消歧检查点
 
 为 AnalysisRun 添加运行态字段
           （error, message, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
@@ -80,27 +77,3 @@ class AnalysisRun(Base):
             f"<AnalysisRun(run_id={self.run_id}, novel_id={self.novel_id}, "
             f"status={self.status}, progress={self.progress})>"
         )
-
-
-class DisambigCheckpoint(Base):
-    """
-    消歧检查点表
-
-    仅存储 DisambiguationState 的 JSON 快照，用于断点续传
-    图投影进度通过 ChunkRelation.projection_status 查询，不在此表中记录
-
-    为 run_id 补充到 analysis_runs 的外键约束，确保检查点生命周期与任务一致
-    """
-
-    __tablename__ = "disambig_checkpoint"
-
-    run_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="disambig_checkpoint_run_id_fkey"),
-        primary_key=True,
-    )
-    state_json: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
-
-    def __repr__(self) -> str:
-        return f"<DisambigCheckpoint(run_id={self.run_id}, updated_at={self.updated_at})>"

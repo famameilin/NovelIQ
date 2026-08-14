@@ -8,6 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.topic.lda_model import LDAConfig, LDATrainer, get_all_topic_words, get_topic_words
 from src.topic.schema import TopicModel, TopicResult, TopicWord
 
+
 class TestLDAConfig(unittest.TestCase):
     def test_default_config(self) -> None:
         config = LDAConfig()
@@ -18,11 +19,6 @@ class TestLDAConfig(unittest.TestCase):
         config = LDAConfig.for_single_book()
         self.assertEqual(config.num_topics, 25)
         self.assertEqual(config.iterations, 500)
-
-    def test_for_multi_book(self) -> None:
-        config = LDAConfig.for_multi_book()
-        self.assertEqual(config.num_topics, 120)
-        self.assertEqual(config.iterations, 1000)
 
 class TestTopicWord(unittest.TestCase):
     def test_creation(self) -> None:

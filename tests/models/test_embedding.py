@@ -23,6 +23,7 @@
 修改内容: 补充批次进度回调测试，确保上层可以按 batch 驱动 SSE 进度更新。
 """
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -106,6 +107,20 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         mock_client.embeddings.create.assert_not_called()
 
     @patch("src.models.local.embedding.AsyncOpenAI")
+    async def test_constructor_does_not_use_openai_api_key(self, mock_openai: MagicMock) -> None:
+        """
+        2026-08-03 用于确认 Embedding 客户端不再读取 OPENAI_API_KEY
+        """
+
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "legacy-key"}, clear=False),
+            patch.object(settings.models.paragraph_embedding, "api_key", None),
+            self.assertRaisesRegex(ValueError, r"EMBEDDING_MODEL_KEY"),
+        ):
+            EmbeddingClient(base_url="http://test", model="test-model")
+        mock_openai.assert_not_called()
+
+    @patch("src.models.local.embedding.AsyncOpenAI")
     async def test_get_embedding_raises_on_dimension_mismatch(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -129,7 +144,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
     async def test_embed_texts_batches_requests(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
-        batch_size = settings.models.semantic_chunking.batch_size
+        batch_size = settings.models.paragraph_embedding.batch_size
         total_texts = batch_size + 2
 
         first_response = MagicMock()
@@ -198,7 +213,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
     async def test_embed_texts_reports_batch_progress(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
-        batch_size = settings.models.semantic_chunking.batch_size
+        batch_size = settings.models.paragraph_embedding.batch_size
         total_texts = batch_size + 1
 
         first_response = MagicMock()

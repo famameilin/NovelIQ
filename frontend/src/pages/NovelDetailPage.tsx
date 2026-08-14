@@ -13,7 +13,7 @@ import {
   getDiagnosis,
   getChunkCurves,
 } from "@/api/results";
-import { isDiagnosisRerunRequiredError } from "@/api/errorGuards";
+import { isDiagnosisRerunRequiredError, isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import {
   createAnalysisTask,
@@ -23,8 +23,11 @@ import {
   getTaskStatus,
 } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
+import { useStreamStore } from "@/store/streamStore";
+import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { DiagnosisSummaryCard } from "@/components/common/DiagnosisSummaryCard";
 import { ScoreOverviewCard } from "@/components/common/ScoreOverviewCard";
 import { DimensionMiniCard } from "@/components/common/DimensionMiniCard";
@@ -141,12 +144,18 @@ export function NovelDetailPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
+  const { currentTaskId, setTask } = useNovelStore();
   const [isStartingTask, setIsStartingTask] = useState(false);
 
+  const urlTaskId = searchParams.get("task_id");
+
+  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后 store 中旧小说的任务
+  // 不得用于新小说的 SSE/查询，也不得回写固化成新小说 URL（模式同 GraphPage）
+  const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
+
   // 使用 useAnalysisStatus hook 进行轮询并同步进度到 store
-  useAnalysisStatus(novelId ?? null, currentTaskId, {
-    enabled: !!novelId && !!currentTaskId,
+  useAnalysisStatus(novelId ?? null, storeTaskId, {
+    enabled: !!novelId && !!storeTaskId,
     onRunning: () => {
       setIsStartingTask(false);
     },
@@ -154,9 +163,9 @@ export function NovelDetailPage() {
       setIsStartingTask(false);
       toast.success("分析完成");
       // 刷新所有指标数据，确保仪表盘显示最新结果
-      queryClient.invalidateQueries({ queryKey: ["metrics", novelId, currentTaskId] });
-      queryClient.invalidateQueries({ queryKey: ["topics", novelId, currentTaskId] });
-      queryClient.invalidateQueries({ queryKey: ["results", novelId, currentTaskId] });
+      queryClient.invalidateQueries({ queryKey: ["metrics", novelId, storeTaskId] });
+      queryClient.invalidateQueries({ queryKey: ["topics", novelId, storeTaskId] });
+      queryClient.invalidateQueries({ queryKey: ["results", novelId, storeTaskId] });
     },
     onCancelled: () => {
       setIsStartingTask(false);
@@ -168,35 +177,41 @@ export function NovelDetailPage() {
     },
   });
 
-  const urlTaskId = searchParams.get("task_id");
-
-  // 组件挂载时把 novelId 同步到 store；如果 URL 带 task_id 就一并初始化任务
-  useEffect(() => {
-    if (novelId) {
-      setNovel(novelId);
-      if (urlTaskId) {
-        setTask(urlTaskId);
-      }
-    }
-  }, [novelId, urlTaskId, setNovel, setTask]);
-
-  // 把 currentTaskId 反映到 URL，方便分享与刷新恢复
+  // 把 store 的当前任务反映到 URL，方便分享与刷新恢复；
+  // 2026-08-13 P1-2: URL 写回同样加小说作用域守卫——跨小说切换瞬间
+  // 旧小说的 task_id 不得固化成新小说 URL；URL 上尚未同步进 store 的
+  // deep-link 也不得被旧 store 状态抢先覆盖（GraphPage/TimelinePage 同款机制）
   useEffect(() => {
     if (!novelId) return;
-    if (currentTaskId) {
-      navigate(`/novels/${novelId}?task_id=${currentTaskId}`, { replace: true });
-    } else {
+    if (!storeTaskId) {
+      // 任务已被删除/尚未选择：清掉 URL 上残留的 task_id；
+      // 若 URL 上的 task_id 还是未同步的 deep-link，则等待同步后再处理
+      if (urlTaskId && urlTaskSyncRef.current === urlTaskId) {
+        return;
+      }
       navigate(`/novels/${novelId}`, { replace: true });
+      return;
     }
-  }, [currentTaskId, novelId, navigate]);
+    if (!shouldWriteBackTaskUrl(urlTaskId, storeTaskId, urlTaskSyncRef)) {
+      return;
+    }
+    navigate(`/novels/${novelId}?task_id=${storeTaskId}`, { replace: true });
+  }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
 
   // 并行拉取数据
-  const enabled = !!novelId && !!currentTaskId;
+  const enabled = !!novelId && !!storeTaskId;
   const taskStatusQuery = useQuery({
-    queryKey: ["task-status", novelId, currentTaskId],
-    queryFn: () => getTaskStatus(novelId!, currentTaskId!),
+    queryKey: ["task-status", novelId, storeTaskId],
+    queryFn: () => getTaskStatus(novelId!, storeTaskId!),
     enabled,
     staleTime: 5 * 1000,
+    // 2026-08-08 用于让 resume 后的任务自动进入进度态：
+    // taskId 不变时 queryKey 不变化，缓存会停留在旧终态（如 cancelled），
+    // 活跃期每 3 秒轮询一次，终态后停止轮询
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "pending" || status === "running" || status === "cancelling" ? 3000 : false;
+    },
   });
   const taskStatus = taskStatusQuery.data?.status;
   const isTaskActivelyProcessing =
@@ -221,7 +236,7 @@ export function NovelDetailPage() {
     }
   }, [novelId, isTaskBusy, queryClient, setTask]);
 
-  /** 继续失败/待处理任务：调用 resumeAnalysisTask → 刷新任务列表 → 保持 task_id 不变 */
+  /** 继续失败/待处理/已取消任务：调用 resumeAnalysisTask → 刷新任务列表与状态 → 保持 task_id 不变 */
   const handleResumeTask = useCallback(async (taskId: string) => {
     if (!novelId || isTaskBusy) return;
     const normalizedTaskId = taskId.trim();
@@ -230,6 +245,10 @@ export function NovelDetailPage() {
     try {
       const result = await resumeAnalysisTask(novelId, normalizedTaskId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
+      queryClient.invalidateQueries({ queryKey: ["task-status", novelId, normalizedTaskId] });
+      // 2026-08-14 D5：resume 是同 task_id 开新轮，必须清空旧轮 SSE 数据
+      // （setTask 对同 id 幂等，store 不会自动重置）
+      useStreamStore.getState().resetStreamForTask(result.task_id);
       setTask(result.task_id);
       toast.info("继续分析任务已启动...");
     } catch {
@@ -278,50 +297,50 @@ export function NovelDetailPage() {
   });
 
   const narrativeQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "narrative"],
-    queryFn: () => getNarrativeStructure(novelId!, currentTaskId!),
+    queryKey: ["metrics", novelId, storeTaskId, "narrative"],
+    queryFn: () => getNarrativeStructure(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const emotionQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "emotion"],
-    queryFn: () => getEmotionStats(novelId!, currentTaskId!),
+    queryKey: ["metrics", novelId, storeTaskId, "emotion"],
+    queryFn: () => getEmotionStats(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const characterQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "character"],
-    queryFn: () => getCharacterStats(novelId!, currentTaskId!),
+    queryKey: ["metrics", novelId, storeTaskId, "character"],
+    queryFn: () => getCharacterStats(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const styleQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "style"],
-    queryFn: () => getStyleStats(novelId!, currentTaskId!),
+    queryKey: ["metrics", novelId, storeTaskId, "style"],
+    queryFn: () => getStyleStats(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const topicsQuery = useQuery({
-    queryKey: ["topics", novelId, currentTaskId],
-    queryFn: () => getTopics(novelId!, currentTaskId!),
+    queryKey: ["topics", novelId, storeTaskId],
+    queryFn: () => getTopics(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const diagnosisQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "diagnosis"],
-    queryFn: () => getDiagnosis(novelId!, currentTaskId!),
+    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
+    queryFn: () => getDiagnosis(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const curvesQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "curves"],
-    queryFn: () => getChunkCurves(novelId!, currentTaskId!),
+    queryKey: ["results", novelId, storeTaskId, "curves"],
+    queryFn: () => getChunkCurves(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
@@ -366,6 +385,20 @@ export function NovelDetailPage() {
     diagnosisQuery.isError ||
     curvesQuery.isError;
 
+  const resultQueryErrors = [
+    narrativeQuery.error,
+    emotionQuery.error,
+    characterQuery.error,
+    styleQuery.error,
+    topicsQuery.error,
+    diagnosisQuery.error,
+    curvesQuery.error,
+  ];
+  const analysisNotComplete = resultQueryErrors.some(isAnalysisNotCompleteError);
+  const analysisFailed = resultQueryErrors.some(
+    (error) => getAnalysisNotCompleteRunStatus(error) === "failed"
+  );
+
   const retryAll = () => {
     taskStatusQuery.refetch();
     narrativeQuery.refetch();
@@ -386,7 +419,7 @@ export function NovelDetailPage() {
         novelId,
         onCreateTask: handleCreateTask,
         onResumeTask: handleResumeTask,
-        onDeleteCurrentTask: currentTaskId ? handleDeleteTask : undefined,
+        onDeleteCurrentTask: storeTaskId ? handleDeleteTask : undefined,
         isResuming: effectiveIsAnalyzing,
       }}
       className="px-5"
@@ -398,25 +431,38 @@ export function NovelDetailPage() {
       */}
 
       {/* 未选择任务时，提示开始分析 */}
-      {!currentTaskId && (
+      {!storeTaskId && (
         <EmptyTaskPrompt onAnalyze={handleCreateTask} isAnalyzing={isStartingTask} />
       )}
 
       {/* 分析进行中时，只显示进度面板并隐藏其他内容 */}
-      {effectiveIsAnalyzing && currentTaskId && (
+      {effectiveIsAnalyzing && storeTaskId && (
         <motion.div className="flex min-h-0 flex-1 flex-col">
           <AnalysisProgressPanel
-            taskId={currentTaskId}
-            onCancel={() => handleCancelTask(currentTaskId)}
+            taskId={storeTaskId}
+            onCancel={() => handleCancelTask(storeTaskId)}
           />
         </motion.div>
       )}
 
       {/* 仅在未分析中时显示加载骨架屏 */}
-      {!effectiveIsAnalyzing && isLoading && currentTaskId && <SkeletonGrid />}
+      {!effectiveIsAnalyzing && isLoading && storeTaskId && <SkeletonGrid />}
 
       {/* 仅在未分析中时显示错误状态 */}
-      {!effectiveIsAnalyzing && hasAnyError && !isLoading && currentTaskId && (
+      {!effectiveIsAnalyzing && analysisNotComplete && !isLoading && storeTaskId && (
+        <AnalysisNotCompleteState
+          title={analysisFailed ? "分析任务已失败" : "分析尚未完成"}
+          description={
+            analysisFailed
+              ? "该分析任务已失败，结果无法读取，请重新发起分析后再查看。"
+              : "当前任务仍在分析中，结果暂时不可读，请等待任务进入完成态后再查看。"
+          }
+          failed={analysisFailed}
+        />
+      )}
+
+      {/* 仅在未分析中时显示其他错误状态 */}
+      {!effectiveIsAnalyzing && hasAnyError && !analysisNotComplete && !isLoading && storeTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
           <Button variant="ghost" size="sm" onClick={retryAll}>
@@ -425,10 +471,10 @@ export function NovelDetailPage() {
         </div>
       )}
 
-      {!effectiveIsAnalyzing && diagnosisRequiresRerun && !isLoading && currentTaskId && <RerunRequiredState />}
+      {!effectiveIsAnalyzing && diagnosisRequiresRerun && !isLoading && storeTaskId && <RerunRequiredState />}
 
       {/* 仅在未分析中时显示主内容 */}
-      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
+      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && !diagnosisRequiresRerun && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
             <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3">

@@ -6,7 +6,6 @@
 
 from src.api.services.results_queries import (
     _calculate_narrative_focus_scores,
-    _fetch_alias_merges_only,
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
@@ -15,7 +14,7 @@ from src.api.services.results_queries import (
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_global_stats,
-    _fetch_graph_events_page,
+    _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_hierarchical_relations,
     _fetch_known_characters,
@@ -24,9 +23,7 @@ from src.api.services.results_queries import (
     _fetch_token_usage_stats,
     _fetch_topics,
     _normalize_arc_scores,
-    _normalize_name,
     _normalize_name_list,
-    _normalize_text_by_alias_map,
     _parse_int_field,
     _parse_json_field,
 )
@@ -34,9 +31,7 @@ from src.api.services.results_queries import (
 __all__ = [
     "_parse_json_field",
     "_parse_int_field",
-    "_normalize_name",
     "_normalize_name_list",
-    "_normalize_text_by_alias_map",
     "_fetch_chunk_curves",
     "_fetch_raw_chunk_curves",
     "_fetch_characters",
@@ -44,7 +39,7 @@ __all__ = [
     "_fetch_topics",
     "_fetch_diagnosis",
     "_fetch_foreshadowing_threads",
-    "_fetch_graph_events_page",
+    "_fetch_graph_changes_page",
     "_fetch_graph_snapshot",
     "_normalize_arc_scores",
     "_fetch_chunk_styles",
@@ -55,5 +50,4 @@ __all__ = [
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
     "_fetch_known_characters",
-    "_fetch_alias_merges_only",
 ]

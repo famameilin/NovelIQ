@@ -943,14 +943,14 @@
           ]
         },
         {
-          "name": "获取图谱事件列表",
+          "name": "获取章节图变化列表",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/novels/{{novel_id}}/graph/events?task_id={{task_id}}",
+              "raw": "{{base_url}}/api/novels/{{novel_id}}/graph/changes?task_id={{task_id}}",
               "host": ["{{base_url}}"],
-              "path": ["api", "novels", "{{novel_id}}", "graph", "events"],
+              "path": ["api", "novels", "{{novel_id}}", "graph", "changes"],
               "query": [
                 {
                   "key": "task_id",
@@ -959,7 +959,7 @@
                 }
               ]
             },
-            "description": "GET /api/novels/{novel_id}/graph/events?task_id={task_id} - 获取图谱事件列表"
+            "description": "GET /api/novels/{novel_id}/graph/changes?task_id={task_id} - 获取章节图变化列表"
           },
           "event": [
             {

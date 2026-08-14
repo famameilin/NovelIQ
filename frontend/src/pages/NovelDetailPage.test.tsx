@@ -108,7 +108,6 @@ vi.mock("@/api/analysis", () => ({
 vi.mock("@/hooks/useAnalysisStatus", () => ({
   useAnalysisStatus: () => ({
     isConnected: false,
-    wsStable: false,
   }),
 }));
 
@@ -253,6 +252,46 @@ describe("NovelDetailPage", () => {
     confirmSpy.mockReset();
     confirmSpy.mockReturnValue(true);
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
+  });
+
+  it("跨小说切换后旧任务不得用于新小说查询或固化成 URL（P1-2 修复）", async () => {
+    currentNovelId = "novel-2";
+    currentSearchParams = "";
+    // store 仍停留在小说 1 的旧任务，页面已切到小说 2
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-old", novelsCache: [] });
+
+    renderNovelDetailPage();
+
+    // 旧任务的 taskStatus 轮询不应发出（否则 404）
+    expect(getTaskStatusMock).not.toHaveBeenCalledWith("novel-2", "task-old");
+    expect(getTaskStatusMock).not.toHaveBeenCalled();
+    // URL 不应被回写固化为旧任务 task_id
+    expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-2?task_id=task-old", { replace: true });
+    // 页面应进入未选择任务态，而不是用旧任务渲染
+    expect(await screen.findByRole("button", { name: "开始分析" })).toBeInTheDocument();
+  });
+
+  it("URL deep-link 任务优先于旧 store 状态，不被旧任务回写覆盖（P1-2 修复）", async () => {
+    currentNovelId = "novel-2";
+    currentSearchParams = "task_id=task-new";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-old", novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-2",
+      task_id: "task-new",
+      status: "completed",
+      progress: 100,
+      current_step: "done",
+    });
+
+    renderNovelDetailPage();
+
+    // deep-link 的 task-new 同步进 store 后成为唯一查询目标
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-2", "task-new");
+    });
+    expect(getTaskStatusMock).not.toHaveBeenCalledWith("novel-2", "task-old");
+    // 旧 store 状态不得抢先把 URL replace 成旧任务
+    expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-2?task_id=task-old", { replace: true });
   });
 
   it("空状态点击开始分析时应走创建任务接口", async () => {
@@ -468,5 +507,44 @@ describe("NovelDetailPage", () => {
     expect(getTopicsMock).not.toHaveBeenCalled();
     expect(getDiagnosisMock).not.toHaveBeenCalled();
     expect(getChunkCurvesMock).not.toHaveBeenCalled();
+  });
+
+  it("已失败任务应显示友好失败提示而非数据加载失败", async () => {
+    currentSearchParams = "task_id=task-failed";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-failed",
+      status: "failed",
+      progress: 0,
+      current_step: "done",
+    });
+    const notCompleteError = {
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: failed",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+          run_status: "failed",
+        },
+      },
+    };
+    getNarrativeStructureMock.mockRejectedValue(notCompleteError);
+    getEmotionStatsMock.mockRejectedValue(notCompleteError);
+    getCharacterStatsMock.mockRejectedValue(notCompleteError);
+    getStyleStatsMock.mockRejectedValue(notCompleteError);
+    getTopicsMock.mockRejectedValue(notCompleteError);
+    getDiagnosisMock.mockRejectedValue(notCompleteError);
+    getChunkCurvesMock.mockRejectedValue(notCompleteError);
+
+    renderNovelDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("分析任务已失败")).toBeInTheDocument();
+      expect(screen.getByText(/请重新发起分析/)).toBeInTheDocument();
+      expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
+    });
   });
 });

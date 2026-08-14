@@ -86,4 +86,27 @@ describe("TaskRow", () => {
 
     expect(screen.getByText("未知时间")).toBeInTheDocument();
   });
+
+  it("cancelled 任务应提供继续分析入口", async () => {
+    const user = userEvent.setup();
+    const onResume = vi.fn();
+
+    render(
+      <TaskRow
+        task={{
+          task_id: "cancelled01",
+          status: "cancelled",
+          created_at: "2026-08-08T00:00:00Z",
+        }}
+        isActive={false}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+        onDelete={vi.fn()}
+        onResume={onResume}
+      />
+    );
+
+    await user.click(screen.getByTitle("继续分析"));
+    expect(onResume).toHaveBeenCalledWith("cancelled01");
+  });
 });

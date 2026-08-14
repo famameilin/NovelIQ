@@ -7,11 +7,10 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
-  ArrowRight,
   Network,
   RefreshCw,
 } from "lucide-react";
-import { isAnalysisNotCompleteError, isDiagnosisRerunRequiredError } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, isDiagnosisRerunRequiredError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getCharacters, getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
@@ -20,13 +19,13 @@ import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeDetailPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { GraphEdge, GraphNode } from "@/api/types";
+import type { GraphNode } from "@/api/types";
 import type { ForceGraphHandle, GraphNodeObject } from "@/components/charts/forceGraphTypes";
 import { GraphOverviewSection } from "@/pages/graph/GraphOverviewSection";
 import { GraphWorkspaceSection } from "@/pages/graph/GraphWorkspaceSection";
 import { buildGraphUrl, buildTimelineUrl } from "@/pages/graph/graphPageNavigation";
 import { useGraphDeepLinkSelection } from "@/pages/graph/useGraphDeepLinkSelection";
-import { useGraphEventPagination } from "@/pages/graph/useGraphEventPagination";
+import { useGraphChangePagination } from "@/pages/graph/useGraphChangePagination";
 
 const STALE_TIME = 5 * 60 * 1000;
 const pageSectionVariants = {
@@ -35,23 +34,18 @@ const pageSectionVariants = {
 };
 
 const changeTypeLabels: Record<string, string> = {
-  无变化: "延续",
-  新建: "建立",
-  强化: "强化",
-  弱化: "弱化",
-  断裂: "断裂",
+  assert: "建立",
+  reinforce: "强化",
+  weaken: "弱化",
+  break: "断裂",
+  refine: "修订",
+  supersede: "替代",
+  retract: "撤回",
 };
 
 function getChangeTypeLabel(changeType?: string | null): string {
   if (!changeType) return "变化";
   return changeTypeLabels[changeType] ?? changeType;
-}
-
-function getEdgeDisplayNames(edge: GraphEdge, nodeNameMap: Map<string, string>): { from: string; to: string } {
-  return {
-    from: edge.from_name ?? nodeNameMap.get(edge.source) ?? edge.source,
-    to: edge.to_name ?? nodeNameMap.get(edge.target) ?? edge.target,
-  };
 }
 
 /**
@@ -66,7 +60,7 @@ export function GraphPage() {
 
   const urlTaskId = searchParams.get("task_id");
   const urlSelectedChunk = searchParams.get("selected_chunk");
-  const urlRelationEventId = searchParams.get("relation_event_id");
+  const urlChangeId = searchParams.get("change_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
 
@@ -140,11 +134,6 @@ export function GraphPage() {
 
   const novelTitle = novelQuery.data?.title ?? "小说详情";
   const graphData = graphQuery.data;
-  const graphContractIssue =
-    enabled &&
-    !!graphData &&
-    (graphData.summary == null || graphData.quality == null || graphData.events_page == null);
-
   const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
     if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
     const map = new Map<string, number>();
@@ -153,14 +142,6 @@ export function GraphPage() {
     });
     return map;
   }, [charactersQuery.data]);
-
-  const nodeNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    graphData?.nodes.forEach((node) => {
-      map.set(node.entity_id, node.name);
-    });
-    return map;
-  }, [graphData]);
 
   const relationTypes = useMemo(() => {
     if (!graphData?.edges) return [];
@@ -186,71 +167,66 @@ export function GraphPage() {
     if (!selectedNode || !graphData) return [];
 
     const related: RelatedNodeInfo[] = [];
-    const nodeMap = new Map<string, GraphNode>();
+    const nodeMap = new Map<number, GraphNode>();
     graphData.nodes.forEach((node) => {
       nodeMap.set(node.entity_id, node);
     });
 
     graphData.edges.forEach((edge) => {
-      if (edge.source === selectedNode.entity_id) {
-        const targetNode = nodeMap.get(edge.target);
+      if (edge.source_entity_id === selectedNode.entity_id) {
+        const targetNode = nodeMap.get(edge.target_entity_id);
         if (targetNode) {
           related.push({
             node: targetNode,
-            relationType: edge.relation_type || "未知",
-            weight: edge.weight ?? 1,
+            relationType: edge.relation_type,
+            relationRevision: edge.relation_revision,
           });
         }
-      } else if (edge.target === selectedNode.entity_id) {
-        const sourceNode = nodeMap.get(edge.source);
+      } else if (edge.target_entity_id === selectedNode.entity_id) {
+        const sourceNode = nodeMap.get(edge.source_entity_id);
         if (sourceNode) {
           related.push({
             node: sourceNode,
-            relationType: edge.relation_type || "未知",
-            weight: edge.weight ?? 1,
+            relationType: edge.relation_type,
+            relationRevision: edge.relation_revision,
           });
         }
       }
     });
 
-    return related.sort((left, right) => right.weight - left.weight);
+    return related.sort((left, right) => right.relationRevision - left.relationRevision);
   }, [selectedNode, graphData]);
 
-  // /graph 返回的是 product-layer summary/quality，而不是 authority 原始事实；
-  // 页面可以自由调整展示摘要，但不应反向定义 authority 语义
-  const graphSummary = graphData?.summary ?? null;
-
   const {
-    eventsLoadError,
-    handleLoadMoreEvents,
-    hasMoreEvents,
-    isEventsLoading,
-    loadedEventCount,
-    loadedEvents,
-    sortedEvents,
-    totalEventCount,
-  } = useGraphEventPagination({
+    changesLoadError,
+    handleLoadMoreChanges,
+    hasMoreChanges,
+    isChangesLoading,
+    loadedChangeCount,
+    loadedChanges,
+    sortedChanges,
+    totalChangeCount,
+  } = useGraphChangePagination({
     novelId,
     taskScopeId,
-    graphData,
   });
 
   const timelineUrl = novelId && taskScopeId ? buildTimelineUrl(novelId, taskScopeId) : null;
   const {
-    activeSelectedEventId,
+    activeSelectedChangeId,
     graphSelectionHint,
     handleGoTimeline,
     handleOpenTimelineChunk,
-    handleSelectEvent,
-    selectedEvent,
+    handleSelectChange,
+    selectedChange,
   } = useGraphDeepLinkSelection({
     novelId,
     taskScopeId,
     timelineUrl,
-    urlRelationEventId,
+    urlChangeId,
     urlSelectedChunk,
-    loadedEvents,
-    sortedEvents,
+    loadedChanges,
+    sortedChanges,
     navigate,
   });
 
@@ -270,48 +246,28 @@ export function GraphPage() {
     setSelectedRelationTypes(new Set());
   }, [taskScopeId]);
 
-  useEffect(() => {
-    if (!graphContractIssue || !graphData) return;
-
-    const missingFields = [
-      graphData.summary ? null : "summary",
-      graphData.quality ? null : "quality",
-      graphData.events_page ? null : "events_page",
-    ].filter(Boolean);
-
-    console.error("[GraphPage] /graph authority contract is missing required fields:", {
-      taskId: taskScopeId,
-      missingFields,
-    });
-  }, [graphContractIssue, graphData, taskScopeId]);
-
-  const weakRelations = useMemo(() => {
-    if (!graphData) return [];
-    return [...graphData.edges]
-      .sort((left, right) => {
-        const weightDiff = (left.weight ?? 1) - (right.weight ?? 1);
-        if (weightDiff !== 0) return weightDiff;
-        return (right.change_count ?? 0) - (left.change_count ?? 0);
-      })
-      .slice(0, 5)
-      .map((edge) => ({
-        ...edge,
-        ...getEdgeDisplayNames(edge, nodeNameMap),
-      }));
-  }, [graphData, nodeNameMap]);
-
   const activeRelationCount = useMemo(
-    () => graphSummary?.edge_count ?? graphData?.edges.filter((edge) => edge.is_active !== false).length ?? 0,
-    [graphData, graphSummary]
-  );
-
-  const inactiveRelationCount = useMemo(
-    () => graphData?.edges.filter((edge) => edge.is_active === false).length ?? 0,
+    () => graphData?.edges.filter((edge) => edge.is_active).length ?? 0,
     [graphData]
   );
 
+  const inactiveRelationCount = useMemo(
+    () => graphData?.edges.filter((edge) => !edge.is_active).length ?? 0,
+    [graphData]
+  );
+  const graphDensity = useMemo(() => {
+    const nodeCount = graphData?.nodes.length ?? 0;
+    if (nodeCount < 2) {
+      return 0;
+    }
+    return activeRelationCount / ((nodeCount * (nodeCount - 1)) / 2);
+  }, [activeRelationCount, graphData]);
+
   const isAnalysisNotComplete =
     isAnalysisNotCompleteError(graphQuery.error) || isAnalysisNotCompleteError(charactersQuery.error);
+  const analysisFailed =
+    getAnalysisNotCompleteRunStatus(graphQuery.error) === "failed" ||
+    getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed";
   const isLoading = graphQuery.isLoading || charactersQuery.isLoading;
   const isError = (graphQuery.isError || charactersQuery.isError) && !graphRerunRequired && !isAnalysisNotComplete;
   const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
@@ -350,39 +306,6 @@ export function GraphPage() {
     charactersQuery.refetch();
   }, [charactersQuery, graphQuery]);
 
-  const renderContractIssue = () => (
-    <motion.section
-      variants={pageSectionVariants}
-      initial="hidden"
-      animate="visible"
-      transition={{ duration: 0.28, delay: 0.05 }}
-    >
-      <Card variant="elevated" className="rounded-2xl border-chart-negative/30">
-        <CardContent className="flex flex-col gap-4 p-8">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-6 w-6 text-chart-negative" />
-            <div className="space-y-2">
-              <p className="text-base font-semibold text-text">图谱数据暂不完整</p>
-              <p className="text-sm leading-6 text-text-muted">
-                当前任务返回了部分图谱数据，但关系概览或变化记录还不完整，请稍后重试。
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" size="sm" onClick={handleRetry}>
-              <RefreshCw className="h-4 w-4" />
-              重新请求
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleGoTimeline} disabled={!timelineUrl}>
-              打开时间轴
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.section>
-  );
-
   // 2026-04-28，任务：分析详情页单屏 Tabs 改造
   // 修改原因：图谱页默认展示关系画布，关系变化和摘要拆入后续 tab，避免 overview 把画布挤到首屏之外
   const graphWorkspaceProps = {
@@ -400,21 +323,21 @@ export function GraphPage() {
     onCenter: handleCenter,
     onRelationTypeChange: handleRelationTypeChange,
     onSearchChange: handleSearchChange,
-    totalEventCount,
-    loadedEventCount,
-    hasMoreEvents,
-    isEventsLoading,
-    eventsLoadError,
+    totalChangeCount,
+    loadedChangeCount,
+    hasMoreChanges,
+    isChangesLoading,
+    changesLoadError,
     graphSelectionHint,
-    sortedEvents,
-    activeSelectedEventId,
-    onSelectEvent: handleSelectEvent,
-    onLoadMoreEvents: handleLoadMoreEvents,
+    sortedChanges,
+    activeSelectedChangeId,
+    onSelectChange: handleSelectChange,
+    onLoadMoreChanges: handleLoadMoreChanges,
     onGoTimeline: handleGoTimeline,
     timelineUrl,
     selectedNode,
     onOpenTimelineChunk: handleOpenTimelineChunk,
-    selectedEvent,
+    selectedChange,
     pageSectionVariants,
     getChangeTypeLabel,
   };
@@ -424,18 +347,18 @@ export function GraphPage() {
       <AnalysisWorkspace.Tab value="graph" label="关系图谱">
         <GraphWorkspaceSection {...graphWorkspaceProps} view="graph" />
       </AnalysisWorkspace.Tab>
-      <AnalysisWorkspace.Tab value="events" label="关系变化">
-        <GraphWorkspaceSection {...graphWorkspaceProps} view="events" />
+      <AnalysisWorkspace.Tab value="changes" label="图谱变化">
+        <GraphWorkspaceSection {...graphWorkspaceProps} view="changes" />
       </AnalysisWorkspace.Tab>
-      <AnalysisWorkspace.Tab value="summary" label="关系摘要">
+      <AnalysisWorkspace.Tab value="summary" label="快照概览">
         <div className="h-full overflow-hidden">
           <GraphOverviewSection
-            graphSummary={graphSummary}
+            graphData={graphData!}
             activeRelationCount={activeRelationCount}
             inactiveRelationCount={inactiveRelationCount}
-            loadedEventCount={loadedEventCount}
-            totalEventCount={totalEventCount}
-            weakRelations={weakRelations}
+            graphDensity={graphDensity}
+            loadedChangeCount={loadedChangeCount}
+            totalChangeCount={totalChangeCount}
             pageSectionVariants={pageSectionVariants}
           />
         </div>
@@ -532,8 +455,13 @@ export function GraphPage() {
             transition={{ duration: 0.28, delay: 0.05 }}
           >
             <AnalysisNotCompleteState
-              title="图谱结果尚未完成"
-              description="当前任务仍在分析中，人物关系图谱和关系变化记录暂时不可读，请等待任务进入完成态后再查看。"
+              title={analysisFailed ? "图谱分析任务已失败" : "图谱结果尚未完成"}
+              description={
+                analysisFailed
+                  ? "该分析任务已失败，人物关系图谱和关系变化记录无法读取，请重新发起分析后再查看。"
+                  : "当前任务仍在分析中，人物关系图谱和关系变化记录暂时不可读，请等待任务进入完成态后再查看。"
+              }
+              failed={analysisFailed}
             />
           </motion.section>
         ) : isError ? (
@@ -574,8 +502,6 @@ export function GraphPage() {
               </CardContent>
             </Card>
           </motion.section>
-        ) : graphContractIssue ? (
-          renderContractIssue()
         ) : (
           renderLoadedContent()
         )}

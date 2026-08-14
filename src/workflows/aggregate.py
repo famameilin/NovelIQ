@@ -1,9 +1,7 @@
 """
 聚合流程核心业务逻辑
 
-从 src/cli/aggregate.py 提取的核心业务逻辑，用于 workflows 模块
-
-
+供 workflows 模块使用。
 """
 
 from __future__ import annotations
@@ -15,6 +13,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.exceptions import GraphReadinessError
 from src.api.models.events import StreamEvent
 from src.config import settings
 from src.lexicons.registry import LexiconRegistry
@@ -178,7 +177,12 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
         if imagery_lexicon_density is None:
             null_chunk_ids.append(chunk_id)
 
-    null_ratio = (len(null_chunk_ids) / len(imagery_rows)) if imagery_rows else 0.0
+    if imagery_rows:
+        null_ratio = len(null_chunk_ids) / len(imagery_rows)
+    else:
+        # 2026-08-13 P2-3 无 imagery 数据时按"不通过"处理（保守方案）：
+        # 0/0 不等于达标，聚合缺数据本身是质量缺陷，避免"无数据=通过质量门"。
+        null_ratio = 1.0
 
     return {
         "tone_distribution_non_empty_rate": 1.0 if tone_non_empty else 0.0,
@@ -327,10 +331,8 @@ async def run_aggregate(
     registry.load()
 
     # 多类型加权检测：均匀采样 10% chunk
-    from src.lexicons.genre_detector import (
-        detect_genre_weighted,
-        get_recommended_lexicons,
-    )
+    from src.lexicons.genre_detector import detect_genre_weighted
+    from src.lexicons.genre_detector_rules import get_recommended_lexicons
     from src.lexicons.registry import get_weighted_lexicon_set
     from src.workflows.curve_metrics import WeightedLexiconSet, compute_emotion_curve_weighted
 
@@ -378,7 +380,7 @@ async def run_aggregate(
     chunk_annotations = ann_repo.fetch_chunk_annotations(run_id)
     chunk_styles = chunk_repo.fetch_chunk_styles(run_id)
 
-    annotation_map = {
+    annotation_map: dict[int, dict[str, str | int | None]] = {
         row.chunk_id: {"event_type": row.event_type, "cliffhanger": row.cliffhanger} for row in chunk_annotations
     }
     style_map = {
@@ -409,7 +411,7 @@ async def run_aggregate(
     stats_repo.insert_chunk_curve(run_id, chunk_curves)
     logger.info(f"inserted {len(chunk_curves)} chunk curve rows")
 
-    global_stats = compute_global_stats(session, raw_densities, tension_composite_values, chunk_texts)
+    global_stats = compute_global_stats(session, run_id, raw_densities, tension_composite_values, chunk_texts)
 
     stats_repo.insert_global_stats(run_id, global_stats)
     logger.info(f"inserted {len(global_stats)} global stats")
@@ -421,6 +423,9 @@ async def run_aggregate(
         quality_report = _build_quality_gate_report(run_id, agg_result, chunk_repo)
         quality_report.update(lexical_curve_quality_report)
         _log_quality_gate_report(run_id, quality_report)
+    except GraphReadinessError as exc:
+        # 2026-08-13 P2-3 图未就绪是可预期降级：保留降级但记录 error 级别日志
+        logger.error(f"aggregate metrics skipped: graph not ready: {exc}")
     except Exception as e:
         logger.warning(f"Failed to compute aggregate metrics: {e}")
 

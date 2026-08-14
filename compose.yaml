@@ -27,7 +27,6 @@ services:
     env_file:
       - ./.env.docker
     environment:
-      DATABASE_URL: postgresql+psycopg://novel_qa:novel_qa_internal_password@db:5432/novel_analysis
       PYTHONUNBUFFERED: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"

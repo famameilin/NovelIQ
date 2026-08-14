@@ -1,15 +1,10 @@
 """
 workflows 模块入口，包含核心业务逻辑，供 API 和 CLI 共同调用
-
-
 """
 
 from src.config.constants import EVENT_TYPE_SCORES
 from src.workflows.aggregate import run_aggregate
 from src.workflows.annotate import run_annotate
-from src.workflows.annotate_helpers.sentence import (
-    build_context_sentences,
-)
 from src.workflows.curve_metrics import (
     compute_emotion_curve,
     compute_global_stats,
@@ -24,7 +19,6 @@ from src.workflows.topic import run_topic_model
 
 __all__ = [
     "EVENT_TYPE_SCORES",
-    "build_context_sentences",
     "compute_emotion_curve",
     "compute_global_stats",
     "compute_rhythm_curve",

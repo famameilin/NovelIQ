@@ -7,19 +7,21 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.exceptions import AnalysisError, NovelNotFoundError
-from src.api.models.events import AnalysisEventBus, StreamEvent
+from src.api.models.events import AnalysisEventBus, StreamEvent, StreamMessageType
 from src.api.models.requests import ReanalyzeRequest
 from src.api.models.responses import TaskStatus
 from src.api.services.analysis.environment_initializer import EnvironmentInitializer
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.analysis.stage_executor import StageExecutor
+from src.api.services.event_manager import event_manager
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.config import settings
@@ -35,6 +37,10 @@ class CancellationStateCheckError(RuntimeError):
 
 TASK_KIND_ANALYSIS = "analysis"
 TASK_KIND_REANALYSIS = "reanalysis"
+
+# 任务 claim 时判定"刚被 resume 重置"的竞态窗口：resume 重置后旧 worker 的延迟取消
+# 写回可能把状态覆盖回 cancelled，只有在该窗口内的重置才允许 claim 侧重新激活
+_RESUME_RESET_WINDOW_SECONDS = 30
 
 
 class AnalysisService:
@@ -79,8 +85,6 @@ class AnalysisService:
         analysis_logger: AnalysisLogger | None,
         skip_stages: dict[str, bool],
         num_topics: int,
-        max_chars: int = 2000,
-        overlap: int = 200,
     ) -> None:
         """
         执行各分析阶段
@@ -94,11 +98,11 @@ class AnalysisService:
         # ── 预处理 ──
         if not skip_stages["skip_preprocess"]:
             await bus.emit_stage_start(
-                "preprocess", message="开始预处理", percent=settings.analysis.progress.preprocess.start
+                "preprocess", message="开始预处理", percent=settings.progress.preprocess.start
             )
 
             await self.stage_executor.run_preprocess(
-                source_path, run_id, session, max_chars, overlap, self._make_stage_emitter(bus, "preprocess")
+                source_path, run_id, session, emitter=self._make_stage_emitter(bus, "preprocess")
             )
             await bus.emit_stage_complete("preprocess")
 
@@ -127,7 +131,7 @@ class AnalysisService:
             await bus.emit_stage_start(
                 "annotate",
                 message="开始标注分析",
-                percent=settings.analysis.progress.annotate.start,
+                percent=settings.progress.annotate.start,
                 total=total_chunks,
             )
 
@@ -149,7 +153,7 @@ class AnalysisService:
         # ── 聚合 ──
         if not skip_stages["skip_aggregate"]:
             await bus.emit_stage_start(
-                "aggregate", message="开始数据聚合", percent=settings.analysis.progress.aggregate.start
+                "aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start
             )
 
             await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
@@ -162,7 +166,7 @@ class AnalysisService:
         # ── 主题建模 ──
         if not skip_stages["skip_topic_model"]:
             await bus.emit_stage_start(
-                "topic-model", message="开始主题建模", percent=settings.analysis.progress.topic_model.start
+                "topic-model", message="开始主题建模", percent=settings.progress.topic_model.start
             )
 
             await self.stage_executor.run_topic_model(
@@ -177,7 +181,7 @@ class AnalysisService:
         # ── 诊断 ──
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start(
-                "diagnose", message="开始诊断报告", percent=settings.analysis.progress.diagnose.start
+                "diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start
             )
 
             await self.stage_executor.run_diagnose(
@@ -289,15 +293,19 @@ class AnalysisService:
             db_session = sf.get_session()
             with db_session:
                 sql_session = db_session.connection
-                with sql_session.begin():
-                    run_repo = RunRepository(sql_session)
-                    run_id = task_id_to_run_id(task_id, sql_session)
-                    run_repo.update_run_task_fields(
-                        run_id,
-                        status="failed",
-                        error=error_message,
-                        completed_at=datetime.now(UTC),
-                    )
+                run_repo = RunRepository(sql_session)
+                run_id = task_id_to_run_id(task_id, sql_session)
+                # 2026-08-13 修复：不用 `with sql_session.begin():` 包裹——兜底路径可能在
+                # _is_cancelled 等查询已开启隐式事务后进入，begin() 会抛
+                # "A transaction is already begun on this Session" 并被内部 except 吞掉，
+                # 导致 DB 终态实际未写入。update_run_task_fields 内部自带 commit，
+                # 无论 session 是否已有事务都能正确提交。
+                run_repo.update_run_task_fields(
+                    run_id,
+                    status="failed",
+                    error=error_message,
+                    completed_at=datetime.now(UTC),
+                )
         except TaskIDNotFoundError:
             logger.warning(f"Task {task_id} not found in id_mapping during failure DB write, skipping")
         except Exception as e:
@@ -392,19 +400,22 @@ class AnalysisService:
                         # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义
                         run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
+                    return self._claim_pending_run(run_repo, run_id)
 
-                    claimed = run_repo.claim_pending_run(
-                        run_id,
-                        worker_id=self.task_manager.get_worker_id(),
-                        heartbeat_at=datetime.now(UTC),
-                    )
-                    if claimed:
-                        return "claimed"
-
+                if status == "cancelled" and self._is_recent_resume_reset(run):
+                    # resume 竞态恢复：resume 先把 DB 重置为 pending，旧 worker 的延迟取消
+                    # 写回（handle_cancel 的 commit）可能随后把状态覆盖回 cancelled，导致新 worker
+                    # 看到 cancelled 静默退出、resume 返回 200 但任务停住。该状态的特征是
+                    # worker_id=None 且 heartbeat_at 为最近的 resume 重置时间；真实取消
+                    # （取消未领取任务 / 执行中取消）都不会同时满足。重新激活为 pending 后走正常领取。
+                    run_repo.update_run_task_fields(run_id, status="pending", completed_at=None)
                     refreshed = run_repo.get_run(run_id)
-                    if refreshed and refreshed.get("status") == "cancelled":
+                    if refreshed is None or refreshed.get("status") != "pending":
+                        return "skipped"
+                    if refreshed.get("cancel_requested", False):
+                        run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
-                    return "skipped"
+                    return self._claim_pending_run(run_repo, run_id)
 
                 if status == "cancelling" and cancel_requested:
                     # 这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
@@ -437,6 +448,77 @@ class AnalysisService:
         except Exception as exc:
             logger.error(f"Failed to prepare execution claim for task {task_id}: {exc}")
             raise AnalysisError(f"任务 {task_id} 执行领取失败") from exc
+
+    def _claim_pending_run(self, run_repo: Any, run_id: str) -> str:
+        """
+        领取 pending 任务：原子 claim，失败时按最新状态判定取消/跳过
+
+        Returns:
+            claimed: 当前 worker 已成功领取任务，可继续执行
+            cancelled: 任务在真正执行前已被取消，调用方应直接结束
+            skipped: 当前 worker 未获得执行权，调用方应静默退出
+        """
+        claimed = run_repo.claim_pending_run(
+            run_id,
+            worker_id=self.task_manager.get_worker_id(),
+            # 2026-08-13 P2：heartbeat_at 列无时区，落 naive UTC 挂钟（避免会话时区转换错位）
+            heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        if claimed:
+            return "claimed"
+
+        refreshed = run_repo.get_run(run_id)
+        if refreshed is None:
+            return "skipped"
+
+        refreshed_status = refreshed.get("status")
+        if refreshed_status == "cancelled":
+            return "cancelled"
+        if refreshed_status == "cancelling" and refreshed.get("cancel_requested"):
+            # 2026-08-13 修复：取消信号落在「读 pending」与「原子 claim」之间的窗口时，
+            # claim 的 UPDATE 不命中（status 已变 cancelling），此前直接返回 skipped 静默退出，
+            # 任务会永久卡在无 owner 的 cancelling（再 cancel 400、resume 拒绝）。
+            # 与 _prepare_task_execution_claim 的 cancelling 收口同口径：
+            # 有 worker 的 cancelling 由该 worker 收尾，无 worker 的在此直接落 cancelled 终态。
+            if refreshed.get("worker_id"):
+                return "skipped"
+            run_repo.update_run_task_fields(
+                run_id,
+                status="cancelled",
+                cancel_requested=False,
+                completed_at=datetime.now(UTC),
+                message=refreshed.get("message") or "任务在启动前已取消",
+                worker_id=None,
+                heartbeat_at=None,
+            )
+            return "cancelled"
+        return "skipped"
+
+    def _is_recent_resume_reset(self, run: dict) -> bool:
+        """
+        判定 run 是否处于"刚被 resume 重置"的竞态窗口
+
+        resume 重置会写入 worker_id=None 且 pending 状态写回自动刷新 heartbeat_at=now；
+        若随后被旧 worker 的延迟取消写回覆盖为 cancelled，这两个字段保持不变。据此区分
+        "resume 后的陈旧取消写回"与"真实用户取消"（后者 heartbeat_at 为 None 或早已陈旧）。
+        """
+        if run.get("worker_id") is not None:
+            return False
+        heartbeat_at = run.get("heartbeat_at")
+        if not heartbeat_at:
+            return False
+        try:
+            heartbeat_dt = datetime.fromisoformat(heartbeat_at)
+        except (TypeError, ValueError):
+            return False
+        # 2026-08-13 P2：写入端与孤儿回收（main.py）均以 UTC 生成/比较心跳时间。
+        # analysis_runs 的 DateTime 列不带时区，写入时 tz 被剥离、读回为 naive UTC
+        # 挂钟；这里统一补 UTC 后与 UTC 挂钟比较，避免服务器本地时区偏移
+        # （如 UTC+8）把真实取消误判为「resume 后的陈旧取消写回」
+        if heartbeat_dt.tzinfo is None:
+            heartbeat_dt = heartbeat_dt.replace(tzinfo=UTC)
+        cutoff = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS)
+        return heartbeat_dt >= cutoff
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
         """
@@ -531,7 +613,7 @@ class AnalysisService:
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行 pending/failed 任务
+        继续执行 pending/failed/cancelled 任务
 
         说明: 只负责“继续已有任务”，不创建新任务
         """
@@ -542,8 +624,8 @@ class AnalysisService:
             raise ValueError(f"任务 {task_id} 不属于小说 {novel_id}")
 
         status = task.get("status", "")
-        if status not in ("pending", "failed"):
-            raise ValueError(f"仅支持继续 pending/failed 任务，当前状态为 {status}")
+        if status not in ("pending", "failed", "cancelled"):
+            raise ValueError(f"仅支持继续 pending/failed/cancelled 任务，当前状态为 {status}")
 
         task_info = self.task_manager.get_task(task_id)
         if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
@@ -570,6 +652,10 @@ class AnalysisService:
             completed_at=None,
         )
 
+        # 清空上一轮 SSE 终态事件缓冲，避免重连客户端先回放 task_cancelled/task_error/
+        # task_complete 再收新一轮 stage_start（resume 启动的是全新一轮，旧终态不应再出现）
+        event_manager.clear_buffer(task_id)
+
         task_kind, execution_request = self._restore_execution_request(task)
         self._schedule_task_execution(task_id, novel, task_kind, execution_request)
         return task_id
@@ -591,9 +677,7 @@ class AnalysisService:
         """
         执行分析任务
         """
-        num_topics = settings.topic_model.single_book.num_topics
-        max_chars = settings.chunking.max_chars
-        overlap = settings.chunking.overlap
+        num_topics = settings.topic_model.num_topics
 
         def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
             return self.env_initializer.check_stage_completion_status(session, run_id)
@@ -610,8 +694,6 @@ class AnalysisService:
             skip_stages_builder=skip_stages_builder,
             num_topics=num_topics,
             log_prefix="Analysis",
-            max_chars=max_chars,
-            overlap=overlap,
             pre_execute_hook=pre_execute_hook,
         )
 
@@ -621,7 +703,7 @@ class AnalysisService:
         """
         skip_stages = self._build_reanalysis_skip_stages(request)
         logger.info(f"Reanalysis skip_stages: {skip_stages}")
-        num_topics = request.num_topics if request else settings.topic_model.single_book.num_topics
+        num_topics = request.num_topics if request else settings.topic_model.num_topics
 
         def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
             return skip_stages
@@ -645,40 +727,23 @@ class AnalysisService:
         analysis_logger: AnalysisLogger | None,
         skip_stages: dict[str, bool],
         num_topics: int,
-        max_chars: int | None = None,
-        overlap: int | None = None,
     ) -> None:
         """
-        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数
+        调用 _execute_analysis_stages
 
         说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑
         """
-        if max_chars is not None and overlap is not None:
-            await self._execute_analysis_stages(
-                bus=bus,
-                session=session,
-                run_id=run_id,
-                source_path=source_path,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                analysis_logger=analysis_logger,
-                skip_stages=skip_stages,
-                num_topics=num_topics,
-                max_chars=max_chars,
-                overlap=overlap,
-            )
-        else:
-            await self._execute_analysis_stages(
-                bus=bus,
-                session=session,
-                run_id=run_id,
-                source_path=source_path,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                analysis_logger=analysis_logger,
-                skip_stages=skip_stages,
-                num_topics=num_topics,
-            )
+        await self._execute_analysis_stages(
+            bus=bus,
+            session=session,
+            run_id=run_id,
+            source_path=source_path,
+            novel_id=novel_id,
+            novel_title=novel_title,
+            analysis_logger=analysis_logger,
+            skip_stages=skip_stages,
+            num_topics=num_topics,
+        )
 
     async def _run_analysis_core(
         self,
@@ -687,8 +752,6 @@ class AnalysisService:
         skip_stages_builder: Callable[[Session, str], dict[str, bool]],
         num_topics: int,
         log_prefix: str = "Analysis",
-        max_chars: int | None = None,
-        overlap: int | None = None,
         pre_execute_hook: Callable[[str, dict[str, bool]], bool] | None = None,
     ) -> None:
         """
@@ -702,8 +765,6 @@ class AnalysisService:
             skip_stages_builder: 构建 skip_stages 的函数
             num_topics: 主题数量
             log_prefix: 日志前缀
-            max_chars: 分块最大字符数
-            overlap: 分块重叠字符数
             pre_execute_hook: 执行前的钩子函数，返回 True 表示跳过执行
         """
         start_time = time.time()
@@ -719,9 +780,20 @@ class AnalysisService:
             if claim_result == "cancelled":
                 self.task_manager.cancel_completed_task(task_id, error="用户取消")
                 logger.info(f"Task {task_id} was cancelled before execution claim completed")
+                # 2026-08-14 P2-10：claim 前取消（含 _claim_pending_run 内部收口分支）也
+                # 必须补发 SSE 终态事件，否则已连接的客户端永远等不到取消信号，
+                # 只能靠轮询 /status 兜底
+                await event_manager.send(
+                    task_id=task_id,
+                    event_type=StreamMessageType.task_cancelled.value,
+                    data={"stage": "cancelled", "message": "任务已取消"},
+                )
                 return
             if claim_result == "skipped":
                 logger.info(f"Task {task_id} execution claim skipped because another state transition won the DB truth")
+                # 2026-08-13 P2：skipped 也要清掉本进程的内存执行缓存（停心跳），
+                # 否则残留 TaskInfo 的心跳写回会覆盖真实 owner 的 worker_id/heartbeat_at
+                self.task_manager.cancel_completed_task(task_id)
                 return
 
             (
@@ -752,11 +824,15 @@ class AnalysisService:
                 analysis_logger=analysis_logger,
                 skip_stages=skip_stages,
                 num_topics=num_topics,
-                max_chars=max_chars,
-                overlap=overlap,
             )
 
             if self._is_cancelled(task_id):
+                # 2026-08-14 P2-13：所有阶段已完成但成功收口前收到取消——此前直接
+                # return 既不落 DB 终态也不发事件，run 卡在 running 直到重启孤儿回收
+                if session and run_id:
+                    await self.error_handler.handle_cancel(
+                        task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
+                    )
                 return
 
             elapsed = time.time() - start_time
@@ -815,8 +891,12 @@ class AnalysisService:
                     log_prefix=log_prefix,
                 )
             else:
+                # 2026-08-13 修复：与 CancellationStateCheckError 分支同口径，
+                # 环境初始化失败（session/run_id 均缺失）时也必须把 DB 终态写下去，
+                # 否则 run 永远停在 running/pending，只能等重启心跳超时兜底
                 self.novel_service.update_task_status(task_id, "failed")
                 self.task_manager.complete_task(task_id, success=False, error=str(e))
+                self._write_failure_to_db(task_id, str(e))
         finally:
             if analysis_logger:
                 analysis_logger.close()

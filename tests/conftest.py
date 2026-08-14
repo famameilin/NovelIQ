@@ -14,7 +14,7 @@
 
 修改时间: 2026-04-20
 任务: fix-test-db-isolation
-修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE_URL，
+修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE，
     并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
 """
 
@@ -97,9 +97,9 @@ def _build_test_engine(database_url: str, schema_name: str):
 def get_test_database_url() -> str:
     """获取测试数据库URL"""
     try:
-        return resolve_database_url_from_env("TEST_DATABASE_URL")
+        return resolve_database_url_from_env("TEST_DATABASE")
     except RuntimeError as exc:
-        raise ValueError("TEST_DATABASE_URL 环境变量未设置") from exc
+        raise ValueError("TEST_DATABASE 环境变量未设置") from exc
 
 
 def _reset_backend_db_singletons() -> None:
@@ -109,7 +109,7 @@ def _reset_backend_db_singletons() -> None:
     创建时间: 2026-04-20
     任务: fix-test-db-isolation
     说明: 测试中存在直接调用 get_session_factory()() 的路径。
-    若不在切换 DATABASE_URL 后立即重置单例，这些调用会继续复用旧连接，导致写入开发库。
+    若不在切换 DATABASE 后立即重置单例，这些调用会继续复用旧连接，导致写入开发库。
     """
     from src.storage import db as db_module
 
@@ -156,6 +156,7 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
 
     with _test_engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         conn.execute(text(f"DROP SCHEMA IF EXISTS {safe_schema} CASCADE"))
         conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
@@ -188,24 +189,31 @@ def force_test_database_url(
     创建时间: 2026-04-20
     任务: fix-test-db-isolation
     说明:
-    - 把 DATABASE_URL 固定指向 TEST_DATABASE_URL
+    - 把 DATABASE_* 固定为 TEST_DATABASE_* 的平铺变量
     - 把 DATABASE_SCHEMA 固定指向当前 pytest 进程独立 schema
     - 覆盖所有直接调用 get_session_factory()() / get_engine() 的路径
     - 会话结束后恢复原始环境变量，避免影响开发命令
     """
-    original_url = os.environ.get("DATABASE_URL")
+    database_fields = ("DATABASE_URL", "DATABASE_USERNAME", "DATABASE_PASSWORD")
+    test_database_fields = ("TEST_DATABASE_URL", "TEST_DATABASE_USERNAME", "TEST_DATABASE_PASSWORD")
+    original_database = {field: os.environ.get(field) for field in database_fields}
+    for database_field, test_database_field in zip(database_fields, test_database_fields, strict=True):
+        test_database_value = os.environ.get(test_database_field)
+        if test_database_value is None or not test_database_value.strip():
+            raise ValueError(f"{test_database_field} 环境变量未设置")
+        os.environ[database_field] = test_database_value
     original_schema = os.environ.get("DATABASE_SCHEMA")
-    os.environ["DATABASE_URL"] = test_database_url
     os.environ["DATABASE_SCHEMA"] = test_database_schema
     _reset_backend_db_singletons()
 
     try:
         yield
     finally:
-        if original_url is not None:
-            os.environ["DATABASE_URL"] = original_url
-        elif "DATABASE_URL" in os.environ:
-            del os.environ["DATABASE_URL"]
+        for database_field, original_value in original_database.items():
+            if original_value is not None:
+                os.environ[database_field] = original_value
+            else:
+                os.environ.pop(database_field, None)
 
         if original_schema is not None:
             os.environ["DATABASE_SCHEMA"] = original_schema
@@ -259,31 +267,6 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def insert_test_novel(db_session) -> callable:
-    """
-    插入测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
-
-    创建时间: 2026-04-23
-    任务: 修复 pytest ForeignKeyViolation
-    """
-
-    def _insert(novel_id: str) -> None:
-        from src.storage.models import Novel
-
-        db_session.add(
-            Novel(
-                novel_id=novel_id,
-                filename=f"{novel_id}.txt",
-                file_path=f"data/uploads/{novel_id}.txt",
-                file_size=128,
-            )
-        )
-        db_session.commit()
-
-    return _insert
-
-
-@pytest.fixture
 def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
     """
     API 测试客户端 fixture
@@ -294,7 +277,7 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
 
     修改时间: 2026-04-20
     任务: fix-test-db-isolation
-    修改内容: 删除局部 DATABASE_URL 覆盖逻辑，改为复用全局自动隔离，避免夹具之间出现连接串切换竞态
+    修改内容: 删除局部 DATABASE 覆盖逻辑，改为复用全局自动隔离，避免夹具之间出现连接对象切换竞态
 
     使用方式:
         def test_something(api_client):
