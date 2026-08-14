@@ -233,3 +233,8 @@ scripts/experiments/
 
 # ZCode 会话内部计划
 .zcode/
+
+# 图形化分析报告导出独立工具（不纳入版本库，含其测试）
+tools/report_exporter/
+tests/report/
+
