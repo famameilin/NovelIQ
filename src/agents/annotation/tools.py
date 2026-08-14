@@ -740,12 +740,13 @@ class AnnotationToolLedger:
         chunk = self.ready_chunk
         self.completed_chunks.append(chunk)
         self.authorized_text_chunk_ids.add(self.current_chunk_id)
-        self.phase = "continuity_open"
+        # 2026-08-14 D1：不再有 continuity_open 阶段，冻结 chunk 后直接进入终态
+        self.phase = "completed"
         return chunk
 
     def finish(self) -> BoundChapterAnnotation:
         """2026-08-11 用于在 chunk 冻结后由系统用各 chunk summary 生成章节摘要并冻结章节"""
-        if self.phase != "continuity_open":
+        if self.phase != "completed":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chapter")
         annotation = BoundChapterAnnotation(
             chapter_summary="\n".join(
@@ -1087,7 +1088,7 @@ def build_annotation_tools(
     @tool
     def search_graph(entities: list[str], relation_type: str | None = None) -> str:
         """2026-08-09 用于按实体名查询图节点及与其相连的一跳邻域（边和邻居节点）"""
-        if ledger.phase not in {"chunk_open", "continuity_open"}:
+        if ledger.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_graph")
         if not entities:
             raise AnnotationInputError("search_graph.entities 不能为空")
@@ -1121,15 +1122,15 @@ def build_annotation_tools(
 
     @tool
     async def search_text(query: str) -> str:
-        """2026-08-07 用于返回运行内编号而不暴露真实 chunk ID（范围由当前阶段自动决定）"""
+        """2026-08-14 用于返回运行内编号而不暴露真实 chunk ID（范围由 allow_future_context 决定）"""
         normalized_query = _normalize_query(query, tool_name="search_text")
-        expected_range = "previous" if ledger.phase == "chunk_open" else "future"
-        if ledger.phase not in {"chunk_open", "continuity_open"}:
+        if ledger.phase != "chunk_open":
             raise AnnotationAuthorizationError(
                 f"阶段 {ledger.phase} 不允许 search_text"
             )
-        if expected_range == "future" and not ledger.allow_future_context:
-            raise AnnotationAuthorizationError("allow_future_context=false 时禁止读取 future")
+        # 2026-08-14 D1：不再有 continuity_open 阶段；allow_future_context 直接控制检索范围，
+        # 开启时前后文都可检索，关闭时仅限当前章节之前的原文
+        expected_range = "all" if ledger.allow_future_context else "previous"
         results = await query_service.search_text(
             normalized_query,
             range_name=expected_range,
@@ -1169,10 +1170,13 @@ def build_annotation_tools(
             raise AnnotationAuthorizationError(
                 f"read_text.result_number 未由本轮 search_text 返回: {result_number}"
             )
-        expected_range = "previous" if ledger.phase == "chunk_open" else "future"
-        if ledger.text_result_range.get(result_number) != expected_range:
+        if ledger.phase != "chunk_open":
+            raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 read_text")
+        stored_range = ledger.text_result_range.get(result_number)
+        allowed_ranges = {"previous"} | ({"future", "all"} if ledger.allow_future_context else set())
+        if stored_range not in allowed_ranges:
             raise AnnotationAuthorizationError(
-                f"read_text.result_number 不属于当前 {expected_range} 阶段"
+                f"read_text.result_number 超出当前权限范围（allow_future_context={ledger.allow_future_context}）"
             )
         content = query_service.read_text(item.chunk_id)
         ledger.authorized_text_chunk_ids.add(item.chunk_id)
@@ -1181,7 +1185,7 @@ def build_annotation_tools(
     @tool
     def search_pool(query: str) -> str:
         """2026-08-07 用于返回临时案例编号和无 ID 伏笔语义"""
-        if ledger.phase not in {"chunk_open", "continuity_open"}:
+        if ledger.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_pool")
         normalized_query = _normalize_query(query, tool_name="search_pool")
         result = query_service.search_pool(
@@ -1231,7 +1235,7 @@ def build_annotation_tools(
         tool_name: str,
     ) -> ActiveCaseDetails:
         """2026-08-11 用于公共校验案例编号并回读活动案例稳定目标"""
-        if ledger.phase not in {"chunk_open", "continuity_open"}:
+        if ledger.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 {tool_name}")
         case_id = ledger.case_number_registry.get(case_number)
         if case_id is None:
@@ -1440,7 +1444,7 @@ def build_annotation_tools(
         （type 是任意描述字符串；description 只写人类可读说明，keys/type/dialogue_id/setup_id
         必须作为独立参数提交，示例：push_case(description="玉戒尺在第 5 章异常发光",
         keys=["玉戒尺"], type="伏笔疑点", setup_id="S-123")）"""
-        if ledger.phase not in {"chunk_open", "continuity_open"}:
+        if ledger.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push_case")
         normalized_type = unicodedata.normalize("NFC", type).strip()
         if not normalized_type:

@@ -114,7 +114,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - 七个领域全部写入成功后系统自动完成章节，无需也不可调用完成工具
 - 章节摘要由系统根据各 chunk 的 summary 自动生成
 
-allow_future_context={allow_future_context}
+- 原文检索范围：allow_future_context={allow_future_context}（true 可检索并读取后文，false 仅限前文）
+
 小说：{novel_title}
 
 ## 初始活动案例

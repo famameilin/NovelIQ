@@ -71,7 +71,7 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
         current_chunk_text="“住手”回荡",
         allow_future_context=False,
     )
-    llm = _SequenceLLM([AIMessage(content="我不调用工具")])
+    llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 3)
     graph = build_annotation_graph(
         llm,
         build_annotation_tools(_QueryService(), ledger),
@@ -87,6 +87,7 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
             ],
             "phase": "chunk_open",
             "iterations": 0,
+            "protocol_errors": 0,
             "error": None,
         }
     )
@@ -99,8 +100,10 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
             select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)
         ).scalars()
     )
-    assert len(turns) == 1
-    assert turns[0].turn_ms is not None and turns[0].turn_ms >= 0
+    # 2026-08-14 P1-4：协议错误预算内重试（2 次重试 = 3 个回合），每个回合都闭合计时
+    assert len(turns) == 3
+    for turn in turns:
+        assert turn.turn_ms is not None and turn.turn_ms >= 0
 
 
 @pytest.mark.asyncio
@@ -244,6 +247,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
             ],
             "phase": "chunk_open",
             "iterations": 0,
+            "protocol_errors": 0,
             "error": None,
         }
     )
@@ -269,7 +273,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         assert turn.model_ms is not None and turn.model_ms >= 0
         assert turn.turn_ms is not None and turn.turn_ms >= 0
         assert turn.raw_response["role"] == "ai"
-        assert turn.context_summary["phase"] in {"chunk_open", "continuity_open", "completed"}
+        assert turn.context_summary["phase"] in {"chunk_open", "completed"}
 
     tool_rows = list(
         db_session.execute(

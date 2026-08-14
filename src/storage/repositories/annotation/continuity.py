@@ -199,15 +199,18 @@ class DatabaseAnnotationQueryService:
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchResult]:
-        """2026-08-07 用于按 previous 或 future 范围联合定位原文候选"""
+        """2026-08-14 用于按 previous/future/all 范围联合定位原文候选"""
         if range_name == "previous":
             min_chunk_id = None
             max_chunk_id = self.current_first_chunk_id - 1
         elif range_name == "future":
             min_chunk_id = self.current_last_chunk_id + 1
             max_chunk_id = None
+        elif range_name == "all":
+            min_chunk_id = None
+            max_chunk_id = None
         else:
-            raise ValueError("search_text.range 只能是 previous 或 future")
+            raise ValueError("search_text.range 只能是 previous、future 或 all")
         candidates = await self.text_search_service.search(
             query,
             min_chunk_id=min_chunk_id,
