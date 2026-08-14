@@ -91,6 +91,7 @@ export function useAnalysisStatus(
     setError,
     setStageDuration,
     reset,
+    resumeEpoch,
   } = useStreamStore();
 
   const enabled = !!novelId && !!taskId && (options?.enabled ?? true);
@@ -426,7 +427,9 @@ export function useAnalysisStatus(
       }
       reset();
     }
-  }, [taskId, novelId, setTaskId, reset, syncTaskStatus]);
+    // 2026-08-14 D5：resumeEpoch 变化（同 task_id resume 开新轮）时同样重置
+    // 内部缓冲，避免旧轮 LLM 输出/进度状态与新轮混叠
+  }, [taskId, novelId, setTaskId, reset, syncTaskStatus, resumeEpoch]);
 
   // 浏览器后台期间 EventSource 可能保持连接（不触发重连），
   // 前台恢复时主动 flush 缓冲并做一次 HTTP 状态回填，避免进度/终态陈旧

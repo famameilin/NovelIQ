@@ -287,8 +287,12 @@ export const resumeTaskHandler = http.post(
       return HttpResponse.json({ detail: "任务不存在" }, { status: 404 });
     }
 
-    if (!["pending", "failed"].includes(task.status)) {
-      return HttpResponse.json({ detail: `仅支持继续 pending/failed 任务，当前状态为 ${task.status}` }, { status: 400 });
+    // 2026-08-14 P2-25：resume 允许 cancelled（与真实后端 analysis_service 一致）
+    if (!["pending", "failed", "cancelled"].includes(task.status)) {
+      return HttpResponse.json(
+        { detail: `仅支持继续 pending/failed/cancelled 任务，当前状态为 ${task.status}` },
+        { status: 400 }
+      );
     }
 
     const existingSim = simulatedTasks.get(taskId as string);

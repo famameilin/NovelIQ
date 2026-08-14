@@ -48,9 +48,13 @@ interface StreamState {
   streamSelectionModes: Map<string, "auto" | "manual">;
   stageDurations: Map<string, number>;
   error: string | null;
+  /** 2026-08-14 D5：resume 轮次信号，每次 resetStreamForTask 自增，消费方据此重置内部缓冲 */
+  resumeEpoch: number;
 
   setConnected: (connected: boolean) => void;
   setTaskId: (taskId: string | null) => void;
+  /** 2026-08-14 D5：无条件重置数据并设置任务（resume 同 task_id 开新轮时使用） */
+  resetStreamForTask: (taskId: string | null) => void;
   updateProgress: (progress: StreamEventData) => void;
   appendLLMOutput: (data: StreamEventData) => void;
   setActiveStreamSelection: (scopeKey: string, groupKey: string) => void;
@@ -288,6 +292,7 @@ const initialState = {
   streamSelectionModes: new Map<string, "auto" | "manual">(),
   stageDurations: new Map<string, number>(),
   error: null,
+  resumeEpoch: 0,
 };
 
 export const useStreamStore = create<StreamState>()((set) => ({
@@ -311,6 +316,20 @@ export const useStreamStore = create<StreamState>()((set) => ({
         error: null,
       };
     }),
+
+  // 2026-08-14 D5：resume 是"同 task_id 开新轮"，setTaskId 对同 id 幂等不重置；
+  // 这里无条件清空旧轮数据并推进 resumeEpoch，供 useAnalysisStatus 重置内部缓冲
+  resetStreamForTask: (taskId) =>
+    set((state) => ({
+      currentTaskId: taskId,
+      progress: null,
+      llmOutputs: new Map<string, LLMStreamGroup>(),
+      activeStreamSelections: new Map<string, string>(),
+      streamSelectionModes: new Map<string, "auto" | "manual">(),
+      stageDurations: new Map<string, number>(),
+      error: null,
+      resumeEpoch: state.resumeEpoch + 1,
+    })),
 
   updateProgress: (progress) =>
     set((state) => {
