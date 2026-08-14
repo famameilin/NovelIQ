@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from sqlalchemy import select
 
@@ -11,7 +13,9 @@ from src.agents.annotation.schema import (
     CaseSearchResult,
     PendingCase,
 )
+from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.config import settings
+from src.preprocess.tokenize import tokenize
 from src.storage.models import DialogueRecord, ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.repositories import ForeshadowingRepository
 from src.storage.repositories.annotation.continuity import (
@@ -19,10 +23,39 @@ from src.storage.repositories.annotation.continuity import (
     DatabaseAnnotationQueryService,
     DialogueRecordRepository,
 )
+from src.storage.repositories.paragraph_repository import ParagraphRepository
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+
+
+def _insert_paragraphs(
+    db_session,
+    run_id: str,
+    texts: list[str],
+    chapter_ids: list[int] | None = None,
+) -> tuple[int, int]:
+    """2026-08-14 二期段落化：检索边界为段落事实源，测试须先落段落行并返回 min/max"""
+    resolved_chapter_ids = chapter_ids or [1] * len(texts)
+    offset = 0
+    chunks = []
+    for chunk_id, (chapter_id, text) in enumerate(zip(resolved_chapter_ids, texts, strict=True)):
+        chunks.append(
+            Chunk(
+                index=chunk_id,
+                text=text,
+                start=offset,
+                end=offset + len(text),
+                chapter_id=chapter_id,
+            )
+        )
+        offset += len(text)
+    spans = split_chunk_paragraphs(chunks)
+    spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]
+    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
+    db_session.commit()
+    return 0, len(spans) - 1
 
 
 def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> None:
@@ -61,8 +94,8 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
         db_session,
         run_id=run_id,
         current_chapter_id=1,
-        current_first_chunk_id=0,
-        current_last_chunk_id=0,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
     )
 
     key_matches = [
@@ -85,8 +118,8 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
 
 
 @pytest.mark.asyncio
-async def test_text_search_returns_only_matching_later_chunks(db_session, monkeypatch) -> None:
-    """2026-08-06 用于验证后文搜索只返回当前位置之后的匹配章节与 chunk"""
+async def test_text_search_returns_only_matching_later_paragraphs(db_session, monkeypatch) -> None:
+    """2026-08-14 二期段落化：后文搜索按段落边界返回当前位置之后的匹配段落"""
     monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -94,20 +127,28 @@ async def test_text_search_returns_only_matching_later_chunks(db_session, monkey
         chapter_ids=[1, 2, 3],
         title="后文动态检索",
     )
+    _insert_paragraphs(
+        db_session,
+        run_id,
+        ["顾霜在当前章现身", "第二章没有目标内容", "第三章顾霜身份揭晓"],
+        chapter_ids=[1, 2, 3],
+    )
     service = DatabaseAnnotationQueryService(
         db_session,
         run_id=run_id,
         current_chapter_id=1,
-        current_first_chunk_id=0,
-        current_last_chunk_id=0,
+        # 当前章（chapter 1）的段落边界：只有 paragraph_id=0
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
     )
 
     results = await service.search_text("顾霜", range_name="future")
 
-    assert [(item.chapter_id, item.chunk_id) for item in results] == [(3, 2)]
+    assert [(item.chapter_id, item.paragraph_id) for item in results] == [(3, 2)]
     assert "顾霜" in results[0].excerpt
-    assert service.read_text(2) == "第三章顾霜身份揭晓"
-    with pytest.raises(ValueError, match="原文 chunk 不存在或跨 run"):
+    # read_text 按 paragraph_id 读目标段 + 默认上下文（前后各一段，换行分隔）
+    assert service.read_text(2) == "第二章没有目标内容\n第三章顾霜身份揭晓"
+    with pytest.raises(ValueError, match="原文段落不存在或跨 run"):
         service.read_text(999)
 
 

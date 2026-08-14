@@ -69,21 +69,21 @@ class _QueryService:
         return SearchResult(results=[self._case()])
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-08-07 用于记录范围并返回原文候选"""
+        """2026-08-07 用于记录范围并返回原文候选（M6：候选定位到段落）"""
         del limit
         self.text_queries.append((query, range_name))
         return [
             TextSearchResult(
                 chapter_id=2,
-                chunk_id=20,
+                paragraph_id=20,
                 excerpt="顾霜喝道",
                 keyword_score=1.0,
             )
         ]
 
-    def read_text(self, chunk_id):
-        """2026-08-07 用于记录已由文本搜索候选授权的原文读取"""
-        self.reads.append(chunk_id)
+    def read_text(self, paragraph_id):
+        """2026-08-07 用于记录已由文本搜索候选授权的原文段落读取"""
+        self.reads.append(paragraph_id)
         return "顾霜喝道"
 
     def fetch_active_case_details(self, case_id):
@@ -160,21 +160,21 @@ class _ForeignChunkQueryService(_QueryService):
         )
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-08-11 用于返回旧 chunk 原文候选"""
+        """2026-08-11 用于返回旧章段落原文候选"""
         del limit
         self.text_queries.append((query, range_name))
         return [
             TextSearchResult(
                 chapter_id=9,
-                chunk_id=99,
+                paragraph_id=99,
                 excerpt="顾霜喝道",
                 keyword_score=1.0,
             )
         ]
 
-    def read_text(self, chunk_id):
-        """2026-08-11 用于记录旧 chunk 原文读取"""
-        self.reads.append(chunk_id)
+    def read_text(self, paragraph_id):
+        """2026-08-11 用于记录旧章段落原文读取"""
+        self.reads.append(paragraph_id)
         return "顾霜喝道"
 
 
@@ -857,11 +857,16 @@ def test_future_enabled_searches_all_and_read_permission_follows_config() -> Non
     assert service.text_queries == [("顾霜", "all")]
     assert payload[0]["result_number"] == 1
     assert "chunk_id" not in payload[0]
+    assert "paragraph_id" not in payload[0]
     read_receipt = json.loads(
         _find_tool(tools, "read_text").invoke({"result_number": 1})
     )
     assert read_receipt == {"content": "顾霜喝道"}
     assert service.reads == [20]
+    # M6：read 授权实际返回的段落及上下文各 1 段（与查询服务上下文契约对齐）
+    assert 20 in ledger.authorized_text_paragraph_ids
+    assert 19 in ledger.authorized_text_paragraph_ids
+    assert 21 in ledger.authorized_text_paragraph_ids
 
     # 关闭开关后，已检索的后文结果不再可读（权限随配置收放）
     ledger.allow_future_context = False
@@ -1017,14 +1022,14 @@ def test_resolve_fact_case_rejects_unregistered_entity() -> None:
 
 
 def test_resolve_case_authorized_on_initial_display() -> None:
-    """2026-08-12 用于验证初始案例展示即授权其源 chunk，无需先 read_text 即可解决"""
+    """2026-08-12 用于验证初始案例展示即授权其源章，无需先 read_text 即可解决"""
     service = _ForeignChunkQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     ledger.graph_queried = True
     initial_cases, rotation_ids = service.find_initial_case_candidates("current")
     ledger.register_initial_cases(initial_cases, rotation_ids)
-    assert 99 in ledger.authorized_text_chunk_ids
+    assert 99 in ledger.authorized_chapter_ids
     tools = _tools(service, ledger)
 
     case_number = ledger.case_number_by_id["foreign-1"]
@@ -1045,7 +1050,7 @@ def test_resolve_case_authorized_on_initial_display() -> None:
 
 
 def test_resolve_case_allowed_after_read_authorization() -> None:
-    """2026-08-11 用于验证读取旧 chunk 原文后解决案例成功"""
+    """2026-08-11 用于验证读取旧章段落原文后解决案例成功"""
     import asyncio
 
     service = _ForeignChunkQueryService()
@@ -1060,7 +1065,11 @@ def test_resolve_case_allowed_after_read_authorization() -> None:
         asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
     )
     _find_tool(tools, "read_text").invoke({"result_number": search[0]["result_number"]})
-    assert 99 in ledger.authorized_text_chunk_ids
+    # 展示授权源章；read 授权实际返回的段落（含上下文）
+    assert 99 in ledger.authorized_chapter_ids
+    assert 99 in ledger.authorized_text_paragraph_ids
+    assert 98 in ledger.authorized_text_paragraph_ids
+    assert 100 in ledger.authorized_text_paragraph_ids
 
     case_number = ledger.case_number_by_id["foreign-1"]
     response = json.loads(

@@ -3,7 +3,7 @@
 from .embedding_ops import (
     ParagraphEmbeddingRow,
     SimilarParagraphRow,
-    get_incomplete_paragraph_embedding_chunk_ids,
+    get_incomplete_paragraph_embedding_paragraph_ids,
     has_paragraph_embeddings,
     insert_paragraph_embeddings,
     search_similar_paragraphs,
@@ -31,7 +31,7 @@ __all__ = [
     "clear_chunk_topics",
     "fetch_chunk_topics_agg",
     "insert_paragraph_embeddings",
-    "get_incomplete_paragraph_embedding_chunk_ids",
+    "get_incomplete_paragraph_embedding_paragraph_ids",
     "search_similar_paragraphs",
     "has_paragraph_embeddings",
     "SimilarParagraphRow",

@@ -379,15 +379,13 @@ async def _generate_paragraph_embedding_rows(
     生成 paragraph embedding 写入 DTO
 
     段落身份以 paragraphs 表为准：embedding 数据从段落事实源读取（不再在 embedding
-    阶段重新切段），保证与段落严格对齐——同一 run 内每条 embedding 的
-    chunk_id/paragraph_index/local/global 坐标与 paragraphs 行一一对应
+    阶段重新切段），保证与段落严格对齐——二期段落化后 embedding 行只携带
+    paragraph_id 与向量，chunk/坐标等派生信息一律从 paragraphs 表读取
 
     复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求
 
     修改说明: paragraph embedding 缺失会阻断语义原文定位，这里采用 fail fast，
               避免 preprocess 成功但后续 readiness 永远失败
-
-    修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段
 
     修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进
     """
@@ -395,10 +393,11 @@ async def _generate_paragraph_embedding_rows(
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
     with get_session_factory()() as session:
-        paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
+        paragraph_refs: list[tuple[int, int, int, int, int, int, int, str]] = []
         for row in ParagraphRepository(session).fetch_paragraph_rows(run_id):
             paragraph_refs.append(
                 (
+                    row.paragraph_id,
                     row.chunk_id,
                     row.paragraph_index,
                     row.local_start_char,
@@ -442,7 +441,7 @@ async def _generate_paragraph_embedding_rows(
             )
         )
 
-    paragraph_texts = [paragraph_text for _, _, _, _, _, _, paragraph_text in paragraph_refs]
+    paragraph_texts = [paragraph_text for _, _, _, _, _, _, _, paragraph_text in paragraph_refs]
     paragraph_embeddings = await embedding_client.embed_texts(
         paragraph_texts,
         progress_callback=_emit_paragraph_embedding_progress,
@@ -456,13 +455,14 @@ async def _generate_paragraph_embedding_rows(
     rows = []
     missing_refs: list[tuple[int, int]] = []
     for (
+        paragraph_id,
         chunk_id,
         paragraph_index,
-        local_start_char,
-        local_end_char,
-        global_start_char,
-        global_end_char,
-        paragraph_text,
+        _local_start_char,
+        _local_end_char,
+        _global_start_char,
+        _global_end_char,
+        _paragraph_text,
     ), embedding in zip(
         paragraph_refs,
         paragraph_embeddings,
@@ -479,13 +479,7 @@ async def _generate_paragraph_embedding_rows(
             continue
         rows.append(
             row_factory(
-                chunk_id=chunk_id,
-                paragraph_index=paragraph_index,
-                paragraph_text=paragraph_text,
-                local_start_char=local_start_char,
-                local_end_char=local_end_char,
-                global_start_char=global_start_char,
-                global_end_char=global_end_char,
+                paragraph_id=paragraph_id,
                 embedding_vector=embedding,
             )
         )

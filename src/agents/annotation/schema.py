@@ -511,7 +511,8 @@ class DialogueCandidate(StrictModel):
     """2026-08-07 用于系统保存对话候选真实原文和位置"""
 
     candidate_key: str = Field(min_length=1)
-    chunk_id: int = Field(ge=0)
+    # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20），候选不落库
+    chunk_id: int
     start: int = Field(ge=0)
     end: int = Field(gt=0)
     content: str = Field(min_length=1)
@@ -570,7 +571,8 @@ class BoundForeshadowing(ForeshadowingInput):
 class BoundChunkAnnotation(StrictModel):
     """2026-08-07 用于保存系统完成绑定的单个 chunk 正式标注"""
 
-    chunk_id: int = Field(ge=0)
+    # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 合并为真实 chunk
+    chunk_id: int
     metrics: ChunkMetricsInput
     entities: BoundEntityDirectory
     character_observations: list[BoundCharacterObservation]
@@ -601,10 +603,10 @@ class BoundChapterAnnotation(StrictModel):
 
 
 class TextSearchResult(StrictModel):
-    """2026-08-07 用于查询服务返回真实原文定位结果"""
+    """2026-08-07 用于查询服务返回真实原文定位结果（M6 段落化：定位到 paragraph_id）"""
 
     chapter_id: int = Field(gt=0)
-    chunk_id: int = Field(ge=0)
+    paragraph_id: int = Field(gt=0)
     excerpt: str
     keyword_score: float = Field(ge=0)
     semantic_score: float | None = None
@@ -764,7 +766,8 @@ class PendingCase(StrictModel):
     """2026-08-11 用于保存模型 push 登记的新连续性疑点案例"""
 
     type: CaseType
-    chunk_id: int = Field(ge=0)
+    # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 映射回真实 chunk
+    chunk_id: int
     keys: list[str] = Field(min_length=1)
     description: str
     target_key: str
@@ -772,13 +775,19 @@ class PendingCase(StrictModel):
 
 
 class AgentRunAudit(StrictModel):
-    """2026-08-10 用于保存系统范围搜索凭据和领域修订记录（完整工具审计进入新审计表）"""
+    """2026-08-10 用于保存系统范围搜索凭据和领域修订记录（完整工具审计进入新审计表）
+
+    2026-08-14 M6/M7：authorized_text_chunk_ids 拆分为章级（案例展示/解决）与段级
+    （read_text 实际返回）两个授权集合；sub_chunk_index 记录子块协议运行序号。
+    """
 
     allow_future_context: bool
     write_revisions: list[dict[str, Any]]
     rotation_case_ids: list[str]
-    authorized_text_chunk_ids: list[int]
+    authorized_chapter_ids: list[int]
+    authorized_text_paragraph_ids: list[int]
     closed_case_ids: list[str] = Field(default_factory=list)
+    sub_chunk_index: int = 0
 
 
 class AgentRunResult(StrictModel):

@@ -129,7 +129,8 @@ def _agent_result(
             allow_future_context=False,
             write_revisions=[],
             rotation_case_ids=[],
-            authorized_text_chunk_ids=[chunk_id],
+            authorized_chapter_ids=[chunk_id],
+            authorized_text_paragraph_ids=[],
         ),
     )
 

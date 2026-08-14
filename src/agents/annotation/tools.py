@@ -114,10 +114,10 @@ class AnnotationQueryService(Protocol):
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchResult]:
-        """2026-08-07 用于定位前文或后文原文候选"""
+        """2026-08-07 用于定位前文或后文原文候选（M6：候选携带 paragraph_id）"""
 
-    def read_text(self, chunk_id: int) -> str:
-        """2026-08-07 用于读取系统已登记的原文候选"""
+    def read_text(self, paragraph_id: int) -> str:
+        """2026-08-07 用于读取系统已登记的原文候选段落（含上下文，M6 段落化）"""
 
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于读取活动案例内部稳定目标"""
@@ -161,7 +161,10 @@ class AnnotationToolLedger:
     next_text_result_number: int = 1
     resolved_cases: list[ResolvedCase] = field(default_factory=list)
     pushed_cases: list[PendingCase] = field(default_factory=list)
-    authorized_text_chunk_ids: set[int] = field(default_factory=set)
+    # 2026-08-14 M6：案例展示/解决授权章（案例源是章级定位，§12.3）
+    authorized_chapter_ids: set[int] = field(default_factory=set)
+    # 2026-08-14 M6：read_text 实际返回的段落（含上下文各 1 段）
+    authorized_text_paragraph_ids: set[int] = field(default_factory=set)
     # 2026-08-12 最近一次 write_dialogues 未提交候选序号（系统默认按 not_dialogue 处理）
     dialogue_missing_indexes: list[int] = field(default_factory=list)
     annotation: BoundChapterAnnotation | None = None
@@ -208,7 +211,8 @@ class AnnotationToolLedger:
                 "next_text_result_number": self.next_text_result_number,
                 "resolved_cases": self.resolved_cases,
                 "pushed_cases": self.pushed_cases,
-                "authorized_text_chunk_ids": self.authorized_text_chunk_ids,
+                "authorized_chapter_ids": self.authorized_chapter_ids,
+                "authorized_text_paragraph_ids": self.authorized_text_paragraph_ids,
                 "dialogue_missing_indexes": self.dialogue_missing_indexes,
                 "annotation": self.annotation,
                 "search_log": self.search_log,
@@ -225,12 +229,12 @@ class AnnotationToolLedger:
         cases: list[CaseSearchResult],
         rotation_case_ids: list[str],
     ) -> None:
-        """2026-08-12 用于登记初始案例并分配运行内临时编号（案例展示即授权其源 chunk）"""
+        """2026-08-12 用于登记初始案例并分配运行内临时编号（案例展示即授权其源章）"""
         self.initial_cases = {case.id: case for case in cases}
         self.rotation_case_ids = list(dict.fromkeys(rotation_case_ids))
         for case in cases:
             self.register_case_number(case.id)
-            self.authorized_text_chunk_ids.add(case.chunk_id)
+            self.authorized_chapter_ids.add(case.chunk_id)
 
     def register_case_number(self, case_id: str) -> int:
         """2026-08-07 用于为真实案例 ID 分配稳定运行内编号"""
@@ -739,7 +743,8 @@ class AnnotationToolLedger:
             )
         chunk = self.ready_chunk
         self.completed_chunks.append(chunk)
-        self.authorized_text_chunk_ids.add(self.current_chunk_id)
+        # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
+        # 相等校验），不再登记文本授权集合
         # 2026-08-14 D1：不再有 continuity_open 阶段，冻结 chunk 后直接进入终态
         self.phase = "completed"
         return chunk
@@ -1122,7 +1127,7 @@ def build_annotation_tools(
 
     @tool
     async def search_text(query: str) -> str:
-        """2026-08-14 用于返回运行内编号而不暴露真实 chunk ID（范围由 allow_future_context 决定）"""
+        """2026-08-14 用于返回运行内编号而不暴露真实 paragraph ID（范围由 allow_future_context 决定）"""
         normalized_query = _normalize_query(query, tool_name="search_text")
         if ledger.phase != "chunk_open":
             raise AnnotationAuthorizationError(
@@ -1164,7 +1169,13 @@ def build_annotation_tools(
 
     @tool
     def read_text(result_number: int) -> str:
-        """2026-08-07 用于通过运行内编号读取真实原文"""
+        """2026-08-07 用于通过运行内编号读取真实原文（目标段落及前后各 1 段上下文）
+
+        2026-08-14 M6：授权实际返回的段落——ledger 按确定性规则登记
+        {paragraph_id - 1, paragraph_id, paragraph_id + 1}，与查询服务
+        read_text 的上下文契约（前后各 1 段）对齐；负 ID 与不存在的段落
+        ID 无害（读不到自然不算授权）。
+        """
         item = ledger.text_result_registry.get(result_number)
         if item is None:
             raise AnnotationAuthorizationError(
@@ -1178,8 +1189,10 @@ def build_annotation_tools(
             raise AnnotationAuthorizationError(
                 f"read_text.result_number 超出当前权限范围（allow_future_context={ledger.allow_future_context}）"
             )
-        content = query_service.read_text(item.chunk_id)
-        ledger.authorized_text_chunk_ids.add(item.chunk_id)
+        content = query_service.read_text(item.paragraph_id)
+        ledger.authorized_text_paragraph_ids.update(
+            {item.paragraph_id - 1, item.paragraph_id, item.paragraph_id + 1}
+        )
         return json.dumps({"content": content}, ensure_ascii=False)
 
     @tool
@@ -1198,8 +1211,8 @@ def build_annotation_tools(
         for item in result.results:
             if isinstance(item, CaseSearchResult):
                 case_number = ledger.register_case_number(item.id)
-                # 案例展示即授权其源 chunk，解决时不再因原文未读取被拒
-                ledger.authorized_text_chunk_ids.add(item.chunk_id)
+                # 案例展示即授权其源章（§12.3 章级定位），解决时不再因原文未读取被拒
+                ledger.authorized_chapter_ids.add(item.chunk_id)
                 case_numbers.append(case_number)
                 views.append(
                     {
@@ -1247,10 +1260,11 @@ def build_annotation_tools(
         details = query_service.fetch_active_case_details(case_id)
         if details is None:
             raise AnnotationInputError(f"案例不存在或已不再 active: {case_number}")
-        allowed_chunk_ids = ledger.authorized_text_chunk_ids | {ledger.current_chunk_id}
-        if details.chunk_id not in allowed_chunk_ids:
+        # 2026-08-14 M6：案例源是章级定位——章被展示授权或为当前章即可解决
+        allowed_chapter_ids = ledger.authorized_chapter_ids | {ledger.current_chapter_id}
+        if details.chunk_id not in allowed_chapter_ids:
             raise AnnotationAuthorizationError(
-                f"案例 {details.id} 原文所在 chunk {details.chunk_id} 未经本轮读取授权，"
+                f"案例 {details.id} 原文所在章 {details.chunk_id} 未经本轮展示授权，"
                 "请先 search_text + read_text 读取原文后再解决"
             )
         return details

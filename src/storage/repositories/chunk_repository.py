@@ -36,7 +36,7 @@ from src.storage.repositories.chunk import (
     fetch_chunk_styles,
     fetch_chunk_styles_full,
     fetch_chunk_topics_agg,
-    get_incomplete_paragraph_embedding_chunk_ids,
+    get_incomplete_paragraph_embedding_paragraph_ids,
     has_paragraph_embeddings,
     insert_chunk_style,
     insert_chunk_topics,
@@ -287,7 +287,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
         if not has_paragraph_embeddings(self.session, run_id):
             return False
-        if get_incomplete_paragraph_embedding_chunk_ids(self.session, run_id):
+        if get_incomplete_paragraph_embedding_paragraph_ids(self.session, run_id):
             return False
         return True
 

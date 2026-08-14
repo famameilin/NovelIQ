@@ -80,11 +80,10 @@ async def test_generate_paragraph_embeddings_uses_paragraph_only(db_session) -> 
     assert mock_client_factory.call_args.kwargs["novel_id"] == novel_id
     mock_client.detect_embedding_dimension.assert_awaited_once()
     mock_ensure_paragraph_schema.assert_called_once()
+    # 二期段落化：embedding 行只携带 paragraph_id + 向量（身份以 paragraphs 表为准）
     paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[2]
-    assert [row.chunk_id for row in paragraph_rows] == [7, 7]
-    assert [row.paragraph_text for row in paragraph_rows] == ["第一段文本", "第二段文本"]
-    assert [row.local_start_char for row in paragraph_rows] == [0, 7]
-    assert [row.global_start_char for row in paragraph_rows] == [0, 7]
+    assert [row.paragraph_id for row in paragraph_rows] == [0, 1]
+    assert [row.embedding_vector for row in paragraph_rows] == [[0.5, 0.6], [0.7, 0.8]]
 
 
 @pytest.mark.asyncio

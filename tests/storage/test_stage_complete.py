@@ -150,30 +150,14 @@ class TestStageCompleteChecks:
         chunk_repo.insert_chunks(run_id, chunks)
         _insert_paragraphs(db_session, run_id, chunks)
         ensure_paragraph_embeddings_schema(db_session, 1024)
+        # 二期段落化：embedding 行按 paragraph_id 对齐段落事实源
+        # （chunk 0 的段 paragraph_id=0，chunk 1 的段 paragraph_id=1）
         insert_paragraph_embeddings(
             db_session,
             run_id,
             [
-                ParagraphEmbeddingRow(
-                    chunk_id=0,
-                    paragraph_index=0,
-                    paragraph_text="测试文本0",
-                    local_start_char=0,
-                    local_end_char=5,
-                    global_start_char=0,
-                    global_end_char=5,
-                    embedding_vector=[0.3] * 1024,
-                ),
-                ParagraphEmbeddingRow(
-                    chunk_id=1,
-                    paragraph_index=0,
-                    paragraph_text="测试文本1",
-                    local_start_char=0,
-                    local_end_char=5,
-                    global_start_char=100,
-                    global_end_char=105,
-                    embedding_vector=[0.4] * 1024,
-                ),
+                ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.3] * 1024),
+                ParagraphEmbeddingRow(paragraph_id=1, embedding_vector=[0.4] * 1024),
             ],
         )
 
@@ -185,6 +169,40 @@ class TestStageCompleteChecks:
             patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
         ):
             assert chunk_repo.is_preprocess_complete(run_id)
+
+    def test_is_preprocess_complete_false_when_partial_paragraph_embeddings(self, db_session):
+        """
+        2026-08-14 二期段落化：readiness 缺口以段落为粒度——
+        部分段落缺 embedding 行时 preprocess 不得判定完成。
+        """
+        run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(novel_id, session=db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+        chunk_repo = ChunkRepository(db_session)
+        chunks = _create_chunks(2)
+        chunk_repo.insert_chunks(run_id, chunks)
+        _insert_paragraphs(db_session, run_id, chunks)
+        ensure_paragraph_embeddings_schema(db_session, 1024)
+        # 只给 paragraph_id=0 写入向量，paragraph_id=1 缺口仍在
+        insert_paragraph_embeddings(
+            db_session,
+            run_id,
+            [ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.3] * 1024)],
+        )
+
+        with (
+            patch(
+                "src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.semantic_enabled",
+                True,
+            ),
+            patch("src.storage.repositories.chunk_repository.settings.models.paragraph_embedding.embedding_dim", 1024),
+        ):
+            assert not chunk_repo.is_preprocess_complete(run_id)
 
     def test_is_annotate_complete_no_annotations(self, db_session):
         """有chunks但无annotations时annotate未完成"""
