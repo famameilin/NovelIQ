@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react";
-import { getChunkCurves, getNarrativeStructure } from "@/api/results";
+import { getParagraphCurves, getNarrativeStructure } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
@@ -15,11 +15,13 @@ import { CurveToolbar } from "@/components/charts/CurveToolbar";
 import { EmotionCurveChart } from "@/components/charts/EmotionCurveChart";
 import { RhythmCurveChart } from "@/components/charts/RhythmCurveChart";
 import { Activity, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+import type { ParagraphCurvePoint } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 
-type EmotionSeriesKey = "pos_density" | "neg_density" | "net_density" | "smoothed_density";
-type RhythmSeriesKey = "surface_tension" | "tension_composite";
+type EmotionSeriesKey = "pos_density" | "neg_density" | "net_density" | "smoothed_net_density";
+type RhythmSeriesKey = "surface_tension" | "smoothed_surface_tension";
 
 interface VisibleSeriesState {
   emotion: Set<EmotionSeriesKey>;
@@ -45,10 +47,12 @@ export function CurvesPage() {
   const rhythmChartRef = useRef<ReactEChartsCore>(null);
 
   const [visibleSeries, setVisibleSeries] = useState<VisibleSeriesState>({
-    emotion: new Set<EmotionSeriesKey>(["pos_density", "neg_density", "net_density", "smoothed_density"]),
-    rhythm: new Set<RhythmSeriesKey>(["surface_tension", "tension_composite"]),
+    emotion: new Set<EmotionSeriesKey>(["pos_density", "neg_density", "net_density", "smoothed_net_density"]),
+    rhythm: new Set<RhythmSeriesKey>(["surface_tension", "smoothed_surface_tension"]),
   });
 
+  // M4：zoomRange 语义从"分块索引对"改为"position 数值对"（值域 [0,1]），
+  // 图表内按 zoomRange[0]/1*100 换算 dataZoom 百分比
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
 
   useEffect(() => {
@@ -60,8 +64,8 @@ export function CurvesPage() {
   const enabled = !!novelId && !!storeTaskId;
 
   const curvesQuery = useQuery({
-    queryKey: ["chunk-curves", novelId, storeTaskId],
-    queryFn: () => getChunkCurves(novelId!, storeTaskId!),
+    queryKey: ["paragraph-curves", novelId, storeTaskId],
+    queryFn: () => getParagraphCurves(novelId!, storeTaskId!, { maxPoints: 800 }),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -102,6 +106,19 @@ export function CurvesPage() {
   const handleZoomChange = useCallback((range: [number, number] | null) => {
     setZoomRange(range);
   }, []);
+
+  // M4 §14.4：点击曲线点定位到对应章节原文（复用 graph 页 selected_chunk 深链约定）；
+  // 无任务上下文时仅提示章节位置，不跳转
+  const handlePointClick = useCallback(
+    (point: ParagraphCurvePoint) => {
+      if (!novelId || !storeTaskId) {
+        toast.info(`该段位于第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段`);
+        return;
+      }
+      navigate(`/novels/${novelId}/graph?task_id=${storeTaskId}&selected_chunk=${point.chapter_id}`);
+    },
+    [navigate, novelId, storeTaskId]
+  );
 
   // 2026-08-14 P2-23：缩放/重置必须按 chartType 分流到当前可见图表。
   // 此前硬编码 emotionChartRef，节奏 tab 的按钮实际作用于隐藏的情绪图，
@@ -254,6 +271,7 @@ export function CurvesPage() {
                   onSeriesToggle={handleEmotionSeriesToggle}
                   zoomRange={zoomRange}
                   onZoomChange={handleZoomChange}
+                  onPointClick={handlePointClick}
                   height="100%"
                   className="h-full"
                 />

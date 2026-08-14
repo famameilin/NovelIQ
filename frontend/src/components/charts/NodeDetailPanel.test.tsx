@@ -1,6 +1,6 @@
 /**
  * 2026-08-13 P2-5: 生命周期字段（first_seen_chunk/last_seen_chunk）为 null 时
- * 不得渲染"第 null 段"，且整行出场信息应隐藏
+ * 不得渲染"第 null 章"，且整行出场信息应隐藏
  */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -22,7 +22,7 @@ function createNode(overrides: Partial<GraphNode>): GraphNode {
 }
 
 describe("NodeDetailPanel 出场信息", () => {
-  it("first_seen_chunk 为 null 时隐藏出场行，不渲染“第 null 段”", () => {
+  it("first_seen_chunk 为 null 时隐藏出场行，不渲染“第 null 章”", () => {
     render(
       <NodeDetailPanel
         node={createNode({ first_seen_chunk: null, last_seen_chunk: null })}
@@ -32,7 +32,7 @@ describe("NodeDetailPanel 出场信息", () => {
       />,
     );
 
-    expect(screen.queryByText(/第 null 段/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/第 null 章/)).not.toBeInTheDocument();
     expect(screen.queryByText(/出场/)).not.toBeInTheDocument();
     expect(screen.getByText("顾霜")).toBeInTheDocument();
   });
@@ -47,6 +47,6 @@ describe("NodeDetailPanel 出场信息", () => {
       />,
     );
 
-    expect(screen.getByText("第 3 段 - 第 12 段")).toBeInTheDocument();
+    expect(screen.getByText("第 3 章 - 第 12 章")).toBeInTheDocument();
   });
 });

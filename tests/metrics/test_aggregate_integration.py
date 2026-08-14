@@ -131,7 +131,8 @@ class TestAggregateAllMetrics:
         stats_repo = StatsRepository(self.db_session)
         result = aggregate_all_metrics(self.run_id, ann_repo, chunk_repo, stats_repo)
         assert "emotion_recovery_speed" in result.emotion_curve
-        assert "pivot_moment_density" in result.emotion_curve
+        # 2026-08-14 重命名（§13.3）：pivot_moment_density → chapter_pivot_rate
+        assert "chapter_pivot_rate" in result.emotion_curve
         assert "positive_ratio" in result.emotion_curve
 
     def test_aggregate_character_relations(self) -> None:
@@ -176,7 +177,8 @@ class TestAggregateAllMetrics:
 
         result = compute_narrative_structure_metrics(annotation_data, tension_data)
 
-        assert result["event_density_铺垫"] == 0.5
-        assert result["event_density_冲突"] == 0.5
-        assert result["event_density_转折"] == 0.0
+        # 2026-08-14 重命名（§13.3）：event_density_{k} → chapter_narrative_function_share_{k}
+        assert result["chapter_narrative_function_share_铺垫"] == 0.5
+        assert result["chapter_narrative_function_share_冲突"] == 0.5
+        assert result["chapter_narrative_function_share_转折"] == 0.0
         assert result["dominant_climax_pos"] == 0.5

@@ -236,7 +236,7 @@ export function NodeDetailPanel({
                       {node.first_seen_chunk != null && node.last_seen_chunk != null && (
                         <InfoRow
                           label="出场"
-                          value={`第 ${node.first_seen_chunk} 段 - 第 ${node.last_seen_chunk} 段`}
+                          value={`第 ${node.first_seen_chunk} 章 - 第 ${node.last_seen_chunk} 章`}
                         />
                       )}
                       <InfoRow label="状态版本" value={`第 ${node.state_revision} 版`} />

@@ -235,6 +235,16 @@ flowchart TD
 - **结果可追溯**：标注与诊断均记录模型响应、有效 Provider Token 用量和实际取证来源
 - **工具循环受限**：普通工具调用达到配置上限后停止，避免无界循环
 
+## 段落粒度指标（2026-08-14 落地）
+
+> 适用分支：`feat/paragraph-granularity`。详细设计见 [docs/章节粒度分析指标重设计.md](docs/章节粒度分析指标重设计.md)，指标口径见 [docs/中文网络小说指标参考手册.md](docs/中文网络小说指标参考手册.md)「段落粒度指标口径」章节。
+
+- **段落为最小事实单元**：`paragraphs` 表为唯一段落事实源，Embedding、指标、主题、检索等派生数据一律复用段落边界，不自行切段。
+- **聚合口径**：章节/全书比率 = 分子和 ÷ 分母和（禁止等权平均）；句长均值/方差由充分统计量（count/sum/sum_sq）恢复；TTR/MTLD 对目标文本序列直接计算；分母为 0 输出 null。
+- **曲线**：x 轴为归一化字符坐标 `position`（段落字符中点 ÷ 全书总字符数）；平滑为字符坐标稳健局部回归（LOWESS，tricube 核 + char_count 权重 + bisquare 稳健迭代，带宽默认 2%、最少 7 点）；Fourier 平滑已移除（`src/metrics/fourier_filter.py` 已删除）。
+- **不兼容旧 run**：旧 run 无段落事实源，`/paragraph-curves` 与 `/chapter-metrics` 返回 409（`paragraph_contract_rerun_required`）提示重新分析；旧 `chunk_*` 表与旧接口退出新主流程（保留仅历史）。
+- **开发库升级**：`powershell -ExecutionPolicy Bypass -File scripts/db/repair_schema_drift.py --target dev`（补齐 `analysis_runs.analysis_contract_version` 列与新表）。
+
 ## 当前 Agent 运行约束
 
 - 标注 Agent 的完整输出必须通过当前 chunk 原文、身份记忆和本轮证据账本校验

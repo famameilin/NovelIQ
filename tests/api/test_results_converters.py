@@ -46,7 +46,8 @@ def test_build_aggregate_metrics_contract_keeps_fixed_non_graph_keys() -> None:
         "act3_ratio": None,
         "climax_spacing": None,
         "middle_collapse_index": None,
-        "event_density": None,
+        # 2026-08-14 重命名（§13.3）：event_density → chapter_narrative_function_share
+        "chapter_narrative_function_share": None,
         "cliffhanger_rate": None,
         "climax_count": None,
         "climax_positions": None,
@@ -56,6 +57,28 @@ def test_build_aggregate_metrics_contract_keeps_fixed_non_graph_keys() -> None:
     }
     assert "graph_summary" not in aggregate_metrics
     assert "graph_quality_report" not in aggregate_metrics
+
+
+def test_build_aggregate_metrics_contract_renames_aggregate_keys() -> None:
+    """2026-08-14 重命名（§13.3）：章节标签占比/pivot 率/关系变化频率使用新键名"""
+    result = AggregateResult(
+        narrative_structure={"chapter_narrative_function_share_冲突": 0.5},
+        emotion_curve={"chapter_pivot_rate": 0.25},
+        character_relations={"relation_change_per_10k_chars": 3.0},
+        language_style={"tone_distribution": {"冷峻": 1.0}},
+    )
+
+    aggregate_metrics = build_aggregate_metrics_contract(result)
+
+    narrative_structure = aggregate_metrics["narrative_structure"]
+    assert narrative_structure["chapter_narrative_function_share"] == {"冲突": 0.5}
+    assert "event_density" not in narrative_structure
+    emotion_stats = aggregate_metrics["emotion_stats"]
+    assert emotion_stats["chapter_pivot_rate"] == 0.25
+    assert "pivot_moment_density" not in emotion_stats
+    character_stats = aggregate_metrics["character_stats"]
+    assert character_stats["relation_change_per_10k_chars"] == 3.0
+    assert "relation_change_freq" not in character_stats
 
 
 def test_validate_aggregate_metrics_contract_rejects_graph_fields() -> None:

@@ -1,7 +1,7 @@
 /**
  * RhythmCurveChart - 节奏张力曲线图表组件
  *
- * 展示表层张力和综合张力曲线，支持三幕分界线和高潮标注
+ * 展示表层张力和平滑张力曲线，支持三幕分界线和高潮标注
  *
  *   - 添加 dataZoom 支持，用于 Brush 缩放同步
  *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
@@ -10,10 +10,15 @@
  *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
  *
  *   - 将展示层第一条节奏曲线切换为 surface_tension
- *   - 高潮标记改为绑定综合张力，避免语义与落点错位
+ *   - 高潮标记改为绑定平滑张力，避免语义与落点错位
  *
  *   - 当前端检测到表层张力仍是 0-1 而综合张力是 0-10 量级时，仅在显示层对前者做 x10 适配
  *   - 保持后端原始返回值不变，先验证产品显示效果
+ *
+ *   - M4 段落粒度改造：数据源从 ChunkCurvePoint 换为 ParagraphCurvePoint
+ *   - x 轴从分块序号改为连续数值 position（值域 [0,1]），三幕 markLine 与高潮
+ *     markPoint 直接用 0-1 比例坐标（act1_ratio / climax_positions 与 position 同域）
+ *   - tooltip 改为章节/段落实名，dataZoom 换算改为 position 值域占比
  */
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
@@ -31,7 +36,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { getCSSColorVar } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
-import type { ChunkCurvePoint, NarrativeStructureMetrics } from "@/api/types";
+import type { ParagraphCurvePoint, NarrativeStructureMetrics } from "@/api/types";
 
 echarts.use([
   GridComponent,
@@ -49,7 +54,7 @@ echarts.use([
 /* ------------------------------------------------------------------ */
 
 export interface RhythmCurveChartProps {
-  data: ChunkCurvePoint[];
+  data: ParagraphCurvePoint[];
   narrativeStructure?: NarrativeStructureMetrics;
   className?: string;
   visibleSeries?: Set<string>;
@@ -61,7 +66,7 @@ export interface RhythmCurveChartProps {
 
 const SERIES_CONFIG = [
   { key: "surface_tension", name: "表层张力", colorVar: "--chart-2" },
-  { key: "tension_composite", name: "综合张力", colorVar: "--chart-3" },
+  { key: "smoothed_surface_tension", name: "平滑张力", colorVar: "--chart-3" },
 ] as const;
 
 /* ------------------------------------------------------------------ */
@@ -101,47 +106,45 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         "--chart-3": chart3Color,
       };
 
-      const xData = data.map((d) => d.chunk_id);
-      const totalChunks = xData.length;
-      const compositeMax = Math.max(...data.map((d) => d.tension_composite ?? 0));
+      const compositeMax = Math.max(...data.map((d) => d.smoothed_surface_tension ?? 0));
       const surfaceMax = Math.max(...data.map((d) => d.surface_tension ?? 0));
       const surfaceDisplayScale = surfaceMax <= 1.05 && compositeMax >= 2 ? 10 : 1;
 
       const act1Ratio = narrativeStructure?.act1_ratio ?? 0.25;
       const act2Ratio = narrativeStructure?.act2_ratio ?? 0.55;
 
-      const act1End = Math.round(totalChunks * act1Ratio);
-      const act2End = Math.round(totalChunks * (act1Ratio + act2Ratio));
+      // 三幕分界线：act_ratio 是 0-1 比例，直接对应 position 值域
+      const act1End = act1Ratio;
+      const act2End = Math.min(act1Ratio + act2Ratio, 1);
 
-      const climaxPositions = (narrativeStructure?.climax_positions ?? []).map(
-        (ratio) => Math.round(totalChunks * ratio)
-      );
+      // climax_positions 已是 0-1 比例，直接作为 x 坐标
+      const climaxPositions = narrativeStructure?.climax_positions ?? [];
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
         // 老 run 的综合张力仍可能是 0-10 量级，而新的 surface_tension 目前是 0-1
         // 这里先只在前端显示层把表层张力按 x10 对齐，便于验证视觉效果，不改后端语义
         const values = data.map((d) => {
-          const rawValue = d[config.key as keyof ChunkCurvePoint];
-          if (typeof rawValue !== "number") return null;
+          const rawValue = d[config.key as keyof ParagraphCurvePoint];
+          if (typeof rawValue !== "number") return [d.position, null] as [number, null];
           if (config.key === "surface_tension") {
-            return rawValue * surfaceDisplayScale;
+            return [d.position, rawValue * surfaceDisplayScale] as [number, number];
           }
-          return rawValue;
+          return [d.position, rawValue] as [number, number];
         });
         const isActive = activeSeries.has(config.key);
 
         const markLineData: Array<{ xAxis: number; label?: object; lineStyle?: object }> = [];
 
         if (isActive) {
-          if (act1End > 0 && act1End < totalChunks) {
+          if (act1End > 0 && act1End < 1) {
             markLineData.push({
               xAxis: act1End,
               label: { show: true, formatter: "第一幕", position: "start", color: "hsl(var(--text-muted))", fontSize: 10 },
               lineStyle: { type: "dashed", color: borderColor, opacity: 0.6 },
             });
           }
-          if (act2End > 0 && act2End < totalChunks) {
+          if (act2End > 0 && act2End < 1) {
             markLineData.push({
               xAxis: act2End,
               label: { show: true, formatter: "第二幕", position: "start", color: "hsl(var(--text-muted))", fontSize: 10 },
@@ -172,8 +175,8 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
       });
 
       const climaxMarkPoint = climaxPositions.length > 0 ? {
-        data: climaxPositions.map((chunkIdx) => ({
-          coord: [chunkIdx, Math.max(...data.map((d) => d.tension_composite ?? 0))],
+        data: climaxPositions.map((ratio) => ({
+          coord: [ratio, Math.max(...data.map((d) => d.smoothed_surface_tension ?? 0))],
           value: "高潮",
           itemStyle: { color: chart3Color },
           symbolSize: 40,
@@ -203,10 +206,11 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           backgroundColor: "hsl(var(--surface))",
           borderColor: "hsl(var(--border))",
           textStyle: { color: "hsl(var(--text))", fontSize: 12 },
-          formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValue?: string }>) => {
+          formatter: (params: Array<{ seriesName: string; value: number; marker: string; dataIndex?: number }>) => {
             if (!Array.isArray(params) || params.length === 0) return "";
-            const chunkId = params[0]?.axisValue ?? "";
-            let html = `<div class="font-medium mb-1">分块 ${chunkId}</div>`;
+            const point = data[params[0]?.dataIndex ?? -1];
+            if (!point) return "";
+            let html = `<div class="font-medium mb-1">第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段</div>`;
             const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
               .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${p.value?.toFixed(4) ?? "-"}</span></div>`)
@@ -218,14 +222,14 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           {
             type: "inside" as const,
             xAxisIndex: 0,
-            start: zoomRange ? (zoomRange[0] / totalChunks) * 100 : 0,
-            end: zoomRange ? (zoomRange[1] / totalChunks) * 100 : 100,
+            start: zoomRange ? zoomRange[0] * 100 : 0,
+            end: zoomRange ? zoomRange[1] * 100 : 100,
           },
           {
             type: "slider" as const,
             xAxisIndex: 0,
-            start: zoomRange ? (zoomRange[0] / totalChunks) * 100 : 0,
-            end: zoomRange ? (zoomRange[1] / totalChunks) * 100 : 100,
+            start: zoomRange ? zoomRange[0] * 100 : 0,
+            end: zoomRange ? zoomRange[1] * 100 : 100,
             height: 20,
             bottom: 10,
             borderColor: borderColor,
@@ -236,9 +240,10 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           },
         ],
         xAxis: {
-          type: "category" as const,
-          data: xData,
-          name: "分块",
+          type: "value" as const,
+          min: 0,
+          max: 1,
+          name: "章节进度",
           nameLocation: "middle",
           nameGap: 25,
           nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
@@ -247,9 +252,8 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           axisLabel: {
             color: "hsl(var(--text-muted))",
             fontSize: 11,
-            interval: Math.floor(xData.length / 10),
+            formatter: (value: number) => `${(value * 100).toFixed(0)}%`,
           },
-          boundaryGap: false,
         },
         yAxis: {
           type: "value" as const,
@@ -262,7 +266,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         },
         series: series.map((s, idx) => ({
           ...s,
-          markPoint: SERIES_CONFIG[idx]?.key === "tension_composite" && climaxMarkPoint ? climaxMarkPoint : undefined,
+          markPoint: SERIES_CONFIG[idx]?.key === "smoothed_surface_tension" && climaxMarkPoint ? climaxMarkPoint : undefined,
         })),
       };
 
@@ -289,9 +293,10 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       if (params.batch && params.batch.length > 0) {
         const { start, end } = params.batch[0];
-        const startIdx = Math.round((start / 100) * data.length);
-        const endIdx = Math.round((end / 100) * data.length);
-        onZoomChange([startIdx, endIdx]);
+        // position 值域为 [0,1]，百分比直接除以 100 得到 position 数值对
+        const startPos = start / 100;
+        const endPos = end / 100;
+        onZoomChange([startPos, endPos]);
       } else {
         onZoomChange(null);
       }

@@ -9,6 +9,11 @@
  *   - 将 series 主色显式绑定到 CSS 变量
  *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
  *   - 删除未使用的 hslToHsla 导入
+ *
+ *   - M4 段落粒度改造：数据源从 ChunkCurvePoint 换为 ParagraphCurvePoint
+ *   - x 轴从分块序号改为连续数值 position（值域 [0,1]），tooltip 改为章节/段落实名
+ *   - dataZoom 百分比换算目标从"索引占比"改为"position 值域占比"
+ *   - 新增点击事件：回调当前数据点，供页面做"定位到原文"跳转
  */
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
@@ -25,7 +30,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
-import type { ChunkCurvePoint } from "@/api/types";
+import type { ParagraphCurvePoint } from "@/api/types";
 
 echarts.use([
   GridComponent,
@@ -42,12 +47,13 @@ echarts.use([
 /* ------------------------------------------------------------------ */
 
 export interface EmotionCurveChartProps {
-  data: ChunkCurvePoint[];
+  data: ParagraphCurvePoint[];
   className?: string;
   visibleSeries?: Set<string>;
   onSeriesToggle?: (series: Set<string>) => void;
   zoomRange?: [number, number] | null;
   onZoomChange?: (range: [number, number] | null) => void;
+  onPointClick?: (point: ParagraphCurvePoint) => void;
   height?: number | string;
 }
 
@@ -55,8 +61,12 @@ const SERIES_CONFIG = [
   { key: "pos_density", name: "正向强度", colorVar: "--chart-positive", role: "aux" },
   { key: "neg_density", name: "负向强度", colorVar: "--chart-negative", role: "aux" },
   { key: "net_density", name: "原始趋势", colorVar: "--chart-1", role: "support" },
-  { key: "smoothed_density", name: "平滑趋势", colorVar: "--primary", role: "main" },
+  { key: "smoothed_net_density", name: "平滑趋势", colorVar: "--primary", role: "main" },
 ] as const;
+
+interface ChartClickParams {
+  dataIndex?: number;
+}
 
 /* ------------------------------------------------------------------ */
 /*  组件主体                                                           */
@@ -71,6 +81,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
       onSeriesToggle,
       zoomRange,
       onZoomChange,
+      onPointClick,
       height = 350,
     },
     ref
@@ -98,9 +109,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         "--primary": primaryColor,
       };
 
-      const xData = data.map((d) => d.chunk_id);
-      const totalChunks = xData.length;
-
+      // x 坐标统一使用 0-1 position 数字值域
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
         const isMainSeries = config.role === "main";
@@ -111,7 +120,11 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         const areaOpacity = isMainSeries ? 0.12 : 0;
         // 情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
         // 避免把“没算出来”和“真实为 0”混成同一条贴地折线
-        const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
+        const values = data.map((d) =>
+          d[config.key as keyof ParagraphCurvePoint] != null
+            ? [d.position, d[config.key as keyof ParagraphCurvePoint]] as [number, number]
+            : [d.position, null] as [number, null]
+        );
         const isActive = activeSeries.has(config.key);
 
         return {
@@ -165,10 +178,11 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           backgroundColor: "hsl(var(--surface))",
           borderColor: "hsl(var(--border))",
           textStyle: { color: "hsl(var(--text))", fontSize: 12 },
-          formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; axisValue?: string }>) => {
+          formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; dataIndex?: number }>) => {
             if (!Array.isArray(params) || params.length === 0) return "";
-            const chunkId = params[0]?.axisValue ?? "";
-            let html = `<div class="font-medium mb-1">分块 ${chunkId}</div>`;
+            const point = data[params[0]?.dataIndex ?? -1];
+            if (!point) return "";
+            let html = `<div class="font-medium mb-1">第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段</div>`;
             const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
               .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(3) : "-"}</span></div>`)
@@ -180,14 +194,14 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           {
             type: "inside" as const,
             xAxisIndex: 0,
-            start: zoomRange ? (zoomRange[0] / totalChunks) * 100 : 0,
-            end: zoomRange ? (zoomRange[1] / totalChunks) * 100 : 100,
+            start: zoomRange ? zoomRange[0] * 100 : 0,
+            end: zoomRange ? zoomRange[1] * 100 : 100,
           },
           {
             type: "slider" as const,
             xAxisIndex: 0,
-            start: zoomRange ? (zoomRange[0] / totalChunks) * 100 : 0,
-            end: zoomRange ? (zoomRange[1] / totalChunks) * 100 : 100,
+            start: zoomRange ? zoomRange[0] * 100 : 0,
+            end: zoomRange ? zoomRange[1] * 100 : 100,
             height: 20,
             bottom: 10,
             borderColor: borderColor,
@@ -198,9 +212,10 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           },
         ],
         xAxis: {
-          type: "category" as const,
-          data: xData,
-          name: "分块",
+          type: "value" as const,
+          min: 0,
+          max: 1,
+          name: "章节进度",
           nameLocation: "middle",
           nameGap: 25,
           nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
@@ -209,9 +224,8 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           axisLabel: {
             color: "hsl(var(--text-muted))",
             fontSize: 11,
-            interval: Math.floor(xData.length / 10),
+            formatter: (value: number) => `${(value * 100).toFixed(0)}%`,
           },
-          boundaryGap: false,
         },
         yAxis: {
           type: "value" as const,
@@ -250,12 +264,21 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
 
       if (params.batch && params.batch.length > 0) {
         const { start, end } = params.batch[0];
-        const startIdx = Math.round((start / 100) * data.length);
-        const endIdx = Math.round((end / 100) * data.length);
-        onZoomChange([startIdx, endIdx]);
+        // position 值域为 [0,1]，百分比直接除以 100 得到 position 数值对
+        const startPos = start / 100;
+        const endPos = end / 100;
+        onZoomChange([startPos, endPos]);
       } else {
         onZoomChange(null);
       }
+    };
+
+    const handleChartClick = (params: ChartClickParams) => {
+      if (!onPointClick) return;
+      if (typeof params?.dataIndex !== "number") return;
+      const point = data[params.dataIndex];
+      if (!point) return;
+      onPointClick(point);
     };
 
     return (
@@ -271,6 +294,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           onEvents={{
             legendClick: handleLegendClick,
             datazoom: handleDataZoom,
+            click: handleChartClick,
           }}
         />
       </div>

@@ -2,6 +2,10 @@
 主题查询组装器
 
 说明: 承载 topics 相关查询组装逻辑
+
+2026-08-14 切换段落（设计文档《章节粒度分析指标重设计》§11.1）：
+聚合源从 chunk_topics 改为 paragraph_topics 的 token 加权聚合
+（fetch_paragraph_topics_agg），归一化使用 weighted_total。
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.api.models.responses import TopicInfo
-from src.storage.repositories import ChunkRepository
+from src.storage.repositories import ParagraphRepository
 
 
 def _resolve_project_root() -> Path:
@@ -30,9 +34,9 @@ def _resolve_project_root() -> Path:
 _PROJECT_ROOT = _resolve_project_root()
 
 
-def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
-    """获取主题数据"""
-    rows = chunk_repo.fetch_chunk_topics_agg(run_id)
+def _fetch_topics(run_id: str, paragraph_repo: ParagraphRepository) -> list:
+    """获取主题数据（段落 token 加权聚合，weighted_total 归一化）"""
+    rows = paragraph_repo.fetch_paragraph_topics_agg(run_id)
 
     model_dir = _PROJECT_ROOT / "models" / "topic" / run_id
     topic_words_map: dict[int, list[str]] = {}
@@ -60,7 +64,7 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
         words: list[str] = topic_words_map.get(topic_id, [])
         label = topic_labels_map.get(topic_id)
         if words:
-            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.total_weight, label=label))
+            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.weighted_total, label=label))
 
     if result:
         total_weight = sum(item.weight for item in result)

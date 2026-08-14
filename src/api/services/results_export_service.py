@@ -47,6 +47,7 @@ from src.metrics.timeline_metrics import (
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
+    ParagraphRepository,
     StatsRepository,
 )
 
@@ -136,7 +137,9 @@ def load_chunk_bundle(
     """
     missing_fields: list[str] = []
 
-    topics = _fetch_topics(run_id, chunk_repo)
+    # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
+    paragraph_repo = ParagraphRepository(annotation_repo.session)
+    topics = _fetch_topics(run_id, paragraph_repo)
 
     chunk_styles = _fetch_chunk_styles(run_id, chunk_repo)
     if not chunk_styles:

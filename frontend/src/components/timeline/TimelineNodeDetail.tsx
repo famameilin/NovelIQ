@@ -151,9 +151,9 @@ export function TimelineNodeDetail({
               <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
                 <span>节点 {node.node_id}</span>
                 {"start_chunk_id" in node && node.start_chunk_id !== node.end_chunk_id ? (
-                  <span>范围 {node.start_chunk_id}-{node.end_chunk_id}</span>
+                  <span>范围 {node.start_chunk_id}-{node.end_chunk_id} 章</span>
                 ) : (
-                  <span>第 {node.anchor_chunk_id} 块</span>
+                  <span>第 {node.anchor_chunk_id} 章</span>
                 )}
                 <span>进度: {Math.round(node.progress * 100)}%</span>
                 <span>重要性: {node.importance_score.toFixed(1)}</span>
@@ -333,7 +333,7 @@ export function TimelineNodeDetail({
                             <Badge variant="outline" className="text-[10px]">
                               {childPresentation.label}
                             </Badge>
-                            <span className="font-medium text-text">Chunk {childNode.anchor_chunk_id}</span>
+                            <span className="font-medium text-text">第 {childNode.anchor_chunk_id} 章</span>
                             <span className="text-text-muted">重要性 {childNode.importance_score.toFixed(1)}</span>
                           </div>
                           <p className="mt-2 leading-5 text-text-muted">{childNode.summary}</p>

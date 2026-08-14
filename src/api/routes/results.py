@@ -20,9 +20,11 @@ from src.api.dependencies import (
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
 from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
 from src.api.models.responses import (
+    ChapterMetricsResponse,
     CharacterStats,
     DiagnosisResult,
     ForeshadowingThreadResponse,
+    ParagraphCurvePoint,
     ResultsWriteResponse,
 )
 from src.api.models.responses import (
@@ -43,10 +45,15 @@ from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
 from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
+from src.api.services.results_queries.paragraphs import (
+    _fetch_chapter_metrics,
+    _fetch_paragraph_curves,
+)
 from src.config import settings
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
+    ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
@@ -82,6 +89,24 @@ def _require_readable_run_status(run: dict[str, Any]) -> None:
         raise AnalysisNotCompleteError(
             f"分析未完成，当前状态: {run['status']}",
             run_status=run["status"],
+        )
+
+
+def _require_paragraph_contract(run: dict[str, Any]) -> None:
+    """
+    段落级接口的合同版本门（设计文档《章节粒度分析指标重设计》§16）
+
+    旧 run（analysis_contract_version 非 paragraph-v1）没有段落事实源数据，
+    直接 409 要求重新分析，不静默返回空数据。
+    """
+    if run.get("analysis_contract_version") != "paragraph-v1":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "paragraph_contract_rerun_required",
+                "message": "当前任务的段落分析合同已失效（旧版 run 无段落事实源），请重新分析。",
+                "reason": f"analysis_contract_version={run.get('analysis_contract_version')!r}",
+            },
         )
 
 
@@ -281,6 +306,50 @@ async def get_chunk_curves(
 
 
 @router.get(
+    "/{novel_id}/paragraph-curves",
+    response_model=list[ParagraphCurvePoint],
+    summary="段落曲线（§13.1，展示降采样可选）",
+)
+async def get_paragraph_curves(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    max_points: Annotated[int | None, Query(gt=0, description="展示降采样点数上限")] = None,
+) -> list[ParagraphCurvePoint]:
+    """
+    获取段落曲线（完整曲线始终一段一点，max_points 仅降采样响应，不回写数据库）
+
+    章节边界段落与 net_density 全局峰值在降采样时强制保留。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    _require_paragraph_contract(run)
+    paragraph_repo = ParagraphRepository(session)
+    return _fetch_paragraph_curves(run_id, paragraph_repo, max_points)
+
+
+@router.get(
+    "/{novel_id}/chapter-metrics",
+    response_model=ChapterMetricsResponse,
+    summary="章节与全书汇总指标（§13.2）",
+)
+async def get_chapter_metrics(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> ChapterMetricsResponse:
+    """
+    获取由段落充分统计量聚合的章节汇总与全书聚合（分子/分母守恒，禁止等权平均）
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    _require_paragraph_contract(run)
+    paragraph_repo = ParagraphRepository(session)
+    annotation_repo = AnnotationRepository(session)
+    return _fetch_chapter_metrics(run_id, paragraph_repo, annotation_repo, run)
+
+
+@router.get(
     "/{novel_id}/chunk-annotations",
     response_model=list[ChunkAnnotationResponse],
 )
@@ -336,17 +405,17 @@ async def get_topics(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list:
-    """获取主题分布数据"""
+    """获取主题分布数据（段落 token 加权聚合，§11.1）"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    chunk_repo = ChunkRepository(session)
+    paragraph_repo = ParagraphRepository(session)
     stats_repo = StatsRepository(session)
     _fetch_and_require_valid_diagnosis(
         run_id=run_id,
         novel_id=novel_id,
         stats_repo=stats_repo,
     )
-    return _fetch_topics(run_id, chunk_repo)
+    return _fetch_topics(run_id, paragraph_repo)
 
 
 @router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult)

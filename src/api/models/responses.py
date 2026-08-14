@@ -96,6 +96,86 @@ class CharacterStats(BaseModel):
     avg_emotion_score: float | None = None
 
 
+class ParagraphCurvePoint(BaseModel):
+    """段落曲线点（设计文档《章节粒度分析指标重设计》§13.1）"""
+
+    paragraph_id: int
+    chapter_id: int
+    paragraph_index: int
+    global_start_char: int
+    global_end_char: int
+    position: float
+    char_count: int
+    token_count: int
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
+    smoothed_net_density: float | None = None
+    surface_tension: float | None = None
+    smoothed_surface_tension: float | None = None
+
+
+class ChapterMetricSummary(BaseModel):
+    """章节汇总（设计文档《章节粒度分析指标重设计》§13.2，由段落充分统计量聚合）"""
+
+    chapter_id: int
+    paragraph_count: int
+    total_chars: int
+    total_tokens: int
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
+    fight_density: float | None = None
+    exclaim_per_100_chars: float | None = None
+    question_per_100_chars: float | None = None
+    pause_per_100_chars: float | None = None
+    dialogue_ratio: float | None = None
+    avg_sent_len: float | None = None
+    sent_len_std: float | None = None
+    ttr: float | None = None
+    mtld: float | None = None
+    narrative_function: str | None = None
+    pivot_moment: bool | None = None
+    cliffhanger: bool | None = None
+    emotional_valence: str | None = None
+
+
+class BookAggregateStats(BaseModel):
+    """全书聚合（设计文档《章节粒度分析指标重设计》§13.2）"""
+
+    total_chapters: int
+    total_paragraphs: int
+    total_chars: int
+    total_tokens: int
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
+    fight_density: float | None = None
+    exclaim_per_100_chars: float | None = None
+    question_per_100_chars: float | None = None
+    pause_per_100_chars: float | None = None
+    dialogue_ratio: float | None = None
+    avg_sent_len: float | None = None
+    sent_len_std: float | None = None
+    ttr: float | None = None
+    mtld: float | None = None
+    chapter_narrative_function_share: dict[str, float] = Field(default_factory=dict)
+    chapter_pivot_rate: float | None = None
+    chapter_cliffhanger_rate: float | None = None
+    chapter_emotional_valence_share: dict[str, float] = Field(default_factory=dict)
+    analysis_contract_version: str
+    paragraph_splitter_version: str
+    metric_version: str
+    curve_version: str
+
+
+class ChapterMetricsResponse(BaseModel):
+    """章节指标响应（章节汇总 + 全书聚合）"""
+
+    chapters: list[ChapterMetricSummary] = Field(default_factory=list)
+    book: BookAggregateStats
+
+
 class ChunkStyle(BaseModel):
     chunk_id: int
     mtld: float | None = None
@@ -233,6 +313,9 @@ class GlobalStats(BaseModel):
 class NarrativeStructureStats(BaseModel):
     """
     叙事结构统计模型
+
+    2026-08-14 重命名（§13.3）：event_density → chapter_narrative_function_share，
+    值语义不变（章节 Agent 标签占比，不再是“事件密度”）
     """
 
     act1_ratio: float | None = None
@@ -240,7 +323,7 @@ class NarrativeStructureStats(BaseModel):
     act3_ratio: float | None = None
     climax_spacing: float | None = None
     middle_collapse_index: float | None = None
-    event_density: dict[str, float] | None = None
+    chapter_narrative_function_share: dict[str, float] | None = None
     cliffhanger_rate: float | None = None
     climax_count: int | None = None
     climax_positions: list[float] | None = None
@@ -255,7 +338,7 @@ class EmotionStats(BaseModel):
     negative_ratio: float | None = None
     neutral_ratio: float | None = None
     recovery_speed: float | None = None
-    pivot_moment_density: float | None = None
+    chapter_pivot_rate: float | None = None
     lexical_emotion_trend: str | None = None
 
 
@@ -264,7 +347,7 @@ class CharacterStatsAggregate(BaseModel):
     greimas_coverage: float | None = None
     function_coverage_distribution: dict[str, float] | None = None
     antagonist_strength_gap: float | None = None
-    relation_change_freq: float | None = None
+    relation_change_per_10k_chars: float | None = None
     degree_centrality: dict[str, float] | None = None
 
 

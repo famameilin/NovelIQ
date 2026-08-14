@@ -141,8 +141,8 @@ function ForeshadowingThreadsSection(props: {
                   <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
                 </div>
                 <div className="text-right text-xs text-text-muted">
-                  <div>首次出现 Chunk {thread.first_chunk_id}</div>
-                  <div>最近命中 Chunk {thread.last_chunk_id}</div>
+                  <div>首次出现于第 {thread.first_chunk_id} 章</div>
+                  <div>最近命中于第 {thread.last_chunk_id} 章</div>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
@@ -155,7 +155,7 @@ function ForeshadowingThreadsSection(props: {
                   {thread.strength}
                 </div>
                 <div>
-                  <span className="font-medium text-text">锚点 Chunk：</span>
+                  <span className="font-medium text-text">锚点章节：</span>
                   {thread.anchor_chunk_ids.join(", ")}
                 </div>
               </div>

@@ -91,7 +91,7 @@ describe("TimelineTrack", () => {
 
     expect(onNodeClick).toHaveBeenCalledWith(node);
     expect(screen.getByText("剧情节点")).toBeInTheDocument();
-    expect(screen.getByText("Chunk 3")).toBeInTheDocument();
+    expect(screen.getByText("第 3 章")).toBeInTheDocument();
     expect(document.querySelector("svg path")).toBeInTheDocument();
   });
 });

@@ -16,7 +16,7 @@ export interface NarrativeStructureBarProps {
   act1Ratio?: number | null;
   act2Ratio?: number | null;
   act3Ratio?: number | null;
-  eventDensity?: Record<string, number> | null;
+  chapterNarrativeFunctionShare?: Record<string, number> | null;
   novelId: string;
   className?: string;
 }
@@ -28,18 +28,22 @@ export interface NarrativeStructureBarProps {
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
  * 修改原因：保留叙事结构摘要文案的拼接逻辑，同时配合新的卡片壳展示
+ *
+ * M4（§13.3 重命名）：event_density -> chapter_narrative_function_share，文案同步为章节叙事功能占比
  */
-function formatEventDensity(density: Record<string, number> | null | undefined): string | null {
-  if (!density || Object.keys(density).length === 0) {
+function formatChapterNarrativeFunctionShare(
+  share: Record<string, number> | null | undefined
+): string | null {
+  if (!share || Object.keys(share).length === 0) {
     return null;
   }
 
-  const parts = Object.entries(density).map(([key, value]) => {
+  const parts = Object.entries(share).map(([key, value]) => {
     const percentage = Math.round(value * 100);
     return `${key}${percentage}%`;
   });
 
-  return `事件密度: ${parts.join(" ")}`;
+  return `章节叙事功能占比: ${parts.join(" ")}`;
 }
 
 /**
@@ -66,13 +70,13 @@ export function NarrativeStructureBar({
   act1Ratio,
   act2Ratio,
   act3Ratio,
-  eventDensity,
+  chapterNarrativeFunctionShare,
   novelId,
   className,
 }: NarrativeStructureBarProps) {
   const navigate = useNavigate();
 
-  const hasData = hasActData(act1Ratio, act2Ratio, act3Ratio) || eventDensity;
+  const hasData = hasActData(act1Ratio, act2Ratio, act3Ratio) || chapterNarrativeFunctionShare;
 
   const segments = hasActData(act1Ratio, act2Ratio, act3Ratio)
     ? [
@@ -94,7 +98,7 @@ export function NarrativeStructureBar({
       ]
     : [];
 
-  const densityText = formatEventDensity(eventDensity);
+  const densityText = formatChapterNarrativeFunctionShare(chapterNarrativeFunctionShare);
 
   return (
     <DashboardCardShell
@@ -132,7 +136,7 @@ export function NarrativeStructureBar({
               </p>
             ) : (
               <p className="rounded-xl border border-border/70 bg-surface/70 px-3 py-2.5 text-xs text-text-muted">
-                事件密度: 暂无数据
+                章节叙事功能占比: 暂无数据
               </p>
             )}
           </>
