@@ -9,81 +9,6 @@ from pathlib import Path
 from typing import Any
 
 
-def load_prompt_from_file(prompt_name: str, config_dir: Path | None = None) -> str:
-    """
-    从文件加载 prompt
-
-    说明: 从 config/prompts/ 目录加载 prompt 文件
-
-    Args:
-        prompt_name: prompt 文件名（不含扩展名）
-        config_dir: 配置目录路径，默认为项目根目录下的 config
-
-    Returns:
-        prompt 内容，如果文件不存在则返回空字符串
-    """
-    if config_dir is None:
-        config_dir = Path(__file__).parent.parent.parent.parent / "config"
-    prompt_file = config_dir / "prompts" / f"{prompt_name}.txt"
-    if prompt_file.exists():
-        return prompt_file.read_text(encoding="utf-8").strip()
-    return ""
-
-
-def parse_prompt_sections(content: str) -> dict[str, str]:
-    """
-    解析包含多个分段的 prompt 文件
-
-    说明: 解析使用 ===SECTION_NAME=== 标记的分段 prompt
-
-    Args:
-        content: prompt 文件内容
-
-    Returns:
-        分段名称到内容的映射
-    """
-    sections: dict[str, str] = {}
-    current_section: str | None = None
-    current_content: list[str] = []
-
-    for line in content.split("\n"):
-        if line.startswith("===") and line.endswith("==="):
-            if current_section is not None:
-                sections[current_section] = "\n".join(current_content).strip()
-            current_section = line.strip("=")
-            current_content = []
-        else:
-            current_content.append(line)
-
-    if current_section is not None:
-        sections[current_section] = "\n".join(current_content).strip()
-
-    return sections
-
-
-@dataclass
-class Phase2Prompts:
-
-    system: str = ""
-    user_template: str = ""
-    examples: str = ""
-
-
-@dataclass
-class Phase3Prompts:
-
-    system: str = ""
-    user_template: str = ""
-    dialogue_batch_size: int = 5
-
-
-@dataclass
-class Phase4Prompts:
-
-    system: str = ""
-    user_template: str = ""
-
-
 @dataclass
 class PathSettings:
     """路径配置"""
@@ -99,18 +24,6 @@ class PathSettings:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
 
-@dataclass
-class PromptSettings:
-    """
-    Prompt 配置
-    """
-
-    phase2: Phase2Prompts = field(default_factory=Phase2Prompts)
-    phase3: Phase3Prompts = field(default_factory=Phase3Prompts)
-    phase4: Phase4Prompts = field(default_factory=Phase4Prompts)
-    diagnose: str = ""
-
-
 def _parse_path_settings(data: dict[str, Any] | None) -> PathSettings:
     """解析路径配置"""
     if not data:
@@ -123,69 +36,5 @@ def _parse_path_settings(data: dict[str, Any] | None) -> PathSettings:
     )
 
 
-def _load_phase2_prompts() -> Phase2Prompts:
-    """
-    加载 Phase2 prompt
-    """
-    content = load_prompt_from_file("phase2")
-    if not content:
-        return Phase2Prompts()
-
-    sections = parse_prompt_sections(content)
-    return Phase2Prompts(
-        system=sections.get("SYSTEM", ""),
-        user_template=sections.get("USER_TEMPLATE", ""),
-        examples=sections.get("EXAMPLES", ""),
-    )
-
-
-def _load_phase3_prompts() -> Phase3Prompts:
-    """
-    加载 Phase3 prompt
-    """
-    content = load_prompt_from_file("phase3")
-    if not content:
-        return Phase3Prompts()
-
-    sections = parse_prompt_sections(content)
-    return Phase3Prompts(
-        system=sections.get("SYSTEM", ""),
-        user_template=sections.get("USER_TEMPLATE", ""),
-    )
-
-
-def _load_phase4_prompts() -> Phase4Prompts:
-    """
-    加载 Phase4 prompt
-    """
-    from loguru import logger
-
-    content = load_prompt_from_file("phase4")
-    if not content:
-        logger.warning("Phase4 prompt file not found or empty")
-        return Phase4Prompts()
-
-    sections = parse_prompt_sections(content)
-    prompts = Phase4Prompts(
-        system=sections.get("SYSTEM", ""),
-        user_template=sections.get("USER_TEMPLATE", ""),
-    )
-
-    if not prompts.system:
-        logger.warning("Phase4 prompt: SYSTEM section is empty")
-    if not prompts.user_template:
-        logger.warning("Phase4 prompt: USER_TEMPLATE section is empty")
-
-    return prompts
-
-
-def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
-    """
-    解析 Prompt 配置
-    """
-    return PromptSettings(
-        phase2=_load_phase2_prompts(),
-        phase3=_load_phase3_prompts(),
-        phase4=_load_phase4_prompts(),
-        diagnose=load_prompt_from_file("diagnose"),
-    )
+# 2026-08-14 D9：config/prompts/*.txt 死配置已删除（旧 phase 合同退役）；
+# 新提示词硬编码在 src/agents/*/prompts.py，无配置文件读取

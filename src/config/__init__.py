@@ -23,7 +23,6 @@ from .schemas import (
     ModelsSettings,
     PathSettings,
     ProgressSettings,
-    PromptSettings,
     TaskModelSettings,
     TopicModelSettings,
 )
@@ -42,7 +41,6 @@ __all__ = [
     "PROPP_FUNCTIONS",
     "PathSettings",
     "ProgressSettings",
-    "PromptSettings",
     "SEMANTIC_CATEGORY_MAPPING",
     "Settings",
     "TaskModelConfig",

@@ -14,14 +14,12 @@ from .schemas import (
     ModelsSettings,
     PathSettings,
     ProgressSettings,
-    PromptSettings,
     TopicModelSettings,
     _parse_logging_settings,
     _parse_metrics_settings,
     _parse_models_settings,
     _parse_path_settings,
     _parse_progress_settings,
-    _parse_prompt_settings,
     _parse_topic_model_settings,
 )
 from .schemas.model import apply_model_environment
@@ -39,7 +37,7 @@ class Settings:
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     topic_model: TopicModelSettings = field(default_factory=TopicModelSettings)
     metrics: MetricsSettings = field(default_factory=MetricsSettings)
-    prompts: PromptSettings = field(default_factory=PromptSettings)
+    # 2026-08-14 D9：prompts 死配置已移除（旧 phase 合同退役，提示词硬编码于 agents/*/prompts.py）
 
     @classmethod
     def from_json(cls, path: Path | None = None) -> Settings:
@@ -74,7 +72,6 @@ class Settings:
             progress=_parse_progress_settings(data.get("progress")),
             topic_model=_parse_topic_model_settings(data.get("topic_model")),
             metrics=_parse_metrics_settings(data.get("metrics")),
-            prompts=_parse_prompt_settings(data.get("prompts")),
         )
 
 
