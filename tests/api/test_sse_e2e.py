@@ -22,6 +22,13 @@ from src.api.services.event_manager import event_manager
 from src.api.services.task_manager import TaskManager
 
 
+@pytest.fixture(autouse=True)
+def _allow_existing_task(monkeypatch):
+    """2026-08-14 P2-11：任务存在性校验默认放行（e2e 使用虚构 task_id）"""
+
+    monkeypatch.setattr("src.api.routes.sse._task_run_exists", lambda task_id: True)
+
+
 def _make_request(disconnect_after: int) -> MagicMock:
     """构造请求 mock：前 disconnect_after 次 is_disconnected 返回 False，之后恒 True"""
     request = MagicMock()

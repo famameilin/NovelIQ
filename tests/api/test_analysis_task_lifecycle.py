@@ -436,6 +436,8 @@ class TestAnalysisErrorHandler:
         )
 
         with patch("src.api.services.analysis.error_handler.RunRepository") as mock_run_repo_cls:
+            # 2026-08-14 P2-13：归属守卫读取 run.worker_id（无归属放行）
+            mock_run_repo_cls.return_value.get_run.return_value = {"worker_id": None}
             await handler.handle_failure(
                 task_id="task-1",
                 novel_id="novel001",
@@ -531,6 +533,8 @@ class TestAnalysisErrorHandler:
         )
 
         with patch("src.api.services.analysis.error_handler.RunRepository") as mock_run_repo_cls:
+            # 2026-08-14 P2-13：归属守卫读取 run.worker_id（无归属放行）
+            mock_run_repo_cls.return_value.get_run.return_value = {"worker_id": None}
             await handler.handle_cancel(
                 task_id="task-1",
                 novel_id="novel001",

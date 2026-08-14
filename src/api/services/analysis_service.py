@@ -15,7 +15,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.exceptions import AnalysisError, NovelNotFoundError
-from src.api.models.events import AnalysisEventBus, StreamEvent
+from src.api.models.events import AnalysisEventBus, StreamEvent, StreamMessageType
 from src.api.models.requests import ReanalyzeRequest
 from src.api.models.responses import TaskStatus
 from src.api.services.analysis.environment_initializer import EnvironmentInitializer
@@ -780,6 +780,14 @@ class AnalysisService:
             if claim_result == "cancelled":
                 self.task_manager.cancel_completed_task(task_id, error="用户取消")
                 logger.info(f"Task {task_id} was cancelled before execution claim completed")
+                # 2026-08-14 P2-10：claim 前取消（含 _claim_pending_run 内部收口分支）也
+                # 必须补发 SSE 终态事件，否则已连接的客户端永远等不到取消信号，
+                # 只能靠轮询 /status 兜底
+                await event_manager.send(
+                    task_id=task_id,
+                    event_type=StreamMessageType.task_cancelled.value,
+                    data={"stage": "cancelled", "message": "任务已取消"},
+                )
                 return
             if claim_result == "skipped":
                 logger.info(f"Task {task_id} execution claim skipped because another state transition won the DB truth")
@@ -819,6 +827,12 @@ class AnalysisService:
             )
 
             if self._is_cancelled(task_id):
+                # 2026-08-14 P2-13：所有阶段已完成但成功收口前收到取消——此前直接
+                # return 既不落 DB 终态也不发事件，run 卡在 running 直到重启孤儿回收
+                if session and run_id:
+                    await self.error_handler.handle_cancel(
+                        task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
+                    )
                 return
 
             elapsed = time.time() - start_time
