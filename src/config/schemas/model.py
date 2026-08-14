@@ -199,21 +199,21 @@ def apply_model_environment(
     2026-08-12 环境变量缺失降级：None 表示该组未配置，保留 settings.json 的对应值
     """
 
-    if model_environment is None:
-        return
-    model_base_url = _normalize_model_base_url_for_docker(model_environment.base_url)
-    for task_settings in (
-        settings.annotation,
-        settings.diagnosis,
-    ):
-        task_settings.base_url = model_base_url
-        task_settings.model = model_environment.model
-        task_settings.api_key = model_environment.api_key
+    # 2026-08-14 P1：两组环境必须独立降级。此前 model_environment is None 时提前 return，
+    # 会连带跳过已配置的 EMBEDDING_MODEL_*；改为两个独立 if，各自缺失各自保留 settings.json 值
+    if model_environment is not None:
+        model_base_url = _normalize_model_base_url_for_docker(model_environment.base_url)
+        for task_settings in (
+            settings.annotation,
+            settings.diagnosis,
+        ):
+            task_settings.base_url = model_base_url
+            task_settings.model = model_environment.model
+            task_settings.api_key = model_environment.api_key
 
-    if embedding_environment is None:
-        return
-    settings.paragraph_embedding.base_url = _normalize_model_base_url_for_docker(
-        embedding_environment.base_url
-    )
-    settings.paragraph_embedding.model = embedding_environment.model
-    settings.paragraph_embedding.api_key = embedding_environment.api_key
+    if embedding_environment is not None:
+        settings.paragraph_embedding.base_url = _normalize_model_base_url_for_docker(
+            embedding_environment.base_url
+        )
+        settings.paragraph_embedding.model = embedding_environment.model
+        settings.paragraph_embedding.api_key = embedding_environment.api_key
