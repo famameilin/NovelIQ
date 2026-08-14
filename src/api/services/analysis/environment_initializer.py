@@ -107,7 +107,7 @@ class EnvironmentInitializer:
     ) -> None:
         """确保全局上下文存在"""
         stats_repo = StatsRepository(conn)
-        if not stats_repo.has_global_context(run_id):
+        if not stats_repo.has_global_context(run_id, novel_id):
             stats_repo.insert_global_context(
                 run_id=run_id,
                 novel_id=novel_id,
