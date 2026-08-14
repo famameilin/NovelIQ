@@ -713,20 +713,19 @@ class TestAnalysis:
             result = analysis_mod._get_task_detail_from_db("deadbeef")
         assert result is None
 
-    def test_status_map_covers_legacy_readable_states(self):
+    def test_status_map_covers_known_states_only(self):
         """
-        2026-08-13 P2：/status 状态映射必须覆盖 aggregated/diagnosed 可读状态。
-
-        说明: results/timeline 路由仍把这两个历史状态当可读状态放行，
-              /status 此前落入 PENDING 兜底误报“未开始”；修复后给出确定映射。
+        2026-08-14 D3：/status 只映射新管线六态；aggregated/diagnosed 为旧合同
+        状态（新管线不再写入），与未知状态一样落入 PENDING 兜底，不再误报 COMPLETED。
         """
-        assert analysis_mod._map_status_to_task_status("aggregated") == analysis_mod.TaskStatus.COMPLETED
-        assert analysis_mod._map_status_to_task_status("diagnosed") == analysis_mod.TaskStatus.COMPLETED
+        assert analysis_mod._map_status_to_task_status("aggregated") == analysis_mod.TaskStatus.PENDING
+        assert analysis_mod._map_status_to_task_status("diagnosed") == analysis_mod.TaskStatus.PENDING
+        assert analysis_mod._map_status_to_task_status("completed") == analysis_mod.TaskStatus.COMPLETED
         assert analysis_mod._map_status_to_task_status("pending") == analysis_mod.TaskStatus.PENDING
         assert analysis_mod._map_status_to_task_status("unknown-state") == analysis_mod.TaskStatus.PENDING
 
-    def test_get_task_status_maps_legacy_aggregated_status(self, api_client: TestClient):
-        """测试 DB 中历史 aggregated 状态的 run 经 /status 返回 completed 而非 pending"""
+    def test_get_task_status_falls_back_for_legacy_aggregated_status(self, api_client: TestClient):
+        """2026-08-14 D3：历史 aggregated 状态的 run 不再映射为 completed（旧合同已退役）"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -747,7 +746,7 @@ class TestAnalysis:
         response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "completed"
+        assert data["status"] == "pending"
         assert data["progress"] == 90.0
 
     def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):

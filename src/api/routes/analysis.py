@@ -34,10 +34,8 @@ _STATUS_MAP: dict[str, TaskStatus] = {
     "failed": TaskStatus.FAILED,
     "cancelling": TaskStatus.CANCELLING,
     "cancelled": TaskStatus.CANCELLED,
-    # 历史/外部写入的可读中间态：results/timeline 路由仍允许读取这类 run，
-    # /status 必须给出确定映射而不是落入 PENDING 兜底，避免误报“未开始”
-    "aggregated": TaskStatus.COMPLETED,
-    "diagnosed": TaskStatus.COMPLETED,
+    # 2026-08-14 D3：aggregated/diagnosed 是旧合同状态（新管线不再写入），
+    # 不再映射到 COMPLETED；未知状态落入 PENDING 兜底
 }
 
 
