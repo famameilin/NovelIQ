@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from pgvector.sqlalchemy import Vector
 
 from src.storage.models import ParagraphEmbedding
-from src.storage.repositories.chunk.embedding_ops import (
+from src.storage.repositories.paragraph.embedding_ops import (
     ParagraphEmbeddingRow,
     get_incomplete_paragraph_embedding_paragraph_ids,
     insert_paragraph_embeddings,
@@ -124,7 +124,6 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
         SimpleNamespace(
             paragraph_id=5,
             chapter_id=2,
-            chunk_id=2,
             paragraph_text="灰衣人站在门外。",
             local_start_char=5,
             local_end_char=13,
@@ -161,7 +160,7 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
     assert statement.compile().params["param_2"] == 0.3
     assert [row.paragraph_id for row in results] == [5]
     assert results[0].chapter_id == 2
-    assert results[0].chunk_id == 2
+    assert results[0].chapter_id == 2
     assert results[0].similarity == 0.93
 
 

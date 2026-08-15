@@ -20,6 +20,9 @@ from src.api.dependencies import (
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
 from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
 from src.api.models.responses import (
+    ChapterAnnotation as ChapterAnnotationResponse,
+)
+from src.api.models.responses import (
     ChapterMetricsResponse,
     CharacterStats,
     DiagnosisResult,
@@ -27,12 +30,9 @@ from src.api.models.responses import (
     ParagraphCurvePoint,
     ResultsWriteResponse,
 )
-from src.api.models.responses import (
-    ChunkAnnotation as ChunkAnnotationResponse,
-)
 from src.api.routes.results_fetchers import (
+    _fetch_chapter_annotations,
     _fetch_characters,
-    _fetch_chunk_annotations,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_graph_changes_page,
@@ -51,7 +51,7 @@ from src.api.services.results_queries.paragraphs import (
 from src.config import settings
 from src.storage.repositories import (
     AnnotationRepository,
-    ChunkRepository,
+    ChapterRepository,
     ParagraphRepository,
     RunRepository,
     StatsRepository,
@@ -179,7 +179,7 @@ def _fetch_and_require_valid_diagnosis(
 
 **生产环境数据获取请使用专用接口：**
 - `GET /{novel_id}/paragraph-curves` - 获取段落曲线（情绪 + 张力）
-- `GET /{novel_id}/chunk-annotations` - 获取分块标注与伏笔详情
+- `GET /{novel_id}/chapter-annotations` - 获取分块标注与伏笔详情
 - `GET /{novel_id}/characters` - 获取人物统计
 - `GET /{novel_id}/topics` - 获取主题分布
 - `GET /{novel_id}/diagnosis` - 获取云端诊断
@@ -233,11 +233,11 @@ async def get_results(
 
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
+    chapter_repo = ChapterRepository(session)
 
     try:
         results_data, missing_fields, novel_name = fetch_all_results_data(
-            novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo
+            novel_id, task_id, run_id, stats_repo, annotation_repo, chapter_repo
         )
     except DiagnosisRerunRequiredError as exc:
         raise HTTPException(
@@ -332,21 +332,21 @@ async def get_chapter_metrics(
 
 
 @router.get(
-    "/{novel_id}/chunk-annotations",
-    response_model=list[ChunkAnnotationResponse],
+    "/{novel_id}/chapter-annotations",
+    response_model=list[ChapterAnnotationResponse],
 )
-async def get_chunk_annotations(
+async def get_chapter_annotations(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> list[ChunkAnnotationResponse]:
+) -> list[ChapterAnnotationResponse]:
     """
     获取分块标注与伏笔详情数据
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    return _fetch_chunk_annotations(
+    return _fetch_chapter_annotations(
         run_id,
         annotation_repo,
     )
@@ -390,6 +390,9 @@ async def get_topics(
     """获取主题分布数据（段落 token 加权聚合，§11.1）"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
+    # 2026-08-15 M6：/topics 数据源已切换为 paragraph_topics，与 /paragraph-curves、
+    # /chapter-metrics 同口径要求段落合同；旧 run 无段落主题数据时 409 而非静默空数组
+    _require_paragraph_contract(run)
     paragraph_repo = ParagraphRepository(session)
     stats_repo = StatsRepository(session)
     _fetch_and_require_valid_diagnosis(

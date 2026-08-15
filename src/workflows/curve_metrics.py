@@ -54,7 +54,7 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
 
     rows = conn.execute(
         select(
-            Paragraph.chunk_id,
+            Paragraph.chapter_id,
             Paragraph.text,
             ParagraphMetric.token_count,
             ParagraphMetric.sentence_count,
@@ -99,7 +99,8 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
     if token_total > 0:
         global_stats.append(("emotion_avg", (pos_total - neg_total) / token_total))
 
-    emotion_values = [float(row.net_density) for row in rows if row.net_density is not None]
+    emotion_indices = [i for i, row in enumerate(rows) if row.net_density is not None]
+    emotion_values = [float(rows[i].net_density) for i in emotion_indices]
     if emotion_values:
         mean = sum(emotion_values) / len(emotion_values)
         variance = sum((d - mean) ** 2 for d in emotion_values) / len(emotion_values)
@@ -108,10 +109,13 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
         global_stats.append(("emotion_min", min(emotion_values)))
         max_idx = _last_extreme_index(emotion_values, want_max=True)
         min_idx = _last_extreme_index(emotion_values, want_max=False)
-        global_stats.append(("emotion_peak_chunk_id", float(rows[max_idx].chunk_id)))
-        global_stats.append(("emotion_min_chunk_id", float(rows[min_idx].chunk_id)))
+        # 极值下标属于过滤后的 emotion_values，必须经 emotion_indices 映射回未过滤的 rows；
+        # 直接 rows[max_idx] 会在存在 NULL 密度行（0-token 段，§15.2）时定位到错误章节
+        global_stats.append(("emotion_peak_chapter_id", float(rows[emotion_indices[max_idx]].chapter_id)))
+        global_stats.append(("emotion_min_chapter_id", float(rows[emotion_indices[min_idx]].chapter_id)))
 
-    tension_values = [float(row.surface_tension) for row in rows if row.surface_tension is not None]
+    tension_indices = [i for i, row in enumerate(rows) if row.surface_tension is not None]
+    tension_values = [float(rows[i].surface_tension) for i in tension_indices]
     if tension_values:
         mean = sum(tension_values) / len(tension_values)
         variance = sum((v - mean) ** 2 for v in tension_values) / len(tension_values)
@@ -121,7 +125,7 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
         global_stats.append(("rhythm_min", min(tension_values)))
         tension_max_idx = _last_extreme_index(tension_values, want_max=True)
         tension_min_idx = _last_extreme_index(tension_values, want_max=False)
-        global_stats.append(("rhythm_max_chunk", float(rows[tension_max_idx].chunk_id)))
-        global_stats.append(("rhythm_min_chunk", float(rows[tension_min_idx].chunk_id)))
+        global_stats.append(("rhythm_peak_chapter_id", float(rows[tension_indices[tension_max_idx]].chapter_id)))
+        global_stats.append(("rhythm_min_chapter_id", float(rows[tension_indices[tension_min_idx]].chapter_id)))
 
     return global_stats

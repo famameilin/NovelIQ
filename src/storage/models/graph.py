@@ -42,8 +42,8 @@ class GraphVersion(Base):
     )
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     chapter_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    first_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    last_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     annotation_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
@@ -53,16 +53,16 @@ class GraphVersion(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["first_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["first_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
-            name="graph_versions_first_chunk_run_fkey",
+            name="graph_versions_first_chapter_run_fkey",
         ),
         ForeignKeyConstraint(
-            ["last_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["last_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
-            name="graph_versions_last_chunk_run_fkey",
+            name="graph_versions_last_chapter_run_fkey",
         ),
         UniqueConstraint("run_id", "chapter_id", name="uq_graph_versions_run_chapter"),
         UniqueConstraint("run_id", "chapter_order", name="uq_graph_versions_run_order"),
@@ -86,8 +86,8 @@ class GraphEntity(Base):
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    first_seen_chunk: Mapped[int] = mapped_column(Integer, nullable=False)
-    last_seen_chunk: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_seen_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_seen_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -103,7 +103,7 @@ class GraphEntity(Base):
         ),
         UniqueConstraint("run_id", "canonical_name", name="uq_graph_entities_run_canonical"),
         Index("idx_graph_entities_run_type", "run_id", "entity_type"),
-        Index("idx_graph_entities_run_last_seen", "run_id", "last_seen_chunk"),
+        Index("idx_graph_entities_run_last_seen", "run_id", "last_seen_chapter"),
     )
 
 
@@ -141,7 +141,7 @@ class GraphFact(Base):
     assertion: Mapped[str] = mapped_column(String(20), nullable=False)
     confidence: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    effective_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
     annotation_id: Mapped[str] = mapped_column(
         String(36),
@@ -153,15 +153,15 @@ class GraphFact(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["effective_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["effective_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
-            name="graph_facts_effective_chunk_run_fkey",
+            name="graph_facts_effective_chapter_run_fkey",
         ),
         CheckConstraint("fact_revision > 0", name="ck_graph_facts_revision_positive"),
         UniqueConstraint("run_id", "fact_id", "fact_revision", name="uq_graph_facts_run_fact_revision"),
         UniqueConstraint("graph_version_id", "payload_path", name="uq_graph_facts_version_payload_path"),
-        Index("idx_graph_facts_run_chunk", "run_id", "effective_chunk_id"),
+        Index("idx_graph_facts_run_chapter", "run_id", "effective_chapter_id"),
         Index("idx_graph_facts_run_subject_predicate", "run_id", "subject_entity_id", "predicate"),
         Index("idx_graph_facts_graph_version", "graph_version_id"),
     )

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import Chunk, CloudAnalysis, GlobalStats, ParagraphTopic
+from src.storage.models import Chapter, CloudAnalysis, GlobalStats, ParagraphTopic
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -178,7 +178,9 @@ def is_aggregate_complete(session: Session, run_id: str) -> bool:
     Returns:
         聚合是否完成
     """
-    chunks_count = session.execute(select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)).scalar() or 0
+    chapters_count = session.execute(
+        select(func.count()).select_from(Chapter).where(Chapter.run_id == run_id)
+    ).scalar() or 0
 
     # 2026-08-14 M8b：聚合阶段唯一落库产物是 global_stats（chunk_curves 已下线），
     # 完成判定改以 global_stats 存在为准
@@ -187,4 +189,4 @@ def is_aggregate_complete(session: Session, run_id: str) -> bool:
         or 0
     )
 
-    return chunks_count > 0 and stats_count > 0
+    return chapters_count > 0 and stats_count > 0

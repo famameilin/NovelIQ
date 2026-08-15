@@ -53,7 +53,9 @@ def _local_regression_fit(
         h = bandwidth
         while True:
             mask = np.abs(dx) <= h
-            if int(mask.sum()) >= min_points or h >= span:
+            # h <= 0 时窗口无法定义且 h *= 2.0 恒不变（死循环）：直接退出，
+            # 退化为当前点的局部窗口（后续加权均值分支返回原值，不伪造）
+            if int(mask.sum()) >= min_points or h >= span or h <= 0:
                 break
             h *= 2.0
         d = dx[mask]
@@ -113,6 +115,12 @@ def robust_local_regression(
         raise ValueError(
             f"x and y length mismatch: len(x)={xa.shape[0]} len(y)={ya.shape[0]}"
         )
+    # 2026-08-15 M3：非正带宽无法定义窗口（且自适应扩窗 h *= 2.0 恒不变会死循环），
+    # 配置错误应在入口快速失败而不是挂死分析进程
+    if bandwidth <= 0:
+        raise ValueError(f"bandwidth must be positive, got {bandwidth}")
+    if min_points < 1:
+        raise ValueError(f"min_points must be at least 1, got {min_points}")
     n = int(xa.shape[0])
     if n == 0:
         return []

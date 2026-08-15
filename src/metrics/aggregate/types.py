@@ -29,7 +29,7 @@ class AggregateResult:
 class AnnotationData:
     """标注数据"""
 
-    chunk_ids: list[int]
+    chapter_ids: list[int]
     event_types: list[str]
     cliffhangers: list[int]
     pivot_moments: list[int]
@@ -83,7 +83,7 @@ class CultureData:
 class TensionData:
     """张力数据"""
 
-    chunk_ids: list[int]
+    chapter_ids: list[int]
     tension_composite_scores: list[float | None]
 
 

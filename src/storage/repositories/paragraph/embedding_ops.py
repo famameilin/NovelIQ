@@ -30,7 +30,6 @@ class SimilarParagraphRow:
 
     paragraph_id: int
     chapter_id: int
-    chunk_id: int
     paragraph_text: str
     local_start_char: int
     local_end_char: int
@@ -112,7 +111,6 @@ def search_similar_paragraphs(
         select(
             Paragraph.paragraph_id,
             Paragraph.chapter_id,
-            Paragraph.chunk_id,
             Paragraph.text.label("paragraph_text"),
             Paragraph.local_start_char,
             Paragraph.local_end_char,
@@ -149,7 +147,6 @@ def _similar_paragraph_row(row: Any) -> SimilarParagraphRow:
     return SimilarParagraphRow(
         paragraph_id=int(row.paragraph_id),
         chapter_id=int(row.chapter_id),
-        chunk_id=int(row.chunk_id),
         paragraph_text=str(row.paragraph_text),
         local_start_char=int(row.local_start_char),
         local_end_char=int(row.local_end_char),

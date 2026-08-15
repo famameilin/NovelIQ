@@ -1,10 +1,8 @@
 """
-分块查询组装器
+章节查询组装器
 
-说明: 承载 chunks 相关查询组装逻辑
-
-2026-08-14 M8a：chunk 曲线/风格查询已删除（前端 M4 已切换段落端点，导出走
-paragraph_curves）；本模块仅保留 chunk 标注展开（chunk_annotations）。
+说明: 承载章节标注相关查询组装逻辑（M9a-2：chunk 命名下线，
+仅保留章节标注展开，数据源为 chapter_annotations 表）。
 """
 
 from __future__ import annotations
@@ -15,17 +13,17 @@ from typing import Any
 from loguru import logger
 
 from src.api.models.responses import (
-    ChunkAnnotation,
-    ChunkCharacter,
-    ChunkDialogue,
-    ChunkRelation,
+    ChapterAnnotation,
+    ChapterCharacter,
+    ChapterDialogue,
+    ChapterRelation,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
 from src.storage.repositories import AnnotationRepository
 
 
-def _fetch_chunk_annotations(
+def _fetch_chapter_annotations(
     run_id: str,
     annotation_repo: AnnotationRepository,
     valid_character_names: set[str] | None = None,
@@ -38,17 +36,17 @@ def _fetch_chunk_annotations(
 
     获取分块标注数据
     """
-    annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
-    characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
-    dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
+    annotations_raw = annotation_repo.fetch_chapter_annotations_full(run_id)
+    characters_raw = annotation_repo.fetch_chapter_characters_full(run_id)
+    dialogues_raw = annotation_repo.fetch_chapter_dialogues_full(run_id)
 
     if export_graph_view is None:
         authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
         export_graph_view = authority_service.build_export_view(run_id)
 
-    characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
+    characters_by_chunk: dict[int, list[ChapterCharacter]] = defaultdict(list)
     for character_row in characters_raw:
-        chunk_id = character_row.chunk_id
+        chapter_id = character_row.chapter_id
         raw_name = str(getattr(character_row, "surface_name", None) or character_row.name)
         decision = decide_character_reference(
             raw_name,
@@ -56,13 +54,13 @@ def _fetch_chunk_annotations(
         )
         character_name = decision.resolved_global_name
         if character_name is None:
-            logger.warning("跳过分块角色中的未解析局部引用: chunk_id={}, name={}", chunk_id, raw_name)
+            logger.warning("跳过分块角色中的未解析局部引用: chapter_id={}, name={}", chapter_id, raw_name)
             continue
         if valid_character_names is not None and character_name not in valid_character_names:
-            logger.warning("跳过分块角色中的悬空引用: chunk_id={}, name={}", chunk_id, character_name)
+            logger.warning("跳过分块角色中的悬空引用: chapter_id={}, name={}", chapter_id, character_name)
             continue
-        characters_by_chunk[chunk_id].append(
-            ChunkCharacter(
+        characters_by_chunk[chapter_id].append(
+            ChapterCharacter(
                 name=character_name,
                 surface_name=raw_name,
                 reference_kind=getattr(character_row, "reference_kind", None) or decision.reference_kind,
@@ -75,25 +73,25 @@ def _fetch_chunk_annotations(
             )
         )
 
-    relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
+    relations_by_chunk: dict[int, list[ChapterRelation]] = defaultdict(list)
     for graph_change in export_graph_view.graph_changes:
         if graph_change.change_kind != "relation":
             continue
-        chunk_id = graph_change.effective_chunk_id
+        chapter_id = graph_change.effective_chapter_id
         from_char = graph_change.from_name or ""
         to_char = graph_change.to_name or ""
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
             logger.warning(
-                "跳过分块关系中的悬空引用: chunk_id={}, from_char={}, to_char={}",
-                chunk_id,
+                "跳过分块关系中的悬空引用: chapter_id={}, from_char={}, to_char={}",
+                chapter_id,
                 from_char,
                 to_char,
             )
             continue
-        relations_by_chunk[chunk_id].append(
-            ChunkRelation(
+        relations_by_chunk[chapter_id].append(
+            ChapterRelation(
                 from_char=from_char,
                 to_char=to_char,
                 from_reference_kind=None,
@@ -109,9 +107,9 @@ def _fetch_chunk_annotations(
             )
         )
 
-    dialogues_by_chunk: dict[int, list[ChunkDialogue]] = defaultdict(list)
+    dialogues_by_chunk: dict[int, list[ChapterDialogue]] = defaultdict(list)
     for dialogue_row in dialogues_raw:
-        chunk_id = dialogue_row.chunk_id
+        chapter_id = dialogue_row.chapter_id
         speakers = dialogue_row.speaker or []
         if not speakers:
             continue
@@ -142,33 +140,41 @@ def _fetch_chunk_annotations(
             )
             normalized_speaker = decision.resolved_global_name
             if normalized_speaker is None:
-                logger.warning("将分块对话中的未解析局部 speaker 置空: chunk_id={}, speaker={}", chunk_id, speaker)
+                logger.warning(
+                    "将章节对话中的未解析局部 speaker 置空: chapter_id={}, speaker={}",
+                    chapter_id,
+                    speaker,
+                )
                 continue
             if (
                 normalized_speaker
                 and valid_character_names is not None
                 and normalized_speaker not in valid_character_names
             ):
-                logger.warning("将分块对话中的悬空 speaker 置空: chunk_id={}, speaker={}", chunk_id, normalized_speaker)
+                logger.warning(
+                    "将章节对话中的悬空 speaker 置空: chapter_id={}, speaker={}",
+                    chapter_id,
+                    normalized_speaker,
+                )
                 continue
             if normalized_speaker:
                 valid_speakers.append(normalized_speaker)
         if not valid_speakers:
             continue
-        dialogues_by_chunk[chunk_id].append(
-            ChunkDialogue(
+        dialogues_by_chunk[chapter_id].append(
+            ChapterDialogue(
                 speaker=valid_speakers,
                 speaker_references=speaker_references,
                 length=int(dialogue_row.length) if dialogue_row.length is not None else None,
             )
         )
 
-    result: list[ChunkAnnotation] = []
+    result: list[ChapterAnnotation] = []
     for annotation_row in annotations_raw:
-        chunk_id = int(annotation_row.chunk_id)
+        chapter_id = int(annotation_row.chapter_id)
         result.append(
-            ChunkAnnotation(
-                chunk_id=chunk_id,
+            ChapterAnnotation(
+                chapter_id=chapter_id,
                 emotional_valence=(
                     str(annotation_row.emotional_valence) if annotation_row.emotional_valence else None
                 ),
@@ -223,9 +229,9 @@ def _fetch_chunk_annotations(
                     if getattr(annotation_row, "linked_setup_id", None)
                     else None
                 ),
-                characters=characters_by_chunk.get(chunk_id, []),
-                relations=relations_by_chunk.get(chunk_id, []),
-                dialogues=dialogues_by_chunk.get(chunk_id, []),
+                characters=characters_by_chunk.get(chapter_id, []),
+                relations=relations_by_chunk.get(chapter_id, []),
+                dialogues=dialogues_by_chunk.get(chapter_id, []),
             )
         )
 

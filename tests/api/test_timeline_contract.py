@@ -10,7 +10,7 @@ from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
     graph_change_names,
     graph_change_tuples,
-    nodes_for_anchor_chunk,
+    nodes_for_anchor_chapter,
 )
 
 
@@ -26,7 +26,7 @@ def test_get_timeline_returns_atomic_and_composite_nodes(api_client: TestClient,
     payload = response.json()
 
     assert payload["meta"]["novel_id"] == scenario.novel_id
-    assert payload["meta"]["total_chunks"] == 5
+    assert payload["meta"]["total_chapters"] == 5
     assert len(payload["phases"]) == 4
     assert payload["tension_curve"] == [0.6, 0.7, 0.9, 0.5, 0.4]
     assert [node["progress"] for node in payload["atomic_nodes"]] == sorted(
@@ -36,26 +36,26 @@ def test_get_timeline_returns_atomic_and_composite_nodes(api_client: TestClient,
         node["start_progress"] for node in payload["composite_nodes"]
     )
 
-    anchor_chunk_zero_nodes = nodes_for_anchor_chunk(payload["atomic_nodes"], 0)
-    anchor_chunk_two_nodes = nodes_for_anchor_chunk(payload["atomic_nodes"], 2)
-    anchor_chunk_four_nodes = nodes_for_anchor_chunk(payload["atomic_nodes"], 4)
-    composite_anchor_chunk_two_nodes = nodes_for_anchor_chunk(payload["composite_nodes"], 2)
+    anchor_chapter_one_nodes = nodes_for_anchor_chapter(payload["atomic_nodes"], 1)
+    anchor_chapter_three_nodes = nodes_for_anchor_chapter(payload["atomic_nodes"], 3)
+    anchor_chapter_five_nodes = nodes_for_anchor_chapter(payload["atomic_nodes"], 5)
+    composite_anchor_chapter_three_nodes = nodes_for_anchor_chapter(payload["composite_nodes"], 3)
 
-    assert any(node["node_type"] == "plot" for node in anchor_chunk_zero_nodes)
+    assert any(node["node_type"] == "plot" for node in anchor_chapter_one_nodes)
     assert any(
-        node["node_type"] == "lifecycle" and node["node_subtype"] == "entry" for node in anchor_chunk_zero_nodes
+        node["node_type"] == "lifecycle" and node["node_subtype"] == "entry" for node in anchor_chapter_one_nodes
     )
-    assert any(node["node_type"] == "plot" for node in anchor_chunk_two_nodes)
-    relation_node = next(node for node in anchor_chunk_two_nodes if node["node_type"] == "relation")
+    assert any(node["node_type"] == "plot" for node in anchor_chapter_three_nodes)
+    relation_node = next(node for node in anchor_chapter_three_nodes if node["node_type"] == "relation")
     assert graph_change_tuples(relation_node["graph_changes"]) == {
         (scenario.hero_name, scenario.rival_name, "assert")
     }
     assert scenario.organization_name not in graph_change_names(relation_node["graph_changes"])
-    assert any(node["node_type"] == "plot" for node in anchor_chunk_four_nodes)
-    assert any(node["node_type"] == "relation" for node in composite_anchor_chunk_two_nodes)
+    assert any(node["node_type"] == "plot" for node in anchor_chapter_five_nodes)
+    assert any(node["node_type"] == "relation" for node in composite_anchor_chapter_three_nodes)
     assert any(
         "relation:" in child_id
-        for node in composite_anchor_chunk_two_nodes
+        for node in composite_anchor_chapter_three_nodes
         for child_id in node["child_node_ids"]
     )
 
@@ -109,7 +109,7 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
 
     assert set(relation_node) == {
         "node_id",
-        "anchor_chunk_id",
+        "anchor_chapter_id",
         "progress",
         "importance_score",
         "level",
@@ -130,7 +130,7 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
         "chapter_id",
         "fact_id",
         "fact_revision",
-        "effective_chunk_id",
+        "effective_chapter_id",
         "changes",
         "entity_id",
         "entity_name",
@@ -152,9 +152,9 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
     composite_relation_node = next(node for node in payload["composite_nodes"] if node["node_type"] == "relation")
     assert set(composite_relation_node) == {
         "node_id",
-        "anchor_chunk_id",
-        "start_chunk_id",
-        "end_chunk_id",
+        "anchor_chapter_id",
+        "start_chapter_id",
+        "end_chapter_id",
         "progress",
         "start_progress",
         "end_progress",

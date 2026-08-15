@@ -29,7 +29,7 @@ from .types import (
 if TYPE_CHECKING:
     from src.storage.repositories import (
         AnnotationRepository,
-        ChunkRepository,
+        ChapterRepository,
         StatsRepository,
     )
 
@@ -78,7 +78,7 @@ def fetch_annotation_data(
     rows = annotation_repo.fetch_full_annotations(run_id)
 
     return AnnotationData(
-        chunk_ids=[row.chunk_id for row in rows],
+        chapter_ids=[row.chapter_id for row in rows],
         event_types=[row.event_type or "铺垫" for row in rows],
         cliffhangers=[row.cliffhanger or 0 for row in rows],
         pivot_moments=[row.pivot_moment or 0 for row in rows],
@@ -98,11 +98,11 @@ def fetch_emotion_data(
     """
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    aggregates = ParagraphRepository(stats_repo.session).fetch_chunk_metric_aggregates(run_id)
+    aggregates = ParagraphRepository(stats_repo.session).fetch_chapter_metric_aggregates(run_id)
     emotion_values: list[float] = []
     pos_densities: list[float] = []
     neg_densities: list[float] = []
-    for _chunk_id, totals in aggregates:
+    for _chapter_id, totals in aggregates:
         token_count = totals.get("token_count", 0.0)
         if token_count <= 0:
             continue
@@ -215,11 +215,11 @@ def fetch_relation_data(
 
 
 def fetch_text_data(
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
     run_id: str,
 ) -> TextData:
     """提取 chunks 表文本数据"""
-    texts = chunk_repo.fetch_all_chunk_texts(run_id)
+    texts = chapter_repo.fetch_all_chapter_texts(run_id)
 
     all_tokens: list[str] = []
     for text in texts:
@@ -240,9 +240,9 @@ def fetch_culture_data(
     """
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    aggregates = ParagraphRepository(stats_repo.session).fetch_chunk_metric_aggregates(run_id)
+    aggregates = ParagraphRepository(stats_repo.session).fetch_chapter_metric_aggregates(run_id)
     imagery_densities: list[float] = []
-    for _chunk_id, totals in aggregates:
+    for _chapter_id, totals in aggregates:
         token_count = totals.get("token_count", 0.0)
         if token_count <= 0:
             continue
@@ -265,10 +265,10 @@ def fetch_tension_data(
     """
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    rows = ParagraphRepository(stats_repo.session).fetch_chunk_tension_scores(run_id)
+    rows = ParagraphRepository(stats_repo.session).fetch_chapter_tension_scores(run_id)
     return TensionData(
-        chunk_ids=[chunk_id for chunk_id, _tension in rows],
-        tension_composite_scores=[tension for _chunk_id, tension in rows],
+        chapter_ids=[chapter_id for chapter_id, _tension in rows],
+        tension_composite_scores=[tension for _chapter_id, tension in rows],
     )
 
 
@@ -279,16 +279,16 @@ def fetch_dialogue_data(
     """
     从数据库图对话事实提取 tone 数据
 
-    按事实中的 chunk_id 展开语气类型用于聚合计算
+    按事实中的 chapter_id 展开语气类型用于聚合计算
 
     """
-    rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
+    rows = annotation_repo.fetch_chapter_dialogues_full(run_id)
     tones = [row.tone for row in rows if row.tone is not None]
     return DialogueData(tones=tones)
 
 
 def fetch_style_data(
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
     run_id: str,
 ) -> StyleData:
     """
@@ -299,7 +299,7 @@ def fetch_style_data(
     """
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    aggregates = ParagraphRepository(chunk_repo.session).fetch_chunk_metric_aggregates(run_id)
+    aggregates = ParagraphRepository(chapter_repo.session).fetch_chapter_metric_aggregates(run_id)
     dialogue_char_total = sum(item.get("dialogue_char_count", 0.0) for _cid, item in aggregates)
     char_total = sum(item.get("char_count", 0.0) for _cid, item in aggregates)
     sentence_char_total = sum(item.get("sentence_char_sum", 0.0) for _cid, item in aggregates)

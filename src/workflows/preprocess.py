@@ -27,7 +27,6 @@ from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import (
     ChapterRepository,
-    ChunkRepository,
 )
 from src.storage.repositories.paragraph_repository import (
     ParagraphMetricRow,
@@ -64,8 +63,8 @@ async def run_preprocess(
     if emitter:
         await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
 
-    chunk_repo = ChunkRepository(session)
-    if chunk_repo.is_preprocess_complete(run_id):
+    chapter_repo = ChapterRepository(session)
+    if chapter_repo.is_preprocess_complete(run_id):
         logger.info(f"preprocess already complete for run_id={run_id}, skipping")
         return 0, 0, 0.0
 
@@ -88,18 +87,18 @@ async def run_preprocess(
         emitter=emitter,
     )
 
-    total_chunks = len(all_chunks)
+    total_chapters = len(all_chunks)
     total_chars = sum(len(chunk.text) for chunk in all_chunks)
-    logger.info(f"chunked {total_chunks} chunks total_chars={total_chars}")
+    logger.info(f"chunked {total_chapters} chunks total_chars={total_chars}")
 
     chapter_repo = ChapterRepository(session)
     chapter_repo.insert_chapters(run_id, all_chapters)
     _commit_preprocess_writes(session, step="insert_chapters")
     logger.info(f"inserted {len(all_chapters)} chapters into db (run_id={run_id})")
 
-    chunk_repo.insert_chunks(run_id, all_chunks)
-    _commit_preprocess_writes(session, step="insert_chunks")
-    logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
+    chapter_repo.insert_chapter_texts(run_id, all_chunks)
+    _commit_preprocess_writes(session, step="insert_chapter_texts")
+    logger.info(f"inserted {total_chapters} chunks into db (run_id={run_id})")
 
     # 段落事实源：chunks 落库后无条件生成段落行（语义检索开关不影响 paragraphs 的生成和内容），
     # 段落身份以 paragraphs 表为准，embedding/检索/指标均从该表读取，保证与段落严格对齐
@@ -126,9 +125,9 @@ async def run_preprocess(
         await _generate_paragraph_embeddings(session, run_id, emitter=emitter)
 
     elapsed = time.time() - start_time
-    logger.info(f"preprocess completed chunks={total_chunks} chars={total_chars} time={elapsed:.2f}s")
+    logger.info(f"preprocess completed chunks={total_chapters} chars={total_chars} time={elapsed:.2f}s")
     logger.info("\n=== Preprocess Statistics ===")
-    logger.info(f"Total chunks: {total_chunks}")
+    logger.info(f"Total chunks: {total_chapters}")
     logger.info(f"Total characters: {total_chars}")
     logger.info(f"Processing time: {elapsed:.2f}s")
 
@@ -137,7 +136,7 @@ async def run_preprocess(
             StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0, sub_percent=100.0)
         )
 
-    return total_chunks, total_chars, elapsed
+    return total_chapters, total_chars, elapsed
 
 
 def _commit_preprocess_writes(session: Session, *, step: str) -> None:
@@ -284,7 +283,7 @@ async def _generate_paragraph_embeddings(
     from src.agents.usage import build_token_usage_callback
     from src.models.local.embedding import EmbeddingClient
     from src.storage.models import AnalysisRun
-    from src.storage.repositories.chunk import (
+    from src.storage.repositories.paragraph import (
         ParagraphEmbeddingRow,
         insert_paragraph_embeddings,
     )
@@ -376,7 +375,7 @@ async def _generate_paragraph_embedding_rows(
             paragraph_refs.append(
                 (
                     row.paragraph_id,
-                    row.chunk_id,
+                    row.chapter_id,
                     row.paragraph_index,
                     row.local_start_char,
                     row.local_end_char,
@@ -403,7 +402,7 @@ async def _generate_paragraph_embedding_rows(
 
         sub_percent = (completed_batches / total_batches) * 100
         # current/total 在这里表达的是“已完成批次/总批次”，
-        # message 再补充总 paragraph 数，避免和 chunk 级 current/total 语义混淆
+        # message 再补充总 paragraph 数，避免和 章节 级 current/total 语义混淆
         await emitter(
             StreamEvent(
                 action="progress",
@@ -434,7 +433,7 @@ async def _generate_paragraph_embedding_rows(
     missing_refs: list[tuple[int, int]] = []
     for (
         paragraph_id,
-        chunk_id,
+        chapter_id,
         paragraph_index,
         _local_start_char,
         _local_end_char,
@@ -448,12 +447,12 @@ async def _generate_paragraph_embedding_rows(
     ):
         if not embedding:
             logger.error(
-                "empty paragraph embedding detected: run_id={} chunk_id={} paragraph_index={}",
+                "empty paragraph embedding detected: run_id={} chapter_id={} paragraph_index={}",
                 run_id,
-                chunk_id,
+                chapter_id,
                 paragraph_index,
             )
-            missing_refs.append((chunk_id, paragraph_index))
+            missing_refs.append((chapter_id, paragraph_index))
             continue
         rows.append(
             row_factory(
@@ -462,7 +461,7 @@ async def _generate_paragraph_embedding_rows(
             )
         )
     if missing_refs:
-        preview_refs = ", ".join(f"{chunk_id}:{paragraph_index}" for chunk_id, paragraph_index in missing_refs[:10])
+        preview_refs = ", ".join(f"{chapter_id}:{paragraph_index}" for chapter_id, paragraph_index in missing_refs[:10])
         raise RuntimeError(
             "paragraph embeddings incomplete during preprocess: "
             f"run_id={run_id}, missing={preview_refs}, total={len(missing_refs)}"

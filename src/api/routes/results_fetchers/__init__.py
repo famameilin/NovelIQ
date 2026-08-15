@@ -6,9 +6,9 @@
 
 from src.api.services.results_queries import (
     _calculate_narrative_focus_scores,
+    _fetch_chapter_annotations,
     _fetch_character_relations,
     _fetch_characters,
-    _fetch_chunk_annotations,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_global_stats,
@@ -37,7 +37,7 @@ __all__ = [
     "_fetch_graph_changes_page",
     "_fetch_graph_snapshot",
     "_normalize_arc_scores",
-    "_fetch_chunk_annotations",
+    "_fetch_chapter_annotations",
     "_fetch_character_relations",
     "_fetch_hierarchical_relations",
     "_fetch_global_stats",

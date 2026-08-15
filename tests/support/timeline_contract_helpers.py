@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.agents.annotation.schema import ResolvedCase
-from src.storage.repositories import GraphRepository, RunRepository, StatsRepository
+from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
@@ -73,17 +73,19 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     run_repo = RunRepository(db_session)
     run_repo.update_run_status(run_id, "completed")
 
-    stats_repo = StatsRepository(db_session)
-    for chunk_id, summary in enumerate(
+    from src.storage.repositories.stats.summaries import insert_chapter_summary
+
+    for chapter_id, summary in enumerate(
         [
             "顾承渊登场",
             "苏映雪现身",
             "顾承渊与苏映雪结盟",
             "苏映雪离场",
             "顾承渊独自前行",
-        ]
+        ],
+        start=1,
     ):
-        stats_repo.insert_chunk_summary(run_id, chunk_id, summary)
+        insert_chapter_summary(db_session, run_id, chapter_id, summary)
 
     # 2026-08-14 段落化：导出核心结果走段落曲线，场景同步插入段落曲线行
     # （每段一行，与 5 个 chunk 一一对应；章张力 = 段内 surface_tension 均值，
@@ -149,7 +151,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=0, name=hero_name, action="初入江湖")],
+        characters=[character_fact(chunk_id=1, name=hero_name, action="初入江湖")],
     )
     persist_timeline_chapter(
         db_session,
@@ -157,7 +159,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         chapter_id=2,
         characters=[
             character_fact(
-                chunk_id=1,
+                chunk_id=2,
                 name=rival_name,
                 action="现身",
                 role_function="帮助者",
@@ -169,20 +171,20 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=3,
-        emotional_valences={2: "strong_negative"},
-        event_types={2: "冲突"},
-        pivot_chunks={2},
-        cliffhanger_chunks={2},
+        emotional_valences={3: "strong_negative"},
+        event_types={3: "冲突"},
+        pivot_chunks={3},
+        cliffhanger_chunks={3},
         characters=[
             character_fact(
-                chunk_id=2,
+                chunk_id=3,
                 name=hero_name,
                 action="结盟",
                 emotion="strong_negative",
                 chapter_id=3,
             ),
             character_fact(
-                chunk_id=2,
+                chunk_id=3,
                 name=rival_name,
                 action="回应",
                 role_function="帮助者",
@@ -191,14 +193,14 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         ],
         relations=[
             relation_fact(
-                chunk_id=2,
+                chunk_id=3,
                 from_name=hero_name,
                 to_name=rival_name,
                 relation_type="盟友",
                 chapter_id=3,
             ),
             relation_fact(
-                chunk_id=2,
+                chunk_id=3,
                 from_name=hero_name,
                 to_name=organization_name,
                 to_entity_type="organization",
@@ -219,11 +221,11 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=4,
-        emotional_valences={3: "mild_negative"},
-        event_types={3: "转折"},
+        emotional_valences={4: "mild_negative"},
+        event_types={4: "转折"},
         characters=[
             character_fact(
-                chunk_id=3,
+                chunk_id=4,
                 name=rival_name,
                 action="离开",
                 role_function="帮助者",
@@ -236,7 +238,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=5,
-        characters=[character_fact(chunk_id=4, name=hero_name, action="独行", chapter_id=5)],
+        characters=[character_fact(chunk_id=5, name=hero_name, action="独行", chapter_id=5)],
         resolved_cases=[
             ResolvedCase(
                 case_id="case-break",
@@ -244,7 +246,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 type="relation_change",
                 reason="决裂",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 4},
+                target_ref={"kind": "relation_change", "chunk_id": 5},
                 from_entity=hero_name,
                 to_entity=rival_name,
                 relation_type="盟友",
@@ -277,11 +279,11 @@ def index_by_node_id(items: list[Any]) -> dict[str, Any]:
     return {str(item["node_id"]) if isinstance(item, dict) else str(item.node_id): item for item in items}
 
 
-def nodes_for_anchor_chunk(items: list[Any], anchor_chunk_id: int) -> list[Any]:
+def nodes_for_anchor_chapter(items: list[Any], anchor_chapter_id: int) -> list[Any]:
     matched: list[Any] = []
     for item in items:
-        current_anchor = int(item["anchor_chunk_id"]) if isinstance(item, dict) else int(item.anchor_chunk_id)
-        if current_anchor == anchor_chunk_id:
+        current_anchor = int(item["anchor_chapter_id"]) if isinstance(item, dict) else int(item.anchor_chapter_id)
+        if current_anchor == anchor_chapter_id:
             matched.append(item)
     return matched
 

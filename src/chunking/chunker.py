@@ -257,7 +257,7 @@ def split_paragraphs(text: str, max_chars: int = 1500) -> list[ParagraphSpan]:
 
     返回的 ParagraphSpan 只含 chunk 局部身份（paragraph_index、
     source_paragraph_index、fragment_index 与 local 坐标），chunk 级身份
-    （chunk_id/chapter_id/paragraph_id/global 坐标）由 split_chunk_paragraphs
+    （chapter_id/chapter_id/paragraph_id/global 坐标）由 split_chunk_paragraphs
     或调用方在归属到 chunk 后填充。
     """
     paragraphs: list[ParagraphSpan] = []
@@ -316,7 +316,7 @@ def split_chunk_paragraphs(
     段落身份不变量（设计文档 §3/§4）：
     - paragraph_id 在 run 内按全文顺序连续（0, 1, 2, ...），不随数据库自增推断
     - global 坐标 = chunk 全文偏移 + local 坐标，与规范化全文坐标一致
-    - chunk_id/chapter_id 直接取自 Chunk 上下文
+    - chapter_id 直接取自 Chunk 上下文（M9a-2：chunks 表合并后段落身份 = chapter_id）
     """
     spans: list[ParagraphSpan] = []
     paragraph_id = 0
@@ -326,7 +326,6 @@ def split_chunk_paragraphs(
                 replace(
                     span,
                     paragraph_id=paragraph_id,
-                    chunk_id=chunk.index,
                     chapter_id=chunk.chapter_id,
                     global_start_char=chunk.start + span.local_start_char,
                     global_end_char=chunk.start + span.local_end_char,

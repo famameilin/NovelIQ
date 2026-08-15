@@ -26,7 +26,7 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
         chapter_order=3,
         fact_id="fact-12",
         fact_revision=4,
-        effective_chunk_id=12,
+        effective_chapter_id=12,
         changes=[{"change_kind": "新建", "field": "relation_type"}],
         entity_id=None,
         entity_name=None,
@@ -50,7 +50,7 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
 
     response = GraphChangesResponse.model_validate(payload)
     change = response.changes[0]
-    assert change.effective_chunk_id == 12
+    assert change.effective_chapter_id == 12
     assert change.relation_id == "relation-7"
     assert change.from_entity_id == 1
     assert change.to_entity_id == 2
@@ -87,7 +87,7 @@ def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
         chapter_order=3,
         fact_id="fact-12",
         fact_revision=4,
-        effective_chunk_id=12,
+        effective_chapter_id=12,
         changes=[{"change_kind": "新建", "field": "relation_type"}],
         entity_id=None,
         entity_name=None,
@@ -141,7 +141,7 @@ def test_graph_changes_page_rejects_out_of_range_cursor() -> None:
         chapter_order=1,
         fact_id="f",
         fact_revision=1,
-        effective_chunk_id=1,
+        effective_chapter_id=1,
         changes=[{"change_kind": "新建", "field": "relation_type"}],
         entity_id=None,
         entity_name=None,

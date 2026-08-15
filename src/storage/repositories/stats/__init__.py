@@ -29,8 +29,8 @@ from .runs import (
     is_aggregate_complete,
 )
 from .summaries import (
-    fetch_chunk_summaries_by_range,
-    insert_chunk_summary,
+    fetch_chapter_summaries_by_range,
+    insert_chapter_summary,
     insert_stage_summary,
 )
 
@@ -54,7 +54,7 @@ __all__ = [
     "has_diagnosis_data",
     "is_aggregate_complete",
     # 汇总仓储
-    "insert_chunk_summary",
+    "insert_chapter_summary",
     "insert_stage_summary",
-    "fetch_chunk_summaries_by_range",
+    "fetch_chapter_summaries_by_range",
 ]

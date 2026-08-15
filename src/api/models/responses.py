@@ -165,7 +165,7 @@ class ChapterMetricsResponse(BaseModel):
     book: BookAggregateStats
 
 
-class ChunkCharacter(BaseModel):
+class ChapterCharacter(BaseModel):
     name: str
     surface_name: str | None = None
     reference_kind: str | None = None
@@ -177,7 +177,7 @@ class ChunkCharacter(BaseModel):
     emotion_score: str | None = None
 
 
-class ChunkRelation(BaseModel):
+class ChapterRelation(BaseModel):
     from_char: str
     to_char: str
     from_reference_kind: str | None = None
@@ -189,15 +189,15 @@ class ChunkRelation(BaseModel):
     change: str
 
 
-class ChunkDialogue(BaseModel):
+class ChapterDialogue(BaseModel):
 
     speaker: list[str] | None = None
     speaker_references: list[dict[str, Any]] = []
     length: int | None = None
 
 
-class ChunkAnnotation(BaseModel):
-    chunk_id: int
+class ChapterAnnotation(BaseModel):
+    chapter_id: int
     emotional_valence: str | None = None
     event_type: str | None = None
     pivot_moment: bool | None = None
@@ -222,9 +222,9 @@ class ChunkAnnotation(BaseModel):
     expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     linked_setup_id: str | None = None
-    characters: list[ChunkCharacter] = []
-    relations: list[ChunkRelation] = []
-    dialogues: list[ChunkDialogue] = []
+    characters: list[ChapterCharacter] = []
+    relations: list[ChapterRelation] = []
+    dialogues: list[ChapterDialogue] = []
 
 
 class ForeshadowingThreadResponse(BaseModel):
@@ -235,9 +235,9 @@ class ForeshadowingThreadResponse(BaseModel):
     """
 
     setup_id: str
-    first_chunk_id: int
-    last_chunk_id: int
-    anchor_chunk_ids: list[int] = []
+    first_chapter_id: int
+    last_chapter_id: int
+    anchor_chapter_ids: list[int] = []
     setup_summary: str
     setup_kind: str
     expected_payoff_family: str
@@ -251,7 +251,7 @@ class ForeshadowingThreadResponse(BaseModel):
 
 
 class CharacterRelation(BaseModel):
-    chunk_id: int
+    chapter_id: int
     from_char: str
     to_char: str
     type: str
@@ -265,14 +265,14 @@ class HierarchicalRelation(BaseModel):
 
     rel_id: str
     rel_type: str
-    first_chunk: int | None = None
-    last_chunk: int | None = None
+    first_chapter: int | None = None
+    last_chapter: int | None = None
     from_entity: str
     to_entity: str
 
 
 class GlobalStats(BaseModel):
-    total_chunks: int | None = None
+    total_chapters: int | None = None
     total_chars: int | None = None
     avg_mtld: float | None = None
     avg_ttr: float | None = None
@@ -381,7 +381,7 @@ class NovelResultsResponse(BaseModel):
     characters: list[CharacterStats]
     topics: list[TopicInfo]
     diagnosis: DiagnosisResult | None = None
-    chunk_annotations: list[ChunkAnnotation] = []
+    chapter_annotations: list[ChapterAnnotation] = []
     character_relations: list[CharacterRelation] = []
     global_stats: GlobalStats | None = None
     narrative_structure: NarrativeStructureStats | None = None
@@ -473,7 +473,7 @@ class BatchDeleteTasksResponse(BaseModel):
 class TokenUsageRecord(BaseModel):
     id: int
     novel_id: str
-    chunk_id: int | None = None
+    chapter_id: int | None = None
     task_type: str
     call_type: str
     model: str

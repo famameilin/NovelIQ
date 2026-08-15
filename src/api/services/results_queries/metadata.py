@@ -15,18 +15,20 @@ from src.api.models.responses import (
     TokenUsageStats,
     TokenUsageSummary,
 )
-from src.storage.repositories import AnnotationRepository, ChunkRepository, DiagnosisRepository, StatsRepository
+from src.storage.repositories import AnnotationRepository, ChapterRepository, DiagnosisRepository, StatsRepository
 
 
-def _fetch_global_stats(run_id: str, stats_repo: StatsRepository, chunk_repo: ChunkRepository) -> GlobalStats | None:
+def _fetch_global_stats(
+    run_id: str, stats_repo: StatsRepository, chapter_repo: ChapterRepository
+) -> GlobalStats | None:
     """获取全局统计数据"""
     stats = stats_repo.fetch_global_stats_dict(run_id)
-    total_chunks, total_chars = chunk_repo.fetch_chunk_counts(run_id)
+    total_chapters, total_chars = chapter_repo.fetch_chapter_counts(run_id)
 
-    if not stats and total_chunks == 0:
+    if not stats and total_chapters == 0:
         return None
     return GlobalStats(
-        total_chunks=total_chunks,
+        total_chapters=total_chapters,
         total_chars=total_chars,
         avg_mtld=stats.get("avg_mtld") or stats.get("global_avg_mtld"),
         avg_ttr=stats.get("avg_ttr") or stats.get("global_avg_ttr"),

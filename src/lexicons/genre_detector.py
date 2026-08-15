@@ -160,7 +160,7 @@ def detect_genre_weighted(
       4. 权重归一化
 
     Args:
-        chunk_texts: chunk 列表，格式 [(chunk_id, text), ...]
+        chunk_texts: chunk 列表，格式 [(chapter_id, text), ...]
         sample_ratio: 采样比例，默认 10%
         min_samples: 最少采样数，默认 10
         registry: 词表注册中心

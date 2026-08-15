@@ -32,8 +32,8 @@ class ForeshadowingThread(Base):
         nullable=False,
         index=True,
     )
-    first_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    last_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     setup_summary: Mapped[str] = mapped_column(Text, nullable=False)
     foreshadowing_type: Mapped[str] = mapped_column(String(50), nullable=False)
     setup_kind: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -58,25 +58,25 @@ class ForeshadowingThread(Base):
 
     __table_args__ = (
         # 2026-08-13 P2：与 ForeshadowingThreadHit 对齐，补齐指向 chunks 的复合 FK，
-        # 防止孤儿 chunk 引用污染伏笔池排序（last_chunk_id 参与查询排序）
+        # 防止孤儿 章节 引用污染伏笔池排序（last_chapter_id 参与查询排序）
         ForeignKeyConstraint(
-            ["first_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["first_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["last_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["last_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_foreshadowing_threads_run_active_last_chunk", "run_id", "active", "last_chunk_id"),
+        Index("idx_foreshadowing_threads_run_active_last_chapter", "run_id", "active", "last_chapter_id"),
         Index("idx_foreshadowing_threads_run_status", "run_id", "status"),
     )
 
     def __repr__(self) -> str:
         return (
             "<ForeshadowingThread("
-            f"setup_id={self.setup_id}, run_id={self.run_id}, last_chunk_id={self.last_chunk_id}"
+            f"setup_id={self.setup_id}, run_id={self.run_id}, last_chapter_id={self.last_chapter_id}"
             ")>"
         )
 
@@ -85,7 +85,7 @@ class ForeshadowingThreadHit(Base):
     """
     强伏笔 thread 命中表
 
-    每次 Phase2 命中都落一条 hit，用于回放 anchor_chunk_ids 和最近理由，不在主表里存 JSON 数组
+    每次 Phase2 命中都落一条 hit，用于回放 anchor_chapter_ids 和最近理由，不在主表里存 JSON 数组
     """
 
     __tablename__ = "foreshadowing_thread_hits"
@@ -101,7 +101,7 @@ class ForeshadowingThreadHit(Base):
         ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
         nullable=False,
     )
-    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC
@@ -113,13 +113,13 @@ class ForeshadowingThreadHit(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         Index("idx_foreshadowing_thread_hits_setup_id", "setup_id"),
-        Index("idx_foreshadowing_thread_hits_run_chunk", "run_id", "chunk_id"),
+        Index("idx_foreshadowing_thread_hits_run_chapter", "run_id", "chapter_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<ForeshadowingThreadHit(setup_id={self.setup_id}, chunk_id={self.chunk_id}, run_id={self.run_id})>"
+        return f"<ForeshadowingThreadHit(setup_id={self.setup_id}, chapter_id={self.chapter_id}, run_id={self.run_id})>"

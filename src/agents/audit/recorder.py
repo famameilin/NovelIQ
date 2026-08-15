@@ -129,7 +129,7 @@ class AgentAuditRecorder:
             session.add(
                 TokenUsage(
                     novel_id=novel_id,
-                    chunk_id=None,
+                    chapter_id=None,
                     task_type=task_type,
                     call_type=call_type,
                     model=model,

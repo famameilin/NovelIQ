@@ -21,8 +21,8 @@ from src.agents.annotation.schema import (
     ResolvedCase,
 )
 from src.storage.models import (
+    Chapter,
     ChapterAnnotationRecord,
-    Chunk,
     DialogueRecord,
     EntityStateVersion,
     ForeshadowingThread,
@@ -61,12 +61,12 @@ def _normalized_name(value: str) -> str:
 
 def stable_annotation_fact_id(
     annotation_id: str,
-    chunk_id: int,
+    chapter_id: int,
     domain: str,
     ordinal: int,
 ) -> str:
     """2026-08-07 用于按章节标注位置生成稳定事实 ID"""
-    return str(uuid5(UUID(annotation_id), f"{chunk_id}:{domain}:{ordinal}"))
+    return str(uuid5(UUID(annotation_id), f"{chapter_id}:{domain}:{ordinal}"))
 
 
 def _graph_version_id(run_id: str, chapter_id: int) -> str:
@@ -97,23 +97,22 @@ def _relation_id(
 
 
 def _chapter_bounds(session: Session, run_id: str, chapter_id: int) -> tuple[int, int, int]:
-    """2026-08-07 用于按具名字段读取章节顺序和首尾 chunk 边界"""
+    """2026-08-07 用于按具名字段读取章节顺序和首尾 chunk 边界
+
+    M9a-2：chunks 表合并进 chapters 后，每章只有一个运行时 chunk
+    （chunk_id == chapter_id），首尾边界即章节自身。
+    """
     chapter_rows = list(
         session.execute(
-            select(
-                Chunk.chapter_id.label("chapter_id"),
-                func.min(Chunk.chunk_id).label("first_chunk_id"),
-                func.max(Chunk.chunk_id).label("last_chunk_id"),
-            )
-            .where(Chunk.run_id == run_id)
-            .group_by(Chunk.chapter_id)
-            .order_by(func.min(Chunk.chunk_id))
-        ).all()
+            select(Chapter.chapter_id)
+            .where(Chapter.run_id == run_id, Chapter.text.isnot(None))
+            .order_by(Chapter.chapter_id)
+        ).scalars()
     )
-    for chapter_order, row in enumerate(chapter_rows, start=1):
-        if int(row.chapter_id) == chapter_id:
-            return chapter_order, int(row.first_chunk_id), int(row.last_chunk_id)
-    raise ValueError(f"章节不存在或没有 chunk: run_id={run_id} chapter_id={chapter_id}")
+    for chapter_order, row_chapter_id in enumerate(chapter_rows, start=1):
+        if int(row_chapter_id) == chapter_id:
+            return chapter_order, chapter_id, chapter_id
+    raise ValueError(f"章节不存在或没有正文: run_id={run_id} chapter_id={chapter_id}")
 
 
 def _validate_annotation_chunks(
@@ -122,17 +121,22 @@ def _validate_annotation_chunks(
     annotation: ChapterAnnotationRecord,
     payload: BoundChapterAnnotation,
 ) -> None:
-    """2026-08-07 用于复核新合同 payload 只覆盖当前 run 真实章节 chunk"""
-    expected = list(
-        session.execute(
-            select(Chunk.chunk_id)
-            .where(
-                Chunk.run_id == annotation.run_id,
-                Chunk.chapter_id == annotation.chapter_id,
-            )
-            .order_by(Chunk.chunk_id)
-        ).scalars()
-    )
+    """2026-08-07 用于复核新合同 payload 只覆盖当前 run 真实章节 chunk
+
+    M9a-2：章节即运行时 chunk（chunk_id == chapter_id），子块负 ID 已在
+    annotate 流程合并回章真实 chunk_id，落库时必须恰有一条。
+    """
+    chapter = session.execute(
+        select(Chapter).where(
+            Chapter.run_id == annotation.run_id,
+            Chapter.chapter_id == annotation.chapter_id,
+        )
+    ).scalar_one_or_none()
+    if chapter is None or chapter.text is None:
+        raise ValueError(
+            f"章节不存在或没有正文: run_id={annotation.run_id} chapter_id={annotation.chapter_id}"
+        )
+    expected = [annotation.chapter_id]
     actual = [chunk.chunk_id for chunk in payload.chunks]
     if actual != expected:
         raise ValueError(
@@ -185,14 +189,14 @@ def _resolve_entities(
     resolved: dict[str, GraphEntity] = {}
     attribute_patches: dict[int, list[dict[str, Any]]] = {}
     for key, items in appearances.items():
-        entity_types = {entity_type for _chunk_id, entity_type, _item in items}
+        entity_types = {entity_type for _chapter_id, entity_type, _item in items}
         if len(entity_types) != 1:
             raise ValueError(f"同一实体名称被声明为多个大类: {display_names[key]}")
         entity_type: EntityType = next(iter(entity_types))
-        chunk_ids = [chunk_id for chunk_id, _item_type, _item in items]
+        chapter_ids = [chapter_id for chapter_id, _item_type, _item in items]
         attributes: dict[str, Any] = {}
         tags: list[str] = []
-        for _chunk_id, _item_type, item in items:
+        for _chapter_id, _item_type, item in items:
             attributes.update(_entity_attributes(item, entity_type))
             for tag in item.tags:
                 if tag not in tags:
@@ -211,8 +215,8 @@ def _resolve_entities(
                     f"expected={entity.entity_type} actual={entity_type}；"
                     "若后文是寄宿或附身等独立身份，请改用区分性名称重新提交"
                 )
-            entity.first_seen_chunk = min(entity.first_seen_chunk, min(chunk_ids))
-            entity.last_seen_chunk = max(entity.last_seen_chunk, max(chunk_ids))
+            entity.first_seen_chapter = min(entity.first_seen_chapter, min(chapter_ids))
+            entity.last_seen_chapter = max(entity.last_seen_chapter, max(chapter_ids))
             # 2026-08-11 属性 JSON Merge Patch：本次提交字段替换旧值，null 删除，未提交字段沿用
             before = dict(entity.attributes or {})
             merged = dict(entity.attributes or {})
@@ -233,7 +237,7 @@ def _resolve_entities(
                             "field": field_name,
                             "before": before.get(field_name),
                             "after": after.get(field_name),
-                            "chunk_id": min(chunk_ids),
+                            "chapter_id": min(chapter_ids),
                         }
                     )
             if field_changes:
@@ -245,8 +249,8 @@ def _resolve_entities(
                 entity_type=entity_type,
                 tags=tags,
                 attributes=attributes,
-                first_seen_chunk=min(chunk_ids),
-                last_seen_chunk=max(chunk_ids),
+                first_seen_chapter=min(chapter_ids),
+                last_seen_chapter=max(chapter_ids),
             )
             session.add(entity)
             session.flush()
@@ -286,7 +290,7 @@ def _new_graph_fact(
     *,
     graph_version: GraphVersion,
     annotation: ChapterAnnotationRecord,
-    chunk_id: int,
+    chapter_id: int,
     domain: str,
     ordinal: int,
     subject: GraphEntity | None,
@@ -306,7 +310,7 @@ def _new_graph_fact(
         chapter_id=annotation.chapter_id,
         fact_id=stable_annotation_fact_id(
             annotation.annotation_id,
-            chunk_id,
+            chapter_id,
             domain,
             ordinal,
         ),
@@ -317,15 +321,15 @@ def _new_graph_fact(
         object=object_value,
         value=value,
         participants=participants,
-        scope=f"chapter:{annotation.chapter_id}:chunk:{chunk_id}",
+        scope=f"chapter:{annotation.chapter_id}:chunk:{chapter_id}",
         story_time=story_time,
         assertion=assertion,
         confidence=confidence,
         content=content,
-        effective_chunk_id=chunk_id,
+        effective_chapter_id=chapter_id,
         source_kind="annotation",
         annotation_id=annotation.annotation_id,
-        payload_path=f"chunks/{chunk_id}/{domain}/{ordinal}",
+        payload_path=f"chunks/{chapter_id}/{domain}/{ordinal}",
     )
 
 
@@ -386,9 +390,9 @@ def _active_relation_keys(
 def _bump_referenced_last_seen(
     entities_by_name: dict[str, GraphEntity],
     chunk: Any,
-    chunk_id: int,
+    chapter_id: int,
 ) -> None:
-    """2026-08-11 用于任意工具引用实体时自动更新 last_seen_chunk（含对话/观察/事件/关系端点）"""
+    """2026-08-11 用于任意工具引用实体时自动更新 last_seen_chapter（含对话/观察/事件/关系端点）"""
     referenced: dict[str, None] = {}
     for entity in chunk.entities.entities:
         referenced.setdefault(_normalized_name(entity.name), None)
@@ -406,7 +410,7 @@ def _bump_referenced_last_seen(
     for key in referenced:
         entity = entities_by_name.get(key)
         if entity is not None:
-            entity.last_seen_chunk = max(int(entity.last_seen_chunk), chunk_id)
+            entity.last_seen_chapter = max(int(entity.last_seen_chapter), chapter_id)
 
 
 def _persist_annotation_facts(
@@ -441,7 +445,7 @@ def _persist_annotation_facts(
             subject = _entity(entities_by_name, observation.character)
             content = {
                 "kind": "character_observation",
-                "chunk_id": chunk_id,
+                "chapter_id": chunk_id,
                 "entity": _entity_descriptor(subject),
                 "role_function": observation.role_function,
                 "action": observation.action,
@@ -450,7 +454,7 @@ def _persist_annotation_facts(
             fact = _new_graph_fact(
                 graph_version=graph_version,
                 annotation=annotation,
-                chunk_id=chunk_id,
+                chapter_id=chunk_id,
                 domain="character_observation",
                 ordinal=ordinal,
                 subject=subject,
@@ -486,14 +490,14 @@ def _persist_annotation_facts(
                 )
             content = {
                 "kind": "event",
-                "chunk_id": chunk_id,
+                "chapter_id": chunk_id,
                 "description": event_item.description,
                 "participants": participants,
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
                 annotation=annotation,
-                chunk_id=chunk_id,
+                chapter_id=chunk_id,
                 domain="event",
                 ordinal=ordinal,
                 subject=participant_entities[0] if participant_entities else None,
@@ -541,7 +545,7 @@ def _persist_annotation_facts(
                 change_kind = "noop"
             content = {
                 "kind": "relation",
-                "chunk_id": chunk_id,
+                "chapter_id": chunk_id,
                 "from_entity": _entity_descriptor(from_entity),
                 "to_entity": _entity_descriptor(to_entity),
                 "relation_type": relation_type,
@@ -553,7 +557,7 @@ def _persist_annotation_facts(
             fact = _new_graph_fact(
                 graph_version=graph_version,
                 annotation=annotation,
-                chunk_id=chunk_id,
+                chapter_id=chunk_id,
                 domain="relation",
                 ordinal=ordinal,
                 subject=from_entity,
@@ -575,14 +579,14 @@ def _persist_annotation_facts(
         for ordinal, foreshadowing in enumerate(chunk.foreshadowings):
             content = {
                 "kind": "foreshadowing",
-                "chunk_id": chunk_id,
+                "chapter_id": chunk_id,
                 "description": foreshadowing.description,
                 "confidence": str(foreshadowing.confidence),
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
                 annotation=annotation,
-                chunk_id=chunk_id,
+                chapter_id=chunk_id,
                 domain="foreshadowing",
                 ordinal=ordinal,
                 subject=None,
@@ -601,8 +605,8 @@ def _persist_annotation_facts(
             session.add(fact)
             facts.append(fact)
 
-    # 属性变化事实与 chunk 循环无关（chunk_id 取自 patch 自身），
-    # 统一在 chunk 循环后生成，避免多 chunk 章节对同一 patch 重复写入
+    # 属性变化事实与 章节 循环无关（chapter_id 取自 patch 自身），
+    # 统一在 章节 循环后生成，避免多 章节 章节对同一 patch 重复写入
     for entity_id, patches in attribute_patches.items():
         entity = entity_by_id.get(entity_id)
         if entity is None:
@@ -612,7 +616,7 @@ def _persist_annotation_facts(
             fact = _new_graph_fact(
                 graph_version=graph_version,
                 annotation=annotation,
-                chunk_id=int(patch["chunk_id"]),
+                chapter_id=int(patch["chapter_id"]),
                 domain="entity_attribute",
                 ordinal=attribute_ordinal,
                 subject=entity,
@@ -628,7 +632,7 @@ def _persist_annotation_facts(
                     "field": patch["field"],
                     "before": patch["before"],
                     "after": patch["after"],
-                    "chunk_id": patch["chunk_id"],
+                    "chapter_id": patch["chapter_id"],
                 },
             )
             session.add(fact)
@@ -640,7 +644,7 @@ def _persist_annotation_facts(
                     "after": patch["after"],
                     "fact_id": fact.fact_id,
                     "fact_revision": fact.fact_revision,
-                    "chunk_id": patch["chunk_id"],
+                    "chapter_id": patch["chapter_id"],
                 }
             )
 
@@ -738,7 +742,7 @@ def _persist_state_versions(
                     "after": after,
                     "fact_id": fact.fact_id,
                     "fact_revision": fact.fact_revision,
-                    "chunk_id": fact.effective_chunk_id,
+                    "chapter_id": fact.effective_chapter_id,
                 }
             )
 
@@ -774,7 +778,7 @@ def _persist_state_versions(
                     "after": change["after"],
                     "fact_id": change["fact_id"],
                     "fact_revision": change["fact_revision"],
-                    "chunk_id": change["chunk_id"],
+                    "chapter_id": change["chapter_id"],
                 }
             )
 
@@ -873,7 +877,7 @@ def _apply_relation_change(
             "after": after,
             "fact_id": fact.fact_id,
             "fact_revision": fact.fact_revision,
-            "chunk_id": fact.effective_chunk_id,
+            "chapter_id": fact.effective_chapter_id,
         }
     )
 
@@ -951,8 +955,12 @@ def _persist_relation_versions(
         )
 
 
-def _target_chunk_id(resolved_case: ResolvedCase) -> int:
-    """2026-08-11 用于读取案例登记时的原文 chunk 位置"""
+def _target_chapter_id(resolved_case: ResolvedCase) -> int:
+    """2026-08-11 用于读取案例登记时的章级锚点
+
+    M9a-2：运行时 target_ref 保留 chunk_id 键（运行时词汇），
+    值为章真实 chunk_id（子块负 ID 已在 annotate 流程映射回正章 ID）。
+    """
     chunk_id = resolved_case.target_ref.get("chunk_id")
     if chunk_id is None:
         raise ValueError(f"案例目标缺少 chunk_id: {resolved_case.case_id}")
@@ -966,7 +974,7 @@ def _resolve_case_entity(
     name: str,
     entities_by_name: dict[str, GraphEntity],
     allowed_types: tuple[str, ...],
-    chunk_id: int,
+    chapter_id: int,
 ) -> GraphEntity:
     """2026-08-11 用于把案例端点名称解析为图实体节点"""
     key = _normalized_name(name)
@@ -994,9 +1002,9 @@ def _resolve_case_entity(
                 f"案例端点名称已属于其他大类: {name} "
                 f"expected={list(allowed_types)} actual={entity.entity_type}"
             )
-        entity.last_seen_chunk = max(
-            entity.last_seen_chunk,
-            chunk_id,
+        entity.last_seen_chapter = max(
+            entity.last_seen_chapter,
+            chapter_id,
         )
         return entity
     if len(allowed_types) != 1:
@@ -1008,8 +1016,8 @@ def _resolve_case_entity(
         canonical_name=name,
         entity_type=allowed_types[0],
         attributes={},
-        first_seen_chunk=chunk_id,
-        last_seen_chunk=chunk_id,
+        first_seen_chapter=chapter_id,
+        last_seen_chapter=chapter_id,
     )
     session.add(entity)
     session.flush()
@@ -1028,9 +1036,13 @@ def _next_fact_revision(session: Session, run_id: str, fact_id: str) -> int:
 
 
 def _validate_dialogue_target(record: DialogueRecord, resolved_case: ResolvedCase) -> None:
-    """2026-08-11 用于核对案例内部目标仍指向同一对话记录"""
+    """2026-08-11 用于核对案例内部目标仍指向同一对话记录
+
+    M9a-2：运行时 target_ref 用 chunk_id 键（值即章 chunk_id），
+    与对话记录的 chapter_id 列对齐比较。
+    """
     expected = {
-        "chunk_id": int(record.chunk_id),
+        "chunk_id": int(record.chapter_id),
         "start": int(record.start),
         "end": int(record.end),
         "content": str(record.content),
@@ -1131,14 +1143,14 @@ def _persist_fact_resolution(
     change_kind = str(resolved_case.change_kind)
     directionality = str(definition["directionality"])
     semantics = str(definition["semantics"])
-    target_chunk_id = _target_chunk_id(resolved_case)
+    target_chapter_id = _target_chapter_id(resolved_case)
     from_entity = _resolve_case_entity(
         session,
         run_id=annotation.run_id,
         name=resolved_case.from_entity or "",
         entities_by_name=entities_by_name,
         allowed_types=tuple(definition["from_types"]),
-        chunk_id=target_chunk_id,
+        chapter_id=target_chapter_id,
     )
     to_entity = _resolve_case_entity(
         session,
@@ -1146,7 +1158,7 @@ def _persist_fact_resolution(
         name=resolved_case.to_entity or "",
         entities_by_name=entities_by_name,
         allowed_types=tuple(definition["to_types"]),
-        chunk_id=target_chunk_id,
+        chapter_id=target_chapter_id,
     )
     if int(from_entity.entity_id) == int(to_entity.entity_id):
         raise ValueError(f"fact 动作两端解析为同一实体: {resolved_case.case_id}")
@@ -1197,7 +1209,7 @@ def _persist_fact_resolution(
         )
     content = {
         "kind": "relation",
-        "chunk_id": target_chunk_id,
+        "chapter_id": target_chapter_id,
         "from_entity": _entity_descriptor(from_entity),
         "to_entity": _entity_descriptor(to_entity),
         "relation_type": relation_type,
@@ -1229,8 +1241,8 @@ def _persist_fact_resolution(
         assertion="affirmed",
         confidence="high",
         content=content,
-        scope=f"chapter:{annotation.chapter_id}:chunk:{target_chunk_id}",
-        effective_chunk_id=target_chunk_id,
+        scope=f"chapter:{annotation.chapter_id}:chunk:{target_chapter_id}",
+        effective_chapter_id=target_chapter_id,
         source_kind="case_resolution",
         annotation_id=annotation.annotation_id,
         payload_path=f"case_resolution/{resolved_case.case_id}",
@@ -1244,7 +1256,7 @@ def _persist_fact_resolution(
         relation_type=relation_type,
     )
     if current_version is not None and current_version.graph_version_id == graph_version.graph_version_id:
-        # 2026-08-12 同一章内 chunk relations 已断言该边（或更早的案例已解决）：
+        # 2026-08-12 同一章内 章节 relations 已断言该边（或更早的案例已解决）：
         # 最新版本行已属于当前 graph_version，(graph_version_id, relation_id) 唯一约束
         # 禁止再插一行，这里直接折叠本次变化进现有版本行（同一 session 对象原地更新）
         current_version.relation_type = draft.relation_type
@@ -1306,21 +1318,21 @@ def _persist_resolved_cases(
     annotation: ChapterAnnotationRecord,
     graph_version: GraphVersion,
     resolved_cases: list[ResolvedCase],
-    authorized_text_chunk_ids: set[int],
+    authorized_text_chapter_ids: set[int],
     entities_by_name: dict[str, GraphEntity],
 ) -> dict[str, Any]:
     """2026-08-11 用于按案例动作分派解决（dialogue 改对话表 / fact 改图 / foreshadowing 写线程 / close 无目标）"""
     payload = BoundChapterAnnotation.model_validate(annotation.payload)
-    allowed_chunk_ids = authorized_text_chunk_ids | {
+    allowed_chapter_ids = authorized_text_chapter_ids | {
         chunk.chunk_id for chunk in payload.chunks
     }
     targets_by_case_id: dict[str, Any] = {}
     for resolved_case in resolved_cases:
-        target_chunk_id = _target_chunk_id(resolved_case)
-        if target_chunk_id not in allowed_chunk_ids:
+        target_chapter_id = _target_chapter_id(resolved_case)
+        if target_chapter_id not in allowed_chapter_ids:
             raise ValueError(
                 "resolve_case 使用了未经系统读取授权的原文: "
-                f"{target_chunk_id}"
+                f"{target_chapter_id}"
             )
         target: Any = None
         if resolved_case.action == "dialogue":
@@ -1356,7 +1368,7 @@ def persist_completion_graph(
     *,
     annotation: ChapterAnnotationRecord,
     resolved_cases: list[ResolvedCase],
-    authorized_text_chunk_ids: set[int],
+    authorized_text_chapter_ids: set[int],
 ) -> PersistedGraphResult:
     """2026-08-07 用于在一个图版本中写入正式标注和连续性修订"""
     payload = BoundChapterAnnotation.model_validate(annotation.payload)
@@ -1365,7 +1377,7 @@ def persist_completion_graph(
         annotation=annotation,
         payload=payload,
     )
-    chapter_order, first_chunk_id, last_chunk_id = _chapter_bounds(
+    chapter_order, first_chapter_id, last_chapter_id = _chapter_bounds(
         session,
         annotation.run_id,
         annotation.chapter_id,
@@ -1375,8 +1387,8 @@ def persist_completion_graph(
         run_id=annotation.run_id,
         chapter_id=annotation.chapter_id,
         chapter_order=chapter_order,
-        first_chunk_id=first_chunk_id,
-        last_chunk_id=last_chunk_id,
+        first_chapter_id=first_chapter_id,
+        last_chapter_id=last_chapter_id,
         annotation_id=annotation.annotation_id,
     )
     session.add(graph_version)
@@ -1420,7 +1432,7 @@ def persist_completion_graph(
         annotation=annotation,
         graph_version=graph_version,
         resolved_cases=resolved_cases,
-        authorized_text_chunk_ids=authorized_text_chunk_ids,
+        authorized_text_chapter_ids=authorized_text_chapter_ids,
         entities_by_name=entities_by_name,
     )
     session.flush()

@@ -17,7 +17,7 @@ from src.api.services.results_contracts import (
     build_aggregate_metrics_contract_from_models,
 )
 from src.metrics.aggregate import aggregate_all_metrics
-from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
+from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
 
 
 class MetricsService:
@@ -87,10 +87,10 @@ class MetricsService:
         # 缓存未命中，执行计算
         logger.info(f"Computing aggregate metrics for {run_id}")
         ann_repo = AnnotationRepository(session)
-        chunk_repo = ChunkRepository(session)
+        chapter_repo = ChapterRepository(session)
         stats_repo = StatsRepository(session)
 
-        result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+        result = aggregate_all_metrics(run_id, ann_repo, chapter_repo, stats_repo)
         converted_result = _convert_aggregate_result(result)
 
         # 设置缓存

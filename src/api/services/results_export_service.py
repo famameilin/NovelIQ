@@ -15,9 +15,9 @@ from src.api.dependencies import get_metrics_service
 from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_contracts import validate_aggregate_metrics_contract
 from src.api.services.results_queries import (
+    _fetch_chapter_annotations,
     _fetch_character_relations,
     _fetch_characters,
-    _fetch_chunk_annotations,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_global_stats,
@@ -45,7 +45,7 @@ from src.metrics.timeline_metrics import (
 )
 from src.storage.repositories import (
     AnnotationRepository,
-    ChunkRepository,
+    ChapterRepository,
     ParagraphRepository,
     StatsRepository,
 )
@@ -55,7 +55,7 @@ def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
 ) -> tuple[list, list[str]]:
     """
     加载核心结果数据：paragraph_curves、缺失字段
@@ -122,7 +122,7 @@ def load_character_bundle(
     return characters, arc_scores, main_characters, valid_character_names, missing_fields
 
 
-def load_chunk_bundle(
+def load_chapter_bundle(
     run_id: str,
     annotation_repo: AnnotationRepository,
     valid_character_names: set[str],
@@ -135,7 +135,7 @@ def load_chunk_bundle(
     风格消费在 M8b 段落化切换后再处理）。
 
     Returns:
-        (topics, chunk_annotations, missing_fields)
+        (topics, chapter_annotations, missing_fields)
     """
     missing_fields: list[str] = []
 
@@ -143,16 +143,16 @@ def load_chunk_bundle(
     paragraph_repo = ParagraphRepository(annotation_repo.session)
     topics = _fetch_topics(run_id, paragraph_repo)
 
-    chunk_annotations = _fetch_chunk_annotations(
+    chapter_annotations = _fetch_chapter_annotations(
         run_id,
         annotation_repo,
         valid_character_names=valid_character_names,
         export_graph_view=export_graph_view,
     )
-    if not chunk_annotations:
-        missing_fields.append("chunk_annotations")
+    if not chapter_annotations:
+        missing_fields.append("chapter_annotations")
 
-    return topics, chunk_annotations, missing_fields
+    return topics, chapter_annotations, missing_fields
 
 
 def load_graph_signal_bundle(
@@ -172,7 +172,7 @@ def load_aggregate_metrics_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
 ) -> tuple[Any, Any, dict[str, Any]]:
     """
     加载非 graph 的聚合结论
@@ -181,7 +181,7 @@ def load_aggregate_metrics_bundle(
     避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()
     """
 
-    global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
+    global_stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
 
     aggregate_metrics = get_metrics_service().get_aggregate_metrics_contract(run_id, stats_repo.session)
@@ -194,7 +194,7 @@ def load_export_relation_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
     valid_character_names: set[str],
     export_graph_view: ExportGraphAuthorityView,
     graph_report: GraphAuthorityReport,
@@ -229,7 +229,7 @@ def load_export_relation_bundle(
         novel_id=novel_id,
         stats_repo=stats_repo,
         annotation_repo=annotation_repo,
-        chunk_repo=chunk_repo,
+        chapter_repo=chapter_repo,
     )
     graph_summary, graph_quality_report = load_graph_signal_bundle(graph_report)
 
@@ -246,7 +246,7 @@ def load_export_relation_bundle(
 
 def _fetch_timeline_data(
     run_id: str,
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
     annotation_repo: AnnotationRepository,
     stats_repo: StatsRepository,
     timeline_view: TimelineAuthorityView,
@@ -265,7 +265,7 @@ def _fetch_timeline_data(
     try:
         timeline_plan = build_timeline_plan(
             run_id,
-            chunk_repo,
+            chapter_repo,
             annotation_repo,
             stats_repo,
             timeline_view,
@@ -285,7 +285,7 @@ def _fetch_timeline_data(
         "composite_nodes": [serialize_timeline_composite_node(node) for node in timeline_plan.composite_nodes],
         "atomic_nodes": [serialize_timeline_node(node) for node in timeline_plan.atomic_nodes],
         "tension_curve": timeline_plan.tension_curve,
-        "total_chunks": timeline_plan.total_chunks,
+        "total_chapters": timeline_plan.total_chapters,
     }
 
 
@@ -297,7 +297,7 @@ def build_export_payload(
     characters: list,
     topics: list,
     diagnosis: Any,
-    chunk_annotations: list,
+    chapter_annotations: list,
     character_relations: list,
     hierarchical_relations: list,
     global_stats: Any,
@@ -319,12 +319,12 @@ def build_export_payload(
         "novel_id": novel_id,
         "novel_name": novel_name,
         "generated_at": datetime.now().isoformat(),
-        "total_chunks": global_stats.total_chunks if global_stats else 0,
+        "total_chapters": global_stats.total_chapters if global_stats else 0,
         "paragraph_curves": [c.model_dump(exclude_none=True) for c in paragraph_curves],
         "characters": [c.model_dump(exclude_none=True) for c in characters],
         "topics": [t.model_dump(exclude_none=True) for t in topics],
         "diagnosis": diagnosis.model_dump(exclude_none=True) if diagnosis else None,
-        "chunk_annotations": [a.model_dump(exclude_none=True) for a in chunk_annotations],
+        "chapter_annotations": [a.model_dump(exclude_none=True) for a in chapter_annotations],
         "foreshadowing_threads": [
             thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])
         ],
@@ -345,7 +345,7 @@ def fetch_all_results_data(
     run_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
@@ -360,7 +360,7 @@ def fetch_all_results_data(
     graph_report = graph_authority_service.build_graph_report(run_id)
     timeline_view = graph_authority_service.build_timeline_view(run_id)
 
-    paragraph_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
+    paragraph_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chapter_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
         run_id, novel_id, stats_repo, annotation_repo, export_graph_view, diagnosis=diagnosis
@@ -371,13 +371,13 @@ def fetch_all_results_data(
         missing_fields.append("diagnosis")
         diagnosis = None
 
-    topics, chunk_annotations, chunk_missing = load_chunk_bundle(
+    topics, chapter_annotations, chapter_missing = load_chapter_bundle(
         run_id,
         annotation_repo,
         valid_character_names,
         export_graph_view,
     )
-    missing_fields.extend(chunk_missing)
+    missing_fields.extend(chapter_missing)
     foreshadowing_threads = _fetch_foreshadowing_threads(run_id, annotation_repo)
 
     (
@@ -393,7 +393,7 @@ def fetch_all_results_data(
         novel_id,
         stats_repo,
         annotation_repo,
-        chunk_repo,
+        chapter_repo,
         valid_character_names,
         export_graph_view,
         graph_report,
@@ -404,7 +404,7 @@ def fetch_all_results_data(
     # 获取时间轴数据
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
-        chunk_repo=chunk_repo,
+        chapter_repo=chapter_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,
         timeline_view=timeline_view,
@@ -424,7 +424,7 @@ def fetch_all_results_data(
         characters=characters,
         topics=topics,
         diagnosis=diagnosis,
-        chunk_annotations=chunk_annotations,
+        chapter_annotations=chapter_annotations,
         foreshadowing_threads=foreshadowing_threads,
         character_relations=character_relations,
         hierarchical_relations=hierarchical_relations,

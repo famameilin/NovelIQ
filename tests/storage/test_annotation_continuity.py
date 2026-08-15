@@ -77,12 +77,12 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
             type="dialogue_speaker",
             keys=["顾霜"],
             description="真实身份悬而未决",
-            chunk_id=0,
+            chunk_id=1,
             target_key="target-case-1",
             target_ref={
                 "kind": "dialogue",
                 "dialogue_id": "candidate-1",
-                "chunk_id": 0,
+                "chunk_id": 1,
                 "start": 0,
                 "end": 2,
                 "text": "顾霜",
@@ -162,12 +162,12 @@ def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session)
     repository = ForeshadowingRepository(db_session)
     first_thread, first_hit = repository.sync(
         run_id=run_id,
-        chunk_id=0,
+        chapter_id=1,
         foreshadowing=BoundForeshadowing(description="顾霜持 Sword", confidence="high"),
     )
     second_thread, second_hit = repository.sync(
         run_id=run_id,
-        chunk_id=0,
+        chapter_id=1,
         foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high"),
     )
     db_session.commit()
@@ -190,8 +190,8 @@ def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session)
     assert len(hits) == 1
 
 
-def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chunk(db_session) -> None:
-    """2026-08-13 P1-3 用于验证已存在 thread 在更大 chunk 再次命中时补写 hit 并推进 last_chunk_id"""
+def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter(db_session) -> None:
+    """2026-08-13 P1-3 用于验证已存在 thread 在更大 chunk 再次命中时补写 hit 并推进 last_chapter_id"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓", "顾霜再誓"],
@@ -201,15 +201,15 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chunk(d
     repository = ForeshadowingRepository(db_session)
     first_thread, first_hit = repository.sync(
         run_id=run_id,
-        chunk_id=0,
+        chapter_id=1,
         foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
     )
-    assert first_thread.last_chunk_id == 0
+    assert first_thread.last_chapter_id == 1
     assert first_hit is not None and first_hit.is_new_setup is True
 
     second_thread, second_hit = repository.sync(
         run_id=run_id,
-        chunk_id=1,
+        chapter_id=2,
         foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
     )
     db_session.commit()
@@ -217,51 +217,52 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chunk(d
     assert second_thread.setup_id == first_thread.setup_id
     assert second_hit is not None
     assert second_hit.is_new_setup is False
-    assert second_hit.chunk_id == 1
-    # 新 chunk 更大时推进 last_chunk_id
-    assert second_thread.last_chunk_id == 1
+    assert second_hit.chapter_id == 2
+    # 新 chunk 更大时推进 last_chapter_id
+    assert second_thread.last_chapter_id == 2
     hits = list(
         db_session.execute(
             select(ForeshadowingThreadHit)
             .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(ForeshadowingThreadHit.chunk_id)
+            .order_by(ForeshadowingThreadHit.chapter_id)
         ).scalars()
     )
-    assert [hit.chunk_id for hit in hits] == [0, 1]
+    assert [hit.chapter_id for hit in hits] == [1, 2]
     assert all(hit.setup_id == first_thread.setup_id for hit in hits)
 
 
 def test_foreshadowing_sync_existing_thread_noop_on_same_chunk(db_session) -> None:
-    """2026-08-13 P1-3 用于验证同 chunk 重复 sync 不推进 last_chunk_id 也不重复写 hit"""
+    """2026-08-13 P1-3 用于验证同 chunk 重复 sync 不推进 last_chapter_id 也不重复写 hit"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓", "顾霜再誓", "顾霜三誓"],
+        chapter_ids=[1, 2, 3],
         title="伏笔 no-op",
     )
     repository = ForeshadowingRepository(db_session)
     first_thread, _first_hit = repository.sync(
         run_id=run_id,
-        chunk_id=1,
+        chapter_id=2,
         foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
     )
-    # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chunk_id
+    # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chapter_id
     thread, hit = repository.sync(
         run_id=run_id,
-        chunk_id=0,
+        chapter_id=1,
         foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
     )
     db_session.commit()
 
     assert hit is not None
-    assert thread.last_chunk_id == 1
+    assert thread.last_chapter_id == 2
     hits = list(
         db_session.execute(
             select(ForeshadowingThreadHit)
             .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(ForeshadowingThreadHit.chunk_id)
+            .order_by(ForeshadowingThreadHit.chapter_id)
         ).scalars()
     )
-    assert [hit.chunk_id for hit in hits] == [0, 1]
+    assert [hit.chapter_id for hit in hits] == [1, 2]
 
 
 def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> None:
@@ -285,15 +286,13 @@ def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> No
     first_rows = repository.sync_dialogues(
         run_id=run_id,
         chapter_id=1,
-        chunk_id=0,
         dialogues=[dialogue],
     )
-    # 第二章重复台词：按 (run_id, chunk_id) 查不到，但唯一约束是 (run_id, candidate_key)，
+    # 第二章重复台词：按 (run_id, chapter_id) 查不到，但唯一约束是 (run_id, candidate_key)，
     # 修复后按 candidate_key 幂等，不重复写
     second_rows = repository.sync_dialogues(
         run_id=run_id,
         chapter_id=2,
-        chunk_id=1,
         dialogues=[dialogue],
     )
     db_session.commit()
@@ -307,4 +306,4 @@ def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> No
     )
     assert len(rows) == 1
     assert rows[0].candidate_key == "dlg_001"
-    assert rows[0].chunk_id == 0
+    assert rows[0].chapter_id == 1

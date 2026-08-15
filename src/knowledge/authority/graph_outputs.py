@@ -56,7 +56,7 @@ def build_graph_page_summary(
         state.name
         for state in sorted(
             [state for state in participant_states if state.entity_type == "character"],
-            key=lambda item: (item.last_seen_chunk is None, -(item.last_seen_chunk or 0), item.name),
+            key=lambda item: (item.last_seen_chapter is None, -(item.last_seen_chapter or 0), item.name),
         )[:GRAPH_PAGE_CORE_CHARACTER_LIMIT]
     ]
     key_relations = [
@@ -70,7 +70,7 @@ def build_graph_page_summary(
             confirmed_relations,
             key=lambda item: (
                 -(item.support_count or 0),
-                -(item.last_seen_chunk or 0),
+                -(item.last_seen_chapter or 0),
                 item.from_name,
                 item.to_name,
             ),
@@ -134,7 +134,7 @@ def build_graph_page_quality(
             chapter_id=change.chapter_id,
             fact_id=change.fact_id,
             fact_revision=change.fact_revision,
-            effective_chunk_id=change.effective_chunk_id,
+            effective_chapter_id=change.effective_chapter_id,
             relation_id=change.relation_id,
             from_name=change.from_name or "",
             to_name=change.to_name or "",

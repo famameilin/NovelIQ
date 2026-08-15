@@ -139,7 +139,7 @@ class AgentStream:
             StreamEvent(
                 action=action,
                 content=text,
-                chunk_id=self._chunk_id,
+                chapter_id=self._chunk_id,
                 sub_stage=self._sub_stage,
             )
         )
@@ -151,7 +151,7 @@ class AgentStream:
                 content=name,
                 message=message,
                 status=status,
-                chunk_id=self._chunk_id,
+                chapter_id=self._chunk_id,
                 sub_stage=self._sub_stage,
             )
         )

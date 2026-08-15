@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, Paragraph, ParagraphCurve, ParagraphTopic, StageSummary
+from src.storage.models import Chapter, Paragraph, ParagraphCurve, ParagraphTopic, StageSummary
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph import GraphRepository
@@ -47,16 +47,16 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def _chunk_text_by_id(self, run_id: str) -> dict[int, str]:
         """2026-08-05 用于构建诊断素材的 chunk 原文映射"""
-        stmt = select(Chunk.chunk_id, Chunk.text).where(Chunk.run_id == run_id)
-        return {int(row.chunk_id): str(row.text) for row in self.session.execute(stmt).all()}
+        stmt = select(Chapter.chapter_id, Chapter.text).where(Chapter.run_id == run_id)
+        return {int(row.chapter_id): str(row.text) for row in self.session.execute(stmt).all()}
 
     def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
         """2026-08-07 用于从章节 chunks metrics 读取转折点原文素材"""
         row_limit = limit if limit is not None else 20
         text_by_chunk = self._chunk_text_by_id(run_id)
         rows = [
-            (row.chunk_id, text_by_chunk.get(row.chunk_id, ""), row.event_type)
-            for row in AnnotationRepository(self.session).fetch_chunk_annotations_full(run_id)
+            (row.chapter_id, text_by_chunk.get(row.chapter_id, ""), row.event_type)
+            for row in AnnotationRepository(self.session).fetch_chapter_annotations_full(run_id)
             if row.pivot_moment
         ]
         return rows[:row_limit]
@@ -105,7 +105,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 after = raw_after if isinstance(raw_after, dict) else {}
                 rows.append(
                     (
-                        int(change["chunk_id"]),
+                        int(change["chapter_id"]),
                         relation.from_name,
                         relation.to_name,
                         str(after.get("relation_type") or relation.relation_type),
@@ -120,11 +120,11 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         text_by_chunk = self._chunk_text_by_id(run_id)
         rows: list[tuple[int, str, str, str]] = []
         for thread in AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id):
-            for chunk_id in thread.anchor_chunk_ids:
+            for chapter_id in thread.anchor_chapter_ids:
                 rows.append(
                     (
-                        chunk_id,
-                        text_by_chunk.get(chunk_id, ""),
+                        chapter_id,
+                        text_by_chunk.get(chapter_id, ""),
                         thread.setup_kind,
                         thread.setup_summary,
                     )
@@ -142,8 +142,8 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """2026-08-07 用于读取章节 chunks metrics 中的转折时刻"""
         return [
-            (chunk_id, text)
-            for chunk_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)
+            (chapter_id, text)
+            for chapter_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)
         ]
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
@@ -209,17 +209,17 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         """2026-08-05 用于读取仍由诊断消费的阶段摘要记录"""
         stmt = (
             select(
-                StageSummary.start_chunk_id,
-                StageSummary.end_chunk_id,
+                StageSummary.start_chapter_id,
+                StageSummary.end_chapter_id,
                 StageSummary.summary,
             )
             .where(StageSummary.run_id == run_id)
-            .order_by(StageSummary.start_chunk_id)
+            .order_by(StageSummary.start_chapter_id)
         )
         return [
             {
-                "start_chunk_id": row.start_chunk_id,
-                "end_chunk_id": row.end_chunk_id,
+                "start_chapter_id": row.start_chapter_id,
+                "end_chapter_id": row.end_chapter_id,
                 "summary": row.summary,
             }
             for row in self.session.execute(stmt)

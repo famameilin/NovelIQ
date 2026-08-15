@@ -29,8 +29,8 @@ from src.models.local.embedding import EmbeddingClient
 from src.storage.models import (
     CasePoolCase,
     CaseResolutionMapping,
+    Chapter,
     ChapterAnnotationRecord,
-    Chunk,
     DialogueRecord,
     ForeshadowingThread,
     ForeshadowingThreadHit,
@@ -57,7 +57,8 @@ def _case_view(row: CasePoolCase) -> CaseSearchResult:
         {
             "id": row.id,
             "type": row.case_type,
-            "chunk_id": row.chunk_id,
+            # M9a-2：运行时 CaseSearchResult 保留 chunk_id 字段（值即章 chunk_id）
+            "chunk_id": row.chapter_id,
             "keys": list(row.keys),
             "description": row.description,
             "state": row.state,
@@ -89,10 +90,9 @@ class DatabaseAnnotationQueryService:
         self.current_last_paragraph_id = current_last_paragraph_id
         chapter_ids = list(
             self.session.execute(
-                select(Chunk.chapter_id)
-                .where(Chunk.run_id == run_id)
-                .group_by(Chunk.chapter_id)
-                .order_by(func.min(Chunk.chunk_id))
+                select(Chapter.chapter_id)
+                .where(Chapter.run_id == run_id)
+                .order_by(Chapter.chapter_id)
             ).scalars()
         )
         if current_chapter_id not in chapter_ids:
@@ -170,7 +170,7 @@ class DatabaseAnnotationQueryService:
                 ForeshadowingThread.run_id == self.run_id,
                 ForeshadowingThread.active.is_(True),
             )
-            .order_by(ForeshadowingThread.last_chunk_id, ForeshadowingThread.setup_id)
+            .order_by(ForeshadowingThread.last_chapter_id, ForeshadowingThread.setup_id)
         )
         for thread in self.session.execute(thread_statement).scalars().all():
             if not _text_matches(
@@ -328,7 +328,8 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
             id=str(uuid4()),
             run_id=run_id,
             case_type=pending_case.type,
-            chunk_id=pending_case.chunk_id,
+            # M9a-2：运行时 PendingCase 保留 chunk_id 字段（值即章 chunk_id）
+            chapter_id=pending_case.chunk_id,
             keys=normalized_keys,
             description=normalize_text(pending_case.description),
             target_key=pending_case.target_key,
@@ -379,13 +380,12 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
         *,
         run_id: str,
         chapter_id: int,
-        chunk_id: int,
         dialogues: list[BoundDialogue],
     ) -> list[DialogueRecord]:
         """2026-08-11 用于把最终系统绑定对话投影到对话记录表（幂等按 candidate_key 去重）"""
         rows: list[DialogueRecord] = []
         # 2026-08-13 P2-4：幂等键与唯一约束 uq_dialogue_records_run_candidate 对齐为
-        # (run_id, candidate_key)。此前按 (run_id, chunk_id) 查 existing，跨章重复台词
+        # (run_id, candidate_key)。此前按 (run_id, chapter_id) 查 existing，跨章重复台词
         # 会撞唯一约束抛 IntegrityError。
         candidate_keys = [dialogue.candidate_key for dialogue in dialogues]
         existing_keys = set(
@@ -402,7 +402,6 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
             row = DialogueRecord(
                 dialogue_id=str(uuid4()),
                 run_id=run_id,
-                chunk_id=chunk_id,
                 chapter_id=chapter_id,
                 candidate_key=dialogue.candidate_key,
                 content=dialogue.content,
@@ -454,7 +453,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         self,
         *,
         run_id: str,
-        chunk_id: int,
+        chapter_id: int,
         foreshadowing: BoundForeshadowing,
     ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit | None]:
         """2026-08-11 用于创建或续接伏笔线程（description 相同视为同一伏笔，不重复建线程）"""
@@ -469,12 +468,12 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         if thread is not None:
             # 2026-08-13 P1-3：已存在 thread 时本次 sync 也是新的 Phase2 命中，
             # 按合同（foreshadowing.py 注释“每次命中都落一条 hit”）补写 hit 行；
-            # 幂等：同 chunk 同 thread 已有 hit 时视为纯 no-op，不重复写、不制造假命中。
+            # 幂等：同 章节 同 thread 已有 hit 时视为纯 no-op，不重复写、不制造假命中。
             existing_hit = self.session.execute(
                 select(ForeshadowingThreadHit.hit_id).where(
                     ForeshadowingThreadHit.setup_id == thread.setup_id,
                     ForeshadowingThreadHit.run_id == run_id,
-                    ForeshadowingThreadHit.chunk_id == chunk_id,
+                    ForeshadowingThreadHit.chapter_id == chapter_id,
                 )
             ).scalar_one_or_none()
             if existing_hit is not None:
@@ -483,14 +482,14 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
             hit = ForeshadowingThreadHit(
                 setup_id=thread.setup_id,
                 run_id=run_id,
-                chunk_id=chunk_id,
+                chapter_id=chapter_id,
                 anchor_text=normalized,
                 is_new_setup=False,
                 created_at=now,
             )
             self.session.add(hit)
-            if chunk_id > thread.last_chunk_id:
-                thread.last_chunk_id = chunk_id
+            if chapter_id > thread.last_chapter_id:
+                thread.last_chapter_id = chapter_id
                 thread.updated_at = now
             self.session.flush()
             return thread, hit
@@ -498,8 +497,8 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         thread = ForeshadowingThread(
             setup_id=str(uuid4()),
             run_id=run_id,
-            first_chunk_id=chunk_id,
-            last_chunk_id=chunk_id,
+            first_chapter_id=chapter_id,
+            last_chapter_id=chapter_id,
             setup_summary=normalized,
             foreshadowing_type="其他",
             setup_kind="其他",
@@ -517,7 +516,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         hit = ForeshadowingThreadHit(
             setup_id=thread.setup_id,
             run_id=run_id,
-            chunk_id=chunk_id,
+            chapter_id=chapter_id,
             anchor_text=normalized,
             is_new_setup=True,
             created_at=now,
@@ -592,7 +591,8 @@ def completion_case_view(row: CasePoolCase) -> CompletionCase:
         {
             "id": row.id,
             "type": row.case_type,
-            "chunk_id": row.chunk_id,
+            # M9a-2：运行时 CompletionCase 保留 chunk_id 字段（值即章 chunk_id）
+            "chunk_id": row.chapter_id,
             "keys": list(row.keys),
             "description": row.description,
             "target_ref": dict(row.target_ref),

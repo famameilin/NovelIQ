@@ -51,8 +51,8 @@ def _add_entity(session, run_id: str, name: str) -> int:
         entity_type="character",
         tags=[],
         attributes={},
-        first_seen_chunk=0,
-        last_seen_chunk=0,
+        first_seen_chapter=1,
+        last_seen_chapter=1,
     )
     session.add(entity)
     session.flush()
@@ -87,8 +87,8 @@ def test_reelect_uses_latest_relation_version_only(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         chapter_order=1,
-        first_chunk_id=0,
-        last_chunk_id=0,
+        first_chapter_id=1,
+        last_chapter_id=1,
         annotation_id=annotation.annotation_id,
     )
     graph_version_2 = GraphVersion(
@@ -98,8 +98,8 @@ def test_reelect_uses_latest_relation_version_only(db_session) -> None:
         run_id=run_id,
         chapter_id=2,
         chapter_order=2,
-        first_chunk_id=0,
-        last_chunk_id=0,
+        first_chapter_id=1,
+        last_chapter_id=1,
         annotation_id=annotation_2.annotation_id,
     )
     db_session.add_all([graph_version, graph_version_2])

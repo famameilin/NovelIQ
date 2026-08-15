@@ -32,13 +32,13 @@ class AnnotationRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_annotation_by_chunk(self, novel_id: str, chunk_id: int) -> AnnotationRecord | None:
+    def get_annotation_by_chapter(self, novel_id: str, chapter_id: int) -> AnnotationRecord | None:
         """
         按分块获取标注
 
         Args:
             novel_id: 小说ID
-            chunk_id: 分块ID
+            chapter_id: 分块ID
 
         Returns:
             标注字典，不存在则返回 None

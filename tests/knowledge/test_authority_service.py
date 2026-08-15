@@ -50,12 +50,12 @@ def test_authority_views_project_chapter_versions_and_graph_changes(db_session) 
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌", role_function="主体"),
-            character_fact(chunk_id=0, name="顾霜", action="协助", role_function="帮助者"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌", role_function="主体"),
+            character_fact(chunk_id=1, name="顾霜", action="协助", role_function="帮助者"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -98,12 +98,12 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="结盟"),
-            character_fact(chunk_id=0, name="顾霜", action="结盟"),
+            character_fact(chunk_id=1, name="林渡", action="结盟"),
+            character_fact(chunk_id=1, name="顾霜", action="结盟"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -125,7 +125,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
+                target_ref={"kind": "relation_change", "chunk_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -162,20 +162,20 @@ def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="伯安", action="同游"),
-            character_fact(chunk_id=0, name="贺重明", action="同游"),
-            character_fact(chunk_id=0, name="猴子", action="同游"),
-            character_fact(chunk_id=0, name="侯飞白", action="同游"),
+            character_fact(chunk_id=1, name="伯安", action="同游"),
+            character_fact(chunk_id=1, name="贺重明", action="同游"),
+            character_fact(chunk_id=1, name="猴子", action="同游"),
+            character_fact(chunk_id=1, name="侯飞白", action="同游"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="伯安",
                 to_name="猴子",
                 relation_type="友情",
             ),
-            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chunk_id=0),
-            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chunk_id=0),
+            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chapter_id=1),
+            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chapter_id=1),
         ],
     )
     db_session.commit()

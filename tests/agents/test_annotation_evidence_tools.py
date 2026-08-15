@@ -1487,3 +1487,25 @@ def test_resolve_dialogue_case_accepts_closed_tone_enum() -> None:
     )
     assert response["accepted"] is True
     assert ledger.resolved_cases[0].tone == "愤怒"
+
+
+def test_text_search_result_accepts_paragraph_id_zero() -> None:
+    """2026-08-15 H1 回归：paragraph_id 按设计 §5.1 从 0 起算，全书第一段是合法检索命中"""
+    result = TextSearchResult(
+        chapter_id=1,
+        paragraph_id=0,
+        excerpt="开篇第一段",
+        keyword_score=2.0,
+    )
+    assert result.paragraph_id == 0
+
+
+def test_text_search_result_rejects_negative_paragraph_id() -> None:
+    """2026-08-15 H1 回归：负 paragraph_id 仍应被约束拒绝"""
+    with pytest.raises(ValidationError):
+        TextSearchResult(
+            chapter_id=1,
+            paragraph_id=-1,
+            excerpt="非法段落",
+            keyword_score=0.0,
+        )

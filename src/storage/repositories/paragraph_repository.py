@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapper
 from src.chunking.spans import ParagraphSpan
 from src.config import settings
 from src.storage.models import (
-    Chunk,
+    Chapter,
     Paragraph,
     ParagraphCurve,
     ParagraphMetric,
@@ -101,7 +101,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             {
                 "run_id": run_id,
                 "paragraph_id": span.paragraph_id,
-                "chunk_id": span.chunk_id,
                 "chapter_id": span.chapter_id,
                 "paragraph_index": span.paragraph_index,
                 "source_paragraph_index": span.source_paragraph_index,
@@ -127,14 +126,14 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         for span in spans:
             if (
                 span.paragraph_id is None
-                or span.chunk_id is None
+                or span.chapter_id is None
                 or span.chapter_id is None
                 or span.global_start_char is None
                 or span.global_end_char is None
                 or span.token_count is None
             ):
                 raise ValueError(
-                    "段落写入失败：段落身份字段（paragraph_id/chunk_id/chapter_id/"
+                    "段落写入失败：段落身份字段（paragraph_id/chapter_id/chapter_id/"
                     f"global_start_char/global_end_char/token_count）不得为 None，"
                     f"run_id={run_id} paragraph_index={span.paragraph_index}"
                 )
@@ -146,19 +145,19 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
         last_local_end: dict[int, int] = {}
         for span in spans:
-            chunk_id = span.chunk_id
-            if chunk_id is None:
+            chapter_id = span.chapter_id
+            if chapter_id is None:
                 # 身份校验已拒绝 None，此处仅为类型收窄
                 continue
-            previous_end = last_local_end.get(chunk_id)
+            previous_end = last_local_end.get(chapter_id)
             if previous_end is not None and span.local_start_char < previous_end:
                 raise ValueError(
                     "段落写入失败：同一 chunk 内 local 坐标必须严格单调不重叠，"
-                    f"run_id={run_id} chunk_id={chunk_id} "
+                    f"run_id={run_id} chapter_id={chapter_id} "
                     f"paragraph_id={span.paragraph_id} local_start_char={span.local_start_char} "
                     f"小于上一段落的 local_end_char={previous_end}"
                 )
-            last_local_end[chunk_id] = span.local_end_char
+            last_local_end[chapter_id] = span.local_end_char
 
         previous_global_end = 0
         for span in spans:
@@ -175,23 +174,23 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             previous_global_end = span.global_end_char
 
         offset_rows = self.session.execute(
-            select(Chunk.chunk_id, Chunk.char_offset).where(
-                Chunk.run_id == run_id, Chunk.char_offset.is_not(None)
+            select(Chapter.chapter_id, Chapter.char_offset).where(
+                Chapter.run_id == run_id, Chapter.char_offset.is_not(None)
             )
         ).all()
-        char_offsets = {row.chunk_id: int(row.char_offset) for row in offset_rows}
+        char_offsets = {row.chapter_id: int(row.char_offset) for row in offset_rows}
         for span in spans:
-            if span.chunk_id is None or span.global_start_char is None:
+            if span.chapter_id is None or span.global_start_char is None:
                 # 身份校验已拒绝 None，此处仅为类型收窄
                 continue
-            chunk_offset = char_offsets.get(span.chunk_id)
+            chunk_offset = char_offsets.get(span.chapter_id)
             if chunk_offset is None:
-                # chunks 行缺 char_offset 时无法校验，跳过该 chunk 的偏移一致性
+                # chapters 行缺 char_offset 时无法校验，跳过该章的偏移一致性
                 continue
             if span.global_start_char - chunk_offset != span.local_start_char:
                 raise ValueError(
                     "段落写入失败：local 与 global 坐标偏移不一致，"
-                    f"run_id={run_id} chunk_id={span.chunk_id} "
+                    f"run_id={run_id} chapter_id={span.chapter_id} "
                     f"paragraph_id={span.paragraph_id} char_offset={chunk_offset} "
                     f"global_start_char={span.global_start_char} "
                     f"local_start_char={span.local_start_char}"
@@ -217,7 +216,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         statement = (
             select(
                 Paragraph.paragraph_id,
-                Paragraph.chunk_id,
                 Paragraph.chapter_id,
                 Paragraph.paragraph_index,
                 Paragraph.source_paragraph_index,
@@ -236,40 +234,40 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         )
         return self.session.execute(statement).all()
 
-    def get_incomplete_paragraph_chunk_ids(self, run_id: str) -> list[int]:
+    def get_incomplete_paragraph_chapter_ids(self, run_id: str) -> list[int]:
         """
         找出段落数据不完整的 chunk：有正文但没有任何段落行、段落序号不连续
-        （min != 0 或 count != max + 1）、或坐标为空的 chunk，返回排序后的 chunk_id 列表
+        （min != 0 或 count != max + 1）、或坐标为空的 chunk，返回排序后的 chapter_id 列表
         """
         paragraph_exists = exists().where(
-            (Paragraph.run_id == Chunk.run_id) & (Paragraph.chunk_id == Chunk.chunk_id)
+            (Paragraph.run_id == Chapter.run_id) & (Paragraph.chapter_id == Chapter.chapter_id)
         )
         missing_statement = (
-            select(Chunk.chunk_id)
-            .where(Chunk.run_id == run_id)
-            # 空文本 chunk 永远无法产出段落行，用 length(text) > 0 排除空串
-            .where(func.length(Chunk.text) > 0)
+            select(Chapter.chapter_id)
+            .where(Chapter.run_id == run_id)
+            # 空正文章节永远无法产出段落行，用 length(text) > 0 排除空串
+            .where(func.length(Chapter.text) > 0)
             .where(~paragraph_exists)
         )
-        missing_chunk_ids = {
-            int(row.chunk_id)
+        missing_chapter_ids = {
+            int(row.chapter_id)
             for row in self.session.execute(missing_statement).all()
         }
         count_label = func.count(Paragraph.paragraph_index)
         max_index_label = func.max(Paragraph.paragraph_index)
         min_index_label = func.min(Paragraph.paragraph_index)
         gapped_statement = (
-            select(Paragraph.chunk_id)
+            select(Paragraph.chapter_id)
             .where(Paragraph.run_id == run_id)
-            .group_by(Paragraph.chunk_id)
+            .group_by(Paragraph.chapter_id)
             .having(or_(min_index_label != 0, count_label != max_index_label + 1))
         )
-        gapped_chunk_ids = {
-            int(row.chunk_id)
+        gapped_chapter_ids = {
+            int(row.chapter_id)
             for row in self.session.execute(gapped_statement).all()
         }
         null_statement = (
-            select(Paragraph.chunk_id)
+            select(Paragraph.chapter_id)
             .where(Paragraph.run_id == run_id)
             .where(
                 or_(
@@ -279,13 +277,13 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                     Paragraph.global_end_char.is_(None),
                 )
             )
-            .group_by(Paragraph.chunk_id)
+            .group_by(Paragraph.chapter_id)
         )
-        null_chunk_ids = {
-            int(row.chunk_id)
+        null_chapter_ids = {
+            int(row.chapter_id)
             for row in self.session.execute(null_statement).all()
         }
-        return sorted(missing_chunk_ids | gapped_chunk_ids | null_chunk_ids)
+        return sorted(missing_chapter_ids | gapped_chapter_ids | null_chapter_ids)
 
     # ------------------------------------------------------------------
     # paragraph_metrics（§5.3 原始计数与充分统计量）
@@ -508,17 +506,17 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         )
         return self.session.execute(statement).all()
 
-    def fetch_chunk_metric_aggregates(self, run_id: str) -> list[tuple[int, dict[str, float]]]:
+    def fetch_chapter_metric_aggregates(self, run_id: str) -> list[tuple[int, dict[str, float]]]:
         """
-        按 chunk 聚合段落指标充分统计量（§9.1 分子/分母守恒）
+        按章聚合段落指标充分统计量（§9.1 分子/分母守恒）
 
-        每行返回 (chunk_id, 字段名 → 数值) 的聚合结果，供聚合 fetchers 与
+        每行返回 (chapter_id, 字段名 → 数值) 的聚合结果，供聚合 fetchers 与
         质量门使用：密度类比率一律在目标粒度上重新求分子之和/分母之和，
         不做等权平均。
         """
         statement = (
             select(
-                Paragraph.chunk_id.label("chunk_id"),
+                Paragraph.chapter_id.label("chapter_id"),
                 func.sum(ParagraphMetric.token_count).label("token_count"),
                 func.sum(ParagraphMetric.char_count).label("char_count"),
                 func.sum(ParagraphMetric.sentence_count).label("sentence_count"),
@@ -534,13 +532,13 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 & (Paragraph.paragraph_id == ParagraphMetric.paragraph_id),
             )
             .where(ParagraphMetric.run_id == run_id)
-            .group_by(Paragraph.chunk_id)
-            .order_by(Paragraph.chunk_id)
+            .group_by(Paragraph.chapter_id)
+            .order_by(Paragraph.chapter_id)
         )
         rows = self.session.execute(statement).all()
-        return [(int(row.chunk_id), {key: float(value) for key, value in row._mapping.items()}) for row in rows]
+        return [(int(row.chapter_id), {key: float(value) for key, value in row._mapping.items()}) for row in rows]
 
-    def fetch_chunk_tension_scores(self, run_id: str) -> list[tuple[int, float]]:
+    def fetch_chapter_tension_scores(self, run_id: str) -> list[tuple[int, float]]:
         """
         每章（chunk）张力 = 章内段落 surface_tension 均值（供 timeline/聚合使用）
 
@@ -549,7 +547,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         """
         statement = (
             select(
-                Paragraph.chunk_id.label("chunk_id"),
+                Paragraph.chapter_id.label("chapter_id"),
                 func.avg(ParagraphCurve.surface_tension).label("avg_tension"),
             )
             .join(
@@ -561,11 +559,11 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 Paragraph.run_id == run_id,
                 ParagraphCurve.surface_tension.is_not(None),
             )
-            .group_by(Paragraph.chunk_id)
-            .order_by(Paragraph.chunk_id)
+            .group_by(Paragraph.chapter_id)
+            .order_by(Paragraph.chapter_id)
         )
         rows = self.session.execute(statement).all()
-        return [(int(row.chunk_id), float(row.avg_tension)) for row in rows]
+        return [(int(row.chapter_id), float(row.avg_tension)) for row in rows]
 
     def has_paragraph_curves(self, run_id: str) -> bool:
         """run 是否存在段落曲线行"""

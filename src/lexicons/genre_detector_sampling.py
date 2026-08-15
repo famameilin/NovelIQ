@@ -55,7 +55,7 @@ def build_text_segments(
 
 
 def sample_weighted_chunk_indices(
-    total_chunks: int,
+    total_chapters: int,
     sample_ratio: float,
     min_samples: int,
 ) -> list[int]:
@@ -64,12 +64,12 @@ def sample_weighted_chunk_indices(
 
     将 weighted 采样策略单独抽出，降低 detect 主函数的流程复杂度
     """
-    if total_chunks <= 0:
+    if total_chapters <= 0:
         return []
-    target_samples = int(total_chunks * sample_ratio)
-    sample_count = max(min_samples, min(target_samples, total_chunks))
-    step = max(1, total_chunks // sample_count)
-    return list(range(0, total_chunks, step))[:sample_count]
+    target_samples = int(total_chapters * sample_ratio)
+    sample_count = max(min_samples, min(target_samples, total_chapters))
+    step = max(1, total_chapters // sample_count)
+    return list(range(0, total_chapters, step))[:sample_count]
 
 
 @dataclass(frozen=True)

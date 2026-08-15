@@ -126,3 +126,19 @@ class TestRobustLocalRegression:
             bandwidth=0.2,
         )
         assert smooth_series(values, bandwidth=0.2) == pytest.approx(expected)
+
+    def test_zero_bandwidth_raises_instead_of_hanging(self) -> None:
+        """2026-08-15 M3 回归：带宽 ≤ 0 时入口快速失败（此前扩窗 ×2 恒不变会死循环）"""
+        x = [float(i) / 9 for i in range(10)]
+        y = [float(i) for i in range(10)]
+        with pytest.raises(ValueError, match="bandwidth must be positive"):
+            robust_local_regression(x, y, bandwidth=0.0)
+        with pytest.raises(ValueError, match="bandwidth must be positive"):
+            robust_local_regression(x, y, bandwidth=-0.02)
+
+    def test_min_points_below_one_raises(self) -> None:
+        """2026-08-15 M3 回归：min_points < 1 同样在入口拒绝"""
+        x = [float(i) / 9 for i in range(10)]
+        y = [float(i) for i in range(10)]
+        with pytest.raises(ValueError, match="min_points"):
+            robust_local_regression(x, y, bandwidth=0.2, min_points=0)

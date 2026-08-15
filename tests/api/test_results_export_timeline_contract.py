@@ -31,39 +31,39 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
-from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
+from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
     graph_change_names,
     graph_change_tuples,
-    nodes_for_anchor_chunk,
+    nodes_for_anchor_chapter,
 )
 
 
 def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
 
-    chunk_repo = ChunkRepository(db_session)
+    chapter_repo = ChapterRepository(db_session)
     annotation_repo = AnnotationRepository(db_session)
     stats_repo = StatsRepository(db_session)
     timeline_view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(scenario.run_id)
 
     timeline_data = _fetch_timeline_data(
         run_id=scenario.run_id,
-        chunk_repo=chunk_repo,
+        chapter_repo=chapter_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,
         timeline_view=timeline_view,
     )
 
     assert timeline_data is not None
-    assert timeline_data["total_chunks"] == 5
+    assert timeline_data["total_chapters"] == 5
     assert timeline_data["tension_curve"] == [0.6, 0.7, 0.9, 0.5, 0.4]
     assert len(timeline_data["phases"]) == 4
 
     relation_node = next(
         node
-        for node in nodes_for_anchor_chunk(timeline_data["atomic_nodes"], 2)
+        for node in nodes_for_anchor_chapter(timeline_data["atomic_nodes"], 3)
         if node["node_type"] == "relation"
     )
     assert graph_change_tuples(relation_node["graph_changes"]) == {
@@ -74,7 +74,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     assert "entity_lifecycles" not in timeline_data
     assert set(relation_node.keys()) == {
         "node_id",
-        "anchor_chunk_id",
+        "anchor_chapter_id",
         "progress",
         "importance_score",
         "level",
@@ -95,7 +95,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         "chapter_id",
         "fact_id",
         "fact_revision",
-        "effective_chunk_id",
+        "effective_chapter_id",
         "changes",
         "entity_id",
         "entity_name",
@@ -111,7 +111,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     assert timeline_data["composite_nodes"]
     composite_relation_node = next(
         node
-        for node in nodes_for_anchor_chunk(timeline_data["composite_nodes"], 2)
+        for node in nodes_for_anchor_chapter(timeline_data["composite_nodes"], 3)
         if node["node_type"] == "relation"
     )
     assert composite_relation_node["representative_node_id"].startswith("relation:")
@@ -129,7 +129,7 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
         characters=[],
         topics=[],
         diagnosis=None,
-        chunk_annotations=[],
+        chapter_annotations=[],
         character_relations=[],
         hierarchical_relations=[],
         global_stats=None,
@@ -151,7 +151,7 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
 
 
 def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    chunk_repo = MagicMock()
+    chapter_repo = MagicMock()
     annotation_repo = MagicMock()
     stats_repo = MagicMock()
 
@@ -163,7 +163,7 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
     with pytest.raises(TimelineAuthorityContractError, match="broken authority contract"):
         _fetch_timeline_data(
             run_id="run-1",
-            chunk_repo=chunk_repo,
+            chapter_repo=chapter_repo,
             annotation_repo=annotation_repo,
             stats_repo=stats_repo,
             timeline_view=MagicMock(),
@@ -171,7 +171,7 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
 
 
 def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    chunk_repo = MagicMock()
+    chapter_repo = MagicMock()
     annotation_repo = MagicMock()
     stats_repo = MagicMock()
 
@@ -183,7 +183,7 @@ def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.M
     with pytest.raises(RuntimeError, match="timeline boom"):
         _fetch_timeline_data(
             run_id="run-1",
-            chunk_repo=chunk_repo,
+            chapter_repo=chapter_repo,
             annotation_repo=annotation_repo,
             stats_repo=stats_repo,
             timeline_view=MagicMock(),
@@ -314,7 +314,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        "src.api.services.results_export_service.load_chunk_bundle",
+        "src.api.services.results_export_service.load_chapter_bundle",
         lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
@@ -336,7 +336,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
             "composite_nodes": [],
             "phases": [],
             "tension_curve": [],
-            "total_chunks": 0,
+            "total_chapters": 0,
         },
     )
     monkeypatch.setattr(
@@ -366,7 +366,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         run_id="run-1",
         stats_repo=MagicMock(session=MagicMock()),
         annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
     )
 
     assert results_data["diagnosis"] is None
@@ -414,7 +414,7 @@ def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch:
             run_id="run-1",
             stats_repo=MagicMock(session=MagicMock()),
             annotation_repo=MagicMock(),
-            chunk_repo=MagicMock(),
+            chapter_repo=MagicMock(),
         )
 
     assert exc_info.value.reason == "focus_contract_incomplete"
@@ -502,7 +502,7 @@ def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pyt
         run_id="run-export-curves",
         stats_repo=MagicMock(),
         annotation_repo=MagicMock(session=MagicMock()),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
     )
 
     assert missing_fields == []
@@ -535,16 +535,16 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 from_name="苏镜",
                 to_name="程霜",
                 relation_type="隶属",
-                first_seen_chunk=2,
-                last_seen_chunk=5,
+                first_seen_chapter=2,
+                last_seen_chapter=5,
             ),
             ExportRelationSnapshot(
                 relation_id="relation-23",
                 from_name="苏镜",
                 to_name="旧友",
                 relation_type="家族",
-                first_seen_chunk=1,
-                last_seen_chunk=4,
+                first_seen_chapter=1,
+                last_seen_chapter=4,
                 is_active=False,
             ),
         ],
@@ -557,7 +557,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 chapter_order=5,
                 fact_id="fact-22",
                 fact_revision=1,
-                effective_chunk_id=5,
+                effective_chapter_id=5,
                 confidence="high",
                 changes=[{"change_kind": "assert"}],
                 from_entity_id=1,
@@ -590,7 +590,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         novel_id="novel-1",
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
         valid_character_names={"苏镜", "程霜"},
         export_graph_view=export_graph_view,
         graph_report=graph_report,
@@ -654,7 +654,7 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
         novel_id="novel-1",
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
     )
 
     assert set(aggregate_metrics) == {
@@ -680,7 +680,7 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
             characters=[],
             topics=[],
             diagnosis=None,
-            chunk_annotations=[],
+            chapter_annotations=[],
             character_relations=[],
             hierarchical_relations=[],
             global_stats=None,

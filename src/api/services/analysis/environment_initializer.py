@@ -119,9 +119,9 @@ class EnvironmentInitializer:
 
     def check_stage_completion_status(self, session: Session, run_id: str) -> dict[str, bool]:
         """检查各阶段完成状态"""
-        from src.storage.repositories import AnnotationRepository, ChunkRepository
+        from src.storage.repositories import AnnotationRepository, ChapterRepository
 
-        chunk_repo = ChunkRepository(session)
+        chapter_repo = ChapterRepository(session)
         ann_repo = AnnotationRepository(session)
         stats_repo = StatsRepository(session)
 
@@ -131,7 +131,7 @@ class EnvironmentInitializer:
         skip_topic_model = False
         skip_diagnose = False
 
-        if chunk_repo.is_preprocess_complete(run_id):
+        if chapter_repo.is_preprocess_complete(run_id):
             logger.info("Preprocess complete, skipping")
             skip_preprocess = True
         if skip_preprocess and ann_repo.is_annotate_complete(run_id):

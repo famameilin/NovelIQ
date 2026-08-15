@@ -6,7 +6,7 @@
   - AnalysisEventBus: 持有当前上下文，自动补全缺失字段，统一发送到 SSE
 
 核心设计:
-  所有事件走同一条路径，Event Bus 持有 stage/sub_stage/chunk_id 上下文，
+  所有事件走同一条路径，Event Bus 持有 stage/sub_stage/chapter_id 上下文，
   LLM 输出不再是旁路，自动获得完整上下文后统一发送
 """
 
@@ -68,7 +68,7 @@ class StreamEvent:
     action: StreamEventAction  # 开始 / 进度 / 完成 / 输出 / 思考 / 工具调用
     stage: str = ""
     sub_stage: str = ""
-    chunk_id: int | None = None
+    chapter_id: int | None = None
     stream_id: str | None = None
     current: int | None = None
     total: int | None = None
@@ -83,7 +83,7 @@ class StreamEvent:
             "action": self.action,
             "stage": self.stage,
             "sub_stage": self.sub_stage,
-            "chunk_id": self.chunk_id or 0,
+            "chapter_id": self.chapter_id or 0,
             "stream_id": self.stream_id,
             "current": self.current or 0,
             "total": self.total or 0,
@@ -102,8 +102,8 @@ class StreamEvent:
 # 终止类事件（task_complete / task_error / task_cancelled）不在此映射表中，
 # 原因如下：
 #   1. 语义差异：映射表中的 5 个 action 是「进行中」事件，需要 EventBus 补全
-#      stage/sub_stage/chunk_id 等上下文字段；而终止类事件表示任务级终态，
-#      不需要也不应携带 chunk 级上下文
+#      stage/sub_stage/chapter_id 等上下文字段；而终止类事件表示任务级终态，
+#      不需要也不应携带 章节 级上下文
 #   2. 数据格式不同：终止类事件的 data 结构固定（如 {"error": ..., "stage": ...}），
 #      与 StreamEvent.to_dict() 的 10 字段格式不同，强行走 emit() 再翻译会丢失
 #      语义或产生冗余字段
@@ -145,7 +145,7 @@ class AnalysisEventBus:
     分析事件总线
 
     职责:
-    1. 持有当前 stage/sub_stage/chunk_id 上下文
+    1. 持有当前 stage/sub_stage/chapter_id 上下文
     2. 自动补全事件缺失的字段
     3. 统一发送到 SSE（唯一发送口）
     4. 同步更新 TaskManager 状态
@@ -158,7 +158,7 @@ class AnalysisEventBus:
         # 上下文状态：由 emit 的事件自动维护
         self._stage: str = ""
         self._sub_stage: str = ""
-        self._chunk_id: int = 0
+        self._chapter_id: int = 0
         self._current: int | None = None
         self._total: int | None = None
         self._percent: float | None = None
@@ -169,7 +169,7 @@ class AnalysisEventBus:
         发送事件：补全上下文 → 翻译为 SSE → 发送
 
         子规则:
-        - 如果事件提供了 stage/sub_stage/chunk_id，更新总线上下文
+        - 如果事件提供了 stage/sub_stage/chapter_id，更新总线上下文
         - 如果事件缺失这些字段，用总线当前上下文补全
         - 将 action 翻译为 SSE event type
         - 调用 event_manager.send() 唯一发送口
@@ -178,14 +178,14 @@ class AnalysisEventBus:
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
         resolved_sub_stage = event.sub_stage or self._sub_stage
-        resolved_chunk_id = event.chunk_id if event.chunk_id is not None else self._chunk_id
+        resolved_chapter_id = event.chapter_id if event.chapter_id is not None else self._chapter_id
 
         if event.stage:
             self._stage = event.stage
         if event.sub_stage:
             self._sub_stage = event.sub_stage
-        if event.chunk_id is not None:
-            self._chunk_id = event.chunk_id
+        if event.chapter_id is not None:
+            self._chapter_id = event.chapter_id
         if event.current is not None:
             self._current = event.current
         if event.total is not None:
@@ -215,7 +215,7 @@ class AnalysisEventBus:
             action=event.action,
             stage=resolved_stage,
             sub_stage=resolved_sub_stage,
-            chunk_id=resolved_chunk_id,
+            chapter_id=resolved_chapter_id,
             current=resolved_current,
             total=resolved_total,
             percent=resolved_percent,
@@ -248,7 +248,7 @@ class AnalysisEventBus:
         log_level(
             f"[EventBus] task_id={self.task_id}, action={resolved_event.action}, "
             f"stage={resolved_event.stage}, sub_stage={resolved_event.sub_stage}, "
-            f"chunk_id={resolved_event.chunk_id}, percent={resolved_percent}, sub_percent={resolved_sub_percent}"
+            f"chapter_id={resolved_event.chapter_id}, percent={resolved_percent}, sub_percent={resolved_sub_percent}"
         )
 
         # 唯一发送口（lazy import 避免循环依赖）
@@ -322,7 +322,7 @@ class AnalysisEventBus:
         """发送阶段开始事件"""
         self._stage = stage
         self._sub_stage = ""
-        self._chunk_id = 0
+        self._chapter_id = 0
         self._sub_percent = 0.0
         # 2026-08-13 P2：阶段边界作废旧阶段的 current/total/percent 上下文，
         # 否则新阶段内不带进度字段的事件会沿用旧阶段数值套新阶段区间算错 percent，

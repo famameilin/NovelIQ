@@ -165,7 +165,7 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
         title="完成事务成功",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
+    annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
     result = _result(
         run_id=run_id,
         chapter_id=1,
@@ -192,7 +192,7 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
     assert first == second
     assert first.created_cases[0].id == case.id
     assert case.case_type == "dialogue_speaker"
-    assert case.chunk_id == 0
+    assert case.chapter_id == 1
     assert case.target_ref["dialogue_id"] == dialogue.candidate_key
     assert dialogue.speaker is None
     assert dialogue.confidence == "medium"
@@ -214,7 +214,7 @@ def test_dialogue_resolution_updates_dialogue_record(
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     first_annotation = _annotation(
-        chunk_id=0,
+        chunk_id=1,
         text="“住手”回荡",
         unresolved_dialogue=True,
     )
@@ -239,7 +239,7 @@ def test_dialogue_resolution_updates_dialogue_record(
         target_ref=dict(case.target_ref),
     )
     second_annotation = _annotation(
-        chunk_id=1,
+        chunk_id=2,
         text="顾霜喝道",
         speaker_entity=True,
     )
@@ -249,7 +249,7 @@ def test_dialogue_resolution_updates_dialogue_record(
             chapter_id=2,
             annotation=second_annotation,
             resolved_cases=[resolved],
-            authorized_chunk_ids=[0, 1],
+            authorized_chunk_ids=[1, 2],
         ),
         session_factory=factory,
     )
@@ -283,7 +283,7 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
         title="完成事务回滚",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
+    annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
 
     with patch(
         "src.workflows.annotate_helpers.storage._persist_foreshadowing",
@@ -318,7 +318,7 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
         title="完成结果回读",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="顾霜喝道", speaker_entity=True)
+    annotation = _annotation(chunk_id=1, text="顾霜喝道", speaker_entity=True)
     expected = complete_annotation_run(
         result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
         session_factory=factory,
@@ -340,7 +340,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         title="来源案例锁定失败",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="顾霜喝道", speaker_entity=True)
+    annotation = _annotation(chunk_id=1, text="顾霜喝道", speaker_entity=True)
     missing = ResolvedCase(
         case_id="missing-case",
         action="close",
@@ -350,7 +350,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         target_ref={
             "kind": "dialogue_speaker",
             "dialogue_id": "dlg_missing",
-            "chunk_id": 0,
+            "chunk_id": 1,
         },
     )
 

@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.storage.repositories import ChunkRepository
+    from src.storage.repositories import ChapterRepository
 
 
 def get_prev_tail_text(
-    chunk_repo: ChunkRepository,
+    chunk_repo: ChapterRepository,
     run_id: str,
     chunk_id: int,
     tail_chars: int = 200,
@@ -15,18 +15,18 @@ def get_prev_tail_text(
     """
     获取上一个 chunk 的完整文本
     """
-    return chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
+    return chunk_repo.fetch_prev_chapter_text(run_id, chunk_id)
 
 
 def get_next_text(
-    chunk_repo: ChunkRepository,
+    chunk_repo: ChapterRepository,
     run_id: str,
     chunk_id: int,
 ) -> str | None:
     """
     获取下一个 chunk 的完整文本
     """
-    return chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
+    return chunk_repo.fetch_next_chapter_text(run_id, chunk_id)
 
 
 def format_rolling_memory_for_prompt(

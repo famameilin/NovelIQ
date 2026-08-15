@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, Paragraph
+from src.storage.models import Chapter, Paragraph
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class KeywordMatchRow:
     """关键词检索段落 DTO，携带命中的关键词明细与全文定位"""
 
     paragraph_id: int
-    chunk_id: int
+    chapter_id: int
     paragraph_index: int
     paragraph_text: str
     local_start_char: int
@@ -63,7 +63,7 @@ def search_paragraphs_by_keywords(
     stmt = (
         select(
             Paragraph.paragraph_id,
-            Paragraph.chunk_id,
+            Paragraph.chapter_id,
             Paragraph.paragraph_index,
             Paragraph.text,
             Paragraph.local_start_char,
@@ -96,7 +96,7 @@ def search_paragraphs_by_keywords(
         results.append(
             KeywordMatchRow(
                 paragraph_id=int(row.paragraph_id),
-                chunk_id=int(row.chunk_id),
+                chapter_id=int(row.chapter_id),
                 paragraph_index=int(row.paragraph_index),
                 paragraph_text=paragraph_text,
                 local_start_char=int(row.local_start_char),
@@ -114,10 +114,11 @@ def search_paragraphs_by_keywords(
     return results[:top_k]
 
 
-def fetch_chunk_text(session: Session, run_id: str, chunk_id: int) -> str | None:
+def fetch_chunk_text(session: Session, run_id: str, chapter_id: int) -> str | None:
     """
-    2026-08-02 用于按 run_id 与 chunk_id 读取单个历史 chunk 原文
+    2026-08-02 用于按 run_id 与 chapter_id 读取单个历史章节原文
+    （M9a-2：chunks 表合并进 chapters，正文列迁移后读取 chapters.text）
     不存在对应记录时返回 None
     """
-    stmt = select(Chunk.text).where(Chunk.run_id == run_id, Chunk.chunk_id == chunk_id)
+    stmt = select(Chapter.text).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
     return session.execute(stmt).scalar_one_or_none()

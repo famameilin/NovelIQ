@@ -328,7 +328,6 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
         "dialogue_records": {
             "dialogue_id",
             "run_id",
-            "chunk_id",
             "chapter_id",
             "candidate_key",
             "content",
@@ -343,7 +342,7 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "id",
             "run_id",
             "type",
-            "chunk_id",
+            "chapter_id",
             "keys",
             "description",
             "target_key",
@@ -433,7 +432,6 @@ def _assert_paragraph_contract_schema(engine: Engine) -> None:
     required_columns = {
         "run_id",
         "paragraph_id",
-        "chunk_id",
         "chapter_id",
         "paragraph_index",
         "source_paragraph_index",
@@ -578,7 +576,7 @@ def init_db() -> None:
 
     ensure_database_exists()
     engine = get_engine()
-    # 2026-08-14 P1：chunks 的 idx_chunks_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
+    # 2026-08-14 P1：chapters 的 idx_chapters_run_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
     # 全新数据库必须先建扩展再 create_all，否则 CREATE INDEX 直接失败阻断启动；
     # 与 vector 扩展（vector_schema.ensure_paragraph_embeddings_schema）同口径按需创建
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")

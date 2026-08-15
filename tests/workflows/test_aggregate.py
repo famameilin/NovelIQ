@@ -33,7 +33,7 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
     ParagraphMetricRow,
@@ -104,14 +104,14 @@ class TestAggregate:
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
 
     def _create_chunks_with_paragraphs(self, chunk_count: int) -> None:
-        chunk_repo = ChunkRepository(self.db_session)
+        chapter_repo = ChapterRepository(self.db_session)
         texts = [f"这是第{i}个测试文本。包含快乐和悲伤的词语。" for i in range(chunk_count)]
         chunks: list[Chunk] = []
         offset = 0
         for i, chunk_text in enumerate(texts):
             chunks.append(Chunk(index=i, start=offset, end=offset + len(chunk_text), text=chunk_text, chapter_id=i + 1))
             offset += len(chunk_text)
-        chunk_repo.insert_chunks(self.run_id, chunks)
+        chapter_repo.insert_chapter_texts(self.run_id, chunks)
 
         spans, metric_rows, curve_rows = _build_paragraph_rows(chunks)
         paragraph_repo = ParagraphRepository(self.db_session)
@@ -165,7 +165,7 @@ class TestAggregate:
 
     @pytest.mark.asyncio()
     async def test_aggregate_with_annotations(self) -> None:
-        chunk_repo = ChunkRepository(self.db_session)
+        chapter_repo = ChapterRepository(self.db_session)
         texts = [f"测试文本{i}" for i in range(3)]
         test_chunks: list[Chunk] = []
         offset = 0
@@ -174,7 +174,7 @@ class TestAggregate:
                 Chunk(index=i, start=offset, end=offset + len(chunk_text), text=chunk_text, chapter_id=i + 1)
             )
             offset += len(chunk_text)
-        chunk_repo.insert_chunks(self.run_id, test_chunks)
+        chapter_repo.insert_chapter_texts(self.run_id, test_chunks)
 
         spans, metric_rows, curve_rows = _build_paragraph_rows(test_chunks)
         paragraph_repo = ParagraphRepository(self.db_session)
@@ -246,9 +246,9 @@ class TestGlobalStatsRunIsolation:
 
     def _insert_metrics_for_run(self, run_id: str, sentence_sum: float, sentence_count: int) -> None:
         """每个 run 插入 1 章 1 段；句长充分统计量不同用于区分 run。"""
-        chunk_repo = ChunkRepository(self.db_session)
+        chapter_repo = ChapterRepository(self.db_session)
         chunk_text = "测试文本内容。"
-        chunk_repo.insert_chunks(
+        chapter_repo.insert_chapter_texts(
             run_id,
             [Chunk(index=0, start=0, end=len(chunk_text), text=chunk_text, chapter_id=1)],
         )

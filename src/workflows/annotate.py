@@ -19,6 +19,7 @@ from src.agents.annotation.schema import (
     AgentRunResult,
     BoundChapterAnnotation,
     BoundChunkAnnotation,
+    BoundDialogue,
     BoundEntity,
     BoundEntityDirectory,
     EntityType,
@@ -31,7 +32,6 @@ from src.config.analysis_logger import AnalysisLogger
 from src.storage.db import get_session_factory
 from src.storage.repositories import (
     ChapterRepository,
-    ChunkRepository,
     DatabaseAnnotationQueryService,
     ParagraphRepository,
 )
@@ -43,17 +43,22 @@ if TYPE_CHECKING:
 
 
 def _group_chunks_by_chapter(
-    chunk_rows: list[tuple[int, int, str]],
+    chapter_rows: list[tuple[int, str]],
 ) -> list[tuple[int, list[tuple[int, str]]]]:
-    """2026-08-05 用于按真实非空 chapter_id 聚合完整 current 并保持原文顺序"""
-    chapters: dict[int, list[tuple[int, str]]] = {}
-    for chunk_id, chapter_id, chunk_text in chunk_rows:
+    """2026-08-05 用于按真实非空 chapter_id 聚合完整 current 并保持原文顺序
+
+    M9a-2：chunks 表合并进 chapters 后，存储层直接返回 (chapter_id, text)，
+    运行时章 chunk 身份 = chapter_id（1 基）；超长章在 _split_chapter_sub_chunks
+    处再切负 ID 子块。
+    """
+    chapters: list[tuple[int, list[tuple[int, str]]]] = []
+    for chapter_id, chapter_text in chapter_rows:
         if chapter_id is None or chapter_id <= 0:
             raise ValueError(
-                f"chunks.chapter_id 必须真实且非空，run 需要重新预处理: chunk_id={chunk_id}"
+                f"chapters.chapter_id 必须真实且非空，run 需要重新预处理: chapter_id={chapter_id}"
             )
-        chapters.setdefault(chapter_id, []).append((chunk_id, chunk_text))
-    return list(chapters.items())
+        chapters.append((chapter_id, [(chapter_id, chapter_text)]))
+    return chapters
 
 
 def _split_chapter_sub_chunks(
@@ -62,7 +67,7 @@ def _split_chapter_sub_chunks(
     *,
     chapter_chunk_id: int,
     max_chars: int,
-) -> list[tuple[int, str]]:
+) -> list[tuple[int, str, int]]:
     """2026-08-14 M7（§20）用于在段落边界把超长章切成运行时子块
 
     子块是纯运行时派发单位：不落库、不进指标、不生成第二套段落边界——
@@ -70,9 +75,12 @@ def _split_chapter_sub_chunks(
     按顺序取 -1, -2, ...；章文本不超过 max_chars 或没有可用段落边界时
     原样返回 [(chapter_chunk_id, chapter_text)]。单个超长自然段无法在
     段落边界内再切，允许子块略超 max_chars（累计字符 ≥ max_chars 成块）。
+
+    2026-08-15：返回三元组 (子块 ID, 子块文本, 子块在章文本内的起始偏移)，
+    供合并阶段把第 2+ 子块的对话 start/end 从子块相对坐标重映射回章坐标。
     """
     if len(chapter_text) <= max_chars:
-        return [(chapter_chunk_id, chapter_text)]
+        return [(chapter_chunk_id, chapter_text, 0)]
     usable_boundaries = sorted(
         {
             int(row.local_start_char)
@@ -81,19 +89,19 @@ def _split_chapter_sub_chunks(
         }
     )
     if not usable_boundaries:
-        return [(chapter_chunk_id, chapter_text)]
-    sub_chunks: list[tuple[int, str]] = []
+        return [(chapter_chunk_id, chapter_text, 0)]
+    sub_chunks: list[tuple[int, str, int]] = []
     sub_index = 1
     block_start = 0
     for boundary in usable_boundaries + [len(chapter_text)]:
         if boundary <= block_start:
             continue
         if boundary - block_start >= max_chars:
-            sub_chunks.append((-sub_index, chapter_text[block_start:boundary]))
+            sub_chunks.append((-sub_index, chapter_text[block_start:boundary], block_start))
             sub_index += 1
             block_start = boundary
     if block_start < len(chapter_text) or not sub_chunks:
-        sub_chunks.append((-sub_index, chapter_text[block_start:]))
+        sub_chunks.append((-sub_index, chapter_text[block_start:], block_start))
     return sub_chunks
 
 
@@ -115,15 +123,21 @@ def _merge_sub_chunk_annotations(
     annotations: list[BoundChapterAnnotation],
     *,
     chapter_chunk_id: int,
+    sub_chunk_offsets: Sequence[int],
 ) -> BoundChapterAnnotation:
     """2026-08-14 M7（§20）用于把同一章各子块标注合并为单 chunk 章节标注
 
     chapter_summary 按子块顺序换行拼接；chunks 收缩为单条
     BoundChunkAnnotation（chunk_id=章真实 chunk_id），metrics 取第一个子块，
     实体目录同名去重（保留先出现），其余领域按子块顺序拼接。
+
+    2026-08-15：第 2+ 子块的对话 start/end 是子块相对坐标，合并落库前按
+    sub_chunk_offsets 加回子块在章文本内的起始偏移，与整章运行口径一致。
     """
     if not annotations:
         raise ValueError("子块标注列表不能为空")
+    if len(sub_chunk_offsets) != len(annotations):
+        raise ValueError("sub_chunk_offsets 长度必须与子块标注列表一致")
     for annotation in annotations:
         if len(annotation.chunks) != 1:
             raise ValueError("子块标注必须恰好包含一个 chunk")
@@ -145,8 +159,8 @@ def _merge_sub_chunk_annotations(
                     for item in annotation.chunks[0].character_observations
                 ],
                 dialogues=[
-                    item
-                    for annotation in annotations
+                    _remap_bound_dialogue(item, sub_chunk_offsets[index])
+                    for index, annotation in enumerate(annotations)
                     for item in annotation.chunks[0].dialogues
                 ],
                 events=[
@@ -164,6 +178,18 @@ def _merge_sub_chunk_annotations(
                 ],
             )
         ],
+    )
+
+
+def _remap_bound_dialogue(dialogue: BoundDialogue, sub_chunk_offset: int) -> BoundDialogue:
+    """2026-08-15 用于把子块相对对话坐标平移回章文本坐标（首块偏移 0 不变）"""
+    if sub_chunk_offset <= 0:
+        return dialogue
+    return dialogue.model_copy(
+        update={
+            "start": dialogue.start + sub_chunk_offset,
+            "end": dialogue.end + sub_chunk_offset,
+        }
     )
 
 
@@ -185,11 +211,15 @@ def _merge_sub_chunk_results(
     results: list[AgentRunResult],
     *,
     chapter_chunk_id: int,
+    sub_chunk_offsets: Sequence[int],
 ) -> AgentRunResult:
     """2026-08-14 M7（§20）用于把同一章各子块 Agent 结果合并为单次完成事务输入
 
     子块运行时负 chunk_id 一律映射回章真实 chunk_id（案例不落负 ID）；
     审计字段按并集/拼接合并，sub_chunk_index 归零（结果已合并为单章）。
+
+    2026-08-15：sub_chunk_offsets 为各子块在章文本内的起始偏移（与 results
+    顺序一致），用于把第 2+ 子块的对话坐标重映射回章坐标。
     """
     if not results:
         raise ValueError("子块 Agent 结果列表不能为空")
@@ -201,6 +231,7 @@ def _merge_sub_chunk_results(
         annotation=_merge_sub_chunk_annotations(
             [result.annotation for result in results],
             chapter_chunk_id=chapter_chunk_id,
+            sub_chunk_offsets=sub_chunk_offsets,
         ),
         resolved_cases=[
             _remap_case_anchor(
@@ -360,12 +391,12 @@ async def run_annotate(
     from src.workflows.annotate_helpers.storage import complete_annotation_run
 
     started_at = time.perf_counter()
-    chunk_rows = ChunkRepository(session).fetch_chunks_with_chapter(run_id)
-    if not chunk_rows:
-        logger.warning("no chunks found in db for run_id={}", run_id)
+    chapter_rows = ChapterRepository(session).fetch_chapters_with_text(run_id)
+    if not chapter_rows:
+        logger.warning("no chapters found in db for run_id={}", run_id)
         return 0, 0, 0
 
-    chapter_groups = _group_chunks_by_chapter(chunk_rows)
+    chapter_groups = _group_chunks_by_chapter(chapter_rows)
     total_chapters = len(chapter_groups)
     chapter_labels = _load_chapter_labels(session, run_id)
     sql_session_factory = get_session_factory()
@@ -428,7 +459,7 @@ async def run_annotate(
                         action="progress",
                         stage="annotate",
                         sub_stage="chapter_agent",
-                        chunk_id=chapter_chunk_id,
+                        chapter_id=chapter_chunk_id,
                         current=chapter_index,
                         total=total_chapters,
                         percent=10 + (chapter_index / total_chapters) * 70,
@@ -459,7 +490,7 @@ async def run_annotate(
                 chapter_paragraph_rows = [
                     row
                     for row in ParagraphRepository(session).fetch_paragraph_rows(run_id)
-                    if int(row.chunk_id) in chapter_chunk_ids
+                    if int(row.chapter_id) in chapter_chunk_ids
                 ]
                 if not chapter_paragraph_rows:
                     raise ValueError(
@@ -483,7 +514,11 @@ async def run_annotate(
                     max_chars=settings.models.annotation.sub_chunk_max_chars,
                 )
                 sub_results: list[AgentRunResult] = []
-                for sub_chunk_index, (sub_chunk_id, sub_chunk_text) in enumerate(sub_chunks):
+                sub_chunk_offsets: list[int] = []
+                for sub_chunk_index, (sub_chunk_id, sub_chunk_text, sub_chunk_offset) in enumerate(
+                    sub_chunks
+                ):
+                    sub_chunk_offsets.append(sub_chunk_offset)
                     sub_results.append(
                         await run_annotation_agent(
                             run_id=run_id,
@@ -511,6 +546,7 @@ async def run_annotate(
                     result=_merge_sub_chunk_results(
                         sub_results,
                         chapter_chunk_id=chapter_chunk_id,
+                        sub_chunk_offsets=sub_chunk_offsets,
                     ),
                     session_factory=sql_session_factory,
                 )
@@ -537,7 +573,7 @@ async def run_annotate(
                     action="progress",
                     stage="annotate",
                     sub_stage="chapter_agent",
-                    chunk_id=chapter_chunk_id,
+                    chapter_id=chapter_chunk_id,
                     current=success_count,
                     total=total_chapters,
                     percent=10 + (success_count / total_chapters) * 70,

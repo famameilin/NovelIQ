@@ -34,14 +34,14 @@ def test_build_aligned_three_act_diagnostics_filters_null_tension_and_aligns_by_
 
     module = _load_recompute_narrative_structure_module()
     annotation_data = AnnotationData(
-        chunk_ids=[10, 11, 12, 13],
+        chapter_ids=[10, 11, 12, 13],
         event_types=["铺垫", "转折", "铺垫", "冲突"],
         cliffhangers=[0, 1, 0, 1],
         pivot_moments=[0, 1, 0, 0],
         emotional_valences=["neutral", "neutral", "neutral", "neutral"],
     )
     tension_data = TensionData(
-        chunk_ids=[11, 13, 10, 12],
+        chapter_ids=[11, 13, 10, 12],
         tension_composite_scores=[0.2, 0.9, 0.1, None],
     )
 

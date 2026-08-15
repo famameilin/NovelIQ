@@ -178,7 +178,7 @@ def build_token_usage_callback(*, session: Any, run_id: str) -> TokenUsageCallba
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
-                chunk_id=chunk_id,
+                chapter_id=chunk_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("failed to record embedding token usage: {}", exc)

@@ -1,10 +1,9 @@
-"""导出存储层常用仓库、会话和 chunk 索引工具"""
+"""导出存储层常用仓库与会话"""
 
-from .chunk_index import read_chunk_index, write_chunk_index
 from .repositories import (
     AnnotationRepository,
     BaseRepository,
-    ChunkRepository,
+    ChapterRepository,
     DiagnosisRepository,
     RunRepository,
     StatsRepository,
@@ -19,7 +18,7 @@ from .session import (
 __all__ = [
     "AnnotationRepository",
     "BaseRepository",
-    "ChunkRepository",
+    "ChapterRepository",
     "DatabaseSession",
     "DiagnosisRepository",
     "RunRepository",

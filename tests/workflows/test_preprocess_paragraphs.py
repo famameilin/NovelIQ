@@ -20,7 +20,7 @@ from src.chapters.preprocess import preprocess_text
 from src.config import settings
 from src.preprocess.cleaning import normalize_text
 from src.storage.models import Paragraph, ParagraphCurve, ParagraphEmbedding, ParagraphMetric
-from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.preprocess import run_preprocess
 from tests.support.analysis_factories import insert_test_novel
@@ -160,7 +160,6 @@ class TestPreprocessParagraphs:
         assert len(rows_semantic) == len(rows_plain)
         identity_fields = (
             "paragraph_id",
-            "chunk_id",
             "chapter_id",
             "paragraph_index",
             "local_start_char",
@@ -233,7 +232,7 @@ class TestPreprocessParagraphs:
         )
         assert chunks1 > 0
         assert ParagraphRepository(db_session).count_paragraphs(run_id) > 0
-        assert ChunkRepository(db_session).is_preprocess_complete(run_id)
+        assert ChapterRepository(db_session).is_preprocess_complete(run_id)
 
         chunks2, chars2, elapsed2 = await run_preprocess(
             source_path=source_path,
