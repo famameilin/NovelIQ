@@ -59,7 +59,7 @@ export function GraphPage() {
   const { currentNovelId, currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
-  const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlSelectedChapter = searchParams.get("selected_chapter");
   const urlChangeId = searchParams.get("change_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
@@ -216,7 +216,7 @@ export function GraphPage() {
     activeSelectedChangeId,
     graphSelectionHint,
     handleGoTimeline,
-    handleOpenTimelineChunk,
+    handleOpenTimelineChapter,
     handleSelectChange,
     selectedChange,
   } = useGraphDeepLinkSelection({
@@ -224,7 +224,7 @@ export function GraphPage() {
     taskScopeId,
     timelineUrl,
     urlChangeId,
-    urlSelectedChunk,
+    urlSelectedChapter,
     loadedChanges,
     sortedChanges,
     navigate,
@@ -336,7 +336,7 @@ export function GraphPage() {
     onGoTimeline: handleGoTimeline,
     timelineUrl,
     selectedNode,
-    onOpenTimelineChunk: handleOpenTimelineChunk,
+    onOpenTimelineChapter: handleOpenTimelineChapter,
     selectedChange,
     pageSectionVariants,
     getChangeTypeLabel,

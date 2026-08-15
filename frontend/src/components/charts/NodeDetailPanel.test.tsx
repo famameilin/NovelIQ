@@ -1,5 +1,5 @@
 /**
- * 2026-08-13 P2-5: 生命周期字段（first_seen_chunk/last_seen_chunk）为 null 时
+ * 2026-08-13 P2-5: 生命周期字段（first_seen_chapter/last_seen_chapter）为 null 时
  * 不得渲染"第 null 章"，且整行出场信息应隐藏
  */
 import { render, screen } from "@testing-library/react";
@@ -13,8 +13,8 @@ function createNode(overrides: Partial<GraphNode>): GraphNode {
     entity_id: 1,
     name: "顾霜",
     entity_type: "character",
-    first_seen_chunk: 1,
-    last_seen_chunk: 15,
+    first_seen_chapter: 1,
+    last_seen_chapter: 15,
     state_revision: 3,
     state: { primary_role_function: "主角", status: "active" },
     ...overrides,
@@ -22,10 +22,10 @@ function createNode(overrides: Partial<GraphNode>): GraphNode {
 }
 
 describe("NodeDetailPanel 出场信息", () => {
-  it("first_seen_chunk 为 null 时隐藏出场行，不渲染“第 null 章”", () => {
+  it("first_seen_chapter 为 null 时隐藏出场行，不渲染“第 null 章”", () => {
     render(
       <NodeDetailPanel
-        node={createNode({ first_seen_chunk: null, last_seen_chunk: null })}
+        node={createNode({ first_seen_chapter: null, last_seen_chapter: null })}
         relatedNodes={[]}
         isOpen
         onClose={() => undefined}
@@ -37,10 +37,10 @@ describe("NodeDetailPanel 出场信息", () => {
     expect(screen.getByText("顾霜")).toBeInTheDocument();
   });
 
-  it("first_seen_chunk 有值时正常渲染出场区间", () => {
+  it("first_seen_chapter 有值时正常渲染出场区间", () => {
     render(
       <NodeDetailPanel
-        node={createNode({ first_seen_chunk: 3, last_seen_chunk: 12 })}
+        node={createNode({ first_seen_chapter: 3, last_seen_chapter: 12 })}
         relatedNodes={[]}
         isOpen
         onClose={() => undefined}

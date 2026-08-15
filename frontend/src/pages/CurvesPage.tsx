@@ -107,7 +107,7 @@ export function CurvesPage() {
     setZoomRange(range);
   }, []);
 
-  // M4 §14.4：点击曲线点定位到对应章节原文（复用 graph 页 selected_chunk 深链约定）；
+  // M4 §14.4：点击曲线点定位到对应章节原文（复用 graph 页 selected_chapter 深链约定）；
   // 无任务上下文时仅提示章节位置，不跳转
   const handlePointClick = useCallback(
     (point: ParagraphCurvePoint) => {
@@ -115,7 +115,7 @@ export function CurvesPage() {
         toast.info(`该段位于第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段`);
         return;
       }
-      navigate(`/novels/${novelId}/graph?task_id=${storeTaskId}&selected_chunk=${point.chapter_id}`);
+      navigate(`/novels/${novelId}/graph?task_id=${storeTaskId}&selected_chapter=${point.chapter_id}`);
     },
     [navigate, novelId, storeTaskId]
   );

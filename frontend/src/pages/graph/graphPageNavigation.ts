@@ -4,11 +4,11 @@
 export function buildGraphUrl(
   novelId: string,
   taskId: string,
-  options?: { chunkId?: number | null; changeId?: string | null }
+  options?: { chapterId?: number | null; changeId?: string | null }
 ): string {
   const params = new URLSearchParams({ task_id: taskId });
-  if (options?.chunkId != null) {
-    params.set("selected_chunk", String(options.chunkId));
+  if (options?.chapterId != null) {
+    params.set("selected_chapter", String(options.chapterId));
   }
   if (options?.changeId) {
     params.set("change_id", options.changeId);
@@ -30,14 +30,14 @@ export function buildTimelineUrl(novelId: string, taskId: string): string {
 // 把时间轴联动参数拼装从页面组件中抽出，减少 UI 代码中的字符串拼接
 export function buildTimelineSelectionUrl(
   baseUrl: string,
-  options?: { selectedNodeId?: string | null; chunkId?: number | null; changeId?: string | null }
+  options?: { selectedNodeId?: string | null; chapterId?: number | null; changeId?: string | null }
 ): string {
   const params: string[] = [];
   if (options?.selectedNodeId) {
     params.push(`selected_node_id=${encodeURIComponent(options.selectedNodeId)}`);
   }
-  if (options?.chunkId != null) {
-    params.push(`selected_chunk=${options.chunkId}`);
+  if (options?.chapterId != null) {
+    params.push(`selected_chapter=${options.chapterId}`);
   }
   if (options?.changeId) {
     params.push(`change_id=${encodeURIComponent(options.changeId)}`);

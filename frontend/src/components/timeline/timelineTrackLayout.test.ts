@@ -9,10 +9,10 @@ import {
 } from "./timelineTrackLayout";
 import { buildTensionAreaPath, interpolateSeriesValueAtProgress, mapTensionValueToTrackY } from "./timelineTrackPaths";
 
-function createNode(chunkId: number, progress: number, summary: string): TimelineNode {
+function createNode(chapterId: number, progress: number, summary: string): TimelineNode {
   return {
-    node_id: `plot:${chunkId}`,
-    anchor_chunk_id: chunkId,
+    node_id: `plot:${chapterId}`,
+    anchor_chapter_id: chapterId,
     progress,
     importance_score: 5,
     level: 1,

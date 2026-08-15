@@ -28,7 +28,7 @@ vi.mock("framer-motion", () => ({
 function createNode(overrides: Partial<TimelineNode> = {}): TimelineNode {
   return {
     node_id: "plot:3",
-    anchor_chunk_id: 3,
+    anchor_chapter_id: 3,
     progress: 0.3,
     importance_score: 8,
     level: 1,
@@ -58,7 +58,7 @@ function createPhases(): TimelinePhase[] {
 
 describe("TimelineTrack", () => {
   it("没有节点时会展示空态", () => {
-    render(<TimelineTrack nodes={[]} totalChunks={20} />);
+    render(<TimelineTrack nodes={[]} totalChapters={20} />);
 
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -76,7 +76,7 @@ describe("TimelineTrack", () => {
         selectedNodeId="plot:3"
         onNodeClick={onNodeClick}
         tensionCurve={[0.2, 0.5, 0.8]}
-        totalChunks={20}
+        totalChapters={20}
       />,
     );
 

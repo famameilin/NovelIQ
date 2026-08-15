@@ -52,7 +52,7 @@ function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
     action: "output",
     stage: "annotate",
     sub_stage: "phase3",
-    chunk_id: 3,
+    chapter_id: 3,
     stream_id: null,
     current: 3,
     total: 10,
@@ -104,7 +104,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "start",
           sub_stage: "chapter_agent",
-          chunk_id: 1,
+          chapter_id: 1,
           current: 1,
           total: 10,
           percent: 17,
@@ -198,14 +198,14 @@ describe("StreamOutput 区块流展示", () => {
     expect(screen.getByText("成功")).toBeInTheDocument();
   });
 
-  it("标注 Agent 进入新 chunk 尚无新流时应回退展示同 chunk 最近输出", () => {
+  it("标注 Agent 进入新章节尚无新流时应回退展示同章节最近输出", () => {
     act(() => {
       useStreamStore.getState().setTaskId("task-phase-fallback");
       useStreamStore.getState().updateProgress(
         createLLMEvent({
           action: "start",
           sub_stage: "chapter_agent",
-          chunk_id: 244,
+          chapter_id: 244,
           current: 244,
           total: 255,
           percent: 77,
@@ -214,12 +214,12 @@ describe("StreamOutput 区块流展示", () => {
           message: "开始 chapter_agent",
         }),
       );
-      // 旧合同（phase2）留下的同 chunk 输出：仅用于在 chapter_agent 契约下验证回退链仍可用
+      // 旧合同（phase2）留下的同章节输出：仅用于在 chapter_agent 契约下验证回退链仍可用
       useStreamStore.getState().appendLLMOutput(
         createLLMEvent({
           action: "output",
           sub_stage: "phase2",
-          chunk_id: 244,
+          chapter_id: 244,
           current: 244,
           total: 255,
           percent: 76.98,
@@ -235,14 +235,14 @@ describe("StreamOutput 区块流展示", () => {
     expect(screen.queryByText(/模型输出尚未到达/)).not.toBeInTheDocument();
   });
 
-  it("同 chunk 的工具调用落在旧合同 sub_stage 时也应在思考区块回退展示", () => {
+  it("同章节的工具调用落在旧合同 sub_stage 时也应在思考区块回退展示", () => {
     act(() => {
       useStreamStore.getState().setTaskId("task-thinking-fallback");
       useStreamStore.getState().updateProgress(
         createLLMEvent({
           action: "start",
           sub_stage: "chapter_agent",
-          chunk_id: 244,
+          chapter_id: 244,
           current: 244,
           total: 255,
           percent: 77,
@@ -255,7 +255,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "output",
           sub_stage: "phase2",
-          chunk_id: 244,
+          chapter_id: 244,
           content: "phase2 输出",
         }),
       );
@@ -263,7 +263,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "tool_call",
           sub_stage: "phase1",
-          chunk_id: 244,
+          chapter_id: 244,
           content: "search_pool",
           message: "正在调用工具 search_pool",
           status: "started",
@@ -286,7 +286,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "start",
           sub_stage: "chapter_agent",
-          chunk_id: 244,
+          chapter_id: 244,
           current: 244,
           total: 255,
           percent: 77,
@@ -299,7 +299,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "output",
           sub_stage: "phase3",
-          chunk_id: 244,
+          chapter_id: 244,
           content: "phase3 输出",
         }),
       );
@@ -307,7 +307,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "tool_call",
           sub_stage: "phase3",
-          chunk_id: 244,
+          chapter_id: 244,
           content: "search_pool",
           message: "正在调用工具 search_pool",
           status: "started",
@@ -325,7 +325,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "output",
           sub_stage: "chapter_agent",
-          chunk_id: 244,
+          chapter_id: 244,
           content: "chapter_agent 输出",
         }),
       );
@@ -340,7 +340,7 @@ describe("StreamOutput 区块流展示", () => {
         createLLMEvent({
           action: "tool_call",
           sub_stage: "chapter_agent",
-          chunk_id: 244,
+          chapter_id: 244,
           content: "resolve_case",
           message: "正在调用工具 resolve_case",
           status: "started",

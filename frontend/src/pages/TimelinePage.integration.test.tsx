@@ -15,7 +15,7 @@ const getNovelMock = vi.fn();
 const getAnalysisTasksMock = vi.fn();
 const navigateMock = vi.fn();
 
-let currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&change_id=relation%3A31";
+let currentTimelineSearchParams = "task_id=task-integration&selected_chapter=8&change_id=relation%3A31";
 let currentTimelineNovelId = "novel-1";
 
 // 2026-04-23，任务：复杂度与耦合审查 P2。集成测试保留真实 timeline 组件，仅替换动画属性
@@ -97,7 +97,7 @@ function renderTimelinePage() {
 }
 
 // 2026-08-07 用于构造时间轴集成测试的稳定图谱变化合同
-function createRelationGraphChange(changeId: string, relationChangeKind: "assert" | "break", chunkId: number) {
+function createRelationGraphChange(changeId: string, relationChangeKind: "assert" | "break", chapterId: number) {
   return {
     change_id: changeId,
     change_kind: "relation" as const,
@@ -105,7 +105,7 @@ function createRelationGraphChange(changeId: string, relationChangeKind: "assert
     chapter_id: 2,
     fact_id: `fact:${changeId}`,
     fact_revision: 1,
-    effective_chunk_id: chunkId,
+    effective_chapter_id: chapterId,
     changes: [{ change_kind: relationChangeKind }],
     relation_id: `relation:${changeId}`,
     relation_version_id: Number(changeId.split(":")[1]),
@@ -124,7 +124,7 @@ function createTimelineResponse(): TimelineResponse {
     meta: {
       novel_id: "novel-1",
       novel_name: "Timeline Integration Novel",
-      total_chunks: 12,
+      total_chapters: 12,
     },
     phases: [
       { name: "引入期", start: 1, end: 3, ratio: 0.25 },
@@ -135,9 +135,9 @@ function createTimelineResponse(): TimelineResponse {
     composite_nodes: [
       {
         node_id: "composite:relation:8:0",
-        anchor_chunk_id: 8,
-        start_chunk_id: 8,
-        end_chunk_id: 8,
+        anchor_chapter_id: 8,
+        start_chapter_id: 8,
+        end_chapter_id: 8,
         progress: 0.66,
         start_progress: 0.66,
         end_progress: 0.66,
@@ -155,7 +155,7 @@ function createTimelineResponse(): TimelineResponse {
     atomic_nodes: [
       {
         node_id: "relation:31",
-        anchor_chunk_id: 8,
+        anchor_chapter_id: 8,
         progress: 0.66,
         importance_score: 9,
         level: 1,
@@ -185,9 +185,9 @@ function createConflictingTimelineResponse(): TimelineResponse {
       ...(createTimelineResponse().composite_nodes ?? []),
       {
         node_id: "composite:relation:9:0",
-        anchor_chunk_id: 9,
-        start_chunk_id: 9,
-        end_chunk_id: 9,
+        anchor_chapter_id: 9,
+        start_chapter_id: 9,
+        end_chapter_id: 9,
         progress: 0.75,
         start_progress: 0.75,
         end_progress: 0.75,
@@ -206,7 +206,7 @@ function createConflictingTimelineResponse(): TimelineResponse {
       ...(createTimelineResponse().atomic_nodes ?? []),
       {
         node_id: "relation:32",
-        anchor_chunk_id: 9,
+        anchor_chapter_id: 9,
         progress: 0.75,
         importance_score: 7,
         level: 1,
@@ -237,7 +237,7 @@ function createNovel(): Novel {
 describe("TimelinePage integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&change_id=relation%3A31";
+    currentTimelineSearchParams = "task_id=task-integration&selected_chapter=8&change_id=relation%3A31";
     currentTimelineNovelId = "novel-1";
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
     getNovelMock.mockResolvedValue(createNovel());
@@ -253,16 +253,16 @@ describe("TimelinePage integration", () => {
     await user.click(screen.getByRole("button", { name: "重要" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chunk=8&change_id=relation%3A31",
+      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chapter=8&change_id=relation%3A31",
       { replace: true }
     );
 
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&change_id=relation%3A31");
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chapter=8&change_id=relation%3A31");
   });
 
   it("does not carry a conflicting change_id back to graph when selected_node_id points elsewhere", async () => {
-    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chunk=8&change_id=relation%3A32";
+    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chapter=8&change_id=relation%3A32";
     getTimelineMock.mockResolvedValue(createConflictingTimelineResponse());
     const user = userEvent.setup();
 
@@ -271,6 +271,6 @@ describe("TimelinePage integration", () => {
     expect((await screen.findAllByText("顾承渊与苏映雪结盟")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&change_id=relation%3A31");
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chapter=8&change_id=relation%3A31");
   });
 });

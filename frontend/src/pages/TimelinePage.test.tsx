@@ -13,7 +13,7 @@ const getTimelineMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
-let currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9002";
+let currentTimelineSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A9002";
 let currentTimelineNovelId = "novel-1";
 type TimelineDisplayNode = TimelineNode | TimelineCompositeNode;
 
@@ -119,7 +119,7 @@ vi.mock("@/components/timeline", () => ({
     <div data-testid="timeline-track">
       {nodes.map((node) => (
         <button key={node.node_id} type="button" onClick={() => onNodeClick(node)}>
-          节点 {node.anchor_chunk_id}
+          节点 {node.anchor_chapter_id}
         </button>
       ))}
     </div>
@@ -189,7 +189,7 @@ function createRelationGraphChange(changeId: string, relationChangeKind: "assert
     chapter_id: 2,
     fact_id: `fact:${changeId}`,
     fact_revision: 1,
-    effective_chunk_id: changeId === "relation:9001" ? 8 : 12,
+    effective_chapter_id: changeId === "relation:9001" ? 8 : 12,
     changes: [{ change_kind: relationChangeKind }],
     relation_id: `relation:${changeId}`,
     relation_version_id: changeId === "relation:9001" ? 9001 : 9002,
@@ -207,7 +207,7 @@ function createTimelineResponse(): TimelineResponse {
     meta: {
       novel_id: "novel-1",
       novel_name: "Timeline Review Novel",
-      total_chunks: 20,
+      total_chapters: 20,
     },
     phases: [
       { name: "引入期", start: 1, end: 5, ratio: 0.25 },
@@ -218,9 +218,9 @@ function createTimelineResponse(): TimelineResponse {
     composite_nodes: [
       {
         node_id: "composite:relation:8:0",
-        anchor_chunk_id: 8,
-        start_chunk_id: 8,
-        end_chunk_id: 8,
+        anchor_chapter_id: 8,
+        start_chapter_id: 8,
+        end_chapter_id: 8,
         progress: 0.4,
         start_progress: 0.4,
         end_progress: 0.4,
@@ -236,9 +236,9 @@ function createTimelineResponse(): TimelineResponse {
       },
       {
         node_id: "composite:relation:12:0",
-        anchor_chunk_id: 12,
-        start_chunk_id: 12,
-        end_chunk_id: 12,
+        anchor_chapter_id: 12,
+        start_chapter_id: 12,
+        end_chapter_id: 12,
         progress: 0.6,
         start_progress: 0.6,
         end_progress: 0.6,
@@ -256,7 +256,7 @@ function createTimelineResponse(): TimelineResponse {
     atomic_nodes: [
       {
         node_id: "relation:9001",
-        anchor_chunk_id: 8,
+        anchor_chapter_id: 8,
         progress: 0.4,
         importance_score: 5,
         level: 2,
@@ -270,7 +270,7 @@ function createTimelineResponse(): TimelineResponse {
       },
       {
         node_id: "relation:9002",
-        anchor_chunk_id: 12,
+        anchor_chapter_id: 12,
         progress: 0.6,
         importance_score: 8,
         level: 1,
@@ -297,7 +297,7 @@ function createEmptyTimelineResponse(): TimelineResponse {
     meta: {
       novel_id: "novel-1",
       novel_name: "Timeline Review Novel",
-      total_chunks: 0,
+      total_chapters: 0,
     },
     phases: [],
     composite_nodes: [],
@@ -314,9 +314,9 @@ function createStateTimelineResponse(): TimelineResponse {
       ...createTimelineResponse().composite_nodes,
       {
         node_id: "composite:state:9:0",
-        anchor_chunk_id: 9,
-        start_chunk_id: 9,
-        end_chunk_id: 9,
+        anchor_chapter_id: 9,
+        start_chapter_id: 9,
+        end_chapter_id: 9,
         progress: 0.45,
         start_progress: 0.45,
         end_progress: 0.45,
@@ -335,7 +335,7 @@ function createStateTimelineResponse(): TimelineResponse {
       ...createTimelineResponse().atomic_nodes,
       {
         node_id: "state:12:9",
-        anchor_chunk_id: 9,
+        anchor_chapter_id: 9,
         progress: 0.45,
         importance_score: 7,
         level: 1,
@@ -353,7 +353,7 @@ function createStateTimelineResponse(): TimelineResponse {
             chapter_id: 2,
             fact_id: "fact:state:12:9",
             fact_revision: 1,
-            effective_chunk_id: 9,
+            effective_chapter_id: 9,
             changes: [{ field: "status", value: "结盟" }],
             entity_id: 12,
             entity_name: "顾承渊",
@@ -364,16 +364,16 @@ function createStateTimelineResponse(): TimelineResponse {
   };
 }
 
-function createAmbiguousChunkTimelineResponse(): TimelineResponse {
+function createAmbiguousChapterTimelineResponse(): TimelineResponse {
   return {
     ...createTimelineResponse(),
     composite_nodes: [
       ...createTimelineResponse().composite_nodes,
       {
         node_id: "composite:plot:12:1",
-        anchor_chunk_id: 12,
-        start_chunk_id: 12,
-        end_chunk_id: 12,
+        anchor_chapter_id: 12,
+        start_chapter_id: 12,
+        end_chapter_id: 12,
         progress: 0.6,
         start_progress: 0.6,
         end_progress: 0.6,
@@ -392,7 +392,7 @@ function createAmbiguousChunkTimelineResponse(): TimelineResponse {
       ...createTimelineResponse().atomic_nodes,
       {
         node_id: "plot:12",
-        anchor_chunk_id: 12,
+        anchor_chapter_id: 12,
         progress: 0.6,
         importance_score: 6,
         level: 2,
@@ -425,7 +425,7 @@ function renderPage() {
 describe("TimelinePage deep links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9002";
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A9002";
     currentTimelineNovelId = "novel-1";
     useNovelStore.setState({
       currentNovelId: null,
@@ -461,7 +461,7 @@ describe("TimelinePage deep links", () => {
   });
 
   it("keeps the URL deep-link task authoritative when the store still holds an older task", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9002";
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A9002";
     useNovelStore.setState({
       currentNovelId: "novel-1",
       currentTaskId: "task-b",
@@ -480,7 +480,7 @@ describe("TimelinePage deep links", () => {
     );
   });
 
-  it("prefers change_id over selected_chunk when deep-linking from graph", async () => {
+  it("prefers change_id over selected_chapter when deep-linking from graph", async () => {
     renderPage();
 
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
@@ -489,7 +489,7 @@ describe("TimelinePage deep links", () => {
   });
 
   it("selects a state node by its stable change_id", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=9&change_id=state%3A12%3A9";
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=9&change_id=state%3A12%3A9";
     getTimelineMock.mockResolvedValue(createStateTimelineResponse());
 
     renderPage();
@@ -499,7 +499,7 @@ describe("TimelinePage deep links", () => {
   });
 
   it("prefers selected_node_id over a conflicting change_id and drops the stale change binding", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_node_id=relation%3A9001&selected_chunk=8&change_id=relation%3A9002";
+    currentTimelineSearchParams = "task_id=task-a&selected_node_id=relation%3A9001&selected_chapter=8&change_id=relation%3A9002";
     const user = userEvent.setup();
 
     renderPage();
@@ -510,13 +510,13 @@ describe("TimelinePage deep links", () => {
     await user.click(screen.getByRole("button", { name: "切到重要" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9001&selected_chunk=8",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9001&selected_chapter=8",
       { replace: true }
     );
   });
 
-  it("falls back to selected_chunk when change_id is missing", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9999";
+  it("falls back to selected_chapter when change_id is missing", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A9999";
 
     renderPage();
 
@@ -525,9 +525,9 @@ describe("TimelinePage deep links", () => {
     expect(screen.getByText("未定位到指定图谱变化，已回退到对应时间节点。")).toBeInTheDocument();
   });
 
-  it("does not guess a node when selected_chunk maps to multiple timeline nodes", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12";
-    getTimelineMock.mockResolvedValue(createAmbiguousChunkTimelineResponse());
+  it("does not guess a node when selected_chapter maps to multiple timeline nodes", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=12";
+    getTimelineMock.mockResolvedValue(createAmbiguousChapterTimelineResponse());
 
     renderPage();
 
@@ -536,8 +536,8 @@ describe("TimelinePage deep links", () => {
     expect(screen.getByText("该时间块包含多个不同类型节点，请使用稳定节点链接重新定位。")).toBeInTheDocument();
   });
 
-  it("shows a no-match hint without keeping stale selection when neither graph change nor chunk exists", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=99&change_id=relation%3A9999";
+  it("shows a no-match hint without keeping stale selection when neither graph change nor chapter exists", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=99&change_id=relation%3A9999";
 
     renderPage();
 
@@ -577,11 +577,11 @@ describe("TimelinePage deep links", () => {
     await screen.findByText("selected-relation:9002");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&change_id=relation%3A9002",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chapter=12&change_id=relation%3A9002",
       { replace: true }
     );
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&change_id=relation%3A9002";
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chapter=12&change_id=relation%3A9002";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />
@@ -590,8 +590,8 @@ describe("TimelinePage deep links", () => {
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
   });
 
-  it("drops a stale change_id when controls change after falling back to selected_chunk", async () => {
-    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&change_id=relation%3A9999";
+  it("drops a stale change_id when controls change after falling back to selected_chapter", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A9999";
     const user = userEvent.setup();
 
     renderPage();
@@ -600,7 +600,7 @@ describe("TimelinePage deep links", () => {
     await user.click(screen.getByRole("button", { name: "切到重要" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=composite%3Arelation%3A12%3A0&selected_chunk=12",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=composite%3Arelation%3A12%3A0&selected_chapter=12",
       { replace: true }
     );
   });
@@ -614,7 +614,7 @@ describe("TimelinePage deep links", () => {
     await user.click(screen.getByRole("button", { name: "节点 8" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=composite%3Arelation%3A8%3A0&selected_chunk=8",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=composite%3Arelation%3A8%3A0&selected_chapter=8",
       { replace: true }
     );
   });
@@ -657,7 +657,7 @@ describe("TimelinePage deep links", () => {
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledTimes(1);
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=3&view=atomic&selected_node_id=relation%3A9001&selected_chunk=8";
+    currentTimelineSearchParams = "task_id=task-a&max_level=3&view=atomic&selected_node_id=relation%3A9001&selected_chapter=8";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />

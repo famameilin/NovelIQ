@@ -3,7 +3,7 @@
  *
  * 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
  *
- *   - 详情面板改为消费 node_id / anchor_chunk_id 新合同
+ *   - 详情面板改为消费 node_id / anchor_chapter_id 新合同
  *   - 展示 score_breakdown、graph_changes 与 lifecycle_events 新结构
  *   - 图谱回跳仅在原子节点具备稳定 change_id 时附带图谱选择参数
  *
@@ -115,7 +115,7 @@ export function TimelineNodeDetail({
     if (!node) return;
     const params = new URLSearchParams({ task_id: taskId });
     if (shouldSelectGraphChange) {
-      params.set("selected_chunk", String(node.anchor_chunk_id));
+      params.set("selected_chapter", String(node.anchor_chapter_id));
       params.set("change_id", graphChangeId);
     }
     navigate(`/novels/${novelId}/graph?${params.toString()}`);
@@ -150,10 +150,10 @@ export function TimelineNodeDetail({
               <p className="text-sm text-text">{node.summary}</p>
               <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
                 <span>节点 {node.node_id}</span>
-                {"start_chunk_id" in node && node.start_chunk_id !== node.end_chunk_id ? (
-                  <span>范围 {node.start_chunk_id}-{node.end_chunk_id} 章</span>
+                {"start_chapter_id" in node && node.start_chapter_id !== node.end_chapter_id ? (
+                  <span>范围 {node.start_chapter_id}-{node.end_chapter_id} 章</span>
                 ) : (
-                  <span>第 {node.anchor_chunk_id} 章</span>
+                  <span>第 {node.anchor_chapter_id} 章</span>
                 )}
                 <span>进度: {Math.round(node.progress * 100)}%</span>
                 <span>重要性: {node.importance_score.toFixed(1)}</span>
@@ -333,7 +333,7 @@ export function TimelineNodeDetail({
                             <Badge variant="outline" className="text-[10px]">
                               {childPresentation.label}
                             </Badge>
-                            <span className="font-medium text-text">第 {childNode.anchor_chunk_id} 章</span>
+                            <span className="font-medium text-text">第 {childNode.anchor_chapter_id} 章</span>
                             <span className="text-text-muted">重要性 {childNode.importance_score.toFixed(1)}</span>
                           </div>
                           <p className="mt-2 leading-5 text-text-muted">{childNode.summary}</p>

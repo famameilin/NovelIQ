@@ -43,7 +43,7 @@ interface GraphWorkspaceSectionProps {
   onGoTimeline: () => void;
   timelineUrl: string | null;
   selectedNode: GraphNode | null;
-  onOpenTimelineChunk: (chunkId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => void;
+  onOpenTimelineChapter: (chapterId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => void;
   selectedChange: GraphChange | null;
   pageSectionVariants: {
     hidden: { opacity: number; y: number };
@@ -87,7 +87,7 @@ export function GraphWorkspaceSection({
   onGoTimeline,
   timelineUrl,
   selectedNode,
-  onOpenTimelineChunk,
+  onOpenTimelineChapter,
   selectedChange,
   pageSectionVariants,
   getChangeTypeLabel,
@@ -215,7 +215,7 @@ export function GraphWorkspaceSection({
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium text-text">
-                              第 {change.effective_chunk_id} 章 ·{" "}
+                              第 {change.effective_chapter_id} 章 ·{" "}
                               {change.change_kind === "relation"
                                 ? `${change.from_name ?? "未知实体"} → ${change.to_name ?? "未知实体"}`
                                 : change.entity_name ?? "未知实体"}
@@ -256,14 +256,14 @@ export function GraphWorkspaceSection({
 
           <div className={cn(view === "changes" ? "flex min-h-0 flex-col gap-4 overflow-hidden" : "space-y-4")}>
           {selectedNode?.entity_type === "character" &&
-          (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
+          (selectedNode.first_seen_chapter != null || selectedNode.last_seen_chapter != null) ? (
             <DashboardCardShell title="角色生命周期联动" icon={<Users className="h-4 w-4" />} accent="chart-3" bodyClassName="gap-4">
               <p className="text-sm text-text-muted">从这里可以继续查看角色在故事中的首次登场和最后活跃位置。</p>
               <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
                 <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
                   当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
-                  {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
-                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 章到第 ${selectedNode.last_seen_chunk} 章。`
+                  {selectedNode.first_seen_chapter != null && selectedNode.last_seen_chapter != null
+                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chapter} 章到第 ${selectedNode.last_seen_chapter} 章。`
                     : "，可继续跳到时间轴查看稳定生命周期节点。"}
                 </div>
                 <div className="flex flex-wrap gap-3">
@@ -271,15 +271,15 @@ export function GraphWorkspaceSection({
                     variant="outline"
                     size="sm"
                     onClick={() =>
-                      onOpenTimelineChunk(
-                        selectedNode.first_seen_chunk,
+                      onOpenTimelineChapter(
+                        selectedNode.first_seen_chapter,
                         null,
-                        selectedNode.first_seen_chunk != null
-                          ? `lifecycle:entry:${selectedNode.entity_id}:${selectedNode.first_seen_chunk}`
+                        selectedNode.first_seen_chapter != null
+                          ? `lifecycle:entry:${selectedNode.entity_id}:${selectedNode.first_seen_chapter}`
                           : null,
                       )
                     }
-                    disabled={selectedNode.first_seen_chunk == null || !timelineUrl}
+                    disabled={selectedNode.first_seen_chapter == null || !timelineUrl}
                   >
                     查看首次登场
                     <ArrowRight className="h-4 w-4" />
@@ -288,15 +288,15 @@ export function GraphWorkspaceSection({
                     variant="outline"
                     size="sm"
                     onClick={() =>
-                      onOpenTimelineChunk(
-                        selectedNode.last_seen_chunk,
+                      onOpenTimelineChapter(
+                        selectedNode.last_seen_chapter,
                         null,
-                        selectedNode.last_seen_chunk != null
-                          ? `lifecycle:exit:${selectedNode.entity_id}:${selectedNode.last_seen_chunk}`
+                        selectedNode.last_seen_chapter != null
+                          ? `lifecycle:exit:${selectedNode.entity_id}:${selectedNode.last_seen_chapter}`
                           : null,
                       )
                     }
-                    disabled={selectedNode.last_seen_chunk == null || !timelineUrl}
+                    disabled={selectedNode.last_seen_chapter == null || !timelineUrl}
                   >
                     查看最后活跃
                     <ArrowRight className="h-4 w-4" />
@@ -325,7 +325,7 @@ export function GraphWorkspaceSection({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                           <p className="text-sm font-medium text-text">
-                           第 {selectedChange.effective_chunk_id} 章 ·{" "}
+                           第 {selectedChange.effective_chapter_id} 章 ·{" "}
                            {selectedChange.change_kind === "relation"
                              ? `${selectedChange.from_name ?? "未知实体"} → ${selectedChange.to_name ?? "未知实体"}`
                              : selectedChange.entity_name ?? "未知实体"}

@@ -71,7 +71,7 @@ export interface TimelineTrackProps {
   onNodeClick?: (node: TimelineDisplayNode) => void;
   className?: string;
   tensionCurve?: number[];
-  totalChunks?: number;
+  totalChapters?: number;
 }
 
 const PHASE_SURFACE_CLASS_MAP: Record<string, string> = {
@@ -89,7 +89,7 @@ export function TimelineTrack({
   onNodeClick,
   className,
   tensionCurve,
-  totalChunks = 0,
+  totalChapters = 0,
 }: TimelineTrackProps) {
   const highlightedRange = useMemo(() => {
     if (!activePhase || !phases) return null;
@@ -100,21 +100,21 @@ export function TimelineTrack({
   const isNodeInHighlight = useCallback(
     (node: TimelineDisplayNode): boolean => {
       if (!highlightedRange) return false;
-      return node.anchor_chunk_id >= highlightedRange[0] && node.anchor_chunk_id <= highlightedRange[1];
+      return node.anchor_chapter_id >= highlightedRange[0] && node.anchor_chapter_id <= highlightedRange[1];
     },
     [highlightedRange]
   );
 
   const sortedNodes = useMemo(() => [...(nodes || [])].sort((a, b) => a.progress - b.progress), [nodes]);
-  const canvasMinWidth = useMemo(() => calculateCanvasMinWidth(sortedNodes.length, totalChunks), [sortedNodes.length, totalChunks]);
+  const canvasMinWidth = useMemo(() => calculateCanvasMinWidth(sortedNodes.length, totalChapters), [sortedNodes.length, totalChapters]);
   const layoutNodes = useMemo(() => createTimelineLayoutNodes(sortedNodes, canvasMinWidth), [canvasMinWidth, sortedNodes]);
 
   const tensionPath = useMemo(() => {
     if (!tensionCurve || tensionCurve.length === 0) {
       return null;
     }
-    return buildTensionAreaPath(tensionCurve, totalChunks, canvasMinWidth);
-  }, [canvasMinWidth, tensionCurve, totalChunks]);
+    return buildTensionAreaPath(tensionCurve, totalChapters, canvasMinWidth);
+  }, [canvasMinWidth, tensionCurve, totalChapters]);
 
   const phaseLayouts = useMemo(() => {
     if (!phases || phases.length === 0) return [];
@@ -193,7 +193,7 @@ export function TimelineTrack({
                   const anchorX = calculateNodeAnchorX(node.progress, canvasMinWidth);
                   const anchorY = calculateNodeAnchorY(node.progress, lane, {
                     tensionCurve,
-                    totalChunks,
+                    totalChapters,
                   });
                   const calibratedAnchorX = anchorX + NODE_RENDER_OFFSET_X_PX;
                   const calibratedAnchorY = anchorY + NODE_RENDER_OFFSET_Y_PX;
@@ -206,10 +206,10 @@ export function TimelineTrack({
                   const presentation = getTimelineNodePresentation(node.node_type, presentationSubtype);
                   const isSelected = selectedNodeId === node.node_id;
                   const isHighlighted = isNodeInHighlight(node);
-                  const chunkLabel =
-                    "start_chunk_id" in node && node.start_chunk_id !== node.end_chunk_id
-                      ? `第 ${node.start_chunk_id}-${node.end_chunk_id} 章`
-                      : `第 ${node.anchor_chunk_id} 章`;
+                  const chapterLabel =
+                    "start_chapter_id" in node && node.start_chapter_id !== node.end_chapter_id
+                      ? `第 ${node.start_chapter_id}-${node.end_chapter_id} 章`
+                      : `第 ${node.anchor_chapter_id} 章`;
 
                   return (
                     <div key={node.node_id}>
@@ -257,7 +257,7 @@ export function TimelineTrack({
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-[11px] font-semibold text-text">{presentation.label}</span>
-                            <span className="text-[11px] text-text-muted">{chunkLabel}</span>
+                            <span className="text-[11px] text-text-muted">{chapterLabel}</span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">{node.summary}</p>
                           {"child_node_ids" in node && node.child_node_ids.length > 1 ? (

@@ -46,8 +46,8 @@ const STAGE_LABELS: Record<string, string> = {
 
 /**
  * 2026-08-12: 标注阶段 agent 化后，后端 sub_stage 固定为 chapter_agent（不再下发 phase1-4）。
- * 该集合仅用于判定标注 Agent 运行期是否启用"同 chunk 回退 + pending 骨架"的稳定化逻辑；
- * chunkFallbackGroups / pendingGroup / displayGroup 回退链在单枚举值下基本不再触发，
+ * 该集合仅用于判定标注 Agent 运行期是否启用"同章节回退 + pending 骨架"的稳定化逻辑；
+ * chapterFallbackGroups / pendingGroup / displayGroup 回退链在单枚举值下基本不再触发，
  * 保留它们以兜住"进度先到、流事件后到"的窗口期，避免阶段切换闪断。
  */
 const ANNOTATION_PHASE_TAB_SUBSTAGES = new Set(["chapter_agent"]);
@@ -69,14 +69,14 @@ function _buildStreamLabel(streamNumber: number): string {
 
 /**
  * phase 切换很快时，当前 scope 可能暂时还没有新流；
- * 这时回退到同 chunk 的最近输出，避免用户明明收到了 SSE 却看到空面板
+ * 这时回退到同章节的最近输出，避免用户明明收到了 SSE 却看到空面板
  */
-function _isSameChunkScope(group: LLMStreamGroup, stage: string, chunkId: number): boolean {
-  return group.stage === stage && group.chunkId === chunkId;
+function _isSameChapterScope(group: LLMStreamGroup, stage: string, chapterId: number): boolean {
+  return group.stage === stage && group.chapterId === chapterId;
 }
 
 /**
- * 同 chunk 跨 phase 回退时，输出和思考可能分别落在不同 group；
+ * 同章节跨 phase 回退时，输出和思考可能分别落在不同 group；
  * 主面板应各自取最近的非空内容，避免 thinking 明明已到却仍显示空态
  */
 function _pickLatestGroupWithContent(
@@ -315,7 +315,7 @@ export function StreamOutput({
     }
     return buildLLMOutputScopeKey({
       stage: progress.stage,
-      chunk_id: progress.chunk_id ?? 0,
+      chapter_id: progress.chapter_id ?? 0,
       sub_stage: progress.sub_stage,
     });
   }, [progress]);
@@ -327,19 +327,19 @@ export function StreamOutput({
     return Array.from(llmOutputs.values()).filter((group) => {
       const groupScopeKey = buildLLMOutputScopeKey({
         stage: group.stage,
-        chunk_id: group.chunkId,
+        chapter_id: group.chapterId,
         sub_stage: group.subStage,
       });
       return groupScopeKey === currentScopeKey;
     });
   }, [currentScopeKey, llmOutputs]);
-  const chunkFallbackGroups = useMemo(() => {
+  const chapterFallbackGroups = useMemo(() => {
     if (!progress || progress.stage !== "annotate") {
       return [];
     }
-    const currentChunkId = progress.chunk_id ?? 0;
+    const currentChapterId = progress.chapter_id ?? 0;
     return Array.from(llmOutputs.values()).filter((group) =>
-      _isSameChunkScope(group, progress.stage, currentChunkId),
+      _isSameChapterScope(group, progress.stage, currentChapterId),
     );
   }, [llmOutputs, progress]);
   const visibleGroups = useMemo(() => {
@@ -347,10 +347,10 @@ export function StreamOutput({
       return scopedGroups;
     }
     if (shouldStabilizePhaseTabs) {
-      return chunkFallbackGroups;
+      return chapterFallbackGroups;
     }
     return scopedGroups;
-  }, [chunkFallbackGroups, scopedGroups, shouldStabilizePhaseTabs]);
+  }, [chapterFallbackGroups, scopedGroups, shouldStabilizePhaseTabs]);
 
   const streamNumberByGroupKey = useMemo(() => {
     return new Map(visibleGroups.map((group, index) => [group.groupKey, index + 1]));
@@ -384,12 +384,12 @@ export function StreamOutput({
     const firstSubStage = visibleGroups[0]?.subStage ?? "";
     return visibleGroups.some((group) => group.subStage !== firstSubStage);
   }, [visibleGroups]);
-  const isChunkFallbackMode = shouldStabilizePhaseTabs && scopedGroups.length === 0 && visibleGroups.length > 0;
+  const isChapterFallbackMode = shouldStabilizePhaseTabs && scopedGroups.length === 0 && visibleGroups.length > 0;
   const displayGroup = useMemo(() => {
     if (!activeGroup) {
       return null;
     }
-    if (!isChunkFallbackMode || !progress) {
+    if (!isChapterFallbackMode || !progress) {
       return activeGroup;
     }
 
@@ -405,7 +405,7 @@ export function StreamOutput({
       groupKey: `fallback-display-${currentScopeKey ?? activeGroup.groupKey}`,
       stage: progress.stage,
       subStage: progress.sub_stage,
-      chunkId: progress.chunk_id ?? activeGroup.chunkId,
+      chapterId: progress.chapter_id ?? activeGroup.chapterId,
       outputText: latestOutputGroup?.outputText ?? activeGroup.outputText,
       outputTotalChars: latestOutputGroup?.outputTotalChars ?? activeGroup.outputTotalChars,
       thinkingText: latestThinkingGroup?.thinkingText ?? activeGroup.thinkingText,
@@ -416,7 +416,7 @@ export function StreamOutput({
         activeGroup.lastUpdatedAt,
       ),
     };
-  }, [activeGroup, currentScopeKey, isChunkFallbackMode, progress, visibleGroups]);
+  }, [activeGroup, currentScopeKey, isChapterFallbackMode, progress, visibleGroups]);
 
   if (!progress || currentTaskId !== taskId) return null;
 
@@ -426,7 +426,7 @@ export function StreamOutput({
         groupKey: `pending-${currentScopeKey ?? "default"}`,
         stage: progress.stage,
         subStage: progress.sub_stage,
-        chunkId: progress.chunk_id ?? 0,
+        chapterId: progress.chapter_id ?? 0,
         streamId: null,
         outputText: "",
         thinkingText: "",

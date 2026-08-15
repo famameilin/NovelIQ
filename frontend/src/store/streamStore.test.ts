@@ -12,7 +12,7 @@ function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
     action: "output",
     stage: "annotate",
     sub_stage: "phase3",
-    chunk_id: 3,
+    chapter_id: 3,
     stream_id: null,
     current: 3,
     total: 10,
@@ -103,7 +103,7 @@ describe("streamStore 多流分组", () => {
     const store = useStreamStore.getState();
     const scopeKey = buildLLMOutputScopeKey({
       stage: "annotate",
-      chunk_id: 3,
+      chapter_id: 3,
       sub_stage: "phase3",
     });
 
@@ -339,24 +339,24 @@ describe("streamStore LRU 淘汰", () => {
         // FIFO 实现会错误淘汰插入序首个的 stream-a（正是当前活跃流）
         vi.setSystemTime(11000);
         useStreamStore.getState().appendLLMOutput(
-          createLLMEvent({ sub_stage: "phase1", chunk_id: 5, stream_id: "stream-d", content: "D" }),
+          createLLMEvent({ sub_stage: "phase1", chapter_id: 5, stream_id: "stream-d", content: "D" }),
         );
 
         const keys = Array.from(useStreamStore.getState().llmOutputs.keys());
         expect(keys).not.toContain(buildLLMOutputGroupKey({
-          stage: "annotate", chunk_id: 3, sub_stage: "phase3", stream_id: "stream-b",
+          stage: "annotate", chapter_id: 3, sub_stage: "phase3", stream_id: "stream-b",
         }));
         expect(keys).toContain(buildLLMOutputGroupKey({
-          stage: "annotate", chunk_id: 3, sub_stage: "phase3", stream_id: "stream-a",
+          stage: "annotate", chapter_id: 3, sub_stage: "phase3", stream_id: "stream-a",
         }));
         expect(keys).toContain(buildLLMOutputGroupKey({
-          stage: "annotate", chunk_id: 3, sub_stage: "phase3", stream_id: "stream-c",
+          stage: "annotate", chapter_id: 3, sub_stage: "phase3", stream_id: "stream-c",
         }));
 
         // 活跃流 A 仍是 scope 的当前选中流
-        const scopeKey = buildLLMOutputScopeKey({ stage: "annotate", chunk_id: 3, sub_stage: "phase3" });
+        const scopeKey = buildLLMOutputScopeKey({ stage: "annotate", chapter_id: 3, sub_stage: "phase3" });
         expect(useStreamStore.getState().activeStreamSelections.get(scopeKey)).toBe(
-          buildLLMOutputGroupKey({ stage: "annotate", chunk_id: 3, sub_stage: "phase3", stream_id: "stream-a" }),
+          buildLLMOutputGroupKey({ stage: "annotate", chapter_id: 3, sub_stage: "phase3", stream_id: "stream-a" }),
         );
       });
     } finally {
@@ -381,18 +381,18 @@ describe("streamStore LRU 淘汰", () => {
           createLLMEvent({ stream_id: "stream-c", content: "C" }),
         );
 
-        const scopeKey = buildLLMOutputScopeKey({ stage: "annotate", chunk_id: 3, sub_stage: "phase3" });
+        const scopeKey = buildLLMOutputScopeKey({ stage: "annotate", chapter_id: 3, sub_stage: "phase3" });
         const groupAKey = buildLLMOutputGroupKey({
-          stage: "annotate", chunk_id: 3, sub_stage: "phase3", stream_id: "stream-a",
+          stage: "annotate", chapter_id: 3, sub_stage: "phase3", stream_id: "stream-a",
         });
         const groupCKey = buildLLMOutputGroupKey({
-          stage: "annotate", chunk_id: 3, sub_stage: "phase3", stream_id: "stream-c",
+          stage: "annotate", chapter_id: 3, sub_stage: "phase3", stream_id: "stream-c",
         });
         // 用户手动选中 stream-a（最旧），随后新流触发淘汰
         useStreamStore.getState().setActiveStreamSelection(scopeKey, groupAKey);
         vi.setSystemTime(4000);
         useStreamStore.getState().appendLLMOutput(
-          createLLMEvent({ sub_stage: "phase1", chunk_id: 5, stream_id: "stream-d", content: "D" }),
+          createLLMEvent({ sub_stage: "phase1", chapter_id: 5, stream_id: "stream-d", content: "D" }),
         );
 
         const keys = Array.from(useStreamStore.getState().llmOutputs.keys());
@@ -404,5 +404,44 @@ describe("streamStore LRU 淘汰", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("streamStore 进度回填章 scope 保护", () => {
+  beforeEach(() => {
+    useStreamStore.getState().reset();
+  });
+
+  it("2026-08-15 M5：回填缺 chapter_id 时保留 annotate 期间的真实章 scope", () => {
+    const store = useStreamStore.getState();
+    store.updateProgress(
+      createLLMEvent({ action: "progress", stage: "annotate", chapter_id: 7, percent: 20 }),
+    );
+    // 模拟 HTTP backfill：不携带 chapter_id（未传 = 保留旧值）
+    store.updateProgress({
+      action: "progress",
+      stage: "annotate",
+      sub_stage: "",
+      current: 1,
+      total: 10,
+      percent: 25,
+      sub_percent: 0,
+      content: "",
+      message: "任务执行中",
+    });
+
+    expect(useStreamStore.getState().progress?.chapter_id).toBe(7);
+  });
+
+  it("2026-08-15 M5：携带真实 chapter_id 的进度事件仍正常覆写", () => {
+    const store = useStreamStore.getState();
+    store.updateProgress(
+      createLLMEvent({ action: "progress", stage: "annotate", chapter_id: 7, percent: 20 }),
+    );
+    store.updateProgress(
+      createLLMEvent({ action: "progress", stage: "annotate", chapter_id: 8, percent: 40 }),
+    );
+
+    expect(useStreamStore.getState().progress?.chapter_id).toBe(8);
   });
 });

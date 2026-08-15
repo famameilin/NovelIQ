@@ -233,10 +233,10 @@ export function NodeDetailPanel({
                       {Array.isArray(node.aliases) && node.aliases.length > 0 && (
                         <InfoRow label="别名" value={node.aliases.join(" / ")} />
                       )}
-                      {node.first_seen_chunk != null && node.last_seen_chunk != null && (
+                      {node.first_seen_chapter != null && node.last_seen_chapter != null && (
                         <InfoRow
                           label="出场"
-                          value={`第 ${node.first_seen_chunk} 章 - 第 ${node.last_seen_chunk} 章`}
+                          value={`第 ${node.first_seen_chapter} 章 - 第 ${node.last_seen_chapter} 章`}
                         />
                       )}
                       <InfoRow label="状态版本" value={`第 ${node.state_revision} 版`} />

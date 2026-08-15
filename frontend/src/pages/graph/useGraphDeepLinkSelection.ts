@@ -10,22 +10,22 @@ interface UseGraphDeepLinkSelectionOptions {
   taskScopeId: string | null;
   timelineUrl: string | null;
   urlChangeId: string | null;
-  urlSelectedChunk: string | null;
+  urlSelectedChapter: string | null;
   loadedChanges: GraphChange[];
   sortedChanges: GraphChange[];
   navigate: NavigateFunction;
 }
 
 /**
- *   - chunk-only deep-link 只在当前变化窗口里唯一命中时才允许自动选中
- *   - 带稳定 change_id 的 deep-link 一旦 miss，不再偷偷回退到同 chunk 其他变化
+ *   - chapter-only deep-link 只在当前变化窗口里唯一命中时才允许自动选中
+ *   - 带稳定 change_id 的 deep-link 一旦 miss，不再偷偷回退到同章节其他变化
  */
-function getUniqueChunkChange(changes: GraphChange[], chunkId: number | null): GraphChange | null {
-  if (chunkId == null) {
+function getUniqueChapterChange(changes: GraphChange[], chapterId: number | null): GraphChange | null {
+  if (chapterId == null) {
     return null;
   }
-  const chunkChanges = changes.filter((change) => change.effective_chunk_id === chunkId);
-  return chunkChanges.length === 1 ? chunkChanges[0] ?? null : null;
+  const chapterChanges = changes.filter((change) => change.effective_chapter_id === chapterId);
+  return chapterChanges.length === 1 ? chapterChanges[0] ?? null : null;
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
@@ -35,7 +35,7 @@ export function useGraphDeepLinkSelection({
   taskScopeId,
   timelineUrl,
   urlChangeId,
-  urlSelectedChunk,
+  urlSelectedChapter,
   loadedChanges,
   sortedChanges,
   navigate,
@@ -45,23 +45,23 @@ export function useGraphDeepLinkSelection({
 
   const initialChangeId = useMemo(() => urlChangeId?.trim() || null, [urlChangeId]);
 
-  const initialSelectedChunk = useMemo(() => {
-    if (!urlSelectedChunk) {
+  const initialSelectedChapter = useMemo(() => {
+    if (!urlSelectedChapter) {
       return null;
     }
-    const parsed = Number(urlSelectedChunk);
+    const parsed = Number(urlSelectedChapter);
     return Number.isInteger(parsed) ? parsed : null;
-  }, [urlSelectedChunk]);
+  }, [urlSelectedChapter]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on deep-link params change
     setHasUserSelectedChange(false);
     setSelectedChangeId(null);
-  }, [initialChangeId, initialSelectedChunk, taskScopeId]);
+  }, [initialChangeId, initialSelectedChapter, taskScopeId]);
 
   useEffect(() => {
     if (hasUserSelectedChange) return;
-    if (initialChangeId == null && initialSelectedChunk == null) return;
+    if (initialChangeId == null && initialSelectedChapter == null) return;
 
     const matchedChange =
       initialChangeId != null
@@ -78,22 +78,22 @@ export function useGraphDeepLinkSelection({
       return;
     }
 
-    const fallbackChange = getUniqueChunkChange(loadedChanges, initialSelectedChunk);
+    const fallbackChange = getUniqueChapterChange(loadedChanges, initialSelectedChapter);
     if (fallbackChange) {
       setSelectedChangeId(fallbackChange.change_id);
       return;
     }
 
     setSelectedChangeId(null);
-  }, [hasUserSelectedChange, initialChangeId, initialSelectedChunk, loadedChanges]);
+  }, [hasUserSelectedChange, initialChangeId, initialSelectedChapter, loadedChanges]);
 
   const selectedChange = useMemo(() => {
     if (sortedChanges.length === 0) return null;
     if (selectedChangeId == null) {
-      return initialChangeId != null || initialSelectedChunk != null ? null : sortedChanges[0];
+      return initialChangeId != null || initialSelectedChapter != null ? null : sortedChanges[0];
     }
     return sortedChanges.find((change) => change.change_id === selectedChangeId) ?? null;
-  }, [initialChangeId, initialSelectedChunk, selectedChangeId, sortedChanges]);
+  }, [initialChangeId, initialSelectedChapter, selectedChangeId, sortedChanges]);
 
   const activeSelectedChangeId = selectedChange?.change_id ?? null;
 
@@ -105,11 +105,11 @@ export function useGraphDeepLinkSelection({
       }
       return null;
     }
-    if (initialSelectedChunk != null) {
-      return getUniqueChunkChange(sortedChanges, initialSelectedChunk)?.change_id ?? null;
+    if (initialSelectedChapter != null) {
+      return getUniqueChapterChange(sortedChanges, initialSelectedChapter)?.change_id ?? null;
     }
     return null;
-  }, [initialChangeId, initialSelectedChunk, sortedChanges]);
+  }, [initialChangeId, initialSelectedChapter, sortedChanges]);
 
   const graphSelectionHint = useMemo(() => {
     if (hasUserSelectedChange) {
@@ -121,7 +121,7 @@ export function useGraphDeepLinkSelection({
     ) {
       return null;
     }
-    if (initialChangeId == null && initialSelectedChunk == null) {
+    if (initialChangeId == null && initialSelectedChapter == null) {
       return null;
     }
     if (initialChangeId != null) {
@@ -133,12 +133,12 @@ export function useGraphDeepLinkSelection({
       // 提示用户可继续加载更多；加载更多合并进新变化后，上方 effect 会自动补选中
       return "未在当前图谱变化窗口定位到指定变化，可能在后页，点击加载更多可继续查找。";
     }
-    if (initialSelectedChunk != null) {
-      const chunkMatchedChanges = sortedChanges.filter((change) => change.effective_chunk_id === initialSelectedChunk);
-      if (chunkMatchedChanges.length === 0) {
+    if (initialSelectedChapter != null) {
+      const chapterMatchedChanges = sortedChanges.filter((change) => change.effective_chapter_id === initialSelectedChapter);
+      if (chapterMatchedChanges.length === 0) {
         return "未在当前变化窗口定位到指定时间节点的图谱变化。";
       }
-      if (chunkMatchedChanges.length > 1) {
+      if (chapterMatchedChanges.length > 1) {
         return "该时间块包含多条图谱变化，请手动选择具体变化。";
       }
     }
@@ -148,7 +148,7 @@ export function useGraphDeepLinkSelection({
     deepLinkResolvedChangeId,
     hasUserSelectedChange,
     initialChangeId,
-    initialSelectedChunk,
+    initialSelectedChapter,
     sortedChanges,
   ]);
 
@@ -161,7 +161,7 @@ export function useGraphDeepLinkSelection({
       }
       navigate(
         buildGraphUrl(novelId, taskScopeId, {
-          chunkId: change.effective_chunk_id,
+          chapterId: change.effective_chapter_id,
           changeId: change.change_id,
         }),
         { replace: true }
@@ -177,20 +177,20 @@ export function useGraphDeepLinkSelection({
     navigate(
       buildTimelineSelectionUrl(timelineUrl, {
         selectedNodeId: selectedChange?.change_id ?? null,
-        chunkId: selectedChange?.effective_chunk_id ?? initialSelectedChunk,
+        chapterId: selectedChange?.effective_chapter_id ?? initialSelectedChapter,
         changeId: selectedChange?.change_id,
       })
     );
-  }, [initialSelectedChunk, navigate, selectedChange, timelineUrl]);
+  }, [initialSelectedChapter, navigate, selectedChange, timelineUrl]);
 
-  const handleOpenTimelineChunk = useCallback(
-    // 2026-08-13 P2-5: chunkId 放宽为 number | null，兼容生命周期字段缺失的节点
-    (chunkId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => {
-      if (!timelineUrl || chunkId == null) return;
+  const handleOpenTimelineChapter = useCallback(
+    // 2026-08-13 P2-5: chapterId 放宽为 number | null，兼容生命周期字段缺失的节点
+    (chapterId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => {
+      if (!timelineUrl || chapterId == null) return;
       navigate(
         buildTimelineSelectionUrl(timelineUrl, {
           selectedNodeId,
-          chunkId,
+          chapterId,
           changeId,
         })
       );
@@ -202,10 +202,10 @@ export function useGraphDeepLinkSelection({
     activeSelectedChangeId,
     graphSelectionHint,
     handleGoTimeline,
-    handleOpenTimelineChunk,
+    handleOpenTimelineChapter,
     handleSelectChange,
     initialChangeId,
-    initialSelectedChunk,
+    initialSelectedChapter,
     selectedChange,
   };
 }

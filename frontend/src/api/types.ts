@@ -158,21 +158,21 @@ export interface ChapterMetricsResponse {
   book: BookAggregateStats;
 }
 
-export interface ChunkCharacter {
+export interface ChapterCharacter {
   name: string;
   role_function?: string | null;
   action?: string | null;
   emotion_score?: string | null;
 }
 
-export interface ChunkRelation {
+export interface ChapterRelation {
   from_char: string;
   to_char: string;
   type: string;
   change: string;
 }
 
-export interface ChunkDialogue {
+export interface ChapterDialogue {
   speaker: string[];
   length?: number | null;
 }
@@ -206,8 +206,8 @@ export type DiagnosisStyleLabel =
   | "权谋"
   | "爽文";
 
-export interface ChunkAnnotation {
-  chunk_id: number;
+export interface ChapterAnnotation {
+  chapter_id: number;
   emotional_valence?: string | null;
   event_type?: string | null;
   pivot_moment?: boolean | null;
@@ -222,9 +222,9 @@ export interface ChunkAnnotation {
   expected_payoff_family?: string | null;
   payoff_likelihood?: ForeshadowingPayoffLikelihood | null;
   linked_setup_id?: string | null;
-  characters: ChunkCharacter[];
-  relations: ChunkRelation[];
-  dialogues: ChunkDialogue[];
+  characters: ChapterCharacter[];
+  relations: ChapterRelation[];
+  dialogues: ChapterDialogue[];
 }
 
 // 主题
@@ -269,9 +269,9 @@ export interface DiagnosisResult {
 
 export interface ForeshadowingThread {
   setup_id: string;
-  first_chunk_id: number;
-  last_chunk_id: number;
-  anchor_chunk_ids: number[];
+  first_chapter_id: number;
+  last_chapter_id: number;
+  anchor_chapter_ids: number[];
   setup_summary: string;
   setup_kind: ForeshadowingSetupKind | string;
   expected_payoff_family: string;
@@ -292,8 +292,8 @@ export interface GraphNode {
   tags?: string[] | null;
   aliases?: string[] | null;
   // 2026-08-13 P2-5: 后端可能下发 null（生命周期数据缺失），放宽为可空
-  first_seen_chunk: number | null;
-  last_seen_chunk: number | null;
+  first_seen_chapter: number | null;
+  last_seen_chapter: number | null;
   state_revision: number;
   state: Record<string, unknown>;
 }
@@ -322,7 +322,7 @@ export interface GraphChange {
   chapter_order: number;
   fact_id: string;
   fact_revision: number;
-  effective_chunk_id: number;
+  effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
   entity_id?: number | null;
   entity_name?: string | null;
@@ -351,8 +351,8 @@ export interface GraphData {
   graph_version_id: string;
   chapter_id: number;
   chapter_order: number;
-  first_chunk_id: number;
-  last_chunk_id: number;
+  first_chapter_id: number;
+  last_chapter_id: number;
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
@@ -369,7 +369,7 @@ export interface GraphChangesPageResponse {
 export interface TimelineMeta {
   novel_id: string;
   novel_name: string;
-  total_chunks: number;
+  total_chapters: number;
 }
 
 export interface TimelinePhase {
@@ -392,7 +392,7 @@ export interface TimelineGraphChange {
   chapter_id: number;
   fact_id: string;
   fact_revision: number;
-  effective_chunk_id: number;
+  effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
   entity_id?: number | null;
   entity_name?: string | null;
@@ -414,7 +414,7 @@ export interface LifecycleTimelineEvent {
 
 export interface TimelineNode {
   node_id: string;
-  anchor_chunk_id: number;
+  anchor_chapter_id: number;
   progress: number;
   importance_score: number;
   level: 1 | 2 | 3;
@@ -431,9 +431,9 @@ export interface TimelineNode {
 
 export interface TimelineCompositeNode {
   node_id: string;
-  anchor_chunk_id: number;
-  start_chunk_id: number;
-  end_chunk_id: number;
+  anchor_chapter_id: number;
+  start_chapter_id: number;
+  end_chapter_id: number;
   progress: number;
   start_progress: number;
   end_progress: number;

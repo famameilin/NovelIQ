@@ -48,7 +48,7 @@ function createRelationGraphChange(changeId = "relation:9002") {
     chapter_id: 2,
     fact_id: `fact:${changeId}`,
     fact_revision: 1,
-    effective_chunk_id: 12,
+    effective_chapter_id: 12,
     changes: [{ change_kind: "break" }],
     relation_id: "relation:88",
     relation_version_id: 88,
@@ -64,7 +64,7 @@ function createRelationGraphChange(changeId = "relation:9002") {
 function createRelationNode(): TimelineNode {
   return {
     node_id: "relation:9002",
-    anchor_chunk_id: 12,
+    anchor_chapter_id: 12,
     progress: 0.6,
     importance_score: 8,
     level: 1,
@@ -81,7 +81,7 @@ function createRelationNode(): TimelineNode {
 function createLifecycleNode(): TimelineNode {
   return {
     node_id: "lifecycle:entry:2:3",
-    anchor_chunk_id: 3,
+    anchor_chapter_id: 3,
     progress: 0.15,
     importance_score: 6,
     level: 1,
@@ -105,7 +105,7 @@ function createLifecycleNode(): TimelineNode {
 function createStateNode(): TimelineNode {
   return {
     node_id: "state:12:9",
-    anchor_chunk_id: 9,
+    anchor_chapter_id: 9,
     progress: 0.45,
     importance_score: 7,
     level: 1,
@@ -123,7 +123,7 @@ function createStateNode(): TimelineNode {
         chapter_id: 2,
         fact_id: "fact:state:12:9",
         fact_revision: 1,
-        effective_chunk_id: 9,
+        effective_chapter_id: 9,
         changes: [{ field: "status", value: "结盟" }],
         entity_id: 12,
         entity_name: "顾承渊",
@@ -135,7 +135,7 @@ function createStateNode(): TimelineNode {
 function createMultiRelationNode(): TimelineNode {
   return {
     node_id: "relation:multi",
-    anchor_chunk_id: 18,
+    anchor_chapter_id: 18,
     progress: 0.9,
     importance_score: 9,
     level: 1,
@@ -164,9 +164,9 @@ function createMultiRelationNode(): TimelineNode {
 function createCompositeRelationNode(): TimelineCompositeNode {
   return {
     node_id: "composite:relation:12:0",
-    anchor_chunk_id: 12,
-    start_chunk_id: 12,
-    end_chunk_id: 13,
+    anchor_chapter_id: 12,
+    start_chapter_id: 12,
+    end_chapter_id: 13,
     progress: 0.6,
     start_progress: 0.6,
     end_progress: 0.7,
@@ -194,7 +194,7 @@ describe("TimelineNodeDetail", () => {
     expect(screen.getAllByText("苏映雪").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("does not send a chunk-only graph selection for lifecycle nodes", async () => {
+  it("does not send a chapter-only graph selection for lifecycle nodes", async () => {
     const user = userEvent.setup();
 
     render(<TimelineNodeDetail node={createLifecycleNode()} atomicNodes={[createLifecycleNode()]} novelId="novel-1" taskId="task-a" />);
@@ -223,7 +223,7 @@ describe("TimelineNodeDetail", () => {
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=9&change_id=state%3A12%3A9",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=9&change_id=state%3A12%3A9",
     );
   });
 
@@ -246,7 +246,7 @@ describe("TimelineNodeDetail", () => {
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A9002",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A9002",
     );
   });
 
@@ -266,7 +266,7 @@ describe("TimelineNodeDetail", () => {
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A9002",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A9002",
     );
   });
 
@@ -288,7 +288,7 @@ describe("TimelineNodeDetail", () => {
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A9002",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A9002",
     );
   });
 
@@ -299,7 +299,7 @@ describe("TimelineNodeDetail", () => {
     const secondAtomicNode: TimelineNode = {
       ...createRelationNode(),
       node_id: "relation:9101",
-      anchor_chunk_id: 13,
+      anchor_chapter_id: 13,
       graph_changes: [createRelationGraphChange("relation:9101")],
     };
 
