@@ -1,7 +1,7 @@
 import { apiClient } from "./client";
 import type {
   Character,
-  ChunkAnnotation,
+  ChapterAnnotation,
   ParagraphCurvePoint,
   ChapterMetricsResponse,
   Topic,
@@ -64,12 +64,12 @@ export async function getChapterMetrics(
   return data;
 }
 
-export async function getChunkAnnotations(
+export async function getChapterAnnotations(
   novelId: string,
   taskId: string
-): Promise<ChunkAnnotation[]> {
-  const { data } = await apiClient.get<ChunkAnnotation[]>(
-    `/api/novels/${novelId}/chunk-annotations`,
+): Promise<ChapterAnnotation[]> {
+  const { data } = await apiClient.get<ChapterAnnotation[]>(
+    `/api/novels/${novelId}/chapter-annotations`,
     { params: { task_id: taskId } }
   );
   return data;

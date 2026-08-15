@@ -102,9 +102,9 @@ function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
 function ForeshadowingThreadsSection(props: {
   foreshadowingThreads: Array<{
     setup_id: string;
-    first_chunk_id: number;
-    last_chunk_id: number;
-    anchor_chunk_ids: number[];
+    first_chapter_id: number;
+    last_chapter_id: number;
+    anchor_chapter_ids: number[];
     setup_summary: string;
     setup_kind: string;
     expected_payoff_family: string;
@@ -141,8 +141,8 @@ function ForeshadowingThreadsSection(props: {
                   <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
                 </div>
                 <div className="text-right text-xs text-text-muted">
-                  <div>首次出现于第 {thread.first_chunk_id} 章</div>
-                  <div>最近命中于第 {thread.last_chunk_id} 章</div>
+                  <div>首次出现于第 {thread.first_chapter_id} 章</div>
+                  <div>最近命中于第 {thread.last_chapter_id} 章</div>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
@@ -156,7 +156,7 @@ function ForeshadowingThreadsSection(props: {
                 </div>
                 <div>
                   <span className="font-medium text-text">锚点章节：</span>
-                  {thread.anchor_chunk_ids.join(", ")}
+                  {thread.anchor_chapter_ids.join(", ")}
                 </div>
               </div>
               {thread.latest_reason && (

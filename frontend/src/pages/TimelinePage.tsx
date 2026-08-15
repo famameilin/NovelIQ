@@ -32,7 +32,7 @@ function buildTimelinePageUrl(
     maxLevel: 1 | 2 | 3;
     viewMode: TimelineViewMode;
     selectedNodeId?: string | null;
-    selectedChunk?: number | null;
+    selectedChapter?: number | null;
     changeId?: string | null;
   }
 ): string {
@@ -44,8 +44,8 @@ function buildTimelinePageUrl(
   if (options.selectedNodeId) {
     params.set("selected_node_id", options.selectedNodeId);
   }
-  if (options.selectedChunk != null) {
-    params.set("selected_chunk", String(options.selectedChunk));
+  if (options.selectedChapter != null) {
+    params.set("selected_chapter", String(options.selectedChapter));
   }
   if (options.changeId) {
     params.set("change_id", options.changeId);
@@ -85,7 +85,7 @@ export function TimelinePage() {
   const urlMaxLevel = searchParams.get("max_level");
   const urlView = searchParams.get("view");
   const urlSelectedNodeId = searchParams.get("selected_node_id");
-  const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlSelectedChapter = searchParams.get("selected_chapter");
   const urlChangeId = searchParams.get("change_id");
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
 
@@ -100,11 +100,11 @@ export function TimelinePage() {
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
 
-  const selectedChunkFromUrl = useMemo(() => {
-    if (!urlSelectedChunk) return null;
-    const parsed = Number(urlSelectedChunk);
+  const selectedChapterFromUrl = useMemo(() => {
+    if (!urlSelectedChapter) return null;
+    const parsed = Number(urlSelectedChapter);
     return Number.isFinite(parsed) ? parsed : null;
-  }, [urlSelectedChunk]);
+  }, [urlSelectedChapter]);
 
   const changeIdFromUrl = useMemo(() => urlChangeId?.trim() || null, [urlChangeId]);
 
@@ -141,9 +141,9 @@ export function TimelinePage() {
         maxLevel,
         viewMode,
         // 时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
-        // 否则旧任务的 change_id / chunk 会污染新任务高亮
+        // 否则旧任务的 change_id / 章节会污染新任务高亮
         selectedNodeId: null,
-        selectedChunk: null,
+        selectedChapter: null,
         changeId: null,
       }), { replace: true });
   }, [maxLevel, navigate, novelId, storeTaskId, urlTaskId, viewMode]);
@@ -172,7 +172,7 @@ export function TimelinePage() {
   const atomicNodes = useMemo(() => timelineData?.atomic_nodes ?? [], [timelineData?.atomic_nodes]);
   const compositeNodes = useMemo(() => timelineData?.composite_nodes ?? [], [timelineData?.composite_nodes]);
   const tensionCurve = timelineData?.tension_curve;
-  const totalChunks = timelineData?.meta?.total_chunks ?? 0;
+  const totalChapters = timelineData?.meta?.total_chapters ?? 0;
   const visibleAtomicNodes = useMemo(
     () => atomicNodes.filter((node) => node.level <= maxLevel),
     [atomicNodes, maxLevel],
@@ -216,10 +216,10 @@ export function TimelinePage() {
     if (!urlSelectedNodeId) return null;
     return compositeNodeById.get(urlSelectedNodeId) ?? atomicNodeById.get(urlSelectedNodeId) ?? null;
   }, [atomicNodeById, compositeNodeById, urlSelectedNodeId]);
-  const selectedChunkCandidates = useMemo(() => {
-    if (selectedChunkFromUrl == null) return [];
-    return displayNodes.filter((node) => node.anchor_chunk_id === selectedChunkFromUrl);
-  }, [displayNodes, selectedChunkFromUrl]);
+  const selectedChapterCandidates = useMemo(() => {
+    if (selectedChapterFromUrl == null) return [];
+    return displayNodes.filter((node) => node.anchor_chapter_id === selectedChapterFromUrl);
+  }, [displayNodes, selectedChapterFromUrl]);
   const selectedDetailNode = useMemo<TimelineDisplayNode | null>(() => {
     if (atomicNodes.length === 0 && compositeNodes.length === 0) return null;
     if (selectedNodeById) {
@@ -228,11 +228,11 @@ export function TimelinePage() {
     if (matchedGraphChangeNode) {
       return matchedGraphChangeNode;
     }
-    if (selectedChunkFromUrl != null) {
-      return selectedChunkCandidates.length === 1 ? selectedChunkCandidates[0] ?? null : null;
+    if (selectedChapterFromUrl != null) {
+      return selectedChapterCandidates.length === 1 ? selectedChapterCandidates[0] ?? null : null;
     }
     return null;
-  }, [atomicNodes.length, compositeNodes.length, matchedGraphChangeNode, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
+  }, [atomicNodes.length, compositeNodes.length, matchedGraphChangeNode, selectedChapterCandidates, selectedChapterFromUrl, selectedNodeById]);
   const resolvedGraphChangeId = useMemo(
     () => getSelectedNodeGraphChangeId(selectedDetailNode, changeIdFromUrl),
     [changeIdFromUrl, selectedDetailNode]
@@ -248,26 +248,26 @@ export function TimelinePage() {
   const selectionHint = useMemo(() => {
     if (changeIdFromUrl == null) return null;
     if (matchedGraphChangeNode) return null;
-    if (selectedChunkFromUrl != null && selectedDetailNode) {
+    if (selectedChapterFromUrl != null && selectedDetailNode) {
       return "未定位到指定图谱变化，已回退到对应时间节点。";
     }
     return "未定位到对应图谱变化。";
-  }, [changeIdFromUrl, matchedGraphChangeNode, selectedChunkFromUrl, selectedDetailNode]);
-  const chunkSelectionHint = useMemo(() => {
-    if (changeIdFromUrl != null || selectedChunkFromUrl == null) {
+  }, [changeIdFromUrl, matchedGraphChangeNode, selectedChapterFromUrl, selectedDetailNode]);
+  const chapterSelectionHint = useMemo(() => {
+    if (changeIdFromUrl != null || selectedChapterFromUrl == null) {
       return null;
     }
     if (selectedDetailNode != null) {
       return null;
     }
-    if (selectedChunkCandidates.length > 1) {
+    if (selectedChapterCandidates.length > 1) {
       return "该时间块包含多个不同类型节点，请使用稳定节点链接重新定位。";
     }
-    if (selectedChunkCandidates.length === 0) {
+    if (selectedChapterCandidates.length === 0) {
       return "未定位到对应时间节点。";
     }
     return null;
-  }, [changeIdFromUrl, selectedChunkCandidates, selectedChunkFromUrl, selectedDetailNode]);
+  }, [changeIdFromUrl, selectedChapterCandidates, selectedChapterFromUrl, selectedDetailNode]);
   const selectedTrackNodeId = useMemo(() => {
     if (selectedDetailNode == null) {
       return undefined;
@@ -291,13 +291,13 @@ export function TimelinePage() {
         maxLevel: level,
         viewMode,
         selectedNodeId: selectedDetailNode?.node_id ?? null,
-        selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
+        selectedChapter: selectedDetailNode?.anchor_chapter_id ?? selectedChapterFromUrl,
         // 控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link
-        // 一旦 change_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择
+        // 一旦 change_id 已无法命中当前时间轴节点，就只保留已回退成功的章节选择
         changeId: resolvedGraphChangeId,
       }), { replace: true });
     },
-    [novelId, taskScopeId, navigate, resolvedGraphChangeId, selectedDetailNode, selectedChunkFromUrl, viewMode]
+    [novelId, taskScopeId, navigate, resolvedGraphChangeId, selectedDetailNode, selectedChapterFromUrl, viewMode]
   );
 
   const handleViewModeChange = useCallback(
@@ -308,13 +308,13 @@ export function TimelinePage() {
           maxLevel,
           viewMode: nextViewMode,
           selectedNodeId: selectedDetailNode?.node_id ?? null,
-          selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
+          selectedChapter: selectedDetailNode?.anchor_chapter_id ?? selectedChapterFromUrl,
           changeId: resolvedGraphChangeId,
         }),
         { replace: true }
       );
     },
-    [maxLevel, navigate, novelId, resolvedGraphChangeId, selectedDetailNode, selectedChunkFromUrl, taskScopeId]
+    [maxLevel, navigate, novelId, resolvedGraphChangeId, selectedDetailNode, selectedChapterFromUrl, taskScopeId]
   );
 
   const handleNodeClick = useCallback((node: TimelineDisplayNode) => {
@@ -325,7 +325,7 @@ export function TimelinePage() {
         maxLevel,
         viewMode,
         selectedNodeId: isSameNode ? null : node.node_id,
-        selectedChunk: isSameNode ? null : node.anchor_chunk_id,
+        selectedChapter: isSameNode ? null : node.anchor_chapter_id,
         changeId: null,
       }),
       { replace: true }
@@ -344,7 +344,7 @@ export function TimelinePage() {
           maxLevel,
           viewMode: "atomic",
           selectedNodeId: node.node_id,
-          selectedChunk: node.anchor_chunk_id,
+          selectedChapter: node.anchor_chapter_id,
           changeId,
         }),
         { replace: true }
@@ -405,10 +405,10 @@ export function TimelinePage() {
       <AnalysisWorkspace.Tabs defaultValue="timeline">
         <AnalysisWorkspace.Tab value="timeline" label="时间轴">
           <div className="flex h-full min-h-0 flex-col">
-            {(selectionHint || chunkSelectionHint) && (
+            {(selectionHint || chapterSelectionHint) && (
               <div className="mb-3 flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
                 <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
-                <p className="text-sm text-text-muted">{selectionHint ?? chunkSelectionHint}</p>
+                <p className="text-sm text-text-muted">{selectionHint ?? chapterSelectionHint}</p>
               </div>
             )}
 
@@ -527,7 +527,7 @@ export function TimelinePage() {
                     selectedNodeId={selectedTrackNodeId}
                     onNodeClick={handleNodeClick}
                     tensionCurve={tensionCurve}
-                    totalChunks={totalChunks}
+                    totalChapters={totalChapters}
                     className="flex-1 min-h-0"
                   />
                 </div>
@@ -551,7 +551,7 @@ export function TimelinePage() {
                       maxLevel,
                       viewMode,
                       selectedNodeId: null,
-                      selectedChunk: null,
+                      selectedChapter: null,
                       changeId: null,
                     }),
                     { replace: true }

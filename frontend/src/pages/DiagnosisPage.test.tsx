@@ -157,9 +157,9 @@ describe("DiagnosisPage", () => {
     getForeshadowingThreadsMock.mockResolvedValue([
       {
         setup_id: "setup-1",
-        first_chunk_id: 3,
-        last_chunk_id: 8,
-        anchor_chunk_ids: [3, 8],
+        first_chapter_id: 3,
+        last_chapter_id: 8,
+        anchor_chapter_ids: [3, 8],
         setup_summary: "铜铃异响反复指向山门旧案",
         setup_kind: "异常物件",
         expected_payoff_family: "真相揭露",

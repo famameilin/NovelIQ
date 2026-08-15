@@ -65,20 +65,20 @@ function buildGraphChangesPageInfo(total: number, start: number, limit: number):
 const MOCK_TIMELINE_TOTAL_CHUNKS = 120;
 
 const MOCK_GRAPH_CHARACTERS = [
-  { entity_id: 1, name: "萧炎", role: "protagonist", first_seen_chunk: 1, last_seen_chunk: 118 },
-  { entity_id: 2, name: "药老", role: "main", first_seen_chunk: 4, last_seen_chunk: 115 },
-  { entity_id: 3, name: "纳兰嫣然", role: "main", first_seen_chunk: 9, last_seen_chunk: 100 },
-  { entity_id: 4, name: "美杜莎", role: "supporting", first_seen_chunk: 28, last_seen_chunk: 110 },
-  { entity_id: 5, name: "云韵", role: "supporting", first_seen_chunk: 40, last_seen_chunk: 95 },
-  { entity_id: 6, name: "小医仙", role: "supporting", first_seen_chunk: 48, last_seen_chunk: 108 },
-  { entity_id: 7, name: "薰儿", role: "main", first_seen_chunk: 15, last_seen_chunk: 120 },
-  { entity_id: 8, name: "海波东", role: "supporting", first_seen_chunk: 36, last_seen_chunk: 112 },
+  { entity_id: 1, name: "萧炎", role: "protagonist", first_seen_chapter: 1, last_seen_chapter: 118 },
+  { entity_id: 2, name: "药老", role: "main", first_seen_chapter: 4, last_seen_chapter: 115 },
+  { entity_id: 3, name: "纳兰嫣然", role: "main", first_seen_chapter: 9, last_seen_chapter: 100 },
+  { entity_id: 4, name: "美杜莎", role: "supporting", first_seen_chapter: 28, last_seen_chapter: 110 },
+  { entity_id: 5, name: "云韵", role: "supporting", first_seen_chapter: 40, last_seen_chapter: 95 },
+  { entity_id: 6, name: "小医仙", role: "supporting", first_seen_chapter: 48, last_seen_chapter: 108 },
+  { entity_id: 7, name: "薰儿", role: "main", first_seen_chapter: 15, last_seen_chapter: 120 },
+  { entity_id: 8, name: "海波东", role: "supporting", first_seen_chapter: 36, last_seen_chapter: 112 },
 ] as const;
 
 const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:101:fact-12:1",
-    chunk_id: 12,
+    chapter_id: 12,
     from_entity_id: 1,
     to_entity_id: 2,
     from_name: "萧炎",
@@ -91,7 +91,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:102:fact-24:1",
-    chunk_id: 24,
+    chapter_id: 24,
     from_entity_id: 1,
     to_entity_id: 3,
     from_name: "萧炎",
@@ -104,7 +104,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:103:fact-39:1",
-    chunk_id: 39,
+    chapter_id: 39,
     from_entity_id: 1,
     to_entity_id: 8,
     from_name: "萧炎",
@@ -117,7 +117,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:104:fact-56:1",
-    chunk_id: 56,
+    chapter_id: 56,
     from_entity_id: 1,
     to_entity_id: 4,
     from_name: "萧炎",
@@ -130,7 +130,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:105:fact-72:1",
-    chunk_id: 72,
+    chapter_id: 72,
     from_entity_id: 1,
     to_entity_id: 7,
     from_name: "萧炎",
@@ -143,7 +143,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:106:fact-90:1",
-    chunk_id: 90,
+    chapter_id: 90,
     from_entity_id: 1,
     to_entity_id: 5,
     from_name: "萧炎",
@@ -156,7 +156,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:107:fact-104:1",
-    chunk_id: 104,
+    chapter_id: 104,
     from_entity_id: 1,
     to_entity_id: 6,
     from_name: "萧炎",
@@ -169,7 +169,7 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   },
   {
     change_id: "relation:108:fact-116:1",
-    chunk_id: 116,
+    chapter_id: 116,
     from_entity_id: 1,
     to_entity_id: 3,
     from_name: "萧炎",
@@ -450,9 +450,9 @@ export function createForeshadowingThreads(): ForeshadowingThread[] {
   return [
     {
       setup_id: "setup-thread-1",
-      first_chunk_id: 3,
-      last_chunk_id: 12,
-      anchor_chunk_ids: [3, 7, 12],
+      first_chapter_id: 3,
+      last_chapter_id: 12,
+      anchor_chapter_ids: [3, 7, 12],
       setup_summary: "主角在旧山门发现一枚残缺令牌，后续多次被提及。",
       setup_kind: "伏笔",
       expected_payoff_family: "身份揭露",
@@ -475,8 +475,8 @@ export function createGraph(): GraphData {
     entity_id: character.entity_id,
     name: character.name,
     entity_type: "character" as const,
-    first_seen_chunk: character.first_seen_chunk,
-    last_seen_chunk: character.last_seen_chunk,
+    first_seen_chapter: character.first_seen_chapter,
+    last_seen_chapter: character.last_seen_chapter,
     state_revision: 1,
     state: {
       primary_role_function: character.role,
@@ -512,8 +512,8 @@ export function createGraph(): GraphData {
     graph_version_id: "mock-graph-version-1",
     chapter_id: 12,
     chapter_order: 12,
-    first_chunk_id: 111,
-    last_chunk_id: 120,
+    first_chapter_id: 111,
+    last_chapter_id: 120,
     nodes,
     edges,
   };
@@ -529,7 +529,7 @@ export function createGraphChangesPage(cursor?: string | null, limit = 8): Graph
     chapter_order: graph.chapter_order,
     fact_id: `fact:${change.change_id}`,
     fact_revision: 1,
-    effective_chunk_id: change.chunk_id,
+    effective_chapter_id: change.chapter_id,
     changes: [{ change_kind: change.relation_change_kind }],
     relation_id: `relation:${change.source_relation_row_id ?? change.change_id}`,
     relation_version_id: change.source_relation_row_id,
@@ -585,17 +585,17 @@ const CHAR_SETS: string[][] = [
   ["萧炎", "药老", "薰儿", "美杜莎"],
 ];
 
-function resolveTimelinePhaseName(chunkId: number): "引入期" | "发展期" | "高潮期" | "收束期" {
-  if (chunkId <= 30) return "引入期";
-  if (chunkId <= 75) return "发展期";
-  if (chunkId <= 105) return "高潮期";
+function resolveTimelinePhaseName(chapterId: number): "引入期" | "发展期" | "高潮期" | "收束期" {
+  if (chapterId <= 30) return "引入期";
+  if (chapterId <= 75) return "发展期";
+  if (chapterId <= 105) return "高潮期";
   return "收束期";
 }
 
 export function createTimeline(): TimelineResponse {
   const plotNodes: TimelineNode[] = PHASE_EVENTS.map((event, i) => ({
     node_id: `plot:${Math.floor((i / PHASE_EVENTS.length) * 120 + 5)}`,
-    anchor_chunk_id: Math.floor((i / PHASE_EVENTS.length) * MOCK_TIMELINE_TOTAL_CHUNKS + 5),
+    anchor_chapter_id: Math.floor((i / PHASE_EVENTS.length) * MOCK_TIMELINE_TOTAL_CHUNKS + 5),
     progress: +(i / PHASE_EVENTS.length).toFixed(3),
     importance_score: +(0.3 + Math.random() * 0.7).toFixed(2),
     level: (Math.random() > 0.6 ? 1 : Math.random() > 0.3 ? 2 : 3) as 1 | 2 | 3,
@@ -618,8 +618,8 @@ export function createTimeline(): TimelineResponse {
 
   const relationNodes: TimelineNode[] = createGraphChangesPage(null, MOCK_GRAPH_RELATION_CHANGES.length).changes.map((change) => ({
     node_id: change.change_id,
-    anchor_chunk_id: change.effective_chunk_id,
-    progress: +(change.effective_chunk_id / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
+    anchor_chapter_id: change.effective_chapter_id,
+    progress: +(change.effective_chapter_id / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
     importance_score:
       change.relation_change_kind === "break" || change.relation_change_kind === "assert"
         ? 0.88
@@ -629,7 +629,7 @@ export function createTimeline(): TimelineResponse {
     level: change.relation_change_kind === "break" || change.relation_change_kind === "assert" ? 1 : 2,
     summary: `${change.from_name}与${change.to_name}关系变化`,
     characters: [change.from_name ?? "未知实体", change.to_name ?? "未知实体"],
-    phase_name: resolveTimelinePhaseName(change.effective_chunk_id),
+    phase_name: resolveTimelinePhaseName(change.effective_chapter_id),
     node_type: "relation" as const,
     node_subtype: (change.relation_change_kind ?? "refine") as TimelineNode["node_subtype"],
     score_breakdown: {
@@ -645,7 +645,7 @@ export function createTimeline(): TimelineResponse {
         chapter_id: change.chapter_id,
         fact_id: change.fact_id,
         fact_revision: change.fact_revision,
-        effective_chunk_id: change.effective_chunk_id,
+        effective_chapter_id: change.effective_chapter_id,
         changes: change.changes,
         relation_id: change.relation_id,
         relation_version_id: change.relation_version_id,
@@ -660,28 +660,28 @@ export function createTimeline(): TimelineResponse {
   }));
 
   const stateNodes: TimelineNode[] = MOCK_GRAPH_CHARACTERS.slice(0, 2).map((character, index) => {
-    const anchorChunkId = index === 0 ? 18 : 42;
+    const anchorChapterId = index === 0 ? 18 : 42;
     return {
-      node_id: `state:${character.entity_id}:${anchorChunkId}`,
-      anchor_chunk_id: anchorChunkId,
-      progress: +(anchorChunkId / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
+      node_id: `state:${character.entity_id}:${anchorChapterId}`,
+      anchor_chapter_id: anchorChapterId,
+      progress: +(anchorChapterId / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
       importance_score: index === 0 ? 0.76 : 0.62,
       level: index === 0 ? 1 : 2,
       summary: `${character.name}状态更新`,
       characters: [character.name],
-      phase_name: resolveTimelinePhaseName(anchorChunkId),
+      phase_name: resolveTimelinePhaseName(anchorChapterId),
       node_type: "state" as const,
       node_subtype: "state" as const,
       score_breakdown: { state_change_weight: index === 0 ? 2.2 : 1.5 },
       graph_changes: [
         {
-          change_id: `state:${character.entity_id}:${anchorChunkId}`,
+          change_id: `state:${character.entity_id}:${anchorChapterId}`,
           change_kind: "state" as const,
           graph_version_id: "mock-graph-version-1",
           chapter_id: 12,
-          fact_id: `state-fact:${character.entity_id}:${anchorChunkId}`,
+          fact_id: `state-fact:${character.entity_id}:${anchorChapterId}`,
           fact_revision: 1,
-          effective_chunk_id: anchorChunkId,
+          effective_chapter_id: anchorChapterId,
           changes: [{ field: "status", value: index === 0 ? "突破" : "收徒" }],
           entity_id: character.entity_id,
           entity_name: character.name,
@@ -692,28 +692,28 @@ export function createTimeline(): TimelineResponse {
 
   const lifecycleNodes: TimelineNode[] = MOCK_GRAPH_CHARACTERS.flatMap((character) => [
     {
-      node_id: `lifecycle:entry:${character.entity_id}:${character.first_seen_chunk}`,
-      anchor_chunk_id: character.first_seen_chunk,
-      progress: +(character.first_seen_chunk / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
+      node_id: `lifecycle:entry:${character.entity_id}:${character.first_seen_chapter}`,
+      anchor_chapter_id: character.first_seen_chapter,
+      progress: +(character.first_seen_chapter / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
       importance_score: character.role === "protagonist" ? 0.82 : 0.58,
       level: (character.role === "protagonist" ? 1 : 2) as 1 | 2,
       summary: `${character.name}首次登场`,
       characters: [character.name],
-      phase_name: resolveTimelinePhaseName(character.first_seen_chunk),
+      phase_name: resolveTimelinePhaseName(character.first_seen_chapter),
       node_type: "lifecycle" as const,
       node_subtype: "entry" as const,
       score_breakdown: { character_importance: character.role === "protagonist" ? 2.4 : 1.4, entry_exit_bonus: 1.4 },
       lifecycle_events: [{ entity_id: Number(character.entity_id), character_name: character.name, lifecycle_type: "entry" as const }],
     },
     {
-      node_id: `lifecycle:exit:${character.entity_id}:${character.last_seen_chunk}`,
-      anchor_chunk_id: character.last_seen_chunk,
-      progress: +(character.last_seen_chunk / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
+      node_id: `lifecycle:exit:${character.entity_id}:${character.last_seen_chapter}`,
+      anchor_chapter_id: character.last_seen_chapter,
+      progress: +(character.last_seen_chapter / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
       importance_score: character.role === "protagonist" ? 0.76 : 0.54,
       level: (character.role === "protagonist" ? 1 : 2) as 1 | 2,
       summary: `${character.name}最后活跃`,
       characters: [character.name],
-      phase_name: resolveTimelinePhaseName(character.last_seen_chunk),
+      phase_name: resolveTimelinePhaseName(character.last_seen_chapter),
       node_type: "lifecycle" as const,
       node_subtype: "exit" as const,
       score_breakdown: { character_importance: character.role === "protagonist" ? 2.4 : 1.4, entry_exit_bonus: 1.2 },
@@ -732,7 +732,7 @@ export function createTimeline(): TimelineResponse {
     meta: {
       novel_id: "",
       novel_name: "斗破苍穹",
-      total_chunks: MOCK_TIMELINE_TOTAL_CHUNKS,
+      total_chapters: MOCK_TIMELINE_TOTAL_CHUNKS,
     },
     phases: [
       { name: "引入期", start: 0, end: 30, ratio: 0.25 },
@@ -741,10 +741,10 @@ export function createTimeline(): TimelineResponse {
       { name: "收束期", start: 105, end: 120, ratio: 0.125 },
     ],
     composite_nodes: nodes.map((node, index): TimelineCompositeNode => ({
-      node_id: `composite:${node.node_type}:${node.anchor_chunk_id}:${index}`,
-      anchor_chunk_id: node.anchor_chunk_id,
-      start_chunk_id: node.anchor_chunk_id,
-      end_chunk_id: node.anchor_chunk_id,
+      node_id: `composite:${node.node_type}:${node.anchor_chapter_id}:${index}`,
+      anchor_chapter_id: node.anchor_chapter_id,
+      start_chapter_id: node.anchor_chapter_id,
+      end_chapter_id: node.anchor_chapter_id,
       progress: node.progress,
       start_progress: node.progress,
       end_progress: node.progress,

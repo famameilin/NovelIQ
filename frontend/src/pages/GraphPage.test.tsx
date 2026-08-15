@@ -128,15 +128,15 @@ function createGraphData(): GraphData {
     graph_version_id: "graph-version-3",
     chapter_id: 3,
     chapter_order: 3,
-    first_chunk_id: 11,
-    last_chunk_id: 15,
+    first_chapter_id: 11,
+    last_chapter_id: 15,
     nodes: [
       {
         entity_id: 1,
         name: "顾霜",
         entity_type: "character",
-        first_seen_chunk: 1,
-        last_seen_chunk: 15,
+        first_seen_chapter: 1,
+        last_seen_chapter: 15,
         state_revision: 3,
         state: { primary_role_function: "主角", status: "active" },
       },
@@ -144,8 +144,8 @@ function createGraphData(): GraphData {
         entity_id: 2,
         name: "司夜",
         entity_type: "character",
-        first_seen_chunk: 2,
-        last_seen_chunk: 15,
+        first_seen_chapter: 2,
+        last_seen_chapter: 15,
         state_revision: 2,
         state: {},
       },
@@ -182,7 +182,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         chapter_order: 3,
         fact_id: "fact-12",
         fact_revision: 1,
-        effective_chunk_id: 12,
+        effective_chapter_id: 12,
         changes: [{ change_kind: "assert" }],
         relation_id: "relation-1",
         relation_version_id: 9,
@@ -204,7 +204,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         chapter_order: 3,
         fact_id: "fact-13",
         fact_revision: 1,
-        effective_chunk_id: 13,
+        effective_chapter_id: 13,
         changes: [{ field: "status", before: "hidden", after: "active" }],
         entity_id: 1,
         entity_name: "顾霜",
@@ -265,7 +265,7 @@ describe("GraphPage", () => {
     await user.click(relationChange.closest("button")!);
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A12%3A1",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1",
       { replace: true },
     );
   });

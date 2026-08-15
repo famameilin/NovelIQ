@@ -69,8 +69,8 @@ export function createTimelineLayoutNodes(nodes: TimelineLayoutInputNode[], canv
   });
 }
 
-export function calculateCanvasMinWidth(nodeCount: number, totalChunks: number): number {
-  return Math.max(TRACK_MIN_WIDTH_PX, nodeCount * TRACK_NODE_SPACING_PX, Math.max(totalChunks, 0) * TRACK_CHUNK_SPACING_PX);
+export function calculateCanvasMinWidth(nodeCount: number, totalChapters: number): number {
+  return Math.max(TRACK_MIN_WIDTH_PX, nodeCount * TRACK_NODE_SPACING_PX, Math.max(totalChapters, 0) * TRACK_CHUNK_SPACING_PX);
 }
 
 export function getLabelTopPx(anchorY: number, lane: number): number {
@@ -98,12 +98,12 @@ export function calculateNodeAnchorY(
   lane: number,
   options: {
     tensionCurve?: number[];
-    totalChunks: number;
+    totalChapters: number;
   }
 ): number {
-  const { tensionCurve, totalChunks } = options;
+  const { tensionCurve, totalChapters } = options;
   if (tensionCurve && tensionCurve.length > 0) {
-    return getCurveNodeYPx(progress, tensionCurve, totalChunks);
+    return getCurveNodeYPx(progress, tensionCurve, totalChapters);
   }
   return TRACK_BASELINE_Y + lane * LANE_GAP_PX;
 }

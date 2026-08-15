@@ -170,14 +170,13 @@ test.describe('分析任务', () => {
       'emotion-stats',
       'character-stats',
       'style-stats',
-      'chunk-curves',
     ];
     for (const endpoint of mockEndpoints) {
       await page.route(`**/api/novels/${NOVEL_ID}/metrics/${endpoint}**`, async (route) => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(endpoint === 'chunk-curves' ? [] : {}),
+          body: JSON.stringify({}),
         });
       });
     }

@@ -25,7 +25,7 @@ export interface LLMStreamGroup {
   groupKey: string;
   stage: string;
   subStage: string;
-  chunkId: number;
+  chapterId: number;
   streamId: string | null;
   outputText: string;
   thinkingText: string;
@@ -63,19 +63,19 @@ interface StreamState {
   reset: () => void;
 }
 
-/** 按 chunk/phase 维度生成活跃流作用域键 */
+/** 按 chapter/phase 维度生成活跃流作用域键 */
 export function buildLLMOutputScopeKey(data: {
   stage: string;
-  chunk_id: number;
+  chapter_id: number;
   sub_stage: string;
 }): string {
-  return `${data.stage}-${data.chunk_id}-${data.sub_stage || "default"}`;
+  return `${data.stage}-${data.chapter_id}-${data.sub_stage || "default"}`;
 }
 
 /** 生成多流分组键，并兼容缺失 stream_id 的旧事件 */
 export function buildLLMOutputGroupKey(data: {
   stage: string;
-  chunk_id: number;
+  chapter_id: number;
   sub_stage: string;
   stream_id?: string | null;
 }): string {
@@ -231,7 +231,7 @@ function _findLatestGroupKeyForScope(
   outputs.forEach((group) => {
     const groupScopeKey = buildLLMOutputScopeKey({
       stage: group.stage,
-      chunk_id: group.chunkId,
+      chapter_id: group.chapterId,
       sub_stage: group.subStage,
     });
     if (groupScopeKey !== scopeKey) {
@@ -259,7 +259,7 @@ function _repairActiveSelectionAfterDeletion(
   const nextSelectionModes = new Map(selectionModes);
   const scopeKey = buildLLMOutputScopeKey({
     stage: deletedGroup.stage,
-    chunk_id: deletedGroup.chunkId,
+    chapter_id: deletedGroup.chapterId,
     sub_stage: deletedGroup.subStage,
   });
   if (nextSelections.get(scopeKey) !== deletedGroup.groupKey) {
@@ -343,6 +343,10 @@ export const useStreamStore = create<StreamState>()((set) => ({
           total: progress.total ?? state.progress.total,
           percent: progress.percent ?? state.progress.percent,
           sub_percent: progress.sub_percent ?? state.progress.sub_percent,
+          // 2026-08-15 M5：HTTP 回填不携带真实章节，spread 会把 chapter_id 置为
+          // undefined/null 并覆写 annotate 期间的真实章 scope，导致 LLM 输出面板
+          // 按章匹配全部落空；此处与 current/total 同口径保留旧值
+          chapter_id: progress.chapter_id ?? state.progress.chapter_id,
         },
       };
     }),
@@ -351,12 +355,12 @@ export const useStreamStore = create<StreamState>()((set) => ({
     set((state) => {
       const scopeKey = buildLLMOutputScopeKey({
         stage: data.stage,
-        chunk_id: data.chunk_id ?? 0,
+        chapter_id: data.chapter_id ?? 0,
         sub_stage: data.sub_stage,
       });
       const groupKey = buildLLMOutputGroupKey({
         stage: data.stage,
-        chunk_id: data.chunk_id ?? 0,
+        chapter_id: data.chapter_id ?? 0,
         sub_stage: data.sub_stage,
         stream_id: data.stream_id,
       });
@@ -367,7 +371,7 @@ export const useStreamStore = create<StreamState>()((set) => ({
         groupKey,
         stage: data.stage,
         subStage: data.sub_stage,
-        chunkId: data.chunk_id ?? 0,
+        chapterId: data.chapter_id ?? 0,
         streamId: data.stream_id ?? null,
         outputText: existing?.outputText ?? "",
         thinkingText: existing?.thinkingText ?? "",

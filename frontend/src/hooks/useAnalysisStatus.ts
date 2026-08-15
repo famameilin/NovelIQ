@@ -36,7 +36,8 @@ function buildBackfillProgress(status: TaskStatusResponse): StreamEventData {
     action: status.status === "pending" ? "start" : "progress",
     stage: fallbackStage,
     sub_stage: status.sub_stage ?? "",
-    chunk_id: 0,
+    // 2026-08-15 M5：HTTP 回填不携带真实章节，不得覆写成 0——
+    // updateProgress 对缺失 chapter_id 保留旧值，避免 annotate 期间面板按章匹配落空
     current: status.current ?? 0,
     total: status.total ?? 0,
     percent: status.progress,
@@ -56,12 +57,12 @@ function isMockEnabled(): boolean {
 }
 
 /** 将同一流的连续输出合并进批量缓冲，减少后台恢复后的逐 token 刷新 */
-function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chunk_id" | "stream_id">): string {
+function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chapter_id" | "stream_id">): string {
   return [
     data.action,
     data.stage,
     data.sub_stage || "default",
-    String(data.chunk_id ?? 0),
+    String(data.chapter_id ?? 0),
     data.stream_id || "default",
   ].join("|");
 }
@@ -147,7 +148,6 @@ export function useAnalysisStatus(
           action: "complete",
           stage: "completed",
           sub_stage: "",
-          chunk_id: 0,
           current: 0,
           total: 0,
           percent: 100,
@@ -168,7 +168,6 @@ export function useAnalysisStatus(
           action: "complete",
           stage: "cancelled",
           sub_stage: "",
-          chunk_id: 0,
           current: 0,
           total: 0,
           percent: 0,
@@ -257,7 +256,7 @@ export function useAnalysisStatus(
         action: eventData.action,
         stage: eventData.stage,
         sub_stage: eventData.sub_stage,
-        chunk_id: eventData.chunk_id,
+        chapter_id: eventData.chapter_id,
         stream_id: eventData.stream_id,
       });
       const existing = llmOutputBufferRef.current.get(bufferKey);
@@ -313,7 +312,7 @@ export function useAnalysisStatus(
             action: eventData.action,
             stage: eventData.stage,
             sub_stage: eventData.sub_stage,
-            chunk_id: eventData.chunk_id,
+            chapter_id: eventData.chapter_id,
             stream_id: eventData.stream_id,
             current: eventData.current,
             total: eventData.total,
@@ -338,7 +337,6 @@ export function useAnalysisStatus(
             action: "complete",
             stage: "cancelled",
             sub_stage: "",
-            chunk_id: 0,
             current: 0,
             total: 0,
             percent: 0,
@@ -357,7 +355,6 @@ export function useAnalysisStatus(
             action: "complete",
             stage: "completed",
             sub_stage: "",
-            chunk_id: 0,
             current: 0,
             total: 0,
             percent: 100,
