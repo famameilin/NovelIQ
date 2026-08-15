@@ -143,7 +143,8 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
     """
     提交 preprocess 阶段的分段写入，及时释放事务锁
 
-    preprocess 会连续写 chunks、chunk_style、paragraph_embeddings，这些表都外键关联 analysis_runs
+    preprocess 会连续写 chapters、paragraphs、paragraph_metrics/paragraph_curves 与 paragraph_embeddings，
+          这些表都外键关联 analysis_runs
           若整段预处理共用一个长事务，EventBus 另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout
           因此这里在关键批量写入后立即提交，主动切断长事务
     """
