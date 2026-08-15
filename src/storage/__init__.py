@@ -26,6 +26,4 @@ __all__ = [
     "StatsRepository",
     "get_db_session",
     "get_session_from_run_id",
-    "read_chunk_index",
-    "write_chunk_index",
 ]

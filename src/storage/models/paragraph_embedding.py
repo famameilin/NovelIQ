@@ -20,7 +20,7 @@ class ParagraphEmbedding(Base):
     Paragraph 向量嵌入表（二期段落化结构，设计文档 §5.2）
 
     段落身份以 paragraphs 表为准（paragraph_id 稠密整数），本表只存向量与
-    溯源元数据；旧结构（chapter_id/paragraph_index/paragraph_text/local/global
+    溯源元数据；旧结构（chunk_id/paragraph_index/paragraph_text/local/global
     坐标冗余列）已在 ensure_paragraph_embeddings_schema 中按不兼容策略
     DROP 重建，数据不回填。
     """
