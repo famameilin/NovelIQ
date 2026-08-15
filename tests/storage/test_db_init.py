@@ -28,7 +28,7 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
         "target_dialogue_id",
         "target_setup_id",
     } <= set(mapping_columns.keys())
-    assert {"type", "chunk_id", "target_key", "target_ref"} <= set(case_columns.keys())
+    assert {"type", "chapter_id", "target_key", "target_ref"} <= set(case_columns.keys())
     assert {
         "graph_version_id",
         "source_kind",
@@ -40,7 +40,6 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
     assert {
         "dialogue_id",
         "run_id",
-        "chunk_id",
         "chapter_id",
         "candidate_key",
         "content",
@@ -144,10 +143,10 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
         "analysis_runs_novel_id_fkey",
         "chapter_annotations_run_id_fkey",
         "case_pool_cases_run_id_fkey",
-        "graph_versions_first_chunk_run_fkey",
-        "graph_versions_last_chunk_run_fkey",
+        "graph_versions_first_chapter_run_fkey",
+        "graph_versions_last_chapter_run_fkey",
         "graph_facts_run_id_fkey",
-        "graph_facts_effective_chunk_run_fkey",
+        "graph_facts_effective_chapter_run_fkey",
         "graph_relation_versions_relation_id_fkey",
         "cloud_analysis_novel_id_fkey",
         "global_context_novel_id_fkey",
@@ -238,9 +237,9 @@ def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
     )
 
     assert foreign_keys == [
-        # 2026-08-13 P2：补齐指向 chunks 的复合 FK（run_id 仍只声明一次）；
+        # M9a-2：chunks 表合并进 chapters 后，FK 指向 chapters 的 chapter_id
         # 列表按 (列名, 引用表, 引用列, ondelete) 字母序排序
-        (("end_chunk_id", "run_id"), ("chunks", "chunks"), ("chunk_id", "run_id"), "CASCADE"),
+        (("end_chapter_id", "run_id"), ("chapters", "chapters"), ("chapter_id", "run_id"), "CASCADE"),
         (("run_id",), ("analysis_runs",), ("run_id",), "CASCADE"),
-        (("start_chunk_id", "run_id"), ("chunks", "chunks"), ("chunk_id", "run_id"), "CASCADE"),
+        (("start_chapter_id", "run_id"), ("chapters", "chapters"), ("chapter_id", "run_id"), "CASCADE"),
     ]

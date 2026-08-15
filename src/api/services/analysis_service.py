@@ -112,13 +112,13 @@ class AnalysisService:
 
         # ── 标注 ──
         if not skip_stages["skip_annotate"]:
-            # 查询 chunk 总数，让前端知道进度规模
-            total_chunks = 0
+            # 查询 章节 总数，让前端知道进度规模
+            total_chapters = 0
             try:
-                from src.storage.repositories import ChunkRepository
+                from src.storage.repositories import ChapterRepository
 
-                chunk_repo = ChunkRepository(session)
-                total_chunks = chunk_repo.count_chunks(run_id)
+                chapter_repo = ChapterRepository(session)
+                total_chapters = chapter_repo.count_chapters(run_id)
             except Exception as exc:
                 logger.warning(
                     "Failed to count chunks before annotate stage, "
@@ -132,7 +132,7 @@ class AnalysisService:
                 "annotate",
                 message="开始标注分析",
                 percent=settings.progress.annotate.start,
-                total=total_chunks,
+                total=total_chapters,
             )
 
             await self.stage_executor.run_annotate(

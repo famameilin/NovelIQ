@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .base import Base
 
 # 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Paragraph.text 列属性，
-# 类体内 __table_args__ 直接引用 text 会解析到列对象而非函数（与 chunk.py 同口径）
+# 类体内 __table_args__ 直接引用 text 会解析到列对象而非函数（与 章节.py 同口径）
 
 
 def _utcnow() -> datetime:
@@ -51,11 +51,10 @@ class Paragraph(Base):
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    # chunk 内段落顺序号（0 起），同一 chunk 内唯一且连续
+    # 章内段落顺序号（0 起），同一章内唯一且连续
     paragraph_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 来源自然段在 chunk 内的序号（0 起）；超长自然段拆出的片段共享该值
+    # 来源自然段在 章节 内的序号（0 起）；超长自然段拆出的片段共享该值
     source_paragraph_index: Mapped[int] = mapped_column(Integer, nullable=False)
     # 超长自然段被拆分后的片段序号（0 起）；未拆分的自然段恒为 0
     fragment_index: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -76,11 +75,11 @@ class Paragraph(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "run_id", "chunk_id", "paragraph_index", name="uq_paragraphs_run_chunk_index"
+            "run_id", "chapter_id", "paragraph_index", name="uq_paragraphs_run_chapter_index"
         ),
         ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
@@ -97,7 +96,7 @@ class Paragraph(Base):
         CheckConstraint("char_count = length(text)", name="ck_paragraphs_char_count_text"),
         Index("idx_paragraphs_run_chapter_index", "run_id", "chapter_id", "paragraph_index"),
         Index("idx_paragraphs_run_global_start", "run_id", "global_start_char"),
-        Index("idx_paragraphs_run_chunk_local_start", "run_id", "chunk_id", "local_start_char"),
+        Index("idx_paragraphs_run_chapter_local_start", "run_id", "chapter_id", "local_start_char"),
         # 2026-08-14 二期段落化：keyword_ops 直接扫 paragraphs 表的查询是
         # lower(text) LIKE '%kw%'，索引必须建在同一个表达式上（lower(text) gin_trgm_ops），
         # 裸 text 列上的 trgm 索引无法被规划器命中，等于死索引（与 chunks 的

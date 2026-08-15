@@ -25,7 +25,7 @@ def test_split_paragraphs_basic_identity() -> None:
     assert all(span.char_count == len(span.text) for span in spans)
     # chunk 级身份未归属时保持 None
     assert all(span.paragraph_id is None for span in spans)
-    assert all(span.chunk_id is None for span in spans)
+    assert all(span.chapter_id is None for span in spans)
     assert all(span.global_start_char is None for span in spans)
 
 
@@ -114,7 +114,6 @@ def test_split_chunk_paragraphs_assigns_run_level_identity() -> None:
 
     assert len(spans) == 3
     assert [span.paragraph_id for span in spans] == [0, 1, 2]
-    assert [span.chunk_id for span in spans] == [0, 0, 1]
     assert [span.chapter_id for span in spans] == [1, 1, 2]
     # global = chunk.start + local
     assert [(span.global_start_char, span.global_end_char) for span in spans] == [
@@ -127,7 +126,7 @@ def test_split_chunk_paragraphs_assigns_run_level_identity() -> None:
         assert spans[i + 1].global_start_char >= spans[i].global_end_char
     # 文本逐字匹配
     for span in spans:
-        chunk = chunks[span.chunk_id or 0]
+        chunk = chunks[span.chapter_id - 1]
         assert chunk.text[span.local_start_char : span.local_end_char] == span.text
 
 

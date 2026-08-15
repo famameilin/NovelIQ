@@ -5,9 +5,9 @@ import pytest
 
 from src.api.exceptions import GraphReadinessError
 from src.api.routes.results_fetchers import (
+    _fetch_chapter_annotations,
     _fetch_character_relations,
     _fetch_characters,
-    _fetch_chunk_annotations,
     _fetch_diagnosis,
     _fetch_foreshadowing_threads,
     _fetch_hierarchical_relations,
@@ -75,11 +75,11 @@ class _DummyAnnotationRepo:
         assert run_id == "run-1"
         return self._rows
 
-    def fetch_chunk_annotations_full(self, run_id):
+    def fetch_chapter_annotations_full(self, run_id):
         assert run_id == "run-1"
         return []
 
-    def fetch_chunk_dialogues_full(self, run_id):
+    def fetch_chapter_dialogues_full(self, run_id):
         assert run_id == "run-1"
         return []
 
@@ -154,9 +154,9 @@ def test_fetch_foreshadowing_threads_preserves_confidence_field():
             return [
                 ForeshadowingThreadView(
                     setup_id="setup-1",
-                    first_chunk_id=2,
-                    last_chunk_id=5,
-                    anchor_chunk_ids=[2, 5],
+                    first_chapter_id=2,
+                    last_chapter_id=5,
+                    anchor_chapter_ids=[2, 5],
                     setup_summary="黑伞只在雨夜自行张开",
                     setup_kind="异常物件",
                     expected_payoff_family="规则兑现",
@@ -575,8 +575,8 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     annotation_repo = _DummyAnnotationRepo2()
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
-            ExportRelationSnapshot(from_name="贺伯安", to_name="二妈妈", relation_type="家族", last_seen_chunk=3),
-            ExportRelationSnapshot(from_name="贺伯安", to_name="林立果", relation_type="盟友", last_seen_chunk=5),
+            ExportRelationSnapshot(from_name="贺伯安", to_name="二妈妈", relation_type="家族", last_seen_chapter=3),
+            ExportRelationSnapshot(from_name="贺伯安", to_name="林立果", relation_type="盟友", last_seen_chapter=5),
         ]
     )
 
@@ -593,12 +593,12 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     assert len(result) == 2
 
     rel1 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "二妈妈")
-    assert rel1.chunk_id == 3
+    assert rel1.chapter_id == 3
     assert rel1.type == "家族"
     assert rel1.change == "汇总"
 
     rel2 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "林立果")
-    assert rel2.chunk_id == 5
+    assert rel2.chapter_id == 5
     assert rel2.type == "盟友"
 
 
@@ -610,14 +610,14 @@ def test_fetch_character_relations_skips_inactive_current_relations():
                 from_name="贺伯安",
                 to_name="二妈妈",
                 relation_type="家族",
-                last_seen_chunk=3,
+                last_seen_chapter=3,
                 is_active=False,
             ),
             ExportRelationSnapshot(
                 from_name="贺伯安",
                 to_name="林立果",
                 relation_type="盟友",
-                last_seen_chunk=5,
+                last_seen_chapter=5,
                 is_active=True,
             ),
         ]
@@ -636,11 +636,11 @@ def test_fetch_character_relations_skips_inactive_current_relations():
     assert [(item.from_char, item.to_char) for item in result] == [("贺伯安", "林立果")]
 
 
-def test_fetch_character_relations_uses_last_seen_chunk_id():
+def test_fetch_character_relations_uses_last_seen_chapter_id():
     annotation_repo = _DummyAnnotationRepo2()
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
-            ExportRelationSnapshot(from_name="张三", to_name="李四", relation_type="朋友", last_seen_chunk=15),
+            ExportRelationSnapshot(from_name="张三", to_name="李四", relation_type="朋友", last_seen_chapter=15),
         ]
     )
 
@@ -655,7 +655,7 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
         )
 
     assert len(result) == 1
-    assert result[0].chunk_id == 15
+    assert result[0].chapter_id == 15
     assert result[0].change == "汇总"
 
 
@@ -702,16 +702,16 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="隶属",
-                first_seen_chunk=2,
-                last_seen_chunk=9,
+                first_seen_chapter=2,
+                last_seen_chapter=9,
             ),
             ExportRelationSnapshot(
                 relation_id="relation-2",
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="家族",
-                first_seen_chunk=2,
-                last_seen_chunk=9,
+                first_seen_chapter=2,
+                last_seen_chapter=9,
             ),
         ]
     )
@@ -736,8 +736,8 @@ def test_fetch_hierarchical_relations_filters_unknown_graph_endpoint():
                 from_name="柳婉儿",
                 to_name="陌生人",
                 relation_type="隶属",
-                first_seen_chunk=1,
-                last_seen_chunk=4,
+                first_seen_chapter=1,
+                last_seen_chapter=4,
             )
         ]
     )
@@ -759,8 +759,8 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
                 from_name="老贺",
                 to_name="伯安",
                 relation_type="隶属",
-                first_seen_chunk=2,
-                last_seen_chunk=9,
+                first_seen_chapter=2,
+                last_seen_chapter=9,
                 is_active=False,
             ),
             ExportRelationSnapshot(
@@ -768,8 +768,8 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
                 from_name="老贺",
                 to_name="阿明",
                 relation_type="隶属",
-                first_seen_chunk=3,
-                last_seen_chunk=10,
+                first_seen_chapter=3,
+                last_seen_chapter=10,
                 is_active=True,
             ),
         ]
@@ -799,8 +799,8 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
                 from_name="伯安",
                 to_name="贺家",
                 relation_type="隶属",
-                first_seen_chunk=2,
-                last_seen_chunk=9,
+                first_seen_chapter=2,
+                last_seen_chapter=9,
                 is_active=True,
             ),
             ExportRelationSnapshot(
@@ -808,8 +808,8 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
                 from_name="赵甲卫",
                 to_name="贺家",
                 relation_type="隶属",
-                first_seen_chunk=3,
-                last_seen_chunk=10,
+                first_seen_chapter=3,
+                last_seen_chapter=10,
                 is_active=True,
             ),
         ],
@@ -827,12 +827,12 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
     ]
 
 
-def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
+def test_fetch_chapter_annotations_builds_relations_from_export_authority_view():
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
-        def fetch_chunk_annotations_full(self, _run_id):
+        def fetch_chapter_annotations_full(self, _run_id):
             return [
                 _DummyRow(
-                    chunk_id=3,
+                    chapter_id=3,
                     emotional_valence="正向",
                     event_type="冲突",
                     pivot_moment=True,
@@ -847,10 +847,10 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
                 )
             ]
 
-        def fetch_chunk_characters_full(self, _run_id):
+        def fetch_chapter_characters_full(self, _run_id):
             return []
 
-        def fetch_chunk_dialogues_full(self, _run_id):
+        def fetch_chapter_dialogues_full(self, _run_id):
             return []
 
     annotation_repo = _AnnotationRepoWithChunkRows()
@@ -864,7 +864,7 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
                 chapter_order=1,
                 fact_id="fact-101",
                 fact_revision=1,
-                effective_chunk_id=3,
+                effective_chapter_id=3,
                 confidence="high",
                 changes=[
                     {
@@ -886,7 +886,7 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
         ]
     )
 
-    result = _fetch_chunk_annotations(
+    result = _fetch_chapter_annotations(
         run_id="run-1",
         annotation_repo=annotation_repo,
         valid_character_names={"贺铮", "伯安"},
@@ -905,13 +905,13 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     assert result[0].relations[0].change == "assert"
 
 
-def test_fetch_chunk_annotations_uses_explicit_database_graph_view():
+def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
     """2026-08-05 用于验证 chunk 展开结果只读取显式数据库图视图"""
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
-        def fetch_chunk_annotations_full(self, _run_id):
+        def fetch_chapter_annotations_full(self, _run_id):
             return [
                 _DummyRow(
-                    chunk_id=3,
+                    chapter_id=3,
                     emotional_valence="正向",
                     event_type="冲突",
                     pivot_moment=True,
@@ -929,32 +929,32 @@ def test_fetch_chunk_annotations_uses_explicit_database_graph_view():
                 )
             ]
 
-        def fetch_chunk_characters_full(self, _run_id):
+        def fetch_chapter_characters_full(self, _run_id):
             return []
 
-        def fetch_chunk_dialogues_full(self, _run_id):
+        def fetch_chapter_dialogues_full(self, _run_id):
             return []
 
-    result = _fetch_chunk_annotations(
+    result = _fetch_chapter_annotations(
         run_id="run-1",
         annotation_repo=_AnnotationRepoWithChunkRows(),
         export_graph_view=ExportGraphAuthorityView(),
     )
 
     assert len(result) == 1
-    assert result[0].chunk_id == 3
+    assert result[0].chapter_id == 3
     assert result[0].is_strong_setup is True
     assert result[0].setup_kind == "异常物件"
     assert result[0].relations == []
 
 
-def test_fetch_chunk_annotations_propagates_database_graph_failure(monkeypatch):
+def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch):
     """2026-08-05 用于验证 chunk 消费者不会在数据库图失败时降级读取"""
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
-        def fetch_chunk_annotations_full(self, _run_id):
+        def fetch_chapter_annotations_full(self, _run_id):
             return [
                 _DummyRow(
-                    chunk_id=3,
+                    chapter_id=3,
                     emotional_valence="正向",
                     event_type="冲突",
                     pivot_moment=True,
@@ -969,10 +969,10 @@ def test_fetch_chunk_annotations_propagates_database_graph_failure(monkeypatch):
                 )
             ]
 
-        def fetch_chunk_characters_full(self, _run_id):
+        def fetch_chapter_characters_full(self, _run_id):
             return []
 
-        def fetch_chunk_dialogues_full(self, _run_id):
+        def fetch_chapter_dialogues_full(self, _run_id):
             return []
 
     annotation_repo = _AnnotationRepoWithChunkRows()
@@ -982,12 +982,12 @@ def test_fetch_chunk_annotations_propagates_database_graph_failure(monkeypatch):
             raise GraphReadinessError("graph participant state is stale or incomplete")
 
     monkeypatch.setattr(
-        "src.api.services.results_queries.chunks.KnowledgeGraphAuthorityService.from_session",
+        "src.api.services.results_queries.chapters.KnowledgeGraphAuthorityService.from_session",
         lambda *_args, **_kwargs: _GraphUnavailableService(),
     )
 
     with pytest.raises(GraphReadinessError, match="graph participant state is stale"):
-        _fetch_chunk_annotations(
+        _fetch_chapter_annotations(
             run_id="run-1",
             annotation_repo=annotation_repo,
         )

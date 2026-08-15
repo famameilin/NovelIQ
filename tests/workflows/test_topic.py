@@ -34,7 +34,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.preprocess.tokenize import tokenize
-from src.storage.repositories import ChunkRepository, ParagraphRepository, RunRepository
+from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.workflows.topic import run_topic_model
 from tests.support.analysis_factories import insert_test_novel
 
@@ -71,7 +71,7 @@ class TestTopicModel:
 
     def _create_paragraphs(self, paragraph_count: int) -> None:
         """每个 chunk 一个自然段：插入 chunks + paragraphs（段落事实源）"""
-        chunk_repo = ChunkRepository(self.db_session)
+        chapter_repo = ChapterRepository(self.db_session)
         chunks = [
             Chunk(
                 index=i,
@@ -82,7 +82,7 @@ class TestTopicModel:
             )
             for i in range(paragraph_count)
         ]
-        chunk_repo.insert_chunks(self.run_id, chunks)
+        chapter_repo.insert_chapter_texts(self.run_id, chunks)
 
         spans = [replace(span, token_count=len(tokenize(span.text))) for span in split_chunk_paragraphs(chunks)]
         ParagraphRepository(self.db_session).insert_paragraphs(self.run_id, spans)

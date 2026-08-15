@@ -42,7 +42,7 @@ from .types import (
 def aggregate_all_metrics(
     run_id: str,
     annotation_repo,
-    chunk_repo,
+    chapter_repo,
     stats_repo,
 ) -> AggregateResult:
     """
@@ -55,14 +55,14 @@ def aggregate_all_metrics(
     emotion_data = fetch_emotion_data(stats_repo, run_id)
     char_data = fetch_character_data(annotation_repo, run_id)
     relation_data = fetch_relation_data(annotation_repo, run_id)
-    text_data = fetch_text_data(chunk_repo, run_id)
+    text_data = fetch_text_data(chapter_repo, run_id)
     culture_data = fetch_culture_data(stats_repo, run_id)
     tension_data = fetch_tension_data(stats_repo, run_id)
     dialogue_data = fetch_dialogue_data(annotation_repo, run_id)
-    style_data = fetch_style_data(chunk_repo, run_id)
+    style_data = fetch_style_data(chapter_repo, run_id)
 
     # 2026-08-14 修复（§19.10）：关系变化频率分母从章节数改为全书总字数。
-    _, total_chars = chunk_repo.fetch_chunk_counts(run_id)
+    _, total_chars = chapter_repo.fetch_chapter_counts(run_id)
 
     result.narrative_structure = compute_narrative_structure_metrics(annotation_data, tension_data)
     result.emotion_curve = compute_emotion_curve_metrics(emotion_data, annotation_data, char_data)

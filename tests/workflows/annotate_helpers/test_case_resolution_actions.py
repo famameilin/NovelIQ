@@ -101,7 +101,7 @@ def _alias_case(
     annotation_id: str,
     name_a: str,
     name_b: str,
-    chunk_id: int = 0,
+    chunk_id: int = 1,
 ) -> CasePoolCase:
     """2026-08-11 用于直接登记疑似同一人物案例"""
     return CasePoolRepository(db_session).create_case(
@@ -135,7 +135,7 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -164,9 +164,9 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=1, text="顾霜自称顾老", entity_names=["顾霜"]),
+            annotation=_annotation(chunk_id=2, text="顾霜自称顾老", entity_names=["顾霜"]),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[0, 1],
+            authorized_chunk_ids=[1, 2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -213,7 +213,7 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -238,9 +238,9 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=1, text="顾老实为夫妻"),
+            annotation=_annotation(chunk_id=2, text="顾老实为夫妻"),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[0, 1],
+            authorized_chunk_ids=[1, 2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -273,7 +273,7 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -284,7 +284,7 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         annotation_id=first.annotation_id,
         name_a="顾霜",
         name_b="顾老",
-        chunk_id=1,
+        chunk_id=2,
     )
     db_session.commit()
     resolved = ResolvedCase(
@@ -303,9 +303,9 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=1, text="顾霜自称顾老", entity_names=["顾霜"]),
+            annotation=_annotation(chunk_id=2, text="顾霜自称顾老", entity_names=["顾霜"]),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[0],
+            authorized_chunk_ids=[2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -331,7 +331,7 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=0, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -361,9 +361,9 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
             result=_result(
                 run_id=run_id,
                 chapter_id=2,
-                annotation=_annotation(chunk_id=1, text="顾霜自称顾老", entity_names=["顾霜"]),
+                annotation=_annotation(chunk_id=2, text="顾霜自称顾老", entity_names=["顾霜"]),
                 resolved_cases=[resolved],
-                authorized_chunk_ids=[1],
+                authorized_chunk_ids=[2],
             ),
             session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
         )
@@ -382,18 +382,18 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=0, text="顾霜喝道", entity_names=["顾霜"]),
+            annotation=_annotation(chunk_id=1, text="顾霜喝道", entity_names=["顾霜"]),
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
     pushed = PendingCase(
         type="dialogue_speaker",
-        chunk_id=0,
+        chunk_id=1,
         keys=["顾霜"],
         description="对话疑点",
         target_key="missing-dialogue-target",
-        target_ref={"kind": "dialogue_speaker", "dialogue_id": "dlg_not_exist", "chunk_id": 0},
+        target_ref={"kind": "dialogue_speaker", "dialogue_id": "dlg_not_exist", "chunk_id": 1},
     )
     row = CasePoolRepository(db_session).create_case(
         run_id=run_id,
@@ -416,9 +416,9 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
             result=_result(
                 run_id=run_id,
                 chapter_id=2,
-                annotation=_annotation(chunk_id=1, text="顾霜喝道", entity_names=["顾霜"]),
+                annotation=_annotation(chunk_id=2, text="顾霜喝道", entity_names=["顾霜"]),
                 resolved_cases=[resolved],
-                authorized_chunk_ids=[0, 1],
+                authorized_chunk_ids=[1, 2],
             ),
             session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
         )
@@ -444,7 +444,7 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
             run_id=run_id,
             chapter_id=1,
             annotation=_annotation(
-                chunk_id=0,
+                chunk_id=1,
                 text="顾霜立誓",
                 foreshadowing=foreshadowing,
             ),
@@ -465,14 +465,14 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     assert thread.active is True
     pushed = PendingCase(
         type="foreshadowing_suspect",
-        chunk_id=0,
+        chunk_id=1,
         keys=["护佑山门"],
         description="伏笔疑点",
         target_key="pushed-foreshadowing",
         target_ref={
             "kind": "foreshadowing_suspect",
             "setup_id": thread.setup_id,
-            "chunk_id": 0,
+            "chunk_id": 1,
         },
     )
     row = CasePoolRepository(db_session).create_case(
@@ -496,9 +496,9 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=1, text="顾霜屡次立誓"),
+            annotation=_annotation(chunk_id=2, text="顾霜屡次立誓"),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[0, 1],
+            authorized_chunk_ids=[1, 2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -534,7 +534,7 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
         description="顾霜承诺护佑山门",
         confidence="high",
     )
-    for chapter_id, chunk_id in ((1, 0), (2, 1)):
+    for chapter_id, chunk_id in ((1, 1), (2, 2)):
         complete_annotation_run(
             result=_result(
                 run_id=run_id,
@@ -558,14 +558,14 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
         db_session.execute(
             select(ForeshadowingThreadHit)
             .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(ForeshadowingThreadHit.chunk_id)
+            .order_by(ForeshadowingThreadHit.chapter_id)
         ).scalars()
     )
     assert len(threads) == 1
     # 2026-08-13 P1-3：每个新 chunk 的 Phase2 命中都落一条 hit（合同），
-    # 第二章在 chunk 1 续接命中后 last_chunk_id 推进到 1
+    # 第二章在章 2 续接命中后 last_chapter_id 推进到 2
     assert len(hits) == 2
-    assert [hit.chunk_id for hit in hits] == [0, 1]
+    assert [hit.chapter_id for hit in hits] == [1, 2]
     assert threads[0].setup_summary == "顾霜承诺护佑山门"
     assert threads[0].foreshadowing_type == "其他"
     assert threads[0].status == "open"

@@ -164,14 +164,14 @@ def _fetch_chapter_metrics(
     - 章节来自段落聚合（fetch_paragraph_rows + fetch_paragraph_metrics 按
       paragraph_id 对齐，缺任一侧的段落跳过），章节顺序与全文段落顺序一致
     - 章节/全书 TTR、MTLD 在拼接后的章节/全书文本上直接计算一次
-    - 章节标签来自 fetch_chunk_annotations_full（按 chunk_id 映射），
+    - 章节标签来自 fetch_chapter_annotations_full（按 chapter_id 映射），
       无标注的章节对应字段为 None
     """
     paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
     metric_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
     metric_by_paragraph_id = {int(row.paragraph_id): row for row in metric_rows}
-    annotation_rows = annotation_repo.fetch_chunk_annotations_full(run_id)
-    annotation_by_chunk_id = {int(row.chunk_id): row for row in annotation_rows}
+    annotation_rows = annotation_repo.fetch_chapter_annotations_full(run_id)
+    annotation_by_chapter_id = {int(row.chapter_id): row for row in annotation_rows}
 
     chapters_by_id: dict[int, _ChapterAccumulator] = {}
     first_paragraph_by_chapter: dict[int, Any] = {}
@@ -202,7 +202,7 @@ def _fetch_chapter_metrics(
     chapter_metrics: list[ChapterMetricSummary] = []
     for accumulator in chapters_by_id.values():
         first_paragraph = first_paragraph_by_chapter[accumulator.chapter_id]
-        annotation = annotation_by_chunk_id.get(int(first_paragraph.chunk_id))
+        annotation = annotation_by_chapter_id.get(int(first_paragraph.chapter_id))
         chapter_metrics.append(_build_chapter_summary(accumulator, annotation))
 
     book = _build_book_aggregate(chapter_metrics, chapters_by_id, run)

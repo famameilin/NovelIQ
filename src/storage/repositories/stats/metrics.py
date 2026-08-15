@@ -92,7 +92,7 @@ def insert_token_usage(
     prompt_tokens: int,
     total_tokens: int,
     completion_tokens: int | None = None,
-    chunk_id: int | None = None,
+    chapter_id: int | None = None,
     cache_read_tokens: int | None = None,
     cost: float | None = None,
     accounting_source: str = "reported",
@@ -112,7 +112,7 @@ def insert_token_usage(
         prompt_tokens: 提示 token 数
         total_tokens: 总 token 数
         completion_tokens: 完成 token 数（可选）
-        chunk_id: 分块ID（可选）
+        chapter_id: 分块ID（可选）
         cache_read_tokens: 缓存命中 token 数，缺失记 0（无缓存证据 = 全量计费）
         cost: 网关返回的费用，不估算
         accounting_source: 记账来源（reported=实报 / estimated=tiktoken 估算）
@@ -127,7 +127,7 @@ def insert_token_usage(
     now = datetime.now().isoformat()
     token_usage = TokenUsage(
         novel_id=novel_id,
-        chunk_id=chunk_id,
+        chapter_id=chapter_id,
         task_type=task_type,
         call_type=call_type,
         model=model,

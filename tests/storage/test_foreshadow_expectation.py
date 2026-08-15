@@ -27,7 +27,7 @@ def _create_thread_with_hit(
     strength: str,
     status: str = "open",
     payoff_likelihood: str = "high",
-    chunk_id: int = 0,
+    chapter_id: int = 1,
 ) -> str:
     """2026-08-09 用于插入带命中记录的伏笔线程并返回 setup_id"""
     setup_id = f"setup-{strength}-{status}-{payoff_likelihood}-{uuid.uuid4().hex[:8]}"[:36]
@@ -35,8 +35,8 @@ def _create_thread_with_hit(
         ForeshadowingThread(
             setup_id=setup_id,
             run_id=run_id,
-            first_chunk_id=chunk_id,
-            last_chunk_id=chunk_id,
+            first_chapter_id=chapter_id,
+            last_chapter_id=chapter_id,
             setup_summary=f"测试伏笔 {setup_id}",
             foreshadowing_type="物件",
             setup_kind="异常物件",
@@ -53,7 +53,7 @@ def _create_thread_with_hit(
         ForeshadowingThreadHit(
             setup_id=setup_id,
             run_id=run_id,
-            chunk_id=chunk_id,
+            chapter_id=chapter_id,
             anchor_text="测试锚点",
             is_new_setup=True,
             created_at=datetime.now(UTC),
@@ -108,7 +108,7 @@ def test_resolved_case_degrades_invalid_foreshadowing_enums_to_unknown() -> None
         type="foreshadowing_suspect",
         reason="任意字符串不应让诊断 KeyError",
         target_key="target-1",
-        target_ref={"setup_id": "setup-1", "chunk_id": 0},
+        target_ref={"setup_id": "setup-1", "chunk_id": 1},
         setup_status="已回收",  # 非法
         payoff_likelihood="certain",  # 非法
         strength="mega",  # 非法
@@ -127,7 +127,7 @@ def test_resolved_case_keeps_valid_foreshadowing_enums() -> None:
         type="foreshadowing_suspect",
         reason="合法枚举",
         target_key="target-1",
-        target_ref={"setup_id": "setup-1", "chunk_id": 0},
+        target_ref={"setup_id": "setup-1", "chunk_id": 1},
         setup_status="reinforced",
         payoff_likelihood="high",
         strength="low",

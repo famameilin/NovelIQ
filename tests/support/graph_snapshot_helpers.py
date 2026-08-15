@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from src.models.cloud.schema import CloudAnalysis
-from src.storage.models import Chunk as ChunkModel
 from src.storage.models import Novel
 from src.storage.repositories import StatsRepository
 
@@ -25,17 +24,22 @@ def insert_graph_test_novel(db_session, novel_id: str) -> None:
 
 
 def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
-    """为 graph relation event 测试补齐 chunks 外键依赖"""
-    db_session.add_all(
+    """为 graph relation event 测试补齐 chapters 外键依赖（M9a-2：chunks 表已合并）"""
+    from src.chunking.chunker import Chunk
+    from src.storage.repositories import ChapterRepository
+
+    ChapterRepository(db_session).insert_chapter_texts(
+        run_id,
         [
-            ChunkModel(
-                chunk_id=chunk_id,
-                chapter_id=1,
-                run_id=run_id,
+            Chunk(
+                index=chunk_id,
+                chapter_id=chunk_id + 1,
+                start=0,
+                end=len(f"chunk-{chunk_id}"),
                 text=f"chunk-{chunk_id}",
             )
             for chunk_id in chunk_ids
-        ]
+        ],
     )
     db_session.commit()
 

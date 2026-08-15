@@ -34,11 +34,11 @@ def detect_genre_weighted(
 
     将 weighted detect 从主模块中抽出，只保留一个 detect 回调依赖
     """
-    total_chunks = len(chunk_texts)
-    if total_chunks == 0:
+    total_chapters = len(chunk_texts)
+    if total_chapters == 0:
         return WeightedGenreResult(genre_weights=[("general", 1.0)], sample_count=0, raw_scores={})
 
-    sample_indices = sample_weighted_chunk_indices(total_chunks, sample_ratio, min_samples)
+    sample_indices = sample_weighted_chunk_indices(total_chapters, sample_ratio, min_samples)
     genre_scores: dict[str, float] = {}
     for idx in sample_indices:
         _, text = chunk_texts[idx]

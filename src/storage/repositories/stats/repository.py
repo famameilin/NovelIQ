@@ -57,7 +57,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         prompt_tokens: int,
         total_tokens: int,
         completion_tokens: int | None = None,
-        chunk_id: int | None = None,
+        chapter_id: int | None = None,
         cache_read_tokens: int | None = None,
         cost: float | None = None,
         accounting_source: str = "reported",
@@ -75,7 +75,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
             prompt_tokens,
             total_tokens,
             completion_tokens,
-            chunk_id,
+            chapter_id,
             cache_read_tokens,
             cost,
             accounting_source,
@@ -149,6 +149,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== summaries 模块方法 ====================
 
-    def insert_chunk_summary(self, run_id: str, chunk_id: int, summary: str, *, commit: bool = True) -> None:
+    def insert_chapter_summary(self, run_id: str, chapter_id: int, summary: str, *, commit: bool = True) -> None:
         """插入分块摘要"""
-        return summaries.insert_chunk_summary(self.session, run_id, chunk_id, summary, commit=commit)
+        return summaries.insert_chapter_summary(self.session, run_id, chapter_id, summary, commit=commit)

@@ -33,8 +33,8 @@ class EntitySnapshotRow:
     entity_type: str
     tags: list[str]
     attributes: dict[str, Any]
-    first_seen_chunk: int
-    last_seen_chunk: int
+    first_seen_chapter: int
+    last_seen_chapter: int
     state_revision: int
     state: dict[str, Any]
 
@@ -58,8 +58,8 @@ class RelationSnapshotRow:
     attributes: dict[str, Any]
     is_active: bool
     changes: list[dict[str, Any]]
-    first_seen_chunk: int
-    last_seen_chunk: int
+    first_seen_chapter: int
+    last_seen_chapter: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +73,7 @@ class GraphChangeRow:
     chapter_order: int
     fact_id: str
     fact_revision: int
-    effective_chunk_id: int
+    effective_chapter_id: int
     confidence: str
     changes: list[dict[str, Any]]
     entity_id: int | None = None
@@ -179,7 +179,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             select(GraphEntity)
             .where(
                 GraphEntity.run_id == boundary.run_id,
-                GraphEntity.first_seen_chunk <= boundary.last_chunk_id,
+                GraphEntity.first_seen_chapter <= boundary.last_chapter_id,
             )
             .order_by(GraphEntity.entity_id)
         ).scalars()
@@ -190,8 +190,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                 entity_type=str(entity.entity_type),
                 tags=list(entity.tags or []),
                 attributes=dict(entity.attributes or {}),
-                first_seen_chunk=int(entity.first_seen_chunk),
-                last_seen_chunk=min(int(entity.last_seen_chunk), int(boundary.last_chunk_id)),
+                first_seen_chapter=int(entity.first_seen_chapter),
+                last_seen_chapter=min(int(entity.last_seen_chapter), int(boundary.last_chapter_id)),
                 state_revision=(
                     int(latest_states[entity.entity_id].state_revision)
                     if entity.entity_id in latest_states
@@ -242,11 +242,11 @@ class GraphRepository(BaseRepository[GraphFact]):
             ).scalars()
         }
         first_seen_by_relation = {
-            str(row.relation_id): int(row.first_seen_chunk)
+            str(row.relation_id): int(row.first_seen_chapter)
             for row in self.session.execute(
                 select(
                     GraphRelationVersion.relation_id,
-                    func.min(GraphVersion.first_chunk_id).label("first_seen_chunk"),
+                    func.min(GraphVersion.first_chapter_id).label("first_seen_chapter"),
                 )
                 .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
                 .where(
@@ -277,8 +277,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                     attributes=dict(version.attributes),
                     is_active=bool(version.is_active),
                     changes=list(version.changes),
-                    first_seen_chunk=first_seen_by_relation[str(relation.relation_id)],
-                    last_seen_chunk=int(graph_version.last_chunk_id),
+                    first_seen_chapter=first_seen_by_relation[str(relation.relation_id)],
+                    last_seen_chapter=int(graph_version.last_chapter_id),
                 )
             )
         return rows
@@ -489,7 +489,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             enriched_rows AS (
                 SELECT
                     cause_rows.*,
-                    fact.effective_chunk_id,
+                    fact.effective_chapter_id,
                     fact.confidence
                 FROM cause_rows
                 LEFT JOIN graph_facts AS fact
@@ -531,7 +531,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         for result in result_rows:
             if result["change_id"] is None:
                 continue
-            if result["effective_chunk_id"] is None:
+            if result["effective_chapter_id"] is None:
                 reference = (str(result["fact_id"]), int(result["fact_revision"]))
                 raise ValueError(f"图变化引用了不存在的事实版本: {reference}")
             rows.append(
@@ -543,7 +543,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     chapter_order=int(result["chapter_order"]),
                     fact_id=str(result["fact_id"]),
                     fact_revision=int(result["fact_revision"]),
-                    effective_chunk_id=int(result["effective_chunk_id"]),
+                    effective_chapter_id=int(result["effective_chapter_id"]),
                     confidence=str(result["confidence"]),
                     changes=list(result["changes"]),
                     entity_id=int(result["entity_id"]) if result["entity_id"] is not None else None,
@@ -646,7 +646,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         )
         for version, relation, graph_version in self.session.execute(statement).all():
             relation_id = str(relation.relation_id)
-            first_seen_by_relation.setdefault(relation_id, int(graph_version.first_chunk_id))
+            first_seen_by_relation.setdefault(relation_id, int(graph_version.first_chapter_id))
             rows.append(
                 RelationSnapshotRow(
                     relation_version_id=int(version.relation_version_id),
@@ -664,8 +664,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                     attributes=dict(version.attributes),
                     is_active=bool(version.is_active),
                     changes=list(version.changes),
-                    first_seen_chunk=first_seen_by_relation[relation_id],
-                    last_seen_chunk=int(graph_version.last_chunk_id),
+                    first_seen_chapter=first_seen_by_relation[relation_id],
+                    last_seen_chapter=int(graph_version.last_chapter_id),
                 )
             )
         return rows

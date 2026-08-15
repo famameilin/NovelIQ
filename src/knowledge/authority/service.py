@@ -89,8 +89,8 @@ class KnowledgeGraphAuthorityService:
                     entity_id=entity.entity_id,
                     name=entity.name,
                     entity_type=entity.entity_type,
-                    first_seen_chunk=entity.first_seen_chunk,
-                    last_seen_chunk=entity.last_seen_chunk,
+                    first_seen_chapter=entity.first_seen_chapter,
+                    last_seen_chapter=entity.last_seen_chapter,
                     status=str(entity.state.get("status") or "active"),
                 )
                 for entity in characters
@@ -114,12 +114,12 @@ class KnowledgeGraphAuthorityService:
                 role=str(entity.state.get("role_function") or "") or None,
                 entity_type=entity.entity_type,
                 status=str(entity.state.get("status") or "active"),
-                last_seen_chunk=entity.last_seen_chunk,
+                last_seen_chapter=entity.last_seen_chapter,
                 recent_action=str(entity.state.get("action") or "") or None,
                 recent_emotion=str(entity.state.get("emotion") or "") or None,
             )
             for entity in self._graph_repo.fetch_latest_entities(run_id)
-            if minimum_chunk <= entity.last_seen_chunk <= current_chunk
+            if minimum_chunk <= entity.last_seen_chapter <= current_chunk
         ]
 
     def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
@@ -238,8 +238,8 @@ class KnowledgeGraphAuthorityService:
                     name=entity.name,
                     entity_type=entity.entity_type,
                     entity_id=entity.entity_id,
-                    first_seen_chunk=entity.first_seen_chunk,
-                    last_seen_chunk=entity.last_seen_chunk,
+                    first_seen_chapter=entity.first_seen_chapter,
+                    last_seen_chapter=entity.last_seen_chapter,
                     primary_role_function=str(entity.state.get("role_function") or "") or None,
                     status=str(entity.state.get("status") or "active"),
                     source_confidence=None,
@@ -289,8 +289,8 @@ class KnowledgeGraphAuthorityService:
                     from_entity_id=from_entity_id,
                     to_entity_id=to_entity_id,
                     is_active=relation.is_active,
-                    first_seen_chunk=relation.first_seen_chunk,
-                    last_seen_chunk=relation.last_seen_chunk,
+                    first_seen_chapter=relation.first_seen_chapter,
+                    last_seen_chapter=relation.last_seen_chapter,
                     change_count=len(relation.changes),
                     support_count=int(relation.attributes.get("support_count", 1)),
                     latest_relation_version_id=relation.relation_version_id,
@@ -310,8 +310,8 @@ class KnowledgeGraphAuthorityService:
                 from_name=relation.from_name,
                 to_name=relation.to_name,
                 relation_type=relation.relation_type,
-                first_seen_chunk=relation.first_seen_chunk,
-                last_seen_chunk=relation.last_seen_chunk,
+                first_seen_chapter=relation.first_seen_chapter,
+                last_seen_chapter=relation.last_seen_chapter,
                 relation_version_id=relation.relation_version_id,
                 is_active=relation.is_active,
             )
@@ -332,7 +332,7 @@ class KnowledgeGraphAuthorityService:
                 chapter_order=row.chapter_order,
                 fact_id=row.fact_id,
                 fact_revision=row.fact_revision,
-                effective_chunk_id=row.effective_chunk_id,
+                effective_chapter_id=row.effective_chapter_id,
                 confidence=row.confidence,
                 changes=list(row.changes),
                 entity_id=row.entity_id,
@@ -365,8 +365,8 @@ class KnowledgeGraphAuthorityService:
                 entity_type=entity.entity_type,
                 status=str(entity.state.get("status") or "active"),
                 primary_role_function=str(entity.state.get("role_function") or "") or None,
-                first_seen_chunk=entity.first_seen_chunk,
-                last_seen_chunk=entity.last_seen_chunk,
+                first_seen_chapter=entity.first_seen_chapter,
+                last_seen_chapter=entity.last_seen_chapter,
                 source_confidence=None,
                 is_representative=(
                     resolution is None

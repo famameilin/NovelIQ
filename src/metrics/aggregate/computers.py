@@ -66,11 +66,11 @@ class _AlignedNarrativeStructureInputs:
     """
     创建时间: 2026-05-02
     任务: three-act-structure-v2-cleanup
-    新建原因: 三幕结构 v2 需要把 annotation 与 tension 按 chunk_id 对齐，
+    新建原因: 三幕结构 v2 需要把 annotation 与 tension 按 chapter_id 对齐，
               不能继续默认两条序列在过滤空值后仍然天然同位。
     """
 
-    chunk_ids: list[int]
+    chapter_ids: list[int]
     event_types: list[str]
     cliffhangers: list[int]
     pivot_moments: list[int]
@@ -81,34 +81,34 @@ def _align_narrative_structure_inputs(
     annotation_data: AnnotationData,
     tension_data: TensionData,
 ) -> _AlignedNarrativeStructureInputs:
-    tension_by_chunk_id: dict[int, float] = {}
-    for chunk_id, tension_score in zip(
-        tension_data.chunk_ids,
+    tension_by_chapter_id: dict[int, float] = {}
+    for chapter_id, tension_score in zip(
+        tension_data.chapter_ids,
         tension_data.tension_composite_scores,
         strict=True,
     ):
-        if tension_score is None or chunk_id in tension_by_chunk_id:
+        if tension_score is None or chapter_id in tension_by_chapter_id:
             continue
-        tension_by_chunk_id[chunk_id] = float(tension_score)
+        tension_by_chapter_id[chapter_id] = float(tension_score)
 
-    aligned_chunk_ids: list[int] = []
+    aligned_chapter_ids: list[int] = []
     aligned_event_types: list[str] = []
     aligned_cliffhangers: list[int] = []
     aligned_pivot_moments: list[int] = []
     aligned_tension_scores: list[float] = []
 
-    for index, chunk_id in enumerate(annotation_data.chunk_ids):
-        tension_score = tension_by_chunk_id.get(chunk_id)
+    for index, chapter_id in enumerate(annotation_data.chapter_ids):
+        tension_score = tension_by_chapter_id.get(chapter_id)
         if tension_score is None:
             continue
-        aligned_chunk_ids.append(chunk_id)
+        aligned_chapter_ids.append(chapter_id)
         aligned_event_types.append(annotation_data.event_types[index])
         aligned_cliffhangers.append(annotation_data.cliffhangers[index])
         aligned_pivot_moments.append(annotation_data.pivot_moments[index])
         aligned_tension_scores.append(tension_score)
 
     return _AlignedNarrativeStructureInputs(
-        chunk_ids=aligned_chunk_ids,
+        chapter_ids=aligned_chapter_ids,
         event_types=aligned_event_types,
         cliffhangers=aligned_cliffhangers,
         pivot_moments=aligned_pivot_moments,
@@ -160,9 +160,9 @@ def compute_narrative_structure_metrics(
         )
     return {
         **diagnostics.ratio_dict(),
-        "climax_spacing": compute_climax_spacing(aligned_inputs.chunk_ids, aligned_inputs.tension_scores),
+        "climax_spacing": compute_climax_spacing(aligned_inputs.chapter_ids, aligned_inputs.tension_scores),
         "middle_collapse_index": compute_middle_collapse_index(
-            aligned_inputs.chunk_ids,
+            aligned_inputs.chapter_ids,
             aligned_inputs.tension_scores,
         ),
         "cliffhanger_rate": compute_cliffhanger_rate(aligned_inputs.cliffhangers),

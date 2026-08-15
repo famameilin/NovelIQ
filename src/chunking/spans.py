@@ -9,7 +9,7 @@
 - paragraph_index 是该段落单元在 chunk（章）内的顺序号
 - paragraph_id 是段落单元在整个 run 内的稳定身份（run 内按全文顺序连续）
 
-chunk 相关字段（chunk_id/chapter_id/global 坐标/paragraph_id）由
+chunk 相关字段（chapter_id/global 坐标/paragraph_id）由
 chunker.split_chunk_paragraphs 填充；直接调用 chunker.split_paragraphs 时这些
 字段为 None，表示尚未归属到 chunk 上下文。
 """
@@ -39,7 +39,6 @@ class ParagraphSpan:
     text: str
     # 以下字段由 split_chunk_paragraphs 填充；split_paragraphs 直接输出时为 None
     paragraph_id: int | None = None
-    chunk_id: int | None = None
     chapter_id: int | None = None
     global_start_char: int | None = None
     global_end_char: int | None = None

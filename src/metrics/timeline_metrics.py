@@ -76,7 +76,7 @@ class GraphChangeDTO:
     chapter_id: int
     fact_id: str
     fact_revision: int
-    effective_chunk_id: int
+    effective_chapter_id: int
     changes: list[dict[str, Any]]
     entity_id: int | None = None
     entity_name: str | None = None
@@ -123,7 +123,7 @@ class TimelineNodeDTO:
     """时间轴节点 DTO"""
 
     node_id: str
-    anchor_chunk_id: int
+    anchor_chapter_id: int
     progress: float
     importance_score: float
     level: ImportanceLevel
@@ -144,9 +144,9 @@ class TimelineCompositeNodeDTO:
     """时间轴复合节点 DTO"""
 
     node_id: str
-    anchor_chunk_id: int
-    start_chunk_id: int
-    end_chunk_id: int
+    anchor_chapter_id: int
+    start_chapter_id: int
+    end_chapter_id: int
     progress: float
     start_progress: float
     end_progress: float
@@ -175,7 +175,7 @@ class NarrativePhase:
 class TimelineAnnotationSnapshot:
     """时间轴候选节点使用的轻量标注快照"""
 
-    chunk_id: int
+    chapter_id: int
     event_type: str
     cliffhanger: bool
     pivot_moment: bool
@@ -195,10 +195,10 @@ class TimelineAuthorityData:
 class TimelineSourceData:
     """时间轴候选构建所需的数据上下文"""
 
-    chunk_texts: list[tuple[int, str]]
-    chunk_ids: list[int]
-    chunk_id_to_idx: dict[int, int]
-    total_chunks: int
+    chapter_texts: list[tuple[int, str]]
+    chapter_ids: list[int]
+    chapter_id_to_idx: dict[int, int]
+    total_chapters: int
     tension_scores: list[float]
     summary_map: dict[int, str]
     annotation_map: dict[int, TimelineAnnotationSnapshot]
@@ -210,7 +210,7 @@ class TimelinePlanBuildResult:
 
     atomic_nodes: list[TimelineNodeDTO]
     composite_nodes: list[TimelineCompositeNodeDTO]
-    total_chunks: int
+    total_chapters: int
     phases: list[TimelinePhaseDTO]
     tension_curve: list[float]
 
@@ -219,7 +219,7 @@ class TimelinePlanBuildResult:
 class PlotAtom:
     """剧情原子信号"""
 
-    anchor_chunk_id: int
+    anchor_chapter_id: int
     progress: float
     summary: str
     phase_name: TimelinePhaseName
@@ -236,7 +236,7 @@ class PlotAtom:
 class RelationAtom:
     """关系变化原子信号"""
 
-    anchor_chunk_id: int
+    anchor_chapter_id: int
     progress: float
     phase_name: TimelinePhaseName
     graph_change: GraphChangeDTO
@@ -249,7 +249,7 @@ class RelationAtom:
 class StateAtom:
     """2026-08-07 用于承载实体状态章节变化原子信号"""
 
-    anchor_chunk_id: int
+    anchor_chapter_id: int
     progress: float
     phase_name: TimelinePhaseName
     graph_change: GraphChangeDTO
@@ -260,7 +260,7 @@ class StateAtom:
 class LifecycleAtom:
     """角色生命周期原子信号"""
 
-    anchor_chunk_id: int
+    anchor_chapter_id: int
     progress: float
     phase_name: TimelinePhaseName
     lifecycle_event: LifecycleEventDTO
@@ -291,7 +291,7 @@ def calculate_tension_percentile(
 
 def compute_four_phases(
     tension_scores: list[float],
-    chunk_ids: list[int],
+    chapter_ids: list[int],
 ) -> list[NarrativePhase]:
     """
     计算四阶段划分（多峰模型）
@@ -299,7 +299,7 @@ def compute_four_phases(
     基于 Freytag 金字塔理论 + 网络小说多波次叠加结构，使用局部峰值
     检测确定高潮位置，而非单一全局峰值
     """
-    if not tension_scores or not chunk_ids:
+    if not tension_scores or not chapter_ids:
         return []
 
     total = len(tension_scores)
@@ -310,31 +310,31 @@ def compute_four_phases(
         boundary_2 = max(boundary_1 + 1, min(int(total * 0.50), total - 2))
         boundary_3 = max(boundary_2 + 1, min(int(total * 0.80), total - 2))
         if total < 5:
-            # 2026-08-13 极端短输入（1~4 chunk）时 boundary 计算会越界
-            # （收束期取 chunk_ids[boundary_3 + 1]），单相位兜底避免时间轴 500
+            # 2026-08-13 极端短输入（1~4 章节）时 boundary 计算会越界
+            # （收束期取 chapter_ids[boundary_3 + 1]），单相位兜底避免时间轴 500
             return [
                 NarrativePhase(
                     "引入期",
-                    chunk_ids[0],
-                    chunk_ids[-1],
+                    chapter_ids[0],
+                    chapter_ids[-1],
                     1.0,
                 )
             ]
         return [
-            NarrativePhase("引入期", chunk_ids[0], chunk_ids[boundary_1], (boundary_1 + 1) / total),
+            NarrativePhase("引入期", chapter_ids[0], chapter_ids[boundary_1], (boundary_1 + 1) / total),
             NarrativePhase(
                 "发展期",
-                chunk_ids[boundary_1 + 1],
-                chunk_ids[boundary_2],
+                chapter_ids[boundary_1 + 1],
+                chapter_ids[boundary_2],
                 (boundary_2 - boundary_1) / total,
             ),
             NarrativePhase(
                 "高潮期",
-                chunk_ids[boundary_2 + 1],
-                chunk_ids[boundary_3],
+                chapter_ids[boundary_2 + 1],
+                chapter_ids[boundary_3],
                 (boundary_3 - boundary_2) / total,
             ),
-            NarrativePhase("收束期", chunk_ids[boundary_3 + 1], chunk_ids[-1], (total - boundary_3 - 1) / total),
+            NarrativePhase("收束期", chapter_ids[boundary_3 + 1], chapter_ids[-1], (total - boundary_3 - 1) / total),
         ]
 
     local_peaks = find_local_peaks(tension_scores, total)
@@ -361,9 +361,9 @@ def compute_four_phases(
     climax_start = max(valley_idx + min_phase_length, peak_idx - climax_radius)
     climax_end = min(total - 1 - min_phase_length, peak_idx + climax_radius)
 
-    # 2026-08-13 修复：峰值贴边（张力单调递减/平曲线时 global peak 落在首 chunk，
-    # 或峰值落在末 chunk 邻域）会产出 climax_start > climax_end 的倒置高潮期，
-    # 负 ratio 直接序列化给前端、区间内 chunk 全被误归收束期。
+    # 2026-08-13 修复：峰值贴边（张力单调递减/平曲线时 global peak 落在首 章节，
+    # 或峰值落在末 章节 邻域）会产出 climax_start > climax_end 的倒置高潮期，
+    # 负 ratio 直接序列化给前端、区间内 章节 全被误归收束期。
     # 倒置时把高潮期钳制为谷底之后的合法单点区间。
     if climax_start > climax_end:
         climax_start = min(valley_idx + min_phase_length, total - 1)
@@ -373,7 +373,7 @@ def compute_four_phases(
     valley_idx = max(valley_idx, min_phase_length)
 
     phases: list[NarrativePhase] = []
-    phases.append(NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total))
+    phases.append(NarrativePhase("引入期", chapter_ids[0], chapter_ids[valley_idx], (valley_idx + 1) / total))
 
     dev_start_idx = valley_idx + 1
     dev_end_idx = climax_start - 1
@@ -381,19 +381,19 @@ def compute_four_phases(
         phases.append(
             NarrativePhase(
                 "发展期",
-                chunk_ids[dev_start_idx],
-                chunk_ids[dev_end_idx],
+                chapter_ids[dev_start_idx],
+                chapter_ids[dev_end_idx],
                 (dev_end_idx - dev_start_idx + 1) / total,
             )
         )
     else:
-        phases.append(NarrativePhase("发展期", chunk_ids[valley_idx], chunk_ids[valley_idx], 0.0))
+        phases.append(NarrativePhase("发展期", chapter_ids[valley_idx], chapter_ids[valley_idx], 0.0))
 
     phases.append(
         NarrativePhase(
             "高潮期",
-            chunk_ids[climax_start],
-            chunk_ids[climax_end],
+            chapter_ids[climax_start],
+            chapter_ids[climax_end],
             (climax_end - climax_start + 1) / total,
         )
     )
@@ -402,20 +402,20 @@ def compute_four_phases(
         phases.append(
             NarrativePhase(
                 "收束期",
-                chunk_ids[climax_end + 1],
-                chunk_ids[-1],
+                chapter_ids[climax_end + 1],
+                chapter_ids[-1],
                 (total - climax_end - 1) / total,
             )
         )
     else:
         # 2026-08-13 修复：高潮期贴尾时此前收束期退化为 [climax_end..climax_end] 的
-        # 0.0 空区间，真正的尾部 chunk（含峰值末章）不入任何阶段、ratio 总和 < 1。
+        # 0.0 空区间，真正的尾部 章节（含峰值末章）不入任何阶段、ratio 总和 < 1。
         # climax_end <= total-2（min_phase_length=1），故此处区间恒非空且不重叠。
         phases.append(
             NarrativePhase(
                 "收束期",
-                chunk_ids[climax_end + 1],
-                chunk_ids[-1],
+                chapter_ids[climax_end + 1],
+                chapter_ids[-1],
                 (total - climax_end - 1) / total,
             )
         )
@@ -570,13 +570,13 @@ def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> Time
 def _load_chapter_tension_scores(
     stats_repo: Any,
     run_id: str,
-    chunk_ids: list[int],
+    chapter_ids: list[int],
 ) -> list[float]:
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    rows = ParagraphRepository(stats_repo.session).fetch_chunk_tension_scores(run_id)
-    tension_by_chunk = dict(rows)
-    return [tension_by_chunk.get(chunk_id, 0.5) for chunk_id in chunk_ids]
+    rows = ParagraphRepository(stats_repo.session).fetch_chapter_tension_scores(run_id)
+    tension_by_chapter = dict(rows)
+    return [tension_by_chapter.get(chapter_id, 0.5) for chapter_id in chapter_ids]
 
 
 # 2026-04-27，任务：时间轴合同重构
@@ -587,8 +587,8 @@ def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, Time
 
     annotation_map: dict[int, TimelineAnnotationSnapshot] = {}
     for row in raw_annotations:
-        annotation_map[row.chunk_id] = TimelineAnnotationSnapshot(
-            chunk_id=row.chunk_id,
+        annotation_map[row.chapter_id] = TimelineAnnotationSnapshot(
+            chapter_id=row.chapter_id,
             event_type=row.event_type if row.event_type else "",
             cliffhanger=row.cliffhanger if row.cliffhanger is not None else False,
             pivot_moment=row.pivot_moment if row.pivot_moment is not None else False,
@@ -598,39 +598,39 @@ def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, Time
 
 
 # 2026-04-27，任务：时间轴合同重构
-    # 统一装载 chunk / summary / annotation / tension 输入，避免 timeline 新引擎继续散落访问 repository
+    # 统一装载 章节 / summary / annotation / tension 输入，避免 timeline 新引擎继续散落访问 repository
 def _load_timeline_source_data(
     run_id: str,
-    chunk_repo: Any,
+    chapter_repo: Any,
     annotation_repo: Any,
     stats_repo: Any,
 ) -> TimelineSourceData:
-    chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
-    if not chunk_texts:
-        raise TimelineDataUnavailableError(f"No chunks found for run {run_id}")
+    chapter_texts = chapter_repo.fetch_chapter_texts(run_id)
+    if not chapter_texts:
+        raise TimelineDataUnavailableError(f"No chapters found for run {run_id}")
 
-    chunk_ids = [chunk_id for chunk_id, _ in chunk_texts]
-    total_chunks = len(chunk_ids)
-    chunk_id_to_idx = {chunk_id: idx for idx, chunk_id in enumerate(chunk_ids)}
+    chapter_ids = [chapter_id for chapter_id, _ in chapter_texts]
+    total_chapters = len(chapter_ids)
+    chapter_id_to_idx = {chapter_id: idx for idx, chapter_id in enumerate(chapter_ids)}
 
-    tension_scores = _load_chapter_tension_scores(stats_repo, run_id, chunk_ids)
-    summary_map = {row.chunk_id: row.summary for row in chunk_repo.fetch_chunk_summaries(run_id)}
-    annotation_map = _build_timeline_annotation_map(annotation_repo.fetch_chunk_annotations_full(run_id))
+    tension_scores = _load_chapter_tension_scores(stats_repo, run_id, chapter_ids)
+    summary_map = {row.chapter_id: row.summary for row in chapter_repo.fetch_chapter_summaries(run_id)}
+    annotation_map = _build_timeline_annotation_map(annotation_repo.fetch_chapter_annotations_full(run_id))
 
     return TimelineSourceData(
-        chunk_texts=chunk_texts,
-        chunk_ids=chunk_ids,
-        chunk_id_to_idx=chunk_id_to_idx,
-        total_chunks=total_chunks,
+        chapter_texts=chapter_texts,
+        chapter_ids=chapter_ids,
+        chapter_id_to_idx=chapter_id_to_idx,
+        total_chapters=total_chapters,
         tension_scores=tension_scores,
         summary_map=summary_map,
         annotation_map=annotation_map,
     )
 
 
-def _resolve_phase_name(chunk_id: int, phases: list[TimelinePhaseDTO]) -> TimelinePhaseName:
+def _resolve_phase_name(chapter_id: int, phases: list[TimelinePhaseDTO]) -> TimelinePhaseName:
     for phase in phases:
-        if phase.start <= chunk_id <= phase.end:
+        if phase.start <= chapter_id <= phase.end:
             return phase.name
     return phases[-1].name if phases else "引入期"
 
@@ -653,10 +653,14 @@ def _build_character_importance_map(
     for lifecycle in authority_data.entity_lifecycles:
         if lifecycle.entity_id is None:
             continue
-        first_seen_chunk = lifecycle.first_seen_chunk if lifecycle.first_seen_chunk is not None else 0
-        last_seen_chunk = lifecycle.last_seen_chunk if lifecycle.last_seen_chunk is not None else first_seen_chunk
-        span = max(last_seen_chunk - first_seen_chunk + 1, 1)
-        span_score = span / max(source_data.total_chunks, 1) * 3.0
+        first_seen_chapter = lifecycle.first_seen_chapter if lifecycle.first_seen_chapter is not None else 0
+        last_seen_chapter = (
+            lifecycle.last_seen_chapter
+            if lifecycle.last_seen_chapter is not None
+            else first_seen_chapter
+        )
+        span = max(last_seen_chapter - first_seen_chapter + 1, 1)
+        span_score = span / max(source_data.total_chapters, 1) * 3.0
         degree_score = len(relation_counterpart_map.get(lifecycle.entity_id, set())) * 0.6
         relation_change_score = relation_change_count_map.get(lifecycle.entity_id, 0) * 0.35
         importance_map[lifecycle.entity_id] = round(span_score + degree_score + relation_change_score, 2)
@@ -666,22 +670,22 @@ def _build_character_importance_map(
 
 # 2026-04-27，任务：时间轴合同重构
 # 新建原因：plot / state / relation / lifecycle 的选择逻辑完全不同，先拆成原子信号，
-    # 再进入统一节点规划层，避免再次退回 “每个 chunk 一个节点” 的旧模型
+    # 再进入统一节点规划层，避免再次退回 “每个 章节 一个节点” 的旧模型
 def build_timeline_atoms(
     source_data: TimelineSourceData,
     authority_data: TimelineAuthorityData,
     phases: list[TimelinePhaseDTO],
 ) -> tuple[list[PlotAtom], list[StateAtom], list[RelationAtom], list[LifecycleAtom]]:
-    phase_names_by_chunk = {
-        chunk_id: _resolve_phase_name(chunk_id, phases)
-        for chunk_id in source_data.chunk_ids
+    phase_names_by_chapter = {
+        chapter_id: _resolve_phase_name(chapter_id, phases)
+        for chapter_id in source_data.chapter_ids
     }
     character_importance_map = _build_character_importance_map(source_data, authority_data)
 
     plot_atoms: list[PlotAtom] = []
-    for index, (chunk_id, text) in enumerate(source_data.chunk_texts):
-        annotation = source_data.annotation_map.get(chunk_id)
-        summary = source_data.summary_map.get(chunk_id, "")
+    for index, (chapter_id, text) in enumerate(source_data.chapter_texts):
+        annotation = source_data.annotation_map.get(chapter_id)
+        summary = source_data.summary_map.get(chapter_id, "")
         if not summary:
             summary = text[:30] + "..." if len(text) > 30 else text
 
@@ -689,15 +693,15 @@ def build_timeline_atoms(
             {
                 lifecycle.name
                 for lifecycle in authority_data.entity_lifecycles
-                if lifecycle.first_seen_chunk == chunk_id or lifecycle.last_seen_chunk == chunk_id
+                if lifecycle.first_seen_chapter == chapter_id or lifecycle.last_seen_chapter == chapter_id
             }
         )
         plot_atoms.append(
             PlotAtom(
-                anchor_chunk_id=chunk_id,
-                progress=index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
+                anchor_chapter_id=chapter_id,
+                progress=index / (source_data.total_chapters - 1) if source_data.total_chapters > 1 else 0.0,
                 summary=summary,
-                phase_name=phase_names_by_chunk[chunk_id],
+                phase_name=phase_names_by_chapter[chapter_id],
                 characters=characters,
                 event_type=annotation.event_type if annotation else "",
                 emotional_valence=annotation.emotional_valence if annotation else "",
@@ -715,8 +719,8 @@ def build_timeline_atoms(
     for graph_change in authority_data.graph_changes:
         if graph_change.change_kind != "state":
             continue
-        chunk_index = source_data.chunk_id_to_idx.get(graph_change.effective_chunk_id)
-        if chunk_index is None:
+        chapter_index = source_data.chapter_id_to_idx.get(graph_change.effective_chapter_id)
+        if chapter_index is None:
             continue
         entity_name = graph_change.entity_name or authority_data.entity_name_map.get(
             graph_change.entity_id,
@@ -724,9 +728,9 @@ def build_timeline_atoms(
         )
         state_atoms.append(
             StateAtom(
-                anchor_chunk_id=graph_change.effective_chunk_id,
-                progress=chunk_index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
-                phase_name=phase_names_by_chunk.get(graph_change.effective_chunk_id, "引入期"),
+                anchor_chapter_id=graph_change.effective_chapter_id,
+                progress=chapter_index / (source_data.total_chapters - 1) if source_data.total_chapters > 1 else 0.0,
+                phase_name=phase_names_by_chapter.get(graph_change.effective_chapter_id, "引入期"),
                 graph_change=GraphChangeDTO(
                     change_id=graph_change.change_id,
                     change_kind="state",
@@ -734,7 +738,7 @@ def build_timeline_atoms(
                     chapter_id=graph_change.chapter_id,
                     fact_id=graph_change.fact_id,
                     fact_revision=graph_change.fact_revision,
-                    effective_chunk_id=graph_change.effective_chunk_id,
+                    effective_chapter_id=graph_change.effective_chapter_id,
                     changes=list(graph_change.changes),
                     entity_id=graph_change.entity_id,
                     entity_name=entity_name,
@@ -747,7 +751,7 @@ def build_timeline_atoms(
     for graph_change in authority_data.graph_changes:
         if graph_change.change_kind != "relation":
             continue
-        phase_name = phase_names_by_chunk.get(graph_change.effective_chunk_id, "引入期")
+        phase_name = phase_names_by_chapter.get(graph_change.effective_chapter_id, "引入期")
         relation_phase_counts[phase_name] = relation_phase_counts.get(phase_name, 0) + 1
 
     max_phase_relation_count = max(relation_phase_counts.values(), default=1)
@@ -755,10 +759,10 @@ def build_timeline_atoms(
     for graph_change in authority_data.graph_changes:
         if graph_change.change_kind != "relation":
             continue
-        chunk_index = source_data.chunk_id_to_idx.get(graph_change.effective_chunk_id)
-        if chunk_index is None:
+        chapter_index = source_data.chapter_id_to_idx.get(graph_change.effective_chapter_id)
+        if chapter_index is None:
             continue
-        phase_name = phase_names_by_chunk.get(graph_change.effective_chunk_id, "引入期")
+        phase_name = phase_names_by_chapter.get(graph_change.effective_chapter_id, "引入期")
         from_name = authority_data.entity_name_map.get(
             graph_change.from_entity_id,
             graph_change.from_name or str(graph_change.from_entity_id),
@@ -780,7 +784,7 @@ def build_timeline_atoms(
             chapter_id=graph_change.chapter_id,
             fact_id=graph_change.fact_id,
             fact_revision=graph_change.fact_revision,
-            effective_chunk_id=graph_change.effective_chunk_id,
+            effective_chapter_id=graph_change.effective_chapter_id,
             changes=list(graph_change.changes),
             relation_id=graph_change.relation_id,
             relation_version_id=graph_change.relation_version_id,
@@ -804,8 +808,8 @@ def build_timeline_atoms(
         )
         relation_atoms.append(
             RelationAtom(
-                anchor_chunk_id=graph_change.effective_chunk_id,
-                progress=chunk_index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
+                anchor_chapter_id=graph_change.effective_chapter_id,
+                progress=chapter_index / (source_data.total_chapters - 1) if source_data.total_chapters > 1 else 0.0,
                 phase_name=phase_name,
                 graph_change=graph_change_dto,
                 characters=sorted({from_name, to_name}),
@@ -818,16 +822,17 @@ def build_timeline_atoms(
     for lifecycle in authority_data.entity_lifecycles:
         if lifecycle.entity_id is None:
             continue
-        if lifecycle.first_seen_chunk is not None:
+        if lifecycle.first_seen_chapter is not None:
             lifecycle_atoms.append(
                 LifecycleAtom(
-                    anchor_chunk_id=lifecycle.first_seen_chunk,
+                    anchor_chapter_id=lifecycle.first_seen_chapter,
                     progress=(
-                        source_data.chunk_id_to_idx.get(lifecycle.first_seen_chunk, 0) / (source_data.total_chunks - 1)
-                        if source_data.total_chunks > 1
+                        source_data.chapter_id_to_idx.get(lifecycle.first_seen_chapter, 0)
+                        / (source_data.total_chapters - 1)
+                        if source_data.total_chapters > 1
                         else 0.0
                     ),
-                    phase_name=phase_names_by_chunk.get(lifecycle.first_seen_chunk, "引入期"),
+                    phase_name=phase_names_by_chapter.get(lifecycle.first_seen_chapter, "引入期"),
                     lifecycle_event=LifecycleEventDTO(
                         entity_id=lifecycle.entity_id,
                         character_name=lifecycle.name,
@@ -836,16 +841,17 @@ def build_timeline_atoms(
                     character_importance=character_importance_map.get(lifecycle.entity_id, 0.0),
                 )
             )
-        if lifecycle.last_seen_chunk is not None:
+        if lifecycle.last_seen_chapter is not None:
             lifecycle_atoms.append(
                 LifecycleAtom(
-                    anchor_chunk_id=lifecycle.last_seen_chunk,
+                    anchor_chapter_id=lifecycle.last_seen_chapter,
                     progress=(
-                        source_data.chunk_id_to_idx.get(lifecycle.last_seen_chunk, 0) / (source_data.total_chunks - 1)
-                        if source_data.total_chunks > 1
+                        source_data.chapter_id_to_idx.get(lifecycle.last_seen_chapter, 0)
+                        / (source_data.total_chapters - 1)
+                        if source_data.total_chapters > 1
                         else 0.0
                     ),
-                    phase_name=phase_names_by_chunk.get(lifecycle.last_seen_chunk, "收束期"),
+                    phase_name=phase_names_by_chapter.get(lifecycle.last_seen_chapter, "收束期"),
                     lifecycle_event=LifecycleEventDTO(
                         entity_id=lifecycle.entity_id,
                         character_name=lifecycle.name,
@@ -894,7 +900,7 @@ def _build_lifecycle_score_breakdown(atom: LifecycleAtom) -> dict[str, float]:
 
 # 2026-04-27，任务：时间轴合同重构
 # 新建原因：节点规划层负责把不同 atom 映射为统一节点 DTO，并显式生成稳定 node_id，
-    # 让 route / export / frontend 全部摆脱 chunk_id 唯一节点假设
+    # 让 route / export / frontend 全部摆脱 chapter_id 唯一节点假设
 def compose_timeline_nodes(
     plot_atoms: list[PlotAtom],
     state_atoms: list[StateAtom],
@@ -908,8 +914,8 @@ def compose_timeline_nodes(
         importance_score, level = compute_importance_score(score_breakdown)
         nodes.append(
             TimelineNodeDTO(
-                node_id=f"plot:{atom.anchor_chunk_id}",
-                anchor_chunk_id=atom.anchor_chunk_id,
+                node_id=f"plot:{atom.anchor_chapter_id}",
+                anchor_chapter_id=atom.anchor_chapter_id,
                 progress=round(atom.progress, 4),
                 importance_score=importance_score,
                 level=level,
@@ -945,7 +951,7 @@ def compose_timeline_nodes(
         nodes.append(
             TimelineNodeDTO(
                 node_id=state_atom.graph_change.change_id,
-                anchor_chunk_id=state_atom.anchor_chunk_id,
+                anchor_chapter_id=state_atom.anchor_chapter_id,
                 progress=round(state_atom.progress, 4),
                 importance_score=importance_score,
                 level=level,
@@ -966,7 +972,7 @@ def compose_timeline_nodes(
         nodes.append(
             TimelineNodeDTO(
                 node_id=relation_atom.graph_change.change_id,
-                anchor_chunk_id=relation_atom.anchor_chunk_id,
+                anchor_chapter_id=relation_atom.anchor_chapter_id,
                 progress=round(relation_atom.progress, 4),
                 importance_score=importance_score,
                 level=level,
@@ -991,9 +997,9 @@ def compose_timeline_nodes(
             TimelineNodeDTO(
                 node_id=(
                     f"lifecycle:{lifecycle_type}:"
-                    f"{lifecycle_atom.lifecycle_event.entity_id}:{lifecycle_atom.anchor_chunk_id}"
+                    f"{lifecycle_atom.lifecycle_event.entity_id}:{lifecycle_atom.anchor_chapter_id}"
                 ),
-                anchor_chunk_id=lifecycle_atom.anchor_chunk_id,
+                anchor_chapter_id=lifecycle_atom.anchor_chapter_id,
                 progress=round(lifecycle_atom.progress, 4),
                 importance_score=importance_score,
                 level=level,
@@ -1028,7 +1034,7 @@ def _node_sort_key(node: TimelineNodeDTO) -> tuple[float, int, str]:
         "retract": 9,
         "exit": 10,
     }
-    return (node.progress, node.anchor_chunk_id, f"{subtype_rank.get(node.node_subtype, 9)}:{node.node_id}")
+    return (node.progress, node.anchor_chapter_id, f"{subtype_rank.get(node.node_subtype, 9)}:{node.node_id}")
 
 
 def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str, str] | None:
@@ -1103,7 +1109,7 @@ def _can_extend_relation_composite(group_nodes: list[TimelineNodeDTO], candidate
     last_node = group_nodes[-1]
     if candidate.phase_name != group_nodes[0].phase_name:
         return False
-    if candidate.anchor_chunk_id > last_node.anchor_chunk_id + 1:
+    if candidate.anchor_chapter_id > last_node.anchor_chapter_id + 1:
         return False
     group_signature = _relation_composite_signature(group_nodes[0])
     candidate_signature = _relation_composite_signature(candidate)
@@ -1127,7 +1133,7 @@ def _can_extend_plot_composite(group_nodes: list[TimelineNodeDTO], candidate: Ti
     last_node = group_nodes[-1]
     if candidate.phase_name != group_nodes[0].phase_name:
         return False
-    if candidate.anchor_chunk_id > last_node.anchor_chunk_id + 1:
+    if candidate.anchor_chapter_id > last_node.anchor_chapter_id + 1:
         return False
     if candidate.composite_group_hint != group_nodes[0].composite_group_hint:
         return False
@@ -1141,7 +1147,7 @@ def _select_representative_atomic_node(group_nodes: list[TimelineNodeDTO]) -> Ti
         group_nodes,
         key=lambda node: (
             node.importance_score,
-            -node.anchor_chunk_id,
+            -node.anchor_chapter_id,
             -node.progress,
         ),
     )
@@ -1152,20 +1158,20 @@ def _build_composite_node(
     ordinal: int,
 ) -> TimelineCompositeNodeDTO:
     representative_node = _select_representative_atomic_node(group_nodes)
-    start_chunk_id = min(node.anchor_chunk_id for node in group_nodes)
-    end_chunk_id = max(node.anchor_chunk_id for node in group_nodes)
+    start_chapter_id = min(node.anchor_chapter_id for node in group_nodes)
+    end_chapter_id = max(node.anchor_chapter_id for node in group_nodes)
     start_progress = min(node.progress for node in group_nodes)
     end_progress = max(node.progress for node in group_nodes)
     characters = _unique_preserving_order(
         [character for node in group_nodes for character in node.characters]
     )
     node_subtypes = _unique_preserving_order([node.node_subtype for node in group_nodes])
-    composite_node_id = f"composite:{representative_node.node_type}:{representative_node.anchor_chunk_id}:{ordinal}"
+    composite_node_id = f"composite:{representative_node.node_type}:{representative_node.anchor_chapter_id}:{ordinal}"
     return TimelineCompositeNodeDTO(
         node_id=composite_node_id,
-        anchor_chunk_id=representative_node.anchor_chunk_id,
-        start_chunk_id=start_chunk_id,
-        end_chunk_id=end_chunk_id,
+        anchor_chapter_id=representative_node.anchor_chapter_id,
+        start_chapter_id=start_chapter_id,
+        end_chapter_id=end_chapter_id,
         progress=representative_node.progress,
         start_progress=start_progress,
         end_progress=end_progress,
@@ -1196,10 +1202,10 @@ def _build_relation_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[Timeli
     ordinal_by_anchor: dict[int, int] = {}
     composite_nodes: list[TimelineCompositeNodeDTO] = []
     for group in grouped_nodes:
-        anchor_chunk_id = _select_representative_atomic_node(group).anchor_chunk_id
-        next_ordinal = ordinal_by_anchor.get(anchor_chunk_id, 0)
+        anchor_chapter_id = _select_representative_atomic_node(group).anchor_chapter_id
+        next_ordinal = ordinal_by_anchor.get(anchor_chapter_id, 0)
         composite_nodes.append(_build_composite_node(group, next_ordinal))
-        ordinal_by_anchor[anchor_chunk_id] = next_ordinal + 1
+        ordinal_by_anchor[anchor_chapter_id] = next_ordinal + 1
     return composite_nodes
 
 
@@ -1218,10 +1224,10 @@ def _build_plot_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[TimelineCo
     ordinal_by_anchor: dict[int, int] = {}
     composite_nodes: list[TimelineCompositeNodeDTO] = []
     for group in grouped_nodes:
-        anchor_chunk_id = _select_representative_atomic_node(group).anchor_chunk_id
-        next_ordinal = ordinal_by_anchor.get(anchor_chunk_id, 0)
+        anchor_chapter_id = _select_representative_atomic_node(group).anchor_chapter_id
+        next_ordinal = ordinal_by_anchor.get(anchor_chapter_id, 0)
         composite_nodes.append(_build_composite_node(group, next_ordinal))
-        ordinal_by_anchor[anchor_chunk_id] = next_ordinal + 1
+        ordinal_by_anchor[anchor_chapter_id] = next_ordinal + 1
     return composite_nodes
 
 
@@ -1230,9 +1236,9 @@ def _build_lifecycle_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[Timel
     ordinal_by_anchor: dict[int, int] = {}
     composite_nodes: list[TimelineCompositeNodeDTO] = []
     for node in lifecycle_nodes:
-        next_ordinal = ordinal_by_anchor.get(node.anchor_chunk_id, 0)
+        next_ordinal = ordinal_by_anchor.get(node.anchor_chapter_id, 0)
         composite_nodes.append(_build_composite_node([node], next_ordinal))
-        ordinal_by_anchor[node.anchor_chunk_id] = next_ordinal + 1
+        ordinal_by_anchor[node.anchor_chapter_id] = next_ordinal + 1
     return composite_nodes
 
 
@@ -1242,9 +1248,9 @@ def _build_state_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[TimelineC
     ordinal_by_anchor: dict[int, int] = {}
     composite_nodes: list[TimelineCompositeNodeDTO] = []
     for node in state_nodes:
-        next_ordinal = ordinal_by_anchor.get(node.anchor_chunk_id, 0)
+        next_ordinal = ordinal_by_anchor.get(node.anchor_chapter_id, 0)
         composite_nodes.append(_build_composite_node([node], next_ordinal))
-        ordinal_by_anchor[node.anchor_chunk_id] = next_ordinal + 1
+        ordinal_by_anchor[node.anchor_chapter_id] = next_ordinal + 1
     return composite_nodes
 
 
@@ -1275,7 +1281,7 @@ def compose_composite_timeline_nodes(
 def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "node_id": node.node_id,
-        "anchor_chunk_id": node.anchor_chunk_id,
+        "anchor_chapter_id": node.anchor_chapter_id,
         "progress": round(node.progress, 4),
         "importance_score": round(node.importance_score, 2),
         "level": node.level,
@@ -1304,7 +1310,7 @@ def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
                 "chapter_id": change.chapter_id,
                 "fact_id": change.fact_id,
                 "fact_revision": change.fact_revision,
-                "effective_chunk_id": change.effective_chunk_id,
+                "effective_chapter_id": change.effective_chapter_id,
                 "changes": change.changes,
                 "entity_id": change.entity_id,
                 "entity_name": change.entity_name,
@@ -1334,9 +1340,9 @@ def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
 def serialize_timeline_composite_node(node: TimelineCompositeNodeDTO) -> dict[str, Any]:
     return {
         "node_id": node.node_id,
-        "anchor_chunk_id": node.anchor_chunk_id,
-        "start_chunk_id": node.start_chunk_id,
-        "end_chunk_id": node.end_chunk_id,
+        "anchor_chapter_id": node.anchor_chapter_id,
+        "start_chapter_id": node.start_chapter_id,
+        "end_chapter_id": node.end_chapter_id,
         "progress": round(node.progress, 4),
         "start_progress": round(node.start_progress, 4),
         "end_progress": round(node.end_progress, 4),
@@ -1365,14 +1371,14 @@ def serialize_timeline_phases(phases: list[TimelinePhaseDTO]) -> list[dict[str, 
 
 def build_timeline_plan(
     run_id: str,
-    chunk_repo: Any,
+    chapter_repo: Any,
     annotation_repo: Any,
     stats_repo: Any,
     timeline_view: TimelineAuthorityView,
 ) -> TimelinePlanBuildResult:
-    source_data = _load_timeline_source_data(run_id, chunk_repo, annotation_repo, stats_repo)
+    source_data = _load_timeline_source_data(run_id, chapter_repo, annotation_repo, stats_repo)
     authority_data = _adapt_timeline_authority_view(timeline_view)
-    phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chunk_ids))
+    phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chapter_ids))
     plot_atoms, state_atoms, relation_atoms, lifecycle_atoms = build_timeline_atoms(
         source_data,
         authority_data,
@@ -1383,7 +1389,7 @@ def build_timeline_plan(
     return TimelinePlanBuildResult(
         atomic_nodes=sorted(atomic_nodes, key=_node_sort_key),
         composite_nodes=composite_nodes,
-        total_chunks=source_data.total_chunks,
+        total_chapters=source_data.total_chapters,
         phases=phases,
         tension_curve=source_data.tension_scores,
     )

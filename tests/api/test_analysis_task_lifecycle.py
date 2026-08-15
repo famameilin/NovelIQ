@@ -175,10 +175,14 @@ class TestDeleteAnalysis:
             run_repo.update_run_task_fields(run_id, status="completed")
             session.execute(
                 text(
-                    "INSERT INTO chunks (chunk_id, chapter_id, text, run_id) "
-                    "VALUES (:chunk_id, :chapter_id, :text, :run_id)"
+                    "INSERT INTO chapters "
+                    "(chapter_id, sequence, title, display_title, display_index_label, "
+                    "level, start_pos, end_pos, text, char_offset, char_end_offset, run_id) "
+                    "VALUES "
+                    "(:chapter_id, 1, '第1章', '第1章', NULL, 'chapter', "
+                    "0, :len, :text, 0, :len, :run_id)"
                 ),
-                {"chunk_id": 0, "chapter_id": 1, "text": "待删除分块", "run_id": run_id},
+                {"chapter_id": 1, "text": "待删除分块", "len": 5, "run_id": run_id},
             )
             session.execute(
                 text(
@@ -207,8 +211,11 @@ class TestDeleteAnalysis:
                 text("SELECT COUNT(*) FROM analysis_runs WHERE run_id = :run_id"),
                 {"run_id": run_id},
             ).scalar_one()
-            remaining_chunks = session.execute(
-                text("SELECT COUNT(*) FROM chunks WHERE run_id = :run_id"),
+            remaining_chapters = session.execute(
+                text(
+                    "SELECT COUNT(*) FROM chapters "
+                    "WHERE run_id = :run_id AND text IS NOT NULL"
+                ),
                 {"run_id": run_id},
             ).scalar_one()
             remaining_context = session.execute(
@@ -217,7 +224,7 @@ class TestDeleteAnalysis:
             ).scalar_one()
 
         assert remaining_run == 0
-        assert remaining_chunks == 0
+        assert remaining_chapters == 0
         assert remaining_context == 0
         assert not log_dir.exists()
         assert not output_file.exists()

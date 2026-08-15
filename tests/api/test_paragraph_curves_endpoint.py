@@ -43,7 +43,6 @@ def _insert_three_paragraph_run(db_session) -> tuple[str, str]:
     spans = [
         make_span(
             paragraph_id=0,
-            chunk_id=0,
             chapter_id=1,
             paragraph_index=0,
             text="aaaaa",
@@ -53,7 +52,6 @@ def _insert_three_paragraph_run(db_session) -> tuple[str, str]:
         ),
         make_span(
             paragraph_id=1,
-            chunk_id=0,
             chapter_id=1,
             paragraph_index=1,
             text="bbbbbb",
@@ -63,7 +61,6 @@ def _insert_three_paragraph_run(db_session) -> tuple[str, str]:
         ),
         make_span(
             paragraph_id=2,
-            chunk_id=1,
             chapter_id=2,
             paragraph_index=0,
             text="cccc",
@@ -171,8 +168,7 @@ def _insert_100_paragraph_run(db_session) -> tuple[str, str]:
         spans.append(
             make_span(
                 paragraph_id=paragraph_id,
-                chunk_id=chapter_id - 1,
-                chapter_id=chapter_id,
+                                chapter_id=chapter_id,
                 paragraph_index=paragraph_index,
                 text="abcde",
                 local_start=paragraph_index * 5,

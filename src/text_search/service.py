@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from src.models.local.embedding import EmbeddingClient
 from src.storage.models import Paragraph
-from src.storage.repositories.chunk import search_paragraphs_by_keywords, search_similar_paragraphs
+from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
 
 _WHOLE_QUERY_MAX_CHARS = 20
 _SPLIT_RE = re.compile(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+")
@@ -53,7 +53,6 @@ class TextSearchCandidate:
     """
 
     chapter_id: int
-    chunk_id: int
     paragraph_id: int
     excerpt: str
     keyword_score: float
@@ -164,9 +163,9 @@ class TextSearchService:
                     candidate["excerpt"] = semantic_row.paragraph_text
 
         chapter_and_chunk_by_paragraph = {
-            int(row.paragraph_id): (int(row.chapter_id), int(row.chunk_id))
+            int(row.paragraph_id): int(row.chapter_id)
             for row in self._session.execute(
-                select(Paragraph.paragraph_id, Paragraph.chapter_id, Paragraph.chunk_id).where(
+                select(Paragraph.paragraph_id, Paragraph.chapter_id).where(
                     Paragraph.run_id == self._run_id,
                     Paragraph.paragraph_id.in_(list(merged)),
                 )
@@ -179,8 +178,7 @@ class TextSearchService:
                 continue
             candidates.append(
                 TextSearchCandidate(
-                    chapter_id=meta[0],
-                    chunk_id=meta[1],
+                    chapter_id=meta,
                     paragraph_id=paragraph_id,
                     excerpt=str(payload["excerpt"]),
                     keyword_score=float(payload["keyword_score"]),

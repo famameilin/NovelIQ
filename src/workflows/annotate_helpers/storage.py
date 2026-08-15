@@ -155,7 +155,6 @@ def _persist_dialogue_records(
         repository.sync_dialogues(
             run_id=result.run_id,
             chapter_id=result.chapter_id,
-            chunk_id=chunk.chunk_id,
             dialogues=chunk.dialogues,
         )
 
@@ -171,7 +170,7 @@ def _persist_foreshadowing(
         for foreshadowing in chunk.foreshadowings:
             repository.sync(
                 run_id=result.run_id,
-                chunk_id=chunk.chunk_id,
+                chapter_id=chunk.chunk_id,
                 foreshadowing=foreshadowing,
             )
 
@@ -380,7 +379,7 @@ def complete_annotation_run(
                 annotation=annotation,
                 resolved_cases=result.resolved_cases,
                 # 2026-08-14 M6：案例源是章级定位（§12.3），落库复查沿用章级授权集合
-                authorized_text_chunk_ids=set(result.audit.authorized_chapter_ids),
+                authorized_text_chapter_ids=set(result.audit.authorized_chapter_ids),
             )
             _reelect_representatives(session, run_id=result.run_id)
             resolved_completion = _persist_resolution_mappings(

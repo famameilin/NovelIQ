@@ -23,14 +23,14 @@ from sqlalchemy.orm import Session
 from src.api.exceptions import GraphReadinessError
 from src.api.models.events import StreamEvent
 from src.metrics.aggregate import aggregate_all_metrics
-from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
+from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.curve_metrics import compute_global_stats
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
     "imagery_density_non_null_rate": 1.0,
-    "imagery_lexicon_null_chunk_ratio_max": 0.0,
+    "imagery_lexicon_null_chapter_ratio_max": 0.0,
 }
 
 
@@ -103,38 +103,46 @@ def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dic
     imagery_density = traditional_culture.get("imagery_density")
     imagery_non_null = imagery_density is not None
 
-    aggregates = ParagraphRepository(session).fetch_chunk_metric_aggregates(run_id)
-    null_chunk_ids: list[int] = []
-    for chunk_id, totals in aggregates:
-        token_count = totals.get("token_count", 0.0)
+    aggregates = ParagraphRepository(session).fetch_chapter_metric_aggregates(run_id)
+    totals_by_chapter = dict(aggregates)
+    # 2026-08-15 质量门分母修复：aggregates 从 ParagraphMetric 内连接出发，完全没有
+    # 指标行的章（空正文/段落指标缺失）不出现，此前被静默排除在分母之外导致空章漏检。
+    # 分母改为"有正文的全部章节"：无指标行的章按 token 0（缺失）计入不通过。
+    chapter_ids_with_text = [
+        chapter_id for chapter_id, _ in ChapterRepository(session).fetch_chapter_texts(run_id)
+    ]
+    null_chapter_ids: list[int] = []
+    for chapter_id in chapter_ids_with_text:
+        totals = totals_by_chapter.get(chapter_id)
+        token_count = float(totals.get("token_count", 0.0)) if totals is not None else 0.0
         if token_count <= 0:
-            null_chunk_ids.append(chunk_id)
+            null_chapter_ids.append(chapter_id)
 
-    if aggregates:
-        null_ratio = len(null_chunk_ids) / len(aggregates)
+    if chapter_ids_with_text:
+        null_ratio = len(null_chapter_ids) / len(chapter_ids_with_text)
     else:
-        # 2026-08-13 P2-3 无段落指标数据时按"不通过"处理（保守方案）：
+        # 2026-08-13 P2-3 无正文章节数据时按"不通过"处理（保守方案）：
         # 0/0 不等于达标，聚合缺数据本身是质量缺陷，避免"无数据=通过质量门"。
         null_ratio = 1.0
 
     return {
         "tone_distribution_non_empty_rate": 1.0 if tone_non_empty else 0.0,
         "imagery_density_non_null_rate": 1.0 if imagery_non_null else 0.0,
-        "imagery_lexicon_null_chunk_ratio": null_ratio,
-        "imagery_lexicon_null_chunk_ids": null_chunk_ids,
+        "imagery_lexicon_null_chapter_ratio": null_ratio,
+        "imagery_lexicon_null_chapter_ids": null_chapter_ids,
     }
 
 
 def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
     tone_rate = float(report.get("tone_distribution_non_empty_rate", 0.0))
     imagery_rate = float(report.get("imagery_density_non_null_rate", 0.0))
-    null_ratio = float(report.get("imagery_lexicon_null_chunk_ratio", 0.0))
-    null_chunk_ids = report.get("imagery_lexicon_null_chunk_ids", [])
+    null_ratio = float(report.get("imagery_lexicon_null_chapter_ratio", 0.0))
+    null_chapter_ids = report.get("imagery_lexicon_null_chapter_ids", [])
 
     logger.info("\n=== Aggregate Quality Gate ===")
     logger.info(f"tone_distribution_non_empty_rate={tone_rate:.0%}")
     logger.info(f"imagery_density_non_null_rate={imagery_rate:.0%}")
-    logger.info(f"imagery_lexicon_null_chunk_ratio={null_ratio:.2%}")
+    logger.info(f"imagery_lexicon_null_chapter_ratio={null_ratio:.2%}")
 
     if tone_rate < QUALITY_TARGETS["tone_distribution_non_empty_rate"]:
         logger.warning(f"[quality-gate] tone_distribution empty (run_id={run_id})")
@@ -142,12 +150,12 @@ def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
     if imagery_rate < QUALITY_TARGETS["imagery_density_non_null_rate"]:
         logger.warning(f"[quality-gate] imagery_density is null (run_id={run_id})")
 
-    if null_ratio > QUALITY_TARGETS["imagery_lexicon_null_chunk_ratio_max"]:
+    if null_ratio > QUALITY_TARGETS["imagery_lexicon_null_chapter_ratio_max"]:
         logger.warning(
             f"[quality-gate] imagery lexicon null chunk ratio {null_ratio * 100:.2f}% exceeds target "
-            f"{QUALITY_TARGETS['imagery_lexicon_null_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
+            f"{QUALITY_TARGETS['imagery_lexicon_null_chapter_ratio_max'] * 100:.2f}% (run_id={run_id})"
         )
-        logger.warning(f"[quality-gate] imagery lexicon null chunk_ids={null_chunk_ids}")
+        logger.warning(f"[quality-gate] imagery lexicon null chapter_ids={null_chapter_ids}")
 
 
 async def run_aggregate(
@@ -171,18 +179,18 @@ async def run_aggregate(
     """
     start_time = time.time()
 
-    chunk_repo = ChunkRepository(session)
+    chapter_repo = ChapterRepository(session)
     stats_repo = StatsRepository(session)
     ann_repo = AnnotationRepository(session)
 
-    chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
+    chunk_texts = chapter_repo.fetch_chapter_texts(run_id)
 
     if not chunk_texts:
         logger.warning("no chunks found in db")
         return 0, 0, 0
 
-    total_chunks = len(chunk_texts)
-    logger.info(f"loaded {total_chunks} chunks from db")
+    total_chapters = len(chunk_texts)
+    logger.info(f"loaded {total_chapters} chunks from db")
 
     global_stats = compute_global_stats(session, run_id)
     stats_repo.insert_global_stats(run_id, global_stats)
@@ -190,7 +198,7 @@ async def run_aggregate(
 
     logger.info("Computing aggregate metrics...")
     try:
-        agg_result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+        agg_result = aggregate_all_metrics(run_id, ann_repo, chapter_repo, stats_repo)
         _log_aggregate_results(agg_result)
         quality_report = _build_quality_gate_report(run_id, agg_result, session)
         _log_quality_gate_report(run_id, quality_report)
@@ -201,9 +209,9 @@ async def run_aggregate(
         logger.warning(f"Failed to compute aggregate metrics: {e}")
 
     elapsed = time.time() - start_time
-    logger.info(f"aggregate completed chunks={total_chunks} global_stats={len(global_stats)} time={elapsed:.2f}s")
+    logger.info(f"aggregate completed chunks={total_chapters} global_stats={len(global_stats)} time={elapsed:.2f}s")
     logger.info("\n=== Aggregate Statistics ===")
-    logger.info(f"Total chunks: {total_chunks}")
+    logger.info(f"Total chunks: {total_chapters}")
     logger.info(f"Global stats: {len(global_stats)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
 
@@ -212,4 +220,4 @@ async def run_aggregate(
             StreamEvent(action="complete", stage="aggregate", current=1, total=1, percent=100.0, sub_percent=100.0)
         )
 
-    return total_chunks, len(global_stats), 0
+    return total_chapters, len(global_stats), 0

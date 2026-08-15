@@ -38,15 +38,15 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def _full_annotation(text: str) -> BoundChapterAnnotation:
+def _full_annotation(text: str, *, chunk_id: int = 1) -> BoundChapterAnnotation:
     """2026-08-11 用于构造覆盖四类实体与全部领域事实的完整章节标注"""
-    candidates = extract_dialogue_candidates(0, text)
+    candidates = extract_dialogue_candidates(chunk_id, text)
     dialogue_candidate = next(candidate for candidate in candidates if candidate.content == "住手")
     return BoundChapterAnnotation(
         chapter_summary="顾霜进入山门并受宗门庇护",
         chunks=[
             BoundChunkAnnotation(
-                chunk_id=0,
+                chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary="顾霜进入山门",
                     emotional_valence="neutral",
@@ -137,7 +137,7 @@ def _persist(
     if annotation is None:
         if text is None:
             raise ValueError("必须提供 annotation 或 text")
-        annotation = _full_annotation(text)
+        annotation = _full_annotation(text, chunk_id=chapter_id)
     row = ChapterAnnotationRepository(db_session).add_annotation(
         run_id=run_id,
         chapter_id=chapter_id,
@@ -147,13 +147,12 @@ def _persist(
         db_session,
         annotation=row,
         resolved_cases=[],
-        authorized_text_chunk_ids={chunk.chunk_id for chunk in annotation.chunks},
+        authorized_text_chapter_ids={chunk.chunk_id for chunk in annotation.chunks},
     )
     for chunk in annotation.chunks:
         DialogueRecordRepository(db_session).sync_dialogues(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chunk.chunk_id,
             dialogues=chunk.dialogues,
         )
     return row, result
@@ -215,10 +214,10 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     }
     assert all(fact.source_kind == "annotation" for fact in facts)
     relation = next(fact for fact in facts if fact.content["kind"] == "relation")
-    assert relation.payload_path == "chunks/0/relation/0"
+    assert relation.payload_path == "chunks/1/relation/0"
     assert relation.fact_id == stable_annotation_fact_id(
         row.annotation_id,
-        0,
+        1,
         "relation",
         0,
     )
@@ -227,7 +226,7 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     ).scalar_one()
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.speaker is None
-    assert dialogue.chunk_id == 0
+    assert dialogue.chapter_id == 1
     assert dialogue.confidence == "medium"
 
 
@@ -250,7 +249,7 @@ def test_dialogue_record_binds_system_original_text_and_position(db_session) -> 
     end = int(dialogue.end)
     assert chunk_text[start:end] == "住手"
     assert dialogue.content == "住手"
-    assert dialogue.chunk_id == 0
+    assert dialogue.chapter_id == 1
     assert dialogue.is_inner_monologue is False
     assert dialogue.confidence == "medium"
     assert db_session.execute(
@@ -330,13 +329,13 @@ def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=0, name="顾霜", action="修炼")],
+        characters=[character_fact(chunk_id=1, name="顾霜", action="修炼")],
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=1, name="顾霜", action="出关")],
+        characters=[character_fact(chunk_id=2, name="顾霜", action="出关")],
     )
     db_session.commit()
 
@@ -347,8 +346,8 @@ def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -
     )
     assert len(entities) == 1
     assert entities[0].canonical_name == "顾霜"
-    assert entities[0].first_seen_chunk == 0
-    assert entities[0].last_seen_chunk == 1
+    assert entities[0].first_seen_chapter == 1
+    assert entities[0].last_seen_chapter == 2
 
 
 def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
@@ -364,7 +363,7 @@ def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="赤羽炽尾鸡", action="踱步")
+            character_fact(chunk_id=1, name="赤羽炽尾鸡", action="踱步")
         ],
     )
     with pytest.raises(ValueError, match="实体名称已属于其他大类"):
@@ -374,7 +373,7 @@ def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
             chapter_id=2,
             relations=[
                 relation_fact(
-                    chunk_id=1,
+                    chunk_id=2,
                     from_name="赤羽炽尾鸡",
                     to_name="山门",
                     relation_type="位于",
@@ -399,7 +398,7 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         chapter_id=1,
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="玄剑",
                 to_name="山门",
                 relation_type="位于",
@@ -412,7 +411,7 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=1, name="剑灵", action="开口")],
+        characters=[character_fact(chunk_id=2, name="剑灵", action="开口")],
     )
     db_session.commit()
 
@@ -439,13 +438,13 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=1,
-        entity_attributes={(0, "玄剑"): {"status": "active", "grade": "凡品"}},
+        entity_attributes={(1, "玄剑"): {"status": "active", "grade": "凡品"}},
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        entity_attributes={(1, "玄剑"): {"grade": "灵品"}},
+        entity_attributes={(2, "玄剑"): {"grade": "灵品"}},
     )
     db_session.commit()
 
@@ -496,13 +495,13 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
         db_session,
         run_id=run_id,
         chapter_id=1,
-        entity_attributes={(0, "玄剑"): {"status": "active", "grade": "凡品"}},
+        entity_attributes={(1, "玄剑"): {"status": "active", "grade": "凡品"}},
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        entity_attributes={(1, "玄剑"): {"status": None, "grade": "灵品"}},
+        entity_attributes={(2, "玄剑"): {"status": None, "grade": "灵品"}},
     )
     db_session.commit()
 
@@ -544,32 +543,29 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
 
 
 def test_attribute_patch_generated_once_for_multi_chunk_chapter(db_session) -> None:
-    """2026-08-12 用于验证同一章节含多个 chunk 时属性变化事实只生成一次：
-    属性 patch 与 chunk 循环无关，不能随本章 chunk 数重复写入"""
+    """2026-08-12 用于验证跨章属性变化事实按字段只生成一次：
+    属性 patch 与 chunk 循环无关，不随同章多次引用重复写入"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["玄剑寒光凛冽。", "玄剑鸣啸", "玄剑低鸣", "玄剑归鞘"],
-        chapter_ids=[1, 1, 2, 2],
-        title="多 chunk 属性",
+        texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
+        chapter_ids=[1, 2],
+        title="属性 patch 去重",
     )
-    # 章1（两个 chunk）首次声明实体，不产生属性 patch
+    # 章1 首次声明实体，不产生属性 patch
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
-        entity_attributes={(0, "玄剑"): {"status": "active"}},
+        entity_attributes={(1, "玄剑"): {"status": "active"}},
     )
     db_session.commit()
-    # 章2（两个 chunk）更新属性：跨章已存在实体产生 patch，
-    # 若在 chunk 循环内生成会随 2 个 chunk 重复写入
+    # 章2 更新属性：跨章已存在实体产生 patch，按字段各生成一条，
+    # 不随同章多次引用重复写入
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        entity_attributes={
-            (2, "玄剑"): {"grade": "灵品"},
-            (3, "玄剑"): {"status": "dormant"},
-        },
+        entity_attributes={(2, "玄剑"): {"grade": "灵品", "status": "dormant"}},
     )
     db_session.commit()
 
@@ -634,12 +630,12 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌"),
+            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -652,7 +648,7 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
         chapter_id=2,
         relations=[
             relation_fact(
-                chunk_id=1,
+                chunk_id=2,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -687,12 +683,12 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌"),
+            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -705,7 +701,7 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
                 type="relation_change",
                 reason="同一人物归并",
                 target_key="target-alias",
-                target_ref={"kind": "relation_change", "chunk_id": 0},
+                target_ref={"kind": "relation_change", "chunk_id": 1},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -763,12 +759,12 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
             run_id=run_id,
             chapter_id=1,
             characters=[
-                character_fact(chunk_id=0, name="林渡", action="迎敌"),
-                character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+                character_fact(chunk_id=1, name="林渡", action="迎敌"),
+                character_fact(chunk_id=1, name="顾霜", action="迎敌"),
             ],
             relations=[
                 relation_fact(
-                    chunk_id=0,
+                    chunk_id=1,
                     from_name="林渡",
                     to_name="顾霜",
                     relation_type="盟友",
@@ -781,7 +777,7 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
                     type="relation_change",
                     reason="同一人物归并",
                     target_key="target-alias",
-                    target_ref={"kind": "relation_change", "chunk_id": 0},
+                    target_ref={"kind": "relation_change", "chunk_id": 1},
                     from_entity="林渡",
                     to_entity="顾霜",
                     relation_type="盟友",

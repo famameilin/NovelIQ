@@ -36,7 +36,6 @@ class DialogueRecord(Base):
         ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
         nullable=False,
     )
-    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     candidate_key: Mapped[str] = mapped_column(String(100), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -56,12 +55,12 @@ class DialogueRecord(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
-            name="dialogue_records_chunk_run_fkey",
+            name="dialogue_records_chapter_run_fkey",
         ),
-        Index("idx_dialogue_records_run_chunk", "run_id", "chunk_id"),
+        Index("idx_dialogue_records_run_chapter", "run_id", "chapter_id"),
         # 2026-08-12 唯一约束兜底 (run_id, candidate_key)：案例解决按该键 scalar_one_or_none 定位，
         # 唯一性此前仅靠应用层保证，防止重复候选键导致定位歧义
         UniqueConstraint(
@@ -72,4 +71,4 @@ class DialogueRecord(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<DialogueRecord(dialogue_id={self.dialogue_id}, run_id={self.run_id}, chunk_id={self.chunk_id})>"
+        return f"<DialogueRecord(dialogue_id={self.dialogue_id}, run_id={self.run_id}, chapter_id={self.chapter_id})>"

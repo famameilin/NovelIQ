@@ -23,8 +23,13 @@ from src.agents.annotation.schema import (
 )
 from src.chunking.chunker import Chunk as ChunkerChunk
 from src.chunking.chunker import split_chunk_paragraphs
-from src.storage.models import Chunk, Novel
-from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository, RunRepository
+from src.storage.models import Chapter, Novel
+from src.storage.repositories import (
+    ChapterAnnotationRepository,
+    ChapterRepository,
+    DialogueRecordRepository,
+    RunRepository,
+)
 from src.storage.repositories.graph import persist_completion_graph
 
 
@@ -58,45 +63,32 @@ def create_run_with_chunks(
     if len(resolved_chapter_ids) != len(texts):
         raise ValueError("chapter_ids 必须与 texts 等长")
     offset = 0
-    rows: list[Chunk] = []
-    for chunk_id, (chapter_id, text_value) in enumerate(
+    chunks: list[ChunkerChunk] = []
+    for chunk_index, (chapter_id, text_value) in enumerate(
         zip(resolved_chapter_ids, texts, strict=True)
     ):
-        rows.append(
-            Chunk(
-                chunk_id=chunk_id,
+        chunks.append(
+            ChunkerChunk(
+                index=chunk_index,
                 chapter_id=chapter_id,
-                char_offset=offset,
-                char_end_offset=offset + len(text_value),
+                start=offset,
+                end=offset + len(text_value),
                 text=text_value,
-                run_id=run_id,
             )
         )
         offset += len(text_value)
-    session.add_all(rows)
+    # M9a-2：chunks 表合并进 chapters——正文切片经 ChapterRepository 落库
+    # （缺失章节行以默认结构补建，见 insert_chapter_texts）
+    ChapterRepository(session).insert_chapter_texts(run_id, chunks)
     session.commit()
     # 2026-08-14 二期：annotate 阶段要求段落事实源存在（章节段落边界查询），
-    # helper 同步插入段落行（一次传入全部 chunk，paragraph_id 全局连续），
+    # helper 同步插入段落行（一次传入全部章节，paragraph_id 全局连续），
     # token_count 用简单切分填充
     from src.storage.repositories import ParagraphRepository
 
-    chunk_models = session.scalars(
-        select(Chunk).where(Chunk.run_id == run_id).order_by(Chunk.chunk_id)
-    ).all()
     spans = [
         replace(span, token_count=max(1, len(span.text) // 2))
-        for span in split_chunk_paragraphs(
-            [
-                ChunkerChunk(
-                    index=chunk.chunk_id,
-                    text=chunk.text,
-                    start=chunk.char_offset or 0,
-                    end=chunk.char_end_offset or 0,
-                    chapter_id=chunk.chapter_id,
-                )
-                for chunk in chunk_models
-            ]
-        )
+        for span in split_chunk_paragraphs(chunks)
     ]
     if spans:
         ParagraphRepository(session).insert_paragraphs(run_id, spans)
@@ -186,11 +178,11 @@ def identity_relation_output(
     *,
     subject_name: str,
     object_name: str,
-    effective_chunk_id: int = 0,
+    effective_chapter_id: int = 0,
 ) -> dict[str, Any]:
     """2026-08-07 用于构造同一人物关系的测试标注项"""
     return relation_fact(
-        chunk_id=effective_chunk_id,
+        chunk_id=effective_chapter_id,
         from_name=subject_name,
         to_name=object_name,
         relation_type="同一人物",
@@ -232,19 +224,18 @@ def persist_chapter_annotation(
     entity_attributes: dict[tuple[int, str], dict[str, Any]] | None = None,
     resolved_cases: list[Any] | None = None,
 ) -> str:
-    """2026-08-12 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化"""
-    chunk_rows = list(
-        session.execute(
-            select(Chunk)
-            .where(Chunk.run_id == run_id, Chunk.chapter_id == chapter_id)
-            .order_by(Chunk.chunk_id)
-        )
-        .scalars()
-        .all()
-    )
-    if not chunk_rows:
-        raise ValueError(f"章节没有原文 chunk: run_id={run_id} chapter_id={chapter_id}")
-    chunk_text_by_id = {int(row.chunk_id): str(row.text) for row in chunk_rows}
+    """2026-08-12 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化
+
+    M9a-2：chunks 表合并进 chapters 后，章节正文取自 chapters 表，
+    运行时 chunk id 即章真实 chapter_id（payload 内 chunk_id == chapter_id）。
+    """
+    chapter_row = session.execute(
+        select(Chapter)
+        .where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
+    ).scalar_one_or_none()
+    if chapter_row is None or chapter_row.text is None:
+        raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
+    chunk_text_by_id = {chapter_id: str(chapter_row.text)}
     candidate_by_content: dict[tuple[int, str], Any] = {}
     for chunk_id, chunk_text in chunk_text_by_id.items():
         for candidate in extract_dialogue_candidates(chunk_id, chunk_text):
@@ -387,13 +378,12 @@ def persist_chapter_annotation(
         session=session,
         annotation=row,
         resolved_cases=resolved_cases or [],
-        authorized_text_chunk_ids=set(chunk_text_by_id),
+        authorized_text_chapter_ids=set(chunk_text_by_id),
     )
     for chunk in annotation.chunks:
         DialogueRecordRepository(session).sync_dialogues(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chunk.chunk_id,
             dialogues=chunk.dialogues,
         )
     session.commit()

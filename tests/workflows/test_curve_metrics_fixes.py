@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
     ParagraphMetricRow,
@@ -30,7 +30,7 @@ def _insert_paragraph_curves(
     net_densities: list[float | None],
     surface_tensions: list[float | None],
 ) -> str:
-    """构造 4 章 4 段的 run（chunk_id = 10..13），写入段落曲线与基础指标。"""
+    """构造 4 章 4 段的 run（chapter_id = 1..4），写入段落曲线与基础指标。"""
     from dataclasses import replace
 
     from src.chunking.chunker import Chunk, split_chunk_paragraphs
@@ -47,7 +47,7 @@ def _insert_paragraph_curves(
     for i, text in enumerate(texts):
         chunks.append(Chunk(index=10 + i, start=offset, end=offset + len(text), text=text, chapter_id=1 + i))
         offset += len(text)
-    ChunkRepository(db_session).insert_chunks(run_id, chunks)
+    ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
 
     spans = [
         replace(span, token_count=2)
@@ -103,7 +103,7 @@ class TestGlobalStatsExtremes:
     """§19.14：并列极值取最后出现的段落（rindex）+ tension 侧对称输出"""
 
     def test_emotion_extremes_use_last_occurrence(self, db_session) -> None:
-        # max 并列于段落 1、2 → 取段落 2（chunk_id=12）
+        # max 并列于段落 1、2 → 取段落 2（chapter_id=3）
         run_id = _insert_paragraph_curves(
             db_session,
             net_densities=[1.0, 5.0, 5.0, 2.0],
@@ -113,12 +113,12 @@ class TestGlobalStatsExtremes:
         stats = dict(compute_global_stats(db_session, run_id))
 
         assert stats["emotion_max"] == 5.0
-        # 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chunk_id
-        assert stats["emotion_peak_chunk_id"] == 12.0
-        assert stats["emotion_min_chunk_id"] == 10.0
+        # 2026-08-14 重命名（§13.3）：emotion_max_chunk → emotion_peak_chapter_id
+        assert stats["emotion_peak_chapter_id"] == 3.0
+        assert stats["emotion_min_chapter_id"] == 1.0
 
     def test_emotion_min_uses_last_occurrence(self, db_session) -> None:
-        # min 并列于段落 0、1 → 取段落 1（chunk_id=11）
+        # min 并列于段落 0、1 → 取段落 1（chapter_id=2）
         run_id = _insert_paragraph_curves(
             db_session,
             net_densities=[0.0, 0.0, 3.0, 3.0],
@@ -128,11 +128,11 @@ class TestGlobalStatsExtremes:
         stats = dict(compute_global_stats(db_session, run_id))
 
         assert stats["emotion_min"] == 0.0
-        assert stats["emotion_min_chunk_id"] == 11.0
-        assert stats["emotion_peak_chunk_id"] == 13.0
+        assert stats["emotion_min_chapter_id"] == 2.0
+        assert stats["emotion_peak_chapter_id"] == 4.0
 
     def test_rhythm_extremes_symmetric_output(self, db_session) -> None:
-        """§19.14 不对称修复：tension 侧新增 rhythm_max_chunk/rhythm_min_chunk"""
+        """§19.14 不对称修复：tension 侧新增 rhythm_peak_chapter_id/rhythm_min_chapter_id"""
         run_id = _insert_paragraph_curves(
             db_session,
             net_densities=[None, None, None, None],
@@ -142,9 +142,9 @@ class TestGlobalStatsExtremes:
         stats = dict(compute_global_stats(db_session, run_id))
 
         assert stats["rhythm_max"] == 4.0
-        assert stats["rhythm_max_chunk"] == 13.0
+        assert stats["rhythm_peak_chapter_id"] == 4.0
         assert stats["rhythm_min"] == 2.0
-        assert stats["rhythm_min_chunk"] == 11.0
+        assert stats["rhythm_min_chapter_id"] == 2.0
 
     def test_rhythm_extremes_guarded_when_no_curve_rows(self, db_session) -> None:
         """无段落曲线数据时输出张力分布统计，也不伪造极值定位"""
@@ -157,4 +157,36 @@ class TestGlobalStatsExtremes:
         stats = dict(compute_global_stats(db_session, run_id))
 
         assert "rhythm_max" not in stats
-        assert "rhythm_max_chunk" not in stats
+        assert "rhythm_peak_chapter_id" not in stats
+
+    def test_emotion_extremes_skip_null_density_rows(self, db_session) -> None:
+        """2026-08-15 M1 回归：NULL 密度行（0-token 段）不参与极值，但下标不得错位"""
+        # 4 行：第 2 行 net_density=None；峰值在段落 2（chapter_id=3）
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[3.0, None, 5.0, 1.0],
+            surface_tensions=[None, None, None, None],
+        )
+
+        stats = dict(compute_global_stats(db_session, run_id))
+
+        assert stats["emotion_max"] == 5.0
+        assert stats["emotion_peak_chapter_id"] == 3.0
+        assert stats["emotion_min"] == 1.0
+        assert stats["emotion_min_chapter_id"] == 4.0
+
+    def test_rhythm_extremes_skip_null_tension_rows(self, db_session) -> None:
+        """2026-08-15 M1 回归：NULL 张力行不参与极值，下标映射回未过滤 rows"""
+        # 第 2 行 surface_tension=None；min 并列于段落 2、3 → 取最后（chapter_id=4）
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[None, None, None, None],
+            surface_tensions=[4.0, None, 2.0, 2.0],
+        )
+
+        stats = dict(compute_global_stats(db_session, run_id))
+
+        assert stats["rhythm_max"] == 4.0
+        assert stats["rhythm_peak_chapter_id"] == 1.0
+        assert stats["rhythm_min"] == 2.0
+        assert stats["rhythm_min_chapter_id"] == 4.0

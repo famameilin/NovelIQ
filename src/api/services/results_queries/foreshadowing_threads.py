@@ -20,9 +20,9 @@ def _fetch_foreshadowing_threads(
     return [
         ForeshadowingThreadResponse(
             setup_id=row.setup_id,
-            first_chunk_id=row.first_chunk_id,
-            last_chunk_id=row.last_chunk_id,
-            anchor_chunk_ids=row.anchor_chunk_ids,
+            first_chapter_id=row.first_chapter_id,
+            last_chapter_id=row.last_chapter_id,
+            anchor_chapter_ids=row.anchor_chapter_ids,
             setup_summary=row.setup_summary,
             setup_kind=row.setup_kind,
             expected_payoff_family=row.expected_payoff_family,

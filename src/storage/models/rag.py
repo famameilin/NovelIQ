@@ -32,7 +32,7 @@ class TokenUsage(Base):
         ForeignKey("novels.novel_id", ondelete="RESTRICT", name="token_usage_novel_id_fkey"),
         nullable=False,
     )
-    chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     call_type: Mapped[str] = mapped_column(String(50), nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)

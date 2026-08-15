@@ -18,25 +18,25 @@ class TestRollingMemory(unittest.TestCase):
 
     修改时间: 2026-03-14
     任务: metrics-repository-refactor
-    修改内容: 更新测试用例以使用 ChunkRepository 接口
+    修改内容: 更新测试用例以使用 ChapterRepository 接口
     """
 
     def test_get_prev_tail_text_first_chunk(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_prev_chunk_text.return_value = None
+        mock_repo.fetch_prev_chapter_text.return_value = None
         result = get_prev_tail_text(mock_repo, run_id="test-run", chunk_id=0, tail_chars=200)
         self.assertIsNone(result)
 
     def test_get_prev_tail_text_no_previous_chunk(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_prev_chunk_text.return_value = None
+        mock_repo.fetch_prev_chapter_text.return_value = None
 
         result = get_prev_tail_text(mock_repo, run_id="test-run", chunk_id=5, tail_chars=200)
         self.assertIsNone(result)
 
     def test_get_prev_tail_text_short_text(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_prev_chunk_text.return_value = "短文本内容"
+        mock_repo.fetch_prev_chapter_text.return_value = "短文本内容"
 
         result = get_prev_tail_text(mock_repo, run_id="test-run", chunk_id=1, tail_chars=200)
         self.assertEqual(result, "短文本内容")
@@ -52,7 +52,7 @@ class TestRollingMemory(unittest.TestCase):
         """
         mock_repo = MagicMock()
         long_text = "a" * 500
-        mock_repo.fetch_prev_chunk_text.return_value = long_text
+        mock_repo.fetch_prev_chapter_text.return_value = long_text
 
         result = get_prev_tail_text(mock_repo, run_id="test-run", chunk_id=1, tail_chars=200)
         self.assertEqual(len(result), 500)
@@ -70,21 +70,21 @@ class TestRollingMemory(unittest.TestCase):
         """
         mock_repo = MagicMock()
         text = "这是一段测试文本，用于测试尾部文本提取功能。"
-        mock_repo.fetch_prev_chunk_text.return_value = text
+        mock_repo.fetch_prev_chapter_text.return_value = text
 
         result = get_prev_tail_text(mock_repo, run_id="test-run", chunk_id=1, tail_chars=10)
         self.assertEqual(result, text)
 
     def test_get_next_text(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_next_chunk_text.return_value = "下一个chunk的内容"
+        mock_repo.fetch_next_chapter_text.return_value = "下一个chunk的内容"
 
         result = get_next_text(mock_repo, run_id="test-run", chunk_id=1)
         self.assertEqual(result, "下一个chunk的内容")
 
     def test_get_next_text_no_next_chunk(self) -> None:
         mock_repo = MagicMock()
-        mock_repo.fetch_next_chunk_text.return_value = None
+        mock_repo.fetch_next_chapter_text.return_value = None
 
         result = get_next_text(mock_repo, run_id="test-run", chunk_id=100)
         self.assertIsNone(result)

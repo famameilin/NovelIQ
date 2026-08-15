@@ -62,16 +62,16 @@ def test_persist_main_character_attributes_clears_previous_run_flags(db_session,
         canonical_name="旧主角",
         entity_type="character",
         attributes={"is_main_character": True},
-        first_seen_chunk=0,
-        last_seen_chunk=0,
+        first_seen_chapter=0,
+        last_seen_chapter=0,
     )
     current = GraphEntity(
         run_id=run_id,
         canonical_name="新主角",
         entity_type="character",
         attributes={},
-        first_seen_chunk=0,
-        last_seen_chunk=0,
+        first_seen_chapter=0,
+        last_seen_chapter=0,
     )
     db_session.add_all([former, current])
     db_session.flush()

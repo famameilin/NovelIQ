@@ -28,7 +28,7 @@ class AliasSuspicion:
     name_a: str
     name_b: str
     overlap: float
-    anchor_chunk_id: int
+    anchor_chapter_id: int
 
 
 def detect_alias_suspicions(
@@ -74,7 +74,7 @@ def detect_alias_suspicions(
         parent.setdefault(entity_id, entity_id)
 
     names_by_id = {int(row.entity_id): row.name for row in entities}
-    last_seen_by_id = {int(row.entity_id): row.last_seen_chunk for row in entities}
+    last_seen_by_id = {int(row.entity_id): row.last_seen_chapter for row in entities}
     character_ids = [int(row.entity_id) for row in entities]
 
     suspicions: list[AliasSuspicion] = []
@@ -100,7 +100,7 @@ def detect_alias_suspicions(
                     name_a=names_by_id[left_id],
                     name_b=names_by_id[right_id],
                     overlap=round(overlap, 3),
-                    anchor_chunk_id=min(
+                    anchor_chapter_id=min(
                         last_seen_by_id[left_id],
                         last_seen_by_id[right_id],
                     ),
@@ -128,7 +128,7 @@ def build_alias_pending_cases(
         pending_cases.append(
             PendingCase(
                 type="entity_alias",
-                chunk_id=suspicion.anchor_chunk_id,
+                chunk_id=suspicion.anchor_chapter_id,
                 keys=[suspicion.name_a, suspicion.name_b, "同一人物"],
                 description=(
                     f"疑似同一人物：{suspicion.name_a} 与 {suspicion.name_b} "
@@ -137,7 +137,7 @@ def build_alias_pending_cases(
                 target_key=target_key,
                 target_ref={
                     "kind": "entity_alias",
-                    "chunk_id": suspicion.anchor_chunk_id,
+                    "chunk_id": suspicion.anchor_chapter_id,
                     "name_a": suspicion.name_a,
                     "name_b": suspicion.name_b,
                 },

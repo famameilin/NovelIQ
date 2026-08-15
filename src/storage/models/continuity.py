@@ -59,7 +59,7 @@ class CasePoolCase(Base):
         nullable=False,
     )
     case_type: Mapped[str] = mapped_column("type", String(50), nullable=False)
-    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     keys: Mapped[list] = mapped_column(JSONB, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     target_key: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -86,10 +86,10 @@ class CasePoolCase(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
-            name="case_pool_cases_chunk_run_fkey",
+            name="case_pool_cases_chapter_run_fkey",
         ),
         CheckConstraint(
             "state IN ('active', 'resolved')",

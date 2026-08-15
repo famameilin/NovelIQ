@@ -8,7 +8,7 @@ import pytest
 from src.api.models.events import StreamEvent
 from src.chunking.chunker import Chunk, split_chunk_paragraphs, split_paragraphs
 from src.preprocess.tokenize import tokenize
-from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.preprocess import (
     _generate_paragraph_embedding_rows,
@@ -18,7 +18,7 @@ from src.workflows.preprocess import (
 from tests.support.analysis_factories import insert_test_novel
 
 
-def _insert_chunks_and_paragraphs(session, chunks: list[Chunk]) -> tuple[str, str]:
+def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[str, str]:
     """
     创建 run 并写入 chunks 与段落事实源
 
@@ -38,7 +38,7 @@ def _insert_chunks_and_paragraphs(session, chunks: list[Chunk]) -> tuple[str, st
         title="Embedding Test",
         run_id=run_id,
     )
-    ChunkRepository(session).insert_chunks(run_id, chunks)
+    ChapterRepository(session).insert_chapter_texts(run_id, chunks)
     spans = split_chunk_paragraphs(chunks)
     spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]
     ParagraphRepository(session).insert_paragraphs(run_id, spans)
@@ -57,7 +57,7 @@ async def test_generate_paragraph_embeddings_uses_paragraph_only(db_session) -> 
     chunks = [
         Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11, chapter_id=1),
     ]
-    run_id, novel_id = _insert_chunks_and_paragraphs(db_session, chunks)
+    run_id, novel_id = _insert_chapter_texts_and_paragraphs(db_session, chunks)
 
     mock_client = MagicMock()
     mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
@@ -66,7 +66,7 @@ async def test_generate_paragraph_embeddings_uses_paragraph_only(db_session) -> 
     with (
         patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
         patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
-        patch("src.storage.repositories.chunk.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
+        patch("src.storage.repositories.paragraph.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
     ):
         inserted = await _generate_paragraph_embeddings(
             session=db_session,
@@ -111,7 +111,7 @@ async def test_generate_paragraph_embeddings_skips_when_no_paragraphs(db_session
 @pytest.mark.asyncio
 async def test_generate_paragraph_embeddings_fails_fast_on_dimension_mismatch(db_session) -> None:
     chunks = [Chunk(index=1, text="测试文本", start=0, end=4, chapter_id=1)]
-    run_id, _ = _insert_chunks_and_paragraphs(db_session, chunks)
+    run_id, _ = _insert_chapter_texts_and_paragraphs(db_session, chunks)
 
     mock_client = MagicMock()
     mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
@@ -135,7 +135,7 @@ async def test_generate_paragraph_embeddings_fails_fast_when_embedding_client_in
     db_session,
 ) -> None:
     chunks = [Chunk(index=1, text="测试文本", start=0, end=4, chapter_id=1)]
-    run_id, _ = _insert_chunks_and_paragraphs(db_session, chunks)
+    run_id, _ = _insert_chapter_texts_and_paragraphs(db_session, chunks)
 
     with (
         patch("src.models.local.embedding.EmbeddingClient", side_effect=ValueError("missing embedding config")),
@@ -153,7 +153,7 @@ async def test_generate_paragraph_embeddings_fails_fast_when_embedding_client_in
 @pytest.mark.asyncio
 async def test_generate_paragraph_embedding_rows_fails_fast_on_empty_embedding(db_session) -> None:
     chunks = [Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11, chapter_id=1)]
-    run_id, _ = _insert_chunks_and_paragraphs(db_session, chunks)
+    run_id, _ = _insert_chapter_texts_and_paragraphs(db_session, chunks)
 
     mock_client = MagicMock()
     mock_client.embed_texts = AsyncMock(return_value=[[0.5, 0.6], []])
@@ -169,7 +169,7 @@ async def test_generate_paragraph_embedding_rows_fails_fast_on_empty_embedding(d
 @pytest.mark.asyncio
 async def test_generate_paragraph_embedding_rows_emits_batch_progress(db_session) -> None:
     chunks = [Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11, chapter_id=1)]
-    run_id, _ = _insert_chunks_and_paragraphs(db_session, chunks)
+    run_id, _ = _insert_chapter_texts_and_paragraphs(db_session, chunks)
 
     mock_client = MagicMock()
 
@@ -265,8 +265,8 @@ def test_split_paragraphs_oversized_without_sentence_boundaries_falls_back_hard_
 @pytest.mark.asyncio
 async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
     mock_session = MagicMock()
-    mock_chunk_repo = MagicMock()
-    mock_chunk_repo.is_preprocess_complete.return_value = False
+    mock_chapter_repo = MagicMock()
+    mock_chapter_repo.is_preprocess_complete.return_value = False
     embedding_stage_commit_counts: list[int] = []
 
     async def fake_generate_paragraph_embeddings(session, run_id, emitter=None) -> int:
@@ -281,8 +281,7 @@ async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
             new=AsyncMock(return_value=([Chunk(index=1, text="测试文本", start=0, end=4, chapter_id=1)], [])),
         ),
         patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
-        patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
-        patch("src.workflows.preprocess.ChapterRepository", return_value=MagicMock()),
+        patch("src.workflows.preprocess.ChapterRepository", return_value=mock_chapter_repo),
         patch("src.workflows.preprocess._generate_paragraph_embeddings", new=fake_generate_paragraph_embeddings),
         patch("src.workflows.preprocess.settings.models.paragraph_embedding.semantic_enabled", True),
         patch(
@@ -310,8 +309,8 @@ async def test_run_preprocess_passes_only_emitter_to_chunk_documents() -> None:
     2026-08-05 用于验证预处理入口只向 chunk_documents_with_chapters 透传 emitter
     """
     mock_session = MagicMock()
-    mock_chunk_repo = MagicMock()
-    mock_chunk_repo.is_preprocess_complete.return_value = False
+    mock_chapter_repo = MagicMock()
+    mock_chapter_repo.is_preprocess_complete.return_value = False
     mock_chunk_documents = AsyncMock(
         return_value=([Chunk(index=0, text="测试文本", start=0, end=4, chapter_id=1)], [])
     )
@@ -321,8 +320,7 @@ async def test_run_preprocess_passes_only_emitter_to_chunk_documents() -> None:
         patch("src.workflows.preprocess.normalize_text", side_effect=lambda text: text),
         patch("src.workflows.preprocess.chunk_documents_with_chapters", new=mock_chunk_documents),
         patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
-        patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
-        patch("src.workflows.preprocess.ChapterRepository", return_value=MagicMock()),
+        patch("src.workflows.preprocess.ChapterRepository", return_value=mock_chapter_repo),
         patch("src.workflows.preprocess.settings.models.paragraph_embedding.semantic_enabled", False),
         patch(
             "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",

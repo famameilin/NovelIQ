@@ -25,7 +25,7 @@ from src.metrics.timeline_metrics import (
     serialize_timeline_node,
     serialize_timeline_phases,
 )
-from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
+from src.storage.repositories import AnnotationRepository, ChapterRepository, RunRepository, StatsRepository
 
 router = APIRouter(prefix="/novels", tags=["timeline"])
 
@@ -94,7 +94,7 @@ async def get_timeline(
             run_status=run_data["status"],
         )
 
-    chunk_repo = ChunkRepository(session)
+    chapter_repo = ChapterRepository(session)
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
@@ -102,7 +102,7 @@ async def get_timeline(
         timeline_view = KnowledgeGraphAuthorityService.from_session(session).build_timeline_view(run_id)
         timeline_plan = build_timeline_plan(
             run_id,
-            chunk_repo,
+            chapter_repo,
             annotation_repo,
             stats_repo,
             timeline_view,
@@ -113,7 +113,7 @@ async def get_timeline(
             meta=TimelineMeta(
                 novel_id=novel_id,
                 novel_name=novel_name,
-                total_chunks=0,
+                total_chapters=0,
             ),
             phases=[],
             composite_nodes=[],
@@ -144,7 +144,7 @@ async def get_timeline(
         meta=TimelineMeta(
             novel_id=novel_id,
             novel_name=novel_name,
-            total_chunks=timeline_plan.total_chunks,
+            total_chapters=timeline_plan.total_chapters,
         ),
         phases=api_phases,
         composite_nodes=api_composite_nodes,

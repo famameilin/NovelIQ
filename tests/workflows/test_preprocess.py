@@ -22,7 +22,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.storage.repositories import ChunkRepository, RunRepository
+from src.storage.repositories import ChapterRepository, RunRepository
 from src.workflows.preprocess import run_preprocess
 from tests.support.analysis_factories import insert_test_novel
 
@@ -121,10 +121,10 @@ class TestPreprocess:
         assert chunks_inserted > 0
         assert total_chars > 0
 
-        chunk_repo = ChunkRepository(db_session)
-        assert chunk_repo.is_preprocess_complete(run_id)
+        chapter_repo = ChapterRepository(db_session)
+        assert chapter_repo.is_preprocess_complete(run_id)
 
-        rows = chunk_repo.fetch_chunk_texts(run_id)
+        rows = chapter_repo.fetch_chapter_texts(run_id)
         assert len(rows) == chunks_inserted
 
     @pytest.mark.asyncio()

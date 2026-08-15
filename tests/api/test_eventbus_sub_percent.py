@@ -23,7 +23,7 @@ async def test_eventbus_emits_sub_percent():
         event = StreamEvent(
             action="complete",
             sub_stage="phase1",
-            chunk_id=0,
+            chapter_id=0,
             sub_percent=25,
             message="phase1 done",
         )
@@ -49,7 +49,7 @@ async def test_eventbus_emits_sub_percent_none_when_not_provided():
         event = StreamEvent(
             action="complete",
             sub_stage="phase1",
-            chunk_id=0,
+            chapter_id=0,
             message="phase1 done",
         )
         await bus.emit(event)
@@ -73,7 +73,7 @@ async def test_eventbus_preserves_sub_percent_from_context():
         event1 = StreamEvent(
             action="complete",
             sub_stage="phase1",
-            chunk_id=0,
+            chapter_id=0,
             sub_percent=25,
         )
         await bus.emit(event1)
@@ -118,7 +118,7 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
                 action="progress",
                 stage="annotate",
                 sub_stage="phase3",
-                chunk_id=8,
+                chapter_id=8,
                 current=21,
                 total=37,
                 percent=49.7,
@@ -130,7 +130,7 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
             StreamEvent(
                 action="progress",
                 stage="annotate",
-                chunk_id=8,
+                chapter_id=8,
                 message="正在收集证据",
             )
         )

@@ -15,8 +15,8 @@ class GraphNode(BaseModel):
     entity_type: Literal["character", "location", "item", "organization"]
     tags: list[str] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
-    first_seen_chunk: int = Field(ge=0)
-    last_seen_chunk: int = Field(ge=0)
+    first_seen_chapter: int = Field(ge=0)
+    last_seen_chapter: int = Field(ge=0)
     state_revision: int = Field(ge=0)
     state: dict[str, Any]
 
@@ -45,8 +45,8 @@ class GraphSnapshotResponse(BaseModel):
     graph_version_id: str
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
-    first_chunk_id: int = Field(ge=0)
-    last_chunk_id: int = Field(ge=0)
+    first_chapter_id: int = Field(ge=0)
+    last_chapter_id: int = Field(ge=0)
     nodes: list[GraphNode]
     edges: list[GraphEdge]
 
@@ -61,7 +61,7 @@ class GraphChange(BaseModel):
     chapter_order: int = Field(gt=0)
     fact_id: str
     fact_revision: int = Field(gt=0)
-    effective_chunk_id: int = Field(ge=0)
+    effective_chapter_id: int = Field(ge=0)
     changes: list[dict[str, Any]] = Field(min_length=1)
     entity_id: int | None = None
     entity_name: str | None = None

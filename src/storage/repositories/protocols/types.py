@@ -45,18 +45,18 @@ class RunRecord(TypedDict, total=False):
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkTextRow:
-    """分块文本行"""
+class ChapterTextRow:
+    """章节文本行"""
 
-    chunk_id: int
+    chapter_id: int
     text: str
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkCounts:
-    """分块统计结果"""
+class ChapterCounts:
+    """章节统计结果"""
 
-    total_chunks: int
+    total_chapters: int
     total_chars: int
 
 
@@ -82,7 +82,7 @@ class GlobalContextRecord:
 class PivotBlock:
     """诊断转折点分块"""
 
-    chunk_id: int
+    chapter_id: int
     text: str
     event_type: str
 
@@ -100,7 +100,7 @@ class HighTensionChunk:
 class RelationChangeRow:
     """关系变更诊断行"""
 
-    chunk_id: int
+    chapter_id: int
     from_char: str
     to_char: str
     relation_type: str
@@ -111,7 +111,7 @@ class RelationChangeRow:
 class ForeshadowingChunk:
     """伏笔诊断分块"""
 
-    chunk_id: int
+    chapter_id: int
     text: str
     foreshadowing_type: str
     foreshadowing_desc: str
@@ -121,5 +121,5 @@ class ForeshadowingChunk:
 class PivotMoment:
     """高潮时刻分块"""
 
-    chunk_id: int
+    chapter_id: int
     text: str

@@ -212,8 +212,8 @@ class TestResults:
         assert payload["code"] == "diagnosis_rerun_required"
         assert payload["reason"] == "focus_contract_incomplete"
 
-    def test_get_chunk_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
-        """测试 chunk_annotations 不接受属于其他小说的 task_id。"""
+    def test_get_chapter_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
+        """测试 chapter_annotations 不接受属于其他小说的 task_id。"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as first_file:
             first_file.write(b"First novel content\n" * 100)
             first_file.flush()
@@ -241,12 +241,12 @@ class TestResults:
         second_novel_id = second_upload_response.json()["novel_id"]
 
         response = api_client.get(
-            f"/api/novels/{second_novel_id}/chunk-annotations?task_id={first_task_id}"
+            f"/api/novels/{second_novel_id}/chapter-annotations?task_id={first_task_id}"
         )
         assert response.status_code == 404
         assert "不属于小说" in response.json()["detail"]
 
-    def test_get_chunk_annotations_openapi_declares_typed_response(self):
+    def test_get_chapter_annotations_openapi_declares_typed_response(self):
         """
         创建时间: 2026-04-26
         任务: phase2-strong-foreshadowing
@@ -254,11 +254,11 @@ class TestResults:
         避免前端和自动化工具只能看到 `items: {}` 的匿名数组。
         """
         schema = app.openapi()
-        response_schema = schema["paths"]["/api/novels/{novel_id}/chunk-annotations"]["get"]["responses"]["200"][
+        response_schema = schema["paths"]["/api/novels/{novel_id}/chapter-annotations"]["get"]["responses"]["200"][
             "content"
         ]["application/json"]["schema"]
         assert response_schema["type"] == "array"
-        assert response_schema["items"]["$ref"] == "#/components/schemas/ChunkAnnotation"
+        assert response_schema["items"]["$ref"] == "#/components/schemas/ChapterAnnotation"
 
     def test_get_diagnosis_openapi_declares_expectation_fallback_and_theme_color(self):
         """
@@ -286,7 +286,7 @@ class TestResults:
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/novels/{novel_id}/chunk-annotations",
+        "/api/novels/{novel_id}/chapter-annotations",
         "/api/novels/{novel_id}/paragraph-curves",
         "/api/novels/{novel_id}/chapter-metrics",
         "/api/novels/{novel_id}/topics",

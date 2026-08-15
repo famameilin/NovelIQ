@@ -606,7 +606,9 @@ class TextSearchResult(StrictModel):
     """2026-08-07 用于查询服务返回真实原文定位结果（M6 段落化：定位到 paragraph_id）"""
 
     chapter_id: int = Field(gt=0)
-    paragraph_id: int = Field(gt=0)
+    # paragraph_id 按设计文档 §5.1 从 0 起算（0, 1, 2, ...）；全书第一段是合法检索命中，
+    # 约束必须为 ge=0（gt=0 会使首段命中在 pydantic 构造时抛 ValidationError）
+    paragraph_id: int = Field(ge=0)
     excerpt: str
     keyword_score: float = Field(ge=0)
     semantic_score: float | None = None

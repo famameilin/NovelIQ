@@ -43,7 +43,7 @@ def create_relation_graph_change(
         chapter_id=3,
         fact_id=f"fact-{relation_version_id}",
         fact_revision=1,
-        effective_chunk_id=relation_version_id,
+        effective_chapter_id=relation_version_id,
         changes=[{"change_kind": relation_change_kind, "fact_id": f"fact-{relation_version_id}"}],
         relation_id=f"relation-id-{relation_version_id}",
         relation_version_id=relation_version_id,
@@ -60,7 +60,7 @@ def create_relation_graph_change(
 def create_node(
     *,
     node_id: str,
-    anchor_chunk_id: int,
+    anchor_chapter_id: int,
     progress: float,
     importance_score: float,
     level: int = 2,
@@ -75,7 +75,7 @@ def create_node(
 ) -> TimelineNodeDTO:
     return TimelineNodeDTO(
         node_id=node_id,
-        anchor_chunk_id=anchor_chunk_id,
+        anchor_chapter_id=anchor_chapter_id,
         progress=progress,
         importance_score=importance_score,
         level=level,
@@ -183,7 +183,7 @@ class TestComputeFourPhases:
         # 四阶段覆盖全书且不重叠：ratio 总和为 1
         assert sum(phase.ratio for phase in phases) == pytest.approx(1.0)
 
-    def test_peak_at_last_chunk_still_covered_by_final_phase(self):
+    def test_peak_at_last_chapter_still_covered_by_final_phase(self):
         """2026-08-13 修复 P1：峰值落在末 chunk 时，收束期此前退化为 0.0 空区间、
         末章不入任何阶段；修复后收束期覆盖剩余区间。"""
         tension_scores = [0.1] * 99 + [0.9]
@@ -226,7 +226,7 @@ class TestComposeCompositeTimelineNodes:
         nodes = [
             create_node(
                 node_id="relation:101",
-                anchor_chunk_id=5,
+                anchor_chapter_id=5,
                 progress=0.5,
                 importance_score=6.9,
                 level=1,
@@ -236,7 +236,7 @@ class TestComposeCompositeTimelineNodes:
             ),
             create_node(
                 node_id="relation:102",
-                anchor_chunk_id=6,
+                anchor_chapter_id=6,
                 progress=0.6,
                 importance_score=6.3,
                 level=1,
@@ -248,7 +248,7 @@ class TestComposeCompositeTimelineNodes:
             ),
             create_node(
                 node_id="relation:103",
-                anchor_chunk_id=7,
+                anchor_chapter_id=7,
                 progress=0.7,
                 importance_score=6.0,
                 level=1,
@@ -281,7 +281,7 @@ class TestComposeCompositeTimelineNodes:
         nodes = [
             create_node(
                 node_id="plot:7",
-                anchor_chunk_id=7,
+                anchor_chapter_id=7,
                 progress=0.58,
                 importance_score=5.8,
                 level=2,
@@ -292,7 +292,7 @@ class TestComposeCompositeTimelineNodes:
             ),
             create_node(
                 node_id="plot:8",
-                anchor_chunk_id=8,
+                anchor_chapter_id=8,
                 progress=0.66,
                 importance_score=5.4,
                 level=2,
@@ -303,7 +303,7 @@ class TestComposeCompositeTimelineNodes:
             ),
             create_node(
                 node_id="plot:10",
-                anchor_chunk_id=10,
+                anchor_chapter_id=10,
                 progress=0.83,
                 importance_score=4.9,
                 level=2,
@@ -319,8 +319,8 @@ class TestComposeCompositeTimelineNodes:
 
         assert len(plot_composites) == 2
         assert plot_composites[0].child_node_ids == ["plot:7", "plot:8"]
-        assert plot_composites[0].start_chunk_id == 7
-        assert plot_composites[0].end_chunk_id == 8
+        assert plot_composites[0].start_chapter_id == 7
+        assert plot_composites[0].end_chapter_id == 8
         assert plot_composites[1].child_node_ids == ["plot:10"]
 
     def test_lifecycle_composite_keeps_one_event_per_node(self):
@@ -335,7 +335,7 @@ class TestComposeCompositeTimelineNodes:
         nodes = [
             create_node(
                 node_id="lifecycle:entry:1:1",
-                anchor_chunk_id=1,
+                anchor_chapter_id=1,
                 progress=0.0,
                 importance_score=4.4,
                 node_type="lifecycle",
@@ -345,7 +345,7 @@ class TestComposeCompositeTimelineNodes:
             ),
             create_node(
                 node_id="lifecycle:exit:1:12",
-                anchor_chunk_id=12,
+                anchor_chapter_id=12,
                 progress=1.0,
                 importance_score=4.2,
                 node_type="lifecycle",
@@ -367,7 +367,7 @@ class TestSerializeTimelineNode:
     def test_serialize_timeline_node_uses_new_atomic_contract(self):
         node = TimelineNodeDTO(
             node_id="relation:101",
-            anchor_chunk_id=8,
+            anchor_chapter_id=8,
             progress=0.4,
             importance_score=6.7,
             level=1,
@@ -384,7 +384,7 @@ class TestSerializeTimelineNode:
 
         assert set(payload) == {
             "node_id",
-            "anchor_chunk_id",
+            "anchor_chapter_id",
             "progress",
             "importance_score",
             "level",
@@ -414,7 +414,7 @@ class TestSerializeTimelineNode:
             [
                 create_node(
                     node_id="relation:101",
-                    anchor_chunk_id=8,
+                    anchor_chapter_id=8,
                     progress=0.66,
                     importance_score=6.7,
                     level=1,
@@ -433,9 +433,9 @@ class TestSerializeTimelineNode:
 
         assert set(payload) == {
             "node_id",
-            "anchor_chunk_id",
-            "start_chunk_id",
-            "end_chunk_id",
+            "anchor_chapter_id",
+            "start_chapter_id",
+            "end_chapter_id",
             "progress",
             "start_progress",
             "end_progress",

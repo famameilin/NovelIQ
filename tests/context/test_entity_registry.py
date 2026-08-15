@@ -76,7 +76,7 @@ class TestEntityRegistry(unittest.TestCase):
         mock_repo = MagicMock()
         mock_repo.fetch_latest_entities.return_value = [
             SimpleNamespace(
-                last_seen_chunk=1,
+                last_seen_chapter=1,
                 name="张三",
                 state={
                     "role_function": "主角",
@@ -86,7 +86,7 @@ class TestEntityRegistry(unittest.TestCase):
                 },
             ),
             SimpleNamespace(
-                last_seen_chunk=2,
+                last_seen_chapter=2,
                 name="李四",
                 state={
                     "role_function": "配角",
@@ -107,7 +107,7 @@ class TestEntityRegistry(unittest.TestCase):
         mock_repo = MagicMock()
         mock_repo.fetch_latest_entities.return_value = [
             SimpleNamespace(
-                last_seen_chunk=1,
+                last_seen_chapter=1,
                 name="张三",
                 state={
                     "role_function": "主角",
@@ -117,7 +117,7 @@ class TestEntityRegistry(unittest.TestCase):
                 },
             ),
             SimpleNamespace(
-                last_seen_chunk=2,
+                last_seen_chapter=2,
                 name="张三",
                 state={
                     "role_function": "主角",
@@ -127,7 +127,7 @@ class TestEntityRegistry(unittest.TestCase):
                 },
             ),
             SimpleNamespace(
-                last_seen_chunk=3,
+                last_seen_chapter=3,
                 name="李四",
                 state={
                     "role_function": "配角",
@@ -154,7 +154,7 @@ class TestEntityRegistry(unittest.TestCase):
         mock_repo = MagicMock()
         mock_repo.fetch_latest_entities.return_value = [
             SimpleNamespace(
-                last_seen_chunk=1,
+                last_seen_chapter=1,
                 name="张三",
                 state={
                     "role_function": "主角",
@@ -164,7 +164,7 @@ class TestEntityRegistry(unittest.TestCase):
                 },
             ),
             SimpleNamespace(
-                last_seen_chunk=2,
+                last_seen_chapter=2,
                 name="李四",
                 state={
                     "role_function": "配角",
@@ -185,7 +185,7 @@ class TestEntityRegistry(unittest.TestCase):
         mock_repo = MagicMock()
         mock_repo.fetch_latest_entities.return_value = [
             SimpleNamespace(
-                last_seen_chunk=3,
+                last_seen_chapter=3,
                 name="王五",
                 state={
                     "role_function": "主角",

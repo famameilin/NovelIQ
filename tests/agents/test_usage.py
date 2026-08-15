@@ -204,7 +204,7 @@ def test_build_token_usage_callback_records_embedding_usage() -> None:
     assert kwargs["model"] == "embed-model"
     assert kwargs["prompt_tokens"] == 10
     assert kwargs["total_tokens"] == 10
-    assert kwargs["chunk_id"] == 7
+    assert kwargs["chapter_id"] == 7
 
 
 def test_turn_usage_records_estimates_missing_usage() -> None:

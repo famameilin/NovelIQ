@@ -21,7 +21,7 @@ from src.chunking.chunker import Chunk
 from src.chunking.spans import ParagraphSpan
 from src.storage.repositories import (
     ChapterAnnotationRepository,
-    ChunkRepository,
+    ChapterRepository,
     ParagraphRepository,
     RunRepository,
 )
@@ -56,7 +56,7 @@ def create_completed_run(
             )
         )
         offset += len(text)
-    ChunkRepository(db_session).insert_chunks(run_id, chunks)
+    ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
     RunRepository(db_session).update_run_status(run_id, "completed")
     return novel_id, run_id
 
@@ -83,7 +83,6 @@ def create_run_with_status(
 def make_span(
     *,
     paragraph_id: int,
-    chunk_id: int,
     chapter_id: int,
     paragraph_index: int,
     text: str,
@@ -101,7 +100,6 @@ def make_span(
         local_end_char=local_end,
         text=text,
         paragraph_id=paragraph_id,
-        chunk_id=chunk_id,
         chapter_id=chapter_id,
         global_start_char=chunk_offset + local_start,
         global_end_char=chunk_offset + local_end,
@@ -188,7 +186,6 @@ def insert_chapter_annotation(
     db_session,
     run_id: str,
     *,
-    chunk_id: int,
     chapter_id: int,
     narrative_function: str = "铺垫",
     emotional_valence: str = "neutral",
@@ -200,9 +197,9 @@ def insert_chapter_annotation(
         chapter_summary=f"章节 {chapter_id} 摘要",
         chunks=[
             BoundChunkAnnotation(
-                chunk_id=chunk_id,
+                chunk_id=chapter_id,
                 metrics=ChunkMetricsInput(
-                    summary=f"chunk {chunk_id} 摘要",
+                    summary=f"章节 {chapter_id} 摘要",
                     emotional_valence=EmotionalValence(emotional_valence),
                     narrative_function=NarrativeFunction(narrative_function),
                     pivot_moment=pivot_moment,

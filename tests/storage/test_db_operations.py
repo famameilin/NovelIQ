@@ -34,7 +34,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.chunking.chunker import chunk_text
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
-    ChunkRepository,
+    ChapterRepository,
     RunRepository,
     StatsRepository,
 )
@@ -51,26 +51,26 @@ def test_create_and_insert(db_session) -> None:
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
-    chunk_repo = ChunkRepository(db_session)
+    chapter_repo = ChapterRepository(db_session)
 
-    chunk_repo.insert_chunks(run_id, chunks)
+    chapter_repo.insert_chapter_texts(run_id, chunks)
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
         characters=[
             character_fact(
-                chunk_id=chunks[0].index,
+                chunk_id=chunks[0].chapter_id,
                 name="张三",
                 action="走",
             )
         ],
     )
-    rows = chunk_repo.fetch_chunk_texts(run_id)
+    rows = chapter_repo.fetch_chapter_texts(run_id)
     assert len(rows) == len(chunks)
-    assert rows[0][0] == 0
+    assert rows[0][0] == 1
     offset_row = db_session.execute(
-        text("SELECT char_offset, char_end_offset FROM chunks WHERE run_id = :run_id AND chunk_id = 0"),
+        text("SELECT char_offset, char_end_offset FROM chapters WHERE run_id = :run_id AND chapter_id = 1"),
         {"run_id": run_id},
     ).fetchone()
     assert offset_row is not None
@@ -78,7 +78,7 @@ def test_create_and_insert(db_session) -> None:
     assert offset_row.char_end_offset == chunks[0].end
 
 
-def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> None:
+def test_insert_chapter_texts_keeps_duplicate_chapter_titles_separate(db_session) -> None:
     """
     2026-08-02 用于保证重复章节标题按出现序号落为不同 chapter_id
     """
@@ -93,11 +93,11 @@ def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> No
         title="Duplicate Chapter Titles",
     )
 
-    chunk_repo = ChunkRepository(db_session)
-    chunk_repo.insert_chunks(run_id, chunks)
-    rows = chunk_repo.fetch_chunks_with_chapter(run_id)
+    chapter_repo = ChapterRepository(db_session)
+    chapter_repo.insert_chapter_texts(run_id, chunks)
+    rows = chapter_repo.fetch_chapters_with_text(run_id)
 
-    assert [row[1] for row in rows] == [1, 2, 3]
+    assert [row[0] for row in rows] == [1, 2, 3]
 
 
 def test_get_run_by_run_id_prefix_escapes_like_wildcards(db_session) -> None:

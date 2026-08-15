@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 from sqlalchemy import text
 
-from src.storage.repositories.chunk.keyword_ops import (
+from src.storage.repositories.paragraph.keyword_ops import (
     KeywordMatchRow,
     fetch_chunk_text,
     search_paragraphs_by_keywords,
@@ -28,7 +28,7 @@ def test_search_paragraphs_by_keywords_orders_by_match_count() -> None:
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
             paragraph_id=4,
-            chunk_id=3,
+            chapter_id=3,
             paragraph_index=1,
             text="赤羽炽尾鸡被阵法镇压，猴子去拔尾羽。",
             local_start_char=0,
@@ -38,7 +38,7 @@ def test_search_paragraphs_by_keywords_orders_by_match_count() -> None:
         ),
         SimpleNamespace(
             paragraph_id=1,
-            chunk_id=1,
+            chapter_id=1,
             paragraph_index=0,
             text="赤羽炽尾鸡是灵兽。",
             local_start_char=0,
@@ -72,7 +72,7 @@ def test_search_paragraphs_by_keywords_filters_non_matching_rows() -> None:
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
             paragraph_id=2,
-            chunk_id=2,
+            chapter_id=2,
             paragraph_index=0,
             text="普通段落没有命中词。",
             local_start_char=0,
@@ -113,7 +113,7 @@ def test_search_paragraphs_by_keywords_scans_paragraphs_table() -> None:
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
             paragraph_id=3,
-            chunk_id=0,
+            chapter_id=0,
             paragraph_index=0,
             text="顾霜入城。",
             local_start_char=0,
@@ -173,7 +173,7 @@ def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() 
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
             paragraph_id=2,
-            chunk_id=2,
+            chapter_id=2,
             paragraph_index=0,
             text="完成度达到100%，代号为A_B。",
             local_start_char=0,
@@ -208,7 +208,7 @@ def test_search_paragraphs_by_keywords_matches_case_insensitively() -> None:
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
             paragraph_id=2,
-            chunk_id=2,
+            chapter_id=2,
             paragraph_index=0,
             text="顾霜持 Sword 现身，Sword 寒光凛冽。",
             local_start_char=0,
@@ -239,7 +239,7 @@ def test_keyword_match_row_is_frozen_dataclass() -> None:
     """
     row = KeywordMatchRow(
         paragraph_id=3,
-        chunk_id=1,
+        chapter_id=1,
         paragraph_index=0,
         paragraph_text="文本",
         local_start_char=0,
@@ -284,7 +284,7 @@ def test_fetch_chunk_text_returns_text_when_present() -> None:
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = "完整章节原文。"
 
-    text = fetch_chunk_text(session, run_id="run-1", chunk_id=3)
+    text = fetch_chunk_text(session, run_id="run-1", chapter_id=3)
 
     assert text == "完整章节原文。"
 
@@ -296,6 +296,6 @@ def test_fetch_chunk_text_returns_none_when_missing() -> None:
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    text = fetch_chunk_text(session, run_id="run-1", chunk_id=99)
+    text = fetch_chunk_text(session, run_id="run-1", chapter_id=99)
 
     assert text is None

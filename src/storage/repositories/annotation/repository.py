@@ -12,8 +12,8 @@ from sqlalchemy import func, select
 from src.agents.annotation.schema import BoundChapterAnnotation
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
+    Chapter,
     ChapterAnnotationRecord,
-    Chunk,
     DialogueRecord,
     ForeshadowingThread,
     ForeshadowingThreadHit,
@@ -29,10 +29,10 @@ _EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
 
 
 @dataclass(frozen=True)
-class ChunkAnnotationRow:
-    """2026-08-05 用于向 chunk 消费者暴露章节 segment 的具名读模型"""
+class ChapterAnnotationRow:
+    """2026-08-05 用于向 章节消费者暴露章节 segment 的具名读模型"""
 
-    chunk_id: int
+    chapter_id: int
     emotional_valence: str
     event_type: str
     pivot_moment: bool
@@ -53,7 +53,7 @@ class ChunkAnnotationRow:
 class CharacterFactRow:
     """2026-08-05 用于向人物与聚合消费者暴露数据库图人物事实"""
 
-    chunk_id: int
+    chapter_id: int
     name: str
     surface_name: str
     reference_kind: str
@@ -69,7 +69,7 @@ class CharacterFactRow:
 class DialogueFactRow:
     """2026-08-05 用于向对话与情绪融合消费者暴露数据库图对话事实"""
 
-    chunk_id: int
+    chapter_id: int
     speaker: list[str]
     speaker_references: list[dict[str, Any]]
     length: int
@@ -81,9 +81,9 @@ class ForeshadowingThreadView:
     """2026-08-05 用于向 API 与诊断暴露伏笔线程汇总视图"""
 
     setup_id: str
-    first_chunk_id: int
-    last_chunk_id: int
-    anchor_chunk_ids: list[int]
+    first_chapter_id: int
+    last_chapter_id: int
+    anchor_chapter_ids: list[int]
     setup_summary: str
     setup_kind: str
     expected_payoff_family: str
@@ -131,11 +131,11 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 for row in latest_by_fact_id.values()
                 if isinstance(row.content, dict) and row.content.get("kind") == content_kind
             ),
-            key=lambda row: (row.effective_chunk_id, row.graph_fact_version_id),
+            key=lambda row: (row.effective_chapter_id, row.graph_fact_version_id),
         )
 
-    def _foreshadowing_by_chunk(self, run_id: str) -> dict[int, dict[str, Any]]:
-        """2026-08-05 用于把伏笔 thread 与 hit 展开到实际命中 chunk"""
+    def _foreshadowing_by_chapter(self, run_id: str) -> dict[int, dict[str, Any]]:
+        """2026-08-05 用于把伏笔 thread 与 hit 展开到实际命中章节"""
         stmt = (
             select(ForeshadowingThreadHit, ForeshadowingThread)
             .join(ForeshadowingThread, ForeshadowingThreadHit.setup_id == ForeshadowingThread.setup_id)
@@ -143,11 +143,11 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 ForeshadowingThreadHit.run_id == run_id,
                 ForeshadowingThread.run_id == run_id,
             )
-            .order_by(ForeshadowingThreadHit.chunk_id, ForeshadowingThreadHit.hit_id)
+            .order_by(ForeshadowingThreadHit.chapter_id, ForeshadowingThreadHit.hit_id)
         )
-        by_chunk: dict[int, dict[str, Any]] = {}
+        by_chapter: dict[int, dict[str, Any]] = {}
         for hit, thread in self.session.execute(stmt).all():
-            by_chunk[hit.chunk_id] = {
+            by_chapter[hit.chapter_id] = {
                 "has_foreshadowing": True,
                 "is_strong_setup": True,
                 "foreshadowing_type": thread.foreshadowing_type,
@@ -159,37 +159,37 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 "payoff_likelihood": thread.payoff_likelihood,
                 "linked_setup_id": None if hit.is_new_setup else thread.setup_id,
             }
-        return by_chunk
+        return by_chapter
 
-    def fetch_chunk_annotations(self, run_id: str) -> list[ChunkAnnotationRow]:
+    def fetch_chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRow]:
         """2026-08-05 用于读取聚合张力所需的章节 segment 标注"""
-        return self.fetch_chunk_annotations_full(run_id)
+        return self.fetch_chapter_annotations_full(run_id)
 
-    def fetch_chunk_annotations_full(self, run_id: str) -> list[ChunkAnnotationRow]:
-        """2026-08-07 用于从最新系统绑定 payload 展开完整 chunk 标注"""
-        foreshadowing_by_chunk = self._foreshadowing_by_chunk(run_id)
-        rows: list[ChunkAnnotationRow] = []
+    def fetch_chapter_annotations_full(self, run_id: str) -> list[ChapterAnnotationRow]:
+        """2026-08-07 用于从最新系统绑定 payload 展开完整章节标注"""
+        foreshadowing_by_chapter = self._foreshadowing_by_chapter(run_id)
+        rows: list[ChapterAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
             annotation = BoundChapterAnnotation.model_validate(record.payload)
             for chunk in annotation.chunks:
                 rows.append(
-                    ChunkAnnotationRow(
-                        chunk_id=chunk.chunk_id,
+                    ChapterAnnotationRow(
+                        chapter_id=chunk.chunk_id,
                         emotional_valence=chunk.metrics.emotional_valence,
                         event_type=chunk.metrics.narrative_function,
                         pivot_moment=chunk.metrics.pivot_moment,
                         cliffhanger=chunk.metrics.cliffhanger,
-                        **foreshadowing_by_chunk.get(chunk.chunk_id, {}),
+                        **foreshadowing_by_chapter.get(chunk.chunk_id, {}),
                     )
                 )
-        return sorted(rows, key=lambda row: row.chunk_id)
+        return sorted(rows, key=lambda row: row.chapter_id)
 
-    def fetch_full_annotations(self, run_id: str) -> list[ChunkAnnotationRow]:
-        """2026-08-05 用于读取指标计算所需的完整 chunk 标注字段"""
-        return self.fetch_chunk_annotations_full(run_id)
+    def fetch_full_annotations(self, run_id: str) -> list[ChapterAnnotationRow]:
+        """2026-08-05 用于读取指标计算所需的完整章节标注字段"""
+        return self.fetch_chapter_annotations_full(run_id)
 
-    def fetch_chunk_characters_full(self, run_id: str) -> list[CharacterFactRow]:
-        """2026-08-05 用于从数据库图人物事实展开 chunk 人物记录"""
+    def fetch_chapter_characters_full(self, run_id: str) -> list[CharacterFactRow]:
+        """2026-08-05 用于从数据库图人物事实展开 章节人物记录"""
         rows: list[CharacterFactRow] = []
         for fact in self._graph_facts(run_id, content_kind="character_observation"):
             content = dict(fact.content)
@@ -201,7 +201,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 continue
             rows.append(
                 CharacterFactRow(
-                    chunk_id=int(content["chunk_id"]),
+                    chapter_id=int(content["chapter_id"]),
                     name=name,
                     surface_name=name,
                     reference_kind="global_character",
@@ -217,19 +217,19 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def fetch_characters_with_scores(self, run_id: str) -> list[CharacterFactRow]:
         """2026-08-05 用于读取人物榜与聚合指标需要的图人物事实"""
-        return self.fetch_chunk_characters_full(run_id)
+        return self.fetch_chapter_characters_full(run_id)
 
     def fetch_character_emotion_sequence(self, run_id: str) -> list[CharacterFactRow]:
-        """2026-08-05 用于按 chunk 顺序读取人物情绪事实序列"""
-        return sorted(self.fetch_chunk_characters_full(run_id), key=lambda row: row.chunk_id)
+        """2026-08-05 用于按章节顺序读取人物情绪事实序列"""
+        return sorted(self.fetch_chapter_characters_full(run_id), key=lambda row: row.chapter_id)
 
-    def fetch_chunk_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
-        """2026-08-11 用于从对话记录表展开 chunk 对话记录"""
+    def fetch_chapter_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
+        """2026-08-11 用于从对话记录表展开 章节对话记录"""
         rows: list[DialogueFactRow] = []
         statement = (
             select(DialogueRecord)
             .where(DialogueRecord.run_id == run_id)
-            .order_by(DialogueRecord.chunk_id, DialogueRecord.start)
+            .order_by(DialogueRecord.chapter_id, DialogueRecord.start)
         )
         for record in self.session.execute(statement).scalars().all():
             speaker_name = str(record.speaker or "").strip()
@@ -253,7 +253,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             )
             rows.append(
                 DialogueFactRow(
-                    chunk_id=int(record.chunk_id),
+                    chapter_id=int(record.chapter_id),
                     speaker=speaker_names,
                     speaker_references=speaker_references,
                     length=len(record.content),
@@ -267,7 +267,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         thread_stmt = (
             select(ForeshadowingThread)
             .where(ForeshadowingThread.run_id == run_id)
-            .order_by(ForeshadowingThread.first_chunk_id, ForeshadowingThread.setup_id)
+            .order_by(ForeshadowingThread.first_chapter_id, ForeshadowingThread.setup_id)
         )
         threads = list(self.session.execute(thread_stmt).scalars().all())
         if not threads:
@@ -277,7 +277,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             .where(ForeshadowingThreadHit.run_id == run_id)
             .order_by(
                 ForeshadowingThreadHit.setup_id,
-                ForeshadowingThreadHit.chunk_id,
+                ForeshadowingThreadHit.chapter_id,
                 ForeshadowingThreadHit.hit_id,
             )
         )
@@ -291,9 +291,9 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             views.append(
                 ForeshadowingThreadView(
                     setup_id=thread.setup_id,
-                    first_chunk_id=thread.first_chunk_id,
-                    last_chunk_id=thread.last_chunk_id,
-                    anchor_chunk_ids=sorted({hit.chunk_id for hit in hits}),
+                    first_chapter_id=thread.first_chapter_id,
+                    last_chapter_id=thread.last_chapter_id,
+                    anchor_chapter_ids=sorted({hit.chapter_id for hit in hits}),
                     setup_summary=thread.setup_summary,
                     setup_kind=thread.setup_kind,
                     expected_payoff_family=thread.expected_payoff_family,
@@ -391,7 +391,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         expected = {
             int(chapter_id)
             for chapter_id in self.session.execute(
-                select(Chunk.chapter_id).where(Chunk.run_id == run_id).distinct()
+                select(Chapter.chapter_id).where(Chapter.run_id == run_id).distinct()
             ).scalars()
         }
         if not expected:
@@ -406,9 +406,9 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         }
         return actual == expected
 
-    def get_annotation_by_chunk(self, run_id: str, chunk_id: int) -> dict[str, Any] | None:
-        """2026-08-05 用于按 chunk_id 回读由章节 segment 展开的标注字典"""
-        for row in self.fetch_chunk_annotations_full(run_id):
-            if row.chunk_id == chunk_id:
+    def get_annotation_by_chapter(self, run_id: str, chapter_id: int) -> dict[str, Any] | None:
+        """2026-08-05 用于按 chapter_id 回读由章节 segment 展开的标注字典"""
+        for row in self.fetch_chapter_annotations_full(run_id):
+            if row.chapter_id == chapter_id:
                 return asdict(row)
         return None

@@ -16,8 +16,8 @@ def _entity(entity_id: int, name: str, *, representative: bool = False) -> Simpl
         name=name,
         entity_type="character",
         tags=[],
-        first_seen_chunk=0,
-        last_seen_chunk=3,
+        first_seen_chapter=0,
+        last_seen_chapter=3,
         state_revision=1,
         state={"status": "active"},
         attributes={"is_representative": True} if representative else {},
@@ -59,8 +59,8 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
         graph_version_id="graph-version-9",
         chapter_id=9,
         chapter_order=9,
-        first_chunk_id=8,
-        last_chunk_id=8,
+        first_chapter_id=8,
+        last_chapter_id=8,
     )
     snapshot = SimpleNamespace(
         graph_version=version,

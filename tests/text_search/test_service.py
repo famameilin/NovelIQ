@@ -9,7 +9,7 @@ import pytest
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.preprocess.tokenize import tokenize
-from src.storage.repositories.chunk.embedding_ops import SimilarParagraphRow
+from src.storage.repositories.paragraph.embedding_ops import SimilarParagraphRow
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.text_search.service import TextSearchService, extract_query_terms
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -120,7 +120,6 @@ async def test_search_returns_separate_candidates_for_paragraphs_in_same_chapter
     # 排序：(-semantic_score, -keyword_score, paragraph_id)
     assert [candidate.paragraph_id for candidate in result] == [0, 1]
     assert all(candidate.chapter_id == 1 for candidate in result)
-    assert all(candidate.chunk_id == 0 for candidate in result)
     # 坐标来自 paragraphs 事实源列
     assert by_paragraph[0].local_start_char == 0
     assert by_paragraph[0].global_start_char == 0
@@ -142,7 +141,6 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
         SimilarParagraphRow(
             paragraph_id=0,
             chapter_id=1,
-            chunk_id=0,
             paragraph_text="林渡与顾霜并肩迎敌，携手入城。",
             local_start_char=0,
             local_end_char=15,

@@ -138,14 +138,14 @@ def _agent_result(
 def test_group_chunks_by_chapter_requires_real_nonempty_identity() -> None:
     """2026-08-05 用于验证章节聚合拒绝空 chapter_id 和运行时序号兜底"""
     with pytest.raises(ValueError, match="chapter_id 必须真实且非空"):
-        _group_chunks_by_chapter([(0, None, "无章节身份")])  # type: ignore[list-item]
+        _group_chunks_by_chapter([(0, "无章节身份")])
 
 
 def test_group_chunks_by_chapter_preserves_persisted_order() -> None:
     """2026-08-05 用于验证章节与 chunk 均保持数据库原文顺序"""
     assert _group_chunks_by_chapter(
-        [(0, 1, "甲"), (1, 1, "乙"), (2, 2, "丙")]
-    ) == [(1, [(0, "甲"), (1, "乙")]), (2, [(2, "丙")])]
+        [(1, "甲"), (1, "乙"), (2, "丙")]
+    ) == [(1, [(1, "甲")]), (1, [(1, "乙")]), (2, [(2, "丙")])]
 
 
 @pytest.mark.asyncio
@@ -182,7 +182,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
         return _agent_result(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chapter_id - 1,
+            chunk_id=chapter_id,
             chunk_text=chunk_text,
             create_case=chapter_id == 1,
         )
@@ -220,7 +220,7 @@ async def test_run_annotate_skips_existing_chapter_completion(db_session) -> Non
         return _agent_result(
             run_id=run_id,
             chapter_id=kwargs["chapter_id"],
-            chunk_id=1,
+            chunk_id=2,
             chunk_text=chunk_text,
         )
 
@@ -264,7 +264,7 @@ async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
         return _agent_result(
             run_id=run_id,
             chapter_id=1,
-            chunk_id=0,
+            chunk_id=1,
             chunk_text=chunk_text,
         )
 
@@ -287,7 +287,8 @@ async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
     assert len(seen_streams) == 1
     assert isinstance(seen_streams[0], AgentStream)
     # 章节开始 thinking 事件已通过 AgentStream 到达 emitter
-    assert ("thinking", "章节 1 标注 Agent 开始处理") in emitted
+    # （M9a-2：insert_chapter_texts 补建的默认章行带"第N章"标题，标签取章标题）
+    assert ("thinking", "章节 第1章 标注 Agent 开始处理") in emitted
 
 
 @pytest.mark.asyncio
@@ -299,32 +300,31 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
         chapter_ids=[2],
         title="编号偏移展示",
     )
-    db_session.add_all(
-        [
-            Chapter(
-                chapter_id=1,
-                sequence=1,
-                title="少年篇",
-                display_title="少年篇",
-                display_index_label=None,
-                level="volume",
-                start_pos=0,
-                end_pos=10,
-                run_id=run_id,
-            ),
-            Chapter(
-                chapter_id=2,
-                sequence=2,
-                title="第一章 贺院三尺有顽童",
-                display_title="第一章 贺院三尺有顽童",
-                display_index_label="第1章",
-                level="chapter",
-                start_pos=10,
-                end_pos=20,
-                run_id=run_id,
-            ),
-        ]
+    # M9a-2：insert_chapter_texts 已为章 2 补建默认结构行（标题"第2章"），
+    # 卷行可直接插入；章 2 行改为更新展示字段，避免重复插入撞 chapters 主键
+    db_session.add(
+        Chapter(
+            chapter_id=1,
+            sequence=1,
+            title="少年篇",
+            display_title="少年篇",
+            display_index_label=None,
+            level="volume",
+            start_pos=0,
+            end_pos=10,
+            run_id=run_id,
+        )
     )
+    chapter_row = db_session.execute(
+        select(Chapter).where(
+            Chapter.run_id == run_id,
+            Chapter.chapter_id == 2,
+        )
+    ).scalar_one()
+    chapter_row.title = "第一章 贺院三尺有顽童"
+    chapter_row.display_title = "第一章 贺院三尺有顽童"
+    chapter_row.display_index_label = "第1章"
+    chapter_row.sequence = 2
     db_session.commit()
     emitted: list[StreamEvent] = []
     seen_labels: list[str | None] = []
@@ -336,7 +336,7 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
         return _agent_result(
             run_id=run_id,
             chapter_id=2,
-            chunk_id=0,
+            chunk_id=1,
             chunk_text=chunk_text,
         )
 
@@ -392,7 +392,7 @@ async def test_run_annotate_interrupts_after_failed_chapter_preserving_committed
         return _agent_result(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chapter_id - 1,
+            chunk_id=chapter_id,
             chunk_text=chunk_text,
         )
 

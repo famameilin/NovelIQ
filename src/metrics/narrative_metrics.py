@@ -101,10 +101,10 @@ def find_valley_before_peak(scores: list[float], peak_idx: int) -> int:
     return min(range(len(before_peak)), key=lambda i: before_peak[i])
 
 
-def find_local_peaks(scores: list[float], total_chunks: int) -> list[int]:
-    if not scores or total_chunks == 0:
+def find_local_peaks(scores: list[float], total_chapters: int) -> list[int]:
+    if not scores or total_chapters == 0:
         return []
-    min_distance = max(10, int(total_chunks * 0.05))
+    min_distance = max(10, int(total_chapters * 0.05))
     peaks: list[int] = []
     for i in range(1, len(scores) - 1):
         if scores[i] > scores[i - 1] and scores[i] > scores[i + 1]:
@@ -818,22 +818,22 @@ def compute_three_act_ratio(
 
 
 def compute_climax_spacing(
-    chunk_ids: list[int],
+    chapter_ids: list[int],
     tension_composite_scores: list[float],
 ) -> float:
-    if not chunk_ids or not tension_composite_scores:
+    if not chapter_ids or not tension_composite_scores:
         return 0.0
-    if len(chunk_ids) != len(tension_composite_scores):
+    if len(chapter_ids) != len(tension_composite_scores):
         return 0.0
 
-    peak_indices = find_local_peaks(tension_composite_scores, len(chunk_ids))
+    peak_indices = find_local_peaks(tension_composite_scores, len(chapter_ids))
 
     if len(peak_indices) < 2:
         return 0.0
 
     spacings = []
     for i in range(1, len(peak_indices)):
-        spacing = chunk_ids[peak_indices[i]] - chunk_ids[peak_indices[i - 1]]
+        spacing = chapter_ids[peak_indices[i]] - chapter_ids[peak_indices[i - 1]]
         spacings.append(spacing)
 
     return sum(spacings) / len(spacings) if spacings else 0.0
@@ -868,16 +868,16 @@ def compute_climax_spacing_by_position(
 
 
 def compute_middle_collapse_index(
-    chunk_ids: list[int],
+    chapter_ids: list[int],
     tension_composite_scores: list[float],
 ) -> float:
-    if not chunk_ids or not tension_composite_scores:
+    if not chapter_ids or not tension_composite_scores:
         return 0.0
 
-    if len(chunk_ids) != len(tension_composite_scores):
+    if len(chapter_ids) != len(tension_composite_scores):
         return 0.0
 
-    total = len(chunk_ids)
+    total = len(chapter_ids)
     if total < settings.metrics.middle_collapse_min_chunks:
         return 0.0
 

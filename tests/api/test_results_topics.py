@@ -18,6 +18,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from fastapi.testclient import TestClient
+
 from src.api.services.results_queries.topics import _fetch_topics
 
 
@@ -120,3 +122,28 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
     assert len(result) == 1
     loaded_dir = trainer.load_model.call_args.args[0]
     assert loaded_dir == _PROJECT_ROOT / "models" / "topic" / "run-anchored"
+
+
+def test_topics_route_requires_paragraph_contract(
+    api_client: TestClient, db_session
+) -> None:
+    """2026-08-15 M6 回归：/topics 与 /paragraph-curves 同口径 409 旧合同 run"""
+    from sqlalchemy import text
+
+    from tests.support.paragraph_fixtures import create_completed_run
+
+    novel_id, run_id = create_completed_run(db_session, chapter_texts=["第一段。"])
+    db_session.execute(
+        text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
+        {"run_id": run_id},
+    )
+    db_session.commit()
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/topics",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "paragraph_contract_rerun_required"

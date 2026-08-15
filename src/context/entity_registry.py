@@ -67,7 +67,12 @@ def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
     if not name:
         return None
     return {
-        "chunk_id": getattr(row, "chunk_id", None),
+        # 2026-08-15：dataclass 行（EntitySnapshotRow）的章锚点字段已改名
+        # last_seen_chapter，chunk_id 属改名残留；按属性存在性回退取值，
+        # 避免 dataclass 分支恒返回 None 的潜伏陷阱
+        "chunk_id": getattr(row, "chunk_id", None)
+        if hasattr(row, "chunk_id")
+        else getattr(row, "last_seen_chapter", None),
         "name": name,
         "role": getattr(row, "role", "") or "",
         "last_action": getattr(row, "last_action", "") or "",
@@ -89,7 +94,7 @@ def get_active_entities(
     minimum_chunk_id = max(0, current_chunk_id - lookback)
     rows = [
         {
-            "chunk_id": row.last_seen_chunk,
+            "chunk_id": row.last_seen_chapter,
             "name": row.name,
             "role": row.state.get("role_function", ""),
             "last_action": row.state.get("action", ""),
@@ -97,7 +102,7 @@ def get_active_entities(
             "emotion_score": row.state.get("emotion_score", 0),
         }
         for row in graph_repo.fetch_latest_entities(run_id)
-        if minimum_chunk_id <= row.last_seen_chunk <= current_chunk_id
+        if minimum_chunk_id <= row.last_seen_chapter <= current_chunk_id
         and (row.state.get("status") or "active") == "active"
     ]
 

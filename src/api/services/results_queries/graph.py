@@ -87,10 +87,10 @@ def _fetch_character_relations(
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
             continue
-        chunk_id = relation.last_seen_chunk or relation.first_seen_chunk
-        if chunk_id is None:
+        chapter_id = relation.last_seen_chapter or relation.first_seen_chapter
+        if chapter_id is None:
             logger.warning(
-                "跳过缺少 chunk_id 的当前关系快照: from_char={}, to_char={}, type={}",
+                "跳过缺少 chapter_id 的当前关系快照: from_char={}, to_char={}, type={}",
                 from_char,
                 to_char,
                 relation.relation_type,
@@ -98,7 +98,7 @@ def _fetch_character_relations(
             continue
         result.append(
             CharacterRelation(
-                chunk_id=chunk_id,
+                chapter_id=chapter_id,
                 from_char=from_char,
                 to_char=to_char,
                 type=relation.relation_type,
@@ -134,8 +134,8 @@ def _fetch_hierarchical_relations(
             HierarchicalRelation(
                 rel_id=relation.relation_id,
                 rel_type=relation.relation_type,
-                first_chunk=relation.first_seen_chunk,
-                last_chunk=relation.last_seen_chunk,
+                first_chapter=relation.first_seen_chapter,
+                last_chapter=relation.last_seen_chapter,
                 from_entity=relation.from_name,
                 to_entity=relation.to_name,
             )
@@ -167,8 +167,8 @@ def _fetch_graph_snapshot(
             "entity_type": entity.entity_type,
             "tags": entity.tags,
             "aliases": resolution.aliases_by_representative.get(entity.entity_id, []),
-            "first_seen_chunk": entity.first_seen_chunk,
-            "last_seen_chunk": entity.last_seen_chunk,
+            "first_seen_chapter": entity.first_seen_chapter,
+            "last_seen_chapter": entity.last_seen_chapter,
             "state_revision": entity.state_revision,
             "state": entity.state,
         }
@@ -202,8 +202,8 @@ def _fetch_graph_snapshot(
         "graph_version_id": version.graph_version_id,
         "chapter_id": version.chapter_id,
         "chapter_order": version.chapter_order,
-        "first_chunk_id": version.first_chunk_id,
-        "last_chunk_id": version.last_chunk_id,
+        "first_chapter_id": version.first_chapter_id,
+        "last_chapter_id": version.last_chapter_id,
         "nodes": nodes,
         "edges": edges,
     }
@@ -238,7 +238,7 @@ def _fetch_graph_changes_page(
                 "chapter_order": row.chapter_order,
                 "fact_id": row.fact_id,
                 "fact_revision": row.fact_revision,
-                "effective_chunk_id": row.effective_chunk_id,
+                "effective_chapter_id": row.effective_chapter_id,
                 "changes": row.changes,
                 "entity_id": row.entity_id,
                 "entity_name": row.entity_name,

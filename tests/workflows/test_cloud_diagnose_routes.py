@@ -23,7 +23,7 @@ from src.agents.annotation.schema import BoundForeshadowing
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
-    ChunkRepository,
+    ChapterRepository,
     DiagnosisRepository,
     ForeshadowingRepository,
     ParagraphRepository,
@@ -64,19 +64,20 @@ class TestDiagnosisRoutes:
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
 
     def _create_full_data(self, chunk_count: int = 5) -> None:
-        chunk_repo = ChunkRepository(self.db_session)
-        # 段落坐标校验要求 global 坐标严格单调不重叠：chunk 偏移随序号递增
+        chapter_repo = ChapterRepository(self.db_session)
+        # M9a-2：每章一个运行时 chunk（chunk_id == chapter_id），
+        # 段落坐标校验要求 global 坐标严格单调不重叠：偏移随章节序号递增
         chunks = [
             Chunk(
                 index=i,
                 start=i * 100,
                 end=(i + 1) * 100,
                 text=f"这是第{i}个测试文本，包含一些内容。",
-                chapter_id=1,
+                chapter_id=i + 1,
             )
             for i in range(chunk_count)
         ]
-        chunk_repo.insert_chunks(self.run_id, chunks)
+        chapter_repo.insert_chapter_texts(self.run_id, chunks)
 
         paragraph_repo = ParagraphRepository(self.db_session)
         spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
@@ -101,33 +102,31 @@ class TestDiagnosisRoutes:
             ],
         )
 
-        persist_chapter_annotation(
-            self.db_session,
-            run_id=self.run_id,
-            chapter_id=1,
-            emotional_valences={
-                i: "mild_positive" if i % 2 == 0 else "mild_negative"
-                for i in range(chunk_count)
-            },
-            event_types={
-                i: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"
-                for i in range(chunk_count)
-            },
-            pivot_chunks={i for i in range(chunk_count) if i in {1, 2}},
-            cliffhanger_chunks={chunk_count - 1},
-            characters=[
-                character_fact(
-                    chunk_id=i,
-                    name=f"角色{i}",
-                    action="测试行为",
-                    role_function="主体" if i == 0 else "客体",
-                )
-                for i in range(chunk_count)
-            ],
-        )
+        for i in range(chunk_count):
+            persist_chapter_annotation(
+                self.db_session,
+                run_id=self.run_id,
+                chapter_id=i + 1,
+                emotional_valences={
+                    i + 1: "mild_positive" if i % 2 == 0 else "mild_negative"
+                },
+                event_types={
+                    i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"
+                },
+                pivot_chunks={i + 1} if i in {1, 2} else None,
+                cliffhanger_chunks={chunk_count} if i == chunk_count - 1 else None,
+                characters=[
+                    character_fact(
+                        chunk_id=i + 1,
+                        name=f"角色{i}",
+                        action="测试行为",
+                        role_function="主体" if i == 0 else "客体",
+                    )
+                ],
+            )
         ForeshadowingRepository(self.db_session).sync(
             run_id=self.run_id,
-            chunk_id=0,
+            chapter_id=1,
             foreshadowing=BoundForeshadowing(
                 description="测试伏笔",
                 confidence="medium",
