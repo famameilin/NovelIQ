@@ -155,14 +155,24 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
     if not data:
         return MetricsSettings()
     surface_tension_weights = data.get("surface_tension_weights")
+    lowess_bandwidth = data.get("lowess_bandwidth", 0.02)
+    lowess_min_points = data.get("lowess_min_points", 7)
+    # 2026-08-15 M3：非正带宽在平滑入口会快速失败（自适应扩窗 h *= 2.0 恒不变），
+    # 配置层提前校验避免分析中途崩溃；带宽是全文比例，>1 已无窗口意义
+    if isinstance(lowess_bandwidth, bool) or not isinstance(lowess_bandwidth, (int, float)):
+        raise ValueError(f"lowess_bandwidth 必须是数值，当前值: {lowess_bandwidth!r}")
+    if not 0 < lowess_bandwidth <= 1:
+        raise ValueError(f"lowess_bandwidth 必须在 (0, 1] 区间内，当前值: {lowess_bandwidth}")
+    if isinstance(lowess_min_points, bool) or not isinstance(lowess_min_points, int) or lowess_min_points < 1:
+        raise ValueError(f"lowess_min_points 必须是 ≥1 的整数，当前值: {lowess_min_points!r}")
     return MetricsSettings(
         mtld_threshold=data.get("mtld_threshold", 0.72),
         middle_collapse_min_chunks=data.get("middle_collapse_min_chunks", 10),
         character_max_iter=data.get("character_max_iter", 100),
         metric_version=data.get("metric_version", "1"),
         curve_version=data.get("curve_version", "1"),
-        lowess_bandwidth=data.get("lowess_bandwidth", 0.02),
-        lowess_min_points=data.get("lowess_min_points", 7),
+        lowess_bandwidth=lowess_bandwidth,
+        lowess_min_points=lowess_min_points,
         surface_tension_weights=(
             surface_tension_weights if isinstance(surface_tension_weights, dict) else None
         )
