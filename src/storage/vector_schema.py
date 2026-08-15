@@ -56,7 +56,7 @@ def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
     ).scalar_one_or_none()
 
 
-# 二期段落化（§5.2）新结构：旧列（chapter_id/paragraph_index/paragraph_text/
+# 二期段落化（§5.2）新结构：旧列（chunk_id/paragraph_index/paragraph_text/
 # local_*/global_*）全部移除，段落身份收敛为 paragraphs 表的 paragraph_id。
 # 旧数据旧代码不兼容：列集合不匹配时直接 DROP TABLE 后重建，数据不回填。
 _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS = {

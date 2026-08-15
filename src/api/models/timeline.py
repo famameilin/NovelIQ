@@ -14,7 +14,7 @@ class TimelineMeta(BaseModel):
 
     novel_id: str = Field(description="小说 ID")
     novel_name: str = Field(description="小说名称")
-    total_chapters: int = Field(ge=0, description="总 chunk 数量")
+    total_chapters: int = Field(ge=0, description="总章节数量")
 
 
 class TimelinePhase(BaseModel):
@@ -69,7 +69,7 @@ class TimelineNode(BaseModel):
     """时间轴节点"""
 
     node_id: str = Field(description="节点唯一标识")
-    anchor_chapter_id: int = Field(description="节点主锚点 chunk ID")
+    anchor_chapter_id: int = Field(description="节点主锚点章节 ID")
     progress: float = Field(ge=0, le=1, description="叙事进度 (0-1)")
     importance_score: float = Field(ge=0, description="重要性分数")
     level: Literal[1, 2, 3] = Field(description="重要性级别: 1=重要, 2=较重要, 3=不重要")
@@ -88,9 +88,9 @@ class TimelineCompositeNode(BaseModel):
     """时间轴复合节点"""
 
     node_id: str = Field(description="复合节点唯一标识")
-    anchor_chapter_id: int = Field(description="复合节点主锚点 chunk ID")
-    start_chapter_id: int = Field(description="复合节点起始 chunk ID")
-    end_chapter_id: int = Field(description="复合节点结束 chunk ID")
+    anchor_chapter_id: int = Field(description="复合节点主锚点章节 ID")
+    start_chapter_id: int = Field(description="复合节点起始章节 ID")
+    end_chapter_id: int = Field(description="复合节点结束章节 ID")
     progress: float = Field(ge=0, le=1, description="代表节点叙事进度 (0-1)")
     start_progress: float = Field(ge=0, le=1, description="起始进度 (0-1)")
     end_progress: float = Field(ge=0, le=1, description="结束进度 (0-1)")

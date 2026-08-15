@@ -127,13 +127,12 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             if (
                 span.paragraph_id is None
                 or span.chapter_id is None
-                or span.chapter_id is None
                 or span.global_start_char is None
                 or span.global_end_char is None
                 or span.token_count is None
             ):
                 raise ValueError(
-                    "段落写入失败：段落身份字段（paragraph_id/chapter_id/chapter_id/"
+                    "段落写入失败：段落身份字段（paragraph_id/chapter_id/"
                     f"global_start_char/global_end_char/token_count）不得为 None，"
                     f"run_id={run_id} paragraph_index={span.paragraph_index}"
                 )
