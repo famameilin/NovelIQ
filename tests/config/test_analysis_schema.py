@@ -1,3 +1,5 @@
+import pytest
+
 from src.config.schemas import (
     _parse_metrics_settings,
     _parse_progress_settings,
@@ -74,3 +76,22 @@ def test_parse_metrics_settings_defaults() -> None:
     assert settings.mtld_threshold == 0.72
     assert settings.middle_collapse_min_chunks == 10
     assert settings.character_max_iter == 100
+
+
+def test_parse_metrics_settings_reads_lowess_fields() -> None:
+    settings = _parse_metrics_settings({"lowess_bandwidth": 0.05, "lowess_min_points": 10})
+
+    assert settings.lowess_bandwidth == 0.05
+    assert settings.lowess_min_points == 10
+
+
+def test_parse_metrics_settings_rejects_invalid_lowess_bandwidth() -> None:
+    for bad in (0, -0.5, 1.5, "0.02"):
+        with pytest.raises(ValueError, match="lowess_bandwidth"):
+            _parse_metrics_settings({"lowess_bandwidth": bad})
+
+
+def test_parse_metrics_settings_rejects_invalid_lowess_min_points() -> None:
+    for bad in (0, -1, 2.5):
+        with pytest.raises(ValueError, match="lowess_min_points"):
+            _parse_metrics_settings({"lowess_min_points": bad})
