@@ -212,6 +212,23 @@ class TestResults:
         assert payload["code"] == "diagnosis_rerun_required"
         assert payload["reason"] == "focus_contract_incomplete"
 
+    def test_get_results_rejects_old_run_paragraph_contract(self, api_client: TestClient, db_session) -> None:
+        novel_id = "r" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Results Old Contract")
+        run_repo.update_run_status(run_id, "completed")
+        db_session.execute(
+            text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        )
+        db_session.commit()
+
+        response = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "paragraph_contract_rerun_required"
+
     def test_get_chapter_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
         """测试 chapter_annotations 不接受属于其他小说的 task_id。"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as first_file:

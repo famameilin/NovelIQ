@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from tests.support.timeline_contract_helpers import (
@@ -194,3 +195,20 @@ def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_pa
 
     assert response.status_code == 500
     assert response.json()["error_type"] == "InternalServerError"
+
+
+def test_get_timeline_rejects_old_run_paragraph_contract(api_client: TestClient, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+    db_session.execute(
+        text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
+        {"run_id": scenario.run_id},
+    )
+    db_session.commit()
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/timeline",
+        params={"task_id": scenario.task_id, "include_curve": "true"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "paragraph_contract_rerun_required"

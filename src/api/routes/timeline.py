@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.contract_guards import require_paragraph_contract
 from src.api.dependencies import get_db_session, get_novel_service
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ErrorResponse
@@ -93,6 +94,7 @@ async def get_timeline(
             f"分析尚未完成，当前状态: {run_data['status']}",
             run_status=run_data["status"],
         )
+    require_paragraph_contract(run_data)
 
     chapter_repo = ChapterRepository(session)
     annotation_repo = AnnotationRepository(session)
