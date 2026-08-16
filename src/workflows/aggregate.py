@@ -77,14 +77,6 @@ def _log_aggregate_results(agg_result) -> None:
                 else:
                     logger.info(f"  {key}: {value}")
 
-    if agg_result.traditional_culture:
-        logger.info("\n--- Traditional Culture ---")
-        for key, value in agg_result.traditional_culture.items():
-            if isinstance(value, float):
-                logger.info(f"  {key}: {value:.4f}")
-            else:
-                logger.info(f"  {key}: {value}")
-
 
 def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dict[str, Any]:
     """
@@ -93,18 +85,20 @@ def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dic
     imagery 完整性按章节从段落指标充分统计量聚合判定（§15.5）：
     章 imagery 密度 = Σimagery_hit_count / Σtoken_count；token 为 0 的章
     视为缺失（不通过），零命中的章不算质量错误。
+    2026-08-15 词表 v3：traditional_culture 下线后，imagery 数据存在性
+    改由段落聚合直接判定（全书 Σimagery_hit_count > 0）。
     """
     language_style = agg_result.language_style if isinstance(agg_result.language_style, dict) else {}
-    traditional_culture = agg_result.traditional_culture if isinstance(agg_result.traditional_culture, dict) else {}
 
     tone_distribution = language_style.get("tone_distribution")
     tone_non_empty = isinstance(tone_distribution, dict) and len(tone_distribution) > 0
 
-    imagery_density = traditional_culture.get("imagery_density")
-    imagery_non_null = imagery_density is not None
-
     aggregates = ParagraphRepository(session).fetch_chapter_metric_aggregates(run_id)
     totals_by_chapter = dict(aggregates)
+    imagery_total = sum(
+        float(totals.get("imagery_hit_count", 0.0)) for _chapter_id, totals in aggregates
+    )
+    imagery_non_null = imagery_total > 0
     # 2026-08-15 质量门分母修复：aggregates 从 ParagraphMetric 内连接出发，完全没有
     # 指标行的章（空正文/段落指标缺失）不出现，此前被静默排除在分母之外导致空章漏检。
     # 分母改为"有正文的全部章节"：无指标行的章按 token 0（缺失）计入不通过。

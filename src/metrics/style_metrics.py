@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Sequence
-from pathlib import Path
 
 from src.config import settings
 from src.config.constants import SEMANTIC_CATEGORY_MAPPING
@@ -11,27 +10,8 @@ from src.config.constants import SEMANTIC_CATEGORY_MAPPING
 from .lexicon_metrics import count_mixed_hits
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 
-FUNCTION_WORDS_PATH = Path(__file__).parent.parent.parent / "data" / "lexicons" / "function_words.txt"
-
 SHORT_CHUNK_TOKEN_THRESHOLD = 12
 SHORT_CHUNK_MIN_POSITIVE_DENSITY = 1e-4
-
-
-def load_function_words(file_path: Path | str | None = None) -> list[str]:
-    if file_path is None:
-        file_path = FUNCTION_WORDS_PATH
-    else:
-        file_path = Path(file_path)
-    if not file_path.exists():
-        raise FileNotFoundError(f"虚词词典文件不存在: {file_path}")
-
-    words: list[str] = []
-    with open(file_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                words.append(line)
-    return words
 
 
 def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:

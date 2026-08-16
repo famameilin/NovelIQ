@@ -118,7 +118,7 @@ class TestAggregateAllMetrics:
         assert isinstance(result.emotion_curve, dict)
         assert isinstance(result.character_relations, dict)
         assert isinstance(result.language_style, dict)
-        assert isinstance(result.traditional_culture, dict)
+        # 2026-08-15 词表 v3：traditional_culture 聚合下线，AggregateResult 不再含该字段
 
     def test_aggregate_narrative_structure(self) -> None:
         ann_repo = AnnotationRepository(self.db_session)
@@ -160,14 +160,6 @@ class TestAggregateAllMetrics:
         result = aggregate_all_metrics(self.run_id, ann_repo, chapter_repo, stats_repo)
         assert "vocab_breadth" in result.language_style
         assert result.language_style["tone_distribution"] == {"愤怒": 1.0}
-
-    def test_aggregate_traditional_culture(self) -> None:
-        ann_repo = AnnotationRepository(self.db_session)
-        chapter_repo = ChapterRepository(self.db_session)
-        stats_repo = StatsRepository(self.db_session)
-        result = aggregate_all_metrics(self.run_id, ann_repo, chapter_repo, stats_repo)
-        assert "idiom_density" in result.traditional_culture
-        assert "classical_sentence_ratio" in result.traditional_culture
 
     def test_compute_narrative_structure_metrics_aligns_annotation_and_tension_by_chapter_id(self) -> None:
         annotation_data = AnnotationData(

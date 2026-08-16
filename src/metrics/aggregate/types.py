@@ -22,7 +22,6 @@ class AggregateResult:
     emotion_curve: dict[str, Any] = field(default_factory=dict)
     character_relations: dict[str, Any] = field(default_factory=dict)
     language_style: dict[str, Any] = field(default_factory=dict)
-    traditional_culture: dict[str, float | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -68,15 +67,6 @@ class TextData:
 
     texts: list[str]
     all_tokens: list[str]
-
-
-@dataclass
-class CultureData:
-    """文化数据
-
-    """
-
-    imagery_densities: list[float]
 
 
 @dataclass

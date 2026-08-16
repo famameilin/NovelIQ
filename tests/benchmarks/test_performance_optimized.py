@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 
-from src.lexicons.registry import LexiconRegistry, get_weighted_lexicon_set
+from src.lexicons.registry import LexiconRegistry
 from src.metrics.emotion_metrics import lexical_sentiment_density
 from src.metrics.lexicon_metrics import (
     build_automaton,
@@ -23,6 +23,15 @@ from src.metrics.lexicon_metrics import (
     get_emotion_spans_fast,
 )
 from src.metrics.text_utils import tokenize_words
+
+
+def _lexicon_set(registry: LexiconRegistry) -> dict[str, dict[str, int]]:
+    """v3：registry 直接组装加权词表集合（get_weighted_lexicon_set 已删除）"""
+    return {
+        "pos_terms": registry.get_weighted("positive.txt"),
+        "neg_terms": registry.get_weighted("negative.txt"),
+        "fight_terms": dict.fromkeys(registry.get("combat.txt"), 1.0),
+    }
 
 
 def generate_test_text(length: int = 1000) -> str:
@@ -46,8 +55,8 @@ def test_aho_corasick_optimization():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
 
     test_text = generate_test_text(1000)
     tokens = tokenize_words(test_text)
@@ -70,7 +79,8 @@ def test_aho_corasick_optimization():
     elapsed_new = time.time() - start
     print(f"   耗时: {elapsed_new / 100 * 1000:.2f}毫秒/次")
 
-    speedup = elapsed_old / elapsed_new
+    # 词表收敛后匹配耗时可能小到计时器归零，给分母加下界避免除零
+    speedup = elapsed_old / max(elapsed_new, 1e-9)
     print(f"\n✅ 性能提升: {speedup:.2f}倍")
     print(f"   时间节省: {(elapsed_old - elapsed_new) / 100 * 1000:.2f}毫秒/次")
 
@@ -84,14 +94,11 @@ def test_multi_type_merge_optimization():
     registry = LexiconRegistry()
     registry.load()
 
-    weighted_lexicons = [
-        get_weighted_lexicon_set(registry, pos_domains=["wuxia"], neg_domains=["wuxia"]),
-        get_weighted_lexicon_set(registry, pos_domains=["urban"], neg_domains=["urban"]),
-        get_weighted_lexicon_set(registry, pos_domains=["xuanhuan"], neg_domains=["xuanhuan"]),
-    ]
+    # v3：domain 扩展词表已删，合并演示基于 registry 单集合
+    weighted_lexicons = [_lexicon_set(registry), _lexicon_set(registry)]
 
     for i, lex in enumerate(weighted_lexicons):
-        print(f"类型{i + 1}: pos={len(lex.pos_terms)}, neg={len(lex.neg_terms)}")
+        print(f"类型{i + 1}: pos={len(lex['pos_terms'])}, neg={len(lex['neg_terms'])}")
 
     chunk_texts = [(i, generate_test_text(500)) for i in range(10)]
 
@@ -102,8 +109,8 @@ def test_multi_type_merge_optimization():
     merged_pos: dict[str, float] = {}
     merged_neg: dict[str, float] = {}
     for lex in weighted_lexicons:
-        merged_pos.update(lex.pos_terms)
-        merged_neg.update(lex.neg_terms)
+        merged_pos.update(lex["pos_terms"])
+        merged_neg.update(lex["neg_terms"])
     automaton = build_automaton(merged_pos.keys())
     start = time.time()
     for _ in range(10):
@@ -122,9 +129,9 @@ def test_end_to_end_optimization():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
-    neg_terms = lexicon_set.neg_terms
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
+    neg_terms = lexicon_set["neg_terms"]
 
     chunk_count = 100
     chunk_length = 500
@@ -161,8 +168,8 @@ def test_different_text_lengths():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
 
     automaton = build_automaton(pos_terms.keys())
 
@@ -186,7 +193,8 @@ def test_different_text_lengths():
         elapsed_new = time.time() - start
         print(f"{elapsed_new / 10 * 1000:.2f}毫秒")
 
-        speedup = elapsed_old / elapsed_new
+        # 词表收敛后匹配耗时可能小到计时器归零，给分母加下界避免除零
+        speedup = elapsed_old / max(elapsed_new, 1e-9)
         print(f"  性能提升: {speedup:.2f}倍")
 
 
@@ -199,8 +207,8 @@ def test_automaton_reuse():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
 
     print(f"词条数量: {len(pos_terms)}")
 
