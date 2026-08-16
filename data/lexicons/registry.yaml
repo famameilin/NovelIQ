@@ -1,126 +1,116 @@
-# 词表注册中心 (Lexicon Registry)
+# 词表注册中心 (Lexicon Registry v3)
 #
-# 定义所有词表的分层归属与元信息。
-# 每个 entry 对应 data/lexicons/ 下的一个 .txt 文件。
-# 新增词表必须在此注册，否则不会被加载器识别。
+# 表目标识即文件名（data/lexicons/ 下无语义 key 层），每个表目登记元数据：
+# kind / status / weight_policy / consumers。
+# 约束取舍（2026-08-15 按用户要求）：
+#   - 加载报错保留（fail-fast）：registry.yaml 缺失、注册词表文件缺失 -> 加载即报错，
+#     防止分析链静默拿到空词表降级
+#   - 内容与声明类校验宽容：版本号不符 / 非法元数据（kind/status/weight_policy）-> warning + 空结果/默认值，
+#     词表与注册表可自由迭代；count/file_hash 声明校验已删除
+#   - version_hash 与加载状态无关：覆盖 registry.yaml + conflict_matrix.yaml + 全部注册文件原文
+#   - consumers 登记真实消费点；新增词表建议同步登记（测试侧校验登记完整性）
 #
-# 创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak
+# 2026-08-15 v3：取消 layers 分层与语义 key，表目即文件名。
+# 删除 13 个词表资产：domain/ 9 表、idioms、classical_imagery、
+# function_words_classical、alias_keywords、disambig_protected、proper_nouns
+# （留存审定依据与实测利用率见 docs/词表体系重设计-修订版实施计划.md §0.2）。
+# 情感词表按 L1 核心 / L2 口语分层（L2 文件与内容由 M3 建立，届时补登记为独立表目）。
 
-version: "2.0"
+version: "3.0"
 
-layers:
-  emotion:
-    description: "情感极性词表，用于 lexical_sentiment_density"
-    lexicons:
-      positive:
-        file: "positive.txt"
-        count: 1061
-        usage: ["emotion_curve", "tension_composite"]
-      negative:
-        file: "negative.txt"
-        count: 1007
-        usage: ["emotion_curve", "tension_composite"]
+lexicons:
+  # ===== 情感（生产：段落链 positive/negative_weight_sum，命中计数） =====
+  positive.txt:
+    kind: emotion
+    tier: L1
+    polarity: positive
+    status: active
+    weight_policy: count   # M3 重建后为纯词条格式，命中计数
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "L1 核心正面情绪词（M3 重建：1061 词审定收敛至 98 词）"
 
-  tension:
-    description: "叙事张力信号词表（战斗/冲突相关）"
-    lexicons:
-      action_terms:
-        file: "combat.txt"
-        count: ~67
-        usage: ["tension_proxy", "rhythm_curve"]
+  negative.txt:
+    kind: emotion
+    tier: L1
+    polarity: negative
+    status: active
+    weight_policy: count
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "L1 核心负面情绪词（M3 重建：1007 词审定收敛至 158 词）"
 
-  style:
-    description: "语言风格维度词表"
-    lexicons:
-      sensory_5sense:
-        file: "sensory.txt"
-        count: ~137
-        usage: ["chunk_style", "sensory_density"]
-      semantic_10cat:
-        file: "semantic_category.txt"
-        count: ~500
-        usage: ["chunk_style", "category_density"]
-      function_words:
-        file: "function_words.txt"
-        count: ~200
-        usage: ["chunk_style", "fw_distribution"]
+  colloquial_positive.txt:
+    kind: emotion
+    tier: L2
+    polarity: positive
+    status: active
+    weight_policy: count
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "L2 网文口语正面情绪词（与 positive.txt 合并消费）"
 
-  culture:
-    description: "文化元素词表"
-    lexicons:
-      imagery:
-        file: "imagery.txt"
-        count: ~100
-        usage: ["chunk_culture", "imagery_density"]
-      idioms:
-        file: "idioms.txt"
-        count: ~300
-        usage: ["idiom_density"]
-      classical_imagery:
-        file: "classical_imagery.txt"
-        count: ~50
-        usage: ["classical_density"]
+  colloquial_negative.txt:
+    kind: emotion
+    tier: L2
+    polarity: negative
+    status: active
+    weight_policy: count
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "L2 网文口语负面情绪词（与 negative.txt 合并消费）"
 
-  auxiliary:
-    description: "辅助词表（停用词、专有名词等）"
-    lexicons:
-      stopwords:
-        file: "stopwords.txt"
-        count: ~2000
-        usage: ["topic_preprocessor", "tokenize"]
-      proper_nouns:
-        file: "proper_nouns.txt"
-        count: ~0
-        usage: ["suggest_expand"]
-      function_words_classical:
-        file: "function_words_classical.txt"
-        count: ~30
-        usage: ["classical_sentence_ratio"]
-      alias_keywords:
-        file: "alias_keywords.txt"
-        count: ~100
-        usage: ["entity_disambiguation"]
-      disambig_protected:
-        file: "disambig_protected.txt"
-        count: ~50
-        usage: ["entity_disambiguation"]
+  # ===== 张力（生产：段落链 fight_weight_sum） =====
+  combat.txt:
+    kind: tension
+    status: active
+    weight_policy: uniform
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "战斗/冲突信号词"
 
-  domain:
-    description: "领域扩展词表（按小说类型/题材分类）"
-    lexicons:
-      xianxia_positive:
-        file: "domain/xianxia_positive.txt"
-        count: 63
-        usage: ["emotion_curve", "domain_xianxia"]
-      xianxia_negative:
-        file: "domain/xianxia_negative.txt"
-        count: 69
-        usage: ["emotion_curve", "domain_xianxia"]
-      shuwen_pattern:
-        file: "domain/shuwen_pattern.txt"
-        count: 65
-        usage: ["emotion_curve", "domain_shuwen"]
-      power_struggle:
-        file: "domain/power_struggle.txt"
-        count: 68
-        usage: ["tension_proxy", "domain_power"]
-      urban_positive:
-        file: "domain/urban_positive.txt"
-        count: 84
-        usage: ["emotion_curve", "domain_urban"]
-      urban_negative:
-        file: "domain/urban_negative.txt"
-        count: 82
-        usage: ["emotion_curve", "domain_urban"]
-      scifi_terms:
-        file: "domain/scifi_terms.txt"
-        count: 49
-        usage: ["domain_scifi"]
-      historical_terms:
-        file: "domain/historical_terms.txt"
-        count: 55
-        usage: ["domain_historical"]
-      mystery_terms:
-        file: "domain/mystery_terms.txt"
-        count: 45
-        usage: ["domain_mystery"]
+  # ===== 风格（生产：段落链 sensory_hit_count / function_word_counts / semantic_category_counts / imagery_hit_count） =====
+  sensory.txt:
+    kind: style
+    status: active
+    weight_policy: uniform
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "五感感官词"
+
+  semantic_category.txt:
+    kind: style
+    status: active
+    weight_policy: uniform
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "语义类别词表（类别标题解析见 style_metrics.parse_semantic_category_lexicon）"
+
+  function_words.txt:
+    kind: style
+    status: active
+    weight_policy: uniform
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "虚词表"
+
+  imagery.txt:
+    kind: style
+    status: active
+    weight_policy: uniform
+    consumers: ["workflows.preprocess_helpers", "metrics.paragraph_metrics"]
+    description: "意象词（原 culture.imagery 随 culture 层删除归位 style；仅段落链 imagery_hit_count 消费）"
+
+  # ===== tokenizer 类 =====
+  stopwords.txt:
+    kind: tokenizer
+    status: active
+    weight_policy: uniform
+    consumers: ["topic.preprocessor"]
+    description: "停用词"
+
+  jieba_user_dict.txt:
+    kind: tokenizer
+    status: active
+    weight_policy: uniform
+    consumers: ["preprocess.tokenize"]
+    description: "jieba 用户词典（v3 补注册）"
+
+  negation_words.txt:
+    kind: tokenizer
+    status: active
+    weight_policy: uniform
+    consumers: ["metrics.negation"]
+    description: "否定词表（M5 重写为 hard/modal/double 分类，由 src.metrics.negation 消费）"

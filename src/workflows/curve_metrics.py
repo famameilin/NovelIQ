@@ -5,32 +5,20 @@
 
 2026-08-14 M8b：chunk 级曲线计算（compute_emotion_curve / compute_tension_signals /
 compute_rhythm_curve / compute_emotion_curve_weighted）已删除——曲线事实源
-改为 paragraph_curves（预处理阶段落库），聚合侧按章节从段落充分统计量重算；
-本模块仅保留 WeightedLexiconSet 与段落化的 compute_global_stats。
+改为 paragraph_curves（预处理阶段落库），聚合侧按章节从段落充分统计量重算。
+2026-08-15 词表 v3：WeightedLexiconSet 随 get_weighted_lexicon_set 删除
+（无生产消费者，benchmark 改用 registry 直接组装）。
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.metrics.style_metrics import mtld, ttr
 from src.preprocess.tokenize import tokenize
-
-
-@dataclass
-class WeightedLexiconSet:
-    """加权词表集合"""
-
-    pos_terms: Mapping[str, float]
-    neg_terms: Mapping[str, float]
-    fight_terms: Mapping[str, float]
-    weight: float = 1.0
-    genre: str = ""
 
 
 def _last_extreme_index(values: list[float], *, want_max: bool) -> int:

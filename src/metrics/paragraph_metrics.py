@@ -14,9 +14,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from src.metrics.emotion_metrics import count_negations_before, load_negation_words
 from src.metrics.lexicon_metrics import count_mixed_hits, get_emotion_spans
 from src.metrics.matching import count_token_hits_enhanced
+from src.metrics.negation import is_flipped, load_negation_spec
 from src.metrics.text_utils import dialogue_length, split_sentences
 
 # 与 style_metrics.metaphor_density 的 markers 保持一致
@@ -65,8 +65,10 @@ def compute_paragraph_metric_counts(
         semantic_categories: dict[str, list[str]]，语义类别词表
 
     情绪计数实现否定翻转（逻辑与 emotion_metrics.lexical_sentiment_density
-    的分子部分一致，此处返回加权和而不是密度）；否定词表经
-    load_negation_words() 加载，空文本/空词表不触发表读取。
+    的分子部分一致，此处返回命中数而不是密度）；2026-08-16 M3/M4：
+    权重弃用，positive/negative_weight_sum 语义为"命中数"（词条权重统一 1.0），
+    字段名与 DB schema 不变；否定判定经 negation 共享层（load_negation_spec），
+    空文本/空词表不触发表读取。
     """
     token_count = len(tokens)
     char_count = len(text)
@@ -84,19 +86,19 @@ def compute_paragraph_metric_counts(
     pos_spans = get_emotion_spans(text, tokens, pos_terms.keys())
     neg_spans = get_emotion_spans(text, tokens, neg_terms.keys())
     if pos_spans or neg_spans:
-        negation_words = load_negation_words()
-        for start, _end, term in pos_spans:
-            weight = float(pos_terms.get(term, 1))
-            if count_negations_before(text, start, negation_words) % 2 == 1:
-                negative_weight_sum += weight
+        # 2026-08-16 M5：否定判定改走共享层 negation.is_flipped
+        # （句边界 + longest-match 去重 + token 级距离约束 + hard/modal/double 分类）
+        spec = load_negation_spec()
+        for start, _end, _term in pos_spans:
+            if is_flipped(text, start, spec):
+                negative_weight_sum += 1.0
             else:
-                positive_weight_sum += weight
-        for start, _end, term in neg_spans:
-            weight = float(neg_terms.get(term, 1))
-            if count_negations_before(text, start, negation_words) % 2 == 1:
-                positive_weight_sum += weight
+                positive_weight_sum += 1.0
+        for start, _end, _term in neg_spans:
+            if is_flipped(text, start, spec):
+                positive_weight_sum += 1.0
             else:
-                negative_weight_sum += weight
+                negative_weight_sum += 1.0
 
     fight_terms = lexicons.get("fight_terms") or {}
     fight_weight_sum = float(

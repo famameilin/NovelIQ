@@ -42,17 +42,13 @@ from ..narrative_metrics import (
 from ..style_metrics_extra import (
     compute_avg_word_len,
     compute_category_density,
-    compute_classical_sentence_ratio,
     compute_function_word_vector,
-    compute_idiom_density,
-    compute_imagery_density,
     compute_sent_len_std,
     compute_vocab_breadth,
 )
 from .types import (
     AnnotationData,
     CharacterData,
-    CultureData,
     EmotionData,
     RelationData,
     StyleData,
@@ -264,18 +260,3 @@ def compute_language_style_metrics(
         result["avg_sent_len"] = None
 
     return result
-
-
-def compute_traditional_culture_metrics(
-    culture_data: CultureData,
-    texts: list[str],
-) -> dict[str, float | None]:
-    """
-    计算传统文化聚合指标
-
-    """
-    return {
-        "idiom_density": compute_idiom_density(texts),
-        "classical_sentence_ratio": compute_classical_sentence_ratio(texts),
-        "imagery_density": compute_imagery_density(texts),
-    }

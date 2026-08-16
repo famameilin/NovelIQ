@@ -22,12 +22,10 @@ from src.metrics.lexicon_metrics import (
 )
 from src.metrics.rhythm_metrics import tension_composite, tension_proxy
 from src.metrics.style_metrics import (
-    FUNCTION_WORDS_PATH,
     average_word_length,
     dialogue_ratio,
     function_word_distribution,
     imagery_density,
-    load_function_words,
     metaphor_density,
     mtld,
     pause_density,
@@ -208,30 +206,6 @@ class TestStyleMetrics(unittest.TestCase):
         tokens = ["的", "的", "的", "我", "爱", "你"]
         dist = function_word_distribution(tokens, ["的"])
         self.assertAlmostEqual(dist["的"], 3 / 6, places=6)
-
-    def test_load_function_words_default(self) -> None:
-        words = load_function_words()
-        self.assertIsInstance(words, list)
-        self.assertGreater(len(words), 100)
-        self.assertIn("的", words)
-        self.assertIn("了", words)
-        self.assertIn("和", words)
-
-    def test_load_function_words_custom_path(self) -> None:
-        words = load_function_words(FUNCTION_WORDS_PATH)
-        self.assertGreater(len(words), 100)
-
-    def test_load_function_words_file_not_found(self) -> None:
-        with self.assertRaises(FileNotFoundError):
-            load_function_words("nonexistent_path.txt")
-
-    def test_function_word_distribution_integration(self) -> None:
-        function_words = load_function_words()
-        tokens = ["我", "的", "书", "在", "桌", "子", "上", "了"]
-        dist = function_word_distribution(tokens, function_words)
-        self.assertIn("的", dist)
-        self.assertIn("在", dist)
-        self.assertIn("了", dist)
 
     def test_semantic_category_density(self) -> None:
         text = "刀剑宗门"

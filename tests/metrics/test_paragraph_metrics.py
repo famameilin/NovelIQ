@@ -21,7 +21,7 @@ TOKENS = [
     "他", "像", "花朵", "一样", "凋零", "他", "在", "战斗", "中", "咆哮", "真的", "吗",
 ]
 LEXICONS = {
-    "pos_terms": {"快乐": 2.0},
+    "pos_terms": {"快乐": 1.0},
     "neg_terms": {"痛苦": 1.0},
     "fight_terms": {"战斗": 1.0},
     "sensory": ["花朵"],
@@ -45,9 +45,9 @@ def test_compute_paragraph_metric_counts_full_fields() -> None:
     assert counts.sentence_char_sum == pytest.approx(35.0)
     assert counts.sentence_char_sum_sq == pytest.approx(427.0)
 
-    # 3. 正负情绪分子（含否定翻转）：快乐(2.0) 正向 + 不快乐(2.0) 翻转负向 + 痛苦(1.0) 负向
-    assert counts.positive_weight_sum == pytest.approx(2.0)
-    assert counts.negative_weight_sum == pytest.approx(3.0)
+    # 3. 正负情绪分子（命中计数 + 否定翻转）：快乐 正向1次 + 不快乐 翻转负向1次 + 痛苦 负向1次
+    assert counts.positive_weight_sum == pytest.approx(1.0)
+    assert counts.negative_weight_sum == pytest.approx(2.0)
 
     # 4. 战斗词加权和（权重统一 1.0，fuzzy 模式）
     assert counts.fight_weight_sum == pytest.approx(1.0)
@@ -86,18 +86,18 @@ def test_sentence_sufficient_statistics_manual() -> None:
 def test_negation_flip_single() -> None:
     """单重否定翻转："不快乐" 计入 negative"""
     counts = compute_paragraph_metric_counts(
-        "他不快乐。", ["他", "不", "快乐"], {"pos_terms": {"快乐": 2.0}}
+        "他不快乐。", ["他", "不", "快乐"], {"pos_terms": {"快乐": 1.0}}
     )
     assert counts.positive_weight_sum == pytest.approx(0.0)
-    assert counts.negative_weight_sum == pytest.approx(2.0)
+    assert counts.negative_weight_sum == pytest.approx(1.0)
 
 
 def test_negation_flip_double() -> None:
-    """双重否定还原："别不快乐"（两个否定词）仍计入 positive"""
+    """双重否定还原："不是不快乐"（两个否定词）仍计入 positive"""
     counts = compute_paragraph_metric_counts(
-        "他别不快乐。", ["他", "别", "不", "快乐"], {"pos_terms": {"快乐": 2.0}}
+        "他不是不快乐。", ["他", "不是", "不", "快乐"], {"pos_terms": {"快乐": 1.0}}
     )
-    assert counts.positive_weight_sum == pytest.approx(2.0)
+    assert counts.positive_weight_sum == pytest.approx(1.0)
     assert counts.negative_weight_sum == pytest.approx(0.0)
 
 

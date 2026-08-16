@@ -16,7 +16,6 @@ from src.models.local.character_reference_policy import decide_character_referen
 from .types import (
     AnnotationData,
     CharacterData,
-    CultureData,
     DialogueData,
     EmotionData,
     RelationData,
@@ -227,30 +226,6 @@ def fetch_text_data(
         all_tokens.extend(tokens)
 
     return TextData(texts=texts, all_tokens=all_tokens)
-
-
-def fetch_culture_data(
-    stats_repo: StatsRepository,
-    run_id: str,
-) -> CultureData:
-    """
-    提取每章（chunk）意象密度（§9.1 守恒聚合，2026-08-14 M8b 段落化）
-
-    章意象密度 = Σimagery_hit_count / Σtoken_count；token 为 0 的章跳过。
-    """
-    from src.storage.repositories.paragraph_repository import ParagraphRepository
-
-    aggregates = ParagraphRepository(stats_repo.session).fetch_chapter_metric_aggregates(run_id)
-    imagery_densities: list[float] = []
-    for _chapter_id, totals in aggregates:
-        token_count = totals.get("token_count", 0.0)
-        if token_count <= 0:
-            continue
-        imagery_densities.append(totals.get("imagery_hit_count", 0.0) / token_count)
-
-    return CultureData(
-        imagery_densities=imagery_densities,
-    )
 
 
 def fetch_tension_data(

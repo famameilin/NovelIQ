@@ -74,8 +74,7 @@ async def run_preprocess(
         return 0, 0, 0.0
     logger.info(f"loaded {len(docs)} documents from {source_path}")
 
-    lexicon_dir = Path("data/lexicons")
-    lexicons = _load_all_lexicons_for_preprocess(lexicon_dir)
+    lexicons = _load_all_lexicons_for_preprocess()
 
     normalized_texts: list[str] = []
     for doc in docs:

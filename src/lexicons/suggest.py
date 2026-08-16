@@ -349,21 +349,13 @@ def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> dict[str, list[s
     reg.load()
 
     lexicons = {
-        "proper_nouns": set(reg.get("auxiliary.proper_nouns")),
-        "combat": set(reg.get("tension.action_terms")),
-        "sensory": set(reg.get("style.sensory_5sense")),
-        "semantic_category": set(reg.get("style.semantic_10cat")),
+        "combat": set(reg.get("combat.txt")),
+        "sensory": set(reg.get("sensory.txt")),
+        "semantic_category": set(reg.get("semantic_category.txt")),
     }
     additions: dict[str, list[str]] = {}
-    additions["proper_nouns"] = _extract_proper_nouns(
-        freq,
-        lexicons["proper_nouns"],
-        _STOPWORD_SUBSTRINGS,
-        _TITLE_SUFFIXES,
-        _PLACE_SUFFIXES,
-        _ARTIFACT_SUFFIXES,
-        _TITLE_ONLY,
-    )
+    # 2026-08-15 词表 v3：proper_nouns 词表已删（0% 利用率），不再产出该建议类别；
+    # _extract_proper_nouns 启发式保留，供词库扩展复用
     additions["combat"] = _extract_combat_terms(
         freq,
         lexicons["combat"],
