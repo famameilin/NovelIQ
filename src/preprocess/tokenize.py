@@ -13,6 +13,21 @@ def _default_stopwords_path() -> Path:
     return Path("data/lexicons/stopwords.txt")
 
 
+# 2026-08-16 情绪词重切分：删除"副词+单字情绪词（爽/慌）"与"爽/慌+得/到"的
+# 融合词路由，使 jieba 切回 很|爽、爽|得，单字表词可被 token 对齐匹配命中。
+# 融合词分两类：jieba 基础词典低频词（仅改用户词典文件无法移除，需运行时
+# del_word）与 HMM 模型词（del_word 注册 force_split 阻断合并）。覆盖
+# 副词×情绪字×{裸/了/的} 全矩阵；爱 类刻意不删（习惯性偏好漂移：最爱说/太爱装）。
+_ADVERB_PREFIXES = ("很", "太", "好", "超", "巨", "特", "挺", "蛮", "更", "最", "极", "颇", "愈", "贼")
+_EMOTION_SINGLE_CHARS = ("爽", "慌")
+_EMOTION_FUSION_SPLITS = tuple(
+    a + c + suffix
+    for a in _ADVERB_PREFIXES
+    for c in _EMOTION_SINGLE_CHARS
+    for suffix in ("", "了", "的")
+) + ("爽得", "爽到", "慌得", "慌到")
+
+
 class Tokenizer:
     _instance = None
     _initialized = False
@@ -76,6 +91,10 @@ class Tokenizer:
         if self._user_dict_path and self._user_dict_path.exists():
             self._jieba.load_userdict(str(self._user_dict_path))
             logger.debug("加载jieba用户词典: {}", self._user_dict_path)
+        # 情绪词重切分：删除融合词路由（基础词典里的低频融合词仅靠用户词典
+        # 无法覆盖删除，需运行时移除；HMM 模型词由用户词典 freq=0 强制切分）
+        for word in _EMOTION_FUSION_SPLITS:
+            self._jieba.del_word(word)
 
     def tokenize(self, text: str, filter_stopwords: bool = False) -> list[str]:
         if not text or not text.strip():
