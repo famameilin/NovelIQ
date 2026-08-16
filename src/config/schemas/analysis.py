@@ -69,8 +69,8 @@ class MetricsSettings:
     mtld_threshold: float = 0.72
     middle_collapse_min_chunks: int = 10
     character_max_iter: int = 100
-    # 段落指标版本标识（§5.3 metric_version）
-    metric_version: str = "1"
+    # 段落指标版本标识（§5.3 metric_version；v2=词表体系重设计 M1-M6 后语义：命中计数+共享否定层）
+    metric_version: str = "2"
     # 段落曲线版本标识（§5.5 curve_version）
     curve_version: str = "1"
     # LOWESS 平滑参数（§9.3，默认 2% 带宽/最少 7 点，待真实小说标定）
@@ -169,7 +169,7 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         mtld_threshold=data.get("mtld_threshold", 0.72),
         middle_collapse_min_chunks=data.get("middle_collapse_min_chunks", 10),
         character_max_iter=data.get("character_max_iter", 100),
-        metric_version=data.get("metric_version", "1"),
+        metric_version=data.get("metric_version", "2"),
         curve_version=data.get("curve_version", "1"),
         lowess_bandwidth=lowess_bandwidth,
         lowess_min_points=lowess_min_points,

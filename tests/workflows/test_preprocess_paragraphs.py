@@ -267,7 +267,7 @@ class TestPreprocessParagraphs:
         ).all()
         assert len(metric_rows) == paragraph_count
         for row in metric_rows:
-            assert row.metric_version == "1"
+            assert row.metric_version == str(settings.metrics.metric_version)
             assert row.char_count > 0
             assert row.token_count >= 0
             assert row.sentence_count >= 0

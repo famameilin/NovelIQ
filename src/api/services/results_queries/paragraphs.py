@@ -37,7 +37,7 @@ def _paragraph_splitter_version() -> str:
 
 
 def _metric_version() -> str:
-    return str(getattr(settings.metrics, "metric_version", None) or "1")
+    return str(getattr(settings.metrics, "metric_version", None) or "2")
 
 
 def _curve_version() -> str:
