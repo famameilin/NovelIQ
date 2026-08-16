@@ -73,6 +73,8 @@ data/novel/
 
 # Outputs - 分析输出结果
 outputs/
+# 词表审计与图表快照等本地产物
+output/
 
 # Cache
 .cache/
@@ -221,6 +223,8 @@ skills/
 
 .codex-runtime/ 
 .playwright-mcp/
+# Playwright CLI 会话快照
+.playwright-cli/
 .pytest-tmp/
 tmp/
 scripts/tools/build_competition_report.py
