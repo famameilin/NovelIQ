@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Annotated, Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,7 @@ from src.api.models.responses import (
     ChapterMetricsResponse,
     CharacterStats,
     DiagnosisResult,
+    EmotionTrendWindow,
     ForeshadowingThreadResponse,
     ParagraphCurvePoint,
     ResultsWriteResponse,
@@ -47,6 +49,7 @@ from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_re
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
 from src.api.services.results_queries.paragraphs import (
     _fetch_chapter_metrics,
+    _fetch_emotion_trend,
     _fetch_paragraph_curves,
 )
 from src.config import settings
@@ -108,6 +111,35 @@ def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> NoRe
             "reason": diagnosis.rerun_reason,
         },
     )
+
+
+def _parse_emotion_trend_range(
+    position_range: str | None,
+) -> tuple[float, float] | None:
+    """2026-08-15 解析情绪趋势 position 区间并统一校验输入"""
+    if position_range is None:
+        return None
+    raw = position_range.strip()
+    try:
+        values = (
+            json.loads(raw)
+            if raw.startswith("[")
+            else [part.strip() for part in raw.split(",")]
+        )
+        if not isinstance(values, list) or len(values) != 2:
+            raise ValueError
+        start, end = float(values[0]), float(values[1])
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="range 格式必须为 start,end 或 [start,end]",
+        ) from exc
+
+    if not all(math.isfinite(value) and 0 <= value <= 1 for value in (start, end)):
+        raise HTTPException(status_code=422, detail="range 的 position 必须位于 0~1")
+    if start >= end:
+        raise HTTPException(status_code=422, detail="range 起点必须小于终点")
+    return start, end
 
 
 def _fetch_and_require_valid_diagnosis(
@@ -292,6 +324,47 @@ async def get_paragraph_curves(
     require_paragraph_contract(run)
     paragraph_repo = ParagraphRepository(session)
     return _fetch_paragraph_curves(run_id, paragraph_repo, max_points)
+
+
+@router.get(
+    "/{novel_id}/emotion-trend",
+    response_model=list[EmotionTrendWindow],
+    summary="情绪趋势窗口聚合（§13.1 展示层，缩放自适应窗口）",
+)
+async def get_emotion_trend(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    request: Request,
+    session: Annotated[Session, Depends(get_db_session)],
+    position_range: Annotated[
+        str | None,
+        Query(alias="range", description="position 区间，格式为 start,end，取值 0~1"),
+    ] = None,
+    window_paragraphs: Annotated[int, Query(description="目标窗口大小，服务端钳制到 5~40")] = 20,
+) -> list[EmotionTrendWindow]:
+    """
+    2026-08-15 提供按 position 区间和每窗段落数重聚合的情绪趋势数据
+
+    获取情绪趋势窗口聚合序列（展示层重采样，不回写数据库）
+
+    每窗段落数作用于 range 过滤后的段落集；窗口大小由服务端钳制到 5~40，
+    深缩放段数不足时最后一个窗口自然退化为实际剩余段落数。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    require_paragraph_contract(run)
+    range_values = request.query_params.getlist("range")
+    parsed_range = _parse_emotion_trend_range(
+        ",".join(range_values) if len(range_values) > 1 else position_range
+    )
+    paragraph_repo = ParagraphRepository(session)
+    return _fetch_emotion_trend(
+        run_id,
+        paragraph_repo,
+        parsed_range[0] if parsed_range else None,
+        parsed_range[1] if parsed_range else None,
+        window_paragraphs,
+    )
 
 
 @router.get(
