@@ -7,11 +7,16 @@
 规则：
 1. 句边界：否定词必须与情绪词在同一句（句界为 。！？!? 与换行）
 2. longest-match 去重：复合否定词优先匹配，非重叠 span 单词只计一次
-3. 最近距离约束：否定 span 结束位置与情绪词起点之间 ≤1 个 token
+3. 最近距离约束：否定 span 结束位置与情绪词起点之间 ≤1 个 token；
+   例外——否定词位于小句开头（前文自上个分句界起仅标点/引号）时管辖整个
+   小句，距离约束不适用；但否定与情绪词之间出现分句界（，、；：）或"的"
+   （定语修饰，如"不灭的最后希望"）仍不翻转
 4. 否定词分类（negation_words.txt 分组注释）：
    - hard   —— 参与翻转计数（单次计 1）
    - modal  —— 情态/推测标记（未必/莫非/难以…），不翻转极性
    - double —— 双重否定词组（不得不…），计 2 次，奇偶抵消
+   - scope  —— VP 辖制否定（舍不得/不舍得…），辖制同小句内其后动词短语，
+               不适用距离约束；分句界或"的"（定语）仍阻断
 """
 
 from __future__ import annotations
@@ -23,6 +28,21 @@ from pathlib import Path
 from src.utils.text_utils import tokenize_words
 
 _SECTION_PATTERN = "====="
+_CLAUSE_BOUNDARY_CHARS = "，、；：,;:"
+_QUOTE_CHARS = " \t'\"“”‘’…—"
+
+
+def _span_at_clause_start(prefix: str, span: NegationSpan) -> bool:
+    """否定 span 是否位于小句开头：自上一个分句界（，、；：）起仅标点/引号/空白"""
+    head = prefix[: span.start]
+    if not head:
+        return True
+    last_boundary = max(head.rfind(c) for c in _CLAUSE_BOUNDARY_CHARS)
+    if last_boundary < 0:
+        tail = head
+    else:
+        tail = head[last_boundary + 1 :]
+    return not tail.strip(_QUOTE_CHARS)
 
 
 @dataclass(frozen=True)
@@ -32,11 +52,14 @@ class NegationSpec:
     hard: frozenset[str]
     modal: frozenset[str]
     double: frozenset[str]
+    scope: frozenset[str] = frozenset()
 
     @property
     def all_words(self) -> tuple[str, ...]:
         """全部否定词，按长度降序（longest-match 优先）"""
-        return tuple(sorted(self.hard | self.modal | self.double, key=len, reverse=True))
+        return tuple(
+            sorted(self.hard | self.modal | self.double | self.scope, key=len, reverse=True)
+        )
 
 
 @dataclass(frozen=True)
@@ -46,13 +69,14 @@ class NegationSpan:
     start: int
     end: int
     word: str
-    kind: str  # hard | modal | double
+    kind: str  # hard | modal | double | scope
 
 
 def _parse_spec(lines: list[str]) -> NegationSpec:
     hard: set[str] = set()
     modal: set[str] = set()
     double: set[str] = set()
+    scope: set[str] = set()
     current: set[str] | None = None
     for line in lines:
         stripped = line.strip()
@@ -65,6 +89,8 @@ def _parse_spec(lines: list[str]) -> NegationSpec:
                 current = modal
             elif "double" in stripped:
                 current = double
+            elif "scope" in stripped:
+                current = scope
             else:
                 current = None
             continue
@@ -74,6 +100,7 @@ def _parse_spec(lines: list[str]) -> NegationSpec:
         hard=frozenset(hard),
         modal=frozenset(modal),
         double=frozenset(double),
+        scope=frozenset(scope),
     )
 
 
@@ -109,6 +136,8 @@ def find_negation_spans(sentence: str, spec: NegationSpec) -> list[NegationSpan]
         word_kind[word] = "modal"
     for word in spec.double:
         word_kind[word] = "double"
+    for word in spec.scope:
+        word_kind[word] = "scope"
 
     for word in spec.all_words:
         start = 0
@@ -140,8 +169,9 @@ def is_flipped(text: str, emotion_start: int, spec: NegationSpec | None = None) 
     """
     判定情绪词是否被否定翻转
 
-    规则：同一句内 + 否定 span 结束与情绪词起点之间 ≤1 token + 有效否定数奇偶
-    （有效否定数 = hard 命中数 + double 命中数 ×2；modal 不参与）。
+    规则：同一句内 + 否定 span 结束与情绪词起点之间 ≤1 token（小句首 hard 与
+    scope 类除外）+ 有效否定数奇偶（有效否定数 = hard/scope 命中数 + double 命中数 ×2；
+    modal 不参与）。
     """
     if emotion_start <= 0:
         return False
@@ -162,9 +192,24 @@ def is_flipped(text: str, emotion_start: int, spec: NegationSpec | None = None) 
         if span.kind == "modal":
             continue
         gap = prefix[span.end :]
+        if span.kind == "scope":
+            # VP 辖制否定（舍不得/不舍得）：辖制同小句内其后动词短语，
+            # 不适用距离约束；分句界或"的"（定语）仍阻断
+            if any(c in gap for c in _CLAUSE_BOUNDARY_CHARS) or "的" in gap:
+                continue
+            effective += 1
+            continue
         gap_tokens = tokenize_words(gap) if gap else []
         if len(gap_tokens) > 1:
-            continue  # 最近距离约束：否定与情绪词之间最多 1 个 token
+            # 距离约束例外：小句首否定词（并没有/没有/不要…）管辖整个小句，
+            # 但否定与情绪词之间出现分句界（，、；：）仍视为出界（计划 §5.2 例 3）；
+            # 含"的"为定语修饰（不灭的/没察觉的），否定只辖相邻词，不翻转
+            if (
+                not _span_at_clause_start(prefix, span)
+                or any(c in gap for c in _CLAUSE_BOUNDARY_CHARS)
+                or "的" in gap
+            ):
+                continue
         if span.kind == "double":
             effective += 2
         else:
