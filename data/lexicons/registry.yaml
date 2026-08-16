@@ -14,7 +14,7 @@
 # 删除 13 个词表资产：domain/ 9 表、idioms、classical_imagery、
 # function_words_classical、alias_keywords、disambig_protected、proper_nouns
 # （留存审定依据与实测利用率见 docs/词表体系重设计-修订版实施计划.md §0.2）。
-# 情感词表按 L1 核心 / L2 口语分层（L2 文件与内容由 M3 建立，届时补登记为独立表目）。
+# 情感词表按 L1 核心 / L2 口语分层（M3 重建并登记为独立表目；权重弃用，命中计数）。
 
 version: "3.0"
 
