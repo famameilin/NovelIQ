@@ -5,6 +5,7 @@ import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
   createParagraphCurves,
+  createEmotionTrendWindows,
   createChapterMetrics,
   createForeshadowingThreads,
   createTopics,
@@ -76,6 +77,28 @@ export const paragraphCurvesHandler = http.get(
     const count = Number.isFinite(maxPoints) && maxPoints > 0 ? Math.min(maxPoints, 5000) : 300;
     return HttpResponse.json(createParagraphCurves(count));
   }
+);
+
+// 获取 /api/novels/:novelId/emotion-trend（窗口情绪趋势，支持 position range）
+export const emotionTrendHandler = http.get(
+  `${BASE}/api/novels/:novelId/emotion-trend`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("task_id") ?? "";
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    const windowParagraphs = Number(url.searchParams.get("window_paragraphs")) || 20;
+    const rawRange = url.searchParams.get("range");
+    const rangeParts = rawRange?.split(",").map(Number);
+    const range =
+      rangeParts && rangeParts.length === 2 && rangeParts.every(Number.isFinite)
+        ? ([rangeParts[0], rangeParts[1]] as [number, number])
+        : null;
+    await delay(400);
+    return HttpResponse.json(createEmotionTrendWindows(windowParagraphs, range));
+  },
 );
 
 // 获取 /api/novels/:novelId/chapter-metrics（M4：章节指标汇总）

@@ -9,6 +9,7 @@ import type {
   AnalysisTask,
   Character,
   ParagraphCurvePoint,
+  EmotionTrendWindow,
   ChapterMetricsResponse,
   Topic,
   DiagnosisResult,
@@ -304,6 +305,57 @@ export function createParagraphCurves(count = 300): ParagraphCurvePoint[] {
       smoothed_surface_tension: +(Math.min(1, surface * 0.8 + 0.1)).toFixed(4),
     };
   });
+}
+
+/** 2026-08-15 生成窗口情绪趋势 mock 数据以覆盖窗口粒度与缩放请求 */
+export function createEmotionTrendWindows(
+  windowParagraphs = 20,
+  range: [number, number] | null = null,
+): EmotionTrendWindow[] {
+  const totalParagraphs = 300;
+  const size = Math.max(5, Math.min(40, Math.trunc(windowParagraphs)));
+  const startParagraph = Math.max(0, Math.floor((range?.[0] ?? 0) * totalParagraphs));
+  const endParagraph = Math.min(
+    totalParagraphs - 1,
+    Math.ceil((range?.[1] ?? 1) * totalParagraphs) - 1,
+  );
+  if (startParagraph > endParagraph) return [];
+
+  const windows: EmotionTrendWindow[] = [];
+  for (let paragraphStart = startParagraph; paragraphStart <= endParagraph; paragraphStart += size) {
+    const paragraphEnd = Math.min(paragraphStart + size - 1, endParagraph);
+    const positionStart = paragraphStart / totalParagraphs;
+    const positionEnd = (paragraphEnd + 1) / totalParagraphs;
+    const progress = (positionStart + positionEnd) / 2;
+    const posCoverage = +(0.35 + 0.25 * Math.sin(progress * Math.PI)).toFixed(4);
+    const negCoverage = +(0.2 + 0.12 * Math.cos(progress * Math.PI)).toFixed(4);
+    const pooledPos = +(posCoverage / 20).toFixed(4);
+    const pooledNeg = +(negCoverage / 20).toFixed(4);
+    windows.push({
+      window_index: windows.length,
+      position: progress,
+      start_position: positionStart,
+      end_position: positionEnd,
+      paragraph_start: paragraphStart,
+      paragraph_end: paragraphEnd,
+      chapter_start: Math.floor(paragraphStart / MOCK_PARAGRAPHS_PER_CHAPTER) + 1,
+      chapter_end: Math.floor(paragraphEnd / MOCK_PARAGRAPHS_PER_CHAPTER) + 1,
+      pos_coverage: posCoverage,
+      neg_coverage: negCoverage,
+      pooled_pos_density: pooledPos,
+      pooled_neg_density: pooledNeg,
+      pooled_net_density: +(pooledPos - pooledNeg).toFixed(4),
+      smoothed_pos_coverage: posCoverage,
+      smoothed_neg_coverage: negCoverage,
+      smoothed_pooled_pos_density: pooledPos,
+      smoothed_pooled_neg_density: pooledNeg,
+      smoothed_pooled_net_density: +(pooledPos - pooledNeg).toFixed(4),
+      token_total: (paragraphEnd - paragraphStart + 1) * 25,
+      hit_paragraphs: Math.round((paragraphEnd - paragraphStart + 1) * posCoverage),
+      paragraph_total: paragraphEnd - paragraphStart + 1,
+    });
+  }
+  return windows;
 }
 
 /* ------------------------------------------------------------------ */

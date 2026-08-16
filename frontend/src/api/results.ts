@@ -14,6 +14,7 @@ import type {
   EmotionStatsMetrics,
   CharacterStatsMetrics,
   StyleStatsMetrics,
+  EmotionTrendWindow,
 } from "./types";
 
 export async function getCharacters(
@@ -46,6 +47,25 @@ export async function getParagraphCurves(
       params: {
         task_id: taskId,
         ...(options?.maxPoints != null && { max_points: options.maxPoints }),
+      },
+    }
+  );
+  return data;
+}
+
+// 情绪趋势窗口聚合：window_paragraphs 作用于 range 区间内（缺省=全书）
+export async function getEmotionTrend(
+  novelId: string,
+  taskId: string,
+  options?: { range?: [number, number]; windowParagraphs?: number }
+): Promise<EmotionTrendWindow[]> {
+  const { data } = await apiClient.get<EmotionTrendWindow[]>(
+    `/api/novels/${novelId}/emotion-trend`,
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.range && { range: options.range.join(",") }),
+        ...(options?.windowParagraphs != null && { window_paragraphs: options.windowParagraphs }),
       },
     }
   );
