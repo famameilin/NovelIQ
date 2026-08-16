@@ -20,9 +20,11 @@ from src.api.models.responses import (
     BookAggregateStats,
     ChapterMetricsResponse,
     ChapterMetricSummary,
+    EmotionTrendWindow,
     ParagraphCurvePoint,
 )
 from src.config import settings
+from src.metrics.robust_smooth import robust_local_regression
 from src.metrics.style_metrics import mtld, ttr
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import AnnotationRepository, ParagraphRepository
@@ -47,6 +49,151 @@ def _safe_ratio(numerator: float, denominator: float) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def _clamp_coverage(value: float | None) -> float | None:
+    """2026-08-15 将后端平滑覆盖率限制在可解释的 0~1 值域"""
+    if value is None:
+        return None
+    return max(0.0, min(1.0, value))
+
+
+def _smooth_emotion_windows(windows: list[EmotionTrendWindow]) -> list[EmotionTrendWindow]:
+    """2026-08-15 对窗口聚合结果执行后端 LOWESS 展示平滑并保留原始值"""
+    if not windows:
+        return windows
+
+    positions = [window.position for window in windows]
+    weights = [float(max(window.token_total, 1)) for window in windows]
+    min_points = int(getattr(settings.metrics, "lowess_min_points", 7) or 7)
+    bandwidth = float(getattr(settings.metrics, "lowess_bandwidth", 0.02) or 0.02)
+
+    def smooth_values(values: list[float | None]) -> list[float | None]:
+        valid = [(index, value) for index, value in enumerate(values) if value is not None]
+        if not valid:
+            return [None] * len(values)
+        fitted = robust_local_regression(
+            [positions[index] for index, _ in valid],
+            [float(value) for _, value in valid],
+            weights=[weights[index] for index, _ in valid],
+            bandwidth=bandwidth,
+            min_points=min_points,
+        )
+        mapped: list[float | None] = [None] * len(values)
+        for (index, _), value in zip(valid, fitted, strict=True):
+            mapped[index] = float(value)
+        return mapped
+
+    pos_coverage = smooth_values([window.pos_coverage for window in windows])
+    neg_coverage = smooth_values([window.neg_coverage for window in windows])
+    pooled_pos = smooth_values([window.pooled_pos_density for window in windows])
+    pooled_neg = smooth_values([window.pooled_neg_density for window in windows])
+    pooled_net = smooth_values([window.pooled_net_density for window in windows])
+
+    return [
+        window.model_copy(
+            update={
+                "smoothed_pos_coverage": (
+                    _clamp_coverage(pos_coverage[index])
+                ),
+                "smoothed_neg_coverage": (
+                    _clamp_coverage(neg_coverage[index])
+                ),
+                "smoothed_pooled_pos_density": pooled_pos[index],
+                "smoothed_pooled_neg_density": pooled_neg[index],
+                "smoothed_pooled_net_density": pooled_net[index],
+            }
+        )
+        for index, window in enumerate(windows)
+    ]
+
+
+def _fetch_emotion_trend(
+    run_id: str,
+    paragraph_repo: ParagraphRepository,
+    range_start: float | None,
+    range_end: float | None,
+    window_paragraphs: int,
+) -> list[EmotionTrendWindow]:
+    """
+    2026-08-15 由段落原始指标构造情绪趋势窗口并附带后端展示平滑值
+
+    情绪趋势窗口聚合（§13.1 展示层，缩放自适应窗口）
+
+    - 输入为段落充分统计量（paragraphs + paragraph_metrics 对齐），
+      命中判定用原始分子（positive_weight_sum/negative_weight_sum > 0），
+      请求时无词典/分词开销
+    - 每窗段落数 window_paragraphs 作用于 range 过滤后的段落集，服务端钳制到 5~40
+    - 覆盖率为命中段占比；池化密度为分子/分母聚合（§8.1），分母为零返回 None
+    - 返回同时保留原始聚合值与后端 LOWESS 展示值，避免平滑覆盖可审计数据
+    """
+    paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
+    metric_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
+    metric_by_paragraph_id = {int(row.paragraph_id): row for row in metric_rows}
+
+    total_chars = sum(int(row.char_count) for row in paragraph_rows)
+
+    entries: list[tuple[Any, Any, float]] = []
+    for row in paragraph_rows:
+        metric = metric_by_paragraph_id.get(int(row.paragraph_id))
+        if metric is None:
+            continue
+        midpoint = (int(row.global_start_char) + int(row.global_end_char)) / 2
+        position = midpoint / total_chars if total_chars > 0 else 0.0
+        if range_start is not None:
+            if range_end is None or position < range_start or position > range_end:
+                continue
+        entries.append((row, metric, position))
+
+    paragraph_total = len(entries)
+    if paragraph_total == 0:
+        return []
+
+    window_size = max(5, min(40, int(window_paragraphs)))
+
+    windows: list[EmotionTrendWindow] = []
+    for index in range(0, paragraph_total, window_size):
+        chunk = entries[index : index + window_size]
+        token_total = sum(int(metric.token_count) for _, metric, _ in chunk)
+        pos_sum = sum(float(metric.positive_weight_sum) for _, metric, _ in chunk)
+        neg_sum = sum(float(metric.negative_weight_sum) for _, metric, _ in chunk)
+        pos_hit = sum(
+            1 for _, metric, _ in chunk if float(metric.positive_weight_sum) > 0
+        )
+        neg_hit = sum(
+            1 for _, metric, _ in chunk if float(metric.negative_weight_sum) > 0
+        )
+        hit_paragraphs = sum(
+            1
+            for _, metric, _ in chunk
+            if float(metric.positive_weight_sum) + float(metric.negative_weight_sum) > 0
+        )
+        count = len(chunk)
+        first_row, _, first_position = chunk[0]
+        _, _, last_position = chunk[-1]
+        center_position = (first_position + last_position) / 2.0
+        windows.append(
+            EmotionTrendWindow(
+                window_index=index // window_size,
+                position=center_position,
+                start_position=first_position,
+                end_position=last_position,
+                paragraph_start=int(first_row.paragraph_id),
+                paragraph_end=int(chunk[-1][0].paragraph_id),
+                chapter_start=int(first_row.chapter_id),
+                chapter_end=int(chunk[-1][0].chapter_id),
+                pos_coverage=pos_hit / count,
+                neg_coverage=neg_hit / count,
+                pooled_pos_density=_safe_ratio(pos_sum, token_total),
+                pooled_neg_density=_safe_ratio(neg_sum, token_total),
+                pooled_net_density=_safe_ratio(pos_sum - neg_sum, token_total),
+                token_total=token_total,
+                hit_paragraphs=hit_paragraphs,
+                paragraph_total=count,
+            )
+        )
+
+    return _smooth_emotion_windows(windows)
 
 
 def _fetch_paragraph_curves(
