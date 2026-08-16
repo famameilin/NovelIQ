@@ -1,19 +1,12 @@
 /**
- * EmotionCurveChart - 情绪趋势曲线图表组件
+ * EmotionTrendChart - 情绪趋势窗口聚合图表组件
  *
- * 展示情绪趋势主线与正负/原始趋势辅助线，支持系列切换和缩放同步
+ * 展示窗口聚合的正负情绪强度、原始趋势与后端平滑趋势，
+ * 保持旧版情绪曲线的折线视觉语义并支持缩放自适应重聚合。
  *
- *   - 添加 dataZoom 支持，用于 Brush 缩放同步
- *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
- *
- *   - 将 series 主色显式绑定到 CSS 变量
- *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
- *   - 删除未使用的 hslToHsla 导入
- *
- *   - M4 段落粒度改造：数据源从 ChunkCurvePoint 换为 ParagraphCurvePoint
- *   - x 轴从分块序号改为连续数值 position（值域 [0,1]），tooltip 改为章节/段落实名
- *   - dataZoom 百分比换算目标从"索引占比"改为"position 值域占比"
- *   - 新增点击事件：回调当前数据点，供页面做"定位到原文"跳转
+ *   - x 轴为连续 position（值域 [0,1]），dataZoom 区间即聚合作用域
+ *   - 平滑由后端请求链路完成，前端只绘制返回值，不重复计算
+ *   - 覆盖率字段仍由接口返回用于窗口统计合同，但不作为图表系列展示
  */
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
@@ -23,20 +16,18 @@ import {
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  MarkLineComponent,
   DataZoomComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
-import type { ParagraphCurvePoint } from "@/api/types";
+import type { EmotionTrendWindow } from "@/api/types";
 
 echarts.use([
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  MarkLineComponent,
   DataZoomComponent,
   LineChart,
   CanvasRenderer,
@@ -46,22 +37,57 @@ echarts.use([
 /*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
-export interface EmotionCurveChartProps {
-  data: ParagraphCurvePoint[];
+export type EmotionTrendSeriesKey =
+  | "pooled_pos_density"
+  | "pooled_neg_density"
+  | "pooled_net_density"
+  | "smoothed_pooled_net_density";
+
+export interface EmotionTrendChartProps {
+  data: EmotionTrendWindow[];
   className?: string;
   visibleSeries?: Set<string>;
   onSeriesToggle?: (series: Set<string>) => void;
   zoomRange?: [number, number] | null;
   onZoomChange?: (range: [number, number] | null) => void;
-  onPointClick?: (point: ParagraphCurvePoint) => void;
+  onZoomEnd?: (range: [number, number] | null) => void;
+  onPointClick?: (window: EmotionTrendWindow) => void;
   height?: number | string;
 }
 
 const SERIES_CONFIG = [
-  { key: "pos_density", name: "正向强度", colorVar: "--chart-positive", role: "aux" },
-  { key: "neg_density", name: "负向强度", colorVar: "--chart-negative", role: "aux" },
-  { key: "net_density", name: "原始趋势", colorVar: "--chart-1", role: "support" },
-  { key: "smoothed_net_density", name: "平滑趋势", colorVar: "--primary", role: "main" },
+  {
+    key: "pooled_pos_density",
+    smoothedKey: "smoothed_pooled_pos_density",
+    name: "正向强度",
+    colorVar: "--chart-positive",
+    role: "aux",
+    useSmoothed: true,
+  },
+  {
+    key: "pooled_neg_density",
+    smoothedKey: "smoothed_pooled_neg_density",
+    name: "负向强度",
+    colorVar: "--chart-negative",
+    role: "aux",
+    useSmoothed: true,
+  },
+  {
+    key: "pooled_net_density",
+    smoothedKey: "pooled_net_density",
+    name: "原始趋势",
+    colorVar: "--chart-1",
+    role: "support",
+    useSmoothed: false,
+  },
+  {
+    key: "smoothed_pooled_net_density",
+    smoothedKey: "smoothed_pooled_net_density",
+    name: "平滑趋势",
+    colorVar: "--primary",
+    role: "main",
+    useSmoothed: true,
+  },
 ] as const;
 
 interface ChartClickParams {
@@ -72,8 +98,8 @@ interface ChartClickParams {
 /*  组件主体                                                           */
 /* ------------------------------------------------------------------ */
 
-export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartProps>(
-  function EmotionCurveChart(
+export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartProps>(
+  function EmotionTrendChart(
     {
       data,
       className,
@@ -81,6 +107,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
       onSeriesToggle,
       zoomRange,
       onZoomChange,
+      onZoomEnd,
       onPointClick,
       height = 350,
     },
@@ -109,29 +136,33 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         "--primary": primaryColor,
       };
 
-      // x 坐标统一使用 0-1 position 数字值域
+      // 窗口 x 坐标取窗内中点，所有曲线共用连续的 position 轴
+      const centers = data.map(
+        (w) => w.position ?? (w.start_position + w.end_position) / 2
+      );
+
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
+        const isActive = activeSeries.has(config.key);
         const isMainSeries = config.role === "main";
         const isSupportSeries = config.role === "support";
-        const lineOpacity = isMainSeries ? 1 : isSupportSeries ? 0.55 : 0.35;
+        const lineOpacity = isMainSeries ? 1 : isSupportSeries ? 0.55 : 0.38;
         const lineWidth = isMainSeries ? 3 : isSupportSeries ? 2 : 1.5;
         const lineType = isSupportSeries ? "dashed" : "solid";
-        const areaOpacity = isMainSeries ? 0.12 : 0;
-        // 情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
-        // 避免把“没算出来”和“真实为 0”混成同一条贴地折线
-        const values = data.map((d) =>
-          d[config.key as keyof ParagraphCurvePoint] != null
-            ? [d.position, d[config.key as keyof ParagraphCurvePoint]] as [number, number]
-            : [d.position, null] as [number, null]
-        );
-        const isActive = activeSeries.has(config.key);
+        const values = centers.map((center, index) => {
+          const window = data[index];
+          const smoothedValue = window[config.smoothedKey];
+          const rawValue = window[config.key];
+          const value = config.useSmoothed ? smoothedValue ?? rawValue : rawValue;
+          return value != null ? [center, value] : [center, null];
+        });
 
         return {
           name: config.name,
           type: "line" as const,
           color,
           data: isActive ? values : [],
+          // 后端负责数值平滑，这里只开启 ECharts 的曲线渲染，避免折线出现棱角
           smooth: true,
           showSymbol: false,
           z: isMainSeries ? 4 : isSupportSeries ? 3 : 2,
@@ -144,17 +175,29 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           areaStyle: isMainSeries
             ? {
                 color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                  { offset: 0, color: hslToHsla(color, areaOpacity) },
+                  { offset: 0, color: hslToHsla(color, 0.12) },
                   { offset: 1, color: hslToHsla(color, 0.01) },
                 ]),
               }
             : undefined,
-          emphasis: {
-            focus: "series" as const,
-          },
+          emphasis: { focus: "series" as const },
           animationDuration: 800,
         };
       });
+
+      // 右轴按当前窗口密度自适应，保留零线并给极小量级留出可读边距
+      const densityValues = series.flatMap((item) =>
+        (item.data as Array<[number, number | null]>).flatMap(([, value]) =>
+          typeof value === "number" && Number.isFinite(value) ? [value] : []
+        )
+      );
+      const densityMin = densityValues.length > 0 ? Math.min(0, ...densityValues) : undefined;
+      const densityMax = densityValues.length > 0 ? Math.max(0, ...densityValues) : undefined;
+      const densitySpan =
+        densityMin != null && densityMax != null
+          ? Math.max(densityMax - densityMin, 0.001)
+          : undefined;
+      const densityPadding = densitySpan != null ? densitySpan * 0.15 : undefined;
 
       const baseOption = {
         grid: {
@@ -180,12 +223,20 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           textStyle: { color: "hsl(var(--text))", fontSize: 12 },
           formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; dataIndex?: number }>) => {
             if (!Array.isArray(params) || params.length === 0) return "";
-            const point = data[params[0]?.dataIndex ?? -1];
-            if (!point) return "";
-            let html = `<div class="font-medium mb-1">第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段</div>`;
+            const windowIndex = Number(params[0]?.dataIndex ?? -1);
+            const window = data[windowIndex];
+            if (!window) return "";
+            const chapterLabel =
+              window.chapter_start === window.chapter_end
+                ? `第 ${window.chapter_start} 章`
+                : `第 ${window.chapter_start}~${window.chapter_end} 章`;
+            let html = `<div class="font-medium mb-1">${chapterLabel} · 第 ${window.paragraph_start + 1}~${window.paragraph_end + 1} 段（共 ${window.paragraph_total} 段）</div>`;
             const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
-              .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(3) : "-"}</span></div>`)
+              .map(
+                (p) =>
+                  `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(4) : "-"}</span></div>`
+              )
               .join("");
             return html;
           },
@@ -229,14 +280,18 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         },
         yAxis: {
           type: "value" as const,
-          name: "情绪分数",
-          min: -1,
-          max: 1,
+          name: "情绪密度",
+          min: densityMin != null && densityPadding != null ? densityMin - densityPadding : undefined,
+          max: densityMax != null && densityPadding != null ? densityMax + densityPadding : undefined,
           nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
           axisLine: { show: false },
           axisTick: { show: false },
           splitLine: { lineStyle: { color: borderColor, opacity: 0.5 } },
-          axisLabel: { color: "hsl(var(--text-muted))", fontSize: 11 },
+          axisLabel: {
+            color: "hsl(var(--text-muted))",
+            fontSize: 11,
+            formatter: (value: number) => value.toFixed(4),
+          },
         },
         series,
       };
@@ -265,20 +320,32 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
       if (params.batch && params.batch.length > 0) {
         const { start, end } = params.batch[0];
         // position 值域为 [0,1]，百分比直接除以 100 得到 position 数值对
-        const startPos = start / 100;
-        const endPos = end / 100;
-        onZoomChange([startPos, endPos]);
+        const range: [number, number] = [start / 100, end / 100];
+        onZoomChange(range);
+        // ECharts 版本未提供 datazoomend 时，以 datazoom 的最后一次事件作为防抖兜底
+        onZoomEnd?.(range);
       } else {
         onZoomChange(null);
+        onZoomEnd?.(null);
+      }
+    };
+
+    const handleDataZoomEnd = (params: { batch?: Array<{ start: number; end: number }> }) => {
+      if (!onZoomEnd || !data.length) return;
+      if (params.batch && params.batch.length > 0) {
+        const { start, end } = params.batch[0];
+        onZoomEnd([start / 100, end / 100]);
+      } else {
+        onZoomEnd(null);
       }
     };
 
     const handleChartClick = (params: ChartClickParams) => {
       if (!onPointClick) return;
       if (typeof params?.dataIndex !== "number") return;
-      const point = data[params.dataIndex];
-      if (!point) return;
-      onPointClick(point);
+      const window = data[params.dataIndex];
+      if (!window) return;
+      onPointClick(window);
     };
 
     return (
@@ -294,6 +361,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           onEvents={{
             legendClick: handleLegendClick,
             datazoom: handleDataZoom,
+            datazoomend: handleDataZoomEnd,
             click: handleChartClick,
           }}
         />

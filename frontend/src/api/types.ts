@@ -101,6 +101,31 @@ export interface ParagraphCurvePoint {
   smoothed_surface_tension: number | null;
 }
 
+// 情绪趋势窗口（展示层缩放自适应窗口聚合，覆盖率为窗内命中段占比）
+export interface EmotionTrendWindow {
+  window_index: number;
+  position: number;
+  start_position: number;
+  end_position: number;
+  paragraph_start: number;
+  paragraph_end: number;
+  chapter_start: number;
+  chapter_end: number;
+  pos_coverage: number;
+  neg_coverage: number;
+  pooled_pos_density: number | null;
+  pooled_neg_density: number | null;
+  pooled_net_density: number | null;
+  smoothed_pos_coverage: number | null;
+  smoothed_neg_coverage: number | null;
+  smoothed_pooled_pos_density: number | null;
+  smoothed_pooled_neg_density: number | null;
+  smoothed_pooled_net_density: number | null;
+  token_total: number;
+  hit_paragraphs: number;
+  paragraph_total: number;
+}
+
 // 章节指标汇总（M4）
 
 export interface ChapterMetricSummary {

@@ -21,6 +21,7 @@ import {
 import {
   charactersHandler,
   paragraphCurvesHandler,
+  emotionTrendHandler,
   chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
@@ -54,6 +55,7 @@ export const worker = setupWorker(
   // 结果
   charactersHandler,
   paragraphCurvesHandler,
+  emotionTrendHandler,
   chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
