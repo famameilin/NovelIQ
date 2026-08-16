@@ -297,7 +297,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         metric_version 从 settings.metrics 读取；surface_tension 系列由
         计算阶段（run 内稳健标准化后）填充，可为 None。
         """
-        metric_version = str(getattr(settings.metrics, "metric_version", None) or "1")
+        metric_version = str(getattr(settings.metrics, "metric_version", None) or "2")
         self.session.execute(delete(ParagraphMetric).where(ParagraphMetric.run_id == run_id))
         if not rows:
             return 0
