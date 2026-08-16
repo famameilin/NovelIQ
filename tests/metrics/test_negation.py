@@ -139,6 +139,42 @@ class TestAuditRegressions:
         """"看都没看跪在地上发抖"：否定距"发抖"过远，不翻转"""
         assert _flipped("看都没看跪在地上发抖", "发抖", spec) is False
 
+    def test_corpus_clause_initial_scope(self, spec: NegationSpec) -> None:
+        """语料实测（重明传）：小句首"并没有"管辖整个小句，跨 3 token 仍翻转"""
+        assert (
+            _flipped(
+                "猴子、柱子和算盘一落地，并没有像往常一样欢呼雀跃，而是扑通几声跪下了。",
+                "欢呼雀跃",
+                spec,
+            )
+            is True
+        )
+
+    def test_clause_boundary_stops_scope(self, spec: NegationSpec) -> None:
+        """小句首否定但情绪词在下一个分句：分句界阻断，不翻转"""
+        assert _flipped("并没有，他欢呼雀跃", "欢呼雀跃", spec) is False
+
+    def test_shebude_scope_flips(self, spec: NegationSpec) -> None:
+        """语料实例（重明传）："舍不得让你受委屈"——"舍不得"辖制其后动词短语，
+        scope 类否定不适用距离约束，正确翻转"""
+        assert _flipped("老天爷肯定舍不得让你受委屈的", "委屈", spec) is True
+
+    def test_shebude_attributive_not_flipped(self, spec: NegationSpec) -> None:
+        """scope 类否定的"的"（定语）阻断："舍不得的快乐"不翻转"""
+        assert _flipped("那份舍不得的快乐", "快乐", spec) is False
+
+    def test_shebude_clause_boundary_not_flipped(self, spec: NegationSpec) -> None:
+        """scope 类否定跨分句界阻断：舍不得在上一分句，不辖制下一分句情绪词"""
+        assert _flipped("他舍不得走，却很开心", "开心", spec) is False
+
+    def test_shebude_double_negation_parity(self, spec: NegationSpec) -> None:
+        """scope 与 hard 叠加计 2：奇偶抵消，不翻转"""
+        assert _flipped("他舍不得不开心", "开心", spec) is False
+
+    def test_meiyou_duo_not_flipped(self, spec: NegationSpec) -> None:
+        """语料实测（重明传）："算盘没有躲"否定辖"躲"，不辖后文"绝望"——不翻转"""
+        assert _flipped("算盘没有躲，眼神中全是深深的悔恨与绝望", "绝望", spec) is False
+
     def test_henduo_guanyong_bingmeiyou(self, spec: NegationSpec) -> None:
         """"并没有"入表后单计一次（不再与"并不"+"没有"双计）"""
         spans = find_negation_spans("他并没有", spec)
