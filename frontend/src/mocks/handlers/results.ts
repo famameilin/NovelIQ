@@ -17,6 +17,7 @@ import {
   createEmotionStats,
   createCharacterStats,
   createStyleStats,
+  createGlobalStats,
   taskDb,
 } from "../data";
 
@@ -276,4 +277,19 @@ export const styleStatsHandler = http.get(
     await delay(200);
     return HttpResponse.json(createStyleStats());
   }
+);
+
+// 获取 /api/novels/:novelId/metrics/global-stats
+export const globalStatsHandler = http.get(
+  `${BASE}/api/novels/:novelId/metrics/global-stats`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
+
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(200);
+    return HttpResponse.json(createGlobalStats());
+  },
 );

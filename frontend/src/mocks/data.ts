@@ -25,6 +25,7 @@ import type {
   EmotionStatsMetrics,
   CharacterStatsMetrics,
   StyleStatsMetrics,
+  GlobalStats,
 } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -880,5 +881,26 @@ export function createStyleStats(): StyleStatsMetrics {
     string_token_diversity: 0.72,
     avg_sent_len: 18.5,
     dialogue_ratio: 0.45,
+  };
+}
+
+/**
+ * 2026-08-16 创建全书统计 mock
+ * 返回详情概览波动卡使用的情绪与节奏全书聚合字段
+ */
+export function createGlobalStats(): GlobalStats {
+  return {
+    total_chapters: MOCK_TIMELINE_TOTAL_CHUNKS,
+    total_chars: 36000,
+    avg_mtld: 58.4,
+    avg_ttr: 0.62,
+    avg_sent_len: 18.5,
+    emotion_std: 0.18,
+    emotion_max: 0.48,
+    emotion_min: -0.22,
+    rhythm_avg: 0.61,
+    rhythm_std: 0.14,
+    rhythm_max: 0.92,
+    rhythm_min: 0.22,
   };
 }
