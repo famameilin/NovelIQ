@@ -6,6 +6,13 @@ export type MetricAccent =
   | "chart-4"
   | "chart-5";
 
+export type MetricTone = "objective" | "subjective";
+
+export const METRIC_TONE_CLASS_MAP: Record<MetricTone, string> = {
+  objective: "border-l-2 border-l-current",
+  subjective: "border-dashed",
+};
+
 const CARD_ACCENT_ALIAS: Record<MetricAccent, "primary" | "chart-2"> = {
   primary: "primary",
   "chart-1": "primary",
@@ -14,6 +21,7 @@ const CARD_ACCENT_ALIAS: Record<MetricAccent, "primary" | "chart-2"> = {
   "chart-4": "primary",
   "chart-5": "chart-2",
 };
+
 /** 2026-08-16 将所有卡片强调色收敛到两种实际视觉分支 */
 export function resolveCardAccent(accent: MetricAccent): "primary" | "chart-2" {
   return CARD_ACCENT_ALIAS[accent];
