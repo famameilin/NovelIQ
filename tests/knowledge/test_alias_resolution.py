@@ -47,10 +47,11 @@ def test_build_alias_resolution_merges_direct_aliases() -> None:
 
     assert resolution.resolve_entity_id(67) == 67
     assert resolution.resolve_entity_id(97) == 67
-    assert resolution.resolve_entity_id(38) == 38
+    # P11：贺伯安/伯安 子串启发式也会并入代表，不再保留独立节点
+    assert resolution.resolve_entity_id(38) == 67
     assert resolution.resolve_name("贺重明") == "伯安"
-    assert resolution.resolve_name("贺伯安") == "贺伯安"
-    assert resolution.aliases_by_representative[67] == ["贺重明"]
+    assert resolution.resolve_name("贺伯安") == "伯安"
+    assert sorted(resolution.aliases_by_representative[67]) == ["贺伯安", "贺重明"]
 
 
 def test_build_alias_resolution_resolves_transitive_chain() -> None:

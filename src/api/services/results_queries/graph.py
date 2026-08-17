@@ -181,6 +181,9 @@ def _fetch_graph_snapshot(
             continue
         from_entity_id = resolution.resolve_entity_id(relation.from_entity_id)
         to_entity_id = resolution.resolve_entity_id(relation.to_entity_id)
+        # 别名归并（含 P11 启发式）后两端落到同一代表时丢弃自环
+        if from_entity_id is not None and from_entity_id == to_entity_id:
+            continue
         edges.append(
             {
                 "relation_id": relation.relation_id,

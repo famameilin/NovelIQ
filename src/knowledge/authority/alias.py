@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 
 from src.storage.repositories.graph.repository import EntitySnapshotRow, RelationSnapshotRow
 
+from .alias_heuristics import find_heuristic_character_edges
+
 
 @dataclass(slots=True)
 class AliasResolution:
@@ -62,6 +64,14 @@ def build_alias_resolution(
             continue
         from_id = int(relation.from_entity_id)
         to_id = int(relation.to_entity_id)
+        parent.setdefault(from_id, from_id)
+        parent.setdefault(to_id, to_id)
+        root_a, root_b = find(from_id), find(to_id)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    # P11：LLM same_character 声明之外，叠加高精度名称启发式边（子串/姓氏片段）
+    for from_id, to_id in find_heuristic_character_edges(entities):
         parent.setdefault(from_id, from_id)
         parent.setdefault(to_id, to_id)
         root_a, root_b = find(from_id), find(to_id)
