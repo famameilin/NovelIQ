@@ -288,7 +288,13 @@ def _fetch_diagnosis(
         dignity_reason=data.get("dignity_reason") if data else None,
         cultural_depth_score=data.get("cultural_depth_score") if data else None,
         cultural_depth_reason=data.get("cultural_depth_reason") if data else None,
-        narrative_arc_type=data.get("narrative_arc_type") if data else None,
+        narrative_arc_type=(
+            narrative_arc_type_value.strip()
+            if data
+            and isinstance((narrative_arc_type_value := data.get("narrative_arc_type")), str)
+            and narrative_arc_type_value.strip()
+            else None
+        ),
         focus_structure=normalized_focus_structure,
         focus_characters=focus_characters_filtered,
         main_characters=main_characters_filtered,

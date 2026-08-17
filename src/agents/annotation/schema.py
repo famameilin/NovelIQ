@@ -737,10 +737,8 @@ class ResolvedCase(StrictModel):
                         field_name,
                         normalize_semantic_text(value, label=f"resolve.{field_name}"),
                     )
-            # 2026-08-13 P1-2：枚举字段非法值降级为 "unknown" 而非报错，
-            # 避免诊断阶段 calculate_foreshadow_expectation 用常量字典索引直接 KeyError。
-            # 合法键集合与 repository.py 的 _EXPECTATION_* 字典一致
-            # （test_expectation_mappings_cover_enum_domains 已锁定该对应关系）。
+            # 2026-08-16 P3：枚举字段不再降级为 "unknown"，非法值直接拦截入库；
+            # 漂移应触发 rerun_required，而不是静默写入默认/兜底值。
             for field_name, valid_values in (
                 (
                     "setup_status",
@@ -757,7 +755,9 @@ class ResolvedCase(StrictModel):
             ):
                 value = getattr(self, field_name)
                 if value is not None and value not in valid_values:
-                    setattr(self, field_name, "unknown")
+                    raise ValueError(
+                        f"resolve.{field_name} 枚举漂移: {value!r}，合法值: {sorted(valid_values)}"
+                    )
             return self
         if self.action == "close":
             return self
