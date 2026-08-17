@@ -85,15 +85,15 @@ class ForeshadowingThreadView:
     last_chapter_id: int
     anchor_chapter_ids: list[int]
     setup_summary: str
-    setup_kind: str
-    expected_payoff_family: str
-    payoff_likelihood: str
+    setup_kind: str | None
+    expected_payoff_family: str | None
+    payoff_likelihood: str | None
     confidence: str
-    strength: str
+    strength: str | None
     status: str
     active: bool
-    latest_reason: str
-    latest_why_unresolved_now: str
+    latest_reason: str | None
+    latest_why_unresolved_now: str | None
 
 
 class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
@@ -149,12 +149,12 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         for hit, thread in self.session.execute(stmt).all():
             by_chapter[hit.chapter_id] = {
                 "has_foreshadowing": True,
-                "is_strong_setup": True,
+                "is_strong_setup": (thread.strength == "high") if thread.strength is not None else None,
                 "foreshadowing_type": thread.foreshadowing_type,
                 "setup_kind": thread.setup_kind,
                 "foreshadowing_desc": thread.setup_summary,
                 "setup_summary": thread.setup_summary,
-                "why_unresolved_now": "",
+                "why_unresolved_now": None,
                 "expected_payoff_family": thread.expected_payoff_family,
                 "payoff_likelihood": thread.payoff_likelihood,
                 "linked_setup_id": None if hit.is_new_setup else thread.setup_id,
@@ -302,8 +302,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     strength=thread.strength,
                     status=thread.status,
                     active=bool(thread.active),
-                    latest_reason=latest.anchor_text if latest else "",
-                    latest_why_unresolved_now="",
+                    latest_reason=latest.anchor_text if latest else None,
+                    latest_why_unresolved_now=None,
                 )
             )
         return views
@@ -332,14 +332,21 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         }
         weighted_total = 0.0
         total_weight = 0.0
+        has_evidence = False
         for thread in threads:
             hit_count = hit_counts.get(thread.setup_id, 0)
             if hit_count < 1:
                 raise ValueError(f"伏笔线程缺少命中记录: {thread.setup_id}")
-            # 2026-08-13 P1-2：schema 侧对枚举字段非法值降级为 "unknown"，
-            # 这里按最保守档位兜底，避免任意字符串直接索引常量字典抛 KeyError
+            # 2026-08-16 P3：字段为 None 时不冒充 LLM 判断；若全线程都无
+            # payoff_likelihood/strength 证据，说明上游输入退化，结果为 None。
+            # status 在 ORM 层必填（生命周期态），不单独构成“有 LLM 枚举证据”。
+            has_evidence = has_evidence or any(
+                value is not None
+                for value in (thread.payoff_likelihood, thread.strength)
+            )
+            # None 按最保守档位参与计算（medium/open/low），避免任意字符串索引抛 KeyError
             base = _EXPECTATION_BASE_SCORE_BY_PAYOFF.get(
-                thread.payoff_likelihood,
+                thread.payoff_likelihood or "",
                 _EXPECTATION_BASE_SCORE_BY_PAYOFF["medium"],
             )
             status_bonus = _EXPECTATION_STATUS_BONUS.get(
@@ -347,7 +354,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 _EXPECTATION_STATUS_BONUS["open"],
             )
             strength_bonus = _EXPECTATION_STRENGTH_BONUS.get(
-                thread.strength,
+                thread.strength or "",
                 _EXPECTATION_STRENGTH_BONUS["low"],
             )
             score = min(
@@ -365,7 +372,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 _EXPECTATION_STATUS_WEIGHT["open"],
             )
             strength_weight = _EXPECTATION_STRENGTH_WEIGHT.get(
-                thread.strength,
+                thread.strength or "",
                 _EXPECTATION_STRENGTH_WEIGHT["low"],
             )
             weight = (
@@ -375,6 +382,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             )
             weighted_total += score * weight
             total_weight += weight
+        if not has_evidence:
+            return None
         return round(weighted_total / total_weight, 4)
 
     def has_annotations(self, run_id: str) -> bool:

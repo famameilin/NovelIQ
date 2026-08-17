@@ -456,10 +456,11 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
         select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
     ).scalar_one()
     assert thread.setup_summary == "顾霜承诺护佑山门"
-    assert thread.foreshadowing_type == "其他"
-    assert thread.setup_kind == "其他"
-    assert thread.expected_payoff_family == "未指定"
-    assert thread.payoff_likelihood == "medium"
+    # P3：write_foreshadowings 仅写 description+confidence，其余枚举不再填哨兵默认值
+    assert thread.foreshadowing_type is None
+    assert thread.setup_kind is None
+    assert thread.expected_payoff_family is None
+    assert thread.payoff_likelihood is None
     assert thread.confidence == "high"
     assert thread.status == "open"
     assert thread.active is True
@@ -567,5 +568,5 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
     assert len(hits) == 2
     assert [hit.chapter_id for hit in hits] == [1, 2]
     assert threads[0].setup_summary == "顾霜承诺护佑山门"
-    assert threads[0].foreshadowing_type == "其他"
+    assert threads[0].foreshadowing_type is None
     assert threads[0].status == "open"

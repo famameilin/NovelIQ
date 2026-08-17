@@ -270,11 +270,11 @@ class ForeshadowingThreadResponse(BaseModel):
     last_chapter_id: int
     anchor_chapter_ids: list[int] = []
     setup_summary: str
-    setup_kind: str
-    expected_payoff_family: str
-    payoff_likelihood: str
-    confidence: str
-    strength: str
+    setup_kind: str | None
+    expected_payoff_family: str | None
+    payoff_likelihood: str | None
+    confidence: str | None
+    strength: str | None
     status: str
     active: bool
     latest_reason: str | None = None

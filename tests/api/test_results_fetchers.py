@@ -388,6 +388,61 @@ def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
     assert result.style_labels == ["严肃"]
 
 
+def test_fetch_diagnosis_blank_narrative_arc_type_is_none() -> None:
+    """P3 回归：空白 narrative_arc_type 不应透传空串，读取层归一化为 None。"""
+    stats_repo = _DummyStatsRepo(
+        {
+            "foreshadow_expectation": 0.42,
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "style_labels": '["严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+            "narrative_arc_type": "   ",
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+    )
+
+    assert result is not None
+    assert result.rerun_required is False
+    assert result.narrative_arc_type is None
+
+
+def test_fetch_diagnosis_strips_narrative_arc_type_whitespace() -> None:
+    """P3 回归：narrative_arc_type 首尾空白应被剥离，不把脏串写入诊断结果。"""
+    stats_repo = _DummyStatsRepo(
+        {
+            "foreshadow_expectation": 0.42,
+            "arc_scores": '{"沈砚": 8.2}',
+            "genre_labels": '["科幻"]',
+            "style_labels": '["严肃"]',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+            "narrative_arc_type": " 三幕式 ",
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+    )
+
+    assert result is not None
+    assert result.narrative_arc_type == "三幕式"
+
+
 def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
     stats_repo = _DummyStatsRepo(
         {

@@ -45,7 +45,7 @@ def normalize_text(value: str) -> str:
     return unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def _text_matches(query: str, *values: str) -> bool:
+def _text_matches(query: str, *values: str | None) -> bool:
     """2026-08-05 用于判断 query 或拆分词项是否命中任一文本字段"""
     haystack = "\n".join(normalize_text(value).lower() for value in values if value)
     return any(term in haystack for term in extract_query_terms(query))
@@ -500,12 +500,12 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
             first_chapter_id=chapter_id,
             last_chapter_id=chapter_id,
             setup_summary=normalized,
-            foreshadowing_type="其他",
-            setup_kind="其他",
-            expected_payoff_family="未指定",
-            payoff_likelihood="medium",
+            foreshadowing_type=None,
+            setup_kind=None,
+            expected_payoff_family=None,
+            payoff_likelihood=None,
             confidence=foreshadowing.confidence,
-            strength=foreshadowing.confidence,
+            strength=None,
             status="open",
             active=True,
             created_at=now,

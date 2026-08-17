@@ -114,11 +114,13 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 )
         return rows[:row_limit]
 
-    def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
+    def fetch_foreshadowing_chunks(
+        self, run_id: str, limit: int | None = None
+    ) -> list[tuple[int, str, str | None, str]]:
         """2026-08-05 用于从伏笔 thread 与 hit 读取 chunk 级诊断素材"""
         row_limit = limit if limit is not None else 30
         text_by_chunk = self._chunk_text_by_id(run_id)
-        rows: list[tuple[int, str, str, str]] = []
+        rows: list[tuple[int, str, str | None, str]] = []
         for thread in AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id):
             for chapter_id in thread.anchor_chapter_ids:
                 rows.append(

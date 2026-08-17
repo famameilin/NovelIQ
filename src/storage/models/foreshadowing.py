@@ -35,12 +35,13 @@ class ForeshadowingThread(Base):
     first_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     last_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     setup_summary: Mapped[str] = mapped_column(Text, nullable=False)
-    foreshadowing_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    setup_kind: Mapped[str] = mapped_column(String(50), nullable=False)
-    expected_payoff_family: Mapped[str] = mapped_column(String(100), nullable=False)
-    payoff_likelihood: Mapped[str] = mapped_column(String(20), nullable=False)
+    foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    setup_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # LLM 写库路径总会提供 confidence；保留 default 避免测试/手工插入漏传触发 NOT NULL
     confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="high")
-    strength: Mapped[str] = mapped_column(String(20), nullable=False)
+    strength: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC（与 agent_audit 等表一致）
