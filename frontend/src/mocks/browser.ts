@@ -40,11 +40,14 @@ import {
   emotionStatsHandler,
   characterStatsHandler,
   styleStatsHandler,
+  globalStatsHandler,
 } from "./handlers/results";
 
 export const worker = setupWorker(
   // 小说
   novelListHandler,
+  novelDetailHandler,
+  novelCoverHandler,
   novelUploadHandler,
   novelDeleteHandler,
   novelBatchDeleteHandler,
