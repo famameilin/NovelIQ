@@ -479,6 +479,8 @@ export interface TimelineResponse {
   composite_nodes: TimelineCompositeNode[];
   atomic_nodes: TimelineNode[];
   tension_curve?: number[];
+  /** 四阶段划分依据：张力峰 / 固定比例估计 */
+  phase_basis?: "tension" | "fixed_percentage";
 }
 
 // 指标

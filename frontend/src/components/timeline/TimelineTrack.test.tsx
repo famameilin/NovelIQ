@@ -83,9 +83,10 @@ describe("TimelineTrack", () => {
     const detailButton = screen.getByText("白芷初遇").closest("button");
     expect(detailButton).not.toBeNull();
     expect(detailButton).toHaveClass("border-primary/35");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
 
-    const nodeButton = screen.getByRole("button", { name: "剧情节点: 白芷初遇" });
-    expect(nodeButton).toHaveClass("ring-2");
+    const connector = screen.getByTestId("timeline-connector");
+    expect(connector).toHaveAttribute("x1", connector.getAttribute("x2"));
 
     fireEvent.click(detailButton!);
 
@@ -93,5 +94,36 @@ describe("TimelineTrack", () => {
     expect(screen.getByText("剧情节点")).toBeInTheDocument();
     expect(screen.getByText("第 3 章")).toBeInTheDocument();
     expect(document.querySelector("svg path")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline-card")).toBe(detailButton);
+  });
+
+  it("按最终进度全局排序，并让奇偶卡严格交替使用第二层和第一层", () => {
+    const nodes = [
+      createNode({ node_id: "plot:4", anchor_chapter_id: 4, progress: 0.4, summary: "顺序4" }),
+      createNode({ node_id: "plot:2", anchor_chapter_id: 2, progress: 0.2, summary: "顺序2" }),
+      createNode({ node_id: "plot:1", anchor_chapter_id: 1, progress: 0.1, summary: "顺序1" }),
+      createNode({ node_id: "plot:3", anchor_chapter_id: 3, progress: 0.3, summary: "顺序3" }),
+    ];
+
+    render(<TimelineTrack nodes={nodes} totalChapters={20} />);
+
+    const cards = screen.getAllByTestId("timeline-card");
+    expect(cards).toHaveLength(4);
+    expect(cards.map((card) => card.dataset.cardOrder)).toEqual(["1", "2", "3", "4"]);
+    expect(cards.map((card) => Number(card.dataset.lane))).toEqual([2, 1, 2, -1]);
+    expect(screen.getAllByRole("button")).toHaveLength(4);
+
+    cards.forEach((card, index) => {
+      expect(card).toHaveTextContent(`顺序${index + 1}`);
+      if (index > 0) {
+        expect(Number.parseFloat(card.style.left)).toBeGreaterThan(
+          Number.parseFloat(cards[index - 1]?.style.left ?? "0"),
+        );
+      }
+    });
+
+    screen.getAllByTestId("timeline-connector").forEach((connector) => {
+      expect(connector).toHaveAttribute("x1", connector.getAttribute("x2"));
+    });
   });
 });

@@ -103,7 +103,14 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
     relation_node = next(node for node in payload["atomic_nodes"] if node["node_type"] == "relation")
     graph_change = relation_node["graph_changes"][0]
 
-    assert set(payload) == {"meta", "phases", "composite_nodes", "atomic_nodes", "tension_curve"}
+    assert set(payload) == {
+        "meta",
+        "phases",
+        "composite_nodes",
+        "atomic_nodes",
+        "tension_curve",
+        "phase_basis",
+    }
     assert "character_entities" not in payload
     assert "entity_lifecycles" not in payload
     assert "graph_changes" not in payload

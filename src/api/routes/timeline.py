@@ -121,6 +121,7 @@ async def get_timeline(
             composite_nodes=[],
             atomic_nodes=[],
             tension_curve=None,
+            phase_basis="tension",
         )
 
     api_composite_nodes = [
@@ -152,4 +153,5 @@ async def get_timeline(
         composite_nodes=api_composite_nodes,
         atomic_nodes=api_atomic_nodes,
         tension_curve=timeline_plan.tension_curve if include_curve else None,
+        phase_basis=timeline_plan.phase_basis,
     )

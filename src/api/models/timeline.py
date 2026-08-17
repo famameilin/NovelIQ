@@ -113,3 +113,7 @@ class TimelineResponse(BaseModel):
     composite_nodes: list[TimelineCompositeNode] = Field(description="默认概览使用的复合节点列表")
     atomic_nodes: list[TimelineNode] = Field(description="全量原子节点列表")
     tension_curve: list[float] | None = Field(default=None, description="张力曲线数据")
+    phase_basis: Literal["tension", "fixed_percentage"] = Field(
+        default="tension",
+        description="四阶段划分依据：少于 20 章时为固定百分比估计，否则读张力曲线",
+    )

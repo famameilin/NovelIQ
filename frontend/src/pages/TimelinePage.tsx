@@ -417,7 +417,7 @@ export function TimelinePage() {
                 label="Overview"
                 value={displayNodes.length}
                 format="raw"
-                accent="chart-1"
+                accent="primary"
                 icon={<TrendingUp className="h-4 w-4" />}
                 description="当前视图与筛选层级下可见的时间轴节点数量。"
                 className="!p-4"
@@ -427,7 +427,7 @@ export function TimelinePage() {
                 label="Pivot"
                 value={pivotCount}
                 format="raw"
-                accent="chart-5"
+                accent="chart-2"
                 icon={<Sparkles className="h-4 w-4" />}
                 description="被标记为转折点的节点数量，适合优先阅读。"
                 className="!p-4"
@@ -437,7 +437,7 @@ export function TimelinePage() {
                 label="Relation"
                 value={relationChangeCount}
                 format="raw"
-                accent="chart-2"
+                accent="primary"
                 icon={<GitBranch className="h-4 w-4" />}
                 description="关系变化节点数量，通常最适合联动图谱排查。"
                 className="!p-4"
@@ -489,34 +489,36 @@ export function TimelinePage() {
                       onViewModeChange={handleViewModeChange}
                     />
 
-                    <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="flex flex-wrap gap-2">
-                        {phases.length === 0 ? (
-                          <p className="text-sm text-text-muted">暂无阶段数据</p>
-                        ) : (
-                          phases.map((phase) => {
-                            const isActive = activePhase === phase.name;
-                            return (
-                              <button
-                                key={phase.name}
-                                type="button"
-                                onClick={() => handlePhaseClick(phase)}
-                                className={[
-                                  "rounded-full border px-3 py-2 text-left transition-all",
-                                  isActive
-                                    ? "border-primary/35 bg-primary/10 text-text shadow-sm"
-                                    : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
-                                ].join(" ")}
-                              >
-                                <span className="text-sm font-medium">{phase.name}</span>
-                                <span className="ml-2 text-xs">{phase.start}-{phase.end}</span>
-                              </button>
-                            );
-                          })
-                        )}
+                    <div className="mt-2 flex flex-col gap-3">
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          {phases.length === 0 ? (
+                            <p className="text-sm text-text-muted">暂无阶段数据</p>
+                          ) : (
+                            phases.map((phase) => {
+                              const isActive = activePhase === phase.name;
+                              return (
+                                <button
+                                  key={phase.name}
+                                  type="button"
+                                  onClick={() => handlePhaseClick(phase)}
+                                  className={[
+                                    "rounded-full border px-3 py-2 text-left transition-all",
+                                    isActive
+                                      ? "border-primary/35 bg-primary/10 text-text shadow-sm"
+                                      : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
+                                  ].join(" ")}
+                                >
+                                  <span className="text-sm font-medium">{phase.name}</span>
+                                  <span className="ml-2 text-xs">{phase.start}-{phase.end}</span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
                       </div>
 
-                      <TimelineLegend className="xl:justify-end" />
+                      <TimelineLegend className="justify-start" />
                     </div>
                   </div>
 
