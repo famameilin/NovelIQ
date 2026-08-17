@@ -97,6 +97,10 @@
     "num_topics": 25,
     "passes": 10,
     "iterations": 500,
+    "num_topics_min": 3,
+    "num_topics_max": 25,
+    "num_topics_scaling_divisor": 30,
+    "topic_model_version": "2",
     "lda": {
       "alpha": "auto",
       "eta": "auto",
