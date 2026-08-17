@@ -17,7 +17,17 @@ function runHandler(
   handler: typeof novelDetailHandler,
   url: string,
 ): Promise<{ response: Response }> {
-  return handler.run({ request: new Request(url) });
+  return handler
+    .run({
+      request: new Request(url),
+      requestId: "novels-handler-test",
+    })
+    .then((result) => {
+      if (!result?.response) {
+        throw new Error("handler 未产生 mock 响应");
+      }
+      return { response: result.response };
+    });
 }
 
 // MSW 相对路径解析到 jsdom 的 origin，请求 URL 必须与之一致才能命中
