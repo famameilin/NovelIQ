@@ -48,11 +48,14 @@ function buildBackfillProgress(status: TaskStatusResponse): StreamEventData {
 }
 
 function isMockEnabled(): boolean {
+  const mockWorkerActive =
+    typeof navigator !== "undefined" && navigator.serviceWorker?.controller != null;
   return (
     import.meta.env.DEV &&
     (appConfig.enableMock ||
       import.meta.env.VITE_ENABLE_MOCK === "true" ||
-      new URLSearchParams(window.location.search).get("mock") === "true")
+      new URLSearchParams(window.location.search).get("mock") === "true" ||
+      mockWorkerActive)
   );
 }
 
