@@ -97,10 +97,9 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
 
     response = GraphSnapshotResponse.model_validate(payload)
     node_names = {node.name for node in response.nodes}
-    assert node_names == {"伯安", "贺伯安"}
+    # P11：贺伯安/伯安 子串启发式合并后只保留代表节点；贺重明 仍经 same_character 并入
+    assert node_names == {"伯安"}
     boan = next(node for node in response.nodes if node.name == "伯安")
-    assert boan.aliases == ["贺重明"]
+    assert sorted(boan.aliases) == ["贺伯安", "贺重明"]
     assert all(edge.relation_semantics != "same_character" for edge in response.edges)
-    assert [(edge.source_name, edge.target_name) for edge in response.edges] == [
-        ("伯安", "贺伯安")
-    ]
+    assert response.edges == []
