@@ -55,8 +55,12 @@ class TopicModelSettings:
     iterations: int = 500
     # 段落 LDA 训练排除的短段 token 阈值（设计 §11.1，待标定）
     min_paragraph_train_tokens: int = 5
+    # 2026-08-16 N2：num_topics 按训练文档数缩放
+    num_topics_min: int = 3
+    num_topics_max: int = 25
+    num_topics_scaling_divisor: int = 30
     # 段落主题推断写入时的模型版本标识（§5.4）
-    topic_model_version: str = "1"
+    topic_model_version: str = "2"
     lda: LdaSettings = field(default_factory=LdaSettings)
 
 
@@ -143,7 +147,10 @@ def _parse_topic_model_settings(data: dict[str, Any] | None) -> TopicModelSettin
         passes=data.get("passes", 10),
         iterations=data.get("iterations", 500),
         min_paragraph_train_tokens=data.get("min_paragraph_train_tokens", 5),
-        topic_model_version=data.get("topic_model_version", "1"),
+        num_topics_min=data.get("num_topics_min", 3),
+        num_topics_max=data.get("num_topics_max", 25),
+        num_topics_scaling_divisor=data.get("num_topics_scaling_divisor", 30),
+        topic_model_version=data.get("topic_model_version", "2"),
         lda=_parse_lda_settings(data.get("lda")),
     )
 

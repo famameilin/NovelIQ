@@ -23,6 +23,25 @@ from src.config import settings
 from src.storage.repositories import ParagraphRepository
 
 
+def resolve_num_topics(
+    num_topics: int | None,
+    valid_doc_count: int,
+    *,
+    min_topics: int,
+    max_topics: int,
+    scaling_divisor: int,
+) -> int:
+    """N2：未显式指定 num_topics 时按训练文档数在 [min_topics, max_topics] 内缩放。
+
+    缩放公式：valid_doc_count // scaling_divisor，缺省边界回落最小值。
+    """
+    if num_topics is not None:
+        return num_topics
+    if valid_doc_count <= 0:
+        return min_topics
+    return max(min_topics, min(max_topics, valid_doc_count // scaling_divisor))
+
+
 async def run_topic_model(
     run_id: str,
     session: Session,
@@ -95,6 +114,16 @@ async def run_topic_model(
         logger.warning("no valid tokens after preprocessing")
         logger.info("No valid tokens after preprocessing.")
         return 0, 0
+
+    # 2026-08-16 N2：未显式指定 num_topics 时按训练文档数缩放，
+    # 避免 25 个主题在短书上退化为大量无行主题/权重偏斜。
+    _num_topics = resolve_num_topics(
+        num_topics,
+        len(valid_docs),
+        min_topics=settings.topic_model.num_topics_min,
+        max_topics=settings.topic_model.num_topics_max,
+        scaling_divisor=settings.topic_model.num_topics_scaling_divisor,
+    )
 
     config = LDAConfig(
         num_topics=_num_topics,
