@@ -183,6 +183,23 @@ export interface ChapterMetricsResponse {
   book: BookAggregateStats;
 }
 
+export interface GlobalStats {
+  total_chapters?: number | null;
+  total_chars?: number | null;
+  avg_mtld?: number | null;
+  avg_ttr?: number | null;
+  avg_sent_len?: number | null;
+  emotion_std?: number | null;
+  emotion_max?: number | null;
+  emotion_min?: number | null;
+  rhythm_avg?: number | null;
+  rhythm_std?: number | null;
+  rhythm_max?: number | null;
+  rhythm_min?: number | null;
+  global_avg_sent_len?: number | null;
+  global_avg_ttr?: number | null;
+}
+
 export interface ChapterCharacter {
   name: string;
   role_function?: string | null;

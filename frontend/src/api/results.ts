@@ -4,6 +4,7 @@ import type {
   ChapterAnnotation,
   ParagraphCurvePoint,
   ChapterMetricsResponse,
+  GlobalStats,
   Topic,
   DiagnosisResult,
   ForeshadowingThread,
@@ -80,6 +81,21 @@ export async function getChapterMetrics(
   const { data } = await apiClient.get<ChapterMetricsResponse>(
     `/api/novels/${novelId}/chapter-metrics`,
     { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+/**
+ * 2026-08-16 获取全书波动统计
+ * 读取后端持久化的全书情绪与节奏聚合，供详情概览展示
+ */
+export async function getGlobalStats(
+  novelId: string,
+  taskId: string,
+): Promise<GlobalStats> {
+  const { data } = await apiClient.get<GlobalStats>(
+    `/api/novels/${novelId}/metrics/global-stats`,
+    { params: { task_id: taskId } },
   );
   return data;
 }
