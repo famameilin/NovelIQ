@@ -10,8 +10,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from sqlalchemy import func, select
+
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
+from src.storage.models import Chapter
 
 from .types import (
     AnnotationData,
@@ -26,11 +29,42 @@ from .types import (
 )
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from src.storage.repositories import (
         AnnotationRepository,
         ChapterRepository,
         StatsRepository,
     )
+
+
+def _fetch_chapter_progress_map(session: Session, run_id: str) -> dict[int, float]:
+    """章起点归一化进度：char_offset / max(char_end_offset)。缺 offset 的章不入表。"""
+    total = session.execute(
+        select(func.max(Chapter.char_end_offset)).where(Chapter.run_id == run_id)
+    ).scalar_one_or_none()
+    if total is None or int(total) <= 0:
+        # 回退：用 max(char_offset)+1，避免全空
+        total = session.execute(
+            select(func.max(Chapter.char_offset)).where(Chapter.run_id == run_id)
+        ).scalar_one_or_none()
+        if total is None or int(total) <= 0:
+            return {}
+        total_chars = float(int(total) + 1)
+    else:
+        total_chars = float(int(total))
+
+    rows = session.execute(
+        select(Chapter.chapter_id, Chapter.char_offset)
+        .where(Chapter.run_id == run_id, Chapter.char_offset.is_not(None))
+        .order_by(Chapter.chapter_id)
+    ).all()
+    progress: dict[int, float] = {}
+    for chapter_id, offset in rows:
+        if offset is None:
+            continue
+        progress[int(chapter_id)] = float(offset) / total_chars
+    return progress
 
 
 def _build_aggregate_graph_view(

@@ -555,6 +555,19 @@ describe("TimelinePage deep links", () => {
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
   });
 
+  it("不展示未经请求的阶段依据说明", async () => {
+    getTimelineMock.mockResolvedValue({
+      ...createTimelineResponse(),
+      phase_basis: "fixed_percentage",
+    });
+
+    renderPage();
+
+    await screen.findByTestId("timeline-track");
+    expect(screen.queryByText(/阶段依据/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/四阶段/)).not.toBeInTheDocument();
+  });
+
   it("shows the error state and supports retry", async () => {
     getTimelineMock.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(createTimelineResponse());
 

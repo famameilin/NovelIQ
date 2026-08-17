@@ -42,19 +42,11 @@ import { useCallback, useMemo } from "react";
 import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
 import { cn } from "@/lib/cn";
 
-import { TimelineNode } from "./TimelineNode";
 import {
   calculateCanvasMinWidth,
-  calculateNodeAnchorX,
-  calculateNodeAnchorY,
   createTimelineLayoutNodes,
-  getClampedLabelLeftPx,
   getLabelTopPx,
-  GUIDE_LINE_OFFSET_X_PX,
-  GUIDE_LINE_OFFSET_Y_PX,
   LABEL_HEIGHT_PX,
-  NODE_RENDER_OFFSET_X_PX,
-  NODE_RENDER_OFFSET_Y_PX,
   PHASE_BAND_BOTTOM_PX,
   PHASE_BAND_TOP_PX,
 } from "./timelineTrackLayout";
@@ -107,7 +99,10 @@ export function TimelineTrack({
 
   const sortedNodes = useMemo(() => [...(nodes || [])].sort((a, b) => a.progress - b.progress), [nodes]);
   const canvasMinWidth = useMemo(() => calculateCanvasMinWidth(sortedNodes.length, totalChapters), [sortedNodes.length, totalChapters]);
-  const layoutNodes = useMemo(() => createTimelineLayoutNodes(sortedNodes, canvasMinWidth), [canvasMinWidth, sortedNodes]);
+  const layoutNodes = useMemo(
+    () => createTimelineLayoutNodes(sortedNodes, canvasMinWidth, { tensionCurve, totalChapters }),
+    [canvasMinWidth, sortedNodes, tensionCurve, totalChapters],
+  );
 
   const tensionPath = useMemo(() => {
     if (!tensionCurve || tensionCurve.length === 0) {
@@ -189,18 +184,9 @@ export function TimelineTrack({
 
               <div className="relative h-full" style={{ minHeight: `${TRACK_HEIGHT_PX}px`, minWidth: `${canvasMinWidth}px` }}>
                 {layoutNodes.map((layoutNode, index) => {
-                  const { node, lane, labelWidth } = layoutNode;
-                  const anchorX = calculateNodeAnchorX(node.progress, canvasMinWidth);
-                  const anchorY = calculateNodeAnchorY(node.progress, lane, {
-                    tensionCurve,
-                    totalChapters,
-                  });
-                  const calibratedAnchorX = anchorX + NODE_RENDER_OFFSET_X_PX;
-                  const calibratedAnchorY = anchorY + NODE_RENDER_OFFSET_Y_PX;
-                  const guideLineX = calibratedAnchorX + GUIDE_LINE_OFFSET_X_PX;
-                  const guideLineY = calibratedAnchorY + GUIDE_LINE_OFFSET_Y_PX;
+                  const { node, lane, labelWidth, anchorX, anchorY } = layoutNode;
                   const labelTop = getLabelTopPx(anchorY, lane);
-                  const labelLeft = getClampedLabelLeftPx(anchorX, labelWidth, canvasMinWidth);
+                  const labelLeft = anchorX - labelWidth / 2;
                   const labelAnchorY = lane < 0 ? labelTop + LABEL_HEIGHT_PX : labelTop;
                   const presentationSubtype = "node_subtype" in node ? node.node_subtype : (node.node_subtypes[0] ?? "plot");
                   const presentation = getTimelineNodePresentation(node.node_type, presentationSubtype);
@@ -213,26 +199,30 @@ export function TimelineTrack({
 
                   return (
                     <div key={node.node_id}>
-                      <motion.div
-                        className={cn(
-                          "absolute w-px bg-border/80",
-                          isSelected && "bg-primary/70",
-                          isHighlighted && !isSelected && "bg-chart-4/70"
-                        )}
-                        style={{
-                          left: `${guideLineX}px`,
-                          top: `${Math.min(guideLineY, labelAnchorY)}px`,
-                          height: `${Math.max(Math.abs(labelAnchorY - guideLineY), 2)}px`,
-                        }}
-                        initial={{ scaleY: 0, opacity: 0.3 }}
-                        animate={{ scaleY: 1, opacity: 1 }}
-                        transition={{ duration: 0.25, delay: index * 0.03 }}
-                      />
+                      <svg
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 overflow-visible"
+                        viewBox={`0 0 ${canvasMinWidth} ${TRACK_HEIGHT_PX}`}
+                      >
+                        <line
+                          data-testid="timeline-connector"
+                          x1={anchorX}
+                          y1={anchorY}
+                          x2={anchorX}
+                          y2={labelAnchorY}
+                          className={cn(
+                            "stroke-current text-border/80",
+                            isSelected && "text-primary/70",
+                            isHighlighted && !isSelected && "text-chart-4/70"
+                          )}
+                          strokeWidth="1"
+                        />
+                      </svg>
 
                       <motion.button
                         type="button"
                         className={cn(
-                          "absolute z-[5] flex items-start gap-2 rounded-2xl border px-3 py-2 text-left shadow-sm backdrop-blur-sm transition-all",
+                          "absolute z-[5] flex h-[68px] items-start gap-2 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-sm backdrop-blur-sm transition-all",
                           "hover:-translate-y-0.5 hover:shadow-md",
                           isSelected
                             ? "border-primary/35 bg-primary/10 shadow-[0_12px_30px_rgba(161,90,43,0.16)]"
@@ -244,39 +234,33 @@ export function TimelineTrack({
                           top: `${labelTop}px`,
                           width: `${labelWidth}px`,
                         }}
+                        data-testid="timeline-card"
+                        data-card-order={index + 1}
+                        data-lane={lane}
                         onClick={() => onNodeClick?.(node)}
                       >
                         <div
                           className={cn(
-                            "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
+                            "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
                             presentation.dotClassName
                           )}
                         >
-                          <presentation.icon className={cn("h-3.5 w-3.5", presentation.iconClassName)} />
+                          <presentation.icon className={cn("h-3 w-3", presentation.iconClassName)} />
                         </div>
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-[11px] font-semibold text-text">{presentation.label}</span>
                             <span className="text-[11px] text-text-muted">{chapterLabel}</span>
                           </div>
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">{node.summary}</p>
+                          <p className="mt-0.5 line-clamp-1 text-xs leading-4 text-text">{node.summary}</p>
                           {"child_node_ids" in node && node.child_node_ids.length > 1 ? (
-                            <p className="mt-1 text-[11px] text-text-muted">
+                            <p className="mt-0.5 text-[10px] leading-4 text-text-muted">
                               聚合 {node.child_node_ids.length} 个原子节点
                             </p>
                           ) : null}
                         </div>
                       </motion.button>
 
-                      <TimelineNode
-                        node={node}
-                        baselineY={calibratedAnchorY}
-                        position={`${calibratedAnchorX}px`}
-                        verticalOffset={0}
-                        isSelected={isSelected}
-                        isHighlighted={isHighlighted}
-                        onClick={() => onNodeClick?.(node)}
-                      />
                     </div>
                   );
                 })}

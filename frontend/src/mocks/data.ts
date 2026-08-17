@@ -812,6 +812,7 @@ export function createTimeline(): TimelineResponse {
     })),
     atomic_nodes: nodes,
     tension_curve,
+    phase_basis: "tension",
   };
 }
 

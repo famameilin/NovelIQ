@@ -200,6 +200,8 @@ class TimelineSourceData:
     chapter_id_to_idx: dict[int, int]
     total_chapters: int
     tension_scores: list[float]
+    # 与 chapter_ids 对齐的归一化进度；缺 offset 时用等间隔占位
+    positions: list[float]
     summary_map: dict[int, str]
     annotation_map: dict[int, TimelineAnnotationSnapshot]
 
@@ -213,6 +215,7 @@ class TimelinePlanBuildResult:
     total_chapters: int
     phases: list[TimelinePhaseDTO]
     tension_curve: list[float]
+    phase_basis: Literal["tension", "fixed_percentage"] = "tension"
 
 
 @dataclass(slots=True)
@@ -292,12 +295,12 @@ def calculate_tension_percentile(
 def compute_four_phases(
     tension_scores: list[float],
     chapter_ids: list[int],
+    positions: list[float] | None = None,
 ) -> list[NarrativePhase]:
     """
     计算四阶段划分（多峰模型）
 
-    基于 Freytag 金字塔理论 + 网络小说多波次叠加结构，使用局部峰值
-    检测确定高潮位置，而非单一全局峰值
+    基于 Freytag 金字塔 + 进度轴局部峰值确定高潮位置。
     """
     if not tension_scores or not chapter_ids:
         return []
@@ -337,11 +340,14 @@ def compute_four_phases(
             NarrativePhase("收束期", chapter_ids[boundary_3 + 1], chapter_ids[-1], (total - boundary_3 - 1) / total),
         ]
 
-    local_peaks = find_local_peaks(tension_scores, total)
-    half_idx = total // 2
+    # 进度轴峰值：positions 与 tension 等长；缺省时用等间隔进度
+    if positions is None or len(positions) != total:
+        positions = [i / max(total - 1, 1) for i in range(total)]
+    local_peaks = find_local_peaks(positions, tension_scores)
+    half_progress = 0.5
 
     if local_peaks:
-        late_peaks = [peak for peak in local_peaks if peak >= half_idx]
+        late_peaks = [peak for peak in local_peaks if positions[peak] >= half_progress]
         if late_peaks:
             peak_idx = max(late_peaks, key=lambda idx: tension_scores[idx])
         else:
@@ -614,6 +620,19 @@ def _load_timeline_source_data(
     chapter_id_to_idx = {chapter_id: idx for idx, chapter_id in enumerate(chapter_ids)}
 
     tension_scores = _load_chapter_tension_scores(stats_repo, run_id, chapter_ids)
+    from src.metrics.aggregate.fetchers import _fetch_chapter_progress_map
+
+    progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
+    if total_chapters <= 1:
+        positions = [0.0] * total_chapters
+    else:
+        positions = []
+        for idx, chapter_id in enumerate(chapter_ids):
+            positions.append(progress_map.get(chapter_id, idx / (total_chapters - 1)))
+        # 保证严格递增（缺 offset 时等间隔回填后仍可能并列）
+        for i in range(1, len(positions)):
+            if positions[i] <= positions[i - 1]:
+                positions[i] = min(1.0, positions[i - 1] + 1e-6)
     summary_map = {row.chapter_id: row.summary for row in chapter_repo.fetch_chapter_summaries(run_id)}
     annotation_map = _build_timeline_annotation_map(annotation_repo.fetch_chapter_annotations_full(run_id))
 
@@ -623,6 +642,7 @@ def _load_timeline_source_data(
         chapter_id_to_idx=chapter_id_to_idx,
         total_chapters=total_chapters,
         tension_scores=tension_scores,
+        positions=positions,
         summary_map=summary_map,
         annotation_map=annotation_map,
     )
@@ -1378,7 +1398,13 @@ def build_timeline_plan(
 ) -> TimelinePlanBuildResult:
     source_data = _load_timeline_source_data(run_id, chapter_repo, annotation_repo, stats_repo)
     authority_data = _adapt_timeline_authority_view(timeline_view)
-    phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chapter_ids))
+    phases = convert_to_timeline_phases(
+        compute_four_phases(
+            source_data.tension_scores,
+            source_data.chapter_ids,
+            source_data.positions,
+        )
+    )
     plot_atoms, state_atoms, relation_atoms, lifecycle_atoms = build_timeline_atoms(
         source_data,
         authority_data,
@@ -1392,4 +1418,5 @@ def build_timeline_plan(
         total_chapters=source_data.total_chapters,
         phases=phases,
         tension_curve=source_data.tension_scores,
+        phase_basis="fixed_percentage" if source_data.total_chapters < 20 else "tension",
     )
