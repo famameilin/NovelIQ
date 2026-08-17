@@ -21,7 +21,7 @@ from src.metrics.aggregate import AggregateResult
 
 
 def test_convert_style_stats_tone_distribution_default_empty_dict() -> None:
-    result = AggregateResult(language_style={"vocab_breadth": 0.42})
+    result = AggregateResult(language_style={"string_token_diversity": 0.42})
 
     style_stats = _convert_style_stats(result)
 

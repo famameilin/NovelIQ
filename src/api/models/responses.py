@@ -308,6 +308,9 @@ class GlobalStats(BaseModel):
     avg_mtld: float | None = None
     avg_ttr: float | None = None
     avg_sent_len: float | None = None
+    emotion_std: float | None = None
+    emotion_max: float | None = None
+    emotion_min: float | None = None
     rhythm_avg: float | None = None
     rhythm_std: float | None = None
     rhythm_max: float | None = None
@@ -339,7 +342,8 @@ class NarrativeStructureStats(BaseModel):
 
 
 class EmotionStats(BaseModel):
-    pos_neg_ratio: float | None = None
+    lexical_pos_neg_ratio: float | None = None
+    arc_delta: float | None = None
     positive_ratio: float | None = None
     negative_ratio: float | None = None
     neutral_ratio: float | None = None
@@ -359,7 +363,7 @@ class CharacterStatsAggregate(BaseModel):
 
 class StyleStats(BaseModel):
     tone_distribution: dict[str, float] | None = None
-    vocab_breadth: float | None = None
+    string_token_diversity: float | None = None
     avg_word_len: float | None = None
     sent_len_std: float | None = None
     dialogue_ratio: float | None = None

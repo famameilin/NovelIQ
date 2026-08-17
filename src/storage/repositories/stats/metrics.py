@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str, float]]) -> None:
+def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str, float | None]]) -> None:
     """
     插入全局统计数据
 
@@ -50,7 +50,7 @@ def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str
     session.commit()
 
 
-def fetch_global_stats(session: Session, run_id: str) -> list[tuple[str, float]]:
+def fetch_global_stats(session: Session, run_id: str) -> list[tuple[str, float | None]]:
     """
     获取全局统计数据
 
@@ -66,7 +66,7 @@ def fetch_global_stats(session: Session, run_id: str) -> list[tuple[str, float]]
     return [(row.stat_name, row.stat_value) for row in result.fetchall()]
 
 
-def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float]:
+def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float | None]:
     """
     获取全局统计数据字典
 

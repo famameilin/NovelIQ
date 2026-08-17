@@ -39,7 +39,7 @@ def build_graph_shared_summary(
     return GraphSharedSummary(
         node_count=node_count,
         edge_count=edge_count,
-        density=round(density, 4),
+        density=round(density, 4) if density is not None else None,
     )
 
 

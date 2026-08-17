@@ -9,9 +9,10 @@ import {
   getEmotionStats,
   getCharacterStats,
   getStyleStats,
+  getChapterMetrics,
   getTopics,
   getDiagnosis,
-  getParagraphCurves,
+  getEmotionTrend,
 } from "@/api/results";
 import { isDiagnosisRerunRequiredError, isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
@@ -324,6 +325,13 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
+  const chapterMetricsQuery = useQuery({
+    queryKey: ["chapter-metrics", novelId, storeTaskId],
+    queryFn: () => getChapterMetrics(novelId!, storeTaskId!),
+    enabled: canRequestResults,
+    staleTime: STALE_TIME,
+  });
+
   const topicsQuery = useQuery({
     queryKey: ["topics", novelId, storeTaskId],
     queryFn: () => getTopics(novelId!, storeTaskId!),
@@ -338,10 +346,9 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
-  const curvesQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "curves"],
-    // M4：段落粒度曲线，maxPoints 200 供仪表盘迷你预览抽稀
-    queryFn: () => getParagraphCurves(novelId!, storeTaskId!, { maxPoints: 200 }),
+  const emotionTrendQuery = useQuery({
+    queryKey: ["emotion-trend", novelId, storeTaskId, 20, null],
+    queryFn: () => getEmotionTrend(novelId!, storeTaskId!, { windowParagraphs: 20 }),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
@@ -359,6 +366,7 @@ export function NovelDetailPage() {
     emotionQuery.data &&
     characterQuery.data &&
     styleQuery.data &&
+    chapterMetricsQuery.data &&
     topicsQuery.data &&
     hasDiagnosisLoaded;
 
@@ -370,9 +378,10 @@ export function NovelDetailPage() {
           emotionQuery.isLoading ||
           characterQuery.isLoading ||
           styleQuery.isLoading ||
+          chapterMetricsQuery.isLoading ||
           topicsQuery.isLoading ||
           diagnosisQuery.isLoading ||
-          curvesQuery.isLoading)));
+           emotionTrendQuery.isLoading)));
 
   // 首页对 rerun-required diagnosis 采用“单一重跑态”；
   // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败
@@ -382,18 +391,20 @@ export function NovelDetailPage() {
     emotionQuery.isError ||
     characterQuery.isError ||
     styleQuery.isError ||
+    chapterMetricsQuery.isError ||
     (topicsQuery.isError && !(diagnosisRequiresRerun && isTopicsRerunError)) ||
     diagnosisQuery.isError ||
-    curvesQuery.isError;
+    emotionTrendQuery.isError;
 
   const resultQueryErrors = [
     narrativeQuery.error,
     emotionQuery.error,
     characterQuery.error,
     styleQuery.error,
+    chapterMetricsQuery.error,
     topicsQuery.error,
     diagnosisQuery.error,
-    curvesQuery.error,
+    emotionTrendQuery.error,
   ];
   const analysisNotComplete = resultQueryErrors.some(isAnalysisNotCompleteError);
   const analysisFailed = resultQueryErrors.some(
@@ -406,9 +417,10 @@ export function NovelDetailPage() {
     emotionQuery.refetch();
     characterQuery.refetch();
     styleQuery.refetch();
+    chapterMetricsQuery.refetch();
     topicsQuery.refetch();
     diagnosisQuery.refetch();
-    curvesQuery.refetch();
+    emotionTrendQuery.refetch();
   };
 
   // ---------- 渲染 ----------
@@ -478,7 +490,8 @@ export function NovelDetailPage() {
       {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && !diagnosisRequiresRerun && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
-            <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3">
+            <div className="h-full min-h-0 overflow-y-auto pr-1">
+              <div className="grid min-h-full grid-rows-[auto_auto_auto] gap-3 pb-1">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {diagnosisQuery.data ? (
                   <DiagnosisSummaryCard diagnosis={diagnosisQuery.data} novelId={novelId!} className="h-full min-h-0" />
@@ -503,16 +516,23 @@ export function NovelDetailPage() {
                 <DimensionMiniCard
                   dimension="emotion"
                   data={{
-                    pos_neg_ratio: emotionQuery.data?.pos_neg_ratio,
-                    positive_ratio: emotionQuery.data?.positive_ratio,
-                    negative_ratio: emotionQuery.data?.negative_ratio,
+                    lexical_positive_density: chapterMetricsQuery.data?.book.pos_density,
+                    lexical_negative_density: chapterMetricsQuery.data?.book.neg_density,
                   }}
                   novelId={novelId!}
                   linkTo={`/novels/${novelId}/curves`}
                   className="min-h-0"
                 />
                 <DimensionMiniCard dimension="character" data={characterQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} className="min-h-0" />
-                <DimensionMiniCard dimension="style" data={styleQuery.data ?? {}} novelId={novelId!} className="min-h-0" />
+                <DimensionMiniCard
+                  dimension="style"
+                  data={{
+                    string_token_diversity: styleQuery.data?.string_token_diversity,
+                    dialogue_ratio: styleQuery.data?.dialogue_ratio,
+                  }}
+                  novelId={novelId!}
+                  className="min-h-0"
+                />
                 <DimensionMiniCard
                   dimension="topic"
                   data={{
@@ -539,7 +559,8 @@ export function NovelDetailPage() {
                   novelId={novelId!}
                   className="h-full min-h-0"
                 />
-                <MiniCurvePreview data={curvesQuery.data ?? []} novelId={novelId!} className="h-full min-h-0" />
+                <MiniCurvePreview data={emotionTrendQuery.data ?? []} novelId={novelId!} className="h-full min-h-0" />
+              </div>
               </div>
             </div>
           </AnalysisWorkspace.Tab>

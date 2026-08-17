@@ -65,7 +65,7 @@ class GlobalStatValue:
     """全局统计写入/读取行"""
 
     stat_name: str
-    stat_value: float
+    stat_value: float | None
 
 
 @dataclass(frozen=True, slots=True)

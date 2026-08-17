@@ -24,6 +24,7 @@ import { RhythmCurveChart } from "@/components/charts/RhythmCurveChart";
 import { Activity, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import type { EmotionTrendWindow } from "@/api/types";
+import { formatProgressSpan } from "@/lib/metricFormat";
 
 const STALE_TIME = 5 * 60 * 1000;
 const ZOOM_REFETCH_DEBOUNCE_MS = 300;
@@ -131,7 +132,6 @@ export function CurvesPage() {
   const emotionData = emotionTrendQuery.data ?? [];
   const curvesData = curvesQuery.data ?? [];
   const narrativeData = narrativeQuery.data;
-
   const handleEmotionSeriesToggle = useCallback((newSet: Set<string>) => {
     setVisibleSeries((prev) => ({
       ...prev,
@@ -286,6 +286,7 @@ export function CurvesPage() {
         2026-04-28，任务：分析详情页单屏 Tabs 改造
         修改原因：曲线页从上下堆叠改为 tab，默认展示最重要的情绪趋势，图表由单屏工作区统一约束。
       */}
+      <div className="flex h-full min-h-0 flex-col gap-2">
       <AnalysisWorkspace.Tabs defaultValue="emotion">
         <AnalysisWorkspace.Tab value="emotion" label="情绪趋势">
           <DashboardCardShell
@@ -297,7 +298,7 @@ export function CurvesPage() {
             contentClassName="flex h-full flex-col"
             bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <Select
                   value={String(windowParagraphs)}
                   onValueChange={(value) => setWindowParagraphs(Number(value))}
@@ -367,18 +368,23 @@ export function CurvesPage() {
           <DashboardCardShell
             title="节奏张力曲线"
             icon={<Activity className="h-4 w-4" />}
-            accent="chart-3"
+            accent="chart-2"
             className="h-full"
             contentClassName="flex h-full flex-col"
             bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
-              <CurveToolbar
-                onZoomIn={() => handleZoomIn("rhythm")}
-                onZoomOut={() => handleZoomOut("rhythm")}
-                onReset={() => handleReset("rhythm")}
-                onFullscreen={() => handleFullscreen("rhythm")}
-                disabled={rhythmLoading || rhythmError || curvesData.length === 0}
-              />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <span className="text-[11px] text-text-muted">
+                  高潮间距：{formatProgressSpan(narrativeData?.climax_spacing)}
+                </span>
+                <CurveToolbar
+                  onZoomIn={() => handleZoomIn("rhythm")}
+                  onZoomOut={() => handleZoomOut("rhythm")}
+                  onReset={() => handleReset("rhythm")}
+                  onFullscreen={() => handleFullscreen("rhythm")}
+                  disabled={rhythmLoading || rhythmError || curvesData.length === 0}
+                />
+              </div>
             }
           >
             <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
@@ -421,6 +427,8 @@ export function CurvesPage() {
           </DashboardCardShell>
         </AnalysisWorkspace.Tab>
       </AnalysisWorkspace.Tabs>
+
+      </div>
     </AnalysisWorkspace>
   );
 }

@@ -114,6 +114,8 @@
   "metrics": {
     "mtld_threshold": 0.72,
     "middle_collapse_min_chunks": 10,
+    "small_sample_min_chapters": 10,
+    "function_word_min_chars": 100000,
     "character_max_iter": 100
   }
 }

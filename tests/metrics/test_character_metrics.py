@@ -39,13 +39,14 @@ class TestCharacterDegreeCentrality(unittest.TestCase):
 
 
 class TestRelationNetworkDensity(unittest.TestCase):
-    def test_empty_relations(self) -> None:
+    def test_empty_relations_returns_none(self) -> None:
         result = compute_relation_network_density([])
-        self.assertEqual(result, 0.0)
+        self.assertIsNone(result)
 
-    def test_single_relation(self) -> None:
+    def test_single_relation_returns_none(self) -> None:
+        # 角色节点 <3 时契约要求 null（metrics_contracts network_density）
         result = compute_relation_network_density([("A", "B")])
-        self.assertEqual(result, 0.0)
+        self.assertIsNone(result)
 
     def test_multiple_relations(self) -> None:
         result = compute_relation_network_density([("A", "B"), ("A", "C")])
@@ -183,11 +184,11 @@ class TestGreimasCoverage(unittest.TestCase):
 class TestAntagonistStrengthGap(unittest.TestCase):
     def test_empty_characters(self) -> None:
         result = compute_antagonist_strength_gap([])
-        self.assertEqual(result, 0.0)
+        self.assertIsNone(result)
 
     def test_no_protagonist(self) -> None:
         result = compute_antagonist_strength_gap([("反派", "反对者", 5)])
-        self.assertEqual(result, 0.0)
+        self.assertIsNone(result)
 
     def test_with_both_roles(self) -> None:
         characters = [
@@ -205,7 +206,7 @@ class TestRelationChangeFrequency(unittest.TestCase):
     def test_empty_relations(self) -> None:
         result = compute_relation_change_frequency([], 10000)
         self.assertEqual(result["total_changes"], 0.0)
-        self.assertEqual(result["relation_change_per_10k_chars"], 0.0)
+        self.assertIsNone(result["relation_change_per_10k_chars"])
         self.assertEqual(result["新建_rate"], 0.0)
         self.assertEqual(result["强化_rate"], 0.0)
         self.assertEqual(result["弱化_rate"], 0.0)
@@ -221,10 +222,10 @@ class TestRelationChangeFrequency(unittest.TestCase):
         self.assertEqual(result["total_changes"], 3.0)
         self.assertEqual(result["relation_change_per_10k_chars"], 3.0)
 
-    def test_change_rate_zero_chars_returns_zero(self) -> None:
+    def test_change_rate_zero_chars_returns_none(self) -> None:
         result = compute_relation_change_frequency([("A", "B", "盟友", "强化")], 0)
         self.assertEqual(result["total_changes"], 0.0)
-        self.assertEqual(result["relation_change_per_10k_chars"], 0.0)
+        self.assertIsNone(result["relation_change_per_10k_chars"])
 
     def test_change_frequency(self) -> None:
         relations = [

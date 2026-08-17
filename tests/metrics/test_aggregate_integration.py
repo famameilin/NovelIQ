@@ -158,7 +158,7 @@ class TestAggregateAllMetrics:
         chapter_repo = ChapterRepository(self.db_session)
         stats_repo = StatsRepository(self.db_session)
         result = aggregate_all_metrics(self.run_id, ann_repo, chapter_repo, stats_repo)
-        assert "vocab_breadth" in result.language_style
+        assert "string_token_diversity" in result.language_style
         assert result.language_style["tone_distribution"] == {"愤怒": 1.0}
 
     def test_compute_narrative_structure_metrics_aligns_annotation_and_tension_by_chapter_id(self) -> None:
@@ -172,12 +172,16 @@ class TestAggregateAllMetrics:
         tension_data = TensionData(
             chapter_ids=[1, 2, 3],
             tension_composite_scores=[0.1, None, 0.9],
+            positions=[0.0, 0.5, 1.0],
         )
 
         result = compute_narrative_structure_metrics(annotation_data, tension_data)
 
-        # 2026-08-14 重命名（§13.3）：event_density_{k} → chapter_narrative_function_share_{k}
-        assert result["chapter_narrative_function_share_铺垫"] == 0.5
-        assert result["chapter_narrative_function_share_冲突"] == 0.5
-        assert result["chapter_narrative_function_share_转折"] == 0.0
-        assert result["dominant_climax_pos"] == 0.5
+        # 章 2 张力 None 被对齐丢弃 → 结构类指标小样本返回 null；
+        # 叙事功能占比分母为全部有效标注章节（3 章），不随张力交集收缩
+        assert round(result["chapter_narrative_function_share_铺垫"], 6) == round(1 / 3, 6)
+        assert round(result["chapter_narrative_function_share_冲突"], 6) == round(1 / 3, 6)
+        assert round(result["chapter_narrative_function_share_转折"], 6) == round(1 / 3, 6)
+        assert result["dominant_climax_pos"] is None
+        assert result["act1_ratio"] is None
+        assert result["climax_spacing"] is None

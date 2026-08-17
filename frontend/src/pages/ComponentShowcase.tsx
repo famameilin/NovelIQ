@@ -485,7 +485,7 @@ export function ComponentShowcase() {
           <TabsContent value="emotion">
             <Card>
               <CardContent className="p-4 text-sm text-text-secondary">
-                情感维度：正面密度 0.45 / 负面密度 0.32 / 净密度 0.13
+              情绪趋势：情感正向趋势 / 情感负向趋势 / 平滑情绪趋势
               </CardContent>
             </Card>
           </TabsContent>

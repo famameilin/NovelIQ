@@ -56,12 +56,12 @@ export function GraphOverviewSection({
           accent="chart-2"
         />
         <MetricCard
-          label="网络密度"
+          label="关系集中度"
           value={graphDensity}
           format="raw"
           decimals={4}
           icon={<Activity className="h-5 w-5" />}
-          description="关系是否集中在少数核心角色身上"
+          description="度中心化口径：关系是否集中在少数核心角色身上"
           accent="chart-4"
         />
         <MetricCard

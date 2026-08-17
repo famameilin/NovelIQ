@@ -106,19 +106,35 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         "--chart-3": chart3Color,
       };
 
-      const compositeMax = Math.max(...data.map((d) => d.smoothed_surface_tension ?? 0));
-      const surfaceMax = Math.max(...data.map((d) => d.surface_tension ?? 0));
+      const compositeValues = data
+        .map((point) => point.smoothed_surface_tension)
+        .filter((value): value is number => value != null && Number.isFinite(value));
+      const surfaceValues = data
+        .map((point) => point.surface_tension)
+        .filter((value): value is number => value != null && Number.isFinite(value));
+      const compositeMax = compositeValues.length > 0 ? Math.max(...compositeValues) : 0;
+      const surfaceMax = surfaceValues.length > 0 ? Math.max(...surfaceValues) : 0;
       const surfaceDisplayScale = surfaceMax <= 1.05 && compositeMax >= 2 ? 10 : 1;
 
-      const act1Ratio = narrativeStructure?.act1_ratio ?? 0.25;
-      const act2Ratio = narrativeStructure?.act2_ratio ?? 0.55;
+      // 三幕分界：缺样本时不画假的 25/55 分割线
+      const act1Ratio = narrativeStructure?.act1_ratio;
+      const act2Ratio = narrativeStructure?.act2_ratio;
+      const act1End =
+        act1Ratio != null && act1Ratio > 0 && act1Ratio < 1 ? act1Ratio : null;
+      const act2End =
+        act1Ratio != null && act2Ratio != null
+          ? Math.min(act1Ratio + act2Ratio, 1)
+          : null;
 
-      // 三幕分界线：act_ratio 是 0-1 比例，直接对应 position 值域
-      const act1End = act1Ratio;
-      const act2End = Math.min(act1Ratio + act2Ratio, 1);
-
-      // climax_positions 已是 0-1 比例，直接作为 x 坐标
-      const climaxPositions = narrativeStructure?.climax_positions ?? [];
+      // climax_positions：归一化进度 [0,1]
+      const climaxPositions =
+        narrativeStructure?.climax_positions?.filter(
+          (position): position is number => Number.isFinite(position),
+        ) ?? [];
+      const tensionValues = data
+        .map((point) => point.smoothed_surface_tension)
+        .filter((value): value is number => value != null && Number.isFinite(value));
+      const tensionPeak = tensionValues.length > 0 ? Math.max(...tensionValues) : null;
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
@@ -137,14 +153,14 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         const markLineData: Array<{ xAxis: number; label?: object; lineStyle?: object }> = [];
 
         if (isActive) {
-          if (act1End > 0 && act1End < 1) {
+          if (act1End != null && act1End > 0 && act1End < 1) {
             markLineData.push({
               xAxis: act1End,
               label: { show: true, formatter: "第一幕", position: "start", color: "hsl(var(--text-muted))", fontSize: 10 },
               lineStyle: { type: "dashed", color: borderColor, opacity: 0.6 },
             });
           }
-          if (act2End > 0 && act2End < 1) {
+          if (act2End != null && act2End > 0 && act2End < 1) {
             markLineData.push({
               xAxis: act2End,
               label: { show: true, formatter: "第二幕", position: "start", color: "hsl(var(--text-muted))", fontSize: 10 },
@@ -163,7 +179,8 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           itemStyle: { color },
           lineStyle: { width: 2, color },
           emphasis: {
-            focus: "series" as const,
+            // 轴向 tooltip 已提供对比反馈，禁用 emphasis 避免悬浮时隐藏曲线
+            disabled: true,
           },
           markLine: markLineData.length > 0 ? {
             symbol: "none",
@@ -174,13 +191,13 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         };
       });
 
-      const climaxMarkPoint = climaxPositions.length > 0 ? {
+      const climaxMarkPoint = climaxPositions.length > 0 && tensionPeak != null ? {
         data: climaxPositions.map((ratio) => ({
-          coord: [ratio, Math.max(...data.map((d) => d.smoothed_surface_tension ?? 0))],
-          value: "高潮",
+          coord: [ratio, tensionPeak],
+          value: `高潮 ${(ratio * 100).toFixed(0)}%`,
           itemStyle: { color: chart3Color },
           symbolSize: 40,
-          label: { show: true, fontSize: 9, color: "#fff" },
+          label: { show: true, formatter: "{c}", fontSize: 9, color: "#fff" },
         })),
       } : undefined;
 
@@ -206,14 +223,26 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           backgroundColor: "hsl(var(--surface))",
           borderColor: "hsl(var(--border))",
           textStyle: { color: "hsl(var(--text))", fontSize: 12 },
-          formatter: (params: Array<{ seriesName: string; value: number; marker: string; dataIndex?: number }>) => {
+          formatter: (
+            params: Array<{
+              seriesName: string;
+              value: number | [number, number | null] | null;
+              marker: string;
+              dataIndex?: number;
+            }>
+          ) => {
             if (!Array.isArray(params) || params.length === 0) return "";
             const point = data[params[0]?.dataIndex ?? -1];
             if (!point) return "";
-            let html = `<div class="font-medium mb-1">第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段</div>`;
+            let html = `<div class="font-medium mb-1">第 ${point.chapter_id} 章 第 ${point.paragraph_index + 1} 段 · 全书进度 ${(point.position * 100).toFixed(1)}%</div>`;
             const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
-              .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${p.value?.toFixed(4) ?? "-"}</span></div>`)
+              .map((p) => {
+                // 数值轴的折线点使用 [x, y] 形式传给 tooltip，需要取第二项作为展示值
+                const value = Array.isArray(p.value) ? p.value[1] : p.value;
+                const formattedValue = typeof value === "number" ? value.toFixed(4) : "-";
+                return `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${formattedValue}</span></div>`;
+              })
               .join("");
             return html;
           },
@@ -243,7 +272,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           type: "value" as const,
           min: 0,
           max: 1,
-          name: "章节进度",
+          name: "全书进度",
           nameLocation: "middle",
           nameGap: 25,
           nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
@@ -304,6 +333,13 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
     return (
       <div className={cn("relative", className)}>
+        {(narrativeStructure?.act1_ratio != null ||
+          narrativeStructure?.act2_ratio != null ||
+          narrativeStructure?.act3_ratio != null) && (
+          <span className="pointer-events-none absolute left-3 top-2 z-10 rounded-full border border-border/70 bg-surface/85 px-2 py-1 text-[10px] text-text-muted">
+            三幕：全书进度
+          </span>
+        )}
         <ReactEChartsCore
           key={themeSignature}
           ref={ref}

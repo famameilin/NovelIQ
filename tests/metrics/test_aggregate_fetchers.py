@@ -244,7 +244,12 @@ def test_fetch_relation_data_consumes_authority_view():
                 changes=[{"change_kind": "assert"}],
             ),
         ],
-        participant_states=[],
+        # P4：人物网络只消费 character 参与者；mock 需补 entity_type
+        participant_states=[
+            SimpleNamespace(name="主角", entity_type="character"),
+            SimpleNamespace(name="反派", entity_type="character"),
+            SimpleNamespace(name="同伴", entity_type="character"),
+        ],
     )
 
     with patch(

@@ -72,7 +72,7 @@ from .style_metrics_extra import (
     compute_category_density,
     compute_function_word_vector,
     compute_sent_len_std,
-    compute_vocab_breadth,
+    compute_string_token_diversity,
 )
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 from .timeline_metrics import (
@@ -143,7 +143,7 @@ __all__ = [
     "compute_relation_network_density",
     "compute_sent_len_std",
     "compute_three_act_ratio_v2",
-    "compute_vocab_breadth",
+    "compute_string_token_diversity",
     "count_mixed_hits",
     "term_mixed_counts",
     "ThreeActBoundaryCandidate",

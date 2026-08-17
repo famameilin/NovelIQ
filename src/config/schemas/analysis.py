@@ -72,6 +72,10 @@ class MetricsSettings:
 
     mtld_threshold: float = 0.72
     middle_collapse_min_chunks: int = 10
+    # 2026-08-16 P7/N6：短书不再输出伪精确值；比率/结构指标低于该章数返回 null
+    small_sample_min_chapters: int = 10
+    # 2026-08-16 N3：虚字指纹在短文本下是噪声，低于该字符数返回 null
+    function_word_min_chars: int = 100_000
     character_max_iter: int = 100
     # 段落指标版本标识（§5.3 metric_version；v2=词表体系重设计 M1-M6 后语义：命中计数+共享否定层）
     metric_version: str = "2"
@@ -175,6 +179,8 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
     return MetricsSettings(
         mtld_threshold=data.get("mtld_threshold", 0.72),
         middle_collapse_min_chunks=data.get("middle_collapse_min_chunks", 10),
+        small_sample_min_chapters=data.get("small_sample_min_chapters", 10),
+        function_word_min_chars=data.get("function_word_min_chars", 100_000),
         character_max_iter=data.get("character_max_iter", 100),
         metric_version=data.get("metric_version", "2"),
         curve_version=data.get("curve_version", "1"),

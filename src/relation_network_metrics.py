@@ -22,7 +22,7 @@ def summarize_relation_network(
     relations: list[tuple[str, str]],
     *,
     node_names: Collection[str] | None = None,
-) -> tuple[int, int, float]:
+) -> tuple[int, int, float | None]:
     degree_map: Counter[str] = Counter()
     if node_names:
         degree_map.update({name: 0 for name in node_names if name})
@@ -38,8 +38,9 @@ def summarize_relation_network(
 
     node_count = len(degree_map)
     edge_count = len(unique_pairs)
+    # 角色节点 <3 时集中度无定义，契约要求 null（metrics_contracts network_density）
     if node_count < 3:
-        return node_count, edge_count, 0.0
+        return node_count, edge_count, None
 
     max_degree = max(degree_map.values(), default=0)
     centralization = sum(max_degree - degree for degree in degree_map.values()) / ((node_count - 1) * (node_count - 2))

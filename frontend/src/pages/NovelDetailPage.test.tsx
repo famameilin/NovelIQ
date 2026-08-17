@@ -19,9 +19,10 @@ const getNarrativeStructureMock = vi.fn();
 const getEmotionStatsMock = vi.fn();
 const getCharacterStatsMock = vi.fn();
 const getStyleStatsMock = vi.fn();
+const getChapterMetricsMock = vi.fn();
 const getTopicsMock = vi.fn();
 const getDiagnosisMock = vi.fn();
-const getParagraphCurvesMock = vi.fn();
+const getEmotionTrendMock = vi.fn();
 const navigateMock = vi.fn();
 const confirmSpy = vi.spyOn(window, "confirm");
 
@@ -88,9 +89,10 @@ vi.mock("@/api/results", () => ({
   getEmotionStats: (...args: unknown[]) => getEmotionStatsMock(...args),
   getCharacterStats: (...args: unknown[]) => getCharacterStatsMock(...args),
   getStyleStats: (...args: unknown[]) => getStyleStatsMock(...args),
+  getChapterMetrics: (...args: unknown[]) => getChapterMetricsMock(...args),
   getTopics: (...args: unknown[]) => getTopicsMock(...args),
   getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
-  getParagraphCurves: (...args: unknown[]) => getParagraphCurvesMock(...args),
+  getEmotionTrend: (...args: unknown[]) => getEmotionTrendMock(...args),
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -200,9 +202,10 @@ describe("NovelDetailPage", () => {
     getEmotionStatsMock.mockReset();
     getCharacterStatsMock.mockReset();
     getStyleStatsMock.mockReset();
+    getChapterMetricsMock.mockReset();
     getTopicsMock.mockReset();
     getDiagnosisMock.mockReset();
-    getParagraphCurvesMock.mockReset();
+    getEmotionTrendMock.mockReset();
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
       title: "测试小说",
@@ -239,6 +242,10 @@ describe("NovelDetailPage", () => {
     getEmotionStatsMock.mockResolvedValue({});
     getCharacterStatsMock.mockResolvedValue({});
     getStyleStatsMock.mockResolvedValue({});
+    getChapterMetricsMock.mockResolvedValue({
+      chapters: [],
+      book: { pos_density: null, neg_density: null },
+    });
     getTopicsMock.mockResolvedValue([]);
     getDiagnosisMock.mockResolvedValue({
       arc_scores: { 沈砚: 8.2 },
@@ -248,7 +255,7 @@ describe("NovelDetailPage", () => {
       main_characters: ["沈砚"],
       core_cast: ["沈砚"],
     });
-    getParagraphCurvesMock.mockResolvedValue([]);
+    getEmotionTrendMock.mockResolvedValue([]);
     confirmSpy.mockReset();
     confirmSpy.mockReturnValue(true);
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
@@ -433,7 +440,7 @@ describe("NovelDetailPage", () => {
     getCharacterStatsMock.mockResolvedValue({});
     getStyleStatsMock.mockResolvedValue({});
     getTopicsMock.mockResolvedValue([]);
-    getParagraphCurvesMock.mockResolvedValue([]);
+    getEmotionTrendMock.mockResolvedValue([]);
 
     renderNovelDetailPage();
 
@@ -473,7 +480,7 @@ describe("NovelDetailPage", () => {
         },
       },
     });
-    getParagraphCurvesMock.mockResolvedValue([]);
+    getEmotionTrendMock.mockResolvedValue([]);
 
     renderNovelDetailPage();
 
@@ -506,7 +513,7 @@ describe("NovelDetailPage", () => {
     expect(getStyleStatsMock).not.toHaveBeenCalled();
     expect(getTopicsMock).not.toHaveBeenCalled();
     expect(getDiagnosisMock).not.toHaveBeenCalled();
-    expect(getParagraphCurvesMock).not.toHaveBeenCalled();
+    expect(getEmotionTrendMock).not.toHaveBeenCalled();
   });
 
   it("已失败任务应显示友好失败提示而非数据加载失败", async () => {
@@ -537,7 +544,7 @@ describe("NovelDetailPage", () => {
     getStyleStatsMock.mockRejectedValue(notCompleteError);
     getTopicsMock.mockRejectedValue(notCompleteError);
     getDiagnosisMock.mockRejectedValue(notCompleteError);
-    getParagraphCurvesMock.mockRejectedValue(notCompleteError);
+    getEmotionTrendMock.mockRejectedValue(notCompleteError);
 
     renderNovelDetailPage();
 
