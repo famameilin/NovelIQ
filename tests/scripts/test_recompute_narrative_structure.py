@@ -43,6 +43,7 @@ def test_build_aligned_three_act_diagnostics_filters_null_tension_and_aligns_by_
     tension_data = TensionData(
         chapter_ids=[11, 13, 10, 12],
         tension_composite_scores=[0.2, 0.9, 0.1, None],
+        positions=[0.25, 0.75, 0.0, 0.5],
     )
 
     diagnostics = module._build_aligned_three_act_diagnostics(annotation_data, tension_data)

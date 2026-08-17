@@ -446,12 +446,16 @@ def _build_book_aggregate(
     pivot_valid_chapters = 0
     cliffhanger_chapters = 0
     cliffhanger_valid_chapters = 0
+    narrative_valid_chapters = 0
+    valence_valid_chapters = 0
     for chapter in chapter_metrics:
         if chapter.narrative_function:
+            narrative_valid_chapters += 1
             narrative_share[chapter.narrative_function] = (
                 narrative_share.get(chapter.narrative_function, 0.0) + 1.0
             )
         if chapter.emotional_valence:
+            valence_valid_chapters += 1
             valence_share[chapter.emotional_valence] = (
                 valence_share.get(chapter.emotional_valence, 0.0) + 1.0
             )
@@ -464,12 +468,13 @@ def _build_book_aggregate(
             if chapter.cliffhanger:
                 cliffhanger_chapters += 1
 
-    if total_chapters > 0:
+    if narrative_valid_chapters > 0:
         narrative_share = {
-            label: round(count / total_chapters, 6) for label, count in narrative_share.items()
+            label: round(count / narrative_valid_chapters, 6) for label, count in narrative_share.items()
         }
+    if valence_valid_chapters > 0:
         valence_share = {
-            label: round(count / total_chapters, 6) for label, count in valence_share.items()
+            label: round(count / valence_valid_chapters, 6) for label, count in valence_share.items()
         }
 
     return BookAggregateStats(

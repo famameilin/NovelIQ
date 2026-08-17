@@ -1,0 +1,231 @@
+version: "1"
+# 指标契约 registry：从“事后快照”改为“问题 × 字段 × 输出契约 × null 语义 × 权威声明”。
+# 此文件是手动维护的契约真相源；docs/generated_metrics_contract.md 由 scripts/tools/generate_metrics_docs.py 生成。
+metrics:
+  - id: act_ratios
+    concept: 叙事结构
+    problem: 三幕比例是否失衡、高潮分布是否合理
+    fields: ["act1_ratio", "act2_ratio", "act3_ratio"]
+    endpoint: "/metrics/narrative-structure"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "有效章节数 < small_sample_min_chapters、缺 char_offset 进度或缺少张力/标注时均为 null；不输出 0+5% 伪归一"
+    computation_chain: "章节 Agent 标签 + 章张力 + char_offset 归一化进度 → 字符跨度三幕聚合"
+    invariants: ["三幕比例全部为 null 或三者之和=1"]
+
+  - id: climax_spacing
+    concept: 叙事结构
+    problem: 高潮间距是否过密或过疏
+    fields: ["climax_spacing"]
+    endpoint: "/metrics/narrative-structure"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "章张力不足或峰值 <2 时为 null；单位=归一化进度差 [0,1]"
+    computation_chain: "paragraph_curves.surface_tension → 章均值 + char_offset 进度 → 局部峰进度间距"
+    invariants: ["无峰值时 null，不允许 0.0 冒充真值；单位非章序号差"]
+
+  - id: middle_collapse_index
+    concept: 叙事结构
+    problem: 中段是否塌陷/注水
+    fields: ["middle_collapse_index"]
+    endpoint: "/metrics/narrative-structure"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "有效点数 < middle_collapse_min_chunks 或首尾均值为 0 时为 null"
+    computation_chain: "章张力 + 归一化进度 → 进度 30%-70% 区间均值 / 首尾区间均值"
+    invariants: ["样本不足时 null，不允许 0.0"]
+
+  - id: cliffhanger_rate
+    concept: 叙事结构
+    problem: 章末悬念钩子密度
+    fields: ["cliffhanger_rate"]
+    endpoint: "/metrics/narrative-structure"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "有效标注章节数 < small_sample_min_chapters 时为 null"
+    computation_chain: "章节 Agent 标签 cliffhanger 计数 / 有效标注章数"
+    invariants: ["小样本 null，其余 0-1"]
+
+  - id: chapter_narrative_function_share
+    concept: 叙事结构
+    problem: 冲突/铺垫/转折章节占比
+    fields: ["chapter_narrative_function_share"]
+    endpoint: "/metrics/narrative-structure, /chapter-metrics"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "无有效标注章节时为 null；分母统一为有效标注章节数"
+    computation_chain: "章节 Agent narrative_function 枚举计数 / 有效标注章数"
+    invariants: ["两个端点的 share 分母一致"]
+
+  - id: lexical_pos_neg_ratio
+    concept: 情感（词表）
+    problem: 全书词表正面/反面比值
+    fields: ["lexical_pos_neg_ratio"]
+    endpoint: "/metrics/emotion-stats"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "无任何词表密度数据时为 null"
+    computation_chain: "paragraph_metrics positive/negative_weight_sum → 章守恒密度 → 词表正负比"
+    invariants: ["与 semantic polarity 为两个概念，不得混称情感基调"]
+
+  - id: semantic_polarity_distribution
+    concept: 情感（语义）
+    problem: 章节情感语义极性分布
+    fields: ["positive_ratio", "negative_ratio", "neutral_ratio"]
+    endpoint: "/metrics/emotion-stats"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "无有效标注章节时为 null"
+    computation_chain: "章节 Agent emotional_valence 五档统计"
+    invariants: ["positive+negative+neutral=1 或全部 null"]
+
+  - id: emotion_recovery_speed
+    concept: 情感
+    problem: 负向低谷后恢复速度
+    fields: ["recovery_speed"]
+    endpoint: "/metrics/emotion-stats"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "无低谷、无法恢复或缺进度轴时为 null"
+    computation_chain: "章净密度 + char_offset 进度 → 低谷到回升的归一化进度距离"
+    invariants: ["单位=归一化进度距离 [0,1]；无低谷 null"]
+
+  - id: chapter_pivot_rate
+    concept: 情感/叙事
+    problem: 章节转折密度
+    fields: ["chapter_pivot_rate"]
+    endpoint: "/metrics/emotion-stats"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "有效标注章节数 < small_sample_min_chapters 时为 null"
+    computation_chain: "章节 Agent pivot_moment 计数 / 有效标注章数"
+    invariants: ["小样本 null"]
+
+  - id: arc_delta
+    concept: 人物弧
+    problem: 角色情感波动幅度
+    fields: ["arc_delta"]
+    endpoint: "/metrics/emotion-stats"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "无角色序列或全部角色样本 <2 时为 null"
+    computation_chain: "role 角色情感序列 stdev 均值"
+    invariants: ["不再只有 aggregate 内部值，必须进 API/导出契约"]
+
+  - id: network_density
+    concept: 人物网络
+    problem: 关系是否集中于少数枢纽角色
+    fields: ["network_density"]
+    endpoint: "/metrics/character-stats"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "角色节点 <3 时为 null（由 0.0 改为 null 语义）"
+    computation_chain: "authority 角色子图 → 度中心化（Freeman 集中度）"
+    invariants: ["只统计 entity_type=character；口径=度中心化而非图密度"]
+
+  - id: antagonist_strength_gap
+    concept: 人物网络
+    problem: 主体/反对者情感张力差异
+    fields: ["antagonist_strength_gap"]
+    endpoint: "/metrics/character-stats"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "缺主体或反对者任一侧时为 null"
+    computation_chain: "角色观察 role_function + emotion_score 绝对值均值差"
+    invariants: ["缺失侧 null，不输出 0.0 哨兵"]
+
+  - id: relation_change_per_10k_chars
+    concept: 人物网络
+    problem: 关系格局变化频率
+    fields: ["relation_change_per_10k_chars"]
+    endpoint: "/metrics/character-stats"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "无关系变化或总字数为 0 时为 null"
+    computation_chain: "authority graph_changes 角色关系变化数 / 总字数 × 10000"
+    invariants: ["total_chars=0 时 null"]
+
+  - id: string_token_diversity
+    concept: 语言风格
+    problem: 连续汉字/拉丁串去重率
+    fields: ["string_token_diversity"]
+    endpoint: "/metrics/style-stats"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "无文本 token 时为 null"
+    computation_chain: "全书连续汉字/拉丁串去重率（非 jieba TTR）"
+    invariants: ["命名标识实际口径，不得标为 TTR"]
+
+  - id: sent_len_std
+    concept: 语言风格
+    problem: 句长波动
+    fields: ["sent_len_std"]
+    endpoint: "/metrics/style-stats, /chapter-metrics"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "句子数 <2 时为 null"
+    computation_chain: "段落/章节充分统计量总体方差口径"
+    invariants: ["两处口径一致（总体方差）"]
+
+  - id: function_word_vector
+    concept: 语言风格
+    problem: 高频虚字指纹
+    fields: ["function_word_vector"]
+    endpoint: "/metrics/style-stats"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "总字符数 < function_word_min_chars 时为 null"
+    computation_chain: "20 个硬编码文言虚字出现次数 / 全书字符数"
+    invariants: ["短文本 null，不输出全 0 噪声"]
+
+  - id: global_emotion_rhythm_stats
+    concept: 全局统计
+    problem: 全书情绪与节奏波动
+    fields: ["emotion_std", "emotion_max", "emotion_min", "rhythm_avg", "rhythm_std", "rhythm_max", "rhythm_min"]
+    endpoint: "export/global_stats"
+    category: A
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "对应段落序列为空时不输出，或由仓库层透传 null"
+    computation_chain: "paragraph_curves.net_density/surface_tension → 全书统计（复合→复合）"
+    invariants: ["从 paragraph_curves 再聚合时保留溯源链路"]
+
+  - id: topic_distribution
+    concept: 主题内容
+    problem: 段落主题分布
+    fields: ["topic_id", "weight"]
+    endpoint: "/topics"
+    category: B
+    objective_subjective: objective
+    authoritative: true
+    null_semantics: "无有效训练文档时不产出；主题权重按 token 加权归一"
+    computation_chain: "paragraph_topics + LDA 模型 → token 加权聚合"
+    invariants: ["num_topics 按语料规模缩放"]
+
+  - id: foreshadow_expectation
+    concept: 伏笔回收预期
+    problem: 伏笔是否可能回收
+    fields: ["foreshadow_expectation"]
+    endpoint: "/diagnosis"
+    category: C
+    objective_subjective: subjective
+    authoritative: true
+    null_semantics: "无伏笔线程或全部线程枚举证据缺失时为 null"
+    computation_chain: "foreshadowing_threads（payoff_likelihood/status/strength）确定性加权"
+    invariants: ["输入退化时 null，不输出恒 0.313"]

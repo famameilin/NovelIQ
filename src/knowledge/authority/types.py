@@ -300,9 +300,9 @@ class GraphSharedSummary:
 
     node_count: int = 0
     edge_count: int = 0
-    density: float = 0.0
+    density: float | None = None
 
-    def to_contract_dict(self) -> dict[str, float | int]:
+    def to_contract_dict(self) -> dict[str, float | int | None]:
         """按显式字段白名单序列化共享图谱摘要"""
 
         return {
@@ -362,7 +362,7 @@ class GraphPageSummary:
 
     node_count: int = 0
     edge_count: int = 0
-    density: float = 0.0
+    density: float | None = None
     core_characters: list[str] = field(default_factory=list)
     key_relations: list[GraphKeyRelationHighlight] = field(default_factory=list)
 

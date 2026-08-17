@@ -5,37 +5,6 @@ from collections import Counter
 from collections.abc import Sequence
 
 
-def compute_emotion_recovery_speed(
-    emotion_values: list[float],
-    threshold: float | None = None,
-) -> float | None:
-    """计算情绪从负向低谷回到基线附近的平均恢复距离"""
-    if not emotion_values:
-        return None
-
-    if threshold is None:
-        if len(emotion_values) > 1:
-            std_dev = statistics.stdev(emotion_values)
-            threshold = max(std_dev * 0.5, 0.005)
-        else:
-            threshold = 0.005
-
-    baseline = sum(emotion_values) / len(emotion_values)
-
-    recovery_distances = []
-    for i, val in enumerate(emotion_values):
-        if val < baseline - threshold:
-            for j in range(i + 1, len(emotion_values)):
-                if emotion_values[j] >= baseline - threshold * 0.5:
-                    recovery_distances.append(j - i)
-                    break
-
-    if not recovery_distances:
-        return None
-
-    return sum(recovery_distances) / len(recovery_distances)
-
-
 def _validate_position_inputs(positions: Sequence[float], scores: Sequence[float]) -> None:
     """校验字符坐标版输入的公共前置条件：长度一致且位置严格单调递增。"""
     if len(positions) != len(scores):
@@ -46,32 +15,14 @@ def _validate_position_inputs(positions: Sequence[float], scores: Sequence[float
                 raise ValueError("positions 必须严格单调递增")
 
 
-def compute_emotion_recovery_speed_by_position(
+def compute_emotion_recovery_speed(
     positions: Sequence[float],
     scores: Sequence[float],
-) -> float:
-    """
-    字符坐标版情绪恢复速度（设计文档 §10、§19.8 修复）。
-
-    与 compute_emotion_recovery_speed 的语义一致：情绪低于
-    baseline - threshold 的低谷点，恢复到 baseline - threshold * 0.5
-    以上所用的距离（threshold 默认取样本标准差的一半，最低 0.005）；
-    差异仅在于距离用字符位置差 positions[j] - positions[i]，
-    不再用点索引差 j - i。无法识别恢复时返回 0.0（旧函数返回 None）。
-
-    Args:
-        positions: 严格单调递增的字符位置（建议使用归一化字符坐标 [0, 1]）。
-        scores: 与 positions 等长的情绪分数。
-
-    Returns:
-        平均恢复字符距离；无低谷或无恢复点时返回 0.0。
-
-    Raises:
-        ValueError: positions 与 scores 长度不一致，或 positions 非严格递增。
-    """
-    _validate_position_inputs(positions, scores)
+) -> float | None:
+    """情绪恢复速度：低谷到回升的归一化进度距离均值；无法识别时 null。"""
     if not scores:
-        return 0.0
+        return None
+    _validate_position_inputs(positions, scores)
 
     if len(scores) > 1:
         std_dev = statistics.stdev(scores)
@@ -80,7 +31,6 @@ def compute_emotion_recovery_speed_by_position(
         threshold = 0.005
 
     baseline = sum(scores) / len(scores)
-
     recovery_distances = []
     for i, val in enumerate(scores):
         if val < baseline - threshold:
@@ -90,17 +40,17 @@ def compute_emotion_recovery_speed_by_position(
                     break
 
     if not recovery_distances:
-        return 0.0
-
+        return None
     return sum(recovery_distances) / len(recovery_distances)
+
 
 
 def compute_emotion_polarity_distribution(
     emotional_valences: list[str],
-) -> dict[str, float]:
-    """计算正向、负向和中性情绪的占比"""
+) -> dict[str, float | None]:
+    """计算正向、负向和中性情绪的占比；无有效情绪标注时三项均为 None（契约 null 语义）"""
     if not emotional_valences:
-        return {"positive_ratio": 0.0, "negative_ratio": 0.0, "neutral_ratio": 0.0}
+        return {"positive_ratio": None, "negative_ratio": None, "neutral_ratio": None}
 
     counts = Counter(emotional_valences)
     total = len(emotional_valences)
@@ -125,35 +75,8 @@ def compute_pivot_moment_density(
     return sum(pivot_moments) / len(pivot_moments)
 
 
-def compute_lexical_emotion_trend(
-    emotion_values: list[float],
-) -> str:
-    """将基于词表的情绪走势分类为上升、下降、稳定或波动"""
-    if len(emotion_values) < 3:
-        return "stable"
 
-    n = len(emotion_values)
-    third = n // 3
-
-    first_segment = emotion_values[:third]
-    last_segment = emotion_values[2 * third :]
-
-    first_avg = sum(first_segment) / len(first_segment) if first_segment else 0.0
-    last_avg = sum(last_segment) / len(last_segment) if last_segment else 0.0
-
-    stdev = statistics.stdev(emotion_values) if len(emotion_values) > 1 else 0.0
-    diff = last_avg - first_avg
-
-    if stdev >= 0.003:
-        return "volatile"
-    if diff > 0.002:
-        return "rising"
-    if diff < -0.002:
-        return "falling"
-    return "stable"
-
-
-def compute_lexical_emotion_trend_by_position(
+def compute_lexical_emotion_trend_detail(
     positions: Sequence[float],
     scores: Sequence[float],
 ) -> dict:
@@ -250,26 +173,38 @@ def compute_lexical_emotion_trend_by_position(
 
 def compute_arc_delta(
     character_emotion_scores: list[tuple[str, list[float]]],
-) -> float:
+) -> float | None:
     if not character_emotion_scores:
-        return 0.0
+        return None
 
     stds = []
     for _, scores in character_emotion_scores:
         if len(scores) >= 2:
             stds.append(statistics.stdev(scores))
 
-    return sum(stds) / len(stds) if stds else 0.0
+    return sum(stds) / len(stds) if stds else None
 
 
 def compute_pos_neg_ratio(
     pos_densities: list[float],
     neg_densities: list[float],
-) -> float:
+) -> float | None:
     if not pos_densities and not neg_densities:
-        return 0.0
+        return None
 
     pos_sum = sum(pos_densities) if pos_densities else 0.0
     neg_sum = sum(neg_densities) if neg_densities else 0.0
 
     return pos_sum / (neg_sum + 1e-6)
+
+
+def compute_lexical_emotion_trend(
+    positions: Sequence[float],
+    scores: Sequence[float],
+) -> str | None:
+    """词表情绪走势标签（进度轴前中后切分）；样本不足时 null。"""
+    if len(scores) < 3:
+        return None
+    detail = compute_lexical_emotion_trend_detail(positions, scores)
+    trend = detail.get("trend")
+    return str(trend) if trend is not None else None

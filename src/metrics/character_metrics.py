@@ -54,7 +54,7 @@ def compute_relation_network_density(
     relations: list[tuple[str, str]],
     graph: nx.Graph | None = None,
     node_names: Collection[str] | None = None,
-) -> float:
+) -> float | None:
     _ = graph
     _, _, density = summarize_relation_network(
         relations,
@@ -197,9 +197,9 @@ def compute_greimas_coverage(
 
 def compute_antagonist_strength_gap(
     characters: list[tuple[str, str, int]],
-) -> float:
+) -> float | None:
     if not characters:
-        return 0.0
+        return None
 
     protagonist_scores = []
     antagonist_scores = []
@@ -211,7 +211,7 @@ def compute_antagonist_strength_gap(
             antagonist_scores.append(abs(score))
 
     if not protagonist_scores or not antagonist_scores:
-        return 0.0
+        return None
 
     avg_protagonist = sum(protagonist_scores) / len(protagonist_scores)
     avg_antagonist = sum(antagonist_scores) / len(antagonist_scores)
@@ -241,19 +241,19 @@ _CHANGE_KIND_TO_RATE_KEY = {
 def compute_relation_change_frequency(
     relations: list[tuple[str, str, str, str]],
     total_chars: int,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """
     计算关系变化频率（每万字变化次数，设计 §8.5 relation_change_per_10k_chars）。
 
     2026-08-14 修复（§19.10）：分母从章节数改为全书总字数（每万字频率），
     relation_change_per_10k_chars = len(relations) / total_chars * 10000。
     2026-08-14 重命名（§13.3）：返回键 change_rate → relation_change_per_10k_chars；
-    total_chars 为 0 时返回 0.0。
+    total_chars 为 0 时 relation_change_per_10k_chars 为 None。
     """
     if not relations or total_chars == 0:
         return {
             "total_changes": 0.0,
-            "relation_change_per_10k_chars": 0.0,
+            "relation_change_per_10k_chars": None,
             **dict.fromkeys(_RATE_KEYS, 0.0),
         }
 

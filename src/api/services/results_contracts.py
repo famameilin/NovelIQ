@@ -80,7 +80,8 @@ def _convert_emotion_stats(
     curve_type = result.emotion_curve.get("lexical_emotion_trend")
 
     return EmotionStats(
-        pos_neg_ratio=result.emotion_curve.get("pos_neg_ratio"),
+        lexical_pos_neg_ratio=result.emotion_curve.get("lexical_pos_neg_ratio"),
+        arc_delta=result.emotion_curve.get("arc_delta"),
         positive_ratio=result.emotion_curve.get("positive_ratio"),
         negative_ratio=result.emotion_curve.get("negative_ratio"),
         neutral_ratio=result.emotion_curve.get("neutral_ratio"),
@@ -151,7 +152,7 @@ def _convert_style_stats(
 
     return StyleStats(
         tone_distribution=_default_distribution(lang_dict.get("tone_distribution")),
-        vocab_breadth=lang_dict.get("vocab_breadth"),
+        string_token_diversity=lang_dict.get("string_token_diversity"),
         avg_word_len=lang_dict.get("avg_word_len"),
         sent_len_std=lang_dict.get("sent_len_std"),
         dialogue_ratio=lang_dict.get("dialogue_ratio"),

@@ -35,15 +35,15 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== metrics 模块方法 ====================
 
-    def insert_global_stats(self, run_id: str, stats: Iterable[tuple[str, float]]) -> None:
+    def insert_global_stats(self, run_id: str, stats: Iterable[tuple[str, float | None]]) -> None:
         """插入全局统计数据"""
         return metrics.insert_global_stats(self.session, run_id, stats)
 
-    def fetch_global_stats(self, run_id: str) -> list[tuple[str, float]]:
+    def fetch_global_stats(self, run_id: str) -> list[tuple[str, float | None]]:
         """获取全局统计数据"""
         return metrics.fetch_global_stats(self.session, run_id)
 
-    def fetch_global_stats_dict(self, run_id: str) -> dict[str, float]:
+    def fetch_global_stats_dict(self, run_id: str) -> dict[str, float | None]:
         """获取全局统计数据字典"""
         return metrics.fetch_global_stats_dict(self.session, run_id)
 

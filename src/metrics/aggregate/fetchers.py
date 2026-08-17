@@ -132,15 +132,23 @@ def fetch_emotion_data(
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
     aggregates = ParagraphRepository(stats_repo.session).fetch_chapter_metric_aggregates(run_id)
+    progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
     emotion_values: list[float] = []
     pos_densities: list[float] = []
     neg_densities: list[float] = []
-    for _chapter_id, totals in aggregates:
+    chapter_ids: list[int] = []
+    positions: list[float] = []
+    for chapter_id, totals in aggregates:
         token_count = totals.get("token_count", 0.0)
         if token_count <= 0:
             continue
+        position = progress_map.get(int(chapter_id))
+        if position is None:
+            continue
         pos_total = totals.get("positive_weight_sum", 0.0)
         neg_total = totals.get("negative_weight_sum", 0.0)
+        chapter_ids.append(int(chapter_id))
+        positions.append(position)
         pos_densities.append(pos_total / token_count)
         neg_densities.append(neg_total / token_count)
         emotion_values.append((pos_total - neg_total) / token_count)
@@ -149,6 +157,8 @@ def fetch_emotion_data(
         emotion_values=emotion_values,
         pos_densities=pos_densities,
         neg_densities=neg_densities,
+        chapter_ids=chapter_ids,
+        positions=positions,
     )
 
 
@@ -219,7 +229,17 @@ def fetch_relation_data(
 ) -> RelationData:
     """提取 graph_* 关系数据（权威来源）"""
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
-    current_relations = list(graph_view.confirmed_relations)
+    # P4：人物网络只消费 entity_type=character 的角色子图，不再把地点/物品等全实体节点计入
+    character_names = {
+        state.name
+        for state in graph_view.participant_states
+        if state.entity_type == "character" and state.name
+    }
+    current_relations = [
+        relation
+        for relation in graph_view.confirmed_relations
+        if relation.from_name in character_names and relation.to_name in character_names
+    ]
     relation_changes = [
         change
         for change in graph_view.graph_changes
@@ -227,6 +247,8 @@ def fetch_relation_data(
         and change.from_name
         and change.to_name
         and change.relation_type
+        and change.from_name in character_names
+        and change.to_name in character_names
     ]
 
     return RelationData(
@@ -243,7 +265,7 @@ def fetch_relation_data(
             )
             for change in relation_changes
         ],
-        participant_names=[state.name for state in graph_view.participant_states if state.name],
+        participant_names=sorted(character_names),
     )
 
 
@@ -275,9 +297,11 @@ def fetch_tension_data(
     from src.storage.repositories.paragraph_repository import ParagraphRepository
 
     rows = ParagraphRepository(stats_repo.session).fetch_chapter_tension_scores(run_id)
+    progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
     return TensionData(
         chapter_ids=[chapter_id for chapter_id, _tension in rows],
         tension_composite_scores=[tension for _chapter_id, tension in rows],
+        positions=[progress_map.get(int(chapter_id)) for chapter_id, _tension in rows],
     )
 
 

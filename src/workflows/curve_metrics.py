@@ -27,7 +27,7 @@ def _last_extreme_index(values: list[float], *, want_max: bool) -> int:
     return len(values) - 1 - values[::-1].index(extreme)
 
 
-def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
+def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | None]]:
     """
     计算全局统计（§9.1 聚合守恒，2026-08-14 M8b 段落化重写）
 
@@ -68,7 +68,7 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
         .order_by(Paragraph.global_start_char, Paragraph.paragraph_id)
     ).fetchall()
 
-    global_stats: list[tuple[str, float]] = []
+    global_stats: list[tuple[str, float | None]] = []
 
     token_total = sum(int(row.token_count or 0) for row in rows)
     pos_total = sum(float(row.positive_weight_sum or 0.0) for row in rows)
@@ -79,7 +79,8 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float]]:
     book_text = "".join(str(row.text) for row in rows if row.text)
     book_tokens = tokenize(book_text) if book_text else []
     if book_tokens:
-        global_stats.append(("global_avg_mtld", float(mtld(book_tokens) or 0.0)))
+        mtld_value = mtld(book_tokens)
+        global_stats.append(("global_avg_mtld", float(mtld_value) if mtld_value is not None else None))
         global_stats.append(("global_avg_ttr", float(ttr(book_tokens))))
     if sentence_count > 0:
         global_stats.append(("global_avg_sent_len", sentence_char_sum / sentence_count))

@@ -845,7 +845,8 @@ export function createNarrativeStructure(): NarrativeStructureMetrics {
 
 export function createEmotionStats(): EmotionStatsMetrics {
   return {
-    pos_neg_ratio: 1.65,
+    lexical_pos_neg_ratio: 1.65,
+    arc_delta: 0.42,
     positive_ratio: 0.52,
     negative_ratio: 0.31,
     neutral_ratio: 0.17,
@@ -876,7 +877,7 @@ export function createCharacterStats(): CharacterStatsMetrics {
 
 export function createStyleStats(): StyleStatsMetrics {
   return {
-    vocab_breadth: 0.72,
+    string_token_diversity: 0.72,
     avg_sent_len: 18.5,
     dialogue_ratio: 0.45,
   };

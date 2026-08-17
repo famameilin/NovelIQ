@@ -486,28 +486,31 @@ export interface TimelineResponse {
 // 指标
 
 export interface NarrativeStructureMetrics {
-  act1_ratio?: number;
-  act2_ratio?: number;
-  act3_ratio?: number;
-  climax_spacing?: number;
-  middle_collapse_index?: number;
-  chapter_narrative_function_share?: Record<string, number>;
-  cliffhanger_rate?: number;
-  climax_count?: number;
-  climax_positions?: number[];
-  climax_heights?: number[];
-  peak_escalation?: string;
-  dominant_climax_pos?: number;
+  act1_ratio?: number | null;
+  act2_ratio?: number | null;
+  act3_ratio?: number | null;
+  /** 相邻高潮归一化进度差均值 [0,1] */
+  climax_spacing?: number | null;
+  middle_collapse_index?: number | null;
+  chapter_narrative_function_share?: Record<string, number> | null;
+  cliffhanger_rate?: number | null;
+  climax_count?: number | null;
+  climax_positions?: number[] | null;
+  climax_heights?: number[] | null;
+  peak_escalation?: string | null;
+  dominant_climax_pos?: number | null;
 }
 
 export interface EmotionStatsMetrics {
-  pos_neg_ratio?: number;
-  positive_ratio?: number;
-  negative_ratio?: number;
-  neutral_ratio?: number;
-  recovery_speed?: number;
-  chapter_pivot_rate?: number;
-  lexical_emotion_trend?: string;
+  lexical_pos_neg_ratio?: number | null;
+  arc_delta?: number | null;
+  positive_ratio?: number | null;
+  negative_ratio?: number | null;
+  neutral_ratio?: number | null;
+  /** 情绪恢复的归一化进度距离 [0,1] */
+  recovery_speed?: number | null;
+  chapter_pivot_rate?: number | null;
+  lexical_emotion_trend?: string | null;
 }
 
 export interface CharacterStatsMetrics {
@@ -520,9 +523,13 @@ export interface CharacterStatsMetrics {
 }
 
 export interface StyleStatsMetrics {
-  vocab_breadth: number;
-  avg_sent_len: number;
-  dialogue_ratio: number;
+  string_token_diversity?: number | null;
+  avg_word_len?: number | null;
+  avg_sent_len?: number | null;
+  dialogue_ratio?: number | null;
+  sent_len_std?: number | null;
+  tone_distribution?: Record<string, number> | null;
+  function_word_vector?: Record<string, number> | null;
 }
 
 // 通用

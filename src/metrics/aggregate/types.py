@@ -42,6 +42,9 @@ class EmotionData:
     emotion_values: list[float]
     pos_densities: list[float]
     neg_densities: list[float]
+    # 与 emotion_values 对齐的归一化进度 [0,1]；缺 offset 的章不入列
+    chapter_ids: list[int] = field(default_factory=list)
+    positions: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -75,6 +78,8 @@ class TensionData:
 
     chapter_ids: list[int]
     tension_composite_scores: list[float | None]
+    # 与 chapter_ids 对齐的归一化进度 [0,1]；缺 offset 时为 None
+    positions: list[float | None] = field(default_factory=list)
 
 
 @dataclass

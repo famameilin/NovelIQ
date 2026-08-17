@@ -13,6 +13,8 @@ from collections import Counter
 
 import jieba
 
+from src.config import settings
+
 from .lexicon_metrics import count_mixed_hits
 from .text_utils import tokenize_words
 
@@ -53,11 +55,12 @@ SEMANTIC_CATEGORY_KEYS = [
 ]
 
 
-def compute_vocab_breadth(
+def compute_string_token_diversity(
     all_tokens: list[str],
-) -> float:
+) -> float | None:
+    """连续汉字/拉丁串去重率（P6 改名：不是 jieba 分词 TTR）"""
     if not all_tokens:
-        return 0.0
+        return None
 
     total_tokens = len(all_tokens)
     unique_tokens = len(set(all_tokens))
@@ -87,9 +90,9 @@ def compute_avg_word_len(
 
 def compute_sent_len_std(
     texts: list[str],
-) -> float:
+) -> float | None:
     if not texts:
-        return 0.0
+        return None
 
     all_sentences = []
     for text in texts:
@@ -100,22 +103,26 @@ def compute_sent_len_std(
                 all_sentences.append(sent)
 
     if len(all_sentences) < 2:
-        return 0.0
+        return None
 
     sent_lengths = [len(sent) for sent in all_sentences]
 
-    return statistics.stdev(sent_lengths)
+    # P10：统一为总体方差口径，与 /chapter-metrics 的充分统计量一致
+    return statistics.pstdev(sent_lengths)
 
 
 def compute_function_word_vector(
     texts: list[str],
-) -> dict[str, float]:
+) -> dict[str, float] | None:
     if not texts:
-        return dict.fromkeys(FUNCTION_WORDS, 0.0)
+        return None
 
     total_chars = sum(len(text) for text in texts)
     if total_chars == 0:
-        return dict.fromkeys(FUNCTION_WORDS, 0.0)
+        return None
+    # N3：虚字指纹需要足够文本量，短书输出 None（禁止 0 值伪装）
+    if total_chars < settings.metrics.function_word_min_chars:
+        return None
 
     all_chars = []
     for text in texts:

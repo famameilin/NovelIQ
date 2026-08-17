@@ -23,6 +23,13 @@ import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { EmotionTrendWindow } from "@/api/types";
+import {
+  EMOTION_TREND_SERIES_CONFIG,
+  formatEmotionTrendTooltipValue,
+  getEmotionTrendSeriesValue,
+} from "./emotionTrendSeries";
+
+export type { EmotionTrendSeriesKey } from "./emotionTrendSeries";
 
 echarts.use([
   GridComponent,
@@ -37,12 +44,6 @@ echarts.use([
 /*  类型定义                                                           */
 /* ------------------------------------------------------------------ */
 
-export type EmotionTrendSeriesKey =
-  | "pooled_pos_density"
-  | "pooled_neg_density"
-  | "pooled_net_density"
-  | "smoothed_pooled_net_density";
-
 export interface EmotionTrendChartProps {
   data: EmotionTrendWindow[];
   className?: string;
@@ -54,41 +55,6 @@ export interface EmotionTrendChartProps {
   onPointClick?: (window: EmotionTrendWindow) => void;
   height?: number | string;
 }
-
-const SERIES_CONFIG = [
-  {
-    key: "pooled_pos_density",
-    smoothedKey: "smoothed_pooled_pos_density",
-    name: "正向强度",
-    colorVar: "--chart-positive",
-    role: "aux",
-    useSmoothed: true,
-  },
-  {
-    key: "pooled_neg_density",
-    smoothedKey: "smoothed_pooled_neg_density",
-    name: "负向强度",
-    colorVar: "--chart-negative",
-    role: "aux",
-    useSmoothed: true,
-  },
-  {
-    key: "pooled_net_density",
-    smoothedKey: "pooled_net_density",
-    name: "原始趋势",
-    colorVar: "--chart-1",
-    role: "support",
-    useSmoothed: false,
-  },
-  {
-    key: "smoothed_pooled_net_density",
-    smoothedKey: "smoothed_pooled_net_density",
-    name: "平滑趋势",
-    colorVar: "--primary",
-    role: "main",
-    useSmoothed: true,
-  },
-] as const;
 
 interface ChartClickParams {
   dataIndex?: number;
@@ -115,7 +81,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
   ) {
     const themeSignature = useChartThemeSignature();
     const activeSeries = useMemo(
-      () => visibleSeries ?? new Set(SERIES_CONFIG.map((s) => s.key)),
+      () => visibleSeries ?? new Set(EMOTION_TREND_SERIES_CONFIG.map((s) => s.key)),
       [visibleSeries]
     );
 
@@ -141,7 +107,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
         (w) => w.position ?? (w.start_position + w.end_position) / 2
       );
 
-      const series = SERIES_CONFIG.map((config) => {
+      const series = EMOTION_TREND_SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
         const isActive = activeSeries.has(config.key);
         const isMainSeries = config.role === "main";
@@ -151,9 +117,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
         const lineType = isSupportSeries ? "dashed" : "solid";
         const values = centers.map((center, index) => {
           const window = data[index];
-          const smoothedValue = window[config.smoothedKey];
-          const rawValue = window[config.key];
-          const value = config.useSmoothed ? smoothedValue ?? rawValue : rawValue;
+          const value = getEmotionTrendSeriesValue(window, config);
           return value != null ? [center, value] : [center, null];
         });
 
@@ -180,7 +144,8 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
                 ]),
               }
             : undefined,
-          emphasis: { focus: "series" as const },
+          // 轴向 tooltip 已提供对比反馈，禁用 emphasis 避免悬浮时淡化曲线
+          emphasis: { disabled: true },
           animationDuration: 800,
         };
       });
@@ -213,7 +178,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           itemGap: 20,
           textStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
           icon: "roundRect",
-          data: SERIES_CONFIG.map((s) => s.name),
+          data: EMOTION_TREND_SERIES_CONFIG.map((s) => s.name),
         },
         tooltip: {
           trigger: "axis" as const,
@@ -221,7 +186,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           backgroundColor: "hsl(var(--surface))",
           borderColor: "hsl(var(--border))",
           textStyle: { color: "hsl(var(--text))", fontSize: 12 },
-          formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; dataIndex?: number }>) => {
+          formatter: (params: Array<{ seriesName: string; value: unknown; marker: string; dataIndex?: number }>) => {
             if (!Array.isArray(params) || params.length === 0) return "";
             const windowIndex = Number(params[0]?.dataIndex ?? -1);
             const window = data[windowIndex];
@@ -230,12 +195,12 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
               window.chapter_start === window.chapter_end
                 ? `第 ${window.chapter_start} 章`
                 : `第 ${window.chapter_start}~${window.chapter_end} 章`;
-            let html = `<div class="font-medium mb-1">${chapterLabel} · 第 ${window.paragraph_start + 1}~${window.paragraph_end + 1} 段（共 ${window.paragraph_total} 段）</div>`;
+            let html = `<div class="font-medium mb-1">情绪窗口聚合 · ${chapterLabel} · 第 ${window.paragraph_start + 1}~${window.paragraph_end + 1} 段（共 ${window.paragraph_total} 段）</div>`;
             const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
               .map(
                 (p) =>
-                  `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(4) : "-"}</span></div>`
+                    `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${formatEmotionTrendTooltipValue(p.value)}</span></div>`
               )
               .join("");
             return html;
@@ -302,7 +267,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
     const handleLegendClick = (event: { name: string }) => {
       if (!onSeriesToggle) return;
 
-      const clickedKey = SERIES_CONFIG.find((s) => s.name === event.name)?.key;
+      const clickedKey = EMOTION_TREND_SERIES_CONFIG.find((s) => s.name === event.name)?.key;
       if (!clickedKey) return;
 
       const newSet = new Set(activeSeries);
