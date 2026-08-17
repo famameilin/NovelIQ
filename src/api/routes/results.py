@@ -30,6 +30,7 @@ from src.api.models.responses import (
     DiagnosisResult,
     EmotionTrendWindow,
     ForeshadowingThreadResponse,
+    GlobalStats,
     ParagraphCurvePoint,
     ResultsWriteResponse,
 )
@@ -607,3 +608,24 @@ async def get_style_stats(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     return metrics_service.get_style_stats(run_id, session)
+
+
+@router.get("/{novel_id}/metrics/global-stats", response_model=GlobalStats)
+async def get_global_stats(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> GlobalStats:
+    """
+    说明: 提供详情概览使用的全书波动统计查询
+    修改时间: 2026-08-16
+    修改原因: 前端需要直接读取已持久化的 global_stats，避免通过导出文件反查
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    stats_repo = StatsRepository(session)
+    chapter_repo = ChapterRepository(session)
+    from src.api.services.results_queries.metadata import _fetch_global_stats
+
+    stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)
+    return stats or GlobalStats()
