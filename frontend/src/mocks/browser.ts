@@ -5,7 +5,14 @@
  * 默认仅在 VITE_ENABLE_MOCK=true 时激活
  */
 import { setupWorker } from "msw/browser";
-import { novelListHandler, novelUploadHandler, novelDeleteHandler, novelBatchDeleteHandler } from "./handlers/novels";
+import {
+  novelListHandler,
+  novelDetailHandler,
+  novelCoverHandler,
+  novelUploadHandler,
+  novelDeleteHandler,
+  novelBatchDeleteHandler,
+} from "./handlers/novels";
 import {
   createTaskHandler,
   analyzeHandler,
@@ -67,4 +74,5 @@ export const worker = setupWorker(
   emotionStatsHandler,
   characterStatsHandler,
   styleStatsHandler,
+  globalStatsHandler,
 );
