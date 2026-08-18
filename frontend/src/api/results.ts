@@ -10,6 +10,7 @@ import type {
   ForeshadowingThread,
   GraphData,
   GraphChangesPageResponse,
+  EventForestResponse,
   TimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
@@ -177,6 +178,25 @@ export async function getGraphChanges(
         ...(options?.chapterId != null ? { chapter_id: options.chapterId } : {}),
         ...(options?.changesCursor ? { changes_cursor: options.changesCursor } : {}),
         ...(options?.changesLimit != null ? { changes_limit: options.changesLimit } : {}),
+      },
+    }
+  );
+  return data;
+}
+
+// 2026-08-18 获取事件森林/DAG 快照
+export async function getEventForest(
+  novelId: string,
+  taskId: string,
+  options?: { chapterId?: number; graphVersionId?: string }
+): Promise<EventForestResponse> {
+  const { data } = await apiClient.get<EventForestResponse>(
+    `/api/novels/${novelId}/event-forest`,
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.chapterId != null ? { chapter_id: options.chapterId } : {}),
+        ...(options?.graphVersionId ? { graph_version_id: options.graphVersionId } : {}),
       },
     }
   );

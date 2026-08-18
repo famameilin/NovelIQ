@@ -23,6 +23,7 @@ import type { GraphNode } from "@/api/types";
 import type { ForceGraphHandle, GraphNodeObject } from "@/components/charts/forceGraphTypes";
 import { GraphOverviewSection } from "@/pages/graph/GraphOverviewSection";
 import { GraphWorkspaceSection } from "@/pages/graph/GraphWorkspaceSection";
+import { EventForestSection } from "@/pages/graph/EventForestSection";
 import { buildGraphUrl, buildTimelineUrl } from "@/pages/graph/graphPageNavigation";
 import { useGraphDeepLinkSelection } from "@/pages/graph/useGraphDeepLinkSelection";
 import { useGraphChangePagination } from "@/pages/graph/useGraphChangePagination";
@@ -350,6 +351,15 @@ export function GraphPage() {
       <AnalysisWorkspace.Tab value="changes" label="图谱变化">
         <GraphWorkspaceSection {...graphWorkspaceProps} view="changes" />
       </AnalysisWorkspace.Tab>
+      {novelId && taskScopeId && (
+        <AnalysisWorkspace.Tab value="events" label="事件过程">
+          <EventForestSection
+            novelId={novelId}
+            taskId={taskScopeId}
+            chapterId={urlSelectedChapter ? Number(urlSelectedChapter) : undefined}
+          />
+        </AnalysisWorkspace.Tab>
+      )}
       <AnalysisWorkspace.Tab value="summary" label="快照概览">
         <div className="h-full overflow-hidden">
           <GraphOverviewSection

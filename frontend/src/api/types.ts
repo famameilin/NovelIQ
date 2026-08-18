@@ -404,6 +404,64 @@ export interface GraphChangesPageResponse {
   page_info: GraphChangesPageInfo;
 }
 
+// 事件森林/DAG（2026-08-18 P2 事件过程层）
+
+export interface EventNodeResponse {
+  event_id: string;
+  event_revision: number;
+  chapter_id: number;
+  chapter_order: number;
+  description: string;
+  participants: Array<Record<string, unknown>>;
+  anchor_paragraph_ids: number[];
+  char_start: number;
+  char_end: number;
+  text_hash: string;
+  evidence: Array<Record<string, unknown>>;
+  causal_event_refs: number[];
+}
+
+export interface EventEdgeResponse {
+  edge_id: string;
+  edge_type: "contains" | "causal";
+  source_event_id: string | null;
+  source_event_revision: number | null;
+  target_event_id: string;
+  target_event_revision: number;
+  source_chapter_id: number;
+  target_chapter_id: number;
+  is_active: boolean;
+  evidence: Array<Record<string, unknown>>;
+}
+
+export interface EventChapterRootResponse {
+  chapter_id: number;
+  chapter_order: number;
+  event_ids: string[];
+}
+
+export interface ForeshadowingEdgeResponse {
+  setup_id: string;
+  setup_event_id: string;
+  payoff_event_id: string | null;
+  first_chapter_id: number;
+  last_chapter_id: number;
+  setup_summary: string;
+  status: string;
+  active: boolean;
+}
+
+export interface EventForestResponse {
+  graph_version_id: string;
+  chapter_order: number;
+  visible_through_chapter_order: number;
+  chapter_roots: EventChapterRootResponse[];
+  derived_event_order: string[];
+  event_nodes: EventNodeResponse[];
+  event_edges: EventEdgeResponse[];
+  foreshadowing_edges: ForeshadowingEdgeResponse[];
+}
+
 // 时间轴
 
 // 更新 Timeline 类型定义，与后端 API 响应结构对齐
