@@ -18,8 +18,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from src.chunking.spans import ParagraphSpan
 from src.storage.db import get_session_factory
-from src.storage.repositories import RunRepository
+from src.storage.repositories import ParagraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 
@@ -52,6 +53,25 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
             {"chapter_id": 1, "text": "测试分块", "len": 4, "run_id": run_id},
         )
         session.flush()
+        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        ParagraphRepository(session).insert_paragraphs(
+            run_id,
+            [
+                ParagraphSpan(
+                    paragraph_index=0,
+                    source_paragraph_index=0,
+                    fragment_index=0,
+                    local_start_char=0,
+                    local_end_char=4,
+                    text="测试分块",
+                    paragraph_id=1,
+                    chapter_id=1,
+                    global_start_char=0,
+                    global_end_char=4,
+                    token_count=1,
+                )
+            ],
+        )
         persist_chapter_annotation(
             session,
             run_id=run_id,
