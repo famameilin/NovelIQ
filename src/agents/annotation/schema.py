@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unicodedata
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -166,6 +167,9 @@ CaseType = str
 CaseAction = Literal["dialogue", "fact", "foreshadowing", "close"]
 CaseState = Literal["active", "resolved"]
 DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
+
+# 2026-08-18 事件森林/DAG 边类型定稿三类；sequence 不落库，按章节顺序和事件锚点生成派生排序
+EventEdgeType = Literal["contains", "causal", "foreshadowing"]
 
 _ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = ("character", "organization")
 _CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = ("character",)
@@ -450,19 +454,139 @@ class EventParticipantInput(StrictModel):
         return self
 
 
+# 2026-08-18 事件森林/DAG 证据类型：统一非空列表，仅允许 GraphEvidence 或 TextEvidence
+class TextEvidence(StrictModel):
+    """2026-08-18 用于保存原文段落锚点证据（段落 ID + 字符范围 + 文本哈希）"""
+
+    paragraph_ids: list[int] = Field(min_length=1, description="全局段落 ID 列表")
+    char_start: int = Field(ge=0, description="锚点文本在章文本中的起始字符偏移")
+    char_end: int = Field(gt=0, description="锚点文本在章文本中的结束字符偏移")
+    text_hash: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="锚点文本 sha256 哈希",
+    )
+
+    @model_validator(mode="after")
+    def validate_span(self) -> TextEvidence:
+        """2026-08-18 用于保证文本证据段落和字符范围具有有效顺序"""
+        if any(paragraph_id < 0 for paragraph_id in self.paragraph_ids):
+            raise ValueError("TextEvidence.paragraph_ids 不能为负数")
+        if self.char_end <= self.char_start:
+            raise ValueError("TextEvidence.char_end 必须大于 char_start")
+        if len(set(self.paragraph_ids)) != len(self.paragraph_ids):
+            raise ValueError("TextEvidence.paragraph_ids 不允许重复")
+        return self
+
+
+class GraphEvidence(StrictModel):
+    """2026-08-18 用于保存引用已有图事实的证据（案例解决路径使用）"""
+
+    fact_id: str = Field(min_length=1)
+    fact_revision: int = Field(gt=0)
+
+
+EvidenceItem = Annotated[
+    TextEvidence | GraphEvidence,
+    Field(union_mode="left_to_right"),
+]
+
+
+class EventHistoryResult(StrictModel):
+    """2026-08-18 用于向当前 Agent 暴露已授权的历史事件及其根 Evidence"""
+
+    event_id: str = Field(min_length=1)
+    event_revision: int = Field(gt=0)
+    chapter_id: int = Field(gt=0)
+    chapter_order: int = Field(gt=0)
+    description: str = Field(min_length=1)
+    participants: list[dict[str, Any]] = Field(default_factory=list)
+    anchor_paragraph_ids: list[int] = Field(min_length=1)
+    char_start: int = Field(ge=0)
+    char_end: int = Field(gt=0)
+    text_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    evidence: list[EvidenceItem] = Field(min_length=1)
+    causal_event_refs: list[int] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ChunkParagraphInfo:
+    """2026-08-18 用于保存当前 chunk 内段落坐标映射（注入 prompt 标记和派生事件锚点）
+
+    段落标记方案：prompt 在每个段落起始处注入 ¶N 标记（N 为 0 基 chunk 内序号）；
+    Agent 提交 anchor_paragraph_ids 时使用这些 0 基序号，服务端按本映射校验并派生
+    字符范围、文本哈希和 TextEvidence。
+    """
+
+    # 0 基 chunk 内序号 → 全局 paragraph_id
+    paragraph_ids: list[int]
+    # 0 基 chunk 内序号 → (start_char, end_char) 在 chunk 文本内的偏移
+    char_spans: list[tuple[int, int]]
+    # 0 基 chunk 内序号 → 段落文本
+    texts: list[str]
+
+    def __post_init__(self) -> None:
+        """2026-08-18 用于校验三组列表长度一致且非空"""
+        n = len(self.paragraph_ids)
+        if n == 0:
+            raise ValueError("ChunkParagraphInfo 不能为空")
+        if len(self.char_spans) != n or len(self.texts) != n:
+            raise ValueError("paragraph_ids / char_spans / texts 长度不一致")
+
+    def is_valid_index(self, index: int) -> bool:
+        """2026-08-18 用于校验段落序号在当前 chunk 范围内"""
+        return 0 <= index < len(self.paragraph_ids)
+
+    def char_span_for(self, indices: list[int]) -> tuple[int, int]:
+        """2026-08-18 用于按段落序号列表派生合并字符范围"""
+        if not indices or not all(self.is_valid_index(i) for i in indices):
+            raise ValueError(f"无效段落序号: {indices}")
+        starts = [self.char_spans[i][0] for i in indices]
+        ends = [self.char_spans[i][1] for i in indices]
+        return min(starts), max(ends)
+
+    def text_for(self, indices: list[int]) -> str:
+        """2026-08-18 用于按段落序号列表拼接段落文本"""
+        if not indices or not all(self.is_valid_index(i) for i in indices):
+            raise ValueError(f"无效段落序号: {indices}")
+        return "".join(self.texts[i] for i in sorted(set(indices)))
+
+    def global_paragraph_ids(self, indices: list[int]) -> list[int]:
+        """2026-08-18 用于按段落序号列表返回全局 paragraph_id"""
+        if not indices or not all(self.is_valid_index(i) for i in indices):
+            raise ValueError(f"无效段落序号: {indices}")
+        return [self.paragraph_ids[i] for i in sorted(set(indices))]
+
+
 class EventInput(StrictModel):
-    """2026-08-11 用于提交不依赖任意 event_type 的事件描述和参与者角色"""
+    """2026-08-18 用于提交事件描述、参与者角色、原文段落锚点和因果前驱引用"""
 
     description: str = Field(min_length=1)
     participants: list[EventParticipantInput] = Field(default_factory=list)
+    anchor_paragraph_ids: list[int] = Field(
+        min_length=1,
+        description="事件锚定的段落序号（0 基，对应 prompt 中 ¶N 标记），至少 1 个",
+    )
+    causal_event_refs: list[int] = Field(
+        default_factory=list,
+        description="本章因果前驱事件序号（1 基，指向本章事件列表中的序号）",
+    )
 
     @model_validator(mode="after")
     def normalize_event(self) -> EventInput:
-        """2026-08-11 用于规范化事件说明"""
+        """2026-08-18 用于规范化事件说明并校验锚点与因果引用"""
         self.description = normalize_semantic_text(
             self.description,
             label="event.description",
         )
+        if any(idx < 0 for idx in self.anchor_paragraph_ids):
+            raise ValueError("event.anchor_paragraph_ids 不能为负数")
+        if any(ref < 1 for ref in self.causal_event_refs):
+            raise ValueError("event.causal_event_refs 必须为 1 基正整数")
+        if len(set(self.causal_event_refs)) != len(self.causal_event_refs):
+            raise ValueError("event.causal_event_refs 不允许重复")
         return self
 
 
@@ -492,14 +616,18 @@ class RelationInput(StrictModel):
 
 
 class ForeshadowingInput(StrictModel):
-    """2026-08-11 用于提交新伏笔描述与置信度（只创建新伏笔）"""
+    """2026-08-18 用于提交新伏笔描述、置信度和 setup 事件绑定（只创建新伏笔）"""
 
     description: str = Field(min_length=1, description="伏笔描述，一句话说明埋设了什么悬念")
     confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
+    setup_event_index: int = Field(
+        gt=0,
+        description="本伏笔的 setup 事件序号（1 基，指向本章事件列表中的序号）",
+    )
 
     @model_validator(mode="after")
     def normalize_foreshadowing(self) -> ForeshadowingInput:
-        """2026-08-11 用于规范化伏笔描述"""
+        """2026-08-18 用于规范化伏笔描述"""
         self.description = normalize_semantic_text(
             self.description,
             label="foreshadowing.description",
@@ -553,8 +681,18 @@ class BoundDialogue(StrictModel):
     is_inner_monologue: bool = False
 
 
-class BoundEvent(EventInput):
-    """2026-08-11 用于系统绑定事件（与输入模型同构，标记已校验）"""
+class BoundEvent(StrictModel):
+    """2026-08-18 用于系统绑定事件（含服务端派生的锚点字符范围、文本哈希和证据）"""
+
+    description: str = Field(min_length=1)
+    participants: list[EventParticipantInput] = Field(default_factory=list)
+    anchor_paragraph_ids: list[int] = Field(min_length=1)
+    causal_event_refs: list[int] = Field(default_factory=list)
+    # 服务端派生：
+    char_start: int = Field(ge=0)
+    char_end: int = Field(gt=0)
+    text_hash: str = Field(min_length=1)
+    evidence: list[TextEvidence] = Field(min_length=1)
 
 
 class BoundRelation(RelationInput):
@@ -564,8 +702,12 @@ class BoundRelation(RelationInput):
     relation_semantics: RelationSemantics
 
 
-class BoundForeshadowing(ForeshadowingInput):
-    """2026-08-11 用于系统绑定伏笔（与输入模型同构，标记已校验）"""
+class BoundForeshadowing(StrictModel):
+    """2026-08-18 用于系统绑定伏笔（含 setup 事件序号绑定，标记已校验）"""
+
+    description: str = Field(min_length=1)
+    confidence: Confidence
+    setup_event_index: int = Field(gt=0)
 
 
 class BoundChunkAnnotation(StrictModel):
@@ -585,7 +727,7 @@ class BoundChunkAnnotation(StrictModel):
 class BoundChapterAnnotation(StrictModel):
     """2026-08-07 用于保存最新语义写入合同的章节正式标注"""
 
-    contract_version: Literal["agent-semantic-v1"] = "agent-semantic-v1"
+    contract_version: Literal["agent-semantic-v2"] = "agent-semantic-v2"
     chapter_summary: str = Field(min_length=1)
     chunks: list[BoundChunkAnnotation] = Field(min_length=1)
 
@@ -678,6 +820,9 @@ class ResolvedCase(StrictModel):
     setup_status: str | None = None
     confidence: str | None = None
     strength: str | None = None
+    # 2026-08-18 伏笔续接/回收案例增加事件引用（新命中优先绑定事件）
+    setup_event_id: str | None = None
+    payoff_event_id: str | None = None
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> ResolvedCase:
@@ -726,6 +871,8 @@ class ResolvedCase(StrictModel):
                     self.setup_status,
                     self.confidence,
                     self.strength,
+                    self.setup_event_id,
+                    self.payoff_event_id,
                 )
             ):
                 raise ValueError("foreshadowing 动作必须至少提供一个更新字段")
@@ -788,6 +935,8 @@ class AgentRunAudit(StrictModel):
     rotation_case_ids: list[str]
     authorized_chapter_ids: list[int]
     authorized_text_paragraph_ids: list[int]
+    # 2026-08-18 P2：历史事件只能使用本轮 search_event_history 返回的稳定 ID
+    authorized_event_ids: list[str] = Field(default_factory=list)
     closed_case_ids: list[str] = Field(default_factory=list)
     sub_chunk_index: int = 0
 
@@ -826,6 +975,9 @@ class CompletionResolvedCase(StrictModel):
     target_setup_id: str | None = None
     target_fact_id: str | None = None
     target_fact_revision: int | None = Field(default=None, gt=0)
+    # 2026-08-18 伏笔续接/回收案例解决可产生事件目标
+    target_setup_event_id: str | None = None
+    target_payoff_event_id: str | None = None
 
 
 class CompletionResult(StrictModel):

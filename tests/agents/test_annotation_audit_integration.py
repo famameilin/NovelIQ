@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
+from src.agents.annotation.schema import ChunkParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from src.agents.audit.observer import AgentTurnObserver
 from src.agents.audit.recorder import AgentAuditRecorder
@@ -27,6 +28,15 @@ from tests.agents.test_annotation_agent import (
     _write_call,
 )
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+
+def _chunk_paragraph_info(text: str) -> ChunkParagraphInfo:
+    """2026-08-18 用于构造单段落 ChunkParagraphInfo（事件锚点派生所需）"""
+    return ChunkParagraphInfo(
+        paragraph_ids=[0],
+        char_spans=[(0, len(text))],
+        texts=[text],
+    )
 
 pytestmark = pytest.mark.asyncio
 
@@ -68,8 +78,9 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 3)
     graph = build_annotation_graph(
@@ -134,8 +145,9 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     llm = _SequenceLLM([])
     graph = build_annotation_graph(
@@ -221,8 +233,9 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(

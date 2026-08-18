@@ -29,6 +29,7 @@ from src.agents.annotation.schema import (
     BoundEntityDirectory,
     CaseSearchResult,
     ChunkMetricsInput,
+    ChunkParagraphInfo,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -165,6 +166,7 @@ def _events_call(call_id: str = "call-events") -> dict:
                 {
                     "description": "顾霜喝止众人",
                     "participants": [{"entity": "顾霜", "role": "主体"}],
+                    "anchor_paragraph_ids": [0],
                 }
             ]
         },
@@ -212,6 +214,11 @@ async def _invoke_graph(
         current_chunk_id=chunk_id,
         current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len(chunk_text))],
+            texts=[chunk_text],
+        ),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -515,13 +522,18 @@ async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
             super()._rebuild_ready_chunk_if_complete()
             self.ready_chunk = None
 
-    chunk_id, chunk_text = 1, "“住手”回荡"
+    chunk_id, chunk_text = 1, "\u201c住手\u201d回荡"
     ledger = _BrokenLedger(
         run_scope="run-1",
         current_chapter_id=1,
         current_chunk_id=chunk_id,
         current_chunk_text=chunk_text,
         allow_future_context=False,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len(chunk_text))],
+            texts=[chunk_text],
+        ),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -868,11 +880,16 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
         run_scope="run-1",
         current_chapter_id=1,
         current_chunk_id=1,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
         graph=FactGraph(
             history_entity_types={"顾霜": "character", "顾老": "character"},
             history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
+        ),
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len("\u201c住手\u201d回荡"))],
+            texts=["\u201c住手\u201d回荡"],
         ),
     )
     ledger.graph_queried = True
