@@ -17,6 +17,7 @@ from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
     CharacterObservationInput,
+    ChunkParagraphInfo,
     DialogueInput,
     EntityInput,
     EventInput,
@@ -205,13 +206,23 @@ def _find_tool(tools: list, name: str):
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
-    """2026-08-07 用于构造带唯一 current 原文和后文开关的工具账本"""
+    """2026-08-07 用于构造带唯一 current 原文和后文开关的工具账本
+
+    2026-08-18：注入 paragraph_info 供事件锚点校验和证据派生使用。
+    """
+    chunk_text = "\u201c住手\u201d回荡"
+    paragraph_info = ChunkParagraphInfo(
+        paragraph_ids=[0],
+        char_spans=[(0, len(chunk_text))],
+        texts=[chunk_text],
+    )
     return AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
         current_chunk_id=10,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
+        paragraph_info=paragraph_info,
     )
 
 
@@ -274,11 +285,20 @@ def _write_remaining_args() -> dict:
                     "participants": [
                         {"entity": "顾霜", "role": "主体"}
                     ],
+                    "anchor_paragraph_ids": [0],
                 }
             ]
         },
         "relations": {"items": []},
-        "foreshadowings": {"items": []},
+        "foreshadowings": {
+            "items": [
+                {
+                    "description": "顾霜的玉戒尺异常发光",
+                    "confidence": "high",
+                    "setup_event_index": 1,
+                }
+            ]
+        },
     }
 
 
@@ -345,6 +365,7 @@ def test_schema_rejects_deleted_contract_fields() -> None:
         EventInput.model_validate(
             {
                 "description": "进入山门",
+                "anchor_paragraph_ids": [0],
                 "event_type": "进入",
                 "location": "山门",
             }
@@ -354,6 +375,7 @@ def test_schema_rejects_deleted_contract_fields() -> None:
             {
                 "description": "伏笔",
                 "confidence": "high",
+                "setup_event_index": 1,
                 "setup_kind": "其他",
                 "setup_summary": "伏笔",
                 "is_new_setup": True,
@@ -536,7 +558,7 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     dialogue = chunk.dialogues[0]
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.content == "住手"
-    assert "“住手”回荡"[dialogue.start : dialogue.end] == "住手"
+    assert "\u201c住手\u201d回荡"[dialogue.start : dialogue.end] == "住手"
     assert dialogue.is_inner_monologue is False
 
 
@@ -621,6 +643,7 @@ def test_domain_reinvocation_completely_replaces_payload() -> None:
     first["items"] = [
         {
             "description": "旧事件",
+            "anchor_paragraph_ids": [0],
         }
     ]
     _call(tools, "write_events", first)
@@ -810,18 +833,29 @@ def test_unresolved_speaker_no_longer_auto_creates_case() -> None:
     assert ledger.pushed_cases == []
 
 
-def test_write_foreshadowings_only_accepts_description_and_confidence() -> None:
-    """2026-08-11 用于验证伏笔合同只含 description 与 confidence"""
+def test_write_foreshadowings_only_accepts_description_confidence_and_setup_event_index() -> None:
+    """2026-08-18 用于验证伏笔合同含 description、confidence 与 setup_event_index"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    args = {"items": [{"description": "玉戒尺异常发光", "confidence": "high"}]}
+    args = {
+        "items": [
+            {"description": "玉戒尺异常发光", "confidence": "high", "setup_event_index": 1}
+        ]
+    }
+    # 2026-08-18 协议顺序：事件参与者须先在 write_entities 声明，
+    # 伏笔的 setup_event_index 绑定事件，必须在 write_events 成功后调用
+    entities_response = _call(tools, "write_entities", _write_entities_args())
+    assert entities_response["accepted"] is True
+    events_response = _call(tools, "write_events", _write_remaining_args()["events"])
+    assert events_response["accepted"] is True
     response = _call(tools, "write_foreshadowings", args)
     assert response["accepted"] is True
     stored = ledger.domain_payloads["foreshadowings"]
     assert stored[0].description == "玉戒尺异常发光"
     assert stored[0].confidence == "high"
+    assert stored[0].setup_event_index == 1
     with pytest.raises(ValidationError):
         _find_tool(tools, "write_foreshadowings").invoke(
             {"items": [{"description": "伏笔", "setup_kind": "其他"}]}
@@ -1413,7 +1447,7 @@ def test_finish_chapter_generates_summary_from_chunk_summaries() -> None:
     ledger.complete_active_chunk()
     annotation = ledger.finish()
     assert annotation.chapter_summary == "住手回荡"
-    assert annotation.contract_version == "agent-semantic-v1"
+    assert annotation.contract_version == "agent-semantic-v2"
 
 
 def test_resolve_fact_case_rejects_foreign_change_kind() -> None:

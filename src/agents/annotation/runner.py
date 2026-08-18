@@ -8,6 +8,7 @@ AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计�
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +24,7 @@ from .errors import (
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
 from .prompts import build_chunk_message, build_system_prompt
-from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation
+from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChunkParagraphInfo
 from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
 
 if TYPE_CHECKING:
@@ -57,7 +58,11 @@ def validate_bound_annotation(
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
 ) -> None:
-    """2026-08-07 用于复核系统绑定标注完整覆盖真实 chunk 和对话原文"""
+    """2026-08-07 用于复核系统绑定标注完整覆盖真实 chunk 和对话原文
+
+    2026-08-18：增加事件锚点校验——每个事件的 char_start/char_end 必须落在
+    chunk 文本范围内，text_hash 必须与 chunk 文本对应切片的哈希一致。
+    """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须为正整数")
     expected_ids = [chunk_id for chunk_id, _text in current_chunks]
@@ -79,6 +84,23 @@ def validate_bound_annotation(
             if actual != dialogue.content:
                 raise ValueError(
                     f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}"
+                )
+        for event in chunk.events:
+            if event.char_start < 0 or event.char_end > len(chunk_text):
+                raise ValueError(
+                    f"事件锚点超出原文范围: chunk_id={chunk.chunk_id} "
+                    f"char_start={event.char_start} char_end={event.char_end} "
+                    f"text_length={len(chunk_text)}"
+                )
+            if event.char_end <= event.char_start:
+                raise ValueError(
+                    f"事件锚点 char_end 必须大于 char_start: chunk_id={chunk.chunk_id}"
+                )
+            anchor_text = chunk_text[event.char_start : event.char_end]
+            actual_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
+            if actual_hash != event.text_hash:
+                raise ValueError(
+                    f"事件锚点文本哈希不一致: chunk_id={chunk.chunk_id}"
                 )
 
 
@@ -125,10 +147,12 @@ async def _run_single_attempt(
     graph_state: FactGraph | None = None,
     observer: AgentTurnObserver | None = None,
     sub_chunk_index: int = 0,
+    paragraph_info: ChunkParagraphInfo | None = None,
 ) -> AgentRunResult:
     """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试
 
     2026-08-14 M7：sub_chunk_index 记录子块协议运行序号（§20 审计合同）。
+    2026-08-18：paragraph_info 提供段落坐标映射，用于事件锚点校验和证据派生。
     """
     from src.config import settings
 
@@ -148,6 +172,7 @@ async def _run_single_attempt(
         current_chunk_text=first_chunk_text,
         allow_future_context=allow_future_context,
         graph=graph_state,
+        paragraph_info=paragraph_info,
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
@@ -175,6 +200,7 @@ async def _run_single_attempt(
                 chunk_total=1,
                 chunk_text=first_chunk_text,
                 candidates=ledger.dialogue_candidates,
+                paragraph_info=paragraph_info,
             )
         ),
     ]
@@ -210,6 +236,7 @@ async def _run_single_attempt(
             rotation_case_ids=ledger.rotation_case_ids,
             authorized_chapter_ids=sorted(ledger.authorized_chapter_ids),
             authorized_text_paragraph_ids=sorted(ledger.authorized_text_paragraph_ids),
+            authorized_event_ids=sorted(ledger.authorized_event_ids),
             sub_chunk_index=sub_chunk_index,
         ),
     )
@@ -230,10 +257,12 @@ async def run_annotation_agent(
     audit_recorder: AgentAuditRecorder | None = None,
     chapter_label: str | None = None,
     sub_chunk_index: int = 0,
+    paragraph_info: ChunkParagraphInfo | None = None,
 ) -> AgentRunResult:
     """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出
 
     2026-08-14 M7（§20）：sub_chunk_index 标记子块协议运行序号，写入 AgentRunAudit。
+    2026-08-18：paragraph_info 提供当前 chunk 段落坐标映射，用于事件锚点校验和证据派生。
     """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
@@ -287,6 +316,7 @@ async def run_annotation_agent(
             graph_state=graph_state,
             observer=observer,
             sub_chunk_index=sub_chunk_index,
+            paragraph_info=paragraph_info,
         )
     except Exception as exc:  # noqa: BLE001
         _close_read_session(read_session)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from .schema import DialogueCandidate, relation_catalog_text
+from .schema import ChunkParagraphInfo, DialogueCandidate, relation_catalog_text
 
 SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系统按原文顺序逐个激活 chunk。
 
@@ -76,9 +76,13 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - relation_type 使用闭合枚举；write_relations 只提交本章确认存在的边（三字段
   from_entity/to_entity/relation_type），新边建图 assert，已存在的同一条边自动接受为
   skipped_existing；关系强化/削弱/解除一律走 resolve_fact_case，不用 state 字段表达变化
-- 事件只填写 description 和 participants（角色闭合枚举：主体/客体/接收者/帮助者/
+- 事件只填写 description、participants 和 anchor_paragraph_ids（角色闭合枚举：主体/客体/接收者/帮助者/
   反对者/见证者/地点；见证者、地点只用于事件参与者，不用于人物观察的 role_function；
   地点作为参与者角色，无单独 location 字段）
+- 每个事件必须提供 anchor_paragraph_ids：事件发生在原文中哪些段落（0 基序号，对应原文 ¶0/¶1/... 标记）；
+  至少 1 个段落，多个段落表示事件横跨连续段落
+- causal_event_refs 是本章因果前驱事件的 1 基序号（指向本章事件列表中的序号）；
+  只能引用本章已定义的事件序号，不能跨章引用；因果链必须严格偏序，不允许环路
 - 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
 
 {relation_catalog}
@@ -90,6 +94,9 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   neighbors=边另一端节点；一次传入全部要核对的实体名
 - search_text 返回 result_number，使用 read_text(result_number) 读取原文；
   read_text 返回 JSON，content 字段为原文全文
+- search_event_history 只检索当前章之前、已经完成且获得授权的事件；历史伏笔续接或回收
+  只能把该工具返回的 event_id 传给 resolve_foreshadowing_case。当前章事件在
+  write_events 成功后按本章事件序号生成并授权对应 event_id，不能猜测其他 run 或章节的 ID
 - search_pool 只查询案例池，返回 case_number；能解决的案例用 resolve_*_case 解决，
   search_pool 返回的伏笔线程带 id，push_case 登记伏笔疑点时必须带上该 id
 - resolve_dialogue_case 解决对话疑点：更新对话记录的 speaker/tone/is_inner_monologue
@@ -101,7 +108,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - resolve_foreshadowing_case 解决伏笔疑点：更新该伏笔线程的
   setup_summary/setup_kind/expected_payoff_family/payoff_likelihood/setup_status/
   confidence/strength（至少一个）；线程由案例登记的 setup_id 定位，字段即更新值
-- write_foreshadowings 只创建新伏笔：提交 description 与 confidence（high/medium/low）；
+- write_foreshadowings 只创建新伏笔：提交 description、confidence（high/medium/low）和
+  setup_event_index（1 基，指向本章事件列表中的序号，标明伏笔由哪个事件埋设）；
   已有伏笔的强化和回收一律走 resolve_foreshadowing_case
 - close_case 只能关闭案例（不产生任何语义变化），用于确认不存在疑点或无法解决的情况
 - 解决不了的案例不要硬解，原案例留在案例池等待后续章节
@@ -138,14 +146,44 @@ def build_system_prompt(
     )
 
 
+def _inject_paragraph_markers(
+    chunk_text: str,
+    paragraph_info: ChunkParagraphInfo | None,
+) -> str:
+    """2026-08-18 用于在 chunk 文本中注入 ¶N 段落标记供 Agent 锚定事件
+
+    段落标记方案：在每个段落起始处插入 ¶N（N 为 0 基 chunk 内序号）。
+    标记插入位置是段落在 chunk 文本中的字符偏移（char_spans[i][0]）。
+    从后往前插入以保持前序偏移不变。无段落信息时返回原始文本。
+    """
+    if paragraph_info is None:
+        return chunk_text
+    # 按字符偏移降序排列，从后往前插入避免偏移漂移
+    insertions: list[tuple[int, str]] = []
+    for index, (start, _end) in enumerate(paragraph_info.char_spans):
+        marker = f"¶{index} "
+        insertions.append((start, marker))
+    insertions.sort(key=lambda item: item[0], reverse=True)
+    result = chunk_text
+    for pos, marker in insertions:
+        result = result[:pos] + marker + result[pos:]
+    return result
+
+
 def build_chunk_message(
     *,
     chunk_index: int,
     chunk_total: int,
     chunk_text: str,
     candidates: list[DialogueCandidate],
+    paragraph_info: ChunkParagraphInfo | None = None,
 ) -> str:
-    """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选"""
+    """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选
+
+    2026-08-18：paragraph_info 非 None 时在 chunk 文本中注入 ¶N 段落标记，
+    供 Agent 在 write_events 的 anchor_paragraph_ids 字段中引用段落序号。
+    """
+    marked_text = _inject_paragraph_markers(chunk_text, paragraph_info)
     candidate_views = [
         {
             "index": index,
@@ -157,7 +195,7 @@ def build_chunk_message(
     ]
     return (
         f"<CurrentChunk order=\"{chunk_index}/{chunk_total}\">\n"
-        f"{chunk_text}\n"
+        f"{marked_text}\n"
         "</CurrentChunk>\n\n"
         "<DialogueCandidates>\n"
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"

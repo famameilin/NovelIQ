@@ -13,7 +13,7 @@ import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from langchain_core.tools import tool
 
@@ -40,6 +40,7 @@ from .schema import (
     CaseSearchResult,
     CharacterObservationInput,
     ChunkMetricsInput,
+    ChunkParagraphInfo,
     Confidence,
     DialogueCandidate,
     DialogueInput,
@@ -49,7 +50,9 @@ from .schema import (
     EntityDirectoryInput,
     EntityInput,
     EntityType,
+    EventHistoryResult,
     EventInput,
+    EventParticipantInput,
     ForeshadowingInput,
     NarrativeFunction,
     PayoffLikelihood,
@@ -59,6 +62,7 @@ from .schema import (
     ResolvedCase,
     SearchResult,
     SetupStatus,
+    TextEvidence,
     TextSearchResult,
     Tone,
     normalize_semantic_text,
@@ -119,6 +123,15 @@ class AnnotationQueryService(Protocol):
     def read_text(self, paragraph_id: int) -> str:
         """2026-08-07 用于读取系统已登记的原文候选段落（含上下文，M6 段落化）"""
 
+    def search_event_history(
+        self,
+        query: str,
+        *,
+        max_chapter_order: int,
+        limit: int = 50,
+    ) -> list[EventHistoryResult]:
+        """2026-08-18 用于按章节可见边界检索已完成章节的事件节点"""
+
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于读取活动案例内部稳定目标"""
 
@@ -172,6 +185,10 @@ class AnnotationToolLedger:
     search_log: list[dict[str, Any]] = field(default_factory=list)
     graph_queried: bool = False
     graph: FactGraph | None = None
+    # 2026-08-18 事件森林/DAG：当前 chunk 的段落坐标映射，用于事件锚点校验和证据派生
+    paragraph_info: ChunkParagraphInfo | None = None
+    # 2026-08-18 P2：本轮通过 search_event_history 获得的历史事件授权集合
+    authorized_event_ids: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一 chunk 的对话候选"""
@@ -213,6 +230,7 @@ class AnnotationToolLedger:
                 "pushed_cases": self.pushed_cases,
                 "authorized_chapter_ids": self.authorized_chapter_ids,
                 "authorized_text_paragraph_ids": self.authorized_text_paragraph_ids,
+                "authorized_event_ids": self.authorized_event_ids,
                 "dialogue_missing_indexes": self.dialogue_missing_indexes,
                 "annotation": self.annotation,
                 "search_log": self.search_log,
@@ -259,6 +277,17 @@ class AnnotationToolLedger:
             for case in self.initial_cases.values()
         ]
 
+    def current_event_id(self, event_index: int) -> str:
+        """2026-08-18 用于按当前章节事件序号派生临时稳定事件 ID"""
+        if event_index <= 0:
+            raise ValueError("事件序号必须为正整数")
+        return str(
+            uuid5(
+                NAMESPACE_URL,
+                f"noveliq:event:{self.run_scope}:{self.current_chapter_id}:{event_index}",
+            )
+        )
+
     # ------------------------------------------------------------------
     # 领域写入核心合同
     # ------------------------------------------------------------------
@@ -270,6 +299,13 @@ class AnnotationToolLedger:
         if domain not in _DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
         bound = self._bind_domain(domain, payload)
+        # 事件列表是伏笔 setup_event_index 的权威序号；事件被重新提交后，
+        # 重新校验已存在的伏笔绑定，避免先写伏笔再改事件留下悬空引用
+        if domain == "events" and "foreshadowings" in self.domain_payloads:
+            self._bind_domain(
+                "foreshadowings",
+                self.domain_payloads["foreshadowings"],
+            )
         relation_outcomes: list[dict[str, Any]] = []
         if self.graph is not None:
             if domain == "entities":
@@ -297,6 +333,13 @@ class AnnotationToolLedger:
         self.domain_payloads[domain] = payload
         self.bound_payloads[domain] = bound
         self.domain_receipts.add(domain)
+        if domain == "events":
+            # 2026-08-18 当前章事件在本轮提交成功后可用于伏笔续接/回收；
+            # 历史事件仍必须通过 search_event_history 获得授权
+            self.authorized_event_ids.update(
+                self.current_event_id(index)
+                for index in range(1, len(payload) + 1)
+            )
         dumped = (
             payload.model_dump(mode="json")
             if hasattr(payload, "model_dump")
@@ -439,6 +482,78 @@ class AnnotationToolLedger:
             ]
         return []
 
+    # ------------------------------------------------------------------
+    # 事件锚点与证据派生（2026-08-18 事件森林/DAG）
+    # ------------------------------------------------------------------
+
+    def _derive_event_evidence(
+        self,
+        anchor_paragraph_ids: list[int],
+    ) -> tuple[int, int, str, list[TextEvidence]]:
+        """2026-08-18 用于按段落序号派生事件锚点字符范围、文本哈希和 TextEvidence
+
+        段落序号是 0 基 chunk 内序号（对应 prompt 中 ¶N 标记）。合并字符范围取
+        所有锚点段落的 min(start) 到 max(end)；文本哈希按拼接段落文本计算。
+        """
+        if self.paragraph_info is None:
+            raise AnnotationInvariantError(
+                "paragraph_info 缺失，无法派生事件锚点（系统不变量被破坏）"
+            )
+        info = self.paragraph_info
+        for idx in anchor_paragraph_ids:
+            if not info.is_valid_index(idx):
+                raise ValueError(
+                    f"event.anchor_paragraph_ids 包含无效段落序号: {idx}"
+                    f"（有效范围 0..{len(info.paragraph_ids) - 1}）"
+                )
+        char_start, char_end = info.char_span_for(anchor_paragraph_ids)
+        # 证据哈希必须覆盖原文字符切片，而不是把去掉段落间空白的文本重新拼接，
+        # 否则多段落事件的哈希会与持久化章节原文不一致
+        anchor_text = self.current_chunk_text[char_start:char_end]
+        text_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
+        evidence = [
+            TextEvidence(
+                paragraph_ids=info.global_paragraph_ids(anchor_paragraph_ids),
+                char_start=char_start,
+                char_end=char_end,
+                text_hash=text_hash,
+            )
+        ]
+        return char_start, char_end, text_hash, evidence
+
+    @staticmethod
+    def _validate_causal_refs(
+        events: list[EventInput],
+        event_evidence: list[tuple[int, int, str, list[TextEvidence]]],
+    ) -> None:
+        """2026-08-18 用于校验因果引用的索引有效性、严格偏序和文本偏序
+
+        约束：① 引用序号是 1 基且在当前事件列表范围内；② 事件 i 的因果前驱
+        序号必须 < i（保证章内无环）；③ 因果前驱的文本 char_end <= 当前事件的
+        char_start（严格文本偏序）。
+        """
+        n = len(events)
+        for i, event in enumerate(events, start=1):
+            for ref in event.causal_event_refs:
+                if ref < 1 or ref > n:
+                    raise ValueError(
+                        f"events[{i - 1}].causal_event_refs 引用越界: {ref}"
+                        f"（有效范围 1..{n}）"
+                    )
+                if ref >= i:
+                    raise ValueError(
+                        f"events[{i - 1}].causal_event_refs 包含非严格前驱引用: {ref}"
+                        f"（因果前驱序号必须小于当前事件序号 {i}）"
+                    )
+                cause_end = event_evidence[ref - 1][1]
+                effect_start = event_evidence[i - 1][0]
+                if cause_end > effect_start:
+                    raise ValueError(
+                        f"events[{i - 1}].causal_event_refs 文本偏序违反: "
+                        f"前驱事件 {ref} 的 char_end={cause_end} "
+                        f"大于当前事件的 char_start={effect_start}"
+                    )
+
     def _validate_domain_endpoints(
         self,
         domain: str,
@@ -523,6 +638,7 @@ class AnnotationToolLedger:
                 (
                     item.description,
                     tuple((part.entity, part.role) for part in item.participants),
+                    tuple(item.anchor_paragraph_ids),
                 )
                 for item in payloads["events"]
             ],
@@ -535,7 +651,8 @@ class AnnotationToolLedger:
                 for item in payloads["relations"]
             ],
             "foreshadowings": [
-                item.description for item in payloads["foreshadowings"]
+                (item.description, item.setup_event_index)
+                for item in payloads["foreshadowings"]
             ],
         }
         errors: list[str] = []
@@ -655,10 +772,30 @@ class AnnotationToolLedger:
                 )
             return bound_dialogues
         if domain == "events":
-            return [
-                BoundEvent(**item.model_dump(mode="python"))
-                for item in payload
-            ]
+            bound_events: list[BoundEvent] = []
+            event_evidence: list[tuple[int, int, str, list[TextEvidence]]] = []
+            for item in payload:
+                char_start, char_end, text_hash, evidence = self._derive_event_evidence(
+                    item.anchor_paragraph_ids
+                )
+                bound_events.append(
+                    BoundEvent(
+                        description=item.description,
+                        participants=[
+                            EventParticipantInput(**p.model_dump(mode="python"))
+                            for p in item.participants
+                        ],
+                        anchor_paragraph_ids=list(item.anchor_paragraph_ids),
+                        causal_event_refs=list(item.causal_event_refs),
+                        char_start=char_start,
+                        char_end=char_end,
+                        text_hash=text_hash,
+                        evidence=evidence,
+                    )
+                )
+                event_evidence.append((char_start, char_end, text_hash, evidence))
+            self._validate_causal_refs(payload, event_evidence)
+            return bound_events
         if domain == "relations":
             bound_relations: list[BoundRelation] = []
             for item in payload:
@@ -688,10 +825,27 @@ class AnnotationToolLedger:
                 )
             return bound_relations
         if domain == "foreshadowings":
-            return [
-                BoundForeshadowing(**item.model_dump(mode="python"))
+            events_payload = self.domain_payloads.get("events")
+            if events_payload is None:
+                raise AnnotationProtocolError(
+                    "write_foreshadowings 必须在 write_events 成功后调用，以绑定 setup 事件"
+                )
+            event_count = len(events_payload)
+            for item in payload:
+                if item.setup_event_index < 1 or item.setup_event_index > event_count:
+                    raise ValueError(
+                        f"foreshadowing.setup_event_index 引用越界: {item.setup_event_index}"
+                        f"（有效范围 1..{event_count}）"
+                    )
+            bound_foreshadowings: list[BoundForeshadowing] = [
+                BoundForeshadowing(
+                    description=item.description,
+                    confidence=item.confidence,
+                    setup_event_index=item.setup_event_index,
+                )
                 for item in payload
             ]
+            return bound_foreshadowings
         raise AnnotationInputError(f"未知标注领域: {domain}")
 
     # ------------------------------------------------------------------
@@ -806,6 +960,8 @@ class AnnotationToolLedger:
                         {"entity": participant.entity, "role": str(participant.role)}
                         for participant in item.participants
                     ],
+                    "anchor_paragraph_ids": list(item.anchor_paragraph_ids),
+                    "causal_event_refs": list(item.causal_event_refs),
                 }
                 for item in payloads["events"]
             ]
@@ -823,6 +979,7 @@ class AnnotationToolLedger:
                 {
                     "description": item.description,
                     "confidence": str(item.confidence),
+                    "setup_event_index": item.setup_event_index,
                 }
                 for item in payloads["foreshadowings"]
             ]
@@ -1196,6 +1353,54 @@ def build_annotation_tools(
         return json.dumps({"content": content}, ensure_ascii=False)
 
     @tool
+    def search_event_history(query: str) -> str:
+        """2026-08-18 用于检索当前章节之前已授权事件并登记 event_id 使用权限"""
+        normalized_query = _normalize_query(query, tool_name="search_event_history")
+        if ledger.phase != "chunk_open":
+            raise AnnotationAuthorizationError(
+                f"阶段 {ledger.phase} 不允许 search_event_history"
+            )
+        results = query_service.search_event_history(
+            normalized_query,
+            max_chapter_order=getattr(
+                query_service,
+                "current_chapter_order",
+                1,
+            )
+            - 1,
+            limit=50,
+        )
+        views: list[dict[str, Any]] = []
+        for item in results:
+            ledger.authorized_event_ids.add(item.event_id)
+            views.append(
+                {
+                    "event_id": item.event_id,
+                    "event_revision": item.event_revision,
+                    "chapter_id": item.chapter_id,
+                    "chapter_order": item.chapter_order,
+                    "description": item.description,
+                    "participants": item.participants,
+                    "anchor_paragraph_ids": item.anchor_paragraph_ids,
+                    "char_start": item.char_start,
+                    "char_end": item.char_end,
+                    "text_hash": item.text_hash,
+                    "evidence": [ev.model_dump(mode="json") for ev in item.evidence],
+                    "causal_event_refs": item.causal_event_refs,
+                    "edges": item.edges,
+                }
+            )
+        ledger.append_search_log(
+            {
+                "tool": "search_event_history",
+                "query": normalized_query,
+                "hits": [item["event_id"] for item in views],
+                "digest": f"sha256:{_content_digest(views)}",
+            }
+        )
+        return json.dumps({"events": views}, ensure_ascii=False)
+
+    @tool
     def search_pool(query: str) -> str:
         """2026-08-07 用于返回临时案例编号和无 ID 伏笔语义"""
         if ledger.phase != "chunk_open":
@@ -1404,8 +1609,14 @@ def build_annotation_tools(
         setup_status: SetupStatus | None = None,
         confidence: Confidence | None = None,
         strength: Confidence | None = None,
+        setup_event_id: str | None = None,
+        payoff_event_id: str | None = None,
     ) -> str:
-        """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）"""
+        """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）
+
+        2026-08-18：setup_event_id/payoff_event_id 用于伏笔续接/回收时绑定事件。
+        setup_event_id 由 Agent 通过授权检索获得（search_event_history 返回的 event_id）。
+        """
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
@@ -1425,7 +1636,19 @@ def build_annotation_tools(
             setup_status=setup_status,
             confidence=confidence,
             strength=strength,
+            setup_event_id=setup_event_id,
+            payoff_event_id=payoff_event_id,
         )
+        for event_id, field_name in (
+            (setup_event_id, "setup_event_id"),
+            (payoff_event_id, "payoff_event_id"),
+        ):
+            if event_id is None:
+                continue
+            if event_id not in ledger.authorized_event_ids:
+                raise AnnotationAuthorizationError(
+                    f"{field_name} 未由本轮 search_event_history 授权: {event_id}"
+                )
         return _append_resolved(ledger, details, resolved)
 
     @tool
@@ -1525,6 +1748,7 @@ def build_annotation_tools(
         search_graph,
         search_text,
         read_text,
+        search_event_history,
         search_pool,
         resolve_dialogue_case,
         resolve_fact_case,
