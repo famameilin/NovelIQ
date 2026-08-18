@@ -318,6 +318,8 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
+        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        _insert_paragraphs(db_session, run_id, chunks)
         persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
         assert not ann_repo.is_annotate_complete(run_id)
 
@@ -335,6 +337,8 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
+        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        _insert_paragraphs(db_session, run_id, chunks)
         for chapter_id in range(1, 4):
             persist_chapter_annotation(db_session, run_id=run_id, chapter_id=chapter_id)
         assert ann_repo.is_annotate_complete(run_id)

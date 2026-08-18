@@ -152,29 +152,36 @@ async def test_text_search_returns_only_matching_later_paragraphs(db_session, mo
         service.read_text(999)
 
 
-def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session) -> None:
-    """2026-08-12 用于验证 setup_summary 大小写变体按 casefold 去重，不重复建伏笔线程"""
+def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
+    """2026-08-18 用于验证去重键为 setup_event_id：同事件不重复建线程，不同事件各建一条"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜持 Sword 现身"],
-        title="伏笔大小写去重",
+        title="伏笔事件去重",
     )
     repository = ForeshadowingRepository(db_session)
+    # 同一 setup_event_id 两次 sync（描述大小写不同）→ 去重，仅 1 线程 1 hit
     first_thread, first_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜持 Sword", confidence="high"),
+        foreshadowing=BoundForeshadowing(
+            description="顾霜持 Sword", confidence="high", setup_event_index=1
+        ),
+        setup_event_id="event-setup-1",
     )
     second_thread, second_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high"),
+        foreshadowing=BoundForeshadowing(
+            description="顾霜持 sword", confidence="high", setup_event_index=1
+        ),
+        setup_event_id="event-setup-1",
     )
     db_session.commit()
 
     assert second_thread.setup_id == first_thread.setup_id
     assert first_hit is not None
-    # 同 chunk 同 thread 的重复 sync 是纯 no-op：不重复写 hit、不制造假命中
+    # 同章节同 thread 重复 sync 是纯 no-op：不重复写 hit、不制造假命中
     assert second_hit is None
     threads = list(
         db_session.execute(
@@ -189,6 +196,25 @@ def test_foreshadowing_sync_dedupes_setup_summary_case_insensitively(db_session)
     )
     assert len(hits) == 1
 
+    # 不同 setup_event_id 即使描述完全相同也各建一条线程
+    third_thread, third_hit = repository.sync(
+        run_id=run_id,
+        chapter_id=1,
+        foreshadowing=BoundForeshadowing(
+            description="顾霜持 sword", confidence="high", setup_event_index=2
+        ),
+        setup_event_id="event-setup-2",
+    )
+    db_session.commit()
+    assert third_thread.setup_id != first_thread.setup_id
+    assert third_hit is not None and third_hit.is_new_setup is True
+    threads = list(
+        db_session.execute(
+            select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
+        ).scalars()
+    )
+    assert len(threads) == 2
+
 
 def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter(db_session) -> None:
     """2026-08-13 P1-3 用于验证已存在 thread 在更大 chunk 再次命中时补写 hit 并推进 last_chapter_id"""
@@ -202,7 +228,10 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter
     first_thread, first_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+        foreshadowing=BoundForeshadowing(
+            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
+        ),
+        setup_event_id="event-护佑",
     )
     assert first_thread.last_chapter_id == 1
     assert first_hit is not None and first_hit.is_new_setup is True
@@ -210,7 +239,10 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter
     second_thread, second_hit = repository.sync(
         run_id=run_id,
         chapter_id=2,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+        foreshadowing=BoundForeshadowing(
+            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
+        ),
+        setup_event_id="event-护佑",
     )
     db_session.commit()
 
@@ -243,13 +275,19 @@ def test_foreshadowing_sync_existing_thread_noop_on_same_chunk(db_session) -> No
     first_thread, _first_hit = repository.sync(
         run_id=run_id,
         chapter_id=2,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+        foreshadowing=BoundForeshadowing(
+            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
+        ),
+        setup_event_id="event-护佑",
     )
     # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chapter_id
     thread, hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high"),
+        foreshadowing=BoundForeshadowing(
+            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
+        ),
+        setup_event_id="event-护佑",
     )
     db_session.commit()
 
@@ -307,3 +345,65 @@ def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> No
     assert len(rows) == 1
     assert rows[0].candidate_key == "dlg_001"
     assert rows[0].chapter_id == 1
+
+
+def test_sync_dialogues_weak_binds_event_id_by_char_span(db_session) -> None:
+    """2026-08-18 P3 用于验证对话只有唯一事件匹配时才写入 event_id"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜拔剑喝止，“住手”回荡。"],
+        title="对话事件弱关联",
+    )
+    repository = DialogueRecordRepository(db_session)
+    dialogue = BoundDialogue(
+        candidate_index=1,
+        candidate_key="dlg_001",
+        content="住手",
+        start=8,
+        end=11,
+        speaker="顾霜",
+        tone="紧张",
+    )
+    rows = repository.sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        dialogues=[dialogue],
+        event_anchors=[
+            ("event-wide", 0, 17),
+            ("event-narrow", 6, 12),
+            ("event-unrelated", 20, 25),
+        ],
+    )
+    db_session.commit()
+
+    assert len(rows) == 1
+    assert rows[0].event_id is None
+
+
+def test_sync_dialogues_no_event_anchor_keeps_null(db_session) -> None:
+    """2026-08-18 P3 用于验证对话不在任何事件区间内时 event_id 保持 None"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜拔剑喝止，“住手”回荡。"],
+        title="对话事件无匹配",
+    )
+    repository = DialogueRecordRepository(db_session)
+    dialogue = BoundDialogue(
+        candidate_index=1,
+        candidate_key="dlg_001",
+        content="住手",
+        start=8,
+        end=11,
+        speaker="顾霜",
+        tone="紧张",
+    )
+    rows = repository.sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        dialogues=[dialogue],
+        event_anchors=[("event-a", 0, 5)],
+    )
+    db_session.commit()
+
+    assert len(rows) == 1
+    assert rows[0].event_id is None

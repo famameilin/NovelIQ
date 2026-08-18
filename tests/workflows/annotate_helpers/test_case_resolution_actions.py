@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+from uuid import NAMESPACE_URL, uuid5
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -11,8 +14,10 @@ from src.agents.annotation.schema import (
     AgentRunResult,
     BoundChapterAnnotation,
     BoundChunkAnnotation,
+    BoundDialogue,
     BoundEntity,
     BoundEntityDirectory,
+    BoundEvent,
     BoundForeshadowing,
     ChunkMetricsInput,
     PendingCase,
@@ -21,8 +26,8 @@ from src.agents.annotation.schema import (
 from src.storage.models import (
     CasePoolCase,
     CaseResolutionMapping,
+    DialogueRecord,
     ForeshadowingThread,
-    ForeshadowingThreadHit,
     GraphFact,
     GraphRelationVersion,
 )
@@ -38,7 +43,14 @@ def _annotation(
     entity_names: list[str] | None = None,
     foreshadowing: BoundForeshadowing | None = None,
 ) -> BoundChapterAnnotation:
-    """2026-08-11 用于构造含实体目录或伏笔的章节标注"""
+    """2026-08-11 用于构造含实体目录或伏笔的章节标注
+
+    2026-08-18：伏笔需要绑定 setup 事件，因此当 foreshadowing 非 None 时
+    自动构造一个锚定整个 chunk 文本的 BoundEvent（序号 1），foreshadowing
+    的 setup_event_index 必须为 1。
+    """
+    import hashlib
+
     entities = [
         BoundEntity(
             name=name,
@@ -46,6 +58,28 @@ def _annotation(
         )
         for name in (entity_names or [])
     ]
+    events: list[BoundEvent] = []
+    if foreshadowing is not None:
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        events.append(
+            BoundEvent(
+                description=f"事件-{text[:6]}",
+                participants=[],
+                anchor_paragraph_ids=[0],
+                causal_event_refs=[],
+                char_start=0,
+                char_end=len(text),
+                text_hash=text_hash,
+                evidence=[
+                    {
+                        "paragraph_ids": [0],
+                        "char_start": 0,
+                        "char_end": len(text),
+                        "text_hash": text_hash,
+                    }
+                ],
+            )
+        )
     return BoundChapterAnnotation(
         chapter_summary=text,
         chunks=[
@@ -59,7 +93,7 @@ def _annotation(
                 entities=BoundEntityDirectory(entities=entities),
                 character_observations=[],
                 dialogues=[],
-                events=[],
+                events=events,
                 relations=[],
                 foreshadowings=[foreshadowing] if foreshadowing is not None else [],
             )
@@ -438,6 +472,7 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     foreshadowing = BoundForeshadowing(
         description="顾霜承诺护佑山门",
         confidence="high",
+        setup_event_index=1,
     )
     first = complete_annotation_run(
         result=_result(
@@ -522,8 +557,13 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     assert second.resolved_cases[0].target_setup_id == thread.setup_id
 
 
-def test_foreshadowing_same_description_creates_single_thread(db_session) -> None:
-    """2026-08-11 用于验证相同 description 的伏笔只创建一条线程"""
+def test_foreshadowing_same_setup_event_creates_single_thread(db_session) -> None:
+    """2026-08-18 用于验证同章同 setup_event_id 重复 sync 只建一条线程（去重键=setup_event_id）
+
+    新合同去重键从 description casefold 改为 setup_event_id：两章各自独立标注的
+    setup 事件（chunk_id 不同 → setup_event_id 不同）是不同线程，不再按描述去重。
+    此测试验证同章同事件重复 sync 的幂等行为。
+    """
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓", "顾霜再誓"],
@@ -534,15 +574,17 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
     foreshadowing = BoundForeshadowing(
         description="顾霜承诺护佑山门",
         confidence="high",
+        setup_event_index=1,
     )
-    for chapter_id, chunk_id in ((1, 1), (2, 2)):
+    # 章 1 同一伏笔连续两次完成事务（模拟重跑）：setup_event_id 相同 → 只建一条线程
+    for _ in range(2):
         complete_annotation_run(
             result=_result(
                 run_id=run_id,
-                chapter_id=chapter_id,
+                chapter_id=1,
                 annotation=_annotation(
-                    chunk_id=chunk_id,
-                    text="顾霜立誓" if chapter_id == 1 else "顾霜再誓",
+                    chunk_id=1,
+                    text="顾霜立誓",
                     foreshadowing=foreshadowing,
                 ),
             ),
@@ -555,18 +597,78 @@ def test_foreshadowing_same_description_creates_single_thread(db_session) -> Non
             select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
         ).scalars()
     )
-    hits = list(
-        db_session.execute(
-            select(ForeshadowingThreadHit)
-            .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(ForeshadowingThreadHit.chapter_id)
-        ).scalars()
-    )
     assert len(threads) == 1
-    # 2026-08-13 P1-3：每个新 chunk 的 Phase2 命中都落一条 hit（合同），
-    # 第二章在章 2 续接命中后 last_chapter_id 推进到 2
-    assert len(hits) == 2
-    assert [hit.chapter_id for hit in hits] == [1, 2]
     assert threads[0].setup_summary == "顾霜承诺护佑山门"
     assert threads[0].foreshadowing_type is None
     assert threads[0].status == "open"
+
+
+def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
+    """2026-08-18 P3 用于验证 complete_annotation_run 落下对话事件弱关联"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜拔剑喝止，我们走。"],
+        title="对话事件端到端",
+    )
+    chunk_text = "顾霜拔剑喝止，我们走。"
+    text_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+    annotation = BoundChapterAnnotation(
+        chapter_summary="顾霜拔剑喝止",
+        chunks=[
+            BoundChunkAnnotation(
+                chunk_id=1,
+                metrics=ChunkMetricsInput(
+                    summary="顾霜拔剑喝止",
+                    emotional_valence="neutral",
+                    narrative_function="冲突",
+                ),
+                entities=BoundEntityDirectory(
+                    entities=[BoundEntity(name="顾霜", entity_type="character")]
+                ),
+                character_observations=[],
+                dialogues=[
+                    BoundDialogue(
+                        candidate_index=1,
+                        candidate_key="dlg_001",
+                        content="我们走",
+                        start=7,
+                        end=10,
+                        speaker="顾霜",
+                        tone="平静",
+                    )
+                ],
+                events=[
+                    BoundEvent(
+                        description="顾霜拔剑喝止",
+                        participants=[],
+                        anchor_paragraph_ids=[0],
+                        causal_event_refs=[],
+                        char_start=0,
+                        char_end=len(chunk_text),
+                        text_hash=text_hash,
+                        evidence=[
+                            {
+                                "paragraph_ids": [0],
+                                "char_start": 0,
+                                "char_end": len(chunk_text),
+                                "text_hash": text_hash,
+                            }
+                        ],
+                    )
+                ],
+                relations=[],
+                foreshadowings=[],
+            )
+        ],
+    )
+    complete_annotation_run(
+        result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    db_session.rollback()
+
+    row = db_session.execute(
+        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
+    ).scalar_one()
+    expected_eid = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    assert row.event_id == expected_eid

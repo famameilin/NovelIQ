@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,12 +26,15 @@ from src.storage.models import (
     ChapterAnnotationRecord,
     DialogueRecord,
     EntityStateVersion,
+    EventEdge,
+    EventNode,
     ForeshadowingThread,
     GraphEntity,
     GraphFact,
     GraphRelation,
     GraphRelationVersion,
     GraphVersion,
+    Paragraph,
 )
 
 
@@ -96,6 +100,29 @@ def _relation_id(
     )
 
 
+def _event_id(run_id: str, chapter_id: int, event_ordinal: int) -> str:
+    """2026-08-18 用于按 run_id + chapter_id + 事件序号确定性生成稳定事件 ID
+
+    事件 ID 在同一 run 内稳定；重新分析创建新 run，不尝试跨 run 复用事件身份。
+    """
+    return str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:{event_ordinal}"))
+
+
+def _event_edge_id(
+    run_id: str,
+    edge_type: str,
+    source_event_id: str,
+    target_event_id: str,
+) -> str:
+    """2026-08-18 用于按 run_id + 边类型 + 端点事件 ID 确定性生成稳定边 ID"""
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"noveliq:event-edge:{run_id}:{edge_type}:{source_event_id}:{target_event_id}",
+        )
+    )
+
+
 def _chapter_bounds(session: Session, run_id: str, chapter_id: int) -> tuple[int, int, int]:
     """2026-08-07 用于按具名字段读取章节顺序和首尾 chunk 边界
 
@@ -120,6 +147,7 @@ def _validate_annotation_chunks(
     *,
     annotation: ChapterAnnotationRecord,
     payload: BoundChapterAnnotation,
+    authorized_text_paragraph_ids: set[int] | None = None,
 ) -> None:
     """2026-08-07 用于复核新合同 payload 只覆盖当前 run 真实章节 chunk
 
@@ -143,6 +171,114 @@ def _validate_annotation_chunks(
             "章节 payload chunk 顺序与数据库不一致: "
             f"expected={expected} actual={actual}"
         )
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(
+                Paragraph.run_id == annotation.run_id,
+                Paragraph.chapter_id == annotation.chapter_id,
+            )
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
+    )
+    paragraph_by_id = {int(row.paragraph_id): row for row in paragraphs}
+    if not paragraph_by_id and any(chunk.events for chunk in payload.chunks):
+        raise ValueError("事件存在但当前章节没有段落事实源")
+    # 当前章节正文属于本次标注的隐式授权范围；历史段落仍只能来自审计授权集合
+    authorized = (
+        (set(authorized_text_paragraph_ids) if authorized_text_paragraph_ids is not None else set())
+        | set(paragraph_by_id)
+    ) if authorized_text_paragraph_ids is not None else None
+    for chunk in payload.chunks:
+        for ordinal, event in enumerate(chunk.events, start=1):
+            if not event.evidence:
+                raise ValueError(f"事件 evidence 不能为空: chunk_id={chunk.chunk_id} ordinal={ordinal}")
+            # EventInput 使用 chunk 内 0 基序号，持久化合同统一保存 Evidence 派生的全局段落 ID
+            canonical_anchor_ids = sorted(
+                {
+                    int(item)
+                    for evidence in event.evidence
+                    if hasattr(evidence, "paragraph_ids")
+                    for item in evidence.paragraph_ids
+                }
+            )
+            if not canonical_anchor_ids:
+                raise ValueError(f"事件 Evidence 缺少文本段落 ID: chunk_id={chunk.chunk_id} ordinal={ordinal}")
+            event.anchor_paragraph_ids = canonical_anchor_ids
+            anchor_ids = set(canonical_anchor_ids)
+            unknown = sorted(anchor_ids - set(paragraph_by_id))
+            if unknown:
+                raise ValueError(
+                    f"事件锚点不属于当前章节: chunk_id={chunk.chunk_id} ordinal={ordinal} ids={unknown}"
+                )
+            if authorized is not None:
+                unauthorized = sorted(anchor_ids - authorized)
+                if unauthorized:
+                    raise ValueError(
+                        "事件锚点超出本轮段落授权范围: "
+                        f"chunk_id={chunk.chunk_id} ordinal={ordinal} ids={unauthorized}"
+                    )
+            if event.char_end > len(chapter.text) or event.char_start < 0:
+                raise ValueError(f"事件字符范围超出数据库章节原文: chunk_id={chunk.chunk_id} ordinal={ordinal}")
+            actual_hash = hashlib.sha256(
+                chapter.text[event.char_start : event.char_end].encode("utf-8")
+            ).hexdigest()
+            if actual_hash != event.text_hash:
+                raise ValueError(f"事件文本哈希与数据库原文不一致: chunk_id={chunk.chunk_id} ordinal={ordinal}")
+            for evidence in event.evidence:
+                evidence_ids = {int(item) for item in evidence.paragraph_ids}
+                if not evidence_ids <= set(paragraph_by_id):
+                    raise ValueError(f"事件 Evidence 引用了其他章节段落: chunk_id={chunk.chunk_id} ordinal={ordinal}")
+                if authorized is not None and not evidence_ids <= authorized:
+                    raise ValueError(f"事件 Evidence 超出本轮段落授权范围: chunk_id={chunk.chunk_id} ordinal={ordinal}")
+                if evidence.char_end > len(chapter.text) or evidence.char_start < 0:
+                    raise ValueError(
+                        "事件 Evidence 字符范围超出数据库原文: "
+                        f"chunk_id={chunk.chunk_id} ordinal={ordinal}"
+                    )
+                evidence_hash = hashlib.sha256(
+                    chapter.text[evidence.char_start : evidence.char_end].encode("utf-8")
+                ).hexdigest()
+                if evidence_hash != evidence.text_hash:
+                    raise ValueError(
+                        "事件 Evidence 文本哈希与数据库原文不一致: "
+                        f"chunk_id={chunk.chunk_id} ordinal={ordinal}"
+                    )
+
+
+def _chapter_text_evidence(
+    session: Session,
+    *,
+    run_id: str,
+    chapter_id: int,
+) -> list[dict[str, Any]]:
+    """2026-08-18 用于为没有专属事件锚点的事实生成数据库原文 Evidence"""
+    chapter = session.execute(
+        select(Chapter).where(
+            Chapter.run_id == run_id,
+            Chapter.chapter_id == chapter_id,
+        )
+    ).scalar_one_or_none()
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
+    )
+    if chapter is None or chapter.text is None or not paragraphs:
+        raise ValueError(f"事实缺少可生成 Evidence 的章节段落: run_id={run_id} chapter_id={chapter_id}")
+    start = min(int(row.local_start_char) for row in paragraphs)
+    end = max(int(row.local_end_char) for row in paragraphs)
+    text_hash = hashlib.sha256(chapter.text[start:end].encode("utf-8")).hexdigest()
+    return [
+        {
+            "paragraph_ids": [int(row.paragraph_id) for row in paragraphs],
+            "char_start": start,
+            "char_end": end,
+            "text_hash": text_hash,
+        }
+    ]
 
 
 def _entity_attributes(entity: BoundEntity, entity_type: EntityType) -> dict[str, Any]:
@@ -302,8 +438,19 @@ def _new_graph_fact(
     assertion: str,
     confidence: str,
     content: dict[str, Any],
+    event_id: str | None = None,
+    event_revision: int | None = None,
+    evidence: list[dict[str, Any]] | None = None,
 ) -> GraphFact:
-    """2026-08-11 用于从系统绑定位置构造单个不可变事实版本"""
+    """2026-08-11 用于从系统绑定位置构造单个不可变事实版本
+
+    2026-08-18：event_id/event_revision 用于事件/伏笔事实引用事件节点；
+    evidence 是非空证据列表（TextEvidence/GraphEvidence 的 JSON 序列化形式）。
+    """
+    if not evidence:
+        raise ValueError(
+            f"{domain} 事实必须携带非空 Evidence: chapter_id={chapter_id} ordinal={ordinal}"
+        )
     return GraphFact(
         graph_version_id=graph_version.graph_version_id,
         run_id=annotation.run_id,
@@ -330,6 +477,9 @@ def _new_graph_fact(
         source_kind="annotation",
         annotation_id=annotation.annotation_id,
         payload_path=f"chunks/{chapter_id}/{domain}/{ordinal}",
+        event_id=event_id,
+        event_revision=event_revision,
+        evidence=evidence,
     )
 
 
@@ -413,6 +563,213 @@ def _bump_referenced_last_seen(
             entity.last_seen_chapter = max(int(entity.last_seen_chapter), chapter_id)
 
 
+def _persist_event_shadow(
+    session: Session,
+    *,
+    annotation: ChapterAnnotationRecord,
+    graph_version: GraphVersion,
+    chunk: Any,
+    chapter_order: int,
+    entities_by_name: dict[str, GraphEntity],
+) -> list[dict[str, Any]]:
+    """2026-08-18 用于在同一完成事务中写入事件影子行并返回事件元信息列表
+
+    影子行与对应 graph_fact 同事务写入——EventNode 行按确定性 event_id 生成，
+    包含稳定身份、描述、参与者、锚点、字符范围、文本哈希和 Evidence。
+    因果边（causal）在事件间写入 EventEdge；contains 边从章节根到各事件。
+    返回 list[dict] 每项含 event_id/event_revision/evidence/char_start/char_end，
+    供事实写入侧引用。
+    """
+    run_id = annotation.run_id
+    chunk_id = chunk.chunk_id
+    event_metas: list[dict[str, Any]] = []
+
+    for ordinal, event_item in enumerate(chunk.events, start=1):
+        eid = _event_id(run_id, chunk_id, ordinal)
+        current_revision = session.execute(
+            select(func.max(EventNode.event_revision)).where(
+                EventNode.run_id == run_id,
+                EventNode.event_id == eid,
+            )
+        ).scalar_one()
+        event_revision = int(current_revision or 0) + 1
+        # 参与者实体解析
+        participants: list[dict[str, Any]] = []
+        for participant in event_item.participants:
+            entity = _entity(entities_by_name, participant.entity)
+            if entity is None:
+                raise ValueError("event participant 缺少实体")
+            participants.append(
+                {
+                    "role": str(participant.role),
+                    "entity": _entity_descriptor(entity),
+                }
+            )
+        evidence_list = [ev.model_dump(mode="json") for ev in event_item.evidence]
+        node = EventNode(
+            event_id=eid,
+            event_revision=event_revision,
+            run_id=run_id,
+            chapter_id=chunk_id,
+            chapter_order=chapter_order,
+            description=event_item.description,
+            participants=participants,
+            anchor_paragraph_ids=list(event_item.anchor_paragraph_ids),
+            char_start=event_item.char_start,
+            char_end=event_item.char_end,
+            text_hash=event_item.text_hash,
+            evidence=evidence_list,
+            causal_event_refs=list(event_item.causal_event_refs),
+            annotation_id=annotation.annotation_id,
+            graph_version_id=graph_version.graph_version_id,
+            source_kind="annotation",
+            payload_path=f"chunks/{chunk_id}/event/{ordinal}",
+        )
+        session.add(node)
+        event_metas.append(
+            {
+                "event_id": eid,
+                "event_revision": event_revision,
+                "ordinal": ordinal,
+                "evidence": evidence_list,
+                "char_start": event_item.char_start,
+                "char_end": event_item.char_end,
+                "causal_event_refs": list(event_item.causal_event_refs),
+            }
+        )
+
+    # EventNode 必须先入库，事件边的复合外键才能在 PostgreSQL 中校验
+    session.flush()
+
+    # 每个事件都挂到当前章节根；根由 source_chapter_id 表达
+    for meta in event_metas:
+        session.add(
+            EventEdge(
+                edge_id=_event_edge_id(
+                    run_id,
+                    "contains",
+                    f"chapter:{chunk_id}",
+                    meta["event_id"],
+                ),
+                run_id=run_id,
+                edge_type="contains",
+                source_event_id=None,
+                source_event_revision=None,
+                target_event_id=meta["event_id"],
+                target_event_revision=meta["event_revision"],
+                source_chapter_id=chunk_id,
+                target_chapter_id=chunk_id,
+                is_active=1,
+                evidence=meta["evidence"],
+                annotation_id=annotation.annotation_id,
+                graph_version_id=graph_version.graph_version_id,
+                payload_path=f"chunks/{chunk_id}/event-edge/contains/{meta['ordinal']}",
+            )
+        )
+
+    # 写入 causal 边（章内因果，严格偏序已在 tools.py 校验）
+    for meta in event_metas:
+        for ref in meta["causal_event_refs"]:
+            if ref < 1 or ref > len(event_metas):
+                raise ValueError(f"因果事件序号越界: {ref}")
+            source_meta = event_metas[ref - 1]  # 1 基 → 0 基
+            if source_meta["char_end"] > meta["char_start"]:
+                raise ValueError(
+                    "因果事件违反原文严格偏序: "
+                    f"source={source_meta['event_id']} target={meta['event_id']}"
+                )
+            edge_id = _event_edge_id(
+                run_id,
+                "causal",
+                source_meta["event_id"],
+                meta["event_id"],
+            )
+            edge = EventEdge(
+                edge_id=edge_id,
+                run_id=run_id,
+                edge_type="causal",
+                source_event_id=source_meta["event_id"],
+                source_event_revision=source_meta["event_revision"],
+                target_event_id=meta["event_id"],
+                target_event_revision=meta["event_revision"],
+                source_chapter_id=chunk_id,
+                target_chapter_id=chunk_id,
+                is_active=1,
+                evidence=source_meta["evidence"] + meta["evidence"],
+                annotation_id=annotation.annotation_id,
+                graph_version_id=graph_version.graph_version_id,
+                payload_path=f"chunks/{chunk_id}/event-edge/causal/{source_meta['ordinal']}_{meta['ordinal']}",
+            )
+            session.add(edge)
+
+    return event_metas
+
+
+def _validate_dag_acyclic(event_metas: list[dict[str, Any]]) -> None:
+    """2026-08-18 用于对因果边做 DAG 无环校验（章内拓扑排序）
+
+    causal_event_refs 在 tools.py 已保证严格前驱（ref < i），但跨章因果边
+    在 P2 才接入；此函数做章内最终校验，确保无环。
+    """
+    n = len(event_metas)
+    # 构建邻接表
+    adj: dict[int, list[int]] = {i: [] for i in range(n)}
+    in_degree: dict[int, int] = dict.fromkeys(range(n), 0)
+    for i, meta in enumerate(event_metas):
+        for ref in meta["causal_event_refs"]:
+            source = ref - 1  # 1 基 → 0 基
+            target = i
+            adj[source].append(target)
+            in_degree[target] += 1
+    # Kahn 拓扑排序
+    queue = [i for i in range(n) if in_degree[i] == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for neighbor in adj[node]:
+            in_degree[neighbor] -= 1
+            if in_degree[neighbor] == 0:
+                queue.append(neighbor)
+    if visited != n:
+        raise ValueError(
+            "事件因果边存在环路（DAG 无环校验失败）"
+        )
+
+
+def _validate_persisted_dag(session: Session, run_id: str) -> None:
+    """2026-08-18 用于对当前 run 已持久化的全部 causal 边执行全图无环校验"""
+    rows = session.execute(
+        select(EventEdge.source_event_id, EventEdge.target_event_id).where(
+            EventEdge.run_id == run_id,
+            EventEdge.edge_type == "causal",
+            EventEdge.is_active == 1,
+        )
+    ).all()
+    adjacency: dict[str, list[str]] = {}
+    in_degree: dict[str, int] = {}
+    for source, target in rows:
+        if source is None or target is None:
+            raise ValueError("causal 边端点不能为空")
+        source_id = str(source)
+        target_id = str(target)
+        adjacency.setdefault(source_id, []).append(target_id)
+        adjacency.setdefault(target_id, [])
+        in_degree.setdefault(source_id, 0)
+        in_degree[target_id] = in_degree.get(target_id, 0) + 1
+    queue = [event_id for event_id, degree in in_degree.items() if degree == 0]
+    visited = 0
+    while queue:
+        event_id = queue.pop(0)
+        visited += 1
+        for target_id in adjacency.get(event_id, []):
+            in_degree[target_id] -= 1
+            if in_degree[target_id] == 0:
+                queue.append(target_id)
+    if visited != len(in_degree):
+        raise ValueError("持久化事件因果图存在环路（DAG 无环校验失败）")
+
+
 def _persist_annotation_facts(
     session: Session,
     *,
@@ -436,11 +793,17 @@ def _persist_annotation_facts(
 
     for chunk in payload.chunks:
         chunk_id = chunk.chunk_id
+        chunk_evidence = _chapter_text_evidence(
+            session,
+            run_id=annotation.run_id,
+            chapter_id=chunk_id,
+        )
         _bump_referenced_last_seen(
             entities_by_name,
             chunk,
             chunk_id,
         )
+        event_facts: list[GraphFact] = []
         for ordinal, observation in enumerate(chunk.character_observations):
             subject = _entity(entities_by_name, observation.character)
             content = {
@@ -470,9 +833,21 @@ def _persist_annotation_facts(
                 assertion="affirmed",
                 confidence="medium",
                 content=content,
+                evidence=chunk_evidence,
             )
             session.add(fact)
             facts.append(fact)
+
+        # 2026-08-18 事件森林/DAG：先写入 EventNode 影子行，再写事件事实引用 event_id
+        event_metas = _persist_event_shadow(
+            session,
+            annotation=annotation,
+            graph_version=graph_version,
+            chunk=chunk,
+            chapter_order=chapter_order,
+            entities_by_name=entities_by_name,
+        )
+        _validate_dag_acyclic(event_metas)
 
         for ordinal, event_item in enumerate(chunk.events):
             participants: list[dict[str, Any]] = []
@@ -493,7 +868,13 @@ def _persist_annotation_facts(
                 "chapter_id": chunk_id,
                 "description": event_item.description,
                 "participants": participants,
+                "anchor_paragraph_ids": list(event_item.anchor_paragraph_ids),
+                "char_start": event_item.char_start,
+                "char_end": event_item.char_end,
+                "text_hash": event_item.text_hash,
+                "causal_event_refs": list(event_item.causal_event_refs),
             }
+            event_meta = event_metas[ordinal]
             fact = _new_graph_fact(
                 graph_version=graph_version,
                 annotation=annotation,
@@ -509,9 +890,13 @@ def _persist_annotation_facts(
                 assertion="affirmed",
                 confidence="medium",
                 content=content,
+                event_id=event_meta["event_id"],
+                event_revision=event_meta["event_revision"],
+                evidence=event_meta["evidence"],
             )
             session.add(fact)
             facts.append(fact)
+            event_facts.append(fact)
 
         for ordinal, relation_item in enumerate(chunk.relations):
             from_entity = _entity(entities_by_name, relation_item.from_entity)
@@ -572,16 +957,37 @@ def _persist_annotation_facts(
                 assertion="affirmed",
                 confidence="medium",
                 content=content,
+                evidence=chunk_evidence,
             )
             session.add(fact)
             facts.append(fact)
 
+        if len(event_facts) != len(event_metas):
+            raise ValueError(
+                "事件影子行与事件事实数量不一致: "
+                f"chunk_id={chunk_id} nodes={len(event_metas)} facts={len(event_facts)}"
+            )
+        for meta, fact in zip(event_metas, event_facts, strict=True):
+            if (
+                fact.event_id != meta["event_id"]
+                or fact.event_revision != meta["event_revision"]
+                or fact.evidence != meta["evidence"]
+            ):
+                raise ValueError(
+                    "事件影子行与事件事实字段不一致: "
+                    f"chunk_id={chunk_id} event_id={meta['event_id']}"
+                )
+
         for ordinal, foreshadowing in enumerate(chunk.foreshadowings):
+            # 2026-08-18 伏笔事实引用 setup 事件节点
+            setup_meta = event_metas[foreshadowing.setup_event_index - 1]
             content = {
                 "kind": "foreshadowing",
                 "chapter_id": chunk_id,
                 "description": foreshadowing.description,
                 "confidence": str(foreshadowing.confidence),
+                "setup_event_id": setup_meta["event_id"],
+                "setup_event_index": foreshadowing.setup_event_index,
             }
             fact = _new_graph_fact(
                 graph_version=graph_version,
@@ -601,6 +1007,9 @@ def _persist_annotation_facts(
                 assertion="affirmed",
                 confidence=str(foreshadowing.confidence),
                 content=content,
+                event_id=setup_meta["event_id"],
+                event_revision=setup_meta["event_revision"],
+                evidence=setup_meta["evidence"],
             )
             session.add(fact)
             facts.append(fact)
@@ -634,6 +1043,11 @@ def _persist_annotation_facts(
                     "after": patch["after"],
                     "chapter_id": patch["chapter_id"],
                 },
+                evidence=_chapter_text_evidence(
+                    session,
+                    run_id=annotation.run_id,
+                    chapter_id=int(patch["chapter_id"]),
+                ),
             )
             session.add(fact)
             facts.append(fact)
@@ -1222,12 +1636,13 @@ def _persist_fact_resolution(
     fact_id = str(
         uuid5(NAMESPACE_URL, f"noveliq:case-resolution:{annotation.run_id}:{relation_id}")
     )
+    fact_revision = _next_fact_revision(session, annotation.run_id, fact_id)
     fact = GraphFact(
         graph_version_id=graph_version.graph_version_id,
         run_id=annotation.run_id,
         chapter_id=annotation.chapter_id,
         fact_id=fact_id,
-        fact_revision=_next_fact_revision(session, annotation.run_id, fact_id),
+        fact_revision=fact_revision,
         fact_type="relation",
         subject_entity_id=from_id,
         predicate=relation_type,
@@ -1246,6 +1661,14 @@ def _persist_fact_resolution(
         source_kind="case_resolution",
         annotation_id=annotation.annotation_id,
         payload_path=f"case_resolution/{resolved_case.case_id}",
+        event_id=None,
+        event_revision=None,
+        # 2026-08-18 解决事实不能把自身作为 Evidence，改用目标章节原文证据
+        evidence=_chapter_text_evidence(
+            session,
+            run_id=annotation.run_id,
+            chapter_id=target_chapter_id,
+        ),
     )
     session.add(fact)
     session.flush()
@@ -1285,15 +1708,43 @@ def _persist_foreshadowing_resolution(
     session: Session,
     *,
     run_id: str,
+    current_chapter_id: int,
     resolved_case: ResolvedCase,
-) -> ForeshadowingThread:
-    """2026-08-11 用于把 foreshadowing 动作解决结果更新到伏笔线程（setup_id 定位）"""
+) -> dict[str, Any]:
+    """2026-08-11 用于把 foreshadowing 动作解决结果更新到伏笔线程（setup_id 定位）
+
+    2026-08-18：setup_event_id/payoff_event_id 更新到线程表；
+    payoff_event_id 填充时自动关闭 active 并推进 status 为 likely_paid_off。
+    """
     setup_id = resolved_case.target_ref.get("setup_id")
     if not setup_id:
         raise ValueError(f"foreshadowing 动作案例缺少伏笔线程目标: {resolved_case.case_id}")
     thread = session.get(ForeshadowingThread, str(setup_id))
     if thread is None or thread.run_id != run_id:
         raise ValueError(f"案例目标伏笔线程不存在或跨 run: {resolved_case.case_id}")
+
+    def validate_event(event_id: str, label: str) -> EventNode:
+        """2026-08-18 用于校验伏笔事件引用属于当前 run 且不越过当前章节"""
+        event = session.execute(
+            select(EventNode)
+            .where(EventNode.run_id == run_id, EventNode.event_id == event_id)
+            .order_by(EventNode.event_revision.desc())
+        ).scalars().first()
+        if event is None:
+            raise ValueError(f"{label} 不存在或跨 run: {event_id}")
+        if event.chapter_order > _chapter_bounds(session, run_id, current_chapter_id)[0]:
+            raise ValueError(f"{label} 不能引用当前章节之后的事件: {event_id}")
+        return event
+
+    setup_event = validate_event(
+        resolved_case.setup_event_id or thread.setup_event_id,
+        "setup_event_id",
+    )
+    payoff_event: EventNode | None = None
+    if resolved_case.payoff_event_id is not None:
+        payoff_event = validate_event(resolved_case.payoff_event_id, "payoff_event_id")
+        if payoff_event.event_id == setup_event.event_id:
+            raise ValueError("setup_event_id 与 payoff_event_id 不能相同")
     for field_name in (
         "setup_summary",
         "setup_kind",
@@ -1306,10 +1757,36 @@ def _persist_foreshadowing_resolution(
         if value is not None:
             setattr(thread, field_name, value)
     if resolved_case.setup_status is not None:
-        thread.status = resolved_case.setup_status
+        next_status = str(resolved_case.setup_status)
+        status_order = {"open": 0, "reinforced": 1, "likely_paid_off": 2}
+        current_status = str(thread.status)
+        if next_status not in status_order:
+            raise ValueError(f"不支持的伏笔状态: {next_status}")
+        if current_status in status_order and status_order[next_status] < status_order[current_status]:
+            raise ValueError(f"伏笔状态不能回退: {current_status} -> {next_status}")
+        thread.status = next_status
+    # 2026-08-18 事件森林/DAG：更新 setup_event_id/payoff_event_id
+    target_setup_event_id: str | None = None
+    target_payoff_event_id: str | None = None
+    if resolved_case.setup_event_id is not None:
+        thread.setup_event_id = resolved_case.setup_event_id
+        target_setup_event_id = resolved_case.setup_event_id
+    if resolved_case.payoff_event_id is not None:
+        thread.payoff_event_id = resolved_case.payoff_event_id
+        target_payoff_event_id = resolved_case.payoff_event_id
+        # 回收后关闭 active 并推进状态
+        thread.active = False
+        if resolved_case.setup_status is None:
+            thread.status = "likely_paid_off"
+    if thread.active is False and thread.status != "likely_paid_off":
+        raise ValueError("已关闭伏笔必须处于 likely_paid_off 状态")
     thread.updated_at = datetime.now(UTC)
     session.flush()
-    return thread
+    return {
+        "thread": thread,
+        "target_setup_event_id": target_setup_event_id,
+        "target_payoff_event_id": target_payoff_event_id,
+    }
 
 
 def _persist_resolved_cases(
@@ -1353,6 +1830,7 @@ def _persist_resolved_cases(
             target = _persist_foreshadowing_resolution(
                 session,
                 run_id=annotation.run_id,
+                current_chapter_id=annotation.chapter_id,
                 resolved_case=resolved_case,
             )
         elif resolved_case.action == "close":
@@ -1369,6 +1847,7 @@ def persist_completion_graph(
     annotation: ChapterAnnotationRecord,
     resolved_cases: list[ResolvedCase],
     authorized_text_chapter_ids: set[int],
+    authorized_text_paragraph_ids: set[int] | None = None,
 ) -> PersistedGraphResult:
     """2026-08-07 用于在一个图版本中写入正式标注和连续性修订"""
     payload = BoundChapterAnnotation.model_validate(annotation.payload)
@@ -1376,6 +1855,7 @@ def persist_completion_graph(
         session,
         annotation=annotation,
         payload=payload,
+        authorized_text_paragraph_ids=authorized_text_paragraph_ids,
     )
     chapter_order, first_chapter_id, last_chapter_id = _chapter_bounds(
         session,
@@ -1422,6 +1902,7 @@ def persist_completion_graph(
         chapter_order=chapter_order,
         facts=facts,
     )
+    _validate_persisted_dag(session, annotation.run_id)
     # 2026-08-13 P1-1: db.py 配置 autoflush=False，这里必须显式 flush 关系版本，
     # 否则 _persist_resolved_cases → _latest_relation_draft 读不到同章已断言的
     # 关系草稿（当前章节 pending 行），会把同一关系按 revision=1 双写，

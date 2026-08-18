@@ -25,16 +25,18 @@
 import asyncio
 import sys
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import chunk_text
+from src.chunking.chunker import chunk_text, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     ChapterRepository,
+    ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
@@ -54,6 +56,9 @@ def test_create_and_insert(db_session) -> None:
     chapter_repo = ChapterRepository(db_session)
 
     chapter_repo.insert_chapter_texts(run_id, chunks)
+    # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+    spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
+    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
     persist_chapter_annotation(
         db_session,
         run_id=run_id,

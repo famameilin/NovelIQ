@@ -337,6 +337,7 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "tone",
             "is_inner_monologue",
             "confidence",
+            "event_id",
         },
         "case_pool_cases": {
             "id",
@@ -362,11 +363,50 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "target_fact_revision",
             "target_dialogue_id",
             "target_setup_id",
+            "target_setup_event_id",
+            "target_payoff_event_id",
+        },
+        "event_nodes": {
+            "event_id",
+            "event_revision",
+            "run_id",
+            "chapter_id",
+            "chapter_order",
+            "anchor_paragraph_ids",
+            "char_start",
+            "char_end",
+            "text_hash",
+            "evidence",
+            "graph_version_id",
+        },
+        "event_edges": {
+            "edge_id",
+            "run_id",
+            "edge_type",
+            "source_event_id",
+            "target_event_id",
+            "source_chapter_id",
+            "target_chapter_id",
+            "evidence",
+        },
+        "graph_facts": {
+            "event_id",
+            "event_revision",
+            "evidence",
+        },
+        "foreshadowing_threads": {
+            "setup_event_id",
+            "payoff_event_id",
         },
     }
     with engine.begin() as connection:
+        required_tables = {"event_nodes", "event_edges"}
         for table_name, required in required_columns.items():
             if not _table_exists(connection, table_name):
+                if table_name in required_tables:
+                    raise RuntimeError(
+                        f"{table_name} 表不存在，请先按当前事件合同重建数据库后启动服务"
+                    )
                 continue
             actual = _get_table_columns(connection, table_name)
             missing = sorted(required - actual)

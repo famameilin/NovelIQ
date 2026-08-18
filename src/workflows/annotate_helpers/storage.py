@@ -81,7 +81,7 @@ def load_completion_result(
     ).scalar_one_or_none()
     if annotation is None:
         return None
-    if annotation.payload.get("contract_version") != "agent-semantic-v1":
+    if annotation.payload.get("contract_version") != "agent-semantic-v2":
         raise ValueError(
             "章节标注使用旧合同，必须重新运行 annotation: "
             f"run_id={run_id} chapter_id={chapter_id}"
@@ -132,6 +132,8 @@ def load_completion_result(
             target_setup_id=row.target_setup_id,
             target_fact_id=row.target_fact_id,
             target_fact_revision=row.target_fact_revision,
+            target_setup_event_id=row.target_setup_event_id,
+            target_payoff_event_id=row.target_payoff_event_id,
         )
         for row in mapping_rows
     ]
@@ -149,13 +151,33 @@ def _persist_dialogue_records(
     *,
     result: AgentRunResult,
 ) -> None:
-    """2026-08-11 用于把最终系统绑定对话投影到对话记录表"""
+    """2026-08-11 用于把最终系统绑定对话投影到对话记录表
+
+    2026-08-18 P3：按与 persistence.py 同公式的确定性 event_id 构造锚点列表，
+    对话写入时弱关联到完全包含其字符区间的事件。
+    """
+    from uuid import NAMESPACE_URL, uuid5
+
     repository = DialogueRecordRepository(session)
     for chunk in result.annotation.chunks:
+        event_anchors = [
+            (
+                str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"noveliq:event:{result.run_id}:{chunk.chunk_id}:{ordinal}",
+                    )
+                ),
+                event.char_start,
+                event.char_end,
+            )
+            for ordinal, event in enumerate(chunk.events, start=1)
+        ]
         repository.sync_dialogues(
             run_id=result.run_id,
             chapter_id=result.chapter_id,
             dialogues=chunk.dialogues,
+            event_anchors=event_anchors,
         )
 
 
@@ -164,14 +186,28 @@ def _persist_foreshadowing(
     *,
     result: AgentRunResult,
 ) -> None:
-    """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表"""
+    """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表
+
+    2026-08-18：伏笔按 setup_event_id 去重——setup_event_id 由 run_id + chapter_id +
+    事件序号确定性生成（与 persistence.py._event_id 同公式），同一 setup 事件只建一条线程。
+    """
+    from uuid import NAMESPACE_URL, uuid5
+
     repository = ForeshadowingRepository(session)
     for chunk in result.annotation.chunks:
         for foreshadowing in chunk.foreshadowings:
+            # 2026-08-18 确定性生成 setup_event_id（与 persistence.py._event_id 同公式）
+            setup_event_id = str(
+                uuid5(
+                    NAMESPACE_URL,
+                    f"noveliq:event:{result.run_id}:{chunk.chunk_id}:{foreshadowing.setup_event_index}",
+                )
+            )
             repository.sync(
                 run_id=result.run_id,
                 chapter_id=chunk.chunk_id,
                 foreshadowing=foreshadowing,
+                setup_event_id=setup_event_id,
             )
 
 
@@ -239,7 +275,11 @@ def _persist_resolution_mappings(
     annotation_id: str,
     resolved_targets_by_case_id: dict,
 ) -> list[CompletionResolvedCase]:
-    """2026-08-11 用于按案例动作保存解决结果与对应目标（对话/线程/事实版本）"""
+    """2026-08-11 用于按案例动作保存解决结果与对应目标（对话/线程/事实版本）
+
+    2026-08-18：foreshadowing 动作返回 dict（含 thread + event 目标），
+    其他动作返回 GraphFact / DialogueRecord / None。
+    """
     repository = CaseResolutionMappingRepository(session)
     completion_results: list[CompletionResolvedCase] = []
     for resolved_case in result.resolved_cases:
@@ -247,11 +287,19 @@ def _persist_resolution_mappings(
         target_fact = target if isinstance(target, GraphFact) else None
         if resolved_case.action in {"dialogue", "foreshadowing"} and target is None:
             raise ValueError(f"{resolved_case.action} 动作未生成解决目标: {resolved_case.case_id}")
-        target_dialogue_id = None
-        target_setup_id = None
+        target_dialogue_id: str | None = None
+        target_setup_id: str | None = None
+        target_setup_event_id: str | None = None
+        target_payoff_event_id: str | None = None
         if isinstance(target, DialogueRecord):
             target_dialogue_id = target.dialogue_id
-        if isinstance(target, ForeshadowingThread):
+        if isinstance(target, dict) and "thread" in target:
+            # 2026-08-18 foreshadowing 动作返回 dict
+            thread = target["thread"]
+            target_setup_id = thread.setup_id
+            target_setup_event_id = target.get("target_setup_event_id")
+            target_payoff_event_id = target.get("target_payoff_event_id")
+        elif isinstance(target, ForeshadowingThread):
             target_setup_id = target.setup_id
         repository.add_mapping(
             run_id=result.run_id,
@@ -260,6 +308,8 @@ def _persist_resolution_mappings(
             target_fact=target_fact,
             target_dialogue_id=target_dialogue_id,
             target_setup_id=target_setup_id,
+            target_setup_event_id=target_setup_event_id,
+            target_payoff_event_id=target_payoff_event_id,
         )
         completion_results.append(
             CompletionResolvedCase(
@@ -273,6 +323,8 @@ def _persist_resolution_mappings(
                 target_fact_revision=(
                     target_fact.fact_revision if target_fact is not None else None
                 ),
+                target_setup_event_id=target_setup_event_id,
+                target_payoff_event_id=target_payoff_event_id,
             )
         )
     return completion_results
@@ -378,8 +430,9 @@ def complete_annotation_run(
                 session,
                 annotation=annotation,
                 resolved_cases=result.resolved_cases,
-                # 2026-08-14 M6：案例源是章级定位（§12.3），落库复查沿用章级授权集合
+                # 2026-08-18：完成事务同时复核 Agent 实际读取过的段落授权
                 authorized_text_chapter_ids=set(result.audit.authorized_chapter_ids),
+                authorized_text_paragraph_ids=set(result.audit.authorized_text_paragraph_ids),
             )
             _reelect_representatives(session, run_id=result.run_id)
             resolved_completion = _persist_resolution_mappings(

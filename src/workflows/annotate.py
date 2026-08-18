@@ -22,9 +22,12 @@ from src.agents.annotation.schema import (
     BoundDialogue,
     BoundEntity,
     BoundEntityDirectory,
+    BoundEvent,
+    ChunkParagraphInfo,
     EntityType,
     PendingCase,
     ResolvedCase,
+    TextEvidence,
 )
 from src.agents.stream import AgentStream
 from src.api.models.events import StreamEvent
@@ -105,6 +108,43 @@ def _split_chapter_sub_chunks(
     return sub_chunks
 
 
+def _build_sub_chunk_paragraph_info(
+    chapter_paragraphs: Sequence[Row],
+    *,
+    sub_chunk_offset: int,
+    sub_chunk_text: str,
+    chapter_char_offset: int = 0,
+) -> ChunkParagraphInfo:
+    """2026-08-18 用于为子块构建段落坐标映射（ChunkParagraphInfo）
+
+    段落标记方案：子块内的段落按 local_start_char 落在子块文本范围内的行筛选，
+    0 基序号即子块内段落顺序。char_spans 是段落在子块文本内的相对偏移
+    （global_start_char - sub_chunk_offset → 子块相对 start）。
+    """
+    paragraph_ids: list[int] = []
+    char_spans: list[tuple[int, int]] = []
+    texts: list[str] = []
+    for row in chapter_paragraphs:
+        local_start = int(row.local_start_char)
+        local_end = int(row.local_end_char)
+        # 落在子块范围内的段落（local 坐标是章内偏移，与 sub_chunk_offset 对齐）
+        if local_start >= sub_chunk_offset and local_end <= sub_chunk_offset + len(sub_chunk_text):
+            paragraph_ids.append(int(row.paragraph_id))
+            sub_start = local_start - sub_chunk_offset
+            sub_end = local_end - sub_chunk_offset
+            char_spans.append((sub_start, sub_end))
+            texts.append(str(row.text))
+    if not paragraph_ids:
+        raise ValueError(
+            f"子块无段落事实源: sub_chunk_offset={sub_chunk_offset}"
+        )
+    return ChunkParagraphInfo(
+        paragraph_ids=paragraph_ids,
+        char_spans=char_spans,
+        texts=texts,
+    )
+
+
 def _merge_sub_chunk_entities(directories: list[BoundEntityDirectory]) -> list[BoundEntity]:
     """2026-08-14 M7 用于按规范化名称合并去重实体目录（同名保留先出现）"""
     seen: set[str] = set()
@@ -142,6 +182,36 @@ def _merge_sub_chunk_annotations(
         if len(annotation.chunks) != 1:
             raise ValueError("子块标注必须恰好包含一个 chunk")
     first_chunk = annotations[0].chunks[0]
+    event_offset = 0
+    merged_events: list[BoundEvent] = []
+    merged_foreshadowings = []
+    for index, annotation in enumerate(annotations):
+        sub_chunk = annotation.chunks[0]
+        local_event_count = len(sub_chunk.events)
+        for event in sub_chunk.events:
+            remapped = _remap_bound_event(event, sub_chunk_offsets[index])
+            # 子块内的序号在合并后必须提升为整章序号；Evidence 中的全局段落 ID
+            # 是持久化锚点的权威值，合并后同步写入 anchor_paragraph_ids
+            if remapped.evidence:
+                global_ids = list(remapped.evidence[0].paragraph_ids)
+            else:
+                global_ids = list(remapped.anchor_paragraph_ids)
+            remapped = remapped.model_copy(
+                update={
+                    "anchor_paragraph_ids": global_ids,
+                    "causal_event_refs": [event_offset + ref for ref in remapped.causal_event_refs],
+                }
+            )
+            merged_events.append(remapped)
+        for foreshadowing in sub_chunk.foreshadowings:
+            merged_foreshadowings.append(
+                foreshadowing.model_copy(
+                    update={
+                        "setup_event_index": event_offset + foreshadowing.setup_event_index,
+                    }
+                )
+            )
+        event_offset += local_event_count
     return BoundChapterAnnotation(
         chapter_summary="\n".join(annotation.chapter_summary for annotation in annotations),
         chunks=[
@@ -163,19 +233,13 @@ def _merge_sub_chunk_annotations(
                     for index, annotation in enumerate(annotations)
                     for item in annotation.chunks[0].dialogues
                 ],
-                events=[
-                    item for annotation in annotations for item in annotation.chunks[0].events
-                ],
+                events=merged_events,
                 relations=[
                     item
                     for annotation in annotations
                     for item in annotation.chunks[0].relations
                 ],
-                foreshadowings=[
-                    item
-                    for annotation in annotations
-                    for item in annotation.chunks[0].foreshadowings
-                ],
+                foreshadowings=merged_foreshadowings,
             )
         ],
     )
@@ -189,6 +253,33 @@ def _remap_bound_dialogue(dialogue: BoundDialogue, sub_chunk_offset: int) -> Bou
         update={
             "start": dialogue.start + sub_chunk_offset,
             "end": dialogue.end + sub_chunk_offset,
+        }
+    )
+
+
+def _remap_bound_event(event: BoundEvent, sub_chunk_offset: int) -> BoundEvent:
+    """2026-08-18 用于把子块相对事件锚点坐标平移回章文本坐标（首块偏移 0 不变）
+
+    事件锚点的 char_start/char_end 和 evidence 内的 char_start/char_end 都需要
+    按子块偏移量平移；anchor_paragraph_ids、causal_event_refs、description、
+    participants、text_hash 不变（text_hash 基于段落文本，与章内偏移无关）。
+    """
+    if sub_chunk_offset <= 0:
+        return event
+    new_evidence = [
+        TextEvidence(
+            paragraph_ids=list(ev.paragraph_ids),
+            char_start=ev.char_start + sub_chunk_offset,
+            char_end=ev.char_end + sub_chunk_offset,
+            text_hash=ev.text_hash,
+        )
+        for ev in event.evidence
+    ]
+    return event.model_copy(
+        update={
+            "char_start": event.char_start + sub_chunk_offset,
+            "char_end": event.char_end + sub_chunk_offset,
+            "evidence": new_evidence,
         }
     )
 
@@ -275,6 +366,13 @@ def _merge_sub_chunk_results(
                     paragraph_id
                     for result in results
                     for paragraph_id in result.audit.authorized_text_paragraph_ids
+                }
+            ),
+            authorized_event_ids=sorted(
+                {
+                    event_id
+                    for result in results
+                    for event_id in result.audit.authorized_event_ids
                 }
             ),
             closed_case_ids=[
@@ -519,6 +617,11 @@ async def run_annotate(
                     sub_chunks
                 ):
                     sub_chunk_offsets.append(sub_chunk_offset)
+                    sub_paragraph_info = _build_sub_chunk_paragraph_info(
+                        chapter_paragraph_rows,
+                        sub_chunk_offset=sub_chunk_offset,
+                        sub_chunk_text=sub_chunk_text,
+                    )
                     sub_results.append(
                         await run_annotation_agent(
                             run_id=run_id,
@@ -540,6 +643,7 @@ async def run_annotate(
                             stream=agent_stream,
                             graph_state=graph_state,
                             chapter_label=chapter_labels.get(chapter_id),
+                            paragraph_info=sub_paragraph_info,
                         )
                     )
                 complete_annotation_run(

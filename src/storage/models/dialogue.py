@@ -45,6 +45,8 @@ class DialogueRecord(Base):
     tone: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_inner_monologue: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     confidence: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 2026-08-18 事件森林/DAG P3：对话弱关联事件（可空——无匹配或多匹配时为 NULL）
+    event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
