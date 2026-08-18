@@ -8,7 +8,7 @@ import unicodedata
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import (
@@ -18,10 +18,13 @@ from src.agents.annotation.schema import (
     BoundForeshadowing,
     CaseSearchResult,
     CompletionCase,
+    EventHistoryResult,
     ForeshadowingSearchResult,
+    GraphEvidence,
     PendingCase,
     ResolvedCase,
     SearchResult,
+    TextEvidence,
     TextSearchResult,
 )
 from src.config import settings
@@ -32,6 +35,8 @@ from src.storage.models import (
     Chapter,
     ChapterAnnotationRecord,
     DialogueRecord,
+    EventEdge,
+    EventNode,
     ForeshadowingThread,
     ForeshadowingThreadHit,
     GraphFact,
@@ -49,6 +54,26 @@ def _text_matches(query: str, *values: str | None) -> bool:
     """2026-08-05 用于判断 query 或拆分词项是否命中任一文本字段"""
     haystack = "\n".join(normalize_text(value).lower() for value in values if value)
     return any(term in haystack for term in extract_query_terms(query))
+
+
+def _match_event_anchor(
+    anchors: list[tuple[str, int, int]],
+    start: int,
+    end: int,
+) -> str | None:
+    """2026-08-18 用于按字符区间包含为对话弱关联事件锚点
+
+    只有恰好一个事件完全包住 [start, end) 时才返回事件 ID；
+    无匹配或多匹配均返回 None。同一坐标系（chunk 文本内偏移）。
+    """
+    candidates = [
+        (event_id, a_start, a_end)
+        for event_id, a_start, a_end in anchors
+        if a_start <= start and end <= a_end
+    ]
+    if len(candidates) != 1:
+        return None
+    return candidates[0][0]
 
 
 def _case_view(row: CasePoolCase) -> CaseSearchResult:
@@ -236,6 +261,85 @@ class DatabaseAnnotationQueryService:
         """2026-08-14 用于读取本轮文本搜索候选段落的同 run 原文（带默认上下文）"""
         return self.text_search_service.read(paragraph_id)
 
+    def search_event_history(
+        self,
+        query: str,
+        *,
+        max_chapter_order: int,
+        limit: int = 50,
+    ) -> list[EventHistoryResult]:
+        """2026-08-18 用于在历史章节边界内检索事件并返回可审计 Evidence"""
+        if max_chapter_order <= 0 or limit <= 0:
+            return []
+        rows = self.session.execute(
+            select(EventNode)
+            .where(
+                EventNode.run_id == self.run_id,
+                EventNode.chapter_order <= max_chapter_order,
+            )
+            .order_by(EventNode.chapter_order.desc(), EventNode.event_id, EventNode.event_revision.desc())
+        ).scalars()
+        latest: dict[str, EventNode] = {}
+        for node in rows:
+            latest.setdefault(node.event_id, node)
+        edge_rows = list(
+            self.session.execute(
+                select(EventEdge).where(
+                    EventEdge.run_id == self.run_id,
+                    EventEdge.is_active == 1,
+                )
+            ).scalars()
+        )
+        matched: list[EventHistoryResult] = []
+        for node in latest.values():
+            participant_text = " ".join(
+                str(participant.get("entity") or participant.get("name") or "")
+                for participant in node.participants
+                if isinstance(participant, dict)
+            )
+            if not _text_matches(query, node.description, participant_text):
+                continue
+            matched.append(
+                EventHistoryResult(
+                    event_id=node.event_id,
+                    event_revision=node.event_revision,
+                    chapter_id=node.chapter_id,
+                    chapter_order=node.chapter_order,
+                    description=node.description,
+                    participants=list(node.participants),
+                    anchor_paragraph_ids=list(node.anchor_paragraph_ids),
+                    char_start=node.char_start,
+                    char_end=node.char_end,
+                    text_hash=node.text_hash,
+                    evidence=[
+                        (
+                            TextEvidence.model_validate(item)
+                            if "paragraph_ids" in item
+                            else GraphEvidence.model_validate(item)
+                        )
+                        for item in node.evidence
+                    ],
+                    causal_event_refs=list(node.causal_event_refs),
+                    edges=[
+                        {
+                            "edge_id": edge.edge_id,
+                            "edge_type": edge.edge_type,
+                            "source_event_id": edge.source_event_id,
+                            "source_event_revision": edge.source_event_revision,
+                            "target_event_id": edge.target_event_id,
+                            "target_event_revision": edge.target_event_revision,
+                            "evidence": list(edge.evidence),
+                        }
+                        for edge in edge_rows
+                        if edge.source_event_id == node.event_id
+                        or edge.target_event_id == node.event_id
+                    ],
+                )
+            )
+            if len(matched) >= limit:
+                break
+        return matched
+
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于回读 active 案例并恢复系统稳定目标"""
         statement = select(CasePoolCase).where(
@@ -381,8 +485,14 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
         run_id: str,
         chapter_id: int,
         dialogues: list[BoundDialogue],
+        event_anchors: list[tuple[str, int, int]] | None = None,
     ) -> list[DialogueRecord]:
-        """2026-08-11 用于把最终系统绑定对话投影到对话记录表（幂等按 candidate_key 去重）"""
+        """2026-08-11 用于把最终系统绑定对话投影到对话记录表（幂等按 candidate_key 去重）
+
+        2026-08-18 P3：event_anchors 为 (event_id, char_start, char_end) 列表，
+        写入时按字符区间包含做弱关联——对话区间完全落在某个事件锚点区间内时
+        关联该事件的 event_id；无匹配或未提供 anchors 时保持 None。
+        """
         rows: list[DialogueRecord] = []
         # 2026-08-13 P2-4：幂等键与唯一约束 uq_dialogue_records_run_candidate 对齐为
         # (run_id, candidate_key)。此前按 (run_id, chapter_id) 查 existing，跨章重复台词
@@ -396,6 +506,7 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
                 )
             ).scalars()
         )
+        anchors = list(event_anchors or [])
         for dialogue in dialogues:
             if dialogue.candidate_key in existing_keys:
                 continue
@@ -411,6 +522,7 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
                 tone=dialogue.tone,
                 is_inner_monologue=dialogue.is_inner_monologue,
                 confidence="medium",
+                event_id=_match_event_anchor(anchors, dialogue.start, dialogue.end),
             )
             self.session.add(row)
             existing_keys.add(dialogue.candidate_key)
@@ -455,19 +567,25 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
         run_id: str,
         chapter_id: int,
         foreshadowing: BoundForeshadowing,
+        setup_event_id: str,
     ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit | None]:
-        """2026-08-11 用于创建或续接伏笔线程（description 相同视为同一伏笔，不重复建线程）"""
+        """2026-08-18 用于创建或续接伏笔线程（按 setup_event_id 去重，不重复建线程）
+
+        2026-08-18：去重键从 setup_summary casefold 文本换为 UNIQUE(run_id, setup_event_id)
+        ——同一 setup 事件只允许一条线程。setup_summary 定义为 setup 事件的派生快照
+        （兼容字段，不再是独立判断源）。
+        """
         normalized = normalize_text(foreshadowing.description)
-        # 2026-08-12 大小写变体按 casefold 视为同一伏笔，避免重复建线程
+        # 2026-08-18 按 setup_event_id 查找已存在线程（UNIQUE(run_id, setup_event_id) 兜底）
         thread = self.session.execute(
             select(ForeshadowingThread).where(
                 ForeshadowingThread.run_id == run_id,
-                func.lower(ForeshadowingThread.setup_summary) == normalized.casefold(),
+                ForeshadowingThread.setup_event_id == setup_event_id,
             )
         ).scalar_one_or_none()
         if thread is not None:
             # 2026-08-13 P1-3：已存在 thread 时本次 sync 也是新的 Phase2 命中，
-            # 按合同（foreshadowing.py 注释“每次命中都落一条 hit”）补写 hit 行；
+            # 按合同（foreshadowing.py 注释"每次命中都落一条 hit"）补写 hit 行；
             # 幂等：同 章节 同 thread 已有 hit 时视为纯 no-op，不重复写、不制造假命中。
             existing_hit = self.session.execute(
                 select(ForeshadowingThreadHit.hit_id).where(
@@ -485,6 +603,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
                 chapter_id=chapter_id,
                 anchor_text=normalized,
                 is_new_setup=False,
+                event_id=setup_event_id,
                 created_at=now,
             )
             self.session.add(hit)
@@ -508,6 +627,8 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
             strength=None,
             status="open",
             active=True,
+            setup_event_id=setup_event_id,
+            payoff_event_id=None,
             created_at=now,
             updated_at=now,
         )
@@ -519,6 +640,7 @@ class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
             chapter_id=chapter_id,
             anchor_text=normalized,
             is_new_setup=True,
+            event_id=setup_event_id,
             created_at=now,
         )
         self.session.add(hit)
@@ -538,8 +660,13 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
         target_fact: GraphFact | None,
         target_dialogue_id: str | None,
         target_setup_id: str | None,
+        target_setup_event_id: str | None = None,
+        target_payoff_event_id: str | None = None,
     ) -> CaseResolutionMapping:
-        """2026-08-11 用于按 action 写入解决结果和对应目标标识"""
+        """2026-08-11 用于按 action 写入解决结果和对应目标标识
+
+        2026-08-18：foreshadowing 动作可产生 setup_event_id/payoff_event_id 目标。
+        """
         resolution = {
             "action": resolved_case.action,
             "reason": resolved_case.reason,
@@ -563,6 +690,8 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
                 "setup_status",
                 "confidence",
                 "strength",
+                "setup_event_id",
+                "payoff_event_id",
             ):
                 value = getattr(resolved_case, field_name)
                 if value is not None:
@@ -579,6 +708,8 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             target_fact_revision=target_fact.fact_revision if target_fact is not None else None,
             target_dialogue_id=target_dialogue_id,
             target_setup_id=target_setup_id,
+            target_setup_event_id=target_setup_event_id,
+            target_payoff_event_id=target_payoff_event_id,
         )
         self.session.add(row)
         self.session.flush()

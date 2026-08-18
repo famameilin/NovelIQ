@@ -130,7 +130,9 @@ class TestDiagnosisRoutes:
             foreshadowing=BoundForeshadowing(
                 description="测试伏笔",
                 confidence="medium",
+                setup_event_index=1,
             ),
+            setup_event_id="event-test-setup",
         )
 
         self.db_session.commit()

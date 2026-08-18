@@ -17,6 +17,7 @@ from src.storage.models.continuity import (
 )
 from src.storage.models.core import AnalysisRun
 from src.storage.models.dialogue import DialogueRecord
+from src.storage.models.event_forest import EventEdge, EventNode
 from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
     EntityStateVersion,
@@ -40,6 +41,8 @@ __all__ = [
     "AgentInvocation",
     "AgentTurn",
     "AgentToolCall",
+    "EventNode",
+    "EventEdge",
     "ForeshadowingThread",
     "ForeshadowingThreadHit",
     "Chapter",

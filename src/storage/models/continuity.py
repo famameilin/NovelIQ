@@ -130,6 +130,9 @@ class CaseResolutionMapping(Base):
     target_fact_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_dialogue_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     target_setup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # 2026-08-18 事件森林/DAG：伏笔续接/回收案例解决可产生事件目标
+    target_setup_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    target_payoff_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

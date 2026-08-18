@@ -10,7 +10,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -44,6 +54,10 @@ class ForeshadowingThread(Base):
     strength: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 2026-08-18 事件森林/DAG：伏笔作为 foreshadowing 边载体——setup_event_id 必填，
+    # payoff_event_id 在 open 期间可空（悬边），回收后填充
+    setup_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payoff_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC（与 agent_audit 等表一致）
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -70,6 +84,9 @@ class ForeshadowingThread(Base):
             ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
+        # 2026-08-18 事件森林/DAG：伏笔线程去重键从 setup_summary casefold 文本
+        # 换为 UNIQUE(run_id, setup_event_id)——同一 setup 事件只允许一条线程
+        UniqueConstraint("run_id", "setup_event_id", name="uq_foreshadowing_threads_run_setup_event"),
         Index("idx_foreshadowing_threads_run_active_last_chapter", "run_id", "active", "last_chapter_id"),
         Index("idx_foreshadowing_threads_run_status", "run_id", "status"),
     )
@@ -105,6 +122,8 @@ class ForeshadowingThreadHit(Base):
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 2026-08-18 事件森林/DAG：新命中优先绑定事件（可空——历史命中或无法绑定时为 NULL）
+    event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

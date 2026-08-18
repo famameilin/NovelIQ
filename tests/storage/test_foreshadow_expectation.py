@@ -34,6 +34,7 @@ def _create_thread_with_hit(
 ) -> str:
     """插入带命中记录的伏笔线程并返回 setup_id。"""
     setup_id = f"setup-{strength}-{status}-{payoff_likelihood}-{uuid.uuid4().hex[:8]}"[:36]
+    setup_event_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"event:{setup_id}"))
     session.add(
         ForeshadowingThread(
             setup_id=setup_id,
@@ -49,6 +50,7 @@ def _create_thread_with_hit(
             strength=strength,
             status=status,
             active=True,
+            setup_event_id=setup_event_id,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -60,6 +62,7 @@ def _create_thread_with_hit(
             chapter_id=chapter_id,
             anchor_text="测试锚点",
             is_new_setup=True,
+            event_id=setup_event_id,
             created_at=datetime.now(UTC),
         )
     )

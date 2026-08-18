@@ -108,7 +108,11 @@ class GraphEntity(Base):
 
 
 class GraphFact(Base):
-    """2026-08-07 用于保存不可变事实版本及其来源与根 Evidence"""
+    """2026-08-07 用于保存不可变事实版本及其来源与根 Evidence
+
+    2026-08-18：增加 event_id/event_revision（事件/伏笔事实引用事件节点）、
+    evidence 列（非空 JSONB 列表，保存 TextEvidence/GraphEvidence）。
+    """
 
     __tablename__ = "graph_facts"
 
@@ -149,6 +153,11 @@ class GraphFact(Base):
         nullable=False,
     )
     payload_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 2026-08-18 事件森林/DAG：事件/伏笔事实引用事件节点（非事件事实为 NULL）
+    event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    event_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 2026-08-18 统一 Evidence：非空 JSONB 列表，保存 TextEvidence/GraphEvidence
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
@@ -158,12 +167,31 @@ class GraphFact(Base):
             ondelete="CASCADE",
             name="graph_facts_effective_chapter_run_fkey",
         ),
+        ForeignKeyConstraint(
+            ["run_id", "event_id", "event_revision"],
+            ["event_nodes.run_id", "event_nodes.event_id", "event_nodes.event_revision"],
+            ondelete="RESTRICT",
+            name="graph_facts_event_fkey",
+        ),
         CheckConstraint("fact_revision > 0", name="ck_graph_facts_revision_positive"),
+        # 2026-08-18 所有事实都必须携带至少一条 Evidence
+        CheckConstraint(
+            "jsonb_array_length(evidence) > 0",
+            name="ck_graph_facts_evidence_non_empty",
+        ),
+        # 2026-08-18 event_id 和 event_revision 必须同时有或同时无
+        CheckConstraint(
+            "(event_id IS NULL AND event_revision IS NULL) OR "
+            "(event_id IS NOT NULL AND event_revision IS NOT NULL)",
+            name="ck_graph_facts_event_id_revision_coupled",
+        ),
         UniqueConstraint("run_id", "fact_id", "fact_revision", name="uq_graph_facts_run_fact_revision"),
         UniqueConstraint("graph_version_id", "payload_path", name="uq_graph_facts_version_payload_path"),
         Index("idx_graph_facts_run_chapter", "run_id", "effective_chapter_id"),
         Index("idx_graph_facts_run_subject_predicate", "run_id", "subject_entity_id", "predicate"),
         Index("idx_graph_facts_graph_version", "graph_version_id"),
+        # 2026-08-18 事件事实按 event_id 快速检索
+        Index("idx_graph_facts_run_event", "run_id", "event_id"),
     )
 
 
