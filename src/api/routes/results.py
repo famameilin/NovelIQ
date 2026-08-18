@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, Literal, NoReturn, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
@@ -20,6 +20,13 @@ from src.api.dependencies import (
     resolve_run_id,
 )
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
+from src.api.models.event_forest import (
+    EventChapterRootResponse,
+    EventEdgeResponse,
+    EventForestResponse,
+    EventNodeResponse,
+    ForeshadowingEdgeResponse,
+)
 from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
 from src.api.models.responses import (
     ChapterAnnotation as ChapterAnnotationResponse,
@@ -629,3 +636,96 @@ async def get_global_stats(
 
     stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)
     return stats or GlobalStats()
+
+
+@router.get("/{novel_id}/event-forest", response_model=EventForestResponse)
+async def get_event_forest(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    chapter_id: Annotated[int | None, Query(gt=0)] = None,
+    graph_version_id: Annotated[str | None, Query(min_length=1)] = None,
+) -> EventForestResponse:
+    """
+    说明: 提供事件森林/DAG 查询，返回章节根、事件节点、三类边、锚点、Evidence、可见边界和派生顺序
+    修改时间: 2026-08-18
+    修改原因: P2 事件过程层正式接管，新增事件森林 API 交付项
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    require_paragraph_contract(run)
+    from src.storage.repositories.graph import EventForestRepository
+
+    repo = EventForestRepository(session)
+    try:
+        snapshot = repo.fetch_snapshot(
+            run_id,
+            chapter_id=chapter_id,
+            graph_version_id=graph_version_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail="当前 run 尚无匹配的章节图版本",
+        )
+    return EventForestResponse(
+        graph_version_id=snapshot.graph_version_id,
+        chapter_order=snapshot.chapter_order,
+        visible_through_chapter_order=snapshot.visible_through_chapter_order,
+        chapter_roots=[
+            EventChapterRootResponse(
+                chapter_id=root.chapter_id,
+                chapter_order=root.chapter_order,
+                event_ids=root.event_ids,
+            )
+            for root in snapshot.chapter_roots
+        ],
+        derived_event_order=snapshot.derived_event_order,
+        event_nodes=[
+            EventNodeResponse(
+                event_id=node.event_id,
+                event_revision=node.event_revision,
+                chapter_id=node.chapter_id,
+                chapter_order=node.chapter_order,
+                description=node.description,
+                participants=node.participants,
+                anchor_paragraph_ids=node.anchor_paragraph_ids,
+                char_start=node.char_start,
+                char_end=node.char_end,
+                text_hash=node.text_hash,
+                evidence=node.evidence,
+                causal_event_refs=node.causal_event_refs,
+            )
+            for node in snapshot.event_nodes
+        ],
+        event_edges=[
+            EventEdgeResponse(
+                edge_id=edge.edge_id,
+                edge_type=cast(Literal["contains", "causal"], edge.edge_type),
+                source_event_id=edge.source_event_id,
+                source_event_revision=edge.source_event_revision,
+                target_event_id=edge.target_event_id,
+                target_event_revision=edge.target_event_revision,
+                source_chapter_id=edge.source_chapter_id,
+                target_chapter_id=edge.target_chapter_id,
+                is_active=edge.is_active,
+                evidence=edge.evidence,
+            )
+            for edge in snapshot.event_edges
+        ],
+        foreshadowing_edges=[
+            ForeshadowingEdgeResponse(
+                setup_id=fe.setup_id,
+                setup_event_id=fe.setup_event_id,
+                payoff_event_id=fe.payoff_event_id,
+                first_chapter_id=fe.first_chapter_id,
+                last_chapter_id=fe.last_chapter_id,
+                setup_summary=fe.setup_summary,
+                status=fe.status,
+                active=fe.active,
+            )
+            for fe in snapshot.foreshadowing_edges
+        ],
+    )

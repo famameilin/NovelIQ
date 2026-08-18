@@ -307,9 +307,12 @@ def build_export_payload(
     graph_summary: dict[str, Any] | None = None,
     graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
+    event_forest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     构建导出 payload
+
+    2026-08-18：新增 event_forest 段，包含事件、边、锚点和直接引用的 Evidence。
     """
     # export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
     # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去
@@ -336,6 +339,7 @@ def build_export_payload(
         "graph_summary": graph_summary or {},
         "graph_quality_report": graph_quality_report or {},
         "timeline": timeline_data,
+        "event_forest": event_forest or {},
     }
 
 
@@ -401,6 +405,73 @@ def fetch_all_results_data(
 
     novel_name = _fetch_novel_name(run_id, novel_id, stats_repo)
 
+    # 2026-08-18 事件森林/DAG：导出 event_forest 段
+    from src.storage.repositories.graph import EventForestRepository
+
+    event_forest_repo = EventForestRepository(stats_repo.session)
+    event_forest_snapshot = event_forest_repo.fetch_snapshot(run_id)
+    event_forest_data: dict[str, Any] | None = None
+    if event_forest_snapshot is not None:
+        event_forest_data = {
+            "graph_version_id": event_forest_snapshot.graph_version_id,
+            "chapter_order": event_forest_snapshot.chapter_order,
+            "visible_through_chapter_order": event_forest_snapshot.visible_through_chapter_order,
+            "chapter_roots": [
+                {
+                    "chapter_id": root.chapter_id,
+                    "chapter_order": root.chapter_order,
+                    "event_ids": root.event_ids,
+                }
+                for root in event_forest_snapshot.chapter_roots
+            ],
+            "derived_event_order": event_forest_snapshot.derived_event_order,
+            "event_nodes": [
+                {
+                    "event_id": node.event_id,
+                    "event_revision": node.event_revision,
+                    "chapter_id": node.chapter_id,
+                    "chapter_order": node.chapter_order,
+                    "description": node.description,
+                    "participants": node.participants,
+                    "anchor_paragraph_ids": node.anchor_paragraph_ids,
+                    "char_start": node.char_start,
+                    "char_end": node.char_end,
+                    "text_hash": node.text_hash,
+                    "evidence": node.evidence,
+                    "causal_event_refs": node.causal_event_refs,
+                }
+                for node in event_forest_snapshot.event_nodes
+            ],
+            "event_edges": [
+                {
+                    "edge_id": edge.edge_id,
+                    "edge_type": edge.edge_type,
+                    "source_event_id": edge.source_event_id,
+                    "source_event_revision": edge.source_event_revision,
+                    "target_event_id": edge.target_event_id,
+                    "target_event_revision": edge.target_event_revision,
+                    "source_chapter_id": edge.source_chapter_id,
+                    "target_chapter_id": edge.target_chapter_id,
+                    "is_active": edge.is_active,
+                    "evidence": edge.evidence,
+                }
+                for edge in event_forest_snapshot.event_edges
+            ],
+            "foreshadowing_edges": [
+                {
+                    "setup_id": fe.setup_id,
+                    "setup_event_id": fe.setup_event_id,
+                    "payoff_event_id": fe.payoff_event_id,
+                    "first_chapter_id": fe.first_chapter_id,
+                    "last_chapter_id": fe.last_chapter_id,
+                    "setup_summary": fe.setup_summary,
+                    "status": fe.status,
+                    "active": fe.active,
+                }
+                for fe in event_forest_snapshot.foreshadowing_edges
+            ],
+        }
+
     # 获取时间轴数据
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
@@ -434,6 +505,7 @@ def fetch_all_results_data(
         graph_summary=graph_summary,
         graph_quality_report=graph_quality_report,
         timeline_data=timeline_data,
+        event_forest=event_forest_data,
     )
 
     return results_data, missing_fields, novel_name
