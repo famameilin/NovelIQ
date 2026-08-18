@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
+from src.agents.annotation.schema import BoundForeshadowing
 from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
@@ -31,7 +33,16 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
-from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
+from src.storage.repositories import (
+    AnnotationRepository,
+    ChapterRepository,
+    ForeshadowingRepository,
+    StatsRepository,
+)
+from tests.support.chapter_annotation_helpers import (
+    create_run_with_chunks,
+    persist_chapter_annotation,
+)
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
     graph_change_names,
@@ -696,3 +707,169 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
             graph_quality_report={"conflict_count": 2},
             timeline_data=None,
         )
+
+
+def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-08-18 用于拦截与 event_forest 无关的兄弟 loader，保留真实 EventForestRepository 读取
+
+    对照组：test_fetch_all_results_data_deduplicates_missing_diagnosis_marker。
+    """
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_core_results",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_character_bundle",
+        lambda *_args, **_kwargs: ([], None, None, set(), []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_chapter_bundle",
+        lambda *_args, **_kwargs: ([], [], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_export_relation_bundle",
+        lambda *_args, **_kwargs: (
+            [],
+            [],
+            None,
+            SimpleNamespace(model_dump=lambda **_kw: {}),
+            {
+                "narrative_structure": None,
+                "emotion_stats": None,
+                "character_stats": None,
+                "style_stats": None,
+            },
+            {},
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_novel_name",
+        lambda *_args, **_kwargs: "Test Novel",
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_timeline_data",
+        lambda *_args, **_kwargs: {
+            "atomic_nodes": [],
+            "composite_nodes": [],
+            "phases": [],
+            "tension_curve": [],
+            "total_chapters": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            assert_graph_ready=lambda _run_id: None,
+            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
+            build_graph_report=lambda _run_id: GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            ),
+            build_timeline_view=lambda _run_id: SimpleNamespace(
+                character_entities=[],
+                entity_lifecycles=[],
+                graph_changes=[],
+            ),
+        ),
+    )
+
+
+def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypatch) -> None:
+    """2026-08-18 用于验证导出 payload 包含事件森林段（节点/因果边/伏笔边与确定性 ID）"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜进入山门。\n顾霜立誓。"],
+        title="导出事件森林",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+            },
+            {
+                "description": "顾霜立誓",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "causal_event_refs": [1],
+            },
+        ],
+    )
+    ForeshadowingRepository(db_session).sync(
+        run_id=run_id,
+        chapter_id=1,
+        foreshadowing=BoundForeshadowing(
+            description="顾霜承诺护佑山门",
+            confidence="high",
+            setup_event_index=1,
+        ),
+        setup_event_id=str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1")),
+    )
+    db_session.commit()
+
+    _stub_export_sibling_loaders(monkeypatch)
+
+    results_data, _missing_fields, _novel_name = fetch_all_results_data(
+        novel_id=_novel_id,
+        task_id=run_id[:8],
+        run_id=run_id,
+        stats_repo=StatsRepository(db_session),
+        annotation_repo=AnnotationRepository(db_session),
+        chapter_repo=ChapterRepository(db_session),
+    )
+
+    forest = results_data["event_forest"]
+    assert forest != {}
+    assert forest["chapter_order"] == 1
+    nodes = {node["event_id"]: node for node in forest["event_nodes"]}
+    assert set(nodes) == {
+        str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1")),
+        str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2")),
+    }
+    assert nodes[str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))]["description"] == "顾霜进入山门"
+
+    causal_edges = [edge for edge in forest["event_edges"] if edge["edge_type"] == "causal"]
+    assert len(causal_edges) == 1
+    assert causal_edges[0]["source_event_id"] == str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+
+    assert len(forest["foreshadowing_edges"]) == 1
+    assert forest["foreshadowing_edges"][0]["setup_event_id"] == str(
+        uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1")
+    )
+    assert forest["foreshadowing_edges"][0]["payoff_event_id"] is None
+
+
+def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_session, monkeypatch) -> None:
+    """2026-08-18 用于验证无事件标注的 run 导出 event_forest 为空对象"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["未标注原文。"],
+        title="空事件森林",
+    )
+    db_session.commit()
+
+    _stub_export_sibling_loaders(monkeypatch)
+
+    results_data, _missing_fields, _novel_name = fetch_all_results_data(
+        novel_id=_novel_id,
+        task_id=run_id[:8],
+        run_id=run_id,
+        stats_repo=StatsRepository(db_session),
+        annotation_repo=AnnotationRepository(db_session),
+        chapter_repo=ChapterRepository(db_session),
+    )
+
+    assert results_data["event_forest"] == {}
