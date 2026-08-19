@@ -7,14 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GraphChangesPageResponse, GraphData, Novel } from "@/api/types";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { createEventForest } from "@/mocks/data";
 import { GraphPage } from "@/pages/GraphPage";
 import { useNovelStore } from "@/store/novelStore";
 
 const getGraphMock = vi.fn();
 const getCharactersMock = vi.fn();
 const getGraphChangesMock = vi.fn();
-const getEventForestMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
@@ -86,7 +84,6 @@ vi.mock("@/api/results", () => ({
   getGraph: (...args: unknown[]) => getGraphMock(...args),
   getCharacters: (...args: unknown[]) => getCharactersMock(...args),
   getGraphChanges: (...args: unknown[]) => getGraphChangesMock(...args),
-  getEventForest: (...args: unknown[]) => getEventForestMock(...args),
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -174,7 +171,6 @@ describe("GraphPage integration", () => {
     getGraphMock.mockResolvedValue(createGraphData());
     getCharactersMock.mockResolvedValue([{ name: "顾霜", appearance_count: 5 }]);
     getGraphChangesMock.mockResolvedValue(createGraphChanges());
-    getEventForestMock.mockResolvedValue(createEventForest());
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
       title: "图谱集成测试小说",
