@@ -8,7 +8,6 @@ import {
   createEmotionTrendWindows,
   createChapterMetrics,
   createForeshadowingThreads,
-  createEventForest,
   createTopics,
   createDiagnosis,
   createGraph,
@@ -160,21 +159,6 @@ export const foreshadowingThreadsHandler = http.get(
 
     await delay(250);
     return HttpResponse.json(createForeshadowingThreads());
-  }
-);
-
-// 获取 /api/novels/:novelId/event-forest（2026-08-19 契约 v3：树 + 树间边）
-export const eventForestHandler = http.get(
-  `${BASE}/api/novels/:novelId/event-forest`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(300);
-    return HttpResponse.json(createEventForest());
   }
 );
 

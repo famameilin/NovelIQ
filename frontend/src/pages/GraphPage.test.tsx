@@ -11,14 +11,12 @@ import type {
   Novel,
 } from "@/api/types";
 import type { GraphNodeObject } from "@/components/charts/forceGraphTypes";
-import { createEventForest } from "@/mocks/data";
 import { GraphPage } from "@/pages/GraphPage";
 import { useNovelStore } from "@/store/novelStore";
 
 const getGraphMock = vi.fn();
 const getCharactersMock = vi.fn();
 const getGraphChangesMock = vi.fn();
-const getEventForestMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
@@ -122,7 +120,6 @@ vi.mock("@/api/results", () => ({
   getGraph: (...args: unknown[]) => getGraphMock(...args),
   getCharacters: (...args: unknown[]) => getCharactersMock(...args),
   getGraphChanges: (...args: unknown[]) => getGraphChangesMock(...args),
-  getEventForest: (...args: unknown[]) => getEventForestMock(...args),
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -245,7 +242,6 @@ describe("GraphPage", () => {
     getGraphMock.mockResolvedValue(createGraphData());
     getCharactersMock.mockResolvedValue([{ name: "顾霜", appearance_count: 4 }]);
     getGraphChangesMock.mockResolvedValue(createGraphChangesPage());
-    getEventForestMock.mockResolvedValue(createEventForest());
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
       title: "图谱测试小说",
@@ -263,11 +259,6 @@ describe("GraphPage", () => {
     expect(screen.getByText(/第 12 章 · 顾霜 → 司夜/)).toBeInTheDocument();
     expect(screen.getByText("盟友 · 建立")).toBeInTheDocument();
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
-    // 事件过程 Tab（契约 v3 树视图）同步渲染：树卡片 + 主链事件计数
-    expect(await screen.findByText("事件树")).toBeInTheDocument();
-    expect(screen.getByText(/2 个事件/)).toBeInTheDocument();
-    expect(screen.getByText("踏入山门")).toBeInTheDocument();
-    expect(getEventForestMock).toHaveBeenCalled();
   });
 
   it("使用稳定 change_id 记录图谱变化选择", async () => {
