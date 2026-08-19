@@ -784,12 +784,13 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypatch) -> None:
-    """2026-08-18 用于验证导出 payload 包含事件森林段（节点/因果边/伏笔边与确定性 ID）"""
+    """2026-08-19 用于验证导出 payload 包含事件森林段（树视图/因果边/伏笔边契约 v3）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。\n顾霜立誓。"],
         title="导出事件森林",
     )
+    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -799,12 +800,16 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "tree_id": "gate",
+                "cause_role": "root",
             },
             {
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [1],
+                "causal_event_refs": [eid1],
+                "tree_id": "gate",
+                "cause_role": "main",
             },
         ],
     )
@@ -816,7 +821,7 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
             confidence="high",
             setup_event_index=1,
         ),
-        setup_event_id=str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1")),
+        setup_event_id=eid1,
     )
     db_session.commit()
 
@@ -836,19 +841,26 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
     assert forest["chapter_order"] == 1
     nodes = {node["event_id"]: node for node in forest["event_nodes"]}
     assert set(nodes) == {
-        str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1")),
+        eid1,
         str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2")),
     }
-    assert nodes[str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))]["description"] == "顾霜进入山门"
+    assert nodes[eid1]["description"] == "顾霜进入山门"
+    assert nodes[eid1]["tree_id"] == "gate"
+    assert nodes[eid1]["cause_role"] == "root"
 
-    causal_edges = [edge for edge in forest["event_edges"] if edge["edge_type"] == "causal"]
+    # 树视图 + 因果边（contains 派生化：event_edges 键移除）
+    assert "event_edges" not in forest
+    trees = {tree["tree_id"]: tree for tree in forest["event_trees"]}
+    assert trees["gate"]["main_chain"] == [
+        eid1,
+        str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2")),
+    ]
+    causal_edges = forest["causal_edges"]
     assert len(causal_edges) == 1
-    assert causal_edges[0]["source_event_id"] == str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    assert causal_edges[0]["source_event_id"] == eid1
 
     assert len(forest["foreshadowing_edges"]) == 1
-    assert forest["foreshadowing_edges"][0]["setup_event_id"] == str(
-        uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1")
-    )
+    assert forest["foreshadowing_edges"][0]["setup_event_id"] == eid1
     assert forest["foreshadowing_edges"][0]["payoff_event_id"] is None
 
 

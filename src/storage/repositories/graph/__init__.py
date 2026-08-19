@@ -1,9 +1,10 @@
 from .event_forest import (
-    EventChapterRootRow,
     EventEdgeRow,
     EventForestRepository,
     EventForestSnapshot,
     EventNodeRow,
+    EventSecondaryGroupRow,
+    EventTreeRow,
     ForeshadowingEdgeRow,
 )
 from .persistence import (
@@ -30,8 +31,9 @@ __all__ = [
     "stable_annotation_fact_id",
     "EventForestRepository",
     "EventForestSnapshot",
-    "EventChapterRootRow",
     "EventNodeRow",
     "EventEdgeRow",
+    "EventSecondaryGroupRow",
+    "EventTreeRow",
     "ForeshadowingEdgeRow",
 ]

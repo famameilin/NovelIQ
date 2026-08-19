@@ -18,7 +18,7 @@ from src.storage.models import EventEdge, EventNode, ForeshadowingThread, GraphV
 
 @dataclass(frozen=True)
 class EventNodeRow:
-    """2026-08-18 用于返回事件节点快照"""
+    """2026-08-19 用于返回事件节点快照（契约 v3：含树结构字段）"""
 
     event_id: str
     event_revision: int
@@ -31,17 +31,19 @@ class EventNodeRow:
     char_end: int
     text_hash: str
     evidence: list[dict[str, Any]]
-    causal_event_refs: list[int]
+    causal_event_refs: list[str]
+    tree_id: str
+    cause_role: str
 
 
 @dataclass(frozen=True)
 class EventEdgeRow:
-    """2026-08-18 用于返回事件边快照"""
+    """2026-08-19 用于返回因果边快照（契约 v3：contains 不再落表，端点必为非空）"""
 
     edge_id: str
     edge_type: str
-    source_event_id: str | None
-    source_event_revision: int | None
+    source_event_id: str
+    source_event_revision: int
     target_event_id: str
     target_event_revision: int
     source_chapter_id: int
@@ -66,25 +68,41 @@ class ForeshadowingEdgeRow:
 
 
 @dataclass(frozen=True)
-class EventChapterRootRow:
-    """2026-08-18 用于返回章节根及其 contains 事件顺序"""
+class EventSecondaryGroupRow:
+    """2026-08-19 用于返回一棵事件树的次因分支（挂在某个目标事件下）"""
 
-    chapter_id: int
-    chapter_order: int
-    event_ids: list[str]
+    target_event_id: str
+    branch: list[str]
+
+
+@dataclass(frozen=True)
+class EventTreeRow:
+    """2026-08-19 用于返回一棵事件树（一棵树 = 一个完整事件）
+
+    main_chain 为主因链（root + main 角色，按锚点原文顺序）；secondary_groups
+    为次因分支（secondary 节点按其首个因果前驱 target 归组）。
+    """
+
+    tree_id: str
+    root_event_id: str
+    main_chain: list[str]
+    secondary_groups: list[EventSecondaryGroupRow]
+    chapter_ids: list[int]
+    char_start: int
+    char_end: int
 
 
 @dataclass(frozen=True)
 class EventForestSnapshot:
-    """2026-08-18 用于返回完整事件森林快照"""
+    """2026-08-19 用于返回完整事件森林快照（树视图 + 树间边，契约 v3）"""
 
     chapter_order: int
     graph_version_id: str
     visible_through_chapter_order: int
-    chapter_roots: list[EventChapterRootRow]
     derived_event_order: list[str]
     event_nodes: list[EventNodeRow]
-    event_edges: list[EventEdgeRow]
+    event_trees: list[EventTreeRow]
+    causal_edges: list[EventEdgeRow]
     foreshadowing_edges: list[ForeshadowingEdgeRow]
 
 
@@ -173,6 +191,8 @@ class EventForestRepository:
                 text_hash=node.text_hash,
                 evidence=list(node.evidence),
                 causal_event_refs=list(node.causal_event_refs),
+                tree_id=node.tree_id,
+                cause_role=node.cause_role,
             )
             for node in sorted(latest.values(), key=lambda n: (n.chapter_order, n.event_id))
         ]
@@ -246,6 +266,64 @@ class EventForestRepository:
             for thread in rows
         ]
 
+    def _build_event_trees(self, event_nodes: list[EventNodeRow]) -> list[EventTreeRow]:
+        """2026-08-19 用于按 tree_id 分组组装事件树视图（契约 v3）
+
+        根 = cause_role 为 root 的唯一事件（缺失/多个时取锚点最早事件）；
+        main_chain = root/main 角色按 (chapter_order, char_start) 原文顺序；
+        secondary_groups = secondary 节点按首个因果前驱 target 归组。
+        """
+        nodes_by_tree: dict[str, list[EventNodeRow]] = {}
+        for node in event_nodes:
+            nodes_by_tree.setdefault(node.tree_id, []).append(node)
+
+        def sort_key(node: EventNodeRow) -> tuple[int, int, int, str]:
+            return (node.chapter_order, node.char_start, node.char_end, node.event_id)
+
+        trees: list[tuple[EventTreeRow, tuple[int, int, int, str]]] = []
+        for tree_id, nodes in nodes_by_tree.items():
+            ordered = sorted(nodes, key=sort_key)
+            roots = [n for n in ordered if n.cause_role == "root"]
+            root_id = roots[0].event_id if len(roots) == 1 else ordered[0].event_id
+            main_chain = [
+                n.event_id
+                for n in ordered
+                if n.cause_role in ("root", "main")
+            ]
+            secondary_by_target: dict[str, list[str]] = {}
+            for node in ordered:
+                if node.cause_role != "secondary":
+                    continue
+                target = (
+                    node.causal_event_refs[0]
+                    if node.causal_event_refs
+                    else tree_id
+                )
+                secondary_by_target.setdefault(target, []).append(node.event_id)
+            secondary_groups = [
+                EventSecondaryGroupRow(
+                    target_event_id=target,
+                    branch=sorted(branch),
+                )
+                for target, branch in sorted(secondary_by_target.items())
+            ]
+            trees.append(
+                (
+                    EventTreeRow(
+                        tree_id=tree_id,
+                        root_event_id=root_id,
+                        main_chain=main_chain,
+                        secondary_groups=secondary_groups,
+                        chapter_ids=sorted({n.chapter_id for n in nodes}),
+                        char_start=min(n.char_start for n in nodes),
+                        char_end=max(n.char_end for n in nodes),
+                    ),
+                    sort_key(ordered[0]),
+                )
+            )
+        trees.sort(key=lambda pair: pair[1])
+        return [tree for tree, _ in trees]
+
     def fetch_snapshot(
         self,
         run_id: str,
@@ -253,7 +331,7 @@ class EventForestRepository:
         chapter_id: int | None = None,
         graph_version_id: str | None = None,
     ) -> EventForestSnapshot | None:
-        """2026-08-18 用于返回完整事件森林快照（章节根、事件节点、三类边、锚点、Evidence、可见边界和派生顺序）"""
+        """2026-08-19 用于返回完整事件森林快照（树视图 + 树间边，契约 v3）"""
         boundary = self.resolve_graph_version(
             run_id,
             chapter_id=chapter_id,
@@ -263,7 +341,7 @@ class EventForestRepository:
             return None
         max_order = int(boundary.chapter_order)
         event_nodes = self.fetch_event_nodes(run_id, max_chapter_order=max_order)
-        event_edges = self.fetch_event_edges(run_id, max_chapter_order=max_order)
+        causal_edges = self.fetch_event_edges(run_id, max_chapter_order=max_order)
         foreshadowing_edges = self.fetch_foreshadowing_edges(
             run_id,
             max_chapter_order=max_order,
@@ -299,21 +377,7 @@ class EventForestRepository:
             )
             for edge in foreshadowing_edges
         ]
-        roots_by_chapter: dict[int, EventChapterRootRow] = {}
-        for node in event_nodes:
-            root = roots_by_chapter.setdefault(
-                node.chapter_id,
-                EventChapterRootRow(
-                    chapter_id=node.chapter_id,
-                    chapter_order=node.chapter_order,
-                    event_ids=[],
-                ),
-            )
-            root.event_ids.append(node.event_id)
-        chapter_roots = sorted(
-            roots_by_chapter.values(),
-            key=lambda root: (root.chapter_order, root.chapter_id),
-        )
+        event_trees = self._build_event_trees(event_nodes)
         derived_event_order = [
             node.event_id
             for node in sorted(
@@ -330,9 +394,9 @@ class EventForestRepository:
             chapter_order=max_order,
             graph_version_id=boundary.graph_version_id,
             visible_through_chapter_order=max_order,
-            chapter_roots=chapter_roots,
             derived_event_order=derived_event_order,
             event_nodes=event_nodes,
-            event_edges=event_edges,
+            event_trees=event_trees,
+            causal_edges=causal_edges,
             foreshadowing_edges=foreshadowing_edges,
         )

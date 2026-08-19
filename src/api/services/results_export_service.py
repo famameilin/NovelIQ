@@ -405,7 +405,7 @@ def fetch_all_results_data(
 
     novel_name = _fetch_novel_name(run_id, novel_id, stats_repo)
 
-    # 2026-08-18 事件森林/DAG：导出 event_forest 段
+    # 2026-08-19 事件森林/DAG：导出 event_forest 段（契约 v3 树视图 + 树间边）
     from src.storage.repositories.graph import EventForestRepository
 
     event_forest_repo = EventForestRepository(stats_repo.session)
@@ -416,14 +416,6 @@ def fetch_all_results_data(
             "graph_version_id": event_forest_snapshot.graph_version_id,
             "chapter_order": event_forest_snapshot.chapter_order,
             "visible_through_chapter_order": event_forest_snapshot.visible_through_chapter_order,
-            "chapter_roots": [
-                {
-                    "chapter_id": root.chapter_id,
-                    "chapter_order": root.chapter_order,
-                    "event_ids": root.event_ids,
-                }
-                for root in event_forest_snapshot.chapter_roots
-            ],
             "derived_event_order": event_forest_snapshot.derived_event_order,
             "event_nodes": [
                 {
@@ -439,10 +431,30 @@ def fetch_all_results_data(
                     "text_hash": node.text_hash,
                     "evidence": node.evidence,
                     "causal_event_refs": node.causal_event_refs,
+                    "tree_id": node.tree_id,
+                    "cause_role": node.cause_role,
                 }
                 for node in event_forest_snapshot.event_nodes
             ],
-            "event_edges": [
+            "event_trees": [
+                {
+                    "tree_id": tree.tree_id,
+                    "root_event_id": tree.root_event_id,
+                    "main_chain": tree.main_chain,
+                    "secondary_groups": [
+                        {
+                            "target_event_id": group.target_event_id,
+                            "branch": group.branch,
+                        }
+                        for group in tree.secondary_groups
+                    ],
+                    "chapter_ids": tree.chapter_ids,
+                    "char_start": tree.char_start,
+                    "char_end": tree.char_end,
+                }
+                for tree in event_forest_snapshot.event_trees
+            ],
+            "causal_edges": [
                 {
                     "edge_id": edge.edge_id,
                     "edge_type": edge.edge_type,
@@ -455,7 +467,7 @@ def fetch_all_results_data(
                     "is_active": edge.is_active,
                     "evidence": edge.evidence,
                 }
-                for edge in event_forest_snapshot.event_edges
+                for edge in event_forest_snapshot.causal_edges
             ],
             "foreshadowing_edges": [
                 {
