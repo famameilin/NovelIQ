@@ -10,15 +10,18 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import NAMESPACE_URL, uuid5
 
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEntityDirectory,
+    BoundEvent,
     ChunkMetricsInput,
     EmotionalValence,
     NarrativeFunction,
+    TextEvidence,
 )
 from src.workflows.annotate import _merge_sub_chunk_annotations, _split_chapter_sub_chunks
 
@@ -39,6 +42,45 @@ def _make_sub_annotation(chunk_id: int, *, summary: str, dialogue: BoundDialogue
                 character_observations=[],
                 dialogues=[dialogue],
                 events=[],
+                relations=[],
+                foreshadowings=[],
+            )
+        ],
+    )
+
+
+def _event(description: str, *, refs: list[str], role: str) -> BoundEvent:
+    """2026-08-19 用于构造契约 v3 事件（含树结构与全局 event_id 因果引用）"""
+    return BoundEvent(
+        description=description,
+        participants=[],
+        anchor_paragraph_ids=[0],
+        causal_event_refs=refs,
+        tree_id="tree-merge",
+        cause_role=role,  # type: ignore[arg-type]
+        char_start=0,
+        char_end=3,
+        text_hash="0" * 64,
+        evidence=[TextEvidence(paragraph_ids=[0], char_start=0, char_end=3, text_hash="0" * 64)],
+    )
+
+
+def _make_event_sub_annotation(chunk_id: int, *, summary: str, events: list[BoundEvent]) -> BoundChapterAnnotation:
+    """2026-08-19 用于构造带事件的子块标注"""
+    return BoundChapterAnnotation(
+        chapter_summary=summary,
+        chunks=[
+            BoundChunkAnnotation(
+                chunk_id=chunk_id,
+                metrics=ChunkMetricsInput(
+                    summary=summary,
+                    emotional_valence=EmotionalValence.NEUTRAL,
+                    narrative_function=NarrativeFunction.SETUP,
+                ),
+                entities=BoundEntityDirectory(entities=[]),
+                character_observations=[],
+                dialogues=[],
+                events=events,
                 relations=[],
                 foreshadowings=[],
             )
@@ -114,6 +156,8 @@ def test_merge_remaps_dialogues_of_later_sub_chunks() -> None:
         [first, second],
         chapter_chunk_id=7,
         sub_chunk_offsets=[0, 20],
+        run_id="run-1",
+        chapter_id=7,
     )
 
     assert merged.chunks[0].chunk_id == 7
@@ -141,4 +185,39 @@ def test_merge_rejects_mismatched_offsets_length() -> None:
             [annotation],
             chapter_chunk_id=7,
             sub_chunk_offsets=[],
+            run_id="run-1",
+            chapter_id=7,
         )
+
+
+def test_merge_remaps_causal_event_refs_to_chapter_ordinals() -> None:
+    """2026-08-19 用于验证第 2+ 子块的事件 id 提升为整章序号 id（契约 v3）"""
+    run_id = "run-1"
+    chapter_id = 7
+    # 子块 1：事件 1（root）+ 事件 2（main 引用事件 1）
+    e1 = _event("进山", refs=[], role="root")
+    e2 = _event("拔剑", refs=[str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:1"))], role="main")
+    # 子块 2：事件 3（root）+ 事件 4（main 引用事件 3 子块内局部 id 1）
+    local_e3_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:1"))
+    e3 = _event("收势", refs=[], role="root")
+    e4 = _event("入鞘", refs=[local_e3_id], role="main")
+
+    merged = _merge_sub_chunk_annotations(
+        [
+            _make_event_sub_annotation(-1, summary="第一块", events=[e1, e2]),
+            _make_event_sub_annotation(-2, summary="第二块", events=[e3, e4]),
+        ],
+        chapter_chunk_id=chapter_id,
+        sub_chunk_offsets=[0, 20],
+        run_id=run_id,
+        chapter_id=chapter_id,
+    )
+
+    events = merged.chunks[0].events
+    assert [event.description for event in events] == ["进山", "拔剑", "收势", "入鞘"]
+    # 事件 4 的引用从子块局部 id（run:7:1）提升为整章序号 id（run:7:3）
+    final_e3_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:3"))
+    assert events[3].causal_event_refs == [final_e3_id]
+    # 子块 1（offset=0）的引用保持整章序号 id（run:7:1）
+    final_e1_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:1"))
+    assert events[1].causal_event_refs == [final_e1_id]

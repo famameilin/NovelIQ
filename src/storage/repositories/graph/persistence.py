@@ -572,13 +572,14 @@ def _persist_event_shadow(
     chapter_order: int,
     entities_by_name: dict[str, GraphEntity],
 ) -> list[dict[str, Any]]:
-    """2026-08-18 用于在同一完成事务中写入事件影子行并返回事件元信息列表
+    """2026-08-19 用于在同一完成事务中写入事件影子行并返回事件元信息列表
 
     影子行与对应 graph_fact 同事务写入——EventNode 行按确定性 event_id 生成，
-    包含稳定身份、描述、参与者、锚点、字符范围、文本哈希和 Evidence。
-    因果边（causal）在事件间写入 EventEdge；contains 边从章节根到各事件。
-    返回 list[dict] 每项含 event_id/event_revision/evidence/char_start/char_end，
-    供事实写入侧引用。
+    包含稳定身份、描述、参与者、锚点、字符范围、文本哈希、Evidence 与树结构
+    （tree_id/cause_role）。因果边（causal）在事件间写入 EventEdge，含树内
+    主链/次因分支与跨章历史事件引用；contains 不再落表（章节归属由 chapter_id
+    分组派生）。返回 list[dict] 每项含 event_id/event_revision/evidence/
+    char_start/char_end，供事实写入侧引用。
     """
     run_id = annotation.run_id
     chunk_id = chunk.chunk_id
@@ -620,6 +621,8 @@ def _persist_event_shadow(
             text_hash=event_item.text_hash,
             evidence=evidence_list,
             causal_event_refs=list(event_item.causal_event_refs),
+            tree_id=event_item.tree_id,
+            cause_role=event_item.cause_role,
             annotation_id=annotation.annotation_id,
             graph_version_id=graph_version.graph_version_id,
             source_kind="annotation",
@@ -640,65 +643,58 @@ def _persist_event_shadow(
 
     # EventNode 必须先入库，事件边的复合外键才能在 PostgreSQL 中校验
     session.flush()
+    meta_by_id = {meta["event_id"]: meta for meta in event_metas}
 
-    # 每个事件都挂到当前章节根；根由 source_chapter_id 表达
-    for meta in event_metas:
-        session.add(
-            EventEdge(
-                edge_id=_event_edge_id(
-                    run_id,
-                    "contains",
-                    f"chapter:{chunk_id}",
-                    meta["event_id"],
-                ),
-                run_id=run_id,
-                edge_type="contains",
-                source_event_id=None,
-                source_event_revision=None,
-                target_event_id=meta["event_id"],
-                target_event_revision=meta["event_revision"],
-                source_chapter_id=chunk_id,
-                target_chapter_id=chunk_id,
-                is_active=1,
-                evidence=meta["evidence"],
-                annotation_id=annotation.annotation_id,
-                graph_version_id=graph_version.graph_version_id,
-                payload_path=f"chunks/{chunk_id}/event-edge/contains/{meta['ordinal']}",
-            )
-        )
-
-    # 写入 causal 边（章内因果，严格偏序已在 tools.py 校验）
+    # 写入 causal 边（树内主链/次因分支 + 跨章历史事件引用；全局偏序已在 tools.py 校验）
     for meta in event_metas:
         for ref in meta["causal_event_refs"]:
-            if ref < 1 or ref > len(event_metas):
-                raise ValueError(f"因果事件序号越界: {ref}")
-            source_meta = event_metas[ref - 1]  # 1 基 → 0 基
-            if source_meta["char_end"] > meta["char_start"]:
+            if ref in meta_by_id:
+                source_meta = meta_by_id[ref]
+                source_revision = source_meta["event_revision"]
+                source_chapter_id = chunk_id
+                source_order = chapter_order
+                source_end = source_meta["char_end"]
+                evidence = source_meta["evidence"] + meta["evidence"]
+                payload_suffix = f"{source_meta['ordinal']}_{meta['ordinal']}"
+            else:
+                source_node = session.execute(
+                    select(EventNode)
+                    .where(EventNode.run_id == run_id, EventNode.event_id == ref)
+                    .order_by(EventNode.event_revision.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if source_node is None:
+                    raise ValueError(f"因果事件引用未知 event_id: {ref}")
+                source_revision = int(source_node.event_revision)
+                source_chapter_id = int(source_node.chapter_id)
+                source_order = int(source_node.chapter_order)
+                source_end = int(source_node.char_end)
+                evidence = list(source_node.evidence) + meta["evidence"]
+                payload_suffix = f"{ref}_{meta['ordinal']}"
+            if source_order > chapter_order or (
+                source_order == chapter_order and source_end > meta["char_start"]
+            ):
                 raise ValueError(
-                    "因果事件违反原文严格偏序: "
-                    f"source={source_meta['event_id']} target={meta['event_id']}"
+                    "因果事件违反全局原文偏序: "
+                    f"source={ref} (chapter_order={source_order}, char_end={source_end}) "
+                    f"target={meta['event_id']} (chapter_order={chapter_order}, "
+                    f"char_start={meta['char_start']})"
                 )
-            edge_id = _event_edge_id(
-                run_id,
-                "causal",
-                source_meta["event_id"],
-                meta["event_id"],
-            )
             edge = EventEdge(
-                edge_id=edge_id,
+                edge_id=_event_edge_id(run_id, "causal", ref, meta["event_id"]),
                 run_id=run_id,
                 edge_type="causal",
-                source_event_id=source_meta["event_id"],
-                source_event_revision=source_meta["event_revision"],
+                source_event_id=ref,
+                source_event_revision=source_revision,
                 target_event_id=meta["event_id"],
                 target_event_revision=meta["event_revision"],
-                source_chapter_id=chunk_id,
+                source_chapter_id=source_chapter_id,
                 target_chapter_id=chunk_id,
                 is_active=1,
-                evidence=source_meta["evidence"] + meta["evidence"],
+                evidence=evidence,
                 annotation_id=annotation.annotation_id,
                 graph_version_id=graph_version.graph_version_id,
-                payload_path=f"chunks/{chunk_id}/event-edge/causal/{source_meta['ordinal']}_{meta['ordinal']}",
+                payload_path=f"chunks/{chunk_id}/event-edge/causal/{payload_suffix}",
             )
             session.add(edge)
 
@@ -706,18 +702,21 @@ def _persist_event_shadow(
 
 
 def _validate_dag_acyclic(event_metas: list[dict[str, Any]]) -> None:
-    """2026-08-18 用于对因果边做 DAG 无环校验（章内拓扑排序）
+    """2026-08-19 用于对批量内的因果边做 DAG 无环校验（契约 v3：全局 event_id）
 
-    causal_event_refs 在 tools.py 已保证严格前驱（ref < i），但跨章因果边
-    在 P2 才接入；此函数做章内最终校验，确保无环。
+    因果引用是全局 event_id；跨批/跨章引用的源不在本批内，跳过（整 run 无环由
+    _validate_persisted_dag 覆盖）；本批内引用的边参与 Kahn 拓扑排序。
     """
     n = len(event_metas)
+    index_by_id = {meta["event_id"]: i for i, meta in enumerate(event_metas)}
     # 构建邻接表
     adj: dict[int, list[int]] = {i: [] for i in range(n)}
     in_degree: dict[int, int] = dict.fromkeys(range(n), 0)
     for i, meta in enumerate(event_metas):
         for ref in meta["causal_event_refs"]:
-            source = ref - 1  # 1 基 → 0 基
+            source = index_by_id.get(ref)
+            if source is None:
+                continue
             target = i
             adj[source].append(target)
             in_degree[target] += 1

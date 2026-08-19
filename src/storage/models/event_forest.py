@@ -1,13 +1,14 @@
 """
 事件森林/DAG 过程层 ORM 模型
 
-三层事实源中的过程层：事件节点（event_nodes）保存稳定事件身份与原文锚点，
-事件边（event_edges）保存 contains / causal 两类边的稳定身份与端点。
+三层事实源中的过程层：事件节点（event_nodes）保存稳定事件身份、原文锚点与
+树结构（tree_id/cause_role，契约 v3「树内图外」）；事件边（event_edges）
+只保存因果关联边（causal，含树内主链/次因分支与树间/跨章边）。
 foreshadowing 边的载体是 foreshadowing_threads 表（setup_event_id/payoff_event_id），
-不在此表落库。
+不在此表落库；contains 边不再落表，章节归属由 chapter_id 分组派生。
 
 2026-08-18：P1 阶段影子表，API 读侧仍走 graph_facts；P2 提升为过程事实源后
-才对 Agent/前端/导出暴露。
+才对 Agent/前端/导出暴露。2026-08-19：契约 v3 落地（contains 派生化 + 树字段）。
 """
 
 from __future__ import annotations
@@ -61,7 +62,10 @@ class EventNode(Base):
     char_end: Mapped[int] = mapped_column(Integer, nullable=False)
     text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    causal_event_refs: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    causal_event_refs: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # 2026-08-19 契约 v3：事件树内部结构（Agent 显式声明）
+    tree_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    cause_role: Mapped[str] = mapped_column(String(16), nullable=False)
     annotation_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
@@ -87,20 +91,26 @@ class EventNode(Base):
         ),
         CheckConstraint("event_revision > 0", name="ck_event_nodes_revision_positive"),
         CheckConstraint("char_end > char_start", name="ck_event_nodes_char_order"),
+        CheckConstraint(
+            "cause_role IN ('root', 'main', 'secondary')",
+            name="ck_event_nodes_cause_role",
+        ),
         UniqueConstraint("run_id", "event_id", "event_revision", name="uq_event_nodes_run_event_revision"),
         UniqueConstraint("graph_version_id", "payload_path", name="uq_event_nodes_graph_version_payload_path"),
         Index("idx_event_nodes_run_chapter", "run_id", "chapter_id"),
         Index("idx_event_nodes_run_chapter_order", "run_id", "chapter_order"),
+        Index("idx_event_nodes_run_tree", "run_id", "tree_id"),
         Index("idx_event_nodes_graph_version", "graph_version_id"),
     )
 
 
 class EventEdge(Base):
-    """2026-08-18 用于保存事件森林/DAG 中 contains 和 causal 边的稳定身份
+    """2026-08-19 用于保存事件森林/DAG 的因果关联边（契约 v3）
 
-    章节根边使用 source_event_id 指向章节根事件节点（contains 边的 source 是
-    章节根，target 是章内事件）；causal 边的 source/target 是两个事件节点。
-    foreshadowing 边不在本表落库——其载体是 foreshadowing_threads。
+    事件间因果（多对多）统一落在 event_edges：树内主链/次因分支边与跨树跨章
+    因果边都是 causal 类型，source/target 均为事件节点。contains 不再落表——
+    章节归属由 event_nodes.chapter_id 分组派生；foreshadowing 边载体仍为
+    foreshadowing_threads。
     """
 
     __tablename__ = "event_edges"
@@ -112,9 +122,8 @@ class EventEdge(Base):
         nullable=False,
     )
     edge_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    # contains 边的 source 使用章节根（通过 source_chapter_id 表达），因此可为空
-    source_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    source_event_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_event_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     target_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
     target_event_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     source_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -152,8 +161,7 @@ class EventEdge(Base):
             ondelete="CASCADE",
             name="event_edges_target_chapter_run_fkey",
         ),
-        # causal 的两个端点必须引用同一 run 的实际事件修订；contains 的 source
-        # 为章节根，source_event_id/source_event_revision 保持 NULL
+        # causal 两端必须引用同一 run 的实际事件修订（contains 已不落表）
         ForeignKeyConstraint(
             ["run_id", "source_event_id", "source_event_revision"],
             ["event_nodes.run_id", "event_nodes.event_id", "event_nodes.event_revision"],
@@ -167,13 +175,8 @@ class EventEdge(Base):
             name="event_edges_target_event_fkey",
         ),
         CheckConstraint(
-            "edge_type IN ('contains', 'causal')",
+            "edge_type = 'causal'",
             name="ck_event_edges_type",
-        ),
-        CheckConstraint(
-            "(edge_type = 'contains' AND source_event_id IS NULL AND source_event_revision IS NULL) OR "
-            "(edge_type = 'causal' AND source_event_id IS NOT NULL AND source_event_revision IS NOT NULL)",
-            name="ck_event_edges_source_shape",
         ),
         CheckConstraint("is_active IN (0, 1)", name="ck_event_edges_is_active_bool"),
         UniqueConstraint("graph_version_id", "payload_path", name="uq_event_edges_graph_version_payload_path"),

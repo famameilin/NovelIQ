@@ -111,6 +111,8 @@ def _full_annotation(text: str, *, chunk_id: int = 1) -> BoundChapterAnnotation:
                         ],
                         anchor_paragraph_ids=[0],
                         causal_event_refs=[],
+                        tree_id="tree-main",
+                        cause_role="root",
                         char_start=0,
                         char_end=10,
                         text_hash=hashlib.sha256(text[:10].encode("utf-8")).hexdigest(),
@@ -851,6 +853,8 @@ def test_persist_writes_event_shadow_node_with_deterministic_id(db_session) -> N
     assert node.char_end == 10
     assert node.anchor_paragraph_ids == [0]
     assert node.causal_event_refs == []
+    assert node.tree_id == "tree-main"
+    assert node.cause_role == "root"
     assert node.source_kind == "annotation"
     assert node.payload_path == "chunks/1/event/1"
     assert len(node.evidence) == 1
@@ -858,13 +862,14 @@ def test_persist_writes_event_shadow_node_with_deterministic_id(db_session) -> N
 
 
 def test_persist_writes_causal_edge_between_events(db_session) -> None:
-    """2026-08-18 用于验证因果引用在 EventEdge 表写入 causal 边"""
+    """2026-08-19 用于验证全局 event_id 因果引用写入 EventEdge causal 边（契约 v3）"""
     text = "顾霜进入山门。\n顾霜拔剑。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=[text],
         title="因果边写入",
     )
+    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -874,12 +879,16 @@ def test_persist_writes_causal_edge_between_events(db_session) -> None:
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "tree_id": "gate-entry",
+                "cause_role": "root",
             },
             {
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [1],
+                "causal_event_refs": [eid1],
+                "tree_id": "gate-entry",
+                "cause_role": "main",
             },
         ],
     )
@@ -895,7 +904,6 @@ def test_persist_writes_causal_edge_between_events(db_session) -> None:
     )
     assert len(edges) == 1
     edge = edges[0]
-    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
     assert edge.source_event_id == eid1
     assert edge.target_event_id == eid2
@@ -916,21 +924,119 @@ def test_persist_writes_causal_edge_between_events(db_session) -> None:
     assert {fact.event_id for fact in event_facts} == {eid1, eid2}
 
 
+def test_persist_does_not_materialize_contains_edges(db_session) -> None:
+    """2026-08-19 用于验证契约 v3：contains 不再落表，event_edges 只有 causal 边"""
+    text = "顾霜进入山门。\n顾霜拔剑。"
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[text],
+        title="contains 派生化",
+    )
+    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "tree_id": "gate-entry",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜拔剑",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "causal_event_refs": [eid1],
+                "tree_id": "gate-entry",
+                "cause_role": "main",
+            },
+        ],
+    )
+    db_session.commit()
+
+    edge_types = set(
+        db_session.execute(
+            select(EventEdge.edge_type).where(EventEdge.run_id == run_id)
+        ).scalars()
+    )
+    assert edge_types == {"causal"}
+    assert "contains" not in edge_types
+
+
+def test_persist_writes_cross_chapter_causal_edge(db_session) -> None:
+    """2026-08-19 用于验证跨章事件引用写入跨章 causal 边（契约 v3 树间/树内跨章）"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜立誓。", "顾霜兑现承诺。"],
+        chapter_ids=[1, 2],
+        title="跨章因果边",
+    )
+    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:2:1"))
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜立誓",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "tree_id": "oath",
+                "cause_role": "root",
+            },
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        events=[
+            {
+                "description": "顾霜兑现承诺",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "causal_event_refs": [eid1],
+                "tree_id": "oath",
+                "cause_role": "main",
+            },
+        ],
+    )
+    db_session.commit()
+
+    edges = list(
+        db_session.execute(
+            select(EventEdge).where(
+                EventEdge.run_id == run_id,
+                EventEdge.edge_type == "causal",
+            )
+        ).scalars()
+    )
+    assert len(edges) == 1
+    assert edges[0].source_event_id == eid1
+    assert edges[0].target_event_id == eid2
+    assert edges[0].source_chapter_id == 1
+    assert edges[0].target_chapter_id == 2
+
+
 def test_dag_acyclic_validation_rejects_cycle() -> None:
-    """2026-08-18 用于验证因果边成环时 DAG 无环校验抛 ValueError"""
+    """2026-08-19 用于验证因果边成环时 DAG 无环校验抛 ValueError（契约 v3：event_id 引用）"""
     event_metas = [
-        {"event_id": "e1", "causal_event_refs": [2]},
-        {"event_id": "e2", "causal_event_refs": [1]},
+        {"event_id": "e1", "causal_event_refs": ["e2"]},
+        {"event_id": "e2", "causal_event_refs": ["e1"]},
     ]
     with pytest.raises(ValueError, match="DAG 无环校验失败"):
         _validate_dag_acyclic(event_metas)
 
 
 def test_dag_acyclic_validation_passes_for_acyclic() -> None:
-    """2026-08-18 用于验证无环因果图通过 DAG 校验"""
+    """2026-08-19 用于验证无环因果图通过 DAG 校验（含多因节点）"""
     event_metas = [
         {"event_id": "e1", "causal_event_refs": []},
-        {"event_id": "e2", "causal_event_refs": [1]},
-        {"event_id": "e3", "causal_event_refs": [1, 2]},
+        {"event_id": "e2", "causal_event_refs": ["e1"]},
+        {"event_id": "e3", "causal_event_refs": ["e1", "e2"]},
     ]
     _validate_dag_acyclic(event_metas)
