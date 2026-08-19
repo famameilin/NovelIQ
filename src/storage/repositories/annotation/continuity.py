@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unicodedata
 from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -18,6 +19,7 @@ from src.agents.annotation.schema import (
     BoundForeshadowing,
     CaseSearchResult,
     CompletionCase,
+    EventCauseRole,
     EventHistoryResult,
     ForeshadowingSearchResult,
     GraphEvidence,
@@ -320,6 +322,8 @@ class DatabaseAnnotationQueryService:
                         for item in node.evidence
                     ],
                     causal_event_refs=list(node.causal_event_refs),
+                    tree_id=node.tree_id,
+                    cause_role=cast(EventCauseRole, node.cause_role),
                     edges=[
                         {
                             "edge_id": edge.edge_id,

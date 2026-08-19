@@ -255,9 +255,11 @@ def make_bound_event(
     participants: list[dict[str, str]] | None = None,
     anchor_paragraph_ids: list[int],
     chunk_paragraph_info: ChunkParagraphInfo,
-    causal_event_refs: list[int] | None = None,
+    causal_event_refs: list[str] | None = None,
+    tree_id: str = "tree-main",
+    cause_role: str = "root",
 ) -> BoundEvent:
-    """2026-08-18 用于构造测试用 BoundEvent（含服务端派生的锚点和证据）"""
+    """2026-08-19 用于构造测试用 BoundEvent（契约 v3：含树结构字段）"""
     char_start, char_end = chunk_paragraph_info.char_span_for(anchor_paragraph_ids)
     anchor_text = chunk_paragraph_info.text_for(anchor_paragraph_ids)
     text_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
@@ -277,6 +279,8 @@ def make_bound_event(
         ],
         anchor_paragraph_ids=anchor_paragraph_ids,
         causal_event_refs=causal_event_refs or [],
+        tree_id=tree_id,
+        cause_role=cause_role,
         char_start=char_start,
         char_end=char_end,
         text_hash=text_hash,
@@ -306,8 +310,8 @@ def persist_chapter_annotation(
     M9a-2：chunks 表合并进 chapters 后，章节正文取自 chapters 表，
     运行时 chunk id 即章真实 chapter_id（payload 内 chunk_id == chapter_id）。
 
-    2026-08-18：events/foreshadowings 参数支持事件森林/DAG v2 合同测试。
-    events 每项含 description/participants/anchor_paragraph_ids/causal_event_refs；
+    2026-08-19：events 每项含 description/participants/anchor_paragraph_ids/
+    causal_event_refs(全局 event_id)/tree_id/cause_role（缺省 tree-main/root）；
     foreshadowings 每项含 description/confidence/setup_event_index。
     """
     chapter_row = session.execute(
@@ -476,6 +480,8 @@ def persist_chapter_annotation(
                     ),
                     chunk_paragraph_info=paragraph_info,
                     causal_event_refs=event_spec.get("causal_event_refs"),
+                    tree_id=event_spec.get("tree_id", "tree-main"),
+                    cause_role=event_spec.get("cause_role", "root"),
                 )
             )
         # 构建伏笔列表（setup_event_index 引用本章事件序号）

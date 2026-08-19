@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
 from typing import cast as type_cast
+from uuid import NAMESPACE_URL, uuid5
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -159,11 +160,44 @@ def _merge_sub_chunk_entities(directories: list[BoundEntityDirectory]) -> list[B
     return merged
 
 
+def _remap_causal_event_refs(
+    refs: list[str],
+    *,
+    run_id: str,
+    chapter_id: int,
+    local_event_count: int,
+    event_offset: int,
+) -> list[str]:
+    """2026-08-19 契约 v3：把子块内事件 id 提升为整章序号 id（跨章引用保持不变）
+
+    子块 Agent 写入的本章因果前驱 id = uuid5(noveliq:event:{run_id}:{chapter_id}:
+    {局部序号})；合并后事件序号提升为 event_offset + 局部序号，引用需同步重算。
+    跨章历史事件 id 不属于本章 id 空间，原样保留，由落库侧解析到 EventNode。
+    """
+    if not refs or local_event_count <= 0:
+        return refs
+    id_base = f"noveliq:event:{run_id}:{chapter_id}:"
+    local_by_id = {
+        str(uuid5(NAMESPACE_URL, f"{id_base}{k}")): k
+        for k in range(1, local_event_count + 1)
+    }
+    remapped: list[str] = []
+    for ref in refs:
+        local = local_by_id.get(ref)
+        if local is None:
+            remapped.append(ref)
+            continue
+        remapped.append(str(uuid5(NAMESPACE_URL, f"{id_base}{event_offset + local}")))
+    return remapped
+
+
 def _merge_sub_chunk_annotations(
     annotations: list[BoundChapterAnnotation],
     *,
     chapter_chunk_id: int,
     sub_chunk_offsets: Sequence[int],
+    run_id: str,
+    chapter_id: int,
 ) -> BoundChapterAnnotation:
     """2026-08-14 M7（§20）用于把同一章各子块标注合并为单 chunk 章节标注
 
@@ -199,7 +233,13 @@ def _merge_sub_chunk_annotations(
             remapped = remapped.model_copy(
                 update={
                     "anchor_paragraph_ids": global_ids,
-                    "causal_event_refs": [event_offset + ref for ref in remapped.causal_event_refs],
+                    "causal_event_refs": _remap_causal_event_refs(
+                        remapped.causal_event_refs,
+                        run_id=run_id,
+                        chapter_id=chapter_id,
+                        local_event_count=local_event_count,
+                        event_offset=event_offset,
+                    ),
                 }
             )
             merged_events.append(remapped)
@@ -323,6 +363,8 @@ def _merge_sub_chunk_results(
             [result.annotation for result in results],
             chapter_chunk_id=chapter_chunk_id,
             sub_chunk_offsets=sub_chunk_offsets,
+            run_id=first.run_id,
+            chapter_id=first.chapter_id,
         ),
         resolved_cases=[
             _remap_case_anchor(

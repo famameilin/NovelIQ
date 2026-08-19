@@ -378,6 +378,8 @@ def _assert_annotation_contract_schema(engine: Engine) -> None:
             "text_hash",
             "evidence",
             "graph_version_id",
+            "tree_id",
+            "cause_role",
         },
         "event_edges": {
             "edge_id",
