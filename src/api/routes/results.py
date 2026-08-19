@@ -21,10 +21,11 @@ from src.api.dependencies import (
 )
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
 from src.api.models.event_forest import (
-    EventChapterRootResponse,
     EventEdgeResponse,
     EventForestResponse,
     EventNodeResponse,
+    EventSecondaryGroupResponse,
+    EventTreeResponse,
     ForeshadowingEdgeResponse,
 )
 from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
@@ -647,9 +648,10 @@ async def get_event_forest(
     graph_version_id: Annotated[str | None, Query(min_length=1)] = None,
 ) -> EventForestResponse:
     """
-    说明: 提供事件森林/DAG 查询，返回章节根、事件节点、三类边、锚点、Evidence、可见边界和派生顺序
-    修改时间: 2026-08-18
-    修改原因: P2 事件过程层正式接管，新增事件森林 API 交付项
+    说明: 提供事件森林/DAG 查询，返回事件树列表（树根/主链/次因分支）、树间因果边、
+          伏笔边、锚点、Evidence、可见边界和派生顺序（契约 v3，contains 派生化）
+    修改时间: 2026-08-19
+    修改原因: 契约 v3 事件层改为「树内图外」双层模型
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -674,14 +676,6 @@ async def get_event_forest(
         graph_version_id=snapshot.graph_version_id,
         chapter_order=snapshot.chapter_order,
         visible_through_chapter_order=snapshot.visible_through_chapter_order,
-        chapter_roots=[
-            EventChapterRootResponse(
-                chapter_id=root.chapter_id,
-                chapter_order=root.chapter_order,
-                event_ids=root.event_ids,
-            )
-            for root in snapshot.chapter_roots
-        ],
         derived_event_order=snapshot.derived_event_order,
         event_nodes=[
             EventNodeResponse(
@@ -697,13 +691,33 @@ async def get_event_forest(
                 text_hash=node.text_hash,
                 evidence=node.evidence,
                 causal_event_refs=node.causal_event_refs,
+                tree_id=node.tree_id,
+                cause_role=cast(Literal["root", "main", "secondary"], node.cause_role),
             )
             for node in snapshot.event_nodes
         ],
-        event_edges=[
+        event_trees=[
+            EventTreeResponse(
+                tree_id=tree.tree_id,
+                root_event_id=tree.root_event_id,
+                main_chain=tree.main_chain,
+                secondary_groups=[
+                    EventSecondaryGroupResponse(
+                        target_event_id=group.target_event_id,
+                        branch=group.branch,
+                    )
+                    for group in tree.secondary_groups
+                ],
+                chapter_ids=tree.chapter_ids,
+                char_start=tree.char_start,
+                char_end=tree.char_end,
+            )
+            for tree in snapshot.event_trees
+        ],
+        causal_edges=[
             EventEdgeResponse(
                 edge_id=edge.edge_id,
-                edge_type=cast(Literal["contains", "causal"], edge.edge_type),
+                edge_type=cast(Literal["causal"], edge.edge_type),
                 source_event_id=edge.source_event_id,
                 source_event_revision=edge.source_event_revision,
                 target_event_id=edge.target_event_id,
@@ -713,7 +727,7 @@ async def get_event_forest(
                 is_active=edge.is_active,
                 evidence=edge.evidence,
             )
-            for edge in snapshot.event_edges
+            for edge in snapshot.causal_edges
         ],
         foreshadowing_edges=[
             ForeshadowingEdgeResponse(

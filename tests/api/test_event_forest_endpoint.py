@@ -46,12 +46,16 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "tree_id": "gate",
+                "cause_role": "root",
             },
             {
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [1],
+                "causal_event_refs": [_event_id(run_id, 1, 1)],
+                "tree_id": "gate",
+                "cause_role": "main",
             },
         ],
     )
@@ -84,7 +88,7 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
 
 
 def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) -> None:
-    """2026-08-18 用于验证事件森林快照的节点、边、章根与可见边界"""
+    """2026-08-19 用于验证事件森林快照的树视图、因果边、伏笔边与可见边界（契约 v3）"""
     novel_id, run_id = _insert_event_forest_run(db_session)
 
     response = api_client.get(
@@ -108,15 +112,25 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert nodes[_event_id(run_id, 1, 2)]["description"] == "顾霜立誓"
     assert nodes[_event_id(run_id, 2, 1)]["description"] == "顾霜拔剑"
     assert nodes[_event_id(run_id, 1, 1)]["anchor_paragraph_ids"] == [0]
+    assert nodes[_event_id(run_id, 1, 1)]["tree_id"] == "gate"
+    assert nodes[_event_id(run_id, 1, 1)]["cause_role"] == "root"
 
-    contains_edges = [e for e in payload["event_edges"] if e["edge_type"] == "contains"]
-    causal_edges = [e for e in payload["event_edges"] if e["edge_type"] == "causal"]
-    # 每事件一条 contains 边（章根 → 事件），3 事件共 3 条
-    assert len(contains_edges) == 3
-    assert all(edge["source_event_id"] is None for edge in contains_edges)
+    # 树视图：章 1 双事件一棵树（主链），章 2 单事件一棵树；contains 派生化不再返回
+    assert "event_edges" not in payload
+    assert "chapter_roots" not in payload
+    trees = {tree["tree_id"]: tree for tree in payload["event_trees"]}
+    assert set(trees) == {"gate", "tree-main"}
+    gate = trees["gate"]
+    assert gate["root_event_id"] == _event_id(run_id, 1, 1)
+    assert gate["main_chain"] == [_event_id(run_id, 1, 1), _event_id(run_id, 1, 2)]
+    assert gate["chapter_ids"] == [1]
+
+    causal_edges = payload["causal_edges"]
     assert len(causal_edges) == 1
+    assert all(edge["edge_type"] == "causal" for edge in causal_edges)
     assert causal_edges[0]["source_event_id"] == _event_id(run_id, 1, 1)
     assert causal_edges[0]["target_event_id"] == _event_id(run_id, 1, 2)
+    assert causal_edges[0]["source_event_revision"] is not None
     assert causal_edges[0]["is_active"] is True
 
     assert len(payload["foreshadowing_edges"]) == 1
@@ -125,14 +139,6 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert foreshadowing["payoff_event_id"] is None
     assert foreshadowing["status"] == "open"
     assert foreshadowing["active"] is True
-
-    assert len(payload["chapter_roots"]) == 2
-    root_by_chapter = {root["chapter_id"]: root for root in payload["chapter_roots"]}
-    assert set(root_by_chapter[1]["event_ids"]) == {
-        _event_id(run_id, 1, 1),
-        _event_id(run_id, 1, 2),
-    }
-    assert root_by_chapter[2]["event_ids"] == [_event_id(run_id, 2, 1)]
 
     assert sorted(payload["derived_event_order"]) == sorted(nodes)
 
