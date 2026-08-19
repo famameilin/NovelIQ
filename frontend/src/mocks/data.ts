@@ -14,6 +14,7 @@ import type {
   Topic,
   DiagnosisResult,
   ForeshadowingThread,
+  EventForestResponse,
   GraphData,
   GraphChange,
   GraphChangesPageInfo,
@@ -510,6 +511,7 @@ export function createForeshadowingThreads(): ForeshadowingThread[] {
       setup_kind: "伏笔",
       expected_payoff_family: "身份揭露",
       payoff_likelihood: "high",
+      confidence: "high",
       strength: "high",
       status: "reinforced",
       active: true,
@@ -517,6 +519,105 @@ export function createForeshadowingThreads(): ForeshadowingThread[] {
       latest_why_unresolved_now: "当前任务尚未给出令牌来历的明确揭晓。",
     },
   ];
+}
+
+/**
+ * 2026-08-19 契约 v3：构造事件森林“树 + 树间边”假数据（树 1 跨章，树 2 单章，
+ * 含一条跨树因果边），供事件过程 Tab 开发调试。
+ */
+export function createEventForest(): EventForestResponse {
+  const node = (
+    eventId: string,
+    chapterId: number,
+    description: string,
+    treeId: string,
+    causeRole: "root" | "main" | "secondary",
+    causalEventRefs: string[] = [],
+  ) => ({
+    event_id: eventId,
+    event_revision: 1,
+    chapter_id: chapterId,
+    chapter_order: chapterId,
+    description,
+    participants: [{ role: "主体", entity: { name: "顾霜" } }],
+    anchor_paragraph_ids: [chapterId - 1],
+    char_start: 0,
+    char_end: 80,
+    text_hash: "0".repeat(64),
+    evidence: [],
+    causal_event_refs: causalEventRefs,
+    tree_id: treeId,
+    cause_role: causeRole,
+  });
+  const e1 = node("event-1", 1, "踏入山门", "tree-oath", "root");
+  const e2 = node("event-2", 1, "立下誓言", "tree-oath", "main", ["event-1"]);
+  const e3 = node("event-3", 3, "兑现承诺", "tree-oath", "main", ["event-2"]);
+  const e4 = node("event-4", 2, "路上遭遇劫匪", "tree-ambush", "root");
+  const e5 = node("event-5", 2, "劫匪提前得到消息", "tree-ambush", "secondary", ["event-4"]);
+  const edge = (
+    edgeId: string,
+    source: string,
+    target: string,
+    sourceChapter: number,
+    targetChapter: number,
+  ) => ({
+    edge_id: edgeId,
+    edge_type: "causal" as const,
+    source_event_id: source,
+    source_event_revision: 1,
+    target_event_id: target,
+    target_event_revision: 1,
+    source_chapter_id: sourceChapter,
+    target_chapter_id: targetChapter,
+    is_active: true,
+    evidence: [],
+  });
+  const nodes = [e1, e2, e3, e4, e5];
+  return {
+    graph_version_id: "graph-version-mock",
+    chapter_order: 3,
+    visible_through_chapter_order: 3,
+    derived_event_order: nodes.map((n) => n.event_id),
+    event_nodes: nodes,
+    event_trees: [
+      {
+        tree_id: "tree-oath",
+        root_event_id: "event-1",
+        main_chain: ["event-1", "event-2", "event-3"],
+        secondary_groups: [],
+        chapter_ids: [1, 3],
+        char_start: 0,
+        char_end: 80,
+      },
+      {
+        tree_id: "tree-ambush",
+        root_event_id: "event-4",
+        main_chain: ["event-4"],
+        secondary_groups: [{ target_event_id: "event-4", branch: ["event-5"] }],
+        chapter_ids: [2],
+        char_start: 0,
+        char_end: 80,
+      },
+    ],
+    causal_edges: [
+      edge("edge-1", "event-1", "event-2", 1, 1),
+      edge("edge-2", "event-2", "event-3", 1, 3),
+      edge("edge-3", "event-4", "event-5", 2, 2),
+      edge("edge-4", "event-2", "event-4", 1, 2),
+    ],
+    foreshadowing_edges: [
+      {
+        setup_id: "foreshadowing-1",
+        setup_event_id: "event-2",
+        payoff_event_id: "event-3",
+        first_chapter_id: 1,
+        last_chapter_id: 3,
+        setup_summary: "誓言将在多年后兑现。",
+        status: "likely_paid_off",
+        active: false,
+      },
+    ],
+  };
 }
 
 /* ------------------------------------------------------------------ */

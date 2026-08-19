@@ -318,6 +318,7 @@ export interface ForeshadowingThread {
   setup_kind: ForeshadowingSetupKind | string;
   expected_payoff_family: string;
   payoff_likelihood: ForeshadowingPayoffLikelihood;
+  confidence: string | null;
   strength: "high" | "medium" | string;
   status: "open" | "reinforced" | "likely_paid_off" | "archived" | string;
   active: boolean;
@@ -404,7 +405,7 @@ export interface GraphChangesPageResponse {
   page_info: GraphChangesPageInfo;
 }
 
-// 事件森林/DAG（2026-08-18 P2 事件过程层）
+// 事件森林/DAG（2026-08-19 P3 契约 v3：树内图外双层模型）
 
 export interface EventNodeResponse {
   event_id: string;
@@ -418,14 +419,16 @@ export interface EventNodeResponse {
   char_end: number;
   text_hash: string;
   evidence: Array<Record<string, unknown>>;
-  causal_event_refs: number[];
+  causal_event_refs: string[];
+  tree_id: string;
+  cause_role: "root" | "main" | "secondary";
 }
 
 export interface EventEdgeResponse {
   edge_id: string;
-  edge_type: "contains" | "causal";
-  source_event_id: string | null;
-  source_event_revision: number | null;
+  edge_type: "causal";
+  source_event_id: string;
+  source_event_revision: number;
   target_event_id: string;
   target_event_revision: number;
   source_chapter_id: number;
@@ -434,10 +437,19 @@ export interface EventEdgeResponse {
   evidence: Array<Record<string, unknown>>;
 }
 
-export interface EventChapterRootResponse {
-  chapter_id: number;
-  chapter_order: number;
-  event_ids: string[];
+export interface EventSecondaryGroupResponse {
+  target_event_id: string;
+  branch: string[];
+}
+
+export interface EventTreeResponse {
+  tree_id: string;
+  root_event_id: string;
+  main_chain: string[];
+  secondary_groups: EventSecondaryGroupResponse[];
+  chapter_ids: number[];
+  char_start: number;
+  char_end: number;
 }
 
 export interface ForeshadowingEdgeResponse {
@@ -455,10 +467,10 @@ export interface EventForestResponse {
   graph_version_id: string;
   chapter_order: number;
   visible_through_chapter_order: number;
-  chapter_roots: EventChapterRootResponse[];
   derived_event_order: string[];
   event_nodes: EventNodeResponse[];
-  event_edges: EventEdgeResponse[];
+  event_trees: EventTreeResponse[];
+  causal_edges: EventEdgeResponse[];
   foreshadowing_edges: ForeshadowingEdgeResponse[];
 }
 
