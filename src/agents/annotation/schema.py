@@ -171,6 +171,10 @@ DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 # 2026-08-18 事件森林/DAG 边类型定稿三类；sequence 不落库，按章节顺序和事件锚点生成派生排序
 EventEdgeType = Literal["contains", "causal", "foreshadowing"]
 
+# 2026-08-19 契约 v3：事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
+# 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
+EventCauseRole = Literal["root", "main", "secondary"]
+
 _ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = ("character", "organization")
 _CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = ("character",)
 _LOCATION_ENTITY_TYPES: tuple[EntityType, ...] = ("location",)
@@ -494,7 +498,11 @@ EvidenceItem = Annotated[
 
 
 class EventHistoryResult(StrictModel):
-    """2026-08-18 用于向当前 Agent 暴露已授权的历史事件及其根 Evidence"""
+    """2026-08-19 用于向当前 Agent 暴露已授权的历史事件及其根 Evidence
+
+    契约 v3：causal_event_refs 改为全局 event_id 字符串；新增 tree_id/cause_role
+    供 Agent 跨章延续事件树（沿用同一 tree_id、引用历史事件作因果前驱）。
+    """
 
     event_id: str = Field(min_length=1)
     event_revision: int = Field(gt=0)
@@ -507,7 +515,9 @@ class EventHistoryResult(StrictModel):
     char_end: int = Field(gt=0)
     text_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     evidence: list[EvidenceItem] = Field(min_length=1)
-    causal_event_refs: list[int] = Field(default_factory=list)
+    causal_event_refs: list[str] = Field(default_factory=list)
+    tree_id: str = Field(min_length=1)
+    cause_role: EventCauseRole = Field(default="main")
     edges: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -561,7 +571,11 @@ class ChunkParagraphInfo:
 
 
 class EventInput(StrictModel):
-    """2026-08-18 用于提交事件描述、参与者角色、原文段落锚点和因果前驱引用"""
+    """2026-08-19 用于提交事件描述、参与者角色、原文段落锚点、因果前驱引用和树结构
+
+    契约 v3「树内图外」：agent 显式声明事件归属的事件树（tree_id）与树内角色
+    （cause_role）；因果前驱改为全局 event_id 引用（可混本章已写 + 历史事件）。
+    """
 
     description: str = Field(min_length=1)
     participants: list[EventParticipantInput] = Field(default_factory=list)
@@ -569,24 +583,35 @@ class EventInput(StrictModel):
         min_length=1,
         description="事件锚定的段落序号（0 基，对应 prompt 中 ¶N 标记），至少 1 个",
     )
-    causal_event_refs: list[int] = Field(
+    causal_event_refs: list[str] = Field(
         default_factory=list,
-        description="本章因果前驱事件序号（1 基，指向本章事件列表中的序号）",
+        description="因果前驱事件的全局 event_id；可引用本章已写事件 id 与 "
+        "search_event_history 返回的历史事件 id（不能引用本轮尚未返回 id 的事件）",
+    )
+    tree_id: str = Field(min_length=1, description="事件归属的事件树 ID（同一棵树内保持一致）")
+    cause_role: EventCauseRole = Field(
+        description="事件在树内的角色：root=触发该事件的第一个自立动作；"
+        "main=主因链上；secondary=父的兄弟即次因分支"
     )
 
     @model_validator(mode="after")
     def normalize_event(self) -> EventInput:
-        """2026-08-18 用于规范化事件说明并校验锚点与因果引用"""
+        """2026-08-19 用于规范化事件说明并校验锚点、因果引用与树角色"""
         self.description = normalize_semantic_text(
             self.description,
             label="event.description",
         )
+        self.tree_id = normalize_semantic_text(self.tree_id, label="event.tree_id")
         if any(idx < 0 for idx in self.anchor_paragraph_ids):
             raise ValueError("event.anchor_paragraph_ids 不能为负数")
-        if any(ref < 1 for ref in self.causal_event_refs):
-            raise ValueError("event.causal_event_refs 必须为 1 基正整数")
+        if any(not ref for ref in self.causal_event_refs):
+            raise ValueError("event.causal_event_refs 不能为空字符串")
         if len(set(self.causal_event_refs)) != len(self.causal_event_refs):
             raise ValueError("event.causal_event_refs 不允许重复")
+        if self.cause_role == "root" and self.causal_event_refs:
+            raise ValueError("event.cause_role=root 时 causal_event_refs 必须为空")
+        if self.cause_role in ("main", "secondary") and not self.causal_event_refs:
+            raise ValueError("event.cause_role=main/secondary 时 causal_event_refs 至少 1 个")
         return self
 
 
@@ -682,12 +707,14 @@ class BoundDialogue(StrictModel):
 
 
 class BoundEvent(StrictModel):
-    """2026-08-18 用于系统绑定事件（含服务端派生的锚点字符范围、文本哈希和证据）"""
+    """2026-08-19 用于系统绑定事件（含服务端派生的锚点字符范围、文本哈希和证据）"""
 
     description: str = Field(min_length=1)
     participants: list[EventParticipantInput] = Field(default_factory=list)
     anchor_paragraph_ids: list[int] = Field(min_length=1)
-    causal_event_refs: list[int] = Field(default_factory=list)
+    causal_event_refs: list[str] = Field(default_factory=list)
+    tree_id: str = Field(min_length=1)
+    cause_role: EventCauseRole
     # 服务端派生：
     char_start: int = Field(ge=0)
     char_end: int = Field(gt=0)

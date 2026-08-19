@@ -76,13 +76,20 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - relation_type 使用闭合枚举；write_relations 只提交本章确认存在的边（三字段
   from_entity/to_entity/relation_type），新边建图 assert，已存在的同一条边自动接受为
   skipped_existing；关系强化/削弱/解除一律走 resolve_fact_case，不用 state 字段表达变化
-- 事件只填写 description、participants 和 anchor_paragraph_ids（角色闭合枚举：主体/客体/接收者/帮助者/
+- 事件填写 description、participants、tree_id、cause_role、causal_event_refs 和
+  anchor_paragraph_ids（角色闭合枚举：主体/客体/接收者/帮助者/
   反对者/见证者/地点；见证者、地点只用于事件参与者，不用于人物观察的 role_function；
   地点作为参与者角色，无单独 location 字段）
+- 每棵树 = 一个完整事件：tree_id 标识归属树，同一棵树的事件必须用同一 tree_id；
+  树根 cause_role=root（触发该事件的第一个自立动作，root 不允许填因果前驱）；
+  主因链上的事件 cause_role=main；次因分支事件（父的兄弟）cause_role=secondary
+- 何时开新树：换参与主体组合、换场景地点、上一段因果已闭合并沉淀为状态、或锚点段落区间不再连续
 - 每个事件必须提供 anchor_paragraph_ids：事件发生在原文中哪些段落（0 基序号，对应原文 ¶0/¶1/... 标记）；
   至少 1 个段落，多个段落表示事件横跨连续段落
-- causal_event_refs 是本章因果前驱事件的 1 基序号（指向本章事件列表中的序号）；
-  只能引用本章已定义的事件序号，不能跨章引用；因果链必须严格偏序，不允许环路
+- causal_event_refs 填因果前驱事件的全局 event_id（不是本章序号），可引用
+  search_event_history 返回的历史事件 id 与本章已写事件 id；不允许引用本轮尚未返回
+  id 的事件——同一本章事件链请分轮写出（write_events 响应会返回每条 event_id，先写
+  前驱拿 id，再写后继引用它）；因果链必须严格偏序（前驱原文位置在前），不允许环路
 - 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
 
 {relation_catalog}
@@ -94,9 +101,11 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   neighbors=边另一端节点；一次传入全部要核对的实体名
 - search_text 返回 result_number，使用 read_text(result_number) 读取原文；
   read_text 返回 JSON，content 字段为原文全文
-- search_event_history 只检索当前章之前、已经完成且获得授权的事件；历史伏笔续接或回收
-  只能把该工具返回的 event_id 传给 resolve_foreshadowing_case。当前章事件在
-  write_events 成功后按本章事件序号生成并授权对应 event_id，不能猜测其他 run 或章节的 ID
+- search_event_history 检索当前章之前、已经完成且获得授权的事件；返回的 event_id
+  可用于两处：作为因果前驱填入 causal_event_refs（跨章因果），或传给
+  resolve_foreshadowing_case 做历史伏笔续接/回收。返回的 tree_id 用于延续同一棵树
+  （跨章同一事件链沿用同一 tree_id）。当前章事件在 write_events 成功后返回并授权
+  对应 event_id，不能猜测其他 run 或章节的 ID
 - search_pool 只查询案例池，返回 case_number；能解决的案例用 resolve_*_case 解决，
   search_pool 返回的伏笔线程带 id，push_case 登记伏笔疑点时必须带上该 id
 - resolve_dialogue_case 解决对话疑点：更新对话记录的 speaker/tone/is_inner_monologue

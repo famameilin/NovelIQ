@@ -158,7 +158,7 @@ def _dialogues_call(call_id: str = "call-dialogues") -> dict:
 
 
 def _events_call(call_id: str = "call-events") -> dict:
-    """2026-08-07 用于构造合法 write_events 调用"""
+    """2026-08-19 用于构造合法 write_events 调用（契约 v3：含树结构字段）"""
     return _write_call(
         "write_events",
         {
@@ -167,6 +167,8 @@ def _events_call(call_id: str = "call-events") -> dict:
                     "description": "顾霜喝止众人",
                     "participants": [{"entity": "顾霜", "role": "主体"}],
                     "anchor_paragraph_ids": [0],
+                    "tree_id": "drink-order",
+                    "cause_role": "root",
                 }
             ]
         },
