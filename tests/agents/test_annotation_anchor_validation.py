@@ -63,6 +63,8 @@ def _event(*, char_start: int, char_end: int, text_hash: str) -> BoundEvent:
         participants=[],
         anchor_paragraph_ids=[0],
         causal_event_refs=[],
+        tree_id="tree-a",
+        cause_role="root",
         char_start=char_start,
         char_end=char_end,
         text_hash=text_hash,

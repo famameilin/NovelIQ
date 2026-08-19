@@ -83,6 +83,7 @@ def _history_event(event_id: str, description: str) -> EventHistoryResult:
         text_hash="0" * 64,
         evidence=[TextEvidence(paragraph_ids=[0], char_start=0, char_end=8, text_hash="0" * 64)],
         causal_event_refs=[],
+        tree_id="tree-h",
     )
 
 

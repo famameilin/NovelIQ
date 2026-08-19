@@ -286,6 +286,8 @@ def _write_remaining_args() -> dict:
                         {"entity": "顾霜", "role": "主体"}
                     ],
                     "anchor_paragraph_ids": [0],
+                    "tree_id": "drink-order",
+                    "cause_role": "root",
                 }
             ]
         },
@@ -644,6 +646,8 @@ def test_domain_reinvocation_completely_replaces_payload() -> None:
         {
             "description": "旧事件",
             "anchor_paragraph_ids": [0],
+            "tree_id": "drink-order",
+            "cause_role": "root",
         }
     ]
     _call(tools, "write_events", first)

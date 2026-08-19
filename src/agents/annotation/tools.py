@@ -189,6 +189,9 @@ class AnnotationToolLedger:
     paragraph_info: ChunkParagraphInfo | None = None
     # 2026-08-18 P2：本轮通过 search_event_history 获得的历史事件授权集合
     authorized_event_ids: set[str] = field(default_factory=set)
+    # 2026-08-19 契约 v3：当前章节序号；已授权/已写事件的全局坐标缓存，供因果引用偏序校验
+    current_chapter_order: int | None = None
+    event_coords: dict[str, dict[str, int | None]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一 chunk 的对话候选"""
@@ -231,6 +234,7 @@ class AnnotationToolLedger:
                 "authorized_chapter_ids": self.authorized_chapter_ids,
                 "authorized_text_paragraph_ids": self.authorized_text_paragraph_ids,
                 "authorized_event_ids": self.authorized_event_ids,
+                "event_coords": self.event_coords,
                 "dialogue_missing_indexes": self.dialogue_missing_indexes,
                 "annotation": self.annotation,
                 "search_log": self.search_log,
@@ -340,6 +344,14 @@ class AnnotationToolLedger:
                 self.current_event_id(index)
                 for index in range(1, len(payload) + 1)
             )
+            # 2026-08-19 契约 v3：登记当前章已写事件坐标，供后续因果引用偏序校验
+            bound_events = bound if isinstance(bound, list) else []
+            for index, bound_event in enumerate(bound_events, start=1):
+                self.event_coords[self.current_event_id(index)] = {
+                    "chapter_order": self.current_chapter_order,
+                    "char_start": bound_event.char_start,
+                    "char_end": bound_event.char_end,
+                }
         dumped = (
             payload.model_dump(mode="json")
             if hasattr(payload, "model_dump")
@@ -395,6 +407,11 @@ class AnnotationToolLedger:
             receipt["relations"] = relation_outcomes
         if domain == "dialogues":
             receipt["defaulted_not_dialogue"] = list(self.dialogue_missing_indexes)
+        if domain == "events":
+            # 2026-08-19 契约 v3：返回本轮事件 event_id，供后续因果引用使用
+            receipt["event_ids"] = [
+                self.current_event_id(index) for index in range(1, len(payload) + 1)
+            ]
         return receipt
 
     # ------------------------------------------------------------------
@@ -521,37 +538,48 @@ class AnnotationToolLedger:
         ]
         return char_start, char_end, text_hash, evidence
 
-    @staticmethod
     def _validate_causal_refs(
+        self,
         events: list[EventInput],
         event_evidence: list[tuple[int, int, str, list[TextEvidence]]],
     ) -> None:
-        """2026-08-18 用于校验因果引用的索引有效性、严格偏序和文本偏序
+        """2026-08-19 用于校验因果引用的授权与全局文本偏序（契约 v3）
 
-        约束：① 引用序号是 1 基且在当前事件列表范围内；② 事件 i 的因果前驱
-        序号必须 < i（保证章内无环）；③ 因果前驱的文本 char_end <= 当前事件的
-        char_start（严格文本偏序）。
+        约束：① 引用必须是已授权的全局 event_id（search_event_history 检索的历史
+        事件，或本章先前已成功写入并返回 id 的事件）；本轮尚未返回 id 的事件天然
+        不可引用，迫使同一本章事件链分轮写出；② 前驱原文位置必须严格先于当前事件
+        （全局偏序：source(chapter_order, char_end) <= target(当前章, char_start)),
+        不允许环路。
         """
-        n = len(events)
+        current_order = self.current_chapter_order
         for i, event in enumerate(events, start=1):
             for ref in event.causal_event_refs:
-                if ref < 1 or ref > n:
+                if ref not in self.authorized_event_ids:
                     raise ValueError(
-                        f"events[{i - 1}].causal_event_refs 引用越界: {ref}"
-                        f"（有效范围 1..{n}）"
+                        f"events[{i - 1}].causal_event_refs 引用未授权事件: {ref}（"
+                        "历史事件须先用 search_event_history 检索，本章已写事件须等 "
+                        "write_events 返回其 event_id 后才能引用）"
                     )
-                if ref >= i:
+                coords = self.event_coords.get(ref)
+                if coords is None:
                     raise ValueError(
-                        f"events[{i - 1}].causal_event_refs 包含非严格前驱引用: {ref}"
-                        f"（因果前驱序号必须小于当前事件序号 {i}）"
+                        f"events[{i - 1}].causal_event_refs 缺少事件坐标: {ref}"
                     )
-                cause_end = event_evidence[ref - 1][1]
+                source_order = coords.get("chapter_order")
+                source_end = coords.get("char_end")
+                if current_order is None or source_order is None or source_end is None:
+                    raise AnnotationInputError(
+                        "事件因果引用偏序校验需要 current_chapter_order"
+                    )
                 effect_start = event_evidence[i - 1][0]
-                if cause_end > effect_start:
+                if source_order > current_order or (
+                    source_order == current_order and source_end > effect_start
+                ):
                     raise ValueError(
                         f"events[{i - 1}].causal_event_refs 文本偏序违反: "
-                        f"前驱事件 {ref} 的 char_end={cause_end} "
-                        f"大于当前事件的 char_start={effect_start}"
+                        f"前驱事件 {ref} 的 (chapter_order={source_order}, "
+                        f"char_end={source_end}) 不早于当前事件 "
+                        f"(chapter_order={current_order}, char_start={effect_start})"
                     )
 
     def _validate_domain_endpoints(
@@ -787,6 +815,8 @@ class AnnotationToolLedger:
                         ],
                         anchor_paragraph_ids=list(item.anchor_paragraph_ids),
                         causal_event_refs=list(item.causal_event_refs),
+                        tree_id=item.tree_id,
+                        cause_role=item.cause_role,
                         char_start=char_start,
                         char_end=char_end,
                         text_hash=text_hash,
@@ -962,6 +992,8 @@ class AnnotationToolLedger:
                     ],
                     "anchor_paragraph_ids": list(item.anchor_paragraph_ids),
                     "causal_event_refs": list(item.causal_event_refs),
+                    "tree_id": item.tree_id,
+                    "cause_role": item.cause_role,
                 }
                 for item in payloads["events"]
             ]
@@ -1373,6 +1405,11 @@ def build_annotation_tools(
         views: list[dict[str, Any]] = []
         for item in results:
             ledger.authorized_event_ids.add(item.event_id)
+            ledger.event_coords[item.event_id] = {
+                "chapter_order": item.chapter_order,
+                "char_start": item.char_start,
+                "char_end": item.char_end,
+            }
             views.append(
                 {
                     "event_id": item.event_id,
@@ -1387,6 +1424,8 @@ def build_annotation_tools(
                     "text_hash": item.text_hash,
                     "evidence": [ev.model_dump(mode="json") for ev in item.evidence],
                     "causal_event_refs": item.causal_event_refs,
+                    "tree_id": item.tree_id,
+                    "cause_role": item.cause_role,
                     "edges": item.edges,
                 }
             )

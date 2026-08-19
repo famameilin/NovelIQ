@@ -173,6 +173,8 @@ async def _run_single_attempt(
         allow_future_context=allow_future_context,
         graph=graph_state,
         paragraph_info=paragraph_info,
+        # 2026-08-19 契约 v3：供因果引用全局偏序校验使用
+        current_chapter_order=getattr(query_service, "current_chapter_order", None),
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
