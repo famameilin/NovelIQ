@@ -427,7 +427,7 @@ export function StreamOutput({
         stage: progress.stage,
         subStage: progress.sub_stage,
         chapterId: progress.chapter_id ?? 0,
-        streamId: null,
+        streamId: "pending",
         outputText: "",
         thinkingText: "",
         outputTotalChars: 0,

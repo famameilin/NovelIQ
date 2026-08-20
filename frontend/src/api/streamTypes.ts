@@ -24,7 +24,7 @@ export interface StreamEventData {
   stage: string;         // 预处理 / 标注 / 聚合 / 主题建模 / 诊断
   sub_stage: string;     // 第一阶段 / 第二阶段 / 第三阶段 / 第四阶段
   chapter_id?: number | null;  // 当前章节 ID（annotate 阶段有效）；HTTP 回填/终态事件不携带真实章节
-  stream_id?: string | null; // 并行 LLM 流分组标识（Phase3 并行 batch 时使用）
+  stream_id?: string | null; // llm_output/llm_thinking/tool_call 事件的显式流标识
   current: number;       // 当前章节编号
   total: number;        // 总章节数
   percent: number;      // 全局进度（stage 级别百分比）
