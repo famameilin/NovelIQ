@@ -15,7 +15,7 @@ function createNode(overrides: Partial<GraphNode>): GraphNode {
     entity_type: "character",
     first_seen_chapter: 1,
     last_seen_chapter: 15,
-    state_revision: 3,
+    state_chapter_id: 15,
     state: { primary_role_function: "主角", status: "active" },
     ...overrides,
   };

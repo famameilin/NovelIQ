@@ -199,7 +199,7 @@ describe("DiagnosisPage", () => {
     expect(screen.getByText("伏笔 setup 台账暂时无法读取，请稍后重试。")).toBeInTheDocument();
   });
 
-  it("renders rerun-required state when diagnosis payload misses focus contract", async () => {
+  it("renders diagnosis cards when optional focus fields are absent", async () => {
     getDiagnosisMock.mockResolvedValue({
       genre_labels: ["科幻"],
       style_labels: ["硬核"],
@@ -210,11 +210,8 @@ describe("DiagnosisPage", () => {
 
     renderDiagnosisPage();
 
-    expect(await screen.findByText("诊断结果需要重跑")).toBeInTheDocument();
-    expect(
-      screen.getByText("当前任务缺少完整的焦点结构 diagnosis，请重新分析该任务后再查看正式诊断报告。"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("伏笔回收预期")).not.toBeInTheDocument();
+    expect(await screen.findByText("伏笔回收预期")).toBeInTheDocument();
+    expect(screen.getByTestId("diagnosis-header")).toBeInTheDocument();
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {

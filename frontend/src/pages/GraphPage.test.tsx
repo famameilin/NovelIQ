@@ -129,7 +129,6 @@ vi.mock("@/api/novels", () => ({
 // 2026-08-07 用于构造章节图快照页面测试数据
 function createGraphData(): GraphData {
   return {
-    graph_version_id: "graph-version-3",
     chapter_id: 3,
     chapter_order: 3,
     first_chapter_id: 11,
@@ -141,7 +140,7 @@ function createGraphData(): GraphData {
         entity_type: "character",
         first_seen_chapter: 1,
         last_seen_chapter: 15,
-        state_revision: 3,
+        state_chapter_id: 3,
         state: { primary_role_function: "主角", status: "active" },
       },
       {
@@ -150,15 +149,14 @@ function createGraphData(): GraphData {
         entity_type: "character",
         first_seen_chapter: 2,
         last_seen_chapter: 15,
-        state_revision: 2,
+        state_chapter_id: 3,
         state: {},
       },
     ],
     edges: [
       {
         relation_id: "relation-1",
-        relation_version_id: 9,
-        relation_revision: 3,
+        state_chapter_id: 3,
         source_entity_id: 1,
         target_entity_id: 2,
         source_name: "顾霜",
@@ -181,16 +179,12 @@ function createGraphChangesPage(): GraphChangesPageResponse {
       {
         change_id: "relation:12:1",
         change_kind: "relation",
-        graph_version_id: "graph-version-3",
         chapter_id: 3,
         chapter_order: 3,
         fact_id: "fact-12",
-        fact_revision: 1,
         effective_chapter_id: 12,
         changes: [{ change_kind: "assert" }],
         relation_id: "relation-1",
-        relation_version_id: 9,
-        relation_revision: 3,
         from_entity_id: 1,
         to_entity_id: 2,
         from_name: "顾霜",
@@ -203,11 +197,9 @@ function createGraphChangesPage(): GraphChangesPageResponse {
       {
         change_id: "state:13:1",
         change_kind: "state",
-        graph_version_id: "graph-version-3",
         chapter_id: 3,
         chapter_order: 3,
         fact_id: "fact-13",
-        fact_revision: 1,
         effective_chapter_id: 13,
         changes: [{ field: "status", before: "hidden", after: "active" }],
         entity_id: 1,

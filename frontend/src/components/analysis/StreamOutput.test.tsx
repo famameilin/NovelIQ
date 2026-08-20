@@ -53,7 +53,7 @@ function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
     stage: "annotate",
     sub_stage: "phase3",
     chapter_id: 3,
-    stream_id: null,
+    stream_id: "stream-default",
     current: 3,
     total: 10,
     percent: 35,

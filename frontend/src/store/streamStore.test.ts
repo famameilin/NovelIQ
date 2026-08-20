@@ -4,16 +4,13 @@ import type { StreamEventData } from "@/api/streamTypes";
 import { appConfig } from "@/config";
 import { buildLLMOutputScopeKey, buildLLMOutputGroupKey, useStreamStore } from "@/store/streamStore";
 
-/**
- * 多流分组和活跃流选择逻辑迁入 store 后，需要用单元测试锁住兼容 default stream 与用户手动选择的行为
- */
 function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
   return {
     action: "output",
     stage: "annotate",
     sub_stage: "phase3",
     chapter_id: 3,
-    stream_id: null,
+    stream_id: "stream-default",
     current: 3,
     total: 10,
     percent: 33,
@@ -62,23 +59,6 @@ describe("streamStore 多流分组", () => {
     expect(groups[0].thinkingTotalChars).toBe(3);
     expect(groups[1].outputText).toBe("乙输出");
     expect(groups[1].thinkingText).toBe("");
-  });
-
-  it("缺失 stream_id 的旧事件应自动归入 default group", () => {
-    const store = useStreamStore.getState();
-
-    store.appendLLMOutput(
-      createLLMEvent({
-        action: "output",
-        stream_id: null,
-        content: "旧单流输出",
-      }),
-    );
-
-    const groups = Array.from(useStreamStore.getState().llmOutputs.values());
-    expect(groups).toHaveLength(1);
-    expect(groups[0].streamId).toBeNull();
-    expect(groups[0].groupKey.endsWith("-default")).toBe(true);
   });
 
   it("单条流文本应维持有界缓冲，同时保留累计字符数", () => {

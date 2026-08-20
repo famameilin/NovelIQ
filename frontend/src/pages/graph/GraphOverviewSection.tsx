@@ -86,8 +86,8 @@ export function GraphOverviewSection({
         transition={{ duration: 0.28, delay: 0.1 }}
         className="text-sm leading-6 text-text-muted"
       >
-        当前快照固定在第 {graphData.chapter_order} 章（第 {graphData.first_chapter_id} 至 {graphData.last_chapter_id} 章），
-        图版本为 {graphData.graph_version_id}。{inactiveRelationCount > 0 ? `另有 ${inactiveRelationCount} 条非活跃关系。` : ""}
+        当前章节边界为第 {graphData.chapter_order} 章（第 {graphData.first_chapter_id} 至 {graphData.last_chapter_id} 章）。
+        {inactiveRelationCount > 0 ? `另有 ${inactiveRelationCount} 条非活跃关系。` : ""}
       </motion.p>
     </div>
   );

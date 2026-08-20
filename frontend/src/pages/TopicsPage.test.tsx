@@ -122,22 +122,15 @@ describe("TopicsPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("renders rerun-required state when diagnosis contract is invalid", async () => {
+  it("renders topics when the diagnosis contains only currently available fields", async () => {
     getTopicsMock.mockResolvedValue([
       { topic_id: 0, words: ["修炼", "成长"], weight: 0.8 },
     ]);
-    getDiagnosisMock.mockResolvedValue({
-      rerun_required: true,
-      rerun_reason: "focus_contract_incomplete",
-    });
+    getDiagnosisMock.mockResolvedValue({ topic_labels: ["成长"] });
 
     renderTopicsPage();
 
-    expect(await screen.findByText("主题结果需要重跑")).toBeInTheDocument();
-    expect(
-      screen.getByText("当前任务的 diagnosis 焦点合同已失效，主题命名结果不再可信，请重新分析后再查看主题页。"),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId("topic-word-cloud")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {

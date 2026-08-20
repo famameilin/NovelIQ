@@ -191,7 +191,6 @@ test.describe('分析结果页面', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          rerun_required: false,
           diagnosis: '该叙事以成长为主题，主角经历磨难最终获得力量。',
           genre_labels: ['成长', '奇幻'],
           theme_color: '#4A90D9',

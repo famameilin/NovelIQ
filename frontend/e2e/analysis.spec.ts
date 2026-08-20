@@ -86,7 +86,6 @@ test.describe('分析任务', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          rerun_required: false,
           diagnosis: '测试诊断结果',
           genre_labels: ['成长'],
           theme_color: '#4A90D9',

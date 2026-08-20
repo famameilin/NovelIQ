@@ -450,47 +450,6 @@ describe("NovelDetailPage", () => {
     });
   });
 
-  it("旧 diagnosis 合同被判重跑时应显示统一重跑态", async () => {
-    currentSearchParams = "task_id=task-ready";
-    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
-    getTaskStatusMock.mockResolvedValue({
-      novel_id: "novel-1",
-      task_id: "task-ready",
-      status: "completed",
-      progress: 100,
-      current_step: "done",
-    });
-    getDiagnosisMock.mockResolvedValue({
-      rerun_required: true,
-      rerun_reason: "focus_contract_incomplete",
-    });
-    getNarrativeStructureMock.mockResolvedValue({});
-    getEmotionStatsMock.mockResolvedValue({});
-    getCharacterStatsMock.mockResolvedValue({});
-    getStyleStatsMock.mockResolvedValue({});
-    getTopicsMock.mockRejectedValue({
-      isAxiosError: true,
-      response: {
-        status: 409,
-        data: {
-          detail: {
-            code: "diagnosis_rerun_required",
-            reason: "focus_contract_incomplete",
-          },
-        },
-      },
-    });
-    getEmotionTrendMock.mockResolvedValue([]);
-
-    renderNovelDetailPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("当前结果需要重新分析")).toBeInTheDocument();
-      expect(screen.queryByTestId("diagnosis-summary-card")).not.toBeInTheDocument();
-      expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
-    });
-  });
-
   it("运行中任务应先显示进度态且不提前请求结果接口", async () => {
     currentSearchParams = "task_id=task-running";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
