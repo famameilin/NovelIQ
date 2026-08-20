@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.contract_guards import require_paragraph_contract
 from src.api.dependencies import get_db_session, get_novel_service
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ErrorResponse
@@ -88,14 +87,11 @@ async def get_timeline(
         raise NovelNotFoundError(f"任务 {task_id} 不属于小说 {novel_id}")
 
     run_id = run_data["run_id"]
-    # 2026-08-14 D3：新管线只写 completed；aggregated/diagnosed 为旧合同状态不再可读
     if run_data["status"] not in ("completed",):
         raise AnalysisNotCompleteError(
             f"分析尚未完成，当前状态: {run_data['status']}",
             run_status=run_data["status"],
         )
-    require_paragraph_contract(run_data)
-
     chapter_repo = ChapterRepository(session)
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)

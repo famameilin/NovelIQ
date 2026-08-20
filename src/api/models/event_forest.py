@@ -15,7 +15,6 @@ class EventNodeResponse(BaseModel):
     """2026-08-19 用于返回事件节点（含树结构字段）"""
 
     event_id: str
-    event_revision: int = Field(gt=0)
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     description: str
@@ -36,9 +35,7 @@ class EventEdgeResponse(BaseModel):
     edge_id: str
     edge_type: Literal["causal"]
     source_event_id: str
-    source_event_revision: int = Field(gt=0)
     target_event_id: str
-    target_event_revision: int = Field(gt=0)
     source_chapter_id: int = Field(gt=0)
     target_chapter_id: int = Field(gt=0)
     is_active: bool
@@ -80,7 +77,7 @@ class EventTreeResponse(BaseModel):
 class EventForestResponse(BaseModel):
     """2026-08-19 用于返回完整事件森林快照（事件树列表 + 树间因果边 + 伏笔边）"""
 
-    graph_version_id: str
+    chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     visible_through_chapter_order: int = Field(gt=0)
     derived_event_order: list[str]

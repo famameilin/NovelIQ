@@ -39,17 +39,13 @@ class GraphTimelineChange(BaseModel):
 
     change_id: str
     change_kind: Literal["state", "relation"]
-    graph_version_id: str
     chapter_id: int = Field(gt=0)
     fact_id: str
-    fact_revision: int = Field(gt=0)
     effective_chapter_id: int = Field(ge=0)
     changes: list[dict[str, Any]] = Field(min_length=1)
     entity_id: int | None = None
     entity_name: str | None = None
     relation_id: str | None = None
-    relation_version_id: int | None = None
-    relation_revision: int | None = None
     from_char: str | None = None
     to_char: str | None = None
     relation_type: str | None = None

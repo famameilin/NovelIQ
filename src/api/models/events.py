@@ -79,6 +79,9 @@ class StreamEvent:
     status: str | None = None  # 工具调用状态（tool_call 事件专用: started/success/failed）
 
     def to_dict(self) -> dict[str, Any]:
+        """2026-08-19 用于序列化统一 SSE 事件并要求 LLM 事件携带流标识"""
+        if self.action in {"output", "thinking", "tool_call"} and not self.stream_id:
+            raise ValueError("LLM 流事件缺少 stream_id")
         return {
             "action": self.action,
             "stage": self.stage,
@@ -216,6 +219,8 @@ class AnalysisEventBus:
             stage=resolved_stage,
             sub_stage=resolved_sub_stage,
             chapter_id=resolved_chapter_id,
+            # 保留 LLM/工具事件的流标识，确保序列化和前端重连使用同一条流
+            stream_id=event.stream_id,
             current=resolved_current,
             total=resolved_total,
             percent=resolved_percent,
