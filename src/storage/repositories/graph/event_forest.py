@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -43,6 +44,7 @@ class EventEdgeRow:
     target_chapter_id: int
     is_active: bool
     evidence: list[dict[str, Any]]
+    expired_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -111,11 +113,15 @@ class EventForestRepository:
             ).scalars()
         )
 
-    def _chapter_ids_for_order(self, run_id: str, max_chapter_order: int) -> set[int]:
-        """2026-08-19 用于按 chapter_order 解析可见章节集合"""
+    def _chapter_ids_for_order(
+        self, run_id: str, max_chapter_order: int, *, chapters: list[Chapter] | None = None
+    ) -> set[int]:
+        """2026-08-19 用于按 chapter_order 解析可见章节集合（复用已缓存 chapters 避免 N+1）"""
+        if chapters is None:
+            chapters = self._chapter_rows(run_id)
         return {
             int(chapter.chapter_id)
-            for index, chapter in enumerate(self._chapter_rows(run_id), start=1)
+            for index, chapter in enumerate(chapters, start=1)
             if index <= max_chapter_order
         }
 
@@ -124,13 +130,47 @@ class EventForestRepository:
         run_id: str,
         *,
         chapter_id: int | None = None,
+        chapters: list[Chapter] | None = None,
     ) -> ChapterBoundary | None:
-        """2026-08-19 用于按章节身份解析当前运行的图谱边界"""
-        chapters = self._chapter_rows(run_id)
+        """2026-08-19 用于按章节身份解析当前运行的图谱边界（缓存 chapters，批量查 annotation 避免逆序 N+1）"""
+        if chapters is None:
+            chapters = self._chapter_rows(run_id)
         if chapter_id is None:
-            target = chapters[-1] if chapters else None
-        else:
-            target = next((chapter for chapter in chapters if int(chapter.chapter_id) == chapter_id), None)
+            if not chapters:
+                return None
+            # 批量查询 annotation 避免逆序 N+1
+            chapter_ids = [int(c.chapter_id) for c in chapters]
+            rows = list(
+                self.session.execute(
+                    select(ChapterAnnotationRecord).where(
+                        ChapterAnnotationRecord.run_id == run_id,
+                        ChapterAnnotationRecord.chapter_id.in_(chapter_ids),
+                    )
+                ).scalars()
+            )
+            annotation_by_chapter: dict[int, ChapterAnnotationRecord] = {
+                int(row.chapter_id): row for row in rows
+            }
+            target = None
+            annotation = None
+            for candidate in reversed(chapters):
+                cand_annotation = annotation_by_chapter.get(int(candidate.chapter_id))
+                if cand_annotation is not None:
+                    target = candidate
+                    annotation = cand_annotation
+                    break
+            if target is None or annotation is None:
+                return None
+            order = chapters.index(target) + 1
+            return ChapterBoundary(
+                run_id=run_id,
+                chapter_id=int(target.chapter_id),
+                chapter_order=order,
+                first_chapter_id=int(target.chapter_id),
+                last_chapter_id=int(target.chapter_id),
+                annotation_id=str(annotation.annotation_id),
+            )
+        target = next((chapter for chapter in chapters if int(chapter.chapter_id) == chapter_id), None)
         if target is None:
             return None
         annotation = self.session.execute(
@@ -177,20 +217,35 @@ class EventForestRepository:
             for node in rows
         ]
 
-    def fetch_event_edges(self, run_id: str, *, max_chapter_order: int) -> list[EventEdgeRow]:
-        """2026-08-19 用于读取截止章节边界的活跃因果边"""
-        chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order)
+    def fetch_event_edges(
+        self,
+        run_id: str,
+        *,
+        max_chapter_order: int,
+        include_inactive: bool = False,
+        chapters: list[Chapter] | None = None,
+    ) -> list[EventEdgeRow]:
+        """2026-08-19 用于读取截止章节边界的因果边（支持复用已缓存 chapters）"""
+        chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order, chapters=chapters)
         if not chapter_ids:
             return []
+        return self._fetch_event_edges_by_chapter_ids(run_id, chapter_ids, include_inactive=include_inactive)
+
+    def _fetch_event_edges_by_chapter_ids(
+        self, run_id: str, chapter_ids: set[int], *, include_inactive: bool = False
+    ) -> list[EventEdgeRow]:
+        """内部：按已解析 chapter_ids 查询因果边，避免重复计算章节集合"""
+        if not chapter_ids:
+            return []
+        filters: list[Any] = [
+            EventEdge.run_id == run_id,
+            EventEdge.source_chapter_id.in_(chapter_ids),
+            EventEdge.target_chapter_id.in_(chapter_ids),
+        ]
+        if not include_inactive:
+            filters.append(EventEdge.is_active.is_(True))
         rows = self.session.execute(
-            select(EventEdge)
-            .where(
-                EventEdge.run_id == run_id,
-                EventEdge.is_active.is_(True),
-                EventEdge.source_chapter_id.in_(chapter_ids),
-                EventEdge.target_chapter_id.in_(chapter_ids),
-            )
-            .order_by(EventEdge.edge_id)
+            select(EventEdge).where(*filters).order_by(EventEdge.edge_id)
         ).scalars()
         return [
             EventEdgeRow(
@@ -202,13 +257,36 @@ class EventForestRepository:
                 target_chapter_id=edge.target_chapter_id,
                 is_active=bool(edge.is_active),
                 evidence=list(edge.evidence),
+                expired_at=edge.expired_at,
             )
             for edge in rows
         ]
 
-    def fetch_foreshadowing_edges(self, run_id: str, *, max_chapter_order: int) -> list[ForeshadowingEdgeRow]:
-        """2026-08-19 用于读取截止章节边界的伏笔边"""
-        chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order)
+    def fetch_timeline_causal_edges(
+        self, run_id: str, *, max_chapter_order: int, chapters: list[Chapter] | None = None
+    ) -> list[EventEdgeRow]:
+        """2026-08-20 用于时间轴返回全量因果边（含 inactive，前端灰显）"""
+        return self.fetch_event_edges(
+            run_id, max_chapter_order=max_chapter_order, include_inactive=True, chapters=chapters
+        )
+
+    def fetch_foreshadowing_edges(
+        self,
+        run_id: str,
+        *,
+        max_chapter_order: int,
+        chapters: list[Chapter] | None = None,
+    ) -> list[ForeshadowingEdgeRow]:
+        """2026-08-19 用于读取截止章节边界的伏笔边（支持复用已缓存 chapters）"""
+        chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order, chapters=chapters)
+        if not chapter_ids:
+            return []
+        return self._fetch_foreshadowing_edges_by_chapter_ids(run_id, chapter_ids)
+
+    def _fetch_foreshadowing_edges_by_chapter_ids(
+        self, run_id: str, chapter_ids: set[int]
+    ) -> list[ForeshadowingEdgeRow]:
+        """内部：按已解析 chapter_ids 查询伏笔边"""
         if not chapter_ids:
             return []
         rows = self.session.execute(
@@ -277,13 +355,20 @@ class EventForestRepository:
         return [tree for tree, _sort in trees]
 
     def fetch_snapshot(self, run_id: str, *, chapter_id: int | None = None) -> EventForestSnapshot | None:
-        """2026-08-19 用于返回章节边界内的事件森林快照"""
-        boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
+        """2026-08-19 用于返回章节边界内的事件森林快照（单次缓存 chapters，避免 4 次 _chapter_rows + 逆序 N+1）"""
+        chapters = self._chapter_rows(run_id)
+        boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id, chapters=chapters)
         if boundary is None:
             return None
         event_nodes = self.fetch_event_nodes(run_id, max_chapter_order=boundary.chapter_order)
-        causal_edges = self.fetch_event_edges(run_id, max_chapter_order=boundary.chapter_order)
-        foreshadowing_edges = self.fetch_foreshadowing_edges(run_id, max_chapter_order=boundary.chapter_order)
+        # 复用已缓存 chapters 解析可见章节集合，单次计算供两类边复用
+        visible_chapter_ids = self._chapter_ids_for_order(
+            run_id, boundary.chapter_order, chapters=chapters
+        )
+        causal_edges = self._fetch_event_edges_by_chapter_ids(
+            run_id, visible_chapter_ids, include_inactive=True
+        )
+        foreshadowing_edges = self._fetch_foreshadowing_edges_by_chapter_ids(run_id, visible_chapter_ids)
         visible_event_ids = {node.event_id for node in event_nodes}
         visible_threads = [
             ForeshadowingEdgeRow(
