@@ -283,7 +283,7 @@ def _agent_result() -> AgentRunResult:
         pushed_cases=[],
         audit=AgentRunAudit(
             allow_future_context=False,
-            write_revisions=[],
+            write_records=[],
             rotation_case_ids=[],
             authorized_chapter_ids=[1],
             authorized_text_paragraph_ids=[],
@@ -404,7 +404,7 @@ async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
     assert len(accepted) == 1
     assert len(rejected) == 1
-    assert '"revision": 1' in accepted[0]
+    assert '"revision"' not in accepted[0]
     assert '"tool": "write_metrics"' in rejected[0]
 
 

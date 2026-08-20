@@ -50,22 +50,13 @@ def test_detect_alias_suspicions_finds_orphan_pair(db_session) -> None:
     )
     db_session.commit()
 
-    from sqlalchemy import select
+    from src.storage.repositories.graph import GraphRepository
 
-    from src.storage.models import GraphVersion
-
-    graph_version = (
-        db_session.execute(
-            select(GraphVersion)
-            .where(GraphVersion.run_id == run_id)
-            .order_by(GraphVersion.chapter_order.desc())
-        )
-        .scalars()
-        .first()
-    )
+    chapter_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id)
+    assert chapter_boundary is not None
     pairs = {
         (item.name_a, item.name_b)
-        for item in detect_alias_suspicions(db_session, graph_version=graph_version)
+        for item in detect_alias_suspicions(db_session, chapter_boundary=chapter_boundary)
     }
     assert ("贺伯安", "伯安") in pairs or ("伯安", "贺伯安") in pairs
 
@@ -93,22 +84,13 @@ def test_detect_alias_suspicions_skips_merged_pairs(db_session) -> None:
     )
     db_session.commit()
 
-    from sqlalchemy import select
+    from src.storage.repositories.graph import GraphRepository
 
-    from src.storage.models import GraphVersion
-
-    graph_version = (
-        db_session.execute(
-            select(GraphVersion)
-            .where(GraphVersion.run_id == run_id)
-            .order_by(GraphVersion.chapter_order.desc())
-        )
-        .scalars()
-        .first()
-    )
+    chapter_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id)
+    assert chapter_boundary is not None
     pairs = {
         (item.name_a, item.name_b)
-        for item in detect_alias_suspicions(db_session, graph_version=graph_version)
+        for item in detect_alias_suspicions(db_session, chapter_boundary=chapter_boundary)
     }
     assert pairs == set()
 
@@ -151,23 +133,14 @@ def test_build_alias_pending_cases_target_ref_carries_chunk_id(db_session) -> No
     )
     db_session.commit()
 
-    from sqlalchemy import select
+    from src.storage.repositories.graph import GraphRepository
 
-    from src.storage.models import GraphVersion
-
-    graph_version = (
-        db_session.execute(
-            select(GraphVersion)
-            .where(GraphVersion.run_id == run_id)
-            .order_by(GraphVersion.chapter_order.desc())
-        )
-        .scalars()
-        .first()
-    )
+    chapter_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id)
+    assert chapter_boundary is not None
     pending_cases = build_alias_pending_cases(
         db_session,
         run_id=run_id,
-        graph_version=graph_version,
+        chapter_boundary=chapter_boundary,
         existing_target_keys=set(),
     )
     assert pending_cases

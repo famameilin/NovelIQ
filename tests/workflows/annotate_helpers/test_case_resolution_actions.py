@@ -121,7 +121,7 @@ def _result(
         pushed_cases=pushed_cases or [],
         audit=AgentRunAudit(
             allow_future_context=False,
-            write_revisions=[],
+            write_records=[],
             rotation_case_ids=[],
             authorized_chapter_ids=authorized_chunk_ids
             or [annotation.chunks[0].chunk_id],
@@ -448,7 +448,7 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
         target_key=pushed.target_key,
         target_ref=dict(pushed.target_ref),
     )
-    with pytest.raises(ValueError, match="案例目标对话记录不存在或跨 run"):
+    with pytest.raises(ValueError, match="案例目标对话记录不存在"):
         complete_annotation_run(
             result=_result(
                 run_id=run_id,
