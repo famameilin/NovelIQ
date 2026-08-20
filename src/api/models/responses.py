@@ -54,7 +54,7 @@ class StatusResponse(BaseModel):
     """
 
     novel_id: str
-    task_id: str | None = None
+    task_id: str
     status: TaskStatus
     progress: float = Field(ge=0, le=100)
     stage: str | None = None
@@ -183,10 +183,6 @@ class BookAggregateStats(BaseModel):
     chapter_pivot_rate: float | None = None
     chapter_cliffhanger_rate: float | None = None
     chapter_emotional_valence_share: dict[str, float] = Field(default_factory=dict)
-    analysis_contract_version: str
-    paragraph_splitter_version: str
-    metric_version: str
-    curve_version: str
 
 
 class ChapterMetricsResponse(BaseModel):
@@ -315,8 +311,6 @@ class GlobalStats(BaseModel):
     rhythm_std: float | None = None
     rhythm_max: float | None = None
     rhythm_min: float | None = None
-    global_avg_sent_len: float | None = None
-    global_avg_ttr: float | None = None
 
 
 class NarrativeStructureStats(BaseModel):
@@ -380,8 +374,6 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
-    rerun_required: bool = False
-    rerun_reason: str | None = None
     foreshadow_expectation: float | None = Field(
         default=None,
         description=(

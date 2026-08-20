@@ -34,8 +34,6 @@ _STATUS_MAP: dict[str, TaskStatus] = {
     "failed": TaskStatus.FAILED,
     "cancelling": TaskStatus.CANCELLING,
     "cancelled": TaskStatus.CANCELLED,
-    # 2026-08-14 D3：aggregated/diagnosed 是旧合同状态（新管线不再写入），
-    # 不再映射到 COMPLETED；未知状态落入 PENDING 兜底
 }
 
 
@@ -43,7 +41,10 @@ def _map_status_to_task_status(status: str) -> TaskStatus:
     """
     将数据库状态字符串映射为TaskStatus枚举
     """
-    return _STATUS_MAP.get(status, TaskStatus.PENDING)
+    try:
+        return _STATUS_MAP[status]
+    except KeyError as exc:
+        raise ValueError(f"未知任务状态: {status}") from exc
 
 
 def _get_task_detail_from_db(task_id: str) -> dict[str, Any] | None:
@@ -276,23 +277,3 @@ async def batch_delete_tasks(
         failed_ids=failed_ids,
     )
 
-
-@router.get("/{novel_id}/status", response_model=StatusResponse)
-async def get_analysis_status(
-    novel_id: str,
-    task_id: str | None = None,
-    novel_service: NovelService = Depends(get_novel_service),
-) -> StatusResponse:
-    """
-    查询分析任务状态
-
-    说明: task_id非必须，但有多个task时必须提供
-    """
-    if not task_id:
-        raise HTTPException(
-            status_code=400,
-            detail="请提供 task_id；推荐使用 /api/novels/{novel_id}/tasks/{task_id}/status",
-        )
-
-    _resolve_task_for_novel(novel_service, novel_id, task_id)
-    return _build_status_response(novel_id, task_id)

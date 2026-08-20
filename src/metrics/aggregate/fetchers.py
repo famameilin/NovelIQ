@@ -57,7 +57,7 @@ def _fetch_chapter_progress_map(session: Session, run_id: str) -> dict[int, floa
     rows = session.execute(
         select(Chapter.chapter_id, Chapter.char_offset)
         .where(Chapter.run_id == run_id, Chapter.char_offset.is_not(None))
-        .order_by(Chapter.chapter_id)
+        .order_by(Chapter.sequence, Chapter.chapter_id)
     ).all()
     progress: dict[int, float] = {}
     for chapter_id, offset in rows:
