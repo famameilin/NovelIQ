@@ -415,6 +415,24 @@ def _persist_state_rows(
         updates_by_entity.setdefault(entity_id, []).extend(
             {"fact_id": change.get("fact_id", ""), **change} for change in changes
         )
+    # 实体属性发生变化时需要形成章节状态快照，供历史图查询继承
+    for entity_id, entity in entity_by_id.items():
+        dynamic_attributes = {
+            key: value
+            for key, value in dict(entity.attributes or {}).items()
+            if key not in {"entity_type", "description"}
+        }
+        if dynamic_attributes and int(entity.first_seen_chapter) == annotation.chapter_id:
+            updates_by_entity.setdefault(entity_id, []).extend(
+                {
+                    "field": key,
+                    "before": None,
+                    "after": value,
+                    "fact_id": "",
+                    "chapter_id": annotation.chapter_id,
+                }
+                for key, value in dynamic_attributes.items()
+            )
     for entity_id, changes in updates_by_entity.items():
         entity = entity_by_id.get(entity_id)
         if entity is None:
@@ -427,11 +445,20 @@ def _persist_state_rows(
         }
         normalized_changes: list[dict[str, Any]] = []
         for change in changes:
-            for field_name in ("role_function", "action", "emotion", "field"):
-                if field_name not in change:
-                    continue
+            field_names = (
+                ["field"]
+                if "field" in change
+                else [field_name for field_name in ("role_function", "action", "emotion") if field_name in change]
+            )
+            for field_name in field_names:
                 actual_field = str(change.get("field", field_name))
                 after = change.get("after", change.get(field_name))
+                if "before" in change and state.get(actual_field) != change.get("before"):
+                    expected_before = change.get("before")
+                    if expected_before is None:
+                        state.pop(actual_field, None)
+                    else:
+                        state[actual_field] = expected_before
                 before = state.get(actual_field)
                 if before == after:
                     continue
@@ -448,7 +475,6 @@ def _persist_state_rows(
                         "chapter_id": change.get("chapter_id", annotation.chapter_id),
                     }
                 )
-                break
         if not normalized_changes:
             continue
         row = session.get(EntityState, (annotation.run_id, annotation.chapter_id, entity_id))
@@ -481,10 +507,11 @@ def _relation_draft(
     relation: GraphRelation,
     chapter_order: int,
     relation_type: str,
+    current_chapter_id: int | None = None,
 ) -> _RelationDraft:
-    """2026-08-19 用于读取关系此前最近状态"""
+    """2026-08-20 用于读取关系此前最近状态并纳入当前事务尚未 flush 的章节状态"""
     order_map = _chapter_order_map(session, run_id)
-    rows = [
+    rows: list[RelationState] = [
         row
         for row in session.execute(
             select(RelationState).where(
@@ -493,12 +520,24 @@ def _relation_draft(
         ).scalars()
         if order_map.get(int(row.chapter_id), 0) < chapter_order
     ]
+    if current_chapter_id is not None:
+        # 案例解决前已写入的同章状态必须参与合并；显式 flush 兼容生产 autoflush=False
+        session.flush()
+        current_rows = session.execute(
+            select(RelationState).where(
+                RelationState.run_id == run_id,
+                RelationState.relation_id == relation.relation_id,
+                RelationState.chapter_id == current_chapter_id,
+            )
+        ).scalars()
+        rows.extend(row for row in current_rows if row not in rows)
     latest = max(rows, key=lambda row: order_map.get(int(row.chapter_id), 0)) if rows else None
     return _RelationDraft(
         relation=relation,
         relation_type=str(latest.relation_type) if latest is not None else relation_type,
         attributes=dict(latest.attributes) if latest is not None else {},
         is_active=bool(latest.is_active) if latest is not None else False,
+        # changes 只保存本次调用新增的变化；已有状态仅用于初始化 before/当前属性
         changes=[],
     )
 
@@ -698,6 +737,7 @@ def _persist_annotation_facts(
                     content={
                         "kind": "character_observation",
                         "chapter_id": chunk.chunk_id,
+                        "entity": _entity_descriptor(subject),
                         "role_function": observation.role_function,
                         "action": observation.action,
                         "emotion": observation.emotion,
@@ -763,6 +803,7 @@ def _persist_annotation_facts(
                     relation=relation,
                     chapter_order=boundary.chapter_order,
                     relation_type=str(relation_item.relation_type),
+                    current_chapter_id=annotation.chapter_id,
                 ),
             )
             change_kind = "assert" if not draft.is_active else "noop"
@@ -990,6 +1031,7 @@ def _persist_fact_resolution(
         relation=relation,
         chapter_order=boundary.chapter_order,
         relation_type=relation_type,
+        current_chapter_id=annotation.chapter_id,
     )
     _apply_relation_change(draft, fact=fact, change_kind=str(resolved_case.change_kind), relation_type=relation_type)
     _persist_relation_state(session, annotation=annotation, draft=draft)

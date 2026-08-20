@@ -58,7 +58,12 @@ def _add_entity(session, run_id: str, name: str) -> int:
 
 def test_reelect_uses_latest_chapter_state_only(db_session) -> None:
     """2026-08-19 用于验证选举只取每关系最近章节状态"""
-    _novel_id, run_id = create_run_with_chunks(db_session, texts=["甲与乙同框"], title="选举防御")
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["甲与乙同框", "甲与乙决裂"],
+        chapter_ids=[1, 2],
+        title="选举防御",
+    )
     entity_a = _add_entity(db_session, run_id, "甲")
     entity_b = _add_entity(db_session, run_id, "乙")
     _add_entity(db_session, run_id, "丙")
