@@ -1,4 +1,3 @@
-version: "1"
 # 指标契约 registry：从“事后快照”改为“问题 × 字段 × 输出契约 × null 语义 × 权威声明”。
 # 此文件是手动维护的契约真相源；docs/generated_metrics_contract.md 由 scripts/tools/generate_metrics_docs.py 生成。
 metrics:

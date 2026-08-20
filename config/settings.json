@@ -31,7 +31,6 @@
   },
   "logging": {
     "console_level": "INFO",
-    "file_level": "DEBUG",
     "log_dir": "logs",
     "rotation": "10 MB",
     "retention": "7 days",
@@ -100,7 +99,6 @@
     "num_topics_min": 3,
     "num_topics_max": 25,
     "num_topics_scaling_divisor": 30,
-    "topic_model_version": "2",
     "lda": {
       "alpha": "auto",
       "eta": "auto",
