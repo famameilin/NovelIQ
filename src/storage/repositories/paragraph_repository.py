@@ -142,7 +142,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             previous_end = last_local_end.get(chapter_id)
             if previous_end is not None and span.local_start_char < previous_end:
                 raise ValueError(
-                    "段落写入失败：同一 chunk 内 local 坐标必须严格单调不重叠，"
+                    "段落写入失败：同一章节内 local 坐标必须严格单调不重叠，"
                     f"run_id={run_id} chapter_id={chapter_id} "
                     f"paragraph_id={span.paragraph_id} local_start_char={span.local_start_char} "
                     f"小于上一段落的 local_end_char={previous_end}"
@@ -173,15 +173,15 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             if span.chapter_id is None or span.global_start_char is None:
                 # 身份校验已拒绝 None，此处仅为类型收窄
                 continue
-            chunk_offset = char_offsets.get(span.chapter_id)
-            if chunk_offset is None:
+            chapter_offset = char_offsets.get(span.chapter_id)
+            if chapter_offset is None:
                 # chapters 行缺 char_offset 时无法校验，跳过该章的偏移一致性
                 continue
-            if span.global_start_char - chunk_offset != span.local_start_char:
+            if span.global_start_char - chapter_offset != span.local_start_char:
                 raise ValueError(
                     "段落写入失败：local 与 global 坐标偏移不一致，"
                     f"run_id={run_id} chapter_id={span.chapter_id} "
-                    f"paragraph_id={span.paragraph_id} char_offset={chunk_offset} "
+                    f"paragraph_id={span.paragraph_id} char_offset={chapter_offset} "
                     f"global_start_char={span.global_start_char} "
                     f"local_start_char={span.local_start_char}"
                 )
@@ -226,8 +226,8 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
     def get_incomplete_paragraph_chapter_ids(self, run_id: str) -> list[int]:
         """
-        找出段落数据不完整的 chunk：有正文但没有任何段落行、段落序号不连续
-        （min != 0 或 count != max + 1）、或坐标为空的 chunk，返回排序后的 chapter_id 列表
+        找出段落数据不完整的章节：有正文但没有任何段落行、段落序号不连续
+        （min != 0 或 count != max + 1）、或坐标为空的章节，返回排序后的 chapter_id 列表
         """
         paragraph_exists = exists().where(
             (Paragraph.run_id == Chapter.run_id) & (Paragraph.chapter_id == Chapter.chapter_id)
@@ -523,7 +523,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
     def fetch_chapter_tension_scores(self, run_id: str) -> list[tuple[int, float]]:
         """
-        每章（chunk）张力 = 章内段落 surface_tension 均值（供 timeline/聚合使用）
+        每章张力 = 章内段落 surface_tension 均值（供 timeline/聚合使用）
 
         段落表面张力已是 run 内稳健标准化 + sigmoid 后的 [0,1] 值，
         章节值取段落均值（缺失张力数据的章由调用方兜底）。
