@@ -127,7 +127,7 @@ def _agent_result(
         ),
         audit=AgentRunAudit(
             allow_future_context=False,
-            write_revisions=[],
+            write_records=[],
             rotation_case_ids=[],
             authorized_chapter_ids=[chunk_id],
             authorized_text_paragraph_ids=[],

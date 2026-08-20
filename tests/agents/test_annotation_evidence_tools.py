@@ -576,7 +576,6 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "accepted",
         "tool",
         "domain",
-        "revision",
         "item_count",
         "state_digest",
     }
@@ -584,7 +583,6 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "accepted": True,
         "tool": "write_entities",
         "domain": "entities",
-        "revision": 1,
         "item_count": 1,
         "state_digest": receipt["state_digest"],
     }
@@ -610,9 +608,7 @@ def test_failed_write_keeps_other_domain_receipts_and_revisions() -> None:
     assert "metrics" in ledger.domain_receipts
     assert "entities" in ledger.domain_receipts
     assert "character_observations" not in ledger.domain_receipts
-    assert ledger.domain_revision_counts["metrics"] == 1
-    assert ledger.domain_revision_counts["entities"] == 1
-    assert "character_observations" not in ledger.domain_revision_counts
+    assert [record["domain"] for record in ledger.write_records] == ["metrics", "entities"]
     assert ledger.ready_chunk is None
 
 
@@ -657,8 +653,7 @@ def test_domain_reinvocation_completely_replaces_payload() -> None:
     stored = ledger.domain_payloads["events"]
     assert len(stored) == 1
     assert stored[0].description == "顾霜喝止众人"
-    assert ledger.domain_revision_counts["events"] == 2
-    assert len([item for item in ledger.write_revisions if item["domain"] == "events"]) == 2
+    assert len([item for item in ledger.write_records if item["domain"] == "events"]) == 2
 
 
 def test_complete_chunk_requires_all_seven_domains() -> None:

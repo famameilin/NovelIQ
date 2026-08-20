@@ -94,7 +94,7 @@ def _audit(
     """2026-08-10 用于构造完成事务审计（完整工具审计由 AgentAuditRecorder 独立写入）"""
     return AgentRunAudit(
         allow_future_context=False,
-        write_revisions=[],
+        write_records=[],
         rotation_case_ids=[],
         authorized_chapter_ids=authorized_chunk_ids,
         authorized_text_paragraph_ids=[],

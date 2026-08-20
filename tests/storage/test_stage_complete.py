@@ -149,7 +149,7 @@ class TestStageCompleteChecks:
         # 2026-08-15 M2：指标/曲线同为完成前置（段落行落库后分段提交的崩溃窗口）
         _insert_paragraph_derived_rows(db_session, run_id, [0])
         with patch(
-            "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.semantic_enabled",
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
             False,
         ):
             assert chapter_repo.is_preprocess_complete(run_id)
@@ -176,11 +176,11 @@ class TestStageCompleteChecks:
 
         with (
             patch(
-                "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.semantic_enabled",
+                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
                 True,
             ),
             patch(
-                "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.embedding_dim",
+                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
                 1024,
             ),
         ):
@@ -220,11 +220,11 @@ class TestStageCompleteChecks:
 
         with (
             patch(
-                "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.semantic_enabled",
+                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
                 True,
             ),
             patch(
-                "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.embedding_dim",
+                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
                 1024,
             ),
         ):
@@ -246,7 +246,7 @@ class TestStageCompleteChecks:
         _insert_paragraphs(db_session, run_id, chunks)
 
         with patch(
-            "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.semantic_enabled",
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
             False,
         ):
             assert not chapter_repo.is_preprocess_complete(run_id)
@@ -278,11 +278,11 @@ class TestStageCompleteChecks:
 
         with (
             patch(
-                "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.semantic_enabled",
+                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
                 True,
             ),
             patch(
-                "src.storage.repositories.paragraph_repository.settings.models.paragraph_embedding.embedding_dim",
+                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
                 1024,
             ),
         ):
