@@ -31,7 +31,6 @@ from src.knowledge.authority import (
     KnowledgeGraphAuthorityService,
     serialize_graph_report_signals,
 )
-from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -51,76 +50,107 @@ from tests.support.timeline_contract_helpers import (
 
 
 def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
+    """2026-08-20 迁移至事件森林：验证新森林路径（含 nodes/causal_edges/foreshadowing_edges）"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜进入山门。\n顾霜拔剑。", "宫主现身。"],
+        chapter_ids=[1, 2],
+        title="事件森林时间轴导出",
+    )
+    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
+    eid3 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:2:1"))
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "tree_id": "gate",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜拔剑",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "causal_event_refs": [eid1],
+                "tree_id": "gate",
+                "cause_role": "main",
+            },
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        events=[
+            {
+                "description": "宫主现身",
+                "participants": ["宫主"],
+                "anchor_paragraph_ids": [0],
+                "causal_event_refs": [eid2],
+                "tree_id": "palace",
+                "cause_role": "root",
+            },
+        ],
+    )
+    # 将其中一条因果边置为 inactive（含 expired_at），用于验证 is_active/expired_at 透传
+    from datetime import datetime, timezone
+
+    from src.storage.models.event_forest import EventEdge
+
+    existing = db_session.query(EventEdge).filter_by(run_id=run_id).first()
+    assert existing is not None
+    existing.is_active = False
+    existing.expired_at = datetime.now(timezone.utc)
+    db_session.commit()
 
     chapter_repo = ChapterRepository(db_session)
     annotation_repo = AnnotationRepository(db_session)
     stats_repo = StatsRepository(db_session)
-    timeline_view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(scenario.run_id)
 
     timeline_data = _fetch_timeline_data(
-        run_id=scenario.run_id,
+        run_id=run_id,
         chapter_repo=chapter_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,
-        timeline_view=timeline_view,
     )
 
     assert timeline_data is not None
-    assert timeline_data["total_chapters"] == 5
-    assert timeline_data["tension_curve"] == [0.6, 0.7, 0.9, 0.5, 0.4]
-    assert len(timeline_data["phases"]) == 4
+    # 新合同字段
+    assert "nodes" in timeline_data
+    assert "causal_edges" in timeline_data
+    assert "foreshadowing_edges" in timeline_data
+    assert "derived_event_order" in timeline_data
+    assert "phases" in timeline_data
+    assert timeline_data["total_chapters"] == 2
+    # 旧字段不应出现
+    assert "atomic_nodes" not in timeline_data
+    assert "composite_nodes" not in timeline_data
 
-    relation_node = next(
-        node
-        for node in nodes_for_anchor_chapter(timeline_data["atomic_nodes"], 3)
-        if node["node_type"] == "relation"
-    )
-    assert graph_change_tuples(relation_node["graph_changes"]) == {
-        (scenario.hero_name, scenario.rival_name, "assert")
-    }
-    assert scenario.organization_name not in graph_change_names(relation_node["graph_changes"])
+    # nodes 按 derivedOrder，前后端均可按此排序
+    assert len(timeline_data["nodes"]) >= 2
+    for node in timeline_data["nodes"]:
+        assert "tree_id" in node
+        assert "participants" in node
+        assert isinstance(node["participants"], list)
+        if node["participants"]:
+            assert isinstance(node["participants"][0], dict)
+            p0 = node["participants"][0]
+            assert "name" in p0 or "entity" in p0
+            if "name" not in p0 and "entity" in p0:
+                assert "name" in p0["entity"]
 
-    assert "entity_lifecycles" not in timeline_data
-    assert set(relation_node.keys()) == {
-        "node_id",
-        "anchor_chapter_id",
-        "progress",
-        "importance_score",
-        "level",
-        "summary",
-        "characters",
-        "phase_name",
-        "node_type",
-        "node_subtype",
-        "score_breakdown",
-        "plot_flags",
-        "graph_changes",
-        "lifecycle_events",
-    }
-    assert set(relation_node["graph_changes"][0].keys()) == {
-        "change_id",
-        "change_kind",
-        "chapter_id",
-        "fact_id",
-        "effective_chapter_id",
-        "changes",
-        "entity_id",
-        "entity_name",
-        "relation_id",
-        "from_char",
-        "to_char",
-        "relation_type",
-        "relation_change_kind",
-        "directionality",
-    }
-    assert timeline_data["composite_nodes"]
-    composite_relation_node = next(
-        node
-        for node in nodes_for_anchor_chapter(timeline_data["composite_nodes"], 3)
-        if node["node_type"] == "relation"
-    )
-    assert composite_relation_node["representative_node_id"].startswith("relation:")
+    # causal_edges 应包含 inactive 边且保留 expired_at
+    assert any(not e["is_active"] for e in timeline_data["causal_edges"])
+    inactive = next(e for e in timeline_data["causal_edges"] if not e["is_active"])
+    assert "expired_at" in inactive
+    assert inactive["expired_at"] is not None
+    # 活性边仍存在
+    assert any(e["is_active"] for e in timeline_data["causal_edges"])
 
 
 def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() -> None:
@@ -156,44 +186,7 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
     assert "core_characters" not in payload["graph_summary"]
 
 
-def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    chapter_repo = MagicMock()
-    annotation_repo = MagicMock()
-    stats_repo = MagicMock()
 
-    def _raise_contract_error(*_args, **_kwargs):
-        raise TimelineAuthorityContractError("broken authority contract")
-
-    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_plan", _raise_contract_error)
-
-    with pytest.raises(TimelineAuthorityContractError, match="broken authority contract"):
-        _fetch_timeline_data(
-            run_id="run-1",
-            chapter_repo=chapter_repo,
-            annotation_repo=annotation_repo,
-            stats_repo=stats_repo,
-            timeline_view=MagicMock(),
-        )
-
-
-def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    chapter_repo = MagicMock()
-    annotation_repo = MagicMock()
-    stats_repo = MagicMock()
-
-    def _raise_runtime_error(*_args, **_kwargs):
-        raise RuntimeError("timeline boom")
-
-    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_plan", _raise_runtime_error)
-
-    with pytest.raises(RuntimeError, match="timeline boom"):
-        _fetch_timeline_data(
-            run_id="run-1",
-            chapter_repo=chapter_repo,
-            annotation_repo=annotation_repo,
-            stats_repo=stats_repo,
-            timeline_view=MagicMock(),
-        )
 
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
