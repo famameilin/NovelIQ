@@ -65,8 +65,21 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             logger.warning(f"Failed to deserialize request_payload: {e}")
             return None
 
-    def _to_dict(self, run: AnalysisRun) -> dict[str, Any]:
-        """将 ORM 对象转换为字典"""
+    def _to_dict_with_deserialization(self, run: AnalysisRun) -> dict[str, Any]:
+        """
+        将 ORM 对象转换为字典并反序列化 request_payload
+
+        2026-08-20 优化：合并 _to_dict 和 _deserialize_request_payload，
+        内联反序列化逻辑以减少多个端点各1层的函数调用开销
+        """
+        # 内联反序列化逻辑，避免额外的函数调用
+        request_payload_dict = None
+        if run.request_payload:
+            try:
+                request_payload_dict = json.loads(run.request_payload)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to deserialize request_payload: {e}")
+
         return {
             "run_id": run.run_id,
             "novel_id": run.novel_id,
@@ -82,7 +95,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "message": run.message,
             "error": run.error,
             "task_kind": run.task_kind,
-            "request_payload": self._deserialize_request_payload(run.request_payload),
+            "request_payload": request_payload_dict,
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
             "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
@@ -149,7 +162,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None
-        return self._to_dict(run)
+        return self._to_dict_with_deserialization(run)
 
     def update_run_status(self, run_id: str, status: str) -> None:
         """
@@ -217,7 +230,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict(run) for run in runs]
+        return [self._to_dict_with_deserialization(run) for run in runs]
 
     def cancel_run(self, run_id: str) -> bool:
         """
@@ -288,7 +301,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         stmt = select(AnalysisRun).where(AnalysisRun.status == status).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict(run) for run in runs]
+        return [self._to_dict_with_deserialization(run) for run in runs]
 
     def get_running_tasks(self) -> list[dict[str, Any]]:
         """
@@ -471,7 +484,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None
-        return self._to_dict(run)
+        return self._to_dict_with_deserialization(run)
 
     def get_latest_run(self, novel_id: str) -> dict[str, Any] | None:
         """
@@ -489,7 +502,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None
-        return self._to_dict(run)
+        return self._to_dict_with_deserialization(run)
 
     def delete_run(self, run_id: str) -> bool:
         """2026-08-05 用于按当前 ORM 外键逆序删除运行数据并由调用方统一提交"""
@@ -616,4 +629,4 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         )
 
         runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict(run) for run in runs]
+        return [self._to_dict_with_deserialization(run) for run in runs]
