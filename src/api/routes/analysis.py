@@ -139,61 +139,33 @@ async def get_task_status(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> StatusResponse:
     """
-    查询单个任务状态（推荐入口）
+    查询单个任务状态
 
-    2026-08-20 优化：一次数据库查询完成验证和响应构造，消除双查询问题
+    2026-08-20 阶段 3.1：消除双查询，一次查询完成验证和响应构造
     """
-    # 一次查询：通过 novel_service 获取任务元数据并验证归属
     try:
         task = novel_service.get_task(task_id)
     except NovelNotFoundError:
         raise HTTPException(status_code=404, detail="任务不存在") from None
 
-    # 验证任务属于指定小说
     if task.get("novel_id") != novel_id:
         raise HTTPException(status_code=404, detail="任务不存在或不属于该小说")
 
-    # 获取完整运行状态（通过 run_id 进行第二次查询，但仅当需要完整状态时）
-    session_factory = get_session_factory()
-    with session_factory() as session:
-        try:
-            run_id = task_id_to_run_id(task_id, session.connection())
-        except (TaskIDNotFoundError, ValueError):
-            # 任务元数据存在但运行记录不存在，返回待机状态
-            return StatusResponse(
-                novel_id=novel_id,
-                task_id=task_id,
-                status=TaskStatus.PENDING,
-                progress=0.0,
-            )
-
-        run_repo = RunRepository(session)
-        run = run_repo.get_run(run_id)
-
-    if run is None:
-        return StatusResponse(
-            novel_id=novel_id,
-            task_id=task_id,
-            status=TaskStatus.PENDING,
-            progress=0.0,
-        )
-
-    # 构建完整响应
-    mapped_status = _map_status_to_task_status(run["status"])
+    mapped_status = _map_status_to_task_status(task["status"])
     return StatusResponse(
         novel_id=novel_id,
         task_id=task_id,
         status=mapped_status,
-        progress=run.get("progress", 0.0),
-        stage=run.get("stage"),
-        sub_stage=run.get("sub_stage"),
-        current=run.get("current"),
-        total=run.get("total"),
-        message=run.get("message"),
+        progress=task.get("progress", 0.0),
+        stage=task.get("stage"),
+        sub_stage=task.get("sub_stage"),
+        current=task.get("current"),
+        total=task.get("total"),
+        message=task.get("message"),
         llm_outputs=None,
-        error=run.get("error"),
-        started_at=run.get("started_at"),
-        completed_at=run.get("completed_at"),
+        error=task.get("error"),
+        started_at=task.get("started_at"),
+        completed_at=task.get("completed_at"),
     )
 
 
