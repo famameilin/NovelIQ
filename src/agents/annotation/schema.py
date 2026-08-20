@@ -485,10 +485,10 @@ class TextEvidence(StrictModel):
 
 
 class GraphEvidence(StrictModel):
-    """2026-08-18 用于保存引用已有图事实的证据（案例解决路径使用）"""
+    """2026-08-19 用于保存引用已有章节图事实的证据"""
 
     fact_id: str = Field(min_length=1)
-    fact_revision: int = Field(gt=0)
+    chapter_id: int = Field(gt=0)
 
 
 EvidenceItem = Annotated[
@@ -505,7 +505,6 @@ class EventHistoryResult(StrictModel):
     """
 
     event_id: str = Field(min_length=1)
-    event_revision: int = Field(gt=0)
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     description: str = Field(min_length=1)
@@ -754,7 +753,6 @@ class BoundChunkAnnotation(StrictModel):
 class BoundChapterAnnotation(StrictModel):
     """2026-08-07 用于保存最新语义写入合同的章节正式标注"""
 
-    contract_version: Literal["agent-semantic-v2"] = "agent-semantic-v2"
     chapter_summary: str = Field(min_length=1)
     chunks: list[BoundChunkAnnotation] = Field(min_length=1)
 
@@ -911,8 +909,7 @@ class ResolvedCase(StrictModel):
                         field_name,
                         normalize_semantic_text(value, label=f"resolve.{field_name}"),
                     )
-            # 2026-08-16 P3：枚举字段不再降级为 "unknown"，非法值直接拦截入库；
-            # 漂移应触发 rerun_required，而不是静默写入默认/兜底值。
+            # 2026-08-16 P3：枚举字段不再降级为 "unknown"，非法值直接拦截入库
             for field_name, valid_values in (
                 (
                     "setup_status",
@@ -951,14 +948,14 @@ class PendingCase(StrictModel):
 
 
 class AgentRunAudit(StrictModel):
-    """2026-08-10 用于保存系统范围搜索凭据和领域修订记录（完整工具审计进入新审计表）
+    """2026-08-19 用于保存系统范围搜索凭据和领域写入记录（完整工具审计进入新审计表）
 
     2026-08-14 M6/M7：authorized_text_chunk_ids 拆分为章级（案例展示/解决）与段级
     （read_text 实际返回）两个授权集合；sub_chunk_index 记录子块协议运行序号。
     """
 
     allow_future_context: bool
-    write_revisions: list[dict[str, Any]]
+    write_records: list[dict[str, Any]]
     rotation_case_ids: list[str]
     authorized_chapter_ids: list[int]
     authorized_text_paragraph_ids: list[int]
@@ -1001,7 +998,6 @@ class CompletionResolvedCase(StrictModel):
     target_dialogue_id: str | None = None
     target_setup_id: str | None = None
     target_fact_id: str | None = None
-    target_fact_revision: int | None = Field(default=None, gt=0)
     # 2026-08-18 伏笔续接/回收案例解决可产生事件目标
     target_setup_event_id: str | None = None
     target_payoff_event_id: str | None = None
@@ -1011,7 +1007,6 @@ class CompletionResult(StrictModel):
     """2026-08-07 用于回读或返回章节唯一完成事务"""
 
     annotation_id: str
-    graph_version_id: str
     chapter_id: int = Field(gt=0)
     created_cases: list[CompletionCase] = Field(default_factory=list)
     resolved_cases: list[CompletionResolvedCase] = Field(default_factory=list)

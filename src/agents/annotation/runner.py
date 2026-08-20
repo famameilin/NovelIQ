@@ -234,7 +234,7 @@ async def _run_single_attempt(
         pushed_cases=list(ledger.pushed_cases),
         audit=AgentRunAudit(
             allow_future_context=allow_future_context,
-            write_revisions=list(ledger.write_revisions),
+            write_records=list(ledger.write_records),
             rotation_case_ids=ledger.rotation_case_ids,
             authorized_chapter_ids=sorted(ledger.authorized_chapter_ids),
             authorized_text_paragraph_ids=sorted(ledger.authorized_text_paragraph_ids),

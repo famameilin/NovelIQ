@@ -1,9 +1,9 @@
 """
 章节标注语义写入工具与系统运行账本
 
-核心合同: 每个 write_* 调用完成该领域的全部业务校验并写入当前候选 revision，
-返回固定压缩回执 {accepted, tool, domain, revision, item_count, state_digest}。
-完整参数、完整结果和历史 revision 只进入审计库，不回到模型上下文。
+核心合同: 每个 write_* 调用完成该领域的全部业务校验并写入当前候选，
+返回固定压缩回执 {accepted, tool, domain, item_count, state_digest}。
+完整参数和完整结果只进入审计库，不回到模型上下文。
 """
 from __future__ import annotations
 
@@ -83,7 +83,6 @@ _INTERNAL_GRAPH_KEYS = {
     "chunk_id",
     "end",
     "fact_id",
-    "fact_revision",
     "relation_id",
     "representative_entity_id",
     "start",
@@ -160,8 +159,7 @@ class AnnotationToolLedger:
     domain_payloads: dict[str, Any] = field(default_factory=dict)
     bound_payloads: dict[str, Any] = field(default_factory=dict)
     domain_receipts: set[str] = field(default_factory=set)
-    domain_revision_counts: dict[str, int] = field(default_factory=dict)
-    write_revisions: list[dict[str, Any]] = field(default_factory=list)
+    write_records: list[dict[str, Any]] = field(default_factory=list)
     completed_chunks: list[BoundChunkAnnotation] = field(default_factory=list)
     ready_chunk: BoundChunkAnnotation | None = None
     initial_cases: dict[str, CaseSearchResult] = field(default_factory=dict)
@@ -219,8 +217,7 @@ class AnnotationToolLedger:
                 "domain_payloads": self.domain_payloads,
                 "bound_payloads": self.bound_payloads,
                 "domain_receipts": self.domain_receipts,
-                "domain_revision_counts": self.domain_revision_counts,
-                "write_revisions": self.write_revisions,
+                "write_records": self.write_records,
                 "completed_chunks": self.completed_chunks,
                 "ready_chunk": self.ready_chunk,
                 "case_number_registry": self.case_number_registry,
@@ -297,7 +294,7 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
 
     def write_domain(self, domain: str, payload: Any, *, tool_name: str) -> dict[str, Any]:
-        """2026-08-10 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入候选 revision"""
+        """2026-08-19 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入当前候选"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
         if domain not in _DOMAIN_NAMES:
@@ -331,9 +328,6 @@ class AnnotationToolLedger:
                             "outcome": "assert" if added else "skipped_existing",
                         }
                     )
-        chunk_id = self.current_chunk_id
-        revision = self.domain_revision_counts.get(domain, 0) + 1
-        self.domain_revision_counts[domain] = revision
         self.domain_payloads[domain] = payload
         self.bound_payloads[domain] = bound
         self.domain_receipts.add(domain)
@@ -357,11 +351,10 @@ class AnnotationToolLedger:
             if hasattr(payload, "model_dump")
             else [item.model_dump(mode="json") for item in payload]
         )
-        self.write_revisions.append(
+        self.write_records.append(
             {
-                "chunk_id": chunk_id,
+                "chunk_id": self.current_chunk_id,
                 "domain": domain,
-                "revision": revision,
                 "payload": dumped,
             }
         )
@@ -370,7 +363,6 @@ class AnnotationToolLedger:
             tool_name=tool_name,
             domain=domain,
             payload=payload,
-            revision=revision,
             relation_outcomes=relation_outcomes or None,
         )
 
@@ -380,7 +372,6 @@ class AnnotationToolLedger:
         tool_name: str,
         domain: str,
         payload: Any,
-        revision: int,
         relation_outcomes: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """2026-08-10 用于生成模型可见的固定压缩回执"""
@@ -399,7 +390,6 @@ class AnnotationToolLedger:
             "accepted": True,
             "tool": tool_name,
             "domain": domain,
-            "revision": revision,
             "item_count": item_count,
             "state_digest": f"sha256:{_content_digest(dumped)}",
         }
@@ -1022,11 +1012,8 @@ class AnnotationToolLedger:
         return {
             "phase": self.phase,
             "chunk_id": self.current_chunk_id,
-            "revisions": {
-                domain: {
-                    "revision": self.domain_revision_counts.get(domain, 0),
-                    "accepted": domain in self.domain_receipts,
-                }
+            "writes": {
+                domain: {"accepted": domain in self.domain_receipts}
                 for domain in _DOMAIN_NAMES
             },
             "missing_domains": [
@@ -1413,7 +1400,6 @@ def build_annotation_tools(
             views.append(
                 {
                     "event_id": item.event_id,
-                    "event_revision": item.event_revision,
                     "chapter_id": item.chapter_id,
                     "chapter_order": item.chapter_order,
                     "description": item.description,

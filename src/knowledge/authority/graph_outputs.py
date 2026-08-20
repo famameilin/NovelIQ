@@ -93,9 +93,7 @@ def build_graph_quality_signals(
     """为共享下游消费者计算仅聚合级的图谱质量计数器"""
 
     low_confidence_count = sum(
-        1
-        for change in graph_changes
-        if change.change_kind == "relation" and change.confidence == "low"
+        1 for change in graph_changes if change.change_kind == "relation" and change.confidence == "low"
     )
     relation_conflicts = _detect_relation_conflicts(confirmed_relations)
     return GraphQualitySignals(
@@ -130,20 +128,14 @@ def build_graph_page_quality(
     low_confidence_changes = [
         GraphLowConfidenceSample(
             change_id=change.change_id,
-            graph_version_id=change.graph_version_id,
             chapter_id=change.chapter_id,
             fact_id=change.fact_id,
-            fact_revision=change.fact_revision,
             effective_chapter_id=change.effective_chapter_id,
             relation_id=change.relation_id,
             from_name=change.from_name or "",
             to_name=change.to_name or "",
             relation_type=change.relation_type,
-            change_kind=(
-                str(change.changes[0].get("change_kind"))
-                if change.changes
-                else None
-            ),
+            change_kind=(str(change.changes[0].get("change_kind")) if change.changes else None),
             confidence=change.confidence,
         )
         for change in graph_changes
@@ -183,11 +175,6 @@ def _detect_relation_conflicts(confirmed_relations: list[ConfirmedRelation]) -> 
                 entity_names=sorted({pair_key[0][1], pair_key[1][1]}),
                 relation_types=sorted(relation_types),
                 relation_count=len(relations),
-                latest_relation_version_ids=[
-                    relation.latest_relation_version_id
-                    for relation in relations
-                    if relation.latest_relation_version_id
-                ],
             )
         )
     return conflicts

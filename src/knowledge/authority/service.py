@@ -70,10 +70,7 @@ class KnowledgeGraphAuthorityService:
         graph_changes = [
             change
             for change in changes
-            if (
-                change.change_kind == "state"
-                and change.entity_id in character_ids
-            )
+            if (change.change_kind == "state" and change.entity_id in character_ids)
             or (
                 change.change_kind == "relation"
                 and change.from_entity_id in character_ids
@@ -172,21 +169,16 @@ class KnowledgeGraphAuthorityService:
             if relation.relation_semantics != "same_character"
         ]
         endpoint_ids = {
-            entity_id
-            for relation in relations
-            for entity_id in (relation.from_entity_id, relation.to_entity_id)
+            entity_id for relation in relations for entity_id in (relation.from_entity_id, relation.to_entity_id)
         }
         entities = [
-            entity
-            for entity in self._graph_repo.fetch_latest_entities(run_id)
-            if entity.entity_id in endpoint_ids
+            entity for entity in self._graph_repo.fetch_latest_entities(run_id) if entity.entity_id in endpoint_ids
         ]
         changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
         graph_changes = [
             change
             for change in changes
-            if change.change_kind != "relation"
-            or change.relation_semantics != "same_character"
+            if change.change_kind != "relation" or change.relation_semantics != "same_character"
         ]
         resolution = self._build_alias_resolution(relations, entities)
         return GraphAuthorityView(
@@ -198,10 +190,8 @@ class KnowledgeGraphAuthorityService:
 
     def assert_graph_ready(self, run_id: str) -> None:
         """2026-08-07 用于确认当前 run 至少存在一个成功章节图版本"""
-        if self._graph_repo.resolve_graph_version(run_id) is None:
-            # GraphReadinessError 是全局唯一 raise 站点，中间件将其映射为 409；
-            # 不能降级为 ValueError（会落入 generic handler 变成 500）
-            raise GraphReadinessError(f"run 尚无已完成章节图版本: {run_id}")
+        if self._graph_repo.resolve_chapter_boundary(run_id) is None:
+            raise GraphReadinessError(f"run 尚无已完成章节图数据: {run_id}")
 
     def _build_alias_resolution(
         self,
@@ -219,19 +209,13 @@ class KnowledgeGraphAuthorityService:
         """2026-08-07 用于把实体状态快照转换为规范实体合同"""
         rows = sorted(entities, key=lambda row: row.name)
         if resolution is not None:
-            rows = [
-                row
-                for row in rows
-                if int(row.entity_id) not in resolution.representative_by_alias
-            ]
+            rows = [row for row in rows if int(row.entity_id) not in resolution.representative_by_alias]
         result: list[CanonicalEntity] = []
         for entity in rows:
             if not is_global_character_surface_name(entity.name):
                 continue
             aliases = (
-                resolution.aliases_by_representative.get(int(entity.entity_id), [])
-                if resolution is not None
-                else []
+                resolution.aliases_by_representative.get(int(entity.entity_id), []) if resolution is not None else []
             )
             result.append(
                 CanonicalEntity(
@@ -261,25 +245,15 @@ class KnowledgeGraphAuthorityService:
         ):
             if relation.relation_semantics == "same_character":
                 continue
-            from_name = (
-                resolution.resolve_name(relation.from_name)
-                if resolution is not None
-                else relation.from_name
-            )
-            to_name = (
-                resolution.resolve_name(relation.to_name)
-                if resolution is not None
-                else relation.to_name
-            )
+            from_name = resolution.resolve_name(relation.from_name) if resolution is not None else relation.from_name
+            to_name = resolution.resolve_name(relation.to_name) if resolution is not None else relation.to_name
             from_entity_id = (
                 resolution.resolve_entity_id(relation.from_entity_id)
                 if resolution is not None
                 else relation.from_entity_id
             )
             to_entity_id = (
-                resolution.resolve_entity_id(relation.to_entity_id)
-                if resolution is not None
-                else relation.to_entity_id
+                resolution.resolve_entity_id(relation.to_entity_id) if resolution is not None else relation.to_entity_id
             )
             result.append(
                 ConfirmedRelation(
@@ -293,7 +267,6 @@ class KnowledgeGraphAuthorityService:
                     last_seen_chapter=relation.last_seen_chapter,
                     change_count=len(relation.changes),
                     support_count=int(relation.attributes.get("support_count", 1)),
-                    latest_relation_version_id=relation.relation_version_id,
                     tension_index=float(relation.attributes.get("tension_index", 0.0)),
                 )
             )
@@ -312,7 +285,6 @@ class KnowledgeGraphAuthorityService:
                 relation_type=relation.relation_type,
                 first_seen_chapter=relation.first_seen_chapter,
                 last_seen_chapter=relation.last_seen_chapter,
-                relation_version_id=relation.relation_version_id,
                 is_active=relation.is_active,
             )
             for relation in relations
@@ -327,11 +299,9 @@ class KnowledgeGraphAuthorityService:
             GraphChange(
                 change_id=row.change_id,
                 change_kind=row.change_kind,
-                graph_version_id=row.graph_version_id,
                 chapter_id=row.chapter_id,
                 chapter_order=row.chapter_order,
                 fact_id=row.fact_id,
-                fact_revision=row.fact_revision,
                 effective_chapter_id=row.effective_chapter_id,
                 confidence=row.confidence,
                 changes=list(row.changes),
@@ -339,8 +309,6 @@ class KnowledgeGraphAuthorityService:
                 entity_name=row.entity_name,
                 entity_type=row.entity_type,
                 relation_id=row.relation_id,
-                relation_version_id=row.relation_version_id,
-                relation_revision=row.relation_revision,
                 from_entity_id=row.from_entity_id,
                 to_entity_id=row.to_entity_id,
                 from_name=row.from_name,
@@ -369,14 +337,10 @@ class KnowledgeGraphAuthorityService:
                 last_seen_chapter=entity.last_seen_chapter,
                 source_confidence=None,
                 is_representative=(
-                    resolution is None
-                    or int(entity.entity_id) not in resolution.representative_by_alias
+                    resolution is None or int(entity.entity_id) not in resolution.representative_by_alias
                 ),
             )
             for entity in entities
             if is_global_character_surface_name(entity.name)
-            and (
-                resolution is None
-                or int(entity.entity_id) not in resolution.representative_by_alias
-            )
+            and (resolution is None or int(entity.entity_id) not in resolution.representative_by_alias)
         ]

@@ -25,8 +25,8 @@ from src.storage.models import (
     DialogueRecord,
     ForeshadowingThread,
     GraphFact,
-    GraphVersion,
 )
+from src.storage.models.graph import ChapterBoundary
 from src.storage.repositories import (
     CasePoolRepository,
     CaseResolutionMappingRepository,
@@ -59,8 +59,7 @@ def _validate_locked_cases(
             raise ValueError(f"resolved case 已不再 active: {row.id}")
         if row.case_type != result.type:
             raise ValueError(
-                f"resolved case 类型已变化: case_id={row.id} "
-                f"expected={row.case_type} actual={result.type}"
+                f"resolved case 类型已变化: case_id={row.id} expected={row.case_type} actual={result.type}"
             )
         if row.target_key != result.target_key or dict(row.target_ref) != result.target_ref:
             raise ValueError(f"resolved case 稳定目标已变化: {row.id}")
@@ -72,7 +71,7 @@ def load_completion_result(
     run_id: str,
     chapter_id: int,
 ) -> CompletionResult | None:
-    """2026-08-07 用于按最新合同标注案例和解决映射回读完成结果"""
+    """2026-08-19 用于按章节标注和解决映射回读完成结果"""
     annotation = session.execute(
         select(ChapterAnnotationRecord).where(
             ChapterAnnotationRecord.run_id == run_id,
@@ -81,22 +80,6 @@ def load_completion_result(
     ).scalar_one_or_none()
     if annotation is None:
         return None
-    if annotation.payload.get("contract_version") != "agent-semantic-v2":
-        raise ValueError(
-            "章节标注使用旧合同，必须重新运行 annotation: "
-            f"run_id={run_id} chapter_id={chapter_id}"
-        )
-    graph_version = session.execute(
-        select(GraphVersion).where(
-            GraphVersion.run_id == run_id,
-            GraphVersion.chapter_id == chapter_id,
-            GraphVersion.annotation_id == annotation.annotation_id,
-        )
-    ).scalar_one_or_none()
-    if graph_version is None:
-        raise ValueError(
-            f"章节标注缺少唯一图版本: run_id={run_id} chapter_id={chapter_id}"
-        )
     created_rows = list(
         session.execute(
             select(CasePoolCase)
@@ -122,16 +105,13 @@ def load_completion_result(
             case_id=row.case_id,
             action=cast(
                 CaseAction,
-                row.resolution.get("action")
-                if isinstance(row.resolution.get("action"), str)
-                else "close",
+                row.resolution.get("action") if isinstance(row.resolution.get("action"), str) else "close",
             ),
             type=row.case_type,
             reason=str(row.resolution.get("reason") or ""),
             target_dialogue_id=row.target_dialogue_id,
             target_setup_id=row.target_setup_id,
             target_fact_id=row.target_fact_id,
-            target_fact_revision=row.target_fact_revision,
             target_setup_event_id=row.target_setup_event_id,
             target_payoff_event_id=row.target_payoff_event_id,
         )
@@ -139,7 +119,6 @@ def load_completion_result(
     ]
     return CompletionResult(
         annotation_id=annotation.annotation_id,
-        graph_version_id=graph_version.graph_version_id,
         chapter_id=annotation.chapter_id,
         created_cases=[completion_case_view(row) for row in created_rows],
         resolved_cases=resolved,
@@ -220,9 +199,7 @@ def _persist_pushed_cases(
     """2026-08-10 用于把模型 push_case 创建的新案例登记进案例池"""
     repository = CasePoolRepository(session)
     existing_keys = set(
-        session.execute(
-            select(CasePoolCase.target_key).where(CasePoolCase.run_id == result.run_id)
-        ).scalars()
+        session.execute(select(CasePoolCase.target_key).where(CasePoolCase.run_id == result.run_id)).scalars()
     )
     completion_cases: list[CompletionCase] = []
     for pushed_case in result.pushed_cases:
@@ -243,20 +220,16 @@ def _persist_alias_pending_cases(
     *,
     run_id: str,
     annotation_id: str,
-    graph_version: GraphVersion,
+    chapter_boundary: ChapterBoundary,
 ) -> list[CompletionCase]:
     """2026-08-09 用于把图验证器疑似同一人物对写入案例池待仲裁"""
     repository = CasePoolRepository(session)
-    existing_keys = set(
-        session.execute(
-            select(CasePoolCase.target_key).where(CasePoolCase.run_id == run_id)
-        ).scalars()
-    )
+    existing_keys = set(session.execute(select(CasePoolCase.target_key).where(CasePoolCase.run_id == run_id)).scalars())
     completion_cases: list[CompletionCase] = []
     for pending_case in build_alias_pending_cases(
         session,
         run_id=run_id,
-        graph_version=graph_version,
+        chapter_boundary=chapter_boundary,
         existing_target_keys=existing_keys,
     ):
         row = repository.create_case(
@@ -320,9 +293,6 @@ def _persist_resolution_mappings(
                 target_dialogue_id=target_dialogue_id,
                 target_setup_id=target_setup_id,
                 target_fact_id=target_fact.fact_id if target_fact is not None else None,
-                target_fact_revision=(
-                    target_fact.fact_revision if target_fact is not None else None
-                ),
                 target_setup_event_id=target_setup_event_id,
                 target_payoff_event_id=target_payoff_event_id,
             )
@@ -336,50 +306,16 @@ def _reelect_representatives(
     run_id: str,
 ) -> None:
     """2026-08-11 用于每章完成后全量清空并重选规范名标记写入实体属性"""
-    from sqlalchemy import func
-
-    from src.storage.models.graph import GraphEntity, GraphRelation, GraphRelationVersion
+    from src.storage.models.graph import GraphEntity
     from src.storage.repositories.graph.election import elect_representatives
+    from src.storage.repositories.graph.repository import GraphRepository
 
-    entities = list(
-        session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
-    latest_revision = (
-        select(
-            GraphRelationVersion.relation_id,
-            func.max(GraphRelationVersion.relation_revision).label("max_revision"),
-        )
-        .where(GraphRelationVersion.run_id == run_id)
-        .group_by(GraphRelationVersion.relation_id)
-        .subquery()
-    )
-    relation_rows = (
-        session.execute(
-            select(GraphRelation.from_entity_id, GraphRelation.to_entity_id)
-            .join(
-                GraphRelationVersion,
-                GraphRelationVersion.relation_id == GraphRelation.relation_id,
-            )
-            # 2026-08-13 P1-3 防御：只取每关系最新版本参与选举，历史残留的
-            # active 版本（关系已被后续章节 break/retract）混入会让已解绑的
-            # 实体对被错误选为代表
-            .join(
-                latest_revision,
-                (latest_revision.c.relation_id == GraphRelationVersion.relation_id)
-                & (latest_revision.c.max_revision == GraphRelationVersion.relation_revision),
-            )
-            .where(
-                GraphRelation.run_id == run_id,
-                GraphRelationVersion.run_id == run_id,
-                GraphRelationVersion.is_active.is_(True),
-                GraphRelation.relation_semantics == "same_character",
-            )
-            .distinct()
-        ).all()
-    )
-    pairs = [(int(row[0]), int(row[1])) for row in relation_rows]
+    entities = list(session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
+    pairs = [
+        (int(row.from_entity_id), int(row.to_entity_id))
+        for row in GraphRepository(session).fetch_latest_relations(run_id, active_only=True)
+        if row.relation_semantics == "same_character"
+    ]
     flags = elect_representatives(entities, pairs=pairs)
     for entity in entities:
         attributes = dict(entity.attributes or {})
@@ -451,7 +387,7 @@ def complete_annotation_run(
                 session,
                 run_id=result.run_id,
                 annotation_id=annotation.annotation_id,
-                graph_version=graph_result.graph_version,
+                chapter_boundary=graph_result.chapter_boundary,
             )
             case_repository.mark_surfaced(
                 run_id=result.run_id,
@@ -460,7 +396,6 @@ def complete_annotation_run(
             )
             completion = CompletionResult(
                 annotation_id=annotation.annotation_id,
-                graph_version_id=graph_result.graph_version.graph_version_id,
                 chapter_id=result.chapter_id,
                 created_cases=[*pushed_completion, *alias_completion],
                 resolved_cases=resolved_completion,

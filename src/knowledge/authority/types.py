@@ -28,7 +28,6 @@ LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "last_seen_chapter",
         "change_count",
         "support_count",
-        "latest_relation_version_id",
         "tension_index",
     ),
     "entity_types": ("name", "entity_type"),
@@ -70,9 +69,8 @@ class ConfirmedRelation:
     last_seen_chapter: int | None = None
     change_count: int | None = None
     support_count: int | None = None
-    latest_relation_version_id: int | None = None
     tension_index: float | None = None
-    source: str = "graph_relation_versions"
+    source: str = "relation_states"
 
 
 @dataclass(slots=True)
@@ -81,11 +79,9 @@ class GraphChange:
 
     change_id: str
     change_kind: str
-    graph_version_id: str
     chapter_id: int
     chapter_order: int
     fact_id: str
-    fact_revision: int
     effective_chapter_id: int
     confidence: str
     changes: list[dict]
@@ -93,8 +89,6 @@ class GraphChange:
     entity_name: str | None = None
     entity_type: str | None = None
     relation_id: str | None = None
-    relation_version_id: int | None = None
-    relation_revision: int | None = None
     from_entity_id: int | None = None
     to_entity_id: int | None = None
     from_name: str | None = None
@@ -102,7 +96,7 @@ class GraphChange:
     relation_type: str | None = None
     directionality: str | None = None
     relation_semantics: str | None = None
-    source: str = "chapter_graph_versions"
+    source: str = "graph_facts"
 
 
 @dataclass(slots=True)
@@ -192,11 +186,9 @@ TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "graph_changes": (
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "chapter_order",
         "fact_id",
-        "fact_revision",
         "effective_chapter_id",
         "changes",
         "entity_id",
@@ -257,10 +249,8 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "graph_changes": (
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "fact_id",
-        "fact_revision",
         "changes",
     ),
 }
@@ -375,7 +365,6 @@ class GraphConflictSample:
     entity_names: list[str] = field(default_factory=list)
     relation_types: list[str] = field(default_factory=list)
     relation_count: int = 0
-    latest_relation_version_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -383,10 +372,8 @@ class GraphLowConfidenceSample:
     """仅供图谱页面展示的单条低置信关系变化样本"""
 
     change_id: str
-    graph_version_id: str
     chapter_id: int
     fact_id: str
-    fact_revision: int
     effective_chapter_id: int
     relation_id: str | None
     from_name: str
@@ -421,9 +408,8 @@ class ExportRelationSnapshot:
     relation_type: str = ""
     first_seen_chapter: int | None = None
     last_seen_chapter: int | None = None
-    relation_version_id: int | None = None
     is_active: bool = True
-    source: str = "graph_relation_versions"
+    source: str = "relation_states"
 
 
 @dataclass(slots=True)
@@ -460,16 +446,13 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "relation_type",
         "first_seen_chapter",
         "last_seen_chapter",
-        "relation_version_id",
         "is_active",
     ),
     "graph_changes": (
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "fact_id",
-        "fact_revision",
         "changes",
     ),
 }
