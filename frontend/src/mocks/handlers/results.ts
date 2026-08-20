@@ -12,7 +12,7 @@ import {
   createDiagnosis,
   createGraph,
   createGraphChangesPage,
-  createTimeline,
+  createEventTimeline,
   createNarrativeStructure,
   createEmotionStats,
   createCharacterStats,
@@ -201,7 +201,7 @@ export const graphChangesHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/timeline
+// 获取 /api/novels/:novelId/timeline（2026-08-20 事件森林一树一节点）
 export const timelineHandler = http.get(
   `${BASE}/api/novels/:novelId/timeline`,
   async ({ request, params }) => {
@@ -213,7 +213,7 @@ export const timelineHandler = http.get(
     if (err) return err;
 
     await delay(400);
-    const data = createTimeline();
+    const data = createEventTimeline();
     data.meta.novel_id = novelId as string;
     return HttpResponse.json(data);
   }

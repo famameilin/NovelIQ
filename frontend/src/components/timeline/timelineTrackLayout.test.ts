@@ -1,39 +1,61 @@
 import { describe, expect, it } from "vitest";
 
-import type { TimelineNode } from "@/api/types";
+import type { TimelineEventNode } from "@/api/types";
 
 import {
   calculateCanvasMinWidth,
   createTimelineLayoutNodes,
   getClampedLabelLeftPx,
+  getEventSpanWidth,
   getLabelTopPx,
   LABEL_HORIZONTAL_GAP_PX,
+  TRACK_NODE_END_PADDING_PX,
+  TRACK_NODE_START_PADDING_PX,
 } from "./timelineTrackLayout";
 import { buildTensionAreaPath, interpolateSeriesValueAtProgress, mapTensionValueToTrackY } from "./timelineTrackPaths";
 
 /**
- * 2026-08-17，作用：构造用于时间轴布局测试的事件节点
- * 说明：保持节点字段完整，让布局测试只关注位置和车道
+ * 2026-08-17，作用：构造用于时间轴布局测试的事件节点（兼容新一树一节点合同）
  */
-function createNode(chapterId: number, progress: number, summary: string): TimelineNode {
+function createEventNode(
+  treeId: string,
+  chapterId: number,
+  progress: number,
+  summary: string,
+  overrides?: Partial<TimelineEventNode>,
+): TimelineEventNode {
   return {
-    node_id: `plot:${chapterId}`,
+    tree_id: treeId,
+    root_event_id: `evt-${treeId}`,
+    title: summary,
+    summary,
     anchor_chapter_id: chapterId,
+    anchor_chapter_order: chapterId,
+    start_chapter_id: chapterId,
+    end_chapter_id: chapterId,
+    start_progress: progress,
+    end_progress: progress,
     progress,
+    chapter_ids: [chapterId],
+    char_start: 0,
+    char_end: 100,
+    participants: [],
+    character_names: [],
     importance_score: 5,
     level: 1,
-    summary,
-    characters: [],
     phase_name: "发展期",
-    node_type: "plot",
-    node_subtype: "plot",
-    score_breakdown: { tension: 1 },
-    plot_flags: {
-      is_pivot: false,
-      is_cliffhanger: false,
-      tension_percentile: 50,
-    },
+    main_chain: [],
+    secondary_groups: [],
+    causal_in: 0,
+    causal_out: 0,
+    node_type: "event",
+    ...overrides,
   };
+}
+
+// 兼容旧 helper 保留
+function createNode(chapterId: number, progress: number, summary: string): TimelineEventNode {
+  return createEventNode(`plot:${chapterId}`, chapterId, progress, summary);
 }
 
 describe("timelineTrackLayout", () => {
@@ -43,8 +65,8 @@ describe("timelineTrackLayout", () => {
       createNode(2, 0.22, "甲乙丙丁戊己庚辛"),
       createNode(3, 0.24, "甲乙丙丁戊己庚辛"),
     ];
-
-    const layoutNodes = createTimelineLayoutNodes(nodes, calculateCanvasMinWidth(nodes.length, 12));
+    const derivedOrder = nodes.map((n) => n.tree_id);
+    const layoutNodes = createTimelineLayoutNodes(nodes, derivedOrder, calculateCanvasMinWidth(nodes.length, 12));
 
     expect(new Set(layoutNodes.map((node) => node.lane)).size).toBeGreaterThan(1);
   });
@@ -56,11 +78,12 @@ describe("timelineTrackLayout", () => {
 
   it("同一进度事件保持全局顺序，并只让同一层卡片保留横向间距", () => {
     const nodes = Array.from({ length: 12 }, (_, index) =>
-      createNode(index + 1, 0.5, `同点事件${index + 1}`),
+      createEventNode(`t${index + 1}`, index + 1, 0.5, `同点事件${index + 1}`),
     );
+    const derivedOrder = nodes.map((n) => n.tree_id);
     const canvasWidth = calculateCanvasMinWidth(nodes.length, 120);
     const tensionCurve = [0, 1, ...Array.from({ length: 118 }, () => 0.5)];
-    const layoutNodes = createTimelineLayoutNodes(nodes, canvasWidth, {
+    const layoutNodes = createTimelineLayoutNodes(nodes, derivedOrder, canvasWidth, {
       tensionCurve,
       totalChapters: 120,
     });
@@ -89,10 +112,11 @@ describe("timelineTrackLayout", () => {
 
   it("中间线靠上时，下方先按第二层、第一层、第二层排布，并把下一张第一层放上方", () => {
     const nodes = Array.from({ length: 8 }, (_, index) =>
-      createNode(index + 1, 0.8, `高线事件${index + 1}`),
+      createEventNode(`h${index + 1}`, index + 1, 0.8, `高线事件${index + 1}`),
     );
+    const derivedOrder = nodes.map((n) => n.tree_id);
     const tensionCurve = [0, ...Array.from({ length: 19 }, () => 1)];
-    const layoutNodes = createTimelineLayoutNodes(nodes, 980, {
+    const layoutNodes = createTimelineLayoutNodes(nodes, derivedOrder, 980, {
       tensionCurve,
       totalChapters: 20,
     });
@@ -103,10 +127,11 @@ describe("timelineTrackLayout", () => {
 
   it("中间线靠下时，上方先按第二层、第一层、第二层排布，并把下一张第一层放下方", () => {
     const nodes = Array.from({ length: 8 }, (_, index) =>
-      createNode(index + 1, 0.2, `低线事件${index + 1}`),
+      createEventNode(`l${index + 1}`, index + 1, 0.2, `低线事件${index + 1}`),
     );
+    const derivedOrder = nodes.map((n) => n.tree_id);
     const tensionCurve = [1, ...Array.from({ length: 19 }, () => 0)];
-    const layoutNodes = createTimelineLayoutNodes(nodes, 980, {
+    const layoutNodes = createTimelineLayoutNodes(nodes, derivedOrder, 980, {
       tensionCurve,
       totalChapters: 20,
     });
@@ -117,10 +142,11 @@ describe("timelineTrackLayout", () => {
 
   it("中间线居中时上下两侧都按成对车道交错", () => {
     const nodes = Array.from({ length: 4 }, (_, index) =>
-      createNode(index + 1, 0.5, `居中事件${index + 1}`),
+      createEventNode(`m${index + 1}`, index + 1, 0.5, `居中事件${index + 1}`),
     );
+    const derivedOrder = nodes.map((n) => n.tree_id);
     const tensionCurve = [0, 1, ...Array.from({ length: 18 }, () => 0.5)];
-    const layoutNodes = createTimelineLayoutNodes(nodes, 980, {
+    const layoutNodes = createTimelineLayoutNodes(nodes, derivedOrder, 980, {
       tensionCurve,
       totalChapters: 20,
     });
@@ -134,6 +160,63 @@ describe("timelineTrackLayout", () => {
     expect(getLabelTopPx(233, -2)).toBe(73);
     expect(getLabelTopPx(233, 1)).toBe(277);
     expect(getLabelTopPx(233, 2)).toBe(352);
+  });
+
+  it("按 derivedOrder 均匀分布 anchorX，而非按 progress 聚簇", () => {
+    // progress 故意打乱，但 derivedOrder 要求均匀
+    const nodes = [
+      createEventNode("tA", 10, 0.9, "事件A"),
+      createEventNode("tB", 2, 0.1, "事件B"),
+      createEventNode("tC", 5, 0.5, "事件C"),
+      createEventNode("tD", 8, 0.8, "事件D"),
+      createEventNode("tE", 1, 0.05, "事件E"),
+    ];
+    const derivedOrder = ["tE", "tB", "tC", "tD", "tA"];
+    const canvasWidth = 1200;
+    const usableWidth = canvasWidth - TRACK_NODE_START_PADDING_PX - TRACK_NODE_END_PADDING_PX;
+    const layoutNodes = createTimelineLayoutNodes(nodes, derivedOrder, canvasWidth, {
+      totalChapters: 20,
+    });
+
+    // 验证顺序严格跟随 derivedOrder
+    expect(layoutNodes.map((n) => n.node.tree_id)).toEqual(derivedOrder);
+    // 验证均匀分布：间距近似相等，容差考虑 pack 最小间距微调及首尾 label 边界约束（START 28 vs 16+半宽）
+    for (let i = 1; i < layoutNodes.length; i++) {
+      const gap = (layoutNodes[i]?.anchorX ?? 0) - (layoutNodes[i - 1]?.anchorX ?? 0);
+      const expectedGap = usableWidth / (nodes.length - 1);
+      // 均匀分布后 pack 仅做最小间距和边界钳制，首尾因 LABEL_START_GAP 会偏移，中间间距仍应接近均匀
+      expect(Math.abs(gap - expectedGap)).toBeLessThan(80);
+    }
+    // progress 乱序不应影响 anchorX 单调性
+    for (let i = 1; i < layoutNodes.length; i++) {
+      expect(layoutNodes[i]?.anchorX).toBeGreaterThan(layoutNodes[i - 1]?.anchorX ?? 0);
+    }
+  });
+
+  it("跨章区间返回带宽而单章返回标签宽度", () => {
+    const canvasWidth = 1000;
+    const crossNode = createEventNode("cross", 2, 0.3, "跨章事件", {
+      start_chapter_id: 2,
+      end_chapter_id: 5,
+      start_progress: 0.2,
+      end_progress: 0.5,
+      chapter_ids: [2, 3, 4, 5],
+    });
+    const singleNode = createEventNode("single", 3, 0.4, "单章事件");
+    const usableWidth = canvasWidth - TRACK_NODE_START_PADDING_PX - TRACK_NODE_END_PADDING_PX;
+    const spanWidth = getEventSpanWidth(crossNode, canvasWidth, 20);
+    expect(spanWidth).toBeCloseTo(0.3 * usableWidth, 5);
+    const singleWidth = getEventSpanWidth(singleNode, canvasWidth, 20);
+    expect(singleWidth).toBeGreaterThanOrEqual(164);
+    expect(singleWidth).toBeLessThanOrEqual(196);
+  });
+
+  it.skip("旧 progress 排序已废弃，仅保留均匀分布", () => {
+    // 旧接口按 progress 排序现已被 derivedOrder 取代，此用例标记跳过以记录迁移
+    const nodes = [createNode(2, 0.8, "旧排序2"), createNode(1, 0.1, "旧排序1")];
+    const derivedOrder: string[] = [];
+    const layout = createTimelineLayoutNodes(nodes, derivedOrder, 980);
+    expect(layout[0]?.node.progress).toBeLessThan(layout[1]?.node.progress ?? 1);
   });
 });
 

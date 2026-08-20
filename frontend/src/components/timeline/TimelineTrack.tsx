@@ -1,68 +1,44 @@
 /**
- * TimelineTrack - 叙事时间轴主视图组件
+ * TimelineTrack - 叙事时间轴主视图组件（2026-08-20 事件森林版）
  *
- * 横向时间轴轨道，包含节点和连接线
- *
- *   - 将单线点阵改为“阶段背景 + 节奏底图 + 上下分层节点”的叙事视图
- *   - 让密集节点通过多层车道避让，减少右侧拥挤和横向滚动依赖
- *   - 为每个节点补上短标签与引导线，真正占用下半区表达信息
- *
- *   - 为主轨道增加横向滚动容器，让密集节点优先展开而不是硬挤
- *   - 放大画布宽度和首尾安全边距，减少节点与标签贴边感
- *   - 为滚动区域补充底部留白，让滚动条和时间轴内容更易区分
- *
- *   - 将阶段背景与张力底图并入可滚动画布，确保随时间轴宽度一起延展
- *   - 恢复滚动主图区的圆角裁切，避免出现生硬直角块面
- *   - 统一滚动画布的背景层，减少前景滚动与背景静止的割裂感
- *
- *   - 节点圆点按 progress 插值吸附到张力曲线，增强事件与节奏的对应关系
- *   - 保留标签分层避让，仅让锚点贴线，避免密集区瞬间失去可读性
- *   - 收紧图例与主图之间的外部间隙，同时在轨道内部补一点上下呼吸空间
- *
- *   - 移除中部旧基线，让张力曲线直接承担时间轴主轴角色
- *   - 将张力曲线提升到画布中段，节点围绕曲线分布而不是落在下半区
- *   - 将内部留白转移为色块与上下标签卡之间的呼吸空间，减少无效空白
- *
- *   - 收紧主画布高度与阶段底边，减少下方无效空带
- *   - 让张力底图更贴近底部，同时缩小底部说明行与主图之间的间距
- *
- *   - 移除底部“开篇/叙事张力逐步累积/结尾”文字区，将高度回灌给主画布
- *   - 适当放宽下方标签卡的容纳高度，避免底部节点卡被裁切
- *
- *   - 缩小顶部保留区与外层内边距，减少主图上方无效空白
- *   - 轻微压缩主画布高度，让整块时间轴卡片更紧凑
- *
- *   - 拆分布局计算与 SVG path 生成纯函数
- *   - TimelineTrack 只保留视图编排职责，并补纯函数测试
+ * - 一棵树=一个节点，按 derived_event_order 均匀排布
+ * - anchorX 均匀分布 + 最小间距微调，anchorY 仍按 progress 插值张力曲线
+ * - 支持跨章区间半透明带宽条
  */
 
 import { motion } from "framer-motion";
 import { useCallback, useMemo } from "react";
 
-import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineEventNode, TimelinePhase } from "@/api/types";
 import { cn } from "@/lib/cn";
 
 import {
   calculateCanvasMinWidth,
   createTimelineLayoutNodes,
+  getEventSpanWidth,
   getLabelTopPx,
   LABEL_HEIGHT_PX,
   PHASE_BAND_BOTTOM_PX,
   PHASE_BAND_TOP_PX,
+  TRACK_NODE_END_PADDING_PX,
+  TRACK_NODE_START_PADDING_PX,
 } from "./timelineTrackLayout";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
-import { buildTensionAreaPath, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
+import { buildTensionAreaPath, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
-type TimelineDisplayNode = TimelineNodeType | TimelineCompositeNode;
+export type TimelineDisplayNode = TimelineEventNode;
+
+type TimelineTrackNodeInput = TimelineEventNode;
 
 export interface TimelineTrackProps {
-  nodes: TimelineDisplayNode[];
-  phases?: { name: string; start: number; end: number; ratio: number }[];
+  nodes: TimelineTrackNodeInput[];
+  derivedOrder?: string[];
+  phases?: { name: string; start: number; end: number; ratio: number }[] | TimelinePhase[];
   activePhase?: string;
   selectedNodeId?: string;
-  onNodeClick?: (node: TimelineDisplayNode) => void;
+  onNodeClick?: (node: TimelineEventNode) => void;
   className?: string;
-  tensionCurve?: number[];
+  tensionCurve?: number[] | null;
   totalChapters?: number;
 }
 
@@ -73,8 +49,33 @@ const PHASE_SURFACE_CLASS_MAP: Record<string, string> = {
   收束期: "from-chart-4/12 to-chart-4/4",
 };
 
+function isTimelineEventNode(node: TimelineTrackNodeInput): node is TimelineEventNode {
+  return typeof (node as TimelineEventNode).tree_id === "string" && typeof (node as TimelineEventNode).root_event_id === "string";
+}
+
+function resolveNodeKey(node: TimelineTrackNodeInput): string {
+  // 类型守卫确保为 TimelineEventNode，避免 any 逃逸
+  if (isTimelineEventNode(node)) {
+    return node.root_event_id ?? node.tree_id ?? "";
+  }
+  return (node as TimelineEventNode).tree_id ?? "";
+}
+
+function resolveChapterIds(node: TimelineTrackNodeInput): number[] {
+  if (Array.isArray(node.chapter_ids) && node.chapter_ids.length > 0) return node.chapter_ids;
+  return typeof node.anchor_chapter_id === "number" ? [node.anchor_chapter_id] : [];
+}
+
+function getEventPresentationSubtype(node: TimelineTrackNodeInput): string {
+  if (node.level === 1) return "root";
+  if (node.level === 2) return "main";
+  if (node.level === 3) return "secondary";
+  return "root";
+}
+
 export function TimelineTrack({
   nodes,
+  derivedOrder = [],
   phases,
   activePhase,
   selectedNodeId,
@@ -90,18 +91,56 @@ export function TimelineTrack({
   }, [activePhase, phases]);
 
   const isNodeInHighlight = useCallback(
-    (node: TimelineDisplayNode): boolean => {
+    (node: TimelineTrackNodeInput): boolean => {
       if (!highlightedRange) return false;
-      return node.anchor_chapter_id >= highlightedRange[0] && node.anchor_chapter_id <= highlightedRange[1];
+      const chIds = resolveChapterIds(node);
+      if (chIds.length > 0) {
+        return chIds.some((cid) => cid >= highlightedRange[0] && cid <= highlightedRange[1]);
+      }
+      return typeof node.anchor_chapter_id === "number" && node.anchor_chapter_id >= highlightedRange[0] && node.anchor_chapter_id <= highlightedRange[1];
     },
-    [highlightedRange]
+    [highlightedRange],
   );
 
-  const sortedNodes = useMemo(() => [...(nodes || [])].sort((a, b) => a.progress - b.progress), [nodes]);
-  const canvasMinWidth = useMemo(() => calculateCanvasMinWidth(sortedNodes.length, totalChapters), [sortedNodes.length, totalChapters]);
+  const sortedNodes = useMemo(() => {
+    if (!nodes) return [];
+    if (!derivedOrder || derivedOrder.length === 0) {
+      return [...nodes].sort((a, b) => {
+        const prog = (a.progress ?? 0) - (b.progress ?? 0);
+        if (prog !== 0) return prog;
+        const aStart = a.char_start ?? Number.MAX_SAFE_INTEGER;
+        const bStart = b.char_start ?? Number.MAX_SAFE_INTEGER;
+        if (aStart !== bStart) return aStart - bStart;
+        return (a.char_end ?? Number.MAX_SAFE_INTEGER) - (b.char_end ?? Number.MAX_SAFE_INTEGER);
+      });
+    }
+    const orderIndexMap = new Map(derivedOrder.map((id, i) => [id, i] as const));
+    return [...nodes].sort((a, b) => {
+      const aIdx = orderIndexMap.get(a.root_event_id ?? "") ?? orderIndexMap.get(a.tree_id ?? "") ?? null;
+      const bIdx = orderIndexMap.get(b.root_event_id ?? "") ?? orderIndexMap.get(b.tree_id ?? "") ?? null;
+      if (aIdx != null && bIdx != null) return aIdx - bIdx;
+      if (aIdx != null) return -1;
+      if (bIdx != null) return 1;
+      const prog = (a.progress ?? 0) - (b.progress ?? 0);
+      if (prog !== 0) return prog;
+      const aStart = a.char_start ?? Number.MAX_SAFE_INTEGER;
+      const bStart = b.char_start ?? Number.MAX_SAFE_INTEGER;
+      if (aStart !== bStart) return aStart - bStart;
+      const aEnd = a.char_end ?? Number.MAX_SAFE_INTEGER;
+      const bEnd = b.char_end ?? Number.MAX_SAFE_INTEGER;
+      if (aEnd !== bEnd) return aEnd - bEnd;
+      return String(a.root_event_id ?? a.tree_id).localeCompare(String(b.root_event_id ?? b.tree_id));
+    });
+  }, [nodes, derivedOrder]);
+
+  const canvasMinWidth = useMemo(
+    () => calculateCanvasMinWidth(sortedNodes.length, totalChapters),
+    [sortedNodes.length, totalChapters],
+  );
+
   const layoutNodes = useMemo(
-    () => createTimelineLayoutNodes(sortedNodes, canvasMinWidth, { tensionCurve, totalChapters }),
-    [canvasMinWidth, sortedNodes, tensionCurve, totalChapters],
+    () => createTimelineLayoutNodes(sortedNodes, derivedOrder, canvasMinWidth, { tensionCurve, totalChapters }),
+    [canvasMinWidth, sortedNodes, derivedOrder, tensionCurve, totalChapters],
   );
 
   const tensionPath = useMemo(() => {
@@ -146,7 +185,7 @@ export function TimelineTrack({
                     className={cn(
                       "absolute rounded-[24px] border border-white/70 bg-gradient-to-b",
                       PHASE_SURFACE_CLASS_MAP[phase.name] ?? "from-primary/12 to-primary/4",
-                      isActive && "shadow-[0_0_0_2px_rgba(255,255,255,0.75)]"
+                      isActive && "shadow-[0_0_0_2px_rgba(255,255,255,0.75)]",
                     )}
                     style={{
                       left: `${phase.left}px`,
@@ -183,22 +222,48 @@ export function TimelineTrack({
               )}
 
               <div className="relative h-full" style={{ minHeight: `${TRACK_HEIGHT_PX}px`, minWidth: `${canvasMinWidth}px` }}>
+                {/* 跨章区间半透明带宽条 */}
+                {layoutNodes.map((layoutNode) => {
+                  const { node, anchorY } = layoutNode;
+                  const isCrossChapter = node.start_chapter_id !== node.end_chapter_id;
+                  if (!isCrossChapter) return null;
+                  const spanWidth = getEventSpanWidth(node, canvasMinWidth, totalChapters);
+                  const usableMinProgress = Math.min(node.start_progress, node.end_progress);
+                  const spanLeft = getTrackPositionPx(usableMinProgress, canvasMinWidth, TRACK_NODE_START_PADDING_PX, TRACK_NODE_END_PADDING_PX);
+                  // 若 spanWidth 为 labelWidth（单章）则不渲染带宽
+                  if (spanWidth <= 0) return null;
+                  return (
+                    <div
+                      key={`span-${resolveNodeKey(node)}`}
+                      data-testid="timeline-span"
+                      className="pointer-events-none absolute rounded-full bg-primary/10 border border-primary/15"
+                      style={{
+                        left: `${spanLeft}px`,
+                        width: `${spanWidth}px`,
+                        top: `${anchorY - 6}px`,
+                        height: "12px",
+                      }}
+                    />
+                  );
+                })}
+
                 {layoutNodes.map((layoutNode, index) => {
                   const { node, lane, labelWidth, anchorX, anchorY } = layoutNode;
                   const labelTop = getLabelTopPx(anchorY, lane);
                   const labelLeft = anchorX - labelWidth / 2;
                   const labelAnchorY = lane < 0 ? labelTop + LABEL_HEIGHT_PX : labelTop;
-                  const presentationSubtype = "node_subtype" in node ? node.node_subtype : (node.node_subtypes[0] ?? "plot");
-                  const presentation = getTimelineNodePresentation(node.node_type, presentationSubtype);
-                  const isSelected = selectedNodeId === node.node_id;
+                  const subtype = getEventPresentationSubtype(node);
+                  const presentation = getTimelineNodePresentation(node.node_type as "event", subtype);
+                  const nodeKey = resolveNodeKey(node);
+                  const isSelected = selectedNodeId === nodeKey;
                   const isHighlighted = isNodeInHighlight(node);
                   const chapterLabel =
-                    "start_chapter_id" in node && node.start_chapter_id !== node.end_chapter_id
+                    node.start_chapter_id !== node.end_chapter_id
                       ? `第 ${node.start_chapter_id}-${node.end_chapter_id} 章`
                       : `第 ${node.anchor_chapter_id} 章`;
 
                   return (
-                    <div key={node.node_id}>
+                    <div key={nodeKey}>
                       <svg
                         aria-hidden="true"
                         className="pointer-events-none absolute inset-0 overflow-visible"
@@ -213,7 +278,7 @@ export function TimelineTrack({
                           className={cn(
                             "stroke-current text-border/80",
                             isSelected && "text-primary/70",
-                            isHighlighted && !isSelected && "text-chart-4/70"
+                            isHighlighted && !isSelected && "text-chart-4/70",
                           )}
                           strokeWidth="1"
                         />
@@ -227,7 +292,7 @@ export function TimelineTrack({
                           isSelected
                             ? "border-primary/35 bg-primary/10 shadow-[0_12px_30px_rgba(161,90,43,0.16)]"
                             : "border-white/80 bg-background/88 hover:border-border/80",
-                          isHighlighted && !isSelected && "border-chart-4/35 bg-chart-4/8"
+                          isHighlighted && !isSelected && "border-chart-4/35 bg-chart-4/8",
                         )}
                         style={{
                           left: `${labelLeft}px`,
@@ -242,7 +307,7 @@ export function TimelineTrack({
                         <div
                           className={cn(
                             "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
-                            presentation.dotClassName
+                            presentation.dotClassName,
                           )}
                         >
                           <presentation.icon className={cn("h-3 w-3", presentation.iconClassName)} />
@@ -253,14 +318,8 @@ export function TimelineTrack({
                             <span className="text-[11px] text-text-muted">{chapterLabel}</span>
                           </div>
                           <p className="mt-0.5 line-clamp-1 text-xs leading-4 text-text">{node.summary}</p>
-                          {"child_node_ids" in node && node.child_node_ids.length > 1 ? (
-                            <p className="mt-0.5 text-[10px] leading-4 text-text-muted">
-                              聚合 {node.child_node_ids.length} 个原子节点
-                            </p>
-                          ) : null}
                         </div>
                       </motion.button>
-
                     </div>
                   );
                 })}

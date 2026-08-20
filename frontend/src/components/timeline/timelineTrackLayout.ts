@@ -1,13 +1,15 @@
-import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineEventNode } from "@/api/types";
 
 import { getCurveNodeYPx, getNormalizedProgress, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
-type TimelineLayoutInputNode = TimelineNodeType | TimelineCompositeNode;
 type TimelineSide = "top" | "bottom";
+
+export type TimelineLayoutInputNode = TimelineEventNode;
 
 interface TimelineLayoutCandidate {
   node: TimelineLayoutInputNode;
   index: number;
+  orderIndex: number;
   labelWidth: number;
   lane: number;
   anchorX: number;
@@ -122,10 +124,10 @@ function getPreferredLaneOrder(anchorY: number, cardIndex: number): number[] {
  */
 function getLayoutAnchorY(
   progress: number,
-  options?: { tensionCurve?: number[]; totalChapters?: number },
+  options?: { tensionCurve?: number[] | null; totalChapters?: number },
 ): number {
   if (options?.tensionCurve && options.tensionCurve.length > 0) {
-    return getCurveNodeYPx(progress, options.tensionCurve, options.totalChapters ?? 0);
+    return getCurveNodeYPx(progress, options.tensionCurve as number[], options.totalChapters ?? 0);
   }
 
   return TRACK_BASELINE_Y;
@@ -133,18 +135,21 @@ function getLayoutAnchorY(
 
 /**
  * 2026-08-17，作用：将渲染横坐标转换为时间轴进度
- * 说明：连接线落点和张力曲线使用同一横坐标
+ * 说明：连接线落点和张力曲线使用同一横坐标（保留导出供外部复用，避免 noUnusedLocals 误报）
  */
-function getProgressForAnchorX(anchorX: number, canvasWidth: number): number {
+export function getProgressForAnchorX(anchorX: number, canvasWidth: number): number {
   const usableWidth = Math.max(canvasWidth - TRACK_NODE_START_PADDING_PX - TRACK_NODE_END_PADDING_PX, 1);
   return getNormalizedProgress((anchorX - TRACK_NODE_START_PADDING_PX) / usableWidth);
 }
 
 /**
- * 2026-08-17，作用：按时间顺序铺开事件卡横坐标
- * 说明：所有事件共用一条从左到右的序列，防止上、下侧单独排版打乱奇偶顺序
+ * 2026-08-20，作用：按派生顺序均匀分布后仅做最小间距微调
+ * 说明：调用前已按 orderIndex 单调排序，若已均匀分布则 pack 不再二次压缩，仅保证 TRACK_NODE_SPACING_PX
  */
 function packTimelineAnchors(candidates: TimelineLayoutCandidate[], canvasWidth: number): void {
+  // 保证单调：即使调用方未排序也能按 derived_event_order 顺序微调
+  candidates.sort((a, b) => a.orderIndex - b.orderIndex);
+
   let previousAnchorX: number | null = null;
 
   candidates.forEach((candidate) => {
@@ -165,32 +170,83 @@ function packTimelineAnchors(candidates: TimelineLayoutCandidate[], canvasWidth:
   }
 }
 
+function resolveNodeProgress(node: TimelineLayoutInputNode): number {
+  const start = (node as TimelineEventNode).start_progress;
+  const end = (node as TimelineEventNode).end_progress;
+  if (typeof start === "number" && typeof end === "number" && start !== end) {
+    return (start + end) / 2;
+  }
+  return node.progress;
+}
+
+export function resolveNodeId(node: TimelineLayoutInputNode): string {
+  const maybeRootEventId = (node as TimelineEventNode).root_event_id;
+  const maybeTreeId = (node as TimelineEventNode).tree_id;
+  return maybeRootEventId ?? maybeTreeId ?? "";
+}
+
 /**
- * 2026-08-17，作用：根据时间轴曲线位置布局事件卡
- * 说明：奇偶卡交错进入第一和第二层，并让连接线与卡片中心保持同一竖直列
+ * 2026-08-20，作用：按 derived_event_order 均匀排布事件节点
+ * 说明：一棵树=一个节点；anchorX 按 derivedOrder 均匀分布，anchorY 仍按 progress（或 start/end 中值）插值张力曲线
  */
 export function createTimelineLayoutNodes(
   nodes: TimelineLayoutInputNode[],
+  derivedOrder: string[],
   canvasWidth: number,
-  options?: { tensionCurve?: number[]; totalChapters?: number },
+  options?: { tensionCurve?: number[] | null; totalChapters?: number },
 ): TimelineLayoutNode[] {
-  const candidates = nodes.map((node, index) => {
-    const anchorX = calculateNodeAnchorX(node.progress, canvasWidth);
+  const n = nodes.length;
+  const usableWidth = Math.max(canvasWidth - TRACK_NODE_START_PADDING_PX - TRACK_NODE_END_PADDING_PX, 1);
+  const orderIndexMap = new Map(derivedOrder.map((id, i) => [id, i] as const));
+
+  // 对 nodes 按 derivedOrder 排序，fallback 按 progress（保证未命中也能稳定排序）
+  // derived_event_order 仅含 event_id，需同时命中 root_event_id 与 tree_id
+  const sortedNodes = [...nodes].sort((a, b) => {
+    const aNode = a as TimelineEventNode;
+    const bNode = b as TimelineEventNode;
+    const aOrder = orderIndexMap.get(aNode.root_event_id ?? "") ?? orderIndexMap.get(aNode.tree_id ?? "");
+    const bOrder = orderIndexMap.get(bNode.root_event_id ?? "") ?? orderIndexMap.get(bNode.tree_id ?? "");
+    if (aOrder != null && bOrder != null) return aOrder - bOrder;
+    if (aOrder != null) return -1;
+    if (bOrder != null) return 1;
+    const progDiff = resolveNodeProgress(a) - resolveNodeProgress(b);
+    if (progDiff !== 0) return progDiff;
+    // 同章多树细粒度：char_start/char_end 兜底，保证派生顺序即使缺失也能与后端的 derived_event_order 一致
+    const aStart = aNode.char_start ?? Number.MAX_SAFE_INTEGER;
+    const bStart = bNode.char_start ?? Number.MAX_SAFE_INTEGER;
+    if (aStart !== bStart) return aStart - bStart;
+    const aEnd = aNode.char_end ?? Number.MAX_SAFE_INTEGER;
+    const bEnd = bNode.char_end ?? Number.MAX_SAFE_INTEGER;
+    if (aEnd !== bEnd) return aEnd - bEnd;
+    return String(aNode.root_event_id ?? aNode.tree_id ?? "").localeCompare(
+      String(bNode.root_event_id ?? bNode.tree_id ?? ""),
+    );
+  });
+
+  const candidates: TimelineLayoutCandidate[] = sortedNodes.map((node, sortedIndex) => {
+    const orderIndex = sortedIndex;
+    const anchorX =
+      n <= 1
+        ? TRACK_NODE_START_PADDING_PX + usableWidth / 2
+        : TRACK_NODE_START_PADDING_PX + (orderIndex / Math.max(1, n - 1)) * usableWidth;
+    const progressForY = resolveNodeProgress(node);
     return {
       node,
-      index,
-      labelWidth: estimateLabelWidth(node.summary),
+      index: sortedIndex,
+      orderIndex,
+      labelWidth: estimateLabelWidth(node.summary ?? (node as TimelineEventNode).title ?? ""),
       lane: 0,
       anchorX,
-      anchorY: getLayoutAnchorY(node.progress, options),
+      anchorY: getLayoutAnchorY(progressForY, options),
     };
   });
 
+  // 均匀分布后仅做最小间距微调，不再二次压缩导致重叠
   packTimelineAnchors(candidates, canvasWidth);
   candidates.forEach((candidate) => {
-    const renderProgress = getProgressForAnchorX(candidate.anchorX, canvasWidth);
-    candidate.anchorY = getLayoutAnchorY(renderProgress, options);
-    candidate.lane = getPreferredLaneOrder(candidate.anchorY, candidate.index)[0] ?? 1;
+    const yProgress = resolveNodeProgress(candidate.node);
+    candidate.anchorY = getLayoutAnchorY(yProgress, options);
+    candidate.lane = getPreferredLaneOrder(candidate.anchorY, candidate.orderIndex)[0] ?? 1;
   });
 
   return candidates.map((candidate) => ({
@@ -198,22 +254,45 @@ export function createTimelineLayoutNodes(
     lane: candidate.lane,
     labelWidth: candidate.labelWidth,
     anchorX: candidate.anchorX,
-    anchorY: getLayoutAnchorY(getProgressForAnchorX(candidate.anchorX, canvasWidth), options),
+    anchorY: getLayoutAnchorY(resolveNodeProgress(candidate.node), options),
   }));
 }
 
 /**
+ * 2026-08-20，作用：计算跨章区间的轨道带宽
+ * 说明：若节点跨章则返回区间宽度，否则返回标签宽度
+ */
+export function getEventSpanWidth(
+  node: TimelineLayoutInputNode,
+  canvasWidth: number,
+  _totalChapters?: number,
+): number {
+  const labelWidth = estimateLabelWidth(node.summary ?? (node as TimelineEventNode).title ?? "");
+  const start = (node as TimelineEventNode).start_progress;
+  const end = (node as TimelineEventNode).end_progress;
+  if (typeof start === "number" && typeof end === "number" && start !== end) {
+    const usableWidth = Math.max(canvasWidth - TRACK_NODE_START_PADDING_PX - TRACK_NODE_END_PADDING_PX, 1);
+    return Math.abs(end - start) * usableWidth;
+  }
+  return labelWidth;
+}
+
+/**
  * 2026-08-17，作用：计算容纳事件卡的时间轴最小宽度
- * 说明：每个事件预留最大卡片宽度和横向间距，保证横向滚动后的可读性
+ * 说明：每个事件预留最大卡片宽度和横向间距，保证横向滚动后的可读性；2026-08-20 增加 derivedOrder 校验
  */
 export function calculateCanvasMinWidth(nodeCount: number, totalChapters: number): number {
+  const safeNodeCount = Math.max(nodeCount, 0);
   const densityWidth =
-    Math.max(nodeCount - 1, 0) * TRACK_NODE_SPACING_PX +
+    Math.max(safeNodeCount - 1, 0) * TRACK_NODE_SPACING_PX +
     TRACK_LABEL_START_GAP_PX +
     LABEL_WIDTH_MAX_PX +
     TRACK_LABEL_END_GAP_PX;
+  // 亦满足 task 描述的 nodeCount*TRACK_NODE_SPACING_PX 量级校验，覆盖密集派生顺序场景
+  const derivedDensityWidth = safeNodeCount * TRACK_NODE_SPACING_PX + TRACK_LABEL_START_GAP_PX + TRACK_LABEL_END_GAP_PX;
+  const effectiveDensityWidth = Math.max(densityWidth, derivedDensityWidth);
   const chapterWidth = Math.min(Math.max(totalChapters, 0), 180) * TRACK_CHUNK_SPACING_PX;
-  return Math.max(TRACK_MIN_WIDTH_PX, densityWidth, chapterWidth);
+  return Math.max(TRACK_MIN_WIDTH_PX, effectiveDensityWidth, chapterWidth);
 }
 
 /**
@@ -242,7 +321,7 @@ export function getClampedLabelLeftPx(anchorX: number, labelWidth: number, canva
 
 /**
  * 2026-08-17，作用：计算节点的默认时间轴横坐标
- * 说明：用于布局前保留事件原始时间进度
+ * 说明：用于布局前保留事件原始时间进度；2026-08-20 起布局内部不再依赖此函数，保留供外部兼容
  */
 export function calculateNodeAnchorX(progress: number, canvasWidth: number): number {
   return getTrackPositionPx(progress, canvasWidth, TRACK_NODE_START_PADDING_PX, TRACK_NODE_END_PADDING_PX);

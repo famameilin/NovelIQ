@@ -18,9 +18,10 @@ import type {
   GraphChange,
   GraphChangesPageInfo,
   GraphChangesPageResponse,
-  TimelineCompositeNode,
-  TimelineNode,
-  TimelineResponse,
+  TimelineEventNode,
+  TimelineEventCausalEdge,
+  TimelineEventForeshadowingEdge,
+  EventTimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
   CharacterStatsMetrics,
@@ -636,130 +637,179 @@ function resolveTimelinePhaseName(chapterId: number): "引入期" | "发展期" 
   return "收束期";
 }
 
-export function createTimeline(): TimelineResponse {
-  const plotNodes: TimelineNode[] = PHASE_EVENTS.map((event, i) => ({
-    node_id: `plot:${Math.floor((i / PHASE_EVENTS.length) * 120 + 5)}`,
-    anchor_chapter_id: Math.floor((i / PHASE_EVENTS.length) * MOCK_TIMELINE_TOTAL_CHUNKS + 5),
-    progress: +(i / PHASE_EVENTS.length).toFixed(3),
-    importance_score: +(0.3 + Math.random() * 0.7).toFixed(2),
-    level: (Math.random() > 0.6 ? 1 : Math.random() > 0.3 ? 2 : 3) as 1 | 2 | 3,
-    summary: event,
-    characters: CHAR_SETS[i],
-      phase_name: (["引入期", "发展期", "高潮期", "收束期"] as const)[Math.min(Math.floor(i / 3), 3)],
-    node_type: "plot" as const,
-    node_subtype: "plot" as const,
-    score_breakdown: {
-      pivot: i === 0 || i === 5 || i === PHASE_EVENTS.length - 1 ? 3 : 0,
-      cliffhanger: i === 4 || i === 7 ? 2 : 0,
-      tension: +(Math.random() * 2).toFixed(2),
-    },
-    plot_flags: {
-      is_pivot: i === 0 || i === 5 || i === PHASE_EVENTS.length - 1,
-      is_cliffhanger: i === 4 || i === 7,
-      tension_percentile: Math.floor(Math.random() * 100),
-    },
-  }));
+// 2026-08-20 事件森林一树一节点工厂：生成 8-12 棵树，每树含 root+1-2 main +0-1 secondary，derived_event_order 按树序+char_start，causal_edges 2-3 条跨树，tension_curve 120点
+export function createEventTimeline(): EventTimelineResponse {
+  const treeCount = 9 + Math.floor(Math.random() * 3); // 9-11
+  const nodes: TimelineEventNode[] = [];
+  const allEventIds: string[] = [];
+  const chapterCursor = { value: 1 };
+  const charCursor = { value: 0 };
 
-  const relationNodes: TimelineNode[] = createGraphChangesPage(null, MOCK_GRAPH_RELATION_CHANGES.length).changes.map((change) => ({
-    node_id: change.change_id,
-    anchor_chapter_id: change.effective_chapter_id,
-    progress: +(change.effective_chapter_id / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
-    importance_score:
-      change.relation_change_kind === "break" || change.relation_change_kind === "assert"
-        ? 0.88
-        : change.relation_change_kind === "reinforce"
-          ? 0.74
-          : 0.63,
-    level: change.relation_change_kind === "break" || change.relation_change_kind === "assert" ? 1 : 2,
-    summary: `${change.from_name}与${change.to_name}关系变化`,
-    characters: [change.from_name ?? "未知实体", change.to_name ?? "未知实体"],
-    phase_name: resolveTimelinePhaseName(change.effective_chapter_id),
-    node_type: "relation" as const,
-    node_subtype: (change.relation_change_kind ?? "refine") as TimelineNode["node_subtype"],
-    score_breakdown: {
-      change_type_weight:
-        change.relation_change_kind === "break" ? 2.6 : change.relation_change_kind === "assert" ? 2.4 : change.relation_change_kind === "reinforce" ? 1.8 : 1.6,
-      pair_importance: 0.8,
-    },
-    graph_changes: [
-      {
-        change_id: change.change_id,
-        change_kind: "relation",
-        chapter_id: change.chapter_id,
-        fact_id: change.fact_id,
-        effective_chapter_id: change.effective_chapter_id,
-        changes: change.changes,
-        relation_id: change.relation_id,
-        from_char: change.from_name,
-        to_char: change.to_name,
-        relation_type: change.relation_type,
-        relation_change_kind: change.relation_change_kind,
-        directionality: change.directionality,
-      },
-    ],
-  }));
+  function nextChapterSpan(): { start: number; end: number; ids: number[] } {
+    const start = chapterCursor.value;
+    const span = 2 + Math.floor(Math.random() * 4); // 2-5 章跨度
+    const end = Math.min(start + span - 1, MOCK_TIMELINE_TOTAL_CHUNKS);
+    const ids = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    chapterCursor.value = Math.min(end + 1 + Math.floor(Math.random() * 3), MOCK_TIMELINE_TOTAL_CHUNKS);
+    if (chapterCursor.value > MOCK_TIMELINE_TOTAL_CHUNKS) chapterCursor.value = Math.max(1, MOCK_TIMELINE_TOTAL_CHUNKS - 5);
+    return { start, end, ids };
+  }
 
-  const stateNodes: TimelineNode[] = MOCK_GRAPH_CHARACTERS.slice(0, 2).map((character, index) => {
-    const anchorChapterId = index === 0 ? 18 : 42;
-    return {
-      node_id: `state:${character.entity_id}:${anchorChapterId}`,
+  for (let t = 0; t < treeCount; t++) {
+    const treeId = `tree:${t + 1}`;
+    const rootEventId = `event:${t + 1}:root`;
+    const mainCount = 1 + Math.floor(Math.random() * 2); // 1-2
+    const secondaryCount = Math.random() > 0.5 ? 1 : 0; // 0-1 分支
+    const mainChain: string[] = [rootEventId];
+    for (let m = 1; m <= mainCount; m++) {
+      const mid = `event:${t + 1}:main:${m}`;
+      mainChain.push(mid);
+      allEventIds.push(mid);
+    }
+    allEventIds.push(rootEventId);
+
+    const secondaryGroups: Array<{ target_event_id: string; branch: string[] }> = [];
+    for (let s = 0; s < secondaryCount; s++) {
+      const targetEventId = `event:${t + 1}:sec:${s + 1}`;
+      const branchLen = 1 + Math.floor(Math.random() * 2);
+      const branch: string[] = [];
+      for (let b = 0; b < branchLen; b++) {
+        const bid = `event:${t + 1}:sec:${s + 1}:b${b + 1}`;
+        branch.push(bid);
+        allEventIds.push(bid);
+      }
+      allEventIds.push(targetEventId);
+      secondaryGroups.push({ target_event_id: targetEventId, branch });
+    }
+
+    const { start, end, ids } = nextChapterSpan();
+    const anchorChapterId = ids[0] ?? start;
+    const anchorChapterOrder = anchorChapterId;
+    const total = MOCK_TIMELINE_TOTAL_CHUNKS;
+    const startProgress = Math.min(1, Math.max(0, start / total));
+    const endProgress = Math.min(1, Math.max(0, end / total));
+    const progress = Math.min(1, Math.max(0, anchorChapterId / total));
+    const charStart = charCursor.value;
+    const charLen = 400 + Math.floor(Math.random() * 1200);
+    const charEnd = charStart + charLen;
+    charCursor.value = charEnd + 80;
+
+    const titlePool = PHASE_EVENTS[t % PHASE_EVENTS.length] ?? `事件树 ${t + 1}`;
+    const summary = `${titlePool}：树 ${t + 1} 包含主链 ${mainChain.length} 环${secondaryGroups.length ? `与旁支 ${secondaryGroups.length} 组` : ""}，横跨第 ${start}-${end} 章。`;
+    const charSet = CHAR_SETS[t % CHAR_SETS.length] ?? ["萧炎"];
+    const participants = charSet.slice(0, 2 + Math.floor(Math.random() * 2)).map((name, idx) => ({
+      name,
+      role: idx === 0 ? "protagonist" : idx === 1 ? "supporting" : "observer",
+      entity_id: 100 + t * 10 + idx,
+      entity_type: "character" as const,
+    }));
+    const character_names = participants.map((p) => p.name);
+
+    // importance 按主链长度 + 旁支 + 随机
+    const importance_score = +(0.6 + mainChain.length * 0.35 + secondaryGroups.length * 0.25 + Math.random() * 1.2).toFixed(2);
+    // level 先占位，后面统一按分位数重算，保证与后端一致逻辑
+    const phase_name = resolveTimelinePhaseName(anchorChapterId);
+
+    nodes.push({
+      tree_id: treeId,
+      root_event_id: rootEventId,
+      title: titlePool,
+      summary,
       anchor_chapter_id: anchorChapterId,
-      progress: +(anchorChapterId / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
-      importance_score: index === 0 ? 0.76 : 0.62,
-      level: index === 0 ? 1 : 2,
-      summary: `${character.name}状态更新`,
-      characters: [character.name],
-      phase_name: resolveTimelinePhaseName(anchorChapterId),
-      node_type: "state" as const,
-      node_subtype: "state" as const,
-      score_breakdown: { state_change_weight: index === 0 ? 2.2 : 1.5 },
-      graph_changes: [
-        {
-          change_id: `state:${character.entity_id}:${anchorChapterId}`,
-          change_kind: "state" as const,
-          chapter_id: 12,
-          fact_id: `state-fact:${character.entity_id}:${anchorChapterId}`,
-          effective_chapter_id: anchorChapterId,
-          changes: [{ field: "status", value: index === 0 ? "突破" : "收徒" }],
-          entity_id: character.entity_id,
-          entity_name: character.name,
-        },
-      ],
-    };
+      anchor_chapter_order: anchorChapterOrder,
+      start_chapter_id: start,
+      end_chapter_id: end,
+      start_progress: +startProgress.toFixed(4),
+      end_progress: +endProgress.toFixed(4),
+      progress: +progress.toFixed(4),
+      chapter_ids: ids,
+      char_start: charStart,
+      char_end: charEnd,
+      participants,
+      character_names,
+      importance_score,
+      level: 3,
+      phase_name,
+      main_chain: mainChain,
+      secondary_groups: secondaryGroups,
+      causal_in: 0,
+      causal_out: 0,
+      node_type: "event",
+    });
+  }
+
+  // 按 importance 重算 level 1-3（与后端分位数一致）
+  if (nodes.length >= 3) {
+    const sortedScores = [...nodes].map((n) => n.importance_score).sort((a, b) => a - b);
+    const qHigh = sortedScores[Math.floor(sortedScores.length * 0.66)] ?? sortedScores[sortedScores.length - 1];
+    const qLow = sortedScores[Math.floor(sortedScores.length * 0.33)] ?? sortedScores[0];
+    nodes.forEach((n) => {
+      if (n.importance_score >= qHigh) n.level = 1;
+      else if (n.importance_score >= qLow) n.level = 2;
+      else n.level = 3;
+    });
+    if (qHigh === qLow && nodes.length > 1) {
+      const maxScore = Math.max(...nodes.map((n) => n.importance_score));
+      nodes.forEach((n) => {
+        n.level = n.importance_score === maxScore ? 1 : 2;
+      });
+    }
+  }
+
+  // 排序：按 anchor_chapter_order + char_start（模拟派生顺序）
+  nodes.sort((a, b) => a.anchor_chapter_order - b.anchor_chapter_order || a.char_start - b.char_start);
+  const derived_event_order: string[] = [];
+  nodes.forEach((n) => {
+    derived_event_order.push(n.root_event_id);
+    n.main_chain.forEach((eid) => {
+      if (!derived_event_order.includes(eid)) derived_event_order.push(eid);
+    });
+    n.secondary_groups.forEach((g) => {
+      if (!derived_event_order.includes(g.target_event_id)) derived_event_order.push(g.target_event_id);
+      g.branch.forEach((eid) => {
+        if (!derived_event_order.includes(eid)) derived_event_order.push(eid);
+      });
+    });
   });
 
-  const lifecycleNodes: TimelineNode[] = MOCK_GRAPH_CHARACTERS.flatMap((character) => [
-    {
-      node_id: `lifecycle:entry:${character.entity_id}:${character.first_seen_chapter}`,
-      anchor_chapter_id: character.first_seen_chapter,
-      progress: +(character.first_seen_chapter / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
-      importance_score: character.role === "protagonist" ? 0.82 : 0.58,
-      level: (character.role === "protagonist" ? 1 : 2) as 1 | 2,
-      summary: `${character.name}首次登场`,
-      characters: [character.name],
-      phase_name: resolveTimelinePhaseName(character.first_seen_chapter),
-      node_type: "lifecycle" as const,
-      node_subtype: "entry" as const,
-      score_breakdown: { character_importance: character.role === "protagonist" ? 2.4 : 1.4, entry_exit_bonus: 1.4 },
-      lifecycle_events: [{ entity_id: Number(character.entity_id), character_name: character.name, lifecycle_type: "entry" as const }],
-    },
-    {
-      node_id: `lifecycle:exit:${character.entity_id}:${character.last_seen_chapter}`,
-      anchor_chapter_id: character.last_seen_chapter,
-      progress: +(character.last_seen_chapter / MOCK_TIMELINE_TOTAL_CHUNKS).toFixed(3),
-      importance_score: character.role === "protagonist" ? 0.76 : 0.54,
-      level: (character.role === "protagonist" ? 1 : 2) as 1 | 2,
-      summary: `${character.name}最后活跃`,
-      characters: [character.name],
-      phase_name: resolveTimelinePhaseName(character.last_seen_chapter),
-      node_type: "lifecycle" as const,
-      node_subtype: "exit" as const,
-      score_breakdown: { character_importance: character.role === "protagonist" ? 2.4 : 1.4, entry_exit_bonus: 1.2 },
-      lifecycle_events: [{ entity_id: Number(character.entity_id), character_name: character.name, lifecycle_type: "exit" as const }],
-    },
-  ]);
+  // causal_edges 2-3 条跨树，is_active 随机，expired_at 仅对 inactive 透出
+  const causal_edges: TimelineEventCausalEdge[] = [];
+  const edgeCount = 3;
+  for (let e = 0; e < edgeCount; e++) {
+    const srcIdx = e % nodes.length;
+    const tgtIdx = (e + 2) % nodes.length;
+    const srcNode = nodes[srcIdx];
+    const tgtNode = nodes[tgtIdx];
+    if (!srcNode || !tgtNode || srcNode.tree_id === tgtNode.tree_id) continue;
+    const srcEvent = srcNode.main_chain[srcNode.main_chain.length - 1] ?? srcNode.root_event_id;
+    const tgtEvent = tgtNode.root_event_id;
+    const isActive = e !== 1; // 中间一条设为 inactive 演示虚线
+    causal_edges.push({
+      edge_id: `causal:${srcEvent}->${tgtEvent}:${e}`,
+      edge_type: "causal",
+      source_event_id: srcEvent,
+      target_event_id: tgtEvent,
+      source_chapter_id: srcNode.anchor_chapter_id,
+      target_chapter_id: tgtNode.anchor_chapter_id,
+      is_active: isActive,
+      evidence: [{ kind: "paragraph", paragraph_id: 100 + e, excerpt: `因果证据 ${e + 1}` }],
+      expired_at: isActive ? null : new Date(Date.now() - 86400000 * (e + 1)).toISOString(),
+    });
+    // 更新节点的 causal_in/out 计数（与 edges 保持一致）
+    srcNode.causal_out += 1;
+    tgtNode.causal_in += 1;
+  }
 
-  const nodes: TimelineNode[] = [...plotNodes, ...stateNodes, ...relationNodes, ...lifecycleNodes].sort((a, b) => a.progress - b.progress);
+  const foreshadowing_edges: TimelineEventForeshadowingEdge[] = nodes.slice(0, 2).map((n, idx) => ({
+    setup_id: `setup:${n.tree_id}`,
+    setup_event_id: n.root_event_id,
+    payoff_event_id: nodes[(idx + 1) % nodes.length]?.root_event_id ?? null,
+    first_chapter_id: n.start_chapter_id,
+    last_chapter_id: n.end_chapter_id,
+    setup_summary: `伏笔 ${idx + 1}：${n.title ?? n.summary.slice(0, 20)}`,
+    status: idx === 0 ? "open" : "reinforced",
+    active: idx === 0,
+  }));
 
   const tension_curve = Array.from({ length: MOCK_TIMELINE_TOTAL_CHUNKS }, (_, i) => {
     const t = i / MOCK_TIMELINE_TOTAL_CHUNKS;
@@ -773,32 +823,18 @@ export function createTimeline(): TimelineResponse {
       total_chapters: MOCK_TIMELINE_TOTAL_CHUNKS,
     },
     phases: [
-      { name: "引入期", start: 0, end: 30, ratio: 0.25 },
-      { name: "发展期", start: 30, end: 75, ratio: 0.375 },
-      { name: "高潮期", start: 75, end: 105, ratio: 0.25 },
-      { name: "收束期", start: 105, end: 120, ratio: 0.125 },
+      { name: "引入期", start: 1, end: 30, ratio: 0.25 },
+      { name: "发展期", start: 31, end: 75, ratio: 0.375 },
+      { name: "高潮期", start: 76, end: 105, ratio: 0.25 },
+      { name: "收束期", start: 106, end: 120, ratio: 0.125 },
     ],
-    composite_nodes: nodes.map((node, index): TimelineCompositeNode => ({
-      node_id: `composite:${node.node_type}:${node.anchor_chapter_id}:${index}`,
-      anchor_chapter_id: node.anchor_chapter_id,
-      start_chapter_id: node.anchor_chapter_id,
-      end_chapter_id: node.anchor_chapter_id,
-      progress: node.progress,
-      start_progress: node.progress,
-      end_progress: node.progress,
-      importance_score: node.importance_score,
-      level: node.level,
-      summary: node.summary,
-      characters: node.characters,
-      phase_name: node.phase_name,
-      node_type: node.node_type,
-      node_subtypes: [node.node_subtype],
-      representative_node_id: node.node_id,
-      child_node_ids: [node.node_id],
-    })),
-    atomic_nodes: nodes,
+    nodes,
+    causal_edges,
+    foreshadowing_edges,
+    derived_event_order,
     tension_curve,
     phase_basis: "tension",
+    total_chapters: MOCK_TIMELINE_TOTAL_CHUNKS,
   };
 }
 

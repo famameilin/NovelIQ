@@ -10,7 +10,7 @@ import type {
   ForeshadowingThread,
   GraphData,
   GraphChangesPageResponse,
-  TimelineResponse,
+  EventTimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
   CharacterStatsMetrics,
@@ -182,13 +182,13 @@ export async function getGraphChanges(
   return data;
 }
 
-// 获取叙事时间轴数据，支持 include_curve 参数
+// 获取叙事时间轴数据，支持 include_curve 参数（仅新森林合同 EventTimelineResponse）
 export async function getTimeline(
   novelId: string,
   taskId: string,
   options?: { includeCurve?: boolean }
-): Promise<TimelineResponse> {
-  const { data } = await apiClient.get<TimelineResponse>(
+): Promise<EventTimelineResponse> {
+  const { data } = await apiClient.get<EventTimelineResponse>(
     `/api/novels/${novelId}/timeline`,
     {
       params: {
