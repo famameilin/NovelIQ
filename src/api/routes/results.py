@@ -6,20 +6,19 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Annotated, Any, Literal, NoReturn, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.contract_guards import require_paragraph_contract
 from src.api.dependencies import (
     get_db_session,
     get_metrics_service,
     get_novel_service,
     resolve_run_id,
 )
-from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
+from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.event_forest import (
     EventEdgeResponse,
     EventForestResponse,
@@ -54,7 +53,7 @@ from src.api.routes.results_fetchers import (
 from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
-from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
+from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
 from src.api.services.results_queries.paragraphs import (
     _fetch_chapter_metrics,
@@ -71,9 +70,6 @@ from src.storage.repositories import (
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-# 2026-08-14 D3：新管线只写 completed/running/pending/failed/cancelling/cancelled，
-# aggregated/diagnosed 是旧合同状态，不再视为可读；无图 run 由图就绪 409 兜底
-# （GraphReadinessError），状态可读与数据可读在此对齐
 READABLE_RUN_STATUSES = ("completed",)
 
 
@@ -104,24 +100,6 @@ def _require_readable_run_status(run: dict[str, Any]) -> None:
         )
 
 
-def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> NoReturn:
-    """
-    说明: 当前分支已经明确不兼容旧 diagnosis 合同；
-    只要结果读取命中 rerun-required diagnosis，就应在 API 层显式中止，
-    不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果
-    修改时间: 2026-04-30
-    修改原因: 明确该 helper 永不返回，避免路由层把 rerun-required 分支继续当成可达路径。
-    """
-    raise HTTPException(
-        status_code=409,
-        detail={
-            "code": "diagnosis_rerun_required",
-            "message": "当前任务的 diagnosis 焦点合同已失效，请重新分析。",
-            "reason": diagnosis.rerun_reason,
-        },
-    )
-
-
 def _parse_emotion_trend_range(
     position_range: str | None,
 ) -> tuple[float, float] | None:
@@ -149,36 +127,6 @@ def _parse_emotion_trend_range(
     if start >= end:
         raise HTTPException(status_code=422, detail="range 起点必须小于终点")
     return start, end
-
-
-def _fetch_and_require_valid_diagnosis(
-    *,
-    run_id: str,
-    novel_id: str,
-    stats_repo: StatsRepository,
-) -> DiagnosisResult:
-    """
-    说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
-    新焦点合同是否有效；这里统一在路由层短路旧 run，避免不同页面对同一 run
-    同时出现“需要重跑”和“还能继续看”的分裂状态
-    修改时间: 2026-04-30
-    修改原因: 显式把 rerun-required 分支收窄为不可返回路径，保证调用方拿到的一定是可读 diagnosis。
-    """
-    diagnosis = _fetch_diagnosis(
-        run_id,
-        novel_id,
-        stats_repo,
-    )
-    if diagnosis is None:
-        _raise_rerun_required_for_focus_contract(
-            DiagnosisResult(
-                rerun_required=True,
-                rerun_reason="diagnosis_missing_focus_contract",
-            )
-        )
-    if diagnosis.rerun_required:
-        _raise_rerun_required_for_focus_contract(diagnosis)
-    return diagnosis
 
 
 @router.get(
@@ -254,26 +202,14 @@ async def get_results(
     run = _require_run_for_novel(session, novel_id, run_id)
 
     _require_readable_run_status(run)
-    require_paragraph_contract(run)
 
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     chapter_repo = ChapterRepository(session)
 
-    try:
-        results_data, missing_fields, novel_name = fetch_all_results_data(
-            novel_id, task_id, run_id, stats_repo, annotation_repo, chapter_repo
-        )
-    except DiagnosisRerunRequiredError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "diagnosis_rerun_required",
-                "message": "当前任务的 diagnosis 焦点合同已失效，请重新分析。",
-                "reason": exc.reason,
-            },
-        ) from exc
-
+    results_data, missing_fields, novel_name = fetch_all_results_data(
+        novel_id, task_id, run_id, stats_repo, annotation_repo, chapter_repo
+    )
     file_path = _write_results_to_file(task_id, results_data)
 
     if missing_fields:
@@ -330,7 +266,6 @@ async def get_paragraph_curves(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    require_paragraph_contract(run)
     paragraph_repo = ParagraphRepository(session)
     return _fetch_paragraph_curves(run_id, paragraph_repo, max_points)
 
@@ -361,7 +296,6 @@ async def get_emotion_trend(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    require_paragraph_contract(run)
     range_values = request.query_params.getlist("range")
     parsed_range = _parse_emotion_trend_range(
         ",".join(range_values) if len(range_values) > 1 else position_range
@@ -391,7 +325,6 @@ async def get_chapter_metrics(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    require_paragraph_contract(run)
     paragraph_repo = ParagraphRepository(session)
     annotation_repo = AnnotationRepository(session)
     return _fetch_chapter_metrics(run_id, paragraph_repo, annotation_repo, run)
@@ -433,13 +366,10 @@ async def get_characters(
     stats_repo = StatsRepository(session)
 
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
-    if diagnosis is not None and diagnosis.rerun_required:
-        _raise_rerun_required_for_focus_contract(diagnosis)
-
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
-    if _is_complete_diagnosis_result(diagnosis):
+    if diagnosis is not None and _has_diagnosis_result(diagnosis):
         arc_scores = diagnosis.arc_scores
         focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
@@ -456,16 +386,7 @@ async def get_topics(
     """获取主题分布数据（段落 token 加权聚合，§11.1）"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    # 2026-08-15 M6：/topics 数据源已切换为 paragraph_topics，与 /paragraph-curves、
-    # /chapter-metrics 同口径要求段落合同；旧 run 无段落主题数据时 409 而非静默空数组
-    require_paragraph_contract(run)
     paragraph_repo = ParagraphRepository(session)
-    stats_repo = StatsRepository(session)
-    _fetch_and_require_valid_diagnosis(
-        run_id=run_id,
-        novel_id=novel_id,
-        stats_repo=stats_repo,
-    )
     return _fetch_topics(run_id, paragraph_repo)
 
 
@@ -478,20 +399,13 @@ async def get_diagnosis(
     """
     获取诊断数据
 
-    修改时间: 2026-04-30
-    修改原因: diagnosis 查询链路对外声明始终返回 DiagnosisResult；
-              读取层即使出现意外空值，也要在路由层回退到 rerun-required 结果而不是泄漏 None。
+    缺少诊断记录时返回当前响应模型的空值字段
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
-    if diagnosis is None:
-        return DiagnosisResult(
-            rerun_required=True,
-            rerun_reason="diagnosis_missing_focus_contract",
-        )
-    return diagnosis
+    return diagnosis or DiagnosisResult()
 
 
 @router.get(
@@ -520,7 +434,6 @@ async def get_graph(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
-    graph_version_id: Annotated[str | None, Query(min_length=1)] = None,
 ) -> GraphSnapshotResponse:
     """2026-08-07 用于读取指定章节边界或最新章节的动态图快照"""
     run = _require_run_for_novel(session, novel_id, run_id)
@@ -531,7 +444,6 @@ async def get_graph(
             run_id,
             annotation_repo,
             chapter_id=chapter_id,
-            graph_version_id=graph_version_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -645,7 +557,6 @@ async def get_event_forest(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
-    graph_version_id: Annotated[str | None, Query(min_length=1)] = None,
 ) -> EventForestResponse:
     """
     说明: 提供事件森林/DAG 查询，返回事件树列表（树根/主链/次因分支）、树间因果边、
@@ -655,7 +566,6 @@ async def get_event_forest(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    require_paragraph_contract(run)
     from src.storage.repositories.graph import EventForestRepository
 
     repo = EventForestRepository(session)
@@ -663,24 +573,19 @@ async def get_event_forest(
         snapshot = repo.fetch_snapshot(
             run_id,
             chapter_id=chapter_id,
-            graph_version_id=graph_version_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if snapshot is None:
-        raise HTTPException(
-            status_code=404,
-            detail="当前 run 尚无匹配的章节图版本",
-        )
+        raise HTTPException(status_code=404, detail="当前 run 尚无匹配的章节图数据")
     return EventForestResponse(
-        graph_version_id=snapshot.graph_version_id,
+        chapter_id=snapshot.chapter_id,
         chapter_order=snapshot.chapter_order,
         visible_through_chapter_order=snapshot.visible_through_chapter_order,
         derived_event_order=snapshot.derived_event_order,
         event_nodes=[
             EventNodeResponse(
                 event_id=node.event_id,
-                event_revision=node.event_revision,
                 chapter_id=node.chapter_id,
                 chapter_order=node.chapter_order,
                 description=node.description,
@@ -719,9 +624,7 @@ async def get_event_forest(
                 edge_id=edge.edge_id,
                 edge_type=cast(Literal["causal"], edge.edge_type),
                 source_event_id=edge.source_event_id,
-                source_event_revision=edge.source_event_revision,
                 target_event_id=edge.target_event_id,
-                target_event_revision=edge.target_event_revision,
                 source_chapter_id=edge.source_chapter_id,
                 target_chapter_id=edge.target_chapter_id,
                 is_active=edge.is_active,

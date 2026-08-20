@@ -53,9 +53,3 @@ class GraphReadinessError(RuntimeError):
         self.message = message
         super().__init__(message)
 
-
-class DiagnosisRerunRequiredError(RuntimeError):
-    def __init__(self, reason: str | None = None, message: str | None = None):
-        self.reason = reason or "focus_contract_incomplete"
-        self.message = message or "Diagnosis rerun required"
-        super().__init__(self.message)
