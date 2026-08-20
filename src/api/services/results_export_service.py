@@ -31,16 +31,16 @@ from src.knowledge.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
     KnowledgeGraphAuthorityService,
-    TimelineAuthorityView,
     serialize_graph_report_signals,
 )
-from src.metrics.timeline_metrics import (
-    TimelineAuthorityContractError,
-    TimelineDataUnavailableError,
-    build_timeline_plan,
-    serialize_timeline_composite_node,
-    serialize_timeline_node,
-    serialize_timeline_phases,
+from src.metrics.event_timeline_metrics import (
+    build_event_timeline_plan as build_event_timeline_plan_new,
+)
+from src.metrics.event_timeline_metrics import (
+    serialize_event_timeline_node,
+)
+from src.metrics.event_timeline_metrics import (
+    serialize_event_timeline_phases as serialize_event_timeline_phases_new,
 )
 from src.storage.repositories import (
     AnnotationRepository,
@@ -246,43 +246,61 @@ def _fetch_timeline_data(
     chapter_repo: ChapterRepository,
     annotation_repo: AnnotationRepository,
     stats_repo: StatsRepository,
-    timeline_view: TimelineAuthorityView,
 ) -> dict[str, Any] | None:
     """
-    获取时间轴数据用于导出
+    获取时间轴数据用于导出（2026-08-20 切换为事件森林时间轴，一树一节点）
 
     Returns:
-        时间轴数据字典，包含 phases, composite_nodes, atomic_nodes, tension_curve
-
-    Contract note:
-        Export intentionally reuses the same authority-backed timeline helper
-        as the /timeline route so both surfaces stay aligned on character
-        lifecycles and character-character relation history
+        时间轴数据字典，包含 phases, nodes, causal_edges, foreshadowing_edges, tension_curve
     """
-    try:
-        timeline_plan = build_timeline_plan(
-            run_id,
-            chapter_repo,
-            annotation_repo,
-            stats_repo,
-            timeline_view,
-        )
-    except TimelineDataUnavailableError as e:
-        logger.warning(f"No chunk data for run {run_id}: {e}")
-        return None
-    except TimelineAuthorityContractError:
-        logger.error(f"Timeline authority contract violated for run {run_id}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error building timeline for run {run_id}: {e}")
-        raise
+    from src.storage.repositories.graph import EventForestRepository
 
+    snapshot = EventForestRepository(stats_repo.session).fetch_snapshot(run_id)
+    if snapshot is None:
+        logger.warning(f"No event forest snapshot for run {run_id}")
+        return None
+    timeline_plan = build_event_timeline_plan_new(
+        run_id,
+        chapter_repo,
+        annotation_repo,
+        stats_repo,
+        snapshot,
+    )
+    # 即便 nodes 为空也返回基础结构（200空而非 None），仅当 snapshot 缺失才返回 None
     return {
-        "phases": serialize_timeline_phases(timeline_plan.phases),
-        "composite_nodes": [serialize_timeline_composite_node(node) for node in timeline_plan.composite_nodes],
-        "atomic_nodes": [serialize_timeline_node(node) for node in timeline_plan.atomic_nodes],
+        "phases": serialize_event_timeline_phases_new(timeline_plan.phases),
+        "nodes": [serialize_event_timeline_node(node) for node in timeline_plan.nodes],
+        "causal_edges": [
+            {
+                "edge_id": e.edge_id,
+                "edge_type": e.edge_type,
+                "source_event_id": e.source_event_id,
+                "target_event_id": e.target_event_id,
+                "source_chapter_id": e.source_chapter_id,
+                "target_chapter_id": e.target_chapter_id,
+                "is_active": e.is_active,
+                "evidence": list(e.evidence),
+                "expired_at": e.expired_at.isoformat() if e.expired_at else None,
+            }
+            for e in snapshot.causal_edges
+        ],
+        "foreshadowing_edges": [
+            {
+                "setup_id": fe.setup_id,
+                "setup_event_id": fe.setup_event_id,
+                "payoff_event_id": fe.payoff_event_id,
+                "first_chapter_id": fe.first_chapter_id,
+                "last_chapter_id": fe.last_chapter_id,
+                "setup_summary": fe.setup_summary,
+                "status": fe.status,
+                "active": fe.active,
+            }
+            for fe in snapshot.foreshadowing_edges
+        ],
+        "derived_event_order": timeline_plan.derived_event_order,
         "tension_curve": timeline_plan.tension_curve,
         "total_chapters": timeline_plan.total_chapters,
+        "phase_basis": timeline_plan.phase_basis,
     }
 
 
@@ -356,7 +374,6 @@ def fetch_all_results_data(
     graph_authority_service.assert_graph_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
     graph_report = graph_authority_service.build_graph_report(run_id)
-    timeline_view = graph_authority_service.build_timeline_view(run_id)
 
     paragraph_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chapter_repo)
 
@@ -456,6 +473,7 @@ def fetch_all_results_data(
                     "target_chapter_id": edge.target_chapter_id,
                     "is_active": edge.is_active,
                     "evidence": edge.evidence,
+                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                 }
                 for edge in event_forest_snapshot.causal_edges
             ],
@@ -474,13 +492,12 @@ def fetch_all_results_data(
             ],
         }
 
-    # 获取时间轴数据
+    # 获取时间轴数据（仅新森林路径）
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
         chapter_repo=chapter_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,
-        timeline_view=timeline_view,
     )
     if not timeline_data:
         missing_fields.append("timeline")
