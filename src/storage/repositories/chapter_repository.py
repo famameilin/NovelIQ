@@ -37,7 +37,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
     def insert_chapters(self, run_id: str, chapters: Sequence[ChapterData]) -> None:
         """批量插入章节目录，插入前先删除该 run_id 的旧数据
 
-        2026-08-14 D8 契约：chapters 是 paragraphs/graph_facts/entity_state_versions/
+        2026-08-14 D8 契约：chapters 是 paragraphs/graph_facts/entity_states/
         dialogue_records/case_pool_cases/foreshadowing_threads 等下游表的 FK 父表
         （ON DELETE CASCADE），先删后插会级联清空同 run 的全部下游数据。
         **同 run 不允许重跑前序阶段**——重分析必须使用新 run_id（reanalysis 每次
@@ -116,7 +116,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         return self.session.execute(stmt).scalars().all()
 
     def fetch_chapter_texts(self, run_id: str) -> list[tuple[int, str]]:
-        """获取所有有正文章节的文本，按 chapter_id 升序
+        """获取所有有正文章节的文本，按章节 sequence 升序
 
         Returns:
             (chapter_id, text) 元组列表
@@ -124,7 +124,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         stmt = (
             select(ChapterModel.chapter_id, ChapterModel.text)
             .where(ChapterModel.run_id == run_id, ChapterModel.text.is_not(None))
-            .order_by(ChapterModel.chapter_id)
+            .order_by(ChapterModel.sequence, ChapterModel.chapter_id)
         )
         result = self.session.execute(stmt)
         return [(int(row.chapter_id), str(row.text)) for row in result.fetchall()]
@@ -156,7 +156,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         stmt = (
             select(ChapterModel.text)
             .where(ChapterModel.run_id == run_id, ChapterModel.text.is_not(None))
-            .order_by(ChapterModel.chapter_id)
+            .order_by(ChapterModel.sequence, ChapterModel.chapter_id)
         )
         result = self.session.execute(stmt)
         return [row.text for row in result.fetchall() if row.text]
@@ -172,22 +172,36 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
 
     def fetch_prev_chapter_text(self, run_id: str, chapter_id: int) -> str | None:
         """获取上一章的正文文本（支持 rolling_memory 运行时上下文）"""
-        if chapter_id <= 0:
+        current_sequence = self.session.scalar(
+            select(ChapterModel.sequence).where(
+                ChapterModel.run_id == run_id,
+                ChapterModel.chapter_id == chapter_id,
+            )
+        )
+        if current_sequence is None:
             return None
         stmt = select(ChapterModel.text).where(
             ChapterModel.run_id == run_id,
-            ChapterModel.chapter_id == chapter_id - 1,
+            ChapterModel.sequence < current_sequence,
             ChapterModel.text.is_not(None),
-        )
+        ).order_by(ChapterModel.sequence.desc(), ChapterModel.chapter_id.desc()).limit(1)
         return self.session.execute(stmt).scalar_one_or_none()
 
     def fetch_next_chapter_text(self, run_id: str, chapter_id: int) -> str | None:
         """获取下一章的正文文本（支持 rolling_memory 运行时上下文）"""
+        current_sequence = self.session.scalar(
+            select(ChapterModel.sequence).where(
+                ChapterModel.run_id == run_id,
+                ChapterModel.chapter_id == chapter_id,
+            )
+        )
+        if current_sequence is None:
+            return None
         stmt = select(ChapterModel.text).where(
             ChapterModel.run_id == run_id,
-            ChapterModel.chapter_id == chapter_id + 1,
+            ChapterModel.sequence > current_sequence,
             ChapterModel.text.is_not(None),
-        )
+        ).order_by(ChapterModel.sequence, ChapterModel.chapter_id).limit(1)
         return self.session.execute(stmt).scalar_one_or_none()
 
     def has_chapters(self, run_id: str) -> bool:
@@ -253,8 +267,13 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         """
         stmt = (
             select(ChapterSummary.chapter_id, ChapterSummary.summary)
+            .join(
+                ChapterModel,
+                (ChapterModel.run_id == ChapterSummary.run_id)
+                & (ChapterModel.chapter_id == ChapterSummary.chapter_id),
+            )
             .where(ChapterSummary.run_id == run_id)
-            .order_by(ChapterSummary.chapter_id)
+            .order_by(ChapterModel.sequence, ChapterSummary.chapter_id)
         )
         result = self.session.execute(stmt)
         return result.fetchall()

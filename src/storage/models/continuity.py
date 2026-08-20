@@ -127,7 +127,6 @@ class CaseResolutionMapping(Base):
     target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
     resolution: Mapped[dict] = mapped_column(JSONB, nullable=False)
     target_fact_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    target_fact_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_dialogue_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     target_setup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 2026-08-18 事件森林/DAG：伏笔续接/回收案例解决可产生事件目标

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import ChapterSummary, StageSummary
+from src.storage.models import Chapter, ChapterSummary, StageSummary
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -113,12 +113,16 @@ def fetch_chapter_summaries_by_range(
 
     stmt = (
         select(ChapterSummary.chapter_id, ChapterSummary.summary)
+        .join(
+            Chapter,
+            (Chapter.run_id == ChapterSummary.run_id) & (Chapter.chapter_id == ChapterSummary.chapter_id),
+        )
         .where(
             ChapterSummary.run_id == run_id,
             ChapterSummary.chapter_id >= start_chapter_id,
             ChapterSummary.chapter_id <= end_chapter_id,
         )
-        .order_by(ChapterSummary.chapter_id)
+        .order_by(Chapter.sequence, ChapterSummary.chapter_id)
     )
     result = session.execute(stmt)
     return [(row.chapter_id, row.summary) for row in result if row.summary]

@@ -33,10 +33,6 @@ class AnalysisRun(Base):
     添加 started_at 字段，记录任务实际开始执行时间，完善运行态时间戳体系
 
     为 novel_id 补充到 novels 表的外键约束，阻止 task 再次脱离小说主表
-
-    添加 analysis_contract_version 字段（设计文档《章节粒度分析指标重设计》§16）：
-    记录 run 的分析合同版本（新 run 默认 paragraph-v1），旧 run 该列为 NULL，
-    段落级接口据此返回 409 要求重新分析。
     """
 
     __tablename__ = "analysis_runs"
@@ -47,7 +43,6 @@ class AnalysisRun(Base):
         ForeignKey("novels.novel_id", ondelete="RESTRICT", name="analysis_runs_novel_id_fkey"),
         nullable=False,
     )
-    analysis_contract_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
