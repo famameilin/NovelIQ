@@ -242,3 +242,4 @@ scripts/experiments/
 tools/report_exporter/
 tests/report/
 
+.omo/

@@ -69,9 +69,7 @@ def _match_event_anchor(
     无匹配或多匹配均返回 None。同一坐标系（chunk 文本内偏移）。
     """
     candidates = [
-        (event_id, a_start, a_end)
-        for event_id, a_start, a_end in anchors
-        if a_start <= start and end <= a_end
+        (event_id, a_start, a_end) for event_id, a_start, a_end in anchors if a_start <= start and end <= a_end
     ]
     if len(candidates) != 1:
         return None
@@ -119,7 +117,7 @@ class DatabaseAnnotationQueryService:
             self.session.execute(
                 select(Chapter.chapter_id)
                 .where(Chapter.run_id == run_id)
-                .order_by(Chapter.chapter_id)
+                .order_by(Chapter.sequence, Chapter.chapter_id)
             ).scalars()
         )
         if current_chapter_id not in chapter_ids:
@@ -193,11 +191,16 @@ class DatabaseAnnotationQueryService:
 
         thread_statement = (
             select(ForeshadowingThread)
+            .join(
+                Chapter,
+                (Chapter.run_id == ForeshadowingThread.run_id)
+                & (Chapter.chapter_id == ForeshadowingThread.last_chapter_id),
+            )
             .where(
                 ForeshadowingThread.run_id == self.run_id,
                 ForeshadowingThread.active.is_(True),
             )
-            .order_by(ForeshadowingThread.last_chapter_id, ForeshadowingThread.setup_id)
+            .order_by(Chapter.sequence, ForeshadowingThread.last_chapter_id, ForeshadowingThread.setup_id)
         )
         for thread in self.session.execute(thread_statement).scalars().all():
             if not _text_matches(
@@ -279,16 +282,14 @@ class DatabaseAnnotationQueryService:
                 EventNode.run_id == self.run_id,
                 EventNode.chapter_order <= max_chapter_order,
             )
-            .order_by(EventNode.chapter_order.desc(), EventNode.event_id, EventNode.event_revision.desc())
+            .order_by(EventNode.chapter_order.desc(), EventNode.event_id)
         ).scalars()
-        latest: dict[str, EventNode] = {}
-        for node in rows:
-            latest.setdefault(node.event_id, node)
+        latest = {node.event_id: node for node in rows}
         edge_rows = list(
             self.session.execute(
                 select(EventEdge).where(
                     EventEdge.run_id == self.run_id,
-                    EventEdge.is_active == 1,
+                    EventEdge.is_active.is_(True),
                 )
             ).scalars()
         )
@@ -304,7 +305,6 @@ class DatabaseAnnotationQueryService:
             matched.append(
                 EventHistoryResult(
                     event_id=node.event_id,
-                    event_revision=node.event_revision,
                     chapter_id=node.chapter_id,
                     chapter_order=node.chapter_order,
                     description=node.description,
@@ -329,14 +329,11 @@ class DatabaseAnnotationQueryService:
                             "edge_id": edge.edge_id,
                             "edge_type": edge.edge_type,
                             "source_event_id": edge.source_event_id,
-                            "source_event_revision": edge.source_event_revision,
                             "target_event_id": edge.target_event_id,
-                            "target_event_revision": edge.target_event_revision,
                             "evidence": list(edge.evidence),
                         }
                         for edge in edge_rows
-                        if edge.source_event_id == node.event_id
-                        or edge.target_event_id == node.event_id
+                        if edge.source_event_id == node.event_id or edge.target_event_id == node.event_id
                     ],
                 )
             )
@@ -709,7 +706,6 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             target_ref=dict(resolved_case.target_ref),
             resolution=resolution,
             target_fact_id=target_fact.fact_id if target_fact is not None else None,
-            target_fact_revision=target_fact.fact_revision if target_fact is not None else None,
             target_dialogue_id=target_dialogue_id,
             target_setup_id=target_setup_id,
             target_setup_event_id=target_setup_event_id,

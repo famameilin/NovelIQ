@@ -70,7 +70,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         return {
             "run_id": run.run_id,
             "novel_id": run.novel_id,
-            "analysis_contract_version": run.analysis_contract_version,
             "source_path": run.source_path,
             "title": run.title,
             "author": run.author,
@@ -128,8 +127,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             author=author,
             status="pending",
             task_kind=task_kind,
-            # §16 分析合同版本：新 run 默认 paragraph-v1，旧 run 为 NULL（段落级接口 409）
-            analysis_contract_version="paragraph-v1",
             request_payload=self._serialize_request_payload(request_payload),
             created_at=now,
             updated_at=now,

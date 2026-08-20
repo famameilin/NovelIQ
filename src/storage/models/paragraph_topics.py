@@ -40,8 +40,6 @@ class ParagraphTopic(Base):
     topic_id: Mapped[int] = mapped_column(Integer, nullable=False)
     topic_weight: Mapped[float] = mapped_column(Float, nullable=False)
     inference_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    topic_model_version: Mapped[str] = mapped_column(String, nullable=False)
-
     __table_args__ = (
         ForeignKeyConstraint(
             ["run_id", "paragraph_id"],

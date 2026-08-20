@@ -19,7 +19,6 @@ from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapper
 
 from src.chunking.spans import ParagraphSpan
-from src.config import settings
 from src.storage.models import (
     Chapter,
     Paragraph,
@@ -81,18 +80,12 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         先删后插写入 run 的段落行（同 run 不可重跑前序阶段的语义）
 
         插入前校验段落身份、token 计数与坐标不变量，违反时抛 ValueError。
-        content_hash 按 span.text 的 UTF-8 字节 sha256 计算；
-        splitter_version/tokenizer_version 从 settings.paragraphs 读取，
-        配置尚不存在时回退默认字符串 "1"。
+        content_hash 按 span.text 的 UTF-8 字节 sha256 计算
 
         Returns:
             本次写入的段落行数
         """
         self._validate_spans(run_id, spans)
-
-        paragraph_config = getattr(settings, "paragraphs", None)
-        splitter_version = str(getattr(paragraph_config, "splitter_version", None) or "1")
-        tokenizer_version = str(getattr(paragraph_config, "tokenizer_version", None) or "1")
 
         self.session.execute(delete(Paragraph).where(Paragraph.run_id == run_id))
         if not spans:
@@ -113,8 +106,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 "token_count": span.token_count,
                 "text": span.text,
                 "content_hash": hashlib.sha256(span.text.encode("utf-8")).hexdigest(),
-                "splitter_version": splitter_version,
-                "tokenizer_version": tokenizer_version,
             }
             for span in spans
         ]
@@ -294,10 +285,8 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         """
         先删后插写入 run 的段落指标行（同 run 不可重跑前序阶段的语义）
 
-        metric_version 从 settings.metrics 读取；surface_tension 系列由
-        计算阶段（run 内稳健标准化后）填充，可为 None。
+        surface_tension 系列由计算阶段（run 内稳健标准化后）填充，可为 None
         """
-        metric_version = str(getattr(settings.metrics, "metric_version", None) or "2")
         self.session.execute(delete(ParagraphMetric).where(ParagraphMetric.run_id == run_id))
         if not rows:
             return 0
@@ -305,7 +294,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             {
                 "run_id": run_id,
                 "paragraph_id": row.paragraph_id,
-                "metric_version": metric_version,
                 "token_count": row.token_count,
                 "char_count": row.char_count,
                 "sentence_count": row.sentence_count,
@@ -382,11 +370,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
         rows: (paragraph_id, topic_id, topic_weight, inference_token_count)
 
-        topic_model_version 从 settings.topic_model 读取。
         """
-        topic_model_version = str(
-            getattr(settings.topic_model, "topic_model_version", None) or "1"
-        )
         topic_rows = [
             {
                 "run_id": run_id,
@@ -394,7 +378,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 "topic_id": topic_id,
                 "topic_weight": topic_weight,
                 "inference_token_count": inference_token_count,
-                "topic_model_version": topic_model_version,
             }
             for paragraph_id, topic_id, topic_weight, inference_token_count in rows
         ]
@@ -464,10 +447,8 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         """
         先删后插写入 run 的段落曲线行
 
-        curve_version 从 settings.metrics 读取；密度列在分母为 0 时为 None
-        （合法观测，不伪造为零）。
+        密度列在分母为 0 时为 None（合法观测，不伪造为零）
         """
-        curve_version = str(getattr(settings.metrics, "curve_version", None) or "1")
         self.session.execute(delete(ParagraphCurve).where(ParagraphCurve.run_id == run_id))
         if not rows:
             return 0
@@ -475,7 +456,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             {
                 "run_id": run_id,
                 "paragraph_id": row.paragraph_id,
-                "curve_version": curve_version,
                 "pos_density": row.pos_density,
                 "neg_density": row.neg_density,
                 "net_density": row.net_density,
@@ -530,9 +510,13 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 (Paragraph.run_id == ParagraphMetric.run_id)
                 & (Paragraph.paragraph_id == ParagraphMetric.paragraph_id),
             )
+            .join(
+                Chapter,
+                (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
+            )
             .where(ParagraphMetric.run_id == run_id)
-            .group_by(Paragraph.chapter_id)
-            .order_by(Paragraph.chapter_id)
+            .group_by(Paragraph.chapter_id, Chapter.sequence)
+            .order_by(Chapter.sequence, Paragraph.chapter_id)
         )
         rows = self.session.execute(statement).all()
         return [(int(row.chapter_id), {key: float(value) for key, value in row._mapping.items()}) for row in rows]
@@ -554,12 +538,16 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 (ParagraphCurve.run_id == Paragraph.run_id)
                 & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
             )
+            .join(
+                Chapter,
+                (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
+            )
             .where(
                 Paragraph.run_id == run_id,
                 ParagraphCurve.surface_tension.is_not(None),
             )
-            .group_by(Paragraph.chapter_id)
-            .order_by(Paragraph.chapter_id)
+            .group_by(Paragraph.chapter_id, Chapter.sequence)
+            .order_by(Chapter.sequence, Paragraph.chapter_id)
         )
         rows = self.session.execute(statement).all()
         return [(int(row.chapter_id), float(row.avg_tension)) for row in rows]

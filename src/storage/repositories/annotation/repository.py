@@ -99,39 +99,46 @@ class ForeshadowingThreadView:
 class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
     """2026-08-05 用于统一读取章节正式标注与数据库图事实"""
 
+    def _chapter_sequence_map(self, run_id: str) -> dict[int, int]:
+        """2026-08-19 用于把稳定 chapter_id 映射为历史展示顺序"""
+        rows = self.session.execute(
+            select(Chapter.chapter_id, Chapter.sequence).where(Chapter.run_id == run_id)
+        ).all()
+        return {int(row.chapter_id): int(row.sequence) for row in rows}
+
     def _chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRecord]:
         """2026-08-05 用于按真实章节顺序读取全部正式章节标注"""
         stmt = (
             select(ChapterAnnotationRecord)
+            .join(
+                Chapter,
+                (Chapter.run_id == ChapterAnnotationRecord.run_id)
+                & (Chapter.chapter_id == ChapterAnnotationRecord.chapter_id),
+            )
             .where(ChapterAnnotationRecord.run_id == run_id)
-            .order_by(ChapterAnnotationRecord.chapter_id)
+            .order_by(Chapter.sequence, ChapterAnnotationRecord.chapter_id)
         )
         return list(self.session.execute(stmt).scalars().all())
 
     def _graph_facts(self, run_id: str, *, content_kind: str) -> list[GraphFact]:
-        """2026-08-07 用于读取指定类型每个 fact_id 的最新不可变版本"""
+        """2026-08-19 用于读取指定类型的章节事实"""
         stmt = (
             select(GraphFact)
+            .join(
+                Chapter,
+                (Chapter.run_id == GraphFact.run_id) & (Chapter.chapter_id == GraphFact.chapter_id),
+            )
             .where(
                 GraphFact.run_id == run_id,
                 GraphFact.source_kind == "annotation",
             )
-            .order_by(
-                GraphFact.fact_id,
-                GraphFact.fact_revision.desc(),
-                GraphFact.graph_fact_version_id.desc(),
-            )
+            .order_by(Chapter.sequence, GraphFact.chapter_id, GraphFact.graph_fact_id)
         )
-        latest_by_fact_id: dict[str, GraphFact] = {}
-        for row in self.session.execute(stmt).scalars().all():
-            latest_by_fact_id.setdefault(str(row.fact_id), row)
+        rows = self.session.execute(stmt).scalars().all()
+        sequence_map = self._chapter_sequence_map(run_id)
         return sorted(
-            (
-                row
-                for row in latest_by_fact_id.values()
-                if isinstance(row.content, dict) and row.content.get("kind") == content_kind
-            ),
-            key=lambda row: (row.effective_chapter_id, row.graph_fact_version_id),
+            (row for row in rows if isinstance(row.content, dict) and row.content.get("kind") == content_kind),
+            key=lambda row: (sequence_map.get(row.effective_chapter_id, row.effective_chapter_id), row.graph_fact_id),
         )
 
     def _foreshadowing_by_chapter(self, run_id: str) -> dict[int, dict[str, Any]]:
@@ -139,11 +146,16 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         stmt = (
             select(ForeshadowingThreadHit, ForeshadowingThread)
             .join(ForeshadowingThread, ForeshadowingThreadHit.setup_id == ForeshadowingThread.setup_id)
+            .join(
+                Chapter,
+                (Chapter.run_id == ForeshadowingThreadHit.run_id)
+                & (Chapter.chapter_id == ForeshadowingThreadHit.chapter_id),
+            )
             .where(
                 ForeshadowingThreadHit.run_id == run_id,
                 ForeshadowingThread.run_id == run_id,
             )
-            .order_by(ForeshadowingThreadHit.chapter_id, ForeshadowingThreadHit.hit_id)
+            .order_by(Chapter.sequence, ForeshadowingThreadHit.chapter_id, ForeshadowingThreadHit.hit_id)
         )
         by_chapter: dict[int, dict[str, Any]] = {}
         for hit, thread in self.session.execute(stmt).all():
@@ -182,7 +194,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                         **foreshadowing_by_chapter.get(chunk.chunk_id, {}),
                     )
                 )
-        return sorted(rows, key=lambda row: row.chapter_id)
+        sequence_map = self._chapter_sequence_map(run_id)
+        return sorted(rows, key=lambda row: (sequence_map.get(row.chapter_id, row.chapter_id), row.chapter_id))
 
     def fetch_full_annotations(self, run_id: str) -> list[ChapterAnnotationRow]:
         """2026-08-05 用于读取指标计算所需的完整章节标注字段"""
@@ -221,21 +234,28 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def fetch_character_emotion_sequence(self, run_id: str) -> list[CharacterFactRow]:
         """2026-08-05 用于按章节顺序读取人物情绪事实序列"""
-        return sorted(self.fetch_chapter_characters_full(run_id), key=lambda row: row.chapter_id)
+        sequence_map = self._chapter_sequence_map(run_id)
+        return sorted(
+            self.fetch_chapter_characters_full(run_id),
+            key=lambda row: (sequence_map.get(row.chapter_id, row.chapter_id), row.chapter_id),
+        )
 
     def fetch_chapter_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
         """2026-08-11 用于从对话记录表展开 章节对话记录"""
         rows: list[DialogueFactRow] = []
         statement = (
             select(DialogueRecord)
+            .join(
+                Chapter,
+                (Chapter.run_id == DialogueRecord.run_id)
+                & (Chapter.chapter_id == DialogueRecord.chapter_id),
+            )
             .where(DialogueRecord.run_id == run_id)
-            .order_by(DialogueRecord.chapter_id, DialogueRecord.start)
+            .order_by(Chapter.sequence, DialogueRecord.chapter_id, DialogueRecord.start)
         )
         for record in self.session.execute(statement).scalars().all():
             speaker_name = str(record.speaker or "").strip()
-            valid_speaker = (
-                speaker_name if is_global_character_surface_name(speaker_name) else None
-            )
+            valid_speaker = speaker_name if is_global_character_surface_name(speaker_name) else None
             speaker_names = [valid_speaker] if valid_speaker else []
             speaker_references = (
                 [
@@ -264,19 +284,31 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def fetch_foreshadowing_threads(self, run_id: str) -> list[ForeshadowingThreadView]:
         """2026-08-05 用于汇总伏笔线程与全部命中锚点"""
+        sequence_map = self._chapter_sequence_map(run_id)
         thread_stmt = (
             select(ForeshadowingThread)
+            .join(
+                Chapter,
+                (Chapter.run_id == ForeshadowingThread.run_id)
+                & (Chapter.chapter_id == ForeshadowingThread.first_chapter_id),
+            )
             .where(ForeshadowingThread.run_id == run_id)
-            .order_by(ForeshadowingThread.first_chapter_id, ForeshadowingThread.setup_id)
+            .order_by(Chapter.sequence, ForeshadowingThread.first_chapter_id, ForeshadowingThread.setup_id)
         )
         threads = list(self.session.execute(thread_stmt).scalars().all())
         if not threads:
             return []
         hit_stmt = (
             select(ForeshadowingThreadHit)
+            .join(
+                Chapter,
+                (Chapter.run_id == ForeshadowingThreadHit.run_id)
+                & (Chapter.chapter_id == ForeshadowingThreadHit.chapter_id),
+            )
             .where(ForeshadowingThreadHit.run_id == run_id)
             .order_by(
                 ForeshadowingThreadHit.setup_id,
+                Chapter.sequence,
                 ForeshadowingThreadHit.chapter_id,
                 ForeshadowingThreadHit.hit_id,
             )
@@ -293,7 +325,10 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     setup_id=thread.setup_id,
                     first_chapter_id=thread.first_chapter_id,
                     last_chapter_id=thread.last_chapter_id,
-                    anchor_chapter_ids=sorted({hit.chapter_id for hit in hits}),
+                    anchor_chapter_ids=sorted(
+                        {hit.chapter_id for hit in hits},
+                        key=lambda chapter_id: (sequence_map.get(chapter_id, chapter_id), chapter_id),
+                    ),
                     setup_summary=thread.setup_summary,
                     setup_kind=thread.setup_kind,
                     expected_payoff_family=thread.expected_payoff_family,
@@ -311,9 +346,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
         """2026-08-05 用于按最新伏笔线程生命周期计算回收预期"""
         threads = list(
-            self.session.execute(
-                select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
-            )
+            self.session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id))
             .scalars()
             .all()
         )
@@ -341,8 +374,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             # payoff_likelihood/strength 证据，说明上游输入退化，结果为 None。
             # status 在 ORM 层必填（生命周期态），不单独构成“有 LLM 枚举证据”。
             has_evidence = has_evidence or any(
-                value is not None
-                for value in (thread.payoff_likelihood, thread.strength)
+                value is not None for value in (thread.payoff_likelihood, thread.strength)
             )
             # None 按最保守档位参与计算（medium/open/low），避免任意字符串索引抛 KeyError
             base = _EXPECTATION_BASE_SCORE_BY_PAYOFF.get(
@@ -375,11 +407,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 thread.strength or "",
                 _EXPECTATION_STRENGTH_WEIGHT["low"],
             )
-            weight = (
-                status_weight
-                + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0)
-                + strength_weight
-            )
+            weight = status_weight + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0) + strength_weight
             weighted_total += score * weight
             total_weight += weight
         if not has_evidence:
@@ -388,11 +416,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def has_annotations(self, run_id: str) -> bool:
         """2026-08-05 用于判断当前 run 是否存在章节正式标注"""
-        stmt = (
-            select(func.count())
-            .select_from(ChapterAnnotationRecord)
-            .where(ChapterAnnotationRecord.run_id == run_id)
-        )
+        stmt = select(func.count()).select_from(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
         return int(self.session.execute(stmt).scalar_one() or 0) > 0
 
     def is_annotate_complete(self, run_id: str) -> bool:
@@ -408,9 +432,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         actual = {
             int(chapter_id)
             for chapter_id in self.session.execute(
-                select(ChapterAnnotationRecord.chapter_id)
-                .where(ChapterAnnotationRecord.run_id == run_id)
-                .distinct()
+                select(ChapterAnnotationRecord.chapter_id).where(ChapterAnnotationRecord.run_id == run_id).distinct()
             ).scalars()
         }
         return actual == expected

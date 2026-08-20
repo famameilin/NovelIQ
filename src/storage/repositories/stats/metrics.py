@@ -336,8 +336,8 @@ def _detect_token_coverage_gaps(
 def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:
     """
     修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: `cloud_analysis` 持久化改为 latest-only，不再写入 reference_contract_version。
+    任务: diagnosis-current-contract
+    修改原因: `cloud_analysis` 持久化统一使用当前结构
 
     插入云端分析结果
 
@@ -382,8 +382,8 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
     """
     修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: 读取层默认把当前 `cloud_analysis` 行当作最新结构，不再回传 reference_contract_version。
+    任务: diagnosis-current-contract
+    修改原因: 读取层统一返回当前 `cloud_analysis` 结构
     """
     stmt = (
         select(CloudAnalysis)

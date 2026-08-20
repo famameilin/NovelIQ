@@ -67,8 +67,6 @@ class Paragraph(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # sha256 hex，供派生数据校验段落内容未变
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    splitter_version: Mapped[str] = mapped_column(String, nullable=False)
-    tokenizer_version: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

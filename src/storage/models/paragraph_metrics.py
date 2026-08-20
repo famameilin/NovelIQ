@@ -45,8 +45,6 @@ class ParagraphMetric(Base):
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    metric_version: Mapped[str] = mapped_column(String, nullable=False)
-
     # 分母与基础计数
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)

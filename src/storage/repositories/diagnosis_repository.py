@@ -215,8 +215,13 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 StageSummary.end_chapter_id,
                 StageSummary.summary,
             )
+            .join(
+                Chapter,
+                (Chapter.run_id == StageSummary.run_id)
+                & (Chapter.chapter_id == StageSummary.start_chapter_id),
+            )
             .where(StageSummary.run_id == run_id)
-            .order_by(StageSummary.start_chapter_id)
+            .order_by(Chapter.sequence, StageSummary.start_chapter_id)
         )
         return [
             {
