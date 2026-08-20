@@ -220,36 +220,52 @@ class NovelService:
     def list_novels(self, session: Session | None = None) -> list[dict]:
         """
         列出所有小说及其信息
+
+        2026-08-20 阶段 3.2：使用 LEFT JOIN 和窗口函数消除 N+1 查询
         """
         novels = []
         try:
             with self._get_session(session) as sess:
-                from sqlalchemy import select
+                from sqlalchemy import func, select
+                from sqlalchemy.orm import aliased
 
                 from src.storage.models import AnalysisRun
 
-                result = sess.execute(select(Novel).order_by(Novel.upload_time.desc()))
-                all_novels = result.scalars().all()
-
-                for novel in all_novels:
-                    runs = (
-                        sess.execute(
-                            select(AnalysisRun)
-                            .where(AnalysisRun.novel_id == novel.novel_id)
-                            .order_by(AnalysisRun.created_at.desc())
-                        )
-                        .scalars()
-                        .all()
+                # 子查询：为每个小说找到最新任务的 created_at
+                latest_run_subq = (
+                    select(
+                        AnalysisRun.novel_id,
+                        func.max(AnalysisRun.created_at).label("latest_created_at")
                     )
+                    .group_by(AnalysisRun.novel_id)
+                    .subquery()
+                )
 
-                    latest_status = runs[0].status if runs else "uploaded"
+                # 主查询：JOIN 获取小说和最新任务状态
+                LatestRun = aliased(AnalysisRun)
+                stmt = (
+                    select(Novel, LatestRun.status)
+                    .outerjoin(
+                        latest_run_subq,
+                        Novel.novel_id == latest_run_subq.c.novel_id
+                    )
+                    .outerjoin(
+                        LatestRun,
+                        (LatestRun.novel_id == latest_run_subq.c.novel_id)
+                        & (LatestRun.created_at == latest_run_subq.c.latest_created_at)
+                    )
+                    .order_by(Novel.upload_time.desc())
+                )
 
+                result = sess.execute(stmt).all()
+
+                for novel, latest_status in result:
                     novels.append(
                         {
                             "novel_id": novel.novel_id,
                             "filename": novel.filename or "unknown.txt",
                             "file_path": novel.file_path or "",
-                            "status": latest_status,
+                            "status": latest_status or "uploaded",
                             "title": novel.title or novel.filename or "未知标题",
                             "author": novel.author or "未知作者",
                             "upload_time": novel.upload_time.isoformat() if novel.upload_time else None,
