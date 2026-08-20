@@ -31,19 +31,6 @@ from src.storage.repositories import AnnotationRepository, ParagraphRepository
 from src.utils.lttb import sample_paragraph_curve_points
 
 
-def _paragraph_splitter_version() -> str:
-    """paragraphs 行写入时使用的切分器版本（与 ParagraphRepository 读取逻辑一致）"""
-    return str(getattr(getattr(settings, "paragraphs", None), "splitter_version", None) or "1")
-
-
-def _metric_version() -> str:
-    return str(getattr(settings.metrics, "metric_version", None) or "2")
-
-
-def _curve_version() -> str:
-    return str(getattr(settings.metrics, "curve_version", None) or "1")
-
-
 def _safe_ratio(numerator: float, denominator: float) -> float | None:
     """分母 <= 0 时返回 None（§15.2：分母为零不伪造数值）"""
     if denominator <= 0:
@@ -504,8 +491,4 @@ def _build_book_aggregate(
             else None
         ),
         chapter_emotional_valence_share=valence_share,
-        analysis_contract_version=str(run.get("analysis_contract_version") or "paragraph-v1"),
-        paragraph_splitter_version=_paragraph_splitter_version(),
-        metric_version=_metric_version(),
-        curve_version=_curve_version(),
     )

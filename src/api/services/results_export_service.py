@@ -12,7 +12,6 @@ from typing import Any
 from loguru import logger
 
 from src.api.dependencies import get_metrics_service
-from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_contracts import validate_aggregate_metrics_contract
 from src.api.services.results_queries import (
     _fetch_chapter_annotations,
@@ -27,7 +26,7 @@ from src.api.services.results_queries import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
-from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
+from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.knowledge.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
@@ -95,16 +94,14 @@ def load_character_bundle(
 
     if diagnosis is None:
         diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
-    if diagnosis is not None and diagnosis.rerun_required:
-        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
-    diagnosis_is_complete = _is_complete_diagnosis_result(diagnosis)
-    if not diagnosis_is_complete:
+    diagnosis_is_available = _has_diagnosis_result(diagnosis)
+    if not diagnosis_is_available:
         missing_fields.append("diagnosis")
 
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
-    if diagnosis_is_complete and diagnosis is not None:
+    if diagnosis_is_available and diagnosis is not None:
         arc_scores = diagnosis.arc_scores
         focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
@@ -355,9 +352,6 @@ def fetch_all_results_data(
     获取所有分析结果数据
     """
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
-    if diagnosis is not None and diagnosis.rerun_required:
-        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
-
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
     graph_authority_service.assert_graph_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
@@ -371,9 +365,8 @@ def fetch_all_results_data(
     )
     missing_fields.extend(char_missing)
 
-    if not _is_complete_diagnosis_result(diagnosis):
+    if not _has_diagnosis_result(diagnosis):
         missing_fields.append("diagnosis")
-        diagnosis = None
 
     topics, chapter_annotations, chapter_missing = load_chapter_bundle(
         run_id,
@@ -413,14 +406,13 @@ def fetch_all_results_data(
     event_forest_data: dict[str, Any] | None = None
     if event_forest_snapshot is not None:
         event_forest_data = {
-            "graph_version_id": event_forest_snapshot.graph_version_id,
+            "chapter_id": event_forest_snapshot.chapter_id,
             "chapter_order": event_forest_snapshot.chapter_order,
             "visible_through_chapter_order": event_forest_snapshot.visible_through_chapter_order,
             "derived_event_order": event_forest_snapshot.derived_event_order,
             "event_nodes": [
                 {
                     "event_id": node.event_id,
-                    "event_revision": node.event_revision,
                     "chapter_id": node.chapter_id,
                     "chapter_order": node.chapter_order,
                     "description": node.description,
@@ -459,9 +451,7 @@ def fetch_all_results_data(
                     "edge_id": edge.edge_id,
                     "edge_type": edge.edge_type,
                     "source_event_id": edge.source_event_id,
-                    "source_event_revision": edge.source_event_revision,
                     "target_event_id": edge.target_event_id,
-                    "target_event_revision": edge.target_event_revision,
                     "source_chapter_id": edge.source_chapter_id,
                     "target_chapter_id": edge.target_chapter_id,
                     "is_active": edge.is_active,
