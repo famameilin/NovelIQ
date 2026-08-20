@@ -294,19 +294,208 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
 
     def write_domain(self, domain: str, payload: Any, *, tool_name: str) -> dict[str, Any]:
-        """2026-08-19 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入当前候选"""
+        """2026-08-20 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入当前候选（优化：内联验证）"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
         if domain not in _DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
-        bound = self._bind_domain(domain, payload)
+
+        # 2026-08-20 内联端点验证与领域绑定逻辑，扁平化调用链
+        entity_types = self._fact_entity_catalog()
+        errors: list[str] = []
+
+        # 内联端点校验（仅对需要端点验证的领域执行）
+        def check_entity(name: str, expected_types: tuple[EntityType, ...] | None, label: str, index: int) -> None:
+            key = unicodedata.normalize("NFC", name).strip().casefold()
+            resolved_key = key
+            if self.graph is not None:
+                resolved_key = _norm_graph_name(self.graph.resolve_name(name))
+            actual_type = entity_types.get(resolved_key) or entity_types.get(key)
+            if actual_type is None:
+                errors.append(
+                    f"[{index}] {label} 未在当前 chunk 的 write_entities 中声明: {name}"
+                    "（请先在 write_entities 声明该实体，或改用已登记实体名）"
+                )
+                return
+            if expected_types is not None and actual_type not in expected_types:
+                errors.append(
+                    f"[{index}] {label} 端点类型必须属于 {list(expected_types)}，"
+                    f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
+                    "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
+                )
+
+        if domain == "character_observations":
+            for index, item in enumerate(payload):
+                check_entity(item.character, ("character",), "character_observation.character", index)
+        elif domain == "dialogues":
+            for index, item in enumerate(payload):
+                if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
+                    check_entity(item.speaker, ("character",), "dialogue.speaker", index)
+        elif domain == "events":
+            for index, item in enumerate(payload):
+                for participant in item.participants:
+                    expected: tuple[EntityType, ...] | None = (
+                        ("location",) if participant.role == "地点" else None
+                    )
+                    check_entity(participant.entity, expected, "event.participant.entity", index)
+        elif domain == "relations":
+            for index, item in enumerate(payload):
+                definition = RELATION_DEFINITIONS[str(item.relation_type)]
+                check_entity(item.from_entity, definition["from_types"], "relation.from_entity", index)
+                check_entity(item.to_entity, definition["to_types"], "relation.to_entity", index)
+
+        if errors:
+            raise ValueError(f"{domain} 校验失败: " + "；".join(errors))
+
+        # 内联领域绑定逻辑（原 _bind_domain 实现）
+        if domain == "metrics":
+            bound = payload
+        elif domain == "entities":
+            for entity in payload.entities:
+                key = unicodedata.normalize("NFC", entity.name).strip().casefold()
+                registered_type = (
+                    self.graph.entity_types.get(key)
+                    if self.graph is not None
+                    else None
+                )
+                if registered_type is not None and registered_type != entity.entity_type:
+                    raise ValueError(
+                        f"已登记实体不允许变更大类: {entity.name} "
+                        f"registered={registered_type} actual={entity.entity_type}（"
+                        "同一词条的不同身份请使用区分性名称，如\"圣城\"是 location、"
+                        "\"圣城朝堂\"是 organization，不要互相改类）"
+                    )
+            bound = self._bound_entities(payload)
+        elif domain == "character_observations":
+            bound = [
+                BoundCharacterObservation(**item.model_dump(mode="python"))
+                for item in payload
+            ]
+        elif domain == "dialogues":
+            candidates = self.dialogue_candidates
+            candidate_by_index = dict(enumerate(candidates, start=1))
+            seen_indexes: set[int] = set()
+            for item in payload:
+                if item.candidate_index not in candidate_by_index:
+                    raise ValueError(
+                        f"write_dialogues.candidate_index 超出系统候选范围: "
+                        f"index={item.candidate_index} expected=1..{len(candidates)}"
+                    )
+                if item.candidate_index in seen_indexes:
+                    raise ValueError(
+                        f"write_dialogues.candidate_index 重复: {item.candidate_index}"
+                    )
+                seen_indexes.add(item.candidate_index)
+            self.dialogue_missing_indexes = sorted(set(candidate_by_index) - seen_indexes)
+            bound_dialogues: list[BoundDialogue] = []
+            for item in sorted(payload, key=lambda entry: entry.candidate_index):
+                if item.verdict == DialogueVerdict.NOT_DIALOGUE:
+                    continue
+                candidate = candidate_by_index[item.candidate_index]
+                bound_dialogues.append(
+                    BoundDialogue(
+                        candidate_index=item.candidate_index,
+                        candidate_key=candidate.candidate_key,
+                        content=candidate.content,
+                        start=candidate.start,
+                        end=candidate.end,
+                        speaker=item.speaker,
+                        tone=item.tone,
+                        is_inner_monologue=item.verdict == DialogueVerdict.INNER_MONOLOGUE,
+                    )
+                )
+            bound = bound_dialogues
+        elif domain == "events":
+            bound_events: list[BoundEvent] = []
+            event_evidence: list[tuple[int, int, str, list[TextEvidence]]] = []
+            for item in payload:
+                char_start, char_end, text_hash, evidence = self._derive_event_evidence(
+                    item.anchor_paragraph_ids
+                )
+                bound_events.append(
+                    BoundEvent(
+                        description=item.description,
+                        participants=[
+                            EventParticipantInput(**p.model_dump(mode="python"))
+                            for p in item.participants
+                        ],
+                        anchor_paragraph_ids=list(item.anchor_paragraph_ids),
+                        causal_event_refs=list(item.causal_event_refs),
+                        tree_id=item.tree_id,
+                        cause_role=item.cause_role,
+                        char_start=char_start,
+                        char_end=char_end,
+                        text_hash=text_hash,
+                        evidence=evidence,
+                    )
+                )
+                event_evidence.append((char_start, char_end, text_hash, evidence))
+            self._validate_causal_refs(payload, event_evidence)
+            bound = bound_events
+        elif domain == "relations":
+            bound_relations: list[BoundRelation] = []
+            for item in payload:
+                resolved_from = (
+                    self.graph.resolve_name(item.from_entity)
+                    if self.graph is not None
+                    else item.from_entity
+                )
+                resolved_to = (
+                    self.graph.resolve_name(item.to_entity)
+                    if self.graph is not None
+                    else item.to_entity
+                )
+                dumped = item.model_dump(mode="python")
+                dumped["from_entity"] = resolved_from
+                dumped["to_entity"] = resolved_to
+                bound_relations.append(
+                    BoundRelation(
+                        **dumped,
+                        directionality=RELATION_DEFINITIONS[str(item.relation_type)][
+                            "directionality"
+                        ],
+                        relation_semantics=RELATION_DEFINITIONS[str(item.relation_type)][
+                            "semantics"
+                        ],
+                    )
+                )
+            bound = bound_relations
+        elif domain == "foreshadowings":
+            events_payload = self.domain_payloads.get("events")
+            if events_payload is None:
+                raise AnnotationProtocolError(
+                    "write_foreshadowings 必须在 write_events 成功后调用，以绑定 setup 事件"
+                )
+            event_count = len(events_payload)
+            for item in payload:
+                if item.setup_event_index < 1 or item.setup_event_index > event_count:
+                    raise ValueError(
+                        f"foreshadowing.setup_event_index 引用越界: {item.setup_event_index}"
+                        f"（有效范围 1..{event_count}）"
+                    )
+            bound_foreshadowings: list[BoundForeshadowing] = [
+                BoundForeshadowing(
+                    description=item.description,
+                    confidence=item.confidence,
+                    setup_event_index=item.setup_event_index,
+                )
+                for item in payload
+            ]
+            bound = bound_foreshadowings
+        else:
+            raise AnnotationInputError(f"未知标注领域: {domain}")
+
         # 事件列表是伏笔 setup_event_index 的权威序号；事件被重新提交后，
         # 重新校验已存在的伏笔绑定，避免先写伏笔再改事件留下悬空引用
         if domain == "events" and "foreshadowings" in self.domain_payloads:
-            self._bind_domain(
-                "foreshadowings",
-                self.domain_payloads["foreshadowings"],
-            )
+            foreshadowing_payload = self.domain_payloads["foreshadowings"]
+            event_count = len(payload)
+            for item in foreshadowing_payload:
+                if item.setup_event_index < 1 or item.setup_event_index > event_count:
+                    raise ValueError(
+                        f"foreshadowing.setup_event_index 引用越界: {item.setup_event_index}"
+                        f"（有效范围 1..{event_count}）"
+                    )
         relation_outcomes: list[dict[str, Any]] = []
         if self.graph is not None:
             if domain == "entities":
@@ -461,33 +650,6 @@ class AnnotationToolLedger:
             )
         return key
 
-    def _require_entity_collected(
-        self,
-        name: str,
-        *,
-        entity_types: dict[str, EntityType],
-        expected_types: tuple[EntityType, ...] | None = None,
-        label: str,
-        index: int,
-    ) -> list[str]:
-        """2026-08-11 用于收集式校验事实端点并返回带条目索引的错误文本"""
-        key = unicodedata.normalize("NFC", name).strip().casefold()
-        resolved_key = key
-        if self.graph is not None:
-            resolved_key = _norm_graph_name(self.graph.resolve_name(name))
-        actual_type = entity_types.get(resolved_key) or entity_types.get(key)
-        if actual_type is None:
-            return [
-                f"[{index}] {label} 未在当前 chunk 的 write_entities 中声明: {name}"
-                "（请先在 write_entities 声明该实体，或改用已登记实体名）"
-            ]
-        if expected_types is not None and actual_type not in expected_types:
-            return [
-                f"[{index}] {label} 端点类型必须属于 {list(expected_types)}，"
-                f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
-                "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
-            ]
-        return []
 
     # ------------------------------------------------------------------
     # 事件锚点与证据派生（2026-08-18 事件森林/DAG）
@@ -579,31 +741,36 @@ class AnnotationToolLedger:
         *,
         entity_types: dict[str, EntityType],
     ) -> None:
-        """2026-08-11 用于在单个领域写入时收集式校验事实端点，一次返回全部错误"""
+        """2026-08-20 用于在单个领域写入时内联校验事实端点，一次返回全部错误（优化：扁平化内联验证）"""
         errors: list[str] = []
+
+        # 2026-08-20 内联实体校验逻辑，避免多层函数调用
+        def check_entity(name: str, expected_types: tuple[EntityType, ...] | None, label: str, index: int) -> None:
+            key = unicodedata.normalize("NFC", name).strip().casefold()
+            resolved_key = key
+            if self.graph is not None:
+                resolved_key = _norm_graph_name(self.graph.resolve_name(name))
+            actual_type = entity_types.get(resolved_key) or entity_types.get(key)
+            if actual_type is None:
+                errors.append(
+                    f"[{index}] {label} 未在当前 chunk 的 write_entities 中声明: {name}"
+                    "（请先在 write_entities 声明该实体，或改用已登记实体名）"
+                )
+                return
+            if expected_types is not None and actual_type not in expected_types:
+                errors.append(
+                    f"[{index}] {label} 端点类型必须属于 {list(expected_types)}，"
+                    f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
+                    "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
+                )
+
         if domain == "character_observations":
             for index, item in enumerate(payload):
-                errors.extend(
-                    self._require_entity_collected(
-                        item.character,
-                        entity_types=entity_types,
-                        expected_types=("character",),
-                        label="character_observation.character",
-                        index=index,
-                    )
-                )
+                check_entity(item.character, ("character",), "character_observation.character", index)
         elif domain == "dialogues":
             for index, item in enumerate(payload):
                 if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
-                    errors.extend(
-                        self._require_entity_collected(
-                            item.speaker,
-                            entity_types=entity_types,
-                            expected_types=("character",),
-                            label="dialogue.speaker",
-                            index=index,
-                        )
-                    )
+                    check_entity(item.speaker, ("character",), "dialogue.speaker", index)
         elif domain == "events":
             for index, item in enumerate(payload):
                 for participant in item.participants:
@@ -612,36 +779,13 @@ class AnnotationToolLedger:
                         if participant.role == "地点"
                         else None
                     )
-                    errors.extend(
-                        self._require_entity_collected(
-                            participant.entity,
-                            entity_types=entity_types,
-                            expected_types=expected,
-                            label="event.participant.entity",
-                            index=index,
-                        )
-                    )
+                    check_entity(participant.entity, expected, "event.participant.entity", index)
         elif domain == "relations":
             for index, item in enumerate(payload):
                 definition = RELATION_DEFINITIONS[str(item.relation_type)]
-                errors.extend(
-                    self._require_entity_collected(
-                        item.from_entity,
-                        entity_types=entity_types,
-                        expected_types=definition["from_types"],
-                        label="relation.from_entity",
-                        index=index,
-                    )
-                )
-                errors.extend(
-                    self._require_entity_collected(
-                        item.to_entity,
-                        entity_types=entity_types,
-                        expected_types=definition["to_types"],
-                        label="relation.to_entity",
-                        index=index,
-                    )
-                )
+                check_entity(item.from_entity, definition["from_types"], "relation.from_entity", index)
+                check_entity(item.to_entity, definition["to_types"], "relation.to_entity", index)
+
         if errors:
             raise ValueError(f"{domain} 校验失败: " + "；".join(errors))
 
@@ -686,33 +830,6 @@ class AnnotationToolLedger:
         if errors:
             raise ValueError("；".join(errors))
 
-    def _validate_fact_endpoints(
-        self,
-        payloads: dict[str, Any],
-        *,
-        entity_types: dict[str, EntityType],
-    ) -> None:
-        """2026-08-10 用于在 ready_chunk 构造时按最终实体目录全量校验事实端点"""
-        self._validate_domain_endpoints(
-            "character_observations",
-            payloads["character_observations"],
-            entity_types=entity_types,
-        )
-        self._validate_domain_endpoints(
-            "dialogues",
-            payloads["dialogues"],
-            entity_types=entity_types,
-        )
-        self._validate_domain_endpoints(
-            "events",
-            payloads["events"],
-            entity_types=entity_types,
-        )
-        self._validate_domain_endpoints(
-            "relations",
-            payloads["relations"],
-            entity_types=entity_types,
-        )
 
     def _bound_entities(
         self,
@@ -879,14 +996,62 @@ class AnnotationToolLedger:
         self.ready_chunk = self._build_ready_chunk()
 
     def _build_ready_chunk(self) -> BoundChunkAnnotation:
-        """2026-08-10 用于从全部已接受领域校验并构造完整 BoundChunkAnnotation"""
+        """2026-08-20 用于从全部已接受领域校验并构造完整 BoundChunkAnnotation（优化：内联验证逻辑）"""
         payloads = self.domain_payloads
         entity_types, _entity_names = self._entity_catalog(payloads["entities"])
         resolved_entity_types = {
             **(self.graph.entity_types if self.graph is not None else {}),
             **entity_types,
         }
-        self._validate_fact_endpoints(payloads, entity_types=resolved_entity_types)
+
+        # 2026-08-20 内联全量端点校验，合并 _validate_fact_endpoints 和 _validate_domain_endpoints
+        errors: list[str] = []
+
+        def check_entity(name: str, expected_types: tuple[EntityType, ...] | None, label: str, index: int) -> None:
+            key = unicodedata.normalize("NFC", name).strip().casefold()
+            resolved_key = key
+            if self.graph is not None:
+                resolved_key = _norm_graph_name(self.graph.resolve_name(name))
+            actual_type = resolved_entity_types.get(resolved_key) or resolved_entity_types.get(key)
+            if actual_type is None:
+                errors.append(
+                    f"[{index}] {label} 未在当前 chunk 的 write_entities 中声明: {name}"
+                    "（请先在 write_entities 声明该实体，或改用已登记实体名）"
+                )
+                return
+            if expected_types is not None and actual_type not in expected_types:
+                errors.append(
+                    f"[{index}] {label} 端点类型必须属于 {list(expected_types)}，"
+                    f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
+                    "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
+                )
+
+        # character_observations 端点校验
+        for index, item in enumerate(payloads["character_observations"]):
+            check_entity(item.character, ("character",), "character_observation.character", index)
+
+        # dialogues 端点校验
+        for index, item in enumerate(payloads["dialogues"]):
+            if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
+                check_entity(item.speaker, ("character",), "dialogue.speaker", index)
+
+        # events 端点校验
+        for index, item in enumerate(payloads["events"]):
+            for participant in item.participants:
+                expected: tuple[EntityType, ...] | None = (
+                    ("location",) if participant.role == "地点" else None
+                )
+                check_entity(participant.entity, expected, "event.participant.entity", index)
+
+        # relations 端点校验
+        for index, item in enumerate(payloads["relations"]):
+            definition = RELATION_DEFINITIONS[str(item.relation_type)]
+            check_entity(item.from_entity, definition["from_types"], "relation.from_entity", index)
+            check_entity(item.to_entity, definition["to_types"], "relation.to_entity", index)
+
+        if errors:
+            raise ValueError("端点校验失败: " + "；".join(errors))
+
         self._validate_domain_duplicates(payloads)
         bound_dialogues = list(self.bound_payloads["dialogues"])
         return BoundChunkAnnotation(
