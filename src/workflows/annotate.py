@@ -386,8 +386,8 @@ def _merge_sub_chunk_results(
         ],
         audit=AgentRunAudit(
             allow_future_context=first.audit.allow_future_context,
-            write_revisions=[
-                revision for result in results for revision in result.audit.write_revisions
+            write_records=[
+                record for result in results for record in result.audit.write_records
             ],
             rotation_case_ids=list(
                 dict.fromkeys(
@@ -472,7 +472,7 @@ def _build_fact_graph(
     read_session = session_factory()
     try:
         graph_repo = GraphRepository(read_session)
-        latest = graph_repo.resolve_graph_version(run_id)
+        latest = graph_repo.resolve_chapter_boundary(run_id)
         history_entity_types: dict[str, EntityType] = {}
         history_entity_names: dict[str, str] = {}
         history_entity_tags: dict[str, list[str]] = {}
@@ -738,9 +738,6 @@ async def run_annotate(
         elapsed,
     )
     if first_failure is not None:
-        # 2026-08-13 章节失败即中断（不再继续后续章节）：失败章未提交图版本，
-        # 若后续章节先提交会造成修订号空洞，resume 补跑失败章时与后续章节
-        # 修订号冲突（uq_*_run_revision）且重试必败。中断后 run 收口 failed，
-        # resume 跳过已成功章节、仅重跑失败章及后续未完成章节，顺序补写无空洞。
+        # 2026-08-19 章节失败即中断，失败章未提交；恢复任务时从失败章节继续
         raise first_failure
     return success_count, 0, total_chapters

@@ -98,10 +98,12 @@ class AgentStream:
         *,
         chunk_id: int = 0,
         sub_stage: str = "",
+        stream_id: str | None = None,
     ) -> None:
         self._emitter = emitter
         self._chunk_id = chunk_id
         self._sub_stage = sub_stage
+        self._stream_id = stream_id or f"{sub_stage or 'agent'}-{chunk_id}"
 
     async def thinking(self, text: str) -> None:
         """发送思考/推理状态事件（仅状态消息，不推送推理 token 内容）"""
@@ -141,6 +143,7 @@ class AgentStream:
                 content=text,
                 chapter_id=self._chunk_id,
                 sub_stage=self._sub_stage,
+                stream_id=self._stream_id,
             )
         )
 
@@ -153,6 +156,7 @@ class AgentStream:
                 status=status,
                 chapter_id=self._chunk_id,
                 sub_stage=self._sub_stage,
+                stream_id=self._stream_id,
             )
         )
 
