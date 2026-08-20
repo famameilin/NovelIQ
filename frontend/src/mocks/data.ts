@@ -431,10 +431,6 @@ export function createChapterMetrics(): ChapterMetricsResponse {
         中性: 0.35,
         消极: 0.25,
       },
-      analysis_contract_version: "2.0",
-      paragraph_splitter_version: "1.0",
-      metric_version: "1.0",
-      curve_version: "1.0",
     },
   };
 }
@@ -531,7 +527,7 @@ export function createGraph(): GraphData {
     entity_type: "character" as const,
     first_seen_chapter: character.first_seen_chapter,
     last_seen_chapter: character.last_seen_chapter,
-    state_revision: 1,
+    state_chapter_id: 12,
     state: {
       primary_role_function: character.role,
       status: "active",
@@ -548,8 +544,7 @@ export function createGraph(): GraphData {
     { source: 2, target: 8, relation_type: "盟友" },
   ].map((edge, index) => ({
     relation_id: `relation-${index + 1}`,
-    relation_version_id: index + 1,
-    relation_revision: 1,
+    state_chapter_id: 12,
     source_entity_id: edge.source,
     target_entity_id: edge.target,
     source_name: nodes.find((node) => node.entity_id === edge.source)?.name ?? "未知实体",
@@ -563,7 +558,6 @@ export function createGraph(): GraphData {
   }));
 
   return {
-    graph_version_id: "mock-graph-version-1",
     chapter_id: 12,
     chapter_order: 12,
     first_chapter_id: 111,
@@ -578,16 +572,12 @@ export function createGraphChangesPage(cursor?: string | null, limit = 8): Graph
   const allChanges: GraphChange[] = MOCK_GRAPH_RELATION_CHANGES.map((change) => ({
     change_id: change.change_id,
     change_kind: "relation",
-    graph_version_id: graph.graph_version_id,
     chapter_id: graph.chapter_id,
     chapter_order: graph.chapter_order,
     fact_id: `fact:${change.change_id}`,
-    fact_revision: 1,
     effective_chapter_id: change.chapter_id,
     changes: [{ change_kind: change.relation_change_kind }],
     relation_id: `relation:${change.source_relation_row_id ?? change.change_id}`,
-    relation_version_id: change.source_relation_row_id,
-    relation_revision: 1,
     from_entity_id: change.from_entity_id,
     to_entity_id: change.to_entity_id,
     from_name: graph.nodes.find((node) => node.entity_id === change.from_entity_id)?.name ?? change.from_name,
@@ -695,15 +685,11 @@ export function createTimeline(): TimelineResponse {
       {
         change_id: change.change_id,
         change_kind: "relation",
-        graph_version_id: change.graph_version_id,
         chapter_id: change.chapter_id,
         fact_id: change.fact_id,
-        fact_revision: change.fact_revision,
         effective_chapter_id: change.effective_chapter_id,
         changes: change.changes,
         relation_id: change.relation_id,
-        relation_version_id: change.relation_version_id,
-        relation_revision: change.relation_revision,
         from_char: change.from_name,
         to_char: change.to_name,
         relation_type: change.relation_type,
@@ -731,10 +717,8 @@ export function createTimeline(): TimelineResponse {
         {
           change_id: `state:${character.entity_id}:${anchorChapterId}`,
           change_kind: "state" as const,
-          graph_version_id: "mock-graph-version-1",
           chapter_id: 12,
           fact_id: `state-fact:${character.entity_id}:${anchorChapterId}`,
-          fact_revision: 1,
           effective_chapter_id: anchorChapterId,
           changes: [{ field: "status", value: index === 0 ? "突破" : "收徒" }],
           entity_id: character.entity_id,

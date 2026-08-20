@@ -20,20 +20,13 @@ interface SSEEventListenerOptions {
   eventTypes?: SSEEventType[];
 }
 
-/**
- * 从 url 中提取 task_id：优先匹配后端 SSE 路由 `/api/events/tasks/{taskId}` 的路径段，
- * 兼容把 task_id 放在 query 上的调用方（测试/其他宿主）。
- */
+/** 从 canonical SSE 路径中提取 task_id */
 function extractTaskIdFromUrl(url: string): string | null {
   const pathMatch = url.match(/\/tasks\/([^/?#]+)/);
   if (pathMatch) {
     return decodeURIComponent(pathMatch[1]);
   }
-  const queryIndex = url.indexOf("?");
-  if (queryIndex >= 0) {
-    return new URLSearchParams(url.slice(queryIndex)).get("task_id");
-  }
-  return null;
+  throw new Error("SSE URL 必须使用 /tasks/{task_id} 路径");
 }
 
 // 2026-08-14 P1-6：每 task 最近一条 SSE 消息 id（seq）的持久化。

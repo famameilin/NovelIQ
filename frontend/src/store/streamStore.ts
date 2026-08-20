@@ -26,7 +26,7 @@ export interface LLMStreamGroup {
   stage: string;
   subStage: string;
   chapterId: number;
-  streamId: string | null;
+  streamId: string;
   outputText: string;
   thinkingText: string;
   outputTotalChars: number;
@@ -72,14 +72,17 @@ export function buildLLMOutputScopeKey(data: {
   return `${data.stage}-${data.chapter_id}-${data.sub_stage || "default"}`;
 }
 
-/** 生成多流分组键，并兼容缺失 stream_id 的旧事件 */
+/** 生成多流分组键，LLM 事件必须携带 stream_id */
 export function buildLLMOutputGroupKey(data: {
   stage: string;
   chapter_id: number;
   sub_stage: string;
-  stream_id?: string | null;
+  stream_id: string;
 }): string {
-  return `${buildLLMOutputScopeKey(data)}-${data.stream_id || "default"}`;
+  if (!data.stream_id) {
+    throw new Error("LLM 流事件缺少 stream_id");
+  }
+  return `${buildLLMOutputScopeKey(data)}-${data.stream_id}`;
 }
 
 /** 将单条流输出裁剪到固定字符数和行数上限内 */
@@ -353,6 +356,9 @@ export const useStreamStore = create<StreamState>()((set) => ({
 
   appendLLMOutput: (data) =>
     set((state) => {
+      if (!data.stream_id) {
+        throw new Error("LLM 流事件缺少 stream_id");
+      }
       const scopeKey = buildLLMOutputScopeKey({
         stage: data.stage,
         chapter_id: data.chapter_id ?? 0,
@@ -372,7 +378,7 @@ export const useStreamStore = create<StreamState>()((set) => ({
         stage: data.stage,
         subStage: data.sub_stage,
         chapterId: data.chapter_id ?? 0,
-        streamId: data.stream_id ?? null,
+        streamId: data.stream_id,
         outputText: existing?.outputText ?? "",
         thinkingText: existing?.thinkingText ?? "",
         outputTotalChars: existing?.outputTotalChars ?? 0,

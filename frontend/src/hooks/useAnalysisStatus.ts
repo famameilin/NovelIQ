@@ -61,12 +61,15 @@ function isMockEnabled(): boolean {
 
 /** 将同一流的连续输出合并进批量缓冲，减少后台恢复后的逐 token 刷新 */
 function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chapter_id" | "stream_id">): string {
+  if (!data.stream_id) {
+    throw new Error("LLM 流事件缺少 stream_id");
+  }
   return [
     data.action,
     data.stage,
     data.sub_stage || "default",
     String(data.chapter_id ?? 0),
-    data.stream_id || "default",
+    data.stream_id,
   ].join("|");
 }
 
