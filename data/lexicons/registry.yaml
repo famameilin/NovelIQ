@@ -5,7 +5,7 @@
 # 约束取舍（2026-08-15 按用户要求）：
 #   - 加载报错保留（fail-fast）：registry.yaml 缺失、注册词表文件缺失 -> 加载即报错，
 #     防止分析链静默拿到空词表降级
-#   - 内容与声明类校验宽容：版本号不符 / 非法元数据（kind/status/weight_policy）-> warning + 空结果/默认值，
+#   - 内容与声明类校验宽容：非法元数据（kind/status/weight_policy）-> warning + 空结果/默认值，
 #     词表与注册表可自由迭代；count/file_hash 声明校验已删除
 #   - version_hash 与加载状态无关：覆盖 registry.yaml + conflict_matrix.yaml + 全部注册文件原文
 #   - consumers 登记真实消费点；新增词表建议同步登记（测试侧校验登记完整性）
@@ -15,8 +15,6 @@
 # function_words_classical、alias_keywords、disambig_protected、proper_nouns
 # （留存审定依据与实测利用率见 docs/词表体系重设计-修订版实施计划.md §0.2）。
 # 情感词表按 L1 核心 / L2 口语分层（M3 重建并登记为独立表目；权重弃用，命中计数）。
-
-version: "3.0"
 
 lexicons:
   # ===== 情感（生产：段落链 positive/negative_weight_sum，命中计数） =====

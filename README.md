@@ -242,8 +242,8 @@ flowchart TD
 - **段落为最小事实单元**：`paragraphs` 表为唯一段落事实源，Embedding、指标、主题、检索等派生数据一律复用段落边界，不自行切段。
 - **聚合口径**：章节/全书比率 = 分子和 ÷ 分母和（禁止等权平均）；句长均值/方差由充分统计量（count/sum/sum_sq）恢复；TTR/MTLD 对目标文本序列直接计算；分母为 0 输出 null。
 - **曲线**：x 轴为归一化字符坐标 `position`（段落字符中点 ÷ 全书总字符数）；平滑为字符坐标稳健局部回归（LOWESS，tricube 核 + char_count 权重 + bisquare 稳健迭代，带宽默认 2%、最少 7 点）；Fourier 平滑已移除（`src/metrics/fourier_filter.py` 已删除）。
-- **不兼容旧 run**：旧 run 无段落事实源，`/paragraph-curves` 与 `/chapter-metrics` 返回 409（`paragraph_contract_rerun_required`）提示重新分析；旧 `chunk_*` 表与旧接口退出新主流程（保留仅历史）。
-- **开发库升级**：`powershell -ExecutionPolicy Bypass -File scripts/db/repair_schema_drift.py --target dev`（补齐 `analysis_runs.analysis_contract_version` 列与新表）。
+- **当前数据结构**：段落事实源、指标、主题和曲线均按当前 ORM 表读取，数据缺失按普通数据缺失处理并返回对应业务校验结果。
+- **数据库重建**：旧数据库直接废弃；开发库使用 `powershell -ExecutionPolicy Bypass -File scripts/db/rebuild_schema.py --target dev --confirm` 按当前 ORM 重建，不执行历史表迁移或字段补齐。
 
 ## 当前 Agent 运行约束
 
