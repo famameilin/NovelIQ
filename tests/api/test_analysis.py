@@ -479,16 +479,23 @@ class TestAnalysis:
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-        task_manager = TaskManager()
-        task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, novel_id)
-        task_manager.update_task(
-            task_id,
-            status=analysis_mod.TaskStatus.RUNNING,
-            progress=42.0,
-            stage="annotate",
-            message="正在分析第 42 个分块",
-        )
+        # 直接更新 DB，不经过 TaskManager 内存缓存
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                task_id,
+                status="running",
+                progress=42.0,
+                stage="annotate",
+                message="正在分析第 42 个分块",
+            )
+        # 验证 DB 中确实写入了 message
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            db_task = run_repo.get_run(task_id)
+            assert db_task is not None
+            assert db_task["message"] == "正在分析第 42 个分块", f"DB message: {db_task.get('message')}"
+
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
         assert status_response.status_code == 200
         data = status_response.json()
