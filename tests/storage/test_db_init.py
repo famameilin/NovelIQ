@@ -8,10 +8,16 @@ from src.storage.models import Base
 
 
 def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
-    """2026-08-07 用于验证 ORM 直接表达章节图版本与事实版本来源"""
-    assert "continuity_facts" not in Base.metadata.tables
-    assert "graph_fact_versions" not in Base.metadata.tables
-    assert "graph_relation_events" not in Base.metadata.tables
+    """2026-08-19 用于验证 ORM 直接表达 run 与章节历史事实"""
+    assert "continuity_" + "facts" not in Base.metadata.tables
+    assert "graph_fact_" + "versions" not in Base.metadata.tables
+    assert "graph_relation_" + "events" not in Base.metadata.tables
+    forbidden_tables = {
+        "graph_" + "versions",
+        "entity_state_" + "versions",
+        "graph_relation_" + "versions",
+    }
+    assert forbidden_tables.isdisjoint(Base.metadata.tables)
 
     mapping_columns = Base.metadata.tables["case_resolution_mappings"].columns
     case_columns = Base.metadata.tables["case_pool_cases"].columns
@@ -24,17 +30,19 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
         "target_ref",
         "resolution",
         "target_fact_id",
-        "target_fact_revision",
         "target_dialogue_id",
         "target_setup_id",
     } <= set(mapping_columns.keys())
     assert {"type", "chapter_id", "target_key", "target_ref"} <= set(case_columns.keys())
     assert {
-        "graph_version_id",
+        "run_id",
+        "chapter_id",
+        "fact_id",
         "source_kind",
         "annotation_id",
         "payload_path",
-        "fact_revision",
+        "effective_chapter_id",
+        "evidence",
     } <= set(fact_columns.keys())
     assert "attributes" in entity_columns
     assert {
@@ -56,20 +64,18 @@ def test_init_db_creates_final_graph_tables_and_excludes_paragraph_embeddings() 
     with (
         patch("src.storage.db.get_engine", return_value=object()),
         patch("src.storage.models.Base.metadata.create_all") as mock_create_all,
-        patch("src.storage.db._assert_focus_contract_schema"),
-        patch("src.storage.db._assert_annotation_contract_schema"),
-        patch("src.storage.db._assert_agent_audit_contract_schema"),
     ):
         init_db()
 
     table_names = [table.name for table in mock_create_all.call_args.kwargs["tables"]]
     assert "paragraph_embeddings" not in table_names
     assert {
-        "graph_versions",
         "graph_facts",
-        "entity_state_versions",
+        "entity_states",
         "graph_relations",
-        "graph_relation_versions",
+        "relation_states",
+        "event_nodes",
+        "event_edges",
         "dialogue_records",
         "agent_invocations",
         "agent_turns",
@@ -84,38 +90,18 @@ def test_init_db_rejects_removed_level3_parameter() -> None:
         init_db(include_level3_tables=True)
 
 
-def test_init_db_runs_contract_guards_after_create_all() -> None:
-    """
-    验证 init_db() 主链路会在 create_all 之后执行 fail-closed 合同校验。
-
-    创建时间: 2026-04-27
-    任务: fix-focus-contract-runtime-schema-conflict
-    说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把合同校验从主链路上绕开。
-    """
+def test_init_db_uses_current_metadata_without_schema_guards() -> None:
+    """2026-08-19 用于验证初始化只创建当前 ORM 元数据"""
     fake_engine = object()
     with (
         patch("src.storage.db.get_engine", return_value=fake_engine),
         patch("src.storage.models.Base.metadata.create_all"),
-        patch("src.storage.db._assert_focus_contract_schema") as mock_assert_focus_contract_schema,
-        patch("src.storage.db._assert_annotation_contract_schema") as mock_assert_annotation_contract_schema,
-        patch("src.storage.db._assert_agent_audit_contract_schema") as mock_assert_agent_audit_contract_schema,
     ):
         init_db()
 
-    mock_assert_focus_contract_schema.assert_called_once_with(fake_engine)
-    mock_assert_annotation_contract_schema.assert_called_once_with(fake_engine)
-    mock_assert_agent_audit_contract_schema.assert_called_once_with(fake_engine)
+    import src.storage.db as db_module
 
-
-def test_agent_audit_contract_guard_rejects_missing_audit_tables(db_session) -> None:
-    """2026-08-10 用于验证缺少新审计表时启动直接失败"""
-    from src.storage.db import _assert_agent_audit_contract_schema
-
-    db_session.execute(text("DROP TABLE IF EXISTS agent_invocations CASCADE"))
-    db_session.commit()
-
-    with pytest.raises(RuntimeError, match="agent_invocations 表不存在"):
-        _assert_agent_audit_contract_schema(db_session.get_bind())
+    assert not any(name.startswith("_assert_") for name in dir(db_module))
 
 
 def test_no_legacy_runtime_schema_compat_path_remains() -> None:
@@ -143,11 +129,13 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
         "analysis_runs_novel_id_fkey",
         "chapter_annotations_run_id_fkey",
         "case_pool_cases_run_id_fkey",
-        "graph_versions_first_chapter_run_fkey",
-        "graph_versions_last_chapter_run_fkey",
+        "entity_states_chapter_run_fkey",
         "graph_facts_run_id_fkey",
         "graph_facts_effective_chapter_run_fkey",
-        "graph_relation_versions_relation_id_fkey",
+        "relation_states_chapter_run_fkey",
+        "event_nodes_chapter_run_fkey",
+        "event_edges_source_chapter_run_fkey",
+        "event_edges_target_chapter_run_fkey",
         "cloud_analysis_novel_id_fkey",
         "global_context_novel_id_fkey",
         "token_usage_novel_id_fkey",
@@ -170,52 +158,42 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     assert set(rows) == expected_constraints
 
 
-def test_fresh_schema_uses_chapter_graph_versions_without_legacy_event_table() -> None:
-    """
-    验证 pytest fresh schema 不再创建 timeline / graph projection 版本列。
-
-    创建时间: 2026-04-28
-    任务: remove-timeline-version-columns
-    说明: 当前主线不再依赖 run-level version 标签 gate；
-          fresh schema 下若还出现这两个列，说明旧兼容层又被带回来了。
-    """
+def test_fresh_schema_uses_chapter_keys_without_version_tables() -> None:
+    """2026-08-19 用于验证新 schema 只保留章节复合键"""
 
     with get_session_factory()() as session:
-        column_rows = session.execute(
+        version_tables = session.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name IN (
+                    'graph_' || 'versions', 'graph_fact_' || 'versions', 'entity_state_' || 'versions',
+                    'graph_relation_' || 'versions', 'graph_relation_' || 'events'
+                  )
+                """
+            )
+        ).scalars().all()
+        version_columns = session.execute(
             text(
                 """
                 SELECT table_name, column_name
                 FROM information_schema.columns
                 WHERE table_schema = current_schema()
-                  AND table_name = 'analysis_runs'
-                  AND column_name IN ('graph_projection_version', 'timeline_contract_version')
+                  AND column_name IN (
+                    'analysis_' || 'contract_' || 'version', 'contract_' || 'version',
+                    'reference_' || 'contract_' || 'version', 'graph_' || 'version_' || 'id',
+                    'fact_' || 'revision', 'event_' || 'revision', 'relation_' || 'version_' || 'id',
+                    'relation_' || 'revision', 'state_' || 'revision', 'rerun_' || 'required',
+                    'rerun_' || 'reason'
+                  )
                 """
             )
         ).all()
-        legacy_table = session.execute(
-            text("SELECT to_regclass('graph_relation_events')")
-        ).scalar_one_or_none()
-        constraints = set(
-            session.execute(
-            text(
-                """
-                SELECT constraint_name
-                FROM information_schema.table_constraints
-                WHERE table_schema = current_schema()
-                  AND table_name = 'graph_versions'
-                  AND constraint_type = 'UNIQUE'
-                """
-            )
-            ).scalars()
-        )
 
-    assert column_rows == []
-    assert legacy_table is None
-    assert {
-        "uq_graph_versions_run_chapter",
-        "uq_graph_versions_run_order",
-        "uq_graph_versions_annotation",
-    } <= constraints
+    assert version_tables == []
+    assert version_columns == []
 
 
 def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:

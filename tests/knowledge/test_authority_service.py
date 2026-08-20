@@ -27,7 +27,7 @@ def _persist_authority_chapter(
     relations: list[dict[str, Any]] | None = None,
     resolved_cases: list[Any] | None = None,
 ) -> None:
-    """2026-08-07 用于为 authority 视图写入章节版本图数据"""
+    """2026-08-19 用于为 authority 视图写入章节图数据"""
     persist_chapter_annotation(
         session,
         run_id=run_id,
@@ -38,7 +38,7 @@ def _persist_authority_chapter(
     )
 
 
-def test_authority_views_project_chapter_versions_and_graph_changes(db_session) -> None:
+def test_authority_views_project_chapter_history_and_graph_changes(db_session) -> None:
     """2026-08-07 用于验证 authority 从章节快照输出实体关系和变化合同"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -73,14 +73,14 @@ def test_authority_views_project_chapter_versions_and_graph_changes(db_session) 
 
     assert {row.name for row in level1.canonical_entities} == {"林渡", "顾霜"}
     assert [(row.from_name, row.to_name, row.source) for row in level1.confirmed_relations] == [
-        ("林渡", "顾霜", "graph_relation_versions")
+        ("林渡", "顾霜", "relation_states")
     ]
     assert {row.change_kind for row in timeline.graph_changes} == {"state", "relation"}
-    assert all(row.fact_id and row.fact_revision == 1 for row in timeline.graph_changes)
+    assert all(row.fact_id and row.chapter_id == 1 for row in timeline.graph_changes)
     assert all(row.changes for row in graph_view.graph_changes)
     assert {row.name for row in graph_view.participant_states} == {"林渡", "顾霜"}
     assert export_view.current_relations[0].relation_id
-    assert export_view.current_relations[0].source == "graph_relation_versions"
+    assert export_view.current_relations[0].source == "relation_states"
     assert report.summary.node_count == 2
     assert report.summary.edge_count == 1
 

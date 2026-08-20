@@ -17,7 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.main import app
 from src.api.models.responses import DiagnosisResult
 from src.storage.repositories import RunRepository
@@ -68,7 +67,7 @@ class TestResults:
         response = api_client.get("/api/novels/nonexistent/diagnosis?task_id=nonexistent")
         assert response.status_code == 404
 
-    def test_get_diagnosis_returns_rerun_required_for_incomplete_focus_contract(
+    def test_get_diagnosis_returns_available_partial_result(
         self,
         api_client: TestClient,
         db_session,
@@ -92,7 +91,7 @@ class TestResults:
                 "novel_id": novel_id,
                 "foreshadow_expectation": 0.42,
                 "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
-                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "diagnosis": "诊断记录只包含当前已有字段",
                 "run_id": run_id,
             },
         )
@@ -102,41 +101,30 @@ class TestResults:
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["rerun_required"] is True
-        assert payload["rerun_reason"] == "focus_contract_incomplete"
-
-    def test_get_characters_rejects_incomplete_focus_contract(self, api_client: TestClient, db_session) -> None:
-        novel_id = "c" + uuid.uuid4().hex[:7]
-        insert_graph_test_novel(db_session, novel_id)
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Characters Incomplete Contract",
-        )
-        run_repo.update_run_status(run_id, "completed")
-        db_session.execute(
-            text(
-                "INSERT INTO cloud_analysis "
-                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
-                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
-            ),
-            {
-                "novel_id": novel_id,
-                "foreshadow_expectation": 0.42,
-                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
-                "diagnosis": "旧 diagnosis 行缺少 focus contract",
-                "run_id": run_id,
-            },
-        )
-        db_session.commit()
-
-        response = api_client.get(f"/api/novels/{novel_id}/characters", params={"task_id": run_id[:8]})
-
-        assert response.status_code == 409
-        payload = response.json()["detail"]
-        assert payload["code"] == "diagnosis_rerun_required"
-        assert payload["reason"] == "focus_contract_incomplete"
+        assert payload["foreshadow_expectation"] == 0.42
+        assert payload["diagnosis"] == "诊断记录只包含当前已有字段"
+        assert set(payload) == {
+            "foreshadow_expectation",
+            "arc_scores",
+            "genre_labels",
+            "style_labels",
+            "topic_labels",
+            "diagnosis",
+            "value_logic_type",
+            "value_logic_reason",
+            "power_stance_score",
+            "power_stance_reason",
+            "common_people_dignity",
+            "dignity_reason",
+            "cultural_depth_score",
+            "cultural_depth_reason",
+            "narrative_arc_type",
+            "focus_structure",
+            "focus_characters",
+            "main_characters",
+            "core_cast",
+            "theme_color",
+        }
 
     @pytest.mark.parametrize(
         ("path", "expected_status"),
@@ -171,7 +159,7 @@ class TestResults:
                 "novel_id": novel_id,
                 "foreshadow_expectation": 0.42,
                 "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
-                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "diagnosis": "诊断记录只包含当前已有字段",
                 "run_id": run_id,
             },
         )
@@ -182,52 +170,6 @@ class TestResults:
         assert response.status_code == expected_status
         if expected_status == 200:
             assert response.json()["changes"] == []
-
-    def test_get_results_rejects_incomplete_focus_contract(
-        self,
-        api_client: TestClient,
-        db_session,
-        monkeypatch,
-    ) -> None:
-        novel_id = "r" + uuid.uuid4().hex[:7]
-        insert_graph_test_novel(db_session, novel_id)
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Results Incomplete Contract",
-        )
-        run_repo.update_run_status(run_id, "completed")
-        monkeypatch.setattr(
-            "src.api.routes.results.fetch_all_results_data",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                DiagnosisRerunRequiredError(reason="focus_contract_incomplete")
-            ),
-        )
-
-        response = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": run_id[:8]})
-
-        assert response.status_code == 409
-        payload = response.json()["detail"]
-        assert payload["code"] == "diagnosis_rerun_required"
-        assert payload["reason"] == "focus_contract_incomplete"
-
-    def test_get_results_rejects_old_run_paragraph_contract(self, api_client: TestClient, db_session) -> None:
-        novel_id = "r" + uuid.uuid4().hex[:7]
-        insert_graph_test_novel(db_session, novel_id)
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Results Old Contract")
-        run_repo.update_run_status(run_id, "completed")
-        db_session.execute(
-            text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
-            {"run_id": run_id},
-        )
-        db_session.commit()
-
-        response = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": run_id[:8]})
-
-        assert response.status_code == 409
-        assert response.json()["detail"]["code"] == "paragraph_contract_rerun_required"
 
     def test_get_chapter_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
         """测试 chapter_annotations 不接受属于其他小说的 task_id。"""

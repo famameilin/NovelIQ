@@ -1451,7 +1451,7 @@ def test_finish_chapter_generates_summary_from_chunk_summaries() -> None:
     ledger.complete_active_chunk()
     annotation = ledger.finish()
     assert annotation.chapter_summary == "住手回荡"
-    assert annotation.contract_version == "agent-semantic-v2"
+    assert len(annotation.chunks) == 1
 
 
 def test_resolve_fact_case_rejects_foreign_change_kind() -> None:

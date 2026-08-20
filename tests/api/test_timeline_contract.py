@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from tests.support.timeline_contract_helpers import (
@@ -134,17 +133,13 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
     assert set(graph_change) == {
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "fact_id",
-        "fact_revision",
         "effective_chapter_id",
         "changes",
         "entity_id",
         "entity_name",
         "relation_id",
-        "relation_version_id",
-        "relation_revision",
         "from_char",
         "to_char",
         "relation_type",
@@ -204,18 +199,12 @@ def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_pa
     assert response.json()["error_type"] == "InternalServerError"
 
 
-def test_get_timeline_rejects_old_run_paragraph_contract(api_client: TestClient, db_session) -> None:
+def test_get_timeline_accepts_current_run_without_contract_gate(api_client: TestClient, db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
-    db_session.execute(
-        text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
-        {"run_id": scenario.run_id},
-    )
-    db_session.commit()
-
     response = api_client.get(
         f"/api/novels/{scenario.novel_id}/timeline",
         params={"task_id": scenario.task_id, "include_curve": "true"},
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "paragraph_contract_rerun_required"
+    assert response.status_code == 200
+    assert response.json()["meta"]["novel_id"] == scenario.novel_id

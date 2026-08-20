@@ -2,7 +2,7 @@
 preprocess 段落事实源测试
 
 验证 run_preprocess 无条件生成 paragraphs（语义检索开关不影响段落事实源），
-段落身份（paragraph_id/坐标/版本号）符合设计文档《段落分析原子与章节汇总重设计方案》§5.1，
+段落身份（paragraph_id/坐标）符合设计文档《段落分析原子与章节汇总重设计方案》§5.1，
 且 paragraph embedding 与段落事实源严格对齐
 """
 
@@ -19,7 +19,7 @@ from sqlalchemy import select
 from src.chapters.preprocess import preprocess_text
 from src.config import settings
 from src.preprocess.cleaning import normalize_text
-from src.storage.models import Paragraph, ParagraphCurve, ParagraphEmbedding, ParagraphMetric
+from src.storage.models import ParagraphCurve, ParagraphEmbedding, ParagraphMetric
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.preprocess import run_preprocess
@@ -79,7 +79,7 @@ class TestPreprocessParagraphs:
         """
         2026-08-14 用于验证 preprocess 无条件生成段落事实源：
         paragraph_id 从 0 连续、global 坐标单调不重叠、char_count == len(text)、
-        文本与 run 级规范化全文切片逐字匹配、content_hash 非空、splitter_version 落库
+        文本与 run 级规范化全文切片逐字匹配、content_hash 非空
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Paragraphs Novel")
@@ -111,17 +111,8 @@ class TestPreprocessParagraphs:
         full_text = preprocess_text(normalize_text(raw_text))
         for row in rows:
             assert row.text == full_text[row.global_start_char : row.global_end_char]
-        # content_hash 非空；splitter_version/tokenizer_version 从 settings.paragraphs 落库
-        # （fetch_paragraph_rows 未投影版本列，直接查 Paragraph 模型验证）
+        # content_hash 非空
         assert all(row.content_hash for row in rows)
-        version_rows = db_session.execute(
-            select(Paragraph.splitter_version, Paragraph.tokenizer_version).where(
-                Paragraph.run_id == run_id
-            )
-        ).all()
-        assert version_rows
-        assert all(row.splitter_version == "1" for row in version_rows)
-        assert all(row.tokenizer_version == "1" for row in version_rows)
         # run_preprocess 填充 token_count
         assert all(row.token_count is not None for row in rows)
 
@@ -246,8 +237,7 @@ class TestPreprocessParagraphs:
     async def test_preprocess_generates_paragraph_metrics(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落指标（§5.3）随 preprocess 无条件生成：
-        行数等于段落数、分子/分母字段非空、surface_tension 值域合法、
-        metric_version 落库
+        行数等于段落数、分子/分母字段非空、surface_tension 值域合法
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Metrics Novel")
@@ -267,7 +257,6 @@ class TestPreprocessParagraphs:
         ).all()
         assert len(metric_rows) == paragraph_count
         for row in metric_rows:
-            assert row.metric_version == str(settings.metrics.metric_version)
             assert row.char_count > 0
             assert row.token_count >= 0
             assert row.sentence_count >= 0
@@ -323,7 +312,7 @@ class TestPreprocessParagraphs:
         """
         2026-08-14 用于验证段落曲线（§5.5）随 preprocess 无条件生成：
         行数等于段落数、net_density 与手工分子/分母一致、smoothed 无 NaN、
-        surface_tension 与 paragraph_metrics 一致、curve_version 落库
+        surface_tension 与 paragraph_metrics 一致
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Curves Novel")
@@ -349,7 +338,6 @@ class TestPreprocessParagraphs:
 
         for row in curve_rows:
             metric = metric_by_paragraph[row.paragraph_id]
-            assert row.curve_version == "1"
             if metric.token_count > 0:
                 assert row.pos_density == pytest.approx(
                     metric.positive_weight_sum / metric.token_count

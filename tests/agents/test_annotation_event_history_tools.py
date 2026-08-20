@@ -72,7 +72,6 @@ def _history_event(event_id: str, description: str) -> EventHistoryResult:
     """2026-08-18 用于构造预设历史事件结果（文本哈希仅满足格式校验）"""
     return EventHistoryResult(
         event_id=event_id,
-        event_revision=1,
         chapter_id=1,
         chapter_order=1,
         description=description,

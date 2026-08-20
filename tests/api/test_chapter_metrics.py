@@ -6,8 +6,7 @@ GET /{novel_id}/chapter-metrics 端点测试（设计文档《章节粒度分析
 - 句长均值/方差从充分统计量恢复
 - 章节 TTR/MTLD 与直接对章节文本计算一致
 - 章节 Agent 标签映射（无标注章节为 None）
-- 全书聚合字段与版本字段
-- 旧 run（analysis_contract_version=NULL）409
+- 全书聚合字段
 """
 
 from __future__ import annotations
@@ -16,9 +15,6 @@ import math
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
-
-from src.config import settings
 from src.metrics.style_metrics import mtld as mtld_fn
 from src.metrics.style_metrics import ttr as ttr_fn
 from src.preprocess.tokenize import tokenize
@@ -260,7 +256,7 @@ def test_chapter_metrics_without_annotations_returns_none_labels(
     assert book["chapter_cliffhanger_rate"] is None
 
 
-def test_chapter_metrics_book_aggregate_and_version_fields(
+def test_chapter_metrics_book_aggregate_fields(
     api_client: TestClient, db_session
 ) -> None:
     novel_id, run_id = _insert_three_chapter_run(db_session)
@@ -292,26 +288,3 @@ def test_chapter_metrics_book_aggregate_and_version_fields(
     }
     assert book["chapter_pivot_rate"] == pytest.approx(1.0 / 3)
     assert book["chapter_cliffhanger_rate"] == pytest.approx(1.0 / 3)
-
-    assert book["analysis_contract_version"] == "paragraph-v1"
-    assert book["paragraph_splitter_version"] == settings.paragraphs.splitter_version
-    assert book["metric_version"] == settings.metrics.metric_version
-    assert book["curve_version"] == settings.metrics.curve_version
-
-
-def test_chapter_metrics_requires_paragraph_contract(api_client: TestClient, db_session) -> None:
-    novel_id, run_id = create_completed_run(db_session, chapter_texts=["第一段。"])
-
-    db_session.execute(
-        text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    )
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{novel_id}/chapter-metrics",
-        params={"task_id": run_id[:8]},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "paragraph_contract_rerun_required"

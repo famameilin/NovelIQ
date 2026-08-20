@@ -19,7 +19,6 @@ from src.config import settings
 from src.preprocess.tokenize import tokenize
 from src.storage.models import (
     DialogueRecord,
-    EventNode,
     ForeshadowingThread,
     ForeshadowingThreadHit,
 )
@@ -415,8 +414,8 @@ def test_sync_dialogues_no_event_anchor_keeps_null(db_session) -> None:
     assert rows[0].event_id is None
 
 
-def test_search_event_history_returns_prior_chapter_latest_revision(db_session, monkeypatch) -> None:
-    """2026-08-18 用于验证事件历史检索按章边界过滤并按 event_id 取最新 revision"""
+def test_search_event_history_returns_events_within_chapter_boundary(db_session, monkeypatch) -> None:
+    """2026-08-19 用于验证事件历史检索按章节边界过滤"""
     monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -448,39 +447,6 @@ def test_search_event_history_returns_prior_chapter_latest_revision(db_session, 
             },
         ],
     )
-    # 单 run 内章节标注唯一（uq_chapter_annotations_run_chapter），revision 递增只能
-    # 通过追加 EventNode 影子行模拟（换 payload_path 避开唯一约束）——验证检索端
-    # 对同一 event_id 只取最新 revision 的去重语义。
-    node_row = db_session.execute(
-        select(EventNode)
-        .where(EventNode.run_id == run_id, EventNode.chapter_id == 2)
-    ).scalars().first()
-    assert node_row is not None
-    db_session.add(
-        EventNode(
-            event_id=node_row.event_id,
-            event_revision=node_row.event_revision + 1,
-            run_id=node_row.run_id,
-            chapter_id=node_row.chapter_id,
-            chapter_order=node_row.chapter_order,
-            description=node_row.description,
-            participants=list(node_row.participants),
-            anchor_paragraph_ids=list(node_row.anchor_paragraph_ids),
-            char_start=node_row.char_start,
-            char_end=node_row.char_end,
-            text_hash=node_row.text_hash,
-            evidence=list(node_row.evidence),
-            causal_event_refs=list(node_row.causal_event_refs),
-            tree_id=node_row.tree_id,
-            cause_role=node_row.cause_role,
-            annotation_id=node_row.annotation_id,
-            graph_version_id=node_row.graph_version_id,
-            source_kind=node_row.source_kind,
-            payload_path=f"{node_row.payload_path}#manual-rev2",
-        )
-    )
-    db_session.commit()
-
     service = DatabaseAnnotationQueryService(
         db_session,
         run_id=run_id,
@@ -492,16 +458,13 @@ def test_search_event_history_returns_prior_chapter_latest_revision(db_session, 
     prior = service.search_event_history("顾霜", max_chapter_order=1)
     assert [item.description for item in prior] == ["顾霜进入山门"]
     assert prior[0].event_id == str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
-    assert prior[0].event_revision == 1
 
     visible = service.search_event_history("顾霜", max_chapter_order=2)
     by_desc = {item.description: item for item in visible}
     assert set(by_desc) == {"顾霜进入山门", "顾霜拔剑迎敌"}
-    # 同一 event_id 只返回最新 revision（手动插入的 revision 2 遮蔽 revision 1）
     assert len(visible) == 2
     latest_payoff = by_desc["顾霜拔剑迎敌"]
     assert latest_payoff.event_id == str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:2:1"))
-    assert latest_payoff.event_revision == 2
     # Evidence 反序列化为 TextEvidence（含 64 位 hex 文本哈希）
     assert len(latest_payoff.evidence) == 1
     assert len(latest_payoff.evidence[0].text_hash) == 64

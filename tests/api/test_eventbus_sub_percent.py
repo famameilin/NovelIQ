@@ -80,6 +80,7 @@ async def test_eventbus_preserves_sub_percent_from_context():
 
         event2 = StreamEvent(
             action="thinking",
+            stream_id="phase1-thinking",
             sub_stage="",
         )
         await bus.emit(event2)
@@ -177,6 +178,7 @@ async def test_eventbus_calculates_percent_from_current_total():
         # 发送 thinking 事件，没有 percent 字段
         event2 = StreamEvent(
             action="thinking",
+            stream_id="phase1-thinking",
             content="thinking content",
         )
         await bus.emit(event2)
@@ -271,8 +273,8 @@ async def test_eventbus_demotes_llm_output_and_thinking_logs_to_debug():
     ):
         mock_em.send = AsyncMock()
 
-        await bus.emit(StreamEvent(action="output", content='{"raw_name":"室内"}'))
-        await bus.emit(StreamEvent(action="thinking", content="思考片段"))
+        await bus.emit(StreamEvent(action="output", stream_id="agent-1", content='{"raw_name":"室内"}'))
+        await bus.emit(StreamEvent(action="thinking", stream_id="agent-1", content="思考片段"))
         await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="phase1", percent=10.0))
 
     assert mock_debug.call_count == 2

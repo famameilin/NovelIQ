@@ -233,4 +233,27 @@ class TestDiagnosisRoutes:
         assert fetched["focus_characters"] is not None
         assert fetched["main_characters"] is not None
         assert fetched["core_cast"] is not None
-        assert "reference_contract_version" not in fetched
+        assert set(fetched) == {
+            "novel_id",
+            "foreshadow_expectation",
+            "arc_scores",
+            "genre_labels",
+            "style_labels",
+            "topic_labels",
+            "diagnosis",
+            "value_logic_type",
+            "value_logic_reason",
+            "power_stance_score",
+            "power_stance_reason",
+            "common_people_dignity",
+            "dignity_reason",
+            "cultural_depth_score",
+            "cultural_depth_reason",
+            "narrative_arc_type",
+            "focus_structure",
+            "focus_characters",
+            "main_characters",
+            "core_cast",
+            "theme_color",
+            "run_id",
+        }

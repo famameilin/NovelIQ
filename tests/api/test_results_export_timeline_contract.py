@@ -7,7 +7,6 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 
 from src.agents.annotation.schema import BoundForeshadowing
-from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -102,17 +101,13 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     assert set(relation_node["graph_changes"][0].keys()) == {
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "fact_id",
-        "fact_revision",
         "effective_chapter_id",
         "changes",
         "entity_id",
         "entity_name",
         "relation_id",
-        "relation_version_id",
-        "relation_revision",
         "from_char",
         "to_char",
         "relation_type",
@@ -209,7 +204,6 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     """
 
     diagnosis = SimpleNamespace(
-        rerun_required=False,
         arc_scores={"沈砚": 8.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
@@ -258,12 +252,10 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
-def test_load_character_bundle_rejects_rerun_required_diagnosis(
+def test_load_character_bundle_accepts_partial_diagnosis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     diagnosis = SimpleNamespace(
-        rerun_required=True,
-        rerun_reason="diagnosis_missing_focus_contract",
         foreshadow_expectation=0.58,
         arc_scores=None,
         focus_structure=None,
@@ -292,16 +284,19 @@ def test_load_character_bundle_rejects_rerun_required_diagnosis(
         ]
     )
 
-    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
-        load_character_bundle(
-            run_id="run-export-bundle",
-            novel_id="novel-1",
-            stats_repo=MagicMock(),
-            annotation_repo=annotation_repo,
-            export_graph_view=export_graph_view,
-        )
+    fetched_characters, arc_scores, main_characters, valid_names, missing_fields = load_character_bundle(
+        run_id="run-export-bundle",
+        novel_id="novel-1",
+        stats_repo=MagicMock(),
+        annotation_repo=annotation_repo,
+        export_graph_view=export_graph_view,
+    )
 
-    assert exc_info.value.reason == "diagnosis_missing_focus_contract"
+    assert fetched_characters == characters
+    assert arc_scores is None
+    assert main_characters is None
+    assert valid_names == {"沈砚"}
+    assert missing_fields == []
 
 
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -385,50 +380,8 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert novel_name == "Test Novel"
 
 
-def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.load_core_results",
-        lambda *_args, **_kwargs: ([], []),
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.load_character_bundle",
-        lambda *_args, **_kwargs: ([], None, None, set(), []),
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            rerun_required=True,
-            rerun_reason="focus_contract_incomplete",
-        ),
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            assert_graph_ready=lambda _run_id: None,
-            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
-            build_graph_report=lambda _run_id: GraphAuthorityReport(
-                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
-                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
-            ),
-            build_timeline_view=lambda _run_id: SimpleNamespace(
-                character_entities=[],
-                entity_lifecycles=[],
-                graph_changes=[],
-            ),
-        ),
-    )
 
-    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
-        fetch_all_results_data(
-            novel_id="novel-1",
-            task_id="task-1",
-            run_id="run-1",
-            stats_repo=MagicMock(session=MagicMock()),
-            annotation_repo=MagicMock(),
-            chapter_repo=MagicMock(),
-        )
 
-    assert exc_info.value.reason == "focus_contract_incomplete"
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -439,7 +392,6 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
     """
 
     diagnosis = SimpleNamespace(
-        rerun_required=False,
         arc_scores={"沈砚": 8.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
@@ -525,6 +477,16 @@ def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pyt
 
 
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_character_relations",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(from_char="苏镜", to_char="程霜", type="隶属")
+        ],
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_hierarchical_relations",
+        lambda *_args, **_kwargs: [SimpleNamespace(rel_id="relation-22")],
+    )
     monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_token_usage_stats",
@@ -563,11 +525,9 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
             GraphChange(
                 change_id="relation:22",
                 change_kind="relation",
-                graph_version_id="graph-version-5",
                 chapter_id=5,
                 chapter_order=5,
                 fact_id="fact-22",
-                fact_revision=1,
                 effective_chapter_id=5,
                 confidence="high",
                 changes=[{"change_kind": "assert"}],
@@ -577,8 +537,6 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 to_name="程霜",
                 relation_type="家族",
                 relation_id="relation-22",
-                relation_version_id=22,
-                relation_revision=1,
                 directionality="directed",
             )
         ],

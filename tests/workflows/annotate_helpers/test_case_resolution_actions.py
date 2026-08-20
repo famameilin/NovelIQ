@@ -29,7 +29,7 @@ from src.storage.models import (
     DialogueRecord,
     ForeshadowingThread,
     GraphFact,
-    GraphRelationVersion,
+    RelationState,
 )
 from src.storage.repositories import CasePoolRepository
 from src.workflows.annotate_helpers.storage import complete_annotation_run
@@ -214,10 +214,11 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
             GraphFact.source_kind == "case_resolution",
         )
     ).scalar_one()
-    relation_version = db_session.execute(
-        select(GraphRelationVersion).where(
-            GraphRelationVersion.run_id == run_id,
-            GraphRelationVersion.relation_id == fact.content["relation_id"],
+    relation_state = db_session.execute(
+        select(RelationState).where(
+            RelationState.run_id == run_id,
+            RelationState.relation_id == fact.content["relation_id"],
+            RelationState.chapter_id == fact.chapter_id,
         )
     ).scalar_one()
     mapping = db_session.execute(
@@ -230,7 +231,7 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
     assert fact.fact_type == "relation"
     assert fact.predicate == "同一人物"
     assert fact.content["change_kind"] == "assert"
-    assert relation_version.is_active is True
+    assert relation_state.is_active is True
     assert mapping.target_fact_id == fact.fact_id
     assert mapping.resolution["action"] == "fact"
     assert second.resolved_cases[0].action == "fact"

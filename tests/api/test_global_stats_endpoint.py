@@ -61,8 +61,6 @@ def test_global_stats_returns_aggregated_fields(api_client: TestClient, db_sessi
     assert payload["rhythm_std"] == 0.14
     assert payload["rhythm_max"] == 0.92
     assert payload["rhythm_min"] == 0.22
-    assert payload["global_avg_sent_len"] is None
-    assert payload["global_avg_ttr"] is None
 
 
 def test_global_stats_without_persisted_rows_returns_none_metrics(

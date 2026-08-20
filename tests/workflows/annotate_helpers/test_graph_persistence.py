@@ -23,15 +23,15 @@ from src.agents.annotation.schema import (
     ResolvedCase,
 )
 from src.storage.models import (
+    ChapterAnnotationRecord,
     DialogueRecord,
-    EntityStateVersion,
+    EntityState,
     EventEdge,
     EventNode,
     GraphEntity,
     GraphFact,
     GraphRelation,
-    GraphRelationVersion,
-    GraphVersion,
+    RelationState,
 )
 from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository
 from src.storage.repositories.graph import persist_completion_graph, stable_annotation_fact_id
@@ -282,32 +282,32 @@ def test_dialogue_record_binds_system_original_text_and_position(db_session) -> 
     ).scalars().all() == []
 
 
-def test_persistence_writes_state_and_relation_versions(db_session) -> None:
-    """2026-08-11 用于验证观察字段与实体属性仍驱动一章一版本的下游状态表"""
+def test_persistence_writes_state_and_relation_rows(db_session) -> None:
+    """2026-08-19 用于验证观察字段与实体属性驱动当前章节状态表"""
     text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=[text],
-        title="状态关系版本",
+        title="状态关系章节",
     )
     _row, result = _persist(db_session, run_id=run_id, text=text)
     db_session.commit()
 
     state_rows = list(
         db_session.execute(
-            select(EntityStateVersion).where(
-                EntityStateVersion.graph_version_id
-                == result.graph_version.graph_version_id
+            select(EntityState).where(
+                EntityState.run_id == run_id,
+                EntityState.chapter_id == result.chapter_boundary.chapter_id,
             )
         ).scalars()
     )
-    relation_version = db_session.execute(
-        select(GraphRelationVersion).where(
-            GraphRelationVersion.graph_version_id
-            == result.graph_version.graph_version_id
+    relation_state = db_session.execute(
+        select(RelationState).where(
+            RelationState.run_id == run_id,
+            RelationState.chapter_id == result.chapter_boundary.chapter_id,
         )
     ).scalar_one()
-    relation_row = db_session.get(GraphRelation, relation_version.relation_id)
+    relation_row = db_session.get(GraphRelation, relation_state.relation_id)
     relation_fact = db_session.execute(
         select(GraphFact).where(
             GraphFact.run_id == run_id,
@@ -335,8 +335,8 @@ def test_persistence_writes_state_and_relation_versions(db_session) -> None:
         ).scalars()
         if entity.entity_type == "location"
     )
-    assert relation_version.relation_revision == 1
-    assert relation_version.changes[0]["fact_id"] == relation_fact.fact_id
+    assert relation_state.chapter_id == result.chapter_boundary.chapter_id
+    assert relation_state.changes[0]["fact_id"] == relation_fact.fact_id
 
 
 def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -> None:
@@ -494,7 +494,7 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
     assert attribute_facts[0].content["field"] == "grade"
     state_rows = list(
         db_session.execute(
-            select(EntityStateVersion).where(EntityStateVersion.run_id == run_id)
+            select(EntityState).where(EntityState.run_id == run_id)
         ).scalars()
     )
     assert len(state_rows) == 1
@@ -506,7 +506,7 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
 
 
 def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) -> None:
-    """2026-08-11 用于验证属性 null 删除与覆盖式更新并驱动状态版本"""
+    """2026-08-11 用于验证属性 null 删除与覆盖式更新并驱动章节状态"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
@@ -553,11 +553,11 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
     assert status_fact.content["after"] is None
     state_rows = list(
         db_session.execute(
-            select(EntityStateVersion).where(EntityStateVersion.run_id == run_id)
+            select(EntityState).where(EntityState.run_id == run_id)
         ).scalars()
     )
     assert len(state_rows) == 1
-    assert state_rows[0].state_revision == 1
+    assert state_rows[0].chapter_id == 1
     assert state_rows[0].state == {
         "entity_type": "character",
         "grade": "灵品",
@@ -625,22 +625,22 @@ def test_persist_completion_graph_only_flushes_caller_transaction(db_session) ->
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=[text],
-        title="图版本事务边界",
+        title="图章节事务边界",
     )
     _persist(db_session, run_id=run_id, text=text)
     assert db_session.in_transaction()
     db_session.rollback()
 
     assert db_session.execute(
-        select(GraphVersion).where(GraphVersion.run_id == run_id)
+        select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
     ).scalars().all() == []
     assert db_session.execute(
         select(GraphFact).where(GraphFact.run_id == run_id)
     ).scalars().all() == []
 
 
-def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session) -> None:
-    """2026-08-12 用于验证后文再次提交同一关系边为 no-op，不产生新版本"""
+def test_relation_remark_in_later_chapter_keeps_chapter_history(db_session) -> None:
+    """2026-08-19 用于验证后文再次提交同一关系边保留章节历史"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
@@ -679,22 +679,20 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
     )
     db_session.commit()
 
-    versions = list(
+    states = list(
         db_session.execute(
-            select(GraphRelationVersion)
-            .where(GraphRelationVersion.run_id == run_id)
-            .order_by(GraphRelationVersion.relation_revision)
+            select(RelationState)
+            .where(RelationState.run_id == run_id)
+            .order_by(RelationState.chapter_id)
         ).scalars()
     )
-    assert len(versions) == 1
-    assert versions[0].is_active is True
-    assert versions[0].changes[0]["change_kind"] == "assert"
+    assert len(states) == 2
+    assert states[0].is_active is True
+    assert states[0].changes[0]["change_kind"] == "assert"
 
 
-def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -> None:
-    """2026-08-12 用于验证本章 chunk relations 首次断言后案例 fact 解决同一边时，
-    变化折叠进现有关系版本行，不再插入 (graph_version_id, relation_id) 重复行
-    触发唯一约束冲突"""
+def test_same_chapter_fact_resolution_merges_into_relation_state(db_session) -> None:
+    """2026-08-19 用于验证本章关系断言与案例事实合并到同一章节状态行"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌"],
@@ -733,18 +731,18 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
     )
     db_session.commit()
 
-    versions = list(
+    states = list(
         db_session.execute(
-            select(GraphRelationVersion)
-            .where(GraphRelationVersion.run_id == run_id)
-            .order_by(GraphRelationVersion.relation_revision)
+            select(RelationState)
+            .where(RelationState.run_id == run_id)
+            .order_by(RelationState.chapter_id)
         ).scalars()
     )
-    assert len(versions) == 1
-    assert versions[0].relation_revision == 1
-    assert versions[0].is_active is True
-    assert versions[0].attributes["support_count"] == 2
-    assert [change["change_kind"] for change in versions[0].changes] == [
+    assert len(states) == 1
+    assert states[0].chapter_id == 1
+    assert states[0].is_active is True
+    assert states[0].attributes["support_count"] == 2
+    assert [change["change_kind"] for change in states[0].changes] == [
         "assert",
         "assert",
     ]
@@ -754,17 +752,13 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
             GraphFact.source_kind == "case_resolution",
         )
     ).scalar_one()
-    assert versions[0].changes[1]["fact_id"] == resolution_fact.fact_id
+    assert states[0].changes[1]["fact_id"] == resolution_fact.fact_id
 
 
 def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_session) -> None:
-    """2026-08-13 P1-1 用于验证生产配置（autoflush=False）下同章断言+案例解决同一
-    关系不再双写关系版本
+    """2026-08-19 用于验证生产配置（autoflush=False）下同章关系不重复写状态
 
-    测试 db_session fixture 的 sessionmaker 默认 autoflush=True，SELECT 前会隐式
-    flush，掩盖了 persist_completion_graph 内部读不到同章 pending 关系版本的问题。
-    这里用同一引擎另建 autoflush=False 会话复现生产路径：修复前 _latest_relation_draft
-    读不到草稿 → 按 revision=1 再插一行 → commit 撞 uq_graph_relation_versions_run_revision。
+    测试通过独立 autoflush=False 会话复现生产路径，确认章节复合主键约束保持稳定
     """
     from sqlalchemy.orm import sessionmaker
 
@@ -810,14 +804,14 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
         # persist_chapter_annotation 已 commit；此处再确认无唯一约束冲突提交成功
         session.commit()
 
-        versions = list(
+        states = list(
             session.execute(
-                select(GraphRelationVersion).where(GraphRelationVersion.run_id == run_id)
+                select(RelationState).where(RelationState.run_id == run_id)
             ).scalars()
         )
-        assert len(versions) == 1
-        assert versions[0].relation_revision == 1
-        assert [change["change_kind"] for change in versions[0].changes] == [
+        assert len(states) == 1
+        assert states[0].chapter_id == 1
+        assert [change["change_kind"] for change in states[0].changes] == [
             "assert",
             "assert",
         ]
@@ -845,7 +839,6 @@ def test_persist_writes_event_shadow_node_with_deterministic_id(db_session) -> N
     node = nodes[0]
     expected_eid = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     assert node.event_id == expected_eid
-    assert node.event_revision == 1
     assert node.chapter_id == 1
     assert node.chapter_order == 1
     assert node.description == "顾霜进入山门"
