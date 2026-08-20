@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.models.local.character_reference_policy import is_global_character_surface_name
 
@@ -165,98 +165,11 @@ class CloudAnalysis(BaseModel):
             normalized[name] = score
         return normalized
 
-    @model_validator(mode="after")
-    def validate_focus_contract(self) -> CloudAnalysis:
-        """
-        修改时间: 2026-04-30
-        任务: diagnosis-latest-only-reference-contract
-        修改原因: diagnosis 正式结果仍然必须满足焦点合同，但不再额外依赖 reference_contract_version
-                  这层版本门槛；缺字段时直接按当前结构校验即可。
-        """
-        # 空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
-        # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
-        # 就必须显式给出完整 focus contract，不能再靠默认值糊成半成品
-        has_formal_diagnosis_payload = any(
-            (
-                self.foreshadow_expectation is not None,
-                bool(self.arc_scores),
-                bool(self.genre_labels),
-                bool(self.style_labels),
-                bool(self.topic_labels),
-                self.diagnosis is not None,
-                self.value_logic_type is not None,
-                self.value_logic_reason is not None,
-                self.power_stance_score is not None,
-                self.power_stance_reason is not None,
-                self.common_people_dignity is not None,
-                self.dignity_reason is not None,
-                self.cultural_depth_score is not None,
-                self.cultural_depth_reason is not None,
-                self.narrative_arc_type is not None,
-                bool(self.main_characters),
-                bool(self.core_cast),
-                self.theme_color is not None,
-            )
-        )
-
-        arc_score_names = set(self.arc_scores.keys())
-
-        for label, values in (
-            ("focus_characters", self.focus_characters),
-            ("main_characters", self.main_characters),
-            ("core_cast", self.core_cast),
-        ):
-            invalid_names = [name for name in values if name not in arc_score_names]
-            if invalid_names:
-                raise ValueError(f"{label} contains names missing from arc_scores: {invalid_names}")
-
-        if has_formal_diagnosis_payload:
-            if self.focus_structure is None:
-                raise ValueError("focus_structure is required for formal diagnosis payload")
-            if not self.focus_characters:
-                raise ValueError("focus_characters is required for formal diagnosis payload")
-            if not self.main_characters:
-                raise ValueError("main_characters is required for formal diagnosis payload")
-            if not self.core_cast:
-                raise ValueError("core_cast is required for formal diagnosis payload")
-            if not self.topic_labels:
-                raise ValueError("topic_labels is required for formal diagnosis payload")
-            if not self.genre_labels:
-                raise ValueError("genre_labels is required for formal diagnosis payload")
-            if not self.style_labels:
-                raise ValueError("style_labels is required for formal diagnosis payload")
-            if len(self.main_characters) > 5:
-                raise ValueError("main_characters cannot exceed 5 items")
-            if len(self.core_cast) > 10:
-                raise ValueError("core_cast cannot exceed 10 items")
-
-        if self.focus_structure is None:
-            if self.focus_characters:
-                raise ValueError("focus_structure is required when focus_characters is not empty")
-            return self
-
-        focus_count = len(self.focus_characters)
-        expected_count_by_structure = {
-            "single": 1,
-            "dual": 2,
-        }
-        if self.focus_structure in expected_count_by_structure:
-            expected_count = expected_count_by_structure[self.focus_structure]
-            if focus_count != expected_count:
-                raise ValueError(
-                    f"focus_structure={self.focus_structure} requires exactly {expected_count} focus_characters, "
-                    f"got {focus_count}"
-                )
-        elif self.focus_structure == "ensemble" and focus_count < 3:
-            raise ValueError("focus_structure=ensemble requires at least 3 focus_characters")
-
-        return self
-
     def to_dict(self) -> dict:
         """
         修改时间: 2026-04-30
         任务: diagnosis-latest-only-reference-contract
-        修改原因: 诊断结果对外和持久化都改为 latest-only，不再暴露 reference_contract_version。
+        修改原因: 诊断结果对外和持久化统一使用当前结构
         """
         return {
             "novel_id": self.novel_id,

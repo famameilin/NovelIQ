@@ -30,9 +30,9 @@ def _fetch_global_stats(
     return GlobalStats(
         total_chapters=total_chapters,
         total_chars=total_chars,
-        avg_mtld=stats.get("avg_mtld") or stats.get("global_avg_mtld"),
-        avg_ttr=stats.get("avg_ttr") or stats.get("global_avg_ttr"),
-        avg_sent_len=stats.get("avg_sent_len") or stats.get("global_avg_sent_len"),
+        avg_mtld=stats.get("avg_mtld"),
+        avg_ttr=stats.get("avg_ttr"),
+        avg_sent_len=stats.get("avg_sent_len"),
         emotion_std=stats.get("emotion_std"),
         emotion_max=stats.get("emotion_max"),
         emotion_min=stats.get("emotion_min"),
@@ -40,8 +40,6 @@ def _fetch_global_stats(
         rhythm_std=stats.get("rhythm_std"),
         rhythm_max=stats.get("rhythm_max"),
         rhythm_min=stats.get("rhythm_min"),
-        global_avg_sent_len=stats.get("global_avg_sent_len"),
-        global_avg_ttr=stats.get("global_avg_ttr"),
     )
 
 

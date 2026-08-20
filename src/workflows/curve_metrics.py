@@ -32,8 +32,8 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
     计算全局统计（§9.1 聚合守恒，2026-08-14 M8b 段落化重写）
 
     数据源从 chunk_style/chunk_curves 切换为段落事实源：
-    - TTR/MTLD 在全文字符序列上直接计算，不再取各章均值
-    - global_avg_sent_len 从句子充分统计量恢复（Σ句长 / Σ句数）
+     - TTR/MTLD 在全文字符序列上直接计算，不再取各章均值
+    - avg_sent_len 从句子充分统计量恢复（Σ句长 / Σ句数）
     - emotion_avg 为全书分子/分母守恒密度（Σpos − Σneg）/ Σtoken
     - emotion/rhythm 的 std/max/min 与峰值定位基于段落密度序列，
       并列极值取最后出现的段落（rindex 语义）
@@ -80,10 +80,10 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
     book_tokens = tokenize(book_text) if book_text else []
     if book_tokens:
         mtld_value = mtld(book_tokens)
-        global_stats.append(("global_avg_mtld", float(mtld_value) if mtld_value is not None else None))
-        global_stats.append(("global_avg_ttr", float(ttr(book_tokens))))
+        global_stats.append(("avg_mtld", float(mtld_value) if mtld_value is not None else None))
+        global_stats.append(("avg_ttr", float(ttr(book_tokens))))
     if sentence_count > 0:
-        global_stats.append(("global_avg_sent_len", sentence_char_sum / sentence_count))
+        global_stats.append(("avg_sent_len", sentence_char_sum / sentence_count))
 
     if token_total > 0:
         global_stats.append(("emotion_avg", (pos_total - neg_total) / token_total))

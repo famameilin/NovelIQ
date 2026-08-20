@@ -9,9 +9,9 @@
   - 消费方经 src.config.constants 的 LEXICON_* 常量引用文件名，不写魔法字符串。
   - 加载报错保留（fail-fast）：registry.yaml 缺失、注册词表文件缺失 -> 加载即报错，
     防止分析链静默拿到空词表降级。
-  - 内容与声明类校验宽容：版本号不符 / 非法元数据（kind/status/weight_policy）
+  - 内容与声明类校验宽容：非法元数据（kind/status/weight_policy）
     / consumers 异常 -> warning + 空结果/默认值，词表与注册表可自由迭代；
-    count/file_hash 声明校验已删除。
+     count/file_hash 声明校验已删除。
   - version_hash 为与加载状态无关的确定性 hash：
     覆盖 registry.yaml + conflict_matrix.yaml + 全部注册文件原文
   - consumers 登记真实消费点（信息性字段，由测试侧校验登记完整性）
@@ -39,7 +39,6 @@ from src.utils.lexicon_parser import load_lexicon_terms, load_weighted_lexicon
 _DEFAULT_LEXICON_DIR = Path("data/lexicons")
 _REGISTRY_FILE = "registry.yaml"
 _CONFLICT_MATRIX_FILE = "conflict_matrix.yaml"
-_REGISTRY_VERSION = "3.0"
 
 _ALLOWED_KINDS = frozenset({"emotion", "tension", "style", "tokenizer"})
 _ALLOWED_STATUSES = frozenset({"active", "deprecated"})
@@ -193,13 +192,6 @@ class LexiconRegistry:
             raise FileNotFoundError(f"registry.yaml not found at {path}")
 
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        version = raw.get("version")
-        if version != _REGISTRY_VERSION:
-            logger.warning(
-                "registry.yaml 版本 {!r} 与期望 {!r} 不符，按当前结构尽力解析",
-                version,
-                _REGISTRY_VERSION,
-            )
         for key, data in raw.get("lexicons", {}).items():
             spec = self._parse_spec(key, data)
             if spec is not None:

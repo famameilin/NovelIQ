@@ -59,8 +59,6 @@ class TopicModelSettings:
     num_topics_min: int = 3
     num_topics_max: int = 25
     num_topics_scaling_divisor: int = 30
-    # 段落主题推断写入时的模型版本标识（§5.4）
-    topic_model_version: str = "2"
     lda: LdaSettings = field(default_factory=LdaSettings)
 
 
@@ -77,10 +75,6 @@ class MetricsSettings:
     # 2026-08-16 N3：虚字指纹在短文本下是噪声，低于该字符数返回 null
     function_word_min_chars: int = 100_000
     character_max_iter: int = 100
-    # 段落指标版本标识（§5.3 metric_version；v2=词表体系重设计 M1-M6 后语义：命中计数+共享否定层）
-    metric_version: str = "2"
-    # 段落曲线版本标识（§5.5 curve_version）
-    curve_version: str = "1"
     # LOWESS 平滑参数（§9.3，默认 2% 带宽/最少 7 点，待真实小说标定）
     lowess_bandwidth: float = 0.02
     lowess_min_points: int = 7
@@ -154,7 +148,6 @@ def _parse_topic_model_settings(data: dict[str, Any] | None) -> TopicModelSettin
         num_topics_min=data.get("num_topics_min", 3),
         num_topics_max=data.get("num_topics_max", 25),
         num_topics_scaling_divisor=data.get("num_topics_scaling_divisor", 30),
-        topic_model_version=data.get("topic_model_version", "2"),
         lda=_parse_lda_settings(data.get("lda")),
     )
 
@@ -182,8 +175,6 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         small_sample_min_chapters=data.get("small_sample_min_chapters", 10),
         function_word_min_chars=data.get("function_word_min_chars", 100_000),
         character_max_iter=data.get("character_max_iter", 100),
-        metric_version=data.get("metric_version", "2"),
-        curve_version=data.get("curve_version", "1"),
         lowess_bandwidth=lowess_bandwidth,
         lowess_min_points=lowess_min_points,
         surface_tension_weights=(
@@ -198,13 +189,10 @@ class ParagraphSettings:
     """
     段落事实源配置
 
-    说明: paragraphs 是 run 内段落身份的唯一事实源（设计文档《段落分析原子与章节汇总重设计方案》§5.1），
-    段落切分参数与切分/分词版本号在此统一管理，版本号写入 paragraphs 行用于后续无效化判断
+    说明: paragraphs 是 run 内段落身份的唯一事实源
     """
 
     max_chars: int = 1500
-    splitter_version: str = "1"
-    tokenizer_version: str = "1"
 
 
 def _parse_paragraph_settings(data: dict[str, Any] | None) -> ParagraphSettings:
@@ -215,6 +203,4 @@ def _parse_paragraph_settings(data: dict[str, Any] | None) -> ParagraphSettings:
         return ParagraphSettings()
     return ParagraphSettings(
         max_chars=data.get("max_chars", 1500),
-        splitter_version=data.get("splitter_version", "1"),
-        tokenizer_version=data.get("tokenizer_version", "1"),
     )

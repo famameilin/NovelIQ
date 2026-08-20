@@ -21,7 +21,6 @@ class LoggingSettings:
     """日志配置"""
 
     console_level: str = "INFO"
-    file_level: str = "DEBUG"  # deprecated: 全仓无读取方，仅为兼容旧配置文件保留
     log_dir: str = "logs"
     rotation: str = "10 MB"
     retention: str = "7 days"
@@ -43,7 +42,6 @@ def _parse_logging_settings(data: dict[str, Any] | None) -> LoggingSettings:
 
     return LoggingSettings(
         console_level=data.get("console_level", "INFO"),
-        file_level=data.get("file_level", "DEBUG"),
         log_dir=data.get("log_dir", "logs"),
         rotation=data.get("rotation", "10 MB"),
         retention=data.get("retention", "7 days"),

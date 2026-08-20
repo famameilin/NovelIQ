@@ -55,7 +55,7 @@ def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
         if not name:
             return None
         return {
-            "chunk_id": row.get("chunk_id"),
+            "last_seen_chapter": row.get("last_seen_chapter"),
             "name": name,
             "role": row.get("role", ""),
             "last_action": row.get("last_action", ""),
@@ -67,12 +67,7 @@ def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
     if not name:
         return None
     return {
-        # 2026-08-15：dataclass 行（EntitySnapshotRow）的章锚点字段已改名
-        # last_seen_chapter，chunk_id 属改名残留；按属性存在性回退取值，
-        # 避免 dataclass 分支恒返回 None 的潜伏陷阱
-        "chunk_id": getattr(row, "chunk_id", None)
-        if hasattr(row, "chunk_id")
-        else getattr(row, "last_seen_chapter", None),
+        "last_seen_chapter": getattr(row, "last_seen_chapter", None),
         "name": name,
         "role": getattr(row, "role", "") or "",
         "last_action": getattr(row, "last_action", "") or "",
@@ -94,7 +89,7 @@ def get_active_entities(
     minimum_chunk_id = max(0, current_chunk_id - lookback)
     rows = [
         {
-            "chunk_id": row.last_seen_chapter,
+            "last_seen_chapter": row.last_seen_chapter,
             "name": row.name,
             "role": row.state.get("role_function", ""),
             "last_action": row.state.get("action", ""),
@@ -112,10 +107,10 @@ def get_active_entities(
         if normalized is None:
             continue
         name = normalized["name"]
-        # 2026-08-14 D9：保留 last_seen_chunk 最新者。此前 fetch_latest_entities
+        # 2026-08-14 D9：保留 last_seen_chapter 最新者。此前 fetch_latest_entities
         # 按 entity_id 升序，首个同名行被保留，与"保留最新"注释承诺相反
         existing = seen.get(name)
-        if existing is None or (normalized.get("chunk_id") or 0) > (existing.get("chunk_id") or 0):
+        if existing is None or (normalized.get("last_seen_chapter") or 0) > (existing.get("last_seen_chapter") or 0):
             seen[name] = normalized
 
     return list(seen.values())
