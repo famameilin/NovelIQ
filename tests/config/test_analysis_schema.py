@@ -31,7 +31,7 @@ def test_parse_topic_model_settings_reads_flat_and_lda_fields() -> None:
                 "alpha": "auto",
                 "eta": "auto",
                 "random_state": 42,
-                "chunksize": 2000,
+                "lda_batch_size": 2000,
                 "minimum_probability": 0.01,
                 "no_below": 5,
                 "no_above": 0.5,
@@ -44,6 +44,11 @@ def test_parse_topic_model_settings_reads_flat_and_lda_fields() -> None:
     assert settings.iterations == 600
     assert settings.lda.random_state == 42
     assert settings.lda.no_below == 5
+
+
+def test_parse_topic_model_settings_rejects_removed_chunksize() -> None:
+    with pytest.raises(ValueError, match="chunksize.*lda_batch_size"):
+        _parse_topic_model_settings({"lda": {"chunksize": 2000}})
 
 
 def test_parse_topic_model_settings_defaults() -> None:
