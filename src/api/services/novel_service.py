@@ -158,7 +158,7 @@ class NovelService:
 
     def _load_task_from_db(self, task_id: str, session: Session | None = None) -> dict | None:
         """
-        从数据库加载任务元数据
+        从数据库加载任务完整信息，包括运行时状态字段
         """
         with self._get_session(session) as sess:
             run_repo = RunRepository(sess)
@@ -171,6 +171,16 @@ class NovelService:
                     "run_id": run["run_id"],
                     "task_kind": run["task_kind"],
                     "request_payload": run["request_payload"],
+                    # 运行时状态字段
+                    "progress": run.get("progress", 0.0),
+                    "stage": run.get("stage"),
+                    "sub_stage": run.get("sub_stage"),
+                    "current": run.get("current"),
+                    "total": run.get("total"),
+                    "message": run.get("message"),
+                    "error": run.get("error"),
+                    "started_at": run.get("started_at"),
+                    "completed_at": run.get("completed_at"),
                 }
         return None
 

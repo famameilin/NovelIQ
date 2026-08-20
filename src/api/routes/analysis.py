@@ -141,7 +141,8 @@ async def get_task_status(
     """
     查询单个任务状态
 
-    2026-08-20 阶段 3.1：消除双查询，一次查询完成验证和响应构造
+    2026-08-20 阶段 3.1：消除双查询，使用 novel_service.get_task 一次获取完整状态
+    数据库是唯一真相源，TaskManager 运行时持续写回状态到 DB
     """
     try:
         task = novel_service.get_task(task_id)
