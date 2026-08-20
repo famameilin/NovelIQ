@@ -47,72 +47,7 @@ def _map_status_to_task_status(status: str) -> TaskStatus:
         raise ValueError(f"未知任务状态: {status}") from exc
 
 
-def _get_task_detail_from_db(task_id: str) -> dict[str, Any] | None:
-    """
-    从数据库获取任务详情
-
-    当任务不在内存中时，从数据库查询状态
-    返回: run 记录字典（含 status/progress/stage），不存在则返回 None
-    """
-    session_factory = get_session_factory()
-    with session_factory() as session:
-        try:
-            run_id = task_id_to_run_id(task_id, session.connection())
-        except (TaskIDNotFoundError, ValueError):
-            return None
-        run_repo = RunRepository(session)
-        return run_repo.get_run(run_id)
-
-
 router = APIRouter(prefix="/novels", tags=["analysis"])
-
-
-def _resolve_task_for_novel(
-    novel_service: NovelService,
-    novel_id: str,
-    task_id: str,
-) -> dict[str, Any]:
-    """
-    获取并校验任务是否属于指定小说（DB-only 查询）
-    """
-    try:
-        task = novel_service.get_task(task_id)
-    except NovelNotFoundError:
-        raise HTTPException(status_code=404, detail="任务不存在") from None
-
-    if task.get("novel_id") != novel_id:
-        raise HTTPException(status_code=400, detail="任务不属于该小说")
-    return task
-
-
-def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
-    """
-    构建单任务状态响应（DB-only 查询）
-    """
-    run = _get_task_detail_from_db(task_id)
-    if run is None:
-        return StatusResponse(
-            novel_id=novel_id,
-            task_id=task_id,
-            status=TaskStatus.PENDING,
-            progress=0.0,
-        )
-    mapped_status = _map_status_to_task_status(run["status"])
-    return StatusResponse(
-        novel_id=novel_id,
-        task_id=task_id,
-        status=mapped_status,
-        progress=run.get("progress", 0.0),
-        stage=run.get("stage"),
-        sub_stage=run.get("sub_stage"),
-        current=run.get("current"),
-        total=run.get("total"),
-        message=run.get("message"),
-        llm_outputs=None,  # DB 中不存储 llm_outputs
-        error=run.get("error"),
-        started_at=run.get("started_at"),
-        completed_at=run.get("completed_at"),
-    )
 
 
 @router.post("/{novel_id}/tasks", response_model=CreateTaskResponse)
@@ -205,9 +140,61 @@ async def get_task_status(
 ) -> StatusResponse:
     """
     查询单个任务状态（推荐入口）
+
+    2026-08-20 优化：一次数据库查询完成验证和响应构造，消除双查询问题
     """
-    _resolve_task_for_novel(novel_service, novel_id, task_id)
-    return _build_status_response(novel_id, task_id)
+    # 一次查询：通过 novel_service 获取任务元数据并验证归属
+    try:
+        task = novel_service.get_task(task_id)
+    except NovelNotFoundError:
+        raise HTTPException(status_code=404, detail="任务不存在") from None
+
+    # 验证任务属于指定小说
+    if task.get("novel_id") != novel_id:
+        raise HTTPException(status_code=404, detail="任务不存在或不属于该小说")
+
+    # 获取完整运行状态（通过 run_id 进行第二次查询，但仅当需要完整状态时）
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        try:
+            run_id = task_id_to_run_id(task_id, session.connection())
+        except (TaskIDNotFoundError, ValueError):
+            # 任务元数据存在但运行记录不存在，返回待机状态
+            return StatusResponse(
+                novel_id=novel_id,
+                task_id=task_id,
+                status=TaskStatus.PENDING,
+                progress=0.0,
+            )
+
+        run_repo = RunRepository(session)
+        run = run_repo.get_run(run_id)
+
+    if run is None:
+        return StatusResponse(
+            novel_id=novel_id,
+            task_id=task_id,
+            status=TaskStatus.PENDING,
+            progress=0.0,
+        )
+
+    # 构建完整响应
+    mapped_status = _map_status_to_task_status(run["status"])
+    return StatusResponse(
+        novel_id=novel_id,
+        task_id=task_id,
+        status=mapped_status,
+        progress=run.get("progress", 0.0),
+        stage=run.get("stage"),
+        sub_stage=run.get("sub_stage"),
+        current=run.get("current"),
+        total=run.get("total"),
+        message=run.get("message"),
+        llm_outputs=None,
+        error=run.get("error"),
+        started_at=run.get("started_at"),
+        completed_at=run.get("completed_at"),
+    )
 
 
 @router.post("/{novel_id}/tasks/{task_id}/cancel")

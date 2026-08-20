@@ -565,22 +565,6 @@ class AnalysisService:
 
         return scheduled_count, cancelled_count
 
-    def _schedule_analysis_task(self, task_id: str, novel: dict) -> None:
-        """
-        安排分析协程并记录 asyncio.Task 引用
-
-        说明: 统一 create/resume 两条路径的协程调度，避免重复代码
-        """
-        task = asyncio.create_task(self._run_analysis(task_id, novel))
-        self.task_manager.store_asyncio_task(task_id, task)
-
-    def _schedule_reanalysis_task(self, task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
-        """
-        安排重分析协程并记录 asyncio.Task 引用
-        """
-        task = asyncio.create_task(self._run_reanalysis(task_id, novel, request))
-        self.task_manager.store_asyncio_task(task_id, task)
-
     def _schedule_task_execution(
         self,
         task_id: str,
@@ -589,15 +573,52 @@ class AnalysisService:
         request: ReanalyzeRequest | None,
     ) -> None:
         """
-        按任务类型调度执行协程
+        2026-08-20 统一调度入口，直接创建执行协程，消除冗余跳转层
+        根据任务类型构建参数后直接调用核心执行逻辑
         """
+        # 根据任务类型构建执行参数
         if task_kind == TASK_KIND_ANALYSIS:
-            self._schedule_analysis_task(task_id, novel)
-            return
-        if task_kind == TASK_KIND_REANALYSIS:
-            self._schedule_reanalysis_task(task_id, novel, request)
-            return
-        raise ValueError(f"任务 {task_id} 的 task_kind 非法: {task_kind}")
+            # 分析任务：检查阶段完成状态，支持断点续传
+            def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
+                return self.env_initializer.check_stage_completion_status(session, run_id)
+
+            def pre_execute_hook(novel_id: str, skip_stages: dict[str, bool]) -> bool:
+                if self._check_all_stages_completed(skip_stages):
+                    self._handle_already_completed(task_id, novel_id, None)
+                    return True
+                return False
+
+            num_topics = settings.topic_model.num_topics
+            log_prefix = "Analysis"
+            hook = pre_execute_hook
+
+        elif task_kind == TASK_KIND_REANALYSIS:
+            # 重分析任务：根据请求参数决定重跑哪些阶段
+            skip_stages = self._build_reanalysis_skip_stages(request)
+            logger.info(f"Reanalysis skip_stages: {skip_stages}")
+
+            def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
+                return skip_stages
+
+            num_topics = request.num_topics if request else settings.topic_model.num_topics
+            log_prefix = "Reanalysis"
+            hook = None
+
+        else:
+            raise ValueError(f"任务 {task_id} 的 task_kind 非法: {task_kind}")
+
+        # 直接创建并调度执行协程
+        task = asyncio.create_task(
+            self._run_analysis_core(
+                task_id=task_id,
+                novel=novel,
+                skip_stages_builder=skip_stages_builder,
+                num_topics=num_topics,
+                log_prefix=log_prefix,
+                pre_execute_hook=hook,
+            )
+        )
+        self.task_manager.store_asyncio_task(task_id, task)
 
     async def create_task_and_start(self, novel_id: str) -> str:
         """
@@ -672,49 +693,6 @@ class AnalysisService:
         self._schedule_task_execution(task_id, novel, TASK_KIND_REANALYSIS, request)
 
         return task_id
-
-    async def _run_analysis(self, task_id: str, novel: dict) -> None:
-        """
-        执行分析任务
-        """
-        num_topics = settings.topic_model.num_topics
-
-        def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
-            return self.env_initializer.check_stage_completion_status(session, run_id)
-
-        def pre_execute_hook(novel_id: str, skip_stages: dict[str, bool]) -> bool:
-            if self._check_all_stages_completed(skip_stages):
-                self._handle_already_completed(task_id, novel_id, None)
-                return True
-            return False
-
-        await self._run_analysis_core(
-            task_id=task_id,
-            novel=novel,
-            skip_stages_builder=skip_stages_builder,
-            num_topics=num_topics,
-            log_prefix="Analysis",
-            pre_execute_hook=pre_execute_hook,
-        )
-
-    async def _run_reanalysis(self, task_id: str, novel: dict, request: ReanalyzeRequest | None) -> None:
-        """
-        执行重新分析任务
-        """
-        skip_stages = self._build_reanalysis_skip_stages(request)
-        logger.info(f"Reanalysis skip_stages: {skip_stages}")
-        num_topics = request.num_topics if request else settings.topic_model.num_topics
-
-        def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
-            return skip_stages
-
-        await self._run_analysis_core(
-            task_id=task_id,
-            novel=novel,
-            skip_stages_builder=skip_stages_builder,
-            num_topics=num_topics,
-            log_prefix="Reanalysis",
-        )
 
     async def _call_execute_analysis_stages(
         self,

@@ -398,7 +398,7 @@ class TestAnalysis:
                 cancel_requested=True,
                 completed_at=datetime.now(),
             )
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
         assert resume_response.status_code == 200
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
@@ -446,7 +446,7 @@ class TestAnalysis:
                 cancel_requested=True,
                 completed_at=None,
             )
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
         assert resume_response.status_code == 200
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
@@ -594,10 +594,10 @@ class TestAnalysis:
         task_id = service.create_task(novel_id)
         scheduled_calls: list[tuple[str, str]] = []
 
-        def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+        def _record_schedule(self, scheduled_task_id: str, novel: dict, task_kind: str, request=None) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
         assert scheduled_count == len(scheduled_calls)
         assert cancelled_count == 0
@@ -633,11 +633,11 @@ class TestAnalysis:
             scheduled_calls.append((scheduled_task_id, resume_novel_id))
             return scheduled_task_id
 
-        def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+        def _record_schedule(self, scheduled_task_id: str, novel: dict, task_kind: str, request=None) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
         with (
-            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule),
+            patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule),
             patch.object(analysis_mod.AnalysisService, "resume_task", new=_resume_or_skip),
         ):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
@@ -669,47 +669,28 @@ class TestAnalysis:
             task_kind="reanalysis",
             request_payload=expected_request.model_dump(mode="json", exclude_none=True),
         )
-        reanalysis_calls: list[tuple[str, str, ReanalyzeRequest | None]] = []
-        analysis_calls: list[str] = []
+        reanalysis_calls: list[tuple[str, str, str, ReanalyzeRequest | None]] = []
 
-        def _record_reanalysis(
+        def _record_schedule(
             self,
             scheduled_task_id: str,
             novel: dict,
+            task_kind: str,
             request: ReanalyzeRequest | None = None,
         ) -> None:
-            reanalysis_calls.append((scheduled_task_id, novel["novel_id"], request))
+            reanalysis_calls.append((scheduled_task_id, novel["novel_id"], task_kind, request))
 
-        def _record_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
-            analysis_calls.append(scheduled_task_id)
-
-        with (
-            patch.object(analysis_mod.AnalysisService, "_schedule_reanalysis_task", new=_record_reanalysis),
-            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_analysis),
-        ):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
         target_calls = [call for call in reanalysis_calls if call[0] == task_id]
         assert target_calls
         assert cancelled_count == 0
-        assert task_id not in analysis_calls
         assert scheduled_count >= len(reanalysis_calls)
-        _, restored_novel_id, restored_request = target_calls[0]
+        _, restored_novel_id, restored_task_kind, restored_request = target_calls[0]
         assert restored_novel_id == novel_id
+        assert restored_task_kind == "reanalysis"
         assert isinstance(restored_request, ReanalyzeRequest)
         assert restored_request == expected_request
-
-    def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
-        """测试未知 task_id 查询详情时返回 None"""
-        mock_session = MagicMock()
-        mock_session.__enter__.return_value = mock_session
-        mock_session.__exit__.return_value = None
-        mock_session.connection.return_value = MagicMock()
-        with (
-            patch.object(analysis_mod, "get_session_factory", return_value=lambda: mock_session),
-            patch.object(analysis_mod, "task_id_to_run_id", side_effect=TaskIDNotFoundError("not found")),
-        ):
-            result = analysis_mod._get_task_detail_from_db("deadbeef")
-        assert result is None
 
     def test_status_map_covers_known_states_only(self):
         """2026-08-19 用于验证任务状态仅映射当前状态集合"""
