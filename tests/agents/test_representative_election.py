@@ -1,15 +1,12 @@
 """规范名选举纯函数测试"""
 
-import uuid
-
 from sqlalchemy import select
 
 from src.storage.models import (
     ChapterAnnotationRecord,
     GraphEntity,
     GraphRelation,
-    GraphRelationVersion,
-    GraphVersion,
+    RelationState,
 )
 from src.storage.repositories.graph.election import elect_representatives
 from src.workflows.annotate_helpers.storage import _reelect_representatives
@@ -59,9 +56,8 @@ def _add_entity(session, run_id: str, name: str) -> int:
     return int(entity.entity_id)
 
 
-def test_reelect_uses_latest_relation_version_only(db_session) -> None:
-    """2026-08-13 P1-3 用于验证选举只取每关系最新版本：历史残留 active 版本
-    （关系已被后续章节 break）混入会让已解绑实体对被错误合并成同一人"""
+def test_reelect_uses_latest_chapter_state_only(db_session) -> None:
+    """2026-08-19 用于验证选举只取每关系最近章节状态"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["甲与乙同框"], title="选举防御")
     entity_a = _add_entity(db_session, run_id, "甲")
     entity_b = _add_entity(db_session, run_id, "乙")
@@ -82,29 +78,6 @@ def test_reelect_uses_latest_relation_version_only(db_session) -> None:
     db_session.add_all([annotation, annotation_2])
     db_session.flush()
 
-    graph_version = GraphVersion(
-        graph_version_id=run_id,
-        run_id=run_id,
-        chapter_id=1,
-        chapter_order=1,
-        first_chapter_id=1,
-        last_chapter_id=1,
-        annotation_id=annotation.annotation_id,
-    )
-    graph_version_2 = GraphVersion(
-        # 2026-08-13 修复 flaky：f"{run_id[:35]}2" 在 run_id 末位恰好为 '2' 时
-        # 与 graph_version_id=run_id 相同 → 撞主键。改用独立 uuid4。
-        graph_version_id=str(uuid.uuid4()),
-        run_id=run_id,
-        chapter_id=2,
-        chapter_order=2,
-        first_chapter_id=1,
-        last_chapter_id=1,
-        annotation_id=annotation_2.annotation_id,
-    )
-    db_session.add_all([graph_version, graph_version_2])
-    db_session.flush()
-
     relation = GraphRelation(
         relation_id=run_id,
         run_id=run_id,
@@ -115,27 +88,21 @@ def test_reelect_uses_latest_relation_version_only(db_session) -> None:
     )
     db_session.add(relation)
     db_session.flush()
-    # v1 断言 active（历史残留，chapter 1），v2 已 break（最新 inactive，chapter 2）
-    # ——修复前 v1 仍会被计入选民对
     db_session.add_all(
         [
-            GraphRelationVersion(
-                graph_version_id=graph_version.graph_version_id,
+            RelationState(
                 run_id=run_id,
                 chapter_id=1,
                 relation_id=relation.relation_id,
-                relation_revision=1,
                 relation_type="同一人物",
                 attributes={},
                 is_active=True,
                 changes=[{"change_kind": "assert"}],
             ),
-            GraphRelationVersion(
-                graph_version_id=graph_version_2.graph_version_id,
+            RelationState(
                 run_id=run_id,
                 chapter_id=2,
                 relation_id=relation.relation_id,
-                relation_revision=2,
                 relation_type="同一人物",
                 attributes={},
                 is_active=False,
@@ -154,7 +121,6 @@ def test_reelect_uses_latest_relation_version_only(db_session) -> None:
             select(GraphEntity).where(GraphEntity.run_id == run_id)
         ).scalars()
     }
-    # 最新版本已 break：甲/乙不再属于同一分量（未参与分量一律 false，
-    # 修复前 v1 残留 active 会把甲选为 {甲,乙} 分量的代表 → flags[甲] is True）
+    # 最近章节已 break：甲/乙不再属于同一分量
     assert flags[entity_a] is False
     assert flags[entity_b] is False

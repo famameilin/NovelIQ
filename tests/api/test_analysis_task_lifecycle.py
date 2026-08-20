@@ -33,7 +33,7 @@ class TestAnalysesList:
     """测试分析列表"""
 
     def test_list_analyses_not_found(self, api_client: TestClient):
-        """测试查询不存在小说的分析版本列表"""
+        """测试查询不存在小说的分析任务列表"""
         response = api_client.get("/api/novels/nonexistent/tasks")
         assert response.status_code == 200
         data = response.json()
@@ -41,7 +41,7 @@ class TestAnalysesList:
         assert data["tasks"] == []
 
     def test_list_analyses_after_reanalyze(self, api_client: TestClient):
-        """测试重新分析后查看版本列表"""
+        """测试重新分析后查看任务列表"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -53,8 +53,8 @@ class TestAnalysesList:
 
         novel_id = upload_response.json()["novel_id"]
 
-        api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "version1"})
-        api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "version2"})
+        api_client.post(f"/api/novels/{novel_id}/reanalyze", json={})
+        api_client.post(f"/api/novels/{novel_id}/reanalyze", json={})
 
         response = api_client.get(f"/api/novels/{novel_id}/tasks")
         assert response.status_code == 200
@@ -127,12 +127,12 @@ class TestDeleteAnalysis:
         assert refreshed_run["cancel_requested"] is False
 
     def test_delete_analysis_not_found(self, api_client: TestClient):
-        """测试删除不存在的分析版本"""
+        """测试删除不存在的分析任务"""
         response = api_client.delete("/api/novels/nonexistent/analyses/nonexistent_analysis")
         assert response.status_code == 404
 
     def test_delete_analysis_success(self, api_client: TestClient):
-        """测试删除分析版本成功"""
+        """测试删除分析任务成功"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -144,7 +144,7 @@ class TestDeleteAnalysis:
 
         novel_id = upload_response.json()["novel_id"]
 
-        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "to_delete"})
+        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={})
         task_id = reanalyze_response.json()["task_id"]
 
         delete_response = api_client.delete(f"/api/novels/{novel_id}/tasks/{task_id}")

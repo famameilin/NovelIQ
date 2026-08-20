@@ -63,12 +63,10 @@ class TestAnalysis:
         response = api_client.post("/api/novels/nonexistent/tasks/fake1234/resume")
         assert response.status_code == 404
 
-    def test_get_status_requires_task_id(self, api_client: TestClient):
-        """测试兼容状态接口必须显式提供 task_id"""
+    def test_novel_status_route_is_removed(self, api_client: TestClient):
+        """测试小说级状态路由已删除"""
         response = api_client.get("/api/novels/nonexistent/status")
-        assert response.status_code == 400
-        data = response.json()
-        assert "task_id" in data["detail"]
+        assert response.status_code == 404
 
     def test_app_shutdown_does_not_cancel_runtime_task_manager(self) -> None:
         """测试应用 shutdown 只回收 SSE 清理协程，不再把运行中分析收口成用户取消。"""
@@ -665,7 +663,7 @@ class TestAnalysis:
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
-        expected_request = ReanalyzeRequest(force_annotate=True, force_topic_model=True, num_topics=7, label="resume")
+        expected_request = ReanalyzeRequest(force_annotate=True, force_topic_model=True, num_topics=7)
         task_id = service.create_task(
             novel_id,
             task_kind="reanalysis",
@@ -714,40 +712,11 @@ class TestAnalysis:
         assert result is None
 
     def test_status_map_covers_known_states_only(self):
-        """
-        2026-08-14 D3：/status 只映射新管线六态；aggregated/diagnosed 为旧合同
-        状态（新管线不再写入），与未知状态一样落入 PENDING 兜底，不再误报 COMPLETED。
-        """
-        assert analysis_mod._map_status_to_task_status("aggregated") == analysis_mod.TaskStatus.PENDING
-        assert analysis_mod._map_status_to_task_status("diagnosed") == analysis_mod.TaskStatus.PENDING
-        assert analysis_mod._map_status_to_task_status("completed") == analysis_mod.TaskStatus.COMPLETED
-        assert analysis_mod._map_status_to_task_status("pending") == analysis_mod.TaskStatus.PENDING
-        assert analysis_mod._map_status_to_task_status("unknown-state") == analysis_mod.TaskStatus.PENDING
-
-    def test_get_task_status_falls_back_for_legacy_aggregated_status(self, api_client: TestClient):
-        """2026-08-14 D3：历史 aggregated 状态的 run 不再映射为 completed（旧合同已退役）"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("legacy_aggregated_status.txt", file, "text/plain")}
-                )
-        assert upload_response.status_code == 200
-        novel_id = upload_response.json()["novel_id"]
-
-        from src.api.dependencies import get_novel_service
-
-        service = get_novel_service()
-        task_id = service.create_task(novel_id)
-        with get_session_factory()() as session:
-            RunRepository(session).update_run_task_fields(task_id, status="aggregated", progress=90.0)
-
-        response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "pending"
-        assert data["progress"] == 90.0
+        """2026-08-19 用于验证任务状态仅映射当前状态集合"""
+        for status in analysis_mod.TaskStatus:
+            assert analysis_mod._map_status_to_task_status(status.value) == status
+        with pytest.raises(ValueError, match="未知任务状态"):
+            analysis_mod._map_status_to_task_status("unknown-state")
 
     def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):
         """

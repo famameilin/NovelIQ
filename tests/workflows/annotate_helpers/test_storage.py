@@ -26,7 +26,6 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     DialogueRecord,
-    GraphVersion,
 )
 from src.workflows.annotate_helpers.storage import complete_annotation_run, load_completion_result
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -198,7 +197,7 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
     assert dialogue.confidence == "medium"
     assert dialogue.is_inner_monologue is False
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
-    assert _count(db_session, GraphVersion, run_id) == 1
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
     assert _count(db_session, DialogueRecord, run_id) == 1
 
 
@@ -305,7 +304,7 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
         CasePoolCase,
         CaseResolutionMapping,
         DialogueRecord,
-        GraphVersion,
+        ChapterAnnotationRecord,
     ):
         assert _count(db_session, model, run_id) == 0
 
@@ -329,7 +328,7 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
 
     assert actual == expected
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
-    assert _count(db_session, GraphVersion, run_id) == 1
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
 
 
 def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) -> None:
@@ -367,4 +366,4 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
 
     db_session.rollback()
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 0
-    assert _count(db_session, GraphVersion, run_id) == 0
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 0

@@ -29,25 +29,21 @@ from src.metrics.timeline_metrics import (
 )
 
 
-# 2026-08-07 用于构造时间轴关系章节图变化
+# 2026-08-19 用于构造时间轴关系章节图变化
 def create_relation_graph_change(
     *,
-    relation_version_id: int,
+    relation_key: int,
     relation_change_kind: str,
 ) -> GraphChangeDTO:
-    """2026-08-07 用于构造关系原子节点所需的章节图变化"""
+    """2026-08-19 用于构造关系原子节点所需的章节图变化"""
     return GraphChangeDTO(
-        change_id=f"relation:{relation_version_id}",
+        change_id=f"relation:{relation_key}",
         change_kind="relation",
-        graph_version_id=f"graph-version-{relation_version_id}",
-        chapter_id=3,
-        fact_id=f"fact-{relation_version_id}",
-        fact_revision=1,
-        effective_chapter_id=relation_version_id,
-        changes=[{"change_kind": relation_change_kind, "fact_id": f"fact-{relation_version_id}"}],
-        relation_id=f"relation-id-{relation_version_id}",
-        relation_version_id=relation_version_id,
-        relation_revision=1,
+        chapter_id=relation_key,
+        fact_id=f"fact-{relation_key}",
+        effective_chapter_id=relation_key,
+        changes=[{"change_kind": relation_change_kind, "fact_id": f"fact-{relation_key}"}],
+        relation_id=f"relation-id-{relation_key}",
         from_char="顾承渊",
         to_char="苏映雪",
         relation_type="盟友",
@@ -63,6 +59,7 @@ def create_node(
     anchor_chapter_id: int,
     progress: float,
     importance_score: float,
+    chapter_order: int,
     level: int = 2,
     node_type: str = "plot",
     node_subtype: str = "plot",
@@ -73,6 +70,7 @@ def create_node(
     characters: list[str] | None = None,
     composite_group_hint: tuple[str, ...] | None = None,
 ) -> TimelineNodeDTO:
+    """2026-08-19 用于构造带章节内部顺序的时间轴原子节点"""
     return TimelineNodeDTO(
         node_id=node_id,
         anchor_chapter_id=anchor_chapter_id,
@@ -89,6 +87,7 @@ def create_node(
         graph_changes=graph_changes,
         lifecycle_events=lifecycle_events,
         composite_group_hint=composite_group_hint,
+        chapter_order=chapter_order,
     )
 
 
@@ -214,6 +213,35 @@ class TestCalculateTensionPercentile:
 
 
 class TestComposeCompositeTimelineNodes:
+    def test_plot_composite_orders_non_contiguous_ids_by_chapter_order(self):
+        """2026-08-19 用于验证章节主键不连续时仍按章节内部顺序分组"""
+        phases = convert_to_timeline_phases([NarrativePhase("发展期", 1, 2, 1.0)])
+        shared_flags = PlotFlagsDTO(is_pivot=False, is_cliffhanger=True, tension_percentile=80)
+        nodes = [
+            create_node(
+                node_id="plot:900",
+                anchor_chapter_id=900,
+                chapter_order=2,
+                progress=0.5,
+                importance_score=5.4,
+                plot_flags=shared_flags,
+                composite_group_hint=("冲突", "strong_negative", "no-pivot", "cliffhanger"),
+            ),
+            create_node(
+                node_id="plot:1200",
+                anchor_chapter_id=1200,
+                chapter_order=1,
+                progress=0.5,
+                importance_score=5.8,
+                plot_flags=shared_flags,
+                composite_group_hint=("冲突", "strong_negative", "no-pivot", "cliffhanger"),
+            ),
+        ]
+
+        composite_nodes = compose_composite_timeline_nodes(nodes, phases)
+
+        assert composite_nodes[0].child_node_ids == ["plot:1200", "plot:900"]
+
     def test_relation_composite_keeps_progressive_changes_but_splits_opposite_change(self):
         phases = convert_to_timeline_phases(
             [
@@ -227,35 +255,38 @@ class TestComposeCompositeTimelineNodes:
             create_node(
                 node_id="relation:101",
                 anchor_chapter_id=5,
+                chapter_order=5,
                 progress=0.5,
                 importance_score=6.9,
                 level=1,
                 node_type="relation",
                 node_subtype="assert",
-                graph_changes=[create_relation_graph_change(relation_version_id=101, relation_change_kind="assert")],
+                graph_changes=[create_relation_graph_change(relation_key=101, relation_change_kind="assert")],
             ),
             create_node(
                 node_id="relation:102",
                 anchor_chapter_id=6,
+                chapter_order=6,
                 progress=0.6,
                 importance_score=6.3,
                 level=1,
                 node_type="relation",
                 node_subtype="reinforce",
                 graph_changes=[
-                    create_relation_graph_change(relation_version_id=102, relation_change_kind="reinforce")
+                    create_relation_graph_change(relation_key=102, relation_change_kind="reinforce")
                 ],
             ),
             create_node(
                 node_id="relation:103",
                 anchor_chapter_id=7,
+                chapter_order=7,
                 progress=0.7,
                 importance_score=6.0,
                 level=1,
                 node_type="relation",
                 node_subtype="break",
                 phase_name="高潮期",
-                graph_changes=[create_relation_graph_change(relation_version_id=103, relation_change_kind="break")],
+                graph_changes=[create_relation_graph_change(relation_key=103, relation_change_kind="break")],
             ),
         ]
 
@@ -282,6 +313,7 @@ class TestComposeCompositeTimelineNodes:
             create_node(
                 node_id="plot:7",
                 anchor_chapter_id=7,
+                chapter_order=7,
                 progress=0.58,
                 importance_score=5.8,
                 level=2,
@@ -293,6 +325,7 @@ class TestComposeCompositeTimelineNodes:
             create_node(
                 node_id="plot:8",
                 anchor_chapter_id=8,
+                chapter_order=8,
                 progress=0.66,
                 importance_score=5.4,
                 level=2,
@@ -304,6 +337,7 @@ class TestComposeCompositeTimelineNodes:
             create_node(
                 node_id="plot:10",
                 anchor_chapter_id=10,
+                chapter_order=10,
                 progress=0.83,
                 importance_score=4.9,
                 level=2,
@@ -336,6 +370,7 @@ class TestComposeCompositeTimelineNodes:
             create_node(
                 node_id="lifecycle:entry:1:1",
                 anchor_chapter_id=1,
+                chapter_order=1,
                 progress=0.0,
                 importance_score=4.4,
                 node_type="lifecycle",
@@ -346,6 +381,7 @@ class TestComposeCompositeTimelineNodes:
             create_node(
                 node_id="lifecycle:exit:1:12",
                 anchor_chapter_id=12,
+                chapter_order=12,
                 progress=1.0,
                 importance_score=4.2,
                 node_type="lifecycle",
@@ -368,6 +404,7 @@ class TestSerializeTimelineNode:
         node = TimelineNodeDTO(
             node_id="relation:101",
             anchor_chapter_id=8,
+            chapter_order=8,
             progress=0.4,
             importance_score=6.7,
             level=1,
@@ -377,7 +414,7 @@ class TestSerializeTimelineNode:
             node_type="relation",
             node_subtype="assert",
             score_breakdown={"change_type_weight": 2.4, "pair_importance": 1.1},
-            graph_changes=[create_relation_graph_change(relation_version_id=101, relation_change_kind="assert")],
+            graph_changes=[create_relation_graph_change(relation_key=101, relation_change_kind="assert")],
         )
 
         payload = serialize_timeline_node(node)
@@ -415,6 +452,7 @@ class TestSerializeTimelineNode:
                 create_node(
                     node_id="relation:101",
                     anchor_chapter_id=8,
+                    chapter_order=8,
                     progress=0.66,
                     importance_score=6.7,
                     level=1,
@@ -422,7 +460,7 @@ class TestSerializeTimelineNode:
                     node_subtype="assert",
                     phase_name="高潮期",
                     graph_changes=[
-                        create_relation_graph_change(relation_version_id=101, relation_change_kind="assert")
+                        create_relation_graph_change(relation_key=101, relation_change_kind="assert")
                     ],
                 )
             ],

@@ -22,11 +22,11 @@ class TestReanalysis:
 
     def test_reanalyze_not_found(self, api_client: TestClient):
         """测试重新分析不存在的小说"""
-        response = api_client.post("/api/novels/nonexistent/reanalyze", json={"label": "test"})
+        response = api_client.post("/api/novels/nonexistent/reanalyze", json={})
         assert response.status_code == 404
 
-    def test_reanalyze_creates_new_version(self, api_client: TestClient):
-        """测试重新分析创建新版本"""
+    def test_reanalyze_creates_new_task(self, api_client: TestClient):
+        """测试重新分析创建新任务"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -39,7 +39,7 @@ class TestReanalysis:
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
 
-        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "v2"})
+        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={})
         assert reanalyze_response.status_code == 200
         data = reanalyze_response.json()
         assert data["novel_id"] == novel_id
@@ -64,7 +64,6 @@ class TestReanalysis:
             "force_preprocess": True,
             "force_topic_model": True,
             "num_topics": 12,
-            "label": "rerun-v2",
         }
         expected_payload = ReanalyzeRequest(**request_payload).model_dump(mode="json", exclude_none=True)
 
@@ -81,15 +80,15 @@ class TestReanalysis:
         assert run["task_kind"] == "reanalysis"
         assert run["request_payload"] == expected_payload
 
-    def test_reanalyze_auto_label(self, api_client: TestClient):
-        """测试重新分析自动生成标签"""
+    def test_reanalyze_without_label(self, api_client: TestClient):
+        """测试重新分析不依赖标签字段"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
 
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("auto_label_test.txt", file, "text/plain")}
+                    "/api/novels/upload", files={"file": ("reanalyze_default_test.txt", file, "text/plain")}
                 )
 
         novel_id = upload_response.json()["novel_id"]
@@ -154,7 +153,7 @@ class TestReanalysis:
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
-        expected_request = ReanalyzeRequest(force_preprocess=True, force_diagnose=True, num_topics=9, label="retry-v3")
+        expected_request = ReanalyzeRequest(force_preprocess=True, force_diagnose=True, num_topics=9)
         task_id = service.create_task(
             novel_id,
             task_kind="reanalysis",

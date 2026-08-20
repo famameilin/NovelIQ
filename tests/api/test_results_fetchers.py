@@ -52,11 +52,7 @@ class _DummyAnnotationRepo2:
 
 class _DummyStatsRepo:
     def __init__(self, payload):
-        """
-        修改时间: 2026-04-30
-        任务: diagnosis-latest-only-reference-contract
-        修改原因: 测试桩不再自动注入 reference_contract_version；所有 cloud_analysis 样例默认按最新结构读取。
-        """
+        """2026-08-19 用于保存当前诊断查询测试数据"""
         self.payload = payload
 
     def fetch_cloud_analysis(self, novel_id, run_id):
@@ -186,9 +182,7 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
         stats_repo=stats_repo,
     )
 
-    assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "diagnosis_missing_focus_contract"
+    assert result is None
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
@@ -225,7 +219,7 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
     assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_marks_focus_contract_incomplete_when_arc_scores_missing():
+def test_fetch_diagnosis_keeps_missing_arc_scores_as_none():
     stats_repo = _DummyStatsRepo(
         {
             "focus_structure": "single",
@@ -242,11 +236,12 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_arc_scores_missing
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.arc_scores is None
+    assert result.focus_characters == []
+    assert result.focus_structure is None
 
 
-def test_fetch_diagnosis_marks_focus_contract_incomplete_when_topic_labels_missing():
+def test_fetch_diagnosis_keeps_missing_topic_labels_as_none():
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": '{"沈砚": 8.2}',
@@ -264,15 +259,15 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_topic_labels_missi
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.topic_labels is None
+    assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_marks_focus_contract_incomplete_when_genre_labels_missing():
+def test_fetch_diagnosis_keeps_missing_genre_labels_as_none():
     """
     创建时间: 2026-04-29
     任务: split-genre-style-labels-review-fixes
-    说明: 题材标签已经成为 diagnosis 正式合同，缺失时结果读取层必须显式要求 rerun。
+    说明: 题材标签缺失时保留其余诊断字段
     """
     stats_repo = _DummyStatsRepo(
         {
@@ -293,15 +288,15 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_genre_labels_missi
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.genre_labels is None
+    assert result.style_labels == ["严肃"]
 
 
-def test_fetch_diagnosis_marks_focus_contract_incomplete_when_style_labels_missing():
+def test_fetch_diagnosis_keeps_missing_style_labels_as_none():
     """
     创建时间: 2026-04-29
     任务: split-genre-style-labels-review-fixes
-    说明: 风格标签和题材标签一样属于正式 diagnosis 合同，读取层不能再把缺风格标签的 row 当作成功结果。
+    说明: 风格标签缺失时保留其余诊断字段
     """
     stats_repo = _DummyStatsRepo(
         {
@@ -322,16 +317,15 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_style_labels_missi
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.genre_labels == ["科幻"]
+    assert result.style_labels is None
 
 
-def test_fetch_diagnosis_marks_focus_contract_incomplete_when_controlled_labels_invalid():
+def test_fetch_diagnosis_drops_invalid_controlled_labels():
     """
     创建时间: 2026-04-29
     任务: split-genre-style-labels-review-fixes
-    说明: 读取层需要和 CloudAnalysisSchema 的受控标签合同一致；
-          只要题材或风格标签不在允许集合内，就必须走 rerun-required。
+    说明: 读取层丢弃不在允许集合内的题材和风格标签
     """
     stats_repo = _DummyStatsRepo(
         {
@@ -353,8 +347,8 @@ def test_fetch_diagnosis_marks_focus_contract_incomplete_when_controlled_labels_
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.genre_labels is None
+    assert result.style_labels is None
 
 
 def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
@@ -383,7 +377,6 @@ def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
     )
 
     assert result is not None
-    assert result.rerun_required is False
     assert result.genre_labels == ["科幻"]
     assert result.style_labels == ["严肃"]
 
@@ -412,7 +405,6 @@ def test_fetch_diagnosis_blank_narrative_arc_type_is_none() -> None:
     )
 
     assert result is not None
-    assert result.rerun_required is False
     assert result.narrative_arc_type is None
 
 
@@ -443,7 +435,7 @@ def test_fetch_diagnosis_strips_narrative_arc_type_whitespace() -> None:
     assert result.narrative_arc_type == "三幕式"
 
 
-def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
+def test_fetch_diagnosis_drops_non_mapping_arc_scores():
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": "[8.2, 6.1]",
@@ -459,18 +451,18 @@ def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.arc_scores is None
+    assert result.main_characters == []
 
 
-def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
+def test_fetch_diagnosis_returns_partial_cloud_row():
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.42,
             "arc_scores": '{"沈砚": 8.2, "陆明": 7.4}',
             "main_characters": '["沈砚", "陆明"]',
             "core_cast": '["沈砚", "陆明"]',
-            "diagnosis": "旧 diagnosis 行缺少 focus 字段",
+            "diagnosis": "诊断记录只包含当前已有字段",
         }
     )
 
@@ -481,17 +473,12 @@ def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
     )
 
     assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "focus_contract_incomplete"
+    assert result.diagnosis == "诊断记录只包含当前已有字段"
+    assert result.focus_characters is None
 
 
-def test_fetch_diagnosis_accepts_missing_reference_contract_version_as_latest_shape():
-    """
-    修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: latest-only 读侧不再把缺失的 reference_contract_version 当作旧合同分支；
-              只要焦点合同字段完整，就应该按当前结构直接返回成功结果。
-    """
+def test_fetch_diagnosis_returns_current_fields():
+    """2026-08-19 用于验证当前诊断字段直接返回"""
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.42,
@@ -513,8 +500,6 @@ def test_fetch_diagnosis_accepts_missing_reference_contract_version_as_latest_sh
     )
 
     assert result is not None
-    assert result.rerun_required is False
-    assert result.rerun_reason is None
     assert result.foreshadow_expectation == 0.42
     assert result.focus_structure == "single"
     assert result.focus_characters == ["沈砚"]
@@ -555,13 +540,14 @@ def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
-    result = _fetch_characters(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        arc_scores={"\u7532": 1.0, "\u4e59": 10.0},
-        focus_characters=["\u4e59", "\u7532"],
-        main_characters=["\u4e59"],
-    )
+    with patch("src.api.services.results_queries.characters._build_name_resolution", return_value={}):
+        result = _fetch_characters(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            arc_scores={"\u7532": 1.0, "\u4e59": 10.0},
+            focus_characters=["\u4e59", "\u7532"],
+            main_characters=["\u4e59"],
+        )
 
     focus_character_names = {char.name for char in result if char.is_focus_character}
     support = next(char for char in result if char.name == "\u7532")
@@ -581,11 +567,12 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
-    result = _fetch_characters(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        limit=None,
-    )
+    with patch("src.api.services.results_queries.characters._build_name_resolution", return_value={}):
+        result = _fetch_characters(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            limit=None,
+        )
 
     assert [char.name for char in result] == ["甲", "乙", "丙"]
 
@@ -603,11 +590,12 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
-    result = _fetch_characters(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        limit=None,
-    )
+    with patch("src.api.services.results_queries.characters._build_name_resolution", return_value={}):
+        result = _fetch_characters(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            limit=None,
+        )
 
     assert [char.name for char in result] == ["沈砚"]
 
@@ -914,11 +902,9 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
             GraphChange(
                 change_id="relation:101",
                 change_kind="relation",
-                graph_version_id="graph-version-1",
                 chapter_id=1,
                 chapter_order=1,
                 fact_id="fact-101",
-                fact_revision=1,
                 effective_chapter_id=3,
                 confidence="high",
                 changes=[
@@ -927,7 +913,6 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
                         "before": None,
                         "after": {"relation_type": "父子", "is_active": True},
                         "fact_id": "fact-101",
-                        "fact_revision": 1,
                         "chunk_id": 3,
                     }
                 ],

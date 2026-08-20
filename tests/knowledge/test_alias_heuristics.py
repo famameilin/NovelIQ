@@ -29,7 +29,7 @@ def _entity(
         attributes={},
         first_seen_chapter=1,
         last_seen_chapter=1,
-        state_revision=1,
+        state_chapter_id=1,
         state={},
     )
 

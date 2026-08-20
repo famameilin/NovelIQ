@@ -7,12 +7,10 @@ import uuid
 from dataclasses import replace
 
 import pytest
-from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.chunking.spans import ParagraphSpan
-from src.storage.db import _assert_paragraph_contract_schema
 from src.storage.models import Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
@@ -105,15 +103,6 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.token_count == span.token_count
         assert row.text == span.text
         assert row.content_hash == hashlib.sha256(span.text.encode("utf-8")).hexdigest()
-
-    version_rows = db_session.execute(
-        select(Paragraph.splitter_version, Paragraph.tokenizer_version)
-        .where(Paragraph.run_id == run_id)
-        .limit(1)
-    ).one()
-    assert version_rows.splitter_version == "1"
-    assert version_rows.tokenizer_version == "1"
-
 
 def test_insert_paragraphs_with_nonzero_chunk_offset(db_session) -> None:
     """chunks.char_offset 非零时，global = char_offset + local 的偏移一致性校验通过"""
@@ -290,40 +279,8 @@ def test_db_constraint_rejects_invalid_local_order(db_session) -> None:
             token_count=1,
             text="abcde",
             content_hash=hashlib.sha256(b"abcde").hexdigest(),
-            splitter_version="1",
-            tokenizer_version="1",
         )
     )
     with pytest.raises(IntegrityError):
         db_session.flush()
 
-
-def test_assert_paragraph_contract_schema_passes_on_fresh_schema(db_session) -> None:
-    """全新 schema 下 paragraphs 表合同列齐备，启动校验不报错"""
-    _assert_paragraph_contract_schema(db_session.get_bind())
-
-
-def test_assert_paragraph_contract_schema_rejects_missing_columns(db_session) -> None:
-    """paragraphs 表缺合同列时启动校验抛 RuntimeError"""
-    engine = db_session.get_bind()
-    db_session.execute(text("DROP TABLE IF EXISTS paragraphs CASCADE"))
-    db_session.commit()
-    db_session.execute(
-        text(
-            """
-            CREATE TABLE paragraphs (
-                run_id varchar(36) NOT NULL,
-                paragraph_id integer NOT NULL,
-                PRIMARY KEY (run_id, paragraph_id)
-            )
-            """
-        )
-    )
-    db_session.commit()
-    try:
-        with pytest.raises(RuntimeError, match="paragraphs"):
-            _assert_paragraph_contract_schema(engine)
-    finally:
-        db_session.execute(text("DROP TABLE IF EXISTS paragraphs CASCADE"))
-        db_session.commit()
-        Paragraph.__table__.create(bind=engine)

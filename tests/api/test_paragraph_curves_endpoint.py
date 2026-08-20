@@ -5,7 +5,6 @@ GET /{novel_id}/paragraph-curves 端点测试（设计文档《章节粒度分�
 - 契约字段全集与 position 计算
 - max_points 降采样：章节边界段落与 net_density 峰值强制保留、数量不超过预算
 - max_points=None 返回全量
-- 旧 run（analysis_contract_version=NULL）409
 - 非 completed 状态 400
 - max_points <= 0 校验 422
 """
@@ -14,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from src.api.models.responses import ParagraphCurvePoint
 from tests.support.paragraph_fixtures import (
@@ -250,31 +248,6 @@ def test_paragraph_curves_rejects_invalid_max_points(api_client: TestClient, db_
     )
 
     assert response.status_code == 422
-
-
-def test_paragraph_curves_requires_paragraph_contract(
-    api_client: TestClient, db_session
-) -> None:
-    novel_id, run_id = create_completed_run(db_session, chapter_texts=["第一段。"])
-
-    # 模拟旧 run：analysis_contract_version 为 NULL（§16 不兼容旧 run）
-    db_session.execute(
-        text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    )
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8]},
-    )
-
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "paragraph_contract_rerun_required"
-    assert "重新分析" in detail["message"]
-
-
 def test_paragraph_curves_rejects_non_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["第一段。"], status="running")
 

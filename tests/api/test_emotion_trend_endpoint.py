@@ -6,7 +6,6 @@ GET /{novel_id}/emotion-trend 端点测试（设计文档《章节粒度分析�
 - range 区间过滤与区间内重切窗口
 - 深缩放段数不足时窗口退化为单段
 - range 参数校验 422 与 window_paragraphs 5~40 钳制
-- 旧 run（analysis_contract_version=NULL）409
 - 非 completed 状态 400
 - 无指标行的段落跳过
 """
@@ -15,7 +14,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from src.api.models.responses import EmotionTrendWindow
 from tests.support.paragraph_fixtures import (
@@ -206,27 +204,6 @@ def test_emotion_trend_rejects_invalid_range(api_client: TestClient, db_session)
         params={"task_id": run_id[:8], "range": "0.6,0.4"},
     )
     assert inverted.status_code == 422
-
-
-def test_emotion_trend_requires_paragraph_contract(api_client: TestClient, db_session) -> None:
-    novel_id, run_id = create_completed_run(db_session, chapter_texts=["第一段。"])
-
-    db_session.execute(
-        text("UPDATE analysis_runs SET analysis_contract_version = NULL WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    )
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8]},
-    )
-
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "paragraph_contract_rerun_required"
-
-
 def test_emotion_trend_rejects_non_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["第一段。"], status="running")
 

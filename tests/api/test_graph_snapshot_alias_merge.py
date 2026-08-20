@@ -18,7 +18,7 @@ def _entity(entity_id: int, name: str, *, representative: bool = False) -> Simpl
         tags=[],
         first_seen_chapter=0,
         last_seen_chapter=3,
-        state_revision=1,
+        state_chapter_id=3,
         state={"status": "active"},
         attributes={"is_representative": True} if representative else {},
     )
@@ -38,8 +38,7 @@ def _relation(
     """2026-08-09 用于构造关系快照桩"""
     return SimpleNamespace(
         relation_id=relation_id,
-        relation_version_id=1,
-        relation_revision=1,
+        chapter_id=9,
         from_entity_id=from_entity_id,
         to_entity_id=to_entity_id,
         from_name=from_name,
@@ -55,15 +54,14 @@ def _relation(
 
 def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
     """2026-08-09 用于验证图谱快照折叠别名节点并重写边端点"""
-    version = SimpleNamespace(
-        graph_version_id="graph-version-9",
+    boundary = SimpleNamespace(
         chapter_id=9,
         chapter_order=9,
         first_chapter_id=8,
         last_chapter_id=8,
     )
     snapshot = SimpleNamespace(
-        graph_version=version,
+        chapter_boundary=boundary,
         entities=[
             _entity(67, "伯安", representative=True),
             _entity(97, "贺重明"),

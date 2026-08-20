@@ -3,9 +3,7 @@
 覆盖：
 - 200 全量快照：事件节点、contains/causal 边、伏笔边（线程即边）、章节根与可见边界、确定性 event_id
 - chapter_id 按章边界截断
-- 422 chapter_id 与 graph_version_id 同时提供
-- 404 无匹配章节图版本
-- 409 旧合同 run（analysis_contract_version=NULL）要求重新分析
+- 404 无匹配章节图数据
 - 400 非 completed run
 """
 
@@ -14,7 +12,6 @@ from __future__ import annotations
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from src.agents.annotation.schema import BoundForeshadowing
 from src.storage.repositories import ForeshadowingRepository, RunRepository
@@ -88,7 +85,7 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
 
 
 def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) -> None:
-    """2026-08-19 用于验证事件森林快照的树视图、因果边、伏笔边与可见边界（契约 v3）"""
+    """2026-08-19 用于验证事件森林快照的树视图、因果边、伏笔边与可见边界"""
     novel_id, run_id = _insert_event_forest_run(db_session)
 
     response = api_client.get(
@@ -98,9 +95,9 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["chapter_id"] == 2
     assert payload["chapter_order"] == 2
     assert payload["visible_through_chapter_order"] == 2
-    assert payload["graph_version_id"]
 
     nodes = {node["event_id"]: node for node in payload["event_nodes"]}
     assert set(nodes) == {
@@ -130,7 +127,8 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert all(edge["edge_type"] == "causal" for edge in causal_edges)
     assert causal_edges[0]["source_event_id"] == _event_id(run_id, 1, 1)
     assert causal_edges[0]["target_event_id"] == _event_id(run_id, 1, 2)
-    assert causal_edges[0]["source_event_revision"] is not None
+    assert causal_edges[0]["source_chapter_id"] == 1
+    assert causal_edges[0]["target_chapter_id"] == 1
     assert causal_edges[0]["is_active"] is True
 
     assert len(payload["foreshadowing_edges"]) == 1
@@ -162,7 +160,7 @@ def test_event_forest_filters_by_chapter_boundary(api_client: TestClient, db_ses
     assert all(node["chapter_id"] == 1 for node in payload["event_nodes"])
 
 
-def test_event_forest_returns_404_without_matching_graph_version(api_client: TestClient, db_session) -> None:
+def test_event_forest_returns_404_without_matching_chapter_data(api_client: TestClient, db_session) -> None:
     """2026-08-18 用于验证无任何章节标注的 run 返回 404"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -178,44 +176,7 @@ def test_event_forest_returns_404_without_matching_graph_version(api_client: Tes
     )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "当前 run 尚无匹配的章节图版本"
-
-
-def test_event_forest_rejects_both_filters(api_client: TestClient, db_session) -> None:
-    """2026-08-18 用于验证同时提供 chapter_id 与 graph_version_id 返回 422"""
-    novel_id, run_id = _insert_event_forest_run(db_session)
-
-    response = api_client.get(
-        f"/api/novels/{novel_id}/event-forest",
-        params={
-            "task_id": run_id[:8],
-            "chapter_id": 1,
-            "graph_version_id": "graph-version-1",
-        },
-    )
-
-    assert response.status_code == 422
-
-
-def test_event_forest_requires_paragraph_contract(api_client: TestClient, db_session) -> None:
-    """2026-08-18 用于验证旧合同 run（analysis_contract_version=NULL）被 409 拒绝"""
-    novel_id, run_id = _insert_event_forest_run(db_session)
-    db_session.execute(
-        text(
-            "UPDATE analysis_runs SET analysis_contract_version = NULL "
-            "WHERE run_id = :run_id"
-        ),
-        {"run_id": run_id},
-    )
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{novel_id}/event-forest",
-        params={"task_id": run_id[:8]},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "paragraph_contract_rerun_required"
+    assert response.json()["detail"] == "当前 run 尚无匹配的章节图数据"
 
 
 def test_event_forest_rejects_non_completed_run(api_client: TestClient, db_session) -> None:

@@ -145,9 +145,9 @@ class TestAggregate:
             {"run_id": self.run_id},
         ).fetchall()
         stat_names = [s[0] for s in stats]
-        assert "global_avg_mtld" in stat_names
-        assert "global_avg_ttr" in stat_names
-        assert "global_avg_sent_len" in stat_names
+        assert "avg_mtld" in stat_names
+        assert "avg_ttr" in stat_names
+        assert "avg_sent_len" in stat_names
         assert "emotion_avg" in stat_names
         assert "emotion_std" in stat_names
         assert "emotion_max" in stat_names
@@ -159,7 +159,7 @@ class TestAggregate:
         # §9.1 守恒：全书情绪密度 = (Σpos − Σneg) / Σtoken
         assert by_name["emotion_avg"] == pytest.approx((5 * 1.0 - 5 * 0.5) / (5 * 10))
         # 平均句长 = Σsentence_char_sum / Σsentence_count
-        assert by_name["global_avg_sent_len"] == pytest.approx(40.0 / 2)
+        assert by_name["avg_sent_len"] == pytest.approx(40.0 / 2)
         # 章张力均值 = 段落 surface_tension 均值
         assert by_name["rhythm_avg"] == pytest.approx(sum(0.3 + i * 0.1 for i in range(5)) / 5)
 
@@ -233,7 +233,7 @@ class TestAggregate:
 
 class TestGlobalStatsRunIsolation:
     """2026-08-13 修复 P1：compute_global_stats 此前查询 chunk_style 缺 run_id 过滤，
-    跨 run 累积的数据会污染当前 run 的 global_avg_* 指标（M8b 后改为段落充分统计量聚合）。"""
+    跨 run 累积的数据会污染当前 run 的 avg_* 指标（M8b 后改为段落充分统计量聚合）。"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
@@ -278,7 +278,7 @@ class TestGlobalStatsRunIsolation:
         stats_b = dict(compute_global_stats(self.db_session, self.run_b))
 
         # run_b 的句长统计不得污染 run_a 的均值
-        assert stats_a["global_avg_sent_len"] == pytest.approx(20.0)
-        assert stats_b["global_avg_sent_len"] == pytest.approx(50.0)
-        assert "global_avg_ttr" in stats_a
-        assert "global_avg_mtld" in stats_a
+        assert stats_a["avg_sent_len"] == pytest.approx(20.0)
+        assert stats_b["avg_sent_len"] == pytest.approx(50.0)
+        assert "avg_ttr" in stats_a
+        assert "avg_mtld" in stats_a
