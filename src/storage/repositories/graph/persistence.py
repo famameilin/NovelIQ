@@ -89,26 +89,6 @@ def _event_edge_id(run_id: str, source_event_id: str, target_event_id: str) -> s
     return str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}"))
 
 
-def _chapter_boundary(session: Session, run_id: str, chapter_id: int, annotation_id: str) -> ChapterBoundary:
-    """2026-08-19 用于按章节身份派生图谱边界"""
-    chapters = list(
-        session.execute(
-            select(Chapter)
-            .where(Chapter.run_id == run_id, Chapter.text.isnot(None))
-            .order_by(Chapter.sequence, Chapter.chapter_id)
-        ).scalars()
-    )
-    for order, chapter in enumerate(chapters, start=1):
-        if int(chapter.chapter_id) == chapter_id:
-            return ChapterBoundary(
-                run_id=run_id,
-                chapter_id=chapter_id,
-                chapter_order=order,
-                first_chapter_id=chapter_id,
-                last_chapter_id=chapter_id,
-                annotation_id=annotation_id,
-            )
-    raise ValueError(f"章节不存在或没有正文: run_id={run_id} chapter_id={chapter_id}")
 
 
 def _chapter_order_map(session: Session, run_id: str) -> dict[int, int]:
@@ -121,76 +101,6 @@ def _chapter_order_map(session: Session, run_id: str) -> dict[int, int]:
     return {int(chapter.chapter_id): index for index, chapter in enumerate(chapters, start=1)}
 
 
-def _validate_annotation_chunks(
-    session: Session,
-    *,
-    annotation: ChapterAnnotationRecord,
-    payload: BoundChapterAnnotation,
-    authorized_text_paragraph_ids: set[int] | None = None,
-) -> None:
-    """2026-08-19 用于复核标注只覆盖当前章节并校验事件证据授权"""
-    chapter = session.execute(
-        select(Chapter).where(Chapter.run_id == annotation.run_id, Chapter.chapter_id == annotation.chapter_id)
-    ).scalar_one_or_none()
-    if chapter is None or chapter.text is None:
-        raise ValueError(f"章节不存在或没有正文: run_id={annotation.run_id} chapter_id={annotation.chapter_id}")
-    if [chunk.chunk_id for chunk in payload.chunks] != [annotation.chapter_id]:
-        raise ValueError("章节 payload chunk 顺序与数据库不一致")
-    paragraphs = list(
-        session.execute(
-            select(Paragraph)
-            .where(Paragraph.run_id == annotation.run_id, Paragraph.chapter_id == annotation.chapter_id)
-            .order_by(Paragraph.paragraph_index)
-        ).scalars()
-    )
-    paragraph_ids = {int(row.paragraph_id) for row in paragraphs}
-    authorized = (
-        (set(authorized_text_paragraph_ids) if authorized_text_paragraph_ids is not None else set()) | paragraph_ids
-    )
-    for chunk in payload.chunks:
-        for event in chunk.events:
-            if not event.evidence:
-                raise ValueError("事件 evidence 不能为空")
-            canonical_anchor_ids = sorted(
-                {
-                    int(item)
-                    for evidence in event.evidence
-                    if hasattr(evidence, "paragraph_ids")
-                    for item in evidence.paragraph_ids
-                }
-            )
-            if not canonical_anchor_ids:
-                raise ValueError("事件 Evidence 缺少文本段落 ID")
-            event.anchor_paragraph_ids = canonical_anchor_ids
-            anchors = set(canonical_anchor_ids)
-            if not anchors <= paragraph_ids:
-                raise ValueError("事件锚点不属于当前章节")
-            unauthorized = sorted(anchors - authorized)
-            if unauthorized:
-                raise ValueError(f"事件锚点超出本轮段落授权范围: ids={unauthorized}")
-            if event.char_start < 0 or event.char_end > len(chapter.text) or event.char_end <= event.char_start:
-                raise ValueError("事件字符范围超出数据库章节原文")
-            actual_hash = hashlib.sha256(chapter.text[event.char_start : event.char_end].encode("utf-8")).hexdigest()
-            if actual_hash != event.text_hash:
-                raise ValueError("事件文本哈希与数据库原文不一致")
-            for evidence in event.evidence:
-                evidence_ids = {int(item) for item in evidence.paragraph_ids}
-                if not evidence_ids <= paragraph_ids:
-                    raise ValueError("事件 Evidence 引用了其他章节段落")
-                unauthorized_evidence = sorted(evidence_ids - authorized)
-                if unauthorized_evidence:
-                    raise ValueError(f"事件 Evidence 超出本轮段落授权范围: ids={unauthorized_evidence}")
-                if (
-                    evidence.char_start < 0
-                    or evidence.char_end > len(chapter.text)
-                    or evidence.char_end <= evidence.char_start
-                ):
-                    raise ValueError("事件 Evidence 字符范围超出数据库章节原文")
-                evidence_hash = hashlib.sha256(
-                    chapter.text[evidence.char_start : evidence.char_end].encode("utf-8")
-                ).hexdigest()
-                if evidence_hash != evidence.text_hash:
-                    raise ValueError("事件 Evidence 文本哈希与数据库原文不一致")
 
 
 def _chapter_text_evidence(session: Session, *, run_id: str, chapter_id: int) -> list[dict[str, Any]]:
@@ -1122,15 +1032,101 @@ def persist_completion_graph(
     authorized_text_chapter_ids: set[int],
     authorized_text_paragraph_ids: set[int] | None = None,
 ) -> PersistedGraphResult:
-    """2026-08-19 用于在一个事务中写入章节事实和当前状态"""
+    """2026-08-20 扁平化图谱持久化链，内联章节边界生成和标注校验逻辑"""
     payload = BoundChapterAnnotation.model_validate(annotation.payload)
-    _validate_annotation_chunks(
-        session,
-        annotation=annotation,
-        payload=payload,
-        authorized_text_paragraph_ids=authorized_text_paragraph_ids,
+
+    # 内联章节和段落查询
+    chapter = session.execute(
+        select(Chapter).where(Chapter.run_id == annotation.run_id, Chapter.chapter_id == annotation.chapter_id)
+    ).scalar_one_or_none()
+    if chapter is None or chapter.text is None:
+        raise ValueError(f"章节不存在或没有正文: run_id={annotation.run_id} chapter_id={annotation.chapter_id}")
+
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(Paragraph.run_id == annotation.run_id, Paragraph.chapter_id == annotation.chapter_id)
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
     )
-    boundary = _chapter_boundary(session, annotation.run_id, annotation.chapter_id, annotation.annotation_id)
+    paragraph_ids = {int(row.paragraph_id) for row in paragraphs}
+
+    # 内联章节边界生成
+    chapters = list(
+        session.execute(
+            select(Chapter)
+            .where(Chapter.run_id == annotation.run_id, Chapter.text.isnot(None))
+            .order_by(Chapter.sequence, Chapter.chapter_id)
+        ).scalars()
+    )
+    boundary: ChapterBoundary | None = None
+    for order, ch in enumerate(chapters, start=1):
+        if int(ch.chapter_id) == annotation.chapter_id:
+            boundary = ChapterBoundary(
+                run_id=annotation.run_id,
+                chapter_id=annotation.chapter_id,
+                chapter_order=order,
+                first_chapter_id=annotation.chapter_id,
+                last_chapter_id=annotation.chapter_id,
+                annotation_id=annotation.annotation_id,
+            )
+            break
+    if boundary is None:
+        raise ValueError(f"章节不存在或没有正文: run_id={annotation.run_id} chapter_id={annotation.chapter_id}")
+
+    # 内联标注校验
+    if [chunk.chunk_id for chunk in payload.chunks] != [annotation.chapter_id]:
+        raise ValueError("章节 payload chunk 顺序与数据库不一致")
+
+    authorized = (
+        (set(authorized_text_paragraph_ids) if authorized_text_paragraph_ids is not None else set()) | paragraph_ids
+    )
+    for chunk in payload.chunks:
+        for event in chunk.events:
+            if not event.evidence:
+                raise ValueError("事件 evidence 不能为空")
+            canonical_anchor_ids = sorted(
+                {
+                    int(item)
+                    for evidence in event.evidence
+                    if hasattr(evidence, "paragraph_ids")
+                    for item in evidence.paragraph_ids
+                }
+            )
+            if not canonical_anchor_ids:
+                raise ValueError("事件 Evidence 缺少文本段落 ID")
+            event.anchor_paragraph_ids = canonical_anchor_ids
+            anchors = set(canonical_anchor_ids)
+            if not anchors <= paragraph_ids:
+                raise ValueError("事件锚点不属于当前章节")
+            unauthorized = sorted(anchors - authorized)
+            if unauthorized:
+                raise ValueError(f"事件锚点超出本轮段落授权范围: ids={unauthorized}")
+            if event.char_start < 0 or event.char_end > len(chapter.text) or event.char_end <= event.char_start:
+                raise ValueError("事件字符范围超出数据库章节原文")
+            actual_hash = hashlib.sha256(chapter.text[event.char_start : event.char_end].encode("utf-8")).hexdigest()
+            if actual_hash != event.text_hash:
+                raise ValueError("事件文本哈希与数据库原文不一致")
+            for evidence in event.evidence:
+                evidence_ids = {int(item) for item in evidence.paragraph_ids}
+                if not evidence_ids <= paragraph_ids:
+                    raise ValueError("事件 Evidence 引用了其他章节段落")
+                unauthorized_evidence = sorted(evidence_ids - authorized)
+                if unauthorized_evidence:
+                    raise ValueError(f"事件 Evidence 超出本轮段落授权范围: ids={unauthorized_evidence}")
+                if (
+                    evidence.char_start < 0
+                    or evidence.char_end > len(chapter.text)
+                    or evidence.char_end <= evidence.char_start
+                ):
+                    raise ValueError("事件 Evidence 字符范围超出数据库章节原文")
+                evidence_hash = hashlib.sha256(
+                    chapter.text[evidence.char_start : evidence.char_end].encode("utf-8")
+                ).hexdigest()
+                if evidence_hash != evidence.text_hash:
+                    raise ValueError("事件 Evidence 文本哈希与数据库原文不一致")
+
+    # 继续原有逻辑
     entities, attribute_changes = _resolve_entities(session, annotation=annotation, payload=payload)
     facts = _persist_annotation_facts(
         session,
