@@ -20,12 +20,12 @@ from src.storage.models.dialogue import DialogueRecord
 from src.storage.models.event_forest import EventEdge, EventNode
 from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
-    EntityStateVersion,
+    ChapterBoundary,
+    EntityState,
     GraphEntity,
     GraphFact,
     GraphRelation,
-    GraphRelationVersion,
-    GraphVersion,
+    RelationState,
 )
 from src.storage.models.novel import Novel
 from src.storage.models.paragraph import Paragraph
@@ -56,12 +56,12 @@ __all__ = [
     "CasePoolCase",
     "CaseResolutionMapping",
     "DialogueRecord",
-    "GraphVersion",
+    "ChapterBoundary",
     "GraphEntity",
     "GraphFact",
-    "EntityStateVersion",
+    "EntityState",
     "GraphRelation",
-    "GraphRelationVersion",
+    "RelationState",
     "CloudAnalysis",
     "GlobalStats",
     "GlobalContext",

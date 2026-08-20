@@ -1,9 +1,4 @@
-"""
-事件森林/DAG 查询 Repository
-
-2026-08-18 P2：事件过程层正式接管后提供查询入口。按章节边界暴露已授权历史
-事件、事件边和 Evidence，供 Agent 事件可见性查询和 API 端点使用。
-"""
+"""章节事件森林查询 Repository"""
 
 from __future__ import annotations
 
@@ -13,15 +8,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.storage.models import EventEdge, EventNode, ForeshadowingThread, GraphVersion
+from src.storage.models import Chapter, ChapterAnnotationRecord, EventEdge, EventNode, ForeshadowingThread
+from src.storage.models.graph import ChapterBoundary
 
 
 @dataclass(frozen=True)
 class EventNodeRow:
-    """2026-08-19 用于返回事件节点快照（契约 v3：含树结构字段）"""
+    """2026-08-19 用于返回章节事件节点"""
 
     event_id: str
-    event_revision: int
     chapter_id: int
     chapter_order: int
     description: str
@@ -38,14 +33,12 @@ class EventNodeRow:
 
 @dataclass(frozen=True)
 class EventEdgeRow:
-    """2026-08-19 用于返回因果边快照（契约 v3：contains 不再落表，端点必为非空）"""
+    """2026-08-19 用于返回章节事件因果边"""
 
     edge_id: str
     edge_type: str
     source_event_id: str
-    source_event_revision: int
     target_event_id: str
-    target_event_revision: int
     source_chapter_id: int
     target_chapter_id: int
     is_active: bool
@@ -54,7 +47,7 @@ class EventEdgeRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    """2026-08-18 用于返回伏笔边（线程即边）快照"""
+    """2026-08-19 用于返回章节伏笔边"""
 
     setup_id: str
     run_id: str
@@ -69,7 +62,7 @@ class ForeshadowingEdgeRow:
 
 @dataclass(frozen=True)
 class EventSecondaryGroupRow:
-    """2026-08-19 用于返回一棵事件树的次因分支（挂在某个目标事件下）"""
+    """2026-08-19 用于返回事件树的次因分支"""
 
     target_event_id: str
     branch: list[str]
@@ -77,11 +70,7 @@ class EventSecondaryGroupRow:
 
 @dataclass(frozen=True)
 class EventTreeRow:
-    """2026-08-19 用于返回一棵事件树（一棵树 = 一个完整事件）
-
-    main_chain 为主因链（root + main 角色，按锚点原文顺序）；secondary_groups
-    为次因分支（secondary 节点按其首个因果前驱 target 归组）。
-    """
+    """2026-08-19 用于返回一棵事件树"""
 
     tree_id: str
     root_event_id: str
@@ -94,10 +83,10 @@ class EventTreeRow:
 
 @dataclass(frozen=True)
 class EventForestSnapshot:
-    """2026-08-19 用于返回完整事件森林快照（树视图 + 树间边，契约 v3）"""
+    """2026-08-19 用于返回章节边界内的事件森林"""
 
+    chapter_id: int
     chapter_order: int
-    graph_version_id: str
     visible_through_chapter_order: int
     derived_event_order: list[str]
     event_nodes: list[EventNodeRow]
@@ -107,80 +96,71 @@ class EventForestSnapshot:
 
 
 class EventForestRepository:
-    """2026-08-18 用于查询事件森林/DAG 快照"""
+    """2026-08-19 用于查询章节事件森林"""
 
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def _chapter_ids_for_order(self, run_id: str, max_chapter_order: int) -> set[int]:
-        """2026-08-18 用于把已完成图版本的 chapter_order 转换为章节边界集合"""
-        return {
-            int(chapter_id)
-            for chapter_id in self.session.execute(
-                select(GraphVersion.chapter_id).where(
-                    GraphVersion.run_id == run_id,
-                    GraphVersion.chapter_order <= max_chapter_order,
-                )
+    def _chapter_rows(self, run_id: str) -> list[Chapter]:
+        """2026-08-19 用于按章节身份读取有正文章节并确定排序"""
+        return list(
+            self.session.execute(
+                select(Chapter)
+                .where(Chapter.run_id == run_id, Chapter.text.isnot(None))
+                .order_by(Chapter.sequence, Chapter.chapter_id)
             ).scalars()
+        )
+
+    def _chapter_ids_for_order(self, run_id: str, max_chapter_order: int) -> set[int]:
+        """2026-08-19 用于按 chapter_order 解析可见章节集合"""
+        return {
+            int(chapter.chapter_id)
+            for index, chapter in enumerate(self._chapter_rows(run_id), start=1)
+            if index <= max_chapter_order
         }
 
-    def resolve_graph_version(
+    def resolve_chapter_boundary(
         self,
         run_id: str,
         *,
         chapter_id: int | None = None,
-        graph_version_id: str | None = None,
-    ) -> GraphVersion | None:
-        """2026-08-18 用于按 chapter_id 或 graph_version_id 解析当前 run 的图版本边界"""
-        if chapter_id is not None and graph_version_id is not None:
-            raise ValueError("chapter_id 与 graph_version_id 只能二选一")
-        if graph_version_id is not None:
-            return self.session.execute(
-                select(GraphVersion).where(
-                    GraphVersion.run_id == run_id,
-                    GraphVersion.graph_version_id == graph_version_id,
-                )
-            ).scalar_one_or_none()
-        if chapter_id is not None:
-            return self.session.execute(
-                select(GraphVersion)
-                .where(
-                    GraphVersion.run_id == run_id,
-                    GraphVersion.chapter_id == chapter_id,
-                )
-                .order_by(GraphVersion.chapter_order.desc())
-            ).scalar_one_or_none()
-        # 无指定时取最新图版本
-        return self.session.execute(
-            select(GraphVersion)
-            .where(GraphVersion.run_id == run_id)
-            .order_by(GraphVersion.chapter_order.desc())
-            .limit(1)
+    ) -> ChapterBoundary | None:
+        """2026-08-19 用于按章节身份解析当前运行的图谱边界"""
+        chapters = self._chapter_rows(run_id)
+        if chapter_id is None:
+            target = chapters[-1] if chapters else None
+        else:
+            target = next((chapter for chapter in chapters if int(chapter.chapter_id) == chapter_id), None)
+        if target is None:
+            return None
+        annotation = self.session.execute(
+            select(ChapterAnnotationRecord).where(
+                ChapterAnnotationRecord.run_id == run_id,
+                ChapterAnnotationRecord.chapter_id == target.chapter_id,
+            )
         ).scalar_one_or_none()
+        if annotation is None:
+            return None
+        order = chapters.index(target) + 1
+        return ChapterBoundary(
+            run_id=run_id,
+            chapter_id=int(target.chapter_id),
+            chapter_order=order,
+            first_chapter_id=int(target.chapter_id),
+            last_chapter_id=int(target.chapter_id),
+            annotation_id=str(annotation.annotation_id),
+        )
 
-    def fetch_event_nodes(
-        self,
-        run_id: str,
-        *,
-        max_chapter_order: int,
-    ) -> list[EventNodeRow]:
-        """2026-08-18 用于读取截止指定章节边界的全部事件节点最新修订"""
+    def fetch_event_nodes(self, run_id: str, *, max_chapter_order: int) -> list[EventNodeRow]:
+        """2026-08-19 用于读取截止章节边界的事件节点"""
         rows = self.session.execute(
             select(EventNode)
-            .where(
-                EventNode.run_id == run_id,
-                EventNode.chapter_order <= max_chapter_order,
-            )
-            .order_by(EventNode.chapter_order, EventNode.event_id, EventNode.event_revision.desc())
+            .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
+            .order_by(EventNode.chapter_order, EventNode.event_id)
         ).scalars()
-        # 每个事件只取最新修订
-        latest: dict[str, EventNode] = {}
-        for node in rows:
-            latest.setdefault(node.event_id, node)
         return [
             EventNodeRow(
                 event_id=node.event_id,
-                event_revision=node.event_revision,
                 chapter_id=node.chapter_id,
                 chapter_order=node.chapter_order,
                 description=node.description,
@@ -194,16 +174,11 @@ class EventForestRepository:
                 tree_id=node.tree_id,
                 cause_role=node.cause_role,
             )
-            for node in sorted(latest.values(), key=lambda n: (n.chapter_order, n.event_id))
+            for node in rows
         ]
 
-    def fetch_event_edges(
-        self,
-        run_id: str,
-        *,
-        max_chapter_order: int,
-    ) -> list[EventEdgeRow]:
-        """2026-08-18 用于读取截止指定章节边界的全部活跃事件边"""
+    def fetch_event_edges(self, run_id: str, *, max_chapter_order: int) -> list[EventEdgeRow]:
+        """2026-08-19 用于读取截止章节边界的活跃因果边"""
         chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order)
         if not chapter_ids:
             return []
@@ -211,7 +186,7 @@ class EventForestRepository:
             select(EventEdge)
             .where(
                 EventEdge.run_id == run_id,
-                EventEdge.is_active == 1,
+                EventEdge.is_active.is_(True),
                 EventEdge.source_chapter_id.in_(chapter_ids),
                 EventEdge.target_chapter_id.in_(chapter_ids),
             )
@@ -222,9 +197,7 @@ class EventForestRepository:
                 edge_id=edge.edge_id,
                 edge_type=edge.edge_type,
                 source_event_id=edge.source_event_id,
-                source_event_revision=edge.source_event_revision,
                 target_event_id=edge.target_event_id,
-                target_event_revision=edge.target_event_revision,
                 source_chapter_id=edge.source_chapter_id,
                 target_chapter_id=edge.target_chapter_id,
                 is_active=bool(edge.is_active),
@@ -233,23 +206,20 @@ class EventForestRepository:
             for edge in rows
         ]
 
-    def fetch_foreshadowing_edges(
-        self,
-        run_id: str,
-        *,
-        max_chapter_order: int,
-    ) -> list[ForeshadowingEdgeRow]:
-        """2026-08-18 用于读取伏笔边（线程即边）"""
+    def fetch_foreshadowing_edges(self, run_id: str, *, max_chapter_order: int) -> list[ForeshadowingEdgeRow]:
+        """2026-08-19 用于读取截止章节边界的伏笔边"""
         chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order)
         if not chapter_ids:
             return []
         rows = self.session.execute(
             select(ForeshadowingThread)
-            .where(
-                ForeshadowingThread.run_id == run_id,
-                ForeshadowingThread.first_chapter_id.in_(chapter_ids),
+            .join(
+                Chapter,
+                (Chapter.run_id == ForeshadowingThread.run_id)
+                & (Chapter.chapter_id == ForeshadowingThread.first_chapter_id),
             )
-            .order_by(ForeshadowingThread.first_chapter_id)
+            .where(ForeshadowingThread.run_id == run_id, ForeshadowingThread.first_chapter_id.in_(chapter_ids))
+            .order_by(Chapter.sequence, ForeshadowingThread.first_chapter_id, ForeshadowingThread.setup_id)
         ).scalars()
         return [
             ForeshadowingEdgeRow(
@@ -267,12 +237,7 @@ class EventForestRepository:
         ]
 
     def _build_event_trees(self, event_nodes: list[EventNodeRow]) -> list[EventTreeRow]:
-        """2026-08-19 用于按 tree_id 分组组装事件树视图（契约 v3）
-
-        根 = cause_role 为 root 的唯一事件（缺失/多个时取锚点最早事件）；
-        main_chain = root/main 角色按 (chapter_order, char_start) 原文顺序；
-        secondary_groups = secondary 节点按首个因果前驱 target 归组。
-        """
+        """2026-08-19 用于按 tree_id 组装事件树视图"""
         nodes_by_tree: dict[str, list[EventNodeRow]] = {}
         for node in event_nodes:
             nodes_by_tree.setdefault(node.tree_id, []).append(node)
@@ -283,80 +248,49 @@ class EventForestRepository:
         trees: list[tuple[EventTreeRow, tuple[int, int, int, str]]] = []
         for tree_id, nodes in nodes_by_tree.items():
             ordered = sorted(nodes, key=sort_key)
-            roots = [n for n in ordered if n.cause_role == "root"]
+            roots = [node for node in ordered if node.cause_role == "root"]
             root_id = roots[0].event_id if len(roots) == 1 else ordered[0].event_id
-            main_chain = [
-                n.event_id
-                for n in ordered
-                if n.cause_role in ("root", "main")
-            ]
             secondary_by_target: dict[str, list[str]] = {}
             for node in ordered:
                 if node.cause_role != "secondary":
                     continue
-                target = (
-                    node.causal_event_refs[0]
-                    if node.causal_event_refs
-                    else tree_id
-                )
+                target = node.causal_event_refs[0] if node.causal_event_refs else tree_id
                 secondary_by_target.setdefault(target, []).append(node.event_id)
-            secondary_groups = [
-                EventSecondaryGroupRow(
-                    target_event_id=target,
-                    branch=sorted(branch),
-                )
-                for target, branch in sorted(secondary_by_target.items())
-            ]
             trees.append(
                 (
                     EventTreeRow(
                         tree_id=tree_id,
                         root_event_id=root_id,
-                        main_chain=main_chain,
-                        secondary_groups=secondary_groups,
-                        chapter_ids=sorted({n.chapter_id for n in nodes}),
-                        char_start=min(n.char_start for n in nodes),
-                        char_end=max(n.char_end for n in nodes),
+                        main_chain=[node.event_id for node in ordered if node.cause_role in ("root", "main")],
+                        secondary_groups=[
+                            EventSecondaryGroupRow(target_event_id=target, branch=sorted(branch))
+                            for target, branch in sorted(secondary_by_target.items())
+                        ],
+                        chapter_ids=sorted({node.chapter_id for node in nodes}),
+                        char_start=min(node.char_start for node in nodes),
+                        char_end=max(node.char_end for node in nodes),
                     ),
                     sort_key(ordered[0]),
                 )
             )
         trees.sort(key=lambda pair: pair[1])
-        return [tree for tree, _ in trees]
+        return [tree for tree, _sort in trees]
 
-    def fetch_snapshot(
-        self,
-        run_id: str,
-        *,
-        chapter_id: int | None = None,
-        graph_version_id: str | None = None,
-    ) -> EventForestSnapshot | None:
-        """2026-08-19 用于返回完整事件森林快照（树视图 + 树间边，契约 v3）"""
-        boundary = self.resolve_graph_version(
-            run_id,
-            chapter_id=chapter_id,
-            graph_version_id=graph_version_id,
-        )
+    def fetch_snapshot(self, run_id: str, *, chapter_id: int | None = None) -> EventForestSnapshot | None:
+        """2026-08-19 用于返回章节边界内的事件森林快照"""
+        boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
         if boundary is None:
             return None
-        max_order = int(boundary.chapter_order)
-        event_nodes = self.fetch_event_nodes(run_id, max_chapter_order=max_order)
-        causal_edges = self.fetch_event_edges(run_id, max_chapter_order=max_order)
-        foreshadowing_edges = self.fetch_foreshadowing_edges(
-            run_id,
-            max_chapter_order=max_order,
-        )
+        event_nodes = self.fetch_event_nodes(run_id, max_chapter_order=boundary.chapter_order)
+        causal_edges = self.fetch_event_edges(run_id, max_chapter_order=boundary.chapter_order)
+        foreshadowing_edges = self.fetch_foreshadowing_edges(run_id, max_chapter_order=boundary.chapter_order)
         visible_event_ids = {node.event_id for node in event_nodes}
-        foreshadowing_edges = [
+        visible_threads = [
             ForeshadowingEdgeRow(
                 setup_id=edge.setup_id,
                 run_id=edge.run_id,
                 setup_event_id=edge.setup_event_id,
-                payoff_event_id=(
-                    edge.payoff_event_id
-                    if edge.payoff_event_id in visible_event_ids
-                    else None
-                ),
+                payoff_event_id=edge.payoff_event_id if edge.payoff_event_id in visible_event_ids else None,
                 first_chapter_id=edge.first_chapter_id,
                 last_chapter_id=(
                     edge.last_chapter_id
@@ -364,39 +298,25 @@ class EventForestRepository:
                     else edge.first_chapter_id
                 ),
                 setup_summary=edge.setup_summary,
-                status=(
-                    edge.status
-                    if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
-                    else "open"
-                ),
-                active=(
-                    edge.active
-                    if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
-                    else True
-                ),
+                status=edge.status
+                if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
+                else "open",
+                active=edge.active
+                if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
+                else True,
             )
             for edge in foreshadowing_edges
         ]
-        event_trees = self._build_event_trees(event_nodes)
-        derived_event_order = [
-            node.event_id
-            for node in sorted(
-                event_nodes,
-                key=lambda node: (
-                    node.chapter_order,
-                    node.char_start,
-                    node.char_end,
-                    node.event_id,
-                ),
-            )
-        ]
+        ordered_nodes = sorted(
+            event_nodes, key=lambda node: (node.chapter_order, node.char_start, node.char_end, node.event_id)
+        )
         return EventForestSnapshot(
-            chapter_order=max_order,
-            graph_version_id=boundary.graph_version_id,
-            visible_through_chapter_order=max_order,
-            derived_event_order=derived_event_order,
+            chapter_id=boundary.chapter_id,
+            chapter_order=boundary.chapter_order,
+            visible_through_chapter_order=boundary.chapter_order,
+            derived_event_order=[node.event_id for node in ordered_nodes],
             event_nodes=event_nodes,
-            event_trees=event_trees,
+            event_trees=self._build_event_trees(event_nodes),
             causal_edges=causal_edges,
-            foreshadowing_edges=foreshadowing_edges,
+            foreshadowing_edges=visible_threads,
         )
