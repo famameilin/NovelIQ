@@ -12,7 +12,6 @@ import type { GraphNode } from "@/api/types";
 export interface RelatedNodeInfo {
   node: GraphNode;
   relationType: string;
-  relationRevision: number;
 }
 
 export interface NodeDetailPanelProps {
@@ -111,7 +110,7 @@ interface RelatedNodeItemProps {
 }
 
 function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
-  const { node, relationType, relationRevision } = relatedNode;
+  const { node, relationType } = relatedNode;
 
   return (
     <motion.button
@@ -131,7 +130,6 @@ function RelatedNodeItem({ relatedNode, onClick }: RelatedNodeItemProps) {
             {relationType}
           </Badge>
         </div>
-        <span className="text-xs text-text-muted">版本 {relationRevision}</span>
       </div>
     </motion.button>
   );
@@ -239,7 +237,10 @@ export function NodeDetailPanel({
                           value={`第 ${node.first_seen_chapter} 章 - 第 ${node.last_seen_chapter} 章`}
                         />
                       )}
-                      <InfoRow label="状态版本" value={`第 ${node.state_revision} 版`} />
+                      <InfoRow
+                        label="状态章节"
+                        value={node.state_chapter_id == null ? "尚无章节状态" : `第 ${node.state_chapter_id} 章`}
+                      />
                       {primaryRole && (
                         <InfoRow
                           label="叙事职责"

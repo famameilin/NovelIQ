@@ -148,7 +148,7 @@ export async function getForeshadowingThreads(
 export async function getGraph(
   novelId: string,
   taskId: string,
-  options?: { chapterId?: number; graphVersionId?: string }
+  options?: { chapterId?: number }
 ): Promise<GraphData> {
   const { data } = await apiClient.get<GraphData>(
     `/api/novels/${novelId}/graph`,
@@ -156,7 +156,6 @@ export async function getGraph(
       params: {
         task_id: taskId,
         ...(options?.chapterId != null ? { chapter_id: options.chapterId } : {}),
-        ...(options?.graphVersionId ? { graph_version_id: options.graphVersionId } : {}),
       },
     }
   );

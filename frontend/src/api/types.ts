@@ -172,10 +172,6 @@ export interface BookAggregateStats {
   chapter_pivot_rate: number | null;
   chapter_cliffhanger_rate: number | null;
   chapter_emotional_valence_share: Record<string, number>;
-  analysis_contract_version: string;
-  paragraph_splitter_version: string;
-  metric_version: string;
-  curve_version: string;
 }
 
 export interface ChapterMetricsResponse {
@@ -196,8 +192,6 @@ export interface GlobalStats {
   rhythm_std?: number | null;
   rhythm_max?: number | null;
   rhythm_min?: number | null;
-  global_avg_sent_len?: number | null;
-  global_avg_ttr?: number | null;
 }
 
 export interface ChapterCharacter {
@@ -285,8 +279,6 @@ export interface Topic {
 // 诊断
 
 export interface DiagnosisResult {
-  rerun_required?: boolean;
-  rerun_reason?: string | null;
   genre_labels?: DiagnosisGenreLabel[] | null;
   style_labels?: DiagnosisStyleLabel[] | null;
   foreshadow_expectation?: number | null;
@@ -337,14 +329,13 @@ export interface GraphNode {
   // 2026-08-13 P2-5: 后端可能下发 null（生命周期数据缺失），放宽为可空
   first_seen_chapter: number | null;
   last_seen_chapter: number | null;
-  state_revision: number;
+  state_chapter_id: number | null;
   state: Record<string, unknown>;
 }
 
 export interface GraphEdge {
   relation_id: string;
-  relation_version_id: number;
-  relation_revision: number;
+  state_chapter_id: number;
   source_entity_id: number;
   target_entity_id: number;
   source_name: string;
@@ -360,18 +351,14 @@ export interface GraphEdge {
 export interface GraphChange {
   change_id: string;
   change_kind: "state" | "relation";
-  graph_version_id: string;
   chapter_id: number;
   chapter_order: number;
   fact_id: string;
-  fact_revision: number;
   effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
   entity_id?: number | null;
   entity_name?: string | null;
   relation_id?: string | null;
-  relation_version_id?: number | null;
-  relation_revision?: number | null;
   from_entity_id?: number | null;
   to_entity_id?: number | null;
   from_name?: string | null;
@@ -391,7 +378,6 @@ export interface GraphChangesPageInfo {
 }
 
 export interface GraphData {
-  graph_version_id: string;
   chapter_id: number;
   chapter_order: number;
   first_chapter_id: number;
@@ -431,17 +417,13 @@ export interface PlotFlags {
 export interface TimelineGraphChange {
   change_id: string;
   change_kind: "state" | "relation";
-  graph_version_id: string;
   chapter_id: number;
   fact_id: string;
-  fact_revision: number;
   effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
   entity_id?: number | null;
   entity_name?: string | null;
   relation_id?: string | null;
-  relation_version_id?: number | null;
-  relation_revision?: number | null;
   from_char?: string | null;
   to_char?: string | null;
   relation_type?: string | null;

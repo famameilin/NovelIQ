@@ -15,7 +15,6 @@ import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotComplet
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
-import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import {
   TopicWordCloud,
   TopicBarChart,
@@ -79,10 +78,6 @@ export function TopicsPage() {
   });
 
   const diagnosis = diagnosisQuery.data;
-  const diagnosisRequiresRerun =
-    diagnosisQuery.isSuccess &&
-    diagnosis != null &&
-    (diagnosis.rerun_required === true || !hasCompleteFocusContract(diagnosis));
   const topicLabels = diagnosis?.topic_labels;
 
   const topics: Topic[] = useMemo(() => {
@@ -106,7 +101,7 @@ export function TopicsPage() {
   const analysisFailed =
     getAnalysisNotCompleteRunStatus(topicsQuery.error) === "failed" ||
     getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed";
-  const isError = (topicsQuery.isError || diagnosisQuery.isError) && !diagnosisRequiresRerun && !isAnalysisNotComplete;
+  const isError = (topicsQuery.isError || diagnosisQuery.isError) && !isAnalysisNotComplete;
   const errors = [topicsQuery.error, diagnosisQuery.error].filter(Boolean);
   const error = errors[0];
 
@@ -167,25 +162,6 @@ export function TopicsPage() {
               </DashboardCardShell>
             </motion.div>
           </div>
-        </motion.div>
-      );
-    }
-
-    if (diagnosisRequiresRerun) {
-      return (
-        <motion.div variants={itemVariants}>
-          <DashboardCardShell
-            title="主题结果需要重跑"
-            icon={<AlertCircle className="h-4 w-4" />}
-            accent="chart-5"
-            className="min-h-[240px]"
-            bodyClassName="items-center justify-center gap-3 text-center"
-          >
-            <AlertCircle className="h-12 w-12 text-chart-negative" />
-            <p className="text-sm text-text-muted">
-              当前任务的 diagnosis 焦点合同已失效，主题命名结果不再可信，请重新分析后再查看主题页。
-            </p>
-          </DashboardCardShell>
         </motion.div>
       );
     }

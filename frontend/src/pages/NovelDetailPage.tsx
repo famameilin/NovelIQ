@@ -14,7 +14,7 @@ import {
   getDiagnosis,
   getEmotionTrend,
 } from "@/api/results";
-import { isDiagnosisRerunRequiredError, isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import {
   createAnalysisTask,
@@ -37,7 +37,6 @@ import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
 import { AnalysisProgressPanel } from "@/components/analysis/AnalysisProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -118,17 +117,6 @@ function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
         {isAnalyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         {isAnalyzing ? "正在创建分析任务..." : "开始分析"}
       </Button>
-    </div>
-  );
-}
-
-function RerunRequiredState() {
-  return (
-    <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
-      <p className="text-base font-semibold text-text">当前结果需要重新分析</p>
-      <p className="text-sm text-text-muted">
-        该任务的 diagnosis 焦点合同已失效，当前仪表盘结果不再可信，请重新分析后再查看。
-      </p>
     </div>
   );
 }
@@ -353,13 +341,7 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
-  const diagnosis = diagnosisQuery.data;
-  const diagnosisRequiresRerun =
-    diagnosisQuery.isSuccess &&
-    diagnosis != null &&
-    (diagnosis.rerun_required === true || !hasCompleteFocusContract(diagnosis));
-  const isTopicsRerunError = isDiagnosisRerunRequiredError(topicsQuery.error);
-  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError && !diagnosisRequiresRerun;
+  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError;
 
   const allMetricsLoaded =
     narrativeQuery.data &&
@@ -392,7 +374,7 @@ export function NovelDetailPage() {
     characterQuery.isError ||
     styleQuery.isError ||
     chapterMetricsQuery.isError ||
-    (topicsQuery.isError && !(diagnosisRequiresRerun && isTopicsRerunError)) ||
+    topicsQuery.isError ||
     diagnosisQuery.isError ||
     emotionTrendQuery.isError;
 
@@ -484,10 +466,8 @@ export function NovelDetailPage() {
         </div>
       )}
 
-      {!effectiveIsAnalyzing && diagnosisRequiresRerun && !isLoading && storeTaskId && <RerunRequiredState />}
-
       {/* 仅在未分析中时显示主内容 */}
-      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && !diagnosisRequiresRerun && (
+      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
             <div className="h-full min-h-0 overflow-y-auto pr-1">
