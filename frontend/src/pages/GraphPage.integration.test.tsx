@@ -99,7 +99,6 @@ vi.mock("@/api/analysis", () => ({
 // 2026-08-07 用于构造真实图谱工作区所需的最小章节快照
 function createGraphData(): GraphData {
   return {
-    graph_version_id: "graph-version-1",
     chapter_id: 1,
     chapter_order: 1,
     first_chapter_id: 1,
@@ -111,7 +110,7 @@ function createGraphData(): GraphData {
         entity_type: "character",
         first_seen_chapter: 1,
         last_seen_chapter: 8,
-        state_revision: 1,
+        state_chapter_id: 1,
         state: { primary_role_function: "主角" },
       },
       {
@@ -120,15 +119,14 @@ function createGraphData(): GraphData {
         entity_type: "character",
         first_seen_chapter: 2,
         last_seen_chapter: 8,
-        state_revision: 1,
+        state_chapter_id: 1,
         state: {},
       },
     ],
     edges: [
       {
         relation_id: "relation-1",
-        relation_version_id: 1,
-        relation_revision: 1,
+        state_chapter_id: 1,
         source_entity_id: 1,
         target_entity_id: 2,
         source_name: "顾霜",
