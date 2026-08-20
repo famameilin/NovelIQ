@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.config import settings
+from src.storage.path_resolver import resolve_model_dir
 from src.storage.repositories import ParagraphRepository
 
 
@@ -102,17 +102,33 @@ async def run_topic_model(
     preprocessor = TopicPreprocessor()
     tokenized_docs = preprocessor.preprocess_documents([row.text for row in paragraph_rows])
 
-    # 训练文档：排除预处理后空 token 且段落 token_count < 阈值的短段（§11.1 训练可排除短段）
+    # 训练文档同时使用预处理结果和原始段落 token_count，分别表达可建模性与业务长度阈值
     min_train_tokens = settings.topic_model.min_paragraph_train_tokens
+    filtered_empty = sum(1 for doc in tokenized_docs if not doc)
+    filtered_short = sum(
+        1
+        for doc, row in zip(tokenized_docs, paragraph_rows, strict=True)
+        if doc and row.token_count < min_train_tokens
+    )
     valid_docs = [
         doc
         for doc, row in zip(tokenized_docs, paragraph_rows, strict=True)
         if doc and row.token_count >= min_train_tokens
     ]
+    logger.info(
+        "训练文档筛选：总段落={}, 预处理后为空={}, 原始 token_count 低于阈值={}, 有效训练文档={}",
+        total_paragraphs,
+        filtered_empty,
+        filtered_short,
+        len(valid_docs),
+    )
 
     if not valid_docs:
-        logger.warning("no valid tokens after preprocessing")
-        logger.info("No valid tokens after preprocessing.")
+        logger.warning(
+            "没有满足 Paragraph LDA 训练条件的文档：预处理后为空={}, 原始 token_count 低于阈值={}",
+            filtered_empty,
+            filtered_short,
+        )
         return 0, 0
 
     # 2026-08-16 N2：未显式指定 num_topics 时按训练文档数缩放，
@@ -137,20 +153,20 @@ async def run_topic_model(
     logger.info(f"LDA model trained with {topic_model.num_topics} topics")
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
 
-    # 推断覆盖所有预处理后有 token 的段落（含训练排除的短段）
+    # 推断覆盖所有预处理后有 token 的段落，权重分母使用段落事实源的原始 token_count
     topic_rows: list[tuple[int, int, float, int]] = []
     for row, tokens in zip(paragraph_rows, tokenized_docs, strict=True):
         if not tokens:
             continue
         results = topic_model.infer_document_topics(tokens, top_n=top_n)
         for result in results:
-            topic_rows.append((row.paragraph_id, result.topic_id, result.weight, len(tokens)))
+            topic_rows.append((row.paragraph_id, result.topic_id, result.weight, row.token_count))
 
     paragraph_repo.insert_paragraph_topics(run_id, topic_rows)
     logger.info(f"inserted {len(topic_rows)} topic assignments")
 
     # 保存主题模型到磁盘
-    model_dir = Path("models") / "topic" / run_id
+    model_dir = resolve_model_dir(run_id)
     trainer.save_model(topic_model, model_dir)
     logger.info(f"saved topic model to {model_dir}")
 
