@@ -103,7 +103,7 @@
       "alpha": "auto",
       "eta": "auto",
       "random_state": 42,
-      "chunksize": 2000,
+      "lda_batch_size": 2000,
       "minimum_probability": 0.01,
       "no_below": 5,
       "no_above": 0.5

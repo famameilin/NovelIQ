@@ -22,7 +22,7 @@ class LDAConfig:
     alpha: str | None = None
     eta: str | None = None
     random_state: int | None = None
-    chunksize: int | None = None
+    lda_batch_size: int | None = None
     minimum_probability: float | None = None
 
     def __post_init__(self) -> None:
@@ -38,8 +38,8 @@ class LDAConfig:
             self.eta = settings.topic_model.lda.eta
         if self.random_state is None:
             self.random_state = settings.topic_model.lda.random_state
-        if self.chunksize is None:
-            self.chunksize = settings.topic_model.lda.chunksize
+        if self.lda_batch_size is None:
+            self.lda_batch_size = settings.topic_model.lda.lda_batch_size
         if self.minimum_probability is None:
             self.minimum_probability = settings.topic_model.lda.minimum_probability
 
@@ -93,7 +93,8 @@ class LDATrainer:
             alpha=self._config.alpha,
             eta=self._config.eta,
             random_state=self._config.random_state,
-            chunksize=self._config.chunksize,
+            # gensim 的底层接口仍使用 chunksize，本模块配置契约使用 lda_batch_size
+            chunksize=self._config.lda_batch_size,
             minimum_probability=self._config.minimum_probability,
         )
         logger.info("LDA训练完成")

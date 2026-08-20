@@ -40,7 +40,7 @@ class LdaSettings:
     alpha: str = "auto"
     eta: str = "auto"
     random_state: int = 42
-    chunksize: int = 2000
+    lda_batch_size: int = 2000
     minimum_probability: float = 0.01
     no_below: int = 5
     no_above: float = 0.5
@@ -125,11 +125,15 @@ def _parse_lda_settings(data: dict[str, Any] | None) -> LdaSettings:
     """解析 LDA 公共参数"""
     if not data:
         return LdaSettings()
+    if "chunksize" in data:
+        raise ValueError(
+            "topic_model.lda.chunksize 已移除，请使用 topic_model.lda.lda_batch_size"
+        )
     return LdaSettings(
         alpha=data.get("alpha", "auto"),
         eta=data.get("eta", "auto"),
         random_state=data.get("random_state", 42),
-        chunksize=data.get("chunksize", 2000),
+        lda_batch_size=data.get("lda_batch_size", 2000),
         minimum_probability=data.get("minimum_probability", 0.01),
         no_below=data.get("no_below", 5),
         no_above=data.get("no_above", 0.5),
