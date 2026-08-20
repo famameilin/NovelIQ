@@ -734,61 +734,6 @@ class AnnotationToolLedger:
                         f"(chapter_order={current_order}, char_start={effect_start})"
                     )
 
-    def _validate_domain_endpoints(
-        self,
-        domain: str,
-        payload: Any,
-        *,
-        entity_types: dict[str, EntityType],
-    ) -> None:
-        """2026-08-20 用于在单个领域写入时内联校验事实端点，一次返回全部错误（优化：扁平化内联验证）"""
-        errors: list[str] = []
-
-        # 2026-08-20 内联实体校验逻辑，避免多层函数调用
-        def check_entity(name: str, expected_types: tuple[EntityType, ...] | None, label: str, index: int) -> None:
-            key = unicodedata.normalize("NFC", name).strip().casefold()
-            resolved_key = key
-            if self.graph is not None:
-                resolved_key = _norm_graph_name(self.graph.resolve_name(name))
-            actual_type = entity_types.get(resolved_key) or entity_types.get(key)
-            if actual_type is None:
-                errors.append(
-                    f"[{index}] {label} 未在当前 chunk 的 write_entities 中声明: {name}"
-                    "（请先在 write_entities 声明该实体，或改用已登记实体名）"
-                )
-                return
-            if expected_types is not None and actual_type not in expected_types:
-                errors.append(
-                    f"[{index}] {label} 端点类型必须属于 {list(expected_types)}，"
-                    f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
-                    "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
-                )
-
-        if domain == "character_observations":
-            for index, item in enumerate(payload):
-                check_entity(item.character, ("character",), "character_observation.character", index)
-        elif domain == "dialogues":
-            for index, item in enumerate(payload):
-                if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
-                    check_entity(item.speaker, ("character",), "dialogue.speaker", index)
-        elif domain == "events":
-            for index, item in enumerate(payload):
-                for participant in item.participants:
-                    expected: tuple[EntityType, ...] | None = (
-                        ("location",)
-                        if participant.role == "地点"
-                        else None
-                    )
-                    check_entity(participant.entity, expected, "event.participant.entity", index)
-        elif domain == "relations":
-            for index, item in enumerate(payload):
-                definition = RELATION_DEFINITIONS[str(item.relation_type)]
-                check_entity(item.from_entity, definition["from_types"], "relation.from_entity", index)
-                check_entity(item.to_entity, definition["to_types"], "relation.to_entity", index)
-
-        if errors:
-            raise ValueError(f"{domain} 校验失败: " + "；".join(errors))
-
     def _validate_domain_duplicates(self, payloads: dict[str, Any]) -> None:
         """2026-08-07 用于拒绝当前 chunk 各领域的重复语义事实"""
         keys_by_domain: dict[str, list[tuple[Any, ...]]] = {
