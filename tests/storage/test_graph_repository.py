@@ -183,7 +183,8 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
     repository = GraphRepository(db_session)
     changes, total = repository.fetch_changes(run_id, chapter_id=2)
 
-    assert total == len(changes) == 2
+    # 一个角色观察包含 role/action/emotion 三个独立状态变化，加上关系断裂
+    assert total == len(changes) == 4
     assert {row.change_kind for row in changes} == {"state", "relation"}
     assert all(row.chapter_id == 2 for row in changes)
 

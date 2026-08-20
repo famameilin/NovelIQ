@@ -236,12 +236,12 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     }
     assert all(fact.source_kind == "annotation" for fact in facts)
     relation = next(fact for fact in facts if fact.content["kind"] == "relation")
-    assert relation.payload_path == "chunks/1/relation/0"
+    assert relation.payload_path == "chunks/1/relation/1"
     assert relation.fact_id == stable_annotation_fact_id(
         row.annotation_id,
         1,
         "relation",
-        0,
+        1,
     )
     dialogue = db_session.execute(
         select(DialogueRecord).where(DialogueRecord.run_id == run_id)
@@ -497,8 +497,9 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
             select(EntityState).where(EntityState.run_id == run_id)
         ).scalars()
     )
-    assert len(state_rows) == 1
-    assert state_rows[0].state == {
+    assert len(state_rows) == 2
+    latest_state = max(state_rows, key=lambda row: row.chapter_id)
+    assert latest_state.state == {
         "entity_type": "character",
         "status": "active",
         "grade": "灵品",
@@ -556,9 +557,10 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
             select(EntityState).where(EntityState.run_id == run_id)
         ).scalars()
     )
-    assert len(state_rows) == 1
-    assert state_rows[0].chapter_id == 1
-    assert state_rows[0].state == {
+    assert len(state_rows) == 2
+    latest_state = max(state_rows, key=lambda row: row.chapter_id)
+    assert latest_state.chapter_id == 2
+    assert latest_state.state == {
         "entity_type": "character",
         "grade": "灵品",
     }
@@ -849,7 +851,7 @@ def test_persist_writes_event_shadow_node_with_deterministic_id(db_session) -> N
     assert node.tree_id == "tree-main"
     assert node.cause_role == "root"
     assert node.source_kind == "annotation"
-    assert node.payload_path == "chunks/1/event/1"
+    assert node.payload_path == "chunks/1/events/1"
     assert len(node.evidence) == 1
     assert node.evidence[0]["paragraph_ids"] == [0]
 
