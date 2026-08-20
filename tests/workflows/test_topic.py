@@ -18,8 +18,7 @@ CLI topic model 模块测试（段落粒度，设计 §11.1）
 
 修改时间: 2026-08-14
 任务: paragraph-granularity
-修改内容: 主题文档粒度由 chunk 改为段落（paragraphs 是唯一事实源），
-        写入 paragraph_topics 而非 chunk_topics
+修改内容: 主题文档使用段落（paragraphs 是唯一事实源），写入 paragraph_topics
 """
 
 import sys
@@ -70,9 +69,9 @@ class TestTopicModel:
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
 
     def _create_paragraphs(self, paragraph_count: int) -> None:
-        """每个 chunk 一个自然段：插入 chunks + paragraphs（段落事实源）"""
+        """每个章节插入一个段落，构造 paragraphs 唯一事实源测试数据"""
         chapter_repo = ChapterRepository(self.db_session)
-        chunks = [
+        chapters = [
             Chunk(
                 index=i,
                 start=i * 1000,
@@ -82,9 +81,9 @@ class TestTopicModel:
             )
             for i in range(paragraph_count)
         ]
-        chapter_repo.insert_chapter_texts(self.run_id, chunks)
+        chapter_repo.insert_chapter_texts(self.run_id, chapters)
 
-        spans = [replace(span, token_count=len(tokenize(span.text))) for span in split_chunk_paragraphs(chunks)]
+        spans = [replace(span, token_count=len(tokenize(span.text))) for span in split_chunk_paragraphs(chapters)]
         ParagraphRepository(self.db_session).insert_paragraphs(self.run_id, spans)
 
     def _count_paragraph_topics(self) -> int:
@@ -115,6 +114,54 @@ class TestTopicModel:
         topic_rows = ParagraphRepository(self.db_session).fetch_paragraph_topics(self.run_id)
         assert len(topic_rows) > 0
         assert all(row.inference_token_count > 0 for row in topic_rows)
+
+        paragraph_rows = ParagraphRepository(self.db_session).fetch_paragraph_rows(self.run_id)
+        token_counts = {row.paragraph_id: row.token_count for row in paragraph_rows}
+        assert all(row.inference_token_count == token_counts[row.paragraph_id] for row in topic_rows)
+
+    @pytest.mark.asyncio()
+    async def test_short_paragraph_is_inferred_but_excluded_from_training(self, monkeypatch) -> None:
+        self._create_paragraphs(2)
+        paragraph_repo = ParagraphRepository(self.db_session)
+        rows = list(paragraph_repo.fetch_paragraph_rows(self.run_id))
+        short_row = rows[0]
+        self.db_session.execute(
+            text(
+                "UPDATE paragraphs SET token_count = :token_count "
+                "WHERE run_id = :run_id AND paragraph_id = :paragraph_id"
+            ),
+            {"token_count": 1, "run_id": self.run_id, "paragraph_id": short_row.paragraph_id},
+        )
+
+        captured_docs: list[list[list[str]]] = []
+
+        from src.topic.lda_model import LDATrainer
+
+        original_train = LDATrainer.train
+
+        def capture_train(self, tokenized_docs, *args, **kwargs):
+            """2026-08-20 捕获实际送入 LDA 训练的段落文档"""
+            captured_docs.append(tokenized_docs)
+            return original_train(self, tokenized_docs, *args, **kwargs)
+
+        monkeypatch.setattr(LDATrainer, "train", capture_train)
+        paragraphs, topics = await run_topic_model(
+            run_id=self.run_id,
+            session=self.db_session,
+            num_topics=2,
+            passes=1,
+            iterations=10,
+            top_n=2,
+        )
+
+        assert paragraphs == 2
+        assert topics == 2
+        assert len(captured_docs) == 1
+        assert len(captured_docs[0]) == 1
+        topic_rows = paragraph_repo.fetch_paragraph_topics(self.run_id)
+        short_topic_rows = [row for row in topic_rows if row.paragraph_id == short_row.paragraph_id]
+        assert short_topic_rows
+        assert all(row.inference_token_count == 1 for row in short_topic_rows)
 
     @pytest.mark.asyncio()
     async def test_topic_model_force_rerun(self) -> None:

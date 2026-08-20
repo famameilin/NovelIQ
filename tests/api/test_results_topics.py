@@ -9,7 +9,7 @@
 - 模型加载异常时降级为警告
 
 2026-08-12 创建，补齐该模块 17% 的低覆盖率。
-2026-08-14 切换段落：fetch_chunk_topics_agg → fetch_paragraph_topics_agg（weighted_total）。
+Paragraph-only 主题结果：fetch_paragraph_topics_agg 使用 weighted_total。
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.api.services.results_queries.topics import _fetch_topics
+import pytest
+
+from src.api.services.results_queries.topics import _fetch_topics, _validate_agg_row
 
 
 def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
@@ -75,7 +77,7 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
 
 
 def test_fetch_topics_uses_paragraph_aggregation_source() -> None:
-    """2026-08-14 切换段落：必须调用 fetch_paragraph_topics_agg 而非 chunk 版本"""
+    """2026-08-20 验证主题查询只调用段落聚合源"""
     repo = _make_repo([])
     _fetch_topics("run-source", repo)
     repo.fetch_paragraph_topics_agg.assert_called_once_with("run-source")
@@ -106,7 +108,7 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
     2026-08-13 P2：模型目录必须基于项目根推导（以 config/settings.json 为锚点），
     而不是相对 CWD 解析，避免服务启动目录不同导致词表/标签加载静默降级。
     """
-    from src.api.services.results_queries.topics import _PROJECT_ROOT
+    from src.storage.path_resolver import resolve_model_dir
 
     repo = _make_repo([_make_row(0, 100.0)])
     trainer = _make_trainer_with_model()
@@ -119,4 +121,17 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
 
     assert len(result) == 1
     loaded_dir = trainer.load_model.call_args.args[0]
-    assert loaded_dir == _PROJECT_ROOT / "models" / "topic" / "run-anchored"
+    assert loaded_dir == resolve_model_dir("run-anchored")
+
+
+def test_validate_agg_row_rejects_missing_fields() -> None:
+    """2026-08-20 验证聚合结果缺字段时快速失败"""
+    with pytest.raises(RuntimeError, match="缺少"):
+        _validate_agg_row(SimpleNamespace(topic_id=1))
+
+
+@pytest.mark.parametrize("weighted_total", [float("nan"), float("inf"), -1.0])
+def test_validate_agg_row_rejects_invalid_weight(weighted_total: float) -> None:
+    """2026-08-20 验证聚合权重必须是非负有限数"""
+    with pytest.raises(RuntimeError, match="weighted_total"):
+        _validate_agg_row(SimpleNamespace(topic_id=1, weighted_total=weighted_total))
