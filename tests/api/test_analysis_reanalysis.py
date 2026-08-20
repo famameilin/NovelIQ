@@ -165,28 +165,25 @@ class TestReanalysis:
 
         scheduled: dict[str, object] = {}
 
-        def _record_reanalysis(
+        def _record_schedule(
             self,
             scheduled_task_id: str,
             novel: dict,
+            task_kind: str,
             request: ReanalyzeRequest | None = None,
         ) -> None:
             scheduled["task_id"] = scheduled_task_id
             scheduled["novel_id"] = novel["novel_id"]
+            scheduled["task_kind"] = task_kind
             scheduled["request"] = request
 
-        def _unexpected_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
-            raise AssertionError(f"resume 错误走到了 analysis 调度: {scheduled_task_id}")
-
-        with (
-            patch.object(analysis_mod.AnalysisService, "_schedule_reanalysis_task", new=_record_reanalysis),
-            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_unexpected_analysis),
-        ):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
 
         assert resume_response.status_code == 200
         assert scheduled["task_id"] == task_id
         assert scheduled["novel_id"] == novel_id
+        assert scheduled["task_kind"] == "reanalysis"
         assert isinstance(scheduled["request"], ReanalyzeRequest)
         restored_request = scheduled["request"]
         assert restored_request == expected_request
