@@ -1,5 +1,6 @@
 // 2026-04-23，任务：复杂度与耦合审查 P1
 // 把 TimelineTrack 的 SVG path 生成与张力插值抽成纯函数，便于单独测试
+// 2026-08-20 事件森林：getTrackPositionPx 对 progress∈[0,1] 仍有效，不强耦合旧 progress 排序；均匀排布由 layout 层按 derived_event_order 负责
 
 export interface TimelineTensionPath {
   linePath: string;

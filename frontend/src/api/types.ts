@@ -391,9 +391,7 @@ export interface GraphChangesPageResponse {
   page_info: GraphChangesPageInfo;
 }
 
-// 时间轴
-
-// 更新 Timeline 类型定义，与后端 API 响应结构对齐
+// 时间轴 — 2026-08-20 事件森林一树一节点新合同
 
 export interface TimelineMeta {
   novel_id: string;
@@ -408,79 +406,82 @@ export interface TimelinePhase {
   ratio: number;
 }
 
-export interface PlotFlags {
-  is_pivot: boolean;
-  is_cliffhanger: boolean;
-  tension_percentile: number;
-}
+// ── 事件森林新合同（一树一节点）与后端 src/api/models/event_timeline.py 严格对齐 ──
 
-export interface TimelineGraphChange {
-  change_id: string;
-  change_kind: "state" | "relation";
-  chapter_id: number;
-  fact_id: string;
-  effective_chapter_id: number;
-  changes: Array<Record<string, unknown>>;
+export interface TimelineEventParticipant {
+  name: string;
+  role: string;
   entity_id?: number | null;
-  entity_name?: string | null;
-  relation_id?: string | null;
-  from_char?: string | null;
-  to_char?: string | null;
-  relation_type?: string | null;
-  relation_change_kind?: string | null;
-  directionality?: "directed" | "bidirectional" | null;
+  entity_type?: string | null;
+  // 透传保留未知字段
+  [key: string]: unknown;
 }
 
-export interface LifecycleTimelineEvent {
-  entity_id: number;
-  character_name: string;
-  lifecycle_type: "entry" | "exit";
+export interface TimelineEventSecondaryGroup {
+  target_event_id: string;
+  branch: string[];
 }
 
-export interface TimelineNode {
-  node_id: string;
-  anchor_chapter_id: number;
-  progress: number;
-  importance_score: number;
-  level: 1 | 2 | 3;
+export interface TimelineEventNode {
+  tree_id: string;
+  root_event_id: string;
+  title?: string | null;
   summary: string;
-  characters: string[];
-  phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "state" | "relation" | "lifecycle";
-  node_subtype: "plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract";
-  score_breakdown: Record<string, number>;
-  plot_flags?: PlotFlags | null;
-  graph_changes?: TimelineGraphChange[] | null;
-  lifecycle_events?: LifecycleTimelineEvent[] | null;
-}
-
-export interface TimelineCompositeNode {
-  node_id: string;
   anchor_chapter_id: number;
+  anchor_chapter_order: number;
   start_chapter_id: number;
   end_chapter_id: number;
-  progress: number;
   start_progress: number;
   end_progress: number;
+  progress: number;
+  chapter_ids: number[];
+  char_start: number;
+  char_end: number;
+  participants: TimelineEventParticipant[];
+  character_names: string[];
   importance_score: number;
   level: 1 | 2 | 3;
-  summary: string;
-  characters: string[];
   phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "state" | "relation" | "lifecycle";
-  node_subtypes: ("plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract")[];
-  representative_node_id: string;
-  child_node_ids: string[];
+  main_chain: string[];
+  secondary_groups: TimelineEventSecondaryGroup[];
+  causal_in: number;
+  causal_out: number;
+  node_type: "event";
 }
 
-export interface TimelineResponse {
+export interface TimelineEventCausalEdge {
+  edge_id: string;
+  edge_type: "causal";
+  source_event_id: string;
+  target_event_id: string;
+  source_chapter_id: number;
+  target_chapter_id: number;
+  is_active: boolean;
+  evidence: Array<Record<string, unknown>>;
+  expired_at?: string | null;
+}
+
+export interface TimelineEventForeshadowingEdge {
+  setup_id: string;
+  setup_event_id: string;
+  payoff_event_id?: string | null;
+  first_chapter_id: number;
+  last_chapter_id: number;
+  setup_summary: string;
+  status: string;
+  active: boolean;
+}
+
+export interface EventTimelineResponse {
   meta: TimelineMeta;
   phases: TimelinePhase[];
-  composite_nodes: TimelineCompositeNode[];
-  atomic_nodes: TimelineNode[];
-  tension_curve?: number[];
-  /** 四阶段划分依据：张力峰 / 固定比例估计 */
-  phase_basis?: "tension" | "fixed_percentage";
+  nodes: TimelineEventNode[];
+  causal_edges: TimelineEventCausalEdge[];
+  foreshadowing_edges: TimelineEventForeshadowingEdge[];
+  derived_event_order: string[];
+  tension_curve?: number[] | null;
+  phase_basis: "tension" | "fixed_percentage";
+  total_chapters: number;
 }
 
 // 指标

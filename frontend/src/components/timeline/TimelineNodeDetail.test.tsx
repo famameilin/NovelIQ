@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TimelineNodeDetail } from "@/components/timeline/TimelineNodeDetail";
-import type { TimelineCompositeNode, TimelineNode } from "@/api/types";
+import type { TimelineEventNode, TimelineEventCausalEdge } from "@/api/types";
 
 const navigateMock = vi.fn();
 
@@ -39,279 +39,123 @@ vi.mock("framer-motion", () => ({
   },
 }));
 
-// 2026-08-07 用于构造时间轴节点消费的稳定图谱变化合同
-function createRelationGraphChange(changeId = "relation:9002") {
+function createEventNode(overrides?: Partial<TimelineEventNode>): TimelineEventNode {
   return {
-    change_id: changeId,
-    change_kind: "relation" as const,
-    chapter_id: 2,
-    fact_id: `fact:${changeId}`,
-    effective_chapter_id: 12,
-    changes: [{ change_kind: "break" }],
-    relation_id: "relation:88",
-    from_char: "顾承渊",
-    to_char: "苏映雪",
-    relation_type: "盟友",
-    relation_change_kind: "break",
-    directionality: "directed" as const,
-  };
-}
-
-function createRelationNode(): TimelineNode {
-  return {
-    node_id: "relation:9002",
-    anchor_chapter_id: 12,
-    progress: 0.6,
-    importance_score: 8,
+    tree_id: "tree:1",
+    root_event_id: "event:1:root",
+    title: "少年初入修炼之路",
+    summary: "树 1 包含主链 2 环与旁支 1 组，横跨第 1-5 章。",
+    anchor_chapter_id: 1,
+    anchor_chapter_order: 1,
+    start_chapter_id: 1,
+    end_chapter_id: 5,
+    start_progress: 0.01,
+    end_progress: 0.05,
+    progress: 0.01,
+    chapter_ids: [1, 2, 3, 4, 5],
+    char_start: 0,
+    char_end: 1200,
+    participants: [
+      { name: "萧炎", role: "protagonist", entity_id: 1, entity_type: "character" },
+      { name: "药老", role: "supporting", entity_id: 2, entity_type: "character" },
+    ],
+    character_names: ["萧炎", "药老"],
+    importance_score: 8.2,
     level: 1,
-    summary: "顾承渊与苏映雪关系断裂",
-    characters: ["顾承渊", "苏映雪"],
-    phase_name: "高潮期",
-    node_type: "relation",
-    node_subtype: "break",
-    score_breakdown: { change_type_weight: 2.6, pair_importance: 1.2 },
-    graph_changes: [createRelationGraphChange()],
-  };
-}
-
-function createLifecycleNode(): TimelineNode {
-  return {
-    node_id: "lifecycle:entry:2:3",
-    anchor_chapter_id: 3,
-    progress: 0.15,
-    importance_score: 6,
-    level: 1,
-    summary: "苏映雪首次登场",
-    characters: ["苏映雪"],
     phase_name: "引入期",
-    node_type: "lifecycle",
-    node_subtype: "entry",
-    score_breakdown: { character_importance: 2.2, entry_exit_bonus: 1.4 },
-    lifecycle_events: [
-      {
-        entity_id: 2,
-        character_name: "苏映雪",
-        lifecycle_type: "entry",
-      },
-    ],
+    main_chain: ["event:1:root", "event:1:main:1"],
+    secondary_groups: [{ target_event_id: "event:1:sec:1", branch: ["event:1:sec:1:b1"] }],
+    causal_in: 1,
+    causal_out: 1,
+    node_type: "event",
+    ...overrides,
   };
 }
 
-// 2026-08-07 用于验证实体状态变化也可稳定回跳到章节图
-function createStateNode(): TimelineNode {
-  return {
-    node_id: "state:12:9",
-    anchor_chapter_id: 9,
-    progress: 0.45,
-    importance_score: 7,
-    level: 1,
-    summary: "顾承渊从试探转为结盟",
-    characters: ["顾承渊"],
-    phase_name: "发展期",
-    node_type: "state",
-    node_subtype: "state",
-    score_breakdown: { state_change_weight: 2.1 },
-    graph_changes: [
-      {
-        change_id: "state:12:9",
-        change_kind: "state",
-        chapter_id: 2,
-        fact_id: "fact:state:12:9",
-        effective_chapter_id: 9,
-        changes: [{ field: "status", value: "结盟" }],
-        entity_id: 12,
-        entity_name: "顾承渊",
-      },
-    ],
-  };
+function createCausalEdges(): TimelineEventCausalEdge[] {
+  const expired = new Date(Date.now() - 86400000).toISOString();
+  return [
+    {
+      edge_id: "causal:external->event:1:root:inactive",
+      edge_type: "causal",
+      source_event_id: "event:external:root",
+      target_event_id: "event:1:root",
+      source_chapter_id: 1,
+      target_chapter_id: 1,
+      is_active: false,
+      evidence: [{ kind: "paragraph", paragraph_id: 102, excerpt: "已过期因果" }],
+      expired_at: expired,
+    },
+    {
+      edge_id: "causal:event:1:main:1->event:external:2:active",
+      edge_type: "causal",
+      source_event_id: "event:1:main:1",
+      target_event_id: "event:external:2",
+      source_chapter_id: 1,
+      target_chapter_id: 8,
+      is_active: true,
+      evidence: [{ kind: "paragraph", paragraph_id: 101, excerpt: "因果证据1" }],
+      expired_at: null,
+    },
+  ];
 }
 
-function createMultiRelationNode(): TimelineNode {
-  return {
-    node_id: "relation:multi",
-    anchor_chapter_id: 18,
-    progress: 0.9,
-    importance_score: 9,
-    level: 1,
-    summary: "多条关系同时变化",
-    characters: ["顾承渊", "苏映雪", "陆沉"],
-    phase_name: "收束期",
-    node_type: "relation",
-    node_subtype: "reinforce",
-    score_breakdown: { change_type_weight: 1.8, pair_importance: 1.9 },
-    graph_changes: [
-      {
-        ...createRelationGraphChange("relation:9101"),
-        to_char: "苏映雪",
-        relation_change_kind: "weaken",
-      },
-      {
-        ...createRelationGraphChange("relation:9102"),
-        to_char: "陆沉",
-        relation_type: "对手",
-        relation_change_kind: "reinforce",
-      },
-    ],
-  };
-}
-
-function createCompositeRelationNode(): TimelineCompositeNode {
-  return {
-    node_id: "composite:relation:12:0",
-    anchor_chapter_id: 12,
-    start_chapter_id: 12,
-    end_chapter_id: 13,
-    progress: 0.6,
-    start_progress: 0.6,
-    end_progress: 0.7,
-    importance_score: 8.5,
-    level: 1,
-    summary: "顾承渊与苏映雪关系连续恶化",
-    characters: ["顾承渊", "苏映雪"],
-    phase_name: "高潮期",
-    node_type: "relation",
-    node_subtypes: ["reinforce", "break"],
-    representative_node_id: "relation:9002",
-    child_node_ids: ["relation:9002", "relation:9101"],
-  };
-}
-
-describe("TimelineNodeDetail", () => {
+describe("TimelineNodeDetail (event forest)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("shows lifecycle guidance for lifecycle entry nodes", () => {
-    render(<TimelineNodeDetail node={createLifecycleNode()} atomicNodes={[createLifecycleNode()]} novelId="novel-1" taskId="task-a" />);
+  it("renders participants as dict and shows main_chain", () => {
+    const node = createEventNode();
+    render(<TimelineNodeDetail node={node} novelId="novel-1" taskId="task-a" causalEdges={[]} />);
 
-    expect(screen.getByText("这里表达的是 authority lifecycle 的稳定事件，不是页面侧临时推断结果。")).toBeInTheDocument();
-    expect(screen.getAllByText("苏映雪").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("萧炎").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("药老").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/event:1:root/)).toBeInTheDocument();
+    expect(screen.getByText(/event:1:main:1/)).toBeInTheDocument();
   });
 
-  it("does not send a chapter-only graph selection for lifecycle nodes", async () => {
-    const user = userEvent.setup();
+  it("renders secondary_groups", () => {
+    const node = createEventNode();
+    render(<TimelineNodeDetail node={node} novelId="novel-1" taskId="task-a" causalEdges={[]} />);
 
-    render(<TimelineNodeDetail node={createLifecycleNode()} atomicNodes={[createLifecycleNode()]} novelId="novel-1" taskId="task-a" />);
-
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
+    expect(screen.getAllByText(/event:1:sec:1/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/旁支分支/)).toBeInTheDocument();
   });
 
-  it("shows a state graph change and can jump back to graph", async () => {
-    const user = userEvent.setup();
+  it("renders causal edges and shows inactive with expired_at", () => {
+    const node = createEventNode();
+    const edges = createCausalEdges();
+    render(<TimelineNodeDetail node={node} novelId="novel-1" taskId="task-a" causalEdges={edges} />);
 
-    render(
-      <TimelineNodeDetail
-        node={createStateNode()}
-        atomicNodes={[createStateNode()]}
-        novelId="novel-1"
-        taskId="task-a"
-        selectedGraphChangeId="state:12:9"
-      />,
-    );
-
-    expect(screen.getByText("顾承渊状态更新")).toBeInTheDocument();
-    expect(screen.getByText("变化 state:12:9")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chapter=9&change_id=state%3A12%3A9",
-    );
+    // 因果边标题包含 入/出 计数
+    expect(screen.getByText(/因果边/)).toBeInTheDocument();
+    // inactive 徽标与过期时间
+    expect(screen.getByText("已失效")).toBeInTheDocument();
+    expect(screen.getByText(/失效于/)).toBeInTheDocument();
+    expect(document.body.textContent).toContain("event:1:root");
+    expect(screen.getByText("活跃")).toBeInTheDocument();
   });
 
-  it("highlights the selected graph change and can jump back to graph", async () => {
+  it("shows jump to evidence with tree_id", async () => {
     const user = userEvent.setup();
+    const node = createEventNode();
 
-    render(
-      <TimelineNodeDetail
-        node={createRelationNode()}
-        atomicNodes={[createRelationNode()]}
-        novelId="novel-1"
-        taskId="task-a"
-        selectedGraphChangeId="relation:9002"
-      />,
-    );
+    render(<TimelineNodeDetail node={node} novelId="novel-1" taskId="task-a" causalEdges={[]} />);
 
-    expect(screen.getByText("变化 relation:9002")).toBeInTheDocument();
-    expect(screen.getByText("directed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看证据" }));
 
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A9002",
-    );
+    expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining("tree%3A1"));
+    expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining("/novels/novel-1/timeline"));
+    expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining("task_id=task-a"));
   });
 
-  it("ignores an external change_id that does not belong to the current node", async () => {
-    const user = userEvent.setup();
+  it("handles node without secondary groups", () => {
+    const node = createEventNode({ secondary_groups: [] });
+    render(<TimelineNodeDetail node={node} novelId="novel-1" taskId="task-a" causalEdges={[]} />);
 
-    render(
-      <TimelineNodeDetail
-        node={createRelationNode()}
-        atomicNodes={[createRelationNode()]}
-        novelId="novel-1"
-        taskId="task-a"
-        selectedGraphChangeId="relation:9101"
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A9002",
-    );
-  });
-
-  it("does not send a graph auto-selection when the node contains multiple graph changes", async () => {
-    const user = userEvent.setup();
-
-    render(<TimelineNodeDetail node={createMultiRelationNode()} atomicNodes={[createMultiRelationNode()]} novelId="novel-1" taskId="task-a" />);
-
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
-  });
-
-  it("falls back to the node's only graph change when the url-level selection is absent", async () => {
-    const user = userEvent.setup();
-
-    render(<TimelineNodeDetail node={createRelationNode()} atomicNodes={[createRelationNode()]} novelId="novel-1" taskId="task-a" />);
-
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A9002",
-    );
-  });
-
-  it("shows composite child nodes and does not construct a fuzzy graph selection", async () => {
-    const user = userEvent.setup();
-    const onSelectAtomicNode = vi.fn();
-    const firstAtomicNode = createRelationNode();
-    const secondAtomicNode: TimelineNode = {
-      ...createRelationNode(),
-      node_id: "relation:9101",
-      anchor_chapter_id: 13,
-      graph_changes: [createRelationGraphChange("relation:9101")],
-    };
-
-    render(
-      <TimelineNodeDetail
-        node={createCompositeRelationNode()}
-        atomicNodes={[firstAtomicNode, secondAtomicNode]}
-        novelId="novel-1"
-        taskId="task-a"
-        onSelectAtomicNode={onSelectAtomicNode}
-      />,
-    );
-
-    expect(screen.getByText("复合节点包含的原子节点")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
-
-    await user.click(screen.getAllByRole("button", { name: "查看原子节点" })[0]!);
-    expect(onSelectAtomicNode).toHaveBeenCalledWith(firstAtomicNode);
+    expect(screen.getAllByText("萧炎").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/旁支分支.*无/)).toBeInTheDocument();
+    expect(screen.getByText("该树暂无旁支")).toBeInTheDocument();
   });
 });

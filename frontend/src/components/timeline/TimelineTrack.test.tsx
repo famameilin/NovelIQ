@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { TimelineNode, TimelinePhase } from "@/api/types";
+import type { TimelineEventNode, TimelinePhase } from "@/api/types";
 import { TimelineTrack } from "./TimelineTrack";
 
 vi.mock("framer-motion", () => ({
@@ -25,24 +25,32 @@ vi.mock("framer-motion", () => ({
   },
 }));
 
-function createNode(overrides: Partial<TimelineNode> = {}): TimelineNode {
+function createEventNode(overrides: Partial<TimelineEventNode> = {}): TimelineEventNode {
   return {
-    node_id: "plot:3",
+    tree_id: "evt-3",
+    root_event_id: "evt-3",
+    title: "白芷初遇",
+    summary: "白芷初遇",
     anchor_chapter_id: 3,
+    anchor_chapter_order: 3,
+    start_chapter_id: 3,
+    end_chapter_id: 3,
+    start_progress: 0.3,
+    end_progress: 0.3,
     progress: 0.3,
+    chapter_ids: [3],
+    char_start: 0,
+    char_end: 100,
+    participants: [],
+    character_names: ["白芷"],
     importance_score: 8,
     level: 1,
-    summary: "白芷初遇",
-    characters: ["白芷"],
     phase_name: "引入期",
-    node_type: "plot",
-    node_subtype: "plot",
-    score_breakdown: { tension: 1.1 },
-    plot_flags: {
-      is_pivot: false,
-      is_cliffhanger: false,
-      tension_percentile: 55,
-    },
+    main_chain: [],
+    secondary_groups: [],
+    causal_in: 0,
+    causal_out: 0,
+    node_type: "event",
     ...overrides,
   };
 }
@@ -58,7 +66,7 @@ function createPhases(): TimelinePhase[] {
 
 describe("TimelineTrack", () => {
   it("没有节点时会展示空态", () => {
-    render(<TimelineTrack nodes={[]} totalChapters={20} />);
+    render(<TimelineTrack nodes={[]} derivedOrder={[]} totalChapters={20} />);
 
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -66,14 +74,15 @@ describe("TimelineTrack", () => {
 
   it("会渲染节点卡片并把点击事件回传给上层", () => {
     const onNodeClick = vi.fn();
-    const node = createNode();
+    const node = createEventNode();
 
     render(
       <TimelineTrack
         nodes={[node]}
+        derivedOrder={[node.tree_id]}
         phases={createPhases()}
         activePhase="引入期"
-        selectedNodeId="plot:3"
+        selectedNodeId={node.tree_id}
         onNodeClick={onNodeClick}
         tensionCurve={[0.2, 0.5, 0.8]}
         totalChapters={20}
@@ -91,25 +100,28 @@ describe("TimelineTrack", () => {
     fireEvent.click(detailButton!);
 
     expect(onNodeClick).toHaveBeenCalledWith(node);
-    expect(screen.getByText("剧情节点")).toBeInTheDocument();
+    // 新合同事件节点默认展示为 事件节点/根因等，需兼容旧文案 "剧情节点" 已改为事件
+    expect(screen.getByText(/事件/)).toBeInTheDocument();
     expect(screen.getByText("第 3 章")).toBeInTheDocument();
     expect(document.querySelector("svg path")).toBeInTheDocument();
     expect(screen.getByTestId("timeline-card")).toBe(detailButton);
   });
 
-  it("按最终进度全局排序，并让奇偶卡严格交替使用第二层和第一层", () => {
+  it("按 derivedOrder 全局排序，并让奇偶卡严格交替使用第二层和第一层", () => {
     const nodes = [
-      createNode({ node_id: "plot:4", anchor_chapter_id: 4, progress: 0.4, summary: "顺序4" }),
-      createNode({ node_id: "plot:2", anchor_chapter_id: 2, progress: 0.2, summary: "顺序2" }),
-      createNode({ node_id: "plot:1", anchor_chapter_id: 1, progress: 0.1, summary: "顺序1" }),
-      createNode({ node_id: "plot:3", anchor_chapter_id: 3, progress: 0.3, summary: "顺序3" }),
+      createEventNode({ tree_id: "t4", summary: "顺序4", anchor_chapter_id: 4, progress: 0.4, start_progress: 0.4, end_progress: 0.4, chapter_ids: [4] }),
+      createEventNode({ tree_id: "t2", summary: "顺序2", anchor_chapter_id: 2, progress: 0.2, start_progress: 0.2, end_progress: 0.2, chapter_ids: [2] }),
+      createEventNode({ tree_id: "t1", summary: "顺序1", anchor_chapter_id: 1, progress: 0.1, start_progress: 0.1, end_progress: 0.1, chapter_ids: [1] }),
+      createEventNode({ tree_id: "t3", summary: "顺序3", anchor_chapter_id: 3, progress: 0.3, start_progress: 0.3, end_progress: 0.3, chapter_ids: [3] }),
     ];
+    const derivedOrder = ["t1", "t2", "t3", "t4"];
 
-    render(<TimelineTrack nodes={nodes} totalChapters={20} />);
+    render(<TimelineTrack nodes={nodes} derivedOrder={derivedOrder} totalChapters={20} />);
 
     const cards = screen.getAllByTestId("timeline-card");
     expect(cards).toHaveLength(4);
     expect(cards.map((card) => card.dataset.cardOrder)).toEqual(["1", "2", "3", "4"]);
+    // lane 仍按 orderIndex 奇偶交错
     expect(cards.map((card) => Number(card.dataset.lane))).toEqual([2, 1, 2, -1]);
     expect(screen.getAllByRole("button")).toHaveLength(4);
 
@@ -125,5 +137,31 @@ describe("TimelineTrack", () => {
     screen.getAllByTestId("timeline-connector").forEach((connector) => {
       expect(connector).toHaveAttribute("x1", connector.getAttribute("x2"));
     });
+  });
+
+  it("跨章区间渲染半透明带宽条", () => {
+    const crossNode = createEventNode({
+      tree_id: "cross",
+      summary: "跨章事件",
+      anchor_chapter_id: 2,
+      start_chapter_id: 2,
+      end_chapter_id: 5,
+      start_progress: 0.1,
+      end_progress: 0.4,
+      chapter_ids: [2, 3, 4, 5],
+      progress: 0.25,
+    });
+    const singleNode = createEventNode({
+      tree_id: "single",
+      summary: "单章事件",
+      anchor_chapter_id: 6,
+      progress: 0.6,
+      start_progress: 0.6,
+      end_progress: 0.6,
+      chapter_ids: [6],
+    });
+
+    render(<TimelineTrack nodes={[crossNode, singleNode]} derivedOrder={["cross", "single"]} totalChapters={20} />);
+    expect(screen.getByTestId("timeline-span")).toBeInTheDocument();
   });
 });
