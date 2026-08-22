@@ -124,19 +124,19 @@ class TestFlipSemantics:
 
 class TestAuditRegressions:
     def test_bu_mie_de_zui_hou_xi_wang(self, spec: NegationSpec) -> None:
-        """"不灭的最后希望"：否定与情绪词间隔过远，不翻转"""
+        """ "不灭的最后希望"：否定与情绪词间隔过远，不翻转"""
         assert _flipped("不灭的最后希望", "希望", spec) is False
 
     def test_mei_chajue_de_xingfen(self, spec: NegationSpec) -> None:
-        """"没察觉的兴奋"：间隔"察觉的"超 1 token，不翻转"""
+        """ "没察觉的兴奋"：间隔"察觉的"超 1 token，不翻转"""
         assert _flipped("没察觉的兴奋", "兴奋", spec) is False
 
     def test_bing_meiyou_huanhu_que_yue(self, spec: NegationSpec) -> None:
-        """"并没有…欢呼雀跃"：longest-match 单计，正确翻转"""
+        """ "并没有…欢呼雀跃"：longest-match 单计，正确翻转"""
         assert _flipped("他并没有为此欢呼雀跃", "欢呼雀跃", spec) is True
 
     def test_kan_dou_mei_kan_fa_dou(self, spec: NegationSpec) -> None:
-        """"看都没看跪在地上发抖"：否定距"发抖"过远，不翻转"""
+        """ "看都没看跪在地上发抖"：否定距"发抖"过远，不翻转"""
         assert _flipped("看都没看跪在地上发抖", "发抖", spec) is False
 
     def test_corpus_clause_initial_scope(self, spec: NegationSpec) -> None:
@@ -176,7 +176,7 @@ class TestAuditRegressions:
         assert _flipped("算盘没有躲，眼神中全是深深的悔恨与绝望", "绝望", spec) is False
 
     def test_henduo_guanyong_bingmeiyou(self, spec: NegationSpec) -> None:
-        """"并没有"入表后单计一次（不再与"并不"+"没有"双计）"""
+        """ "并没有"入表后单计一次（不再与"并不"+"没有"双计）"""
         spans = find_negation_spans("他并没有", spec)
         hard_hits = [s for s in spans if s.kind == "hard"]
         assert [s.word for s in hard_hits] == ["并没有"]

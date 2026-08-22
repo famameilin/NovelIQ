@@ -147,15 +147,9 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
     assert "FROM paragraph_embeddings JOIN paragraphs" in compiled_sql
     order_by_pos = compiled_sql.index("ORDER BY")
     # ORDER BY 是裸算子升序：1 - (embedding_vector <=> :q) 包裹表达式不在 ORDER BY 中
-    assert (
-        "(paragraph_embeddings.embedding_vector <=> :embedding_vector_1) ASC"
-        in compiled_sql[order_by_pos:]
-    )
+    assert "(paragraph_embeddings.embedding_vector <=> :embedding_vector_1) ASC" in compiled_sql[order_by_pos:]
     # 阈值下推：WHERE 直接比较裸距离 embedding_vector <=> :q <= :threshold
-    assert (
-        "(paragraph_embeddings.embedding_vector <=> :embedding_vector_1) <= :param_2"
-        in compiled_sql
-    )
+    assert "(paragraph_embeddings.embedding_vector <=> :embedding_vector_1) <= :param_2" in compiled_sql
     # similarity >= 0.7 即 distance <= 0.3（round 消除浮点噪声）
     assert statement.compile().params["param_2"] == 0.3
     assert [row.paragraph_id for row in results] == [5]

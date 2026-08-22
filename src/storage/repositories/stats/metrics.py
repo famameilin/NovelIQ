@@ -19,14 +19,7 @@ if TYPE_CHECKING:
 
 
 def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str, float | None]]) -> None:
-    """
-    插入全局统计数据
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        stats: 统计数据迭代器 (stat_name, stat_value)
-    """
+    """插入全局统计数据。"""
     stats_list = list(stats)
     if not stats_list:
         return
@@ -51,32 +44,14 @@ def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str
 
 
 def fetch_global_stats(session: Session, run_id: str) -> list[tuple[str, float | None]]:
-    """
-    获取全局统计数据
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        (stat_name, stat_value) 元组列表
-    """
+    """获取全局统计数据。"""
     stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(GlobalStats.run_id == run_id)
     result = session.execute(stmt)
     return [(row.stat_name, row.stat_value) for row in result.fetchall()]
 
 
 def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float | None]:
-    """
-    获取全局统计数据字典
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        统计名称到值的映射字典
-    """
+    """获取全局统计数据字典。"""
     stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(GlobalStats.run_id == run_id)
     result = session.execute(stmt).fetchall()
     return {row.stat_name: row.stat_value for row in result}
@@ -99,29 +74,7 @@ def insert_token_usage(
     reasoning_tokens: int | None = None,
     agent_turn_id: int | None = None,
 ) -> int | None:
-    """
-    插入 token 使用记录
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        novel_id: 小说ID
-        task_type: 任务类型
-        call_type: 调用类型
-        model: 模型名称
-        prompt_tokens: 提示 token 数
-        total_tokens: 总 token 数
-        completion_tokens: 完成 token 数（可选）
-        chapter_id: 分块ID（可选）
-        cache_read_tokens: 缓存命中 token 数，缺失记 0（无缓存证据 = 全量计费）
-        cost: 网关返回的费用，不估算
-        accounting_source: 记账来源（reported=实报 / estimated=tiktoken 估算）
-        reasoning_tokens: 推理 token 数（可选）
-        agent_turn_id: 关联 agent_turns.id（Agent 回合行一对一，可选）
-
-    Returns:
-        插入记录的ID
-    """
+    """插入 token 使用记录（cache_read_tokens 缺失记 0）。"""
     from datetime import datetime
 
     now = datetime.now().isoformat()
@@ -148,17 +101,7 @@ def insert_token_usage(
 
 
 def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
-    """
-    获取 token 使用统计
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        novel_id: 小说ID
-
-    Returns:
-        使用统计数据字典
-    """
+    """获取 token 使用统计。"""
     summary = _fetch_usage_summary(session, run_id, novel_id)
     by_task = _fetch_usage_by_task(session, run_id, novel_id)
     by_call_type = _fetch_usage_by_call_type(session, run_id, novel_id)
@@ -334,15 +277,7 @@ def _detect_token_coverage_gaps(
 
 
 def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:
-    """
-    修改时间: 2026-04-30
-    任务: diagnosis-current-contract
-    修改原因: `cloud_analysis` 持久化统一使用当前结构
-
-    插入云端分析结果
-
-    `cloud_analysis` 统一落库焦点合同字段，不再写入旧 `protagonist` 列
-    """
+    """按当前焦点合同写入云端分析结果"""
     arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
     genre_labels_json = json.dumps(list(analysis.genre_labels), ensure_ascii=False)
     style_labels_json = json.dumps(list(analysis.style_labels), ensure_ascii=False)
@@ -380,11 +315,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 
 
 def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
-    """
-    修改时间: 2026-04-30
-    任务: diagnosis-current-contract
-    修改原因: 读取层统一返回当前 `cloud_analysis` 结构
-    """
+    """读取当前云端分析结构"""
     stmt = (
         select(CloudAnalysis)
         .where(
@@ -398,12 +329,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
     result = session.execute(stmt).scalar_one_or_none()
 
     if result is None:
-        stmt = (
-            select(CloudAnalysis)
-            .where(CloudAnalysis.run_id == run_id)
-            .order_by(CloudAnalysis.id.desc())
-            .limit(1)
-        )
+        stmt = select(CloudAnalysis).where(CloudAnalysis.run_id == run_id).order_by(CloudAnalysis.id.desc()).limit(1)
         result = session.execute(stmt).scalar_one_or_none()
 
     if result is None:
@@ -443,17 +369,7 @@ def insert_global_context(
     world_setting: str,
     novel_title: str | None = None,
 ) -> None:
-    """
-    插入全局上下文
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        novel_id: 小说ID
-        core_characters: 核心角色
-        world_setting: 世界观设定
-        novel_title: 小说标题（可选）
-    """
+    """插入全局上下文。"""
     now = datetime.now().isoformat()
     stmt = (
         pg_insert(GlobalContext)
@@ -481,17 +397,7 @@ def insert_global_context(
 
 
 def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[str, str, str, str] | None:
-    """
-    获取全局上下文
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        novel_id: 小说ID
-
-    Returns:
-        (novel_title, core_characters, world_setting, updated_at) 元组，不存在则返回 None
-    """
+    """获取全局上下文。"""
     # 2026-08-14 D15：insert 按 novel_id upsert 并覆写 run_id（全局上下文只保留
     # 最新 run），读侧若再按 run_id 过滤，旧 run 会读不到上下文而视图不一致；
     # 统一只按 novel_id 读取（run_id 参数保留仅为调用方兼容）
@@ -510,15 +416,7 @@ def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[
 
 
 def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs: Any) -> None:
-    """
-    更新全局上下文
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        novel_id: 小说ID
-        **kwargs: 要更新的字段
-    """
+    """更新全局上下文（仅允许 core_characters / world_setting）。"""
     allowed_fields = {"core_characters", "world_setting"}
     update_data = {}
     for key, value in kwargs.items():
@@ -539,17 +437,7 @@ def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs
 
 
 def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | None:
-    """
-    获取小说标题
-
-    Args:
-        session: 数据库会话
-        novel_id: 小说ID
-        run_id: 运行ID
-
-    Returns:
-        小说标题，不存在则返回 None
-    """
+    """获取小说标题。"""
     stmt = (
         select(GlobalContext.novel_title)
         # 2026-08-14 D15：只按 novel_id 读取最新行

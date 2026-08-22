@@ -199,9 +199,7 @@ class TestResults:
         assert second_upload_response.status_code == 200
         second_novel_id = second_upload_response.json()["novel_id"]
 
-        response = api_client.get(
-            f"/api/novels/{second_novel_id}/chapter-annotations?task_id={first_task_id}"
-        )
+        response = api_client.get(f"/api/novels/{second_novel_id}/chapter-annotations?task_id={first_task_id}")
         assert response.status_code == 404
         assert "不属于小说" in response.json()["detail"]
 

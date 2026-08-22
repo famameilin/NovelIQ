@@ -49,9 +49,7 @@ def _annotation(
         )
     dialogues: list[BoundDialogue] = []
     if unresolved_dialogue:
-        candidate = next(
-            item for item in extract_dialogue_candidates(chunk_id, text) if item.content == "住手"
-        )
+        candidate = next(item for item in extract_dialogue_candidates(chunk_id, text) if item.content == "住手")
         dialogues.append(
             BoundDialogue(
                 candidate_index=1,
@@ -141,19 +139,14 @@ def _result(
         resolved_cases=resolved_cases or [],
         pushed_cases=pushed_cases or _pushed_case_for(annotation),
         audit=_audit(
-            authorized_chunk_ids=authorized_chunk_ids
-            or [annotation.chunks[0].chunk_id],
+            authorized_chunk_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
         ),
     )
 
 
 def _count(session, model, run_id: str) -> int:
     """2026-08-07 用于按 run 统计完成事务相关持久化行数"""
-    return int(
-        session.execute(
-            select(func.count()).select_from(model).where(model.run_id == run_id)
-        ).scalar_one()
-    )
+    return int(session.execute(select(func.count()).select_from(model).where(model.run_id == run_id)).scalar_one())
 
 
 def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> None:
@@ -181,12 +174,8 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
     )
 
     db_session.rollback()
-    case = db_session.execute(
-        select(CasePoolCase).where(CasePoolCase.run_id == run_id)
-    ).scalar_one()
-    dialogue = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
+    case = db_session.execute(select(CasePoolCase).where(CasePoolCase.run_id == run_id)).scalar_one()
+    dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
 
     assert first == second
     assert first.created_cases[0].id == case.id
@@ -254,9 +243,7 @@ def test_dialogue_resolution_updates_dialogue_record(
     )
 
     db_session.rollback()
-    dialogue = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
+    dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
     resolved_case = db_session.get(CasePoolCase, case.id)
     mapping = db_session.execute(
         select(CaseResolutionMapping).where(

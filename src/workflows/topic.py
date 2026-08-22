@@ -1,13 +1,4 @@
-"""
-主题建模工作流模块
-
-本文件包含主题建模的核心业务逻辑，供多个入口复用。
-
-主题建模为段落粒度（设计文档《章节粒度分析指标重设计》§11.1）：
-paragraphs 是主题文档的唯一事实源，每个有效段落是一个 LDA 文档；
-训练阶段可排除预处理后无 token 或 token_count 低于阈值的短段，
-推断阶段覆盖所有预处理后有 token 的段落。
-"""
+"""主题建模工作流（段落粒度 §11.1）：paragraphs 为唯一事实源，训练排除短段，推断覆盖所有有 token 段落。"""
 
 from __future__ import annotations
 
@@ -52,26 +43,7 @@ async def run_topic_model(
     force: bool = False,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int]:
-    """
-    执行主题建模流程（段落粒度，设计 §11.1）
-
-    每个有效段落是一个 LDA 文档。训练使用预处理后仍有 token 且段落
-    token_count 不低于 settings.topic_model.min_paragraph_train_tokens
-    的段落；推断覆盖所有预处理后有 token 的段落（含训练排除的短段）。
-    结果写入 paragraph_topics（先清后插，force 时先清空）。
-
-    Args:
-        run_id: 运行ID
-        session: 数据库连接
-        num_topics: 主题数量
-        passes: 迭代次数
-        iterations: 训练迭代次数
-        top_n: 每个文档返回的 top N 主题
-        force: 是否强制重新计算
-
-    Returns:
-        Tuple[int, int]: (总段落数, 主题数量)
-    """
+    """执行主题建模（段落粒度 §11.1），训练用达标段落，推断覆盖所有有 token 段落，结果写入 paragraph_topics。"""
     _num_topics = num_topics if num_topics is not None else settings.topic_model.num_topics
     _passes = passes if passes is not None else settings.topic_model.passes
     _iterations = iterations if iterations is not None else settings.topic_model.iterations
@@ -106,9 +78,7 @@ async def run_topic_model(
     min_train_tokens = settings.topic_model.min_paragraph_train_tokens
     filtered_empty = sum(1 for doc in tokenized_docs if not doc)
     filtered_short = sum(
-        1
-        for doc, row in zip(tokenized_docs, paragraph_rows, strict=True)
-        if doc and row.token_count < min_train_tokens
+        1 for doc, row in zip(tokenized_docs, paragraph_rows, strict=True) if doc and row.token_count < min_train_tokens
     )
     valid_docs = [
         doc
@@ -178,8 +148,7 @@ async def run_topic_model(
 
     elapsed = time.time() - start_time
     logger.info(
-        f"topic_model completed paragraphs={total_paragraphs} topics={topic_model.num_topics} "
-        f"time={elapsed:.2f}s"
+        f"topic_model completed paragraphs={total_paragraphs} topics={topic_model.num_topics} time={elapsed:.2f}s"
     )
     logger.info("\n=== Topic Model Statistics ===")
     logger.info(f"Total paragraphs: {total_paragraphs}")

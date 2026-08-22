@@ -159,9 +159,7 @@ class TestPreprocessParagraphs:
             "global_end_char",
             "text",
         )
-        assert [
-            tuple(getattr(row, field) for field in identity_fields) for row in rows_semantic
-        ] == [
+        assert [tuple(getattr(row, field) for field in identity_fields) for row in rows_semantic] == [
             tuple(getattr(row, field) for field in identity_fields) for row in rows_plain
         ]
 
@@ -252,9 +250,7 @@ class TestPreprocessParagraphs:
         paragraph_count = paragraph_repo.count_paragraphs(run_id)
         assert paragraph_count > 0
 
-        metric_rows = db_session.scalars(
-            select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)
-        ).all()
+        metric_rows = db_session.scalars(select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)).all()
         assert len(metric_rows) == paragraph_count
         for row in metric_rows:
             assert row.char_count > 0
@@ -287,9 +283,7 @@ class TestPreprocessParagraphs:
 
         paragraph_repo = ParagraphRepository(db_session)
         paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
-        metric_rows = db_session.scalars(
-            select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)
-        ).all()
+        metric_rows = db_session.scalars(select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)).all()
         metric_by_paragraph = {row.paragraph_id: row for row in metric_rows}
 
         assert len(metric_rows) == len(paragraph_rows)
@@ -327,27 +321,18 @@ class TestPreprocessParagraphs:
         paragraph_count = paragraph_repo.count_paragraphs(run_id)
         assert paragraph_count > 0
 
-        curve_rows = db_session.scalars(
-            select(ParagraphCurve).where(ParagraphCurve.run_id == run_id)
-        ).all()
-        metric_rows = db_session.scalars(
-            select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)
-        ).all()
+        curve_rows = db_session.scalars(select(ParagraphCurve).where(ParagraphCurve.run_id == run_id)).all()
+        metric_rows = db_session.scalars(select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)).all()
         assert len(curve_rows) == paragraph_count
         metric_by_paragraph = {row.paragraph_id: row for row in metric_rows}
 
         for row in curve_rows:
             metric = metric_by_paragraph[row.paragraph_id]
             if metric.token_count > 0:
-                assert row.pos_density == pytest.approx(
-                    metric.positive_weight_sum / metric.token_count
-                )
-                assert row.neg_density == pytest.approx(
-                    metric.negative_weight_sum / metric.token_count
-                )
+                assert row.pos_density == pytest.approx(metric.positive_weight_sum / metric.token_count)
+                assert row.neg_density == pytest.approx(metric.negative_weight_sum / metric.token_count)
                 assert row.net_density == pytest.approx(
-                    metric.positive_weight_sum / metric.token_count
-                    - metric.negative_weight_sum / metric.token_count
+                    metric.positive_weight_sum / metric.token_count - metric.negative_weight_sum / metric.token_count
                 )
                 assert row.smoothed_net_density is not None
                 assert math.isfinite(row.smoothed_net_density)

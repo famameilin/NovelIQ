@@ -788,9 +788,7 @@ async def test_aggregator_omits_note_when_reasoning_streamed() -> None:
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
-    await aggregator.add_chunk(
-        AIMessageChunk(content="", additional_kwargs={"reasoning_content": "先分析"})
-    )
+    await aggregator.add_chunk(AIMessageChunk(content="", additional_kwargs={"reasoning_content": "先分析"}))
 
     timing = aggregator.timing()
     assert timing.reasoning_ms is not None
@@ -899,12 +897,8 @@ async def test_aggregator_keeps_latest_finish_reason_when_repeated() -> None:
     aggregator = StreamChunkAggregator(stream)
 
     await aggregator.add_chunk(AIMessageChunk(content=""))
-    await aggregator.add_chunk(
-        AIMessageChunk(content="", response_metadata={"finish_reason": "stop"})
-    )
-    await aggregator.add_chunk(
-        AIMessageChunk(content="", response_metadata={"finish_reason": "length"})
-    )
+    await aggregator.add_chunk(AIMessageChunk(content="", response_metadata={"finish_reason": "stop"}))
+    await aggregator.add_chunk(AIMessageChunk(content="", response_metadata={"finish_reason": "length"}))
 
     message = aggregator.finish()
 

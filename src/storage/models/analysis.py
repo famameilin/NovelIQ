@@ -6,9 +6,6 @@
 - GlobalStats: 全局统计表
 - GlobalContext: 全局上下文表
 - ChapterSummary: 章节摘要表
-
-2026-08-14 M8b：ChunkCurve（chunk_curves 表）已下线——曲线事实源改为
-paragraph_curves，聚合侧按章节从段落曲线重算，不再落 chunk 级曲线表。
 """
 
 from __future__ import annotations
@@ -20,20 +17,7 @@ from .base import Base
 
 
 class CloudAnalysis(Base):
-    """
-    云端分析结果表
-
-    存储云端模型的分析结果
-
-    为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表
-
-    废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
-    以持久化 single / dual / ensemble 三类叙事焦点结构。
-
-    2026-05-02，任务：split-diagnosis-genre-and-style-labels
-    修改原因：`genre_labels` 只保留真正题材；`权谋/爽文` 这类非题材标签改收口到 `style_labels`，
-    避免继续把题材与附加定位混在同一个字段里。
-    """
+    """存储云端分析结果、叙事焦点结构以及分离的题材和风格标签"""
 
     __tablename__ = "cloud_analysis"
 

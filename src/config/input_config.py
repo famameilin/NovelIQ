@@ -1,22 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 from .settings import settings
-
-
-@dataclass(frozen=True)
-class InputConfig:
-    source_path: Path
-    metadata_path: Path | None = None
-
-    def __post_init__(self) -> None:
-        if not self.source_path.exists():
-            raise FileNotFoundError(self.source_path)
-        if self.metadata_path is not None and not self.metadata_path.exists():
-            raise FileNotFoundError(self.metadata_path)
 
 
 @dataclass(frozen=True)

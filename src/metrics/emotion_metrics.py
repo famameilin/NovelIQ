@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from src.utils.text_utils import tokenize_words
+
 from .lexicon_metrics import count_mixed_hits, count_weighted_hits, get_emotion_spans
 from .negation import is_flipped, load_negation_spec
-from .text_utils import tokenize_words
 
 
 def lexical_sentiment_density(
@@ -20,26 +21,7 @@ def lexical_sentiment_density(
     spec=None,
     enable_negation: bool = True,
 ) -> dict[str, float]:
-    """
-    计算词汇情感密度（支持否定翻转，命中计数）
-
-    使用 phrase 模式匹配，支持：
-    - token 级匹配（如"快乐"）
-    - 子串匹配（如"冷笑"被分词为"冷"+"笑"时仍能匹配）
-    - 否定词翻转：2026-08-16 M5 起与生产路径共用 src.metrics.negation
-      （句边界 + longest-match 去重 + token 级距离约束 + hard/modal/double 分类）
-    - 命中计数：词条权重统一 1.0（M4 权重弃用）
-
-    参数:
-        text: 原始文本
-        pos_terms: 正面情感词表，格式为 {词条: 权重}
-        neg_terms: 负面情感词表，格式为 {词条: 权重}
-        spec: NegationSpec，为 None 时自动加载
-        enable_negation: 是否启用否定词翻转，默认 True
-
-    返回:
-        dict[str, float]: 包含 pos_density, neg_density, net_density
-    """
+    """计算词汇情感密度（phrase 匹配，2026-08-16 M5 起否定翻转复用 src.metrics.negation，权重 1.0）。"""
     if not text:
         return {"pos_density": 0.0, "neg_density": 0.0, "net_density": 0.0}
 

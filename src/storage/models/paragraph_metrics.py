@@ -78,9 +78,7 @@ class ParagraphMetric(Base):
     surface_tension_z: Mapped[float | None] = mapped_column(Float, nullable=True)
     surface_tension: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -97,6 +95,4 @@ class ParagraphMetric(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<ParagraphMetric(run_id={self.run_id}, paragraph_id={self.paragraph_id})>"
-        )
+        return f"<ParagraphMetric(run_id={self.run_id}, paragraph_id={self.paragraph_id})>"

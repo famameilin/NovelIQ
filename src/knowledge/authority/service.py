@@ -11,7 +11,6 @@ from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, Re
 from .alias import AliasResolution, build_alias_resolution
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from .types import (
-    ActiveEntityContext,
     CanonicalEntity,
     ConfirmedRelation,
     EntityLifecycle,
@@ -95,29 +94,6 @@ class KnowledgeGraphAuthorityService:
             ],
             graph_changes=self._build_graph_changes(graph_changes),
         )
-
-    def build_active_entity_view(
-        self,
-        run_id: str,
-        current_chunk: int,
-        lookback: int = 10,
-    ) -> list[ActiveEntityContext]:
-        """2026-08-07 用于从最新章节状态筛选当前位置附近活动实体"""
-        minimum_chunk = max(0, current_chunk - lookback)
-        return [
-            ActiveEntityContext(
-                name=entity.name,
-                entity_id=entity.entity_id,
-                role=str(entity.state.get("role_function") or "") or None,
-                entity_type=entity.entity_type,
-                status=str(entity.state.get("status") or "active"),
-                last_seen_chapter=entity.last_seen_chapter,
-                recent_action=str(entity.state.get("action") or "") or None,
-                recent_emotion=str(entity.state.get("emotion") or "") or None,
-            )
-            for entity in self._graph_repo.fetch_latest_entities(run_id)
-            if minimum_chunk <= entity.last_seen_chapter <= current_chunk
-        ]
 
     def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
         """2026-08-07 用于向诊断和导出提供章节版本图的聚合信号"""

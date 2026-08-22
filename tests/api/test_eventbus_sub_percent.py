@@ -373,9 +373,7 @@ async def test_emit_stage_start_resets_progress_context_and_never_writes_total_z
 
     # stage_start(annotate) 写 total=37；后续调用不得再写 total（缺省 0 视为未提供）
     total_written = [
-        kwargs.get("total")
-        for call in task_manager.update_task.call_args_list
-        for kwargs in [call.kwargs]
+        kwargs.get("total") for call in task_manager.update_task.call_args_list for kwargs in [call.kwargs]
     ]
     assert total_written == [37, None, None]
     # percent：annotate 起点 10.0 → aggregate 起点 80.0 → 无进度事件回退 80.0

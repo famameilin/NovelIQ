@@ -78,11 +78,7 @@ def test_authoritative_unique_per_concept_field() -> None:
         for field in contract.fields:
             owners[(contract.concept, field)].append(contract.id)
 
-    conflicts = {
-        f"{concept}/{field}: {ids}"
-        for (concept, field), ids in owners.items()
-        if len(ids) > 1
-    }
+    conflicts = {f"{concept}/{field}: {ids}" for (concept, field), ids in owners.items() if len(ids) > 1}
     assert conflicts == set(), "同概念字段存在多个权威声明:\n" + "\n".join(sorted(conflicts))
 
 

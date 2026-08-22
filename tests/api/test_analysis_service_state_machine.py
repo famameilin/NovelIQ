@@ -254,7 +254,6 @@ async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(
     修复后必须通过兜底路径把 failed + error 写入 DB。
     """
 
-
     _insert_novel(db_session, "svcfail3")
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id="svcfail3")
@@ -262,9 +261,7 @@ async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(
 
     # 注意：不预先 claim——_run_analysis_core 内部会自行领取（首次 claim 必成功）；
     # 预 claim 会让内部第二次 claim 失败返回 skipped、提前 return 测不到失败路径
-    service.env_initializer.init_analysis_environment = MagicMock(
-        side_effect=RuntimeError("db 连接失败")
-    )
+    service.env_initializer.init_analysis_environment = MagicMock(side_effect=RuntimeError("db 连接失败"))
 
     await service._run_analysis_core(
         task_id=run_id[:8],
@@ -361,9 +358,7 @@ def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
 
     # 写入端落库剥离 tz（naive UTC），读回补 UTC 后仍判定为新鲜
     db_session.execute(
-        text(
-            "UPDATE analysis_runs SET worker_id = NULL, heartbeat_at = :hb WHERE run_id = :rid"
-        ),
+        text("UPDATE analysis_runs SET worker_id = NULL, heartbeat_at = :hb WHERE run_id = :rid"),
         {"hb": fresh_utc.replace(tzinfo=None), "rid": run_id},
     )
     db_session.commit()
@@ -375,9 +370,7 @@ def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
     # 陈旧心跳（超过窗口）判定为不新鲜
     stale_utc = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS + 3600)
     db_session.execute(
-        text(
-            "UPDATE analysis_runs SET heartbeat_at = :hb WHERE run_id = :rid"
-        ),
+        text("UPDATE analysis_runs SET heartbeat_at = :hb WHERE run_id = :rid"),
         {"hb": stale_utc.replace(tzinfo=None), "rid": run_id},
     )
     db_session.commit()

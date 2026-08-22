@@ -67,14 +67,10 @@ class Paragraph(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # sha256 hex，供派生数据校验段落内容未变
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
-        UniqueConstraint(
-            "run_id", "chapter_id", "paragraph_index", name="uq_paragraphs_run_chapter_index"
-        ),
+        UniqueConstraint("run_id", "chapter_id", "paragraph_index", name="uq_paragraphs_run_chapter_index"),
         ForeignKeyConstraint(
             ["chapter_id", "run_id"],
             ["chapters.chapter_id", "chapters.run_id"],

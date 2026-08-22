@@ -97,9 +97,7 @@ class AnalysisService:
 
         # ── 预处理 ──
         if not skip_stages["skip_preprocess"]:
-            await bus.emit_stage_start(
-                "preprocess", message="开始预处理", percent=settings.progress.preprocess.start
-            )
+            await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.progress.preprocess.start)
 
             await self.stage_executor.run_preprocess(
                 source_path, run_id, session, emitter=self._make_stage_emitter(bus, "preprocess")
@@ -152,9 +150,7 @@ class AnalysisService:
 
         # ── 聚合 ──
         if not skip_stages["skip_aggregate"]:
-            await bus.emit_stage_start(
-                "aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start
-            )
+            await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start)
 
             await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
             await bus.emit_stage_complete("aggregate")
@@ -180,10 +176,7 @@ class AnalysisService:
 
         # ── 诊断 ──
         if not skip_stages["skip_diagnose"]:
-            await bus.emit_stage_start(
-                "diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start
-            )
-
+            await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start)
             await self.stage_executor.run_diagnose(
                 run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose")
             )
@@ -242,8 +235,7 @@ class AnalysisService:
         novel_id: str,
         analysis_logger: AnalysisLogger | None,
     ) -> None:
-        """处理已完成的分析任务，确保 DB 状态一致
-        """
+        """处理已完成的分析任务，确保 DB 状态一致"""
         logger.info(f"Task {task_id} already completed, no action needed")
         self.novel_service.update_task_status(task_id, "completed")
         self.task_manager.complete_task(task_id, success=True)
@@ -295,11 +287,7 @@ class AnalysisService:
                 sql_session = db_session.connection
                 run_repo = RunRepository(sql_session)
                 run_id = task_id_to_run_id(task_id, sql_session)
-                # 2026-08-13 修复：不用 `with sql_session.begin():` 包裹——兜底路径可能在
-                # _is_cancelled 等查询已开启隐式事务后进入，begin() 会抛
-                # "A transaction is already begun on this Session" 并被内部 except 吞掉，
-                # 导致 DB 终态实际未写入。update_run_task_fields 内部自带 commit，
-                # 无论 session 是否已有事务都能正确提交。
+                # update_run_task_fields 自带提交，可兼容查询已开启的隐式事务
                 run_repo.update_run_task_fields(
                     run_id,
                     status="failed",
@@ -396,18 +384,14 @@ class AnalysisService:
 
                 if status == "pending":
                     if cancel_requested:
-                        # 用户在 worker 真正领取前就已经点了取消，此时直接落终态，
-                        # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义
+                        # 未领取任务没有执行方收尾，直接落取消终态
                         run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
                     return self._claim_pending_run(run_repo, run_id)
 
                 if status == "cancelled" and self._is_recent_resume_reset(run):
-                    # resume 竞态恢复：resume 先把 DB 重置为 pending，旧 worker 的延迟取消
-                    # 写回（handle_cancel 的 commit）可能随后把状态覆盖回 cancelled，导致新 worker
-                    # 看到 cancelled 静默退出、resume 返回 200 但任务停住。该状态的特征是
-                    # worker_id=None 且 heartbeat_at 为最近的 resume 重置时间；真实取消
-                    # （取消未领取任务 / 执行中取消）都不会同时满足。重新激活为 pending 后走正常领取。
+                    # 恢复 resume 后被旧 worker 延迟取消写回覆盖的短暂竞态
+                    # 最近心跳且没有 worker 的 cancelled 任务可重新进入领取流程
                     run_repo.update_run_task_fields(run_id, status="pending", completed_at=None)
                     refreshed = run_repo.get_run(run_id)
                     if refreshed is None or refreshed.get("status") != "pending":
@@ -418,8 +402,7 @@ class AnalysisService:
                     return self._claim_pending_run(run_repo, run_id)
 
                 if status == "cancelling" and cancel_requested:
-                    # 这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
-                    # 避免卡在无 owner 的 cancelling 历史脏状态
+                    # 没有真实 worker 时直接收口，避免任务停在无 owner 的 cancelling
                     if refreshed_worker_id := run.get("worker_id"):
                         logger.info(
                             "Task {} is cancelling under worker {}, current worker skips execution claim",
@@ -461,7 +444,7 @@ class AnalysisService:
         claimed = run_repo.claim_pending_run(
             run_id,
             worker_id=self.task_manager.get_worker_id(),
-            # 2026-08-13 P2：heartbeat_at 列无时区，落 naive UTC 挂钟（避免会话时区转换错位）
+            # 无时区列统一写入 naive UTC
             heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
         )
         if claimed:
@@ -475,11 +458,8 @@ class AnalysisService:
         if refreshed_status == "cancelled":
             return "cancelled"
         if refreshed_status == "cancelling" and refreshed.get("cancel_requested"):
-            # 2026-08-13 修复：取消信号落在「读 pending」与「原子 claim」之间的窗口时，
-            # claim 的 UPDATE 不命中（status 已变 cancelling），此前直接返回 skipped 静默退出，
-            # 任务会永久卡在无 owner 的 cancelling（再 cancel 400、resume 拒绝）。
-            # 与 _prepare_task_execution_claim 的 cancelling 收口同口径：
-            # 有 worker 的 cancelling 由该 worker 收尾，无 worker 的在此直接落 cancelled 终态。
+            # 取消可能在读取 pending 与原子领取之间到达
+            # 有 worker 时由其收尾，无 worker 时直接落取消终态
             if refreshed.get("worker_id"):
                 return "skipped"
             run_repo.update_run_task_fields(
@@ -498,9 +478,7 @@ class AnalysisService:
         """
         判定 run 是否处于"刚被 resume 重置"的竞态窗口
 
-        resume 重置会写入 worker_id=None 且 pending 状态写回自动刷新 heartbeat_at=now；
-        若随后被旧 worker 的延迟取消写回覆盖为 cancelled，这两个字段保持不变。据此区分
-        "resume 后的陈旧取消写回"与"真实用户取消"（后者 heartbeat_at 为 None 或早已陈旧）。
+        最近心跳且没有 worker 表示可能被旧 worker 的延迟取消写回覆盖
         """
         if run.get("worker_id") is not None:
             return False
@@ -511,25 +489,14 @@ class AnalysisService:
             heartbeat_dt = datetime.fromisoformat(heartbeat_at)
         except (TypeError, ValueError):
             return False
-        # 2026-08-13 P2：写入端与孤儿回收（main.py）均以 UTC 生成/比较心跳时间。
-        # analysis_runs 的 DateTime 列不带时区，写入时 tz 被剥离、读回为 naive UTC
-        # 挂钟；这里统一补 UTC 后与 UTC 挂钟比较，避免服务器本地时区偏移
-        # （如 UTC+8）把真实取消误判为「resume 后的陈旧取消写回」
+        # 无时区心跳按 UTC 解释，与写入端和孤儿回收口径保持一致
         if heartbeat_dt.tzinfo is None:
             heartbeat_dt = heartbeat_dt.replace(tzinfo=UTC)
         cutoff = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS)
         return heartbeat_dt >= cutoff
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
-        """
-        启动时把 DB 中的 pending 任务重新接回当前执行器
-
-        修改原因: startup recovery 需要按任务级隔离异常；
-        单个 pending 恢复失败不能把后续 pending 任务整轮拦死
-
-        Returns:
-            tuple[int, int]: (scheduled_count, cancelled_count)
-        """
+        """启动时恢复 pending 任务并隔离单任务失败，返回已调度和已取消数量"""
         from src.storage.repositories import RunRepository
 
         scheduled_count = 0
@@ -758,9 +725,7 @@ class AnalysisService:
             if claim_result == "cancelled":
                 self.task_manager.cancel_completed_task(task_id, error="用户取消")
                 logger.info(f"Task {task_id} was cancelled before execution claim completed")
-                # 2026-08-14 P2-10：claim 前取消（含 _claim_pending_run 内部收口分支）也
-                # 必须补发 SSE 终态事件，否则已连接的客户端永远等不到取消信号，
-                # 只能靠轮询 /status 兜底
+                # 领取前取消也要发送 SSE 终态，避免客户端只能轮询状态
                 await event_manager.send(
                     task_id=task_id,
                     event_type=StreamMessageType.task_cancelled.value,
@@ -769,8 +734,7 @@ class AnalysisService:
                 return
             if claim_result == "skipped":
                 logger.info(f"Task {task_id} execution claim skipped because another state transition won the DB truth")
-                # 2026-08-13 P2：skipped 也要清掉本进程的内存执行缓存（停心跳），
-                # 否则残留 TaskInfo 的心跳写回会覆盖真实 owner 的 worker_id/heartbeat_at
+                # 跳过执行时清除本进程缓存，避免残留心跳覆盖真实 owner
                 self.task_manager.cancel_completed_task(task_id)
                 return
 
@@ -805,8 +769,7 @@ class AnalysisService:
             )
 
             if self._is_cancelled(task_id):
-                # 2026-08-14 P2-13：所有阶段已完成但成功收口前收到取消——此前直接
-                # return 既不落 DB 终态也不发事件，run 卡在 running 直到重启孤儿回收
+                # 成功收口前收到取消时仍需落 DB 终态并发送事件
                 if session and run_id:
                     await self.error_handler.handle_cancel(
                         task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
@@ -869,9 +832,7 @@ class AnalysisService:
                     log_prefix=log_prefix,
                 )
             else:
-                # 2026-08-13 修复：与 CancellationStateCheckError 分支同口径，
-                # 环境初始化失败（session/run_id 均缺失）时也必须把 DB 终态写下去，
-                # 否则 run 永远停在 running/pending，只能等重启心跳超时兜底
+                # 环境初始化失败时也要写入 DB 失败终态
                 self.novel_service.update_task_status(task_id, "failed")
                 self.task_manager.complete_task(task_id, success=False, error=str(e))
                 self._write_failure_to_db(task_id, str(e))
@@ -896,12 +857,3 @@ class AnalysisService:
             "status": task["status"],
             "run_id": task["run_id"],
         }
-
-    def get_novel_tasks(self, novel_id: str) -> list[dict]:
-        """
-        获取小说的所有任务（DB-only 查询）
-
-        说明: 从数据库查询小说的任务列表，不再依赖内存中的 TaskManager
-        """
-        tasks = self.novel_service.get_tasks_by_novel(novel_id)
-        return tasks

@@ -48,10 +48,7 @@ def _build_paragraph_rows(
     chunks: list[Chunk],
 ) -> tuple[list, list, list]:
     """按章节构造段落事实源 + 段落指标 + 段落曲线（每章一个段落）。"""
-    spans = [
-        replace(span, token_count=10)
-        for span in split_chunk_paragraphs(chunks, max_chars=1500)
-    ]
+    spans = [replace(span, token_count=10) for span in split_chunk_paragraphs(chunks, max_chars=1500)]
     metric_rows: list[ParagraphMetricRow] = []
     curve_rows: list[ParagraphCurveRow] = []
     for index, span in enumerate(spans):

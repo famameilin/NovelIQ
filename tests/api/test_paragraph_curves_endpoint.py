@@ -166,7 +166,7 @@ def _insert_100_paragraph_run(db_session) -> tuple[str, str]:
         spans.append(
             make_span(
                 paragraph_id=paragraph_id,
-                                chapter_id=chapter_id,
+                chapter_id=chapter_id,
                 paragraph_index=paragraph_index,
                 text="abcde",
                 local_start=paragraph_index * 5,
@@ -187,9 +187,7 @@ def _insert_100_paragraph_run(db_session) -> tuple[str, str]:
     return novel_id, run_id
 
 
-def test_paragraph_curves_max_points_keeps_boundaries_and_peak(
-    api_client: TestClient, db_session
-) -> None:
+def test_paragraph_curves_max_points_keeps_boundaries_and_peak(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_100_paragraph_run(db_session)
 
     response = api_client.get(
@@ -206,9 +204,7 @@ def test_paragraph_curves_max_points_keeps_boundaries_and_peak(
     # net_density 全局峰值
     assert 50 in paragraph_ids
     # 返回仍按 paragraph_id 升序
-    assert [point["paragraph_id"] for point in payload] == sorted(
-        point["paragraph_id"] for point in payload
-    )
+    assert [point["paragraph_id"] for point in payload] == sorted(point["paragraph_id"] for point in payload)
 
 
 def test_paragraph_curves_max_points_none_returns_all(api_client: TestClient, db_session) -> None:
@@ -225,9 +221,7 @@ def test_paragraph_curves_max_points_none_returns_all(api_client: TestClient, db
     assert [point["paragraph_id"] for point in payload] == list(range(100))
 
 
-def test_paragraph_curves_max_points_greater_than_count_returns_all(
-    api_client: TestClient, db_session
-) -> None:
+def test_paragraph_curves_max_points_greater_than_count_returns_all(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_100_paragraph_run(db_session)
 
     response = api_client.get(
@@ -248,6 +242,8 @@ def test_paragraph_curves_rejects_invalid_max_points(api_client: TestClient, db_
     )
 
     assert response.status_code == 422
+
+
 def test_paragraph_curves_rejects_non_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["第一段。"], status="running")
 

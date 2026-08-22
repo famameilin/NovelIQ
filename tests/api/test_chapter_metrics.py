@@ -15,6 +15,7 @@ import math
 
 import pytest
 from fastapi.testclient import TestClient
+
 from src.metrics.style_metrics import mtld as mtld_fn
 from src.metrics.style_metrics import ttr as ttr_fn
 from src.preprocess.tokenize import tokenize
@@ -57,20 +58,40 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
     )
     spans = [
         make_span(
-            paragraph_id=0, chapter_id=1, paragraph_index=0,
-            text="他怒喝一声！", local_start=0, chunk_offset=0, token_count=5,
+            paragraph_id=0,
+            chapter_id=1,
+            paragraph_index=0,
+            text="他怒喝一声！",
+            local_start=0,
+            chunk_offset=0,
+            token_count=5,
         ),
         make_span(
-            paragraph_id=1, chapter_id=1, paragraph_index=1,
-            text="你为何如此？", local_start=6, chunk_offset=0, token_count=5,
+            paragraph_id=1,
+            chapter_id=1,
+            paragraph_index=1,
+            text="你为何如此？",
+            local_start=6,
+            chunk_offset=0,
+            token_count=5,
         ),
         make_span(
-            paragraph_id=2, chapter_id=2, paragraph_index=0,
-            text="平静地叙述日常。", local_start=0, chunk_offset=13, token_count=7,
+            paragraph_id=2,
+            chapter_id=2,
+            paragraph_index=0,
+            text="平静地叙述日常。",
+            local_start=0,
+            chunk_offset=13,
+            token_count=7,
         ),
         make_span(
-            paragraph_id=3, chapter_id=3, paragraph_index=0,
-            text="此人竟敢叛变！？", local_start=0, chunk_offset=21, token_count=6,
+            paragraph_id=3,
+            chapter_id=3,
+            paragraph_index=0,
+            text="此人竟敢叛变！？",
+            local_start=0,
+            chunk_offset=21,
+            token_count=6,
         ),
     ]
     insert_spans(db_session, run_id, spans)
@@ -79,47 +100,79 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
         run_id,
         [
             make_metric_row(
-                0, token_count=5, char_count=6,
-                sentence_count=1, sentence_char_sum=4.0, sentence_char_sum_sq=16.0,
-                positive_weight_sum=2.0, fight_weight_sum=1.0, exclaim_count=1,
+                0,
+                token_count=5,
+                char_count=6,
+                sentence_count=1,
+                sentence_char_sum=4.0,
+                sentence_char_sum_sq=16.0,
+                positive_weight_sum=2.0,
+                fight_weight_sum=1.0,
+                exclaim_count=1,
             ),
             make_metric_row(
-                1, token_count=5, char_count=6,
-                sentence_count=1, sentence_char_sum=8.0, sentence_char_sum_sq=64.0,
-                negative_weight_sum=1.0, question_count=1, pause_count=1,
+                1,
+                token_count=5,
+                char_count=6,
+                sentence_count=1,
+                sentence_char_sum=8.0,
+                sentence_char_sum_sq=64.0,
+                negative_weight_sum=1.0,
+                question_count=1,
+                pause_count=1,
                 dialogue_char_count=6,
             ),
             make_metric_row(
-                2, token_count=7, char_count=8,
-                sentence_count=1, sentence_char_sum=8.0, sentence_char_sum_sq=64.0,
-                positive_weight_sum=0.5, negative_weight_sum=0.5,
+                2,
+                token_count=7,
+                char_count=8,
+                sentence_count=1,
+                sentence_char_sum=8.0,
+                sentence_char_sum_sq=64.0,
+                positive_weight_sum=0.5,
+                negative_weight_sum=0.5,
             ),
             make_metric_row(
-                3, token_count=6, char_count=8,
-                sentence_count=1, sentence_char_sum=8.0, sentence_char_sum_sq=64.0,
-                negative_weight_sum=2.0, fight_weight_sum=1.0,
-                exclaim_count=1, question_count=1,
+                3,
+                token_count=6,
+                char_count=8,
+                sentence_count=1,
+                sentence_char_sum=8.0,
+                sentence_char_sum_sq=64.0,
+                negative_weight_sum=2.0,
+                fight_weight_sum=1.0,
+                exclaim_count=1,
+                question_count=1,
             ),
         ],
     )
     if annotated:
         insert_chapter_annotation(
-            db_session, run_id,
+            db_session,
+            run_id,
             chapter_id=1,
-            narrative_function="转折", emotional_valence="mild_negative",
-            pivot_moment=True, cliffhanger=False,
+            narrative_function="转折",
+            emotional_valence="mild_negative",
+            pivot_moment=True,
+            cliffhanger=False,
         )
         insert_chapter_annotation(
-            db_session, run_id,
+            db_session,
+            run_id,
             chapter_id=2,
-            narrative_function="铺垫", emotional_valence="neutral",
-            pivot_moment=False, cliffhanger=True,
+            narrative_function="铺垫",
+            emotional_valence="neutral",
+            pivot_moment=False,
+            cliffhanger=True,
         )
         insert_chapter_annotation(
-            db_session, run_id,
+            db_session,
+            run_id,
             chapter_id=3,
-            narrative_function="冲突", emotional_valence="strong_positive",
-            pivot_moment=False, cliffhanger=False,
+            narrative_function="冲突",
+            emotional_valence="strong_positive",
+            pivot_moment=False,
+            cliffhanger=False,
         )
     return novel_id, run_id
 
@@ -133,9 +186,7 @@ def _get_chapter_metrics(api_client, novel_id: str, run_id: str):
     return response.json()
 
 
-def test_chapter_metrics_aggregates_conserve_numerators_and_denominators(
-    api_client: TestClient, db_session
-) -> None:
+def test_chapter_metrics_aggregates_conserve_numerators_and_denominators(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_three_chapter_run(db_session)
     payload = _get_chapter_metrics(api_client, novel_id, run_id)
 
@@ -192,9 +243,7 @@ def test_chapter_metrics_sentence_length_mean_and_std_recovered_from_sufficient_
     assert book["sent_len_std"] == pytest.approx(math.sqrt(3.0))
 
 
-def test_chapter_metrics_ttr_mtld_match_direct_computation(
-    api_client: TestClient, db_session
-) -> None:
+def test_chapter_metrics_ttr_mtld_match_direct_computation(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_three_chapter_run(db_session)
     payload = _get_chapter_metrics(api_client, novel_id, run_id)
 
@@ -217,9 +266,7 @@ def test_chapter_metrics_ttr_mtld_match_direct_computation(
     assert book["mtld"] == mtld_fn(book_tokens)
 
 
-def test_chapter_metrics_annotation_labels_mapped_per_chapter(
-    api_client: TestClient, db_session
-) -> None:
+def test_chapter_metrics_annotation_labels_mapped_per_chapter(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_three_chapter_run(db_session)
     payload = _get_chapter_metrics(api_client, novel_id, run_id)
 
@@ -237,9 +284,7 @@ def test_chapter_metrics_annotation_labels_mapped_per_chapter(
     assert chapters[3]["emotional_valence"] == "strong_positive"
 
 
-def test_chapter_metrics_without_annotations_returns_none_labels(
-    api_client: TestClient, db_session
-) -> None:
+def test_chapter_metrics_without_annotations_returns_none_labels(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_three_chapter_run(db_session, annotated=False)
     payload = _get_chapter_metrics(api_client, novel_id, run_id)
 
@@ -256,9 +301,7 @@ def test_chapter_metrics_without_annotations_returns_none_labels(
     assert book["chapter_cliffhanger_rate"] is None
 
 
-def test_chapter_metrics_book_aggregate_fields(
-    api_client: TestClient, db_session
-) -> None:
+def test_chapter_metrics_book_aggregate_fields(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_three_chapter_run(db_session)
     payload = _get_chapter_metrics(api_client, novel_id, run_id)
 

@@ -208,12 +208,21 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
     OpenAI 兼容流式接口把工具调用拆成多个分片：name 首片完整、args 为 JSON 片段增量，
     需要按 index 拼接后再解析。JSON 解析失败说明流被截断（Provider 丢尾包/模型截断），
     不再静默包装 {"_raw": ...} 执行，而是打 truncated 标记并保留原文供诊断与拒绝执行。
+    2026-08-22 修复：部分网关（muse-spark via zen）并发工具返回 index 均为 0，
+    需按 name/id 冲突自动分配新 index，避免名串接成单条（如 get_a+get_b）。
     """
     merged: dict[int, dict[str, str]] = {}
     for raw in tool_call_chunks:
         index = int(raw.get("index", len(merged)))
+        # 若 index 已被不同 name 占用，分配新 index
+        raw_name = raw.get("name") or ""
+        if index in merged and raw_name and merged[index]["name"] and merged[index]["name"] != raw_name:
+            index = max(merged.keys()) + 1
+            # 同时检查新 index 是否仍冲突（极端情况）
+            while index in merged and merged[index]["name"] and merged[index]["name"] != raw_name:
+                index += 1
         entry = merged.setdefault(index, {"name": "", "args": "", "id": ""})
-        name = raw.get("name") or ""
+        name = raw_name
         if name:
             entry["name"] += name
         args = raw.get("args") or ""
@@ -321,9 +330,7 @@ class StreamChunkAggregator:
         if isinstance(content, str) and content:
             # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出。
             # 重叠部分进消息链（保留重试输出全文）但不推 SSE，非重叠部分正常推送。
-            overlap, content, self._skip_output_prefix = self._split_overlap(
-                content, self._skip_output_prefix
-            )
+            overlap, content, self._skip_output_prefix = self._split_overlap(content, self._skip_output_prefix)
             if overlap:
                 self._content_parts.append(overlap)
             if content:
@@ -418,11 +425,7 @@ class StreamChunkAggregator:
         elif reasoning_ms is None:
             notes.append("reasoning_not_streamed")
         return ModelCallTiming(
-            ttft_ms=(
-                round((self._ttft_ns - self._started_ns) / 1_000_000)
-                if self._ttft_ns is not None
-                else None
-            ),
+            ttft_ms=(round((self._ttft_ns - self._started_ns) / 1_000_000) if self._ttft_ns is not None else None),
             first_visible_ms=(
                 round((self._first_visible_ns - self._started_ns) / 1_000_000)
                 if self._first_visible_ns is not None
@@ -476,11 +479,7 @@ async def run_model_call(
     from src.config import settings
 
     started_ns = perf_counter_ns()
-    total_attempts = (
-        total_attempts
-        if total_attempts is not None
-        else settings.models.annotation.total_attempts
-    )
+    total_attempts = total_attempts if total_attempts is not None else settings.models.annotation.total_attempts
     if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
         retries_remaining = max(0, total_attempts - 1)
         if stream is not None:
@@ -497,7 +496,7 @@ async def run_model_call(
             except StreamEmitError:
                 # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # 2026-08-13 P2-6 非流式路径只对网络/限流瞬态错误重试，
                 # 参数/鉴权等确定性错误重试无意义
                 if retries_remaining <= 0 or not _is_transient_model_error(exc):
@@ -510,9 +509,7 @@ async def run_model_call(
                     retries_remaining,
                 )
                 if stream is not None:
-                    await stream.thinking(
-                        f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）"
-                    )
+                    await stream.thinking(f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）")
                 await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
                 continue
         timing = ModelCallTiming(
@@ -542,7 +539,7 @@ async def run_model_call(
         except StreamEmitError:
             # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if retries_remaining <= 0:
                 logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
                 raise
@@ -554,9 +551,7 @@ async def run_model_call(
                 retries_remaining,
             )
             if stream is not None:
-                await stream.thinking(
-                    f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）"
-                )
+                await stream.thinking(f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）")
             if aggregator._usage_metadata:
                 _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
             skip_output_prefix = "".join(aggregator._content_parts)
@@ -585,12 +580,7 @@ async def emit_tool_results(stream: AgentStream, tool_messages: list[Any]) -> No
         name = getattr(message, "name", "") or "unknown"
         content = getattr(message, "content", "") or ""
         text = str(content)
-        is_failed = (
-            text.startswith("Error:")
-            or '"error"' in text
-            or "执行失败" in text
-            or "校验失败" in text
-        )
+        is_failed = text.startswith("Error:") or '"error"' in text or "执行失败" in text or "校验失败" in text
         if is_failed:
             await stream.tool_call_failed(name, text)
         else:

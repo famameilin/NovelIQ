@@ -112,21 +112,15 @@ class TestThreeActStructure(unittest.TestCase):
             tension_scores[idx] = 0.18 + ((idx - 52) * 0.01)
             event_types[idx] = "冲突"
             pivot_moments[idx] = 1
-        diagnostics = analyze_three_act_structure(
-            positions, event_types, cliffhangers, pivot_moments, tension_scores
-        )
+        diagnostics = analyze_three_act_structure(positions, event_types, cliffhangers, pivot_moments, tension_scores)
         ratios = diagnostics.ratio_dict()
         self.assertAlmostEqual(sum(ratios.values()), 1.0, places=3)
-        ratios_v2 = compute_three_act_ratio_v2(
-            positions, event_types, cliffhangers, pivot_moments, tension_scores
-        )
+        ratios_v2 = compute_three_act_ratio_v2(positions, event_types, cliffhangers, pivot_moments, tension_scores)
         self.assertEqual(ratios_v2, ratios)
 
     def test_len_mismatch_raises(self) -> None:
         with self.assertRaises(ValueError):
-            analyze_three_act_structure(
-                [0.0, 0.5, 1.0], ["铺垫"] * 3, [0] * 3, [0] * 3, [0.1, 0.2]
-            )
+            analyze_three_act_structure([0.0, 0.5, 1.0], ["铺垫"] * 3, [0] * 3, [0] * 3, [0.1, 0.2])
 
 
 class TestEventDensityAndCliffhanger(unittest.TestCase):

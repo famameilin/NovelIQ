@@ -196,16 +196,8 @@ def _build_finalize_node(
                     call_index=0,
                     tool_name=str(call.get("name")),
                     request_args=dict(call.get("args") or {}),
-                    raw_args=(
-                        str(call.get("raw_args"))
-                        if call.get("raw_args") is not None
-                        else None
-                    ),
-                    response=(
-                        {"accepted": True}
-                        if status == "success"
-                        else {"accepted": False, "error": error}
-                    ),
+                    raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
+                    response=({"accepted": True} if status == "success" else {"accepted": False, "error": error}),
                     receipt=None,
                     status=status,
                     error=error,
@@ -274,7 +266,7 @@ def _build_finalize_node(
             parsed = response_model.model_validate(candidate_for_state)
             if response_validator is not None:
                 response_validator(parsed)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error_msg = f"finish 输出校验失败: {exc}"
             attempts = int(state.get("attempts") or 0) + 1
             close_submission_audit(
@@ -334,9 +326,7 @@ def _build_agent_node(
         if stream is not None:
             await stream.thinking("正在推理，规划下一步动作...")
         turn_started_ns = time.perf_counter_ns()
-        summary = (
-            context_summary(state) if context_summary is not None else {"phase": "agent_loop"}
-        )
+        summary = context_summary(state) if context_summary is not None else {"phase": "agent_loop"}
 
         def on_turn_complete(message: AIMessage, timing: Any) -> None:
             """2026-08-10 用于在模型流结束后写入回合审计"""
@@ -358,7 +348,7 @@ def _build_agent_node(
                 on_turn_complete=on_turn_complete,
                 total_attempts=retries,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if observer is not None:
                 observer.record_failed_turn(
                     context_summary=summary,
@@ -411,7 +401,7 @@ def _build_tools_node(
                     result = await _invoke_tool(tool_map, call)
                     status = "success"
                     error = None
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     result = f"Error: {exc}"
                     status = "error"
                     error = str(exc)
@@ -421,11 +411,7 @@ def _build_tools_node(
                     call_index=call_index,
                     tool_name=name,
                     request_args=dict(call.get("args") or {}),
-                    raw_args=(
-                        str(call.get("raw_args"))
-                        if call.get("raw_args") is not None
-                        else None
-                    ),
+                    raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
                     response={"result": str(result)[:2000]},
                     receipt=None,
                     status=status,
@@ -469,8 +455,7 @@ def _build_tool_limit_node(
             observer.close_turn()
         return {
             "error": (
-                f"agent 工具调用超过上限 {max_tool_iterations}，"
-                f"已执行 {int(state.get('tool_iterations') or 0)} 次"
+                f"agent 工具调用超过上限 {max_tool_iterations}，已执行 {int(state.get('tool_iterations') or 0)} 次"
             )
         }
 
@@ -498,9 +483,7 @@ def build_agent_graph(
     graph = StateGraph(AgentLoopState)
     finish_payload_field = _resolve_finish_payload_field(tools, tool_name=finish_tool_name)
     revision_payload_field = (
-        _resolve_finish_payload_field(tools, tool_name=revision_tool_name)
-        if revision_tool_name is not None
-        else None
+        _resolve_finish_payload_field(tools, tool_name=revision_tool_name) if revision_tool_name is not None else None
     )
     if (revision_tool_name is None) != (revision_response_model is None):
         raise ValueError("局部修正工具名和局部修正响应模型必须同时配置")

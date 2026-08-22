@@ -57,10 +57,7 @@ def lttb_indices(
         best_idx = bucket_start
         best_area = -1.0
         for idx in range(bucket_start, bucket_end):
-            area = abs(
-                (prev_x - next_x) * (y[idx] - prev_y)
-                - (prev_x - idx) * (next_mean_y - prev_y)
-            )
+            area = abs((prev_x - next_x) * (y[idx] - prev_y) - (prev_x - idx) * (next_mean_y - prev_y))
             if area > best_area:
                 best_area = area
                 best_idx = idx

@@ -15,9 +15,7 @@ def _find_project_root(start: Path) -> Path:
     for candidate in (resolved_start, *resolved_start.parents):
         if (candidate / "config" / "settings.json").is_file():
             return candidate
-    raise RuntimeError(
-        "无法定位项目根目录：祖先目录中未找到 config/settings.json"
-    )
+    raise RuntimeError("无法定位项目根目录：祖先目录中未找到 config/settings.json")
 
 
 def resolve_project_root() -> Path:

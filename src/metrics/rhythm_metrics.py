@@ -8,27 +8,13 @@
 
 from __future__ import annotations
 
+from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
+
 from .matching import count_token_hits_enhanced
-from .text_utils import dialogue_length, split_sentences, tokenize_words
 
 
 def tension_proxy(text: str, fight_terms: dict[str, float]) -> dict[str, float]:
-    """
-    计算张力代理指标
-
-    使用 fuzzy 模式匹配，支持分词变体（如"剑气"/"剑罡"）
-    - 子串匹配（如"冷笑"被分词为"冷"+"笑"时仍能匹配）
-    - 编辑距离容错（如"剑罡"匹配"剑气"）
-
-    参数:
-        text: 原始文本
-        fight_terms: 战斗词条集合，格式为 {词条: 权重}
-
-    返回:
-        dict[str, float]: 包含 fight_density, exclaim_density, question_density, dialogue_ratio, avg_sent_len
-
-
-    """
+    """计算张力代理指标（fuzzy 匹配战斗词 + 标点/对话/句长统计）。"""
     if not text:
         return {
             "fight_density": 0.0,
@@ -72,26 +58,7 @@ def tension_composite(
     dialogue_ratio: float,
     avg_sent_len: float,
 ) -> float:
-    """
-    计算张力综合指标
-
-    公式:
-            0.4 * fight_density
-            + 0.2 * exclaim_density
-            + 0.2 * question_density
-            + 0.1 * dialogue_ratio
-            + 0.1 * avg_sent_len_normalized
-
-    参数:
-        fight_density: 战斗密度
-        exclaim_density: 感叹密度
-        question_density: 问句密度
-        dialogue_ratio: 对话比例
-        avg_sent_len: 平均句长
-
-    返回:
-        float: 张力综合指标
-    """
+    """张力综合指标：0.4*fight + 0.2*exclaim + 0.2*question + 0.1*dialogue + 0.1*norm(avg_sent_len)。"""
     avg_sent_len_normalized = min(avg_sent_len / 50.0, 1.0)
     return (
         0.4 * fight_density

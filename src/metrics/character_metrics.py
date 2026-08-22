@@ -19,9 +19,7 @@ GREIMAS_FUNCTIONS = {
 }
 
 
-# 2026-04-28，任务：统一关系图谱结构口径。
-# 修改原因：其他图算法仍需要简单无向图，但“网络密度”展示值已经不再直接复用
-# networkx.density；这里继续保留图构建 helper 供中心性、聚类系数等指标使用。
+# 保留无向图构建，供中心性和聚类系数等关系指标复用
 def build_character_graph(
     relations: list[tuple[str, str]],
     node_names: Collection[str] | None = None,
@@ -47,9 +45,7 @@ def compute_character_degree_centrality(
     return dict(centrality)
 
 
-# 2026-04-28，任务：将“网络密度”改为关系集中度口径。
-# 修改原因：用户感知的“图谱挤不挤”更接近连接是否集中在少数枢纽角色上，
-# 因此这里改为返回基于唯一人物对关系的度中心化结果，而不再返回图论密度。
+# 网络密度使用关系集中度口径
 def compute_relation_network_density(
     relations: list[tuple[str, str]],
     graph: nx.Graph | None = None,

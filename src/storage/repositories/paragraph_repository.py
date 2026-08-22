@@ -239,10 +239,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             .where(func.length(Chapter.text) > 0)
             .where(~paragraph_exists)
         )
-        missing_chapter_ids = {
-            int(row.chapter_id)
-            for row in self.session.execute(missing_statement).all()
-        }
+        missing_chapter_ids = {int(row.chapter_id) for row in self.session.execute(missing_statement).all()}
         count_label = func.count(Paragraph.paragraph_index)
         max_index_label = func.max(Paragraph.paragraph_index)
         min_index_label = func.min(Paragraph.paragraph_index)
@@ -252,10 +249,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             .group_by(Paragraph.chapter_id)
             .having(or_(min_index_label != 0, count_label != max_index_label + 1))
         )
-        gapped_chapter_ids = {
-            int(row.chapter_id)
-            for row in self.session.execute(gapped_statement).all()
-        }
+        gapped_chapter_ids = {int(row.chapter_id) for row in self.session.execute(gapped_statement).all()}
         null_statement = (
             select(Paragraph.chapter_id)
             .where(Paragraph.run_id == run_id)
@@ -269,19 +263,14 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             )
             .group_by(Paragraph.chapter_id)
         )
-        null_chapter_ids = {
-            int(row.chapter_id)
-            for row in self.session.execute(null_statement).all()
-        }
+        null_chapter_ids = {int(row.chapter_id) for row in self.session.execute(null_statement).all()}
         return sorted(missing_chapter_ids | gapped_chapter_ids | null_chapter_ids)
 
     # ------------------------------------------------------------------
     # paragraph_metrics（§5.3 原始计数与充分统计量）
     # ------------------------------------------------------------------
 
-    def insert_paragraph_metrics(
-        self, run_id: str, rows: Sequence[ParagraphMetricRow]
-    ) -> int:
+    def insert_paragraph_metrics(self, run_id: str, rows: Sequence[ParagraphMetricRow]) -> int:
         """
         先删后插写入 run 的段落指标行（同 run 不可重跑前序阶段的语义）
 
@@ -349,11 +338,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
     def has_paragraph_metrics(self, run_id: str) -> bool:
         """run 是否存在段落指标行"""
-        statement = (
-            select(ParagraphMetric.paragraph_id)
-            .where(ParagraphMetric.run_id == run_id)
-            .limit(1)
-        )
+        statement = select(ParagraphMetric.paragraph_id).where(ParagraphMetric.run_id == run_id).limit(1)
         return self.session.execute(statement).scalar_one_or_none() is not None
 
     # ------------------------------------------------------------------
@@ -384,23 +369,12 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         if not topic_rows:
             return 0
         self.session.execute(delete(ParagraphTopic).where(ParagraphTopic.run_id == run_id))
-        self.session.bulk_insert_mappings(
-            cast(Mapper[Any], ParagraphTopic), topic_rows
-        )
+        self.session.bulk_insert_mappings(cast(Mapper[Any], ParagraphTopic), topic_rows)
         return len(topic_rows)
 
     def clear_paragraph_topics(self, run_id: str) -> None:
         """清空 run 的段落主题行"""
         self.session.execute(delete(ParagraphTopic).where(ParagraphTopic.run_id == run_id))
-
-    def has_paragraph_topics(self, run_id: str) -> bool:
-        """run 是否存在段落主题行"""
-        statement = (
-            select(ParagraphTopic.id)
-            .where(ParagraphTopic.run_id == run_id)
-            .limit(1)
-        )
-        return self.session.execute(statement).scalar_one_or_none() is not None
 
     def fetch_paragraph_topics(self, run_id: str) -> Sequence[Row]:
         """读取 run 的全部段落主题行（按段落与主题排序）"""
@@ -426,10 +400,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         stmt = (
             select(
                 ParagraphTopic.topic_id,
-                func.sum(
-                    ParagraphTopic.topic_weight
-                    * ParagraphTopic.inference_token_count
-                ).label("weighted_total"),
+                func.sum(ParagraphTopic.topic_weight * ParagraphTopic.inference_token_count).label("weighted_total"),
                 func.sum(ParagraphTopic.inference_token_count).label("inference_total"),
             )
             .where(ParagraphTopic.run_id == run_id)
@@ -441,9 +412,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
     # paragraph_curves（§5.5 段落曲线）
     # ------------------------------------------------------------------
 
-    def insert_paragraph_curves(
-        self, run_id: str, rows: Sequence[ParagraphCurveRow]
-    ) -> int:
+    def insert_paragraph_curves(self, run_id: str, rows: Sequence[ParagraphCurveRow]) -> int:
         """
         先删后插写入 run 的段落曲线行
 
@@ -507,8 +476,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             )
             .join(
                 Paragraph,
-                (Paragraph.run_id == ParagraphMetric.run_id)
-                & (Paragraph.paragraph_id == ParagraphMetric.paragraph_id),
+                (Paragraph.run_id == ParagraphMetric.run_id) & (Paragraph.paragraph_id == ParagraphMetric.paragraph_id),
             )
             .join(
                 Chapter,
@@ -535,8 +503,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
             )
             .join(
                 ParagraphCurve,
-                (ParagraphCurve.run_id == Paragraph.run_id)
-                & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
+                (ParagraphCurve.run_id == Paragraph.run_id) & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
             )
             .join(
                 Chapter,
@@ -554,9 +521,5 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
     def has_paragraph_curves(self, run_id: str) -> bool:
         """run 是否存在段落曲线行"""
-        statement = (
-            select(ParagraphCurve.paragraph_id)
-            .where(ParagraphCurve.run_id == run_id)
-            .limit(1)
-        )
+        statement = select(ParagraphCurve.paragraph_id).where(ParagraphCurve.run_id == run_id).limit(1)
         return self.session.execute(statement).scalar_one_or_none() is not None

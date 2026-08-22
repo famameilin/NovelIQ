@@ -55,8 +55,7 @@ def test_detect_alias_suspicions_finds_orphan_pair(db_session) -> None:
     chapter_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id)
     assert chapter_boundary is not None
     pairs = {
-        (item.name_a, item.name_b)
-        for item in detect_alias_suspicions(db_session, chapter_boundary=chapter_boundary)
+        (item.name_a, item.name_b) for item in detect_alias_suspicions(db_session, chapter_boundary=chapter_boundary)
     }
     assert ("贺伯安", "伯安") in pairs or ("伯安", "贺伯安") in pairs
 
@@ -89,8 +88,7 @@ def test_detect_alias_suspicions_skips_merged_pairs(db_session) -> None:
     chapter_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id)
     assert chapter_boundary is not None
     pairs = {
-        (item.name_a, item.name_b)
-        for item in detect_alias_suspicions(db_session, chapter_boundary=chapter_boundary)
+        (item.name_a, item.name_b) for item in detect_alias_suspicions(db_session, chapter_boundary=chapter_boundary)
     }
     assert pairs == set()
 

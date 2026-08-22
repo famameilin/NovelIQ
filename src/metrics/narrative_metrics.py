@@ -101,8 +101,6 @@ def find_valley_before_peak(scores: list[float], peak_idx: int) -> int:
     return min(range(len(before_peak)), key=lambda i: before_peak[i])
 
 
-
-
 def _validate_position_inputs(positions: Sequence[float], scores: Sequence[float]) -> None:
     """校验字符坐标版输入的公共前置条件：长度一致且位置严格单调递增。"""
     if len(positions) != len(scores):
@@ -118,25 +116,7 @@ def find_local_peaks(
     scores: Sequence[float],
     min_spacing: float = 0.05,
 ) -> list[int]:
-    """
-    局部峰值检测（归一化进度轴，最小间距为进度差）。
-
-    与 find_local_peaks 的差异：
-    - 最小间距使用字符位置差（positions[i] - positions[peak[-1]] >= min_spacing），
-      不再使用点索引差；
-    - 峰值判定仍为严格相邻比较 scores[i] > scores[i-1] and scores[i] > scores[i+1]。
-
-    Args:
-        positions: 严格单调递增的字符位置（建议使用归一化字符坐标 [0, 1]）。
-        scores: 与 positions 等长的张力/情绪分数。
-        min_spacing: 相邻峰值之间的最小字符位置差（全文比例，默认 0.05）。
-
-    Returns:
-        峰值索引列表（按位置升序）。
-
-    Raises:
-        ValueError: positions 与 scores 长度不一致，或 positions 非严格递增。
-    """
+    """局部峰值：scores[i] > 邻点且与前峰字符间距 >= min_spacing。"""
     _validate_position_inputs(positions, scores)
     if len(scores) < 3:
         return []
@@ -171,35 +151,11 @@ def _build_min_ratio_normalized_result(
     }
 
 
-def _count_conflicts(event_types: list[str], start_idx: int, end_idx: int) -> int:
-    return sum(1 for event_type in event_types[start_idx:end_idx] if event_type == "冲突")
-
-
-def _count_plot_flags(cliffhangers: list[int], pivot_moments: list[int], start_idx: int, end_idx: int) -> int:
-    return sum(cliffhangers[start_idx:end_idx]) + sum(pivot_moments[start_idx:end_idx])
-
-
-def _compute_structure_density(
-    event_types: list[str],
-    cliffhangers: list[int],
-    pivot_moments: list[int],
-    start_idx: int,
-    end_idx: int,
-) -> tuple[float, int, int]:
-    window_len = max(end_idx - start_idx, 1)
-    conflict_count = _count_conflicts(event_types, start_idx, end_idx)
-    plot_flag_count = _count_plot_flags(cliffhangers, pivot_moments, start_idx, end_idx)
-    density = (conflict_count + plot_flag_count) / window_len
-    return density, conflict_count, plot_flag_count
-
-
 def _compute_window_mean(scores: list[float], start_idx: int, end_idx: int) -> float:
     window = scores[start_idx:end_idx]
     if not window:
         return 0.0
     return sum(window) / len(window)
-
-
 
 
 def _char_span_of_n_points(positions: Sequence[float], n: int) -> float:
@@ -235,13 +191,7 @@ def _select_climax_region(
     pivot_moments: Sequence[int],
     tension_scores: Sequence[float],
 ) -> tuple[int, int, int, int, int, float]:
-    """
-    字符坐标版主高潮区识别（设计文档 §10、§19.8 修复）。
-
-    与 _select_climax_region 的差异：窗口按字符区间定义——
-    窗口宽度 = 8% 字符跨度（至少覆盖 8 个点、至多 24 个点对应的字符宽度），
-    扫描范围为后 45% 字符跨度。字符跨度为零时退化到点索引窗口（与旧实现一致）。
-    """
+    """主高潮区识别（§10/§19.8 字符坐标版）：8% 跨度窗口扫描后 45%。"""
     total = len(tension_scores)
     if total == 0:
         return 0, 0, 0, 0, 0, 0.0
@@ -269,9 +219,7 @@ def _select_climax_region(
     if scan_start_pos > last_start_pos:
         scan_start_pos = last_start_pos
     candidate_starts = [
-        i
-        for i in range(total)
-        if positions[i] >= scan_start_pos and positions[i] <= last_start_pos + 1e-9
+        i for i in range(total) if positions[i] >= scan_start_pos and positions[i] <= last_start_pos + 1e-9
     ]
     if not candidate_starts:
         # 点过于稀疏：退化为最后一个可放下窗口的起点。
@@ -337,14 +285,7 @@ def _select_act1_boundary(
     climax_region_start: int,
     representative_peak_idx: int,
 ) -> tuple[int, bool, list[ThreeActBoundaryCandidate]]:
-    """
-    字符坐标版第一幕边界选择（设计文档 §10、§19.8 修复）。
-
-    与 _select_act1_boundary 的差异：前后窗口按字符区间定义——
-    before = [j | positions[j] in (p - w, p)]、after = [j | positions[j] in [p, p + w)]，
-    窗口宽度 w = 6% 字符跨度（至少覆盖 6 个点、至多 18 个点对应的字符宽度），
-    且不宽于主高潮区起点的字符位置。
-    """
+    """第一幕边界选择（§10/§19.8 字符坐标版）：6% 跨度双窗口择优。"""
     total = len(tension_scores)
     if total < 3:
         return 0, True, []
@@ -402,18 +343,13 @@ def _select_act1_boundary(
         after_plot_flag_count = sum(cliffhangers[j] for j in after_indices) + sum(
             pivot_moments[j] for j in after_indices
         )
-        before_structure_density = (
-            before_conflict_count + before_plot_flag_count
-        ) / len(before_indices)
-        after_structure_density = (
-            after_conflict_count + after_plot_flag_count
-        ) / len(after_indices)
+        before_structure_density = (before_conflict_count + before_plot_flag_count) / len(before_indices)
+        after_structure_density = (after_conflict_count + after_plot_flag_count) / len(after_indices)
         if after_mean_tension <= before_mean_tension or after_structure_density <= before_structure_density:
             continue
 
-        combined_uplift = (
-            (after_mean_tension - before_mean_tension)
-            + (after_structure_density - before_structure_density)
+        combined_uplift = (after_mean_tension - before_mean_tension) + (
+            after_structure_density - before_structure_density
         )
         candidates.append(
             ThreeActBoundaryCandidate(
@@ -446,21 +382,7 @@ def analyze_three_act_structure(
     tension_scores: Sequence[float],
     min_act_ratio: float = 0.05,
 ) -> ThreeActStructureDiagnostics:
-    """
-    三幕结构诊断（归一化字符进度轴）。
-
-    与 analyze_three_act_structure 的差异：
-    - 主高潮区与第一幕边界的前后窗口按字符区间切分（8% / 6% 字符跨度），
-      不再按固定点数；
-    - 三幕比例使用字符位置差：
-      act1_raw = (positions[boundary] - positions[0]) / span，
-      act2_raw / act3_raw 同理以主高潮代表峰位置为界；
-    - 字符跨度为零（退化输入）时按等分兜底。
-
-    返回 ThreeActStructureDiagnostics：索引字段（climax_region_start /
-    climax_region_end / representative_peak_idx / act1_boundary_idx）仍表示
-    positions 中的点索引；ratio_dict() 的比例则为字符位置比例。
-    """
+    """三幕结构诊断（字符进度轴）：8%/6% 窗口选区，字符位置算比例。"""
     _validate_position_inputs(positions, tension_scores)
     if not tension_scores:
         return ThreeActStructureDiagnostics(
@@ -563,12 +485,10 @@ def compute_three_act_ratio_v2(
     ).ratio_dict()
 
 
-
 def compute_three_act_ratio(
     event_types: list[str],
 ) -> dict[str, float]:
     return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
-
 
 
 def compute_climax_spacing(
@@ -586,12 +506,8 @@ def compute_climax_spacing(
     if len(peak_indices) < 2:
         return None
 
-    spacings = [
-        positions[peak_indices[i]] - positions[peak_indices[i - 1]]
-        for i in range(1, len(peak_indices))
-    ]
+    spacings = [positions[peak_indices[i]] - positions[peak_indices[i - 1]] for i in range(1, len(peak_indices))]
     return sum(spacings) / len(spacings) if spacings else None
-
 
 
 def compute_middle_collapse_index(
@@ -612,11 +528,7 @@ def compute_middle_collapse_index(
         return None
 
     def avg_in_range(lo: float, hi: float) -> float | None:
-        vals = [
-            tension_scores[i]
-            for i, pos in enumerate(positions)
-            if lo <= (pos - positions[0]) / span < hi
-        ]
+        vals = [tension_scores[i] for i, pos in enumerate(positions) if lo <= (pos - positions[0]) / span < hi]
         if not vals:
             return None
         return sum(vals) / len(vals)
@@ -630,7 +542,6 @@ def compute_middle_collapse_index(
     if head_tail_avg == 0:
         return None
     return middle / head_tail_avg
-
 
 
 def compute_event_density(
@@ -655,24 +566,11 @@ def compute_cliffhanger_rate(
     return sum(cliffhangers) / len(cliffhangers)
 
 
-
 def compute_climax_profile(
     positions: Sequence[float],
     tension_scores: Sequence[float],
 ) -> dict:
-    """
-    字符坐标版多高潮剖面（设计文档 §10、§19.8 修复）。
-
-    与 compute_climax_profile 的差异：climax_positions 直接使用真实字符位置
-    positions[p]（保留三位小数），不再用 p / total 的百分比估算。
-
-    返回字段（与 compute_climax_profile 一致）:
-    - climax_count: 高潮数量
-    - climax_positions: 各高潮的真实字符位置
-    - climax_heights: 各高潮的张力值（归一化）
-    - peak_escalation: 是否逐步升级（ascending/descending/flat）
-    - dominant_climax_pos: 最强高潮的字符位置
-    """
+    """多高潮剖面（§10/§19.8 字符坐标版）：真实位置三位小数。"""
     if not tension_scores:
         return {
             "climax_count": 0,

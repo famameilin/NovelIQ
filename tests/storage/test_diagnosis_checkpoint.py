@@ -1,4 +1,4 @@
-﻿from types import SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
@@ -7,9 +7,7 @@ from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 def test_fetch_known_characters_falls_back_when_graph_missing() -> None:
     """2026-08-09 用于验证无图版本时诊断人物名单回退到原始实体节点"""
     session = MagicMock()
-    with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService"
-    ) as authority_service:
+    with patch("src.knowledge.authority.KnowledgeGraphAuthorityService") as authority_service:
         authority_service.from_session.return_value.build_export_view.side_effect = ValueError(
             "run 尚无已完成章节图版本"
         )
@@ -42,9 +40,7 @@ def test_fetch_known_characters_uses_canonical_view_with_aliases() -> None:
         name="贺府",
         aliases=[],
     )
-    with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService"
-    ) as authority_service:
+    with patch("src.knowledge.authority.KnowledgeGraphAuthorityService") as authority_service:
         view = MagicMock()
         view.canonical_entities = [canonical_entity, null_entity, location_entity]
         authority_service.from_session.return_value.build_export_view.return_value = view
@@ -78,4 +74,3 @@ def test_fetch_high_tension_chunks_orders_by_paragraph_surface_tension() -> None
     assert "surface_tension" in sql
     assert "chunk_curves" not in sql
     assert "tension_composite" not in sql
-

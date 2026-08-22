@@ -122,9 +122,7 @@ def test_reelect_uses_latest_chapter_state_only(db_session) -> None:
 
     flags = {
         int(row.entity_id): row.attributes.get("is_representative")
-        for row in db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
+        for row in db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
     }
     # 最近章节已 break：甲/乙不再属于同一分量
     assert flags[entity_a] is False

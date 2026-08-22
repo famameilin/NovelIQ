@@ -17,8 +17,28 @@ from src.metrics.paragraph_metrics import (
 
 TEXT = "他很快乐，也很痛苦。不快乐的时候，他像花朵一样凋零！他在战斗中咆哮，真的吗？"
 TOKENS = [
-    "他", "很", "快乐", "也", "很", "痛苦", "不", "快乐", "的", "时候",
-    "他", "像", "花朵", "一样", "凋零", "他", "在", "战斗", "中", "咆哮", "真的", "吗",
+    "他",
+    "很",
+    "快乐",
+    "也",
+    "很",
+    "痛苦",
+    "不",
+    "快乐",
+    "的",
+    "时候",
+    "他",
+    "像",
+    "花朵",
+    "一样",
+    "凋零",
+    "他",
+    "在",
+    "战斗",
+    "中",
+    "咆哮",
+    "真的",
+    "吗",
 ]
 LEXICONS = {
     "pos_terms": {"快乐": 1.0},
@@ -85,9 +105,7 @@ def test_sentence_sufficient_statistics_manual() -> None:
 
 def test_negation_flip_single() -> None:
     """单重否定翻转："不快乐" 计入 negative"""
-    counts = compute_paragraph_metric_counts(
-        "他不快乐。", ["他", "不", "快乐"], {"pos_terms": {"快乐": 1.0}}
-    )
+    counts = compute_paragraph_metric_counts("他不快乐。", ["他", "不", "快乐"], {"pos_terms": {"快乐": 1.0}})
     assert counts.positive_weight_sum == pytest.approx(0.0)
     assert counts.negative_weight_sum == pytest.approx(1.0)
 
@@ -103,16 +121,14 @@ def test_negation_flip_double() -> None:
 
 def test_negation_flip_negative_term() -> None:
     """否定翻转同样作用于负面词："不痛苦" 计入 positive"""
-    counts = compute_paragraph_metric_counts(
-        "他不痛苦。", ["他", "不", "痛苦"], {"neg_terms": {"痛苦": 1.0}}
-    )
+    counts = compute_paragraph_metric_counts("他不痛苦。", ["他", "不", "痛苦"], {"neg_terms": {"痛苦": 1.0}})
     assert counts.positive_weight_sum == pytest.approx(1.0)
     assert counts.negative_weight_sum == pytest.approx(0.0)
 
 
 def test_dialogue_char_count() -> None:
     """对话字符数：「」角引号 + 英文双引号内容合计"""
-    text = "「你好，世界。」他说：\"你好\"！"
+    text = '「你好，世界。」他说："你好"！'
     counts = compute_paragraph_metric_counts(text, ["你好", "世界", "他说", "你好"], {})
     assert counts.dialogue_char_count == 8
 
@@ -157,7 +173,8 @@ def test_empty_lexicons_non_empty_text() -> None:
 def test_semantic_categories_without_hits() -> None:
     """语义类别给出但无命中：类别键保留、计数为 0"""
     counts = compute_paragraph_metric_counts(
-        "你好。", ["你好"],
+        "你好。",
+        ["你好"],
         {"semantic_categories": {"emotion": ["快乐"], "combat": ["战斗"]}},
     )
     assert counts.semantic_category_counts == {"emotion": 0, "combat": 0}

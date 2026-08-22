@@ -95,16 +95,12 @@ def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dic
 
     aggregates = ParagraphRepository(session).fetch_chapter_metric_aggregates(run_id)
     totals_by_chapter = dict(aggregates)
-    imagery_total = sum(
-        float(totals.get("imagery_hit_count", 0.0)) for _chapter_id, totals in aggregates
-    )
+    imagery_total = sum(float(totals.get("imagery_hit_count", 0.0)) for _chapter_id, totals in aggregates)
     imagery_non_null = imagery_total > 0
     # 2026-08-15 质量门分母修复：aggregates 从 ParagraphMetric 内连接出发，完全没有
     # 指标行的章（空正文/段落指标缺失）不出现，此前被静默排除在分母之外导致空章漏检。
     # 分母改为"有正文的全部章节"：无指标行的章按 token 0（缺失）计入不通过。
-    chapter_ids_with_text = [
-        chapter_id for chapter_id, _ in ChapterRepository(session).fetch_chapter_texts(run_id)
-    ]
+    chapter_ids_with_text = [chapter_id for chapter_id, _ in ChapterRepository(session).fetch_chapter_texts(run_id)]
     null_chapter_ids: list[int] = []
     for chapter_id in chapter_ids_with_text:
         totals = totals_by_chapter.get(chapter_id)
@@ -157,19 +153,10 @@ async def run_aggregate(
     session: Session,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
-    """
-    执行聚合流程
+    """执行聚合流程 — 2026-08-14 M8b 不再写 chunk_curves(源 paragraph_curves)，
+    仅写 global_stats(§9.1守恒聚合)并跑 /metrics。
 
-    2026-08-14 M8b：不再写入 chunk_curves（曲线事实源为 paragraph_curves），
-    只写 global_stats（段落充分统计量守恒聚合），并运行 /metrics 聚合。
-
-    Args:
-        run_id: 运行ID
-        session: 数据库连接
-        emitter: 统一事件发送器，签名为 async (StreamEvent) -> None
-
-    Returns:
-        Tuple[int, int, int]: (总章数, 全局统计条数, 保留位恒为 0)
+    Args: run_id / session / emitter(async StreamEvent->None)  Returns: (总章数, 全局统计条数, 保留位0)
     """
     start_time = time.time()
 

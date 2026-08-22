@@ -22,10 +22,7 @@ def test_database_name_parsed_from_plain_url() -> None:
 
 def test_database_name_parsed_with_query_params() -> None:
     """2026-08-08 用于验证带查询参数的 URL 仍能解析库名"""
-    url = (
-        "postgresql+psycopg://user:pass@localhost:5432/novel_analysis"
-        "?options=-c%20search_path%3Dtest"
-    )
+    url = "postgresql+psycopg://user:pass@localhost:5432/novel_analysis?options=-c%20search_path%3Dtest"
     assert _database_name_from_url(url) == "novel_analysis"
 
 
@@ -58,9 +55,7 @@ def test_ensure_database_exists_skips_when_already_present(monkeypatch) -> None:
     """2026-08-08 用于验证目标库已存在时不执行 CREATE DATABASE"""
     executed: list[str] = []
     connection = MagicMock()
-    connection.execute.side_effect = lambda stmt, *args, **kwargs: (
-        _record_and_return_truthy(executed, stmt)
-    )
+    connection.execute.side_effect = lambda stmt, *args, **kwargs: _record_and_return_truthy(executed, stmt)
     engine = MagicMock()
     engine.connect.return_value.__enter__.return_value = connection
     monkeypatch.setattr("src.storage.db.create_engine", lambda *a, **k: engine)
@@ -76,9 +71,7 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch) -> None:
     """2026-08-08 用于验证缺失数据库时执行一次 CREATE DATABASE"""
     executed: list[str] = []
     connection = MagicMock()
-    connection.execute.side_effect = lambda stmt, *args, **kwargs: (
-        _record_and_return_falsy(executed, stmt)
-    )
+    connection.execute.side_effect = lambda stmt, *args, **kwargs: _record_and_return_falsy(executed, stmt)
     engine = MagicMock()
     engine.connect.return_value.__enter__.return_value = connection
     monkeypatch.setattr("src.storage.db.create_engine", lambda *a, **k: engine)
@@ -86,7 +79,7 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch) -> None:
 
     ensure_database_exists()
 
-    assert "CREATE DATABASE \"novel_analysis\"" in executed
+    assert 'CREATE DATABASE "novel_analysis"' in executed
     assert executed[0] == "SELECT 1 FROM pg_database WHERE datname = :name"
 
 

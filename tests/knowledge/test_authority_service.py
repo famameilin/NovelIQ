@@ -145,9 +145,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         (1, relation_id),
     ]
     assert relation_changes[0].changes[0]["change_kind"] == "break"
-    assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [
-        (relation_id, False)
-    ]
+    assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [(relation_id, False)]
 
 
 def test_authority_merges_same_character_aliases_in_views(db_session) -> None:

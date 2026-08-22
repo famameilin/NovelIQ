@@ -163,7 +163,7 @@ def build_diagnosis_tools(
 
         try:
             graph_report = KnowledgeGraphAuthorityService.from_session(session).build_graph_report(run_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"（图谱信号不可用: {exc}）"
         summary, quality = serialize_graph_report_signals(graph_report)
         merged_signals = {**summary, **quality}

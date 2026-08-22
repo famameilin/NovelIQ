@@ -53,7 +53,4 @@ class ParagraphEmbedding(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            "<ParagraphEmbedding("
-            f"run_id={self.run_id}, paragraph_id={self.paragraph_id})>"
-        )
+        return f"<ParagraphEmbedding(run_id={self.run_id}, paragraph_id={self.paragraph_id})>"

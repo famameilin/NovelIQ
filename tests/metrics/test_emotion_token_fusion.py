@@ -39,7 +39,7 @@ class TestFusionSplits:
         assert _spans("爽爆了", {"爽爆"}) == ["爽爆"]
 
     def test_negation_flip_after_split(self) -> None:
-        """"不是很爽"：切开后 爽 与"不是"相邻，正确翻转"""
+        """ "不是很爽"：切开后 爽 与"不是"相邻，正确翻转"""
         spec = load_negation_spec()
         toks = tokenize("不是很爽")
         spans = get_emotion_spans("不是很爽", toks, {"爽"})

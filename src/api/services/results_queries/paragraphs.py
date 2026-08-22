@@ -80,12 +80,8 @@ def _smooth_emotion_windows(windows: list[EmotionTrendWindow]) -> list[EmotionTr
     return [
         window.model_copy(
             update={
-                "smoothed_pos_coverage": (
-                    _clamp_coverage(pos_coverage[index])
-                ),
-                "smoothed_neg_coverage": (
-                    _clamp_coverage(neg_coverage[index])
-                ),
+                "smoothed_pos_coverage": (_clamp_coverage(pos_coverage[index])),
+                "smoothed_neg_coverage": (_clamp_coverage(neg_coverage[index])),
                 "smoothed_pooled_pos_density": pooled_pos[index],
                 "smoothed_pooled_neg_density": pooled_neg[index],
                 "smoothed_pooled_net_density": pooled_net[index],
@@ -144,16 +140,10 @@ def _fetch_emotion_trend(
         token_total = sum(int(metric.token_count) for _, metric, _ in chunk)
         pos_sum = sum(float(metric.positive_weight_sum) for _, metric, _ in chunk)
         neg_sum = sum(float(metric.negative_weight_sum) for _, metric, _ in chunk)
-        pos_hit = sum(
-            1 for _, metric, _ in chunk if float(metric.positive_weight_sum) > 0
-        )
-        neg_hit = sum(
-            1 for _, metric, _ in chunk if float(metric.negative_weight_sum) > 0
-        )
+        pos_hit = sum(1 for _, metric, _ in chunk if float(metric.positive_weight_sum) > 0)
+        neg_hit = sum(1 for _, metric, _ in chunk if float(metric.negative_weight_sum) > 0)
         hit_paragraphs = sum(
-            1
-            for _, metric, _ in chunk
-            if float(metric.positive_weight_sum) + float(metric.negative_weight_sum) > 0
+            1 for _, metric, _ in chunk if float(metric.positive_weight_sum) + float(metric.negative_weight_sum) > 0
         )
         count = len(chunk)
         first_row, _, first_position = chunk[0]
@@ -315,9 +305,7 @@ def _fetch_chapter_metrics(
             continue
         chapter_id = int(paragraph_row.chapter_id)
         first_paragraph_by_chapter.setdefault(chapter_id, paragraph_row)
-        accumulator = chapters_by_id.setdefault(
-            chapter_id, _ChapterAccumulator(chapter_id=chapter_id)
-        )
+        accumulator = chapters_by_id.setdefault(chapter_id, _ChapterAccumulator(chapter_id=chapter_id))
         accumulator.paragraph_count += 1
         accumulator.total_chars += int(paragraph_row.char_count)
         accumulator.total_tokens += int(metric_row.token_count)
@@ -353,8 +341,7 @@ def _build_chapter_summary(
     if accumulator.sentence_count > 0 and sentence_mean is not None:
         sentence_var = max(
             0.0,
-            accumulator.sentence_char_sum_sq / accumulator.sentence_count
-            - sentence_mean * sentence_mean,
+            accumulator.sentence_char_sum_sq / accumulator.sentence_count - sentence_mean * sentence_mean,
         )
     return ChapterMetricSummary(
         chapter_id=accumulator.chapter_id,
@@ -376,23 +363,15 @@ def _build_chapter_summary(
         sent_len_std=math.sqrt(sentence_var) if sentence_var is not None else None,
         ttr=ttr(tokens) if tokens else None,
         mtld=mtld(tokens) if tokens else None,
-        narrative_function=(
-            str(annotation.event_type) if annotation is not None and annotation.event_type else None
-        ),
+        narrative_function=(str(annotation.event_type) if annotation is not None and annotation.event_type else None),
         pivot_moment=(
-            bool(annotation.pivot_moment)
-            if annotation is not None and annotation.pivot_moment is not None
-            else None
+            bool(annotation.pivot_moment) if annotation is not None and annotation.pivot_moment is not None else None
         ),
         cliffhanger=(
-            bool(annotation.cliffhanger)
-            if annotation is not None and annotation.cliffhanger is not None
-            else None
+            bool(annotation.cliffhanger) if annotation is not None and annotation.cliffhanger is not None else None
         ),
         emotional_valence=(
-            str(annotation.emotional_valence)
-            if annotation is not None and annotation.emotional_valence
-            else None
+            str(annotation.emotional_valence) if annotation is not None and annotation.emotional_valence else None
         ),
     )
 
@@ -423,9 +402,7 @@ def _build_book_aggregate(
     sentence_mean = _safe_ratio(sentence_char_sum, sentence_count)
     sentence_var: float | None = None
     if sentence_count > 0 and sentence_mean is not None:
-        sentence_var = max(
-            0.0, sentence_char_sum_sq / sentence_count - sentence_mean * sentence_mean
-        )
+        sentence_var = max(0.0, sentence_char_sum_sq / sentence_count - sentence_mean * sentence_mean)
 
     narrative_share: dict[str, float] = {}
     valence_share: dict[str, float] = {}
@@ -438,14 +415,10 @@ def _build_book_aggregate(
     for chapter in chapter_metrics:
         if chapter.narrative_function:
             narrative_valid_chapters += 1
-            narrative_share[chapter.narrative_function] = (
-                narrative_share.get(chapter.narrative_function, 0.0) + 1.0
-            )
+            narrative_share[chapter.narrative_function] = narrative_share.get(chapter.narrative_function, 0.0) + 1.0
         if chapter.emotional_valence:
             valence_valid_chapters += 1
-            valence_share[chapter.emotional_valence] = (
-                valence_share.get(chapter.emotional_valence, 0.0) + 1.0
-            )
+            valence_share[chapter.emotional_valence] = valence_share.get(chapter.emotional_valence, 0.0) + 1.0
         if chapter.pivot_moment is not None:
             pivot_valid_chapters += 1
             if chapter.pivot_moment:
@@ -460,9 +433,7 @@ def _build_book_aggregate(
             label: round(count / narrative_valid_chapters, 6) for label, count in narrative_share.items()
         }
     if valence_valid_chapters > 0:
-        valence_share = {
-            label: round(count / valence_valid_chapters, 6) for label, count in valence_share.items()
-        }
+        valence_share = {label: round(count / valence_valid_chapters, 6) for label, count in valence_share.items()}
 
     return BookAggregateStats(
         total_chapters=total_chapters,
@@ -482,13 +453,9 @@ def _build_book_aggregate(
         ttr=ttr(book_tokens) if book_tokens else None,
         mtld=mtld(book_tokens) if book_tokens else None,
         chapter_narrative_function_share=narrative_share,
-        chapter_pivot_rate=(
-            pivot_chapters / pivot_valid_chapters if pivot_valid_chapters > 0 else None
-        ),
+        chapter_pivot_rate=(pivot_chapters / pivot_valid_chapters if pivot_valid_chapters > 0 else None),
         chapter_cliffhanger_rate=(
-            cliffhanger_chapters / cliffhanger_valid_chapters
-            if cliffhanger_valid_chapters > 0
-            else None
+            cliffhanger_chapters / cliffhanger_valid_chapters if cliffhanger_valid_chapters > 0 else None
         ),
         chapter_emotional_valence_share=valence_share,
     )

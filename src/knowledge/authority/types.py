@@ -125,26 +125,6 @@ class EntityLifecycle:
 
 
 @dataclass(slots=True)
-class ActiveEntityContext:
-    """
-    附近活跃实体的 Level 2 局部上下文合同
-
-    这样既能让 prompt 消费者摆脱 repository 行结构，
-    又能暴露标注/消歧所需的最近局部状态
-    """
-
-    name: str
-    entity_id: int | None = None
-    role: str | None = None
-    entity_type: str = "character"
-    status: str = "active"
-    last_seen_chapter: int | None = None
-    recent_action: str | None = None
-    recent_emotion: str | None = None
-    source: str = "graph_active_entities"
-
-
-@dataclass(slots=True)
 class ParticipantState:
     """
     跨 chunk 复用的稳定实体状态

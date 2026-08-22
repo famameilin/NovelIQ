@@ -53,9 +53,7 @@ class EventManager:
             self._connections[task_id].append(queue)
             self._last_activity[task_id] = time.monotonic()
             buffered = [
-                msg
-                for msg in self._buffers.get(task_id, ())
-                if last_seq is None or msg.get("seq", 0) > last_seq
+                msg for msg in self._buffers.get(task_id, ()) if last_seq is None or msg.get("seq", 0) > last_seq
             ]
 
         # 锁外回放：asyncio.Queue 无界 put 不会真正阻塞，但避免在锁内 await

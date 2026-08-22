@@ -109,17 +109,13 @@ def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
         graph_repository.return_value.fetch_changes.return_value = ([row], 10)
         cursor = _encode_graph_changes_cursor(5)
         _fetch_graph_changes_page("run-1", annotation_repo, changes_cursor=cursor, changes_limit=2)
-        graph_repository.return_value.fetch_changes.assert_called_once_with(
-            "run-1", chapter_id=None, offset=5, limit=2
-        )
+        graph_repository.return_value.fetch_changes.assert_called_once_with("run-1", chapter_id=None, offset=5, limit=2)
 
     # 下限钳制：changes_limit=0 → 1
     with patch("src.api.services.results_queries.graph.GraphRepository") as graph_repository:
         graph_repository.return_value.fetch_changes.return_value = ([row], 1)
         _fetch_graph_changes_page("run-1", annotation_repo, changes_limit=0)
-        graph_repository.return_value.fetch_changes.assert_called_once_with(
-            "run-1", chapter_id=None, offset=0, limit=1
-        )
+        graph_repository.return_value.fetch_changes.assert_called_once_with("run-1", chapter_id=None, offset=0, limit=1)
 
 
 def test_graph_changes_page_rejects_out_of_range_cursor() -> None:

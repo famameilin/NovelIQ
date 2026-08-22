@@ -1,17 +1,4 @@
-"""
-字符坐标稳健局部回归（LOWESS）
-
-实现设计文档《章节粒度分析指标重设计》§9.3 的平滑要求：
-
-1. 自变量为归一化字符位置 position；距离由真实字符位置计算。
-2. 样本权重乘以段落 char_count（或 token_count）。
-3. 带宽以全文比例表示，点过少时自适应扩大（每次 ×2）。
-4. 少于最小有效点数时返回原始曲线，不生成常数线。
-
-本模块同时提供等间距包装 `smooth_series`，用于 chunk 链路（无真实字符坐标）
-替代被移除的傅里叶滤波 `fourier_smooth`（§9.3：Fourier 假设等间距采样，
-且 n ≤ 19 时只剩 DC 分量输出常数直线，见 §19.2）。
-"""
+"""字符坐标 LOWESS 平滑（§9.3）：以归一化位置为 x、char_count 为权重，带宽按全文比例自适应；n<min 返原始。"""
 
 from __future__ import annotations
 
@@ -90,31 +77,13 @@ def robust_local_regression(
     min_points: int = 7,
     robust_iters: int = 3,
 ) -> list[float]:
-    """
-    字符坐标上的稳健局部线性回归（LOWESS）
-
-    Args:
-        x: 自变量（归一化字符位置），调用方保证单调递增
-        y: 因变量
-        weights: 样本权重（如段落 char_count），None 时等权
-        bandwidth: 以 x 全距比例表示的初始窗口带宽（§9.3 默认 2% 全文）
-        min_points: 窗口内最少有效点数，不足时自适应扩大（每次 ×2）
-        robust_iters: bisquare 残差权重迭代次数（标准 LOWESS 稳健化）
-
-    Returns:
-        与输入等长的平滑序列 list[float]。空输入返回 []；
-        n < min_points 返回原始序列（§9.3 第 4 条，不生成常数线）；
-        权重退化（窗口权重和 <= 0）时对应点返回原值，保证不含 NaN。
-        长度不匹配（x/y/weights 三者不一致）抛 ValueError。
-    """
+    """字符坐标 LOWESS 平滑；空输入返 []，n<min 返原始，无 NaN，长度不匹配抛错。"""
     xa = np.asarray(x, dtype=np.float64)
     ya = np.asarray(y, dtype=np.float64)
     if xa.ndim != 1 or ya.ndim != 1:
         raise ValueError("x and y must be one-dimensional sequences")
     if xa.shape[0] != ya.shape[0]:
-        raise ValueError(
-            f"x and y length mismatch: len(x)={xa.shape[0]} len(y)={ya.shape[0]}"
-        )
+        raise ValueError(f"x and y length mismatch: len(x)={xa.shape[0]} len(y)={ya.shape[0]}")
     # 2026-08-15 M3：非正带宽无法定义窗口（且自适应扩窗 h *= 2.0 恒不变会死循环），
     # 配置错误应在入口快速失败而不是挂死分析进程
     if bandwidth <= 0:
@@ -129,9 +98,7 @@ def robust_local_regression(
     else:
         sample_w = np.asarray(weights, dtype=np.float64)
         if sample_w.shape != (n,):
-            raise ValueError(
-                f"weights length mismatch: len(weights)={sample_w.shape[0]} len(x)={n}"
-            )
+            raise ValueError(f"weights length mismatch: len(weights)={sample_w.shape[0]} len(x)={n}")
     if n < min_points:
         return ya.tolist()
 
@@ -149,9 +116,7 @@ def robust_local_regression(
             scale = 6.0 * median_abs_residual + 1e-12
             u = residuals / scale
             robust_w = np.where(np.abs(u) < 1.0, (1.0 - u * u) ** 2, 0.0)
-            fitted = _local_regression_fit(
-                xa, ya, sample_w * robust_w, bandwidth, min_points
-            )
+            fitted = _local_regression_fit(xa, ya, sample_w * robust_w, bandwidth, min_points)
     return [float(value) for value in fitted]
 
 
@@ -172,6 +137,4 @@ def smooth_series(
     if n == 0:
         return []
     x = np.linspace(0.0, 1.0, n).tolist()
-    return robust_local_regression(
-        x, value_list, bandwidth=bandwidth, min_points=min_points
-    )
+    return robust_local_regression(x, value_list, bandwidth=bandwidth, min_points=min_points)

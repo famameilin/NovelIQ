@@ -57,9 +57,7 @@ class NegationSpec:
     @property
     def all_words(self) -> tuple[str, ...]:
         """全部否定词，按长度降序（longest-match 优先）"""
-        return tuple(
-            sorted(self.hard | self.modal | self.double | self.scope, key=len, reverse=True)
-        )
+        return tuple(sorted(self.hard | self.modal | self.double | self.scope, key=len, reverse=True))
 
 
 @dataclass(frozen=True)
@@ -204,11 +202,7 @@ def is_flipped(text: str, emotion_start: int, spec: NegationSpec | None = None) 
             # 距离约束例外：小句首否定词（并没有/没有/不要…）管辖整个小句，
             # 但否定与情绪词之间出现分句界（，、；：）仍视为出界（计划 §5.2 例 3）；
             # 含"的"为定语修饰（不灭的/没察觉的），否定只辖相邻词，不翻转
-            if (
-                not _span_at_clause_start(prefix, span)
-                or any(c in gap for c in _CLAUSE_BOUNDARY_CHARS)
-                or "的" in gap
-            ):
+            if not _span_at_clause_start(prefix, span) or any(c in gap for c in _CLAUSE_BOUNDARY_CHARS) or "的" in gap:
                 continue
         if span.kind == "double":
             effective += 2
