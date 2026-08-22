@@ -5,6 +5,7 @@ Metrics 模块入口
 """
 
 from src.config.constants import CLASSICAL_PATTERNS, PROPP_FUNCTIONS
+from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
 
 from .aggregate import (
     AggregateResult,
@@ -74,7 +75,6 @@ from .style_metrics_extra import (
     compute_sent_len_std,
     compute_string_token_diversity,
 )
-from .text_utils import dialogue_length, split_sentences, tokenize_words
 from .timeline_phase import (
     NarrativePhase,
     TimelinePhaseDTO,
