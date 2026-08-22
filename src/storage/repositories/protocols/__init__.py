@@ -9,7 +9,6 @@ from __future__ import annotations
 from .annotation import AnnotationRepositoryProtocol
 from .diagnosis import DiagnosisRepositoryProtocol
 from .run import RunRepositoryProtocol
-from .stats import StatsRepositoryProtocol
 from .types import (
     AnnotationRecord,
     ChapterCounts,
@@ -33,7 +32,6 @@ __all__ = [
     "AnnotationRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "RunRepositoryProtocol",
-    "StatsRepositoryProtocol",
     "AnnotationRecord",
     "ChapterCounts",
     "ChapterTextRow",

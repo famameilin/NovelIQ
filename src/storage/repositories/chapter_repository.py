@@ -108,11 +108,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
 
     def fetch_chapters(self, run_id: str) -> Sequence[ChapterModel]:
         """按顺序读取指定 run 的章节目录"""
-        stmt = (
-            select(ChapterModel)
-            .where(ChapterModel.run_id == run_id)
-            .order_by(ChapterModel.sequence)
-        )
+        stmt = select(ChapterModel).where(ChapterModel.run_id == run_id).order_by(ChapterModel.sequence)
         return self.session.execute(stmt).scalars().all()
 
     def fetch_chapter_texts(self, run_id: str) -> list[tuple[int, str]]:
@@ -169,40 +165,6 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
             .where(ChapterModel.run_id == run_id, ChapterModel.text.is_not(None))
         )
         return int(self.session.execute(stmt).scalar_one() or 0)
-
-    def fetch_prev_chapter_text(self, run_id: str, chapter_id: int) -> str | None:
-        """获取上一章的正文文本（支持 rolling_memory 运行时上下文）"""
-        current_sequence = self.session.scalar(
-            select(ChapterModel.sequence).where(
-                ChapterModel.run_id == run_id,
-                ChapterModel.chapter_id == chapter_id,
-            )
-        )
-        if current_sequence is None:
-            return None
-        stmt = select(ChapterModel.text).where(
-            ChapterModel.run_id == run_id,
-            ChapterModel.sequence < current_sequence,
-            ChapterModel.text.is_not(None),
-        ).order_by(ChapterModel.sequence.desc(), ChapterModel.chapter_id.desc()).limit(1)
-        return self.session.execute(stmt).scalar_one_or_none()
-
-    def fetch_next_chapter_text(self, run_id: str, chapter_id: int) -> str | None:
-        """获取下一章的正文文本（支持 rolling_memory 运行时上下文）"""
-        current_sequence = self.session.scalar(
-            select(ChapterModel.sequence).where(
-                ChapterModel.run_id == run_id,
-                ChapterModel.chapter_id == chapter_id,
-            )
-        )
-        if current_sequence is None:
-            return None
-        stmt = select(ChapterModel.text).where(
-            ChapterModel.run_id == run_id,
-            ChapterModel.sequence > current_sequence,
-            ChapterModel.text.is_not(None),
-        ).order_by(ChapterModel.sequence, ChapterModel.chapter_id).limit(1)
-        return self.session.execute(stmt).scalar_one_or_none()
 
     def has_chapters(self, run_id: str) -> bool:
         """检查指定运行是否有正文章节数据"""
@@ -269,8 +231,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
             select(ChapterSummary.chapter_id, ChapterSummary.summary)
             .join(
                 ChapterModel,
-                (ChapterModel.run_id == ChapterSummary.run_id)
-                & (ChapterModel.chapter_id == ChapterSummary.chapter_id),
+                (ChapterModel.run_id == ChapterSummary.run_id) & (ChapterModel.chapter_id == ChapterSummary.chapter_id),
             )
             .where(ChapterSummary.run_id == run_id)
             .order_by(ChapterModel.sequence, ChapterSummary.chapter_id)

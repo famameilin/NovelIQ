@@ -18,7 +18,6 @@ from .protocols import (
     AnnotationRepositoryProtocol,
     DiagnosisRepositoryProtocol,
     RunRepositoryProtocol,
-    StatsRepositoryProtocol,
 )
 from .run_repository import RunRepository
 from .stats import StatsRepository
@@ -37,7 +36,6 @@ __all__ = [
     "DatabaseAnnotationQueryService",
     "RunRepositoryProtocol",
     "AnnotationRepositoryProtocol",
-    "StatsRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "GraphRepository",
     "EntitySnapshotRow",
