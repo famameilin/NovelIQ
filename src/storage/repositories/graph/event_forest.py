@@ -120,9 +120,7 @@ class EventForestRepository:
         if chapters is None:
             chapters = self._chapter_rows(run_id)
         return {
-            int(chapter.chapter_id)
-            for index, chapter in enumerate(chapters, start=1)
-            if index <= max_chapter_order
+            int(chapter.chapter_id) for index, chapter in enumerate(chapters, start=1) if index <= max_chapter_order
         }
 
     def resolve_chapter_boundary(
@@ -148,9 +146,7 @@ class EventForestRepository:
                     )
                 ).scalars()
             )
-            annotation_by_chapter: dict[int, ChapterAnnotationRecord] = {
-                int(row.chapter_id): row for row in rows
-            }
+            annotation_by_chapter: dict[int, ChapterAnnotationRecord] = {int(row.chapter_id): row for row in rows}
             target = None
             annotation = None
             for candidate in reversed(chapters):
@@ -244,9 +240,7 @@ class EventForestRepository:
         ]
         if not include_inactive:
             filters.append(EventEdge.is_active.is_(True))
-        rows = self.session.execute(
-            select(EventEdge).where(*filters).order_by(EventEdge.edge_id)
-        ).scalars()
+        rows = self.session.execute(select(EventEdge).where(*filters).order_by(EventEdge.edge_id)).scalars()
         return [
             EventEdgeRow(
                 edge_id=edge.edge_id,
@@ -362,12 +356,8 @@ class EventForestRepository:
             return None
         event_nodes = self.fetch_event_nodes(run_id, max_chapter_order=boundary.chapter_order)
         # 复用已缓存 chapters 解析可见章节集合，单次计算供两类边复用
-        visible_chapter_ids = self._chapter_ids_for_order(
-            run_id, boundary.chapter_order, chapters=chapters
-        )
-        causal_edges = self._fetch_event_edges_by_chapter_ids(
-            run_id, visible_chapter_ids, include_inactive=True
-        )
+        visible_chapter_ids = self._chapter_ids_for_order(run_id, boundary.chapter_order, chapters=chapters)
+        causal_edges = self._fetch_event_edges_by_chapter_ids(run_id, visible_chapter_ids, include_inactive=True)
         foreshadowing_edges = self._fetch_foreshadowing_edges_by_chapter_ids(run_id, visible_chapter_ids)
         visible_event_ids = {node.event_id for node in event_nodes}
         visible_threads = [

@@ -132,25 +132,18 @@ def _persist_dialogue_records(
 ) -> None:
     """2026-08-11 用于把最终系统绑定对话投影到对话记录表
 
-    2026-08-18 P3：按与 persistence.py 同公式的确定性 event_id 构造锚点列表，
-    对话写入时弱关联到完全包含其字符区间的事件。
+    2026-08-18 P3：按事件锚点列表写入，对话弱关联到完全包含其字符区间的事件。
+    2026-08-22锚点直接取服务端生成的 event.node_id。
     """
-    from uuid import NAMESPACE_URL, uuid5
-
     repository = DialogueRecordRepository(session)
     for chunk in result.annotation.chunks:
         event_anchors = [
             (
-                str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        f"noveliq:event:{result.run_id}:{chunk.chunk_id}:{ordinal}",
-                    )
-                ),
+                event.node_id,
                 event.char_start,
                 event.char_end,
             )
-            for ordinal, event in enumerate(chunk.events, start=1)
+            for event in chunk.events
         ]
         repository.sync_dialogues(
             run_id=result.run_id,
@@ -167,26 +160,18 @@ def _persist_foreshadowing(
 ) -> None:
     """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表
 
-    2026-08-18：伏笔按 setup_event_id 去重——setup_event_id 由 run_id + chapter_id +
-    事件序号确定性生成（与 persistence.py._event_id 同公式），同一 setup 事件只建一条线程。
+    2026-08-18：伏笔按 setup_event_id 去重——同一 setup 事件只建一条线程。
+    2026-08-22setup_event_id 直接取服务端生成的 setup_node_id，
+    不再按序号重算。
     """
-    from uuid import NAMESPACE_URL, uuid5
-
     repository = ForeshadowingRepository(session)
     for chunk in result.annotation.chunks:
         for foreshadowing in chunk.foreshadowings:
-            # 2026-08-18 确定性生成 setup_event_id（与 persistence.py._event_id 同公式）
-            setup_event_id = str(
-                uuid5(
-                    NAMESPACE_URL,
-                    f"noveliq:event:{result.run_id}:{chunk.chunk_id}:{foreshadowing.setup_event_index}",
-                )
-            )
             repository.sync(
                 run_id=result.run_id,
                 chapter_id=chunk.chunk_id,
                 foreshadowing=foreshadowing,
-                setup_event_id=setup_event_id,
+                setup_event_id=foreshadowing.setup_node_id,
             )
 
 

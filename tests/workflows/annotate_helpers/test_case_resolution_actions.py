@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from sqlalchemy import select
@@ -46,8 +45,8 @@ def _annotation(
     """2026-08-11 用于构造含实体目录或伏笔的章节标注
 
     2026-08-18：伏笔需要绑定 setup 事件，因此当 foreshadowing 非 None 时
-    自动构造一个锚定整个 chunk 文本的 BoundEvent（序号 1），foreshadowing
-    的 setup_event_index 必须为 1。
+    自动构造一个锚定整个 chunk 文本的 BoundEvent；2026-08-22 下
+    伏笔 setup_node_id 直接指向该事件节点 id。
     """
     import hashlib
 
@@ -61,14 +60,18 @@ def _annotation(
     events: list[BoundEvent] = []
     if foreshadowing is not None:
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        # setup_node_id 直接指向本章事件节点 id
+        setup_node_id = f"evt-setup-{chunk_id}"
         events.append(
             BoundEvent(
+                node_id=setup_node_id,
+                tree_id=f"tree-{chunk_id}",
+                parent_node_id=None,
+                cause_role="root",
                 description=f"事件-{text[:6]}",
                 participants=[],
                 anchor_paragraph_ids=[0],
                 causal_event_refs=[],
-                tree_id="tree-main",
-                cause_role="root",
                 char_start=0,
                 char_end=len(text),
                 text_hash=text_hash,
@@ -82,6 +85,7 @@ def _annotation(
                 ],
             )
         )
+        foreshadowing = foreshadowing.model_copy(update={"setup_node_id": setup_node_id})
     return BoundChapterAnnotation(
         chapter_summary=text,
         chunks=[
@@ -123,8 +127,7 @@ def _result(
             allow_future_context=False,
             write_records=[],
             rotation_case_ids=[],
-            authorized_chapter_ids=authorized_chunk_ids
-            or [annotation.chunks[0].chunk_id],
+            authorized_chapter_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
             authorized_text_paragraph_ids=[],
         ),
     )
@@ -475,7 +478,7 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     foreshadowing = BoundForeshadowing(
         description="顾霜承诺护佑山门",
         confidence="high",
-        setup_event_index=1,
+        setup_node_id="evt-setup-1",
     )
     first = complete_annotation_run(
         result=_result(
@@ -490,11 +493,9 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
-    thread = db_session.execute(
-        select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
-    ).scalar_one()
+    thread = db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalar_one()
     assert thread.setup_summary == "顾霜承诺护佑山门"
-    # P3：write_foreshadowings 仅写 description+confidence，其余枚举不再填哨兵默认值
+    # P3：create_event(isforeshadowing) 仅写 description+confidence，其余枚举不再填哨兵默认值
     assert thread.foreshadowing_type is None
     assert thread.setup_kind is None
     assert thread.expected_payoff_family is None
@@ -543,9 +544,7 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     )
 
     db_session.rollback()
-    updated = db_session.execute(
-        select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
-    ).scalar_one()
+    updated = db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalar_one()
     mapping = db_session.execute(
         select(CaseResolutionMapping).where(
             CaseResolutionMapping.run_id == run_id,
@@ -577,7 +576,7 @@ def test_foreshadowing_same_setup_event_creates_single_thread(db_session) -> Non
     foreshadowing = BoundForeshadowing(
         description="顾霜承诺护佑山门",
         confidence="high",
-        setup_event_index=1,
+        setup_node_id="evt-setup-1",
     )
     # 章 1 同一伏笔连续两次完成事务（模拟重跑）：setup_event_id 相同 → 只建一条线程
     for _ in range(2):
@@ -596,9 +595,7 @@ def test_foreshadowing_same_setup_event_creates_single_thread(db_session) -> Non
         db_session.rollback()
 
     threads = list(
-        db_session.execute(
-            select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
-        ).scalars()
+        db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalars()
     )
     assert len(threads) == 1
     assert threads[0].setup_summary == "顾霜承诺护佑山门"
@@ -625,9 +622,7 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                     emotional_valence="neutral",
                     narrative_function="冲突",
                 ),
-                entities=BoundEntityDirectory(
-                    entities=[BoundEntity(name="顾霜", entity_type="character")]
-                ),
+                entities=BoundEntityDirectory(entities=[BoundEntity(name="顾霜", entity_type="character")]),
                 character_observations=[],
                 dialogues=[
                     BoundDialogue(
@@ -642,12 +637,14 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                 ],
                 events=[
                     BoundEvent(
+                        node_id="evt-dialogue-anchor",
+                        tree_id="tree-main",
+                        parent_node_id=None,
+                        cause_role="root",
                         description="顾霜拔剑喝止",
                         participants=[],
                         anchor_paragraph_ids=[0],
                         causal_event_refs=[],
-                        tree_id="tree-main",
-                        cause_role="root",
                         char_start=0,
                         char_end=len(chunk_text),
                         text_hash=text_hash,
@@ -672,8 +669,6 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
     )
     db_session.rollback()
 
-    row = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
-    expected_eid = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    row = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
+    expected_eid = "evt-dialogue-anchor"
     assert row.event_id == expected_eid

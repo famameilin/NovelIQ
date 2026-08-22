@@ -1,8 +1,4 @@
-"""
-事件森林时间轴 API 路由（一树一节点）
-
-2026-08-20：重构为事件森林时间轴，不兼容旧 TimelineResponse / authority 合同。
-"""
+"""事件森林时间轴 API 路由"""
 
 from __future__ import annotations
 
@@ -29,7 +25,7 @@ from src.metrics.event_timeline_metrics import (
     serialize_event_timeline_node,
     serialize_event_timeline_phases,
 )
-from src.storage.repositories import AnnotationRepository, ChapterRepository, RunRepository, StatsRepository
+from src.storage.repositories import ChapterRepository, RunRepository, StatsRepository
 from src.storage.repositories.graph import EventForestRepository
 from src.storage.repositories.graph.event_forest import EventForestSnapshot
 
@@ -39,7 +35,7 @@ router = APIRouter(prefix="/novels", tags=["timeline"])
 def _serialize_snapshot_edges(
     snapshot: EventForestSnapshot,
 ) -> tuple[list[EventTimelineCausalEdge], list[EventTimelineForeshadowingEdge]]:
-    """2026-08-20 用于去重快照边序列化（避免两分支重复代码）"""
+    """序列化事件森林快照中的边"""
     causal = [
         EventTimelineCausalEdge(
             edge_id=e.edge_id,
@@ -74,17 +70,7 @@ def _serialize_snapshot_edges(
     "/{novel_id}/timeline",
     response_model=EventTimelineResponse,
     summary="获取事件森林时间轴（一树一节点）",
-    description="""
-📊 **事件森林时间轴接口（一树一节点）**
-
-基于事件森林快照与段落张力，生成以事件树为节点的时间轴视图。
-
-**功能：**
-- 四阶段划分（引入期/发展期/高潮期/收束期，复用 compute_four_phases）
-- 一树一节点（tree_id = node 唯一标识）
-- 全量因果边（is_active 均返回，前端灰显）与伏笔边
-- 张力曲线数据（按 include_curve 控制）
-""",
+    description="基于事件森林快照与段落张力生成一树一节点的时间轴视图",
     responses={
         200: {
             "description": "时间轴数据",
@@ -107,12 +93,7 @@ async def get_timeline(
     response: Response,
     include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
 ) -> EventTimelineResponse:
-    """
-    获取事件森林时间轴数据（一树一节点）
-
-    直接基于 EventForestRepository.fetch_snapshot + build_event_timeline_plan，
-    不再依赖 KnowledgeGraphAuthorityService.build_timeline_view / build_timeline_plan。
-    """
+    """获取事件森林时间轴数据"""
 
     novels = service.list_novels()
     novel_info = next((novel for novel in novels if novel.get("novel_id") == novel_id), None)
@@ -135,7 +116,6 @@ async def get_timeline(
             run_status=run_data["status"],
         )
     chapter_repo = ChapterRepository(session)
-    annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
     snapshot = EventForestRepository(session).fetch_snapshot(run_id, chapter_id=None)
@@ -161,51 +141,27 @@ async def get_timeline(
     timeline_plan = build_event_timeline_plan(
         run_id,
         chapter_repo,
-        annotation_repo,
         stats_repo,
         snapshot,
     )
 
-    # 若快照有但无节点，同样 200 空而非 500
-    if not timeline_plan.nodes:
-        logger.info("Timeline empty for run {}: {} phases, 0 nodes", run_id, len(timeline_plan.phases))
-        api_phases_empty = [
-            EventTimelinePhase.model_validate(item) for item in serialize_event_timeline_phases(timeline_plan.phases)
-        ]
-        api_causal_edges_empty, api_foreshadowing_edges_empty = _serialize_snapshot_edges(snapshot)
-        return EventTimelineResponse(
-            meta=EventTimelineMeta(
-                novel_id=novel_id,
-                novel_name=novel_name,
-                total_chapters=timeline_plan.total_chapters,
-            ),
-            phases=api_phases_empty,
-            nodes=[],
-            causal_edges=api_causal_edges_empty,
-            foreshadowing_edges=api_foreshadowing_edges_empty,
-            derived_event_order=timeline_plan.derived_event_order,
-            tension_curve=timeline_plan.tension_curve if include_curve else None,
-            phase_basis=cast(Literal["tension", "fixed_percentage"], timeline_plan.phase_basis),
-            total_chapters=timeline_plan.total_chapters,
-        )
-
-    api_nodes = [
-        EventTimelineNode.model_validate(serialize_event_timeline_node(node)) for node in timeline_plan.nodes
-    ]
+    api_nodes = [EventTimelineNode.model_validate(serialize_event_timeline_node(node)) for node in timeline_plan.nodes]
     api_phases = [
-        EventTimelinePhase.model_validate(item)
-        for item in serialize_event_timeline_phases(timeline_plan.phases)
+        EventTimelinePhase.model_validate(item) for item in serialize_event_timeline_phases(timeline_plan.phases)
     ]
     api_causal_edges, api_foreshadowing_edges = _serialize_snapshot_edges(snapshot)
 
-    logger.info(
-        "Event timeline generated for novel {} task {}: {} nodes, {} phases, {} causal edges",
-        novel_id,
-        task_id,
-        len(api_nodes),
-        len(api_phases),
-        len(api_causal_edges),
-    )
+    if api_nodes:
+        logger.info(
+            "Event timeline generated for novel {} task {}: {} nodes, {} phases, {} causal edges",
+            novel_id,
+            task_id,
+            len(api_nodes),
+            len(api_phases),
+            len(api_causal_edges),
+        )
+    else:
+        logger.info("Timeline empty for run {}: {} phases, 0 nodes", run_id, len(api_phases))
 
     return EventTimelineResponse(
         meta=EventTimelineMeta(

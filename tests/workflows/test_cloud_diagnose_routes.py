@@ -107,12 +107,8 @@ class TestDiagnosisRoutes:
                 self.db_session,
                 run_id=self.run_id,
                 chapter_id=i + 1,
-                emotional_valences={
-                    i + 1: "mild_positive" if i % 2 == 0 else "mild_negative"
-                },
-                event_types={
-                    i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"
-                },
+                emotional_valences={i + 1: "mild_positive" if i % 2 == 0 else "mild_negative"},
+                event_types={i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"},
                 pivot_chunks={i + 1} if i in {1, 2} else None,
                 cliffhanger_chunks={chunk_count} if i == chunk_count - 1 else None,
                 characters=[
@@ -130,7 +126,7 @@ class TestDiagnosisRoutes:
             foreshadowing=BoundForeshadowing(
                 description="测试伏笔",
                 confidence="medium",
-                setup_event_index=1,
+                setup_node_id="event-test-setup",
             ),
             setup_event_id="event-test-setup",
         )

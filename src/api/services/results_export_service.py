@@ -34,13 +34,9 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.event_timeline_metrics import (
-    build_event_timeline_plan as build_event_timeline_plan_new,
-)
-from src.metrics.event_timeline_metrics import (
+    build_event_timeline_plan,
     serialize_event_timeline_node,
-)
-from src.metrics.event_timeline_metrics import (
-    serialize_event_timeline_phases as serialize_event_timeline_phases_new,
+    serialize_event_timeline_phases,
 )
 from src.storage.repositories import (
     AnnotationRepository,
@@ -197,18 +193,18 @@ def load_export_relation_bundle(
     graph_report: GraphAuthorityReport,
 ) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """
-    加载聚合统计数据
+        加载聚合统计数据
 
-    Returns:
-        (
-            character_relations,
-            hierarchical_relations,
-            global_stats,
-            token_usage_stats,
-            aggregate_metrics,
-            graph_summary,
-            graph_quality_report,
-        )
+        Returns:
+            (
+                character_relations,
+                hierarchical_relations,
+                global_stats,
+                token_usage_stats,
+                aggregate_metrics,
+                graph_summary,
+                graph_quality_report,
+    )
     """
     character_relations = _fetch_character_relations(
         run_id,
@@ -244,31 +240,23 @@ def load_export_relation_bundle(
 def _fetch_timeline_data(
     run_id: str,
     chapter_repo: ChapterRepository,
-    annotation_repo: AnnotationRepository,
     stats_repo: StatsRepository,
 ) -> dict[str, Any] | None:
-    """
-    获取时间轴数据用于导出（2026-08-20 切换为事件森林时间轴，一树一节点）
-
-    Returns:
-        时间轴数据字典，包含 phases, nodes, causal_edges, foreshadowing_edges, tension_curve
-    """
+    """获取用于导出的事件森林时间轴数据"""
     from src.storage.repositories.graph import EventForestRepository
 
     snapshot = EventForestRepository(stats_repo.session).fetch_snapshot(run_id)
     if snapshot is None:
         logger.warning(f"No event forest snapshot for run {run_id}")
         return None
-    timeline_plan = build_event_timeline_plan_new(
+    timeline_plan = build_event_timeline_plan(
         run_id,
         chapter_repo,
-        annotation_repo,
         stats_repo,
         snapshot,
     )
-    # 即便 nodes 为空也返回基础结构（200空而非 None），仅当 snapshot 缺失才返回 None
     return {
-        "phases": serialize_event_timeline_phases_new(timeline_plan.phases),
+        "phases": serialize_event_timeline_phases(timeline_plan.phases),
         "nodes": [serialize_event_timeline_node(node) for node in timeline_plan.nodes],
         "causal_edges": [
             {
@@ -343,9 +331,7 @@ def build_export_payload(
         "topics": [t.model_dump(exclude_none=True) for t in topics],
         "diagnosis": diagnosis.model_dump(exclude_none=True) if diagnosis else None,
         "chapter_annotations": [a.model_dump(exclude_none=True) for a in chapter_annotations],
-        "foreshadowing_threads": [
-            thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])
-        ],
+        "foreshadowing_threads": [thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])],
         "character_relations": [r.model_dump(exclude_none=True) for r in character_relations],
         "hierarchical_relations": [r.model_dump(exclude_none=True) for r in hierarchical_relations],
         "global_stats": global_stats.model_dump(exclude_none=True) if global_stats else None,
@@ -415,7 +401,7 @@ def fetch_all_results_data(
 
     novel_name = _fetch_novel_name(run_id, novel_id, stats_repo)
 
-    # 2026-08-19 事件森林/DAG：导出 event_forest 段（契约 v3 树视图 + 树间边）
+    # 2026-08-19 事件森林/DAG：导出 event_forest 段（ 树视图 + 树间边）
     from src.storage.repositories.graph import EventForestRepository
 
     event_forest_repo = EventForestRepository(stats_repo.session)
@@ -496,7 +482,6 @@ def fetch_all_results_data(
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
         chapter_repo=chapter_repo,
-        annotation_repo=annotation_repo,
         stats_repo=stats_repo,
     )
     if not timeline_data:

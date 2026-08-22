@@ -14,7 +14,7 @@ from tests.support.chapter_annotation_helpers import (
 
 
 def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None:
-    """2026-08-19 用于验证持久化后 fetch_snapshot 返回树视图与因果边（契约 v3）"""
+    """2026-08-19 用于验证持久化后 fetch_snapshot 返回树视图与因果边（）"""
     text = "顾霜进入山门。\n顾霜拔剑。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -32,6 +32,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": eid1,
                 "tree_id": "gate-entry",
                 "cause_role": "root",
             },
@@ -39,9 +40,10 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
+                "node_id": eid2,
                 "causal_event_refs": [eid1],
-                "tree_id": "gate-entry",
-                "cause_role": "main",
+                "tree_id": "draw-entry",
+                "cause_role": "root",
             },
         ],
     )
@@ -60,14 +62,13 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     assert nodes_by_desc["顾霜进入山门"].tree_id == "gate-entry"
     assert nodes_by_desc["顾霜进入山门"].cause_role == "root"
 
-    # 树视图：一棵树，主链按原文顺序；次因分支为空
-    assert len(snapshot.event_trees) == 1
-    tree = snapshot.event_trees[0]
-    assert tree.tree_id == "gate-entry"
-    assert tree.root_event_id == eid1
-    assert tree.main_chain == [eid1, eid2]
-    assert tree.secondary_groups == []
-    assert tree.chapter_ids == [1]
+    # 树视图：两棵树，因果边跨树；主链按原文顺序
+    assert len(snapshot.event_trees) == 2
+    gate_tree = next(t for t in snapshot.event_trees if t.tree_id == "gate-entry")
+    assert gate_tree.root_event_id == eid1
+    assert gate_tree.main_chain == [eid1]
+    assert gate_tree.secondary_groups == []
+    assert gate_tree.chapter_ids == [1]
 
     # 因果边（contains 已派生化：只返回 causal 且两端必非空）
     causal_edges = snapshot.causal_edges
@@ -80,7 +81,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
 
 
 def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
-    """2026-08-19 用于验证次因分支（secondary）按因果前驱 target 归组（契约 v3）"""
+    """2026-08-19 用于验证次因分支（secondary）按因果前驱 target 归组（）"""
     text = "顾霜拔剑。\n顾霜喝止。\n顾霜降敌。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -99,6 +100,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": eid1,
                 "tree_id": "duel",
                 "cause_role": "root",
             },
@@ -106,7 +108,8 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
                 "description": "顾霜喝止",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [eid1],
+                "node_id": eid2,
+                "parent_node_id": eid1,
                 "tree_id": "duel",
                 "cause_role": "main",
             },
@@ -114,6 +117,8 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
                 "description": "顾霜降敌",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [2],
+                "node_id": eid3,
+                "parent_node_id": eid2,
                 "causal_event_refs": [eid2],
                 "tree_id": "duel",
                 "cause_role": "secondary",
@@ -160,7 +165,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
         foreshadowing=BoundForeshadowing(
             description="顾霜承诺护佑山门",
             confidence="high",
-            setup_event_index=1,
+            setup_node_id=setup_eid,
         ),
         setup_event_id=setup_eid,
     )

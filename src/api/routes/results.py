@@ -108,11 +108,7 @@ def _parse_emotion_trend_range(
         return None
     raw = position_range.strip()
     try:
-        values = (
-            json.loads(raw)
-            if raw.startswith("[")
-            else [part.strip() for part in raw.split(",")]
-        )
+        values = json.loads(raw) if raw.startswith("[") else [part.strip() for part in raw.split(",")]
         if not isinstance(values, list) or len(values) != 2:
             raise ValueError
         start, end = float(values[0]), float(values[1])
@@ -297,9 +293,7 @@ async def get_emotion_trend(
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     range_values = request.query_params.getlist("range")
-    parsed_range = _parse_emotion_trend_range(
-        ",".join(range_values) if len(range_values) > 1 else position_range
-    )
+    parsed_range = _parse_emotion_trend_range(",".join(range_values) if len(range_values) > 1 else position_range)
     paragraph_repo = ParagraphRepository(session)
     return _fetch_emotion_trend(
         run_id,
@@ -536,11 +530,7 @@ async def get_global_stats(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> GlobalStats:
-    """
-    说明: 提供详情概览使用的全书波动统计查询
-    修改时间: 2026-08-16
-    修改原因: 前端需要直接读取已持久化的 global_stats，避免通过导出文件反查
-    """
+    """查询详情概览使用的全书波动统计"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
@@ -558,12 +548,7 @@ async def get_event_forest(
     session: Annotated[Session, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> EventForestResponse:
-    """
-    说明: 提供事件森林/DAG 查询，返回事件树列表（树根/主链/次因分支）、树间因果边、
-          伏笔边、锚点、Evidence、可见边界和派生顺序（契约 v3，contains 派生化）
-    修改时间: 2026-08-19
-    修改原因: 契约 v3 事件层改为「树内图外」双层模型
-    """
+    """查询事件树、树间边、锚点、证据、可见边界和派生顺序"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     from src.storage.repositories.graph import EventForestRepository
