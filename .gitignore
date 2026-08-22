@@ -243,3 +243,12 @@ tools/report_exporter/
 tests/report/
 
 .omo/
+
+# OpenViking / 向量库等本地运行时数据（不入库）
+data/_system/
+data/vectordb/
+data/viking/
+
+# opencode 本地 MCP 配置
+opencode.json
+
