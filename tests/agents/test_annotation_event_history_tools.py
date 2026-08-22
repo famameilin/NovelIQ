@@ -1,8 +1,7 @@
-"""search_event_history 工具与 authorized_event_ids 授权链路测试
+"""search_event 工具与 authorized_event_ids 授权链路测试
 
 覆盖：
-- 检索返回历史事件视图并把返回 event_id 登记进授权集合
-- 检索范围 max_chapter_order = 当前章序 - 1（只检索当前章之前）
+- 检索返回历史事件树根视图并把 tree_id/root_node_id 登记进授权集合
 - 非 chunk_open 阶段拒绝检索
 - resolve_foreshadowing_case 对未授权 event_id 拒绝
 - 先检索授权后 resolve 通过（setup/payoff 事件绑定写入 ResolvedCase）
@@ -18,8 +17,7 @@ from src.agents.annotation.errors import AnnotationAuthorizationError
 from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
-    EventHistoryResult,
-    TextEvidence,
+    EventTreeHistoryResult,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -27,14 +25,14 @@ _CHUNK_TEXT = "\u201c住手\u201d回荡"
 
 
 class _EventHistoryService:
-    """2026-08-18 用于记录检索调用并返回预设历史事件的测试查询服务"""
+    """2026-08-18 用于记录检索调用并返回预设历史事件树的测试查询服务"""
 
     def __init__(
         self,
-        events: list[EventHistoryResult] | None = None,
+        trees: list[EventTreeHistoryResult] | None = None,
         current_chapter_order: int = 2,
     ) -> None:
-        self.events = events or []
+        self.trees = trees or []
         self.current_chapter_order = current_chapter_order
         self.calls: list[tuple[str, int, int]] = []
 
@@ -63,26 +61,21 @@ class _EventHistoryService:
         )
 
     def search_event_history(self, query, *, max_chapter_order, limit=50):
-        """2026-08-18 用于记录检索范围并返回预设事件"""
+        """2026-08-22记录检索范围并返回预设树根视图"""
         self.calls.append((query, max_chapter_order, limit))
-        return list(self.events)
+        return list(self.trees)
 
 
-def _history_event(event_id: str, description: str) -> EventHistoryResult:
-    """2026-08-18 用于构造预设历史事件结果（文本哈希仅满足格式校验）"""
-    return EventHistoryResult(
-        event_id=event_id,
+def _history_tree(tree_id: str, root_node_id: str, description: str) -> EventTreeHistoryResult:
+    """2026-08-22 用于构造预设历史树根视图"""
+    return EventTreeHistoryResult(
+        tree_id=tree_id,
+        root_node_id=root_node_id,
         chapter_id=1,
         chapter_order=1,
         description=description,
         participants=[{"entity": "顾霜", "role": "主体"}],
-        anchor_paragraph_ids=[0],
-        char_start=0,
-        char_end=8,
-        text_hash="0" * 64,
-        evidence=[TextEvidence(paragraph_ids=[0], char_start=0, char_end=8, text_hash="0" * 64)],
-        causal_event_refs=[],
-        tree_id="tree-h",
+        cross_chapter=False,
     )
 
 
@@ -90,10 +83,11 @@ def _ledger() -> AnnotationToolLedger:
     """2026-08-18 用于构造带唯一 current 原文的工具账本"""
     return AnnotationToolLedger(
         run_scope="run-1",
-        current_chapter_id=1,
+        current_chapter_id=2,
         current_chunk_id=10,
         current_chunk_text=_CHUNK_TEXT,
         allow_future_context=False,
+        current_chapter_order=2,
     )
 
 
@@ -112,43 +106,44 @@ def _register_payoff_case(service, ledger) -> int:
     return ledger.case_number_by_id["case-1"]
 
 
-def test_search_event_history_registers_authorized_event_ids() -> None:
-    """2026-08-18 用于验证检索结果登记授权事件且范围限当前章之前"""
-    service = _EventHistoryService(events=[_history_event("event-a", "顾霜进入山门")])
+def test_search_event_registers_authorized_tree_ids() -> None:
+    """2026-08-22检索结果把 tree_id 与 root_node_id 登记进授权集合"""
+    service = _EventHistoryService(trees=[_history_tree("tree-h", "node-h-root", "顾霜进入山门")])
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    view = json.loads(_find_tool(tools, "search_event_history").invoke({"query": "顾霜"}))
+    view = json.loads(_find_tool(tools, "search_event").invoke({"keyword": "顾霜"}))
 
-    assert view["events"][0]["event_id"] == "event-a"
-    assert ledger.authorized_event_ids == {"event-a"}
+    assert view["trees"][0]["tree_id"] == "tree-h"
+    assert ledger.authorized_event_ids == {"tree-h", "node-h-root"}
+    assert ledger.history_tree_views["tree-h"]["root_node_id"] == "node-h-root"
     # current_chapter_order=2 → 只检索第 1 章
-    assert service.calls == [("顾霜", 1, 50)]
-    assert ledger.search_log[-1]["tool"] == "search_event_history"
-    assert ledger.search_log[-1]["hits"] == ["event-a"]
+    assert service.calls == [("顾霜", 1, 20)]
+    assert ledger.search_log[-1]["tool"] == "search_event"
+    assert ledger.search_log[-1]["hits"] == ["tree-h"]
 
 
-def test_search_event_history_rejects_outside_chunk_open_phase() -> None:
+def test_search_event_rejects_outside_chunk_open_phase() -> None:
     """2026-08-18 用于验证非 chunk_open 阶段检索被拒绝"""
-    service = _EventHistoryService(events=[_history_event("event-a", "顾霜进入山门")])
+    service = _EventHistoryService(trees=[_history_tree("tree-h", "node-h-root", "顾霜进入山门")])
     ledger = _ledger()
     ledger.set_phase("writing")
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationAuthorizationError, match="阶段 .* 不允许 search_event_history"):
-        _find_tool(tools, "search_event_history").invoke({"query": "顾霜"})
+    with pytest.raises(AnnotationAuthorizationError, match="阶段 .* 不允许 search_event"):
+        _find_tool(tools, "search_event").invoke({"keyword": "顾霜"})
 
 
 def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
-    """2026-08-18 用于验证未经检索授权的 event_id 不能被伏笔解决引用"""
-    service = _EventHistoryService(events=[_history_event("event-a", "顾霜进入山门")])
+    """2026-08-18 用于验证未经授权的 event_id 不能被伏笔解决引用"""
+    service = _EventHistoryService(trees=[_history_tree("tree-h", "node-h-root", "顾霜进入山门")])
     ledger = _ledger()
     tools = _tools(service, ledger)
     case_number = _register_payoff_case(service, ledger)
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match="setup_event_id 未由本轮 search_event_history 授权: event-x",
+        match="setup_event_id 未由 create_event/update_event 回执或 search_event 授权: event-x",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
@@ -160,32 +155,32 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 
 
 def test_resolve_foreshadowing_case_passes_authorized_event_ids() -> None:
-    """2026-08-18 用于验证先检索授权后 resolve 可绑定 setup/payoff 事件"""
+    """2026-08-22先 search_event 授权后 resolve 可绑定 setup/payoff 节点"""
     service = _EventHistoryService(
-        events=[
-            _history_event("event-setup", "顾霜立誓"),
-            _history_event("event-payoff", "顾霜兑现承诺"),
+        trees=[
+            _history_tree("tree-setup", "node-setup", "顾霜立誓"),
+            _history_tree("tree-payoff", "node-payoff", "顾霜兑现承诺"),
         ]
     )
     ledger = _ledger()
     tools = _tools(service, ledger)
     case_number = _register_payoff_case(service, ledger)
 
-    _find_tool(tools, "search_event_history").invoke({"query": "顾霜"})
-    assert ledger.authorized_event_ids == {"event-setup", "event-payoff"}
+    _find_tool(tools, "search_event").invoke({"keyword": "顾霜"})
+    assert ledger.authorized_event_ids >= {"tree-setup", "node-setup", "tree-payoff", "node-payoff"}
 
     resolved = json.loads(
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
                 "case_number": case_number,
                 "reason": "伏笔回收",
-                "setup_event_id": "event-setup",
-                "payoff_event_id": "event-payoff",
+                "setup_event_id": "node-setup",
+                "payoff_event_id": "node-payoff",
             }
         )
     )
 
     assert resolved["accepted"] is True
     assert ledger.resolved_cases[-1].action == "foreshadowing"
-    assert ledger.resolved_cases[-1].setup_event_id == "event-setup"
-    assert ledger.resolved_cases[-1].payoff_event_id == "event-payoff"
+    assert ledger.resolved_cases[-1].setup_event_id == "node-setup"
+    assert ledger.resolved_cases[-1].payoff_event_id == "node-payoff"

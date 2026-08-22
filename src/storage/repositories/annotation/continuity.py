@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import unicodedata
 from datetime import UTC, datetime
-from typing import cast
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -19,14 +18,11 @@ from src.agents.annotation.schema import (
     BoundForeshadowing,
     CaseSearchResult,
     CompletionCase,
-    EventCauseRole,
-    EventHistoryResult,
+    EventTreeHistoryResult,
     ForeshadowingSearchResult,
-    GraphEvidence,
     PendingCase,
     ResolvedCase,
     SearchResult,
-    TextEvidence,
     TextSearchResult,
 )
 from src.config import settings
@@ -271,9 +267,12 @@ class DatabaseAnnotationQueryService:
         query: str,
         *,
         max_chapter_order: int,
-        limit: int = 50,
-    ) -> list[EventHistoryResult]:
-        """2026-08-18 用于在历史章节边界内检索事件并返回可审计 Evidence"""
+        limit: int = 20,
+    ) -> list[EventTreeHistoryResult]:
+        """2026-08-22 用于在历史章节边界内检索事件树（根视图）并授权 tree_id
+
+        只返回每棵树的主链根节点视图；cross_chapter 由该树的因果入边派生。
+        """
         if max_chapter_order <= 0 or limit <= 0:
             return []
         rows = self.session.execute(
@@ -290,11 +289,21 @@ class DatabaseAnnotationQueryService:
                 select(EventEdge).where(
                     EventEdge.run_id == self.run_id,
                     EventEdge.is_active.is_(True),
+                    EventEdge.edge_type == "causal",
                 )
             ).scalars()
         )
-        matched: list[EventHistoryResult] = []
+        incoming_causes = {edge.target_event_id for edge in edge_rows}
+        foreshadow_setups = set(
+            self.session.execute(
+                select(ForeshadowingThread.setup_event_id).where(ForeshadowingThread.run_id == self.run_id)
+            ).scalars()
+        )
+        matched: list[EventTreeHistoryResult] = []
+        seen_trees: set[str] = set()
         for node in latest.values():
+            if node.tree_id in seen_trees or node.cause_role != "root":
+                continue
             participant_text = " ".join(
                 str(participant.get("entity") or participant.get("name") or "")
                 for participant in node.participants
@@ -302,38 +311,30 @@ class DatabaseAnnotationQueryService:
             )
             if not _text_matches(query, node.description, participant_text):
                 continue
+            seen_trees.add(node.tree_id)
+            node_edges = [
+                edge
+                for edge in edge_rows
+                if edge.source_event_id == node.event_id or edge.target_event_id == node.event_id
+            ]
             matched.append(
-                EventHistoryResult(
-                    event_id=node.event_id,
+                EventTreeHistoryResult(
+                    tree_id=node.tree_id,
                     chapter_id=node.chapter_id,
                     chapter_order=node.chapter_order,
                     description=node.description,
                     participants=list(node.participants),
-                    anchor_paragraph_ids=list(node.anchor_paragraph_ids),
-                    char_start=node.char_start,
-                    char_end=node.char_end,
-                    text_hash=node.text_hash,
-                    evidence=[
-                        (
-                            TextEvidence.model_validate(item)
-                            if "paragraph_ids" in item
-                            else GraphEvidence.model_validate(item)
-                        )
-                        for item in node.evidence
-                    ],
-                    causal_event_refs=list(node.causal_event_refs),
-                    tree_id=node.tree_id,
-                    cause_role=cast(EventCauseRole, node.cause_role),
+                    is_foreshadow_setup=node.event_id in foreshadow_setups,
+                    cross_chapter=node.event_id in incoming_causes,
+                    root_node_id=node.event_id,
                     edges=[
                         {
                             "edge_id": edge.edge_id,
                             "edge_type": edge.edge_type,
                             "source_event_id": edge.source_event_id,
                             "target_event_id": edge.target_event_id,
-                            "evidence": list(edge.evidence),
                         }
-                        for edge in edge_rows
-                        if edge.source_event_id == node.event_id or edge.target_event_id == node.event_id
+                        for edge in node_edges
                     ],
                 )
             )

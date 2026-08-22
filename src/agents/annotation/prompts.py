@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from .schema import ChunkParagraphInfo, DialogueCandidate, relation_catalog_text
+from .schema import DialogueCandidate, relation_catalog_text
 
 SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系统按原文顺序逐个激活 chunk。
 
@@ -18,10 +18,12 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 ## 当前 chunk 写入
 
-- 使用 write_metrics、write_entities 和五个事实 write 工具完整写入当前 chunk
-- 每个 write 工具重新调用时完整替换该领域，空数组表示已检查且没有结果
-- 同一回复可以调用多个 write 工具
-- 七个领域全部写入成功后由系统自动冻结当前 chunk，无需也不可调用完成工具
+- 使用 write_metrics、write_entities、write_character_observations、write_dialogues、
+  write_relations 完整写入对应领域；事件用 create_event/update_event 增量写入
+- 每个 write 工具重新调用时完整替换该领域，空数组表示已检查且没有结果；
+  create_event/update_event 是增量操作，重复调用会追加而非替换
+- 同一回复可以调用多个写工具
+- 六个领域全部有写入后由系统自动冻结当前 chunk，无需也不可调用完成工具
 - 章节摘要由系统用各 chunk 的 summary 自动生成，无需单独提交
 - 所有事实端点必须使用当前 chunk 的 write_entities 中提交的实体名称
 
@@ -76,20 +78,21 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - relation_type 使用闭合枚举；write_relations 只提交本章确认存在的边（三字段
   from_entity/to_entity/relation_type），新边建图 assert，已存在的同一条边自动接受为
   skipped_existing；关系强化/削弱/解除一律走 resolve_fact_case，不用 state 字段表达变化
-- 事件填写 description、participants、tree_id、cause_role、causal_event_refs 和
-  anchor_paragraph_ids（角色闭合枚举：主体/客体/接收者/帮助者/
-  反对者/见证者/地点；见证者、地点只用于事件参与者，不用于人物观察的 role_function；
+- 事件用 create_event 和 update_event 写入（系统派发全部 id 与结构，
+  你不提交任何 id、边或段落锚点；环在构造上不可能）
+- create_event(description, participants, isforeshadowing?, cause_tree_id?) 创建一棵
+  新事件树并返回 tree_id；participants 角色闭合枚举：主体/客体/接收者/帮助者/
+  反对者/见证者/地点（见证者、地点只用于事件参与者，不用于人物观察的 role_function；
   地点作为参与者角色，无单独 location 字段）
-- 每棵树 = 一个完整事件：tree_id 标识归属树，同一棵树的事件必须用同一 tree_id；
-  树根 cause_role=root（触发该事件的第一个自立动作，root 不允许填因果前驱）；
-  主因链上的事件 cause_role=main；次因分支事件（父的兄弟）cause_role=secondary
-- 何时开新树：换参与主体组合、换场景地点、上一段因果已闭合并沉淀为状态、或锚点段落区间不再连续
-- 每个事件必须提供 anchor_paragraph_ids：事件发生在原文中哪些段落（0 基序号，对应原文 ¶0/¶1/... 标记）；
-  至少 1 个段落，多个段落表示事件横跨连续段落
-- causal_event_refs 填因果前驱事件的全局 event_id（不是本章序号），可引用
-  search_event_history 返回的历史事件 id 与本章已写事件 id；不允许引用本轮尚未返回
-  id 的事件——同一本章事件链请分轮写出（write_events 响应会返回每条 event_id，先写
-  前驱拿 id，再写后继引用它）；因果链必须严格偏序（前驱原文位置在前），不允许环路
+- 每棵树 = 一个完整事件；何时开新树：换参与主体组合、换场景地点、或上一段
+  因果已闭合并沉淀为状态
+- update_event(tree_id, items) 向本章已有的树追加子节点；items 每条 {type, description}：
+  type=main 表示顺延主因链（成为新的链尾），type=secondary 表示当前链尾的次因分支；
+  只能更新本章 create_event 返回的树（单章闭环），历史树已冻结不可更新
+- 跨章因果延续：先 search_event 检索前文事件树拿到 tree_id，再 create_event 时填
+  cause_tree_id=该 tree_id，系统自动建立跨章因果边；不允许猜测任何 id
+- isforeshadowing=true 标记该事件为伏笔埋设：系统自动创建伏笔线程，
+  无需也不可再调用伏笔创建工具
 - 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
 
 {relation_catalog}
@@ -101,11 +104,9 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   neighbors=边另一端节点；一次传入全部要核对的实体名
 - search_text 返回 result_number，使用 read_text(result_number) 读取原文；
   read_text 返回 JSON，content 字段为原文全文
-- search_event_history 检索当前章之前、已经完成且获得授权的事件；返回的 event_id
-  可用于两处：作为因果前驱填入 causal_event_refs（跨章因果），或传给
-  resolve_foreshadowing_case 做历史伏笔续接/回收。返回的 tree_id 用于延续同一棵树
-  （跨章同一事件链沿用同一 tree_id）。当前章事件在 write_events 成功后返回并授权
-  对应 event_id，不能猜测其他 run 或章节的 ID
+- search_event(keyword) 检索当前章之前已完成章节的事件树（根视图）；返回的 tree_id
+  可作为 create_event 的 cause_tree_id 表达跨章因果，返回的 root_node_id 可传给
+  resolve_foreshadowing_case 做历史伏笔续接/回收；不能猜测其他 run 或章节的 ID
 - search_pool 只查询案例池，返回 case_number；能解决的案例用 resolve_*_case 解决，
   search_pool 返回的伏笔线程带 id，push_case 登记伏笔疑点时必须带上该 id
 - resolve_dialogue_case 解决对话疑点：更新对话记录的 speaker/tone/is_inner_monologue
@@ -116,10 +117,9 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   break/retract=解除、refine=微调、supersede=取代；"同一人物"关系用于归并疑似同一人物
 - resolve_foreshadowing_case 解决伏笔疑点：更新该伏笔线程的
   setup_summary/setup_kind/expected_payoff_family/payoff_likelihood/setup_status/
-  confidence/strength（至少一个）；线程由案例登记的 setup_id 定位，字段即更新值
-- write_foreshadowings 只创建新伏笔：提交 description、confidence（high/medium/low）和
-  setup_event_index（1 基，指向本章事件列表中的序号，标明伏笔由哪个事件埋设）；
-  已有伏笔的强化和回收一律走 resolve_foreshadowing_case
+  confidence/strength（至少一个）；线程由案例登记的 setup_id 定位，字段即更新值；
+  新伏笔在 create_event 时置 isforeshadowing=true，已有伏笔的强化和回收一律走
+  resolve_foreshadowing_case
 - close_case 只能关闭案例（不产生任何语义变化），用于确认不存在疑点或无法解决的情况
 - 解决不了的案例不要硬解，原案例留在案例池等待后续章节
 - 分析中发现案例池没有的新连续性疑点（如无法确认说话人的对话、疑似同一人物、伏笔疑点）时，
@@ -128,7 +128,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 ## 章节完成
 
-- 七个领域全部写入成功后系统自动完成章节，无需也不可调用完成工具
+- 六个领域全部有写入后系统自动完成章节，无需也不可调用完成工具
 - 章节摘要由系统根据各 chunk 的 summary 自动生成
 
 - 原文检索范围：allow_future_context={allow_future_context}（true 可检索并读取后文，false 仅限前文）
@@ -139,6 +139,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 {initial_cases}
 """
+
 
 def build_system_prompt(
     *,
@@ -155,44 +156,17 @@ def build_system_prompt(
     )
 
 
-def _inject_paragraph_markers(
-    chunk_text: str,
-    paragraph_info: ChunkParagraphInfo | None,
-) -> str:
-    """2026-08-18 用于在 chunk 文本中注入 ¶N 段落标记供 Agent 锚定事件
-
-    段落标记方案：在每个段落起始处插入 ¶N（N 为 0 基 chunk 内序号）。
-    标记插入位置是段落在 chunk 文本中的字符偏移（char_spans[i][0]）。
-    从后往前插入以保持前序偏移不变。无段落信息时返回原始文本。
-    """
-    if paragraph_info is None:
-        return chunk_text
-    # 按字符偏移降序排列，从后往前插入避免偏移漂移
-    insertions: list[tuple[int, str]] = []
-    for index, (start, _end) in enumerate(paragraph_info.char_spans):
-        marker = f"¶{index} "
-        insertions.append((start, marker))
-    insertions.sort(key=lambda item: item[0], reverse=True)
-    result = chunk_text
-    for pos, marker in insertions:
-        result = result[:pos] + marker + result[pos:]
-    return result
-
-
 def build_chunk_message(
     *,
     chunk_index: int,
     chunk_total: int,
     chunk_text: str,
     candidates: list[DialogueCandidate],
-    paragraph_info: ChunkParagraphInfo | None = None,
 ) -> str:
     """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选
 
-    2026-08-18：paragraph_info 非 None 时在 chunk 文本中注入 ¶N 段落标记，
-    供 Agent 在 write_events 的 anchor_paragraph_ids 字段中引用段落序号。
+    2026-08-22事件不再携带段落锚点，移除 ¶N 段落标记注入。
     """
-    marked_text = _inject_paragraph_markers(chunk_text, paragraph_info)
     candidate_views = [
         {
             "index": index,
@@ -203,8 +177,8 @@ def build_chunk_message(
         for index, candidate in enumerate(candidates, start=1)
     ]
     return (
-        f"<CurrentChunk order=\"{chunk_index}/{chunk_total}\">\n"
-        f"{marked_text}\n"
+        f'<CurrentChunk order="{chunk_index}/{chunk_total}">\n'
+        f"{chunk_text}\n"
         "</CurrentChunk>\n\n"
         "<DialogueCandidates>\n"
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"

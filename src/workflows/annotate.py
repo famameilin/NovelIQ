@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
 from typing import cast as type_cast
-from uuid import NAMESPACE_URL, uuid5
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -58,9 +57,7 @@ def _group_chunks_by_chapter(
     chapters: list[tuple[int, list[tuple[int, str]]]] = []
     for chapter_id, chapter_text in chapter_rows:
         if chapter_id is None or chapter_id <= 0:
-            raise ValueError(
-                f"chapters.chapter_id 必须真实且非空，run 需要重新预处理: chapter_id={chapter_id}"
-            )
+            raise ValueError(f"chapters.chapter_id 必须真实且非空，run 需要重新预处理: chapter_id={chapter_id}")
         chapters.append((chapter_id, [(chapter_id, chapter_text)]))
     return chapters
 
@@ -72,25 +69,14 @@ def _split_chapter_sub_chunks(
     chapter_chunk_id: int,
     max_chars: int,
 ) -> list[tuple[int, str, int]]:
-    """2026-08-14 M7（§20）用于在段落边界把超长章切成运行时子块
-
-    子块是纯运行时派发单位：不落库、不进指标、不生成第二套段落边界——
-    切分位置只取 paragraphs 行的 local_start_char（相对章文本）。子块 ID
-    按顺序取 -1, -2, ...；章文本不超过 max_chars 或没有可用段落边界时
-    原样返回 [(chapter_chunk_id, chapter_text)]。单个超长自然段无法在
-    段落边界内再切，允许子块略超 max_chars（累计字符 ≥ max_chars 成块）。
-
-    2026-08-15：返回三元组 (子块 ID, 子块文本, 子块在章文本内的起始偏移)，
-    供合并阶段把第 2+ 子块的对话 start/end 从子块相对坐标重映射回章坐标。
+    """2026-08-14 M7(§20)在段落边界切超长章为运行时子块(不落库/不进指标/不重建段落边界)，
+    边界取 paragraphs.local_start_char，ID -1,-2…；≤max_chars或无边界原样返回，单段超长允许略超(≥max_chars成块)。
+    2026-08-15 返回(子块ID, 文本, 章内偏移)供对话 start/end 重映射回章坐标。
     """
     if len(chapter_text) <= max_chars:
         return [(chapter_chunk_id, chapter_text, 0)]
     usable_boundaries = sorted(
-        {
-            int(row.local_start_char)
-            for row in chapter_paragraphs
-            if 0 < int(row.local_start_char) < len(chapter_text)
-        }
+        {int(row.local_start_char) for row in chapter_paragraphs if 0 < int(row.local_start_char) < len(chapter_text)}
     )
     if not usable_boundaries:
         return [(chapter_chunk_id, chapter_text, 0)]
@@ -114,21 +100,14 @@ def _build_sub_chunk_paragraph_info(
     *,
     sub_chunk_offset: int,
     sub_chunk_text: str,
-    chapter_char_offset: int = 0,
 ) -> ChunkParagraphInfo:
-    """2026-08-18 用于为子块构建段落坐标映射（ChunkParagraphInfo）
-
-    段落标记方案：子块内的段落按 local_start_char 落在子块文本范围内的行筛选，
-    0 基序号即子块内段落顺序。char_spans 是段落在子块文本内的相对偏移
-    （global_start_char - sub_chunk_offset → 子块相对 start）。
-    """
+    """为子块构建段落坐标映射"""
     paragraph_ids: list[int] = []
     char_spans: list[tuple[int, int]] = []
     texts: list[str] = []
     for row in chapter_paragraphs:
         local_start = int(row.local_start_char)
         local_end = int(row.local_end_char)
-        # 落在子块范围内的段落（local 坐标是章内偏移，与 sub_chunk_offset 对齐）
         if local_start >= sub_chunk_offset and local_end <= sub_chunk_offset + len(sub_chunk_text):
             paragraph_ids.append(int(row.paragraph_id))
             sub_start = local_start - sub_chunk_offset
@@ -136,9 +115,7 @@ def _build_sub_chunk_paragraph_info(
             char_spans.append((sub_start, sub_end))
             texts.append(str(row.text))
     if not paragraph_ids:
-        raise ValueError(
-            f"子块无段落事实源: sub_chunk_offset={sub_chunk_offset}"
-        )
+        raise ValueError(f"子块无段落事实源: sub_chunk_offset={sub_chunk_offset}")
     return ChunkParagraphInfo(
         paragraph_ids=paragraph_ids,
         char_spans=char_spans,
@@ -160,44 +137,11 @@ def _merge_sub_chunk_entities(directories: list[BoundEntityDirectory]) -> list[B
     return merged
 
 
-def _remap_causal_event_refs(
-    refs: list[str],
-    *,
-    run_id: str,
-    chapter_id: int,
-    local_event_count: int,
-    event_offset: int,
-) -> list[str]:
-    """2026-08-19 契约 v3：把子块内事件 id 提升为整章序号 id（跨章引用保持不变）
-
-    子块 Agent 写入的本章因果前驱 id = uuid5(noveliq:event:{run_id}:{chapter_id}:
-    {局部序号})；合并后事件序号提升为 event_offset + 局部序号，引用需同步重算。
-    跨章历史事件 id 不属于本章 id 空间，原样保留，由落库侧解析到 EventNode。
-    """
-    if not refs or local_event_count <= 0:
-        return refs
-    id_base = f"noveliq:event:{run_id}:{chapter_id}:"
-    local_by_id = {
-        str(uuid5(NAMESPACE_URL, f"{id_base}{k}")): k
-        for k in range(1, local_event_count + 1)
-    }
-    remapped: list[str] = []
-    for ref in refs:
-        local = local_by_id.get(ref)
-        if local is None:
-            remapped.append(ref)
-            continue
-        remapped.append(str(uuid5(NAMESPACE_URL, f"{id_base}{event_offset + local}")))
-    return remapped
-
-
 def _merge_sub_chunk_annotations(
     annotations: list[BoundChapterAnnotation],
     *,
     chapter_chunk_id: int,
     sub_chunk_offsets: Sequence[int],
-    run_id: str,
-    chapter_id: int,
 ) -> BoundChapterAnnotation:
     """2026-08-14 M7（§20）用于把同一章各子块标注合并为单 chunk 章节标注
 
@@ -207,6 +151,9 @@ def _merge_sub_chunk_annotations(
 
     2026-08-15：第 2+ 子块的对话 start/end 是子块相对坐标，合并落库前按
     sub_chunk_offsets 加回子块在章文本内的起始偏移，与整章运行口径一致。
+
+    2026-08-22事件 node_id/tree_id 与伏笔 setup_node_id 均为服务端
+    一次性 uuid，合并只平移文本坐标，不再重排事件序号。
     """
     if not annotations:
         raise ValueError("子块标注列表不能为空")
@@ -216,42 +163,23 @@ def _merge_sub_chunk_annotations(
         if len(annotation.chunks) != 1:
             raise ValueError("子块标注必须恰好包含一个 chunk")
     first_chunk = annotations[0].chunks[0]
-    event_offset = 0
     merged_events: list[BoundEvent] = []
     merged_foreshadowings = []
     for index, annotation in enumerate(annotations):
         sub_chunk = annotation.chunks[0]
-        local_event_count = len(sub_chunk.events)
         for event in sub_chunk.events:
             remapped = _remap_bound_event(event, sub_chunk_offsets[index])
-            # 子块内的序号在合并后必须提升为整章序号；Evidence 中的全局段落 ID
-            # 是持久化锚点的权威值，合并后同步写入 anchor_paragraph_ids
+            # 2026-08-22node_id/tree_id/setup_node_id 均为服务端一次性
+            # uuid，合并无需重排；Evidence 中的全局段落 ID 是持久化锚点的权威值，
+            # 合并后同步写入 anchor_paragraph_ids
             if remapped.evidence:
                 global_ids = list(remapped.evidence[0].paragraph_ids)
             else:
                 global_ids = list(remapped.anchor_paragraph_ids)
-            remapped = remapped.model_copy(
-                update={
-                    "anchor_paragraph_ids": global_ids,
-                    "causal_event_refs": _remap_causal_event_refs(
-                        remapped.causal_event_refs,
-                        run_id=run_id,
-                        chapter_id=chapter_id,
-                        local_event_count=local_event_count,
-                        event_offset=event_offset,
-                    ),
-                }
-            )
+            remapped = remapped.model_copy(update={"anchor_paragraph_ids": global_ids})
             merged_events.append(remapped)
         for foreshadowing in sub_chunk.foreshadowings:
-            merged_foreshadowings.append(
-                foreshadowing.model_copy(
-                    update={
-                        "setup_event_index": event_offset + foreshadowing.setup_event_index,
-                    }
-                )
-            )
-        event_offset += local_event_count
+            merged_foreshadowings.append(foreshadowing.model_copy())
     return BoundChapterAnnotation(
         chapter_summary="\n".join(annotation.chapter_summary for annotation in annotations),
         chunks=[
@@ -259,14 +187,10 @@ def _merge_sub_chunk_annotations(
                 chunk_id=chapter_chunk_id,
                 metrics=first_chunk.metrics,
                 entities=BoundEntityDirectory(
-                    entities=_merge_sub_chunk_entities(
-                        [annotation.chunks[0].entities for annotation in annotations]
-                    )
+                    entities=_merge_sub_chunk_entities([annotation.chunks[0].entities for annotation in annotations])
                 ),
                 character_observations=[
-                    item
-                    for annotation in annotations
-                    for item in annotation.chunks[0].character_observations
+                    item for annotation in annotations for item in annotation.chunks[0].character_observations
                 ],
                 dialogues=[
                     _remap_bound_dialogue(item, sub_chunk_offsets[index])
@@ -274,11 +198,7 @@ def _merge_sub_chunk_annotations(
                     for item in annotation.chunks[0].dialogues
                 ],
                 events=merged_events,
-                relations=[
-                    item
-                    for annotation in annotations
-                    for item in annotation.chunks[0].relations
-                ],
+                relations=[item for annotation in annotations for item in annotation.chunks[0].relations],
                 foreshadowings=merged_foreshadowings,
             )
         ],
@@ -363,8 +283,6 @@ def _merge_sub_chunk_results(
             [result.annotation for result in results],
             chapter_chunk_id=chapter_chunk_id,
             sub_chunk_offsets=sub_chunk_offsets,
-            run_id=first.run_id,
-            chapter_id=first.chapter_id,
         ),
         resolved_cases=[
             _remap_case_anchor(
@@ -386,40 +304,20 @@ def _merge_sub_chunk_results(
         ],
         audit=AgentRunAudit(
             allow_future_context=first.audit.allow_future_context,
-            write_records=[
-                record for result in results for record in result.audit.write_records
-            ],
+            write_records=[record for result in results for record in result.audit.write_records],
             rotation_case_ids=list(
-                dict.fromkeys(
-                    case_id
-                    for result in results
-                    for case_id in result.audit.rotation_case_ids
-                )
+                dict.fromkeys(case_id for result in results for case_id in result.audit.rotation_case_ids)
             ),
             authorized_chapter_ids=sorted(
-                {
-                    case_id
-                    for result in results
-                    for case_id in result.audit.authorized_chapter_ids
-                }
+                {case_id for result in results for case_id in result.audit.authorized_chapter_ids}
             ),
             authorized_text_paragraph_ids=sorted(
-                {
-                    paragraph_id
-                    for result in results
-                    for paragraph_id in result.audit.authorized_text_paragraph_ids
-                }
+                {paragraph_id for result in results for paragraph_id in result.audit.authorized_text_paragraph_ids}
             ),
             authorized_event_ids=sorted(
-                {
-                    event_id
-                    for result in results
-                    for event_id in result.audit.authorized_event_ids
-                }
+                {event_id for result in results for event_id in result.audit.authorized_event_ids}
             ),
-            closed_case_ids=[
-                case_id for result in results for case_id in result.audit.closed_case_ids
-            ],
+            closed_case_ids=[case_id for result in results for case_id in result.audit.closed_case_ids],
         ),
     )
 
@@ -618,9 +516,7 @@ async def run_annotate(
                 else None
             )
             if agent_stream is not None:
-                await agent_stream.thinking(
-                    f"章节 {chapter_labels.get(chapter_id, chapter_id)} 标注 Agent 开始处理"
-                )
+                await agent_stream.thinking(f"章节 {chapter_labels.get(chapter_id, chapter_id)} 标注 Agent 开始处理")
 
             try:
                 # 2026-08-14 二期段落化：查询服务边界从 chunk 改为段落事实源边界。
@@ -633,20 +529,12 @@ async def run_annotate(
                     if int(row.chapter_id) in chapter_chunk_ids
                 ]
                 if not chapter_paragraph_rows:
-                    raise ValueError(
-                        f"章节无段落事实源: run_id={run_id} chapter_id={chapter_id}"
-                    )
-                chapter_first_paragraph_id = min(
-                    int(row.paragraph_id) for row in chapter_paragraph_rows
-                )
-                chapter_last_paragraph_id = max(
-                    int(row.paragraph_id) for row in chapter_paragraph_rows
-                )
+                    raise ValueError(f"章节无段落事实源: run_id={run_id} chapter_id={chapter_id}")
+                chapter_first_paragraph_id = min(int(row.paragraph_id) for row in chapter_paragraph_rows)
+                chapter_last_paragraph_id = max(int(row.paragraph_id) for row in chapter_paragraph_rows)
                 # 2026-08-14 M7（§20）：章文本超过上限时在段落边界切成负 ID 子块，
                 # 各子块严格串行运行章节 Agent，全部成功后合并为单章完成事务。
-                chapter_text = "".join(
-                    chunk_text for _chunk_id, chunk_text in current_chunks
-                )
+                chapter_text = "".join(chunk_text for _chunk_id, chunk_text in current_chunks)
                 sub_chunks = _split_chapter_sub_chunks(
                     chapter_text,
                     chapter_paragraph_rows,
@@ -655,9 +543,7 @@ async def run_annotate(
                 )
                 sub_results: list[AgentRunResult] = []
                 sub_chunk_offsets: list[int] = []
-                for sub_chunk_index, (sub_chunk_id, sub_chunk_text, sub_chunk_offset) in enumerate(
-                    sub_chunks
-                ):
+                for sub_chunk_index, (sub_chunk_id, sub_chunk_text, sub_chunk_offset) in enumerate(sub_chunks):
                     sub_chunk_offsets.append(sub_chunk_offset)
                     sub_paragraph_info = _build_sub_chunk_paragraph_info(
                         chapter_paragraph_rows,
@@ -697,7 +583,7 @@ async def run_annotate(
                     session_factory=sql_session_factory,
                 )
                 success_count += 1
-            except Exception as exc:  # noqa: BLE001 单章失败即中断，run 收口 failed 后可 resume 补跑
+            except Exception as exc:
                 if first_failure is None:
                     first_failure = exc
                 failed_count += 1

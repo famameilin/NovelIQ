@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from uuid import NAMESPACE_URL, uuid5
-
 from fastapi.testclient import TestClient
 
 from src.agents.annotation.schema import BoundForeshadowing
@@ -21,19 +19,21 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def _event_id(run_id: str, chapter_id: int, ordinal: int) -> str:
-    """2026-08-18 与生产侧 _event_id 保持一致的确定性事件 ID"""
-    return str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:{ordinal}"))
-
-
 def _insert_event_forest_run(db_session) -> tuple[str, str]:
-    """两章三事件：章 1 双事件（含因果边）+ 伏笔绑定章 1 事件 1；章 2 单事件。"""
+    """两章三事件：章 1 双事件（含因果边）+ 伏笔绑定章 1 事件 1；章 2 单事件。
+
+    节点 id 按 run 前缀派生：event_id 为全局主键，避免跨测试数据残留冲突。
+    """
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。\n顾霜立誓。", "顾霜拔剑。"],
         chapter_ids=[1, 2],
         title="事件森林端点",
     )
+    t = run_id[:8]
+    gate_root = f"evt-{t}-gate-root"
+    gate_main = f"evt-{t}-gate-main"
+    sword_root = f"evt-{t}-sword-root"
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -43,6 +43,7 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": gate_root,
                 "tree_id": "gate",
                 "cause_role": "root",
             },
@@ -50,7 +51,9 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [_event_id(run_id, 1, 1)],
+                "node_id": gate_main,
+                "parent_node_id": gate_root,
+                "causal_event_refs": [],
                 "tree_id": "gate",
                 "cause_role": "main",
             },
@@ -63,9 +66,9 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
         foreshadowing=BoundForeshadowing(
             description="顾霜承诺护佑山门",
             confidence="high",
-            setup_event_index=1,
+            setup_node_id=gate_root,
         ),
-        setup_event_id=_event_id(run_id, 1, 1),
+        setup_event_id=gate_root,
     )
     persist_chapter_annotation(
         db_session,
@@ -76,6 +79,11 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": sword_root,
+                "tree_id": "sword",
+                "cause_role": "root",
+                # 跨章因果唯一出口是 cause_tree_id 对应的根节点引用
+                "causal_event_refs": [gate_root],
             },
         ],
     )
@@ -85,8 +93,15 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
 
 
 def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) -> None:
-    """2026-08-19 用于验证事件森林快照的树视图、因果边、伏笔边与可见边界"""
+    """2026-08-19 用于验证事件森林快照的树视图、因果边、伏笔边与可见边界
+
+    2026-08-22节点 id 由测试显式指定（服务端 uuid4 的可预测替身）。
+    """
     novel_id, run_id = _insert_event_forest_run(db_session)
+    t = run_id[:8]
+    gate_root = f"evt-{t}-gate-root"
+    gate_main = f"evt-{t}-gate-main"
+    sword_root = f"evt-{t}-sword-root"
 
     response = api_client.get(
         f"/api/novels/{novel_id}/event-forest",
@@ -100,40 +115,36 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert payload["visible_through_chapter_order"] == 2
 
     nodes = {node["event_id"]: node for node in payload["event_nodes"]}
-    assert set(nodes) == {
-        _event_id(run_id, 1, 1),
-        _event_id(run_id, 1, 2),
-        _event_id(run_id, 2, 1),
-    }
-    assert nodes[_event_id(run_id, 1, 1)]["description"] == "顾霜进入山门"
-    assert nodes[_event_id(run_id, 1, 2)]["description"] == "顾霜立誓"
-    assert nodes[_event_id(run_id, 2, 1)]["description"] == "顾霜拔剑"
-    assert nodes[_event_id(run_id, 1, 1)]["anchor_paragraph_ids"] == [0]
-    assert nodes[_event_id(run_id, 1, 1)]["tree_id"] == "gate"
-    assert nodes[_event_id(run_id, 1, 1)]["cause_role"] == "root"
+    assert set(nodes) == {gate_root, gate_main, sword_root}
+    assert nodes[gate_root]["description"] == "顾霜进入山门"
+    assert nodes[gate_main]["description"] == "顾霜立誓"
+    assert nodes[sword_root]["description"] == "顾霜拔剑"
+    assert nodes[gate_root]["anchor_paragraph_ids"] == [0]
+    assert nodes[gate_root]["tree_id"] == "gate"
+    assert nodes[gate_root]["cause_role"] == "root"
 
     # 树视图：章 1 双事件一棵树（主链），章 2 单事件一棵树；contains 派生化不再返回
     assert "event_edges" not in payload
     assert "chapter_roots" not in payload
     trees = {tree["tree_id"]: tree for tree in payload["event_trees"]}
-    assert set(trees) == {"gate", "tree-main"}
+    assert set(trees) == {"gate", "sword"}
     gate = trees["gate"]
-    assert gate["root_event_id"] == _event_id(run_id, 1, 1)
-    assert gate["main_chain"] == [_event_id(run_id, 1, 1), _event_id(run_id, 1, 2)]
+    assert gate["root_event_id"] == gate_root
+    assert gate["main_chain"] == [gate_root, gate_main]
     assert gate["chapter_ids"] == [1]
 
     causal_edges = payload["causal_edges"]
     assert len(causal_edges) == 1
     assert all(edge["edge_type"] == "causal" for edge in causal_edges)
-    assert causal_edges[0]["source_event_id"] == _event_id(run_id, 1, 1)
-    assert causal_edges[0]["target_event_id"] == _event_id(run_id, 1, 2)
+    assert causal_edges[0]["source_event_id"] == gate_root
+    assert causal_edges[0]["target_event_id"] == sword_root
     assert causal_edges[0]["source_chapter_id"] == 1
-    assert causal_edges[0]["target_chapter_id"] == 1
+    assert causal_edges[0]["target_chapter_id"] == 2
     assert causal_edges[0]["is_active"] is True
 
     assert len(payload["foreshadowing_edges"]) == 1
     foreshadowing = payload["foreshadowing_edges"][0]
-    assert foreshadowing["setup_event_id"] == _event_id(run_id, 1, 1)
+    assert foreshadowing["setup_event_id"] == gate_root
     assert foreshadowing["payoff_event_id"] is None
     assert foreshadowing["status"] == "open"
     assert foreshadowing["active"] is True

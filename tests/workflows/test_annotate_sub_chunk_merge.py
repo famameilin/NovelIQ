@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from uuid import NAMESPACE_URL, uuid5
 
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
@@ -50,14 +49,16 @@ def _make_sub_annotation(chunk_id: int, *, summary: str, dialogue: BoundDialogue
 
 
 def _event(description: str, *, refs: list[str], role: str) -> BoundEvent:
-    """2026-08-19 用于构造契约 v3 事件（含树结构与全局 event_id 因果引用）"""
+    """2026-08-19 用于构造事件（服务端 uuid 替身 id）"""
     return BoundEvent(
+        node_id=f"evt-{description}",
+        tree_id="tree-merge",
+        parent_node_id=None,
+        cause_role=role,  # type: ignore[arg-type]
         description=description,
         participants=[],
         anchor_paragraph_ids=[0],
         causal_event_refs=refs,
-        tree_id="tree-merge",
-        cause_role=role,  # type: ignore[arg-type]
         char_start=0,
         char_end=3,
         text_hash="0" * 64,
@@ -110,7 +111,7 @@ def test_split_chapter_sub_chunks_returns_offsets() -> None:
     assert [offset for _, _, offset in sub_chunks] == [0, 40]
     # 各子块文本确为其起始偏移处的切片
     for chunk_id, text, offset in sub_chunks:
-        assert text == chapter_text[offset:offset + len(text)]
+        assert text == chapter_text[offset : offset + len(text)]
         assert chunk_id < 0
 
 
@@ -156,8 +157,6 @@ def test_merge_remaps_dialogues_of_later_sub_chunks() -> None:
         [first, second],
         chapter_chunk_id=7,
         sub_chunk_offsets=[0, 20],
-        run_id="run-1",
-        chapter_id=7,
     )
 
     assert merged.chunks[0].chunk_id == 7
@@ -185,39 +184,27 @@ def test_merge_rejects_mismatched_offsets_length() -> None:
             [annotation],
             chapter_chunk_id=7,
             sub_chunk_offsets=[],
-            run_id="run-1",
-            chapter_id=7,
         )
 
 
-def test_merge_remaps_causal_event_refs_to_chapter_ordinals() -> None:
-    """2026-08-19 用于验证第 2+ 子块的事件 id 提升为整章序号 id（契约 v3）"""
-    run_id = "run-1"
-    chapter_id = 7
-    # 子块 1：事件 1（root）+ 事件 2（main 引用事件 1）
+def test_merge_keeps_event_ids_and_refs_unmapped() -> None:
+    """2026-08-22 事件 node_id/tree_id 与因果引用均为服务端一次性 uuid，合并只平移文本坐标"""
     e1 = _event("进山", refs=[], role="root")
-    e2 = _event("拔剑", refs=[str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:1"))], role="main")
-    # 子块 2：事件 3（root）+ 事件 4（main 引用事件 3 子块内局部 id 1）
-    local_e3_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:1"))
+    e2 = _event("拔剑", refs=["evt-upstream-root"], role="main")
     e3 = _event("收势", refs=[], role="root")
-    e4 = _event("入鞘", refs=[local_e3_id], role="main")
+    e4 = _event("入鞘", refs=["evt-local-prev"], role="main")
 
     merged = _merge_sub_chunk_annotations(
         [
             _make_event_sub_annotation(-1, summary="第一块", events=[e1, e2]),
             _make_event_sub_annotation(-2, summary="第二块", events=[e3, e4]),
         ],
-        chapter_chunk_id=chapter_id,
+        chapter_chunk_id=7,
         sub_chunk_offsets=[0, 20],
-        run_id=run_id,
-        chapter_id=chapter_id,
     )
 
     events = merged.chunks[0].events
     assert [event.description for event in events] == ["进山", "拔剑", "收势", "入鞘"]
-    # 事件 4 的引用从子块局部 id（run:7:1）提升为整章序号 id（run:7:3）
-    final_e3_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:3"))
-    assert events[3].causal_event_refs == [final_e3_id]
-    # 子块 1（offset=0）的引用保持整章序号 id（run:7:1）
-    final_e1_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:1"))
-    assert events[1].causal_event_refs == [final_e1_id]
+    # 引用原样保留，不做任何序号重排
+    assert events[1].causal_event_refs == ["evt-upstream-root"]
+    assert events[3].causal_event_refs == ["evt-local-prev"]

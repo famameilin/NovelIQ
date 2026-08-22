@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
@@ -28,7 +27,6 @@ from src.knowledge.authority import (
     GraphPageSummary,
     GraphQualitySignals,
     GraphSharedSummary,
-    KnowledgeGraphAuthorityService,
     serialize_graph_report_signals,
 )
 from src.storage.repositories import (
@@ -41,12 +39,6 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
-from tests.support.timeline_contract_helpers import (
-    create_timeline_contract_scenario,
-    graph_change_names,
-    graph_change_tuples,
-    nodes_for_anchor_chapter,
-)
 
 
 def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> None:
@@ -57,9 +49,8 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         chapter_ids=[1, 2],
         title="事件森林时间轴导出",
     )
-    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
-    eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
-    eid3 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:2:1"))
+    eid1 = "evt-tl-gate-root"
+    eid2 = "evt-tl-gate-main"
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -69,6 +60,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
             },
@@ -76,7 +68,8 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [eid1],
+                "node_id": eid2,
+                "parent_node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "main",
             },
@@ -91,31 +84,39 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "宫主现身",
                 "participants": ["宫主"],
                 "anchor_paragraph_ids": [0],
+                "node_id": "evt-tl-palace-root",
                 "causal_event_refs": [eid2],
                 "tree_id": "palace",
+                "cause_role": "root",
+            },
+            {
+                "description": "宫主出手",
+                "participants": ["宫主"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-tl-strike-root",
+                "causal_event_refs": ["evt-tl-palace-root"],
+                "tree_id": "strike",
                 "cause_role": "root",
             },
         ],
     )
     # 将其中一条因果边置为 inactive（含 expired_at），用于验证 is_active/expired_at 透传
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from src.storage.models.event_forest import EventEdge
 
     existing = db_session.query(EventEdge).filter_by(run_id=run_id).first()
     assert existing is not None
     existing.is_active = False
-    existing.expired_at = datetime.now(timezone.utc)
+    existing.expired_at = datetime.now(UTC)
     db_session.commit()
 
     chapter_repo = ChapterRepository(db_session)
-    annotation_repo = AnnotationRepository(db_session)
     stats_repo = StatsRepository(db_session)
 
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
         chapter_repo=chapter_repo,
-        annotation_repo=annotation_repo,
         stats_repo=stats_repo,
     )
 
@@ -127,10 +128,6 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     assert "derived_event_order" in timeline_data
     assert "phases" in timeline_data
     assert timeline_data["total_chapters"] == 2
-    # 旧字段不应出现
-    assert "atomic_nodes" not in timeline_data
-    assert "composite_nodes" not in timeline_data
-
     # nodes 按 derivedOrder，前后端均可按此排序
     assert len(timeline_data["nodes"]) >= 2
     for node in timeline_data["nodes"]:
@@ -184,9 +181,6 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
     assert payload["graph_summary"] == {"node_count": 3, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 2}
     assert "core_characters" not in payload["graph_summary"]
-
-
-
 
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -331,8 +325,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_timeline_data",
         lambda *_args, **_kwargs: {
-            "atomic_nodes": [],
-            "composite_nodes": [],
+            "nodes": [],
             "phases": [],
             "tension_curve": [],
             "total_chapters": 0,
@@ -371,8 +364,6 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert results_data["diagnosis"] is None
     assert missing_fields.count("diagnosis") == 1
     assert novel_name == "Test Novel"
-
-
 
 
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
@@ -472,9 +463,7 @@ def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pyt
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_character_relations",
-        lambda *_args, **_kwargs: [
-            SimpleNamespace(from_char="苏镜", to_char="程霜", type="隶属")
-        ],
+        lambda *_args, **_kwargs: [SimpleNamespace(from_char="苏镜", to_char="程霜", type="隶属")],
     )
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_hierarchical_relations",
@@ -709,8 +698,7 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_timeline_data",
         lambda *_args, **_kwargs: {
-            "atomic_nodes": [],
-            "composite_nodes": [],
+            "nodes": [],
             "phases": [],
             "tension_curve": [],
             "total_chapters": 0,
@@ -735,13 +723,13 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypatch) -> None:
-    """2026-08-19 用于验证导出 payload 包含事件森林段（树视图/因果边/伏笔边契约 v3）"""
+    """2026-08-19 用于验证导出 payload 包含事件森林段（树视图/因果边/伏笔边）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。\n顾霜立誓。"],
         title="导出事件森林",
     )
-    eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    eid1 = "evt-export-gate-root"
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -751,6 +739,7 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
             },
@@ -758,7 +747,8 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [eid1],
+                "node_id": "evt-export-gate-main",
+                "parent_node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "main",
             },
@@ -770,7 +760,7 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
         foreshadowing=BoundForeshadowing(
             description="顾霜承诺护佑山门",
             confidence="high",
-            setup_event_index=1,
+            setup_node_id=eid1,
         ),
         setup_event_id=eid1,
     )
@@ -793,7 +783,7 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
     nodes = {node["event_id"]: node for node in forest["event_nodes"]}
     assert set(nodes) == {
         eid1,
-        str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2")),
+        "evt-export-gate-main",
     }
     assert nodes[eid1]["description"] == "顾霜进入山门"
     assert nodes[eid1]["tree_id"] == "gate"
@@ -804,11 +794,11 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
     trees = {tree["tree_id"]: tree for tree in forest["event_trees"]}
     assert trees["gate"]["main_chain"] == [
         eid1,
-        str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2")),
+        "evt-export-gate-main",
     ]
+    # 树内主链不再是因果边（contains 派生化 + 因果边仅跨树）
     causal_edges = forest["causal_edges"]
-    assert len(causal_edges) == 1
-    assert causal_edges[0]["source_event_id"] == eid1
+    assert causal_edges == []
 
     assert len(forest["foreshadowing_edges"]) == 1
     assert forest["foreshadowing_edges"][0]["setup_event_id"] == eid1

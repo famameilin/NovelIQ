@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from sqlalchemy import select
@@ -169,17 +168,13 @@ def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
     first_thread, first_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜持 Sword", confidence="high", setup_event_index=1
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜持 Sword", confidence="high", setup_node_id="event-setup-1"),
         setup_event_id="event-setup-1",
     )
     second_thread, second_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜持 sword", confidence="high", setup_event_index=1
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high", setup_node_id="event-setup-1"),
         setup_event_id="event-setup-1",
     )
     db_session.commit()
@@ -189,15 +184,11 @@ def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
     # 同章节同 thread 重复 sync 是纯 no-op：不重复写 hit、不制造假命中
     assert second_hit is None
     threads = list(
-        db_session.execute(
-            select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
-        ).scalars()
+        db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalars()
     )
     assert len(threads) == 1
     hits = list(
-        db_session.execute(
-            select(ForeshadowingThreadHit).where(ForeshadowingThreadHit.run_id == run_id)
-        ).scalars()
+        db_session.execute(select(ForeshadowingThreadHit).where(ForeshadowingThreadHit.run_id == run_id)).scalars()
     )
     assert len(hits) == 1
 
@@ -205,18 +196,14 @@ def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
     third_thread, third_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜持 sword", confidence="high", setup_event_index=2
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high", setup_node_id="event-setup-2"),
         setup_event_id="event-setup-2",
     )
     db_session.commit()
     assert third_thread.setup_id != first_thread.setup_id
     assert third_hit is not None and third_hit.is_new_setup is True
     threads = list(
-        db_session.execute(
-            select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
-        ).scalars()
+        db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalars()
     )
     assert len(threads) == 2
 
@@ -233,9 +220,7 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter
     first_thread, first_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
         setup_event_id="event-护佑",
     )
     assert first_thread.last_chapter_id == 1
@@ -244,9 +229,7 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter
     second_thread, second_hit = repository.sync(
         run_id=run_id,
         chapter_id=2,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
         setup_event_id="event-护佑",
     )
     db_session.commit()
@@ -280,18 +263,14 @@ def test_foreshadowing_sync_existing_thread_noop_on_same_chunk(db_session) -> No
     first_thread, _first_hit = repository.sync(
         run_id=run_id,
         chapter_id=2,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
         setup_event_id="event-护佑",
     )
     # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chapter_id
     thread, hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门", confidence="high", setup_event_index=1
-        ),
+        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
         setup_event_id="event-护佑",
     )
     db_session.commit()
@@ -342,11 +321,7 @@ def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> No
 
     assert len(first_rows) == 1
     assert second_rows == []
-    rows = list(
-        db_session.execute(
-            select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-        ).scalars()
-    )
+    rows = list(db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalars())
     assert len(rows) == 1
     assert rows[0].candidate_key == "dlg_001"
     assert rows[0].chapter_id == 1
@@ -432,6 +407,7 @@ def test_search_event_history_returns_events_within_chapter_boundary(db_session,
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": "evt-history-gate",
             },
         ],
     )
@@ -444,6 +420,7 @@ def test_search_event_history_returns_events_within_chapter_boundary(db_session,
                 "description": "顾霜拔剑迎敌",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": "evt-history-draw",
             },
         ],
     )
@@ -455,19 +432,18 @@ def test_search_event_history_returns_events_within_chapter_boundary(db_session,
         current_last_paragraph_id=0,
     )
 
+    # search_event_history 返回事件树根视图
     prior = service.search_event_history("顾霜", max_chapter_order=1)
     assert [item.description for item in prior] == ["顾霜进入山门"]
-    assert prior[0].event_id == str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    assert prior[0].root_node_id == "evt-history-gate"
+    assert prior[0].cross_chapter is False
 
     visible = service.search_event_history("顾霜", max_chapter_order=2)
     by_desc = {item.description: item for item in visible}
     assert set(by_desc) == {"顾霜进入山门", "顾霜拔剑迎敌"}
     assert len(visible) == 2
     latest_payoff = by_desc["顾霜拔剑迎敌"]
-    assert latest_payoff.event_id == str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:2:1"))
-    # Evidence 反序列化为 TextEvidence（含 64 位 hex 文本哈希）
-    assert len(latest_payoff.evidence) == 1
-    assert len(latest_payoff.evidence[0].text_hash) == 64
+    assert latest_payoff.root_node_id == "evt-history-draw"
 
 
 def test_search_event_history_returns_empty_when_no_match(db_session, monkeypatch) -> None:

@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
-from uuid import NAMESPACE_URL, uuid5
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from src.storage.models import EventEdge
 from src.storage.repositories import RunRepository
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
-
-
-def _event_id(run_id: str, chapter_id: int, ordinal: int) -> str:
-    return str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:{ordinal}"))
 
 
 def _insert_two_chapter_forest(db_session):
@@ -24,6 +18,7 @@ def _insert_two_chapter_forest(db_session):
         chapter_ids=[1, 2],
         title="事件森林契约",
     )
+    t = run_id[:8]
     # chapter 1: two events in same tree gate
     persist_chapter_annotation(
         db_session,
@@ -34,6 +29,7 @@ def _insert_two_chapter_forest(db_session):
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": f"evt-{t}-gate-root",
                 "tree_id": "gate",
                 "cause_role": "root",
             },
@@ -41,7 +37,8 @@ def _insert_two_chapter_forest(db_session):
                 "description": "顾霜立誓",
                 "participants": ["顾霜", "苏映雪"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [_event_id(run_id, 1, 1)],
+                "node_id": f"evt-{t}-gate-main",
+                "parent_node_id": f"evt-{t}-gate-root",
                 "tree_id": "gate",
                 "cause_role": "main",
             },
@@ -57,6 +54,8 @@ def _insert_two_chapter_forest(db_session):
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "node_id": f"evt-{t}-sword-root",
+                "causal_event_refs": [f"evt-{t}-gate-main", f"evt-{t}-gate-root"],
                 "tree_id": "sword",
                 "cause_role": "root",
             },
@@ -64,7 +63,8 @@ def _insert_two_chapter_forest(db_session):
                 "description": "顾霜归来",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
-                "causal_event_refs": [_event_id(run_id, 2, 1)],
+                "node_id": f"evt-{t}-sword-main",
+                "parent_node_id": f"evt-{t}-sword-root",
                 "tree_id": "sword",
                 "cause_role": "main",
             },
@@ -125,8 +125,6 @@ def test_snapshot_none_returns_200_empty(api_client: TestClient, db_session) -> 
     assert payload["foreshadowing_edges"] == []
     assert payload["derived_event_order"] == []
     assert payload["tension_curve"] is None
-    assert "atomic_nodes" not in payload
-    assert "composite_nodes" not in payload
     # optional header
     assert response.headers.get("X-Timeline-Empty-Reason") in (None, "no_event_forest")
 
@@ -150,8 +148,9 @@ def test_returns_nodes_sorted_by_derived_order(api_client: TestClient, db_sessio
     assert progresses == sorted(progresses)
     # derived order first two belong to gate tree, ordering preserved
     derived = payload["derived_event_order"]
+    t = run_id[:8]
     # check that gate root is before sword root in derived order (chapter order)
-    assert derived.index(_event_id(run_id, 1, 1)) < derived.index(_event_id(run_id, 2, 1))
+    assert derived.index(f"evt-{t}-gate-root") < derived.index(f"evt-{t}-sword-root")
     # also ensure nodes' tree_id respects derived order: gate before sword
     assert nodes[0]["tree_id"] == "gate"
     assert nodes[1]["tree_id"] == "sword"
@@ -206,8 +205,6 @@ def test_participants_keep_dict(api_client: TestClient, db_session) -> None:
                 assert "name" in p0["entity"]
         assert all(isinstance(c, str) for c in node["character_names"])
         assert node.get("node_type") == "event"
-    assert "atomic_nodes" not in payload
-    assert "composite_nodes" not in payload
 
 
 def test_causal_edges_include_inactive_and_expired_at(api_client: TestClient, db_session) -> None:
@@ -217,7 +214,7 @@ def test_causal_edges_include_inactive_and_expired_at(api_client: TestClient, db
     existing_edge = db_session.query(EventEdge).filter_by(run_id=run_id).first()
     assert existing_edge is not None
     existing_edge.is_active = False
-    existing_edge.expired_at = datetime.now(timezone.utc)
+    existing_edge.expired_at = datetime.now(UTC)
     db_session.commit()
 
     task_id = run_id[:8]
@@ -262,7 +259,7 @@ def test_analysis_not_complete_returns_400(api_client: TestClient, db_session) -
 
 
 def test_empty_forest_still_returns_phases_and_edges(api_client: TestClient, db_session) -> None:
-    """空 nodes 但快照存在的边界：若有树但手工清空？这里验证 pending->completed 空快照已测，另验证有章节但无树时 phases/edges 仍可返回"""
+    """验证快照存在时阶段和边仍会返回"""
     novel_id, run_id = _insert_two_chapter_forest(db_session)
     task_id = run_id[:8]
     response = api_client.get(

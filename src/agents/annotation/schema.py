@@ -131,20 +131,6 @@ class RelationType(StrEnum):
     LEADER = "领导"
 
 
-class SetupKind(StrEnum):
-    """2026-08-07 用于约束伏笔 setup 的宽口径类别（系统内部默认值使用）"""
-
-    ABNORMAL_OBJECT = "异常物件"
-    ABNORMAL_RULE = "异常规则"
-    HIDDEN_IDENTITY = "隐藏身份"
-    EXPLICIT_PROMISE = "明确承诺"
-    EXPLICIT_THREAT = "明确威胁"
-    COUNTDOWN = "倒计时"
-    UNEXPLAINED_ABILITY = "未解释能力"
-    CAUSAL_TRIGGER = "因果引线"
-    OTHER = "其他"
-
-
 class SetupStatus(StrEnum):
     """2026-08-07 用于约束伏笔线程当前阶段（系统内部默认值使用）"""
 
@@ -171,7 +157,7 @@ DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 # 2026-08-18 事件森林/DAG 边类型定稿三类；sequence 不落库，按章节顺序和事件锚点生成派生排序
 EventEdgeType = Literal["contains", "causal", "foreshadowing"]
 
-# 2026-08-19 契约 v3：事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
+# 2026-08-19事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
 # 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
 EventCauseRole = Literal["root", "main", "secondary"]
 
@@ -304,7 +290,7 @@ class EntityInput(StrictModel):
     )
     tags: list[str] = Field(
         default_factory=list,
-        description="可空标签，最多 3 个，每个最多 5 个字，如\"灵兽\"\"剑灵\"\"法宝\"",
+        description='可空标签，最多 3 个，每个最多 5 个字，如"灵兽""剑灵""法宝"',
     )
     description: str | None = Field(
         default=None,
@@ -312,8 +298,7 @@ class EntityInput(StrictModel):
     )
     attributes: dict[str, JsonValue | None] = Field(
         default_factory=dict,
-        description="JSON Merge Patch：普通值表示设置该属性，null 表示删除该属性；"
-        "已登记实体只提交本次变化的字段",
+        description="JSON Merge Patch：普通值表示设置该属性，null 表示删除该属性；已登记实体只提交本次变化的字段",
     )
 
     @model_validator(mode="after")
@@ -426,9 +411,7 @@ class DialogueInput(StrictModel):
         """2026-08-11 用于规范化说话人并约束三态字段组合"""
         if self.verdict == DialogueVerdict.NOT_DIALOGUE:
             if self.speaker is not None or self.tone is not None:
-                raise ValueError(
-                    "not_dialogue 候选只能提交 candidate_index 和 verdict；speaker/tone 必须为 null"
-                )
+                raise ValueError("not_dialogue 候选只能提交 candidate_index 和 verdict；speaker/tone 必须为 null")
             return self
         if self.speaker is not None:
             self.speaker = normalize_semantic_text(
@@ -497,26 +480,20 @@ EvidenceItem = Annotated[
 ]
 
 
-class EventHistoryResult(StrictModel):
-    """2026-08-19 用于向当前 Agent 暴露已授权的历史事件及其根 Evidence
+class EventTreeHistoryResult(StrictModel):
+    """2026-08-22search_event 暴露的历史事件树视图
 
-    契约 v3：causal_event_refs 改为全局 event_id 字符串；新增 tree_id/cause_role
-    供 Agent 跨章延续事件树（沿用同一 tree_id、引用历史事件作因果前驱）。
+    一棵树 = 一个完整事件；跨章树（大事件）通过 cause_tree_id 因果链跨越多章。
     """
 
-    event_id: str = Field(min_length=1)
+    tree_id: str = Field(min_length=1)
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     description: str = Field(min_length=1)
     participants: list[dict[str, Any]] = Field(default_factory=list)
-    anchor_paragraph_ids: list[int] = Field(min_length=1)
-    char_start: int = Field(ge=0)
-    char_end: int = Field(gt=0)
-    text_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
-    evidence: list[EvidenceItem] = Field(min_length=1)
-    causal_event_refs: list[str] = Field(default_factory=list)
-    tree_id: str = Field(min_length=1)
-    cause_role: EventCauseRole = Field(default="main")
+    is_foreshadow_setup: bool = False
+    cross_chapter: bool = False
+    root_node_id: str = Field(min_length=1, description="树根节点 id（落库 event_id）")
     edges: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -569,48 +546,58 @@ class ChunkParagraphInfo:
         return [self.paragraph_ids[i] for i in sorted(set(indices))]
 
 
-class EventInput(StrictModel):
-    """2026-08-19 用于提交事件描述、参与者角色、原文段落锚点、因果前驱引用和树结构
+class CreateEventInput(StrictModel):
+    """2026-08-22创建新事件树，系统派发 tree_id 并盖章当前章
 
-    契约 v3「树内图外」：agent 显式声明事件归属的事件树（tree_id）与树内角色
-    （cause_role）；因果前驱改为全局 event_id 引用（可混本章已写 + 历史事件）。
+    模型零结构输入：不给 id、不给边、不给段落锚点。跨章延续唯一出口是
+    cause_tree_id（必须指向已存在的树），环在构造上不可能。
     """
 
-    description: str = Field(min_length=1)
+    description: str = Field(min_length=1, description="事件的完整一句话描述（树的根）")
     participants: list[EventParticipantInput] = Field(default_factory=list)
-    anchor_paragraph_ids: list[int] = Field(
-        min_length=1,
-        description="事件锚定的段落序号（0 基，对应 prompt 中 ¶N 标记），至少 1 个",
+    isforeshadowing: bool = Field(
+        default=False,
+        description="标记该事件为伏笔埋设点（系统自动创建伏笔线程，无需再调用伏笔工具）",
     )
-    causal_event_refs: list[str] = Field(
-        default_factory=list,
-        description="因果前驱事件的全局 event_id；可引用本章已写事件 id 与 "
-        "search_event_history 返回的历史事件 id（不能引用本轮尚未返回 id 的事件）",
-    )
-    tree_id: str = Field(min_length=1, description="事件归属的事件树 ID（同一棵树内保持一致）")
-    cause_role: EventCauseRole = Field(
-        description="事件在树内的角色：root=触发该事件的第一个自立动作；"
-        "main=主因链上；secondary=父的兄弟即次因分支"
+    cause_tree_id: str | None = Field(
+        default=None,
+        description="因果前驱事件树 id（可选）。本章新树填 create_event 返回的 tree_id；"
+        "延续前文剧情先 search_event 检索历史树再填其 tree_id",
     )
 
     @model_validator(mode="after")
-    def normalize_event(self) -> EventInput:
-        """2026-08-19 用于规范化事件说明并校验锚点、因果引用与树角色"""
-        self.description = normalize_semantic_text(
-            self.description,
-            label="event.description",
-        )
-        self.tree_id = normalize_semantic_text(self.tree_id, label="event.tree_id")
-        if any(idx < 0 for idx in self.anchor_paragraph_ids):
-            raise ValueError("event.anchor_paragraph_ids 不能为负数")
-        if any(not ref for ref in self.causal_event_refs):
-            raise ValueError("event.causal_event_refs 不能为空字符串")
-        if len(set(self.causal_event_refs)) != len(self.causal_event_refs):
-            raise ValueError("event.causal_event_refs 不允许重复")
-        if self.cause_role == "root" and self.causal_event_refs:
-            raise ValueError("event.cause_role=root 时 causal_event_refs 必须为空")
-        if self.cause_role in ("main", "secondary") and not self.causal_event_refs:
-            raise ValueError("event.cause_role=main/secondary 时 causal_event_refs 至少 1 个")
+    def normalize_create(self) -> CreateEventInput:
+        """2026-08-22 用于规范化事件描述与前驱树 id"""
+        self.description = normalize_semantic_text(self.description, label="create_event.description")
+        if self.cause_tree_id is not None:
+            cleaned = normalize_semantic_text(self.cause_tree_id, label="create_event.cause_tree_id")
+            self.cause_tree_id = cleaned or None
+        return self
+
+
+class EventAppendItem(StrictModel):
+    """2026-08-22向事件树追加的子节点"""
+
+    type: Literal["main", "secondary"] = Field(description="main=顺延主因链（成为新的链尾）；secondary=当前链尾的分支")
+    description: str = Field(min_length=1, description="子事件描述")
+
+    @model_validator(mode="after")
+    def normalize_item(self) -> EventAppendItem:
+        """2026-08-22 用于规范化子事件描述"""
+        self.description = normalize_semantic_text(self.description, label="update_event.description")
+        return self
+
+
+class UpdateEventInput(StrictModel):
+    """2026-08-22向本章已有事件树追加子节点（单章闭环，历史树不可更新）"""
+
+    tree_id: str = Field(min_length=1, description="目标事件树 id（create_event 返回）")
+    items: list[EventAppendItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def normalize_update(self) -> UpdateEventInput:
+        """2026-08-22 用于规范化树 id"""
+        self.tree_id = normalize_semantic_text(self.tree_id, label="update_event.tree_id")
         return self
 
 
@@ -619,9 +606,7 @@ class RelationInput(StrictModel):
 
     from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
     to_entity: str = Field(min_length=1, description="关系终点实体（图上的登记名称）")
-    relation_type: RelationType = Field(
-        description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text()
-    )
+    relation_type: RelationType = Field(description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text())
 
     @model_validator(mode="after")
     def normalize_relation(self) -> RelationInput:
@@ -636,26 +621,6 @@ class RelationInput(StrictModel):
         )
         if self.from_entity == self.to_entity:
             raise ValueError("关系两端不能是同一名称")
-        return self
-
-
-class ForeshadowingInput(StrictModel):
-    """2026-08-18 用于提交新伏笔描述、置信度和 setup 事件绑定（只创建新伏笔）"""
-
-    description: str = Field(min_length=1, description="伏笔描述，一句话说明埋设了什么悬念")
-    confidence: Confidence = Field(description="本次判断的置信度：high/medium/low")
-    setup_event_index: int = Field(
-        gt=0,
-        description="本伏笔的 setup 事件序号（1 基，指向本章事件列表中的序号）",
-    )
-
-    @model_validator(mode="after")
-    def normalize_foreshadowing(self) -> ForeshadowingInput:
-        """2026-08-18 用于规范化伏笔描述"""
-        self.description = normalize_semantic_text(
-            self.description,
-            label="foreshadowing.description",
-        )
         return self
 
 
@@ -706,15 +671,23 @@ class BoundDialogue(StrictModel):
 
 
 class BoundEvent(StrictModel):
-    """2026-08-19 用于系统绑定事件（含服务端派生的锚点字符范围、文本哈希和证据）"""
+    """2026-08-22事件树节点（服务端派生角色、id 与章级证据）
 
+    节点由 create_event/update_event 服务端生成：node_id 即最终落库 event_id，
+    因果边仅允许 root 携带跨章前驱（cause_tree_id 的根节点），环构造性不可能。
+    """
+
+    node_id: str = Field(min_length=1, description="服务端派生的节点 id（=落库 event_id）")
+    tree_id: str = Field(min_length=1)
+    parent_node_id: str | None = Field(default=None, description="root 为 None")
+    cause_role: EventCauseRole
     description: str = Field(min_length=1)
     participants: list[EventParticipantInput] = Field(default_factory=list)
-    anchor_paragraph_ids: list[int] = Field(min_length=1)
+    is_foreshadow_setup: bool = False
+    # 仅跨章树的根节点携带 [cause_tree_id 根节点 id]，其余恒为空
     causal_event_refs: list[str] = Field(default_factory=list)
-    tree_id: str = Field(min_length=1)
-    cause_role: EventCauseRole
-    # 服务端派生：
+    # 服务端派生章级证据（整 chunk 范围，与原事件证据同偏移空间）：
+    anchor_paragraph_ids: list[int] = Field(min_length=1)
     char_start: int = Field(ge=0)
     char_end: int = Field(gt=0)
     text_hash: str = Field(min_length=1)
@@ -729,11 +702,11 @@ class BoundRelation(RelationInput):
 
 
 class BoundForeshadowing(StrictModel):
-    """2026-08-18 用于系统绑定伏笔（含 setup 事件序号绑定，标记已校验）"""
+    """2026-08-22系统绑定伏笔（setup 直接指向事件树节点 id）"""
 
     description: str = Field(min_length=1)
-    confidence: Confidence
-    setup_event_index: int = Field(gt=0)
+    confidence: Confidence = Field(default="medium")
+    setup_node_id: str = Field(min_length=1, description="埋设事件树节点 id（=落库 setup_event_id）")
 
 
 class BoundChunkAnnotation(StrictModel):
@@ -862,10 +835,7 @@ class ResolvedCase(StrictModel):
                     self.description,
                     label="resolve.description",
                 )
-            if all(
-                value is None
-                for value in (self.speaker, self.tone, self.description, self.is_inner_monologue)
-            ):
+            if all(value is None for value in (self.speaker, self.tone, self.description, self.is_inner_monologue)):
                 raise ValueError("dialogue 动作必须至少提供 speaker/tone/description/is_inner_monologue 之一")
             return self
         if self.action == "fact":
@@ -926,9 +896,7 @@ class ResolvedCase(StrictModel):
             ):
                 value = getattr(self, field_name)
                 if value is not None and value not in valid_values:
-                    raise ValueError(
-                        f"resolve.{field_name} 枚举漂移: {value!r}，合法值: {sorted(valid_values)}"
-                    )
+                    raise ValueError(f"resolve.{field_name} 枚举漂移: {value!r}，合法值: {sorted(valid_values)}")
             return self
         if self.action == "close":
             return self

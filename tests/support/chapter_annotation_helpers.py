@@ -6,6 +6,7 @@ import hashlib
 import uuid
 from dataclasses import replace
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -70,9 +71,7 @@ def create_run_with_chunks(
         raise ValueError("chapter_ids 必须与 texts 等长")
     offset = 0
     chunks: list[ChunkerChunk] = []
-    for chunk_index, (chapter_id, text_value) in enumerate(
-        zip(resolved_chapter_ids, texts, strict=True)
-    ):
+    for chunk_index, (chapter_id, text_value) in enumerate(zip(resolved_chapter_ids, texts, strict=True)):
         chunks.append(
             ChunkerChunk(
                 index=chunk_index,
@@ -92,10 +91,7 @@ def create_run_with_chunks(
     # token_count 用简单切分填充
     from src.storage.repositories import ParagraphRepository
 
-    spans = [
-        replace(span, token_count=max(1, len(span.text) // 2))
-        for span in split_chunk_paragraphs(chunks)
-    ]
+    spans = [replace(span, token_count=max(1, len(span.text) // 2)) for span in split_chunk_paragraphs(chunks)]
     if spans:
         ParagraphRepository(session).insert_paragraphs(run_id, spans)
         session.commit()
@@ -256,10 +252,12 @@ def make_bound_event(
     anchor_paragraph_ids: list[int],
     chunk_paragraph_info: ChunkParagraphInfo,
     causal_event_refs: list[str] | None = None,
-    tree_id: str = "tree-main",
+    tree_id: str | None = None,
+    node_id: str | None = None,
+    parent_node_id: str | None = None,
     cause_role: str = "root",
 ) -> BoundEvent:
-    """2026-08-19 用于构造测试用 BoundEvent（契约 v3：含树结构字段）"""
+    """2026-08-22 用于构造测试用 BoundEvent（服务端 uuid 派生 id）"""
     char_start, char_end = chunk_paragraph_info.char_span_for(anchor_paragraph_ids)
     anchor_text = chunk_paragraph_info.text_for(anchor_paragraph_ids)
     text_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
@@ -271,16 +269,16 @@ def make_bound_event(
             text_hash=text_hash,
         )
     ]
+    resolved_tree_id = tree_id or f"tree-{uuid4()}"
     return BoundEvent(
+        node_id=node_id or str(uuid4()),
+        tree_id=resolved_tree_id,
+        parent_node_id=parent_node_id,
+        cause_role=cause_role,
         description=description,
-        participants=[
-            EventParticipantInput(entity=p["entity"], role=p["role"])
-            for p in (participants or [])
-        ],
+        participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in (participants or [])],
         anchor_paragraph_ids=anchor_paragraph_ids,
         causal_event_refs=causal_event_refs or [],
-        tree_id=tree_id,
-        cause_role=cause_role,
         char_start=char_start,
         char_end=char_end,
         text_hash=text_hash,
@@ -311,12 +309,12 @@ def persist_chapter_annotation(
     运行时 chunk id 即章真实 chapter_id（payload 内 chunk_id == chapter_id）。
 
     2026-08-19：events 每项含 description/participants/anchor_paragraph_ids/
-    causal_event_refs(全局 event_id)/tree_id/cause_role（缺省 tree-main/root）；
-    foreshadowings 每项含 description/confidence/setup_event_index。
+    causal_event_refs(全局 event_id)/tree_id/cause_role（缺省 tree-main/root）。
+    2026-08-22事件 id 由 uuid4 服务端派生，伏笔 setup_node_id
+    直接指向本章事件节点（setup_event_index 为 1 基序号映射）。
     """
     chapter_row = session.execute(
-        select(Chapter)
-        .where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
+        select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
     ).scalar_one_or_none()
     if chapter_row is None or chapter_row.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
@@ -326,19 +324,10 @@ def persist_chapter_annotation(
         for candidate in extract_dialogue_candidates(chunk_id, chunk_text):
             candidate_by_content[(chunk_id, candidate.content)] = candidate
 
-    directories: dict[int, dict[str, list[BoundEntity]]] = {
-        chunk_id: {"entities": []}
-        for chunk_id in chunk_text_by_id
-    }
-    observations_by_chunk: dict[int, list[BoundCharacterObservation]] = {
-        chunk_id: [] for chunk_id in chunk_text_by_id
-    }
-    dialogues_by_chunk: dict[int, list[BoundDialogue]] = {
-        chunk_id: [] for chunk_id in chunk_text_by_id
-    }
-    relations_by_chunk: dict[int, list[BoundRelation]] = {
-        chunk_id: [] for chunk_id in chunk_text_by_id
-    }
+    directories: dict[int, dict[str, list[BoundEntity]]] = {chunk_id: {"entities": []} for chunk_id in chunk_text_by_id}
+    observations_by_chunk: dict[int, list[BoundCharacterObservation]] = {chunk_id: [] for chunk_id in chunk_text_by_id}
+    dialogues_by_chunk: dict[int, list[BoundDialogue]] = {chunk_id: [] for chunk_id in chunk_text_by_id}
+    relations_by_chunk: dict[int, list[BoundRelation]] = {chunk_id: [] for chunk_id in chunk_text_by_id}
 
     for fact in characters or []:
         chunk_id = int(fact["_chunk_id"]) if "_chunk_id" in fact else int(fact.get("chunk_id", -1))
@@ -387,9 +376,7 @@ def persist_chapter_annotation(
         content = fact["candidate_content"]
         candidate = candidate_by_content.get((chunk_id, content))
         if candidate is None:
-            raise ValueError(
-                f"测试对话未出现在系统候选原文中: chunk_id={chunk_id} content={content!r}"
-            )
+            raise ValueError(f"测试对话未出现在系统候选原文中: chunk_id={chunk_id} content={content!r}")
         speaker = fact["speaker"]
         if speaker is not None:
             _register_entity(
@@ -413,11 +400,7 @@ def persist_chapter_annotation(
     for (chunk_id, entity_name), attributes in (entity_attributes or {}).items():
         if chunk_id not in chunk_text_by_id:
             raise ValueError(f"测试实体属性引用了非本章 chunk: {chunk_id}")
-        registered = [
-            entity
-            for entity in directories[chunk_id]["entities"]
-            if entity.name == entity_name
-        ]
+        registered = [entity for entity in directories[chunk_id]["entities"] if entity.name == entity_name]
         if registered:
             registered[0].attributes = dict(attributes)
         else:
@@ -445,10 +428,7 @@ def persist_chapter_annotation(
         if paragraph_rows:
             paragraph_info = ChunkParagraphInfo(
                 paragraph_ids=[int(row.paragraph_id) for row in paragraph_rows],
-                char_spans=[
-                    (int(row.local_start_char), int(row.local_end_char))
-                    for row in paragraph_rows
-                ],
+                char_spans=[(int(row.local_start_char), int(row.local_end_char)) for row in paragraph_rows],
                 texts=[str(row.text) for row in paragraph_rows],
             )
         else:
@@ -460,10 +440,7 @@ def persist_chapter_annotation(
         # 构建事件列表
         bound_events: list[BoundEvent] = []
         for event_spec in events or []:
-            event_participants = [
-                {"entity": p, "role": "主体"}
-                for p in event_spec.get("participants", [])
-            ]
+            event_participants = [{"entity": p, "role": "主体"} for p in event_spec.get("participants", [])]
             # 注册事件参与者实体
             for p in event_spec.get("participants", []):
                 _register_entity(
@@ -475,23 +452,23 @@ def persist_chapter_annotation(
                 make_bound_event(
                     description=event_spec["description"],
                     participants=event_participants,
-                    anchor_paragraph_ids=event_spec.get(
-                        "anchor_paragraph_ids", [0]
-                    ),
+                    anchor_paragraph_ids=event_spec.get("anchor_paragraph_ids", [0]),
                     chunk_paragraph_info=paragraph_info,
                     causal_event_refs=event_spec.get("causal_event_refs"),
-                    tree_id=event_spec.get("tree_id", "tree-main"),
+                    tree_id=event_spec.get("tree_id"),
+                    node_id=event_spec.get("node_id"),
+                    parent_node_id=event_spec.get("parent_node_id"),
                     cause_role=event_spec.get("cause_role", "root"),
                 )
             )
-        # 构建伏笔列表（setup_event_index 引用本章事件序号）
+        # 构建伏笔列表（setup_node_id 直接指向本章事件节点 id；setup_event_index 为 1 基序号）
         bound_foreshadowings: list[BoundForeshadowing] = []
         for fs_spec in foreshadowings or []:
             bound_foreshadowings.append(
                 BoundForeshadowing(
                     description=fs_spec["description"],
                     confidence=fs_spec.get("confidence", "high"),
-                    setup_event_index=fs_spec["setup_event_index"],
+                    setup_node_id=bound_events[int(fs_spec["setup_event_index"]) - 1].node_id,
                 )
             )
         chunks.append(

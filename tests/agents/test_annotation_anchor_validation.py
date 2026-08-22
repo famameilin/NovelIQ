@@ -59,12 +59,14 @@ def _hash(text: str) -> str:
 def _event(*, char_start: int, char_end: int, text_hash: str) -> BoundEvent:
     """2026-08-18 用于构造指定锚点字段的事件（evidence 独立持有合法区间）"""
     return BoundEvent(
+        node_id="evt-anchor-root",
+        tree_id="tree-a",
+        parent_node_id=None,
+        cause_role="root",
         description="顾霜拔剑",
         participants=[],
         anchor_paragraph_ids=[0],
         causal_event_refs=[],
-        tree_id="tree-a",
-        cause_role="root",
         char_start=char_start,
         char_end=char_end,
         text_hash=text_hash,

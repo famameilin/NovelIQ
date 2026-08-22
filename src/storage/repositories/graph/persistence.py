@@ -79,16 +79,9 @@ def _relation_id(
     return str(uuid5(NAMESPACE_URL, f"noveliq:relation:{run_id}:{left_id}:{right_id}:{relation_type}:{directionality}"))
 
 
-def _event_id(run_id: str, chapter_id: int, event_ordinal: int) -> str:
-    """2026-08-19 用于按运行、章节和序号生成稳定事件 ID"""
-    return str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:{chapter_id}:{event_ordinal}"))
-
-
 def _event_edge_id(run_id: str, source_event_id: str, target_event_id: str) -> str:
     """2026-08-19 用于按运行和事件端点生成稳定因果边 ID"""
     return str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}"))
-
-
 
 
 def _chapter_order_map(session: Session, run_id: str) -> dict[int, int]:
@@ -99,8 +92,6 @@ def _chapter_order_map(session: Session, run_id: str) -> dict[int, int]:
         .order_by(Chapter.sequence, Chapter.chapter_id)
     ).scalars()
     return {int(chapter.chapter_id): index for index, chapter in enumerate(chapters, start=1)}
-
-
 
 
 def _chapter_text_evidence(session: Session, *, run_id: str, chapter_id: int) -> list[dict[str, Any]]:
@@ -250,14 +241,22 @@ def _new_fact(
     content: dict[str, Any],
     evidence: list[dict[str, Any]],
     event_id: str | None = None,
+    fact_id: str | None = None,
+    payload_path: str | None = None,
 ) -> GraphFact:
     """2026-08-19 用于构造单个章节事实"""
     if not evidence:
         raise ValueError("事实必须携带非空 Evidence")
+    resolved_fact_id = fact_id
+    if resolved_fact_id is None:
+        resolved_fact_id = stable_annotation_fact_id(annotation.annotation_id, chapter_id, domain, ordinal)
+    resolved_payload_path = payload_path
+    if resolved_payload_path is None:
+        resolved_payload_path = f"chunks/{chapter_id}/{domain}/{ordinal}"
     return GraphFact(
         run_id=annotation.run_id,
         chapter_id=chapter_id,
-        fact_id=stable_annotation_fact_id(annotation.annotation_id, chapter_id, domain, ordinal),
+        fact_id=resolved_fact_id,
         fact_type=domain,
         subject_entity_id=int(subject.entity_id) if subject is not None else None,
         predicate=predicate,
@@ -272,7 +271,7 @@ def _new_fact(
         effective_chapter_id=chapter_id,
         source_kind="annotation",
         annotation_id=annotation.annotation_id,
-        payload_path=f"chunks/{chapter_id}/{domain}/{ordinal}",
+        payload_path=resolved_payload_path,
         event_id=event_id,
         evidence=evidence,
     )
@@ -344,11 +343,11 @@ def _persist_state_rows(
                 for key, value in dynamic_attributes.items()
             )
     for entity_id, changes in updates_by_entity.items():
-        entity = entity_by_id.get(entity_id)
-        if entity is None:
+        state_entity = entity_by_id.get(entity_id)
+        if state_entity is None:
             continue
         state = {
-            **dict(entity.attributes or {}),
+            **dict(state_entity.attributes or {}),
             **_previous_state(
                 session, run_id=annotation.run_id, entity_id=entity_id, chapter_order=boundary.chapter_order
             ),
@@ -514,19 +513,14 @@ def _persist_event_nodes(
     chunk: Any,
     entities: dict[str, GraphEntity],
 ) -> dict[int, str]:
-    """2026-08-19 用于写入事件节点及当前章节因果边"""
-    _validate_dag_acyclic(
-        [
-            {
-                "event_id": _event_id(annotation.run_id, chunk.chunk_id, index),
-                "causal_event_refs": list(event.causal_event_refs),
-            }
-            for index, event in enumerate(chunk.events, start=1)
-        ]
-    )
+    """2026-08-19 用于写入事件节点及当前章节因果边
+
+    2026-08-22event_id 直接取服务端生成的 node_id；因果边只存在于
+    跨章树根（cause_tree_id），由 create_event 结构性保证无环，DAG 校验删除。
+    """
     event_ids: dict[int, str] = {}
     for index, event in enumerate(chunk.events, start=1):
-        event_id = _event_id(annotation.run_id, chunk.chunk_id, index)
+        event_id = event.node_id
         event_ids[index] = event_id
         participants = [
             {"role": participant.role, "entity": _entity_descriptor(_entity(entities, participant.entity))}
@@ -582,32 +576,6 @@ def _persist_event_nodes(
                     )
                 )
     return event_ids
-
-
-def _validate_dag_acyclic(event_metas: list[dict[str, Any]]) -> None:
-    """2026-08-19 用于校验事件因果引用不形成有向环"""
-    graph = {
-        str(item["event_id"]): [str(ref) for ref in item.get("causal_event_refs", [])]
-        for item in event_metas
-    }
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(event_id: str) -> None:
-        """2026-08-19 用于深度优先检查单个事件的因果前驱"""
-        if event_id in visiting:
-            raise ValueError("DAG 无环校验失败: 事件因果引用形成环")
-        if event_id in visited:
-            return
-        visiting.add(event_id)
-        for source_id in graph.get(event_id, []):
-            if source_id in graph:
-                visit(source_id)
-        visiting.remove(event_id)
-        visited.add(event_id)
-
-    for event_id in graph:
-        visit(event_id)
 
 
 def _persist_annotation_facts(
@@ -744,9 +712,8 @@ def _persist_annotation_facts(
                 draft, fact=fact, change_kind=change_kind, relation_type=str(relation_item.relation_type)
             )
         for ordinal, foreshadowing in enumerate(chunk.foreshadowings, start=1):
-            setup_event_id = event_ids.get(foreshadowing.setup_event_index)
-            if setup_event_id is None:
-                raise ValueError("伏笔 setup_event_index 超出当前章节事件范围")
+            # 2026-08-22setup_event_id 直接取服务端生成的 setup_node_id
+            setup_event_id = foreshadowing.setup_node_id
             facts.append(
                 _new_fact(
                     annotation=annotation,
@@ -768,9 +735,10 @@ def _persist_annotation_facts(
             entity = next((item for item in entities.values() if int(item.entity_id) == entity_id), None)
             if entity is None:
                 continue
+            chapter_for_fact = int(change.get("chapter_id", annotation.chapter_id))
             fact = _new_fact(
                 annotation=annotation,
-                chapter_id=int(change.get("chapter_id", annotation.chapter_id)),
+                chapter_id=chapter_for_fact,
                 domain="entity_attribute",
                 ordinal=ordinal,
                 subject=entity,
@@ -779,9 +747,14 @@ def _persist_annotation_facts(
                 value=change.get("after"),
                 participants=[],
                 content={"kind": "entity_attribute", **change},
-                evidence=_chapter_text_evidence(
-                    session, run_id=annotation.run_id, chapter_id=int(change.get("chapter_id", annotation.chapter_id))
+                evidence=_chapter_text_evidence(session, run_id=annotation.run_id, chapter_id=chapter_for_fact),
+                fact_id=str(
+                    uuid5(
+                        UUID(annotation.annotation_id),
+                        f"{chapter_for_fact}:entity_attribute:{entity_id}:{ordinal}",
+                    )
                 ),
+                payload_path=(f"chunks/{chapter_for_fact}/entity_attribute/{entity_id}/{ordinal}"),
             )
             change["fact_id"] = fact.fact_id
             facts.append(fact)
@@ -1079,8 +1052,8 @@ def persist_completion_graph(
         raise ValueError("章节 payload chunk 顺序与数据库不一致")
 
     authorized = (
-        (set(authorized_text_paragraph_ids) if authorized_text_paragraph_ids is not None else set()) | paragraph_ids
-    )
+        set(authorized_text_paragraph_ids) if authorized_text_paragraph_ids is not None else set()
+    ) | paragraph_ids
     for chunk in payload.chunks:
         for event in chunk.events:
             if not event.evidence:

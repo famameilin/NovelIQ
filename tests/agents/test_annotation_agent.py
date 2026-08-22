@@ -158,29 +158,21 @@ def _dialogues_call(call_id: str = "call-dialogues") -> dict:
 
 
 def _events_call(call_id: str = "call-events") -> dict:
-    """2026-08-19 用于构造合法 write_events 调用（契约 v3：含树结构字段）"""
+    """2026-08-22 用于构造合法 create_event 调用（服务端派发 id）"""
     return _write_call(
-        "write_events",
+        "create_event",
         {
-            "items": [
-                {
-                    "description": "顾霜喝止众人",
-                    "participants": [{"entity": "顾霜", "role": "主体"}],
-                    "anchor_paragraph_ids": [0],
-                    "tree_id": "drink-order",
-                    "cause_role": "root",
-                }
-            ]
+            "description": "顾霜喝止众人",
+            "participants": [{"entity": "顾霜", "role": "主体"}],
         },
         call_id=call_id,
     )
 
 
 def _empty_domain_calls() -> list[dict]:
-    """2026-08-07 用于构造剩余两个空领域的写入调用"""
+    """2026-08-07 用于构造剩余空领域的写入调用"""
     return [
         _write_call("write_relations", {"items": []}, call_id="call-relations"),
-        _write_call("write_foreshadowings", {"items": []}, call_id="call-foreshadowings"),
     ]
 
 
@@ -293,11 +285,7 @@ def _agent_result() -> AgentRunResult:
 
 def _tool_receipts(captured_round: list) -> list[str]:
     """2026-08-10 用于提取某轮模型请求中的全部 ToolMessage 内容"""
-    return [
-        str(message.content)
-        for message in captured_round
-        if getattr(message, "type", "") == "tool"
-    ]
+    return [str(message.content) for message in captured_round if getattr(message, "type", "") == "tool"]
 
 
 @pytest.mark.asyncio
@@ -351,11 +339,6 @@ async def test_six_success_one_failure_keeps_six_receipts() -> None:
                     _events_call(),
                     _write_call("write_relations", {"items": []}, call_id="call-relations"),
                     invalid_metrics,
-                    _write_call(
-                        "write_foreshadowings",
-                        {"items": []},
-                        call_id="call-foreshadowings",
-                    ),
                 ]
             ),
             _tool_message(
@@ -372,7 +355,7 @@ async def test_six_success_one_failure_keeps_six_receipts() -> None:
     receipts = _tool_receipts(llm.captured_messages[1])
     accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
-    assert len(accepted) == 6
+    assert len(accepted) == 5
     assert len(rejected) == 1
     assert '"tool": "write_metrics"' in rejected[0]
 
