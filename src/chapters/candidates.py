@@ -148,8 +148,7 @@ def _resolve_same_line_break(
         return line_end, display_title
 
     needs_fix = len(content) > config.max_reasonable_title_length or (
-        len(content) > config.title_body_min_chars
-        and any(ch in content for ch in SENTENCE_END_CHARS)
+        len(content) > config.title_body_min_chars and any(ch in content for ch in SENTENCE_END_CHARS)
     )
     if not needs_fix:
         return line_end, display_title

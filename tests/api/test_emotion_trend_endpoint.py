@@ -153,9 +153,7 @@ def test_emotion_trend_range_rebuckets_within_selection(api_client: TestClient, 
         assert window["paragraph_total"] == 5
 
 
-def test_emotion_trend_deep_zoom_returns_partial_window(
-    api_client: TestClient, db_session
-) -> None:
+def test_emotion_trend_deep_zoom_returns_partial_window(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _insert_100_paragraph_run(db_session)
 
     # 段 10..12 的中点分别为 52.5 / 57.5 / 62.5（/500）
@@ -204,6 +202,8 @@ def test_emotion_trend_rejects_invalid_range(api_client: TestClient, db_session)
         params={"task_id": run_id[:8], "range": "0.6,0.4"},
     )
     assert inverted.status_code == 422
+
+
 def test_emotion_trend_rejects_non_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["第一段。"], status="running")
 
@@ -225,12 +225,33 @@ def test_emotion_trend_skips_paragraphs_without_metrics(api_client: TestClient, 
         db_session,
         run_id,
         [
-            make_span(paragraph_id=0, chapter_id=1, paragraph_index=0, text="aaaaa",
-                      local_start=0, chunk_offset=0, token_count=2),
-            make_span(paragraph_id=1, chapter_id=1, paragraph_index=1, text="bbbbbb",
-                      local_start=5, chunk_offset=0, token_count=3),
-            make_span(paragraph_id=2, chapter_id=2, paragraph_index=0, text="cccc",
-                      local_start=0, chunk_offset=12, token_count=4),
+            make_span(
+                paragraph_id=0,
+                chapter_id=1,
+                paragraph_index=0,
+                text="aaaaa",
+                local_start=0,
+                chunk_offset=0,
+                token_count=2,
+            ),
+            make_span(
+                paragraph_id=1,
+                chapter_id=1,
+                paragraph_index=1,
+                text="bbbbbb",
+                local_start=5,
+                chunk_offset=0,
+                token_count=3,
+            ),
+            make_span(
+                paragraph_id=2,
+                chapter_id=2,
+                paragraph_index=0,
+                text="cccc",
+                local_start=0,
+                chunk_offset=12,
+                token_count=4,
+            ),
         ],
     )
     # 仅段落 0、2 有指标行（段落 1 应被跳过）

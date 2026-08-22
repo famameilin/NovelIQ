@@ -33,7 +33,6 @@ _DOMAIN_NAMES = (
     "dialogues",
     "events",
     "relations",
-    "foreshadowings",
 )
 _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
 
@@ -94,7 +93,7 @@ def _build_agent_node(
                 on_turn_complete=on_turn_complete,
                 total_attempts=retries,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if observer is not None:
                 observer.record_failed_turn(
                     context_summary=context_summary,
@@ -191,11 +190,7 @@ def _build_tool_batch_node(
                         call_index=call_index,
                         tool_name=name,
                         request_args=dict(call.get("args") or {}),
-                        raw_args=(
-                            str(call.get("raw_args"))
-                            if call.get("raw_args") is not None
-                            else None
-                        ),
+                        raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
                         response=json.loads(result),
                         receipt=json.loads(result),
                         status="error",
@@ -213,9 +208,7 @@ def _build_tool_batch_node(
                 )
                 continue
             ledger_snapshot = ledger.snapshot()
-            graph_snapshot = (
-                ledger.graph.snapshot() if ledger.graph is not None else None
-            )
+            graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None else None
             started_ns = time.perf_counter_ns()
             try:
                 if stream is not None:
@@ -229,7 +222,7 @@ def _build_tool_batch_node(
                 if observer is not None:
                     observer.close_turn()
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 ledger.restore(ledger_snapshot)
                 if graph_snapshot is not None and ledger.graph is not None:
                     ledger.graph.restore(graph_snapshot)
@@ -238,19 +231,13 @@ def _build_tool_batch_node(
                 status = "error"
                 error = str(exc)
                 receipt = json.loads(result)
-            tool_duration_ms = max(
-                0, round((time.perf_counter_ns() - started_ns) / 1_000_000)
-            )
+            tool_duration_ms = max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000))
             if observer is not None:
                 observer.record_tool_call(
                     call_index=call_index,
                     tool_name=name,
                     request_args=dict(call.get("args") or {}),
-                    raw_args=(
-                        str(call.get("raw_args"))
-                        if call.get("raw_args") is not None
-                        else None
-                    ),
+                    raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
                     response=receipt,
                     receipt=receipt,
                     status=status,
@@ -343,12 +330,7 @@ def _build_protocol_error_node(
                 ],
                 "protocol_errors": attempts + 1,
             }
-        return {
-            "error": (
-                "annotation 工具协议错误：连续无工具调用达到上限 "
-                f"{max_retries + 1} 次，必须调用工具"
-            )
-        }
+        return {"error": (f"annotation 工具协议错误：连续无工具调用达到上限 {max_retries + 1} 次，必须调用工具")}
 
     return protocol_error
 

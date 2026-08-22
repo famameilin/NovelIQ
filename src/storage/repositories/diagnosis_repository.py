@@ -30,10 +30,7 @@ def _topic_words_from_model_dir(model_dir: Path) -> dict[int, tuple[list[str], s
     result: dict[int, tuple[list[str], str | None]] = {}
     labels = getattr(topic_model, "labels", None) or {}
     for topic_id in range(topic_model.num_topics):
-        words = [
-            word.word
-            for word in topic_model.get_topic_words(topic_id, top_n=10)
-        ]
+        words = [word.word for word in topic_model.get_topic_words(topic_id, top_n=10)]
         label = labels.get(topic_id)
         result[topic_id] = (words, label if isinstance(label, str) else None)
     return result
@@ -89,10 +86,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .order_by(tension_expr.desc())
             .limit(row_limit)
         )
-        return [
-            (int(row.paragraph_id), str(row.text), float(row.tension))
-            for row in self.session.execute(stmt)
-        ]
+        return [(int(row.paragraph_id), str(row.text), float(row.tension)) for row in self.session.execute(stmt)]
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
         """2026-08-07 用于从章节关系版本逐次变化读取诊断素材"""
@@ -144,10 +138,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """2026-08-07 用于读取章节标注中的转折时刻"""
-        return [
-            (chapter_id, text)
-            for chapter_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)
-        ]
+        return [(chapter_id, text) for chapter_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)]
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
         """2026-08-11 用于读取按累计权重排序的主题词（含主题词与标签，模型缺失时仅 id/weight）。
@@ -157,9 +148,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         与 /topics 端点及 export 的聚合口径一致。
         """
         row_limit = top_n if top_n is not None else 10
-        weighted_sum = func.sum(
-            ParagraphTopic.topic_weight * ParagraphTopic.inference_token_count
-        )
+        weighted_sum = func.sum(ParagraphTopic.topic_weight * ParagraphTopic.inference_token_count)
         stmt = (
             select(
                 ParagraphTopic.topic_id,
@@ -192,10 +181,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             view = authority.build_export_view(run_id)
         except ValueError:
             graph_repo = GraphRepository(self.session)
-            return sorted(
-                entity.name
-                for entity in graph_repo.fetch_latest_entities(run_id, entity_type="character")
-            )
+            return sorted(entity.name for entity in graph_repo.fetch_latest_entities(run_id, entity_type="character"))
         rows: list[str] = []
         for entity in view.canonical_entities:
             if entity.entity_type != "character":
@@ -218,8 +204,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             )
             .join(
                 Chapter,
-                (Chapter.run_id == StageSummary.run_id)
-                & (Chapter.chapter_id == StageSummary.start_chapter_id),
+                (Chapter.run_id == StageSummary.run_id) & (Chapter.chapter_id == StageSummary.start_chapter_id),
             )
             .where(StageSummary.run_id == run_id)
             .order_by(Chapter.sequence, StageSummary.start_chapter_id)

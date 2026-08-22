@@ -156,10 +156,14 @@ class TestNovelUpload:
         novel_id = upload_response.json()["novel_id"]
 
         with get_session_factory()() as session:
-            novel_row = session.execute(
-                text("SELECT file_path FROM novels WHERE novel_id = :novel_id"),
-                {"novel_id": novel_id},
-            ).mappings().one()
+            novel_row = (
+                session.execute(
+                    text("SELECT file_path FROM novels WHERE novel_id = :novel_id"),
+                    {"novel_id": novel_id},
+                )
+                .mappings()
+                .one()
+            )
         novel_file_path = Path(str(novel_row["file_path"]))
 
         task_ids = [
@@ -180,10 +184,7 @@ class TestNovelUpload:
                 {"novel_id": novel_id},
             ).scalar_one()
             chapter_count = session.execute(
-                text(
-                    "SELECT COUNT(*) FROM chapters "
-                    "WHERE run_id IN (:run_id_1, :run_id_2) AND text IS NOT NULL"
-                ),
+                text("SELECT COUNT(*) FROM chapters WHERE run_id IN (:run_id_1, :run_id_2) AND text IS NOT NULL"),
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
             annotation_count = session.execute(

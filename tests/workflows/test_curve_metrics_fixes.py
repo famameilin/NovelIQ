@@ -37,9 +37,7 @@ def _insert_paragraph_curves(
 
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id, source_path="test", title="Global Stats"
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Global Stats")
 
     texts = ["甲。", "乙。", "丙。", "丁。"]
     chunks: list[Chunk] = []
@@ -49,10 +47,7 @@ def _insert_paragraph_curves(
         offset += len(text)
     ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
 
-    spans = [
-        replace(span, token_count=2)
-        for span in split_chunk_paragraphs(chunks, max_chars=1500)
-    ]
+    spans = [replace(span, token_count=2) for span in split_chunk_paragraphs(chunks, max_chars=1500)]
     assert len(spans) == 4
     paragraph_repo = ParagraphRepository(db_session)
     paragraph_repo.insert_paragraphs(run_id, spans)
@@ -150,9 +145,7 @@ class TestGlobalStatsExtremes:
         """无段落曲线数据时输出张力分布统计，也不伪造极值定位"""
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
-        run_id = RunRepository(db_session).create_run(
-            novel_id=novel_id, source_path="test", title="Global Stats"
-        )
+        run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Global Stats")
 
         stats = dict(compute_global_stats(db_session, run_id))
 

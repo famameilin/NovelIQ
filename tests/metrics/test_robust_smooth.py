@@ -102,12 +102,8 @@ class TestRobustLocalRegression:
         outlier_index = 25
         y[outlier_index] = 50.0
 
-        robust_result = robust_local_regression(
-            x, y, bandwidth=0.2, min_points=7, robust_iters=3
-        )
-        non_robust_result = robust_local_regression(
-            x, y, bandwidth=0.2, min_points=7, robust_iters=0
-        )
+        robust_result = robust_local_regression(x, y, bandwidth=0.2, min_points=7, robust_iters=3)
+        non_robust_result = robust_local_regression(x, y, bandwidth=0.2, min_points=7, robust_iters=0)
         # 离群点处平滑值回到真实趋势（2*0.5+1=2.0）附近，而非被拉到 50；
         # 且显著优于不做稳健化的拟合
         assert robust_result[outlier_index] == pytest.approx(2.0, abs=3.0)

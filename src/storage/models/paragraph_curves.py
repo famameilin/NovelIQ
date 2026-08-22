@@ -56,9 +56,7 @@ class ParagraphCurve(Base):
     surface_tension: Mapped[float | None] = mapped_column(Float, nullable=True)
     smoothed_surface_tension: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
         ForeignKeyConstraint(

@@ -215,8 +215,6 @@ def apply_model_environment(
             task_settings.api_key = model_environment.api_key
 
     if embedding_environment is not None:
-        settings.paragraph_embedding.base_url = _normalize_model_base_url_for_docker(
-            embedding_environment.base_url
-        )
+        settings.paragraph_embedding.base_url = _normalize_model_base_url_for_docker(embedding_environment.base_url)
         settings.paragraph_embedding.model = embedding_environment.model
         settings.paragraph_embedding.api_key = embedding_environment.api_key

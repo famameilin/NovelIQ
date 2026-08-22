@@ -20,7 +20,7 @@ from src.lexicons.registry import LexiconRegistry
 from src.metrics.emotion_metrics import lexical_sentiment_density
 from src.metrics.lexicon_metrics import count_weighted_hits, get_emotion_spans
 from src.metrics.negation import is_flipped, load_negation_spec
-from src.metrics.text_utils import tokenize_words
+from src.utils.text_utils import tokenize_words
 
 
 def _lexicon_set(registry: LexiconRegistry) -> dict[str, dict[str, int]]:

@@ -14,9 +14,7 @@ def test_system_prompt_contains_contract_rules() -> None:
 
 
 def test_patch_merge_semantics() -> None:
-    patch = CloudAnalysisPatch.model_validate(
-        {"style_labels": ["硬核"], "main_characters": ["石轩"]}
-    )
+    patch = CloudAnalysisPatch.model_validate({"style_labels": ["硬核"], "main_characters": ["石轩"]})
     dumped = patch.model_dump(exclude_unset=True)
     assert dumped == {"style_labels": ["硬核"], "main_characters": ["石轩"]}
 

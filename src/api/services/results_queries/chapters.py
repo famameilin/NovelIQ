@@ -29,13 +29,7 @@ def _fetch_chapter_annotations(
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: chunk results 读取层需要过滤未解析代词引用，避免“我”等局部引用泄漏为全局角色。
-
-    获取分块标注数据
-    """
+    """组装章节标注并过滤未解析的局部角色引用"""
     annotations_raw = annotation_repo.fetch_chapter_annotations_full(run_id)
     characters_raw = annotation_repo.fetch_chapter_characters_full(run_id)
     dialogues_raw = annotation_repo.fetch_chapter_dialogues_full(run_id)
@@ -175,20 +169,12 @@ def _fetch_chapter_annotations(
         result.append(
             ChapterAnnotation(
                 chapter_id=chapter_id,
-                emotional_valence=(
-                    str(annotation_row.emotional_valence) if annotation_row.emotional_valence else None
-                ),
+                emotional_valence=(str(annotation_row.emotional_valence) if annotation_row.emotional_valence else None),
                 event_type=str(annotation_row.event_type) if annotation_row.event_type else None,
-                pivot_moment=(
-                    bool(annotation_row.pivot_moment) if annotation_row.pivot_moment is not None else None
-                ),
-                cliffhanger=(
-                    bool(annotation_row.cliffhanger) if annotation_row.cliffhanger is not None else None
-                ),
+                pivot_moment=(bool(annotation_row.pivot_moment) if annotation_row.pivot_moment is not None else None),
+                cliffhanger=(bool(annotation_row.cliffhanger) if annotation_row.cliffhanger is not None else None),
                 has_foreshadowing=(
-                    bool(annotation_row.has_foreshadowing)
-                    if annotation_row.has_foreshadowing is not None
-                    else None
+                    bool(annotation_row.has_foreshadowing) if annotation_row.has_foreshadowing is not None else None
                 ),
                 is_strong_setup=(
                     bool(annotation_row.is_strong_setup)
@@ -198,16 +184,12 @@ def _fetch_chapter_annotations(
                 foreshadowing_type=(
                     str(annotation_row.foreshadowing_type) if annotation_row.foreshadowing_type else None
                 ),
-                setup_kind=(
-                    str(annotation_row.setup_kind) if getattr(annotation_row, "setup_kind", None) else None
-                ),
+                setup_kind=(str(annotation_row.setup_kind) if getattr(annotation_row, "setup_kind", None) else None),
                 foreshadowing_desc=(
                     str(annotation_row.foreshadowing_desc) if annotation_row.foreshadowing_desc else None
                 ),
                 setup_summary=(
-                    str(annotation_row.setup_summary)
-                    if getattr(annotation_row, "setup_summary", None)
-                    else None
+                    str(annotation_row.setup_summary) if getattr(annotation_row, "setup_summary", None) else None
                 ),
                 why_unresolved_now=(
                     str(annotation_row.why_unresolved_now)
@@ -225,9 +207,7 @@ def _fetch_chapter_annotations(
                     else None
                 ),
                 linked_setup_id=(
-                    str(annotation_row.linked_setup_id)
-                    if getattr(annotation_row, "linked_setup_id", None)
-                    else None
+                    str(annotation_row.linked_setup_id) if getattr(annotation_row, "linked_setup_id", None) else None
                 ),
                 characters=characters_by_chunk.get(chapter_id, []),
                 relations=relations_by_chunk.get(chapter_id, []),

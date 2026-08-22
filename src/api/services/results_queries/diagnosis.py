@@ -27,14 +27,7 @@ def _filter_character_list_against_arc_scores(
     values: list[str] | None,
     arc_scores: dict[str, float] | None,
 ) -> list[str] | None:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: 过滤 arc_scores 时先排除未解析代词，避免旧 diagnosis 把局部引用当成焦点角色。
-
-    说明: 结果读取层按 `arc_scores` 收口焦点人物、主要人物和核心角色，
-    避免诊断名单继续携带不属于当前角色合同的名称
-    """
+    """按有效角色弧线分数过滤全局角色名单"""
     if values is None:
         return None
     if not arc_scores:
@@ -44,11 +37,7 @@ def _filter_character_list_against_arc_scores(
 
 
 def _filter_global_arc_scores(arc_scores: dict[str, float] | None) -> dict[str, float] | None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: diagnosis 读取层的 arc_scores 是角色合同源头，必须先剔除“我”等未解析局部引用。
-    """
+    """创建时间: 2026-04-29 作用: 过滤未解析局部引用的角色弧线分数"""
     if not arc_scores:
         return None
     filtered = {name: score for name, score in arc_scores.items() if filter_global_character_names([name])}
@@ -77,12 +66,7 @@ def _normalize_controlled_label_list(
     *,
     allowed_values: tuple[str, ...],
 ) -> list[str] | None:
-    """
-    修改时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    修改原因: diagnosis 读取层必须和 CloudAnalysisSchema 的受控标签合同保持一致；
-              非法标签、超上限标签或全空白标签都应直接视为无效 diagnosis，而不是继续对外暴露。
-    """
+    """规范化受控标签，非法或超过上限时返回空值"""
     if values is None:
         return None
 
@@ -123,22 +107,16 @@ def _fetch_diagnosis(
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (
-        _normalize_name_list(focus_characters_raw)
-        if isinstance(focus_characters_raw, list)
-        else focus_characters_raw
+        _normalize_name_list(focus_characters_raw) if isinstance(focus_characters_raw, list) else focus_characters_raw
     )
 
     main_characters_raw = _parse_json_field(data.get("main_characters")) if data else None
     main_characters_normalized = (
-        _normalize_name_list(main_characters_raw)
-        if isinstance(main_characters_raw, list)
-        else main_characters_raw
+        _normalize_name_list(main_characters_raw) if isinstance(main_characters_raw, list) else main_characters_raw
     )
 
     core_cast_raw = _parse_json_field(data.get("core_cast")) if data else None
-    core_cast_normalized = (
-        _normalize_name_list(core_cast_raw) if isinstance(core_cast_raw, list) else core_cast_raw
-    )
+    core_cast_normalized = _normalize_name_list(core_cast_raw) if isinstance(core_cast_raw, list) else core_cast_raw
 
     arc_scores_raw = _parse_json_field(data.get("arc_scores")) if data else None
     arc_scores_normalized = _filter_global_arc_scores(_normalize_arc_scores(arc_scores_raw))

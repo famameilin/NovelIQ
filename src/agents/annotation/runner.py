@@ -68,23 +68,16 @@ def validate_bound_annotation(
     expected_ids = [chunk_id for chunk_id, _text in current_chunks]
     actual_ids = [chunk.chunk_id for chunk in annotation.chunks]
     if actual_ids != expected_ids:
-        raise ValueError(
-            "系统绑定 chunks 必须按原文顺序精确覆盖 current: "
-            f"expected={expected_ids} actual={actual_ids}"
-        )
+        raise ValueError(f"系统绑定 chunks 必须按原文顺序精确覆盖 current: expected={expected_ids} actual={actual_ids}")
     text_by_id = dict(current_chunks)
     for chunk in annotation.chunks:
         chunk_text = text_by_id[chunk.chunk_id]
         for dialogue in chunk.dialogues:
             if dialogue.end > len(chunk_text):
-                raise ValueError(
-                    f"系统对话位置超出原文: chunk_id={chunk.chunk_id}"
-                )
+                raise ValueError(f"系统对话位置超出原文: chunk_id={chunk.chunk_id}")
             actual = chunk_text[dialogue.start : dialogue.end]
             if actual != dialogue.content:
-                raise ValueError(
-                    f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}"
-                )
+                raise ValueError(f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}")
         for event in chunk.events:
             if event.char_start < 0 or event.char_end > len(chunk_text):
                 raise ValueError(
@@ -93,15 +86,11 @@ def validate_bound_annotation(
                     f"text_length={len(chunk_text)}"
                 )
             if event.char_end <= event.char_start:
-                raise ValueError(
-                    f"事件锚点 char_end 必须大于 char_start: chunk_id={chunk.chunk_id}"
-                )
+                raise ValueError(f"事件锚点 char_end 必须大于 char_start: chunk_id={chunk.chunk_id}")
             anchor_text = chunk_text[event.char_start : event.char_end]
             actual_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
             if actual_hash != event.text_hash:
-                raise ValueError(
-                    f"事件锚点文本哈希不一致: chunk_id={chunk.chunk_id}"
-                )
+                raise ValueError(f"事件锚点文本哈希不一致: chunk_id={chunk.chunk_id}")
 
 
 def _model_provider(llm: Any) -> str:
@@ -173,7 +162,7 @@ async def _run_single_attempt(
         allow_future_context=allow_future_context,
         graph=graph_state,
         paragraph_info=paragraph_info,
-        # 2026-08-19 契约 v3：供因果引用全局偏序校验使用
+        # 2026-08-19供因果引用全局偏序校验使用
         current_chapter_order=getattr(query_service, "current_chapter_order", None),
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
@@ -202,7 +191,6 @@ async def _run_single_attempt(
                 chunk_total=1,
                 chunk_text=first_chunk_text,
                 candidates=ledger.dialogue_candidates,
-                paragraph_info=paragraph_info,
             )
         ),
     ]
@@ -320,7 +308,7 @@ async def run_annotation_agent(
             sub_chunk_index=sub_chunk_index,
             paragraph_info=paragraph_info,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _close_read_session(read_session)
         if graph_state is not None:
             # 章节失败时恢复事实图历史快照，避免当章脏状态残留到后续章节

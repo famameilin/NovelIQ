@@ -45,18 +45,14 @@ class FactGraph:
     history_entity_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
     history_entity_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     history_relations: set[tuple[str, str, str]] = field(default_factory=set)
-    history_relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(
-        default_factory=dict
-    )
+    history_relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict)
     entity_types: dict[str, EntityType] = field(default_factory=dict, init=False)
     entity_names: dict[str, str] = field(default_factory=dict, init=False)
     entity_tags: dict[str, list[str]] = field(default_factory=dict, init=False)
     entity_attributes: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
     entity_state: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
     active_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
-    relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(
-        default_factory=dict, init=False
-    )
+    relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict, init=False)
     chapter_registered_entities: dict[str, EntityType] = field(default_factory=dict, init=False)
     chapter_added_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
 
@@ -64,13 +60,8 @@ class FactGraph:
         """2026-08-09 用于以历史快照初始化实时事实图状态"""
         self.entity_types = dict(self.history_entity_types)
         self.entity_names = dict(self.history_entity_names)
-        self.entity_tags = {
-            key: list(tags) for key, tags in self.history_entity_tags.items()
-        }
-        self.entity_attributes = {
-            key: dict(attributes)
-            for key, attributes in self.history_entity_attributes.items()
-        }
+        self.entity_tags = {key: list(tags) for key, tags in self.history_entity_tags.items()}
+        self.entity_attributes = {key: dict(attributes) for key, attributes in self.history_entity_attributes.items()}
         self.entity_state = {key: dict(state) for key, state in self.history_entity_state.items()}
         # 2026-08-12 历史关系按稳定键归一化加载，避免双向边端点顺序不一致导致匹配失败
         self.active_relations = {
@@ -78,8 +69,7 @@ class FactGraph:
             for (from_name, to_name, relation_type) in self.history_relations
         }
         self.relation_attributes = {
-            key: dict(attributes)
-            for key, attributes in self.history_relation_attributes.items()
+            key: dict(attributes) for key, attributes in self.history_relation_attributes.items()
         }
 
     @staticmethod
@@ -190,15 +180,9 @@ class FactGraph:
         """
         self.history_entity_types = dict(self.entity_types)
         self.history_entity_names = dict(self.entity_names)
-        self.history_entity_tags = {
-            key: list(tags) for key, tags in self.entity_tags.items()
-        }
-        self.history_entity_attributes = {
-            key: dict(attributes) for key, attributes in self.entity_attributes.items()
-        }
-        self.history_entity_state = {
-            key: dict(state) for key, state in self.entity_state.items()
-        }
+        self.history_entity_tags = {key: list(tags) for key, tags in self.entity_tags.items()}
+        self.history_entity_attributes = {key: dict(attributes) for key, attributes in self.entity_attributes.items()}
+        self.history_entity_state = {key: dict(state) for key, state in self.entity_state.items()}
         self.history_relations = set(self.active_relations)
         self.history_relation_attributes = {
             key: dict(attributes) for key, attributes in self.relation_attributes.items()
@@ -274,14 +258,9 @@ class FactGraph:
             return None
         root = find(key)
         members = [node for node in parent if find(node) == root]
-        registered_order = {
-            node: index for index, node in enumerate(self.entity_names)
-        }
+        registered_order = {node: index for index, node in enumerate(self.entity_names)}
         members.sort(key=lambda node: registered_order.get(node, len(registered_order)))
-        flagged = [
-            node for node in members
-            if bool((self.entity_attributes.get(node) or {}).get("is_representative"))
-        ]
+        flagged = [node for node in members if bool((self.entity_attributes.get(node) or {}).get("is_representative"))]
         if flagged:
             return flagged[0]
         history_members = [node for node in members if node in self.history_entity_types]

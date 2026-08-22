@@ -44,18 +44,7 @@ async def run_preprocess(
     metadata_path: Path | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, float]:
-    """
-    执行预处理流程
-
-    Args:
-        source_path: 源文件路径
-        run_id: 运行ID
-        session: 数据库连接
-        metadata_path: 元数据路径
-
-    Returns:
-        Tuple[int, int, float]: (总块数, 总字符数, 耗时)
-    """
+    """执行预处理流程。Args: source_path/run_id/session/metadata_path  Returns: (总块数, 总字符数, 耗时s)"""
     from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 
     start_time = time.time()
@@ -103,10 +92,7 @@ async def run_preprocess(
     # 段落身份以 paragraphs 表为准，embedding/检索/指标均从该表读取，保证与段落严格对齐
     spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
     tokenized: list[list[str]] = [tokenize(span.text) for span in spans]
-    spans = [
-        replace(span, token_count=len(tokens))
-        for span, tokens in zip(spans, tokenized, strict=True)
-    ]
+    spans = [replace(span, token_count=len(tokens)) for span, tokens in zip(spans, tokenized, strict=True)]
     paragraph_repo = ParagraphRepository(session)
     paragraph_repo.insert_paragraphs(run_id, spans)
     _commit_preprocess_writes(session, step="insert_paragraphs")
@@ -183,9 +169,7 @@ def _insert_paragraph_metrics(
         compute_paragraph_metric_counts(span.text, tokens, lexicons)
         for span, tokens in zip(spans, tokenized, strict=True)
     ]
-    z_components = robust_standardize_components(
-        [surface_tension_components(counts) for counts in counts_list]
-    )
+    z_components = robust_standardize_components([surface_tension_components(counts) for counts in counts_list])
     weights = settings.metrics.surface_tension_weights
 
     rows: list[ParagraphMetricRow] = []
@@ -193,9 +177,7 @@ def _insert_paragraph_metrics(
         paragraph_id = span.paragraph_id
         if paragraph_id is None:
             # insert_paragraphs 已校验段落身份完整，此处仅为类型收窄
-            raise ValueError(
-                f"段落指标写入失败：paragraph_id 未分配，paragraph_index={span.paragraph_index}"
-            )
+            raise ValueError(f"段落指标写入失败：paragraph_id 未分配，paragraph_index={span.paragraph_index}")
         z_value = surface_tension_z_value(z_comp, weights)
         rows.append(
             ParagraphMetricRow(
@@ -264,21 +246,8 @@ async def _generate_paragraph_embeddings(
     run_id: str,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> int:
-    """
-    为段落事实源中的全部段落生成 embedding 并存入数据库
-
-    段落身份以 paragraphs 表为准：embedding 数据从段落事实源读取（不再在 embedding
-    阶段重新切段），保证与段落严格对齐；行数 > 0 才继续，空 run 直接跳过
-
-    RAG 检索粒度固定为一个自然段，只生成 paragraph embedding，不再生成 chunk embedding
-
-    Args:
-        session: 数据库连接
-        run_id: 运行ID
-        emitter: 事件发射器
-
-    Returns:
-        生成的 embedding 数量
+    """为 paragraphs 生成 embedding 落库；从 paragraphs 读不重切段，0行跳过。
+    RAG 粒度固定自然段(仅 paragraph)。Args: session/run_id/emitter  Returns: embedding 数量
     """
     from src.agents.usage import build_token_usage_callback
     from src.models.local.embedding import EmbeddingClient
@@ -311,8 +280,7 @@ async def _generate_paragraph_embeddings(
     actual_dim = await embedding_client.detect_embedding_dimension()
     if actual_dim != expected_dim:
         raise ValueError(
-            "semantic text retrieval embedding dimension mismatch: "
-            f"configured={expected_dim}, actual={actual_dim}"
+            f"semantic text retrieval embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}"
         )
 
     ensure_paragraph_embeddings_schema(session, expected_dim)
@@ -352,19 +320,8 @@ async def _generate_paragraph_embedding_rows(
     row_factory: Any,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Any]:
-    """
-    生成 paragraph embedding 写入 DTO
-
-    段落身份以 paragraphs 表为准：embedding 数据从段落事实源读取（不再在 embedding
-    阶段重新切段），保证与段落严格对齐——二期段落化后 embedding 行只携带
-    paragraph_id 与向量，chunk/坐标等派生信息一律从 paragraphs 表读取
-
-    复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求
-
-    修改说明: paragraph embedding 缺失会阻断语义原文定位，这里采用 fail fast，
-              避免 preprocess 成功但后续 readiness 永远失败
-
-    修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进
+    """生成 paragraph embedding 写入 DTO — 段落源 paragraphs(不重切，仅 paragraph_id+向量)，
+    坐标从 paragraphs 读；批量 embed_texts 防单条退化。缺失 fail fast(防 readiness 假成功)，progress_callback 发 SSE。
     """
     from src.storage.db import get_session_factory
     from src.storage.repositories.paragraph_repository import ParagraphRepository
@@ -411,10 +368,7 @@ async def _generate_paragraph_embedding_rows(
                 current=completed_batches,
                 total=total_batches,
                 sub_percent=sub_percent,
-                message=(
-                    f"段落向量落库准备 {completed_batches}/{total_batches}"
-                    f" 批（共 {total_items} 段）"
-                ),
+                message=(f"段落向量落库准备 {completed_batches}/{total_batches} 批（共 {total_items} 段）"),
             )
         )
 

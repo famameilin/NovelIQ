@@ -21,10 +21,7 @@ def _default_stopwords_path() -> Path:
 _ADVERB_PREFIXES = ("很", "太", "好", "超", "巨", "特", "挺", "蛮", "更", "最", "极", "颇", "愈", "贼")
 _EMOTION_SINGLE_CHARS = ("爽", "慌")
 _EMOTION_FUSION_SPLITS = tuple(
-    a + c + suffix
-    for a in _ADVERB_PREFIXES
-    for c in _EMOTION_SINGLE_CHARS
-    for suffix in ("", "了", "的")
+    a + c + suffix for a in _ADVERB_PREFIXES for c in _EMOTION_SINGLE_CHARS for suffix in ("", "了", "的")
 ) + ("爽得", "爽到", "慌得", "慌到")
 
 

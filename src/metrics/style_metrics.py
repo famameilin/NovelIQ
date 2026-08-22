@@ -6,9 +6,9 @@ from collections.abc import Iterable, Sequence
 
 from src.config import settings
 from src.config.constants import SEMANTIC_CATEGORY_MAPPING
+from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
 
 from .lexicon_metrics import count_mixed_hits
-from .text_utils import dialogue_length, split_sentences, tokenize_words
 
 SHORT_CHUNK_TOKEN_THRESHOLD = 12
 SHORT_CHUNK_MIN_POSITIVE_DENSITY = 1e-4
@@ -155,10 +155,7 @@ def metaphor_density(text: str) -> float:
 
 
 def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str) -> float:
-    """
-    计算词表密度（使用 phrase 模式匹配）
-
-    """
+    """词表密度（phrase模式）。"""
     total_tokens = len(tokens)
     hit_count = count_mixed_hits(text, tokens, terms)
     density = hit_count / max(total_tokens, 1)

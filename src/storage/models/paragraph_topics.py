@@ -47,16 +47,11 @@ class ParagraphTopic(Base):
             ondelete="CASCADE",
         ),
         # 防重跑翻倍：同 (run_id, paragraph_id, topic_id) 唯一
-        UniqueConstraint(
-            "run_id", "paragraph_id", "topic_id", name="uq_paragraph_topics_run_para_topic"
-        ),
+        UniqueConstraint("run_id", "paragraph_id", "topic_id", name="uq_paragraph_topics_run_para_topic"),
         Index("idx_paragraph_topics_run_paragraph", "run_id", "paragraph_id"),
         Index("idx_paragraph_topics_topic_id", "topic_id"),
         Index("idx_paragraph_topics_run_id", "run_id"),
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<ParagraphTopic(run_id={self.run_id}, paragraph_id={self.paragraph_id}, "
-            f"topic_id={self.topic_id})>"
-        )
+        return f"<ParagraphTopic(run_id={self.run_id}, paragraph_id={self.paragraph_id}, topic_id={self.topic_id})>"

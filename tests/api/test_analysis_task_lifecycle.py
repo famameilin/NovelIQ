@@ -212,10 +212,7 @@ class TestDeleteAnalysis:
                 {"run_id": run_id},
             ).scalar_one()
             remaining_chapters = session.execute(
-                text(
-                    "SELECT COUNT(*) FROM chapters "
-                    "WHERE run_id = :run_id AND text IS NOT NULL"
-                ),
+                text("SELECT COUNT(*) FROM chapters WHERE run_id = :run_id AND text IS NOT NULL"),
                 {"run_id": run_id},
             ).scalar_one()
             remaining_context = session.execute(

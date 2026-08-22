@@ -107,37 +107,19 @@ def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
 
 
 def has_aggregated_data(session: Session, run_id: str) -> bool:
-    """
-    检查指定运行是否有聚合数据
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        是否有聚合数据
-    """
+    """检查指定运行是否有聚合数据（查 global_stats）。Args: session/run_id；Returns: 是否存在。"""
     # 2026-08-14 M8b：聚合唯一落库产物为 global_stats（chunk_curves 已下线）
     stats_count = (
-        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar()
-        or 0
+        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar() or 0
     )
 
     return stats_count > 0
 
 
 def has_topic_data(session: Session, run_id: str) -> bool:
-    """
-    检查指定运行是否有主题数据（段落粒度，设计 §11.1）
+    """检查指定运行是否有主题数据（段落粒度 §11.1，查 paragraph_topics）。
 
-    主题建模已段落化，chunk_topics 不再写入；完成判定改查 paragraph_topics。
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        是否有主题数据
+    Args: session/run_id；Returns: 是否存在（chunk_topics 已废弃）。
     """
     count = (
         session.execute(
@@ -149,16 +131,7 @@ def has_topic_data(session: Session, run_id: str) -> bool:
 
 
 def has_diagnosis_data(session: Session, run_id: str) -> bool:
-    """
-    检查指定运行是否有诊断数据
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        是否有诊断数据
-    """
+    """检查指定运行是否有诊断数据。Args: session/run_id；Returns: 是否存在。"""
     latest_row = session.execute(
         select(CloudAnalysis).where(CloudAnalysis.run_id == run_id).order_by(CloudAnalysis.id.desc()).limit(1)
     ).scalar_one_or_none()
@@ -168,25 +141,15 @@ def has_diagnosis_data(session: Session, run_id: str) -> bool:
 
 
 def is_aggregate_complete(session: Session, run_id: str) -> bool:
-    """
-    检查聚合阶段是否完成
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        聚合是否完成
-    """
-    chapters_count = session.execute(
-        select(func.count()).select_from(Chapter).where(Chapter.run_id == run_id)
-    ).scalar() or 0
+    """检查聚合阶段是否完成（chapters+global_stats 均存在）。Args: session/run_id；Returns: 是否完成。"""
+    chapters_count = (
+        session.execute(select(func.count()).select_from(Chapter).where(Chapter.run_id == run_id)).scalar() or 0
+    )
 
     # 2026-08-14 M8b：聚合阶段唯一落库产物是 global_stats（chunk_curves 已下线），
     # 完成判定改以 global_stats 存在为准
     stats_count = (
-        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar()
-        or 0
+        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar() or 0
     )
 
     return chapters_count > 0 and stats_count > 0

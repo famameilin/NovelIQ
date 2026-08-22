@@ -1,11 +1,4 @@
-"""
-Token计数工具模块
-
-说明: 为流式API提供token使用估算功能
-
-本模块提供基于tiktoken的token计数功能，支持多种模型编码器
-对于中文内容，使用cl100k_base编码器（GPT-4/GPT-3.5-turbo使用的编码器）
-"""
+"""Token 计数（tiktoken，cl100k_base 兼容中文）。"""
 
 from __future__ import annotations
 
@@ -30,30 +23,14 @@ _encoding_cache: dict[str, tiktoken.Encoding] = {}
 
 
 def _get_encoding(encoding_name: str) -> tiktoken.Encoding:
-    """
-    获取编码器实例（带缓存）
-
-    Args:
-        encoding_name: 编码器名称
-
-    Returns:
-        tiktoken.Encoding: 编码器实例
-    """
+    """获取编码器（带缓存）。"""
     if encoding_name not in _encoding_cache:
         _encoding_cache[encoding_name] = tiktoken.get_encoding(encoding_name)
     return _encoding_cache[encoding_name]
 
 
 def _get_encoding_for_model(model_name: str) -> str:
-    """
-    根据模型名称获取对应的编码器名称
-
-    Args:
-        model_name: 模型名称
-
-    Returns:
-        str: 编码器名称
-    """
+    """按模型名取编码器名（精确+前缀匹配，回退 cl100k_base）。"""
     model_name_lower = model_name.lower()
 
     # 精确匹配
@@ -70,22 +47,7 @@ def _get_encoding_for_model(model_name: str) -> str:
 
 
 def count_tokens(text: str, model: str | None = None) -> int:
-    """
-    计算文本的token数量
-
-    Args:
-        text: 要计算的文本
-        model: 模型名称（用于选择编码器），默认为None使用cl100k_base
-
-    Returns:
-        int: token数量
-
-    Example:
-        >>> count_tokens("Hello, world!")
-        4
-        >>> count_tokens("你好，世界！", model="gpt-4")
-        6
-    """
+    """计算 token 数量（失败回退字符估算）。"""
     if not text:
         return 0
 

@@ -22,9 +22,7 @@ if TYPE_CHECKING:
     from src.api.services.task_manager import TaskManager
 
 
-# ------------------------------------------------------------------ #
-#  StreamMessageType — SSE 事件类型枚举                                #
-# ------------------------------------------------------------------ #
+# SSE 事件类型
 
 
 class StreamMessageType(StrEnum):
@@ -41,9 +39,7 @@ class StreamMessageType(StrEnum):
     task_cancelled = "task_cancelled"
 
 
-# ------------------------------------------------------------------ #
-#  StreamEvent — 统一事件格式                                         #
-# ------------------------------------------------------------------ #
+# 统一事件格式
 
 StreamEventAction = Literal["start", "progress", "complete", "output", "thinking", "tool_call"]
 """StreamEvent.action 的合法值"""
@@ -98,22 +94,7 @@ class StreamEvent:
         }
 
 
-# ------------------------------------------------------------------ #
-#  Action → SSE event type 映射                                       #
-# ------------------------------------------------------------------ #
-
-# 终止类事件（task_complete / task_error / task_cancelled）不在此映射表中，
-# 原因如下：
-#   1. 语义差异：映射表中的 5 个 action 是「进行中」事件，需要 EventBus 补全
-#      stage/sub_stage/chapter_id 等上下文字段；而终止类事件表示任务级终态，
-#      不需要也不应携带 章节 级上下文
-#   2. 数据格式不同：终止类事件的 data 结构固定（如 {"error": ..., "stage": ...}），
-#      与 StreamEvent.to_dict() 的 10 字段格式不同，强行走 emit() 再翻译会丢失
-#      语义或产生冗余字段
-#   3. 副作用控制：emit() 内部会同步调用 task_manager.update_task()，
-#      对终止事件而言这些更新既不必要也可能引发状态冲突
-# 因此 emit_task_complete / emit_task_error / emit_task_cancelled 直接调用
-# event_manager.send()，跳过 emit() 的上下文补全和 TaskManager 同步逻辑
+# 终态事件直接发送，避免补入章节上下文或触发 TaskManager 的进行中状态同步
 _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "start": StreamMessageType.stage_start.value,
     "progress": StreamMessageType.stage_progress.value,
@@ -138,9 +119,7 @@ _STAGE_PERCENT_RANGES: dict[str, tuple[float, float]] = {
 }
 
 
-# ------------------------------------------------------------------ #
-#  AnalysisEventBus — 上下文保持器 + 统一发送口                        #
-# ------------------------------------------------------------------ #
+# 事件上下文与统一发送入口
 
 
 class AnalysisEventBus:
@@ -244,10 +223,7 @@ class AnalysisEventBus:
         log_level = (
             logger.debug
             if resolved_event.action in {"output", "thinking", "tool_call"}
-            or (
-                resolved_event.action == "progress"
-                and resolved_event.sub_stage in _DEBUG_PROGRESS_SUB_STAGES
-            )
+            or (resolved_event.action == "progress" and resolved_event.sub_stage in _DEBUG_PROGRESS_SUB_STAGES)
             else logger.info
         )
         log_level(
@@ -313,9 +289,7 @@ class AnalysisEventBus:
         start, end = _STAGE_PERCENT_RANGES.get(stage, (0.0, 100.0))
         return start + progress_ratio * (end - start)
 
-    # ------------------------------------------------------------------
-    #  便捷方法：阶段级事件
-    # ------------------------------------------------------------------
+    # 阶段级事件
 
     async def emit_stage_start(
         self,

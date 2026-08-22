@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
@@ -23,9 +21,6 @@ from src.api.services.analysis_service import AnalysisService
 from src.api.services.novel_service import NovelService
 from src.api.services.task_application_service import TaskApplicationService
 from src.api.services.task_manager import TaskManager
-from src.storage.db import get_session_factory
-from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
-from src.storage.repositories import RunRepository
 
 _STATUS_MAP: dict[str, TaskStatus] = {
     "completed": TaskStatus.COMPLETED,
@@ -83,8 +78,8 @@ async def resume_task(
 async def start_reanalysis(
     novel_id: str,
     request: ReanalyzeRequest | None = None,
-    novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
 ) -> ReanalyzeResponse:
     analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.start_reanalysis(novel_id, request)
@@ -92,7 +87,7 @@ async def start_reanalysis(
 
 
 @router.get("/{novel_id}/tasks", response_model=TaskListResponse)
-async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:  # noqa: B008
+async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:
     """
     获取小说的所有任务列表
     """
@@ -190,8 +185,8 @@ async def cancel_task(
 async def batch_delete_tasks(
     novel_id: str,
     request: BatchDeleteTasksRequest,
-    novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
 ) -> BatchDeleteTasksResponse:
     """
     批量删除指定的分析任务
@@ -236,4 +231,3 @@ async def batch_delete_tasks(
         deleted_ids=deleted_ids,
         failed_ids=failed_ids,
     )
-

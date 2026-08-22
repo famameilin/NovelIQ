@@ -63,14 +63,8 @@ def test_character_observation_errors_collected_with_indexes() -> None:
         )
     message = str(excinfo.value)
     assert "character_observations 校验失败" in message
-    assert (
-        "[0] character_observation.character 未在当前 chunk 的 write_entities 中声明: 甲"
-        in message
-    )
-    assert (
-        "[1] character_observation.character 未在当前 chunk 的 write_entities 中声明: 乙"
-        in message
-    )
+    assert "[0] character_observation.character 未在当前 chunk 的 write_entities 中声明: 甲" in message
+    assert "[1] character_observation.character 未在当前 chunk 的 write_entities 中声明: 乙" in message
 
 
 def test_dialogue_speaker_error_collected_with_index() -> None:

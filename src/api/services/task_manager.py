@@ -22,8 +22,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class TaskInfo:
-    """任务执行缓存，仅保留进程级执行对象和短期输出缓冲
-    """
+    """任务执行缓存，仅保留进程级执行对象和短期输出缓冲"""
 
     task_id: str
     llm_outputs: list[str] = field(default_factory=list)
@@ -34,27 +33,9 @@ class TaskInfo:
 
 
 class TaskManager:
-    """
-    进程级执行缓存容器（非业务真相源）
+    """进程级执行缓存（非真相源）：管 asyncio.Task/取消信号/SSE 缓冲。
 
-    职责边界:
-    =========
-    属于本类职责:
-    - asyncio.Task 对象引用管理（store_asyncio_task）
-    - 取消信号传递（cancel_event）
-    - SSE 短期输出缓冲（llm_outputs, stage/progress 更新）
-    - 创建/删除/更新内存 TaskInfo 对象
-
-    不属于本类职责（由业务层/DB层处理）:
-    - 任务存在性判断（应查询数据库）
-    - 业务状态合法性判断（如 cancel/delete 前置条件）
-    - 任务列表查询（应直接查询数据库）
-    - 决定 cancel/resume/delete 操作是否合法
-
-    调用方须知:
-    - get_task() 返回"当前进程是否持有该任务的执行缓存"，而非"系统是否存在该任务"
-    - 服务重启后，所有任务在 TaskManager 中均不存在，需从 DB 恢复
-    - 业务真相唯一来源: 数据库 run 表
+    业务判断查 DB；get_task() 仅答进程缓存，重启后从 DB 恢复。
     """
 
     def __init__(
@@ -105,8 +86,7 @@ class TaskManager:
         return self._runtime_persistence._resolve_run_id_for_db_write(task_id, session)
 
     def create_task(self, task_id: str, novel_id: str) -> TaskInfo:
-        """创建任务的内存执行缓存
-        """
+        """创建任务的内存执行缓存"""
         task = TaskInfo(
             task_id=task_id,
             cancel_event=asyncio.Event(),

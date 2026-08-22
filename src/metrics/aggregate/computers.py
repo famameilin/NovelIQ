@@ -153,10 +153,7 @@ def _null_narrative_structure(event_types: list[str]) -> dict[str, Any]:
         "climax_spacing": None,
         "middle_collapse_index": None,
         "cliffhanger_rate": None,
-        **{
-            f"chapter_narrative_function_share_{k}": v
-            for k, v in compute_event_density(event_types).items()
-        },
+        **{f"chapter_narrative_function_share_{k}": v for k, v in compute_event_density(event_types).items()},
         "climax_count": 0,
         "climax_positions": [],
         "climax_heights": [],
@@ -205,9 +202,7 @@ def compute_narrative_structure_metrics(
         "climax_heights": climax_profile["climax_heights"],
         "peak_escalation": climax_profile["peak_escalation"],
         "dominant_climax_pos": (
-            dominant_climax_pos
-            if dominant_climax_pos is not None
-            else climax_profile.get("dominant_climax_pos")
+            dominant_climax_pos if dominant_climax_pos is not None else climax_profile.get("dominant_climax_pos")
         ),
     }
 
@@ -220,15 +215,9 @@ def compute_emotion_curve_metrics(
     """情感曲线聚合：恢复速度/词表趋势走进度轴。"""
     positions = emotion_data.positions
     values = emotion_data.emotion_values
-    can_use_progress = (
-        len(positions) == len(values)
-        and len(values) >= 2
-        and _positions_are_usable(list(positions))
-    )
+    can_use_progress = len(positions) == len(values) and len(values) >= 2 and _positions_are_usable(list(positions))
     return {
-        "emotion_recovery_speed": (
-            compute_emotion_recovery_speed(positions, values) if can_use_progress else None
-        ),
+        "emotion_recovery_speed": (compute_emotion_recovery_speed(positions, values) if can_use_progress else None),
         "chapter_pivot_rate": (
             compute_pivot_moment_density(annotation_data.pivot_moments)
             if len(annotation_data.chapter_ids) >= settings.metrics.small_sample_min_chapters
@@ -237,15 +226,11 @@ def compute_emotion_curve_metrics(
         **compute_emotion_polarity_distribution(annotation_data.emotional_valences),
         "lexical_pos_neg_ratio": compute_pos_neg_ratio(emotion_data.pos_densities, emotion_data.neg_densities),
         "arc_delta": compute_arc_delta(char_data.char_emotion_scores),
-        "lexical_emotion_trend": (
-            compute_lexical_emotion_trend(positions, values) if can_use_progress else None
-        ),
+        "lexical_emotion_trend": (compute_lexical_emotion_trend(positions, values) if can_use_progress else None),
     }
 
 
-# 2026-04-28，任务：统一关系图谱密度口径。
-# 修改原因：人物聚合指标里的 `network_density` 需要和 graph page 共享同一批参与者，
-# 避免孤点被排除后把密度抬高。
+# 人物聚合的 network_density 与 graph page 使用同一批参与者
 def compute_character_relation_metrics(
     relation_data: RelationData,
     char_data: CharacterData,

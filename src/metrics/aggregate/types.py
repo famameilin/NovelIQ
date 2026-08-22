@@ -14,9 +14,7 @@ from src.config.constants import EMOTION_SCORE_MAPPING
 
 @dataclass
 class AggregateResult:
-    """聚合结果数据类
-
-    """
+    """聚合结果数据类"""
 
     narrative_structure: dict[str, Any] = field(default_factory=dict)
     emotion_curve: dict[str, Any] = field(default_factory=dict)

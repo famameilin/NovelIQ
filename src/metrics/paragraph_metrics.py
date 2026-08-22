@@ -1,12 +1,5 @@
-"""
-段落级指标原始计数与充分统计量（设计文档《章节粒度分析指标重设计》§5.3）
-
-本模块只产出"分子/分母"口径的原始计数与充分统计量，不计算任何密度：
-密度由上层按 run 汇总后另行计算（分母为零是合法观测，调用方负责）。
-
-与 `src.storage.repositories.paragraph_repository.ParagraphMetricRow`
-（§5.3 paragraph_metrics 表）一一对应，缺 paragraph_id 与 surface_tension 系列。
-"""
+"""段落级原始计数与充分统计量（§5.3，分子/分母口径不算密度）。
+对应 ParagraphMetricRow（缺 paragraph_id/surface_tension）。"""
 
 from __future__ import annotations
 
@@ -17,7 +10,7 @@ from typing import Any
 from src.metrics.lexicon_metrics import count_mixed_hits, get_emotion_spans
 from src.metrics.matching import count_token_hits_enhanced
 from src.metrics.negation import is_flipped, load_negation_spec
-from src.metrics.text_utils import dialogue_length, split_sentences
+from src.utils.text_utils import dialogue_length, split_sentences
 
 # 与 style_metrics.metaphor_density 的 markers 保持一致
 # （该处未导出常量，此处本地声明一份，避免反向依赖）
@@ -54,22 +47,8 @@ def compute_paragraph_metric_counts(
     tokens: list[str],
     lexicons: dict[str, Any],
 ) -> ParagraphMetricCounts:
-    """
-    计算段落级原始计数与充分统计量
-
-    lexicons 键（缺失按空处理）：
-        pos_terms / neg_terms: dict[str, float]，正/负面情感词及权重
-        fight_terms: dict[str, float]，战斗词及权重（本模块统一按 1.0 计）
-        sensory / imagery: list[str]，感官词 / 意象词
-        function_words: list[str]，虚词表
-        semantic_categories: dict[str, list[str]]，语义类别词表
-
-    情绪计数实现否定翻转（逻辑与 emotion_metrics.lexical_sentiment_density
-    的分子部分一致，此处返回命中数而不是密度）；2026-08-16 M3/M4：
-    权重弃用，positive/negative_weight_sum 语义为"命中数"（词条权重统一 1.0），
-    字段名与 DB schema 不变；否定判定经 negation 共享层（load_negation_spec），
-    空文本/空词表不触发表读取。
-    """
+    """段落级原始计数与充分统计量（分子/分母口径，2026-08-16 M3/M4：权重弃用统一1.0计命中数）。
+    lexicons缺失按空处理；情绪计数经negation共享层翻转，空文本/空词表不触发表读取。"""
     token_count = len(tokens)
     char_count = len(text)
 
@@ -101,9 +80,7 @@ def compute_paragraph_metric_counts(
                 negative_weight_sum += 1.0
 
     fight_terms = lexicons.get("fight_terms") or {}
-    fight_weight_sum = float(
-        count_token_hits_enhanced(text, tokens, list(fight_terms.keys()), mode="fuzzy")
-    )
+    fight_weight_sum = float(count_token_hits_enhanced(text, tokens, list(fight_terms.keys()), mode="fuzzy"))
 
     exclaim_count = text.count("!") + text.count("！")
     question_count = text.count("?") + text.count("？")
@@ -116,9 +93,7 @@ def compute_paragraph_metric_counts(
     sensory_hit_count = count_mixed_hits(text, tokens, sensory)
     imagery_hit_count = count_mixed_hits(text, tokens, imagery)
 
-    metaphor_sentence_count = sum(
-        1 for sentence in sentences if any(marker in sentence for marker in METAPHOR_MARKERS)
-    )
+    metaphor_sentence_count = sum(1 for sentence in sentences if any(marker in sentence for marker in METAPHOR_MARKERS))
 
     function_words = lexicons.get("function_words") or []
     function_word_set = {word for word in function_words if word}

@@ -20,9 +20,7 @@ def _insert_paragraphs(db_session, run_id: str, texts: list[str]) -> None:
     offset = 0
     chunks = []
     for chunk_id, text in enumerate(texts):
-        chunks.append(
-            Chunk(index=chunk_id, text=text, start=offset, end=offset + len(text), chapter_id=1)
-        )
+        chunks.append(Chunk(index=chunk_id, text=text, start=offset, end=offset + len(text), chapter_id=1))
         offset += len(text)
     spans = split_chunk_paragraphs(chunks)
     spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]

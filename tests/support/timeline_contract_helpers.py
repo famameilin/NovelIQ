@@ -212,9 +212,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     chapter_three_snapshot = GraphRepository(db_session).fetch_snapshot(run_id, chapter_id=3)
     assert chapter_three_snapshot is not None
     assert any(
-        relation.from_name == hero_name
-        and relation.to_name == rival_name
-        and relation.relation_type == "盟友"
+        relation.from_name == hero_name and relation.to_name == rival_name and relation.relation_type == "盟友"
         for relation in chapter_three_snapshot.relations
     )
     persist_timeline_chapter(

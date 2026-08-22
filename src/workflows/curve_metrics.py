@@ -54,14 +54,12 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
         )
         .join(
             ParagraphMetric,
-            (ParagraphMetric.run_id == Paragraph.run_id)
-            & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
             isouter=True,
         )
         .join(
             ParagraphCurve,
-            (ParagraphCurve.run_id == Paragraph.run_id)
-            & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphCurve.run_id == Paragraph.run_id) & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
             isouter=True,
         )
         .where(Paragraph.run_id == run_id)

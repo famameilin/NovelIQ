@@ -220,9 +220,7 @@ def fetch_character_data(
     )
 
 
-# 2026-04-28，任务：统一关系图谱密度口径。
-# 修改原因：aggregate 之前只看有边的节点，导致孤立参与者不会进入密度分母，
-# 和 graph page 基于整张参与者子图的展示口径对不上。
+# 关系聚合使用完整角色子图，孤立参与者也进入统计口径
 def fetch_relation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
@@ -231,9 +229,7 @@ def fetch_relation_data(
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
     # P4：人物网络只消费 entity_type=character 的角色子图，不再把地点/物品等全实体节点计入
     character_names = {
-        state.name
-        for state in graph_view.participant_states
-        if state.entity_type == "character" and state.name
+        state.name for state in graph_view.participant_states if state.entity_type == "character" and state.name
     }
     current_relations = [
         relation
@@ -259,9 +255,7 @@ def fetch_relation_data(
                 change.to_name or "",
                 change.relation_type or "",
                 # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
-                str(change.changes[0].get("change_kind") or "refine")
-                if change.changes
-                else "refine",
+                str(change.changes[0].get("change_kind") or "refine") if change.changes else "refine",
             )
             for change in relation_changes
         ],

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +18,6 @@ class AnalysisLogger:
         self._task_id = task_id
         self._log_dir = log_base_dir / task_id
         self._log_dir.mkdir(parents=True, exist_ok=True)
-        # 统一的 prompt 日志文件
-        self._prompts_file = self._log_dir / "prompts.jsonl"
-        self._annotation_file = self._log_dir / "annotations.jsonl"
         self._handler_id: int | None = None
         self._setup_file_loggers()
 
@@ -52,47 +48,6 @@ class AnalysisLogger:
     def log_dir(self) -> Path:
         return self._log_dir
 
-    def log_prompt(
-        self,
-        messages: list[dict[str, str]],
-        response: str,
-        metadata: dict[str, Any] | None = None,
-        chunk_id: int | None = None,
-    ) -> None:
-        """
-        记录统一的 prompt/response 日志
-
-        说明: 统一的日志记录方法，不再区分本地和云端
-        """
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "chunk_id": chunk_id,
-            "messages": messages,
-            "response": response,
-            "metadata": metadata or {},
-        }
-        self._append_jsonl(self._prompts_file, entry)
-
-    def log_annotation(
-        self,
-        chunk_id: int,
-        annotation: dict[str, Any],
-        raw_response: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "chunk_id": chunk_id,
-            "annotation": annotation,
-            "raw_response": raw_response,
-            "metadata": metadata or {},
-        }
-        self._append_jsonl(self._annotation_file, entry)
-
-    def _append_jsonl(self, file_path: Path, entry: dict[str, Any]) -> None:
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
     def write_summary(self, summary: dict[str, Any]) -> None:
         summary_file = self._log_dir / "summary.json"
         summary_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -107,10 +62,3 @@ class AnalysisLogger:
                     del _active_file_handlers[log_key]
             except ValueError:
                 pass
-
-
-def get_or_create_analysis_logger(
-    log_base_dir: Path,
-    task_id: str,
-) -> AnalysisLogger:
-    return AnalysisLogger(log_base_dir, task_id)

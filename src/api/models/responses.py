@@ -217,7 +217,6 @@ class ChapterRelation(BaseModel):
 
 
 class ChapterDialogue(BaseModel):
-
     speaker: list[str] | None = None
     speaker_references: list[dict[str, Any]] = []
     length: int | None = None
@@ -232,9 +231,7 @@ class ChapterAnnotation(BaseModel):
     has_foreshadowing: bool | None = Field(
         default=None,
         description=(
-            "当前 chunk 是否包含伏笔元素。"
-            "这是分块级存在性标记，不等于全书伏笔回收预期，"
-            "更不是严格全文事实回收率。"
+            "当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔回收预期，更不是严格全文事实回收率。"
         ),
     )
     is_strong_setup: bool | None = Field(
@@ -376,10 +373,7 @@ class TopicInfo(BaseModel):
 class DiagnosisResult(BaseModel):
     foreshadow_expectation: float | None = Field(
         default=None,
-        description=(
-            "伏笔回收预期，基于 setup thread ledger 加权估算的近似值，"
-            "取值范围 0-1，不是严格全文事实回收率。"
-        ),
+        description=("伏笔回收预期，基于 setup thread ledger 加权估算的近似值，取值范围 0-1，不是严格全文事实回收率。"),
     )
     arc_scores: dict[str, float] | None = None
     genre_labels: list[str] | None = None
@@ -495,19 +489,6 @@ class BatchDeleteTasksResponse(BaseModel):
     failed_count: int
     deleted_ids: list[str]
     failed_ids: list[dict[str, str]]  # [{"task_id": "xxx", "reason": "错误原因"}]
-
-
-class TokenUsageRecord(BaseModel):
-    id: int
-    novel_id: str
-    chapter_id: int | None = None
-    task_type: str
-    call_type: str
-    model: str
-    prompt_tokens: int
-    completion_tokens: int | None = None
-    total_tokens: int
-    created_at: str
 
 
 class TokenUsageSummary(BaseModel):

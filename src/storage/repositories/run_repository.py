@@ -115,19 +115,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         task_kind: str = "analysis",
         request_payload: dict[str, Any] | None = None,
     ) -> str:
-        """
-        创建新的分析运行记录
-
-        Args:
-            novel_id: 小说ID
-            source_path: 源文件路径
-            title: 小说标题
-            author: 小说作者
-            run_id: 可选的运行ID，如果不提供则自动生成
-
-        Returns:
-            运行ID
-        """
+        """创建新的分析运行记录。Args: novel_id/source_path/title/author/run_id；Returns: 运行ID。"""
         if run_id is None:
             run_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -233,23 +221,13 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         return [self._to_dict_with_deserialization(run) for run in runs]
 
     def cancel_run(self, run_id: str) -> bool:
-        """
-        原子性地设置任务的取消请求标记
-
-        DB 驱动的取消机制，通过 cancel_requested flag 传递取消信号
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            是否成功设置取消标记
-        """
+        """原子性设置取消标记（DB 驱动 cancel_requested）。Args: run_id；Returns: 是否成功。"""
         from sqlalchemy import update
 
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.cancel_requested == False)  # noqa: E712
+            .where(AnalysisRun.cancel_requested.is_(False))
             .values(cancel_requested=True, updated_at=datetime.now(UTC))
         )
         result = self.session.execute(stmt)
@@ -288,17 +266,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         return str(refreshed_status) if refreshed_status is not None else None
 
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
-        """
-        按状态查询任务
-
-        用于查询指定状态的所有任务
-
-        Args:
-            status: 任务状态
-
-        Returns:
-            符合状态的任务记录列表
-        """
+        """按状态查询任务。Args: status；Returns: 任务记录列表。"""
         stmt = select(AnalysisRun).where(AnalysisRun.status == status).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict_with_deserialization(run) for run in runs]
@@ -337,7 +305,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
             .where(AnalysisRun.status == "pending")
-            .where(AnalysisRun.cancel_requested == False)  # noqa: E712
+            .where(AnalysisRun.cancel_requested.is_(False))
             .values(
                 status="running",
                 worker_id=worker_id,
@@ -397,27 +365,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         started_at: datetime | None | object = _UNSET,
         completed_at: datetime | None | object = _UNSET,
     ) -> None:
-        """
-        批量更新任务的运行态字段
-
-        统一的运行态字段更新方法，支持选择性更新
-
-        Args:
-            run_id: 运行ID
-            status: 任务状态
-            progress: 进度 (0-100)
-            stage: 阶段名称
-            sub_stage: 子阶段名称
-            current: 当前进度分子
-            total: 总量
-            message: 提示信息
-            error: 错误信息
-            cancel_requested: 是否请求取消
-            worker_id: 当前执行该任务的 worker 标识
-            heartbeat_at: 最近一次心跳时间
-            started_at: 任务实际开始执行时间
-            completed_at: 完成时间
-        """
+        """批量更新运行态字段（仅写入显式传入的字段）。"""
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if not run:
@@ -458,23 +406,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         self.session.commit()
 
     def get_run_by_run_id_prefix(self, run_id_prefix: str) -> dict[str, Any] | None:
-        """
-        通过run_id前缀获取运行记录
-
-        使用run_id前缀匹配查询运行记录
-
-        Args:
-            run_id_prefix: run_id前缀（如前8位）
-
-        Returns:
-            运行记录字典，不存在则返回 None
-
-        使用 limit(1) 避免多记录时抛出异常
-        """
+        """按 run_id 前缀查询（LIKE 转义 %/_/\，limit(1) 防多记录异常）。Args: run_id_prefix；Returns: 记录或 None。"""
         # 2026-08-13 P2-9：前缀中的 %/_/\\ 按字面字符匹配，避免被 LIKE 当作通配符
-        escaped_prefix = (
-            run_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        )
+        escaped_prefix = run_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         stmt = (
             select(AnalysisRun)
             .where(AnalysisRun.run_id.like(f"{escaped_prefix}%", escape="\\"))

@@ -266,16 +266,12 @@ def split_paragraphs(text: str, max_chars: int = 1500) -> list[ParagraphSpan]:
 
     for match in PARAGRAPH_SPLIT_RE.finditer(text):
         end = match.start()
-        paragraphs.extend(
-            _split_oversized_span(text, start, end, max_chars, source_paragraph_index)
-        )
+        paragraphs.extend(_split_oversized_span(text, start, end, max_chars, source_paragraph_index))
         source_paragraph_index += 1
         start = match.end()
 
     if start < len(text):
-        paragraphs.extend(
-            _split_oversized_span(text, start, len(text), max_chars, source_paragraph_index)
-        )
+        paragraphs.extend(_split_oversized_span(text, start, len(text), max_chars, source_paragraph_index))
 
     if paragraphs:
         return [

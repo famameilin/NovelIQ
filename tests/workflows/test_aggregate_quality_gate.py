@@ -37,9 +37,7 @@ def _create_run_with_paragraph_metrics(
 
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id, source_path="test", title="Quality Gate"
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
 
     texts = [f"第{i}章测试文本。" for i in range(len(token_counts))]
     chunks: list[Chunk] = []
@@ -49,10 +47,7 @@ def _create_run_with_paragraph_metrics(
         offset += len(text)
     ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
 
-    spans = [
-        replace(span, token_count=1)
-        for span in split_chunk_paragraphs(chunks, max_chars=1500)
-    ]
+    spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks, max_chars=1500)]
     metric_rows = [
         ParagraphMetricRow(
             paragraph_id=span.paragraph_id,
@@ -85,9 +80,7 @@ def _create_run_with_paragraph_metrics(
 
 def test_build_quality_gate_report_flags_null_chunk_cultures(db_session) -> None:
     """token 为 0 的章（无有效密度）视为 imagery 缺失；全书存在 imagery 数据"""
-    run_id = _create_run_with_paragraph_metrics(
-        db_session, token_counts=[0, 10], imagery_hit_counts=[0, 3]
-    )
+    run_id = _create_run_with_paragraph_metrics(db_session, token_counts=[0, 10], imagery_hit_counts=[0, 3])
     agg_result = AggregateResult(
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
@@ -118,9 +111,7 @@ def test_build_quality_gate_report_no_rows_is_not_a_pass(db_session) -> None:
     """2026-08-13 P2-3 无段落指标数据时质量门不通过（保守：缺数据=缺陷）"""
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id, source_path="test", title="Quality Gate"
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
     agg_result = AggregateResult(
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
@@ -134,9 +125,7 @@ def test_build_quality_gate_report_no_rows_is_not_a_pass(db_session) -> None:
 def test_build_quality_gate_report_handles_missing_fields(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id, source_path="test", title="Quality Gate"
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
     agg_result = AggregateResult(language_style={})
 
     report = _build_quality_gate_report(run_id, agg_result, db_session)
@@ -161,9 +150,7 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
 
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id, source_path="test", title="Quality Gate"
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
     chunks = [
         Chunk(index=0, start=0, end=4, text="第一章。", chapter_id=1),
         Chunk(index=1, start=4, end=8, text="第二章。", chapter_id=2),

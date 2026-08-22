@@ -99,15 +99,13 @@ def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
             "style_labels": '["\\u4e25\\u8083"]',
             "topic_labels": '["\\u67f3\\u5a49\\u513f", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
             "diagnosis": (
-                "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c"
-                "\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
+                "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
             ),
             "value_logic_reason": "\u67f3\u5a49\u513f\u5f71\u54cd\u4e86\u4faf\u98de\u767d\u7684\u5224\u65ad\u3002",
             "power_stance_reason": "\u6797\u7acb\u679c\u538b\u5236\u4e86\u67f3\u5a49\u513f\u3002",
             "dignity_reason": "\u67f3\u5a49\u513f\u4fdd\u6301\u4f53\u9762\u3002",
             "cultural_depth_reason": (
-                "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f"
-                "\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
+                "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
             ),
             "focus_structure": "dual",
             "focus_characters": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
@@ -824,9 +822,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
         valid_character_names={"老贺", "伯安", "阿明"},
     )
 
-    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [
-        ("relation-2", "老贺", "阿明")
-    ]
+    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [("relation-2", "老贺", "阿明")]
 
 
 def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
@@ -947,6 +943,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
 
 def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
     """2026-08-05 用于验证 chunk 展开结果只读取显式数据库图视图"""
+
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chapter_annotations_full(self, _run_id):
             return [
@@ -961,8 +958,7 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
                     foreshadowing_type="物件",
                     setup_kind="异常物件",
                     foreshadowing_desc=(
-                        "玉佩发热 - 具体钩子：玉佩出现异常发热。"
-                        "未闭合原因：当前还没有解释它为何会发热。"
+                        "玉佩发热 - 具体钩子：玉佩出现异常发热。未闭合原因：当前还没有解释它为何会发热。"
                     ),
                     why_unresolved_now="当前还没有解释它为何会发热。",
                     expected_payoff_family="能力触发",
@@ -990,6 +986,7 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
 
 def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch):
     """2026-08-05 用于验证 chunk 消费者不会在数据库图失败时降级读取"""
+
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chapter_annotations_full(self, _run_id):
             return [

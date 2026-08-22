@@ -169,7 +169,7 @@ def get_engine():
     if database_url.startswith("postgresql"):
 
         @event.listens_for(_engine, "connect")
-        def set_postgresql_settings(dbapi_connection, connection_record):
+        def set_postgresql_settings(dbapi_connection, _connection_record):
             cursor = dbapi_connection.cursor()
             cursor.execute("SET TIME ZONE 'UTC'")
             if database_schema:
@@ -179,12 +179,12 @@ def get_engine():
             cursor.close()
 
     @event.listens_for(_engine, "checkout")
-    def on_checkout(dbapi_conn, conn_record, conn_proxy):
+    def on_checkout(_dbapi_conn, _conn_record, _conn_proxy):
         if _engine is not None:
             logger.debug(f"Pool checkout: active={_engine.pool.status()}")
 
     @event.listens_for(_engine, "checkin")
-    def on_checkin(dbapi_conn, connection_record):
+    def on_checkin(_dbapi_conn, _connection_record):
         if _engine is not None:
             logger.debug(f"Pool checkin: active={_engine.pool.status()}")
 
@@ -235,24 +235,7 @@ SessionLocal = get_session_factory
 
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
-    """
-    获取 Session 的上下文管理器
-
-    说明: 提供上下文管理器方式获取 Session，自动处理提交和回滚
-
-    Yields:
-        SQLAlchemy Session 实例
-
-    注意:
-        - 退出上下文时会自动调用 commit()
-        - 对于只读操作（如 SELECT），commit 是无害的空操作
-        - 如需显式控制事务，请在上下文内调用 session.rollback() 或 session.commit()
-
-    使用示例:
-        with get_session() as session:
-            session.execute(text("SELECT 1"))
-            session.commit()
-    """
+    """获取 Session 上下文管理器，退出时自动 commit，异常回滚。"""
     session_factory = get_session_factory()
     session = session_factory()
     try:

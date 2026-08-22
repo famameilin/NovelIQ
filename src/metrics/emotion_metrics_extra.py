@@ -44,7 +44,6 @@ def compute_emotion_recovery_speed(
     return sum(recovery_distances) / len(recovery_distances)
 
 
-
 def compute_emotion_polarity_distribution(
     emotional_valences: list[str],
 ) -> dict[str, float | None]:
@@ -75,29 +74,12 @@ def compute_pivot_moment_density(
     return sum(pivot_moments) / len(pivot_moments)
 
 
-
 def compute_lexical_emotion_trend_detail(
     positions: Sequence[float],
     scores: Sequence[float],
 ) -> dict:
-    """
-    字符坐标版前中后情绪趋势（设计文档 §10、§19.8 修复）。
-
-    与 compute_lexical_emotion_trend 的差异：
-    - 前中后三等分按字符区间切分：前段 = positions 落在 [0, 1/3)，
-      中段 = [1/3, 2/3)，后段 = [2/3, 1]（相对总字符跨度的位置）；
-    - 每段统计为字符跨度加权均值：点的权重取该点覆盖的字符宽度
-      （相邻位置差的一半，端点用边缘宽度），等间距时退化为等权均值；
-    - 波动/趋势分类沿用旧口径：stdev >= 0.003 判 volatile，
-      段均差 diff = last_avg - first_avg 超过 0.002 判 rising/falling。
-
-    返回字段:
-    - first_avg: 前段 [0, 1/3) 字符区间的加权均值
-    - middle_avg: 中段 [1/3, 2/3) 字符区间的加权均值
-    - last_avg: 后段 [2/3, 1] 字符区间的加权均值
-    - stdev: 全段样本标准差（沿用波动判定阈值）
-    - trend: rising / falling / stable / volatile
-    """
+    """字符坐标版前中后趋势（§10/§19.8）：按字符跨度 [0,1/3)/[1/3,2/3)/[2/3,1] 三等分段内加权均值。
+    stdev≥0.003判volatile，否则diff=last-first超±0.002判rising/falling；返回first/middle/last_avg、stdev、trend。"""
     _validate_position_inputs(positions, scores)
     if len(scores) < 3:
         return {
@@ -141,9 +123,7 @@ def compute_lexical_emotion_trend_detail(
         first_boundary = positions[0] + span / 3
         second_boundary = positions[0] + 2 * span / 3
         first_indices = [j for j in range(total) if positions[j] < first_boundary]
-        middle_indices = [
-            j for j in range(total) if first_boundary <= positions[j] < second_boundary
-        ]
+        middle_indices = [j for j in range(total) if first_boundary <= positions[j] < second_boundary]
         last_indices = [j for j in range(total) if positions[j] >= second_boundary]
 
     first_avg = segment_avg(first_indices)

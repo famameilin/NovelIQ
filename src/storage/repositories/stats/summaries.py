@@ -65,18 +65,7 @@ def insert_stage_summary(
     end_chapter_id: int,
     summary: str,
 ) -> None:
-    """
-    插入阶段性摘要
-
-    存储增量消歧阶段生成的阶段性摘要
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        start_chapter_id: 起始分块ID
-        end_chapter_id: 结束分块ID
-        summary: 阶段性摘要文本（100字以内）
-    """
+    """插入阶段性摘要（增量消歧，100字内）。Args: session/run_id/start_chapter_id/end_chapter_id/summary。"""
     now = datetime.now().isoformat()
     stage_summary = StageSummary(
         run_id=run_id,
@@ -95,19 +84,9 @@ def fetch_chapter_summaries_by_range(
     start_chapter_id: int,
     end_chapter_id: int,
 ) -> list[tuple[int, str]]:
-    """
-    获取指定范围内的分块摘要
+    """获取指定范围内分块摘要（增量消歧取最近N章）。
 
-    用于增量消歧阶段获取最近N章的摘要
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        start_chapter_id: 起始分块ID
-        end_chapter_id: 结束分块ID
-
-    Returns:
-        (chapter_id, summary) 元组列表
+    Args: session/run_id/start…/end…；Returns: (chapter_id, summary) 列表。
     """
     from sqlalchemy import select
 

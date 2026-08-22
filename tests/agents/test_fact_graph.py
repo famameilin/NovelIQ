@@ -95,9 +95,7 @@ def test_fact_graph_rejects_registered_type_change() -> None:
 def test_begin_chapter_keeps_previous_chapter_edges_and_clears_tracking() -> None:
     """2026-08-11 用于验证章节边界把本章增量并入历史，不删除上一章 assert 的关系"""
     graph = FactGraph()
-    graph.register_entities(
-        [_Entity("算盘", "character"), _Entity("猴子", "character")]
-    )
+    graph.register_entities([_Entity("算盘", "character"), _Entity("猴子", "character")])
     graph.apply_relation(_relation("算盘", "猴子", "友情"))
     assert graph.relation_exists("算盘", "猴子", "友情")
 
@@ -111,9 +109,7 @@ def test_begin_chapter_keeps_previous_chapter_edges_and_clears_tracking() -> Non
 def test_reset_chapter_relations_after_begin_chapter_keeps_previous_chapter_edges() -> None:
     """2026-08-11 用于复现跨章污染：上一章 assert 的边不得被本章 reset 误删"""
     graph = FactGraph()
-    graph.register_entities(
-        [_Entity("算盘", "character"), _Entity("猴子", "character")]
-    )
+    graph.register_entities([_Entity("算盘", "character"), _Entity("猴子", "character")])
     graph.apply_relation(_relation("算盘", "猴子", "友情"))
     graph.begin_chapter()
     graph.register_entities([_Entity("顾霜", "character")])
@@ -206,9 +202,7 @@ def test_reset_chapter_relations_rolls_back_support_count() -> None:
     """2026-08-13 P2-9 write_relations 完整替换：reset 回退本章新增边的 support_count，
     重新提交已 assert 边不重复 +1（修复前每次替换 +1 导致支持度虚高）"""
     graph = FactGraph()
-    graph.register_entities(
-        [_Entity("顾霜", "character"), _Entity("顾老", "character")]
-    )
+    graph.register_entities([_Entity("顾霜", "character"), _Entity("顾老", "character")])
     graph.apply_relation(_relation("顾霜", "顾老", "同一人物"))
     key = ("顾老", "顾霜", "同一人物")
     assert graph.relation_attributes[key]["support_count"] == 1
@@ -242,9 +236,7 @@ def test_reset_chapter_relations_rolls_back_support_count_only_for_chapter_edges
 def test_fact_graph_register_entities_updates_tags_and_description() -> None:
     """2026-08-11 用于验证当章登记实体携带标签与简介属性"""
     graph = FactGraph()
-    graph.register_entities(
-        [_RichEntity("算盘", "character", tags=["法宝"], description="能打能算")]
-    )
+    graph.register_entities([_RichEntity("算盘", "character", tags=["法宝"], description="能打能算")])
     assert graph.entity_tags["算盘"] == ["法宝"]
     assert graph.entity_attributes["算盘"]["description"] == "能打能算"
 
@@ -254,9 +246,7 @@ def test_fact_graph_register_entities_applies_attribute_merge_patch() -> None:
     graph = FactGraph(
         history_entity_types={"算盘": "character"},
         history_entity_names={"算盘": "算盘"},
-        history_entity_attributes={
-            "算盘": {"status": "active", "nickname": "老伙计", "description": "能打能算"}
-        },
+        history_entity_attributes={"算盘": {"status": "active", "nickname": "老伙计", "description": "能打能算"}},
     )
     graph.register_entities(
         [
@@ -278,11 +268,7 @@ def _alias_graph(*, flagged: bool = True) -> FactGraph:
     graph = FactGraph(
         history_entity_types={"石轩": "character", "小石头": "character"},
         history_entity_names={"石轩": "石轩", "小石头": "小石头"},
-        history_entity_attributes=(
-            {"石轩": {"is_representative": True}, "小石头": {}}
-            if flagged
-            else {}
-        ),
+        history_entity_attributes=({"石轩": {"is_representative": True}, "小石头": {}} if flagged else {}),
     )
     graph.apply_relation(_relation("石轩", "小石头", "同一人物"))
     return graph

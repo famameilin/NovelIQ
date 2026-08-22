@@ -146,16 +146,12 @@ class TestRobustStandardize:
 class TestSurfaceTensionZValue:
     def test_default_weights_equal(self) -> None:
         """默认等权（settings.metrics.surface_tension_weights）：全 1 的 z 分量为 1.0"""
-        z = surface_tension_z_value(
-            {"fight": 1.0, "exclaim": 1.0, "question": 1.0, "dialogue": 1.0, "pause": 1.0}
-        )
+        z = surface_tension_z_value({"fight": 1.0, "exclaim": 1.0, "question": 1.0, "dialogue": 1.0, "pause": 1.0})
         assert z == pytest.approx(1.0)
 
     def test_custom_weights(self) -> None:
         """自定义权重加权平均"""
-        z = surface_tension_z_value(
-            {"fight": 1.0, "exclaim": 3.0}, weights={"fight": 0.5, "exclaim": 0.5}
-        )
+        z = surface_tension_z_value({"fight": 1.0, "exclaim": 3.0}, weights={"fight": 0.5, "exclaim": 0.5})
         assert z == pytest.approx(2.0)
 
     def test_missing_keys_zero(self) -> None:
@@ -188,17 +184,32 @@ class TestPipeline:
         counts_list = [
             _make_counts(token_count=10, char_count=100, fight_weight_sum=1.0),
             _make_counts(
-                token_count=10, char_count=100, fight_weight_sum=2.0, exclaim_count=5,
-                question_count=2, dialogue_char_count=30, pause_count=4,
+                token_count=10,
+                char_count=100,
+                fight_weight_sum=2.0,
+                exclaim_count=5,
+                question_count=2,
+                dialogue_char_count=30,
+                pause_count=4,
             ),
             _make_counts(token_count=10, char_count=100, fight_weight_sum=3.0, exclaim_count=1),
             _make_counts(
-                token_count=10, char_count=100, fight_weight_sum=4.0, exclaim_count=2,
-                question_count=3, dialogue_char_count=20, pause_count=3,
+                token_count=10,
+                char_count=100,
+                fight_weight_sum=4.0,
+                exclaim_count=2,
+                question_count=3,
+                dialogue_char_count=20,
+                pause_count=3,
             ),
             _make_counts(
-                token_count=10, char_count=100, fight_weight_sum=5.0, exclaim_count=8,
-                question_count=4, dialogue_char_count=50, pause_count=6,
+                token_count=10,
+                char_count=100,
+                fight_weight_sum=5.0,
+                exclaim_count=8,
+                question_count=4,
+                dialogue_char_count=50,
+                pause_count=6,
             ),
         ]
         components = [surface_tension_components(counts) for counts in counts_list]

@@ -76,9 +76,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
 
     assert first_snapshot is not None
     assert second_snapshot is not None
-    assert [(row.from_name, row.to_name, row.is_active) for row in first_snapshot.relations] == [
-        ("林渡", "顾霜", True)
-    ]
+    assert [(row.from_name, row.to_name, row.is_active) for row in first_snapshot.relations] == [("林渡", "顾霜", True)]
     assert second_snapshot.relations == []
     assert {(entity.name, entity.state_chapter_id) for entity in second_snapshot.entities} == {
         ("林渡", 1),

@@ -11,8 +11,6 @@ from .repositories import (
 from .session import (
     DatabaseSession,
     SessionFactory,
-    get_db_session,
-    get_session_from_run_id,
 )
 
 __all__ = [
@@ -24,6 +22,4 @@ __all__ = [
     "RunRepository",
     "SessionFactory",
     "StatsRepository",
-    "get_db_session",
-    "get_session_from_run_id",
 ]

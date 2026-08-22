@@ -311,9 +311,7 @@ async def test_run_preprocess_passes_only_emitter_to_chunk_documents() -> None:
     mock_session = MagicMock()
     mock_chapter_repo = MagicMock()
     mock_chapter_repo.is_preprocess_complete.return_value = False
-    mock_chunk_documents = AsyncMock(
-        return_value=([Chunk(index=0, text="测试文本", start=0, end=4, chapter_id=1)], [])
-    )
+    mock_chunk_documents = AsyncMock(return_value=([Chunk(index=0, text="测试文本", start=0, end=4, chapter_id=1)], []))
 
     with (
         patch("src.workflows.preprocess.ingest_path", return_value=[SimpleNamespace(text="测试文本")]),

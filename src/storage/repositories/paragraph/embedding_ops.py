@@ -61,9 +61,7 @@ def insert_paragraph_embeddings(
             Paragraph.paragraph_id.in_(paragraph_ids),
         )
     ).all()
-    content_hash_by_paragraph = {
-        int(row.paragraph_id): str(row.content_hash) for row in hash_rows
-    }
+    content_hash_by_paragraph = {int(row.paragraph_id): str(row.content_hash) for row in hash_rows}
     model_settings = settings.models.paragraph_embedding
     created_at = datetime.now().isoformat()
     insert_rows = [
@@ -92,16 +90,10 @@ def search_similar_paragraphs(
     min_paragraph_id: int | None = None,
     max_paragraph_id: int | None = None,
 ) -> list[SimilarParagraphRow]:
-    """2026-08-14 用于在同 run 原文自然段中执行有段落边界的 pgvector 检索
+    """2026-08-14 同 run 原文自然段 pgvector 检索（段落边界）。
 
-    2026-08-13 P1-1：ORDER BY 与阈值 WHERE 都改用裸余弦距离算子
-    ``embedding_vector <=> :query``（cos 距离，升序），不再包裹成
-    ``1 - (embedding_vector <=> :query)``，否则 pgvector 无法命中 HNSW ANN 索引。
-    阈值语义等价：similarity >= threshold 即 distance <= 1 - threshold。
-
-    2026-08-14 二期段落化：SELECT 从 paragraph_embeddings JOIN paragraphs
-    （run_id 对齐），段落身份/章节/坐标全部以 paragraphs 事实源为准；
-    边界参数改为 paragraph_id。
+    2026-08-13 P1-1 裸余弦 ``<=>``（升序）命中 HNSW，阈值 distance<=1-threshold；
+    2026-08-14 二期 JOIN paragraphs（run_id/paragraph_id 对齐），以 paragraphs 为事实源。
     """
     distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
     similarity_expr = 1 - distance_expr
@@ -158,15 +150,11 @@ def _similar_paragraph_row(row: Any) -> SimilarParagraphRow:
 
 def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
     """2026-08-07 用于检查指定 run 是否存在自然段向量"""
-    statement = select(ParagraphEmbedding.paragraph_id).where(
-        ParagraphEmbedding.run_id == run_id
-    ).limit(1)
+    statement = select(ParagraphEmbedding.paragraph_id).where(ParagraphEmbedding.run_id == run_id).limit(1)
     return session.execute(statement).scalar_one_or_none() is not None
 
 
-def get_incomplete_paragraph_embedding_paragraph_ids(
-    session: Session, run_id: str
-) -> list[int]:
+def get_incomplete_paragraph_embedding_paragraph_ids(session: Session, run_id: str) -> list[int]:
     """2026-08-14 用于发现"有段落但无可用向量"的缺口段落 ID 列表
 
     二期段落化：段落身份以 paragraphs 表为准，不再按 chunk 聚合判定。
@@ -189,18 +177,10 @@ def get_incomplete_paragraph_embedding_paragraph_ids(
             ParagraphEmbedding.run_id.is_(None),
         )
     )
-    missing_paragraph_ids = {
-        int(row.paragraph_id) for row in session.execute(missing_statement).all()
-    }
-    null_vector_statement = (
-        select(ParagraphEmbedding.paragraph_id)
-        .where(
-            ParagraphEmbedding.run_id == run_id,
-            ParagraphEmbedding.embedding_vector.is_(None),
-        )
+    missing_paragraph_ids = {int(row.paragraph_id) for row in session.execute(missing_statement).all()}
+    null_vector_statement = select(ParagraphEmbedding.paragraph_id).where(
+        ParagraphEmbedding.run_id == run_id,
+        ParagraphEmbedding.embedding_vector.is_(None),
     )
-    null_vector_paragraph_ids = {
-        int(row.paragraph_id)
-        for row in session.execute(null_vector_statement).all()
-    }
+    null_vector_paragraph_ids = {int(row.paragraph_id) for row in session.execute(null_vector_statement).all()}
     return sorted(missing_paragraph_ids | null_vector_paragraph_ids)

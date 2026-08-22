@@ -142,18 +142,22 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     }
 
     with get_session_factory()() as session:
-        rows = session.execute(
-            text(
-                """
+        rows = (
+            session.execute(
+                text(
+                    """
                 SELECT constraint_name
                 FROM information_schema.table_constraints
                 WHERE table_schema = current_schema()
                   AND constraint_type = 'FOREIGN KEY'
                   AND constraint_name = ANY(:constraint_names)
                 """
-            ),
-            {"constraint_names": list(expected_constraints)},
-        ).scalars().all()
+                ),
+                {"constraint_names": list(expected_constraints)},
+            )
+            .scalars()
+            .all()
+        )
 
     assert set(rows) == expected_constraints
 
@@ -162,9 +166,10 @@ def test_fresh_schema_uses_chapter_keys_without_version_tables() -> None:
     """2026-08-19 用于验证新 schema 只保留章节复合键"""
 
     with get_session_factory()() as session:
-        version_tables = session.execute(
-            text(
-                """
+        version_tables = (
+            session.execute(
+                text(
+                    """
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = current_schema()
@@ -173,8 +178,11 @@ def test_fresh_schema_uses_chapter_keys_without_version_tables() -> None:
                     'graph_relation_' || 'versions', 'graph_relation_' || 'events'
                   )
                 """
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         version_columns = session.execute(
             text(
                 """

@@ -48,18 +48,13 @@ def search_paragraphs_by_keywords(
     """
     # 2026-08-13 P2-6：词项统一小写（与 extract_query_terms 口径一致），
     # SQL 与 Python 两侧都以小写对比，避免英文词大小写不一致漏命中
-    normalized = list(
-        dict.fromkeys(kw.strip().lower() for kw in keywords if kw and kw.strip())
-    )
+    normalized = list(dict.fromkeys(kw.strip().lower() for kw in keywords if kw and kw.strip()))
     if not normalized:
         return []
 
     # 2026-08-13 P2-6：查询词项已由 extract_query_terms 统一小写，
     # SQL 侧对原文做 lower() 归一，避免 LIKE 大小写敏感导致英文词漏命中
-    match_expressions = [
-        func.lower(Paragraph.text).contains(keyword, autoescape=True)
-        for keyword in normalized
-    ]
+    match_expressions = [func.lower(Paragraph.text).contains(keyword, autoescape=True) for keyword in normalized]
     stmt = (
         select(
             Paragraph.paragraph_id,
@@ -88,9 +83,7 @@ def search_paragraphs_by_keywords(
     for row in session.execute(stmt).all():
         paragraph_text = str(row.text or "")
         # 2026-08-13 P2-6：与 SQL 侧一致，Python 侧匹配也做 lower 归一
-        matched = tuple(
-            keyword for keyword in normalized if keyword in paragraph_text.lower()
-        )
+        matched = tuple(keyword for keyword in normalized if keyword in paragraph_text.lower())
         if not matched:
             continue
         results.append(

@@ -101,9 +101,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def _chapter_sequence_map(self, run_id: str) -> dict[int, int]:
         """2026-08-19 用于把稳定 chapter_id 映射为历史展示顺序"""
-        rows = self.session.execute(
-            select(Chapter.chapter_id, Chapter.sequence).where(Chapter.run_id == run_id)
-        ).all()
+        rows = self.session.execute(select(Chapter.chapter_id, Chapter.sequence).where(Chapter.run_id == run_id)).all()
         return {int(row.chapter_id): int(row.sequence) for row in rows}
 
     def _chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRecord]:
@@ -247,8 +245,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             select(DialogueRecord)
             .join(
                 Chapter,
-                (Chapter.run_id == DialogueRecord.run_id)
-                & (Chapter.chapter_id == DialogueRecord.chapter_id),
+                (Chapter.run_id == DialogueRecord.run_id) & (Chapter.chapter_id == DialogueRecord.chapter_id),
             )
             .where(DialogueRecord.run_id == run_id)
             .order_by(Chapter.sequence, DialogueRecord.chapter_id, DialogueRecord.start)

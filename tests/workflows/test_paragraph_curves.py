@@ -115,9 +115,7 @@ class TestComputeParagraphCurves:
             )
             for i in range(paragraph_count)
         ]
-        expected_positions = [
-            (i * 100 + (i + 1) * 100) / 2 / 1000 for i in range(paragraph_count)
-        ]
+        expected_positions = [(i * 100 + (i + 1) * 100) / 2 / 1000 for i in range(paragraph_count)]
         metric_rows = [
             _metric(
                 i,
@@ -229,10 +227,7 @@ class TestComputeParagraphCurves:
             _paragraph(i, global_start_char=i * 10, global_end_char=(i + 1) * 10, char_count=10, token_count=10)
             for i in range(10)
         ]
-        metric_rows = [
-            _metric(i, positive_weight_sum=5.0, negative_weight_sum=4.0, token_count=10)
-            for i in range(10)
-        ]
+        metric_rows = [_metric(i, positive_weight_sum=5.0, negative_weight_sum=4.0, token_count=10) for i in range(10)]
 
         rows = compute_paragraph_curves(paragraphs, metric_rows, total_chars=0)
 
@@ -253,8 +248,7 @@ class TestComputeParagraphCurves:
             for i in range(10)
         ]
         metric_rows = [
-            _metric(i, positive_weight_sum=5.0 + i, negative_weight_sum=4.0, token_count=10)
-            for i in range(10)
+            _metric(i, positive_weight_sum=5.0 + i, negative_weight_sum=4.0, token_count=10) for i in range(10)
         ]
 
         rows = compute_paragraph_curves(paragraphs, metric_rows, total_chars=100)
@@ -289,10 +283,7 @@ class TestComputeParagraphCurves:
             _paragraph(i, global_start_char=i * 10, global_end_char=(i + 1) * 10, char_count=10, token_count=10)
             for i in range(10)
         ]
-        metric_rows = [
-            _metric(i, positive_weight_sum=5.0, negative_weight_sum=4.0, token_count=10)
-            for i in range(10)
-        ]
+        metric_rows = [_metric(i, positive_weight_sum=5.0, negative_weight_sum=4.0, token_count=10) for i in range(10)]
 
         default_rows = compute_paragraph_curves(paragraphs, metric_rows, total_chars=100)
         custom_rows = compute_paragraph_curves(
@@ -307,9 +298,7 @@ class TestComputeParagraphCurves:
         )
 
     def test_weights_length_mismatch_raises(self) -> None:
-        paragraphs = [
-            _paragraph(0, global_start_char=0, global_end_char=10, char_count=10, token_count=5)
-        ]
+        paragraphs = [_paragraph(0, global_start_char=0, global_end_char=10, char_count=10, token_count=5)]
         metric_rows = [_metric(0, positive_weight_sum=1.0, negative_weight_sum=0.0, token_count=5)]
 
         with pytest.raises(ValueError):

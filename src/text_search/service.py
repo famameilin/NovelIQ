@@ -26,13 +26,7 @@ def extract_query_terms(query: str, *, max_whole_query_chars: int = _WHOLE_QUERY
     整句原文仅在前缀长度受限时保留为词项；长句只保留拆分词项；
     长句无分隔符时返回空列表（不产生必然不命中的整句全表 LIKE 扫描）。
     """
-    normalized = (
-        unicodedata.normalize("NFC", query)
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-        .strip()
-        .lower()
-    )
+    normalized = unicodedata.normalize("NFC", query).replace("\r\n", "\n").replace("\r", "\n").strip().lower()
     if not normalized:
         return []
     terms = [term for term in _SPLIT_RE.split(normalized) if term]
@@ -208,11 +202,13 @@ class TextSearchService:
         start = paragraph_id - max(0, context_paragraphs)
         end = paragraph_id + max(0, context_paragraphs)
         rows = self._session.execute(
-            select(Paragraph.paragraph_id, Paragraph.text).where(
+            select(Paragraph.paragraph_id, Paragraph.text)
+            .where(
                 Paragraph.run_id == self._run_id,
                 Paragraph.paragraph_id >= start,
                 Paragraph.paragraph_id <= end,
-            ).order_by(Paragraph.paragraph_id.asc())
+            )
+            .order_by(Paragraph.paragraph_id.asc())
         ).all()
         if not any(int(row.paragraph_id) == paragraph_id for row in rows):
             raise ValueError(f"原文段落不存在或跨 run: paragraph_id={paragraph_id}")

@@ -64,7 +64,8 @@ def test_global_stats_returns_aggregated_fields(api_client: TestClient, db_sessi
 
 
 def test_global_stats_without_persisted_rows_returns_none_metrics(
-    api_client: TestClient, db_session,
+    api_client: TestClient,
+    db_session,
 ) -> None:
     novel_id, run_id = create_completed_run(db_session, chapter_texts=["a" * 100])
 
@@ -80,7 +81,9 @@ def test_global_stats_without_persisted_rows_returns_none_metrics(
 
 def test_global_stats_rejects_non_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(
-        db_session, chapter_texts=["a" * 100], status="running",
+        db_session,
+        chapter_texts=["a" * 100],
+        status="running",
     )
 
     resp = _get_global_stats(api_client, novel_id, run_id)

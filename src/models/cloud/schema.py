@@ -129,11 +129,7 @@ class CloudAnalysis(BaseModel):
     @field_validator("focus_characters", "main_characters", "core_cast")
     @classmethod
     def validate_character_lists(cls, values: list[str]) -> list[str]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: diagnosis 正式角色名单只能包含 global-character，未解析代词必须触发重试而不是入库。
-        """
+        """校验正式角色名单只包含可进入主链的全局角色"""
         normalized: list[str] = []
         seen: set[str] = set()
         for value in values:
@@ -149,11 +145,7 @@ class CloudAnalysis(BaseModel):
     @field_validator("arc_scores")
     @classmethod
     def validate_arc_scores(cls, values: dict[str, float]) -> dict[str, float]:
-        """
-        修改时间: 2026-04-29
-        任务: 角色引用分层重构
-        修改原因: arc_scores 是 diagnosis 角色合同源头，不能接收“我/她”等局部引用 key。
-        """
+        """校验角色弧线分数只使用全局角色名"""
         normalized: dict[str, float] = {}
         for raw_name, raw_score in values.items():
             name = raw_name.strip()
@@ -166,11 +158,7 @@ class CloudAnalysis(BaseModel):
         return normalized
 
     def to_dict(self) -> dict:
-        """
-        修改时间: 2026-04-30
-        任务: diagnosis-latest-only-reference-contract
-        修改原因: 诊断结果对外和持久化统一使用当前结构
-        """
+        """转换为对外和持久化使用的当前结构"""
         return {
             "novel_id": self.novel_id,
             "foreshadow_expectation": self.foreshadow_expectation,

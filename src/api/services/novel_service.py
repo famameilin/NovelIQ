@@ -1,8 +1,6 @@
 """
 小说服务类
 
-修改历史:
-
 说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储小说元数据和分析任务
 """
 
@@ -243,10 +241,7 @@ class NovelService:
 
                 # 子查询：为每个小说找到最新任务的 created_at
                 latest_run_subq = (
-                    select(
-                        AnalysisRun.novel_id,
-                        func.max(AnalysisRun.created_at).label("latest_created_at")
-                    )
+                    select(AnalysisRun.novel_id, func.max(AnalysisRun.created_at).label("latest_created_at"))
                     .group_by(AnalysisRun.novel_id)
                     .subquery()
                 )
@@ -255,14 +250,11 @@ class NovelService:
                 LatestRun = aliased(AnalysisRun)
                 stmt = (
                     select(Novel, LatestRun.status)
-                    .outerjoin(
-                        latest_run_subq,
-                        Novel.novel_id == latest_run_subq.c.novel_id
-                    )
+                    .outerjoin(latest_run_subq, Novel.novel_id == latest_run_subq.c.novel_id)
                     .outerjoin(
                         LatestRun,
                         (LatestRun.novel_id == latest_run_subq.c.novel_id)
-                        & (LatestRun.created_at == latest_run_subq.c.latest_created_at)
+                        & (LatestRun.created_at == latest_run_subq.c.latest_created_at),
                     )
                     .order_by(Novel.upload_time.desc())
                 )
@@ -285,20 +277,6 @@ class NovelService:
         except Exception as e:
             logger.warning(f"Failed to list novels from database: {e}")
         return novels
-
-    def get_analysis_count(self, session: Session | None = None) -> int:
-        """
-        从 novels 表查询小说数量
-        """
-        try:
-            with self._get_session(session) as sess:
-                from sqlalchemy import func, select
-
-                result = sess.execute(select(func.count()).select_from(Novel))
-                return result.scalar() or 0
-        except Exception as e:
-            logger.warning(f"Failed to get novel count from database: {e}")
-            return 0
 
     def _delete_novel_source_file(self, file_path: str | None) -> None:
         """

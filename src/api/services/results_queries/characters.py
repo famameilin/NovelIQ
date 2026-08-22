@@ -49,20 +49,7 @@ def _fetch_characters(
     main_characters: list[str] | None = None,
     limit: int | None = 50,
 ) -> list:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: 角色榜只聚合 global-character 准入后的名字，未解析代词或泛称不能进入 results。
-
-    修改时间: 2026-08-09
-    任务: 消歧读侧消费
-    修改原因: 同一人物关系产生的别名（如 贺重明=伯安）需要在角色榜归一到代表名，
-              否则同一角色会拆成多行。
-    修改时间: 2026-08-09
-    任务: 诊断命名对齐
-    修改原因: 诊断输出的 main_characters/focus_characters/arc_scores 使用别名名
-              （如 贺重明），必须归一到代表名后才能参与聚焦评分匹配。
-    """
+    """组装角色榜，过滤局部引用、归并别名并对齐诊断名单"""
     rows = annotation_repo.fetch_characters_with_scores(run_id)
     name_resolution = _build_name_resolution(
         annotation_repo,
@@ -123,10 +110,7 @@ def _fetch_characters(
     if arc_scores is not None and main_characters is not None and focus_characters is not None:
         main_resolved = [name_resolution.get(name, name) for name in main_characters]
         focus_resolved = [name_resolution.get(name, name) for name in focus_characters]
-        arc_resolved = {
-            name_resolution.get(name, name): score
-            for name, score in arc_scores.items()
-        }
+        arc_resolved = {name_resolution.get(name, name): score for name, score in arc_scores.items()}
         result = _calculate_narrative_focus_scores(
             result,
             arc_resolved,

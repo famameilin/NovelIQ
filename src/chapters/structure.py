@@ -59,7 +59,7 @@ def decide_structure(
 
     _drop_trailing_empty_chapters(text, chapters)
     _insert_prologue(text, chapters, prologue_start, config)
-    if not any(text[ch.start_char:ch.end_char].strip() for ch in chapters):
+    if not any(text[ch.start_char : ch.end_char].strip() for ch in chapters):
         return []
     return chapters
 

@@ -104,6 +104,7 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.text == span.text
         assert row.content_hash == hashlib.sha256(span.text.encode("utf-8")).hexdigest()
 
+
 def test_insert_paragraphs_with_nonzero_chunk_offset(db_session) -> None:
     """chunks.char_offset 非零时，global = char_offset + local 的偏移一致性校验通过"""
     run_id = _create_run(db_session)
@@ -283,4 +284,3 @@ def test_db_constraint_rejects_invalid_local_order(db_session) -> None:
     )
     with pytest.raises(IntegrityError):
         db_session.flush()
-

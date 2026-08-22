@@ -24,6 +24,7 @@ class TestLDAConfig(unittest.TestCase):
         config = LDAConfig(lda_batch_size=123)
         self.assertEqual(config.lda_batch_size, 123)
 
+
 class TestTopicWord(unittest.TestCase):
     def test_creation(self) -> None:
         tw = TopicWord(word="测试", weight=0.5)
@@ -52,6 +53,7 @@ class TestTopicResult(unittest.TestCase):
         self.assertEqual(d["weight"], 0.5)
         self.assertEqual(d["label"], "测试主题")
         self.assertEqual(len(d["words"]), 2)
+
 
 class TestTopicModel(unittest.TestCase):
     def test_get_topic_words(self) -> None:
@@ -116,6 +118,7 @@ class TestTopicModel(unittest.TestCase):
         )
         results = model.infer_document_topics([])
         self.assertEqual(results, [])
+
 
 class TestLDATrainer(unittest.TestCase):
     def test_train_basic(self) -> None:

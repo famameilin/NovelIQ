@@ -126,9 +126,7 @@ def _parse_lda_settings(data: dict[str, Any] | None) -> LdaSettings:
     if not data:
         return LdaSettings()
     if "chunksize" in data:
-        raise ValueError(
-            "topic_model.lda.chunksize 已移除，请使用 topic_model.lda.lda_batch_size"
-        )
+        raise ValueError("topic_model.lda.chunksize 已移除，请使用 topic_model.lda.lda_batch_size")
     return LdaSettings(
         alpha=data.get("alpha", "auto"),
         eta=data.get("eta", "auto"),
@@ -181,9 +179,7 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         character_max_iter=data.get("character_max_iter", 100),
         lowess_bandwidth=lowess_bandwidth,
         lowess_min_points=lowess_min_points,
-        surface_tension_weights=(
-            surface_tension_weights if isinstance(surface_tension_weights, dict) else None
-        )
+        surface_tension_weights=(surface_tension_weights if isinstance(surface_tension_weights, dict) else None)
         or MetricsSettings().surface_tension_weights,
     )
 

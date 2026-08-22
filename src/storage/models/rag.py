@@ -42,9 +42,7 @@ class TokenUsage(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
-    accounting_source: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="reported"
-    )
+    accounting_source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="reported")
     created_at: Mapped[str] = mapped_column(String(50), nullable=False)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True

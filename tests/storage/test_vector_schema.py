@@ -22,7 +22,9 @@ def _table_columns(db_session, table_name: str) -> set[str]:
                 """
             ),
             {"schema_name": runtime_schema, "table_name": table_name},
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
 
@@ -138,9 +140,7 @@ def test_ensure_paragraph_embeddings_schema_rebuilds_incompatible_legacy_structu
             "(run_id, chunk_id, paragraph_index, paragraph_text, local_start_char, "
             "local_end_char, global_start_char, global_end_char, embedding_vector) "
             "VALUES ('run-legacy', 0, 0, '旧段落', 0, 3, 0, 3, "
-            "'["
-            + ",".join(["0.1"] * 1024)
-            + "]'::vector)"
+            "'[" + ",".join(["0.1"] * 1024) + "]'::vector)"
         )
     )
     db_session.commit()
@@ -156,10 +156,7 @@ def test_ensure_paragraph_embeddings_schema_rebuilds_incompatible_legacy_structu
     assert "paragraph_text" not in columns
     # 旧数据不回填
     legacy_count = db_session.execute(
-        text(
-            f"SELECT count(*) FROM {runtime_schema}.paragraph_embeddings "
-            "WHERE run_id = 'run-legacy'"
-        )
+        text(f"SELECT count(*) FROM {runtime_schema}.paragraph_embeddings WHERE run_id = 'run-legacy'")
     ).scalar_one()
     assert legacy_count == 0
     # 旧结构外键（指向 chunks）消失，新结构外键指向 paragraphs/analysis_runs
@@ -176,7 +173,9 @@ def test_ensure_paragraph_embeddings_schema_rebuilds_incompatible_legacy_structu
                 """
             ),
             {"table_name": f"{runtime_schema}.paragraph_embeddings"},
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     }
     assert fk_targets == {"paragraphs", "analysis_runs"}
     assert "chunks" not in fk_targets

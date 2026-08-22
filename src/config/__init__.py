@@ -1,4 +1,3 @@
-
 from . import bootstrap
 from .constants import (
     CLASSICAL_PATTERNS,
@@ -8,7 +7,6 @@ from .constants import (
     THREE_ACT_MAPPING,
 )
 from .input_config import (
-    InputConfig,
     TaskModelConfig,
     TaskType,
     load_task_config,
@@ -32,7 +30,6 @@ __all__ = [
     "CLASSICAL_PATTERNS",
     "EmbeddingModelSettings",
     "EVENT_TYPE_SCORES",
-    "InputConfig",
     "LdaSettings",
     "LoggingModuleSettings",
     "LoggingSettings",

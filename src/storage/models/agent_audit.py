@@ -40,9 +40,7 @@ class AgentInvocation(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    __table_args__ = (
-        Index("idx_agent_invocations_run_task", "run_id", "task_type"),
-    )
+    __table_args__ = (Index("idx_agent_invocations_run_task", "run_id", "task_type"),)
 
 
 class AgentTurn(Base):
@@ -81,9 +79,7 @@ class AgentTurn(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    __table_args__ = (
-        Index("idx_agent_turns_invocation_index", "invocation_id", "turn_index"),
-    )
+    __table_args__ = (Index("idx_agent_turns_invocation_index", "invocation_id", "turn_index"),)
 
 
 class AgentToolCall(Base):
@@ -109,9 +105,7 @@ class AgentToolCall(Base):
     tool_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
-    __table_args__ = (
-        Index("idx_agent_tool_calls_turn", "turn_id", "call_index"),
-    )
+    __table_args__ = (Index("idx_agent_tool_calls_turn", "turn_id", "call_index"),)
 
 
 __all__ = ["AgentInvocation", "AgentToolCall", "AgentTurn"]

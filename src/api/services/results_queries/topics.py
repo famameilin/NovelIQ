@@ -31,24 +31,16 @@ def _validate_agg_row(row: object) -> tuple[int, float]:
         raw_topic_id = typed_row.topic_id
         raw_weighted_total = typed_row.weighted_total
     except AttributeError as exc:
-        raise RuntimeError(
-            "paragraph_topics 聚合结果缺少 topic_id 或 weighted_total 字段"
-        ) from exc
+        raise RuntimeError("paragraph_topics 聚合结果缺少 topic_id 或 weighted_total 字段") from exc
 
     if isinstance(raw_topic_id, bool) or not isinstance(raw_topic_id, int):
-        raise RuntimeError(
-            f"paragraph_topics 聚合结果 topic_id 类型错误: {type(raw_topic_id).__name__}"
-        )
+        raise RuntimeError(f"paragraph_topics 聚合结果 topic_id 类型错误: {type(raw_topic_id).__name__}")
     try:
         weighted_total = float(raw_weighted_total)
     except (TypeError, ValueError) as exc:
-        raise RuntimeError(
-            f"paragraph_topics 聚合结果 weighted_total 类型错误: {raw_weighted_total!r}"
-        ) from exc
+        raise RuntimeError(f"paragraph_topics 聚合结果 weighted_total 类型错误: {raw_weighted_total!r}") from exc
     if not isfinite(weighted_total) or weighted_total < 0:
-        raise RuntimeError(
-            f"paragraph_topics 聚合结果 weighted_total 必须是非负有限数: {weighted_total!r}"
-        )
+        raise RuntimeError(f"paragraph_topics 聚合结果 weighted_total 必须是非负有限数: {weighted_total!r}")
     return raw_topic_id, weighted_total
 
 

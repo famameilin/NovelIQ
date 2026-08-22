@@ -29,7 +29,6 @@ from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.database_url import resolve_database_url_from_env
 from src.storage.db import get_session_factory
-from src.storage.id_mapping import TaskIDNotFoundError
 from src.storage.repositories import RunRepository
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
@@ -312,9 +311,8 @@ class TestAnalysis:
         task_manager.create_task(task_id, novel_id)
         api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
         try:
-            with patch.object(
-                analysis_mod.RunRepository,
-                "request_task_cancellation",
+            with patch(
+                "src.api.services.task_application_service.RunRepository.request_task_cancellation",
                 side_effect=RuntimeError("db write failed"),
             ):
                 response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
@@ -508,9 +506,9 @@ class TestAnalysis:
 
         session_factory = get_session_factory()
         # 2026-08-13 P2：heartbeat_at 列无时区，落库统一为 naive UTC 挂钟
-        stale_heartbeat = (
-            datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
-        ).replace(tzinfo=None)
+        stale_heartbeat = (datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)).replace(
+            tzinfo=None
+        )
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = uuid.uuid4().hex[:8]
         cancelling_novel_id = uuid.uuid4().hex[:8]

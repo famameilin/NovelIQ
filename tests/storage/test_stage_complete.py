@@ -113,8 +113,6 @@ def _insert_paragraph_derived_rows(db_session, run_id: str, paragraph_ids: list[
     )
 
 
-
-
 class TestStageCompleteChecks:
     """测试各阶段完整性检查函数"""
 

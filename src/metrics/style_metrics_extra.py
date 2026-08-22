@@ -1,9 +1,4 @@
-"""
-语言风格指标计算模块 (扩展)
-
-从 style_metrics.py 提取扩展指标计算函数
-
-"""
+"""语言风格扩展指标（自 style_metrics 提取）。"""
 
 from __future__ import annotations
 
@@ -14,9 +9,9 @@ from collections import Counter
 import jieba
 
 from src.config import settings
+from src.utils.text_utils import tokenize_words
 
 from .lexicon_metrics import count_mixed_hits
-from .text_utils import tokenize_words
 
 FUNCTION_WORDS = {
     "之",
@@ -134,11 +129,7 @@ def compute_function_word_vector(
 
 
 def _load_semantic_categories() -> dict[str, list[str]]:
-    """
-    加载语义类别词表
-
-    2026-08-15 词表 v3：经 tables 常量（registry 一次性读取 + 类别解析）
-    """
+    """加载语义类别词表（2026-08-15 词表v3：经tables常量registry一次性读取）。"""
     from src.lexicons.tables import SEMANTIC_CATEGORIES
 
     return {key: SEMANTIC_CATEGORIES.get(key, []) for key in SEMANTIC_CATEGORY_KEYS}
@@ -147,10 +138,7 @@ def _load_semantic_categories() -> dict[str, list[str]]:
 def compute_category_density(
     texts: list[str],
 ) -> dict[str, float]:
-    """
-    计算语义类别密度
-
-    """
+    """语义类别密度。"""
     category_terms = _load_semantic_categories()
 
     if not texts:

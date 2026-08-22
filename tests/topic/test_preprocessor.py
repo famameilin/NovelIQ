@@ -53,6 +53,7 @@ class TestTopicPreprocessor(unittest.TestCase):
         self.assertIsInstance(stopwords, set)
         self.assertIn("的", stopwords)
 
+
 class TestTopicPreprocessorWithUserDict(unittest.TestCase):
     def test_user_dict_loading(self) -> None:
         with patch("jieba.load_userdict") as mock_load:

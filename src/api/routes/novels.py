@@ -62,7 +62,7 @@ async def list_novels(
 @router.get("/{novel_id}")
 async def get_novel(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service),  # noqa: B008
+    service: NovelService = Depends(get_novel_service),
 ):
     try:
         return service.get_novel(novel_id)
@@ -73,8 +73,8 @@ async def get_novel(
 @router.delete("/{novel_id}")
 async def delete_novel(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service),  # noqa: B008
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
 ):
     try:
         service.delete_novel(novel_id, task_manager=task_manager)
@@ -87,7 +87,7 @@ async def delete_novel(
 async def batch_delete_novels(
     request: BatchDeleteNovelsRequest,
     service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    task_manager: TaskManager = Depends(get_task_manager),
 ) -> BatchDeleteNovelsResponse:
     """
     批量删除小说

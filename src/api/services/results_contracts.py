@@ -23,15 +23,6 @@ def _default_distribution(value: Any) -> dict[str, float]:
     return value if isinstance(value, dict) else {}
 
 
-def _default_float(value: Any, default: float = 0.0) -> float:
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _convert_narrative_structure(
     result: AggregateResult,
 ) -> NarrativeStructureStats | None:
@@ -45,9 +36,7 @@ def _convert_narrative_structure(
     chapter_narrative_function_share: dict[str, Any] = {}
     for key, value in result.narrative_structure.items():
         if key.startswith("chapter_narrative_function_share_"):
-            chapter_narrative_function_share[
-                key.replace("chapter_narrative_function_share_", "")
-            ] = value
+            chapter_narrative_function_share[key.replace("chapter_narrative_function_share_", "")] = value
 
     return NarrativeStructureStats(
         act1_ratio=result.narrative_structure.get("act1_ratio"),
