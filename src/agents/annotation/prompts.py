@@ -20,8 +20,9 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 - 使用 write_metrics、write_entities、write_character_observations、write_dialogues、
   write_relations 完整写入对应领域；事件用 create_event/update_event 增量写入
-- 每个 write 工具重新调用时完整替换该领域，空数组表示已检查且没有结果；
-  create_event/update_event 是增量操作，重复调用会追加而非替换
+- write_metrics、write_character_observations、write_dialogues、write_relations 重新调用时完整
+  替换该领域，空数组表示已检查且没有结果；write_entities 是追加与更新（新名注册、同名更新，
+  已登记实体不会被撤销）；create_event/update_event 是增量操作，重复调用会追加而非替换
 - 同一回复可以调用多个写工具
 - 六个领域全部有写入后由系统自动冻结当前 chunk，无需也不可调用完成工具
 - 章节摘要由系统用各 chunk 的 summary 自动生成，无需单独提交
@@ -86,7 +87,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   地点作为参与者角色，无单独 location 字段）
 - 每棵树 = 一个完整事件；何时开新树：换参与主体组合、换场景地点、或上一段
   因果已闭合并沉淀为状态
-- update_event(tree_id, items) 向本章已有的树追加子节点；items 每条 {type, description}：
+- update_event(tree_id, items) 向本章已有的树追加子节点；items 每条 {{type, description}}：
   type=main 表示顺延主因链（成为新的链尾），type=secondary 表示当前链尾的次因分支；
   只能更新本章 create_event 返回的树（单章闭环），历史树已冻结不可更新
 - 跨章因果延续：先 search_event 检索前文事件树拿到 tree_id，再 create_event 时填

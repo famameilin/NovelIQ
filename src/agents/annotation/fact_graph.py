@@ -82,8 +82,7 @@ class FactGraph:
         return _stable_relation_key(from_name, to_name, relation_type)
 
     def register_entities(self, entities: list) -> None:
-        """2026-08-11 用于把当前 chunk 实体目录应用到实时事实图（完整替换，attributes 走 JSON Merge Patch）"""
-        self._reset_chapter_entities()
+        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新，历史类型冲突仍拒绝）"""
         for entity in entities:
             key = _norm(entity.name)
             if key in self.history_entity_types:
@@ -115,17 +114,6 @@ class FactGraph:
                         merged[field_name] = value
                 self.entity_attributes[key] = merged
             self.chapter_registered_entities[key] = entity.entity_type
-
-    def _reset_chapter_entities(self) -> None:
-        """2026-08-09 用于在完整替换语义下撤销当章登记的实体"""
-        for key in list(self.chapter_registered_entities):
-            if key not in self.history_entity_types:
-                self.entity_types.pop(key, None)
-                self.entity_names.pop(key, None)
-                self.entity_tags.pop(key, None)
-                self.entity_attributes.pop(key, None)
-                self.entity_state.pop(key, None)
-        self.chapter_registered_entities.clear()
 
     def apply_relation(self, item: RelationInput) -> bool:
         """2026-08-12 用于登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
