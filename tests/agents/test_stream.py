@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -23,6 +24,22 @@ def _collect_events() -> list[tuple[str, str, str]]:
         events.append((event.action, event.content, event.status or ""))
 
     return events, emitter
+
+
+def _tool_call_message(content: str = "完整回复") -> AIMessage:
+    """2026-08-23 用于构造带工具调用的完整回复，满足调用层对工具调用的完成判据"""
+    return AIMessage(
+        content=content,
+        tool_calls=[{"name": "finish", "args": {}, "id": "call-1", "type": "tool_call"}],
+    )
+
+
+def _tool_call_chunk() -> AIMessageChunk:
+    """2026-08-23 用于在流式分片末尾附加工具调用，满足调用层对工具调用的完成判据"""
+    return AIMessageChunk(
+        content="",
+        tool_call_chunks=[{"name": "finish", "args": "{}", "id": "call-1", "index": 0}],
+    )
 
 
 class _StreamingLLM:
@@ -241,6 +258,7 @@ async def test_run_model_call_streams_chunks_to_events() -> None:
         [
             AIMessageChunk(content="你好"),
             AIMessageChunk(content="世界"),
+            _tool_call_chunk(),
         ]
     )
 
@@ -258,7 +276,7 @@ async def test_run_model_call_retries_current_request_on_stream_interruption() -
     """2026-08-11 用于验证断流时用同一 messages 重发当前模型请求"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    model = _FlakyStreamingLLM([AIMessageChunk(content="你好世界")], fail_count=1)
+    model = _FlakyStreamingLLM([AIMessageChunk(content="你好世界"), _tool_call_chunk()], fail_count=1)
 
     response = await run_model_call(model, [AIMessage(content="问")], stream)
 
@@ -321,6 +339,7 @@ async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
                 usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
             ),
             AIMessageChunk(content="世界"),
+            _tool_call_chunk(),
         ],
     )
 
@@ -347,7 +366,7 @@ async def test_run_model_call_keeps_retry_output_when_shorter_than_failed_attemp
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
         failing_chunks=[AIMessageChunk(content="你好好好")],
-        success_chunks=[AIMessageChunk(content="你好")],
+        success_chunks=[AIMessageChunk(content="你好"), _tool_call_chunk()],
     )
 
     response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
@@ -363,7 +382,7 @@ async def test_run_model_call_skips_only_overlapping_prefix_on_retry() -> None:
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
         failing_chunks=[AIMessageChunk(content="你好好好")],
-        success_chunks=[AIMessageChunk(content="你好世界")],
+        success_chunks=[AIMessageChunk(content="你好世界"), _tool_call_chunk()],
     )
 
     response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
@@ -379,7 +398,7 @@ async def test_run_model_call_uses_ainvoke_when_streaming_disabled() -> None:
     """2026-08-12 用于验证 stream_enabled=False（模型 streaming 配置关闭）时走 ainvoke 非流式路径"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    model = _ConfigDisabledStreamingLLM(AIMessage(content="完整回复"))
+    model = _ConfigDisabledStreamingLLM(_tool_call_message())
 
     response = await run_model_call(model, [AIMessage(content="问")], stream)
 
@@ -389,6 +408,7 @@ async def test_run_model_call_uses_ainvoke_when_streaming_disabled() -> None:
     assert events == [
         ("thinking", "模型未启用流式输出，等待完整回复...", ""),
         ("output", "完整回复", ""),
+        ("tool_call", "finish", "started"),
     ]
 
 
@@ -408,7 +428,7 @@ async def test_run_model_call_non_streaming_retries_transient_error(monkeypatch)
     """2026-08-13 P2-6 非流式路径对网络/限流瞬态错误按 total_attempts 重试"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    model = _FlakyNonStreamingLLM(AIMessage(content="完整回复"), fail_count=1)
+    model = _FlakyNonStreamingLLM(_tool_call_message(), fail_count=1)
     sleeps = _noop_sleep(monkeypatch)
 
     response = await run_model_call(model, [AIMessage(content="问")], stream)
@@ -637,9 +657,10 @@ async def test_run_model_call_streams_usage_metadata_into_response() -> None:
         [
             AIMessageChunk(content="你好"),
             AIMessageChunk(
-                content="世界",
+                content="",
                 usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
             ),
+            _tool_call_chunk(),
         ]
     )
 
@@ -667,7 +688,7 @@ async def test_run_model_call_falls_back_to_ainvoke() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_without_stream_uses_plain_ainvoke() -> None:
-    model = _NonStreamingLLM(AIMessage(content="回复"))
+    model = _NonStreamingLLM(_tool_call_message(content="回复"))
     response = await run_model_call(model, [], None)
     assert response.content == "回复"
 
@@ -675,7 +696,7 @@ async def test_run_model_call_without_stream_uses_plain_ainvoke() -> None:
 @pytest.mark.asyncio
 async def test_run_model_call_streams_without_agent_stream() -> None:
     """2026-08-10 用于验证不开启 SSE 时仍优先走 Provider 流式接口"""
-    model = _StreamingLLM([AIMessageChunk(content="你好")])
+    model = _StreamingLLM([AIMessageChunk(content="你好"), _tool_call_chunk()])
 
     response = await run_model_call(model, [], None)
 
@@ -728,7 +749,7 @@ async def test_run_model_call_non_streaming_records_null_ttft(monkeypatch) -> No
     """2026-08-10 用于验证非流式 Provider 的 TTFT 与推理时间记录为 NULL"""
     ticks = iter([0, 250_000_000])
     monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
-    model = _NonStreamingLLM(AIMessage(content="回复"))
+    model = _NonStreamingLLM(_tool_call_message(content="回复"))
     captured: dict[str, object] = {}
 
     def on_turn_complete(message, timing) -> None:
@@ -802,7 +823,7 @@ async def test_run_model_call_non_streaming_notes_provider_fallback(monkeypatch)
     """
     ticks = iter([0, 250_000_000])
     monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
-    model = _NonStreamingLLM(AIMessage(content="回复"))
+    model = _NonStreamingLLM(_tool_call_message(content="回复"))
     captured: dict[str, object] = {}
 
     def on_turn_complete(message, timing) -> None:
@@ -848,7 +869,7 @@ async def test_emit_tool_results_marks_failure_by_content() -> None:
 async def test_run_model_call_uses_mock_astream_when_present() -> None:
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    model = _StreamingLLM([])
+    model = _StreamingLLM([_tool_call_chunk()])
 
     response = await run_model_call(model, [], stream)
 
@@ -962,3 +983,101 @@ def test_merge_tool_call_chunks_carries_raw_args() -> None:
     assert calls[0]["name"] == "push_case"
     assert calls[0]["args"] == {"description": "关键词"}
     assert calls[0]["raw_args"] == '{"description": "关键词"}'
+
+
+class _ScriptedStreamingLLM:
+    """2026-08-22 用于按脚本逐次返回流式分片，验证无工具回复的调用层重发"""
+
+    def __init__(self, scripts: list[list[Any]]):
+        self.scripts = [list(script) for script in scripts]
+        self.captured_messages: list[list[Any]] = []
+
+    def bind_tools(self, tools):
+        return self
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        for chunk in self.scripts.pop(0):
+            yield chunk
+
+
+async def _no_sleep(_seconds: float) -> None:
+    """2026-08-22 用于在重试测试中跳过退避等待"""
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_retries_when_reply_has_no_tool_call(monkeypatch) -> None:
+    """2026-08-22 用于验证无工具回复视同调用未正常结束：退避重发后返回正常回复"""
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
+    truncated = AIMessageChunk(content="", additional_kwargs={"reasoning_content": "思考被截断"})
+    complete = AIMessageChunk(
+        content="",
+        tool_call_chunks=[{"name": "write_metrics", "args": "{}", "id": "call-1", "index": 0}],
+    )
+    model = _ScriptedStreamingLLM([[truncated], [complete]])
+
+    response = await run_model_call(model, [], None)
+
+    assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
+    assert len(model.captured_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_raises_after_no_tool_call_retry_exhaustion(monkeypatch) -> None:
+    """2026-08-22 用于验证无工具回复重试耗尽后上抛，而非把空回复交回上层协议处理"""
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
+    truncated = AIMessageChunk(content="", additional_kwargs={"reasoning_content": "思考被截断"})
+    model = _ScriptedStreamingLLM([[truncated], [truncated]])
+
+    with pytest.raises(RuntimeError, match="未正常结束"):
+        await run_model_call(model, [], None, total_attempts=2)
+
+    assert len(model.captured_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_retries_plain_text_reply_by_default(monkeypatch) -> None:
+    """2026-08-22 用于验证默认即要求工具调用：纯文本回复视同未正常结束并重发"""
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
+    text_only = AIMessageChunk(content="普通文本回复")
+    complete = AIMessageChunk(
+        content="",
+        tool_call_chunks=[{"name": "write_metrics", "args": "{}", "id": "call-1", "index": 0}],
+    )
+    model = _ScriptedStreamingLLM([[text_only], [complete]])
+
+    response = await run_model_call(model, [], None)
+
+    assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
+    assert len(model.captured_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_non_streaming_retries_missing_tool_call(monkeypatch) -> None:
+    """2026-08-22 用于验证非流式路径对无工具回复同样按调用层故障重发"""
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
+
+    class _NoStreamLLM:
+        """2026-08-22 用于模拟 streaming=False 且首次响应缺失工具调用的模型"""
+
+        streaming = False
+
+        def __init__(self):
+            self.responses = [
+                AIMessage(content="", additional_kwargs={"reasoning_content": "截断"}),
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "write_metrics", "args": {}, "id": "call-1", "type": "tool_call"}],
+                ),
+            ]
+            self.captured_messages: list[list[Any]] = []
+
+        async def ainvoke(self, messages):
+            self.captured_messages.append(list(messages))
+            return self.responses.pop(0)
+
+    model = _NoStreamLLM()
+    response = await run_model_call(model, [], None)
+
+    assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
+    assert len(model.captured_messages) == 2

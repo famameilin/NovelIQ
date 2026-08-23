@@ -65,6 +65,16 @@ def _retry_backoff_seconds(attempt: int) -> float:
     return min(0.5 * (2 ** max(attempt, 1)), 3.0)
 
 
+def _is_call_complete(message: Any) -> bool:
+    """2026-08-22 用于判定一次模型调用是否正常结束：响应包含至少一个工具调用
+
+    本项目所有 agent（标注/诊断）的有效产出均经工具调用产生，纯文本回复不推进任何状态。
+    网关在思考阶段静默截断流式响应时，聚合结果正是"仅推理、无正文、无工具调用"的空回复；
+    该形态与断流统一走调用层重发，不再进入上层协议处理，避免传输故障冒充模型行为问题。
+    """
+    return bool(getattr(message, "tool_calls", None))
+
+
 def _truncate(text: str, limit: int = _MAX_TOOL_SUMMARY_CHARS) -> str:
     """截断过长摘要，避免工具结果刷爆事件负载"""
     if len(text) <= limit:
@@ -474,6 +484,9 @@ async def run_model_call(
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
     非流式路径同样遵守 total_attempts 重试语义，但只对网络/限流等瞬态错误
     （_is_transient_model_error）重发请求，其余错误直接失败。
+    2026-08-22 把"响应不含任何工具调用"视同调用未正常结束（涵盖网关思考阶段
+    静默截断产生的空回复），与瞬态错误共用 total_attempts 预算退避重发；
+    耗尽后上抛 RuntimeError。回合审计回调先于该判定执行，截断回合仍留痕。
     on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
     """
     from src.config import settings
@@ -492,7 +505,6 @@ async def run_model_call(
         while True:
             try:
                 response = await model.ainvoke(messages)
-                break
             except StreamEmitError:
                 # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
                 raise
@@ -512,15 +524,31 @@ async def run_model_call(
                     await stream.thinking(f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）")
                 await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
                 continue
-        timing = ModelCallTiming(
-            model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
-            timing_notes=("provider_non_streaming",),
-        )
-        if stream is not None:
-            await emit_completed_model_call(stream, response)
-        if on_turn_complete is not None:
-            on_turn_complete(response, timing)
-        return response
+            timing = ModelCallTiming(
+                model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
+                timing_notes=("provider_non_streaming",),
+            )
+            if stream is not None:
+                await emit_completed_model_call(stream, response)
+            if on_turn_complete is not None:
+                on_turn_complete(response, timing)
+            # 2026-08-22 调用未正常结束（响应不含工具调用）视同调用层故障：
+            # 与瞬态错误共用 total_attempts 预算退避重发，耗尽后上抛
+            if not _is_call_complete(response):
+                if retries_remaining <= 0:
+                    logger.warning("模型调用未正常结束且重试已耗尽")
+                    raise RuntimeError("模型调用未正常结束：响应未包含任何工具调用，重发后仍未恢复")
+                failed_attempt = total_attempts - retries_remaining
+                retries_remaining -= 1
+                logger.warning(
+                    "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
+                    retries_remaining,
+                )
+                if stream is not None:
+                    await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
+                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+                continue
+            return response
 
     retries_remaining = max(0, total_attempts - 1)
     skip_output_prefix = ""
@@ -567,6 +595,26 @@ async def run_model_call(
             response.usage_metadata = cast(UsageMetadata, retried_usage)
         if on_turn_complete is not None:
             on_turn_complete(response, aggregator.timing())
+        # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）
+        # 视同调用层故障：退避重发同一请求，耗尽后上抛交由上层失败审计收口
+        if not _is_call_complete(response):
+            if retries_remaining <= 0:
+                logger.warning("模型调用未正常结束且重试已耗尽")
+                raise RuntimeError("模型调用未正常结束：响应未包含任何工具调用，重发后仍未恢复")
+            failed_attempt = total_attempts - retries_remaining
+            retries_remaining -= 1
+            logger.warning(
+                "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
+                retries_remaining,
+            )
+            if aggregator._usage_metadata:
+                _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
+            skip_output_prefix = "".join(aggregator._content_parts)
+            announced_tools = set(aggregator._announced_tools)
+            if stream is not None:
+                await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
+            await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+            continue
         return response
 
 
