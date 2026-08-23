@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 from sqlalchemy import select
 
@@ -116,19 +114,7 @@ def _full_annotation(
                             {"entity": "顾霜", "role": "主体"},
                             {"entity": "山门", "role": "地点"},
                         ],
-                        anchor_paragraph_ids=[0],
                         causal_event_refs=[],
-                        char_start=0,
-                        char_end=10,
-                        text_hash=hashlib.sha256(text[:10].encode("utf-8")).hexdigest(),
-                        evidence=[
-                            {
-                                "paragraph_ids": [0],
-                                "char_start": 0,
-                                "char_end": 10,
-                                "text_hash": hashlib.sha256(text[:10].encode("utf-8")).hexdigest(),
-                            }
-                        ],
                     )
                 ],
                 relations=[
@@ -809,7 +795,7 @@ def test_persist_writes_event_shadow_node(db_session) -> None:
     assert node.chapter_order == 1
     assert node.description == "顾霜进入山门"
     assert node.char_start == 0
-    assert node.char_end == 10
+    assert node.char_end == len(text)
     assert node.anchor_paragraph_ids == [0]
     assert node.causal_event_refs == []
     assert node.tree_id == "tree-main"

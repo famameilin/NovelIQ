@@ -25,6 +25,7 @@ from src.storage.models import (
     DialogueRecord,
     ForeshadowingThread,
     GraphFact,
+    Paragraph,
 )
 from src.storage.models.graph import ChapterBoundary
 from src.storage.repositories import (
@@ -134,17 +135,25 @@ def _persist_dialogue_records(
 
     2026-08-18 P3：按事件锚点列表写入，对话弱关联到完全包含其字符区间的事件。
     2026-08-22锚点直接取服务端生成的 event.node_id。
+    2026-08-22 重构：BoundEvent 不再携带字符区间，弱关联改用章级原文区间。
     """
     repository = DialogueRecordRepository(session)
-    for chunk in result.annotation.chunks:
-        event_anchors = [
-            (
-                event.node_id,
-                event.char_start,
-                event.char_end,
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(
+                Paragraph.run_id == result.run_id,
+                Paragraph.chapter_id == result.chapter_id,
             )
-            for event in chunk.events
-        ]
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
+    )
+    if not paragraphs:
+        raise ValueError(f"对话落库缺少章节段落: run_id={result.run_id} chapter_id={result.chapter_id}")
+    char_start = min(int(row.local_start_char) for row in paragraphs)
+    char_end = max(int(row.local_end_char) for row in paragraphs)
+    for chunk in result.annotation.chunks:
+        event_anchors = [(event.node_id, char_start, char_end) for event in chunk.events]
         repository.sync_dialogues(
             run_id=result.run_id,
             chapter_id=result.chapter_id,

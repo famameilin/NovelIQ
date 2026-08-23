@@ -136,6 +136,20 @@ class GraphRepository(BaseRepository[GraphFact]):
             annotation_id=str(annotation.annotation_id),
         )
 
+    def resolve_persisted_boundary(self, run_id: str) -> ChapterBoundary | None:
+        """2026-08-23 用于构造覆盖全部已提交数据的历史边界（不依赖 annotation record）"""
+        chapters = self._chapter_rows(run_id)
+        if not chapters:
+            return None
+        return ChapterBoundary(
+            run_id=run_id,
+            chapter_id=int(chapters[-1].chapter_id),
+            chapter_order=len(chapters),
+            first_chapter_id=int(chapters[0].chapter_id),
+            last_chapter_id=int(chapters[-1].chapter_id),
+            annotation_id="",
+        )
+
     def previous_chapter_boundary(self, run_id: str, *, chapter_order: int) -> ChapterBoundary | None:
         """2026-08-19 用于按章节顺序读取最近的前一章节边界"""
         chapters = self._chapter_rows(run_id)
@@ -390,7 +404,7 @@ class GraphRepository(BaseRepository[GraphFact]):
 
     def fetch_latest_entities(self, run_id: str, *, entity_type: str | None = None) -> list[EntitySnapshotRow]:
         """2026-08-19 用于读取当前章节边界的实体状态"""
-        boundary = self.resolve_chapter_boundary(run_id)
+        boundary = self.resolve_persisted_boundary(run_id)
         if boundary is None:
             return []
         return [
@@ -402,7 +416,7 @@ class GraphRepository(BaseRepository[GraphFact]):
 
     def fetch_latest_relations(self, run_id: str, *, active_only: bool = True) -> list[RelationSnapshotRow]:
         """2026-08-19 用于读取当前章节边界的关系状态"""
-        boundary = self.resolve_chapter_boundary(run_id)
+        boundary = self.resolve_persisted_boundary(run_id)
         return [] if boundary is None else self.fetch_relation_snapshots(boundary, active_only=active_only)
 
     def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:

@@ -27,7 +27,6 @@ from src.agents.annotation.schema import (
     EntityType,
     PendingCase,
     ResolvedCase,
-    TextEvidence,
 )
 from src.agents.stream import AgentStream
 from src.api.models.events import StreamEvent
@@ -165,19 +164,11 @@ def _merge_sub_chunk_annotations(
     first_chunk = annotations[0].chunks[0]
     merged_events: list[BoundEvent] = []
     merged_foreshadowings = []
-    for index, annotation in enumerate(annotations):
+    for annotation in annotations:
         sub_chunk = annotation.chunks[0]
-        for event in sub_chunk.events:
-            remapped = _remap_bound_event(event, sub_chunk_offsets[index])
-            # 2026-08-22node_id/tree_id/setup_node_id 均为服务端一次性
-            # uuid，合并无需重排；Evidence 中的全局段落 ID 是持久化锚点的权威值，
-            # 合并后同步写入 anchor_paragraph_ids
-            if remapped.evidence:
-                global_ids = list(remapped.evidence[0].paragraph_ids)
-            else:
-                global_ids = list(remapped.anchor_paragraph_ids)
-            remapped = remapped.model_copy(update={"anchor_paragraph_ids": global_ids})
-            merged_events.append(remapped)
+        # 2026-08-22 重构：事件不再携带锚点/字符区间/证据，章级证据由
+        # 持久化层按整章统一盖章，合并无需任何重排或坐标平移
+        merged_events.extend(sub_chunk.events)
         for foreshadowing in sub_chunk.foreshadowings:
             merged_foreshadowings.append(foreshadowing.model_copy())
     return BoundChapterAnnotation(
@@ -213,33 +204,6 @@ def _remap_bound_dialogue(dialogue: BoundDialogue, sub_chunk_offset: int) -> Bou
         update={
             "start": dialogue.start + sub_chunk_offset,
             "end": dialogue.end + sub_chunk_offset,
-        }
-    )
-
-
-def _remap_bound_event(event: BoundEvent, sub_chunk_offset: int) -> BoundEvent:
-    """2026-08-18 用于把子块相对事件锚点坐标平移回章文本坐标（首块偏移 0 不变）
-
-    事件锚点的 char_start/char_end 和 evidence 内的 char_start/char_end 都需要
-    按子块偏移量平移；anchor_paragraph_ids、causal_event_refs、description、
-    participants、text_hash 不变（text_hash 基于段落文本，与章内偏移无关）。
-    """
-    if sub_chunk_offset <= 0:
-        return event
-    new_evidence = [
-        TextEvidence(
-            paragraph_ids=list(ev.paragraph_ids),
-            char_start=ev.char_start + sub_chunk_offset,
-            char_end=ev.char_end + sub_chunk_offset,
-            text_hash=ev.text_hash,
-        )
-        for ev in event.evidence
-    ]
-    return event.model_copy(
-        update={
-            "char_start": event.char_start + sub_chunk_offset,
-            "char_end": event.char_end + sub_chunk_offset,
-            "evidence": new_evidence,
         }
     )
 
@@ -363,14 +327,14 @@ def _build_fact_graph(
     session_factory: Callable[[], Session],
     run_id: str,
 ) -> FactGraph:
-    """2026-08-09 用于在首个章节 Agent 启动时从库加载常驻事实图"""
+    """2026-08-09 创建；2026-08-23 用于启动时从库直接加载已提交事实图（不依赖 annotation record）"""
     from src.agents.annotation.fact_graph import FactGraph, _stable_relation_key
     from src.storage.repositories.graph import GraphRepository
 
     read_session = session_factory()
     try:
         graph_repo = GraphRepository(read_session)
-        latest = graph_repo.resolve_chapter_boundary(run_id)
+        latest = graph_repo.resolve_persisted_boundary(run_id)
         history_entity_types: dict[str, EntityType] = {}
         history_entity_names: dict[str, str] = {}
         history_entity_tags: dict[str, list[str]] = {}

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -48,8 +46,6 @@ def _annotation(
     自动构造一个锚定整个 chunk 文本的 BoundEvent；2026-08-22 下
     伏笔 setup_node_id 直接指向该事件节点 id。
     """
-    import hashlib
-
     entities = [
         BoundEntity(
             name=name,
@@ -59,7 +55,6 @@ def _annotation(
     ]
     events: list[BoundEvent] = []
     if foreshadowing is not None:
-        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         # setup_node_id 直接指向本章事件节点 id
         setup_node_id = f"evt-setup-{chunk_id}"
         events.append(
@@ -70,19 +65,7 @@ def _annotation(
                 cause_role="root",
                 description=f"事件-{text[:6]}",
                 participants=[],
-                anchor_paragraph_ids=[0],
                 causal_event_refs=[],
-                char_start=0,
-                char_end=len(text),
-                text_hash=text_hash,
-                evidence=[
-                    {
-                        "paragraph_ids": [0],
-                        "char_start": 0,
-                        "char_end": len(text),
-                        "text_hash": text_hash,
-                    }
-                ],
             )
         )
         foreshadowing = foreshadowing.model_copy(update={"setup_node_id": setup_node_id})
@@ -610,8 +593,6 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
         texts=["顾霜拔剑喝止，我们走。"],
         title="对话事件端到端",
     )
-    chunk_text = "顾霜拔剑喝止，我们走。"
-    text_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
     annotation = BoundChapterAnnotation(
         chapter_summary="顾霜拔剑喝止",
         chunks=[
@@ -643,19 +624,7 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                         cause_role="root",
                         description="顾霜拔剑喝止",
                         participants=[],
-                        anchor_paragraph_ids=[0],
                         causal_event_refs=[],
-                        char_start=0,
-                        char_end=len(chunk_text),
-                        text_hash=text_hash,
-                        evidence=[
-                            {
-                                "paragraph_ids": [0],
-                                "char_start": 0,
-                                "char_end": len(chunk_text),
-                                "text_hash": text_hash,
-                            }
-                        ],
                     )
                 ],
                 relations=[],

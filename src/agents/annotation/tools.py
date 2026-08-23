@@ -63,7 +63,6 @@ from .schema import (
     ResolvedCase,
     SearchResult,
     SetupStatus,
-    TextEvidence,
     TextSearchResult,
     Tone,
     UpdateEventInput,
@@ -291,14 +290,6 @@ class AnnotationToolLedger:
         """2026-08-22服务端一次生成节点 id（=最终落库 event_id）"""
         return str(uuid4())
 
-    def _chunk_evidence(self) -> tuple[list[int], int, int, str, list[TextEvidence]]:
-        """2026-08-22派生整 chunk 范围的章级证据（与原事件证据同偏移空间）"""
-        if self.paragraph_info is None:
-            raise AnnotationInvariantError("paragraph_info 缺失，无法派生事件证据（系统不变量被破坏）")
-        all_ids = list(self.paragraph_info.paragraph_ids)
-        char_start, char_end, text_hash, evidence = self._derive_event_evidence(all_ids)
-        return all_ids, char_start, char_end, text_hash, evidence
-
     # ------------------------------------------------------------------
     # 事件树写入（create_event / update_event）
     # ------------------------------------------------------------------
@@ -342,7 +333,6 @@ class AnnotationToolLedger:
 
         tree_id = self._tree_id()
         root_node_id = self._node_id()
-        anchor_ids, char_start, char_end, text_hash, evidence = self._chunk_evidence()
 
         causal_refs: list[str] = []
         cross_chapter = False
@@ -361,11 +351,6 @@ class AnnotationToolLedger:
             participants=[EventParticipantInput(**p.model_dump(mode="python")) for p in payload.participants],
             is_foreshadow_setup=payload.isforeshadowing,
             causal_event_refs=causal_refs,
-            anchor_paragraph_ids=anchor_ids,
-            char_start=char_start,
-            char_end=char_end,
-            text_hash=text_hash,
-            evidence=evidence,
         )
         self.event_trees[tree_id] = {
             "tree_id": tree_id,
@@ -432,7 +417,6 @@ class AnnotationToolLedger:
             hint = "属于前文章节的树已闭环，不能 update_event；如需延续请 create_event 并填 cause_tree_id"
             raise ValueError(f"update_event.tree_id 不存在或不可更新: {payload.tree_id}（{hint}）")
 
-        anchor_ids, char_start, char_end, text_hash, evidence = self._chunk_evidence()
         appended: list[dict[str, Any]] = []
         for item in payload.items:
             node_id = self._node_id()
@@ -447,11 +431,6 @@ class AnnotationToolLedger:
                 participants=[],
                 is_foreshadow_setup=False,
                 causal_event_refs=[],
-                anchor_paragraph_ids=anchor_ids,
-                char_start=char_start,
-                char_end=char_end,
-                text_hash=text_hash,
-                evidence=evidence,
             )
             tree["nodes"][node_id] = {
                 "node_id": node_id,
@@ -739,38 +718,8 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
     # 事件锚点与证据派生（2026-08-18 事件森林/DAG）
     # ------------------------------------------------------------------
-
-    def _derive_event_evidence(
-        self,
-        anchor_paragraph_ids: list[int],
-    ) -> tuple[int, int, str, list[TextEvidence]]:
-        """2026-08-18 用于按段落序号派生事件锚点字符范围、文本哈希和 TextEvidence
-
-        段落序号是 0 基 chunk 内序号（对应 prompt 中 ¶N 标记）。合并字符范围取
-        所有锚点段落的 min(start) 到 max(end)；文本哈希按拼接段落文本计算。
-        """
-        if self.paragraph_info is None:
-            raise AnnotationInvariantError("paragraph_info 缺失，无法派生事件锚点（系统不变量被破坏）")
-        info = self.paragraph_info
-        for idx in anchor_paragraph_ids:
-            if not info.is_valid_index(idx):
-                raise ValueError(
-                    f"event.anchor_paragraph_ids 包含无效段落序号: {idx}（有效范围 0..{len(info.paragraph_ids) - 1}）"
-                )
-        char_start, char_end = info.char_span_for(anchor_paragraph_ids)
-        # 证据哈希必须覆盖原文字符切片，而不是把去掉段落间空白的文本重新拼接，
-        # 否则多段落事件的哈希会与持久化章节原文不一致
-        anchor_text = self.current_chunk_text[char_start:char_end]
-        text_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
-        evidence = [
-            TextEvidence(
-                paragraph_ids=info.global_paragraph_ids(anchor_paragraph_ids),
-                char_start=char_start,
-                char_end=char_end,
-                text_hash=text_hash,
-            )
-        ]
-        return char_start, char_end, text_hash, evidence
+    # 2026-08-22 重构：证据升为章级单份，由持久化层统一盖章，
+    # 账本侧不再持有任何锚点/哈希派生逻辑
 
     def _validate_domain_duplicates(self, payloads: dict[str, Any]) -> None:
         """2026-08-07 用于拒绝当前 chunk 各领域的重复语义事实"""
@@ -1159,7 +1108,7 @@ def build_annotation_tools(
 
     @tool
     def write_entities(entities: list[EntityInput]) -> str:
-        """2026-08-08 用于完整替换当前 chunk 实体出现目录（单列表）"""
+        """2026-08-08 创建；2026-08-23 用于向当前 chunk 追加新实体或更新已有实体（单列表，不撤销已登记）"""
         if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried:
             raise AnnotationAuthorizationError("提交 write_entities 前必须先调用 search_graph 查询已登记实体")
         payload = EntityDirectoryInput(entities=entities)

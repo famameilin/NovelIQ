@@ -154,10 +154,7 @@ CaseAction = Literal["dialogue", "fact", "foreshadowing", "close"]
 CaseState = Literal["active", "resolved"]
 DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 
-# 2026-08-18 事件森林/DAG 边类型定稿三类；sequence 不落库，按章节顺序和事件锚点生成派生排序
-EventEdgeType = Literal["contains", "causal", "foreshadowing"]
-
-# 2026-08-19事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
+# 2026-08-19 事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
 # 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
 EventCauseRole = Literal["root", "main", "secondary"]
 
@@ -429,7 +426,10 @@ DialogueSubmissionItem = tuple[int, DialogueVerdict, str | None, Tone | None]
 class EventParticipantInput(StrictModel):
     """2026-08-11 用于描述实体在当前事件中的闭合角色"""
 
-    entity: str = Field(min_length=1)
+    entity: str = Field(
+        min_length=1,
+        description="参与者实体名称，必须是图上已登记实体名（不是 name 字段）",
+    )
     role: EventParticipantRole = Field(
         description="参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点作为参与者角色）"
     )
@@ -619,7 +619,7 @@ class RelationInput(StrictModel):
             self.to_entity,
             label="relation.to_entity",
         )
-        if self.from_entity == self.to_entity:
+        if self.from_entity == self.to_entity and self.relation_type != RelationType.SAME_CHARACTER:
             raise ValueError("关系两端不能是同一名称")
         return self
 
@@ -671,10 +671,11 @@ class BoundDialogue(StrictModel):
 
 
 class BoundEvent(StrictModel):
-    """2026-08-22事件树节点（服务端派生角色、id 与章级证据）
+    """2026-08-22事件树节点（服务端派生角色、id；章级证据由持久化层盖章）
 
     节点由 create_event/update_event 服务端生成：node_id 即最终落库 event_id，
     因果边仅允许 root 携带跨章前驱（cause_tree_id 的根节点），环构造性不可能。
+    2026-08-22 重构：证据升为章级单份，节点不再携带锚点/字符区间/哈希/证据。
     """
 
     node_id: str = Field(min_length=1, description="服务端派生的节点 id（=落库 event_id）")
@@ -686,12 +687,6 @@ class BoundEvent(StrictModel):
     is_foreshadow_setup: bool = False
     # 仅跨章树的根节点携带 [cause_tree_id 根节点 id]，其余恒为空
     causal_event_refs: list[str] = Field(default_factory=list)
-    # 服务端派生章级证据（整 chunk 范围，与原事件证据同偏移空间）：
-    anchor_paragraph_ids: list[int] = Field(min_length=1)
-    char_start: int = Field(ge=0)
-    char_end: int = Field(gt=0)
-    text_hash: str = Field(min_length=1)
-    evidence: list[TextEvidence] = Field(min_length=1)
 
 
 class BoundRelation(RelationInput):

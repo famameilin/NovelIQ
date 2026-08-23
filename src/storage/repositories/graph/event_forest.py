@@ -30,6 +30,7 @@ class EventNodeRow:
     causal_event_refs: list[str]
     tree_id: str
     cause_role: str
+    payload_path: str
 
 
 @dataclass(frozen=True)
@@ -209,6 +210,7 @@ class EventForestRepository:
                 causal_event_refs=list(node.causal_event_refs),
                 tree_id=node.tree_id,
                 cause_role=node.cause_role,
+                payload_path=node.payload_path,
             )
             for node in rows
         ]
@@ -315,7 +317,12 @@ class EventForestRepository:
             nodes_by_tree.setdefault(node.tree_id, []).append(node)
 
         def sort_key(node: EventNodeRow) -> tuple[int, int, int, str]:
-            return (node.chapter_order, node.char_start, node.char_end, node.event_id)
+            # 章级证据盖章后同章节点 char_start/char_end 相同，不能再靠字符区间排主链。
+            # payload_path 末段是写入序号（chunks/{id}/events/{index}），配合 cause_role 恢复树序。
+            tail = node.payload_path.rsplit("/", 1)[-1]
+            ordinal = int(tail) if tail.isdigit() else 0
+            role_rank = {"root": 0, "main": 1, "secondary": 2}.get(node.cause_role, 9)
+            return (node.chapter_order, role_rank, ordinal, node.event_id)
 
         trees: list[tuple[EventTreeRow, tuple[int, int, int, str]]] = []
         for tree_id, nodes in nodes_by_tree.items():

@@ -8,7 +8,6 @@ AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计�
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -78,19 +77,7 @@ def validate_bound_annotation(
             actual = chunk_text[dialogue.start : dialogue.end]
             if actual != dialogue.content:
                 raise ValueError(f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}")
-        for event in chunk.events:
-            if event.char_start < 0 or event.char_end > len(chunk_text):
-                raise ValueError(
-                    f"事件锚点超出原文范围: chunk_id={chunk.chunk_id} "
-                    f"char_start={event.char_start} char_end={event.char_end} "
-                    f"text_length={len(chunk_text)}"
-                )
-            if event.char_end <= event.char_start:
-                raise ValueError(f"事件锚点 char_end 必须大于 char_start: chunk_id={chunk.chunk_id}")
-            anchor_text = chunk_text[event.char_start : event.char_end]
-            actual_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
-            if actual_hash != event.text_hash:
-                raise ValueError(f"事件锚点文本哈希不一致: chunk_id={chunk.chunk_id}")
+        # 2026-08-22 重构：事件不再携带锚点/字符区间/哈希，章级证据由持久化层盖章
 
 
 def _model_provider(llm: Any) -> str:
@@ -199,7 +186,6 @@ async def _run_single_attempt(
             "messages": initial_messages,
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )

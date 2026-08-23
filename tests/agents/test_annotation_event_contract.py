@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.annotation.tools import build_annotation_tools
+from src.agents.annotation.schema import ChunkParagraphInfo
+from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from tests.agents.test_annotation_event_history_tools import (
     _EventHistoryService,
     _history_tree,
@@ -164,3 +165,40 @@ class _QueryServiceShim:
     def fetch_active_case_details(self, case_id):
         del case_id
         return None
+
+
+def _offset_paragraph_ledger() -> AnnotationToolLedger:
+    """2026-08-22 用于构造全局段落 id 与 0 基局部下标错位的账本（复现第 2 章坐标场景）"""
+    chunk_text = "\u201c住手\u201d回荡"
+    return AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=2,
+        current_chunk_id=20,
+        current_chunk_text=chunk_text,
+        allow_future_context=False,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[44, 45],
+            char_spans=[(0, 4), (4, len(chunk_text))],
+            texts=["\u201c住手\u201d", "回荡"],
+        ),
+    )
+
+
+def test_create_event_does_not_require_local_paragraph_indices() -> None:
+    """2026-08-22 回归：create_event 不再按段落锚点派生证据
+
+    节点不携带锚点/字符区间/哈希/证据；章级证据由持久化层盖章。
+    全局 paragraph_id 与局部下标错位时，create_event 仍应成功。
+    """
+    ledger = _offset_paragraph_ledger()
+    tools = _tools_with_entities_shim(ledger)
+
+    receipt = _call(tools, "create_event", _create_args())
+
+    assert receipt["accepted"] is True
+    bound = ledger.bound_payloads["events"][0]
+    dumped = bound.model_dump()
+    assert "anchor_paragraph_ids" not in dumped
+    assert "evidence" not in dumped
+    assert "char_start" not in dumped
+    assert dumped["description"] == "顾霜拔剑"

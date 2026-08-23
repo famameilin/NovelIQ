@@ -20,7 +20,6 @@ from src.agents.annotation.schema import (
     ChunkMetricsInput,
     EmotionalValence,
     NarrativeFunction,
-    TextEvidence,
 )
 from src.workflows.annotate import _merge_sub_chunk_annotations, _split_chapter_sub_chunks
 
@@ -57,12 +56,7 @@ def _event(description: str, *, refs: list[str], role: str) -> BoundEvent:
         cause_role=role,  # type: ignore[arg-type]
         description=description,
         participants=[],
-        anchor_paragraph_ids=[0],
         causal_event_refs=refs,
-        char_start=0,
-        char_end=3,
-        text_hash="0" * 64,
-        evidence=[TextEvidence(paragraph_ids=[0], char_start=0, char_end=3, text_hash="0" * 64)],
     )
 
 
