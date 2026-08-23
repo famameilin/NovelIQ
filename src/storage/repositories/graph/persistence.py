@@ -517,7 +517,11 @@ def _persist_event_nodes(
 
     2026-08-22event_id 直接取服务端生成的 node_id；因果边只存在于
     跨章树根（cause_tree_id），由 create_event 结构性保证无环，DAG 校验删除。
+    2026-08-22 重构：章级证据单份派生并盖章到每个节点（节点不再携带证据字段）。
     """
+    chapter_evidence = _chapter_text_evidence(
+        session, run_id=annotation.run_id, chapter_id=chunk.chunk_id
+    )[0]
     event_ids: dict[int, str] = {}
     for index, event in enumerate(chunk.events, start=1):
         event_id = event.node_id
@@ -536,11 +540,11 @@ def _persist_event_nodes(
                     chapter_order=boundary.chapter_order,
                     description=event.description,
                     participants=participants,
-                    anchor_paragraph_ids=list(event.anchor_paragraph_ids),
-                    char_start=event.char_start,
-                    char_end=event.char_end,
-                    text_hash=event.text_hash,
-                    evidence=[evidence.model_dump() for evidence in event.evidence],
+                    anchor_paragraph_ids=list(chapter_evidence["paragraph_ids"]),
+                    char_start=int(chapter_evidence["char_start"]),
+                    char_end=int(chapter_evidence["char_end"]),
+                    text_hash=str(chapter_evidence["text_hash"]),
+                    evidence=[dict(chapter_evidence)],
                     causal_event_refs=list(event.causal_event_refs),
                     tree_id=event.tree_id,
                     cause_role=event.cause_role,
@@ -570,7 +574,7 @@ def _persist_event_nodes(
                         source_chapter_id=source.chapter_id,
                         target_chapter_id=chunk.chunk_id,
                         is_active=True,
-                        evidence=[evidence.model_dump() for evidence in event.evidence],
+                        evidence=[dict(chapter_evidence)],
                         annotation_id=annotation.annotation_id,
                         payload_path=f"chunks/{chunk.chunk_id}/events/{index}/causes/{source_id}",
                     )
@@ -643,9 +647,9 @@ def _persist_annotation_facts(
                         "kind": "event",
                         "chapter_id": chunk.chunk_id,
                         "description": event.description,
-                        "anchor_paragraph_ids": list(event.anchor_paragraph_ids),
+                        "anchor_paragraph_ids": list(evidence[0]["paragraph_ids"]),
                     },
-                    evidence=[evidence_item.model_dump() for evidence_item in event.evidence],
+                    evidence=evidence,
                     event_id=event_ids[ordinal],
                 )
             )
@@ -1015,15 +1019,6 @@ def persist_completion_graph(
     if chapter is None or chapter.text is None:
         raise ValueError(f"章节不存在或没有正文: run_id={annotation.run_id} chapter_id={annotation.chapter_id}")
 
-    paragraphs = list(
-        session.execute(
-            select(Paragraph)
-            .where(Paragraph.run_id == annotation.run_id, Paragraph.chapter_id == annotation.chapter_id)
-            .order_by(Paragraph.paragraph_index)
-        ).scalars()
-    )
-    paragraph_ids = {int(row.paragraph_id) for row in paragraphs}
-
     # 内联章节边界生成
     chapters = list(
         session.execute(
@@ -1051,53 +1046,10 @@ def persist_completion_graph(
     if [chunk.chunk_id for chunk in payload.chunks] != [annotation.chapter_id]:
         raise ValueError("章节 payload chunk 顺序与数据库不一致")
 
-    authorized = (
-        set(authorized_text_paragraph_ids) if authorized_text_paragraph_ids is not None else set()
-    ) | paragraph_ids
-    for chunk in payload.chunks:
-        for event in chunk.events:
-            if not event.evidence:
-                raise ValueError("事件 evidence 不能为空")
-            canonical_anchor_ids = sorted(
-                {
-                    int(item)
-                    for evidence in event.evidence
-                    if hasattr(evidence, "paragraph_ids")
-                    for item in evidence.paragraph_ids
-                }
-            )
-            if not canonical_anchor_ids:
-                raise ValueError("事件 Evidence 缺少文本段落 ID")
-            event.anchor_paragraph_ids = canonical_anchor_ids
-            anchors = set(canonical_anchor_ids)
-            if not anchors <= paragraph_ids:
-                raise ValueError("事件锚点不属于当前章节")
-            unauthorized = sorted(anchors - authorized)
-            if unauthorized:
-                raise ValueError(f"事件锚点超出本轮段落授权范围: ids={unauthorized}")
-            if event.char_start < 0 or event.char_end > len(chapter.text) or event.char_end <= event.char_start:
-                raise ValueError("事件字符范围超出数据库章节原文")
-            actual_hash = hashlib.sha256(chapter.text[event.char_start : event.char_end].encode("utf-8")).hexdigest()
-            if actual_hash != event.text_hash:
-                raise ValueError("事件文本哈希与数据库原文不一致")
-            for evidence in event.evidence:
-                evidence_ids = {int(item) for item in evidence.paragraph_ids}
-                if not evidence_ids <= paragraph_ids:
-                    raise ValueError("事件 Evidence 引用了其他章节段落")
-                unauthorized_evidence = sorted(evidence_ids - authorized)
-                if unauthorized_evidence:
-                    raise ValueError(f"事件 Evidence 超出本轮段落授权范围: ids={unauthorized_evidence}")
-                if (
-                    evidence.char_start < 0
-                    or evidence.char_end > len(chapter.text)
-                    or evidence.char_end <= evidence.char_start
-                ):
-                    raise ValueError("事件 Evidence 字符范围超出数据库章节原文")
-                evidence_hash = hashlib.sha256(
-                    chapter.text[evidence.char_start : evidence.char_end].encode("utf-8")
-                ).hexdigest()
-                if evidence_hash != evidence.text_hash:
-                    raise ValueError("事件 Evidence 文本哈希与数据库原文不一致")
+    # 2026-08-22 重构：证据升为章级单份，事件节点只携带树结构；
+    # 模型零结构输入后不再存在节点级锚点/哈希可校验，
+    # 章级证据在持久化时按章统一盖章（_persist_event_nodes）
+    _chapter_text_evidence(session, run_id=annotation.run_id, chapter_id=annotation.chapter_id)
 
     # 继续原有逻辑
     entities, attribute_changes = _resolve_entities(session, annotation=annotation, payload=payload)

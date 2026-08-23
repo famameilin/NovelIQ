@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from dataclasses import replace
 from typing import Any
@@ -23,14 +22,12 @@ from src.agents.annotation.schema import (
     BoundForeshadowing,
     BoundRelation,
     ChunkMetricsInput,
-    ChunkParagraphInfo,
     EntityType,
     EventParticipantInput,
-    TextEvidence,
 )
 from src.chunking.chunker import Chunk as ChunkerChunk
 from src.chunking.chunker import split_chunk_paragraphs
-from src.storage.models import Chapter, Novel, Paragraph
+from src.storage.models import Chapter, Novel
 from src.storage.repositories import (
     ChapterAnnotationRepository,
     ChapterRepository,
@@ -211,78 +208,25 @@ def _register_entity(
     )
 
 
-def _build_chunk_paragraph_info_from_text(
-    chunk_text: str,
-    *,
-    run_id: str,
-    chapter_id: int,
-    paragraph_id_start: int = 0,
-) -> ChunkParagraphInfo:
-    """2026-08-18 用于从章节文本按换行切段构建测试用 ChunkParagraphInfo
-
-    测试场景下不依赖真实 paragraphs 表行——按换行符切段，
-    段落 ID 从 paragraph_id_start 起递增，字符范围覆盖整个段落文本（含换行符）。
-    """
-    lines = chunk_text.split("\n")
-    paragraph_ids: list[int] = []
-    char_spans: list[tuple[int, int]] = []
-    texts: list[str] = []
-    offset = 0
-    for i, line in enumerate(lines):
-        segment = line + ("\n" if i < len(lines) - 1 else "")
-        paragraph_ids.append(paragraph_id_start + i)
-        char_spans.append((offset, offset + len(segment)))
-        texts.append(segment)
-        offset += len(segment)
-    if not paragraph_ids:
-        paragraph_ids = [paragraph_id_start]
-        char_spans = [(0, len(chunk_text))]
-        texts = [chunk_text]
-    return ChunkParagraphInfo(
-        paragraph_ids=paragraph_ids,
-        char_spans=char_spans,
-        texts=texts,
-    )
-
-
 def make_bound_event(
     *,
     description: str,
     participants: list[dict[str, str]] | None = None,
-    anchor_paragraph_ids: list[int],
-    chunk_paragraph_info: ChunkParagraphInfo,
     causal_event_refs: list[str] | None = None,
     tree_id: str | None = None,
     node_id: str | None = None,
     parent_node_id: str | None = None,
     cause_role: str = "root",
 ) -> BoundEvent:
-    """2026-08-22 用于构造测试用 BoundEvent（服务端 uuid 派生 id）"""
-    char_start, char_end = chunk_paragraph_info.char_span_for(anchor_paragraph_ids)
-    anchor_text = chunk_paragraph_info.text_for(anchor_paragraph_ids)
-    text_hash = hashlib.sha256(anchor_text.encode("utf-8")).hexdigest()
-    evidence = [
-        TextEvidence(
-            paragraph_ids=chunk_paragraph_info.global_paragraph_ids(anchor_paragraph_ids),
-            char_start=char_start,
-            char_end=char_end,
-            text_hash=text_hash,
-        )
-    ]
-    resolved_tree_id = tree_id or f"tree-{uuid4()}"
+    """2026-08-22 用于构造测试用 BoundEvent（服务端 uuid 派生 id；证据由持久化层章级盖章）"""
     return BoundEvent(
         node_id=node_id or str(uuid4()),
-        tree_id=resolved_tree_id,
+        tree_id=tree_id or f"tree-{uuid4()}",
         parent_node_id=parent_node_id,
         cause_role=cause_role,
         description=description,
         participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in (participants or [])],
-        anchor_paragraph_ids=anchor_paragraph_ids,
         causal_event_refs=causal_event_refs or [],
-        char_start=char_start,
-        char_end=char_end,
-        text_hash=text_hash,
-        evidence=evidence,
     )
 
 
@@ -308,10 +252,11 @@ def persist_chapter_annotation(
     M9a-2：chunks 表合并进 chapters 后，章节正文取自 chapters 表，
     运行时 chunk id 即章真实 chapter_id（payload 内 chunk_id == chapter_id）。
 
-    2026-08-19：events 每项含 description/participants/anchor_paragraph_ids/
+    2026-08-19：events 每项含 description/participants/
     causal_event_refs(全局 event_id)/tree_id/cause_role（缺省 tree-main/root）。
     2026-08-22事件 id 由 uuid4 服务端派生，伏笔 setup_node_id
     直接指向本章事件节点（setup_event_index 为 1 基序号映射）。
+    2026-08-22 重构：节点不再携带锚点；章级证据由持久化层盖章。
     """
     chapter_row = session.execute(
         select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
@@ -413,35 +358,10 @@ def persist_chapter_annotation(
             )
 
     chunks: list[BoundChunkAnnotation] = []
-    for chunk_id, chunk_text in chunk_text_by_id.items():
-        # 2026-08-18 构建段落坐标映射供事件锚点派生
-        paragraph_rows = list(
-            session.execute(
-                select(Paragraph)
-                .where(
-                    Paragraph.run_id == run_id,
-                    Paragraph.chapter_id == chapter_id,
-                )
-                .order_by(Paragraph.paragraph_index)
-            ).scalars()
-        )
-        if paragraph_rows:
-            paragraph_info = ChunkParagraphInfo(
-                paragraph_ids=[int(row.paragraph_id) for row in paragraph_rows],
-                char_spans=[(int(row.local_start_char), int(row.local_end_char)) for row in paragraph_rows],
-                texts=[str(row.text) for row in paragraph_rows],
-            )
-        else:
-            paragraph_info = _build_chunk_paragraph_info_from_text(
-                chunk_text,
-                run_id=run_id,
-                chapter_id=chapter_id,
-            )
-        # 构建事件列表
+    for chunk_id, _chunk_text in chunk_text_by_id.items():
         bound_events: list[BoundEvent] = []
         for event_spec in events or []:
             event_participants = [{"entity": p, "role": "主体"} for p in event_spec.get("participants", [])]
-            # 注册事件参与者实体
             for p in event_spec.get("participants", []):
                 _register_entity(
                     directories[chunk_id],
@@ -452,8 +372,6 @@ def persist_chapter_annotation(
                 make_bound_event(
                     description=event_spec["description"],
                     participants=event_participants,
-                    anchor_paragraph_ids=event_spec.get("anchor_paragraph_ids", [0]),
-                    chunk_paragraph_info=paragraph_info,
                     causal_event_refs=event_spec.get("causal_event_refs"),
                     tree_id=event_spec.get("tree_id"),
                     node_id=event_spec.get("node_id"),

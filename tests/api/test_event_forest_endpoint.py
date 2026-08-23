@@ -119,7 +119,7 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert nodes[gate_root]["description"] == "顾霜进入山门"
     assert nodes[gate_main]["description"] == "顾霜立誓"
     assert nodes[sword_root]["description"] == "顾霜拔剑"
-    assert nodes[gate_root]["anchor_paragraph_ids"] == [0]
+    assert nodes[gate_root]["anchor_paragraph_ids"] == [0, 1]
     assert nodes[gate_root]["tree_id"] == "gate"
     assert nodes[gate_root]["cause_role"] == "root"
 
