@@ -236,7 +236,6 @@ async def _invoke_graph(
             ],
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )
@@ -458,37 +457,6 @@ async def test_truncated_tool_call_skips_business_tool_and_feeds_error_receipt()
     assert len(accepted) == 1
     assert '"tool": "write_metrics"' in rejected[0]
     assert "截断" in rejected[0]
-
-
-@pytest.mark.asyncio
-async def test_protocol_error_rejects_plain_text_reply() -> None:
-    """2026-08-14 用于验证连续无工具回复在重试预算耗尽后按协议错误收口"""
-    llm = _SequenceLLM([AIMessage(content="已经完成")] * 3)
-    result = await _invoke_graph(llm, allow_future_context=False)
-
-    assert "annotation 工具协议错误" in str(result["error"])
-    assert llm.calls == 3
-
-
-@pytest.mark.asyncio
-async def test_protocol_error_retries_then_recovers() -> None:
-    """2026-08-14 用于验证无工具回复会回灌提示重试，随后正确调用工具即可完成章节"""
-    llm = _SequenceLLM(
-        [
-            AIMessage(content="我忘记调用工具了"),
-            _tool_message(_full_write_calls()),
-        ]
-    )
-    result = await _invoke_graph(llm, allow_future_context=False)
-
-    assert result["phase"] == "completed"
-    assert result.get("error") is None
-    assert llm.calls == 2
-    # 回灌的 SystemMessage 出现在第二次请求的消息链中
-    assert any(
-        isinstance(message, SystemMessage) and "未包含任何工具调用" in message.content
-        for message in llm.captured_messages[1]
-    )
 
 
 @pytest.mark.asyncio
@@ -909,7 +877,6 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
             ],
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )

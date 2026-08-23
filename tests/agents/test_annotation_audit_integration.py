@@ -48,8 +48,8 @@ def _count(db_session, model, run_id: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
-    """2026-08-11 用于验证无工具回复的协议错误回合同样闭合 turn_ms"""
+async def test_no_tool_reply_closes_turns_then_fails(db_session) -> None:
+    """2026-08-22 用于验证无工具回复逐回合闭合计时，调用层重试耗尽后按失败收口"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["“住手”回荡"])
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
@@ -79,7 +79,7 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
         allow_future_context=False,
         paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
-    llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 3)
+    llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 5)
     graph = build_annotation_graph(
         llm,
         build_annotation_tools(_QueryService(), ledger),
@@ -87,27 +87,25 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
         max_iterations=30,
         observer=observer,
     )
-    result_state = await graph.ainvoke(
-        {
-            "messages": [
-                SystemMessage(content="test"),
-                HumanMessage(content="标注这段"),
-            ],
-            "phase": "chunk_open",
-            "iterations": 0,
-            "protocol_errors": 0,
-            "error": None,
-        }
-    )
-    recorder.finish_invocation(invocation_id, status="error", final_error=str(result_state["error"]))
+    with pytest.raises(RuntimeError, match="未正常结束"):
+        await graph.ainvoke(
+            {
+                "messages": [
+                    SystemMessage(content="test"),
+                    HumanMessage(content="标注这段"),
+                ],
+                "phase": "chunk_open",
+                "iterations": 0,
+                "error": None,
+            }
+        )
+    recorder.finish_invocation(invocation_id, status="error", final_error="模型调用未正常结束")
 
-    assert "协议错误" in (result_state.get("error") or "")
     db_session.rollback()
     turns = list(db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalars())
-    # 2026-08-14 P1-4：协议错误预算内重试（2 次重试 = 3 个回合），每个回合都闭合计时
-    assert len(turns) == 3
-    for turn in turns:
-        assert turn.turn_ms is not None and turn.turn_ms >= 0
+    # 调用层重试预算默认 3 次：每次尝试的回合都闭合计时，末尾另有一条 provider_call_failed 失败行
+    assert len(turns) == 4
+    assert all(turn.turn_ms is not None and turn.turn_ms >= 0 for turn in turns)
 
 
 @pytest.mark.asyncio
@@ -249,7 +247,6 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
             ],
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )
