@@ -60,13 +60,13 @@ def test_fact_graph_loads_history_relations() -> None:
     assert graph.apply_relation(_relation("贺伯安", "赵兰英", "家族")) is False
 
 
-def test_fact_graph_entity_replacement_removes_chapter_entities() -> None:
-    """2026-08-09 用于验证完整替换语义撤销当章登记实体"""
+def test_fact_graph_entity_registration_appends_and_keeps_previous() -> None:
+    """2026-08-09 创建；2026-08-23 用于验证实体注册为追加语义，已注册实体不被后续调用撤销"""
     graph = FactGraph()
     graph.register_entities([_Entity("算盘", "character")])
     assert graph.entity_type("算盘") == "character"
     graph.register_entities([_Entity("猴子", "character")])
-    assert graph.entity_type("算盘") is None
+    assert graph.entity_type("算盘") == "character"
     assert graph.entity_type("猴子") == "character"
 
 
