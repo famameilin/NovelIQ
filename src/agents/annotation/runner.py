@@ -154,7 +154,7 @@ async def _run_single_attempt(
     )
     ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
-    total_iteration_limit = max(1, settings.models.annotation.max_iterations) + 5
+    total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
         llm,
         tools,

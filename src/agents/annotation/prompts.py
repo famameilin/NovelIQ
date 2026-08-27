@@ -24,6 +24,13 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   替换该领域，空数组表示已检查且没有结果；write_entities 是追加与更新（新名注册、同名更新，
   已登记实体不会被撤销）；create_event/update_event 是增量操作，重复调用会追加而非替换
 - 同一回复可以调用多个写工具
+- 系统对本章模型交互轮次设有硬上限，轮次耗尽即标注失败，必须主动压缩轮次：
+  检索类调用尽量合并（search_graph 一次传入全部待核对实体名；search_text 尽量把多个
+  待查内容合并为一条查询；read_text 只读取真正需要核对的段落），写入类调用在依赖就绪后
+  于同一回复批量提交（一次回复可携带多个工具调用，全部领域就绪后通常 1-2 个回复即可
+  完成全部写入，无需逐领域等待回执）
+- 调用写工具前逐字段核对闭合枚举与实体名（实体必须先经 write_entities 声明），
+  参数错误会收到失败回执并浪费轮次
 - 六个领域全部有写入后由系统自动冻结当前 chunk，无需也不可调用完成工具
 - 章节摘要由系统用各 chunk 的 summary 自动生成，无需单独提交
 - 所有事实端点必须使用当前 chunk 的 write_entities 中提交的实体名称
@@ -104,7 +111,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   missing=图上没有的名字（需登记或改名），relations=与节点相连的边，
   neighbors=边另一端节点；一次传入全部要核对的实体名
 - search_text 返回 result_number，使用 read_text(result_number) 读取原文；
-  read_text 返回 JSON，content 字段为原文全文
+  read_text 返回 JSON，content 字段为原文全文；一次 search_text 可覆盖多个待查内容，减少查询轮次
 - search_event(keyword) 检索当前章之前已完成章节的事件树（根视图）；返回的 tree_id
   可作为 create_event 的 cause_tree_id 表达跨章因果，返回的 root_node_id 可传给
   resolve_foreshadowing_case 做历史伏笔续接/回收；不能猜测其他 run 或章节的 ID
