@@ -288,6 +288,57 @@ def _tool_receipts(captured_round: list) -> list[str]:
 
 
 @pytest.mark.asyncio
+async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
+    """2026-08-26 回归：write_entities 追加与更新语义必须落地最终载荷
+
+    契约允许模型分两次提交实体（先新实体、后补别名），运行时图登记累积使
+    校验通过，但最终载荷此前只保留最后一次调用，导致较早声明实体在持久化
+    层事实端点解析时缺失（"事实端点实体未被系统解析"）。
+    """
+    ledger = AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text="住手回荡",
+        allow_future_context=False,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, 4)],
+            texts=["住手回荡"],
+        ),
+    )
+    tools = build_annotation_tools(_QueryService(), ledger)
+    by_name = {tool.name: tool for tool in tools}
+    await by_name["write_entities"].ainvoke(
+        {
+            "entities": [
+                {"name": "侯飞白", "entity_type": "character", "description": "贺军情报头子之子"},
+                {"name": "褚大山", "entity_type": "character"},
+            ]
+        }
+    )
+    await by_name["write_entities"].ainvoke(
+        {
+            "entities": [
+                {"name": "猴子", "entity_type": "character", "description": "侯飞白外号"},
+            ]
+        }
+    )
+    await by_name["write_entities"].ainvoke(
+        {
+            "entities": [
+                {"name": "侯飞白", "entity_type": "character", "tags": ["小孩"]},
+            ]
+        }
+    )
+    catalog = ledger.bound_payloads["entities"]
+    assert [entity.name for entity in catalog.entities] == ["侯飞白", "褚大山", "猴子"]
+    bound_hou = next(entity for entity in catalog.entities if entity.name == "侯飞白")
+    assert bound_hou.description == "贺军情报头子之子"
+    assert bound_hou.tags == ["小孩"]
+
+
+@pytest.mark.asyncio
 async def test_single_chunk_chapter_completes_via_write_and_auto_finalize() -> None:
     """2026-08-07 用于验证单 chunk 章节经领域写入后由系统自动冻结完成"""
     llm = _SequenceLLM(
