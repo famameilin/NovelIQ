@@ -4,6 +4,7 @@ import { useId } from "react";
 import { Activity } from "lucide-react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { cn } from "@/lib/cn";
+import { formatSampleInsufficient } from "@/lib/metricFormat";
 
 export interface ScoreCardProps {
   title: string;
@@ -63,7 +64,7 @@ export function ScoreCard({
               {isPercent ? `${Math.round(displayValue as number)}%` : `${displayValue}/${maxScore}`}
             </p>
           ) : (
-            <p className="text-lg text-text-muted">暂无数据</p>
+            <p className="text-lg text-text-muted">{formatSampleInsufficient()}</p>
           )}
         </div>
       </div>

@@ -9,6 +9,7 @@ import {
   getMetricAccentHoverTextClass,
   type MetricAccent,
 } from "@/components/common/DashboardCardShell";
+import { formatSampleInsufficient } from "@/lib/metricFormat";
 import { cn } from "@/lib/cn";
 
 export interface ScoreOverviewCardProps {
@@ -160,7 +161,7 @@ function ScoreRow({
     return (
       <div className="flex items-center justify-between">
         <span className="text-xs text-text-muted">{label}</span>
-        <span className="text-xs text-text-muted">暂无数据</span>
+        <span className="text-xs text-text-muted">{formatSampleInsufficient()}</span>
       </div>
     );
   }
@@ -244,7 +245,7 @@ export function ScoreOverviewCard({
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-text-muted">伏笔回收预期</p>
-                <p className="text-sm text-text-muted">暂无数据</p>
+                <p className="text-sm text-text-muted">{formatSampleInsufficient()}</p>
               </div>
             </div>
           )}

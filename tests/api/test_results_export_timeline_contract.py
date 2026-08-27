@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.api.exceptions import DiagnosisRerunRequiredError
+from src.agents.annotation.schema import BoundForeshadowing
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -27,94 +27,127 @@ from src.knowledge.authority import (
     GraphPageSummary,
     GraphQualitySignals,
     GraphSharedSummary,
-    KnowledgeGraphAuthorityService,
     serialize_graph_report_signals,
 )
-from src.metrics.timeline_metrics import TimelineAuthorityContractError
-from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
-from tests.support.timeline_contract_helpers import (
-    create_timeline_contract_scenario,
-    graph_change_names,
-    graph_change_tuples,
-    nodes_for_anchor_chunk,
+from src.storage.repositories import (
+    AnnotationRepository,
+    ChapterRepository,
+    ForeshadowingRepository,
+    StatsRepository,
+)
+from tests.support.chapter_annotation_helpers import (
+    create_run_with_chunks,
+    persist_chapter_annotation,
 )
 
 
 def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
+    """2026-08-20 迁移至事件森林：验证新森林路径（含 nodes/causal_edges/foreshadowing_edges）"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜进入山门。\n顾霜拔剑。", "宫主现身。"],
+        chapter_ids=[1, 2],
+        title="事件森林时间轴导出",
+    )
+    eid1 = "evt-tl-gate-root"
+    eid2 = "evt-tl-gate-main"
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": eid1,
+                "tree_id": "gate",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜拔剑",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "node_id": eid2,
+                "parent_node_id": eid1,
+                "tree_id": "gate",
+                "cause_role": "main",
+            },
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        events=[
+            {
+                "description": "宫主现身",
+                "participants": ["宫主"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-tl-palace-root",
+                "causal_event_refs": [eid2],
+                "tree_id": "palace",
+                "cause_role": "root",
+            },
+            {
+                "description": "宫主出手",
+                "participants": ["宫主"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-tl-strike-root",
+                "causal_event_refs": ["evt-tl-palace-root"],
+                "tree_id": "strike",
+                "cause_role": "root",
+            },
+        ],
+    )
+    # 将其中一条因果边置为 inactive（含 expired_at），用于验证 is_active/expired_at 透传
+    from datetime import UTC, datetime
 
-    chunk_repo = ChunkRepository(db_session)
-    annotation_repo = AnnotationRepository(db_session)
+    from src.storage.models.event_forest import EventEdge
+
+    existing = db_session.query(EventEdge).filter_by(run_id=run_id).first()
+    assert existing is not None
+    existing.is_active = False
+    existing.expired_at = datetime.now(UTC)
+    db_session.commit()
+
+    chapter_repo = ChapterRepository(db_session)
     stats_repo = StatsRepository(db_session)
-    timeline_view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(scenario.run_id)
 
     timeline_data = _fetch_timeline_data(
-        run_id=scenario.run_id,
-        chunk_repo=chunk_repo,
-        annotation_repo=annotation_repo,
+        run_id=run_id,
+        chapter_repo=chapter_repo,
         stats_repo=stats_repo,
-        timeline_view=timeline_view,
     )
 
     assert timeline_data is not None
-    assert timeline_data["total_chunks"] == 5
-    assert timeline_data["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
-    assert len(timeline_data["phases"]) == 4
+    # 新合同字段
+    assert "nodes" in timeline_data
+    assert "causal_edges" in timeline_data
+    assert "foreshadowing_edges" in timeline_data
+    assert "derived_event_order" in timeline_data
+    assert "phases" in timeline_data
+    assert timeline_data["total_chapters"] == 2
+    # nodes 按 derivedOrder，前后端均可按此排序
+    assert len(timeline_data["nodes"]) >= 2
+    for node in timeline_data["nodes"]:
+        assert "tree_id" in node
+        assert "participants" in node
+        assert isinstance(node["participants"], list)
+        if node["participants"]:
+            assert isinstance(node["participants"][0], dict)
+            p0 = node["participants"][0]
+            assert "name" in p0 or "entity" in p0
+            if "name" not in p0 and "entity" in p0:
+                assert "name" in p0["entity"]
 
-    relation_node = next(
-        node
-        for node in nodes_for_anchor_chunk(timeline_data["atomic_nodes"], 2)
-        if node["node_type"] == "relation"
-    )
-    assert graph_change_tuples(relation_node["graph_changes"]) == {
-        (scenario.hero_name, scenario.rival_name, "assert")
-    }
-    assert scenario.organization_name not in graph_change_names(relation_node["graph_changes"])
-
-    assert "entity_lifecycles" not in timeline_data
-    assert set(relation_node.keys()) == {
-        "node_id",
-        "anchor_chunk_id",
-        "progress",
-        "importance_score",
-        "level",
-        "summary",
-        "characters",
-        "phase_name",
-        "node_type",
-        "node_subtype",
-        "score_breakdown",
-        "plot_flags",
-        "graph_changes",
-        "lifecycle_events",
-    }
-    assert set(relation_node["graph_changes"][0].keys()) == {
-        "change_id",
-        "change_kind",
-        "graph_version_id",
-        "chapter_id",
-        "fact_id",
-        "fact_revision",
-        "effective_chunk_id",
-        "changes",
-        "entity_id",
-        "entity_name",
-        "relation_id",
-        "relation_version_id",
-        "relation_revision",
-        "from_char",
-        "to_char",
-        "relation_type",
-        "relation_change_kind",
-        "directionality",
-    }
-    assert timeline_data["composite_nodes"]
-    composite_relation_node = next(
-        node
-        for node in nodes_for_anchor_chunk(timeline_data["composite_nodes"], 2)
-        if node["node_type"] == "relation"
-    )
-    assert composite_relation_node["representative_node_id"].startswith("relation:")
+    # causal_edges 应包含 inactive 边且保留 expired_at
+    assert any(not e["is_active"] for e in timeline_data["causal_edges"])
+    inactive = next(e for e in timeline_data["causal_edges"] if not e["is_active"])
+    assert "expired_at" in inactive
+    assert inactive["expired_at"] is not None
+    # 活性边仍存在
+    assert any(e["is_active"] for e in timeline_data["causal_edges"])
 
 
 def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() -> None:
@@ -125,12 +158,11 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
         task_id="task-1",
         novel_id="novel-1",
         novel_name="Test Novel",
-        chunk_curves=[],
+        paragraph_curves=[],
         characters=[],
         topics=[],
         diagnosis=None,
-        chunk_styles=[],
-        chunk_annotations=[],
+        chapter_annotations=[],
         character_relations=[],
         hierarchical_relations=[],
         global_stats=None,
@@ -151,46 +183,6 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
     assert "core_characters" not in payload["graph_summary"]
 
 
-def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    chunk_repo = MagicMock()
-    annotation_repo = MagicMock()
-    stats_repo = MagicMock()
-
-    def _raise_contract_error(*_args, **_kwargs):
-        raise TimelineAuthorityContractError("broken authority contract")
-
-    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_plan", _raise_contract_error)
-
-    with pytest.raises(TimelineAuthorityContractError, match="broken authority contract"):
-        _fetch_timeline_data(
-            run_id="run-1",
-            chunk_repo=chunk_repo,
-            annotation_repo=annotation_repo,
-            stats_repo=stats_repo,
-            timeline_view=MagicMock(),
-        )
-
-
-def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    chunk_repo = MagicMock()
-    annotation_repo = MagicMock()
-    stats_repo = MagicMock()
-
-    def _raise_runtime_error(*_args, **_kwargs):
-        raise RuntimeError("timeline boom")
-
-    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_plan", _raise_runtime_error)
-
-    with pytest.raises(RuntimeError, match="timeline boom"):
-        _fetch_timeline_data(
-            run_id="run-1",
-            chunk_repo=chunk_repo,
-            annotation_repo=annotation_repo,
-            stats_repo=stats_repo,
-            timeline_view=MagicMock(),
-        )
-
-
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     修改时间: 2026-04-29
@@ -199,7 +191,6 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     """
 
     diagnosis = SimpleNamespace(
-        rerun_required=False,
         arc_scores={"沈砚": 8.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
@@ -248,12 +239,10 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
-def test_load_character_bundle_rejects_rerun_required_diagnosis(
+def test_load_character_bundle_accepts_partial_diagnosis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     diagnosis = SimpleNamespace(
-        rerun_required=True,
-        rerun_reason="diagnosis_missing_focus_contract",
         foreshadow_expectation=0.58,
         arc_scores=None,
         focus_structure=None,
@@ -282,16 +271,19 @@ def test_load_character_bundle_rejects_rerun_required_diagnosis(
         ]
     )
 
-    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
-        load_character_bundle(
-            run_id="run-export-bundle",
-            novel_id="novel-1",
-            stats_repo=MagicMock(),
-            annotation_repo=annotation_repo,
-            export_graph_view=export_graph_view,
-        )
+    fetched_characters, arc_scores, main_characters, valid_names, missing_fields = load_character_bundle(
+        run_id="run-export-bundle",
+        novel_id="novel-1",
+        stats_repo=MagicMock(),
+        annotation_repo=annotation_repo,
+        export_graph_view=export_graph_view,
+    )
 
-    assert exc_info.value.reason == "diagnosis_missing_focus_contract"
+    assert fetched_characters == characters
+    assert arc_scores is None
+    assert main_characters is None
+    assert valid_names == {"沈砚"}
+    assert missing_fields == []
 
 
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,8 +307,8 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        "src.api.services.results_export_service.load_chunk_bundle",
-        lambda *_args, **_kwargs: ([], [], [], []),
+        "src.api.services.results_export_service.load_chapter_bundle",
+        lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_foreshadowing_threads",
@@ -333,11 +325,10 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_timeline_data",
         lambda *_args, **_kwargs: {
-            "atomic_nodes": [],
-            "composite_nodes": [],
+            "nodes": [],
             "phases": [],
             "tension_curve": [],
-            "total_chunks": 0,
+            "total_chapters": 0,
         },
     )
     monkeypatch.setattr(
@@ -367,7 +358,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         run_id="run-1",
         stats_repo=MagicMock(session=MagicMock()),
         annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
     )
 
     assert results_data["diagnosis"] is None
@@ -375,50 +366,6 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert novel_name == "Test Novel"
 
 
-def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.load_core_results",
-        lambda *_args, **_kwargs: ([], []),
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.load_character_bundle",
-        lambda *_args, **_kwargs: ([], None, None, set(), []),
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            rerun_required=True,
-            rerun_reason="focus_contract_incomplete",
-        ),
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            assert_graph_ready=lambda _run_id: None,
-            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
-            build_graph_report=lambda _run_id: GraphAuthorityReport(
-                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
-                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
-            ),
-            build_timeline_view=lambda _run_id: SimpleNamespace(
-                character_entities=[],
-                entity_lifecycles=[],
-                graph_changes=[],
-            ),
-        ),
-    )
-
-    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
-        fetch_all_results_data(
-            novel_id="novel-1",
-            task_id="task-1",
-            run_id="run-1",
-            stats_repo=MagicMock(session=MagicMock()),
-            annotation_repo=MagicMock(),
-            chunk_repo=MagicMock(),
-        )
-
-    assert exc_info.value.reason == "focus_contract_incomplete"
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -429,7 +376,6 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
     """
 
     diagnosis = SimpleNamespace(
-        rerun_required=False,
         arc_scores={"沈砚": 8.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
@@ -474,47 +420,55 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
     assert valid_character_names == {"沈砚"}
 
 
-def test_load_core_results_keeps_export_on_raw_chunk_curves(monkeypatch: pytest.MonkeyPatch) -> None:
-    raw_curve = SimpleNamespace(
-        chunk_id=7,
+def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-08-14 M8a：load_core_results 从段落事实源导出原始曲线（不降采样、
+    不复用 chunk 展示层融合曲线），缺失字段语义同步为 paragraph_curves。"""
+    paragraph_point = SimpleNamespace(
+        paragraph_id=7,
+        chapter_id=1,
+        paragraph_index=0,
+        global_start_char=100,
+        global_end_char=200,
+        position=0.1,
+        char_count=100,
+        token_count=50,
         pos_density=0.12,
         neg_density=0.03,
         net_density=0.09,
-        smoothed_density=0.08,
-        tension_proxy=0.41,
-        tension_composite=0.39,
+        smoothed_net_density=0.08,
+        surface_tension=0.41,
+        smoothed_surface_tension=0.39,
     )
-
-    def _raise_if_display_curve_is_used(*_args, **_kwargs):
-        raise AssertionError("load_core_results should not reuse display-layer fused chunk curves")
 
     monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_raw_chunk_curves",
-        lambda *_args, **_kwargs: [raw_curve],
-    )
-    # 2026-08-13 P2：results_fetchers 转发层死代码已删除，防御 patch 指向
-    # 真实实现模块（若 load_core_results 误用展示层融合曲线会触发异常）
-    monkeypatch.setattr(
-        "src.api.services.results_queries._fetch_chunk_curves",
-        _raise_if_display_curve_is_used,
+        "src.api.services.results_export_service._fetch_paragraph_curves",
+        lambda *_args, **_kwargs: [paragraph_point],
     )
 
-    chunk_curves, missing_fields = load_core_results(
+    paragraph_curves, missing_fields = load_core_results(
         run_id="run-export-curves",
         stats_repo=MagicMock(),
-        annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        annotation_repo=MagicMock(session=MagicMock()),
+        chapter_repo=MagicMock(),
     )
 
     assert missing_fields == []
-    assert len(chunk_curves) == 1
-    assert chunk_curves[0].chunk_id == 7
-    assert chunk_curves[0].pos_density == pytest.approx(0.12)
-    assert chunk_curves[0].net_density == pytest.approx(0.09)
-    assert chunk_curves[0].smoothed_density == pytest.approx(0.08)
+    assert len(paragraph_curves) == 1
+    assert paragraph_curves[0].paragraph_id == 7
+    assert paragraph_curves[0].pos_density == pytest.approx(0.12)
+    assert paragraph_curves[0].net_density == pytest.approx(0.09)
+    assert paragraph_curves[0].smoothed_net_density == pytest.approx(0.08)
 
 
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_character_relations",
+        lambda *_args, **_kwargs: [SimpleNamespace(from_char="苏镜", to_char="程霜", type="隶属")],
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_hierarchical_relations",
+        lambda *_args, **_kwargs: [SimpleNamespace(rel_id="relation-22")],
+    )
     monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_token_usage_stats",
@@ -536,16 +490,16 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 from_name="苏镜",
                 to_name="程霜",
                 relation_type="隶属",
-                first_seen_chunk=2,
-                last_seen_chunk=5,
+                first_seen_chapter=2,
+                last_seen_chapter=5,
             ),
             ExportRelationSnapshot(
                 relation_id="relation-23",
                 from_name="苏镜",
                 to_name="旧友",
                 relation_type="家族",
-                first_seen_chunk=1,
-                last_seen_chunk=4,
+                first_seen_chapter=1,
+                last_seen_chapter=4,
                 is_active=False,
             ),
         ],
@@ -553,12 +507,10 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
             GraphChange(
                 change_id="relation:22",
                 change_kind="relation",
-                graph_version_id="graph-version-5",
                 chapter_id=5,
                 chapter_order=5,
                 fact_id="fact-22",
-                fact_revision=1,
-                effective_chunk_id=5,
+                effective_chapter_id=5,
                 confidence="high",
                 changes=[{"change_kind": "assert"}],
                 from_entity_id=1,
@@ -567,8 +519,6 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 to_name="程霜",
                 relation_type="家族",
                 relation_id="relation-22",
-                relation_version_id=22,
-                relation_revision=1,
                 directionality="directed",
             )
         ],
@@ -591,7 +541,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         novel_id="novel-1",
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
         valid_character_names={"苏镜", "程霜"},
         export_graph_view=export_graph_view,
         graph_report=graph_report,
@@ -655,7 +605,7 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
         novel_id="novel-1",
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
-        chunk_repo=MagicMock(),
+        chapter_repo=MagicMock(),
     )
 
     assert set(aggregate_metrics) == {
@@ -677,12 +627,11 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
             task_id="task-1",
             novel_id="novel-1",
             novel_name="Test Novel",
-            chunk_curves=[],
+            paragraph_curves=[],
             characters=[],
             topics=[],
             diagnosis=None,
-            chunk_styles=[],
-            chunk_annotations=[],
+            chapter_annotations=[],
             character_relations=[],
             hierarchical_relations=[],
             global_stats=None,
@@ -698,3 +647,182 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
             graph_quality_report={"conflict_count": 2},
             timeline_data=None,
         )
+
+
+def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-08-18 用于拦截与 event_forest 无关的兄弟 loader，保留真实 EventForestRepository 读取
+
+    对照组：test_fetch_all_results_data_deduplicates_missing_diagnosis_marker。
+    """
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_core_results",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_character_bundle",
+        lambda *_args, **_kwargs: ([], None, None, set(), []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_chapter_bundle",
+        lambda *_args, **_kwargs: ([], [], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_export_relation_bundle",
+        lambda *_args, **_kwargs: (
+            [],
+            [],
+            None,
+            SimpleNamespace(model_dump=lambda **_kw: {}),
+            {
+                "narrative_structure": None,
+                "emotion_stats": None,
+                "character_stats": None,
+                "style_stats": None,
+            },
+            {},
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_novel_name",
+        lambda *_args, **_kwargs: "Test Novel",
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_timeline_data",
+        lambda *_args, **_kwargs: {
+            "nodes": [],
+            "phases": [],
+            "tension_curve": [],
+            "total_chapters": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            assert_graph_ready=lambda _run_id: None,
+            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
+            build_graph_report=lambda _run_id: GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            ),
+            build_timeline_view=lambda _run_id: SimpleNamespace(
+                character_entities=[],
+                entity_lifecycles=[],
+                graph_changes=[],
+            ),
+        ),
+    )
+
+
+def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypatch) -> None:
+    """2026-08-19 用于验证导出 payload 包含事件森林段（树视图/因果边/伏笔边）"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜进入山门。\n顾霜立誓。"],
+        title="导出事件森林",
+    )
+    eid1 = "evt-export-gate-root"
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": eid1,
+                "tree_id": "gate",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜立誓",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "node_id": "evt-export-gate-main",
+                "parent_node_id": eid1,
+                "tree_id": "gate",
+                "cause_role": "main",
+            },
+        ],
+    )
+    ForeshadowingRepository(db_session).sync(
+        run_id=run_id,
+        chapter_id=1,
+        foreshadowing=BoundForeshadowing(
+            description="顾霜承诺护佑山门",
+            confidence="high",
+            setup_node_id=eid1,
+        ),
+        setup_event_id=eid1,
+    )
+    db_session.commit()
+
+    _stub_export_sibling_loaders(monkeypatch)
+
+    results_data, _missing_fields, _novel_name = fetch_all_results_data(
+        novel_id=_novel_id,
+        task_id=run_id[:8],
+        run_id=run_id,
+        stats_repo=StatsRepository(db_session),
+        annotation_repo=AnnotationRepository(db_session),
+        chapter_repo=ChapterRepository(db_session),
+    )
+
+    forest = results_data["event_forest"]
+    assert forest != {}
+    assert forest["chapter_order"] == 1
+    nodes = {node["event_id"]: node for node in forest["event_nodes"]}
+    assert set(nodes) == {
+        eid1,
+        "evt-export-gate-main",
+    }
+    assert nodes[eid1]["description"] == "顾霜进入山门"
+    assert nodes[eid1]["tree_id"] == "gate"
+    assert nodes[eid1]["cause_role"] == "root"
+
+    # 树视图 + 因果边（contains 派生化：event_edges 键移除）
+    assert "event_edges" not in forest
+    trees = {tree["tree_id"]: tree for tree in forest["event_trees"]}
+    assert trees["gate"]["main_chain"] == [
+        eid1,
+        "evt-export-gate-main",
+    ]
+    # 树内主链不再是因果边（contains 派生化 + 因果边仅跨树）
+    causal_edges = forest["causal_edges"]
+    assert causal_edges == []
+
+    assert len(forest["foreshadowing_edges"]) == 1
+    assert forest["foreshadowing_edges"][0]["setup_event_id"] == eid1
+    assert forest["foreshadowing_edges"][0]["payoff_event_id"] is None
+
+
+def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_session, monkeypatch) -> None:
+    """2026-08-18 用于验证无事件标注的 run 导出 event_forest 为空对象"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["未标注原文。"],
+        title="空事件森林",
+    )
+    db_session.commit()
+
+    _stub_export_sibling_loaders(monkeypatch)
+
+    results_data, _missing_fields, _novel_name = fetch_all_results_data(
+        novel_id=_novel_id,
+        task_id=run_id[:8],
+        run_id=run_id,
+        stats_repo=StatsRepository(db_session),
+        annotation_repo=AnnotationRepository(db_session),
+        chapter_repo=ChapterRepository(db_session),
+    )
+
+    assert results_data["event_forest"] == {}

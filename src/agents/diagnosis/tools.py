@@ -82,9 +82,9 @@ def build_diagnosis_tools(
         high_tension = repo.fetch_high_tension_chunks(run_id, limit=10)
         if high_tension:
             parts.append("<高张力>")
-            for chunk_id, chunk_text, tension in high_tension:
-                preview = (chunk_text or "")[:300]
-                parts.append(f"[chunk {chunk_id}] (tension={tension:.4f}) {preview}")
+            for paragraph_id, paragraph_text, tension in high_tension:
+                preview = (paragraph_text or "")[:300]
+                parts.append(f"[paragraph {paragraph_id}] (tension={tension:.4f}) {preview}")
             parts.append("</高张力>")
 
         foreshadowing_threads = repo.fetch_foreshadowing_threads(run_id)
@@ -163,7 +163,7 @@ def build_diagnosis_tools(
 
         try:
             graph_report = KnowledgeGraphAuthorityService.from_session(session).build_graph_report(run_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"（图谱信号不可用: {exc}）"
         summary, quality = serialize_graph_report_signals(graph_report)
         merged_signals = {**summary, **quality}

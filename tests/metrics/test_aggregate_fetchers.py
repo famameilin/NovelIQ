@@ -177,9 +177,7 @@ def test_fetch_relation_data_propagates_database_graph_readiness_failure():
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
     mock_service.assert_graph_ready = MagicMock(
-        side_effect=GraphReadinessError(
-            "database graph is unavailable for the requested run."
-        )
+        side_effect=GraphReadinessError("database graph is unavailable for the requested run.")
     )
     mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[],
@@ -244,7 +242,12 @@ def test_fetch_relation_data_consumes_authority_view():
                 changes=[{"change_kind": "assert"}],
             ),
         ],
-        participant_states=[],
+        # P4：人物网络只消费 character 参与者；mock 需补 entity_type
+        participant_states=[
+            SimpleNamespace(name="主角", entity_type="character"),
+            SimpleNamespace(name="反派", entity_type="character"),
+            SimpleNamespace(name="同伴", entity_type="character"),
+        ],
     )
 
     with patch(
@@ -266,9 +269,7 @@ def test_fetch_relation_data_propagates_graph_failure_before_using_non_empty_vie
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
     mock_service.assert_graph_ready = MagicMock(
-        side_effect=GraphReadinessError(
-            "database graph is unavailable for the requested run."
-        )
+        side_effect=GraphReadinessError("database graph is unavailable for the requested run.")
     )
     mock_service.build_representative_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[SimpleNamespace(from_name="主角", to_name="反派")],

@@ -29,7 +29,6 @@ from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.database_url import resolve_database_url_from_env
 from src.storage.db import get_session_factory
-from src.storage.id_mapping import TaskIDNotFoundError
 from src.storage.repositories import RunRepository
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
@@ -50,6 +49,43 @@ class TestTestDatabaseIsolation:
         assert actual_url == expected_url
 
 
+class TestRunTimestampContract:
+    """2026-08-26 运行时间戳口径回归：无时区列统一 naive UTC，序列化带 Z 后缀"""
+
+    def test_aware_completed_at_persists_as_naive_utc_with_z_suffix(self, api_client: TestClient):
+        """验证 aware UTC 写入不会按会话时区虚增 8 小时，且 API 侧带 Z 后缀"""
+        _insert_test_novel("tz_run1")
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_id = run_repo.create_run(novel_id="tz_run1", title="tz-regression")
+            run_repo.update_run_task_fields(
+                run_id,
+                status="completed",
+                completed_at=datetime.now(UTC),  # 此前 aware UTC 被 PG 按 Asia/Shanghai 转换虚增 8h
+            )
+            run = run_repo.get_run(run_id)
+        assert run["status"] == "completed"
+        completed_serialized = run["completed_at"]
+        assert completed_serialized is not None
+        assert completed_serialized.endswith("Z")
+        persisted = datetime.fromisoformat(completed_serialized[:-1])
+        assert persisted.tzinfo is None
+        delta = abs((datetime.now(UTC).replace(tzinfo=None) - persisted).total_seconds())
+        assert delta < 5, f"completed_at 与当前时刻偏差过大（可能仍被时区污染）: {delta}s"
+
+    def test_update_run_status_completed_at_is_consistent_with_started_at(self, api_client: TestClient):
+        """验证 update_run_status 终态时间与 started_at 同口径，无 8 小时跨度假象"""
+        _insert_test_novel("tz_run2")
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_id = run_repo.create_run(novel_id="tz_run2", title="tz-regression-2")
+            run_repo.update_run_status(run_id, "completed")
+            run = run_repo.get_run(run_id)
+        assert run["started_at"] is None
+        assert run["completed_at"] is not None and run["completed_at"].endswith("Z")
+        assert run["updated_at"] is not None and run["updated_at"].endswith("Z")
+
+
 class TestAnalysis:
     """测试分析端点"""
 
@@ -63,12 +99,10 @@ class TestAnalysis:
         response = api_client.post("/api/novels/nonexistent/tasks/fake1234/resume")
         assert response.status_code == 404
 
-    def test_get_status_requires_task_id(self, api_client: TestClient):
-        """测试兼容状态接口必须显式提供 task_id"""
+    def test_novel_status_route_is_removed(self, api_client: TestClient):
+        """测试小说级状态路由已删除"""
         response = api_client.get("/api/novels/nonexistent/status")
-        assert response.status_code == 400
-        data = response.json()
-        assert "task_id" in data["detail"]
+        assert response.status_code == 404
 
     def test_app_shutdown_does_not_cancel_runtime_task_manager(self) -> None:
         """测试应用 shutdown 只回收 SSE 清理协程，不再把运行中分析收口成用户取消。"""
@@ -314,9 +348,8 @@ class TestAnalysis:
         task_manager.create_task(task_id, novel_id)
         api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
         try:
-            with patch.object(
-                analysis_mod.RunRepository,
-                "request_task_cancellation",
+            with patch(
+                "src.api.services.task_application_service.RunRepository.request_task_cancellation",
                 side_effect=RuntimeError("db write failed"),
             ):
                 response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
@@ -400,7 +433,7 @@ class TestAnalysis:
                 cancel_requested=True,
                 completed_at=datetime.now(),
             )
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
         assert resume_response.status_code == 200
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
@@ -448,7 +481,7 @@ class TestAnalysis:
                 cancel_requested=True,
                 completed_at=None,
             )
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
         assert resume_response.status_code == 200
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
@@ -481,16 +514,23 @@ class TestAnalysis:
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-        task_manager = TaskManager()
-        task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, novel_id)
-        task_manager.update_task(
-            task_id,
-            status=analysis_mod.TaskStatus.RUNNING,
-            progress=42.0,
-            stage="annotate",
-            message="正在分析第 42 个分块",
-        )
+        # 直接更新 DB，不经过 TaskManager 内存缓存
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                task_id,
+                status="running",
+                progress=42.0,
+                stage="annotate",
+                message="正在分析第 42 个分块",
+            )
+        # 验证 DB 中确实写入了 message
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            db_task = run_repo.get_run(task_id)
+            assert db_task is not None
+            assert db_task["message"] == "正在分析第 42 个分块", f"DB message: {db_task.get('message')}"
+
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
         assert status_response.status_code == 200
         data = status_response.json()
@@ -503,9 +543,9 @@ class TestAnalysis:
 
         session_factory = get_session_factory()
         # 2026-08-13 P2：heartbeat_at 列无时区，落库统一为 naive UTC 挂钟
-        stale_heartbeat = (
-            datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
-        ).replace(tzinfo=None)
+        stale_heartbeat = (datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)).replace(
+            tzinfo=None
+        )
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = uuid.uuid4().hex[:8]
         cancelling_novel_id = uuid.uuid4().hex[:8]
@@ -596,10 +636,10 @@ class TestAnalysis:
         task_id = service.create_task(novel_id)
         scheduled_calls: list[tuple[str, str]] = []
 
-        def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+        def _record_schedule(self, scheduled_task_id: str, novel: dict, task_kind: str, request=None) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
         assert scheduled_count == len(scheduled_calls)
         assert cancelled_count == 0
@@ -635,11 +675,11 @@ class TestAnalysis:
             scheduled_calls.append((scheduled_task_id, resume_novel_id))
             return scheduled_task_id
 
-        def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+        def _record_schedule(self, scheduled_task_id: str, novel: dict, task_kind: str, request=None) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
         with (
-            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule),
+            patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule),
             patch.object(analysis_mod.AnalysisService, "resume_task", new=_resume_or_skip),
         ):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
@@ -665,89 +705,41 @@ class TestAnalysis:
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
-        expected_request = ReanalyzeRequest(force_annotate=True, force_topic_model=True, num_topics=7, label="resume")
+        expected_request = ReanalyzeRequest(force_annotate=True, force_topic_model=True, num_topics=7)
         task_id = service.create_task(
             novel_id,
             task_kind="reanalysis",
             request_payload=expected_request.model_dump(mode="json", exclude_none=True),
         )
-        reanalysis_calls: list[tuple[str, str, ReanalyzeRequest | None]] = []
-        analysis_calls: list[str] = []
+        reanalysis_calls: list[tuple[str, str, str, ReanalyzeRequest | None]] = []
 
-        def _record_reanalysis(
+        def _record_schedule(
             self,
             scheduled_task_id: str,
             novel: dict,
+            task_kind: str,
             request: ReanalyzeRequest | None = None,
         ) -> None:
-            reanalysis_calls.append((scheduled_task_id, novel["novel_id"], request))
+            reanalysis_calls.append((scheduled_task_id, novel["novel_id"], task_kind, request))
 
-        def _record_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
-            analysis_calls.append(scheduled_task_id)
-
-        with (
-            patch.object(analysis_mod.AnalysisService, "_schedule_reanalysis_task", new=_record_reanalysis),
-            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_analysis),
-        ):
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
         target_calls = [call for call in reanalysis_calls if call[0] == task_id]
         assert target_calls
         assert cancelled_count == 0
-        assert task_id not in analysis_calls
         assert scheduled_count >= len(reanalysis_calls)
-        _, restored_novel_id, restored_request = target_calls[0]
+        _, restored_novel_id, restored_task_kind, restored_request = target_calls[0]
         assert restored_novel_id == novel_id
+        assert restored_task_kind == "reanalysis"
         assert isinstance(restored_request, ReanalyzeRequest)
         assert restored_request == expected_request
 
-    def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
-        """测试未知 task_id 查询详情时返回 None"""
-        mock_session = MagicMock()
-        mock_session.__enter__.return_value = mock_session
-        mock_session.__exit__.return_value = None
-        mock_session.connection.return_value = MagicMock()
-        with (
-            patch.object(analysis_mod, "get_session_factory", return_value=lambda: mock_session),
-            patch.object(analysis_mod, "task_id_to_run_id", side_effect=TaskIDNotFoundError("not found")),
-        ):
-            result = analysis_mod._get_task_detail_from_db("deadbeef")
-        assert result is None
-
     def test_status_map_covers_known_states_only(self):
-        """
-        2026-08-14 D3：/status 只映射新管线六态；aggregated/diagnosed 为旧合同
-        状态（新管线不再写入），与未知状态一样落入 PENDING 兜底，不再误报 COMPLETED。
-        """
-        assert analysis_mod._map_status_to_task_status("aggregated") == analysis_mod.TaskStatus.PENDING
-        assert analysis_mod._map_status_to_task_status("diagnosed") == analysis_mod.TaskStatus.PENDING
-        assert analysis_mod._map_status_to_task_status("completed") == analysis_mod.TaskStatus.COMPLETED
-        assert analysis_mod._map_status_to_task_status("pending") == analysis_mod.TaskStatus.PENDING
-        assert analysis_mod._map_status_to_task_status("unknown-state") == analysis_mod.TaskStatus.PENDING
-
-    def test_get_task_status_falls_back_for_legacy_aggregated_status(self, api_client: TestClient):
-        """2026-08-14 D3：历史 aggregated 状态的 run 不再映射为 completed（旧合同已退役）"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("legacy_aggregated_status.txt", file, "text/plain")}
-                )
-        assert upload_response.status_code == 200
-        novel_id = upload_response.json()["novel_id"]
-
-        from src.api.dependencies import get_novel_service
-
-        service = get_novel_service()
-        task_id = service.create_task(novel_id)
-        with get_session_factory()() as session:
-            RunRepository(session).update_run_task_fields(task_id, status="aggregated", progress=90.0)
-
-        response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "pending"
-        assert data["progress"] == 90.0
+        """2026-08-19 用于验证任务状态仅映射当前状态集合"""
+        for status in analysis_mod.TaskStatus:
+            assert analysis_mod._map_status_to_task_status(status.value) == status
+        with pytest.raises(ValueError, match="未知任务状态"):
+            analysis_mod._map_status_to_task_status("unknown-state")
 
     def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):
         """

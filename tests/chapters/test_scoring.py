@@ -83,9 +83,7 @@ def test_number_decrement_penalty() -> None:
 
 
 def test_even_density_bonus() -> None:
-    candidates = [
-        _candidate(display_title=f"章节标题{i}", number=i, start_char=i * 100) for i in range(1, 4)
-    ]
+    candidates = [_candidate(display_title=f"章节标题{i}", number=i, start_char=i * 100) for i in range(1, 4)]
     scored = _scored(candidates)
     assert scored[0].confidence == pytest.approx(1.0 * 1.1 * 1.2)
     assert scored[1].confidence == pytest.approx(1.0 * 1.1 * 1.1 * 1.2)

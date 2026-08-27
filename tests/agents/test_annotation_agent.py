@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from src.agents.annotation.errors import AnnotationAuthorizationError, AnnotationInvariantError
+from src.agents.annotation.errors import (
+    AnnotationAuthorizationError,
+    AnnotationInputError,
+    AnnotationInvariantError,
+)
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
@@ -25,6 +29,7 @@ from src.agents.annotation.schema import (
     BoundEntityDirectory,
     CaseSearchResult,
     ChunkMetricsInput,
+    ChunkParagraphInfo,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -153,26 +158,21 @@ def _dialogues_call(call_id: str = "call-dialogues") -> dict:
 
 
 def _events_call(call_id: str = "call-events") -> dict:
-    """2026-08-07 用于构造合法 write_events 调用"""
+    """2026-08-22 用于构造合法 create_event 调用（服务端派发 id）"""
     return _write_call(
-        "write_events",
+        "create_event",
         {
-            "items": [
-                {
-                    "description": "顾霜喝止众人",
-                    "participants": [{"entity": "顾霜", "role": "主体"}],
-                }
-            ]
+            "description": "顾霜喝止众人",
+            "participants": [{"entity": "顾霜", "role": "主体"}],
         },
         call_id=call_id,
     )
 
 
 def _empty_domain_calls() -> list[dict]:
-    """2026-08-07 用于构造剩余两个空领域的写入调用"""
+    """2026-08-07 用于构造剩余空领域的写入调用"""
     return [
         _write_call("write_relations", {"items": []}, call_id="call-relations"),
-        _write_call("write_foreshadowings", {"items": []}, call_id="call-foreshadowings"),
     ]
 
 
@@ -208,6 +208,11 @@ async def _invoke_graph(
         current_chunk_id=chunk_id,
         current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len(chunk_text))],
+            texts=[chunk_text],
+        ),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -231,7 +236,6 @@ async def _invoke_graph(
             ],
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )
@@ -270,20 +274,68 @@ def _agent_result() -> AgentRunResult:
         pushed_cases=[],
         audit=AgentRunAudit(
             allow_future_context=False,
-            write_revisions=[],
+            write_records=[],
             rotation_case_ids=[],
-            authorized_text_chunk_ids=[1],
+            authorized_chapter_ids=[1],
+            authorized_text_paragraph_ids=[],
         ),
     )
 
 
 def _tool_receipts(captured_round: list) -> list[str]:
     """2026-08-10 用于提取某轮模型请求中的全部 ToolMessage 内容"""
-    return [
-        str(message.content)
-        for message in captured_round
-        if getattr(message, "type", "") == "tool"
-    ]
+    return [str(message.content) for message in captured_round if getattr(message, "type", "") == "tool"]
+
+
+@pytest.mark.asyncio
+async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
+    """2026-08-26 回归：write_entities 追加与更新语义必须落地最终载荷
+
+    契约允许模型分两次提交实体（先新实体、后补别名），运行时图登记累积使
+    校验通过，但最终载荷此前只保留最后一次调用，导致较早声明实体在持久化
+    层事实端点解析时缺失（"事实端点实体未被系统解析"）。
+    """
+    ledger = AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text="住手回荡",
+        allow_future_context=False,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, 4)],
+            texts=["住手回荡"],
+        ),
+    )
+    tools = build_annotation_tools(_QueryService(), ledger)
+    by_name = {tool.name: tool for tool in tools}
+    await by_name["write_entities"].ainvoke(
+        {
+            "entities": [
+                {"name": "侯飞白", "entity_type": "character", "description": "贺军情报头子之子"},
+                {"name": "褚大山", "entity_type": "character"},
+            ]
+        }
+    )
+    await by_name["write_entities"].ainvoke(
+        {
+            "entities": [
+                {"name": "猴子", "entity_type": "character", "description": "侯飞白外号"},
+            ]
+        }
+    )
+    await by_name["write_entities"].ainvoke(
+        {
+            "entities": [
+                {"name": "侯飞白", "entity_type": "character", "tags": ["小孩"]},
+            ]
+        }
+    )
+    catalog = ledger.bound_payloads["entities"]
+    assert [entity.name for entity in catalog.entities] == ["侯飞白", "褚大山", "猴子"]
+    bound_hou = next(entity for entity in catalog.entities if entity.name == "侯飞白")
+    assert bound_hou.description == "贺军情报头子之子"
+    assert bound_hou.tags == ["小孩"]
 
 
 @pytest.mark.asyncio
@@ -337,11 +389,6 @@ async def test_six_success_one_failure_keeps_six_receipts() -> None:
                     _events_call(),
                     _write_call("write_relations", {"items": []}, call_id="call-relations"),
                     invalid_metrics,
-                    _write_call(
-                        "write_foreshadowings",
-                        {"items": []},
-                        call_id="call-foreshadowings",
-                    ),
                 ]
             ),
             _tool_message(
@@ -358,7 +405,7 @@ async def test_six_success_one_failure_keeps_six_receipts() -> None:
     receipts = _tool_receipts(llm.captured_messages[1])
     accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
-    assert len(accepted) == 6
+    assert len(accepted) == 5
     assert len(rejected) == 1
     assert '"tool": "write_metrics"' in rejected[0]
 
@@ -390,7 +437,7 @@ async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
     assert len(accepted) == 1
     assert len(rejected) == 1
-    assert '"revision": 1' in accepted[0]
+    assert '"revision"' not in accepted[0]
     assert '"tool": "write_metrics"' in rejected[0]
 
 
@@ -464,37 +511,6 @@ async def test_truncated_tool_call_skips_business_tool_and_feeds_error_receipt()
 
 
 @pytest.mark.asyncio
-async def test_protocol_error_rejects_plain_text_reply() -> None:
-    """2026-08-14 用于验证连续无工具回复在重试预算耗尽后按协议错误收口"""
-    llm = _SequenceLLM([AIMessage(content="已经完成")] * 3)
-    result = await _invoke_graph(llm, allow_future_context=False)
-
-    assert "annotation 工具协议错误" in str(result["error"])
-    assert llm.calls == 3
-
-
-@pytest.mark.asyncio
-async def test_protocol_error_retries_then_recovers() -> None:
-    """2026-08-14 用于验证无工具回复会回灌提示重试，随后正确调用工具即可完成章节"""
-    llm = _SequenceLLM(
-        [
-            AIMessage(content="我忘记调用工具了"),
-            _tool_message(_full_write_calls()),
-        ]
-    )
-    result = await _invoke_graph(llm, allow_future_context=False)
-
-    assert result["phase"] == "completed"
-    assert result.get("error") is None
-    assert llm.calls == 2
-    # 回灌的 SystemMessage 出现在第二次请求的消息链中
-    assert any(
-        isinstance(message, SystemMessage) and "未包含任何工具调用" in message.content
-        for message in llm.captured_messages[1]
-    )
-
-
-@pytest.mark.asyncio
 async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
     """2026-08-10 用于验证 receipt 齐全但 ready_chunk 缺失时按不变量错误终止而非回环修正"""
     llm = _SequenceLLM(
@@ -510,13 +526,18 @@ async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
             super()._rebuild_ready_chunk_if_complete()
             self.ready_chunk = None
 
-    chunk_id, chunk_text = 1, "“住手”回荡"
+    chunk_id, chunk_text = 1, "\u201c住手\u201d回荡"
     ledger = _BrokenLedger(
         run_scope="run-1",
         current_chapter_id=1,
         current_chunk_id=chunk_id,
         current_chunk_text=chunk_text,
         allow_future_context=False,
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len(chunk_text))],
+            texts=[chunk_text],
+        ),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -678,6 +699,134 @@ async def test_runner_returns_result_from_single_attempt() -> None:
     assert recorder.finish_invocation.call_args.kwargs["status"] == "success"
 
 
+@pytest.mark.asyncio
+async def test_runner_accepts_multiple_sub_chunk_entries_and_negative_ids() -> None:
+    """2026-08-14 M7（§20）用于验证多 chunk 输入与负子块 ID 通过章节身份校验"""
+    session = MagicMock()
+    result = _agent_result()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=result),
+    ) as run_attempt:
+        actual = await run_annotation_agent(
+            run_id="run-1",
+            chapter_id=1,
+            current_chunks=[(-1, "第一个子块"), (-2, "第二个子块")],
+            query_service_factory=lambda session: _QueryService(),
+            session_factory=lambda: session,
+            llm=MagicMock(),
+            audit_recorder=MagicMock(),
+        )
+    assert actual == result
+    assert run_attempt.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_empty_chunk_text_entry() -> None:
+    """2026-08-14 M7 用于验证逐条校验子块原文非空"""
+    session = MagicMock()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=_agent_result()),
+    ) as run_attempt:
+        with pytest.raises(AnnotationInputError, match="原文不能为空"):
+            await run_annotation_agent(
+                run_id="run-1",
+                chapter_id=1,
+                current_chunks=[(-1, "   ")],
+                query_service_factory=lambda session: _QueryService(),
+                session_factory=lambda: session,
+                llm=MagicMock(),
+                audit_recorder=MagicMock(),
+            )
+    assert run_attempt.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_forwards_sub_chunk_index_to_attempt() -> None:
+    """2026-08-14 M7（§20）用于验证 sub_chunk_index 透传到底层尝试"""
+    session = MagicMock()
+    with patch(
+        "src.agents.annotation.runner._run_single_attempt",
+        new=AsyncMock(return_value=_agent_result()),
+    ) as run_attempt:
+        await run_annotation_agent(
+            run_id="run-1",
+            chapter_id=1,
+            current_chunks=[(-2, "第二个子块")],
+            sub_chunk_index=1,
+            query_service_factory=lambda session: _QueryService(),
+            session_factory=lambda: session,
+            llm=MagicMock(),
+            audit_recorder=MagicMock(),
+        )
+    assert run_attempt.call_args.kwargs["sub_chunk_index"] == 1
+
+
+def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
+    """2026-08-14 M7 用于验证多条目 current 按子块 ID 精确覆盖且对话按各自原文绑定"""
+    first = BoundChunkAnnotation(
+        chunk_id=-1,
+        metrics=ChunkMetricsInput(
+            summary="第一子块",
+            emotional_valence="neutral",
+            narrative_function="铺垫",
+        ),
+        entities=BoundEntityDirectory(),
+        character_observations=[],
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_1",
+                content="住手",
+                start=0,
+                end=2,
+            )
+        ],
+        events=[],
+        relations=[],
+        foreshadowings=[],
+    )
+    second = BoundChunkAnnotation(
+        chunk_id=-2,
+        metrics=ChunkMetricsInput(
+            summary="第二子块",
+            emotional_valence="neutral",
+            narrative_function="铺垫",
+        ),
+        entities=BoundEntityDirectory(),
+        character_observations=[],
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_2",
+                content="退下",
+                start=0,
+                end=2,
+            )
+        ],
+        events=[],
+        relations=[],
+        foreshadowings=[],
+    )
+    annotation = BoundChapterAnnotation(
+        chapter_summary="子块合并摘要",
+        chunks=[first, second],
+    )
+    validate_bound_annotation(
+        annotation,
+        chapter_id=1,
+        current_chunks=[(-1, "住手喝止"), (-2, "退下众人")],
+    )
+    # 顺序错位仍被拒绝
+    with pytest.raises(ValueError, match="必须按原文顺序精确覆盖"):
+        validate_bound_annotation(
+            annotation,
+            chapter_id=1,
+            current_chunks=[(-2, "退下众人"), (-1, "住手喝止")],
+        )
+
+
 class _AliasCaseQueryService(_QueryService):
     """2026-08-12 用于提供 entity_alias 活动案例的图级测试查询桩"""
 
@@ -735,11 +884,16 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
         run_scope="run-1",
         current_chapter_id=1,
         current_chunk_id=1,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
         graph=FactGraph(
             history_entity_types={"顾霜": "character", "顾老": "character"},
             history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
+        ),
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len("\u201c住手\u201d回荡"))],
+            texts=["\u201c住手\u201d回荡"],
         ),
     )
     ledger.graph_queried = True
@@ -774,7 +928,6 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
             ],
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )

@@ -73,6 +73,8 @@ data/novel/
 
 # Outputs - 分析输出结果
 outputs/
+# 词表审计与图表快照等本地产物
+output/
 
 # Cache
 .cache/
@@ -221,6 +223,8 @@ skills/
 
 .codex-runtime/ 
 .playwright-mcp/
+# Playwright CLI 会话快照
+.playwright-cli/
 .pytest-tmp/
 tmp/
 scripts/tools/build_competition_report.py
@@ -237,4 +241,14 @@ scripts/experiments/
 # 图形化分析报告导出独立工具（不纳入版本库，含其测试）
 tools/report_exporter/
 tests/report/
+
+.omo/
+
+# OpenViking / 向量库等本地运行时数据（不入库）
+data/_system/
+data/vectordb/
+data/viking/
+
+# opencode 本地 MCP 配置
+opencode.json
 

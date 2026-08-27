@@ -1,42 +1,35 @@
 /**
- * TimelineNode - 时间轴节点组件
+ * TimelineNode - 事件森林节点徽标（2026-08-20 一树一节点版）
  *
- * 时间轴上的单个节点，根据属性映射大小/颜色/图标
- *
- *   - 节点改为显式对齐轨道基线，避免出现节点与时间轴横线错位
- *   - 统一复用节点视觉语义配置，保证图例、节点、详情表达一致
- *   - 增强选中/高亮态，让节点在复杂时间轴中更容易被识别
+ * 一棵树=一个节点：展示 title||summary 前30字 + character_names + main_chain 长度 + 旁支数
+ * 点击回调传递 tree_id，选中态按 tree_id 判
  */
 
 import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
-import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineEventNode } from "@/api/types";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 const NODE_SIZE_MIN = 12;
 const NODE_SIZE_MAX = 28;
-
-/** 后端 importance_score 最大值（与 timeline.py Field(ge=0, le=13) 对齐） */
 const IMPORTANCE_SCORE_MAX = 13;
 
-/* ------------------------------------------------------------------ */
-/*  类型定义                                                           */
-/* ------------------------------------------------------------------ */
-
 export interface TimelineNodeProps {
-  node: TimelineNodeType | TimelineCompositeNode;
+  node: TimelineEventNode;
   isSelected?: boolean;
   isHighlighted?: boolean;
-  onClick?: () => void;
+  onClick?: (treeId: string) => void;
   showLabel?: boolean;
   baselineY?: number;
   position?: string;
   verticalOffset?: number;
 }
 
-/* ------------------------------------------------------------------ */
-/*  组件主体                                                           */
-/* ------------------------------------------------------------------ */
+function resolveCauseRole(level: 1 | 2 | 3): "root" | "main" | "secondary" {
+  if (level === 1) return "root";
+  if (level === 2) return "main";
+  return "secondary";
+}
 
 export function TimelineNode({
   node,
@@ -48,14 +41,15 @@ export function TimelineNode({
   position,
   verticalOffset,
 }: TimelineNodeProps) {
-  const presentationSubtype = "node_subtype" in node ? node.node_subtype : (node.node_subtypes[0] ?? "plot");
-  const presentation = getTimelineNodePresentation(node.node_type, presentationSubtype);
+  const causeRole = resolveCauseRole(node.level);
+  const presentation = getTimelineNodePresentation("event", causeRole);
   const Icon = presentation.icon;
 
   const size = calculateNodeSize(node.importance_score);
-  const tensionPercentile = "plot_flags" in node ? node.plot_flags?.tension_percentile ?? 50 : 50;
-  const resolvedVerticalOffset =
-    verticalOffset ?? calculateDefaultVerticalOffset(tensionPercentile);
+  const resolvedVerticalOffset = verticalOffset ?? 0;
+  const displayTitle = (node.title?.trim() ? node.title : node.summary).slice(0, 30);
+  const mainChainLen = node.main_chain?.length ?? 0;
+  const secondaryCount = node.secondary_groups?.length ?? 0;
 
   return (
     <motion.button
@@ -77,68 +71,48 @@ export function TimelineNode({
       animate={{ scale: 1, opacity: 1 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
       whileHover={{ scale: 1.2 }}
-      onClick={onClick}
+      onClick={() => onClick?.(node.tree_id)}
       title={node.summary}
-      aria-label={`${presentation.label}: ${node.summary}`}
+      aria-label={`${presentation.label}: ${displayTitle}`}
+      data-testid="timeline-node"
+      data-tree-id={node.tree_id}
     >
       <div
-        className={cn(
-          "flex items-center justify-center rounded-full border",
-          presentation.dotClassName
-        )}
+        className={cn("flex items-center justify-center rounded-full border", presentation.dotClassName)}
         style={{ width: size, height: size }}
       >
-        <Icon
-          className={cn(presentation.iconClassName)}
-          style={{
-            width: size * 0.5,
-            height: size * 0.5,
-          }}
-        />
+        <Icon className={cn(presentation.iconClassName)} style={{ width: size * 0.5, height: size * 0.5 }} />
       </div>
 
       {showLabel && (
         <span className="absolute top-full mt-1 whitespace-nowrap text-[10px] text-text-muted">
-          {(node.summary ?? "").slice(0, 10)}...
+          {displayTitle}
         </span>
       )}
 
-      {"plot_flags" in node && node.plot_flags?.is_pivot && (
-        <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-chart-negative text-[8px] text-white">
-          !
+      {/* 角色与链路徽标：主链长度 + 旁支数（按 spec 在节点右上角以 badge 形式） */}
+      <span className="absolute -right-1 -top-1 flex min-w-[14px] justify-center rounded-full bg-primary px-1 text-[9px] font-medium text-white">
+        {mainChainLen}
+      </span>
+      {secondaryCount > 0 ? (
+        <span className="absolute -right-1 bottom-0 flex min-w-[14px] justify-center rounded-full bg-chart-4 px-1 text-[9px] font-medium text-white">
+          +{secondaryCount}
         </span>
-      )}
+      ) : null}
 
-      {"plot_flags" in node && node.plot_flags?.is_cliffhanger && (
-        <span
-          className={cn(
-            "absolute flex h-3 w-3 items-center justify-center rounded-full bg-chart-3 text-[8px] text-white",
-            node.plot_flags?.is_pivot ? "-right-4 -top-1" : "-right-1 -top-1"
-          )}
-        >
-          ?
+      {/* 角色名气泡（最多展示2个，其余省略） */}
+      {node.character_names.length > 0 ? (
+        <span className="absolute left-full top-1/2 ml-1 hidden -translate-y-1/2 whitespace-nowrap rounded bg-surface px-1 py-0.5 text-[10px] text-text-muted shadow md:block">
+          {node.character_names.slice(0, 2).join(" / ")}
+          {node.character_names.length > 2 ? "…" : ""}
         </span>
-      )}
+      ) : null}
     </motion.button>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  辅助函数                                                           */
-/* ------------------------------------------------------------------ */
 
 function calculateNodeSize(importanceScore: number): number {
   const normalized = Math.min(Math.max(importanceScore, 0), IMPORTANCE_SCORE_MAX);
   const ratio = normalized / IMPORTANCE_SCORE_MAX;
   return NODE_SIZE_MIN + ratio * (NODE_SIZE_MAX - NODE_SIZE_MIN);
-}
-
-/**
- * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 默认节点仍保留基于张力的轻微偏移，但轨道组件也可以显式覆盖为分层布局偏移
- */
-function calculateDefaultVerticalOffset(tensionPercentile: number): number {
-  const normalized = Math.min(Math.max(tensionPercentile, 0), 100);
-  const offset = (normalized - 50) * 0.3;
-  return -offset;
 }

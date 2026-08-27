@@ -183,26 +183,6 @@ export const createTaskHandler = http.post(`${BASE}/api/novels/:novelId/tasks`, 
   });
 });
 
-// 兼容旧入口：语义对齐为“创建新任务”，不再承载 resume 行为
-export const analyzeHandler = http.post(`${BASE}/api/novels/:novelId/analyze`, async ({ params, request }) => {
-  await delay(500);
-  const body = await request.clone().json().catch(() => null) as { task_id?: string } | null;
-  if (body?.task_id) {
-    return HttpResponse.json(
-      { detail: "analyze 接口不再支持 task_id 续跑，请使用 /api/novels/{novel_id}/tasks/{task_id}/resume" },
-      { status: 400 }
-    );
-  }
-  const { novelId } = params;
-  const taskId = createAndStartTask(novelId as string);
-
-  return HttpResponse.json({
-    novel_id: novelId,
-    task_id: taskId,
-    message: "分析任务已创建并启动",
-  });
-});
-
 export const reanalyzeHandler = http.post(`${BASE}/api/novels/:novelId/reanalyze`, async ({ params }) => {
   await delay(500);
   const { novelId } = params;
@@ -255,23 +235,6 @@ export const taskStatusHandler = http.get(
     await delay(100);
     const { novelId, taskId } = params;
     return buildTaskStatusPayload(novelId as string, taskId as string);
-  }
-);
-
-// 兼容旧入口：仍允许通过 query 读取，但前端主流程已切到 /tasks/{taskId}/status
-export const analysisStatusHandler = http.get(
-  `${BASE}/api/novels/:novelId/status`,
-  async ({ params, request }) => {
-    await delay(100);
-    const { novelId } = params;
-    const url = new URL(request.url);
-    const taskId = url.searchParams.get("task_id");
-
-    if (!taskId) {
-      return HttpResponse.json({ detail: "必须提供 task_id" }, { status: 400 });
-    }
-
-    return buildTaskStatusPayload(novelId as string, taskId);
   }
 );
 

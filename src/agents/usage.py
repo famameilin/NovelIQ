@@ -127,9 +127,7 @@ def estimate_agent_token_usage(messages: list[Any]) -> list[AgentTokenUsage]:
     completion 按响应文本计数，缓存命中记 0（无缓存证据 = 全量计费），费用留 NULL
     """
     prompt_parts = [
-        str(getattr(message, "content", "") or "")
-        for message in messages
-        if getattr(message, "type", None) != "ai"
+        str(getattr(message, "content", "") or "") for message in messages if getattr(message, "type", None) != "ai"
     ]
     prompt_tokens = count_tokens("\n\n".join(prompt_parts))
     estimated: list[AgentTokenUsage] = []
@@ -178,9 +176,9 @@ def build_token_usage_callback(*, session: Any, run_id: str) -> TokenUsageCallba
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
-                chunk_id=chunk_id,
+                chapter_id=chunk_id,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("failed to record embedding token usage: {}", exc)
 
     return callback

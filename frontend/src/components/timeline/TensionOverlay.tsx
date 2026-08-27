@@ -17,7 +17,7 @@ import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 
 export interface TensionOverlayProps {
   tensionCurve: number[];
-  totalChunks: number;
+  totalChapters: number;
   height?: number;
   className?: string;
 }
@@ -28,7 +28,7 @@ export interface TensionOverlayProps {
 
 export function TensionOverlay({
   tensionCurve,
-  totalChunks,
+  totalChapters,
   height = 120,
   className,
 }: TensionOverlayProps) {
@@ -60,7 +60,7 @@ export function TensionOverlay({
   const xData = tensionCurve.map((_, i) => i);
   const yData = tensionCurve;
 
-  const safeTotalChunks = Math.max(1, totalChunks);
+  const safeTotalChapters = Math.max(1, totalChapters);
 
   // 动态计算 Y 轴范围，适配不同数据源（tension_proxy / tension_composite）
   const yMin = Math.min(...yData);
@@ -79,7 +79,7 @@ export function TensionOverlay({
       data: xData,
       show: false,
       min: 0,
-      max: safeTotalChunks - 1,
+      max: safeTotalChapters - 1,
     },
     yAxis: {
       type: "value",

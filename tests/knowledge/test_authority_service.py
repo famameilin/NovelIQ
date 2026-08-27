@@ -27,7 +27,7 @@ def _persist_authority_chapter(
     relations: list[dict[str, Any]] | None = None,
     resolved_cases: list[Any] | None = None,
 ) -> None:
-    """2026-08-07 用于为 authority 视图写入章节版本图数据"""
+    """2026-08-19 用于为 authority 视图写入章节图数据"""
     persist_chapter_annotation(
         session,
         run_id=run_id,
@@ -38,7 +38,7 @@ def _persist_authority_chapter(
     )
 
 
-def test_authority_views_project_chapter_versions_and_graph_changes(db_session) -> None:
+def test_authority_views_project_chapter_history_and_graph_changes(db_session) -> None:
     """2026-08-07 用于验证 authority 从章节快照输出实体关系和变化合同"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -50,12 +50,12 @@ def test_authority_views_project_chapter_versions_and_graph_changes(db_session) 
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌", role_function="主体"),
-            character_fact(chunk_id=0, name="顾霜", action="协助", role_function="帮助者"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌", role_function="主体"),
+            character_fact(chunk_id=1, name="顾霜", action="协助", role_function="帮助者"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -73,14 +73,14 @@ def test_authority_views_project_chapter_versions_and_graph_changes(db_session) 
 
     assert {row.name for row in level1.canonical_entities} == {"林渡", "顾霜"}
     assert [(row.from_name, row.to_name, row.source) for row in level1.confirmed_relations] == [
-        ("林渡", "顾霜", "graph_relation_versions")
+        ("林渡", "顾霜", "relation_states")
     ]
     assert {row.change_kind for row in timeline.graph_changes} == {"state", "relation"}
-    assert all(row.fact_id and row.fact_revision == 1 for row in timeline.graph_changes)
+    assert all(row.fact_id and row.chapter_id == 1 for row in timeline.graph_changes)
     assert all(row.changes for row in graph_view.graph_changes)
     assert {row.name for row in graph_view.participant_states} == {"林渡", "顾霜"}
     assert export_view.current_relations[0].relation_id
-    assert export_view.current_relations[0].source == "graph_relation_versions"
+    assert export_view.current_relations[0].source == "relation_states"
     assert report.summary.node_count == 2
     assert report.summary.edge_count == 1
 
@@ -98,12 +98,12 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="结盟"),
-            character_fact(chunk_id=0, name="顾霜", action="结盟"),
+            character_fact(chunk_id=1, name="林渡", action="结盟"),
+            character_fact(chunk_id=1, name="顾霜", action="结盟"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -125,7 +125,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
+                target_ref={"kind": "relation_change", "chunk_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -145,9 +145,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         (1, relation_id),
     ]
     assert relation_changes[0].changes[0]["change_kind"] == "break"
-    assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [
-        (relation_id, False)
-    ]
+    assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [(relation_id, False)]
 
 
 def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
@@ -162,20 +160,20 @@ def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="伯安", action="同游"),
-            character_fact(chunk_id=0, name="贺重明", action="同游"),
-            character_fact(chunk_id=0, name="猴子", action="同游"),
-            character_fact(chunk_id=0, name="侯飞白", action="同游"),
+            character_fact(chunk_id=1, name="伯安", action="同游"),
+            character_fact(chunk_id=1, name="贺重明", action="同游"),
+            character_fact(chunk_id=1, name="猴子", action="同游"),
+            character_fact(chunk_id=1, name="侯飞白", action="同游"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="伯安",
                 to_name="猴子",
                 relation_type="友情",
             ),
-            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chunk_id=0),
-            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chunk_id=0),
+            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chapter_id=1),
+            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chapter_id=1),
         ],
     )
     db_session.commit()

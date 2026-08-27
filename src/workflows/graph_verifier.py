@@ -13,12 +13,12 @@ from hashlib import sha256
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import PendingCase
-from src.storage.models import GraphVersion
+from src.storage.models import ChapterBoundary
 from src.storage.repositories.graph import GraphRepository
 
 _NEIGHBOR_OVERLAP_THRESHOLD = 0.4
 _MIN_SHARED_NEIGHBOR_COUNT = 2
-_MAX_ALIAS_PAIRS_PER_VERSION = 10
+_MAX_ALIAS_PAIRS_PER_RUN = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,22 +28,18 @@ class AliasSuspicion:
     name_a: str
     name_b: str
     overlap: float
-    anchor_chunk_id: int
+    anchor_chapter_id: int
 
 
 def detect_alias_suspicions(
     session: Session,
     *,
-    graph_version: GraphVersion,
+    chapter_boundary: ChapterBoundary,
 ) -> list[AliasSuspicion]:
     """2026-08-09 用于检测共享邻居高度重叠的角色对，疑似同一人物进案例池仲裁"""
     graph_repo = GraphRepository(session)
-    entities = [
-        row
-        for row in graph_repo.fetch_entity_snapshots(graph_version)
-        if row.entity_type == "character"
-    ]
-    relations = graph_repo.fetch_relation_snapshots(graph_version, active_only=True)
+    entities = [row for row in graph_repo.fetch_entity_snapshots(chapter_boundary) if row.entity_type == "character"]
+    relations = graph_repo.fetch_relation_snapshots(chapter_boundary, active_only=True)
 
     neighbors: dict[int, set[int]] = {}
     parent: dict[int, int] = {}
@@ -74,7 +70,7 @@ def detect_alias_suspicions(
         parent.setdefault(entity_id, entity_id)
 
     names_by_id = {int(row.entity_id): row.name for row in entities}
-    last_seen_by_id = {int(row.entity_id): row.last_seen_chunk for row in entities}
+    last_seen_by_id = {int(row.entity_id): row.last_seen_chapter for row in entities}
     character_ids = [int(row.entity_id) for row in entities]
 
     suspicions: list[AliasSuspicion] = []
@@ -100,35 +96,33 @@ def detect_alias_suspicions(
                     name_a=names_by_id[left_id],
                     name_b=names_by_id[right_id],
                     overlap=round(overlap, 3),
-                    anchor_chunk_id=min(
+                    anchor_chapter_id=min(
                         last_seen_by_id[left_id],
                         last_seen_by_id[right_id],
                     ),
                 )
             )
     suspicions.sort(key=lambda item: item.overlap, reverse=True)
-    return suspicions[:_MAX_ALIAS_PAIRS_PER_VERSION]
+    return suspicions[:_MAX_ALIAS_PAIRS_PER_RUN]
 
 
 def build_alias_pending_cases(
     session: Session,
     *,
     run_id: str,
-    graph_version: GraphVersion,
+    chapter_boundary: ChapterBoundary,
     existing_target_keys: set[str],
 ) -> list[PendingCase]:
     """2026-08-09 用于把疑似同一人物对转换为待仲裁案例"""
     pending_cases: list[PendingCase] = []
-    for suspicion in detect_alias_suspicions(session, graph_version=graph_version):
-        target_key = sha256(
-            f"{run_id}:entity_alias:{suspicion.name_a}:{suspicion.name_b}".encode()
-        ).hexdigest()
+    for suspicion in detect_alias_suspicions(session, chapter_boundary=chapter_boundary):
+        target_key = sha256(f"{run_id}:entity_alias:{suspicion.name_a}:{suspicion.name_b}".encode()).hexdigest()
         if target_key in existing_target_keys:
             continue
         pending_cases.append(
             PendingCase(
                 type="entity_alias",
-                chunk_id=suspicion.anchor_chunk_id,
+                chunk_id=suspicion.anchor_chapter_id,
                 keys=[suspicion.name_a, suspicion.name_b, "同一人物"],
                 description=(
                     f"疑似同一人物：{suspicion.name_a} 与 {suspicion.name_b} "
@@ -137,7 +131,7 @@ def build_alias_pending_cases(
                 target_key=target_key,
                 target_ref={
                     "kind": "entity_alias",
-                    "chunk_id": suspicion.anchor_chunk_id,
+                    "chunk_id": suspicion.anchor_chapter_id,
                     "name_a": suspicion.name_a,
                     "name_b": suspicion.name_b,
                 },

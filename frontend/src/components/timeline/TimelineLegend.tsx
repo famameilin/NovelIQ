@@ -7,7 +7,6 @@
  *   - 补充“节点越大、越重要”等阅读提示，服务时间轴主视图
  */
 
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
@@ -16,27 +15,22 @@ export interface TimelineLegendProps {
 }
 
 export function TimelineLegend({ className }: TimelineLegendProps) {
+  // 一树一节点体系：仅展示根因 / 主链 / 旁支 三档 + 因果边图例
   const presentations = [
-    { key: "plot", nodeType: "plot", nodeSubtype: "plot" },
-    { key: "state", nodeType: "state", nodeSubtype: "state" },
-    { key: "relation", nodeType: "relation", nodeSubtype: "assert" },
-    { key: "entry", nodeType: "lifecycle", nodeSubtype: "entry" },
-    { key: "exit", nodeType: "lifecycle", nodeSubtype: "exit" },
+    { key: "root", nodeType: "event" as const, nodeSubtype: "root" },
+    { key: "main", nodeType: "event" as const, nodeSubtype: "main" },
+    { key: "secondary", nodeType: "event" as const, nodeSubtype: "secondary" },
   ] as const;
 
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-2",
-        className
-      )}
-    >
+    <div className={cn("flex flex-wrap items-center gap-2", className)}>
       {presentations.map(({ key, nodeType, nodeSubtype }) => {
         const presentation = getTimelineNodePresentation(nodeType, nodeSubtype);
         const Icon = presentation.icon;
         return (
           <div
             key={key}
+            data-testid={`legend-${key}`}
             className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5"
             title={presentation.description}
           >
@@ -52,20 +46,23 @@ export function TimelineLegend({ className }: TimelineLegendProps) {
           </div>
         );
       })}
-      <Badge variant="outline" className="gap-1 border-chart-negative/30 text-chart-negative">
-          <span className="text-[10px] font-bold">!</span>
-          转折点
-      </Badge>
-      <Badge variant="outline" className="gap-1 border-chart-3/30 text-chart-3">
-          <span className="text-[10px] font-bold">?</span>
-          悬念点
-      </Badge>
-      <Badge variant="outline" className="text-text-muted">
-          节点越大，重要性越高
-      </Badge>
-      <Badge variant="outline" className="text-text-muted">
-        上下分层帮助阅读密集节点
-      </Badge>
+      {/* 因果边图例：实线=active 虚线=inactive，与详情因果区块灰显一致 */}
+      <div
+        data-testid="legend-causal-active"
+        className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5"
+        title="实线为活跃因果边"
+      >
+        <span className="h-0.5 w-8 bg-primary" />
+        <span className="text-xs font-medium text-text">因果（活跃）</span>
+      </div>
+      <div
+        data-testid="legend-causal-inactive"
+        className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5 opacity-70"
+        title="虚线为已失效因果边，详情中灰显"
+      >
+        <span className="h-0.5 w-8 border-t border-dashed border-text-muted bg-transparent" />
+        <span className="text-xs font-medium text-text-muted">因果（已失效）</span>
+      </div>
     </div>
   );
 }

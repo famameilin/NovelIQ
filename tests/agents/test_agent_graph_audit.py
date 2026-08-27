@@ -346,11 +346,7 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
 
     recorder.finish_invocation(invocation_id, status="error", final_error="provider timeout")
     db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)
-        ).scalars()
-    )
+    turns = list(db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalars())
     assert len(turns) == 1
     turn = turns[0]
     assert turn.status == "error"
@@ -373,9 +369,7 @@ async def test_graph_finish_emits_tool_call_succeeded_event() -> None:
     async def emitter(event) -> None:
         events.append((event.action, event.content, event.status or ""))
 
-    llm = _SequencedLLM(
-        [AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])]
-    )
+    llm = _SequencedLLM([AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])])
     graph = build_agent_graph(
         llm,
         [],

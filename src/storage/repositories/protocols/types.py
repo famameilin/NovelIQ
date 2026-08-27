@@ -45,41 +45,19 @@ class RunRecord(TypedDict, total=False):
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkTextRow:
-    """分块文本行"""
+class ChapterTextRow:
+    """章节文本行"""
 
-    chunk_id: int
+    chapter_id: int
     text: str
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkCounts:
-    """分块统计结果"""
+class ChapterCounts:
+    """章节统计结果"""
 
-    total_chunks: int
+    total_chapters: int
     total_chars: int
-
-
-@dataclass(frozen=True, slots=True)
-class ChunkTopicWeight:
-    """分块主题权重写入行"""
-
-    chunk_id: int
-    topic_id: int
-    topic_weight: float
-
-
-@dataclass(frozen=True, slots=True)
-class ChunkCurveRow:
-    """分块曲线写入行"""
-
-    chunk_id: int
-    pos_density: float
-    neg_density: float
-    net_density: float
-    smoothed_density: float
-    tension_proxy: float
-    tension_composite: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +65,7 @@ class GlobalStatValue:
     """全局统计写入/读取行"""
 
     stat_name: str
-    stat_value: float
+    stat_value: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,16 +82,16 @@ class GlobalContextRecord:
 class PivotBlock:
     """诊断转折点分块"""
 
-    chunk_id: int
+    chapter_id: int
     text: str
     event_type: str
 
 
 @dataclass(frozen=True, slots=True)
 class HighTensionChunk:
-    """高张力分块"""
+    """高张力段落（2026-08-14 M8a：事实源切换为段落曲线）"""
 
-    chunk_id: int
+    paragraph_id: int
     text: str
     tension: float
 
@@ -122,7 +100,7 @@ class HighTensionChunk:
 class RelationChangeRow:
     """关系变更诊断行"""
 
-    chunk_id: int
+    chapter_id: int
     from_char: str
     to_char: str
     relation_type: str
@@ -133,7 +111,7 @@ class RelationChangeRow:
 class ForeshadowingChunk:
     """伏笔诊断分块"""
 
-    chunk_id: int
+    chapter_id: int
     text: str
     foreshadowing_type: str
     foreshadowing_desc: str
@@ -143,5 +121,5 @@ class ForeshadowingChunk:
 class PivotMoment:
     """高潮时刻分块"""
 
-    chunk_id: int
+    chapter_id: int
     text: str

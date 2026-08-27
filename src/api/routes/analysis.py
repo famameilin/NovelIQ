@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
@@ -23,9 +21,6 @@ from src.api.services.analysis_service import AnalysisService
 from src.api.services.novel_service import NovelService
 from src.api.services.task_application_service import TaskApplicationService
 from src.api.services.task_manager import TaskManager
-from src.storage.db import get_session_factory
-from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
-from src.storage.repositories import RunRepository
 
 _STATUS_MAP: dict[str, TaskStatus] = {
     "completed": TaskStatus.COMPLETED,
@@ -34,8 +29,6 @@ _STATUS_MAP: dict[str, TaskStatus] = {
     "failed": TaskStatus.FAILED,
     "cancelling": TaskStatus.CANCELLING,
     "cancelled": TaskStatus.CANCELLED,
-    # 2026-08-14 D3：aggregated/diagnosed 是旧合同状态（新管线不再写入），
-    # 不再映射到 COMPLETED；未知状态落入 PENDING 兜底
 }
 
 
@@ -43,75 +36,13 @@ def _map_status_to_task_status(status: str) -> TaskStatus:
     """
     将数据库状态字符串映射为TaskStatus枚举
     """
-    return _STATUS_MAP.get(status, TaskStatus.PENDING)
-
-
-def _get_task_detail_from_db(task_id: str) -> dict[str, Any] | None:
-    """
-    从数据库获取任务详情
-
-    当任务不在内存中时，从数据库查询状态
-    返回: run 记录字典（含 status/progress/stage），不存在则返回 None
-    """
-    session_factory = get_session_factory()
-    with session_factory() as session:
-        try:
-            run_id = task_id_to_run_id(task_id, session.connection())
-        except (TaskIDNotFoundError, ValueError):
-            return None
-        run_repo = RunRepository(session)
-        return run_repo.get_run(run_id)
+    try:
+        return _STATUS_MAP[status]
+    except KeyError as exc:
+        raise ValueError(f"未知任务状态: {status}") from exc
 
 
 router = APIRouter(prefix="/novels", tags=["analysis"])
-
-
-def _resolve_task_for_novel(
-    novel_service: NovelService,
-    novel_id: str,
-    task_id: str,
-) -> dict[str, Any]:
-    """
-    获取并校验任务是否属于指定小说（DB-only 查询）
-    """
-    try:
-        task = novel_service.get_task(task_id)
-    except NovelNotFoundError:
-        raise HTTPException(status_code=404, detail="任务不存在") from None
-
-    if task.get("novel_id") != novel_id:
-        raise HTTPException(status_code=400, detail="任务不属于该小说")
-    return task
-
-
-def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
-    """
-    构建单任务状态响应（DB-only 查询）
-    """
-    run = _get_task_detail_from_db(task_id)
-    if run is None:
-        return StatusResponse(
-            novel_id=novel_id,
-            task_id=task_id,
-            status=TaskStatus.PENDING,
-            progress=0.0,
-        )
-    mapped_status = _map_status_to_task_status(run["status"])
-    return StatusResponse(
-        novel_id=novel_id,
-        task_id=task_id,
-        status=mapped_status,
-        progress=run.get("progress", 0.0),
-        stage=run.get("stage"),
-        sub_stage=run.get("sub_stage"),
-        current=run.get("current"),
-        total=run.get("total"),
-        message=run.get("message"),
-        llm_outputs=None,  # DB 中不存储 llm_outputs
-        error=run.get("error"),
-        started_at=run.get("started_at"),
-        completed_at=run.get("completed_at"),
-    )
 
 
 @router.post("/{novel_id}/tasks", response_model=CreateTaskResponse)
@@ -147,8 +78,8 @@ async def resume_task(
 async def start_reanalysis(
     novel_id: str,
     request: ReanalyzeRequest | None = None,
-    novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
 ) -> ReanalyzeResponse:
     analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.start_reanalysis(novel_id, request)
@@ -156,7 +87,7 @@ async def start_reanalysis(
 
 
 @router.get("/{novel_id}/tasks", response_model=TaskListResponse)
-async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:  # noqa: B008
+async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:
     """
     获取小说的所有任务列表
     """
@@ -203,10 +134,35 @@ async def get_task_status(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> StatusResponse:
     """
-    查询单个任务状态（推荐入口）
+    查询单个任务状态
+
+    2026-08-20 阶段 3.1：消除双查询，使用 novel_service.get_task 一次获取完整状态
+    数据库是唯一真相源，TaskManager 运行时持续写回状态到 DB
     """
-    _resolve_task_for_novel(novel_service, novel_id, task_id)
-    return _build_status_response(novel_id, task_id)
+    try:
+        task = novel_service.get_task(task_id)
+    except NovelNotFoundError:
+        raise HTTPException(status_code=404, detail="任务不存在") from None
+
+    if task.get("novel_id") != novel_id:
+        raise HTTPException(status_code=404, detail="任务不存在或不属于该小说")
+
+    mapped_status = _map_status_to_task_status(task["status"])
+    return StatusResponse(
+        novel_id=novel_id,
+        task_id=task_id,
+        status=mapped_status,
+        progress=task.get("progress", 0.0),
+        stage=task.get("stage"),
+        sub_stage=task.get("sub_stage"),
+        current=task.get("current"),
+        total=task.get("total"),
+        message=task.get("message"),
+        llm_outputs=None,
+        error=task.get("error"),
+        started_at=task.get("started_at"),
+        completed_at=task.get("completed_at"),
+    )
 
 
 @router.post("/{novel_id}/tasks/{task_id}/cancel")
@@ -229,8 +185,8 @@ async def cancel_task(
 async def batch_delete_tasks(
     novel_id: str,
     request: BatchDeleteTasksRequest,
-    novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
 ) -> BatchDeleteTasksResponse:
     """
     批量删除指定的分析任务
@@ -275,24 +231,3 @@ async def batch_delete_tasks(
         deleted_ids=deleted_ids,
         failed_ids=failed_ids,
     )
-
-
-@router.get("/{novel_id}/status", response_model=StatusResponse)
-async def get_analysis_status(
-    novel_id: str,
-    task_id: str | None = None,
-    novel_service: NovelService = Depends(get_novel_service),
-) -> StatusResponse:
-    """
-    查询分析任务状态
-
-    说明: task_id非必须，但有多个task时必须提供
-    """
-    if not task_id:
-        raise HTTPException(
-            status_code=400,
-            detail="请提供 task_id；推荐使用 /api/novels/{novel_id}/tasks/{task_id}/status",
-        )
-
-    _resolve_task_for_novel(novel_service, novel_id, task_id)
-    return _build_status_response(novel_id, task_id)

@@ -21,11 +21,7 @@ def _session_factory(db_session):
 
 def _count(db_session, model, run_id: str) -> int:
     """2026-08-10 用于按 run 统计审计行数"""
-    return int(
-        db_session.execute(
-            select(func.count()).select_from(model).where(model.run_id == run_id)
-        ).scalar_one()
-    )
+    return int(db_session.execute(select(func.count()).select_from(model).where(model.run_id == run_id)).scalar_one())
 
 
 def test_recorder_writes_invocation_in_independent_transaction(db_session) -> None:
@@ -44,9 +40,7 @@ def test_recorder_writes_invocation_in_independent_transaction(db_session) -> No
     recorder.finish_invocation(invocation_id, status="success")
 
     db_session.rollback()
-    row = db_session.execute(
-        select(AgentInvocation).where(AgentInvocation.id == invocation_id)
-    ).scalar_one()
+    row = db_session.execute(select(AgentInvocation).where(AgentInvocation.id == invocation_id)).scalar_one()
     assert row.task_type == "annotation"
     assert row.chapter_id == 3
     assert row.attempt_number == 1
@@ -129,9 +123,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     assert turn.model_ms == 900
     assert turn.tool_wall_ms == 250
     assert turn.turn_ms == 1200
-    token_row = db_session.execute(
-        select(TokenUsage).where(TokenUsage.agent_turn_id == turn_id)
-    ).scalar_one()
+    token_row = db_session.execute(select(TokenUsage).where(TokenUsage.agent_turn_id == turn_id)).scalar_one()
     assert token_row.novel_id == novel_id
     assert token_row.run_id == run_id
     assert token_row.task_type == "annotation"
@@ -141,9 +133,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     assert token_row.cost == 0.42
     token_count = int(
         db_session.execute(
-            select(func.count())
-            .select_from(TokenUsage)
-            .where(TokenUsage.agent_turn_id == turn_id)
+            select(func.count()).select_from(TokenUsage).where(TokenUsage.agent_turn_id == turn_id)
         ).scalar_one()
     )
     assert token_count == 1
@@ -186,9 +176,7 @@ def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> N
     # DB 会话按本地时区（UTC+8）回读，因此断言相对差值而非绝对值
     assert turn.started_at is not None
     assert turn.finished_at is not None
-    assert (turn.finished_at - turn.started_at).total_seconds() == (
-        updated_at - inserted_at
-    ).total_seconds()
+    assert (turn.finished_at - turn.started_at).total_seconds() == (updated_at - inserted_at).total_seconds()
     assert turn.finished_at > turn.started_at
 
 
@@ -228,9 +216,7 @@ def test_record_tool_call_persists_full_args_result_and_duration(db_session) -> 
     )
 
     db_session.rollback()
-    row = db_session.execute(
-        select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)
-    ).scalar_one()
+    row = db_session.execute(select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)).scalar_one()
     assert row.tool_name == "write_metrics"
     assert row.call_index == 0
     assert row.request_args == {"summary": "章节开端"}
@@ -278,9 +264,7 @@ def test_record_tool_call_persists_raw_args(db_session) -> None:
     )
 
     db_session.rollback()
-    row = db_session.execute(
-        select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)
-    ).scalar_one()
+    row = db_session.execute(select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)).scalar_one()
     assert row.raw_args == raw
     assert row.request_args["description"] == "神秘仪式"
 
@@ -321,9 +305,7 @@ def test_failed_tool_call_recorded_with_error(db_session) -> None:
     )
 
     db_session.rollback()
-    row = db_session.execute(
-        select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)
-    ).scalar_one()
+    row = db_session.execute(select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)).scalar_one()
     assert row.status == "error"
     assert row.error == "参数非法"
     assert row.response["accepted"] is False
@@ -411,11 +393,7 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
     assert turn.turn_ms is not None and turn.turn_ms >= 0
     assert turn.tool_wall_ms == 5
     assert _count(db_session, AgentInvocation, run_id) == 1
-    tool_rows = list(
-        db_session.execute(
-            select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)
-        ).scalars()
-    )
+    tool_rows = list(db_session.execute(select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)).scalars())
     assert len(tool_rows) == 1
 
 
@@ -683,9 +661,7 @@ def test_observer_records_failed_turn_with_real_request_messages(db_session) -> 
     )
 
     db_session.rollback()
-    turn = db_session.execute(
-        select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)
-    ).scalar_one()
+    turn = db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalar_one()
     assert turn.status == "error"
     assert turn.turn_ms is not None
     assert turn.request_messages == [

@@ -18,8 +18,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from src.chunking.spans import ParagraphSpan
 from src.storage.db import get_session_factory
-from src.storage.repositories import RunRepository
+from src.storage.repositories import ParagraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 
@@ -29,7 +30,7 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
 
     创建时间: 2026-04-22
     任务: fix-novel-task-delete-consistency
-    说明: 这里构造 chunks/global_context/graph/chapter_annotations 与日志导出文件，
+    说明: 这里构造 chapters/global_context/graph/chapter_annotations 与日志导出文件，
           用于验证 novel 级删除会不会把 task 侧残留一起清掉。
     """
     task_id = run_id[:8]
@@ -41,20 +42,43 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
         session.execute(
             text(
                 """
-                INSERT INTO chunks (chunk_id, chapter_id, text, run_id)
-                VALUES (:chunk_id, :chapter_id, :text, :run_id)
+                INSERT INTO chapters
+                    (chapter_id, sequence, title, display_title, display_index_label,
+                     level, start_pos, end_pos, text, char_offset, char_end_offset, run_id)
+                VALUES
+                    (:chapter_id, 1, '第1章', '第1章', NULL, 'chapter',
+                     0, :len, :text, 0, :len, :run_id)
                 """
             ),
-            {"chunk_id": 0, "chapter_id": 1, "text": "测试分块", "run_id": run_id},
+            {"chapter_id": 1, "text": "测试分块", "len": 4, "run_id": run_id},
         )
         session.flush()
+        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        ParagraphRepository(session).insert_paragraphs(
+            run_id,
+            [
+                ParagraphSpan(
+                    paragraph_index=0,
+                    source_paragraph_index=0,
+                    fragment_index=0,
+                    local_start_char=0,
+                    local_end_char=4,
+                    text="测试分块",
+                    paragraph_id=1,
+                    chapter_id=1,
+                    global_start_char=0,
+                    global_end_char=4,
+                    token_count=1,
+                )
+            ],
+        )
         persist_chapter_annotation(
             session,
             run_id=run_id,
             chapter_id=1,
             characters=[
                 character_fact(
-                    chunk_id=0,
+                    chunk_id=1,
                     name=f"人物-{task_id}",
                     action="参与级联删除验证",
                 )
@@ -132,10 +156,14 @@ class TestNovelUpload:
         novel_id = upload_response.json()["novel_id"]
 
         with get_session_factory()() as session:
-            novel_row = session.execute(
-                text("SELECT file_path FROM novels WHERE novel_id = :novel_id"),
-                {"novel_id": novel_id},
-            ).mappings().one()
+            novel_row = (
+                session.execute(
+                    text("SELECT file_path FROM novels WHERE novel_id = :novel_id"),
+                    {"novel_id": novel_id},
+                )
+                .mappings()
+                .one()
+            )
         novel_file_path = Path(str(novel_row["file_path"]))
 
         task_ids = [
@@ -155,8 +183,8 @@ class TestNovelUpload:
                 text("SELECT COUNT(*) FROM analysis_runs WHERE novel_id = :novel_id"),
                 {"novel_id": novel_id},
             ).scalar_one()
-            chunk_count = session.execute(
-                text("SELECT COUNT(*) FROM chunks WHERE run_id IN (:run_id_1, :run_id_2)"),
+            chapter_count = session.execute(
+                text("SELECT COUNT(*) FROM chapters WHERE run_id IN (:run_id_1, :run_id_2) AND text IS NOT NULL"),
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
             annotation_count = session.execute(
@@ -170,7 +198,7 @@ class TestNovelUpload:
 
         assert novel_count == 0
         assert run_count == 0
-        assert chunk_count == 0
+        assert chapter_count == 0
         assert annotation_count == 0
         assert graph_count == 0
         assert not novel_file_path.exists()

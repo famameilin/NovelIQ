@@ -8,44 +8,30 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any
-
-from sqlalchemy.engine import Row
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
-from . import chunks, metrics, runs, summaries
+from . import metrics, runs, summaries
 
 
 class StatsRepository(BaseRepository[dict[str, Any]]):
-    """
-    统计数据 Repository
-
-    管理全局统计、情绪曲线、节奏曲线等数据
-    所有方法支持 run_id 参数以区分不同的分析运行
-
-    使用函数组合方式重组代码结构，拆分为5个模块：
-        - metrics: 全局统计和Token使用统计、云端分析、全局上下文
-        - runs: 运行状态和完成度检查
-        - chunks: 分块曲线、文化数据
-        - summaries: 分块摘要、角色出场信息
-
-    """
+    """统计数据 Repository：管理全局统计等数据，按 run_id 隔离；组合 metrics/runs/chunks/summaries 四模块。"""
 
     # ==================== metrics 模块方法 ====================
 
-    def insert_global_stats(self, run_id: str, stats: Iterable[tuple[str, float]]) -> None:
+    def insert_global_stats(self, run_id: str, stats: Iterable[tuple[str, float | None]]) -> None:
         """插入全局统计数据"""
         return metrics.insert_global_stats(self.session, run_id, stats)
 
-    def fetch_global_stats(self, run_id: str) -> list[tuple[str, float]]:
+    def fetch_global_stats(self, run_id: str) -> list[tuple[str, float | None]]:
         """获取全局统计数据"""
         return metrics.fetch_global_stats(self.session, run_id)
 
-    def fetch_global_stats_dict(self, run_id: str) -> dict[str, float]:
+    def fetch_global_stats_dict(self, run_id: str) -> dict[str, float | None]:
         """获取全局统计数据字典"""
         return metrics.fetch_global_stats_dict(self.session, run_id)
 
@@ -59,7 +45,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         prompt_tokens: int,
         total_tokens: int,
         completion_tokens: int | None = None,
-        chunk_id: int | None = None,
+        chapter_id: int | None = None,
         cache_read_tokens: int | None = None,
         cost: float | None = None,
         accounting_source: str = "reported",
@@ -77,7 +63,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
             prompt_tokens,
             total_tokens,
             completion_tokens,
-            chunk_id,
+            chapter_id,
             cache_read_tokens,
             cost,
             accounting_source,
@@ -106,36 +92,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     def is_aggregate_complete(self, run_id: str) -> bool:
         """检查聚合阶段是否完成"""
         return runs.is_aggregate_complete(self.session, run_id)
-
-    # ==================== chunks 模块方法 ====================
-
-    def insert_chunk_curve(
-        self,
-        run_id: str,
-        rows: Iterable[tuple[int, float, float, float, float, float, float]],
-    ) -> None:
-        """插入分块曲线数据（情绪 + 节奏）"""
-        return chunks.insert_chunk_curve(self.session, run_id, rows)
-
-    def fetch_chunk_culture(self, run_id: str) -> Sequence[Row]:
-        """获取分块文化数据"""
-        return chunks.fetch_chunk_culture(self.session, run_id)
-
-    def fetch_chunk_curves_full(self, run_id: str) -> Sequence[Row]:
-        """
-        获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）
-
-        返回 Sequence[Row] 支持字段名访问， 替代元组列表
-        """
-        return chunks.fetch_chunk_curves_full(self.session, run_id)
-
-    def fetch_emotion_densities(self, run_id: str) -> Sequence[Row]:
-        """
-        获取情绪密度数据
-
-        返回 Sequence[Row] 支持字段名访问， 替代元组列表
-        """
-        return chunks.fetch_emotion_densities(self.session, run_id)
 
     # ==================== metrics 模块补充方法 ====================
 
@@ -181,6 +137,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== summaries 模块方法 ====================
 
-    def insert_chunk_summary(self, run_id: str, chunk_id: int, summary: str, *, commit: bool = True) -> None:
+    def insert_chapter_summary(self, run_id: str, chapter_id: int, summary: str, *, commit: bool = True) -> None:
         """插入分块摘要"""
-        return summaries.insert_chunk_summary(self.session, run_id, chunk_id, summary, commit=commit)
+        return summaries.insert_chapter_summary(self.session, run_id, chapter_id, summary, commit=commit)

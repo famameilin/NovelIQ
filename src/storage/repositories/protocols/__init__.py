@@ -7,16 +7,12 @@
 from __future__ import annotations
 
 from .annotation import AnnotationRepositoryProtocol
-from .chunk import ChunkRepositoryProtocol
 from .diagnosis import DiagnosisRepositoryProtocol
 from .run import RunRepositoryProtocol
-from .stats import StatsRepositoryProtocol
 from .types import (
     AnnotationRecord,
-    ChunkCounts,
-    ChunkCurveRow,
-    ChunkTextRow,
-    ChunkTopicWeight,
+    ChapterCounts,
+    ChapterTextRow,
     CloudAnalysisRecord,
     ForeshadowingChunk,
     GlobalContextRecord,
@@ -34,15 +30,11 @@ from .types import (
 
 __all__ = [
     "AnnotationRepositoryProtocol",
-    "ChunkRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "RunRepositoryProtocol",
-    "StatsRepositoryProtocol",
     "AnnotationRecord",
-    "ChunkCounts",
-    "ChunkCurveRow",
-    "ChunkTextRow",
-    "ChunkTopicWeight",
+    "ChapterCounts",
+    "ChapterTextRow",
     "CloudAnalysisRecord",
     "ForeshadowingChunk",
     "GlobalContextRecord",

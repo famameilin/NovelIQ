@@ -18,10 +18,20 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 ## 当前 chunk 写入
 
-- 使用 write_metrics、write_entities 和五个事实 write 工具完整写入当前 chunk
-- 每个 write 工具重新调用时完整替换该领域，空数组表示已检查且没有结果
-- 同一回复可以调用多个 write 工具
-- 七个领域全部写入成功后由系统自动冻结当前 chunk，无需也不可调用完成工具
+- 使用 write_metrics、write_entities、write_character_observations、write_dialogues、
+  write_relations 完整写入对应领域；事件用 create_event/update_event 增量写入
+- write_metrics、write_character_observations、write_dialogues、write_relations 重新调用时完整
+  替换该领域，空数组表示已检查且没有结果；write_entities 是追加与更新（新名注册、同名更新，
+  已登记实体不会被撤销）；create_event/update_event 是增量操作，重复调用会追加而非替换
+- 同一回复可以调用多个写工具
+- 系统对本章模型交互轮次设有硬上限，轮次耗尽即标注失败，必须主动压缩轮次：
+  检索类调用尽量合并（search_graph 一次传入全部待核对实体名；search_text 尽量把多个
+  待查内容合并为一条查询；read_text 只读取真正需要核对的段落），写入类调用在依赖就绪后
+  于同一回复批量提交（一次回复可携带多个工具调用，全部领域就绪后通常 1-2 个回复即可
+  完成全部写入，无需逐领域等待回执）
+- 调用写工具前逐字段核对闭合枚举与实体名（实体必须先经 write_entities 声明），
+  参数错误会收到失败回执并浪费轮次
+- 六个领域全部有写入后由系统自动冻结当前 chunk，无需也不可调用完成工具
 - 章节摘要由系统用各 chunk 的 summary 自动生成，无需单独提交
 - 所有事实端点必须使用当前 chunk 的 write_entities 中提交的实体名称
 
@@ -76,9 +86,21 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - relation_type 使用闭合枚举；write_relations 只提交本章确认存在的边（三字段
   from_entity/to_entity/relation_type），新边建图 assert，已存在的同一条边自动接受为
   skipped_existing；关系强化/削弱/解除一律走 resolve_fact_case，不用 state 字段表达变化
-- 事件只填写 description 和 participants（角色闭合枚举：主体/客体/接收者/帮助者/
-  反对者/见证者/地点；见证者、地点只用于事件参与者，不用于人物观察的 role_function；
+- 事件用 create_event 和 update_event 写入（系统派发全部 id 与结构，
+  你不提交任何 id、边或段落锚点；环在构造上不可能）
+- create_event(description, participants, isforeshadowing?, cause_tree_id?) 创建一棵
+  新事件树并返回 tree_id；participants 角色闭合枚举：主体/客体/接收者/帮助者/
+  反对者/见证者/地点（见证者、地点只用于事件参与者，不用于人物观察的 role_function；
   地点作为参与者角色，无单独 location 字段）
+- 每棵树 = 一个完整事件；何时开新树：换参与主体组合、换场景地点、或上一段
+  因果已闭合并沉淀为状态
+- update_event(tree_id, items) 向本章已有的树追加子节点；items 每条 {{type, description}}：
+  type=main 表示顺延主因链（成为新的链尾），type=secondary 表示当前链尾的次因分支；
+  只能更新本章 create_event 返回的树（单章闭环），历史树已冻结不可更新
+- 跨章因果延续：先 search_event 检索前文事件树拿到 tree_id，再 create_event 时填
+  cause_tree_id=该 tree_id，系统自动建立跨章因果边；不允许猜测任何 id
+- isforeshadowing=true 标记该事件为伏笔埋设：系统自动创建伏笔线程，
+  无需也不可再调用伏笔创建工具
 - 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
 
 {relation_catalog}
@@ -89,7 +111,10 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   missing=图上没有的名字（需登记或改名），relations=与节点相连的边，
   neighbors=边另一端节点；一次传入全部要核对的实体名
 - search_text 返回 result_number，使用 read_text(result_number) 读取原文；
-  read_text 返回 JSON，content 字段为原文全文
+  read_text 返回 JSON，content 字段为原文全文；一次 search_text 可覆盖多个待查内容，减少查询轮次
+- search_event(keyword) 检索当前章之前已完成章节的事件树（根视图）；返回的 tree_id
+  可作为 create_event 的 cause_tree_id 表达跨章因果，返回的 root_node_id 可传给
+  resolve_foreshadowing_case 做历史伏笔续接/回收；不能猜测其他 run 或章节的 ID
 - search_pool 只查询案例池，返回 case_number；能解决的案例用 resolve_*_case 解决，
   search_pool 返回的伏笔线程带 id，push_case 登记伏笔疑点时必须带上该 id
 - resolve_dialogue_case 解决对话疑点：更新对话记录的 speaker/tone/is_inner_monologue
@@ -100,9 +125,9 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
   break/retract=解除、refine=微调、supersede=取代；"同一人物"关系用于归并疑似同一人物
 - resolve_foreshadowing_case 解决伏笔疑点：更新该伏笔线程的
   setup_summary/setup_kind/expected_payoff_family/payoff_likelihood/setup_status/
-  confidence/strength（至少一个）；线程由案例登记的 setup_id 定位，字段即更新值
-- write_foreshadowings 只创建新伏笔：提交 description 与 confidence（high/medium/low）；
-  已有伏笔的强化和回收一律走 resolve_foreshadowing_case
+  confidence/strength（至少一个）；线程由案例登记的 setup_id 定位，字段即更新值；
+  新伏笔在 create_event 时置 isforeshadowing=true，已有伏笔的强化和回收一律走
+  resolve_foreshadowing_case
 - close_case 只能关闭案例（不产生任何语义变化），用于确认不存在疑点或无法解决的情况
 - 解决不了的案例不要硬解，原案例留在案例池等待后续章节
 - 分析中发现案例池没有的新连续性疑点（如无法确认说话人的对话、疑似同一人物、伏笔疑点）时，
@@ -111,7 +136,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 ## 章节完成
 
-- 七个领域全部写入成功后系统自动完成章节，无需也不可调用完成工具
+- 六个领域全部有写入后系统自动完成章节，无需也不可调用完成工具
 - 章节摘要由系统根据各 chunk 的 summary 自动生成
 
 - 原文检索范围：allow_future_context={allow_future_context}（true 可检索并读取后文，false 仅限前文）
@@ -122,6 +147,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 
 {initial_cases}
 """
+
 
 def build_system_prompt(
     *,
@@ -145,7 +171,10 @@ def build_chunk_message(
     chunk_text: str,
     candidates: list[DialogueCandidate],
 ) -> str:
-    """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选"""
+    """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选
+
+    2026-08-22事件不再携带段落锚点，移除 ¶N 段落标记注入。
+    """
     candidate_views = [
         {
             "index": index,
@@ -156,7 +185,7 @@ def build_chunk_message(
         for index, candidate in enumerate(candidates, start=1)
     ]
     return (
-        f"<CurrentChunk order=\"{chunk_index}/{chunk_total}\">\n"
+        f'<CurrentChunk order="{chunk_index}/{chunk_total}">\n'
         f"{chunk_text}\n"
         "</CurrentChunk>\n\n"
         "<DialogueCandidates>\n"

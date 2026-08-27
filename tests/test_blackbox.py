@@ -326,7 +326,7 @@ class TestResultQueryEquivalenceClass:
             time.sleep(0.5)
 
         # 使用有效ID查询结果
-        response = client.get(f"/api/novels/{novel_id}/chunk-curves?task_id={task_id}")
+        response = client.get(f"/api/novels/{novel_id}/paragraph-curves?task_id={task_id}")
         # 可能返回 200 或 400（分析未完成）
         assert response.status_code in [200, 400]
 
@@ -335,7 +335,7 @@ class TestResultQueryEquivalenceClass:
 
     def test_ec7_invalid_novel_id(self):
         """EC7: 无效 novel_id"""
-        response = client.get("/api/novels/invalid-novel-id/chunk-curves?task_id=invalid")
+        response = client.get("/api/novels/invalid-novel-id/paragraph-curves?task_id=invalid")
         assert response.status_code == 404
 
     def test_ec8_invalid_task_id(self):

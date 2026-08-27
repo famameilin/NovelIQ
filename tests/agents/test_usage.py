@@ -27,6 +27,8 @@ def test_extract_agent_token_usage_reads_langchain_usage_metadata() -> None:
     assert usage.prompt_tokens == 12
     assert usage.completion_tokens == 8
     assert usage.total_tokens == 20
+
+
 def test_extract_agent_token_usage_reads_deepseek_raw_usage() -> None:
     """
     2026-08-10 用于验证 DeepSeek 原始 usage 结构被解析为统一用量
@@ -186,6 +188,8 @@ def test_estimate_agent_token_usage_returns_empty_without_ai_messages() -> None:
     2026-08-10 用于验证没有 AI 响应时估算列表为空
     """
     assert estimate_agent_token_usage([HumanMessage(content="hi")]) == []
+
+
 def test_build_token_usage_callback_records_embedding_usage() -> None:
     """
     2026-08-10 用于验证 EmbeddingClient 的 token 用量回调逐笔落入账本
@@ -204,7 +208,7 @@ def test_build_token_usage_callback_records_embedding_usage() -> None:
     assert kwargs["model"] == "embed-model"
     assert kwargs["prompt_tokens"] == 10
     assert kwargs["total_tokens"] == 10
-    assert kwargs["chunk_id"] == 7
+    assert kwargs["chapter_id"] == 7
 
 
 def test_turn_usage_records_estimates_missing_usage() -> None:

@@ -54,7 +54,7 @@ class StatusResponse(BaseModel):
     """
 
     novel_id: str
-    task_id: str | None = None
+    task_id: str
     status: TaskStatus
     progress: float = Field(ge=0, le=100)
     stage: str | None = None
@@ -66,17 +66,6 @@ class StatusResponse(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-
-
-class ChunkCurvePoint(BaseModel):
-    chunk_id: int
-    pos_density: float | None = None
-    neg_density: float | None = None
-    net_density: float | None = None
-    smoothed_density: float | None = None
-    tension_proxy: float | None = None
-    tension_composite: float | None = None
-    surface_tension: float | None = None
 
 
 class CharacterStats(BaseModel):
@@ -96,21 +85,114 @@ class CharacterStats(BaseModel):
     avg_emotion_score: float | None = None
 
 
-class ChunkStyle(BaseModel):
-    chunk_id: int
-    mtld: float | None = None
-    ttr: float | None = None
-    avg_sent_len: float | None = None
-    d_value: float | None = None
-    pause_density: float | None = None
+class ParagraphCurvePoint(BaseModel):
+    """段落曲线点（设计文档《章节粒度分析指标重设计》§13.1）"""
+
+    paragraph_id: int
+    chapter_id: int
+    paragraph_index: int
+    global_start_char: int
+    global_end_char: int
+    position: float
+    char_count: int
+    token_count: int
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
+    smoothed_net_density: float | None = None
+    surface_tension: float | None = None
+    smoothed_surface_tension: float | None = None
+
+
+class EmotionTrendWindow(BaseModel):
+    """情绪趋势窗口（§13.1 展示层：缩放自适应窗口聚合，由段落充分统计量计算）
+
+    - 覆盖率为窗内命中段占比，值域 [0,1]，不受段长稀释
+    - 池化密度为窗内分子/分母聚合（§8.1），禁止等权平均段落密度
+    - position 语义与 ParagraphCurvePoint 一致（段落中点 / 全书字符数）
+    """
+
+    window_index: int
+    position: float
+    start_position: float
+    end_position: float
+    paragraph_start: int
+    paragraph_end: int
+    chapter_start: int
+    chapter_end: int
+    pos_coverage: float
+    neg_coverage: float
+    pooled_pos_density: float | None = None
+    pooled_neg_density: float | None = None
+    pooled_net_density: float | None = None
+    smoothed_pos_coverage: float | None = None
+    smoothed_neg_coverage: float | None = None
+    smoothed_pooled_pos_density: float | None = None
+    smoothed_pooled_neg_density: float | None = None
+    smoothed_pooled_net_density: float | None = None
+    token_total: int
+    hit_paragraphs: int
+    paragraph_total: int
+
+
+class ChapterMetricSummary(BaseModel):
+    """章节汇总（设计文档《章节粒度分析指标重设计》§13.2，由段落充分统计量聚合）"""
+
+    chapter_id: int
+    paragraph_count: int
+    total_chars: int
+    total_tokens: int
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
     fight_density: float | None = None
+    exclaim_per_100_chars: float | None = None
+    question_per_100_chars: float | None = None
+    pause_per_100_chars: float | None = None
     dialogue_ratio: float | None = None
-    sensory_density: float | None = None
-    metaphor_density: float | None = None
-    imagery_lexicon_density: float | None = None
+    avg_sent_len: float | None = None
+    sent_len_std: float | None = None
+    ttr: float | None = None
+    mtld: float | None = None
+    narrative_function: str | None = None
+    pivot_moment: bool | None = None
+    cliffhanger: bool | None = None
+    emotional_valence: str | None = None
 
 
-class ChunkCharacter(BaseModel):
+class BookAggregateStats(BaseModel):
+    """全书聚合（设计文档《章节粒度分析指标重设计》§13.2）"""
+
+    total_chapters: int
+    total_paragraphs: int
+    total_chars: int
+    total_tokens: int
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
+    fight_density: float | None = None
+    exclaim_per_100_chars: float | None = None
+    question_per_100_chars: float | None = None
+    pause_per_100_chars: float | None = None
+    dialogue_ratio: float | None = None
+    avg_sent_len: float | None = None
+    sent_len_std: float | None = None
+    ttr: float | None = None
+    mtld: float | None = None
+    chapter_narrative_function_share: dict[str, float] = Field(default_factory=dict)
+    chapter_pivot_rate: float | None = None
+    chapter_cliffhanger_rate: float | None = None
+    chapter_emotional_valence_share: dict[str, float] = Field(default_factory=dict)
+
+
+class ChapterMetricsResponse(BaseModel):
+    """章节指标响应（章节汇总 + 全书聚合）"""
+
+    chapters: list[ChapterMetricSummary] = Field(default_factory=list)
+    book: BookAggregateStats
+
+
+class ChapterCharacter(BaseModel):
     name: str
     surface_name: str | None = None
     reference_kind: str | None = None
@@ -122,7 +204,7 @@ class ChunkCharacter(BaseModel):
     emotion_score: str | None = None
 
 
-class ChunkRelation(BaseModel):
+class ChapterRelation(BaseModel):
     from_char: str
     to_char: str
     from_reference_kind: str | None = None
@@ -134,15 +216,14 @@ class ChunkRelation(BaseModel):
     change: str
 
 
-class ChunkDialogue(BaseModel):
-
+class ChapterDialogue(BaseModel):
     speaker: list[str] | None = None
     speaker_references: list[dict[str, Any]] = []
     length: int | None = None
 
 
-class ChunkAnnotation(BaseModel):
-    chunk_id: int
+class ChapterAnnotation(BaseModel):
+    chapter_id: int
     emotional_valence: str | None = None
     event_type: str | None = None
     pivot_moment: bool | None = None
@@ -150,9 +231,7 @@ class ChunkAnnotation(BaseModel):
     has_foreshadowing: bool | None = Field(
         default=None,
         description=(
-            "当前 chunk 是否包含伏笔元素。"
-            "这是分块级存在性标记，不等于全书伏笔回收预期，"
-            "更不是严格全文事实回收率。"
+            "当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔回收预期，更不是严格全文事实回收率。"
         ),
     )
     is_strong_setup: bool | None = Field(
@@ -167,9 +246,9 @@ class ChunkAnnotation(BaseModel):
     expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     linked_setup_id: str | None = None
-    characters: list[ChunkCharacter] = []
-    relations: list[ChunkRelation] = []
-    dialogues: list[ChunkDialogue] = []
+    characters: list[ChapterCharacter] = []
+    relations: list[ChapterRelation] = []
+    dialogues: list[ChapterDialogue] = []
 
 
 class ForeshadowingThreadResponse(BaseModel):
@@ -180,15 +259,15 @@ class ForeshadowingThreadResponse(BaseModel):
     """
 
     setup_id: str
-    first_chunk_id: int
-    last_chunk_id: int
-    anchor_chunk_ids: list[int] = []
+    first_chapter_id: int
+    last_chapter_id: int
+    anchor_chapter_ids: list[int] = []
     setup_summary: str
-    setup_kind: str
-    expected_payoff_family: str
-    payoff_likelihood: str
-    confidence: str
-    strength: str
+    setup_kind: str | None
+    expected_payoff_family: str | None
+    payoff_likelihood: str | None
+    confidence: str | None
+    strength: str | None
     status: str
     active: bool
     latest_reason: str | None = None
@@ -196,7 +275,7 @@ class ForeshadowingThreadResponse(BaseModel):
 
 
 class CharacterRelation(BaseModel):
-    chunk_id: int
+    chapter_id: int
     from_char: str
     to_char: str
     type: str
@@ -210,29 +289,33 @@ class HierarchicalRelation(BaseModel):
 
     rel_id: str
     rel_type: str
-    first_chunk: int | None = None
-    last_chunk: int | None = None
+    first_chapter: int | None = None
+    last_chapter: int | None = None
     from_entity: str
     to_entity: str
 
 
 class GlobalStats(BaseModel):
-    total_chunks: int | None = None
+    total_chapters: int | None = None
     total_chars: int | None = None
     avg_mtld: float | None = None
     avg_ttr: float | None = None
     avg_sent_len: float | None = None
+    emotion_std: float | None = None
+    emotion_max: float | None = None
+    emotion_min: float | None = None
     rhythm_avg: float | None = None
     rhythm_std: float | None = None
     rhythm_max: float | None = None
     rhythm_min: float | None = None
-    global_avg_sent_len: float | None = None
-    global_avg_ttr: float | None = None
 
 
 class NarrativeStructureStats(BaseModel):
     """
     叙事结构统计模型
+
+    2026-08-14 重命名（§13.3）：event_density → chapter_narrative_function_share，
+    值语义不变（章节 Agent 标签占比，不再是“事件密度”）
     """
 
     act1_ratio: float | None = None
@@ -240,7 +323,7 @@ class NarrativeStructureStats(BaseModel):
     act3_ratio: float | None = None
     climax_spacing: float | None = None
     middle_collapse_index: float | None = None
-    event_density: dict[str, float] | None = None
+    chapter_narrative_function_share: dict[str, float] | None = None
     cliffhanger_rate: float | None = None
     climax_count: int | None = None
     climax_positions: list[float] | None = None
@@ -250,12 +333,13 @@ class NarrativeStructureStats(BaseModel):
 
 
 class EmotionStats(BaseModel):
-    pos_neg_ratio: float | None = None
+    lexical_pos_neg_ratio: float | None = None
+    arc_delta: float | None = None
     positive_ratio: float | None = None
     negative_ratio: float | None = None
     neutral_ratio: float | None = None
     recovery_speed: float | None = None
-    pivot_moment_density: float | None = None
+    chapter_pivot_rate: float | None = None
     lexical_emotion_trend: str | None = None
 
 
@@ -264,13 +348,13 @@ class CharacterStatsAggregate(BaseModel):
     greimas_coverage: float | None = None
     function_coverage_distribution: dict[str, float] | None = None
     antagonist_strength_gap: float | None = None
-    relation_change_freq: float | None = None
+    relation_change_per_10k_chars: float | None = None
     degree_centrality: dict[str, float] | None = None
 
 
 class StyleStats(BaseModel):
     tone_distribution: dict[str, float] | None = None
-    vocab_breadth: float | None = None
+    string_token_diversity: float | None = None
     avg_word_len: float | None = None
     sent_len_std: float | None = None
     dialogue_ratio: float | None = None
@@ -287,14 +371,9 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
-    rerun_required: bool = False
-    rerun_reason: str | None = None
     foreshadow_expectation: float | None = Field(
         default=None,
-        description=(
-            "伏笔回收预期，基于 setup thread ledger 加权估算的近似值，"
-            "取值范围 0-1，不是严格全文事实回收率。"
-        ),
+        description=("伏笔回收预期，基于 setup thread ledger 加权估算的近似值，取值范围 0-1，不是严格全文事实回收率。"),
     )
     arc_scores: dict[str, float] | None = None
     genre_labels: list[str] | None = None
@@ -320,12 +399,10 @@ class DiagnosisResult(BaseModel):
 class NovelResultsResponse(BaseModel):
     novel_id: str
     novel_info: dict[str, Any]
-    chunk_curves: list[ChunkCurvePoint] = []
     characters: list[CharacterStats]
     topics: list[TopicInfo]
     diagnosis: DiagnosisResult | None = None
-    chunk_styles: list[ChunkStyle] = []
-    chunk_annotations: list[ChunkAnnotation] = []
+    chapter_annotations: list[ChapterAnnotation] = []
     character_relations: list[CharacterRelation] = []
     global_stats: GlobalStats | None = None
     narrative_structure: NarrativeStructureStats | None = None
@@ -412,19 +489,6 @@ class BatchDeleteTasksResponse(BaseModel):
     failed_count: int
     deleted_ids: list[str]
     failed_ids: list[dict[str, str]]  # [{"task_id": "xxx", "reason": "错误原因"}]
-
-
-class TokenUsageRecord(BaseModel):
-    id: int
-    novel_id: str
-    chunk_id: int | None = None
-    task_type: str
-    call_type: str
-    model: str
-    prompt_tokens: int
-    completion_tokens: int | None = None
-    total_tokens: int
-    created_at: str
 
 
 class TokenUsageSummary(BaseModel):

@@ -22,12 +22,10 @@ from src.metrics.lexicon_metrics import (
 )
 from src.metrics.rhythm_metrics import tension_composite, tension_proxy
 from src.metrics.style_metrics import (
-    FUNCTION_WORDS_PATH,
     average_word_length,
     dialogue_ratio,
     function_word_distribution,
     imagery_density,
-    load_function_words,
     metaphor_density,
     mtld,
     pause_density,
@@ -36,7 +34,7 @@ from src.metrics.style_metrics import (
     ttr,
     word_frequency_breadth,
 )
-from src.metrics.text_utils import dialogue_length, split_sentences, tokenize_words
+from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
 
 
 class TestLexiconMetrics(unittest.TestCase):
@@ -129,10 +127,33 @@ class TestStyleMetrics(unittest.TestCase):
     def test_sentence_length_stats(self) -> None:
         stats = sentence_length_stats("你好。再见。")
         self.assertGreater(stats["avg_sent_len"], 0)
+        # §19.5: d_value 与 sent_len_std 完全重复，已移除
+        self.assertNotIn("d_value", stats)
+        self.assertIn("sent_len_std", stats)
+        self.assertEqual(
+            stats["sent_len_std"],
+            sentence_length_stats("你好。再见。")["sent_len_std"],
+        )
+
+    def test_sentence_length_stats_empty(self) -> None:
+        stats = sentence_length_stats("")
+        self.assertEqual(stats["avg_sent_len"], 0.0)
+        self.assertEqual(stats["sent_len_std"], 0.0)
+        self.assertNotIn("d_value", stats)
 
     def test_pause_density(self) -> None:
         text = "你好，世界；再见。"
         self.assertGreater(pause_density(text), 0)
+
+    def test_pause_density_per_hundred_chars(self) -> None:
+        # §19.4: 每百字停顿频率，随长度线性增长而非二次增长
+        text_short = "你，你。"
+        text_long = text_short * 10
+        self.assertAlmostEqual(pause_density(text_short), pause_density(text_long), places=6)
+        text_empty = ""
+        self.assertEqual(pause_density(text_empty), 0.0)
+        text_no_pause = "你好世界"
+        self.assertEqual(pause_density(text_no_pause), 0.0)
 
     def test_metaphor_density(self) -> None:
         text = "她像风一样。"
@@ -144,6 +165,14 @@ class TestStyleMetrics(unittest.TestCase):
         self.assertGreater(mtld(tokens), 0)
         self.assertGreater(average_word_length(tokens), 0)
         self.assertGreaterEqual(word_frequency_breadth(tokens, 0.8), 0)
+
+    def test_mtld_factors_zero_returns_none(self) -> None:
+        # §19.12: 全唯一词（TTR 未跌破阈值）时 MTLD 数学上无定义，返回 None
+        tokens = ["我", "爱", "你"]
+        self.assertIsNone(mtld(tokens))
+
+    def test_mtld_empty_tokens(self) -> None:
+        self.assertEqual(mtld([]), 0.0)
 
     def test_function_word_distribution(self) -> None:
         tokens = ["的", "是", "我", "的"]
@@ -177,30 +206,6 @@ class TestStyleMetrics(unittest.TestCase):
         tokens = ["的", "的", "的", "我", "爱", "你"]
         dist = function_word_distribution(tokens, ["的"])
         self.assertAlmostEqual(dist["的"], 3 / 6, places=6)
-
-    def test_load_function_words_default(self) -> None:
-        words = load_function_words()
-        self.assertIsInstance(words, list)
-        self.assertGreater(len(words), 100)
-        self.assertIn("的", words)
-        self.assertIn("了", words)
-        self.assertIn("和", words)
-
-    def test_load_function_words_custom_path(self) -> None:
-        words = load_function_words(FUNCTION_WORDS_PATH)
-        self.assertGreater(len(words), 100)
-
-    def test_load_function_words_file_not_found(self) -> None:
-        with self.assertRaises(FileNotFoundError):
-            load_function_words("nonexistent_path.txt")
-
-    def test_function_word_distribution_integration(self) -> None:
-        function_words = load_function_words()
-        tokens = ["我", "的", "书", "在", "桌", "子", "上", "了"]
-        dist = function_word_distribution(tokens, function_words)
-        self.assertIn("的", dist)
-        self.assertIn("在", dist)
-        self.assertIn("了", dist)
 
     def test_semantic_category_density(self) -> None:
         text = "刀剑宗门"

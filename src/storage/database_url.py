@@ -47,8 +47,7 @@ def resolve_database_url_from_env(
 
     if url.username is not None or url.password is not None:
         raise ValueError(
-            f"{env_var_name}_URL 不允许包含账号密码，请使用 "
-            f"{env_var_name}_USERNAME 和 {env_var_name}_PASSWORD"
+            f"{env_var_name}_URL 不允许包含账号密码，请使用 {env_var_name}_USERNAME 和 {env_var_name}_PASSWORD"
         )
 
     return url.set(

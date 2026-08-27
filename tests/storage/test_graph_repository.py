@@ -1,4 +1,4 @@
-"""章节级图版本查询仓储测试"""
+"""章节图谱历史查询仓储测试"""
 
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌"),
+            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -41,9 +41,8 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         ],
     )
     db_session.commit()
-    first_version = GraphRepository(db_session).resolve_graph_version(run_id, chapter_id=1)
-    assert first_version is not None
-    first_version_id = first_version.graph_version_id
+    first_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id, chapter_id=1)
+    assert first_boundary is not None
     relation_id = db_session.execute(
         select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
     ).scalar_one()
@@ -58,7 +57,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
+                target_ref={"kind": "relation_change", "chunk_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -67,36 +66,32 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         ],
     )
     db_session.commit()
-    second_version = GraphRepository(db_session).resolve_graph_version(run_id, chapter_id=2)
-    assert second_version is not None
-    second_version_id = second_version.graph_version_id
+    second_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id, chapter_id=2)
+    assert second_boundary is not None
 
     repository = GraphRepository(db_session)
-    first_snapshot = repository.fetch_snapshot(run_id, graph_version_id=first_version_id)
-    second_snapshot = repository.fetch_snapshot(run_id, graph_version_id=second_version_id)
+    first_snapshot = repository.fetch_snapshot(run_id, chapter_id=1)
+    second_snapshot = repository.fetch_snapshot(run_id, chapter_id=2)
     changes, total = repository.fetch_changes(run_id)
 
     assert first_snapshot is not None
     assert second_snapshot is not None
-    assert [(row.from_name, row.to_name, row.is_active) for row in first_snapshot.relations] == [
-        ("林渡", "顾霜", True)
-    ]
+    assert [(row.from_name, row.to_name, row.is_active) for row in first_snapshot.relations] == [("林渡", "顾霜", True)]
     assert second_snapshot.relations == []
-    assert {(entity.name, entity.state_revision) for entity in second_snapshot.entities} == {
+    assert {(entity.name, entity.state_chapter_id) for entity in second_snapshot.entities} == {
         ("林渡", 1),
         ("顾霜", 1),
     }
     assert total == len(changes)
-    # 2026-08-13 P1-5：change_id 追加 fact_id/fact_revision 后缀后须全局唯一
-    # （前端用作 React key 与深链参数；同版本多事实变更时旧格式会重复）
+    # 变化 ID 必须在当前 run 内唯一，供前端列表和深链使用
     assert len({row.change_id for row in changes}) == len(changes)
     relation_changes = [row for row in changes if row.change_kind == "relation"]
-    assert [(row.chapter_id, row.relation_id, row.fact_revision) for row in relation_changes] == [
-        (2, relation_id, 1),
-        (1, relation_id, 1),
+    assert [(row.chapter_id, row.relation_id) for row in relation_changes] == [
+        (2, relation_id),
+        (1, relation_id),
     ]
     assert relation_changes[0].changes[0]["change_kind"] == "break"
-    assert relation_changes[0].effective_chunk_id == 1
+    assert relation_changes[0].effective_chapter_id == 2
 
 
 def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(db_session) -> None:
@@ -111,18 +106,18 @@ def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(d
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="授艺"),
-            character_fact(chunk_id=0, name="顾霜", action="学习"),
+            character_fact(chunk_id=1, name="林渡", action="授艺"),
+            character_fact(chunk_id=1, name="顾霜", action="学习"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
             ),
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="师徒",
@@ -136,7 +131,7 @@ def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(d
     assert snapshot is not None
     assert len({row.relation_id for row in snapshot.relations}) == 2
     assert {row.relation_type for row in snapshot.relations} == {"盟友", "师徒"}
-    assert all(row.relation_revision == 1 for row in snapshot.relations)
+    assert all(row.chapter_id == 1 for row in snapshot.relations)
 
 
 def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> None:
@@ -154,7 +149,7 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
         chapter_id=1,
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -165,7 +160,7 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=1, name="林渡", action="离开")],
+        characters=[character_fact(chunk_id=2, name="林渡", action="离开")],
         resolved_cases=[
             ResolvedCase(
                 case_id="case-break",
@@ -173,7 +168,7 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
+                target_ref={"kind": "relation_change", "chunk_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -186,8 +181,8 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
     repository = GraphRepository(db_session)
     changes, total = repository.fetch_changes(run_id, chapter_id=2)
 
-    assert total == 2
-    assert len(changes) == 2
+    # 一个角色观察包含 role/action/emotion 三个独立状态变化，加上关系断裂
+    assert total == len(changes) == 4
     assert {row.change_kind for row in changes} == {"state", "relation"}
     assert all(row.chapter_id == 2 for row in changes)
 
@@ -207,10 +202,10 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌"),
+            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
         ],
-        relations=[relation_fact(chunk_id=0, from_name="林渡", to_name="顾霜", relation_type="盟友")],
+        relations=[relation_fact(chunk_id=1, from_name="林渡", to_name="顾霜", relation_type="盟友")],
     )
     db_session.commit()
     # 章2：强化关系 + 新增实体
@@ -219,9 +214,9 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         run_id=run_id,
         chapter_id=2,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="同行"),
-            character_fact(chunk_id=1, name="顾霜", action="同行"),
-            character_fact(chunk_id=1, name="白鹤", action="旁观"),
+            character_fact(chunk_id=2, name="林渡", action="同行"),
+            character_fact(chunk_id=2, name="顾霜", action="同行"),
+            character_fact(chunk_id=2, name="白鹤", action="旁观"),
         ],
         resolved_cases=[
             ResolvedCase(
@@ -230,7 +225,7 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
                 type="relation_change",
                 reason="关系加深",
                 target_key="target-2",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
+                target_ref={"kind": "relation_change", "chunk_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -245,8 +240,8 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         run_id=run_id,
         chapter_id=3,
         characters=[
-            character_fact(chunk_id=2, name="林渡", action="离去"),
-            character_fact(chunk_id=2, name="顾霜", action="离去"),
+            character_fact(chunk_id=3, name="林渡", action="离去"),
+            character_fact(chunk_id=3, name="顾霜", action="离去"),
         ],
         resolved_cases=[
             ResolvedCase(
@@ -255,7 +250,7 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-3",
-                target_ref={"kind": "relation_change", "chunk_id": 2},
+                target_ref={"kind": "relation_change", "chunk_id": 3},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",

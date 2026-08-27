@@ -18,6 +18,32 @@ from src.storage.models import AnalysisRun, Base
 
 from .base import BaseRepository
 
+
+def _naive_utcnow() -> datetime:
+    """2026-08-26 无时区列统一落 naive UTC 挂钟
+
+    与 2026-08-13 heartbeat_at 修复同口径：aware UTC 直接赋给
+    timestamp without time zone 列会被 PG 按会话时区（如 Asia/Shanghai）
+    转换，导致 completed_at 等时间戳虚增 8 小时。
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    """2026-08-26 无时区 UTC 挂钟序列化为 ISO 字符串并标注 Z 后缀
+
+    DB 各列统一存 naive UTC 墙钟，序列化显式带 Z 后前端
+    new Date() 可按 UTC 解析并正确显示本地时间。
+    """
+    return value.isoformat() + "Z" if value is not None else None
+
+
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    """2026-08-26 归一化调用方传入的时间戳为 naive UTC 挂钟"""
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
 _UNSET = object()
 T = TypeVar("T")
 
@@ -65,8 +91,21 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             logger.warning(f"Failed to deserialize request_payload: {e}")
             return None
 
-    def _to_dict(self, run: AnalysisRun) -> dict[str, Any]:
-        """将 ORM 对象转换为字典"""
+    def _to_dict_with_deserialization(self, run: AnalysisRun) -> dict[str, Any]:
+        """
+        将 ORM 对象转换为字典并反序列化 request_payload
+
+        2026-08-20 优化：合并 _to_dict 和 _deserialize_request_payload，
+        内联反序列化逻辑以减少多个端点各1层的函数调用开销
+        """
+        # 内联反序列化逻辑，避免额外的函数调用
+        request_payload_dict = None
+        if run.request_payload:
+            try:
+                request_payload_dict = json.loads(run.request_payload)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to deserialize request_payload: {e}")
+
         return {
             "run_id": run.run_id,
             "novel_id": run.novel_id,
@@ -82,14 +121,14 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "message": run.message,
             "error": run.error,
             "task_kind": run.task_kind,
-            "request_payload": self._deserialize_request_payload(run.request_payload),
+            "request_payload": request_payload_dict,
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
-            "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-            "created_at": run.created_at.isoformat() if run.created_at else None,
-            "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+            "heartbeat_at": _utc_isoformat(run.heartbeat_at),
+            "started_at": _utc_isoformat(run.started_at),
+            "completed_at": _utc_isoformat(run.completed_at),
+            "created_at": _utc_isoformat(run.created_at),
+            "updated_at": _utc_isoformat(run.updated_at),
         }
 
     def create_run(
@@ -102,22 +141,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         task_kind: str = "analysis",
         request_payload: dict[str, Any] | None = None,
     ) -> str:
-        """
-        创建新的分析运行记录
-
-        Args:
-            novel_id: 小说ID
-            source_path: 源文件路径
-            title: 小说标题
-            author: 小说作者
-            run_id: 可选的运行ID，如果不提供则自动生成
-
-        Returns:
-            运行ID
-        """
+        """创建新的分析运行记录。Args: novel_id/source_path/title/author/run_id；Returns: 运行ID。"""
         if run_id is None:
             run_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
 
         run = AnalysisRun(
             run_id=run_id,
@@ -149,7 +176,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None
-        return self._to_dict(run)
+        return self._to_dict_with_deserialization(run)
 
     def update_run_status(self, run_id: str, status: str) -> None:
         """
@@ -159,7 +186,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             status: 新状态
         """
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -179,7 +206,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             progress: 进度值 (0-100)
         """
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -197,7 +224,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             stage: 阶段名称
         """
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -217,27 +244,17 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict(run) for run in runs]
+        return [self._to_dict_with_deserialization(run) for run in runs]
 
     def cancel_run(self, run_id: str) -> bool:
-        """
-        原子性地设置任务的取消请求标记
-
-        DB 驱动的取消机制，通过 cancel_requested flag 传递取消信号
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            是否成功设置取消标记
-        """
+        """原子性设置取消标记（DB 驱动 cancel_requested）。Args: run_id；Returns: 是否成功。"""
         from sqlalchemy import update
 
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.cancel_requested == False)  # noqa: E712
-            .values(cancel_requested=True, updated_at=datetime.now(UTC))
+            .where(AnalysisRun.cancel_requested.is_(False))
+            .values(cancel_requested=True, updated_at=_naive_utcnow())
         )
         result = self.session.execute(stmt)
         self.session.commit()
@@ -254,7 +271,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -275,20 +292,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         return str(refreshed_status) if refreshed_status is not None else None
 
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
-        """
-        按状态查询任务
-
-        用于查询指定状态的所有任务
-
-        Args:
-            status: 任务状态
-
-        Returns:
-            符合状态的任务记录列表
-        """
+        """按状态查询任务。Args: status；Returns: 任务记录列表。"""
         stmt = select(AnalysisRun).where(AnalysisRun.status == status).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict(run) for run in runs]
+        return [self._to_dict_with_deserialization(run) for run in runs]
 
     def get_running_tasks(self) -> list[dict[str, Any]]:
         """
@@ -319,12 +326,12 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
         # 2026-08-13 P2：heartbeat_at 列无时区，默认值统一落 naive UTC 挂钟
         # （避免 aware UTC 被 PG 按会话时区转换，导致 resume 窗口/孤儿回收误判）
-        now = heartbeat_at or datetime.now(UTC).replace(tzinfo=None)
+        now = heartbeat_at or _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
             .where(AnalysisRun.status == "pending")
-            .where(AnalysisRun.cancel_requested == False)  # noqa: E712
+            .where(AnalysisRun.cancel_requested.is_(False))
             .values(
                 status="running",
                 worker_id=worker_id,
@@ -345,7 +352,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -384,33 +391,13 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         started_at: datetime | None | object = _UNSET,
         completed_at: datetime | None | object = _UNSET,
     ) -> None:
-        """
-        批量更新任务的运行态字段
-
-        统一的运行态字段更新方法，支持选择性更新
-
-        Args:
-            run_id: 运行ID
-            status: 任务状态
-            progress: 进度 (0-100)
-            stage: 阶段名称
-            sub_stage: 子阶段名称
-            current: 当前进度分子
-            total: 总量
-            message: 提示信息
-            error: 错误信息
-            cancel_requested: 是否请求取消
-            worker_id: 当前执行该任务的 worker 标识
-            heartbeat_at: 最近一次心跳时间
-            started_at: 任务实际开始执行时间
-            completed_at: 完成时间
-        """
+        """批量更新运行态字段（仅写入显式传入的字段）。"""
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if not run:
             return
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         if _is_set(status):
             run.status = status
         if _is_set(progress):
@@ -436,32 +423,18 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if _is_set(worker_id):
             run.worker_id = worker_id
         if _is_set(heartbeat_at):
-            run.heartbeat_at = heartbeat_at
+            run.heartbeat_at = _as_naive_utc(heartbeat_at)
         if _is_set(started_at):
-            run.started_at = started_at
+            run.started_at = _as_naive_utc(started_at)
         if _is_set(completed_at):
-            run.completed_at = completed_at
+            run.completed_at = _as_naive_utc(completed_at)
         run.updated_at = now
         self.session.commit()
 
     def get_run_by_run_id_prefix(self, run_id_prefix: str) -> dict[str, Any] | None:
-        """
-        通过run_id前缀获取运行记录
-
-        使用run_id前缀匹配查询运行记录
-
-        Args:
-            run_id_prefix: run_id前缀（如前8位）
-
-        Returns:
-            运行记录字典，不存在则返回 None
-
-        使用 limit(1) 避免多记录时抛出异常
-        """
+        """按 run_id 前缀查询（LIKE 转义 %/_/\，limit(1) 防多记录异常）。Args: run_id_prefix；Returns: 记录或 None。"""
         # 2026-08-13 P2-9：前缀中的 %/_/\\ 按字面字符匹配，避免被 LIKE 当作通配符
-        escaped_prefix = (
-            run_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        )
+        escaped_prefix = run_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         stmt = (
             select(AnalysisRun)
             .where(AnalysisRun.run_id.like(f"{escaped_prefix}%", escape="\\"))
@@ -471,7 +444,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None
-        return self._to_dict(run)
+        return self._to_dict_with_deserialization(run)
 
     def get_latest_run(self, novel_id: str) -> dict[str, Any] | None:
         """
@@ -489,7 +462,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None
-        return self._to_dict(run)
+        return self._to_dict_with_deserialization(run)
 
     def delete_run(self, run_id: str) -> bool:
         """2026-08-05 用于按当前 ORM 外键逆序删除运行数据并由调用方统一提交"""
@@ -531,7 +504,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "running")
@@ -565,7 +538,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")
@@ -616,4 +589,4 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         )
 
         runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict(run) for run in runs]
+        return [self._to_dict_with_deserialization(run) for run in runs]

@@ -1,0 +1,196 @@
+{
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/{novel_id}/tasks/{task_id}/resume",
+      "handler": "src.api.routes.analysis:resume_task",
+      "depth": 21
+    },
+    {
+      "method": "POST",
+      "path": "/{novel_id}/tasks",
+      "handler": "src.api.routes.analysis:create_and_start_task",
+      "depth": 20
+    },
+    {
+      "method": "POST",
+      "path": "/{novel_id}/reanalyze",
+      "handler": "src.api.routes.analysis:start_reanalysis",
+      "depth": 20
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/metrics/narrative-structure",
+      "handler": "src.api.routes.results:get_narrative_structure",
+      "depth": 11
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/metrics/emotion-stats",
+      "handler": "src.api.routes.results:get_emotion_stats",
+      "depth": 11
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/metrics/character-stats",
+      "handler": "src.api.routes.results:get_character_stats",
+      "depth": 11
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/metrics/style-stats",
+      "handler": "src.api.routes.results:get_style_stats",
+      "depth": 11
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/results",
+      "handler": "src.api.routes.results:get_results",
+      "depth": 10
+    },
+    {
+      "method": "DELETE",
+      "path": "/{novel_id}/tasks/{task_id}",
+      "handler": "src.api.routes.analysis:delete_task",
+      "depth": 8
+    },
+    {
+      "method": "POST",
+      "path": "/{novel_id}/tasks/{task_id}/cancel",
+      "handler": "src.api.routes.analysis:cancel_task",
+      "depth": 8
+    },
+    {
+      "method": "POST",
+      "path": "/{novel_id}/tasks/batch-delete",
+      "handler": "src.api.routes.analysis:batch_delete_tasks",
+      "depth": 8
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/characters",
+      "handler": "src.api.routes.results:get_characters",
+      "depth": 8
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/diagnosis",
+      "handler": "src.api.routes.results:get_diagnosis",
+      "depth": 8
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/tasks/{task_id}/status",
+      "handler": "src.api.routes.analysis:get_task_status",
+      "depth": 7
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/chapter-annotations",
+      "handler": "src.api.routes.results:get_chapter_annotations",
+      "depth": 7
+    },
+    {
+      "method": "DELETE",
+      "path": "/{novel_id}",
+      "handler": "src.api.routes.novels:delete_novel",
+      "depth": 6
+    },
+    {
+      "method": "POST",
+      "path": "/batch-delete",
+      "handler": "src.api.routes.novels:batch_delete_novels",
+      "depth": 6
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/emotion-trend",
+      "handler": "src.api.routes.results:get_emotion_trend",
+      "depth": 6
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/timeline",
+      "handler": "src.api.routes.timeline:get_timeline",
+      "depth": 6
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/tasks",
+      "handler": "src.api.routes.analysis:list_tasks",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/paragraph-curves",
+      "handler": "src.api.routes.results:get_paragraph_curves",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/chapter-metrics",
+      "handler": "src.api.routes.results:get_chapter_metrics",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/topics",
+      "handler": "src.api.routes.results:get_topics",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/foreshadowing-threads",
+      "handler": "src.api.routes.results:get_foreshadowing_threads",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/graph",
+      "handler": "src.api.routes.results:get_graph",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/graph/changes",
+      "handler": "src.api.routes.results:get_graph_changes",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/metrics/global-stats",
+      "handler": "src.api.routes.results:get_global_stats",
+      "depth": 5
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}/event-forest",
+      "handler": "src.api.routes.results:get_event_forest",
+      "depth": 5
+    },
+    {
+      "method": "POST",
+      "path": "/upload",
+      "handler": "src.api.routes.novels:upload_novel",
+      "depth": 3
+    },
+    {
+      "method": "GET",
+      "path": "/",
+      "handler": "src.api.routes.novels:list_novels",
+      "depth": 3
+    },
+    {
+      "method": "GET",
+      "path": "/{novel_id}",
+      "handler": "src.api.routes.novels:get_novel",
+      "depth": 3
+    },
+    {
+      "method": "GET",
+      "path": "/events/tasks/{task_id}",
+      "handler": "src.api.routes.sse:sse_endpoint",
+      "depth": 2
+    }
+  ]
+}

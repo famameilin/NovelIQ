@@ -20,6 +20,11 @@ class TestLDAConfig(unittest.TestCase):
         self.assertEqual(config.num_topics, 25)
         self.assertEqual(config.iterations, 500)
 
+    def test_lda_batch_size_is_the_public_config_name(self) -> None:
+        config = LDAConfig(lda_batch_size=123)
+        self.assertEqual(config.lda_batch_size, 123)
+
+
 class TestTopicWord(unittest.TestCase):
     def test_creation(self) -> None:
         tw = TopicWord(word="测试", weight=0.5)
@@ -48,6 +53,7 @@ class TestTopicResult(unittest.TestCase):
         self.assertEqual(d["weight"], 0.5)
         self.assertEqual(d["label"], "测试主题")
         self.assertEqual(len(d["words"]), 2)
+
 
 class TestTopicModel(unittest.TestCase):
     def test_get_topic_words(self) -> None:
@@ -113,6 +119,7 @@ class TestTopicModel(unittest.TestCase):
         results = model.infer_document_topics([])
         self.assertEqual(results, [])
 
+
 class TestLDATrainer(unittest.TestCase):
     def test_train_basic(self) -> None:
         tokenized_docs = [
@@ -126,6 +133,19 @@ class TestLDATrainer(unittest.TestCase):
         self.assertEqual(model.num_topics, 2)
         self.assertIsNotNone(model.dictionary)
         self.assertIsNotNone(model.lda_model)
+
+    @unittest.mock.patch("src.topic.lda_model.LdaModel")
+    def test_gensim_adapter_receives_chunksize(self, lda_model: MagicMock) -> None:
+        """2026-08-20 验证新配置名正确映射到 gensim 底层参数"""
+        dictionary = MagicMock()
+        dictionary.doc2bow.return_value = [(0, 1)]
+        lda_model.return_value.num_topics = 2
+        trainer = LDATrainer(LDAConfig(num_topics=2, iterations=1, passes=1, lda_batch_size=123))
+
+        with unittest.mock.patch("src.topic.lda_model.Dictionary", return_value=dictionary):
+            trainer.train([["词"]], filter_extremes=False)
+
+        self.assertEqual(lda_model.call_args.kwargs["chunksize"], 123)
 
 
 class TestHelperFunctions(unittest.TestCase):

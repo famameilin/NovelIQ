@@ -34,6 +34,11 @@ async def list_novels(
     page_size: int = 12,
     service: NovelService = Depends(get_novel_service),
 ):
+    """
+    列出所有小说
+
+    2026-08-20 阶段 3.2：消除 N+1 查询，list_novels 已优化为单次 JOIN
+    """
     if page < 1:
         raise HTTPException(status_code=422, detail="页码必须大于 0")
     if page_size < 1:
@@ -42,7 +47,7 @@ async def list_novels(
         raise HTTPException(status_code=422, detail="每页数量不能超过 100")
 
     novels = service.list_novels()
-    total = service.get_analysis_count()
+    total = len(novels)
     start = (page - 1) * page_size
     end = start + page_size
     return {
@@ -57,7 +62,7 @@ async def list_novels(
 @router.get("/{novel_id}")
 async def get_novel(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service),  # noqa: B008
+    service: NovelService = Depends(get_novel_service),
 ):
     try:
         return service.get_novel(novel_id)
@@ -68,8 +73,8 @@ async def get_novel(
 @router.delete("/{novel_id}")
 async def delete_novel(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service),  # noqa: B008
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
 ):
     try:
         service.delete_novel(novel_id, task_manager=task_manager)
@@ -82,7 +87,7 @@ async def delete_novel(
 async def batch_delete_novels(
     request: BatchDeleteNovelsRequest,
     service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+    task_manager: TaskManager = Depends(get_task_manager),
 ) -> BatchDeleteNovelsResponse:
     """
     批量删除小说

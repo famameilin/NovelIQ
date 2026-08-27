@@ -14,22 +14,19 @@ from src.config.constants import EMOTION_SCORE_MAPPING
 
 @dataclass
 class AggregateResult:
-    """聚合结果数据类
-
-    """
+    """聚合结果数据类"""
 
     narrative_structure: dict[str, Any] = field(default_factory=dict)
     emotion_curve: dict[str, Any] = field(default_factory=dict)
     character_relations: dict[str, Any] = field(default_factory=dict)
     language_style: dict[str, Any] = field(default_factory=dict)
-    traditional_culture: dict[str, float | None] = field(default_factory=dict)
 
 
 @dataclass
 class AnnotationData:
     """标注数据"""
 
-    chunk_ids: list[int]
+    chapter_ids: list[int]
     event_types: list[str]
     cliffhangers: list[int]
     pivot_moments: list[int]
@@ -43,6 +40,9 @@ class EmotionData:
     emotion_values: list[float]
     pos_densities: list[float]
     neg_densities: list[float]
+    # 与 emotion_values 对齐的归一化进度 [0,1]；缺 offset 的章不入列
+    chapter_ids: list[int] = field(default_factory=list)
+    positions: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -71,20 +71,13 @@ class TextData:
 
 
 @dataclass
-class CultureData:
-    """文化数据
-
-    """
-
-    imagery_densities: list[float]
-
-
-@dataclass
 class TensionData:
     """张力数据"""
 
-    chunk_ids: list[int]
+    chapter_ids: list[int]
     tension_composite_scores: list[float | None]
+    # 与 chapter_ids 对齐的归一化进度 [0,1]；缺 offset 时为 None
+    positions: list[float | None] = field(default_factory=list)
 
 
 @dataclass
@@ -99,13 +92,15 @@ class DialogueData:
 
 @dataclass
 class StyleData:
-    """风格指标数据
+    """风格指标数据（全书守恒聚合，§9.1）
 
-    存储风格指标数据用于聚合计算
+    2026-08-14 M8b：由每章比值列表改为全书分子/分母守恒值——
+    dialogue_ratio = Σdialogue_char_count / Σchar_count，
+    avg_sent_len = Σsentence_char_sum / Σsentence_count。
     """
 
-    dialogue_ratios: list[float]
-    avg_sent_lens: list[float]
+    dialogue_ratio: float | None
+    avg_sent_len: float | None
 
 
 def map_emotion_score(score_raw: str | None) -> int:

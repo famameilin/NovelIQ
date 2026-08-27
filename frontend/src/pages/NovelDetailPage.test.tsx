@@ -19,9 +19,10 @@ const getNarrativeStructureMock = vi.fn();
 const getEmotionStatsMock = vi.fn();
 const getCharacterStatsMock = vi.fn();
 const getStyleStatsMock = vi.fn();
+const getChapterMetricsMock = vi.fn();
 const getTopicsMock = vi.fn();
 const getDiagnosisMock = vi.fn();
-const getChunkCurvesMock = vi.fn();
+const getEmotionTrendMock = vi.fn();
 const navigateMock = vi.fn();
 const confirmSpy = vi.spyOn(window, "confirm");
 
@@ -88,9 +89,10 @@ vi.mock("@/api/results", () => ({
   getEmotionStats: (...args: unknown[]) => getEmotionStatsMock(...args),
   getCharacterStats: (...args: unknown[]) => getCharacterStatsMock(...args),
   getStyleStats: (...args: unknown[]) => getStyleStatsMock(...args),
+  getChapterMetrics: (...args: unknown[]) => getChapterMetricsMock(...args),
   getTopics: (...args: unknown[]) => getTopicsMock(...args),
   getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
-  getChunkCurves: (...args: unknown[]) => getChunkCurvesMock(...args),
+  getEmotionTrend: (...args: unknown[]) => getEmotionTrendMock(...args),
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -147,10 +149,10 @@ vi.mock("@/components/common/DimensionMiniCard", () => ({
 
 vi.mock("@/components/common/NarrativeStructureBar", () => ({
   NarrativeStructureBar: (props: {
-    eventDensity?: Record<string, number> | null;
+    chapterNarrativeFunctionShare?: Record<string, number> | null;
   }) => (
     <div data-testid="narrative-structure-bar">
-      {props.eventDensity ? JSON.stringify(props.eventDensity) : "no-event-density"}
+      {props.chapterNarrativeFunctionShare ? JSON.stringify(props.chapterNarrativeFunctionShare) : "no-event-density"}
     </div>
   ),
 }));
@@ -200,9 +202,10 @@ describe("NovelDetailPage", () => {
     getEmotionStatsMock.mockReset();
     getCharacterStatsMock.mockReset();
     getStyleStatsMock.mockReset();
+    getChapterMetricsMock.mockReset();
     getTopicsMock.mockReset();
     getDiagnosisMock.mockReset();
-    getChunkCurvesMock.mockReset();
+    getEmotionTrendMock.mockReset();
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
       title: "测试小说",
@@ -239,6 +242,10 @@ describe("NovelDetailPage", () => {
     getEmotionStatsMock.mockResolvedValue({});
     getCharacterStatsMock.mockResolvedValue({});
     getStyleStatsMock.mockResolvedValue({});
+    getChapterMetricsMock.mockResolvedValue({
+      chapters: [],
+      book: { pos_density: null, neg_density: null },
+    });
     getTopicsMock.mockResolvedValue([]);
     getDiagnosisMock.mockResolvedValue({
       arc_scores: { 沈砚: 8.2 },
@@ -248,7 +255,7 @@ describe("NovelDetailPage", () => {
       main_characters: ["沈砚"],
       core_cast: ["沈砚"],
     });
-    getChunkCurvesMock.mockResolvedValue([]);
+    getEmotionTrendMock.mockResolvedValue([]);
     confirmSpy.mockReset();
     confirmSpy.mockReturnValue(true);
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
@@ -383,7 +390,7 @@ describe("NovelDetailPage", () => {
     expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-1", { replace: true });
   });
 
-  it("详情页应将事件密度传给叙事结构卡片", async () => {
+  it("详情页应将章节叙事功能占比传给叙事结构卡片", async () => {
     currentSearchParams = "task_id=task-ready";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
     getTaskStatusMock.mockResolvedValue({
@@ -397,7 +404,7 @@ describe("NovelDetailPage", () => {
       act1_ratio: 0.1,
       act2_ratio: 0.6,
       act3_ratio: 0.3,
-      event_density: {
+      chapter_narrative_function_share: {
         冲突: 0.5,
         铺垫: 0.3,
         转折: 0.2,
@@ -433,54 +440,13 @@ describe("NovelDetailPage", () => {
     getCharacterStatsMock.mockResolvedValue({});
     getStyleStatsMock.mockResolvedValue({});
     getTopicsMock.mockResolvedValue([]);
-    getChunkCurvesMock.mockResolvedValue([]);
+    getEmotionTrendMock.mockResolvedValue([]);
 
     renderNovelDetailPage();
 
     await waitFor(() => {
       expect(screen.getByText("暂无诊断数据")).toBeInTheDocument();
       expect(screen.getByTestId("score-overview-card")).toBeInTheDocument();
-    });
-  });
-
-  it("旧 diagnosis 合同被判重跑时应显示统一重跑态", async () => {
-    currentSearchParams = "task_id=task-ready";
-    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
-    getTaskStatusMock.mockResolvedValue({
-      novel_id: "novel-1",
-      task_id: "task-ready",
-      status: "completed",
-      progress: 100,
-      current_step: "done",
-    });
-    getDiagnosisMock.mockResolvedValue({
-      rerun_required: true,
-      rerun_reason: "focus_contract_incomplete",
-    });
-    getNarrativeStructureMock.mockResolvedValue({});
-    getEmotionStatsMock.mockResolvedValue({});
-    getCharacterStatsMock.mockResolvedValue({});
-    getStyleStatsMock.mockResolvedValue({});
-    getTopicsMock.mockRejectedValue({
-      isAxiosError: true,
-      response: {
-        status: 409,
-        data: {
-          detail: {
-            code: "diagnosis_rerun_required",
-            reason: "focus_contract_incomplete",
-          },
-        },
-      },
-    });
-    getChunkCurvesMock.mockResolvedValue([]);
-
-    renderNovelDetailPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("当前结果需要重新分析")).toBeInTheDocument();
-      expect(screen.queryByTestId("diagnosis-summary-card")).not.toBeInTheDocument();
-      expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
     });
   });
 
@@ -506,7 +472,7 @@ describe("NovelDetailPage", () => {
     expect(getStyleStatsMock).not.toHaveBeenCalled();
     expect(getTopicsMock).not.toHaveBeenCalled();
     expect(getDiagnosisMock).not.toHaveBeenCalled();
-    expect(getChunkCurvesMock).not.toHaveBeenCalled();
+    expect(getEmotionTrendMock).not.toHaveBeenCalled();
   });
 
   it("已失败任务应显示友好失败提示而非数据加载失败", async () => {
@@ -537,7 +503,7 @@ describe("NovelDetailPage", () => {
     getStyleStatsMock.mockRejectedValue(notCompleteError);
     getTopicsMock.mockRejectedValue(notCompleteError);
     getDiagnosisMock.mockRejectedValue(notCompleteError);
-    getChunkCurvesMock.mockRejectedValue(notCompleteError);
+    getEmotionTrendMock.mockRejectedValue(notCompleteError);
 
     renderNovelDetailPage();
 

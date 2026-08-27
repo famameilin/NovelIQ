@@ -26,7 +26,7 @@ def _record_belongs_to_project(record) -> bool:
 def _module_filter(module_name: str):
     """2026-08-08 用于按模块前缀过滤 loguru 记录"""
 
-    def filter(record) -> bool:  # noqa: A001
+    def filter(record) -> bool:
         name = str(record["name"])
         return name == module_name or name.startswith(f"{module_name}.")
 

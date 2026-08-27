@@ -25,17 +25,18 @@
 import asyncio
 import sys
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import chunk_text
+from src.chunking.chunker import chunk_text, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
-    ChunkRepository,
-    ChunkStyleData,
+    ChapterRepository,
+    ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
@@ -52,57 +53,29 @@ def test_create_and_insert(db_session) -> None:
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
-    chunk_repo = ChunkRepository(db_session)
+    chapter_repo = ChapterRepository(db_session)
 
-    chunk_repo.insert_chunks(run_id, chunks)
+    chapter_repo.insert_chapter_texts(run_id, chunks)
+    # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+    spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
+    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
         characters=[
             character_fact(
-                chunk_id=chunks[0].index,
+                chunk_id=chunks[0].chapter_id,
                 name="张三",
                 action="走",
             )
         ],
     )
-    chunk_repo.insert_chunk_style(
-        run_id,
-        [
-            ChunkStyleData(
-                chunk_id=chunks[0].index,
-                mtld=1.0,
-                ttr=0.5,
-                avg_sent_len=12.0,
-                sent_len_std=3.0,
-                d_value=0.8,
-                pause_density=0.2,
-                fight_density=0.1,
-                exclaim_density=0.05,
-                dialogue_ratio=0.3,
-                question_density=0.02,
-                sensory_density=0.04,
-                metaphor_density=0.01,
-                function_word_vector="{}",
-                category_density_combat=0.0,
-                category_density_body=0.0,
-                category_density_relation=0.0,
-                category_density_faction=0.0,
-                category_density_command=0.0,
-                category_density_action=0.0,
-                category_density_psychology=0.0,
-                category_density_measure=0.0,
-                category_density_emotion=0.0,
-                category_density_color=0.0,
-            )
-        ],
-    )
-    rows = chunk_repo.fetch_chunk_texts(run_id)
+    rows = chapter_repo.fetch_chapter_texts(run_id)
     assert len(rows) == len(chunks)
-    assert rows[0][0] == 0
+    assert rows[0][0] == 1
     offset_row = db_session.execute(
-        text("SELECT char_offset, char_end_offset FROM chunks WHERE run_id = :run_id AND chunk_id = 0"),
+        text("SELECT char_offset, char_end_offset FROM chapters WHERE run_id = :run_id AND chapter_id = 1"),
         {"run_id": run_id},
     ).fetchone()
     assert offset_row is not None
@@ -110,7 +83,7 @@ def test_create_and_insert(db_session) -> None:
     assert offset_row.char_end_offset == chunks[0].end
 
 
-def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> None:
+def test_insert_chapter_texts_keeps_duplicate_chapter_titles_separate(db_session) -> None:
     """
     2026-08-02 用于保证重复章节标题按出现序号落为不同 chapter_id
     """
@@ -125,11 +98,11 @@ def test_insert_chunks_keeps_duplicate_chapter_titles_separate(db_session) -> No
         title="Duplicate Chapter Titles",
     )
 
-    chunk_repo = ChunkRepository(db_session)
-    chunk_repo.insert_chunks(run_id, chunks)
-    rows = chunk_repo.fetch_chunks_with_chapter(run_id)
+    chapter_repo = ChapterRepository(db_session)
+    chapter_repo.insert_chapter_texts(run_id, chunks)
+    rows = chapter_repo.fetch_chapters_with_text(run_id)
 
-    assert [row[1] for row in rows] == [1, 2, 3]
+    assert [row[0] for row in rows] == [1, 2, 3]
 
 
 def test_get_run_by_run_id_prefix_escapes_like_wildcards(db_session) -> None:

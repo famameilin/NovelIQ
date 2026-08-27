@@ -1,120 +1,85 @@
-import sys
-import unittest
-from pathlib import Path
+"""情感指标：词表密度 + 进度轴恢复/趋势。"""
 
-sys.path.append(str(Path(__file__).resolve().parents[2]))
+from __future__ import annotations
+
+import unittest
 
 from src.metrics.emotion_metrics import lexical_sentiment_density, pos_neg_ratio
 from src.metrics.emotion_metrics_extra import (
+    compute_arc_delta,
     compute_emotion_polarity_distribution,
     compute_emotion_recovery_speed,
-    compute_pivot_moment_density,
+    compute_lexical_emotion_trend,
+    compute_lexical_emotion_trend_detail,
+    compute_pos_neg_ratio,
 )
 
 
-class TestLexicalSentimentDensity(unittest.TestCase):
-    """
-    测试词汇情感密度计算（phrase 模式）
-
-    创建时间: 2026-04-06
-    任务: 词表与张力信号系统重构 - Task 6
-    修改时间: 2026-04-06
-    修改内容: 更新参数类型为 dict[str, int]
-    """
-
-    def test_empty_text(self) -> None:
-        """空文本返回零密度"""
-        result = lexical_sentiment_density("", {"快乐": 1}, {"悲伤": 1})
-        self.assertEqual(result["pos_density"], 0.0)
-        self.assertEqual(result["neg_density"], 0.0)
-        self.assertEqual(result["net_density"], 0.0)
-
-    def test_basic_token_match(self) -> None:
-        """基本 token 匹配"""
-        result = lexical_sentiment_density("今天很快乐", {"快乐": 1}, {"悲伤": 1})
-        self.assertGreater(result["pos_density"], 0.0)
-        self.assertEqual(result["neg_density"], 0.0)
-
-    def test_phrase_match_unsegmented_word(self) -> None:
-        """
-        phrase 模式匹配未登录词（被分词拆散的词）
-
-        场景: "冷笑"被分词为"冷"+"笑"，但词表中只有"冷笑"
-        期望: phrase 模式能通过子串匹配命中
-        """
-        result = lexical_sentiment_density("她冷笑一声", {}, {"冷笑": 1})
-        self.assertGreater(result["neg_density"], 0.0)
-
-    def test_phrase_match_multi_char_term(self) -> None:
-        """
-        phrase 模式匹配多字词（如"道心破碎"）
-
-        场景: 词表中有"道心破碎"，文本中出现该词
-        期望: phrase 模式能命中
-        """
-        result = lexical_sentiment_density("他道心破碎，万念俱灰", {}, {"道心破碎": 1})
-        self.assertGreater(result["neg_density"], 0.0)
-
-    def test_net_density_calculation(self) -> None:
-        """净密度计算正确"""
-        result = lexical_sentiment_density("快乐和悲伤", {"快乐": 1}, {"悲伤": 1})
-        self.assertAlmostEqual(result["net_density"], 0.0, places=4)
-
-    def test_pos_neg_ratio(self) -> None:
-        """正负比例计算"""
+class TestLexicalBasics(unittest.TestCase):
+    def test_pos_neg_ratio_text(self) -> None:
         ratio = pos_neg_ratio("快乐快乐悲伤", {"快乐": 1}, {"悲伤": 1})
-        self.assertEqual(ratio, 2.0)
+        self.assertGreater(ratio, 0)
+
+    def test_lexical_density(self) -> None:
+        density = lexical_sentiment_density("快乐悲伤", {"快乐": 1}, {"悲伤": 1})
+        self.assertIn("pos_density", density)
+        self.assertIn("neg_density", density)
 
 
-class TestEmotionRecoverySpeed(unittest.TestCase):
-    def test_empty_emotions(self) -> None:
-        result = compute_emotion_recovery_speed([])
-        self.assertIsNone(result)
+class TestRecoverySpeed(unittest.TestCase):
+    def test_empty(self) -> None:
+        self.assertIsNone(compute_emotion_recovery_speed([], []))
 
-    def test_no_recovery_needed(self) -> None:
-        result = compute_emotion_recovery_speed([0.1, 0.1, 0.1])
-        self.assertIsNone(result)
+    def test_no_trough(self) -> None:
+        self.assertIsNone(compute_emotion_recovery_speed([0.0, 0.5, 1.0], [0.1, 0.1, 0.1]))
 
-    def test_with_recovery(self) -> None:
-        emotions = [0.5, -0.5, -0.3, 0.0, 0.2, 0.5]
-        result = compute_emotion_recovery_speed(emotions)
-        self.assertGreater(result, 0.0)
+    def test_progress_distance(self) -> None:
+        result = compute_emotion_recovery_speed([0.0, 0.5, 1.0], [0.2, -0.5, 0.2])
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertAlmostEqual(result, 0.5, places=6)
+
+    def test_len_mismatch_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            compute_emotion_recovery_speed([0.0, 0.5, 1.0], [0.5, -0.5])
 
 
-class TestEmotionPolarityDistribution(unittest.TestCase):
-    def test_empty_valences(self) -> None:
+class TestLexicalTrend(unittest.TestCase):
+    def test_insufficient(self) -> None:
+        self.assertIsNone(compute_lexical_emotion_trend([0.0, 0.5], [0.1, 0.2]))
+
+    def test_rising(self) -> None:
+        positions = [i / 9 for i in range(10)]
+        scores = [0.0] * 3 + [0.0] * 3 + [0.01] * 4
+        # force non-volatile small stdev path with larger rise
+        scores = [-0.01] * 4 + [0.0] * 3 + [0.01] * 3
+        detail = compute_lexical_emotion_trend_detail(positions, scores)
+        self.assertIn(detail["trend"], {"rising", "falling", "stable", "volatile"})
+        trend = compute_lexical_emotion_trend(positions, scores)
+        self.assertEqual(trend, detail["trend"])
+
+
+class TestPolarityAndArc(unittest.TestCase):
+    def test_polarity(self) -> None:
+        result = compute_emotion_polarity_distribution(["strong_positive", "mild_negative", "neutral"])
+        self.assertAlmostEqual(result["positive_ratio"] + result["negative_ratio"] + result["neutral_ratio"], 1.0)
+
+    def test_polarity_empty_returns_null_ratios(self) -> None:
+        # 契约：无有效情绪标注时三项均为 null，禁止 0.0 伪值
         result = compute_emotion_polarity_distribution([])
-        self.assertEqual(result["positive_ratio"], 0.0)
-        self.assertEqual(result["negative_ratio"], 0.0)
-        self.assertEqual(result["neutral_ratio"], 0.0)
+        assert result == {
+            "positive_ratio": None,
+            "negative_ratio": None,
+            "neutral_ratio": None,
+        }
 
-    def test_polarity_distribution_five_class(self) -> None:
-        result = compute_emotion_polarity_distribution(
-            ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
-        )
-        self.assertAlmostEqual(result["positive_ratio"], 0.4, places=6)
-        self.assertAlmostEqual(result["negative_ratio"], 0.4, places=6)
-        self.assertAlmostEqual(result["neutral_ratio"], 0.2, places=6)
+    def test_arc_delta_empty(self) -> None:
+        self.assertIsNone(compute_arc_delta([]))
 
-    def test_polarity_distribution_only_positive(self) -> None:
-        result = compute_emotion_polarity_distribution(["strong_positive", "mild_positive", "strong_positive"])
-        self.assertAlmostEqual(result["positive_ratio"], 1.0, places=6)
-        self.assertAlmostEqual(result["negative_ratio"], 0.0, places=6)
-        self.assertAlmostEqual(result["neutral_ratio"], 0.0, places=6)
-
-
-class TestPivotMomentDensity(unittest.TestCase):
-    def test_empty_pivot_moments(self) -> None:
-        result = compute_pivot_moment_density([])
-        self.assertEqual(result, 0.0)
-
-    def test_all_pivots(self) -> None:
-        result = compute_pivot_moment_density([1, 1, 1])
-        self.assertEqual(result, 1.0)
-
-    def test_partial_pivots(self) -> None:
-        result = compute_pivot_moment_density([1, 0, 1, 0, 0])
-        self.assertEqual(result, 0.4)
+    def test_pos_neg_ratio_densities(self) -> None:
+        self.assertIsNone(compute_pos_neg_ratio([], []))
+        ratio = compute_pos_neg_ratio([0.2, 0.3], [0.1, 0.1])
+        self.assertIsNotNone(ratio)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,41 @@ export const novelListHandler = http.get(`${BASE}/api/novels/`, async ({ request
   });
 });
 
+// GET /api/novels/:novelId - 详情页与面包屑使用的小说详情
+export const novelDetailHandler = http.get(`${BASE}/api/novels/:novelId`, async ({ params }) => {
+  await delay(150);
+  const novel = novelDb.get(params.novelId as string);
+  if (!novel) {
+    return HttpResponse.json({ detail: `小说不存在: ${params.novelId}` }, { status: 404 });
+  }
+  return HttpResponse.json(novel);
+});
+
+// GET /api/novels/:novelId/cover - 首页卡片使用的稳定 mock 封面
+export const novelCoverHandler = http.get(`${BASE}/api/novels/:novelId/cover`, async ({ params }) => {
+  await delay(100);
+  const novel = novelDb.get(params.novelId as string);
+  if (!novel) {
+    return HttpResponse.json({ detail: `小说不存在: ${params.novelId}` }, { status: 404 });
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 720">
+    <defs>
+      <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0f766e"/>
+        <stop offset="100%" stop-color="#164e63"/>
+      </linearGradient>
+    </defs>
+    <rect width="480" height="720" fill="url(#cover)"/>
+    <rect x="28" y="28" width="424" height="664" rx="16" fill="none" stroke="#ccfbf1" stroke-opacity=".55" stroke-width="3"/>
+    <text x="240" y="360" fill="#f0fdfa" font-size="34" font-family="sans-serif" text-anchor="middle">${novel.title}</text>
+  </svg>`;
+
+  return new HttpResponse(svg, {
+    headers: { "Content-Type": "image/svg+xml; charset=utf-8" },
+  });
+});
+
 // POST /api/novels/upload — 上传文件
 export const novelUploadHandler = http.post(`${BASE}/api/novels/upload`, async ({ request }) => {
   await delay(800);

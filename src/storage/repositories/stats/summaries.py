@@ -11,16 +11,16 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import ChunkSummary, StageSummary
+from src.storage.models import Chapter, ChapterSummary, StageSummary
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_chunk_summary(
+def insert_chapter_summary(
     session: Session,
     run_id: str,
-    chunk_id: int,
+    chapter_id: int,
     summary: str,
     *,
     commit: bool = True,
@@ -31,20 +31,20 @@ def insert_chunk_summary(
     Args:
         session: 数据库会话
         run_id: 运行ID
-        chunk_id: 分块ID
+        chapter_id: 分块ID
         summary: 摘要文本
     """
     now = datetime.now().isoformat()
     stmt = (
-        pg_insert(ChunkSummary)
+        pg_insert(ChapterSummary)
         .values(
-            chunk_id=chunk_id,
+            chapter_id=chapter_id,
             summary=summary,
             created_at=now,
             run_id=run_id,
         )
         .on_conflict_do_update(
-            index_elements=["chunk_id", "run_id"],
+            index_elements=["chapter_id", "run_id"],
             set_={
                 "summary": summary,
                 "created_at": now,
@@ -61,27 +61,16 @@ def insert_chunk_summary(
 def insert_stage_summary(
     session: Session,
     run_id: str,
-    start_chunk_id: int,
-    end_chunk_id: int,
+    start_chapter_id: int,
+    end_chapter_id: int,
     summary: str,
 ) -> None:
-    """
-    插入阶段性摘要
-
-    存储增量消歧阶段生成的阶段性摘要
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        start_chunk_id: 起始分块ID
-        end_chunk_id: 结束分块ID
-        summary: 阶段性摘要文本（100字以内）
-    """
+    """插入阶段性摘要（增量消歧，100字内）。Args: session/run_id/start_chapter_id/end_chapter_id/summary。"""
     now = datetime.now().isoformat()
     stage_summary = StageSummary(
         run_id=run_id,
-        start_chunk_id=start_chunk_id,
-        end_chunk_id=end_chunk_id,
+        start_chapter_id=start_chapter_id,
+        end_chapter_id=end_chapter_id,
         summary=summary,
         created_at=now,
     )
@@ -89,36 +78,30 @@ def insert_stage_summary(
     session.commit()
 
 
-def fetch_chunk_summaries_by_range(
+def fetch_chapter_summaries_by_range(
     session: Session,
     run_id: str,
-    start_chunk_id: int,
-    end_chunk_id: int,
+    start_chapter_id: int,
+    end_chapter_id: int,
 ) -> list[tuple[int, str]]:
-    """
-    获取指定范围内的分块摘要
+    """获取指定范围内分块摘要（增量消歧取最近N章）。
 
-    用于增量消歧阶段获取最近N个chunk的摘要
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        start_chunk_id: 起始分块ID
-        end_chunk_id: 结束分块ID
-
-    Returns:
-        (chunk_id, summary) 元组列表
+    Args: session/run_id/start…/end…；Returns: (chapter_id, summary) 列表。
     """
     from sqlalchemy import select
 
     stmt = (
-        select(ChunkSummary.chunk_id, ChunkSummary.summary)
-        .where(
-            ChunkSummary.run_id == run_id,
-            ChunkSummary.chunk_id >= start_chunk_id,
-            ChunkSummary.chunk_id <= end_chunk_id,
+        select(ChapterSummary.chapter_id, ChapterSummary.summary)
+        .join(
+            Chapter,
+            (Chapter.run_id == ChapterSummary.run_id) & (Chapter.chapter_id == ChapterSummary.chapter_id),
         )
-        .order_by(ChunkSummary.chunk_id)
+        .where(
+            ChapterSummary.run_id == run_id,
+            ChapterSummary.chapter_id >= start_chapter_id,
+            ChapterSummary.chapter_id <= end_chapter_id,
+        )
+        .order_by(Chapter.sequence, ChapterSummary.chapter_id)
     )
     result = session.execute(stmt)
-    return [(row.chunk_id, row.summary) for row in result if row.summary]
+    return [(row.chapter_id, row.summary) for row in result if row.summary]

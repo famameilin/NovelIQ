@@ -23,7 +23,7 @@ async def test_eventbus_emits_sub_percent():
         event = StreamEvent(
             action="complete",
             sub_stage="phase1",
-            chunk_id=0,
+            chapter_id=0,
             sub_percent=25,
             message="phase1 done",
         )
@@ -49,7 +49,7 @@ async def test_eventbus_emits_sub_percent_none_when_not_provided():
         event = StreamEvent(
             action="complete",
             sub_stage="phase1",
-            chunk_id=0,
+            chapter_id=0,
             message="phase1 done",
         )
         await bus.emit(event)
@@ -73,13 +73,14 @@ async def test_eventbus_preserves_sub_percent_from_context():
         event1 = StreamEvent(
             action="complete",
             sub_stage="phase1",
-            chunk_id=0,
+            chapter_id=0,
             sub_percent=25,
         )
         await bus.emit(event1)
 
         event2 = StreamEvent(
             action="thinking",
+            stream_id="phase1-thinking",
             sub_stage="",
         )
         await bus.emit(event2)
@@ -118,7 +119,7 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
                 action="progress",
                 stage="annotate",
                 sub_stage="phase3",
-                chunk_id=8,
+                chapter_id=8,
                 current=21,
                 total=37,
                 percent=49.7,
@@ -130,7 +131,7 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
             StreamEvent(
                 action="progress",
                 stage="annotate",
-                chunk_id=8,
+                chapter_id=8,
                 message="正在收集证据",
             )
         )
@@ -177,6 +178,7 @@ async def test_eventbus_calculates_percent_from_current_total():
         # 发送 thinking 事件，没有 percent 字段
         event2 = StreamEvent(
             action="thinking",
+            stream_id="phase1-thinking",
             content="thinking content",
         )
         await bus.emit(event2)
@@ -271,8 +273,8 @@ async def test_eventbus_demotes_llm_output_and_thinking_logs_to_debug():
     ):
         mock_em.send = AsyncMock()
 
-        await bus.emit(StreamEvent(action="output", content='{"raw_name":"室内"}'))
-        await bus.emit(StreamEvent(action="thinking", content="思考片段"))
+        await bus.emit(StreamEvent(action="output", stream_id="agent-1", content='{"raw_name":"室内"}'))
+        await bus.emit(StreamEvent(action="thinking", stream_id="agent-1", content="思考片段"))
         await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="phase1", percent=10.0))
 
     assert mock_debug.call_count == 2
@@ -371,9 +373,7 @@ async def test_emit_stage_start_resets_progress_context_and_never_writes_total_z
 
     # stage_start(annotate) 写 total=37；后续调用不得再写 total（缺省 0 视为未提供）
     total_written = [
-        kwargs.get("total")
-        for call in task_manager.update_task.call_args_list
-        for kwargs in [call.kwargs]
+        kwargs.get("total") for call in task_manager.update_task.call_args_list for kwargs in [call.kwargs]
     ]
     assert total_written == [37, None, None]
     # percent：annotate 起点 10.0 → aggregate 起点 80.0 → 无进度事件回退 80.0

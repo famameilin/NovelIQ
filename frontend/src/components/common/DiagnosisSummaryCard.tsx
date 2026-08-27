@@ -7,7 +7,6 @@ import {
   getMetricAccentHoverTextClass,
 } from "@/components/common/DashboardCardShell";
 import { cn } from "@/lib/cn";
-import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import type { DiagnosisResult } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -37,7 +36,6 @@ export function DiagnosisSummaryCard({
   className,
 }: DiagnosisSummaryCardProps) {
   const navigate = useNavigate();
-  const hasFocusContract = hasCompleteFocusContract(diagnosis);
   const focusStructureLabel =
     diagnosis.focus_structure === "dual"
       ? "双主角"
@@ -68,12 +66,7 @@ export function DiagnosisSummaryCard({
         </Button>
       }
     >
-      {!hasFocusContract ? (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-3 text-sm text-text-muted">
-          当前任务缺少完整焦点合同，请重新分析该任务。
-        </div>
-      ) : (
-        <>
+      <>
         <div className="flex flex-wrap gap-1.5">
             {diagnosis.genre_labels?.map((label) => (
               <Badge key={label} variant="secondary" className="border border-primary/10 bg-primary/10 text-primary">
@@ -137,8 +130,7 @@ export function DiagnosisSummaryCard({
               </div>
             </div>
           )}
-        </>
-      )}
+      </>
     </DashboardCardShell>
   );
 }

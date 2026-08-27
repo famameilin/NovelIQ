@@ -70,7 +70,14 @@ async def test_sse_e2e_eventbus_to_stream_full_chain() -> None:
 
     response = await sse_endpoint(task_id, _make_request(disconnect_after=4))
     # 连接建立后（缓冲回放 2 条）再实时 emit 2 条
-    await bus.emit(StreamEvent(action="output", stage="preprocess", content="流式正文片段"))
+    await bus.emit(
+        StreamEvent(
+            action="output",
+            stage="preprocess",
+            stream_id="preprocess-output",
+            content="流式正文片段",
+        )
+    )
     await bus.emit_task_complete()
 
     chunks = await _drain(response, event_count=4)
@@ -99,6 +106,7 @@ async def test_sse_e2e_eventbus_to_stream_full_chain() -> None:
 
     data2 = json.loads(chunks[2]["data"])
     assert data2["content"] == "流式正文片段"
+    assert data2["stream_id"] == "preprocess-output"
 
     data3 = json.loads(chunks[3]["data"])
     assert data3["stage"] == "completed"
@@ -117,6 +125,7 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
             action="tool_call",
             stage="annotate",
             sub_stage="chapter_agent",
+            stream_id="chapter-agent-1",
             content="write_relations",
             status="started",
         )
@@ -126,6 +135,7 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
             action="tool_call",
             stage="annotate",
             sub_stage="chapter_agent",
+            stream_id="chapter-agent-1",
             content="write_relations",
             status="success",
             message="写入 3 条关系",

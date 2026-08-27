@@ -103,6 +103,7 @@ switch ($Command.ToLowerInvariant()) {
             $commandArgs = @("-m", "pytest") + $CommandArgs
             Run-VenvPython -CommandArgs $commandArgs
         }
+        exit $LASTEXITCODE
     }
     "lint" {
         Ensure-Setup

@@ -5,9 +5,11 @@
 from .analysis import (
     LdaSettings,
     MetricsSettings,
+    ParagraphSettings,
     ProgressSettings,
     TopicModelSettings,
     _parse_metrics_settings,
+    _parse_paragraph_settings,
     _parse_progress_settings,
     _parse_topic_model_settings,
 )
@@ -36,6 +38,7 @@ __all__ = [
     "LoggingSettings",
     "MetricsSettings",
     "ModelsSettings",
+    "ParagraphSettings",
     "PathSettings",
     "ProgressSettings",
     "TaskModelSettings",
@@ -44,6 +47,7 @@ __all__ = [
     "_parse_logging_settings",
     "_parse_metrics_settings",
     "_parse_models_settings",
+    "_parse_paragraph_settings",
     "_parse_path_settings",
     "_parse_progress_settings",
     "_parse_task_model_settings",

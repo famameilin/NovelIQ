@@ -56,8 +56,26 @@ def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
     ).scalar_one_or_none()
 
 
+# 二期段落化（§5.2）新结构：旧列（chunk_id/paragraph_index/paragraph_text/
+# local_*/global_*）全部移除，段落身份收敛为 paragraphs 表的 paragraph_id。
+# 旧数据旧代码不兼容：列集合不匹配时直接 DROP TABLE 后重建，数据不回填。
+_REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS = {
+    "run_id",
+    "paragraph_id",
+    "embedding_vector",
+    "embedding_model_key",
+    "embedding_dimension",
+    "source_content_hash",
+    "created_at",
+}
+
+
 def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
-    """2026-08-07 用于创建或验证原文自然段向量表"""
+    """2026-08-07 用于创建或验证原文自然段向量表
+
+    2026-08-14 二期段落化：列集合与当前结构不一致（含旧结构）时，
+    DROP TABLE 后按新结构重建；重建不迁移旧数据（不兼容旧数据策略）。
+    """
     if embedding_dim <= 0:
         raise ValueError("embedding_dim must be positive")
     session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -67,43 +85,28 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
         text("SELECT to_regclass(:table_name)"),
         {"table_name": table_regclass},
     ).scalar_one()
-    required_columns = {
-        "run_id",
-        "chunk_id",
-        "paragraph_index",
-        "paragraph_text",
-        "local_start_char",
-        "local_end_char",
-        "global_start_char",
-        "global_end_char",
-        "embedding_vector",
-        "created_at",
-    }
     existing_columns = _get_table_columns(session, "paragraph_embeddings") if table_exists is not None else set()
-    if table_exists is not None and existing_columns != required_columns:
-        raise ValueError(
-            "paragraph_embeddings schema mismatch: "
-            f"expected={sorted(required_columns)} actual={sorted(existing_columns)}"
-        )
+    if table_exists is not None and existing_columns != _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS:
+        # 2026-08-14 二期段落化：旧结构（含一期段落 embedding 结构）直接 DROP 重建，
+        # 不尝试 ALTER 兼容——旧列与新结构语义完全不同，且旧数据不回填
+        session.execute(text(f"DROP TABLE {table_regclass}"))
+        table_exists = None
     if table_exists is None:
         session.execute(
             text(
                 f"""
                 CREATE TABLE {schema}.paragraph_embeddings (
                     run_id VARCHAR(36) NOT NULL,
-                    chunk_id INTEGER NOT NULL,
-                    paragraph_index INTEGER NOT NULL,
-                    paragraph_text TEXT NOT NULL,
-                    local_start_char INTEGER NOT NULL,
-                    local_end_char INTEGER NOT NULL,
-                    global_start_char INTEGER NOT NULL,
-                    global_end_char INTEGER NOT NULL,
+                    paragraph_id INTEGER NOT NULL,
                     embedding_vector vector({embedding_dim}),
+                    embedding_model_key VARCHAR,
+                    embedding_dimension INTEGER,
+                    source_content_hash VARCHAR(64),
                     created_at VARCHAR(50),
-                    PRIMARY KEY (run_id, chunk_id, paragraph_index),
+                    PRIMARY KEY (run_id, paragraph_id),
                     FOREIGN KEY (run_id) REFERENCES {schema}.analysis_runs(run_id) ON DELETE CASCADE,
-                    FOREIGN KEY (chunk_id, run_id)
-                        REFERENCES {schema}.chunks(chunk_id, run_id) ON DELETE CASCADE
+                    FOREIGN KEY (run_id, paragraph_id)
+                        REFERENCES {schema}.paragraphs(run_id, paragraph_id) ON DELETE CASCADE
                 )
                 """
             )
@@ -119,12 +122,6 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
         text(
             f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_run_id "
             f"ON {schema}.paragraph_embeddings USING btree (run_id)"
-        )
-    )
-    session.execute(
-        text(
-            f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_run_chunk "
-            f"ON {schema}.paragraph_embeddings USING btree (run_id, chunk_id)"
         )
     )
     # 2026-08-13 P2：章节 Agent 语义检索（search_similar_paragraphs）此前对同 run 全量
@@ -159,7 +156,7 @@ def _hnsw_index_exists(session: Session, schema: str) -> bool:
 
 
 def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
-    """2026-08-07 用于校验原文自然段向量表与当前维度合同一致"""
+    """2026-08-07 用于校验原文自然段向量表与当前维度合同一致（二期段落化列集）"""
     if embedding_dim <= 0:
         raise ValueError("embedding_dim must be positive")
     schema = _runtime_schema()
@@ -169,23 +166,12 @@ def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -
     ).scalar_one()
     if table_exists is None:
         raise ValueError("paragraph_embeddings table does not exist")
-    expected_columns = {
-        "run_id",
-        "chunk_id",
-        "paragraph_index",
-        "paragraph_text",
-        "local_start_char",
-        "local_end_char",
-        "global_start_char",
-        "global_end_char",
-        "embedding_vector",
-        "created_at",
-    }
     actual_columns = _get_table_columns(session, "paragraph_embeddings")
-    if actual_columns != expected_columns:
+    if actual_columns != _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS:
         raise ValueError(
             "paragraph_embeddings schema mismatch: "
-            f"expected={sorted(expected_columns)} actual={sorted(actual_columns)}"
+            f"expected={sorted(_REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS)} "
+            f"actual={sorted(actual_columns)}"
         )
     expected_type = f"vector({embedding_dim})"
     vector_type = _get_embedding_vector_type(session, "paragraph_embeddings")

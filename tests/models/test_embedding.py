@@ -148,9 +148,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         total_texts = batch_size + 2
 
         first_response = MagicMock()
-        first_response.data = [
-            MagicMock(index=i, embedding=[float(i), float(i) + 0.5]) for i in range(batch_size)
-        ]
+        first_response.data = [MagicMock(index=i, embedding=[float(i), float(i) + 0.5]) for i in range(batch_size)]
         first_response.usage = None
 
         second_response = MagicMock()

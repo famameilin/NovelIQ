@@ -1,16 +1,5 @@
-"""
-增强匹配模块 (Enhanced Matching v2)
-
-提供两种匹配模式:
-  - phrase 模式: 子串匹配 + token 匹配，处理未登录词（如"冷笑""道心破碎"）
-  - fuzzy 模式: 在 phrase 基础上增加编辑距离容错，处理分词变体（如"剑气"/"剑罡"）
-
-设计原则:
-  - phrase 模式为默认模式
-  - 复用现有基础设施: _count_non_overlapping_spans 已在 lexicon_metrics 中实现
-
-
-"""
+"""增强匹配（Enhanced Matching v2）：phrase=子串+token（默认）、fuzzy=phrase+编辑距离容错。
+复用 lexicon_metrics._count_non_overlapping_spans，处理未登录词/分词变体。"""
 
 from __future__ import annotations
 
@@ -23,20 +12,7 @@ def count_token_hits_enhanced(
     terms: Sequence[str],
     mode: str = "phrase",
 ) -> int:
-    """
-    多模式词条命中计数
-
-    Args:
-        text: 原始文本
-        tokens: 分词后的 token 序列
-        terms: 词条集合
-        mode: 匹配模式
-            - "phrase":  子串匹配 + token 匹配，处理未登录词（默认）
-            - "fuzzy":   在 phrase 基础上增加编辑距离容错
-
-    Returns:
-        命中次数
-    """
+    """多模式命中计数：phrase=子串+token（默认，处理未登录词），fuzzy=phrase+编辑距离容错。"""
     if not tokens or not terms:
         return 0
 
@@ -54,14 +30,7 @@ def count_token_hits_enhanced(
 
 
 def _count_phrase_hits(text: str, tokens: Sequence[str], term_set: set[str]) -> int:
-    """
-    短语级匹配: 同时支持子串匹配和 token 匹配
-
-    策略:
-      1. 长词优先匹配（避免短词吞掉长词的一部分）
-      2. 已匹配的文本区间不再重复计数（非重叠 span）
-      3. 单字 token 不参与子串匹配（减少噪音）
-    """
+    """短语匹配：子串+token，长词优先、非重叠span、单字不参与子串。"""
     from .lexicon_metrics import _count_non_overlapping_spans
 
     counts = _count_non_overlapping_spans(text, term_set, tokens)
@@ -69,15 +38,7 @@ def _count_phrase_hits(text: str, tokens: Sequence[str], term_set: set[str]) -> 
 
 
 def _count_fuzzy_hits(text: str, tokens: Sequence[str], term_set: set[str], max_edit_distance: int = 1) -> int:
-    """
-    模糊匹配: 在短语匹配基础上增加编辑距离容错
-
-    对于每个未命中的 token，检查是否与某个词条的编辑距离 ≤ max_edit_distance
-    仅对长度 ≥ 2 的 token/词条做模糊匹配（单字模糊无意义）
-
-    性能注意: 此模式比 phrase 慢约 3-5x，
-              仅建议用于 tension 相关指标等关键路径
-    """
+    """模糊匹配：phrase+编辑距离≤1（仅长度≥2，慢3-5x，限tension等关键路径）。"""
     base_count = _count_phrase_hits(text, tokens, term_set)
 
     fuzzy_hits = 0
@@ -99,11 +60,7 @@ def _count_fuzzy_hits(text: str, tokens: Sequence[str], term_set: set[str], max_
 
 
 def _edit_distance(s1: str, s2: str) -> int:
-    """
-    计算 Levenshtein 编辑距离
-
-    使用空间优化的 DP 实现（O(min(m,n)) 空间）
-    """
+    """Levenshtein编辑距离，空间优化DP O(min(m,n))。"""
     if len(s1) < len(s2):
         return _edit_distance(s2, s1)
 

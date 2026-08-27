@@ -1,5 +1,6 @@
 // 2026-04-23，任务：复杂度与耦合审查 P1
 // 把 TimelineTrack 的 SVG path 生成与张力插值抽成纯函数，便于单独测试
+// 2026-08-20 事件森林：getTrackPositionPx 对 progress∈[0,1] 仍有效，不强耦合旧 progress 排序；均匀排布由 layout 层按 derived_event_order 负责
 
 export interface TimelineTensionPath {
   linePath: string;
@@ -40,7 +41,7 @@ export function mapTensionValueToTrackY(value: number, series: number[]): number
   return CURVE_CENTER_Y + (0.5 - normalized) * CURVE_AMPLITUDE_PX * 2;
 }
 
-export function interpolateSeriesValueAtProgress(progress: number, series: number[], totalChunks: number): number {
+export function interpolateSeriesValueAtProgress(progress: number, series: number[], totalChapters: number): number {
   if (series.length === 0) {
     return 0;
   }
@@ -49,7 +50,7 @@ export function interpolateSeriesValueAtProgress(progress: number, series: numbe
   }
 
   const normalized = getNormalizedProgress(progress);
-  const maxIndex = totalChunks > 1 ? totalChunks - 1 : series.length - 1;
+  const maxIndex = totalChapters > 1 ? totalChapters - 1 : series.length - 1;
   const sampleIndex = normalized * Math.max(maxIndex, 1);
   const leftIndex = Math.max(0, Math.min(Math.floor(sampleIndex), series.length - 1));
   const rightIndex = Math.max(0, Math.min(Math.ceil(sampleIndex), series.length - 1));
@@ -64,22 +65,22 @@ export function interpolateSeriesValueAtProgress(progress: number, series: numbe
   return leftValue + (rightValue - leftValue) * ratio;
 }
 
-export function getCurveNodeYPx(progress: number, tensionCurve: number[], totalChunks: number): number {
+export function getCurveNodeYPx(progress: number, tensionCurve: number[], totalChapters: number): number {
   if (tensionCurve.length === 0) {
     return CURVE_CENTER_Y;
   }
 
-  const interpolatedValue = interpolateSeriesValueAtProgress(progress, tensionCurve, totalChunks);
+  const interpolatedValue = interpolateSeriesValueAtProgress(progress, tensionCurve, totalChapters);
   return mapTensionValueToTrackY(interpolatedValue, tensionCurve);
 }
 
 export function buildTensionAreaPath(
   tensionCurve: number[],
-  totalChunks: number,
+  totalChapters: number,
   canvasWidth: number
 ): TimelineTensionPath | null {
   const normalizedPoints = tensionCurve.map((value, index) => {
-    const xProgress = totalChunks > 1 ? index / Math.max(totalChunks - 1, 1) : index / Math.max(tensionCurve.length - 1, 1);
+    const xProgress = totalChapters > 1 ? index / Math.max(totalChapters - 1, 1) : index / Math.max(tensionCurve.length - 1, 1);
     const clampedValue = Number.isFinite(value) ? value : 0;
     return {
       x: getTrackPositionPx(xProgress, canvasWidth, TRACK_CURVE_START_PADDING_PX, TRACK_CURVE_END_PADDING_PX),

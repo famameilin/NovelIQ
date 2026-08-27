@@ -75,9 +75,9 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
 
   const sortedChanges = useMemo(() => {
     return [...loadedChanges].sort((left, right) => {
-      const chunkDiff = right.effective_chunk_id - left.effective_chunk_id;
-      if (chunkDiff !== 0) {
-        return chunkDiff;
+      const chapterDiff = right.effective_chapter_id - left.effective_chapter_id;
+      if (chapterDiff !== 0) {
+        return chapterDiff;
       }
       return right.change_id.localeCompare(left.change_id, "zh-CN");
     });

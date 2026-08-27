@@ -6,7 +6,6 @@ from .types import (
     GRAPH_REPORT_AUTHORITY_DEPENDENCY_FIELDS,
     LEVEL1_AUTHORITY_DEPENDENCY_FIELDS,
     TIMELINE_AUTHORITY_DEPENDENCY_FIELDS,
-    ActiveEntityContext,
     CanonicalEntity,
     ConfirmedRelation,
     EntityLifecycle,
@@ -29,7 +28,6 @@ from .types import (
 )
 
 __all__ = [
-    "ActiveEntityContext",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityLifecycle",

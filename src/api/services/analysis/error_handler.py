@@ -94,12 +94,10 @@ class AnalysisErrorHandler:
                 completed_at=datetime.now(UTC),
             )
             session.commit()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 2026-08-14 P2-12：终态 DB 写失败不再静默/上抛——内存态已收口，
             # DB 停留在旧状态，留给重启孤儿回收兜底；显式告警便于排查
-            logger.error(
-                f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}"
-            )
+            logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
 
         # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
         # 这里必须命中 api.dependencies 中维护的同一 MetricsService 单例，
@@ -169,10 +167,8 @@ class AnalysisErrorHandler:
                 completed_at=datetime.now(UTC),
             )
             session.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}"
-            )
+        except Exception as exc:
+            logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
 
         if bus:
             await bus.emit_task_error(str(error))
@@ -211,10 +207,8 @@ class AnalysisErrorHandler:
                 completed_at=datetime.now(UTC),
             )
             session.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}"
-            )
+        except Exception as exc:
+            logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
 
         if bus:
             await bus.emit_task_cancelled()

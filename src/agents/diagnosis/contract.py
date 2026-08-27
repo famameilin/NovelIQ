@@ -27,7 +27,7 @@ class CloudAnalysisPatch(BaseModel):
     dignity_reason: str | None = None
     cultural_depth_score: int | None = Field(default=None, ge=0, le=5)
     cultural_depth_reason: str | None = None
-    narrative_arc_type: str | None = None
+    narrative_arc_type: str | None = Field(default=None, min_length=1)
     focus_structure: Literal["single", "dual", "ensemble"] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None

@@ -78,13 +78,35 @@ test.describe('分析结果页面', () => {
   });
 
   test('曲线页应正常加载', async ({ page }) => {
-    await page.route(`**/api/novels/${NOVEL_ID}/chunk-curves**`, async (route) => {
+    await page.route(`**/api/novels/${NOVEL_ID}/paragraph-curves**`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify([
-          { chunk_id: 0, pos_density: 0.01, neg_density: 0.02, tension_composite: 0.3 },
-          { chunk_id: 1, pos_density: 0.03, neg_density: 0.01, tension_composite: 0.5 },
+          {
+            paragraph_id: 0,
+            chapter_id: 1,
+            paragraph_index: 0,
+            position: 0.0,
+            pos_density: 0.01,
+            neg_density: 0.02,
+            net_density: -0.01,
+            smoothed_net_density: -0.01,
+            surface_tension: 0.3,
+            smoothed_surface_tension: 0.3,
+          },
+          {
+            paragraph_id: 1,
+            chapter_id: 2,
+            paragraph_index: 0,
+            position: 1.0,
+            pos_density: 0.03,
+            neg_density: 0.01,
+            net_density: 0.02,
+            smoothed_net_density: 0.02,
+            surface_tension: 0.5,
+            smoothed_surface_tension: 0.5,
+          },
         ]),
       });
     });
@@ -147,7 +169,7 @@ test.describe('分析结果页面', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          meta: { novel_id: NOVEL_ID, novel_name: '测试小说', total_chunks: 100 },
+          meta: { novel_id: NOVEL_ID, novel_name: '测试小说', total_chapters: 100 },
           phases: [
             { name: '引入期', start: 1, end: 15, ratio: 0.15 },
             { name: '发展期', start: 16, end: 70, ratio: 0.55 },
@@ -169,7 +191,6 @@ test.describe('分析结果页面', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          rerun_required: false,
           diagnosis: '该叙事以成长为主题，主角经历磨难最终获得力量。',
           genre_labels: ['成长', '奇幻'],
           theme_color: '#4A90D9',
@@ -191,7 +212,7 @@ test.describe('分析结果页面', () => {
 
   test('任务未完成时结果页应显示提示', async ({ page }) => {
     await mockTaskStatus(page, 'running');
-    await page.route(`**/api/novels/${NOVEL_ID}/chunk-curves**`, async (route) => {
+    await page.route(`**/api/novels/${NOVEL_ID}/paragraph-curves**`, async (route) => {
       await route.fulfill({
         status: 409,
         contentType: 'application/json',

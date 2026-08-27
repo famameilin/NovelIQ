@@ -23,28 +23,20 @@ def _default_distribution(value: Any) -> dict[str, float]:
     return value if isinstance(value, dict) else {}
 
 
-def _default_float(value: Any, default: float = 0.0) -> float:
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _convert_narrative_structure(
     result: AggregateResult,
 ) -> NarrativeStructureStats | None:
     """转换叙事结构统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理叙事结构统计转换
+    说明: 从 _convert_aggregate_result 拆分出来，专门处理叙事结构统计转换。
+    2026-08-14 重命名（§13.3）：event_density 键 → chapter_narrative_function_share。
     """
     if not result.narrative_structure:
         return None
 
-    event_density = {}
+    chapter_narrative_function_share: dict[str, Any] = {}
     for key, value in result.narrative_structure.items():
-        if key.startswith("event_density_"):
-            event_density[key.replace("event_density_", "")] = value
+        if key.startswith("chapter_narrative_function_share_"):
+            chapter_narrative_function_share[key.replace("chapter_narrative_function_share_", "")] = value
 
     return NarrativeStructureStats(
         act1_ratio=result.narrative_structure.get("act1_ratio"),
@@ -52,7 +44,9 @@ def _convert_narrative_structure(
         act3_ratio=result.narrative_structure.get("act3_ratio"),
         climax_spacing=result.narrative_structure.get("climax_spacing"),
         middle_collapse_index=result.narrative_structure.get("middle_collapse_index"),
-        event_density=event_density if event_density else None,
+        chapter_narrative_function_share=(
+            chapter_narrative_function_share if chapter_narrative_function_share else None
+        ),
         cliffhanger_rate=result.narrative_structure.get("cliffhanger_rate"),
         climax_count=result.narrative_structure.get("climax_count"),
         climax_positions=result.narrative_structure.get("climax_positions"),
@@ -66,7 +60,8 @@ def _convert_emotion_stats(
     result: AggregateResult,
 ) -> EmotionStats | None:
     """转换情感统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理情感统计转换
+    说明: 从 _convert_aggregate_result 拆分出来，专门处理情感统计转换。
+    2026-08-14 重命名（§13.3）：pivot_moment_density → chapter_pivot_rate。
     """
     if not result.emotion_curve:
         return None
@@ -74,12 +69,13 @@ def _convert_emotion_stats(
     curve_type = result.emotion_curve.get("lexical_emotion_trend")
 
     return EmotionStats(
-        pos_neg_ratio=result.emotion_curve.get("pos_neg_ratio"),
+        lexical_pos_neg_ratio=result.emotion_curve.get("lexical_pos_neg_ratio"),
+        arc_delta=result.emotion_curve.get("arc_delta"),
         positive_ratio=result.emotion_curve.get("positive_ratio"),
         negative_ratio=result.emotion_curve.get("negative_ratio"),
         neutral_ratio=result.emotion_curve.get("neutral_ratio"),
         recovery_speed=result.emotion_curve.get("emotion_recovery_speed"),
-        pivot_moment_density=result.emotion_curve.get("pivot_moment_density"),
+        chapter_pivot_rate=result.emotion_curve.get("chapter_pivot_rate"),
         lexical_emotion_trend=str(curve_type) if curve_type is not None else None,
     )
 
@@ -88,7 +84,8 @@ def _convert_character_stats(
     result: AggregateResult,
 ) -> CharacterStatsAggregate | None:
     """转换人物统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理人物统计转换
+    说明: 从 _convert_aggregate_result 拆分出来，专门处理人物统计转换。
+    2026-08-14 重命名（§13.3）：change_rate → relation_change_per_10k_chars。
     """
     if not result.character_relations:
         return None
@@ -110,7 +107,7 @@ def _convert_character_stats(
         greimas_coverage=greimas_coverage_value,
         function_coverage_distribution=function_coverage_distribution if function_coverage_distribution else None,
         antagonist_strength_gap=result.character_relations.get("antagonist_strength_gap"),
-        relation_change_freq=result.character_relations.get("change_rate"),
+        relation_change_per_10k_chars=result.character_relations.get("relation_change_per_10k_chars"),
         degree_centrality=degree_centrality if degree_centrality else None,
     )
 
@@ -144,7 +141,7 @@ def _convert_style_stats(
 
     return StyleStats(
         tone_distribution=_default_distribution(lang_dict.get("tone_distribution")),
-        vocab_breadth=lang_dict.get("vocab_breadth"),
+        string_token_diversity=lang_dict.get("string_token_diversity"),
         avg_word_len=lang_dict.get("avg_word_len"),
         sent_len_std=lang_dict.get("sent_len_std"),
         dialogue_ratio=lang_dict.get("dialogue_ratio"),

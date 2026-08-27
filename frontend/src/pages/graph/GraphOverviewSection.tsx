@@ -56,12 +56,12 @@ export function GraphOverviewSection({
           accent="chart-2"
         />
         <MetricCard
-          label="网络密度"
+          label="关系集中度"
           value={graphDensity}
           format="raw"
           decimals={4}
           icon={<Activity className="h-5 w-5" />}
-          description="关系是否集中在少数核心角色身上"
+          description="度中心化口径：关系是否集中在少数核心角色身上"
           accent="chart-4"
         />
         <MetricCard
@@ -86,8 +86,8 @@ export function GraphOverviewSection({
         transition={{ duration: 0.28, delay: 0.1 }}
         className="text-sm leading-6 text-text-muted"
       >
-        当前快照固定在第 {graphData.chapter_order} 章（第 {graphData.first_chunk_id} 至 {graphData.last_chunk_id} 段），
-        图版本为 {graphData.graph_version_id}。{inactiveRelationCount > 0 ? `另有 ${inactiveRelationCount} 条非活跃关系。` : ""}
+        当前章节边界为第 {graphData.chapter_order} 章（第 {graphData.first_chapter_id} 至 {graphData.last_chapter_id} 章）。
+        {inactiveRelationCount > 0 ? `另有 ${inactiveRelationCount} 条非活跃关系。` : ""}
       </motion.p>
     </div>
   );

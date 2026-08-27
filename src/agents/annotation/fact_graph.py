@@ -45,18 +45,14 @@ class FactGraph:
     history_entity_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
     history_entity_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     history_relations: set[tuple[str, str, str]] = field(default_factory=set)
-    history_relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(
-        default_factory=dict
-    )
+    history_relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict)
     entity_types: dict[str, EntityType] = field(default_factory=dict, init=False)
     entity_names: dict[str, str] = field(default_factory=dict, init=False)
     entity_tags: dict[str, list[str]] = field(default_factory=dict, init=False)
     entity_attributes: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
     entity_state: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
     active_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
-    relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(
-        default_factory=dict, init=False
-    )
+    relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict, init=False)
     chapter_registered_entities: dict[str, EntityType] = field(default_factory=dict, init=False)
     chapter_added_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
 
@@ -64,13 +60,8 @@ class FactGraph:
         """2026-08-09 用于以历史快照初始化实时事实图状态"""
         self.entity_types = dict(self.history_entity_types)
         self.entity_names = dict(self.history_entity_names)
-        self.entity_tags = {
-            key: list(tags) for key, tags in self.history_entity_tags.items()
-        }
-        self.entity_attributes = {
-            key: dict(attributes)
-            for key, attributes in self.history_entity_attributes.items()
-        }
+        self.entity_tags = {key: list(tags) for key, tags in self.history_entity_tags.items()}
+        self.entity_attributes = {key: dict(attributes) for key, attributes in self.history_entity_attributes.items()}
         self.entity_state = {key: dict(state) for key, state in self.history_entity_state.items()}
         # 2026-08-12 历史关系按稳定键归一化加载，避免双向边端点顺序不一致导致匹配失败
         self.active_relations = {
@@ -78,8 +69,7 @@ class FactGraph:
             for (from_name, to_name, relation_type) in self.history_relations
         }
         self.relation_attributes = {
-            key: dict(attributes)
-            for key, attributes in self.history_relation_attributes.items()
+            key: dict(attributes) for key, attributes in self.history_relation_attributes.items()
         }
 
     @staticmethod
@@ -92,8 +82,7 @@ class FactGraph:
         return _stable_relation_key(from_name, to_name, relation_type)
 
     def register_entities(self, entities: list) -> None:
-        """2026-08-11 用于把当前 chunk 实体目录应用到实时事实图（完整替换，attributes 走 JSON Merge Patch）"""
-        self._reset_chapter_entities()
+        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新，历史类型冲突仍拒绝）"""
         for entity in entities:
             key = _norm(entity.name)
             if key in self.history_entity_types:
@@ -125,17 +114,6 @@ class FactGraph:
                         merged[field_name] = value
                 self.entity_attributes[key] = merged
             self.chapter_registered_entities[key] = entity.entity_type
-
-    def _reset_chapter_entities(self) -> None:
-        """2026-08-09 用于在完整替换语义下撤销当章登记的实体"""
-        for key in list(self.chapter_registered_entities):
-            if key not in self.history_entity_types:
-                self.entity_types.pop(key, None)
-                self.entity_names.pop(key, None)
-                self.entity_tags.pop(key, None)
-                self.entity_attributes.pop(key, None)
-                self.entity_state.pop(key, None)
-        self.chapter_registered_entities.clear()
 
     def apply_relation(self, item: RelationInput) -> bool:
         """2026-08-12 用于登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
@@ -190,15 +168,9 @@ class FactGraph:
         """
         self.history_entity_types = dict(self.entity_types)
         self.history_entity_names = dict(self.entity_names)
-        self.history_entity_tags = {
-            key: list(tags) for key, tags in self.entity_tags.items()
-        }
-        self.history_entity_attributes = {
-            key: dict(attributes) for key, attributes in self.entity_attributes.items()
-        }
-        self.history_entity_state = {
-            key: dict(state) for key, state in self.entity_state.items()
-        }
+        self.history_entity_tags = {key: list(tags) for key, tags in self.entity_tags.items()}
+        self.history_entity_attributes = {key: dict(attributes) for key, attributes in self.entity_attributes.items()}
+        self.history_entity_state = {key: dict(state) for key, state in self.entity_state.items()}
         self.history_relations = set(self.active_relations)
         self.history_relation_attributes = {
             key: dict(attributes) for key, attributes in self.relation_attributes.items()
@@ -274,14 +246,9 @@ class FactGraph:
             return None
         root = find(key)
         members = [node for node in parent if find(node) == root]
-        registered_order = {
-            node: index for index, node in enumerate(self.entity_names)
-        }
+        registered_order = {node: index for index, node in enumerate(self.entity_names)}
         members.sort(key=lambda node: registered_order.get(node, len(registered_order)))
-        flagged = [
-            node for node in members
-            if bool((self.entity_attributes.get(node) or {}).get("is_representative"))
-        ]
+        flagged = [node for node in members if bool((self.entity_attributes.get(node) or {}).get("is_representative"))]
         if flagged:
             return flagged[0]
         history_members = [node for node in members if node in self.history_entity_types]

@@ -82,34 +82,133 @@ export interface Character {
   avg_emotion_score?: number | null;
 }
 
-// 分块曲线
+// 段落曲线（M4：从分块粒度迁移到段落粒度，x 坐标统一使用 0-1 position 值域）
 
-export interface ChunkCurvePoint {
-  chunk_id: number;
+export interface ParagraphCurvePoint {
+  paragraph_id: number;
+  chapter_id: number;
+  paragraph_index: number;
+  global_start_char: number;
+  global_end_char: number;
+  position: number; // 0-1 数字坐标
+  char_count: number;
+  token_count: number;
   pos_density: number | null;
   neg_density: number | null;
   net_density: number | null;
-  smoothed_density: number | null;
-  tension_proxy: number | null;
-  tension_composite?: number | null;
-  surface_tension?: number | null;
+  smoothed_net_density: number | null;
+  surface_tension: number | null;
+  smoothed_surface_tension: number | null;
 }
 
-export interface ChunkCharacter {
+// 情绪趋势窗口（展示层缩放自适应窗口聚合，覆盖率为窗内命中段占比）
+export interface EmotionTrendWindow {
+  window_index: number;
+  position: number;
+  start_position: number;
+  end_position: number;
+  paragraph_start: number;
+  paragraph_end: number;
+  chapter_start: number;
+  chapter_end: number;
+  pos_coverage: number;
+  neg_coverage: number;
+  pooled_pos_density: number | null;
+  pooled_neg_density: number | null;
+  pooled_net_density: number | null;
+  smoothed_pos_coverage: number | null;
+  smoothed_neg_coverage: number | null;
+  smoothed_pooled_pos_density: number | null;
+  smoothed_pooled_neg_density: number | null;
+  smoothed_pooled_net_density: number | null;
+  token_total: number;
+  hit_paragraphs: number;
+  paragraph_total: number;
+}
+
+// 章节指标汇总（M4）
+
+export interface ChapterMetricSummary {
+  chapter_id: number;
+  paragraph_count: number;
+  total_chars: number;
+  total_tokens: number;
+  pos_density: number | null;
+  neg_density: number | null;
+  net_density: number | null;
+  fight_density: number | null;
+  exclaim_per_100_chars: number | null;
+  question_per_100_chars: number | null;
+  pause_per_100_chars: number | null;
+  dialogue_ratio: number | null;
+  avg_sent_len: number | null;
+  sent_len_std: number | null;
+  ttr: number | null;
+  mtld: number | null;
+  narrative_function: string | null;
+  pivot_moment: boolean | null;
+  cliffhanger: boolean | null;
+  emotional_valence: string | null;
+}
+
+export interface BookAggregateStats {
+  total_chapters: number;
+  total_paragraphs: number;
+  total_chars: number;
+  total_tokens: number;
+  pos_density: number | null;
+  neg_density: number | null;
+  net_density: number | null;
+  fight_density: number | null;
+  exclaim_per_100_chars: number | null;
+  question_per_100_chars: number | null;
+  pause_per_100_chars: number | null;
+  dialogue_ratio: number | null;
+  avg_sent_len: number | null;
+  sent_len_std: number | null;
+  ttr: number | null;
+  mtld: number | null;
+  chapter_narrative_function_share: Record<string, number>;
+  chapter_pivot_rate: number | null;
+  chapter_cliffhanger_rate: number | null;
+  chapter_emotional_valence_share: Record<string, number>;
+}
+
+export interface ChapterMetricsResponse {
+  chapters: ChapterMetricSummary[];
+  book: BookAggregateStats;
+}
+
+export interface GlobalStats {
+  total_chapters?: number | null;
+  total_chars?: number | null;
+  avg_mtld?: number | null;
+  avg_ttr?: number | null;
+  avg_sent_len?: number | null;
+  emotion_std?: number | null;
+  emotion_max?: number | null;
+  emotion_min?: number | null;
+  rhythm_avg?: number | null;
+  rhythm_std?: number | null;
+  rhythm_max?: number | null;
+  rhythm_min?: number | null;
+}
+
+export interface ChapterCharacter {
   name: string;
   role_function?: string | null;
   action?: string | null;
   emotion_score?: string | null;
 }
 
-export interface ChunkRelation {
+export interface ChapterRelation {
   from_char: string;
   to_char: string;
   type: string;
   change: string;
 }
 
-export interface ChunkDialogue {
+export interface ChapterDialogue {
   speaker: string[];
   length?: number | null;
 }
@@ -143,8 +242,8 @@ export type DiagnosisStyleLabel =
   | "权谋"
   | "爽文";
 
-export interface ChunkAnnotation {
-  chunk_id: number;
+export interface ChapterAnnotation {
+  chapter_id: number;
   emotional_valence?: string | null;
   event_type?: string | null;
   pivot_moment?: boolean | null;
@@ -159,9 +258,9 @@ export interface ChunkAnnotation {
   expected_payoff_family?: string | null;
   payoff_likelihood?: ForeshadowingPayoffLikelihood | null;
   linked_setup_id?: string | null;
-  characters: ChunkCharacter[];
-  relations: ChunkRelation[];
-  dialogues: ChunkDialogue[];
+  characters: ChapterCharacter[];
+  relations: ChapterRelation[];
+  dialogues: ChapterDialogue[];
 }
 
 // 主题
@@ -180,8 +279,6 @@ export interface Topic {
 // 诊断
 
 export interface DiagnosisResult {
-  rerun_required?: boolean;
-  rerun_reason?: string | null;
   genre_labels?: DiagnosisGenreLabel[] | null;
   style_labels?: DiagnosisStyleLabel[] | null;
   foreshadow_expectation?: number | null;
@@ -206,13 +303,14 @@ export interface DiagnosisResult {
 
 export interface ForeshadowingThread {
   setup_id: string;
-  first_chunk_id: number;
-  last_chunk_id: number;
-  anchor_chunk_ids: number[];
+  first_chapter_id: number;
+  last_chapter_id: number;
+  anchor_chapter_ids: number[];
   setup_summary: string;
   setup_kind: ForeshadowingSetupKind | string;
   expected_payoff_family: string;
   payoff_likelihood: ForeshadowingPayoffLikelihood;
+  confidence: string | null;
   strength: "high" | "medium" | string;
   status: "open" | "reinforced" | "likely_paid_off" | "archived" | string;
   active: boolean;
@@ -229,16 +327,15 @@ export interface GraphNode {
   tags?: string[] | null;
   aliases?: string[] | null;
   // 2026-08-13 P2-5: 后端可能下发 null（生命周期数据缺失），放宽为可空
-  first_seen_chunk: number | null;
-  last_seen_chunk: number | null;
-  state_revision: number;
+  first_seen_chapter: number | null;
+  last_seen_chapter: number | null;
+  state_chapter_id: number | null;
   state: Record<string, unknown>;
 }
 
 export interface GraphEdge {
   relation_id: string;
-  relation_version_id: number;
-  relation_revision: number;
+  state_chapter_id: number;
   source_entity_id: number;
   target_entity_id: number;
   source_name: string;
@@ -254,18 +351,14 @@ export interface GraphEdge {
 export interface GraphChange {
   change_id: string;
   change_kind: "state" | "relation";
-  graph_version_id: string;
   chapter_id: number;
   chapter_order: number;
   fact_id: string;
-  fact_revision: number;
-  effective_chunk_id: number;
+  effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
   entity_id?: number | null;
   entity_name?: string | null;
   relation_id?: string | null;
-  relation_version_id?: number | null;
-  relation_revision?: number | null;
   from_entity_id?: number | null;
   to_entity_id?: number | null;
   from_name?: string | null;
@@ -285,11 +378,10 @@ export interface GraphChangesPageInfo {
 }
 
 export interface GraphData {
-  graph_version_id: string;
   chapter_id: number;
   chapter_order: number;
-  first_chunk_id: number;
-  last_chunk_id: number;
+  first_chapter_id: number;
+  last_chapter_id: number;
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
@@ -299,14 +391,12 @@ export interface GraphChangesPageResponse {
   page_info: GraphChangesPageInfo;
 }
 
-// 时间轴
-
-// 更新 Timeline 类型定义，与后端 API 响应结构对齐
+// 时间轴 — 2026-08-20 事件森林一树一节点新合同
 
 export interface TimelineMeta {
   novel_id: string;
   novel_name: string;
-  total_chunks: number;
+  total_chapters: number;
 }
 
 export interface TimelinePhase {
@@ -316,108 +406,112 @@ export interface TimelinePhase {
   ratio: number;
 }
 
-export interface PlotFlags {
-  is_pivot: boolean;
-  is_cliffhanger: boolean;
-  tension_percentile: number;
-}
+// ── 事件森林新合同（一树一节点）与后端 src/api/models/event_timeline.py 严格对齐 ──
 
-export interface TimelineGraphChange {
-  change_id: string;
-  change_kind: "state" | "relation";
-  graph_version_id: string;
-  chapter_id: number;
-  fact_id: string;
-  fact_revision: number;
-  effective_chunk_id: number;
-  changes: Array<Record<string, unknown>>;
+export interface TimelineEventParticipant {
+  name: string;
+  role: string;
   entity_id?: number | null;
-  entity_name?: string | null;
-  relation_id?: string | null;
-  relation_version_id?: number | null;
-  relation_revision?: number | null;
-  from_char?: string | null;
-  to_char?: string | null;
-  relation_type?: string | null;
-  relation_change_kind?: string | null;
-  directionality?: "directed" | "bidirectional" | null;
+  entity_type?: string | null;
+  // 透传保留未知字段
+  [key: string]: unknown;
 }
 
-export interface LifecycleTimelineEvent {
-  entity_id: number;
-  character_name: string;
-  lifecycle_type: "entry" | "exit";
+export interface TimelineEventSecondaryGroup {
+  target_event_id: string;
+  branch: string[];
 }
 
-export interface TimelineNode {
-  node_id: string;
-  anchor_chunk_id: number;
-  progress: number;
-  importance_score: number;
-  level: 1 | 2 | 3;
+export interface TimelineEventNode {
+  tree_id: string;
+  root_event_id: string;
+  title?: string | null;
   summary: string;
-  characters: string[];
-  phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "state" | "relation" | "lifecycle";
-  node_subtype: "plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract";
-  score_breakdown: Record<string, number>;
-  plot_flags?: PlotFlags | null;
-  graph_changes?: TimelineGraphChange[] | null;
-  lifecycle_events?: LifecycleTimelineEvent[] | null;
-}
-
-export interface TimelineCompositeNode {
-  node_id: string;
-  anchor_chunk_id: number;
-  start_chunk_id: number;
-  end_chunk_id: number;
-  progress: number;
+  anchor_chapter_id: number;
+  anchor_chapter_order: number;
+  start_chapter_id: number;
+  end_chapter_id: number;
   start_progress: number;
   end_progress: number;
+  progress: number;
+  chapter_ids: number[];
+  char_start: number;
+  char_end: number;
+  participants: TimelineEventParticipant[];
+  character_names: string[];
   importance_score: number;
   level: 1 | 2 | 3;
-  summary: string;
-  characters: string[];
   phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
-  node_type: "plot" | "state" | "relation" | "lifecycle";
-  node_subtypes: ("plot" | "state" | "entry" | "exit" | "assert" | "reinforce" | "weaken" | "break" | "refine" | "supersede" | "retract")[];
-  representative_node_id: string;
-  child_node_ids: string[];
+  main_chain: string[];
+  secondary_groups: TimelineEventSecondaryGroup[];
+  causal_in: number;
+  causal_out: number;
+  node_type: "event";
 }
 
-export interface TimelineResponse {
+export interface TimelineEventCausalEdge {
+  edge_id: string;
+  edge_type: "causal";
+  source_event_id: string;
+  target_event_id: string;
+  source_chapter_id: number;
+  target_chapter_id: number;
+  is_active: boolean;
+  evidence: Array<Record<string, unknown>>;
+  expired_at?: string | null;
+}
+
+export interface TimelineEventForeshadowingEdge {
+  setup_id: string;
+  setup_event_id: string;
+  payoff_event_id?: string | null;
+  first_chapter_id: number;
+  last_chapter_id: number;
+  setup_summary: string;
+  status: string;
+  active: boolean;
+}
+
+export interface EventTimelineResponse {
   meta: TimelineMeta;
   phases: TimelinePhase[];
-  composite_nodes: TimelineCompositeNode[];
-  atomic_nodes: TimelineNode[];
-  tension_curve?: number[];
+  nodes: TimelineEventNode[];
+  causal_edges: TimelineEventCausalEdge[];
+  foreshadowing_edges: TimelineEventForeshadowingEdge[];
+  derived_event_order: string[];
+  tension_curve?: number[] | null;
+  phase_basis: "tension" | "fixed_percentage";
+  total_chapters: number;
 }
 
 // 指标
 
 export interface NarrativeStructureMetrics {
-  act1_ratio?: number;
-  act2_ratio?: number;
-  act3_ratio?: number;
-  climax_spacing?: number;
-  middle_collapse_index?: number;
-  event_density?: Record<string, number>;
-  cliffhanger_rate?: number;
-  climax_count?: number;
-  climax_positions?: number[];
-  climax_heights?: number[];
-  peak_escalation?: string;
-  dominant_climax_pos?: number;
+  act1_ratio?: number | null;
+  act2_ratio?: number | null;
+  act3_ratio?: number | null;
+  /** 相邻高潮归一化进度差均值 [0,1] */
+  climax_spacing?: number | null;
+  middle_collapse_index?: number | null;
+  chapter_narrative_function_share?: Record<string, number> | null;
+  cliffhanger_rate?: number | null;
+  climax_count?: number | null;
+  climax_positions?: number[] | null;
+  climax_heights?: number[] | null;
+  peak_escalation?: string | null;
+  dominant_climax_pos?: number | null;
 }
 
 export interface EmotionStatsMetrics {
-  pos_neg_ratio?: number;
-  positive_ratio?: number;
-  negative_ratio?: number;
-  neutral_ratio?: number;
-  recovery_speed?: number;
-  pivot_moment_density?: number;
-  lexical_emotion_trend?: string;
+  lexical_pos_neg_ratio?: number | null;
+  arc_delta?: number | null;
+  positive_ratio?: number | null;
+  negative_ratio?: number | null;
+  neutral_ratio?: number | null;
+  /** 情绪恢复的归一化进度距离 [0,1] */
+  recovery_speed?: number | null;
+  chapter_pivot_rate?: number | null;
+  lexical_emotion_trend?: string | null;
 }
 
 export interface CharacterStatsMetrics {
@@ -425,14 +519,18 @@ export interface CharacterStatsMetrics {
   greimas_coverage?: number | null;
   function_coverage_distribution?: Record<string, number> | null;
   antagonist_strength_gap?: number | null;
-  relation_change_freq?: number | null;
+  relation_change_per_10k_chars?: number | null;
   degree_centrality?: Record<string, number> | null;
 }
 
 export interface StyleStatsMetrics {
-  vocab_breadth: number;
-  avg_sent_len: number;
-  dialogue_ratio: number;
+  string_token_diversity?: number | null;
+  avg_word_len?: number | null;
+  avg_sent_len?: number | null;
+  dialogue_ratio?: number | null;
+  sent_len_std?: number | null;
+  tone_distribution?: Record<string, number> | null;
+  function_word_vector?: Record<string, number> | null;
 }
 
 // 通用
