@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import Connection, Engine, create_engine, event, text
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -74,9 +74,7 @@ def _database_name_from_url(database_url: str) -> str | None:
 
 def _admin_database_url(database_url: str) -> str:
     """2026-08-08 用于把目标库 URL 指向默认 postgres 库以执行建库 DDL"""
-    return make_url(database_url).set(database="postgres").render_as_string(
-        hide_password=False
-    )
+    return make_url(database_url).set(database="postgres").render_as_string(hide_password=False)
 
 
 def _safe_identifier(name: str) -> bool:
@@ -171,7 +169,7 @@ def get_engine():
     if database_url.startswith("postgresql"):
 
         @event.listens_for(_engine, "connect")
-        def set_postgresql_settings(dbapi_connection, connection_record):
+        def set_postgresql_settings(dbapi_connection, _connection_record):
             cursor = dbapi_connection.cursor()
             cursor.execute("SET TIME ZONE 'UTC'")
             if database_schema:
@@ -181,12 +179,12 @@ def get_engine():
             cursor.close()
 
     @event.listens_for(_engine, "checkout")
-    def on_checkout(dbapi_conn, conn_record, conn_proxy):
+    def on_checkout(_dbapi_conn, _conn_record, _conn_proxy):
         if _engine is not None:
             logger.debug(f"Pool checkout: active={_engine.pool.status()}")
 
     @event.listens_for(_engine, "checkin")
-    def on_checkin(dbapi_conn, connection_record):
+    def on_checkin(_dbapi_conn, _connection_record):
         if _engine is not None:
             logger.debug(f"Pool checkin: active={_engine.pool.status()}")
 
@@ -235,215 +233,9 @@ def get_session_factory() -> sessionmaker:
 SessionLocal = get_session_factory
 
 
-def _table_exists(connection: Connection, table_name: str) -> bool:
-    """
-    检查当前 schema 下是否存在指定表
-    """
-
-    return bool(
-        connection.execute(
-            text(
-                """
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_schema = current_schema()
-                  AND table_name = :table_name
-                LIMIT 1
-                """
-            ),
-            {"table_name": table_name},
-        ).scalar_one_or_none()
-    )
-
-
-def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
-    """
-    说明: 启动期需要对关键表做正式合同校验，这里统一读取当前 schema 下的列集合，
-    避免后续把“旧表还能跑”误当成可接受状态
-    """
-
-    rows = connection.execute(
-        text(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = current_schema()
-              AND table_name = :table_name
-            """
-        ),
-        {"table_name": table_name},
-    ).fetchall()
-    return {str(row.column_name) for row in rows}
-
-
-def _assert_focus_contract_schema(engine: Engine) -> None:
-    """
-    修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: latest-only 之后只校验真实焦点合同列，不再把 reference_contract_version 当成启动前置条件。
-
-    说明: 启动时显式检查 `cloud_analysis` 是否具备完整焦点合同列；
-    缺失即阻断启动（当前只有最新口径，不再检查旧结构残留）
-    """
-    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
-    if dialect_name != "postgresql":
-        return
-
-    with engine.begin() as conn:
-        if not _table_exists(conn, "cloud_analysis"):
-            return
-
-        actual_columns = _get_table_columns(conn, "cloud_analysis")
-        required_columns = {
-            "genre_labels",
-            "style_labels",
-            "focus_structure",
-            "focus_characters",
-            "main_characters",
-            "core_cast",
-        }
-        missing_columns = sorted(required_columns - actual_columns)
-        if missing_columns:
-            raise RuntimeError(
-                "cloud_analysis is missing focus contract columns: "
-                f"{missing_columns}. Please recreate or manually migrate the current database schema "
-                "so that `cloud_analysis` includes the full focus-contract column set before starting the service."
-            )
-
-
-def _assert_annotation_contract_schema(engine: Engine) -> None:
-    """2026-08-07 用于阻止旧合同列继续承载新语义写入标注"""
-    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
-    if dialect_name != "postgresql":
-        return
-
-    required_columns = {
-        "chapter_annotations": {
-            "annotation_id",
-            "run_id",
-            "chapter_id",
-            "payload",
-            "created_at",
-        },
-        "dialogue_records": {
-            "dialogue_id",
-            "run_id",
-            "chunk_id",
-            "chapter_id",
-            "candidate_key",
-            "content",
-            "start",
-            "end",
-            "speaker",
-            "tone",
-            "is_inner_monologue",
-            "confidence",
-        },
-        "case_pool_cases": {
-            "id",
-            "run_id",
-            "type",
-            "chunk_id",
-            "keys",
-            "description",
-            "target_key",
-            "target_ref",
-            "state",
-            "created_by_annotation_id",
-        },
-        "case_resolution_mappings": {
-            "mapping_id",
-            "run_id",
-            "annotation_id",
-            "case_id",
-            "type",
-            "target_ref",
-            "resolution",
-            "target_fact_id",
-            "target_fact_revision",
-            "target_dialogue_id",
-            "target_setup_id",
-        },
-    }
-    with engine.begin() as connection:
-        for table_name, required in required_columns.items():
-            if not _table_exists(connection, table_name):
-                continue
-            actual = _get_table_columns(connection, table_name)
-            missing = sorted(required - actual)
-            if missing:
-                raise RuntimeError(
-                    f"{table_name} is missing annotation contract columns: {missing}. "
-                    "Please recreate or explicitly migrate the continuity tables before starting the service."
-                )
-
-
-def _assert_agent_audit_contract_schema(engine: Engine) -> None:
-    """
-    2026-08-10 用于校验 Agent 审计三表与 token_usage 新结构就绪
-
-    说明: 当前只有最新口径（create_all 直接建出新库），
-    启动时校验审计表与 token_usage 合同列齐备；缺失即阻断启动。
-    """
-    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
-    if dialect_name != "postgresql":
-        return
-
-    required_tables = {
-        "agent_invocations": {"id", "run_id", "task_type", "attempt_number", "status"},
-        "agent_turns": {
-            "id",
-            "invocation_id",
-            "turn_index",
-            "raw_response",
-            "context_summary",
-            "model_ms",
-            "request_messages",
-            "timing_notes",
-        },
-        "agent_tool_calls": {"id", "turn_id", "tool_name", "request_args", "status"},
-    }
-    with engine.begin() as connection:
-        for table_name, required in required_tables.items():
-            if not _table_exists(connection, table_name):
-                raise RuntimeError(f"{table_name} 表不存在，请先执行 init_db 建表后启动服务")
-            actual = _get_table_columns(connection, table_name)
-            missing = sorted(required - actual)
-            if missing:
-                raise RuntimeError(
-                    f"{table_name} is missing agent audit contract columns: {missing}. "
-                    "请先执行 init_db 重建审计表后启动服务"
-                )
-        if _table_exists(connection, "token_usage"):
-            actual = _get_table_columns(connection, "token_usage")
-            missing = sorted({"agent_turn_id", "reasoning_tokens"} - actual)
-            if missing:
-                raise RuntimeError(
-                    "token_usage 仍是旧结构，缺少 agent_turn_id/reasoning_tokens: "
-                    f"{missing}. 请先执行 init_db 重建 token_usage"
-                )
-
-
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
-    """
-    获取 Session 的上下文管理器
-
-    说明: 提供上下文管理器方式获取 Session，自动处理提交和回滚
-
-    Yields:
-        SQLAlchemy Session 实例
-
-    注意:
-        - 退出上下文时会自动调用 commit()
-        - 对于只读操作（如 SELECT），commit 是无害的空操作
-        - 如需显式控制事务，请在上下文内调用 session.rollback() 或 session.commit()
-
-    使用示例:
-        with get_session() as session:
-            session.execute(text("SELECT 1"))
-            session.commit()
-    """
+    """获取 Session 上下文管理器，退出时自动 commit，异常回滚。"""
     session_factory = get_session_factory()
     session = session_factory()
     try:
@@ -468,22 +260,15 @@ def init_db() -> None:
 
     ensure_database_exists()
     engine = get_engine()
-    # 2026-08-14 P1：chunks 的 idx_chunks_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
+    # 2026-08-14 P1：chapters 的 idx_chapters_run_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
     # 全新数据库必须先建扩展再 create_all，否则 CREATE INDEX 直接失败阻断启动；
     # 与 vector 扩展（vector_schema.ensure_paragraph_embeddings_schema）同口径按需创建
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name == "postgresql":
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-    tables = [
-        table
-        for table in Base.metadata.sorted_tables
-        if table.name != "paragraph_embeddings"
-    ]
+    tables = [table for table in Base.metadata.sorted_tables if table.name != "paragraph_embeddings"]
     Base.metadata.create_all(bind=engine, tables=tables)
-    _assert_focus_contract_schema(engine)
-    _assert_annotation_contract_schema(engine)
-    _assert_agent_audit_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 

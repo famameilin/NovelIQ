@@ -127,22 +127,27 @@ describe("CharactersPage", () => {
     currentSearchParams = "task_id=task-1";
     getCharactersMock.mockReset();
     getDiagnosisMock.mockReset();
+    getCharactersMock.mockResolvedValue([]);
     useNovelStore.getState().clear();
   });
 
-  it("renders rerun-required state when diagnosis focus contract is incomplete", async () => {
+  it("renders characters when diagnosis has only partial fields", async () => {
     getDiagnosisMock.mockResolvedValue({
       foreshadow_expectation: 0.42,
     });
+    getCharactersMock.mockResolvedValue([
+      {
+        name: "沈砚",
+        mention_count: 12,
+        role_function: "protagonist",
+        importance_score: 0.9,
+      },
+    ]);
 
     renderCharactersPage();
 
-    expect(await screen.findByText("角色焦点结果需要重跑")).toBeInTheDocument();
-    expect(
-      screen.getByText("当前任务缺少完整的焦点结构合同，请重新分析后再查看角色焦点结果。"),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId("character-ranking-bar")).not.toBeInTheDocument();
-    expect(getCharactersMock).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("character-ranking-bar")).toBeInTheDocument();
+    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 
   it("renders empty diagnosis state when diagnosis is still missing", async () => {
@@ -152,7 +157,7 @@ describe("CharactersPage", () => {
 
     expect(await screen.findByText("角色焦点结果暂未生成")).toBeInTheDocument();
     expect(screen.getByText("当前任务暂时还没有可展示的角色焦点结果。")).toBeInTheDocument();
-    expect(getCharactersMock).not.toHaveBeenCalled();
+    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {
@@ -172,6 +177,6 @@ describe("CharactersPage", () => {
 
     expect(await screen.findByText("角色结果尚未完成")).toBeInTheDocument();
     expect(screen.getByText("当前任务仍在分析中，角色焦点结果暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
-    expect(getCharactersMock).not.toHaveBeenCalled();
+    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 });

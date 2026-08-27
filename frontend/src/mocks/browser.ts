@@ -5,13 +5,18 @@
  * 默认仅在 VITE_ENABLE_MOCK=true 时激活
  */
 import { setupWorker } from "msw/browser";
-import { novelListHandler, novelUploadHandler, novelDeleteHandler, novelBatchDeleteHandler } from "./handlers/novels";
+import {
+  novelListHandler,
+  novelDetailHandler,
+  novelCoverHandler,
+  novelUploadHandler,
+  novelDeleteHandler,
+  novelBatchDeleteHandler,
+} from "./handlers/novels";
 import {
   createTaskHandler,
-  analyzeHandler,
   reanalyzeHandler,
   taskStatusHandler,
-  analysisStatusHandler,
   resumeTaskHandler,
   analysisTasksHandler,
   deleteTaskHandler,
@@ -20,7 +25,9 @@ import {
 } from "./handlers/analysis";
 import {
   charactersHandler,
-  chunkCurvesHandler,
+  paragraphCurvesHandler,
+  emotionTrendHandler,
+  chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
@@ -31,20 +38,21 @@ import {
   emotionStatsHandler,
   characterStatsHandler,
   styleStatsHandler,
+  globalStatsHandler,
 } from "./handlers/results";
 
 export const worker = setupWorker(
   // 小说
   novelListHandler,
+  novelDetailHandler,
+  novelCoverHandler,
   novelUploadHandler,
   novelDeleteHandler,
   novelBatchDeleteHandler,
   // 分析
   createTaskHandler,
-  analyzeHandler,
   reanalyzeHandler,
   taskStatusHandler,
-  analysisStatusHandler,
   resumeTaskHandler,
   analysisTasksHandler,
   deleteTaskHandler,
@@ -52,7 +60,9 @@ export const worker = setupWorker(
   cancelTaskHandler,
   // 结果
   charactersHandler,
-  chunkCurvesHandler,
+  paragraphCurvesHandler,
+  emotionTrendHandler,
+  chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
@@ -63,4 +73,5 @@ export const worker = setupWorker(
   emotionStatsHandler,
   characterStatsHandler,
   styleStatsHandler,
+  globalStatsHandler,
 );

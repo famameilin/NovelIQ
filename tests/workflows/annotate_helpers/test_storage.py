@@ -26,7 +26,6 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     DialogueRecord,
-    GraphVersion,
 )
 from src.workflows.annotate_helpers.storage import complete_annotation_run, load_completion_result
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -50,9 +49,7 @@ def _annotation(
         )
     dialogues: list[BoundDialogue] = []
     if unresolved_dialogue:
-        candidate = next(
-            item for item in extract_dialogue_candidates(chunk_id, text) if item.content == "住手"
-        )
+        candidate = next(item for item in extract_dialogue_candidates(chunk_id, text) if item.content == "住手")
         dialogues.append(
             BoundDialogue(
                 candidate_index=1,
@@ -95,9 +92,10 @@ def _audit(
     """2026-08-10 用于构造完成事务审计（完整工具审计由 AgentAuditRecorder 独立写入）"""
     return AgentRunAudit(
         allow_future_context=False,
-        write_revisions=[],
+        write_records=[],
         rotation_case_ids=[],
-        authorized_text_chunk_ids=authorized_chunk_ids,
+        authorized_chapter_ids=authorized_chunk_ids,
+        authorized_text_paragraph_ids=[],
     )
 
 
@@ -141,19 +139,14 @@ def _result(
         resolved_cases=resolved_cases or [],
         pushed_cases=pushed_cases or _pushed_case_for(annotation),
         audit=_audit(
-            authorized_chunk_ids=authorized_chunk_ids
-            or [annotation.chunks[0].chunk_id],
+            authorized_chunk_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
         ),
     )
 
 
 def _count(session, model, run_id: str) -> int:
     """2026-08-07 用于按 run 统计完成事务相关持久化行数"""
-    return int(
-        session.execute(
-            select(func.count()).select_from(model).where(model.run_id == run_id)
-        ).scalar_one()
-    )
+    return int(session.execute(select(func.count()).select_from(model).where(model.run_id == run_id)).scalar_one())
 
 
 def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> None:
@@ -164,7 +157,7 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
         title="完成事务成功",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
+    annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
     result = _result(
         run_id=run_id,
         chapter_id=1,
@@ -181,23 +174,19 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
     )
 
     db_session.rollback()
-    case = db_session.execute(
-        select(CasePoolCase).where(CasePoolCase.run_id == run_id)
-    ).scalar_one()
-    dialogue = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
+    case = db_session.execute(select(CasePoolCase).where(CasePoolCase.run_id == run_id)).scalar_one()
+    dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
 
     assert first == second
     assert first.created_cases[0].id == case.id
     assert case.case_type == "dialogue_speaker"
-    assert case.chunk_id == 0
+    assert case.chapter_id == 1
     assert case.target_ref["dialogue_id"] == dialogue.candidate_key
     assert dialogue.speaker is None
     assert dialogue.confidence == "medium"
     assert dialogue.is_inner_monologue is False
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
-    assert _count(db_session, GraphVersion, run_id) == 1
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
     assert _count(db_session, DialogueRecord, run_id) == 1
 
 
@@ -213,7 +202,7 @@ def test_dialogue_resolution_updates_dialogue_record(
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     first_annotation = _annotation(
-        chunk_id=0,
+        chunk_id=1,
         text="“住手”回荡",
         unresolved_dialogue=True,
     )
@@ -238,7 +227,7 @@ def test_dialogue_resolution_updates_dialogue_record(
         target_ref=dict(case.target_ref),
     )
     second_annotation = _annotation(
-        chunk_id=1,
+        chunk_id=2,
         text="顾霜喝道",
         speaker_entity=True,
     )
@@ -248,15 +237,13 @@ def test_dialogue_resolution_updates_dialogue_record(
             chapter_id=2,
             annotation=second_annotation,
             resolved_cases=[resolved],
-            authorized_chunk_ids=[0, 1],
+            authorized_chunk_ids=[1, 2],
         ),
         session_factory=factory,
     )
 
     db_session.rollback()
-    dialogue = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
+    dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
     resolved_case = db_session.get(CasePoolCase, case.id)
     mapping = db_session.execute(
         select(CaseResolutionMapping).where(
@@ -282,7 +269,7 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
         title="完成事务回滚",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="“住手”回荡", unresolved_dialogue=True)
+    annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
 
     with patch(
         "src.workflows.annotate_helpers.storage._persist_foreshadowing",
@@ -304,7 +291,7 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
         CasePoolCase,
         CaseResolutionMapping,
         DialogueRecord,
-        GraphVersion,
+        ChapterAnnotationRecord,
     ):
         assert _count(db_session, model, run_id) == 0
 
@@ -317,7 +304,7 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
         title="完成结果回读",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="顾霜喝道", speaker_entity=True)
+    annotation = _annotation(chunk_id=1, text="顾霜喝道", speaker_entity=True)
     expected = complete_annotation_run(
         result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
         session_factory=factory,
@@ -328,7 +315,7 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
 
     assert actual == expected
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
-    assert _count(db_session, GraphVersion, run_id) == 1
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 1
 
 
 def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) -> None:
@@ -339,7 +326,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         title="来源案例锁定失败",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=0, text="顾霜喝道", speaker_entity=True)
+    annotation = _annotation(chunk_id=1, text="顾霜喝道", speaker_entity=True)
     missing = ResolvedCase(
         case_id="missing-case",
         action="close",
@@ -349,7 +336,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         target_ref={
             "kind": "dialogue_speaker",
             "dialogue_id": "dlg_missing",
-            "chunk_id": 0,
+            "chunk_id": 1,
         },
     )
 
@@ -366,4 +353,4 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
 
     db_session.rollback()
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 0
-    assert _count(db_session, GraphVersion, run_id) == 0
+    assert _count(db_session, ChapterAnnotationRecord, run_id) == 0

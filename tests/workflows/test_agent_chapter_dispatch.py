@@ -36,11 +36,7 @@ def _annotation(
     """2026-08-07 用于构造指定章节的新合同完整标注"""
     dialogues: list[BoundDialogue] = []
     if create_case:
-        candidate = next(
-            item
-            for item in extract_dialogue_candidates(chunk_id, chunk_text)
-            if item.content == "住手"
-        )
+        candidate = next(item for item in extract_dialogue_candidates(chunk_id, chunk_text) if item.content == "住手")
         dialogues.append(
             BoundDialogue(
                 candidate_index=1,
@@ -81,11 +77,7 @@ def _pending_case(
     chapter_id: int,
 ) -> PendingCase:
     """2026-08-07 用于构造绑定 chapter 对话的系统自动案例"""
-    candidate = next(
-        item
-        for item in extract_dialogue_candidates(chunk_id, chunk_text)
-        if item.content == "住手"
-    )
+    candidate = next(item for item in extract_dialogue_candidates(chunk_id, chunk_text) if item.content == "住手")
     return PendingCase(
         type="dialogue_speaker",
         chunk_id=chunk_id,
@@ -121,15 +113,14 @@ def _agent_result(
         annotation=annotation,
         resolved_cases=[],
         pushed_cases=(
-            [_pending_case(chunk_id=chunk_id, chunk_text=chunk_text, chapter_id=chapter_id)]
-            if create_case
-            else []
+            [_pending_case(chunk_id=chunk_id, chunk_text=chunk_text, chapter_id=chapter_id)] if create_case else []
         ),
         audit=AgentRunAudit(
             allow_future_context=False,
-            write_revisions=[],
+            write_records=[],
             rotation_case_ids=[],
-            authorized_text_chunk_ids=[chunk_id],
+            authorized_chapter_ids=[chunk_id],
+            authorized_text_paragraph_ids=[],
         ),
     )
 
@@ -137,14 +128,16 @@ def _agent_result(
 def test_group_chunks_by_chapter_requires_real_nonempty_identity() -> None:
     """2026-08-05 用于验证章节聚合拒绝空 chapter_id 和运行时序号兜底"""
     with pytest.raises(ValueError, match="chapter_id 必须真实且非空"):
-        _group_chunks_by_chapter([(0, None, "无章节身份")])  # type: ignore[list-item]
+        _group_chunks_by_chapter([(0, "无章节身份")])
 
 
 def test_group_chunks_by_chapter_preserves_persisted_order() -> None:
     """2026-08-05 用于验证章节与 chunk 均保持数据库原文顺序"""
-    assert _group_chunks_by_chapter(
-        [(0, 1, "甲"), (1, 1, "乙"), (2, 2, "丙")]
-    ) == [(1, [(0, "甲"), (1, "乙")]), (2, [(2, "丙")])]
+    assert _group_chunks_by_chapter([(1, "甲"), (1, "乙"), (2, "丙")]) == [
+        (1, [(1, "甲")]),
+        (1, [(1, "乙")]),
+        (2, [(2, "丙")]),
+    ]
 
 
 @pytest.mark.asyncio
@@ -171,9 +164,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
                     "住手",
                     hidden_case_ids=set(),
                 )
-                assert all(
-                    isinstance(item, CaseSearchResult) for item in search_result.results
-                )
+                assert all(isinstance(item, CaseSearchResult) for item in search_result.results)
                 assert search_result.results[0].description == "该句住手由谁说出"
             finally:
                 read_session.rollback()
@@ -181,7 +172,7 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
         return _agent_result(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chapter_id - 1,
+            chunk_id=chapter_id,
             chunk_text=chunk_text,
             create_case=chapter_id == 1,
         )
@@ -219,7 +210,7 @@ async def test_run_annotate_skips_existing_chapter_completion(db_session) -> Non
         return _agent_result(
             run_id=run_id,
             chapter_id=kwargs["chapter_id"],
-            chunk_id=1,
+            chunk_id=2,
             chunk_text=chunk_text,
         )
 
@@ -237,9 +228,7 @@ async def test_run_annotate_skips_existing_chapter_completion(db_session) -> Non
     assert calls == [2]
     db_session.rollback()
     count = db_session.execute(
-        select(func.count())
-        .select_from(ChapterAnnotationRecord)
-        .where(ChapterAnnotationRecord.run_id == run_id)
+        select(func.count()).select_from(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
     ).scalar_one()
     assert count == 2
 
@@ -263,7 +252,7 @@ async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
         return _agent_result(
             run_id=run_id,
             chapter_id=1,
-            chunk_id=0,
+            chunk_id=1,
             chunk_text=chunk_text,
         )
 
@@ -286,7 +275,8 @@ async def test_run_annotate_passes_agent_stream_to_agent(db_session) -> None:
     assert len(seen_streams) == 1
     assert isinstance(seen_streams[0], AgentStream)
     # 章节开始 thinking 事件已通过 AgentStream 到达 emitter
-    assert ("thinking", "章节 1 标注 Agent 开始处理") in emitted
+    # （M9a-2：insert_chapter_texts 补建的默认章行带"第N章"标题，标签取章标题）
+    assert ("thinking", "章节 第1章 标注 Agent 开始处理") in emitted
 
 
 @pytest.mark.asyncio
@@ -298,32 +288,31 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
         chapter_ids=[2],
         title="编号偏移展示",
     )
-    db_session.add_all(
-        [
-            Chapter(
-                chapter_id=1,
-                sequence=1,
-                title="少年篇",
-                display_title="少年篇",
-                display_index_label=None,
-                level="volume",
-                start_pos=0,
-                end_pos=10,
-                run_id=run_id,
-            ),
-            Chapter(
-                chapter_id=2,
-                sequence=2,
-                title="第一章 贺院三尺有顽童",
-                display_title="第一章 贺院三尺有顽童",
-                display_index_label="第1章",
-                level="chapter",
-                start_pos=10,
-                end_pos=20,
-                run_id=run_id,
-            ),
-        ]
+    # M9a-2：insert_chapter_texts 已为章 2 补建默认结构行（标题"第2章"），
+    # 卷行可直接插入；章 2 行改为更新展示字段，避免重复插入撞 chapters 主键
+    db_session.add(
+        Chapter(
+            chapter_id=1,
+            sequence=1,
+            title="少年篇",
+            display_title="少年篇",
+            display_index_label=None,
+            level="volume",
+            start_pos=0,
+            end_pos=10,
+            run_id=run_id,
+        )
     )
+    chapter_row = db_session.execute(
+        select(Chapter).where(
+            Chapter.run_id == run_id,
+            Chapter.chapter_id == 2,
+        )
+    ).scalar_one()
+    chapter_row.title = "第一章 贺院三尺有顽童"
+    chapter_row.display_title = "第一章 贺院三尺有顽童"
+    chapter_row.display_index_label = "第1章"
+    chapter_row.sequence = 2
     db_session.commit()
     emitted: list[StreamEvent] = []
     seen_labels: list[str | None] = []
@@ -335,7 +324,7 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
         return _agent_result(
             run_id=run_id,
             chapter_id=2,
-            chunk_id=0,
+            chunk_id=1,
             chunk_text=chunk_text,
         )
 
@@ -357,9 +346,7 @@ async def test_run_annotate_uses_display_label_for_shifted_chapter_ids(db_sessio
     assert result == (1, 0, 1)
     assert seen_labels == ["第1章"]
     # chapter_id=2 的展示标签为"第1章"，而非内部编号 2
-    assert ("thinking", "章节 第1章 标注 Agent 开始处理") in [
-        (event.action, event.content) for event in emitted
-    ]
+    assert ("thinking", "章节 第1章 标注 Agent 开始处理") in [(event.action, event.content) for event in emitted]
     messages = [event.message for event in emitted if event.action == "progress"]
     assert "章节 第1章 标注 Agent 运行中" in messages
     assert "章节 第1章 已完成" in messages
@@ -391,7 +378,7 @@ async def test_run_annotate_interrupts_after_failed_chapter_preserving_committed
         return _agent_result(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chapter_id - 1,
+            chunk_id=chapter_id,
             chunk_text=chunk_text,
         )
 
@@ -410,9 +397,7 @@ async def test_run_annotate_interrupts_after_failed_chapter_preserving_committed
     assert calls == [1, 2]
     db_session.rollback()
     count = db_session.execute(
-        select(func.count())
-        .select_from(ChapterAnnotationRecord)
-        .where(ChapterAnnotationRecord.run_id == run_id)
+        select(func.count()).select_from(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
     ).scalar_one()
     assert count == 1
 
@@ -446,8 +431,6 @@ async def test_run_annotate_raises_when_all_chapters_fail(db_session) -> None:
     assert agent.call_count == 1
     db_session.rollback()
     count = db_session.execute(
-        select(func.count())
-        .select_from(ChapterAnnotationRecord)
-        .where(ChapterAnnotationRecord.run_id == run_id)
+        select(func.count()).select_from(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
     ).scalar_one()
     assert count == 0

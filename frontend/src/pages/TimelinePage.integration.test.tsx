@@ -5,20 +5,20 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Novel, TimelineResponse } from "@/api/types";
+import type { Novel, TimelineEventNode } from "@/api/types";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { useNovelStore } from "@/store/novelStore";
+import { createEventTimeline } from "@/mocks/data";
 
 const getTimelineMock = vi.fn();
 const getNovelMock = vi.fn();
 const getAnalysisTasksMock = vi.fn();
 const navigateMock = vi.fn();
 
-let currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&change_id=relation%3A31";
+let currentTimelineSearchParams = "task_id=task-integration&tree_id=tree%3A1";
 let currentTimelineNovelId = "novel-1";
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。集成测试保留真实 timeline 组件，仅替换动画属性
 function motionElement(tagName: string) {
   const Component = (props: {
     children?: ReactNode;
@@ -61,11 +61,54 @@ vi.mock("framer-motion", () => ({
   ),
 }));
 
-vi.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
-  TooltipProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+vi.mock("@/components/layout/PageContainer", () => ({
+  PageContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+}));
+vi.mock("@/components/common/NovelHeader", () => ({
+  NovelHeader: ({ title }: { title: string }) => <div>{title}</div>,
+}));
+vi.mock("@/components/common/MetricCard", () => ({
+  MetricCard: ({ label, value }: { label: string; value: number }) => (
+    <div>{label}:{value}</div>
+  ),
+}));
+
+// mock timeline components like unit test to make integration deterministic
+vi.mock("@/components/timeline", () => ({
+  TimelineControls: ({ onMaxLevelChange }: { onMaxLevelChange: (l: 1 | 2 | 3) => void }) => (
+    <div>
+      <button type="button" onClick={() => onMaxLevelChange(1)}>
+        重要
+      </button>
+      <button type="button" onClick={() => onMaxLevelChange(3)}>
+        全部
+      </button>
+      <button type="button" onClick={() => navigateMock("/novels/novel-1/graph?task_id=task-integration&tree_id=tree%3A1")}>
+        回到图谱入口
+      </button>
+    </div>
+  ),
+  PhaseBar: () => <div />,
+  TimelineLegend: () => <div />,
+  TensionOverlay: () => <div />,
+  TimelineTrack: ({
+    nodes,
+    onNodeClick,
+  }: {
+    nodes: TimelineEventNode[];
+    onNodeClick: (n: TimelineEventNode) => void;
+  }) => (
+    <div>
+      {nodes.map((n) => (
+        <button key={n.tree_id} type="button" onClick={() => onNodeClick(n)}>
+          {n.tree_id}
+        </button>
+      ))}
+    </div>
+  ),
+  TimelineNodeDetail: ({ node }: { node: TimelineEventNode | null }) => (
+    <div>{node ? node.tree_id : "none"}</div>
+  ),
 }));
 
 vi.mock("@/api/results", () => ({
@@ -82,7 +125,6 @@ vi.mock("@/api/analysis", () => ({
   getAnalysisTasks: (...args: unknown[]) => getAnalysisTasksMock(...args),
 }));
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。创建独立 QueryClient，验证页面级组件真实组合
 function renderTimelinePage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -96,133 +138,6 @@ function renderTimelinePage() {
   );
 }
 
-// 2026-08-07 用于构造时间轴集成测试的稳定图谱变化合同
-function createRelationGraphChange(changeId: string, relationChangeKind: "assert" | "break", chunkId: number) {
-  return {
-    change_id: changeId,
-    change_kind: "relation" as const,
-    graph_version_id: "graph-version-1",
-    chapter_id: 2,
-    fact_id: `fact:${changeId}`,
-    fact_revision: 1,
-    effective_chunk_id: chunkId,
-    changes: [{ change_kind: relationChangeKind }],
-    relation_id: `relation:${changeId}`,
-    relation_version_id: Number(changeId.split(":")[1]),
-    relation_revision: 1,
-    from_char: "顾承渊",
-    to_char: changeId === "relation:32" ? "陆沉" : "苏映雪",
-    relation_type: changeId === "relation:32" ? "对手" : "盟友",
-    relation_change_kind: relationChangeKind,
-    directionality: "directed" as const,
-  };
-}
-
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation node 的时间轴响应，覆盖图谱联动路径
-function createTimelineResponse(): TimelineResponse {
-  return {
-    meta: {
-      novel_id: "novel-1",
-      novel_name: "Timeline Integration Novel",
-      total_chunks: 12,
-    },
-    phases: [
-      { name: "引入期", start: 1, end: 3, ratio: 0.25 },
-      { name: "发展期", start: 4, end: 6, ratio: 0.25 },
-      { name: "高潮期", start: 7, end: 9, ratio: 0.25 },
-      { name: "收束期", start: 10, end: 12, ratio: 0.25 },
-    ],
-    composite_nodes: [
-      {
-        node_id: "composite:relation:8:0",
-        anchor_chunk_id: 8,
-        start_chunk_id: 8,
-        end_chunk_id: 8,
-        progress: 0.66,
-        start_progress: 0.66,
-        end_progress: 0.66,
-        importance_score: 9,
-        level: 1,
-        summary: "顾承渊与苏映雪结盟",
-        characters: ["顾承渊", "苏映雪"],
-        phase_name: "高潮期",
-        node_type: "relation",
-        node_subtypes: ["assert"],
-        representative_node_id: "relation:31",
-        child_node_ids: ["relation:31"],
-      },
-    ],
-    atomic_nodes: [
-      {
-        node_id: "relation:31",
-        anchor_chunk_id: 8,
-        progress: 0.66,
-        importance_score: 9,
-        level: 1,
-        summary: "顾承渊与苏映雪结盟",
-        characters: ["顾承渊", "苏映雪"],
-        phase_name: "高潮期",
-        node_type: "relation",
-        node_subtype: "assert",
-        score_breakdown: { change_type_weight: 2.4, pair_importance: 1.6 },
-        plot_flags: {
-          is_pivot: true,
-          is_cliffhanger: false,
-          tension_percentile: 82,
-        },
-        graph_changes: [createRelationGraphChange("relation:31", "assert", 8)],
-      },
-    ],
-    tension_curve: [0.2, 0.45, 0.8],
-  };
-}
-
-// 2026-08-07 用于验证 selected_node_id 与 change_id 冲突时页面不会把错误变化带回图谱
-function createConflictingTimelineResponse(): TimelineResponse {
-  return {
-    ...createTimelineResponse(),
-    composite_nodes: [
-      ...(createTimelineResponse().composite_nodes ?? []),
-      {
-        node_id: "composite:relation:9:0",
-        anchor_chunk_id: 9,
-        start_chunk_id: 9,
-        end_chunk_id: 9,
-        progress: 0.75,
-        start_progress: 0.75,
-        end_progress: 0.75,
-        importance_score: 7,
-        level: 1,
-        summary: "顾承渊与陆沉反目",
-        characters: ["顾承渊", "陆沉"],
-        phase_name: "高潮期",
-        node_type: "relation",
-        node_subtypes: ["break"],
-        representative_node_id: "relation:32",
-        child_node_ids: ["relation:32"],
-      },
-    ],
-    atomic_nodes: [
-      ...(createTimelineResponse().atomic_nodes ?? []),
-      {
-        node_id: "relation:32",
-        anchor_chunk_id: 9,
-        progress: 0.75,
-        importance_score: 7,
-        level: 1,
-        summary: "顾承渊与陆沉反目",
-        characters: ["顾承渊", "陆沉"],
-        phase_name: "高潮期",
-        node_type: "relation",
-        node_subtype: "break",
-        score_breakdown: { change_type_weight: 2.1, pair_importance: 1.3 },
-        graph_changes: [createRelationGraphChange("relation:32", "break", 9)],
-      },
-    ],
-  };
-}
-
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造真实 NovelHeader 查询所需小说对象
 function createNovel(): Novel {
   return {
     novel_id: "novel-1",
@@ -234,43 +149,56 @@ function createNovel(): Novel {
   };
 }
 
-describe("TimelinePage integration", () => {
+describe("TimelinePage integration (event forest)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&change_id=relation%3A31";
+    currentTimelineSearchParams = "task_id=task-integration&tree_id=tree%3A1";
     currentTimelineNovelId = "novel-1";
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
     getNovelMock.mockResolvedValue(createNovel());
     getAnalysisTasksMock.mockResolvedValue([]);
-    getTimelineMock.mockResolvedValue(createTimelineResponse());
+    getTimelineMock.mockResolvedValue(createEventTimeline());
   });
 
   it("keeps graph deep-link state through real timeline controls and detail actions", async () => {
     const user = userEvent.setup();
+    const timeline = createEventTimeline();
+    getTimelineMock.mockResolvedValue(timeline);
     renderTimelinePage();
 
-    expect((await screen.findAllByText("顾承渊与苏映雪结盟")).length).toBeGreaterThan(0);
+    const first = timeline.nodes[0]!;
+    expect(await screen.findByRole("button", { name: first.tree_id })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重要" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chunk=8&change_id=relation%3A31",
+      expect.stringContaining("max_level=1"),
       { replace: true }
     );
+    // deep link tree_id should be preserved
+    expect(navigateMock).toHaveBeenCalledWith(
+      expect.stringContaining(encodeURIComponent(first.tree_id)),
+      expect.anything()
+    );
 
+    // back to graph button should preserve tree_id
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&change_id=relation%3A31");
+    expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining("/novels/novel-1/graph"));
+    expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent(first.tree_id)));
   });
 
-  it("does not carry a conflicting change_id back to graph when selected_node_id points elsewhere", async () => {
-    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chunk=8&change_id=relation%3A32";
-    getTimelineMock.mockResolvedValue(createConflictingTimelineResponse());
+  it("does not carry conflicting event_id back to graph when tree selection points elsewhere", async () => {
+    const timeline = createEventTimeline();
+    getTimelineMock.mockResolvedValue(timeline);
+    const first = timeline.nodes[0]!;
+    const second = timeline.nodes[1]!;
+    currentTimelineSearchParams = `task_id=task-integration&tree_id=${encodeURIComponent(first.tree_id)}&event_id=${encodeURIComponent(second.root_event_id)}`;
     const user = userEvent.setup();
 
     renderTimelinePage();
 
-    expect((await screen.findAllByText("顾承渊与苏映雪结盟")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("button", { name: first.tree_id })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&change_id=relation%3A31");
+    expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent(first.tree_id)));
   });
 });

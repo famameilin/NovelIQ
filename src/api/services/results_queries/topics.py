@@ -2,39 +2,53 @@
 主题查询组装器
 
 说明: 承载 topics 相关查询组装逻辑
+
+Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合
+（fetch_paragraph_topics_agg），归一化使用 weighted_total
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from math import isfinite
+from typing import Any, Protocol, cast
 
 from loguru import logger
 
 from src.api.models.responses import TopicInfo
-from src.storage.repositories import ChunkRepository
+from src.storage.path_resolver import resolve_model_dir
+from src.storage.repositories import ParagraphRepository
 
 
-def _resolve_project_root() -> Path:
-    """
-    从模块位置逐级向上查找项目根目录（以 config/settings.json 为锚点）
-
-    说明: 避免 Path("models") 相对 CWD 解析导致的服务启动目录漂移
-    """
-    current = Path(__file__).resolve().parent
-    for candidate in (current, *current.parents):
-        if (candidate / "config" / "settings.json").exists():
-            return candidate
-    return current
+class _TopicAggregationRow(Protocol):
+    topic_id: object
+    weighted_total: Any
 
 
-_PROJECT_ROOT = _resolve_project_root()
+def _validate_agg_row(row: object) -> tuple[int, float]:
+    """2026-08-20 校验主题聚合行并返回语义化字段"""
+    typed_row = cast(_TopicAggregationRow, row)
+    try:
+        raw_topic_id = typed_row.topic_id
+        raw_weighted_total = typed_row.weighted_total
+    except AttributeError as exc:
+        raise RuntimeError("paragraph_topics 聚合结果缺少 topic_id 或 weighted_total 字段") from exc
+
+    if isinstance(raw_topic_id, bool) or not isinstance(raw_topic_id, int):
+        raise RuntimeError(f"paragraph_topics 聚合结果 topic_id 类型错误: {type(raw_topic_id).__name__}")
+    try:
+        weighted_total = float(raw_weighted_total)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"paragraph_topics 聚合结果 weighted_total 类型错误: {raw_weighted_total!r}") from exc
+    if not isfinite(weighted_total) or weighted_total < 0:
+        raise RuntimeError(f"paragraph_topics 聚合结果 weighted_total 必须是非负有限数: {weighted_total!r}")
+    return raw_topic_id, weighted_total
 
 
-def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
-    """获取主题数据"""
-    rows = chunk_repo.fetch_chunk_topics_agg(run_id)
+def _fetch_topics(run_id: str, paragraph_repo: ParagraphRepository) -> list:
+    """获取主题数据（段落 token 加权聚合，weighted_total 归一化）"""
+    rows = paragraph_repo.fetch_paragraph_topics_agg(run_id)
 
-    model_dir = _PROJECT_ROOT / "models" / "topic" / run_id
+    model_dir = resolve_model_dir(run_id)
     topic_words_map: dict[int, list[str]] = {}
     topic_labels_map: dict[int, str] = {}
 
@@ -56,11 +70,11 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
 
     result: list[TopicInfo] = []
     for row in rows:
-        topic_id = row.topic_id
+        topic_id, weighted_total = _validate_agg_row(row)
         words: list[str] = topic_words_map.get(topic_id, [])
         label = topic_labels_map.get(topic_id)
         if words:
-            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.total_weight, label=label))
+            result.append(TopicInfo(topic_id=topic_id, words=words, weight=weighted_total, label=label))
 
     if result:
         total_weight = sum(item.weight for item in result)

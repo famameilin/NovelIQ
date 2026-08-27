@@ -5,7 +5,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GraphChangesPageResponse, GraphData, Novel } from "@/api/types";
+import type {
+  GraphChangesPageResponse,
+  GraphData,
+  Novel,
+} from "@/api/types";
 import type { GraphNodeObject } from "@/components/charts/forceGraphTypes";
 import { GraphPage } from "@/pages/GraphPage";
 import { useNovelStore } from "@/store/novelStore";
@@ -125,36 +129,34 @@ vi.mock("@/api/novels", () => ({
 // 2026-08-07 用于构造章节图快照页面测试数据
 function createGraphData(): GraphData {
   return {
-    graph_version_id: "graph-version-3",
     chapter_id: 3,
     chapter_order: 3,
-    first_chunk_id: 11,
-    last_chunk_id: 15,
+    first_chapter_id: 11,
+    last_chapter_id: 15,
     nodes: [
       {
         entity_id: 1,
         name: "顾霜",
         entity_type: "character",
-        first_seen_chunk: 1,
-        last_seen_chunk: 15,
-        state_revision: 3,
+        first_seen_chapter: 1,
+        last_seen_chapter: 15,
+        state_chapter_id: 3,
         state: { primary_role_function: "主角", status: "active" },
       },
       {
         entity_id: 2,
         name: "司夜",
         entity_type: "character",
-        first_seen_chunk: 2,
-        last_seen_chunk: 15,
-        state_revision: 2,
+        first_seen_chapter: 2,
+        last_seen_chapter: 15,
+        state_chapter_id: 3,
         state: {},
       },
     ],
     edges: [
       {
         relation_id: "relation-1",
-        relation_version_id: 9,
-        relation_revision: 3,
+        state_chapter_id: 3,
         source_entity_id: 1,
         target_entity_id: 2,
         source_name: "顾霜",
@@ -177,16 +179,12 @@ function createGraphChangesPage(): GraphChangesPageResponse {
       {
         change_id: "relation:12:1",
         change_kind: "relation",
-        graph_version_id: "graph-version-3",
         chapter_id: 3,
         chapter_order: 3,
         fact_id: "fact-12",
-        fact_revision: 1,
-        effective_chunk_id: 12,
+        effective_chapter_id: 12,
         changes: [{ change_kind: "assert" }],
         relation_id: "relation-1",
-        relation_version_id: 9,
-        relation_revision: 3,
         from_entity_id: 1,
         to_entity_id: 2,
         from_name: "顾霜",
@@ -199,12 +197,10 @@ function createGraphChangesPage(): GraphChangesPageResponse {
       {
         change_id: "state:13:1",
         change_kind: "state",
-        graph_version_id: "graph-version-3",
         chapter_id: 3,
         chapter_order: 3,
         fact_id: "fact-13",
-        fact_revision: 1,
-        effective_chunk_id: 13,
+        effective_chapter_id: 13,
         changes: [{ field: "status", before: "hidden", after: "active" }],
         entity_id: 1,
         entity_name: "顾霜",
@@ -251,8 +247,8 @@ describe("GraphPage", () => {
   it("读取章节快照并独立加载实体与关系变化", async () => {
     renderPage();
 
-    expect((await screen.findAllByText(/第 13 段 · 顾霜/)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/第 12 段 · 顾霜 → 司夜/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/第 13 章 · 顾霜/)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/第 12 章 · 顾霜 → 司夜/)).toBeInTheDocument();
     expect(screen.getByText("盟友 · 建立")).toBeInTheDocument();
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
   });
@@ -261,11 +257,11 @@ describe("GraphPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    const relationChange = await screen.findByText(/第 12 段 · 顾霜 → 司夜/);
+    const relationChange = await screen.findByText(/第 12 章 · 顾霜 → 司夜/);
     await user.click(relationChange.closest("button")!);
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A12%3A1",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1",
       { replace: true },
     );
   });

@@ -32,7 +32,7 @@ class TokenUsage(Base):
         ForeignKey("novels.novel_id", ondelete="RESTRICT", name="token_usage_novel_id_fkey"),
         nullable=False,
     )
-    chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     call_type: Mapped[str] = mapped_column(String(50), nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -42,9 +42,7 @@ class TokenUsage(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
-    accounting_source: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="reported"
-    )
+    accounting_source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="reported")
     created_at: Mapped[str] = mapped_column(String(50), nullable=False)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True

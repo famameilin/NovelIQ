@@ -65,7 +65,7 @@ class DiagnosisRepositoryProtocol(Protocol):
         ...
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[HighTensionChunk]:
-        """获取高张力分块"""
+        """获取高张力段落（paragraph_curves.surface_tension 排序）"""
         ...
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[RelationChangeRow]:

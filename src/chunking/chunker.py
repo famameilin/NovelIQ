@@ -12,13 +12,14 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable, Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from src.chapters.models import ChapterData
 from src.chapters.parser import parse_chapters
 from src.chapters.preprocess import preprocess_text
+from src.chunking.spans import ParagraphSpan
 
 if TYPE_CHECKING:
     from src.api.models.events import StreamEvent
@@ -193,7 +194,7 @@ async def chunk_documents_with_chapters(
 
 
 # =============================================================================
-# 自然段分割（RAG 粒度）
+# 自然段分割（最小事实单元）
 # =============================================================================
 
 PARAGRAPH_SPLIT_RE = re.compile(r"\n")
@@ -205,15 +206,19 @@ def _split_oversized_span(
     start: int,
     end: int,
     max_chars: int,
-) -> list[tuple[int, int, str]]:
+    source_paragraph_index: int,
+) -> list[ParagraphSpan]:
     """
-    2026-08-08 用于把段落切分出的超大区间按句子边界再切到 max_chars 以内
+    把段落切分出的超大区间按句子边界再切到 max_chars 以内
 
     单段 token 数可能超过 embedding 服务的物理 batch 上限，
     必须在段落粒度内按句子边界再切（无句子边界时退化为固定字数硬切）
+
+    拆分出的片段共享 source_paragraph_index，fragment_index 从 0 递增
     """
-    spans: list[tuple[int, int, str]] = []
+    spans: list[ParagraphSpan] = []
     cursor = start
+    fragment_index = 0
     while cursor < end:
         chunk_end = min(cursor + max_chars, end)
         if chunk_end < end:
@@ -225,34 +230,102 @@ def _split_oversized_span(
                 chunk_end = sentence_end + 1
         span = _resolve_trimmed_span(text, cursor, chunk_end)
         if span is not None:
-            spans.append(span)
+            local_start, local_end, paragraph_text = span
+            spans.append(
+                ParagraphSpan(
+                    paragraph_index=-1,  # 由 split_paragraphs 统一分配
+                    source_paragraph_index=source_paragraph_index,
+                    fragment_index=fragment_index,
+                    local_start_char=local_start,
+                    local_end_char=local_end,
+                    text=paragraph_text,
+                )
+            )
         cursor = chunk_end
+        fragment_index += 1
     return spans
 
 
-def split_paragraphs(text: str, max_chars: int = 1500) -> list[tuple[int, int, str]]:
+def split_paragraphs(text: str, max_chars: int = 1500) -> list[ParagraphSpan]:
     """
-    将文本按自然段分割，返回 (start, end, text) 三元组（strip 后真实坐标）
+    将文本按自然段分割为段落单元（ParagraphSpan，strip 后真实局部坐标）
 
-    RAG 检索粒度固定为一个自然段，本函数是段落级证据的统一分割入口。
+    段落单元是文本分析的最小事实单元（设计文档《章节粒度分析指标重设计》§3）。
     段落边界为任意换行（单换行也算段落边界，网文 txt 常以单换行分段），
     连续空行产生的空段自动跳过；超过 max_chars 的超长段落再按句子边界切分，
-    保证单段 token 数不超过 embedding 服务物理 batch 上限
+    保证单段 token 数不超过 embedding 服务物理 batch 上限。
+
+    返回的 ParagraphSpan 只含 chunk 局部身份（paragraph_index、
+    source_paragraph_index、fragment_index 与 local 坐标），chunk 级身份
+    （chapter_id/chapter_id/paragraph_id/global 坐标）由 split_chunk_paragraphs
+    或调用方在归属到 chunk 后填充。
     """
-    paragraphs: list[tuple[int, int, str]] = []
+    paragraphs: list[ParagraphSpan] = []
+    source_paragraph_index = 0
     start = 0
 
     for match in PARAGRAPH_SPLIT_RE.finditer(text):
         end = match.start()
-        paragraphs.extend(_split_oversized_span(text, start, end, max_chars))
+        paragraphs.extend(_split_oversized_span(text, start, end, max_chars, source_paragraph_index))
+        source_paragraph_index += 1
         start = match.end()
 
     if start < len(text):
-        paragraphs.extend(_split_oversized_span(text, start, len(text), max_chars))
+        paragraphs.extend(_split_oversized_span(text, start, len(text), max_chars, source_paragraph_index))
 
     if paragraphs:
-        return paragraphs
+        return [
+            ParagraphSpan(
+                paragraph_index=idx,
+                source_paragraph_index=span.source_paragraph_index,
+                fragment_index=span.fragment_index,
+                local_start_char=span.local_start_char,
+                local_end_char=span.local_end_char,
+                text=span.text,
+            )
+            for idx, span in enumerate(paragraphs)
+        ]
     if text.strip():
         span = _resolve_trimmed_span(text, 0, len(text))
-        return [span] if span is not None else []
+        if span is not None:
+            local_start, local_end, paragraph_text = span
+            return [
+                ParagraphSpan(
+                    paragraph_index=0,
+                    source_paragraph_index=0,
+                    fragment_index=0,
+                    local_start_char=local_start,
+                    local_end_char=local_end,
+                    text=paragraph_text,
+                )
+            ]
     return []
+
+
+def split_chunk_paragraphs(
+    chunks: Sequence[Chunk],
+    max_chars: int = 1500,
+) -> list[ParagraphSpan]:
+    """
+    将多个 chunk（章）的文本切分为带 run 级身份的段落单元
+
+    段落身份不变量（设计文档 §3/§4）：
+    - paragraph_id 在 run 内按全文顺序连续（0, 1, 2, ...），不随数据库自增推断
+    - global 坐标 = chunk 全文偏移 + local 坐标，与规范化全文坐标一致
+    - chapter_id 直接取自 Chunk 上下文（M9a-2：chunks 表合并后段落身份 = chapter_id）
+    """
+    spans: list[ParagraphSpan] = []
+    paragraph_id = 0
+    for chunk in chunks:
+        for span in split_paragraphs(chunk.text, max_chars=max_chars):
+            spans.append(
+                replace(
+                    span,
+                    paragraph_id=paragraph_id,
+                    chapter_id=chunk.chapter_id,
+                    global_start_char=chunk.start + span.local_start_char,
+                    global_end_char=chunk.start + span.local_end_char,
+                )
+            )
+            paragraph_id += 1
+    return spans

@@ -8,23 +8,19 @@ const navigateMock = vi.fn();
 
 /**
  * 2026-08-12 用于锁住图谱页 deep-link 选择逻辑：
- * 首屏默认选中、change_id 命中/miss、chunk 唯一命中、手动选择后清除提示、
+ * 首屏默认选中、change_id 命中/miss、章节唯一命中、手动选择后清除提示、
  * load-more 合并进新变化后自动补选中、任务切换重置
  */
-function createChange(changeId: string, effectiveChunkId: number): GraphChange {
+function createChange(changeId: string, effectiveChapterId: number): GraphChange {
   return {
     change_id: changeId,
     change_kind: "relation",
-    graph_version_id: "graph-version-1",
     chapter_id: 1,
     chapter_order: 1,
     fact_id: `fact-${changeId}`,
-    fact_revision: 1,
-    effective_chunk_id: effectiveChunkId,
+    effective_chapter_id: effectiveChapterId,
     changes: [{ change_kind: "assert" }],
     relation_id: `relation-${changeId}`,
-    relation_version_id: 1,
-    relation_revision: 1,
     from_entity_id: 1,
     to_entity_id: 2,
     from_name: "甲",
@@ -38,7 +34,7 @@ function createChange(changeId: string, effectiveChunkId: number): GraphChange {
 
 interface DeepLinkHookProps {
   urlChangeId?: string | null;
-  urlSelectedChunk?: string | null;
+  urlSelectedChapter?: string | null;
   loadedChanges?: GraphChange[];
   taskScopeId?: string | null;
 }
@@ -47,17 +43,17 @@ const FIRST_PAGE_CHANGES = [createChange("relation:12:1", 12), createChange("sta
 
 function renderDeepLinkHook(initialProps: DeepLinkHookProps = {}) {
   return renderHook(
-    ({ urlChangeId, urlSelectedChunk, loadedChanges, taskScopeId }: DeepLinkHookProps) => {
+    ({ urlChangeId, urlSelectedChapter, loadedChanges, taskScopeId }: DeepLinkHookProps) => {
       const effectiveChanges = loadedChanges ?? FIRST_PAGE_CHANGES;
       const sortedChanges = [...effectiveChanges].sort(
-        (left, right) => right.effective_chunk_id - left.effective_chunk_id,
+        (left, right) => right.effective_chapter_id - left.effective_chapter_id,
       );
       return useGraphDeepLinkSelection({
         novelId: "novel-1",
         taskScopeId: taskScopeId ?? "task-a",
         timelineUrl: "/novels/novel-1/timeline?task_id=task-a",
         urlChangeId: urlChangeId ?? null,
-        urlSelectedChunk: urlSelectedChunk ?? null,
+        urlSelectedChapter: urlSelectedChapter ?? null,
         loadedChanges: effectiveChanges,
         sortedChanges,
         navigate: navigateMock,
@@ -91,7 +87,7 @@ describe("useGraphDeepLinkSelection", () => {
     expect(result.current.graphSelectionHint).toBeNull();
   });
 
-  it("change_id miss 时不回退到同 chunk 其他变化，并提示可加载更多", async () => {
+  it("change_id miss 时不回退到同章节其他变化，并提示可加载更多", async () => {
     const { result } = renderDeepLinkHook({ urlChangeId: "relation:9999" });
 
     await waitFor(() => {
@@ -102,8 +98,8 @@ describe("useGraphDeepLinkSelection", () => {
     );
   });
 
-  it("chunk-only deep-link 在当前窗口唯一命中时自动选中", async () => {
-    const { result } = renderDeepLinkHook({ urlSelectedChunk: "12" });
+  it("chapter-only deep-link 在当前窗口唯一命中时自动选中", async () => {
+    const { result } = renderDeepLinkHook({ urlSelectedChapter: "12" });
 
     await waitFor(() => {
       expect(result.current.selectedChange?.change_id).toBe("relation:12:1");
@@ -124,7 +120,7 @@ describe("useGraphDeepLinkSelection", () => {
     expect(result.current.selectedChange?.change_id).toBe("relation:12:1");
     expect(result.current.graphSelectionHint).toBeNull();
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&change_id=relation%3A12%3A1",
+      "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1",
       { replace: true },
     );
   });

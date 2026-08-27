@@ -1,8 +1,6 @@
 """
 小说服务类
 
-修改历史:
-
 说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储小说元数据和分析任务
 """
 
@@ -158,7 +156,7 @@ class NovelService:
 
     def _load_task_from_db(self, task_id: str, session: Session | None = None) -> dict | None:
         """
-        从数据库加载任务元数据
+        从数据库加载任务完整信息，包括运行时状态字段
         """
         with self._get_session(session) as sess:
             run_repo = RunRepository(sess)
@@ -171,6 +169,16 @@ class NovelService:
                     "run_id": run["run_id"],
                     "task_kind": run["task_kind"],
                     "request_payload": run["request_payload"],
+                    # 运行时状态字段
+                    "progress": run.get("progress", 0.0),
+                    "stage": run.get("stage"),
+                    "sub_stage": run.get("sub_stage"),
+                    "current": run.get("current"),
+                    "total": run.get("total"),
+                    "message": run.get("message"),
+                    "error": run.get("error"),
+                    "started_at": run.get("started_at"),
+                    "completed_at": run.get("completed_at"),
                 }
         return None
 
@@ -220,36 +228,46 @@ class NovelService:
     def list_novels(self, session: Session | None = None) -> list[dict]:
         """
         列出所有小说及其信息
+
+        2026-08-20 阶段 3.2：使用 LEFT JOIN 和窗口函数消除 N+1 查询
         """
         novels = []
         try:
             with self._get_session(session) as sess:
-                from sqlalchemy import select
+                from sqlalchemy import func, select
+                from sqlalchemy.orm import aliased
 
                 from src.storage.models import AnalysisRun
 
-                result = sess.execute(select(Novel).order_by(Novel.upload_time.desc()))
-                all_novels = result.scalars().all()
+                # 子查询：为每个小说找到最新任务的 created_at
+                latest_run_subq = (
+                    select(AnalysisRun.novel_id, func.max(AnalysisRun.created_at).label("latest_created_at"))
+                    .group_by(AnalysisRun.novel_id)
+                    .subquery()
+                )
 
-                for novel in all_novels:
-                    runs = (
-                        sess.execute(
-                            select(AnalysisRun)
-                            .where(AnalysisRun.novel_id == novel.novel_id)
-                            .order_by(AnalysisRun.created_at.desc())
-                        )
-                        .scalars()
-                        .all()
+                # 主查询：JOIN 获取小说和最新任务状态
+                LatestRun = aliased(AnalysisRun)
+                stmt = (
+                    select(Novel, LatestRun.status)
+                    .outerjoin(latest_run_subq, Novel.novel_id == latest_run_subq.c.novel_id)
+                    .outerjoin(
+                        LatestRun,
+                        (LatestRun.novel_id == latest_run_subq.c.novel_id)
+                        & (LatestRun.created_at == latest_run_subq.c.latest_created_at),
                     )
+                    .order_by(Novel.upload_time.desc())
+                )
 
-                    latest_status = runs[0].status if runs else "uploaded"
+                result = sess.execute(stmt).all()
 
+                for novel, latest_status in result:
                     novels.append(
                         {
                             "novel_id": novel.novel_id,
                             "filename": novel.filename or "unknown.txt",
                             "file_path": novel.file_path or "",
-                            "status": latest_status,
+                            "status": latest_status or "uploaded",
                             "title": novel.title or novel.filename or "未知标题",
                             "author": novel.author or "未知作者",
                             "upload_time": novel.upload_time.isoformat() if novel.upload_time else None,
@@ -259,20 +277,6 @@ class NovelService:
         except Exception as e:
             logger.warning(f"Failed to list novels from database: {e}")
         return novels
-
-    def get_analysis_count(self, session: Session | None = None) -> int:
-        """
-        从 novels 表查询小说数量
-        """
-        try:
-            with self._get_session(session) as sess:
-                from sqlalchemy import func, select
-
-                result = sess.execute(select(func.count()).select_from(Novel))
-                return result.scalar() or 0
-        except Exception as e:
-            logger.warning(f"Failed to get novel count from database: {e}")
-            return 0
 
     def _delete_novel_source_file(self, file_path: str | None) -> None:
         """

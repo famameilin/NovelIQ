@@ -7,7 +7,7 @@
  *   - lifecycle 的 entry / exit 与 relation 的不同变化类型统一走同一选择器
  */
 
-import { Activity, Link2, User, UserMinus, Zap, type LucideIcon } from "lucide-react";
+import { Activity, Link2, Zap, type LucideIcon } from "lucide-react";
 
 export interface TimelineNodePresentation {
   icon: LucideIcon;
@@ -18,62 +18,53 @@ export interface TimelineNodePresentation {
   accent: "primary" | "chart-2" | "chart-3" | "chart-4" | "chart-5";
 }
 
-const DEFAULT_PLOT_PRESENTATION: TimelineNodePresentation = {
+const DEFAULT_EVENT_PRESENTATION: TimelineNodePresentation = {
   icon: Zap,
-  label: "剧情节点",
-  description: "关键剧情推进、转折或节奏抬升节点",
+  label: "完整事件",
+  description: "事件森林一树一节点完整视图",
   dotClassName: "border-primary/30 bg-primary/15",
   iconClassName: "text-primary",
   accent: "primary",
 };
 
 const PRESENTATION_MAP: Record<string, TimelineNodePresentation> = {
-  plot: DEFAULT_PLOT_PRESENTATION,
-  relation: {
+  "event:root": {
+    icon: Zap,
+    label: "根因事件",
+    description: "事件森林根因节点：该树的因果起点",
+    dotClassName: "border-primary/30 bg-primary/15",
+    iconClassName: "text-primary",
+    accent: "primary",
+  },
+  "event:main": {
     icon: Link2,
-    label: "关系变化",
-    description: "角色关系发生了可进入图谱历史的真实变化",
+    label: "主链事件",
+    description: "主链事件：沿根因展开的核心因果链条",
     dotClassName: "border-chart-2/30 bg-chart-2/15",
     iconClassName: "text-chart-2",
     accent: "chart-2",
   },
-  state: {
+  "event:secondary": {
     icon: Activity,
-    label: "状态变化",
-    description: "角色当前状态或叙事职责发生可追溯更新",
+    label: "旁支事件",
+    description: "旁支事件：次因分支扩散",
     dotClassName: "border-chart-4/30 bg-chart-4/15",
     iconClassName: "text-chart-4",
     accent: "chart-4",
   },
-  "lifecycle:entry": {
-    icon: User,
-    label: "角色登场",
-    description: "角色首次进入稳定叙事舞台",
-    dotClassName: "border-chart-positive/30 bg-chart-positive/15",
-    iconClassName: "text-chart-positive",
-    accent: "chart-3",
-  },
-  "lifecycle:exit": {
-    icon: UserMinus,
-    label: "角色退场",
-    description: "角色从稳定活跃状态中退出",
-    dotClassName: "border-chart-negative/30 bg-chart-negative/15",
-    iconClassName: "text-chart-negative",
-    accent: "chart-5",
+  event: {
+    icon: Zap,
+    label: "完整事件",
+    description: "事件森林一树一节点",
+    dotClassName: "border-primary/30 bg-primary/15",
+    iconClassName: "text-primary",
+    accent: "primary",
   },
 };
 
-/**
- * 2026-04-27，任务：时间轴合同重构
- * 节点视觉语义现在由 node_type/node_subtype 共同决定，
- * 必须避免前端继续把 lifecycle 与 relation 节点硬压回旧的单字符串类型
- */
 export function getTimelineNodePresentation(
-  nodeType: "plot" | "state" | "relation" | "lifecycle",
+  _nodeType: "event",
   nodeSubtype: string,
 ): TimelineNodePresentation {
-  if (nodeType === "lifecycle") {
-    return PRESENTATION_MAP[`lifecycle:${nodeSubtype}`] ?? DEFAULT_PLOT_PRESENTATION;
-  }
-  return PRESENTATION_MAP[nodeType] ?? DEFAULT_PLOT_PRESENTATION;
+  return PRESENTATION_MAP[`event:${nodeSubtype}`] ?? PRESENTATION_MAP["event"] ?? DEFAULT_EVENT_PRESENTATION;
 }

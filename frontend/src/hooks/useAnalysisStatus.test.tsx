@@ -7,6 +7,7 @@ import type { SSEEventType } from "@/api/streamTypes";
 const getTaskStatusMock = vi.fn();
 const disconnectMock = vi.fn();
 let mockedIsConnected = false;
+let latestSSEUrl: string | null | undefined;
 let latestSSEHandlers:
   | {
       onEvent?: (eventType: SSEEventType | "message", data: unknown) => void;
@@ -29,7 +30,8 @@ vi.mock("@/api/analysis", () => ({
 }));
 
 vi.mock("@/hooks/useEventSource", () => ({
-  useSSEListener: (_url: string | null, options?: typeof latestSSEHandlers) => {
+  useSSEListener: (url: string | null, options?: typeof latestSSEHandlers) => {
+    latestSSEUrl = url;
     latestSSEHandlers = options ?? null;
     return {
       isConnected: mockedIsConnected,
@@ -100,6 +102,7 @@ function emitSSEError(): void {
 describe("useAnalysisStatus", () => {
   beforeEach(() => {
     mockedIsConnected = false;
+    latestSSEUrl = undefined;
     latestSSEHandlers = null;
     getTaskStatusMock.mockReset();
     disconnectMock.mockReset();
@@ -114,6 +117,40 @@ describe("useAnalysisStatus", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("检测到已激活的 mock service worker 时跳过 SSE 连接", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-mock"));
+
+    const originalServiceWorker = navigator.serviceWorker;
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { controller: {} },
+    });
+
+    render(<HookHarness novelId="novel-1" taskId="task-mock" />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-mock");
+    });
+    // mock 运行态下 SSE URL 应为 null（避免与 mock 事件流双写）
+    expect(latestSSEUrl).toBeNull();
+
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: originalServiceWorker,
+    });
+  });
+
+  it("未启用 mock 时保持 SSE 连接", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-live"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-live" />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-live");
+    });
+    expect(latestSSEUrl).toContain("/api/events/tasks/task-live");
   });
 
   it("会把 pending 任务回填成活跃态并触发 onRunning", async () => {
@@ -320,7 +357,7 @@ describe("useAnalysisStatus", () => {
       action: "progress",
       stage: "annotate",
       sub_stage: "phase1",
-      chunk_id: 2,
+      chapter_id: 2,
       current: 2,
       total: 10,
       percent: 20,
@@ -352,7 +389,7 @@ describe("useAnalysisStatus", () => {
       action: "output",
       stage: "annotate",
       sub_stage: "phase3",
-      chunk_id: 3,
+      chapter_id: 3,
       stream_id: "phase3-3-2",
       current: 3,
       total: 10,
@@ -365,7 +402,7 @@ describe("useAnalysisStatus", () => {
       action: "output",
       stage: "annotate",
       sub_stage: "phase3",
-      chunk_id: 3,
+      chapter_id: 3,
       stream_id: "phase3-3-2",
       current: 3,
       total: 10,

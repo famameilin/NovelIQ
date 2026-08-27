@@ -55,8 +55,7 @@ def _validate_topic_label_count(
     actual_count = len(analysis.topic_labels)
     if actual_count != expected_count:
         raise ValueError(
-            "topic_labels count must match available topic data: "
-            f"expected {expected_count}, got {actual_count}"
+            f"topic_labels count must match available topic data: expected {expected_count}, got {actual_count}"
         )
 
 
@@ -184,7 +183,10 @@ async def run_diagnosis_agent(
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    system_prompt = build_diagnosis_system_prompt(novel_title)
+    system_prompt = build_diagnosis_system_prompt(
+        novel_title,
+        topic_label_count=expected_topic_label_count,
+    )
     initial_messages: list[Any] = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=f"请对小说 {novel_title or novel_id} 完成整体诊断。"),
@@ -200,7 +202,7 @@ async def run_diagnosis_agent(
 
     try:
         result_state = cast(dict[str, Any], await graph.ainvoke(initial_state))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("diagnosis agent graph failed: run_id={} error={}", run_id, exc)
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise DiagnosisAgentRunError(f"诊断 agent 运行失败: {exc}") from exc
@@ -223,7 +225,7 @@ async def run_diagnosis_agent(
             novel_id=novel_id,
             foreshadow_expectation=foreshadow_expectation,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("diagnosis finalize failed: run_id={} error={}", run_id, exc)
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise DiagnosisAgentRunError(f"诊断结果终态校验失败: {exc}") from exc

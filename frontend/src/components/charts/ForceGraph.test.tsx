@@ -56,19 +56,18 @@ vi.mock("./forceGraph/useG6ForceGraph", () => ({
 
 function createGraphData(): GraphData {
   return {
-    graph_version_id: "graph-version-1",
     chapter_id: 1,
     chapter_order: 1,
-    first_chunk_id: 1,
-    last_chunk_id: 1,
+    first_chapter_id: 1,
+    last_chapter_id: 1,
     nodes: [
       {
         entity_id: 1,
         name: "白芷",
         entity_type: "character",
-        first_seen_chunk: 1,
-        last_seen_chunk: 1,
-        state_revision: 1,
+        first_seen_chapter: 1,
+        last_seen_chapter: 1,
+        state_chapter_id: 1,
         state: {},
       },
     ],

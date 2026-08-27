@@ -9,11 +9,12 @@ import {
   getEmotionStats,
   getCharacterStats,
   getStyleStats,
+  getChapterMetrics,
   getTopics,
   getDiagnosis,
-  getChunkCurves,
+  getEmotionTrend,
 } from "@/api/results";
-import { isDiagnosisRerunRequiredError, isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import {
   createAnalysisTask,
@@ -36,7 +37,6 @@ import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
 import { AnalysisProgressPanel } from "@/components/analysis/AnalysisProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -117,17 +117,6 @@ function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
         {isAnalyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         {isAnalyzing ? "正在创建分析任务..." : "开始分析"}
       </Button>
-    </div>
-  );
-}
-
-function RerunRequiredState() {
-  return (
-    <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
-      <p className="text-base font-semibold text-text">当前结果需要重新分析</p>
-      <p className="text-sm text-text-muted">
-        该任务的 diagnosis 焦点合同已失效，当前仪表盘结果不再可信，请重新分析后再查看。
-      </p>
     </div>
   );
 }
@@ -324,6 +313,13 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
+  const chapterMetricsQuery = useQuery({
+    queryKey: ["chapter-metrics", novelId, storeTaskId],
+    queryFn: () => getChapterMetrics(novelId!, storeTaskId!),
+    enabled: canRequestResults,
+    staleTime: STALE_TIME,
+  });
+
   const topicsQuery = useQuery({
     queryKey: ["topics", novelId, storeTaskId],
     queryFn: () => getTopics(novelId!, storeTaskId!),
@@ -338,26 +334,21 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
-  const curvesQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "curves"],
-    queryFn: () => getChunkCurves(novelId!, storeTaskId!),
+  const emotionTrendQuery = useQuery({
+    queryKey: ["emotion-trend", novelId, storeTaskId, 20, null],
+    queryFn: () => getEmotionTrend(novelId!, storeTaskId!, { windowParagraphs: 20 }),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
-  const diagnosis = diagnosisQuery.data;
-  const diagnosisRequiresRerun =
-    diagnosisQuery.isSuccess &&
-    diagnosis != null &&
-    (diagnosis.rerun_required === true || !hasCompleteFocusContract(diagnosis));
-  const isTopicsRerunError = isDiagnosisRerunRequiredError(topicsQuery.error);
-  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError && !diagnosisRequiresRerun;
+  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError;
 
   const allMetricsLoaded =
     narrativeQuery.data &&
     emotionQuery.data &&
     characterQuery.data &&
     styleQuery.data &&
+    chapterMetricsQuery.data &&
     topicsQuery.data &&
     hasDiagnosisLoaded;
 
@@ -369,9 +360,10 @@ export function NovelDetailPage() {
           emotionQuery.isLoading ||
           characterQuery.isLoading ||
           styleQuery.isLoading ||
+          chapterMetricsQuery.isLoading ||
           topicsQuery.isLoading ||
           diagnosisQuery.isLoading ||
-          curvesQuery.isLoading)));
+           emotionTrendQuery.isLoading)));
 
   // 首页对 rerun-required diagnosis 采用“单一重跑态”；
   // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败
@@ -381,18 +373,20 @@ export function NovelDetailPage() {
     emotionQuery.isError ||
     characterQuery.isError ||
     styleQuery.isError ||
-    (topicsQuery.isError && !(diagnosisRequiresRerun && isTopicsRerunError)) ||
+    chapterMetricsQuery.isError ||
+    topicsQuery.isError ||
     diagnosisQuery.isError ||
-    curvesQuery.isError;
+    emotionTrendQuery.isError;
 
   const resultQueryErrors = [
     narrativeQuery.error,
     emotionQuery.error,
     characterQuery.error,
     styleQuery.error,
+    chapterMetricsQuery.error,
     topicsQuery.error,
     diagnosisQuery.error,
-    curvesQuery.error,
+    emotionTrendQuery.error,
   ];
   const analysisNotComplete = resultQueryErrors.some(isAnalysisNotCompleteError);
   const analysisFailed = resultQueryErrors.some(
@@ -405,9 +399,10 @@ export function NovelDetailPage() {
     emotionQuery.refetch();
     characterQuery.refetch();
     styleQuery.refetch();
+    chapterMetricsQuery.refetch();
     topicsQuery.refetch();
     diagnosisQuery.refetch();
-    curvesQuery.refetch();
+    emotionTrendQuery.refetch();
   };
 
   // ---------- 渲染 ----------
@@ -471,13 +466,12 @@ export function NovelDetailPage() {
         </div>
       )}
 
-      {!effectiveIsAnalyzing && diagnosisRequiresRerun && !isLoading && storeTaskId && <RerunRequiredState />}
-
       {/* 仅在未分析中时显示主内容 */}
-      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && !diagnosisRequiresRerun && (
+      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
-            <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3">
+            <div className="h-full min-h-0 overflow-y-auto pr-1">
+              <div className="grid min-h-full grid-rows-[auto_auto_auto] gap-3 pb-1">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {diagnosisQuery.data ? (
                   <DiagnosisSummaryCard diagnosis={diagnosisQuery.data} novelId={novelId!} className="h-full min-h-0" />
@@ -502,16 +496,23 @@ export function NovelDetailPage() {
                 <DimensionMiniCard
                   dimension="emotion"
                   data={{
-                    pos_neg_ratio: emotionQuery.data?.pos_neg_ratio,
-                    positive_ratio: emotionQuery.data?.positive_ratio,
-                    negative_ratio: emotionQuery.data?.negative_ratio,
+                    lexical_positive_density: chapterMetricsQuery.data?.book.pos_density,
+                    lexical_negative_density: chapterMetricsQuery.data?.book.neg_density,
                   }}
                   novelId={novelId!}
                   linkTo={`/novels/${novelId}/curves`}
                   className="min-h-0"
                 />
                 <DimensionMiniCard dimension="character" data={characterQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} className="min-h-0" />
-                <DimensionMiniCard dimension="style" data={styleQuery.data ?? {}} novelId={novelId!} className="min-h-0" />
+                <DimensionMiniCard
+                  dimension="style"
+                  data={{
+                    string_token_diversity: styleQuery.data?.string_token_diversity,
+                    dialogue_ratio: styleQuery.data?.dialogue_ratio,
+                  }}
+                  novelId={novelId!}
+                  className="min-h-0"
+                />
                 <DimensionMiniCard
                   dimension="topic"
                   data={{
@@ -534,11 +535,12 @@ export function NovelDetailPage() {
                   act1Ratio={narrativeQuery.data?.act1_ratio}
                   act2Ratio={narrativeQuery.data?.act2_ratio}
                   act3Ratio={narrativeQuery.data?.act3_ratio}
-                  eventDensity={narrativeQuery.data?.event_density}
+                  chapterNarrativeFunctionShare={narrativeQuery.data?.chapter_narrative_function_share}
                   novelId={novelId!}
                   className="h-full min-h-0"
                 />
-                <MiniCurvePreview data={curvesQuery.data ?? []} novelId={novelId!} className="h-full min-h-0" />
+                <MiniCurvePreview data={emotionTrendQuery.data ?? []} novelId={novelId!} className="h-full min-h-0" />
+              </div>
               </div>
             </div>
           </AnalysisWorkspace.Tab>

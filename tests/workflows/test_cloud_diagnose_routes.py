@@ -3,10 +3,14 @@
 
 说明: 诊断已 agent 化（工具化自主取证），payload 构建与 DiagnosisClient 已移除；
      本文件保留数据层取证测试，并通过 patch run_diagnosis_agent 验证工作流落库
+
+2026-08-14 M8a：取证事实源段落化——测试数据改为写入 paragraphs/paragraph_topics/
+paragraph_curves（chunk_topics 已删除），高张力素材来自段落曲线 surface_tension。
 """
 
 import sys
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -16,16 +20,17 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.agents.annotation.schema import BoundForeshadowing
-from src.chunking.chunker import Chunk
+from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
-    ChunkRepository,
-    ChunkStyleData,
+    ChapterRepository,
     DiagnosisRepository,
     ForeshadowingRepository,
+    ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
+from src.storage.repositories.paragraph_repository import ParagraphCurveRow
 from src.workflows.diagnose import run_diagnose
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
@@ -59,96 +64,71 @@ class TestDiagnosisRoutes:
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
 
     def _create_full_data(self, chunk_count: int = 5) -> None:
-        chunk_repo = ChunkRepository(self.db_session)
+        chapter_repo = ChapterRepository(self.db_session)
+        # M9a-2：每章一个运行时 chunk（chunk_id == chapter_id），
+        # 段落坐标校验要求 global 坐标严格单调不重叠：偏移随章节序号递增
         chunks = [
-            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。", chapter_id=1)
-            for i in range(chunk_count)
-        ]
-        chunk_repo.insert_chunks(self.run_id, chunks)
-        chunk_repo.insert_chunk_topics(self.run_id, [(i, 0, 1.0) for i in range(chunk_count)])
-
-        style_rows = [
-            ChunkStyleData(
-                chunk_id=i,
-                mtld=50.0 + i,
-                ttr=0.5,
-                avg_sent_len=20.0 + i,
-                sent_len_std=5.0,
-                d_value=5.0,
-                pause_density=0.1,
-                fight_density=0.0,
-                exclaim_density=0.0,
-                dialogue_ratio=0.2,
-                question_density=0.0,
-                sensory_density=0.0,
-                metaphor_density=0.0,
-                function_word_vector="{}",
-                category_density_combat=0.0,
-                category_density_body=0.0,
-                category_density_relation=0.0,
-                category_density_faction=0.0,
-                category_density_command=0.0,
-                category_density_action=0.0,
-                category_density_psychology=0.0,
-                category_density_measure=0.0,
-                category_density_emotion=0.0,
-                category_density_color=0.0,
+            Chunk(
+                index=i,
+                start=i * 100,
+                end=(i + 1) * 100,
+                text=f"这是第{i}个测试文本，包含一些内容。",
+                chapter_id=i + 1,
             )
             for i in range(chunk_count)
         ]
-        chunk_repo.insert_chunk_style(self.run_id, style_rows)
+        chapter_repo.insert_chapter_texts(self.run_id, chunks)
 
-        for i in range(chunk_count):
-            self.db_session.execute(
-                text(
-                    "INSERT INTO chunk_curves ("
-                    "chunk_id, pos_density, neg_density, net_density, smoothed_density, "
-                    "tension_proxy, tension_composite, run_id"
-                    ") VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :proxy, :composite, :run_id)"
-                ),
-                {
-                    "chunk_id": i,
-                    "pos": 0.1,
-                    "neg": 0.05,
-                    "net": 0.05 + i * 0.01,
-                    "smoothed": 0.05,
-                    "proxy": 0.5,
-                    "composite": 0.5,
-                    "run_id": self.run_id,
-                },
-            )
-
-        persist_chapter_annotation(
-            self.db_session,
-            run_id=self.run_id,
-            chapter_id=1,
-            emotional_valences={
-                i: "mild_positive" if i % 2 == 0 else "mild_negative"
-                for i in range(chunk_count)
-            },
-            event_types={
-                i: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"
-                for i in range(chunk_count)
-            },
-            pivot_chunks={i for i in range(chunk_count) if i in {1, 2}},
-            cliffhanger_chunks={chunk_count - 1},
-            characters=[
-                character_fact(
-                    chunk_id=i,
-                    name=f"角色{i}",
-                    action="测试行为",
-                    role_function="主体" if i == 0 else "客体",
+        paragraph_repo = ParagraphRepository(self.db_session)
+        spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
+        paragraph_repo.insert_paragraphs(self.run_id, spans)
+        paragraph_repo.insert_paragraph_topics(
+            self.run_id,
+            [(span.paragraph_id, 0, 1.0, 1) for span in spans],
+        )
+        paragraph_repo.insert_paragraph_curves(
+            self.run_id,
+            [
+                ParagraphCurveRow(
+                    paragraph_id=span.paragraph_id,
+                    pos_density=0.1,
+                    neg_density=0.05,
+                    net_density=0.05 + span.paragraph_id * 0.01,
+                    smoothed_net_density=0.05,
+                    surface_tension=0.5,
+                    smoothed_surface_tension=0.5,
                 )
-                for i in range(chunk_count)
+                for span in spans
             ],
         )
+
+        for i in range(chunk_count):
+            persist_chapter_annotation(
+                self.db_session,
+                run_id=self.run_id,
+                chapter_id=i + 1,
+                emotional_valences={i + 1: "mild_positive" if i % 2 == 0 else "mild_negative"},
+                event_types={i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"},
+                pivot_chunks={i + 1} if i in {1, 2} else None,
+                cliffhanger_chunks={chunk_count} if i == chunk_count - 1 else None,
+                characters=[
+                    character_fact(
+                        chunk_id=i + 1,
+                        name=f"角色{i}",
+                        action="测试行为",
+                        role_function="主体" if i == 0 else "客体",
+                    )
+                ],
+            )
         ForeshadowingRepository(self.db_session).sync(
             run_id=self.run_id,
-            chunk_id=0,
+            chapter_id=1,
             foreshadowing=BoundForeshadowing(
                 description="测试伏笔",
                 confidence="medium",
+                setup_node_id="event-test-setup",
             ),
+            setup_event_id="event-test-setup",
         )
 
         self.db_session.commit()
@@ -249,4 +229,27 @@ class TestDiagnosisRoutes:
         assert fetched["focus_characters"] is not None
         assert fetched["main_characters"] is not None
         assert fetched["core_cast"] is not None
-        assert "reference_contract_version" not in fetched
+        assert set(fetched) == {
+            "novel_id",
+            "foreshadow_expectation",
+            "arc_scores",
+            "genre_labels",
+            "style_labels",
+            "topic_labels",
+            "diagnosis",
+            "value_logic_type",
+            "value_logic_reason",
+            "power_stance_score",
+            "power_stance_reason",
+            "common_people_dignity",
+            "dignity_reason",
+            "cultural_depth_score",
+            "cultural_depth_reason",
+            "narrative_arc_type",
+            "focus_structure",
+            "focus_characters",
+            "main_characters",
+            "core_cast",
+            "theme_color",
+            "run_id",
+        }

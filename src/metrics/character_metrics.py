@@ -19,9 +19,7 @@ GREIMAS_FUNCTIONS = {
 }
 
 
-# 2026-04-28，任务：统一关系图谱结构口径。
-# 修改原因：其他图算法仍需要简单无向图，但“网络密度”展示值已经不再直接复用
-# networkx.density；这里继续保留图构建 helper 供中心性、聚类系数等指标使用。
+# 保留无向图构建，供中心性和聚类系数等关系指标复用
 def build_character_graph(
     relations: list[tuple[str, str]],
     node_names: Collection[str] | None = None,
@@ -47,14 +45,12 @@ def compute_character_degree_centrality(
     return dict(centrality)
 
 
-# 2026-04-28，任务：将“网络密度”改为关系集中度口径。
-# 修改原因：用户感知的“图谱挤不挤”更接近连接是否集中在少数枢纽角色上，
-# 因此这里改为返回基于唯一人物对关系的度中心化结果，而不再返回图论密度。
+# 网络密度使用关系集中度口径
 def compute_relation_network_density(
     relations: list[tuple[str, str]],
     graph: nx.Graph | None = None,
     node_names: Collection[str] | None = None,
-) -> float:
+) -> float | None:
     _ = graph
     _, _, density = summarize_relation_network(
         relations,
@@ -197,9 +193,9 @@ def compute_greimas_coverage(
 
 def compute_antagonist_strength_gap(
     characters: list[tuple[str, str, int]],
-) -> float:
+) -> float | None:
     if not characters:
-        return 0.0
+        return None
 
     protagonist_scores = []
     antagonist_scores = []
@@ -211,7 +207,7 @@ def compute_antagonist_strength_gap(
             antagonist_scores.append(abs(score))
 
     if not protagonist_scores or not antagonist_scores:
-        return 0.0
+        return None
 
     avg_protagonist = sum(protagonist_scores) / len(protagonist_scores)
     avg_antagonist = sum(antagonist_scores) / len(antagonist_scores)
@@ -240,12 +236,20 @@ _CHANGE_KIND_TO_RATE_KEY = {
 
 def compute_relation_change_frequency(
     relations: list[tuple[str, str, str, str]],
-    total_chunks: int,
-) -> dict[str, float]:
-    if not relations or total_chunks == 0:
+    total_chars: int,
+) -> dict[str, float | None]:
+    """
+    计算关系变化频率（每万字变化次数，设计 §8.5 relation_change_per_10k_chars）。
+
+    2026-08-14 修复（§19.10）：分母从章节数改为全书总字数（每万字频率），
+    relation_change_per_10k_chars = len(relations) / total_chars * 10000。
+    2026-08-14 重命名（§13.3）：返回键 change_rate → relation_change_per_10k_chars；
+    total_chars 为 0 时 relation_change_per_10k_chars 为 None。
+    """
+    if not relations or total_chars == 0:
         return {
             "total_changes": 0.0,
-            "change_rate": 0.0,
+            "relation_change_per_10k_chars": None,
             **dict.fromkeys(_RATE_KEYS, 0.0),
         }
 
@@ -257,6 +261,6 @@ def compute_relation_change_frequency(
 
     return {
         "total_changes": float(len(relations)),
-        "change_rate": len(relations) / total_chunks,
+        "relation_change_per_10k_chars": round(len(relations) / total_chars * 10000, 6),
         **{key: rate_counts.get(key, 0) / len(relations) for key in _RATE_KEYS},
     }

@@ -2,8 +2,7 @@
 
 from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from src.storage.models.analysis import (
-    ChunkCurve,
-    ChunkSummary,
+    ChapterSummary,
     CloudAnalysis,
     GlobalContext,
     GlobalStats,
@@ -11,8 +10,6 @@ from src.storage.models.analysis import (
 )
 from src.storage.models.base import Base
 from src.storage.models.chapter import Chapter
-from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
-from src.storage.models.chunk_embedding import EMBEDDING_DIM, ParagraphEmbedding
 from src.storage.models.continuity import (
     CasePoolCase,
     CaseResolutionMapping,
@@ -20,16 +17,22 @@ from src.storage.models.continuity import (
 )
 from src.storage.models.core import AnalysisRun
 from src.storage.models.dialogue import DialogueRecord
+from src.storage.models.event_forest import EventEdge, EventNode
 from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
-    EntityStateVersion,
+    ChapterBoundary,
+    EntityState,
     GraphEntity,
     GraphFact,
     GraphRelation,
-    GraphRelationVersion,
-    GraphVersion,
+    RelationState,
 )
 from src.storage.models.novel import Novel
+from src.storage.models.paragraph import Paragraph
+from src.storage.models.paragraph_curves import ParagraphCurve
+from src.storage.models.paragraph_embedding import EMBEDDING_DIM, ParagraphEmbedding
+from src.storage.models.paragraph_metrics import ParagraphMetric
+from src.storage.models.paragraph_topics import ParagraphTopic
 from src.storage.models.rag import TokenUsage
 
 __all__ = [
@@ -38,29 +41,31 @@ __all__ = [
     "AgentInvocation",
     "AgentTurn",
     "AgentToolCall",
+    "EventNode",
+    "EventEdge",
     "ForeshadowingThread",
     "ForeshadowingThreadHit",
     "Chapter",
-    "Chunk",
-    "ChunkStyle",
-    "ChunkTopic",
+    "Paragraph",
     "ParagraphEmbedding",
+    "ParagraphMetric",
+    "ParagraphTopic",
+    "ParagraphCurve",
     "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
     "CasePoolCase",
     "CaseResolutionMapping",
     "DialogueRecord",
-    "GraphVersion",
+    "ChapterBoundary",
     "GraphEntity",
     "GraphFact",
-    "EntityStateVersion",
+    "EntityState",
     "GraphRelation",
-    "GraphRelationVersion",
+    "RelationState",
     "CloudAnalysis",
-    "ChunkCurve",
     "GlobalStats",
     "GlobalContext",
-    "ChunkSummary",
+    "ChapterSummary",
     "StageSummary",
     "TokenUsage",
     "Novel",

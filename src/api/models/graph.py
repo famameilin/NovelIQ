@@ -15,9 +15,9 @@ class GraphNode(BaseModel):
     entity_type: Literal["character", "location", "item", "organization"]
     tags: list[str] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
-    first_seen_chunk: int = Field(ge=0)
-    last_seen_chunk: int = Field(ge=0)
-    state_revision: int = Field(ge=0)
+    first_seen_chapter: int = Field(ge=0)
+    last_seen_chapter: int = Field(ge=0)
+    state_chapter_id: int | None = Field(default=None, ge=0)
     state: dict[str, Any]
 
 
@@ -25,8 +25,7 @@ class GraphEdge(BaseModel):
     """2026-08-07 用于返回目标章节边界的稳定关系边"""
 
     relation_id: str
-    relation_version_id: int = Field(gt=0)
-    relation_revision: int = Field(gt=0)
+    state_chapter_id: int = Field(gt=0)
     source_entity_id: int = Field(gt=0)
     target_entity_id: int = Field(gt=0)
     source_name: str
@@ -40,34 +39,29 @@ class GraphEdge(BaseModel):
 
 
 class GraphSnapshotResponse(BaseModel):
-    """2026-08-07 用于返回一个冻结章节图版本的实体和有效关系"""
+    """2026-08-19 用于返回一个章节边界的实体和有效关系"""
 
-    graph_version_id: str
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
-    first_chunk_id: int = Field(ge=0)
-    last_chunk_id: int = Field(ge=0)
+    first_chapter_id: int = Field(ge=0)
+    last_chapter_id: int = Field(ge=0)
     nodes: list[GraphNode]
     edges: list[GraphEdge]
 
 
 class GraphChange(BaseModel):
-    """2026-08-07 用于返回由单个事实版本解释的实体或关系变化"""
+    """2026-08-19 用于返回由单个章节事实解释的实体或关系变化"""
 
     change_id: str
     change_kind: Literal["state", "relation"]
-    graph_version_id: str
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     fact_id: str
-    fact_revision: int = Field(gt=0)
-    effective_chunk_id: int = Field(ge=0)
+    effective_chapter_id: int = Field(ge=0)
     changes: list[dict[str, Any]] = Field(min_length=1)
     entity_id: int | None = None
     entity_name: str | None = None
     relation_id: str | None = None
-    relation_version_id: int | None = None
-    relation_revision: int | None = None
     from_entity_id: int | None = None
     to_entity_id: int | None = None
     from_name: str | None = None

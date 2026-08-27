@@ -10,7 +10,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -32,17 +42,22 @@ class ForeshadowingThread(Base):
         nullable=False,
         index=True,
     )
-    first_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    last_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     setup_summary: Mapped[str] = mapped_column(Text, nullable=False)
-    foreshadowing_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    setup_kind: Mapped[str] = mapped_column(String(50), nullable=False)
-    expected_payoff_family: Mapped[str] = mapped_column(String(100), nullable=False)
-    payoff_likelihood: Mapped[str] = mapped_column(String(20), nullable=False)
+    foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    setup_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # LLM 写库路径总会提供 confidence；保留 default 避免测试/手工插入漏传触发 NOT NULL
     confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="high")
-    strength: Mapped[str] = mapped_column(String(20), nullable=False)
+    strength: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 2026-08-18 事件森林/DAG：伏笔作为 foreshadowing 边载体——setup_event_id 必填，
+    # payoff_event_id 在 open 期间可空（悬边），回收后填充
+    setup_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payoff_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC（与 agent_audit 等表一致）
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -58,25 +73,28 @@ class ForeshadowingThread(Base):
 
     __table_args__ = (
         # 2026-08-13 P2：与 ForeshadowingThreadHit 对齐，补齐指向 chunks 的复合 FK，
-        # 防止孤儿 chunk 引用污染伏笔池排序（last_chunk_id 参与查询排序）
+        # 防止孤儿 章节 引用污染伏笔池排序（last_chapter_id 参与查询排序）
         ForeignKeyConstraint(
-            ["first_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["first_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["last_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["last_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_foreshadowing_threads_run_active_last_chunk", "run_id", "active", "last_chunk_id"),
+        # 2026-08-18 事件森林/DAG：伏笔线程去重键从 setup_summary casefold 文本
+        # 换为 UNIQUE(run_id, setup_event_id)——同一 setup 事件只允许一条线程
+        UniqueConstraint("run_id", "setup_event_id", name="uq_foreshadowing_threads_run_setup_event"),
+        Index("idx_foreshadowing_threads_run_active_last_chapter", "run_id", "active", "last_chapter_id"),
         Index("idx_foreshadowing_threads_run_status", "run_id", "status"),
     )
 
     def __repr__(self) -> str:
         return (
             "<ForeshadowingThread("
-            f"setup_id={self.setup_id}, run_id={self.run_id}, last_chunk_id={self.last_chunk_id}"
+            f"setup_id={self.setup_id}, run_id={self.run_id}, last_chapter_id={self.last_chapter_id}"
             ")>"
         )
 
@@ -85,7 +103,7 @@ class ForeshadowingThreadHit(Base):
     """
     强伏笔 thread 命中表
 
-    每次 Phase2 命中都落一条 hit，用于回放 anchor_chunk_ids 和最近理由，不在主表里存 JSON 数组
+    每次 Phase2 命中都落一条 hit，用于回放 anchor_chapter_ids 和最近理由，不在主表里存 JSON 数组
     """
 
     __tablename__ = "foreshadowing_thread_hits"
@@ -101,9 +119,11 @@ class ForeshadowingThreadHit(Base):
         ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
         nullable=False,
     )
-    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     anchor_text: Mapped[str] = mapped_column(Text, nullable=False)
     is_new_setup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 2026-08-18 事件森林/DAG：新命中优先绑定事件（可空——历史命中或无法绑定时为 NULL）
+    event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 2026-08-14 D9：datetime.utcnow 已弃用且 naive，统一为 aware UTC
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -113,13 +133,13 @@ class ForeshadowingThreadHit(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         Index("idx_foreshadowing_thread_hits_setup_id", "setup_id"),
-        Index("idx_foreshadowing_thread_hits_run_chunk", "run_id", "chunk_id"),
+        Index("idx_foreshadowing_thread_hits_run_chapter", "run_id", "chapter_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<ForeshadowingThreadHit(setup_id={self.setup_id}, chunk_id={self.chunk_id}, run_id={self.run_id})>"
+        return f"<ForeshadowingThreadHit(setup_id={self.setup_id}, chapter_id={self.chapter_id}, run_id={self.run_id})>"

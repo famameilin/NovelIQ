@@ -1,12 +1,4 @@
-"""
-提供统一的ID生成和转换工具，建立task_id和run_id之间的映射关系
-
-设计原则:
-- task_id (8位): 用于API层、外部交互
-- run_id (36位): 用于数据库主键、内部数据关联
-- 映射关系: task_id = run_id[:8]
-
-"""
+"""ID 映射：task_id（8 位，外部）与 run_id（36 位 UUID，内部）的互转，task_id = run_id[:8]。"""
 
 from __future__ import annotations
 
@@ -31,100 +23,31 @@ class TaskIDNotFoundError(IDMappingError):
 
 
 def generate_run_id() -> str:
-    """
-    生成完整的run_id (36位UUID)
-
-    Returns:
-        36位UUID字符串，格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
-    Example:
-        >>> generate_run_id()
-        '0211f894-1a72-4444-a772-2ddc64334cd2'
-    """
+    """生成完整 run_id（36 位 UUID）。"""
     return str(uuid.uuid4())
 
 
 def generate_task_id() -> str:
-    """
-    生成task_id (8位短UUID)
-
-    Returns:
-        8位短UUID字符串
-
-    Example:
-        >>> generate_task_id()
-        '3a25baca'
-    """
+    """生成 task_id（8 位短 UUID，取 UUID 前 8 位）。"""
     return str(uuid.uuid4())[:8]
 
 
 def run_id_to_task_id(run_id: str) -> str:
-    """
-    从run_id提取task_id
-
-    Args:
-        run_id: 36位完整UUID
-
-    Returns:
-        8位task_id (run_id的前8位)
-
-    Raises:
-        ValueError: 如果run_id格式不正确
-
-    Example:
-        >>> run_id_to_task_id('0211f894-1a72-4444-a772-2ddc64334cd2')
-        '0211f894'
-    """
+    """从 run_id 提取 task_id（前 8 位）。"""
     if not run_id or len(run_id) < 8:
         raise ValueError(f"Invalid run_id: {run_id}. Expected at least 8 characters.")
     return run_id[:8]
 
 
 def task_id_to_run_id_pattern(task_id: str) -> str:
-    """
-    将task_id转换为SQL LIKE查询模式
-
-    Args:
-        task_id: 8位task_id
-
-    Returns:
-        用于SQL LIKE查询的模式字符串
-
-    Raises:
-        ValueError: 如果task_id格式不正确
-
-    Example:
-        >>> task_id_to_run_id_pattern('3a25baca')
-        '3a25baca%'
-    """
+    """将 task_id 转为 SQL LIKE 模式（追加 %）。"""
     if not task_id or len(task_id) != 8:
         raise ValueError(f"Invalid task_id: {task_id}. Expected exactly 8 characters.")
     return f"{task_id}%"
 
 
 def task_id_to_run_id(task_id: str, conn: Connection | Session) -> str:
-    """
-    将task_id转换为run_id
-
-    通过查询数据库的analysis_runs表，根据task_id找到对应的run_id
-
-    Args:
-        task_id: 8位task_id
-        conn: 数据库连接 (SQLAlchemy Connection 或 Session)
-
-    Returns:
-        对应的36位run_id
-
-    Raises:
-        TaskIDNotFoundError: 如果找不到对应的run_id
-        ValueError: 如果task_id格式不正确
-
-    Example:
-        >>> task_id_to_run_id('3a25baca', conn)
-        '3a25baca-1a72-4444-a772-2ddc64334cd2'
-
-    使用 limit(1) 避免多记录时抛出异常
-    """
+    """按 task_id 查询 analysis_runs 取得对应 run_id（最早一条）。"""
     if not task_id or len(task_id) != 8:
         raise ValueError(f"Invalid task_id: {task_id}. Expected exactly 8 characters.")
 
@@ -149,20 +72,7 @@ def task_id_to_run_id(task_id: str, conn: Connection | Session) -> str:
 
 
 def convert_response_run_ids_to_task_ids(data: dict | list | Any) -> dict | list | Any:
-    """
-    递归地将响应数据中的run_id字段转换为task_id
-
-    Args:
-        data: 包含run_id字段的字典、列表或任何类型
-
-    Returns:
-        转换后的数据，所有run_id字段被替换为task_id
-
-    Example:
-        >>> data = {"run_id": "0211f894-1a72-4444-a772-2ddc64334cd2", "name": "test"}
-        >>> convert_response_run_ids_to_task_ids(data)
-        {"task_id": "0211f894", "name": "test"}
-    """
+    """递归将响应中的 run_id 字段替换为 task_id。"""
     if isinstance(data, dict):
         result: dict = {}
         for key, value in data.items():

@@ -24,20 +24,20 @@ def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="伯安", action="同游"),
-            character_fact(chunk_id=0, name="贺重明", action="同游"),
-            character_fact(chunk_id=0, name="猴子", action="同游"),
-            character_fact(chunk_id=0, name="侯飞白", action="同游"),
+            character_fact(chunk_id=1, name="伯安", action="同游"),
+            character_fact(chunk_id=1, name="贺重明", action="同游"),
+            character_fact(chunk_id=1, name="猴子", action="同游"),
+            character_fact(chunk_id=1, name="侯飞白", action="同游"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="伯安",
                 to_name="猴子",
                 relation_type="友情",
             ),
-            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chunk_id=0),
-            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chunk_id=0),
+            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chapter_id=1),
+            identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chapter_id=1),
         ],
     )
     db_session.commit()
@@ -70,11 +70,11 @@ def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="伯安", action="同游"),
-            character_fact(chunk_id=0, name="贺重明", action="同游"),
+            character_fact(chunk_id=1, name="伯安", action="同游"),
+            character_fact(chunk_id=1, name="贺重明", action="同游"),
         ],
         relations=[
-            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chunk_id=0),
+            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chapter_id=1),
         ],
     )
     db_session.commit()
@@ -103,11 +103,11 @@ def test_fetch_characters_normalizes_diagnosis_keys_for_focus_scores(db_session)
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="伯安", action="同游"),
-            character_fact(chunk_id=0, name="贺重明", action="同游"),
+            character_fact(chunk_id=1, name="伯安", action="同游"),
+            character_fact(chunk_id=1, name="贺重明", action="同游"),
         ],
         relations=[
-            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chunk_id=0),
+            identity_relation_output(subject_name="伯安", object_name="贺重明", effective_chapter_id=1),
         ],
     )
     db_session.commit()

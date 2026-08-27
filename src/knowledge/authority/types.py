@@ -10,8 +10,8 @@ LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "name",
         "entity_type",
         "entity_id",
-        "first_seen_chunk",
-        "last_seen_chunk",
+        "first_seen_chapter",
+        "last_seen_chapter",
         "primary_role_function",
         "status",
         "source_confidence",
@@ -24,11 +24,10 @@ LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "from_entity_id",
         "to_entity_id",
         "is_active",
-        "first_seen_chunk",
-        "last_seen_chunk",
+        "first_seen_chapter",
+        "last_seen_chapter",
         "change_count",
         "support_count",
-        "latest_relation_version_id",
         "tension_index",
     ),
     "entity_types": ("name", "entity_type"),
@@ -47,8 +46,8 @@ class CanonicalEntity:
     name: str
     entity_type: str = "character"
     entity_id: int | None = None
-    first_seen_chunk: int | None = None
-    last_seen_chunk: int | None = None
+    first_seen_chapter: int | None = None
+    last_seen_chapter: int | None = None
     primary_role_function: str | None = None
     status: str = "active"
     source_confidence: float | None = None
@@ -66,13 +65,12 @@ class ConfirmedRelation:
     from_entity_id: int | None = None
     to_entity_id: int | None = None
     is_active: bool = True
-    first_seen_chunk: int | None = None
-    last_seen_chunk: int | None = None
+    first_seen_chapter: int | None = None
+    last_seen_chapter: int | None = None
     change_count: int | None = None
     support_count: int | None = None
-    latest_relation_version_id: int | None = None
     tension_index: float | None = None
-    source: str = "graph_relation_versions"
+    source: str = "relation_states"
 
 
 @dataclass(slots=True)
@@ -81,20 +79,16 @@ class GraphChange:
 
     change_id: str
     change_kind: str
-    graph_version_id: str
     chapter_id: int
     chapter_order: int
     fact_id: str
-    fact_revision: int
-    effective_chunk_id: int
+    effective_chapter_id: int
     confidence: str
     changes: list[dict]
     entity_id: int | None = None
     entity_name: str | None = None
     entity_type: str | None = None
     relation_id: str | None = None
-    relation_version_id: int | None = None
-    relation_revision: int | None = None
     from_entity_id: int | None = None
     to_entity_id: int | None = None
     from_name: str | None = None
@@ -102,7 +96,7 @@ class GraphChange:
     relation_type: str | None = None
     directionality: str | None = None
     relation_semantics: str | None = None
-    source: str = "chapter_graph_versions"
+    source: str = "graph_facts"
 
 
 @dataclass(slots=True)
@@ -124,30 +118,10 @@ class EntityLifecycle:
     entity_id: int
     name: str
     entity_type: str
-    first_seen_chunk: int | None = None
-    last_seen_chunk: int | None = None
+    first_seen_chapter: int | None = None
+    last_seen_chapter: int | None = None
     status: str = "active"
     source: str = "graph_entities"
-
-
-@dataclass(slots=True)
-class ActiveEntityContext:
-    """
-    附近活跃实体的 Level 2 局部上下文合同
-
-    这样既能让 prompt 消费者摆脱 repository 行结构，
-    又能暴露标注/消歧所需的最近局部状态
-    """
-
-    name: str
-    entity_id: int | None = None
-    role: str | None = None
-    entity_type: str = "character"
-    status: str = "active"
-    last_seen_chunk: int | None = None
-    recent_action: str | None = None
-    recent_emotion: str | None = None
-    source: str = "graph_active_entities"
 
 
 @dataclass(slots=True)
@@ -163,8 +137,8 @@ class ParticipantState:
     entity_type: str
     status: str = "active"
     primary_role_function: str | None = None
-    first_seen_chunk: int | None = None
-    last_seen_chunk: int | None = None
+    first_seen_chapter: int | None = None
+    last_seen_chapter: int | None = None
     source_confidence: float | None = None
     is_representative: bool = True
     source: str = "graph_facts"
@@ -188,16 +162,14 @@ class Level1AuthoritySnapshot:
 # 不允许从 GraphAuthorityView 或 repository 原始形状反推历史语义
 TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "character_entities": ("entity_id", "name", "entity_type"),
-    "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chunk", "last_seen_chunk"),
+    "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chapter", "last_seen_chapter"),
     "graph_changes": (
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "chapter_order",
         "fact_id",
-        "fact_revision",
-        "effective_chunk_id",
+        "effective_chapter_id",
         "changes",
         "entity_id",
         "entity_name",
@@ -239,8 +211,8 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "entity_type",
         "status",
         "primary_role_function",
-        "first_seen_chunk",
-        "last_seen_chunk",
+        "first_seen_chapter",
+        "last_seen_chapter",
         "is_representative",
     ),
     "confirmed_relations": (
@@ -257,10 +229,8 @@ GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "graph_changes": (
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "fact_id",
-        "fact_revision",
         "changes",
     ),
 }
@@ -300,9 +270,9 @@ class GraphSharedSummary:
 
     node_count: int = 0
     edge_count: int = 0
-    density: float = 0.0
+    density: float | None = None
 
-    def to_contract_dict(self) -> dict[str, float | int]:
+    def to_contract_dict(self) -> dict[str, float | int | None]:
         """按显式字段白名单序列化共享图谱摘要"""
 
         return {
@@ -362,7 +332,7 @@ class GraphPageSummary:
 
     node_count: int = 0
     edge_count: int = 0
-    density: float = 0.0
+    density: float | None = None
     core_characters: list[str] = field(default_factory=list)
     key_relations: list[GraphKeyRelationHighlight] = field(default_factory=list)
 
@@ -375,7 +345,6 @@ class GraphConflictSample:
     entity_names: list[str] = field(default_factory=list)
     relation_types: list[str] = field(default_factory=list)
     relation_count: int = 0
-    latest_relation_version_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -383,11 +352,9 @@ class GraphLowConfidenceSample:
     """仅供图谱页面展示的单条低置信关系变化样本"""
 
     change_id: str
-    graph_version_id: str
     chapter_id: int
     fact_id: str
-    fact_revision: int
-    effective_chunk_id: int
+    effective_chapter_id: int
     relation_id: str | None
     from_name: str
     to_name: str
@@ -419,11 +386,10 @@ class ExportRelationSnapshot:
     from_name: str = ""
     to_name: str = ""
     relation_type: str = ""
-    first_seen_chunk: int | None = None
-    last_seen_chunk: int | None = None
-    relation_version_id: int | None = None
+    first_seen_chapter: int | None = None
+    last_seen_chapter: int | None = None
     is_active: bool = True
-    source: str = "graph_relation_versions"
+    source: str = "relation_states"
 
 
 @dataclass(slots=True)
@@ -446,8 +412,8 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "name",
         "entity_type",
         "entity_id",
-        "first_seen_chunk",
-        "last_seen_chunk",
+        "first_seen_chapter",
+        "last_seen_chapter",
         "primary_role_function",
         "status",
         "source_confidence",
@@ -458,18 +424,15 @@ EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
         "from_name",
         "to_name",
         "relation_type",
-        "first_seen_chunk",
-        "last_seen_chunk",
-        "relation_version_id",
+        "first_seen_chapter",
+        "last_seen_chapter",
         "is_active",
     ),
     "graph_changes": (
         "change_id",
         "change_kind",
-        "graph_version_id",
         "chapter_id",
         "fact_id",
-        "fact_revision",
         "changes",
     ),
 }

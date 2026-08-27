@@ -1,12 +1,7 @@
-"""角色引用分层准入规则。
-
-说明: 该模块是 annotation / disambiguation / graph / results / diagnosis
-共用的角色主链准入入口，避免各模块继续把原文称呼直接当成全局角色。
-"""
+"""角色引用分层准入规则"""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
@@ -43,12 +38,11 @@ GENERIC_REFERENCE_NAMES: frozenset[str] = frozenset(
         "此人",
     }
 )
-BLOCKED_SURFACE_REFERENCES: frozenset[str] = POV_PRONOUNS | PERSON_PRONOUNS | GENERIC_REFERENCE_NAMES
 
 
 @dataclass(frozen=True)
 class CharacterReferenceDecision:
-    """角色引用准入决策结果。"""
+    """创建时间: 2026-04-29 作用: 保存角色引用准入决策结果"""
 
     surface_name: str
     reference_kind: ReferenceKind
@@ -59,22 +53,14 @@ class CharacterReferenceDecision:
 
 
 def normalize_reference_name(name: str | None) -> str:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 所有角色引用入口需要统一去空白，避免各模块自行判断空串。
-    """
+    """创建时间: 2026-04-29 作用: 规范化角色引用名称"""
     if name is None:
         return ""
     return str(name).strip()
 
 
 def classify_reference_kind(surface_name: str | None) -> ReferenceKind:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 统一区分原文称呼、视角位和可进入主链的全局角色。
-    """
+    """创建时间: 2026-04-29 作用: 区分全局角色、代词、视角位和泛指引用"""
     normalized = normalize_reference_name(surface_name)
     if normalized.startswith(POV_SLOT_PREFIX):
         return "pov_slot"
@@ -90,40 +76,19 @@ def classify_reference_kind(surface_name: str | None) -> ReferenceKind:
 
 
 def is_reference_slot_name(name: str | None) -> bool:
-    """
-    创建时间: 2026-04-29
-    任务: Phase4 / RAG reference_slots 合同
-    新建原因: Phase4 prompt、RAG request 与读侧过滤都需要显式识别 slot 前缀，避免把 slot 当成全局角色名。
-    """
+    """创建时间: 2026-04-29 作用: 判断名称是否为局部引用位"""
     normalized = normalize_reference_name(name)
     return normalized.startswith(POV_SLOT_PREFIX) or normalized.startswith(LOCAL_REFERENCE_SLOT_PREFIX)
 
 
-def is_reference_surface_name(name: str | None) -> bool:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 消歧与图谱构建需要快速判断一个 surface 是否只能作为局部引用。
-    """
-    return classify_reference_kind(name) != "global_character"
-
-
 def is_global_character_surface_name(name: str | None) -> bool:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: results/diagnosis/graph 需要共用“可直接作为全局角色名”的判断。
-    """
+    """创建时间: 2026-04-29 作用: 判断名称是否可直接作为全局角色名"""
     normalized = normalize_reference_name(name)
     return bool(normalized) and classify_reference_kind(normalized) == "global_character"
 
 
 def build_reference_slot(surface_name: str | None, *, chunk_id: int | None = None) -> str | None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 未解析代词需要保留为稳定 reference slot，而不是被提升为 canonical。
-    """
+    """创建时间: 2026-04-29 作用: 把未解析引用转换为稳定引用位"""
     normalized = normalize_reference_name(surface_name)
     if is_reference_slot_name(normalized):
         return normalized
@@ -135,56 +100,12 @@ def build_reference_slot(surface_name: str | None, *, chunk_id: int | None = Non
     return f"{prefix}{chunk_part}_{normalized}"
 
 
-def extract_surface_name_from_reference_slot(name: str | None) -> str:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: history rewrite / backfill 需要把 Phase4 产出的 slot endpoint 还原回 surface key，
-              才能命中当前 surface-keyed reference_resolutions。
-    """
-    normalized = normalize_reference_name(name)
-    if normalized.startswith(POV_SLOT_PREFIX):
-        payload = normalized[len(POV_SLOT_PREFIX) :]
-    elif normalized.startswith(LOCAL_REFERENCE_SLOT_PREFIX):
-        payload = normalized[len(LOCAL_REFERENCE_SLOT_PREFIX) :]
-    else:
-        return normalized
-
-    if payload.startswith("C"):
-        separator_index = payload.find("_")
-        if separator_index > 1 and payload[1:separator_index].isdigit():
-            return payload[separator_index + 1 :]
-    return payload
-
-
-def build_reference_resolution_lookup_keys(name: str | None) -> list[str]:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 当前 checkpoint 仍按 surface key 保存 resolution，但历史行可能落原始 surface 或 slot 名，
-              这里统一生成可尝试的查找 key，避免 relation slot endpoint 命不中实名解析。
-    """
-    normalized = normalize_reference_name(name)
-    if not normalized:
-        return []
-
-    lookup_keys = [normalized]
-    slot_surface = normalize_reference_name(extract_surface_name_from_reference_slot(normalized))
-    if slot_surface and slot_surface not in lookup_keys:
-        lookup_keys.append(slot_surface)
-    return lookup_keys
-
-
 def collect_reference_slots_from_names(
     names: Iterable[str | None],
     *,
     chunk_id: int | None = None,
 ) -> list[str]:
-    """
-    创建时间: 2026-04-29
-    任务: Phase4 / RAG reference_slots 合同
-    新建原因: Phase4 request 需要把局部引用位从 global names 中分离出来，并保留稳定的 slot 列表。
-    """
+    """创建时间: 2026-04-29 作用: 从名称列表提取并去重局部引用位"""
     reference_slots: list[str] = []
     for name in names:
         slot = build_reference_slot(name, chunk_id=chunk_id)
@@ -193,41 +114,12 @@ def collect_reference_slots_from_names(
     return reference_slots
 
 
-def collect_reference_slots_from_text(
-    text: str | None,
-    *,
-    chunk_id: int | None = None,
-) -> list[str]:
-    """
-    创建时间: 2026-04-29
-    任务: Phase4 / RAG reference_slots 合同
-    新建原因: context.py 在 Phase4 request template 阶段还拿不到 Phase1 结果，需要先从当前 chunk 识别局部引用位。
-    """
-    normalized_text = str(text or "").strip()
-    if not normalized_text:
-        return []
-
-    surface_pattern = "|".join(
-        re.escape(surface_name)
-        for surface_name in sorted(BLOCKED_SURFACE_REFERENCES, key=len, reverse=True)
-    )
-    if not surface_pattern:
-        return []
-
-    matched_surfaces = [match.group(0) for match in re.finditer(surface_pattern, normalized_text)]
-    return collect_reference_slots_from_names(matched_surfaces, chunk_id=chunk_id)
-
-
 def resolve_global_character_name(
     surface_name: str | None,
     *,
     resolved_global_name: str | None = None,
 ) -> str | None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 已解析代词只能以实名进入主链，未解析 surface 不能自行升级。
-    """
+    """创建时间: 2026-04-29 作用: 解析允许进入主链的全局角色名"""
     explicit_resolved = normalize_reference_name(resolved_global_name)
     if explicit_resolved:
         if is_global_character_surface_name(explicit_resolved):
@@ -246,11 +138,7 @@ def decide_character_reference(
     resolved_global_name: str | None = None,
     chunk_id: int | None = None,
 ) -> CharacterReferenceDecision:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 将“surface -> reference_kind -> resolved_global_name -> can_enter”收口为单一决策对象。
-    """
+    """创建时间: 2026-04-29 作用: 生成角色引用的统一准入决策"""
     normalized = normalize_reference_name(surface_name)
     reference_kind = classify_reference_kind(normalized)
     global_name = resolve_global_character_name(
@@ -284,11 +172,7 @@ def decide_character_reference(
 def filter_global_character_names(
     names: list[str] | tuple[str, ...] | set[str] | frozenset[str],
 ) -> list[str]:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: Phase3/Phase4/results/diagnosis 需要用同一规则过滤主链角色名单。
-    """
+    """创建时间: 2026-04-29 作用: 过滤并去重可进入主链的全局角色名"""
     filtered: list[str] = []
     for name in names:
         resolved = resolve_global_character_name(name)

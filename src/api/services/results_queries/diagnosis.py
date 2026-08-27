@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypeGuard
+from typing import Literal
 
 from loguru import logger
 
@@ -27,14 +27,7 @@ def _filter_character_list_against_arc_scores(
     values: list[str] | None,
     arc_scores: dict[str, float] | None,
 ) -> list[str] | None:
-    """
-    修改时间: 2026-04-29
-    任务: 角色引用分层重构
-    修改原因: 过滤 arc_scores 时先排除未解析代词，避免旧 diagnosis 把局部引用当成焦点角色。
-
-    说明: 结果读取层按 `arc_scores` 收口焦点人物、主要人物和核心角色，
-    避免诊断名单继续携带不属于当前角色合同的名称
-    """
+    """按有效角色弧线分数过滤全局角色名单"""
     if values is None:
         return None
     if not arc_scores:
@@ -44,11 +37,7 @@ def _filter_character_list_against_arc_scores(
 
 
 def _filter_global_arc_scores(arc_scores: dict[str, float] | None) -> dict[str, float] | None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: diagnosis 读取层的 arc_scores 是角色合同源头，必须先剔除“我”等未解析局部引用。
-    """
+    """创建时间: 2026-04-29 作用: 过滤未解析局部引用的角色弧线分数"""
     if not arc_scores:
         return None
     filtered = {name: score for name, score in arc_scores.items() if filter_global_character_names([name])}
@@ -77,12 +66,7 @@ def _normalize_controlled_label_list(
     *,
     allowed_values: tuple[str, ...],
 ) -> list[str] | None:
-    """
-    修改时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    修改原因: diagnosis 读取层必须和 CloudAnalysisSchema 的受控标签合同保持一致；
-              非法标签、超上限标签或全空白标签都应直接视为无效 diagnosis，而不是继续对外暴露。
-    """
+    """规范化受控标签，非法或超过上限时返回空值"""
     if values is None:
         return None
 
@@ -104,58 +88,9 @@ def _normalize_controlled_label_list(
     return normalized
 
 
-def _has_complete_focus_contract(
-    arc_scores: dict[str, float] | None,
-    focus_structure: Literal["single", "dual", "ensemble"] | None,
-    focus_characters: list[str] | None,
-    main_characters: list[str] | None = None,
-    core_cast: list[str] | None = None,
-    topic_labels: list[str] | None = None,
-    genre_labels: list[str] | None = None,
-    style_labels: list[str] | None = None,
-) -> bool:
-    """
-    修改时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    修改原因: `genre_labels/style_labels` 已经成为 diagnosis 正式合同的一部分；
-              结果读取层必须和持久化完成态保持一致，缺少任一标签数组都要走 rerun-required。
-
-    说明: 当前分支已经明确“不兼容缺焦点合同的旧 diagnosis 行”；
-    结果读取层必须把缺 `focus_structure` / `focus_characters` / `topic_labels`
-    / `genre_labels` / `style_labels` 的数据视为无效，
-    统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象
-    """
-    if (
-        not arc_scores
-        or focus_structure is None
-        or not focus_characters
-        or not main_characters
-        or not core_cast
-        or not topic_labels
-        or not genre_labels
-        or not style_labels
-    ):
-        return False
-    return _derive_focus_structure_from_characters(focus_characters) == focus_structure
-
-
-def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> TypeGuard[DiagnosisResult]:
-    """
-    说明: results/export/characters 都需要把“新焦点合同是否完整”当成统一真相源；
-    这里收口到 DiagnosisResult 级别，避免每条链路各自重复判断
-    """
-    if diagnosis is None or diagnosis.rerun_required:
-        return False
-    return _has_complete_focus_contract(
-        diagnosis.arc_scores,
-        diagnosis.focus_structure,
-        diagnosis.focus_characters,
-        diagnosis.main_characters,
-        diagnosis.core_cast,
-        diagnosis.topic_labels,
-        diagnosis.genre_labels,
-        diagnosis.style_labels,
-    )
+def _has_diagnosis_result(diagnosis: DiagnosisResult | None) -> bool:
+    """2026-08-19 判断当前 run 是否存在诊断记录，不对字段完整性做版本门控"""
+    return diagnosis is not None
 
 
 def _fetch_diagnosis(
@@ -164,38 +99,24 @@ def _fetch_diagnosis(
     stats_repo: StatsRepository,
 ) -> DiagnosisResult | None:
     """
-    修改时间: 2026-04-30
-    任务: diagnosis-latest-only-reference-contract
-    修改原因: 读取层不再把 reference_contract_version 当成额外 gate；
-              只要当前焦点合同字段完整，就默认按最新结构对外暴露。
-
     从数据库获取诊断结果
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
     if not data:
-        return DiagnosisResult(
-            rerun_required=True,
-            rerun_reason="diagnosis_missing_focus_contract",
-        )
+        return None
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (
-        _normalize_name_list(focus_characters_raw)
-        if isinstance(focus_characters_raw, list)
-        else focus_characters_raw
+        _normalize_name_list(focus_characters_raw) if isinstance(focus_characters_raw, list) else focus_characters_raw
     )
 
     main_characters_raw = _parse_json_field(data.get("main_characters")) if data else None
     main_characters_normalized = (
-        _normalize_name_list(main_characters_raw)
-        if isinstance(main_characters_raw, list)
-        else main_characters_raw
+        _normalize_name_list(main_characters_raw) if isinstance(main_characters_raw, list) else main_characters_raw
     )
 
     core_cast_raw = _parse_json_field(data.get("core_cast")) if data else None
-    core_cast_normalized = (
-        _normalize_name_list(core_cast_raw) if isinstance(core_cast_raw, list) else core_cast_raw
-    )
+    core_cast_normalized = _normalize_name_list(core_cast_raw) if isinstance(core_cast_raw, list) else core_cast_raw
 
     arc_scores_raw = _parse_json_field(data.get("arc_scores")) if data else None
     arc_scores_normalized = _filter_global_arc_scores(_normalize_arc_scores(arc_scores_raw))
@@ -248,31 +169,6 @@ def _fetch_diagnosis(
             focus_characters_filtered,
         )
 
-    if not _has_complete_focus_contract(
-        arc_scores_normalized,
-        normalized_focus_structure,
-        focus_characters_filtered,
-        main_characters_filtered,
-        core_cast_filtered,
-        topic_labels_normalized if isinstance(topic_labels_normalized, list) else None,
-        genre_labels_normalized,
-        style_labels_normalized,
-    ):
-        logger.warning(
-            "diagnosis focus contract incomplete after graph-name validation: run_id={} novel_id={} raw_structure={} "
-            "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
-            run_id,
-            novel_id,
-            focus_structure,
-            normalized_focus_structure,
-            focus_characters_normalized,
-            focus_characters_filtered,
-        )
-        return DiagnosisResult(
-            rerun_required=True,
-            rerun_reason="focus_contract_incomplete",
-        )
-
     return DiagnosisResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,
         arc_scores=arc_scores_normalized,
@@ -288,7 +184,13 @@ def _fetch_diagnosis(
         dignity_reason=data.get("dignity_reason") if data else None,
         cultural_depth_score=data.get("cultural_depth_score") if data else None,
         cultural_depth_reason=data.get("cultural_depth_reason") if data else None,
-        narrative_arc_type=data.get("narrative_arc_type") if data else None,
+        narrative_arc_type=(
+            narrative_arc_type_value.strip()
+            if data
+            and isinstance((narrative_arc_type_value := data.get("narrative_arc_type")), str)
+            and narrative_arc_type_value.strip()
+            else None
+        ),
         focus_structure=normalized_focus_structure,
         focus_characters=focus_characters_filtered,
         main_characters=main_characters_filtered,

@@ -1,4 +1,4 @@
-"""agent-semantic-v1 图持久化测试"""
+"""agent-semantic-v2 图持久化测试"""
 
 from __future__ import annotations
 
@@ -20,13 +20,15 @@ from src.agents.annotation.schema import (
     ResolvedCase,
 )
 from src.storage.models import (
+    ChapterAnnotationRecord,
     DialogueRecord,
-    EntityStateVersion,
+    EntityState,
+    EventEdge,
+    EventNode,
     GraphEntity,
     GraphFact,
     GraphRelation,
-    GraphRelationVersion,
-    GraphVersion,
+    RelationState,
 )
 from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository
 from src.storage.repositories.graph import persist_completion_graph, stable_annotation_fact_id
@@ -38,15 +40,20 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def _full_annotation(text: str) -> BoundChapterAnnotation:
+def _full_annotation(
+    text: str,
+    *,
+    chunk_id: int = 1,
+    event_node_id: str = "evt-persist-root",
+) -> BoundChapterAnnotation:
     """2026-08-11 用于构造覆盖四类实体与全部领域事实的完整章节标注"""
-    candidates = extract_dialogue_candidates(0, text)
+    candidates = extract_dialogue_candidates(chunk_id, text)
     dialogue_candidate = next(candidate for candidate in candidates if candidate.content == "住手")
     return BoundChapterAnnotation(
         chapter_summary="顾霜进入山门并受宗门庇护",
         chunks=[
             BoundChunkAnnotation(
-                chunk_id=0,
+                chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary="顾霜进入山门",
                     emotional_valence="neutral",
@@ -98,11 +105,16 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                 ],
                 events=[
                     BoundEvent(
+                        node_id=event_node_id,
+                        tree_id="tree-main",
+                        parent_node_id=None,
+                        cause_role="root",
                         description="顾霜进入山门",
                         participants=[
                             {"entity": "顾霜", "role": "主体"},
                             {"entity": "山门", "role": "地点"},
                         ],
+                        causal_event_refs=[],
                     )
                 ],
                 relations=[
@@ -118,6 +130,7 @@ def _full_annotation(text: str) -> BoundChapterAnnotation:
                     BoundForeshadowing(
                         description="天衡宗将庇护顾霜",
                         confidence="high",
+                        setup_node_id=event_node_id,
                     )
                 ],
             )
@@ -132,12 +145,13 @@ def _persist(
     chapter_id: int = 1,
     annotation: BoundChapterAnnotation | None = None,
     text: str | None = None,
+    event_node_id: str = "evt-persist-root",
 ):
     """2026-08-07 用于通过生产入口持久化测试章节标注"""
     if annotation is None:
         if text is None:
             raise ValueError("必须提供 annotation 或 text")
-        annotation = _full_annotation(text)
+        annotation = _full_annotation(text, chunk_id=chapter_id, event_node_id=event_node_id)
     row = ChapterAnnotationRepository(db_session).add_annotation(
         run_id=run_id,
         chapter_id=chapter_id,
@@ -147,13 +161,12 @@ def _persist(
         db_session,
         annotation=row,
         resolved_cases=[],
-        authorized_text_chunk_ids={chunk.chunk_id for chunk in annotation.chunks},
+        authorized_text_chapter_ids={chunk.chunk_id for chunk in annotation.chunks},
     )
     for chunk in annotation.chunks:
         DialogueRecordRepository(db_session).sync_dialogues(
             run_id=run_id,
             chapter_id=chapter_id,
-            chunk_id=chunk.chunk_id,
             dialogues=chunk.dialogues,
         )
     return row, result
@@ -185,16 +198,12 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
 
     entities = list(
         db_session.execute(
-            select(GraphEntity)
-            .where(GraphEntity.run_id == run_id)
-            .order_by(GraphEntity.entity_type)
+            select(GraphEntity).where(GraphEntity.run_id == run_id).order_by(GraphEntity.entity_type)
         ).scalars()
     )
     facts = list(
         db_session.execute(
-            select(GraphFact)
-            .where(GraphFact.run_id == run_id)
-            .order_by(GraphFact.payload_path)
+            select(GraphFact).where(GraphFact.run_id == run_id).order_by(GraphFact.payload_path)
         ).scalars()
     )
     assert {entity.entity_type for entity in entities} == {
@@ -215,19 +224,17 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     }
     assert all(fact.source_kind == "annotation" for fact in facts)
     relation = next(fact for fact in facts if fact.content["kind"] == "relation")
-    assert relation.payload_path == "chunks/0/relation/0"
+    assert relation.payload_path == "chunks/1/relation/1"
     assert relation.fact_id == stable_annotation_fact_id(
         row.annotation_id,
-        0,
+        1,
         "relation",
-        0,
+        1,
     )
-    dialogue = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
+    dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.speaker is None
-    assert dialogue.chunk_id == 0
+    assert dialogue.chapter_id == 1
     assert dialogue.confidence == "medium"
 
 
@@ -242,51 +249,54 @@ def test_dialogue_record_binds_system_original_text_and_position(db_session) -> 
     _persist(db_session, run_id=run_id, text=text)
     db_session.commit()
 
-    dialogue = db_session.execute(
-        select(DialogueRecord).where(DialogueRecord.run_id == run_id)
-    ).scalar_one()
+    dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
     chunk_text = "顾霜进入山门，“住手”回荡。"
     start = int(dialogue.start)
     end = int(dialogue.end)
     assert chunk_text[start:end] == "住手"
     assert dialogue.content == "住手"
-    assert dialogue.chunk_id == 0
+    assert dialogue.chapter_id == 1
     assert dialogue.is_inner_monologue is False
     assert dialogue.confidence == "medium"
-    assert db_session.execute(
-        select(GraphFact).where(
-            GraphFact.run_id == run_id,
-            GraphFact.fact_type == "dialogue",
+    assert (
+        db_session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_type == "dialogue",
+            )
         )
-    ).scalars().all() == []
+        .scalars()
+        .all()
+        == []
+    )
 
 
-def test_persistence_writes_state_and_relation_versions(db_session) -> None:
-    """2026-08-11 用于验证观察字段与实体属性仍驱动一章一版本的下游状态表"""
+def test_persistence_writes_state_and_relation_rows(db_session) -> None:
+    """2026-08-19 用于验证观察字段与实体属性驱动当前章节状态表"""
     text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=[text],
-        title="状态关系版本",
+        title="状态关系章节",
     )
     _row, result = _persist(db_session, run_id=run_id, text=text)
     db_session.commit()
 
     state_rows = list(
         db_session.execute(
-            select(EntityStateVersion).where(
-                EntityStateVersion.graph_version_id
-                == result.graph_version.graph_version_id
+            select(EntityState).where(
+                EntityState.run_id == run_id,
+                EntityState.chapter_id == result.chapter_boundary.chapter_id,
             )
         ).scalars()
     )
-    relation_version = db_session.execute(
-        select(GraphRelationVersion).where(
-            GraphRelationVersion.graph_version_id
-            == result.graph_version.graph_version_id
+    relation_state = db_session.execute(
+        select(RelationState).where(
+            RelationState.run_id == run_id,
+            RelationState.chapter_id == result.chapter_boundary.chapter_id,
         )
     ).scalar_one()
-    relation_row = db_session.get(GraphRelation, relation_version.relation_id)
+    relation_row = db_session.get(GraphRelation, relation_state.relation_id)
     relation_fact = db_session.execute(
         select(GraphFact).where(
             GraphFact.run_id == run_id,
@@ -309,13 +319,11 @@ def test_persistence_writes_state_and_relation_versions(db_session) -> None:
     assert state_rows[0].changes[0]["fact_id"] == observation_fact.fact_id
     assert relation_row.to_entity_id == next(
         entity.entity_id
-        for entity in db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
+        for entity in db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         if entity.entity_type == "location"
     )
-    assert relation_version.relation_revision == 1
-    assert relation_version.changes[0]["fact_id"] == relation_fact.fact_id
+    assert relation_state.chapter_id == result.chapter_boundary.chapter_id
+    assert relation_state.changes[0]["fact_id"] == relation_fact.fact_id
 
 
 def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -> None:
@@ -330,25 +338,21 @@ def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=0, name="顾霜", action="修炼")],
+        characters=[character_fact(chunk_id=1, name="顾霜", action="修炼")],
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=1, name="顾霜", action="出关")],
+        characters=[character_fact(chunk_id=2, name="顾霜", action="出关")],
     )
     db_session.commit()
 
-    entities = list(
-        db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
+    entities = list(db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
     assert len(entities) == 1
     assert entities[0].canonical_name == "顾霜"
-    assert entities[0].first_seen_chunk == 0
-    assert entities[0].last_seen_chunk == 1
+    assert entities[0].first_seen_chapter == 1
+    assert entities[0].last_seen_chapter == 2
 
 
 def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
@@ -363,9 +367,7 @@ def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[
-            character_fact(chunk_id=0, name="赤羽炽尾鸡", action="踱步")
-        ],
+        characters=[character_fact(chunk_id=1, name="赤羽炽尾鸡", action="踱步")],
     )
     with pytest.raises(ValueError, match="实体名称已属于其他大类"):
         persist_chapter_annotation(
@@ -374,7 +376,7 @@ def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
             chapter_id=2,
             relations=[
                 relation_fact(
-                    chunk_id=1,
+                    chunk_id=2,
                     from_name="赤羽炽尾鸡",
                     to_name="山门",
                     relation_type="位于",
@@ -399,7 +401,7 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         chapter_id=1,
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="玄剑",
                 to_name="山门",
                 relation_type="位于",
@@ -412,15 +414,11 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=1, name="剑灵", action="开口")],
+        characters=[character_fact(chunk_id=2, name="剑灵", action="开口")],
     )
     db_session.commit()
 
-    entities = list(
-        db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
+    entities = list(db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
     by_name = {entity.canonical_name: entity for entity in entities}
     assert {"玄剑", "剑灵"} <= set(by_name)
     assert by_name["玄剑"].entity_type == "item"
@@ -439,21 +437,17 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=1,
-        entity_attributes={(0, "玄剑"): {"status": "active", "grade": "凡品"}},
+        entity_attributes={(1, "玄剑"): {"status": "active", "grade": "凡品"}},
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        entity_attributes={(1, "玄剑"): {"grade": "灵品"}},
+        entity_attributes={(2, "玄剑"): {"grade": "灵品"}},
     )
     db_session.commit()
 
-    entities = list(
-        db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
+    entities = list(db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
     assert len(entities) == 1
     assert entities[0].attributes == {
         "entity_type": "character",
@@ -471,13 +465,10 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
     assert len(attribute_facts) == 1
     assert attribute_facts[0].content["kind"] == "entity_attribute"
     assert attribute_facts[0].content["field"] == "grade"
-    state_rows = list(
-        db_session.execute(
-            select(EntityStateVersion).where(EntityStateVersion.run_id == run_id)
-        ).scalars()
-    )
-    assert len(state_rows) == 1
-    assert state_rows[0].state == {
+    state_rows = list(db_session.execute(select(EntityState).where(EntityState.run_id == run_id)).scalars())
+    assert len(state_rows) == 2
+    latest_state = max(state_rows, key=lambda row: row.chapter_id)
+    assert latest_state.state == {
         "entity_type": "character",
         "status": "active",
         "grade": "灵品",
@@ -485,7 +476,7 @@ def test_entity_attributes_merged_across_chapters(db_session) -> None:
 
 
 def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) -> None:
-    """2026-08-11 用于验证属性 null 删除与覆盖式更新并驱动状态版本"""
+    """2026-08-11 用于验证属性 null 删除与覆盖式更新并驱动章节状态"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
@@ -496,21 +487,17 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
         db_session,
         run_id=run_id,
         chapter_id=1,
-        entity_attributes={(0, "玄剑"): {"status": "active", "grade": "凡品"}},
+        entity_attributes={(1, "玄剑"): {"status": "active", "grade": "凡品"}},
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        entity_attributes={(1, "玄剑"): {"status": None, "grade": "灵品"}},
+        entity_attributes={(2, "玄剑"): {"status": None, "grade": "灵品"}},
     )
     db_session.commit()
 
-    entities = list(
-        db_session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
+    entities = list(db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
     assert len(entities) == 1
     assert entities[0].attributes == {
         "entity_type": "character",
@@ -525,51 +512,43 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
         ).scalars()
     )
     assert {fact.content["field"] for fact in attribute_facts} == {"status", "grade"}
-    status_fact = next(
-        fact for fact in attribute_facts if fact.content["field"] == "status"
-    )
+    status_fact = next(fact for fact in attribute_facts if fact.content["field"] == "status")
     assert status_fact.content["before"] == "active"
     assert status_fact.content["after"] is None
-    state_rows = list(
-        db_session.execute(
-            select(EntityStateVersion).where(EntityStateVersion.run_id == run_id)
-        ).scalars()
-    )
-    assert len(state_rows) == 1
-    assert state_rows[0].state_revision == 1
-    assert state_rows[0].state == {
+    state_rows = list(db_session.execute(select(EntityState).where(EntityState.run_id == run_id)).scalars())
+    assert len(state_rows) == 2
+    latest_state = max(state_rows, key=lambda row: row.chapter_id)
+    assert latest_state.chapter_id == 2
+    assert latest_state.state == {
         "entity_type": "character",
         "grade": "灵品",
     }
 
 
 def test_attribute_patch_generated_once_for_multi_chunk_chapter(db_session) -> None:
-    """2026-08-12 用于验证同一章节含多个 chunk 时属性变化事实只生成一次：
-    属性 patch 与 chunk 循环无关，不能随本章 chunk 数重复写入"""
+    """2026-08-12 用于验证跨章属性变化事实按字段只生成一次：
+    属性 patch 与 chunk 循环无关，不随同章多次引用重复写入"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["玄剑寒光凛冽。", "玄剑鸣啸", "玄剑低鸣", "玄剑归鞘"],
-        chapter_ids=[1, 1, 2, 2],
-        title="多 chunk 属性",
+        texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
+        chapter_ids=[1, 2],
+        title="属性 patch 去重",
     )
-    # 章1（两个 chunk）首次声明实体，不产生属性 patch
+    # 章1 首次声明实体，不产生属性 patch
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
-        entity_attributes={(0, "玄剑"): {"status": "active"}},
+        entity_attributes={(1, "玄剑"): {"status": "active"}},
     )
     db_session.commit()
-    # 章2（两个 chunk）更新属性：跨章已存在实体产生 patch，
-    # 若在 chunk 循环内生成会随 2 个 chunk 重复写入
+    # 章2 更新属性：跨章已存在实体产生 patch，按字段各生成一条，
+    # 不随同章多次引用重复写入
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        entity_attributes={
-            (2, "玄剑"): {"grade": "灵品"},
-            (3, "玄剑"): {"status": "dormant"},
-        },
+        entity_attributes={(2, "玄剑"): {"grade": "灵品", "status": "dormant"}},
     )
     db_session.commit()
 
@@ -595,7 +574,7 @@ def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
         texts=[text],
         title="未解析端点",
     )
-    annotation = _full_annotation(text)
+    annotation = _full_annotation(text, event_node_id="evt-flush-check")
     annotation.chunks[0].entities.entities[0].name = "无名客"
     with pytest.raises(ValueError, match="事实端点实体未被系统解析"):
         _persist(db_session, run_id=run_id, annotation=annotation)
@@ -607,22 +586,23 @@ def test_persist_completion_graph_only_flushes_caller_transaction(db_session) ->
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=[text],
-        title="图版本事务边界",
+        title="图章节事务边界",
     )
     _persist(db_session, run_id=run_id, text=text)
     assert db_session.in_transaction()
     db_session.rollback()
 
-    assert db_session.execute(
-        select(GraphVersion).where(GraphVersion.run_id == run_id)
-    ).scalars().all() == []
-    assert db_session.execute(
-        select(GraphFact).where(GraphFact.run_id == run_id)
-    ).scalars().all() == []
+    assert (
+        db_session.execute(select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id))
+        .scalars()
+        .all()
+        == []
+    )
+    assert db_session.execute(select(GraphFact).where(GraphFact.run_id == run_id)).scalars().all() == []
 
 
-def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session) -> None:
-    """2026-08-12 用于验证后文再次提交同一关系边为 no-op，不产生新版本"""
+def test_relation_remark_in_later_chapter_keeps_chapter_history(db_session) -> None:
+    """2026-08-19 用于验证后文再次提交同一关系边保留章节历史"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
@@ -634,12 +614,12 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌"),
+            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -652,7 +632,7 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
         chapter_id=2,
         relations=[
             relation_fact(
-                chunk_id=1,
+                chunk_id=2,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -661,22 +641,18 @@ def test_relation_remark_in_later_chapter_is_noop_without_new_version(db_session
     )
     db_session.commit()
 
-    versions = list(
+    states = list(
         db_session.execute(
-            select(GraphRelationVersion)
-            .where(GraphRelationVersion.run_id == run_id)
-            .order_by(GraphRelationVersion.relation_revision)
+            select(RelationState).where(RelationState.run_id == run_id).order_by(RelationState.chapter_id)
         ).scalars()
     )
-    assert len(versions) == 1
-    assert versions[0].is_active is True
-    assert versions[0].changes[0]["change_kind"] == "assert"
+    assert len(states) == 2
+    assert states[0].is_active is True
+    assert states[0].changes[0]["change_kind"] == "assert"
 
 
-def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -> None:
-    """2026-08-12 用于验证本章 chunk relations 首次断言后案例 fact 解决同一边时，
-    变化折叠进现有关系版本行，不再插入 (graph_version_id, relation_id) 重复行
-    触发唯一约束冲突"""
+def test_same_chapter_fact_resolution_merges_into_relation_state(db_session) -> None:
+    """2026-08-19 用于验证本章关系断言与案例事实合并到同一章节状态行"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌"],
@@ -687,12 +663,12 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=0, name="林渡", action="迎敌"),
-            character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+            character_fact(chunk_id=1, name="林渡", action="迎敌"),
+            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=0,
+                chunk_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -705,7 +681,7 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
                 type="relation_change",
                 reason="同一人物归并",
                 target_key="target-alias",
-                target_ref={"kind": "relation_change", "chunk_id": 0},
+                target_ref={"kind": "relation_change", "chunk_id": 1},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -715,18 +691,16 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
     )
     db_session.commit()
 
-    versions = list(
+    states = list(
         db_session.execute(
-            select(GraphRelationVersion)
-            .where(GraphRelationVersion.run_id == run_id)
-            .order_by(GraphRelationVersion.relation_revision)
+            select(RelationState).where(RelationState.run_id == run_id).order_by(RelationState.chapter_id)
         ).scalars()
     )
-    assert len(versions) == 1
-    assert versions[0].relation_revision == 1
-    assert versions[0].is_active is True
-    assert versions[0].attributes["support_count"] == 2
-    assert [change["change_kind"] for change in versions[0].changes] == [
+    assert len(states) == 1
+    assert states[0].chapter_id == 1
+    assert states[0].is_active is True
+    assert states[0].attributes["support_count"] == 2
+    assert [change["change_kind"] for change in states[0].changes] == [
         "assert",
         "assert",
     ]
@@ -736,17 +710,13 @@ def test_same_chapter_fact_resolution_merges_into_relation_version(db_session) -
             GraphFact.source_kind == "case_resolution",
         )
     ).scalar_one()
-    assert versions[0].changes[1]["fact_id"] == resolution_fact.fact_id
+    assert states[0].changes[1]["fact_id"] == resolution_fact.fact_id
 
 
 def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_session) -> None:
-    """2026-08-13 P1-1 用于验证生产配置（autoflush=False）下同章断言+案例解决同一
-    关系不再双写关系版本
+    """2026-08-19 用于验证生产配置（autoflush=False）下同章关系不重复写状态
 
-    测试 db_session fixture 的 sessionmaker 默认 autoflush=True，SELECT 前会隐式
-    flush，掩盖了 persist_completion_graph 内部读不到同章 pending 关系版本的问题。
-    这里用同一引擎另建 autoflush=False 会话复现生产路径：修复前 _latest_relation_draft
-    读不到草稿 → 按 revision=1 再插一行 → commit 撞 uq_graph_relation_versions_run_revision。
+    测试通过独立 autoflush=False 会话复现生产路径，确认章节复合主键约束保持稳定
     """
     from sqlalchemy.orm import sessionmaker
 
@@ -763,12 +733,12 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
             run_id=run_id,
             chapter_id=1,
             characters=[
-                character_fact(chunk_id=0, name="林渡", action="迎敌"),
-                character_fact(chunk_id=0, name="顾霜", action="迎敌"),
+                character_fact(chunk_id=1, name="林渡", action="迎敌"),
+                character_fact(chunk_id=1, name="顾霜", action="迎敌"),
             ],
             relations=[
                 relation_fact(
-                    chunk_id=0,
+                    chunk_id=1,
                     from_name="林渡",
                     to_name="顾霜",
                     relation_type="盟友",
@@ -781,7 +751,7 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
                     type="relation_change",
                     reason="同一人物归并",
                     target_key="target-alias",
-                    target_ref={"kind": "relation_change", "chunk_id": 0},
+                    target_ref={"kind": "relation_change", "chunk_id": 1},
                     from_entity="林渡",
                     to_entity="顾霜",
                     relation_type="盟友",
@@ -792,16 +762,209 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
         # persist_chapter_annotation 已 commit；此处再确认无唯一约束冲突提交成功
         session.commit()
 
-        versions = list(
-            session.execute(
-                select(GraphRelationVersion).where(GraphRelationVersion.run_id == run_id)
-            ).scalars()
-        )
-        assert len(versions) == 1
-        assert versions[0].relation_revision == 1
-        assert [change["change_kind"] for change in versions[0].changes] == [
+        states = list(session.execute(select(RelationState).where(RelationState.run_id == run_id)).scalars())
+        assert len(states) == 1
+        assert states[0].chapter_id == 1
+        assert [change["change_kind"] for change in states[0].changes] == [
             "assert",
             "assert",
         ]
     finally:
         session.close()
+
+
+def test_persist_writes_event_shadow_node(db_session) -> None:
+    """2026-08-18 用于验证持久化在同一事务写入 EventNode 影子行
+
+    2026-08-22node_id 为服务端一次性 uuid（测试用固定替身）。
+    """
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[text],
+        title="事件影子写入",
+    )
+    _persist(db_session, run_id=run_id, text=text, event_node_id="evt-shadow-root")
+    db_session.commit()
+
+    nodes = list(db_session.execute(select(EventNode).where(EventNode.run_id == run_id)).scalars())
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node.event_id == "evt-shadow-root"
+    assert node.chapter_id == 1
+    assert node.chapter_order == 1
+    assert node.description == "顾霜进入山门"
+    assert node.char_start == 0
+    assert node.char_end == len(text)
+    assert node.anchor_paragraph_ids == [0]
+    assert node.causal_event_refs == []
+    assert node.tree_id == "tree-main"
+    assert node.cause_role == "root"
+    assert node.source_kind == "annotation"
+    assert node.payload_path == "chunks/1/events/1"
+    assert len(node.evidence) == 1
+    assert node.evidence[0]["paragraph_ids"] == [0]
+
+
+def test_persist_writes_causal_edge_between_events(db_session) -> None:
+    """2026-08-22因果引用只出现在树根（跨树引用），写入 EventEdge causal 边"""
+    text = "顾霜进入山门。\n顾霜拔剑。"
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[text],
+        title="因果边写入",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-causal-gate",
+                "tree_id": "gate-entry",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜拔剑",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "node_id": "evt-causal-draw",
+                "causal_event_refs": ["evt-causal-gate"],
+                "tree_id": "draw-entry",
+                "cause_role": "root",
+            },
+        ],
+    )
+    db_session.commit()
+
+    edges = list(
+        db_session.execute(
+            select(EventEdge).where(
+                EventEdge.run_id == run_id,
+                EventEdge.edge_type == "causal",
+            )
+        ).scalars()
+    )
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge.source_event_id == "evt-causal-gate"
+    assert edge.target_event_id == "evt-causal-draw"
+    assert edge.is_active == 1
+    assert edge.source_chapter_id == 1
+    assert edge.target_chapter_id == 1
+
+    # 事件事实也应链接 event_id
+    event_facts = list(
+        db_session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_type == "event",
+            )
+        ).scalars()
+    )
+    assert len(event_facts) == 2
+    assert {fact.event_id for fact in event_facts} == {
+        "evt-causal-gate",
+        "evt-causal-draw",
+    }
+
+
+def test_persist_does_not_materialize_contains_edges(db_session) -> None:
+    """2026-08-19 用于验证contains 不再落表，event_edges 只有 causal 边
+
+    2026-08-22树内主链由 contains 派生化表达，不再产生任何 EventEdge 行。
+    """
+    text = "顾霜进入山门。\n顾霜拔剑。"
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[text],
+        title="contains 派生化",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-contains-root",
+                "tree_id": "gate-entry",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜拔剑",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "node_id": "evt-contains-main",
+                "parent_node_id": "evt-contains-root",
+                "tree_id": "gate-entry",
+                "cause_role": "main",
+            },
+        ],
+    )
+    db_session.commit()
+
+    edge_types = set(db_session.execute(select(EventEdge.edge_type).where(EventEdge.run_id == run_id)).scalars())
+    assert edge_types == set()
+    assert "contains" not in edge_types
+
+
+def test_persist_writes_cross_chapter_causal_edge(db_session) -> None:
+    """2026-08-22跨章延续经 create_event(cause_tree_id) 落为跨章 causal 边"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜立誓。", "顾霜兑现承诺。"],
+        chapter_ids=[1, 2],
+        title="跨章因果边",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜立誓",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-oath-root",
+                "tree_id": "oath",
+                "cause_role": "root",
+            },
+        ],
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        events=[
+            {
+                "description": "顾霜兑现承诺",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": "evt-fulfill-root",
+                "causal_event_refs": ["evt-oath-root"],
+                "tree_id": "fulfill",
+                "cause_role": "root",
+            },
+        ],
+    )
+    db_session.commit()
+
+    edges = list(
+        db_session.execute(
+            select(EventEdge).where(
+                EventEdge.run_id == run_id,
+                EventEdge.edge_type == "causal",
+            )
+        ).scalars()
+    )
+    assert len(edges) == 1
+    assert edges[0].source_event_id == "evt-oath-root"
+    assert edges[0].target_event_id == "evt-fulfill-root"
+    assert edges[0].source_chapter_id == 1
+    assert edges[0].target_chapter_id == 2

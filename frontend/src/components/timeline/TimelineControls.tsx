@@ -1,12 +1,8 @@
 /**
- * TimelineControls - 时间轴控制面板组件
+ * TimelineControls - 时间轴控制面板组件（2026-08-20 事件森林版）
  *
- * 提供重要性级别筛选
- *
- *   - 支持内联模式，便于直接嵌入时间轴主图顶部而不是额外挂一个控制卡片
- *
- *   - 增加复合视图 / 原子视图切换
- *   - `maxLevel` 仅表示前端本地展示层级，不再表示后端裁剪参数
+ * 一树一节点体系下仅保留重要性级别筛选，移除 composite/atomic 视图切换
+ * `maxLevel` 仅表示前端本地展示层级，按 importance_score/level 统一过滤
  */
 
 import { cn } from "@/lib/cn";
@@ -20,10 +16,12 @@ import { Filter } from "lucide-react";
 export interface TimelineControlsProps {
   maxLevel: 1 | 2 | 3;
   onMaxLevelChange: (level: 1 | 2 | 3) => void;
-  viewMode: "composite" | "atomic";
-  onViewModeChange: (viewMode: "composite" | "atomic") => void;
   className?: string;
   variant?: "card" | "inline";
+  /** @deprecated 事件森林体系已移除视图切换，保留仅为兼容旧调用 */
+  viewMode?: "composite" | "atomic";
+  /** @deprecated */
+  onViewModeChange?: (viewMode: "composite" | "atomic") => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -46,8 +44,6 @@ const LEVEL_CONFIG: Record<
 export function TimelineControls({
   maxLevel,
   onMaxLevelChange,
-  viewMode,
-  onViewModeChange,
   className,
   variant = "card",
 }: TimelineControlsProps) {
@@ -85,26 +81,7 @@ export function TimelineControls({
           })}
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        <Button
-          variant={viewMode === "composite" ? "default" : "outline"}
-          size="sm"
-          onClick={() => onViewModeChange("composite")}
-          className={cn("h-7 px-3 text-xs", viewMode === "composite" && "bg-primary text-primary-foreground")}
-          title="默认概览视图"
-        >
-          复合视图
-        </Button>
-        <Button
-          variant={viewMode === "atomic" ? "default" : "outline"}
-          size="sm"
-          onClick={() => onViewModeChange("atomic")}
-          className={cn("h-7 px-3 text-xs", viewMode === "atomic" && "bg-primary text-primary-foreground")}
-          title="查看全部原子节点"
-        >
-          原子视图
-        </Button>
-      </div>
+      <span className="text-xs text-text-muted">按重要度筛选（level ≤ {maxLevel}）</span>
     </div>
   );
 

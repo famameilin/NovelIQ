@@ -6,6 +6,10 @@ import {
   getMetricAccentHoverTextClass,
   type MetricAccent,
 } from "@/components/common/DashboardCardShell";
+import {
+  formatNullableNumber,
+  formatSampleInsufficient,
+} from "@/lib/metricFormat";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
@@ -16,11 +20,11 @@ export type DimensionType = "narrative" | "emotion" | "character" | "style" | "t
 
 export interface DimensionData {
   middle_collapse_index?: number | null;
-  pos_neg_ratio?: number | null;
-  positive_ratio?: number | null;
-  negative_ratio?: number | null;
+  lexical_pos_neg_ratio?: number | null;
+  lexical_positive_density?: number | null;
+  lexical_negative_density?: number | null;
   network_density?: number | null;
-  vocab_breadth?: number | null;
+  string_token_diversity?: number | null;
   dialogue_ratio?: number | null;
   topic_count?: number | null;
   top_topics?: Array<{ words: string[]; weight: number }>;
@@ -43,39 +47,27 @@ const DIMENSION_CONFIG: Record<
   {
     label: string;
     accent: MetricAccent;
-    gradientEnd: string;
-    hoverBorder: string;
   }
 > = {
   narrative: {
     label: "叙事结构",
-    accent: "chart-1",
-    gradientEnd: "to-chart-1/15",
-    hoverBorder: "hover:border-chart-1/30",
+    accent: "primary",
   },
   emotion: {
-    label: "情感基调",
+    label: "情绪指标",
     accent: "chart-2",
-    gradientEnd: "to-chart-2/15",
-    hoverBorder: "hover:border-chart-2/30",
   },
   character: {
     label: "人物网络",
-    accent: "chart-3",
-    gradientEnd: "to-chart-3/15",
-    hoverBorder: "hover:border-chart-3/30",
+    accent: "chart-2",
   },
   style: {
     label: "语言风格",
     accent: "chart-4",
-    gradientEnd: "to-chart-4/15",
-    hoverBorder: "hover:border-chart-4/30",
   },
   topic: {
     label: "主题内容",
-    accent: "chart-5",
-    gradientEnd: "to-chart-5/15",
-    hoverBorder: "hover:border-chart-5/30",
+    accent: "chart-2",
   },
 };
 
@@ -165,19 +157,20 @@ function NarrativeVisualization({
 /* ------------------------------------------------------------------ */
 
 function EmotionVisualization({
-  positiveRatio,
-  negativeRatio,
+  positiveDensity,
+  negativeDensity,
 }: {
-  positiveRatio: number | null | undefined;
-  negativeRatio: number | null | undefined;
+  positiveDensity: number | null | undefined;
+  negativeDensity: number | null | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
 
-  if (positiveRatio == null || negativeRatio == null) {
+  if (positiveDensity == null || negativeDensity == null) {
     return <EmptyState />;
   }
 
+  const maxDensity = Math.max(positiveDensity, negativeDensity, 0.0001);
   const barHeight = 36;
   const barWidth = 16;
 
@@ -196,7 +189,7 @@ function EmotionVisualization({
           fill="hsl(var(--chart-positive))"
           rx="2"
           initial={{ scaleY: 0 }}
-          animate={{ scaleY: isInView ? (positiveRatio ?? 0) : 0 }}
+          animate={{ scaleY: isInView ? Math.min(positiveDensity / maxDensity, 1) : 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
           style={{ transformOrigin: `${8 + barWidth / 2}px 44px` }}
         />
@@ -209,7 +202,7 @@ function EmotionVisualization({
           fill="hsl(var(--chart-negative))"
           rx="2"
           initial={{ scaleY: 0 }}
-          animate={{ scaleY: isInView ? (negativeRatio ?? 0) : 0 }}
+          animate={{ scaleY: isInView ? Math.min(negativeDensity / maxDensity, 1) : 0 }}
           transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
           style={{ transformOrigin: `${26 + barWidth / 2}px 44px` }}
 
@@ -283,16 +276,16 @@ function CharacterVisualization({ density }: { density: number | null | undefine
 /* ------------------------------------------------------------------ */
 
 function StyleVisualization({
-  vocabBreadth,
+  stringTokenDiversity,
   dialogueRatio,
 }: {
-  vocabBreadth: number | null | undefined;
+  stringTokenDiversity: number | null | undefined;
   dialogueRatio: number | null | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
 
-  if (vocabBreadth == null || dialogueRatio == null) {
+  if (stringTokenDiversity == null || dialogueRatio == null) {
     return <EmptyState />;
   }
 
@@ -305,7 +298,7 @@ function StyleVisualization({
             <motion.div
               className="h-full rounded-full bg-chart-4"
               initial={{ scaleX: 0 }}
-              animate={{ scaleX: isInView ? Math.min(vocabBreadth ?? 0, 1) : 0 }}
+              animate={{ scaleX: isInView ? Math.min(stringTokenDiversity, 1) : 0 }}
               transition={{ duration: 0.6, ease: "easeOut" }}
               style={{ transformOrigin: "left" }}
             />
@@ -317,7 +310,7 @@ function StyleVisualization({
             <motion.div
               className="h-full rounded-full bg-chart-4/70"
               initial={{ scaleX: 0 }}
-              animate={{ scaleX: isInView ? Math.min(dialogueRatio ?? 0, 1) : 0 }}
+              animate={{ scaleX: isInView ? Math.min(dialogueRatio, 1) : 0 }}
               transition={{ duration: 0.6, ease: "easeOut", delay: 0.15 }}
               style={{ transformOrigin: "left" }}
             />
@@ -384,7 +377,7 @@ function TopicVisualization({
 function EmptyState() {
   return (
     <div className="flex h-full w-full items-center justify-center">
-      <span className="text-[10px] text-text-muted">暂无数据</span>
+      <span className="text-[10px] text-text-muted">{formatSampleInsufficient()}</span>
     </div>
   );
 }
@@ -420,8 +413,8 @@ export function DimensionMiniCard({
       case "emotion":
         return (
           <EmotionVisualization
-            positiveRatio={data.positive_ratio}
-            negativeRatio={data.negative_ratio}
+            positiveDensity={data.lexical_positive_density}
+            negativeDensity={data.lexical_negative_density}
           />
         );
       case "character":
@@ -429,7 +422,7 @@ export function DimensionMiniCard({
       case "style":
         return (
           <StyleVisualization
-            vocabBreadth={data.vocab_breadth}
+            stringTokenDiversity={data.string_token_diversity}
             dialogueRatio={data.dialogue_ratio}
           />
         );
@@ -446,17 +439,17 @@ export function DimensionMiniCard({
   const renderValue = () => {
     switch (dimension) {
       case "narrative":
-        return data.middle_collapse_index?.toFixed(2) ?? "—";
+        return formatNullableNumber(data.middle_collapse_index);
       case "emotion":
-        return data.pos_neg_ratio?.toFixed(2) ?? "—";
+        return null;
       case "character":
-        return data.network_density?.toFixed(2) ?? "—";
+        return formatNullableNumber(data.network_density);
       case "style":
-        return data.vocab_breadth != null
-          ? `${(data.vocab_breadth * 100).toFixed(0)}%`
-          : "—";
+        return data.string_token_diversity != null
+          ? `${(data.string_token_diversity * 100).toFixed(0)}%`
+          : formatSampleInsufficient();
       case "topic":
-        return data.topic_count?.toString() ?? "—";
+        return data.topic_count != null ? data.topic_count.toString() : formatSampleInsufficient();
     }
   };
 
@@ -465,9 +458,9 @@ export function DimensionMiniCard({
       case "narrative":
         return "中段塌陷";
       case "emotion":
-        return "正负词比";
+        return "正向密度 / 负向密度";
       case "character":
-        return "网络密度";
+        return "关系集中度（度中心化）";
       case "style":
         return "词频广度";
       case "topic":
@@ -514,10 +507,29 @@ export function DimensionMiniCard({
     >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-2xl font-bold tabular-nums text-text">
-              {renderValue()}
-            </p>
-            <p className="mt-0.5 text-[10px] text-text-muted">{renderValueLabel()}</p>
+            {dimension === "emotion" ? (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
+                  <span>正向密度</span>
+                  <span className="font-medium tabular-nums text-text">
+                    {formatNullableNumber(data.lexical_positive_density, 4)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
+                  <span>负向密度</span>
+                  <span className="font-medium tabular-nums text-text">
+                    {formatNullableNumber(data.lexical_negative_density, 4)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-2xl font-bold tabular-nums text-text">{renderValue()}</p>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <p className="text-[10px] text-text-muted">{renderValueLabel()}</p>
+                </div>
+              </>
+            )}
           </div>
           <div className="flex h-12 w-[72px] flex-shrink-0 items-center justify-center">
             {renderVisualization()}

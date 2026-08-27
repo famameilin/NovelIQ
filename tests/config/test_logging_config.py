@@ -22,7 +22,6 @@ class TestLoggingSetup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config = LoggingSettings(
                 console_level="INFO",
-                file_level="DEBUG",
                 log_dir=tmp,
                 modules={
                     "test_logging_config": LoggingModuleSettings(file="api.log", level="DEBUG"),

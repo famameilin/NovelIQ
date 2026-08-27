@@ -157,9 +157,7 @@ def test_prologue_does_not_swallow_first_chapter_title_line() -> None:
     text = "楔子 命运\n这段开篇正文足够长，超过了最小阈值。\n第一章 起点\n内容甲。"
     first_title_start = text.index("第一章 起点")
     body_start = text.index("内容甲。")
-    candidates = [
-        _candidate(start_char=first_title_start, body_start_char=body_start)
-    ]
+    candidates = [_candidate(start_char=first_title_start, body_start_char=body_start)]
     chapters = _decide(text, candidates)
     assert len(chapters) == 2
     prologue, first = chapters

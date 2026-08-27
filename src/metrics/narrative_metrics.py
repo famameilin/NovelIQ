@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from src.config import settings
@@ -100,14 +101,29 @@ def find_valley_before_peak(scores: list[float], peak_idx: int) -> int:
     return min(range(len(before_peak)), key=lambda i: before_peak[i])
 
 
-def find_local_peaks(scores: list[float], total_chunks: int) -> list[int]:
-    if not scores or total_chunks == 0:
+def _validate_position_inputs(positions: Sequence[float], scores: Sequence[float]) -> None:
+    """校验字符坐标版输入的公共前置条件：长度一致且位置严格单调递增。"""
+    if len(positions) != len(scores):
+        raise ValueError("positions 与 scores 长度必须一致")
+    if len(positions) >= 2:
+        for prev, curr in zip(positions[:-1], positions[1:], strict=True):
+            if curr <= prev:
+                raise ValueError("positions 必须严格单调递增")
+
+
+def find_local_peaks(
+    positions: Sequence[float],
+    scores: Sequence[float],
+    min_spacing: float = 0.05,
+) -> list[int]:
+    """局部峰值：scores[i] > 邻点且与前峰字符间距 >= min_spacing。"""
+    _validate_position_inputs(positions, scores)
+    if len(scores) < 3:
         return []
-    min_distance = max(10, int(total_chunks * 0.05))
     peaks: list[int] = []
     for i in range(1, len(scores) - 1):
         if scores[i] > scores[i - 1] and scores[i] > scores[i + 1]:
-            if not peaks or (i - peaks[-1]) >= min_distance:
+            if not peaks or (positions[i] - positions[peaks[-1]]) >= min_spacing:
                 peaks.append(i)
     return peaks
 
@@ -120,8 +136,10 @@ def _build_min_ratio_normalized_result(
     act1_raw: float,
     act2_raw: float,
     act3_raw: float,
+    min_ratio: float = 0.05,
 ) -> dict[str, float]:
-    min_ratio = 0.05
+    """将三幕原始比例按最低占比下限做归一化（2026-08-14 起支持自定义 min_ratio，
+    旧调用方不传参时行为不变）。"""
     act1 = max(act1_raw, min_ratio)
     act2 = max(act2_raw, min_ratio)
     act3 = max(act3_raw, min_ratio)
@@ -133,28 +151,6 @@ def _build_min_ratio_normalized_result(
     }
 
 
-def _count_conflicts(event_types: list[str], start_idx: int, end_idx: int) -> int:
-    return sum(1 for event_type in event_types[start_idx:end_idx] if event_type == "冲突")
-
-
-def _count_plot_flags(cliffhangers: list[int], pivot_moments: list[int], start_idx: int, end_idx: int) -> int:
-    return sum(cliffhangers[start_idx:end_idx]) + sum(pivot_moments[start_idx:end_idx])
-
-
-def _compute_structure_density(
-    event_types: list[str],
-    cliffhangers: list[int],
-    pivot_moments: list[int],
-    start_idx: int,
-    end_idx: int,
-) -> tuple[float, int, int]:
-    window_len = max(end_idx - start_idx, 1)
-    conflict_count = _count_conflicts(event_types, start_idx, end_idx)
-    plot_flag_count = _count_plot_flags(cliffhangers, pivot_moments, start_idx, end_idx)
-    density = (conflict_count + plot_flag_count) / window_len
-    return density, conflict_count, plot_flag_count
-
-
 def _compute_window_mean(scores: list[float], start_idx: int, end_idx: int) -> float:
     window = scores[start_idx:end_idx]
     if not window:
@@ -162,42 +158,92 @@ def _compute_window_mean(scores: list[float], start_idx: int, end_idx: int) -> f
     return sum(window) / len(window)
 
 
-def _select_climax_region(
-    event_types: list[str],
-    cliffhangers: list[int],
-    pivot_moments: list[int],
-    tension_composite_scores: list[float],
-) -> tuple[int, int, int, int, int, float]:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2
-    新建原因: 正式三幕口径先识别后段主高潮区，再从区内选代表峰，
-              不能继续把单个数值峰直接当成完整高潮结构。
+def _char_span_of_n_points(positions: Sequence[float], n: int) -> float:
+    """返回覆盖前 n 个点所需的字符宽度；点数不足 n 时用全部点，不足 2 点时返回 0.0。"""
+    k = min(n, len(positions))
+    if k < 2:
+        return 0.0
+    return positions[k - 1] - positions[0]
 
-    修改时间: 2026-05-02
-    任务: review-fix-mypy-errors
-    修改原因: 返回类型标注与实际返回数量不一致，早期返回补上缺失的 best_plot_flags。
-    """
-    total = len(tension_composite_scores)
+
+def _indices_in_position_range(
+    positions: Sequence[float],
+    lower: float,
+    upper: float,
+    *,
+    include_lower: bool = True,
+    include_upper: bool = False,
+) -> list[int]:
+    """返回 positions 落在 (lower, upper) 或 [lower, upper) 等区间的索引列表（升序）。"""
+    indices: list[int] = []
+    for j, position in enumerate(positions):
+        in_lower = position >= lower if include_lower else position > lower
+        in_upper = position < upper if include_upper else position <= upper
+        if in_lower and in_upper:
+            indices.append(j)
+    return indices
+
+
+def _select_climax_region(
+    positions: Sequence[float],
+    event_types: Sequence[str],
+    cliffhangers: Sequence[int],
+    pivot_moments: Sequence[int],
+    tension_scores: Sequence[float],
+) -> tuple[int, int, int, int, int, float]:
+    """主高潮区识别（§10/§19.8 字符坐标版）：8% 跨度窗口扫描后 45%。"""
+    total = len(tension_scores)
     if total == 0:
         return 0, 0, 0, 0, 0, 0.0
 
-    window_size = min(total, _clamp(round(total * 0.08), 8, 24))
-    late_window_span = max(1, round(total * 0.45))
-    scan_start = max(0, total - late_window_span)
-    last_start = max(0, total - window_size)
-    if scan_start > last_start:
-        scan_start = last_start
+    span = positions[-1] - positions[0]
+    if span <= 0:
+        peak = find_global_peak(list(tension_scores))
+        total = len(tension_scores)
+        return (
+            0,
+            total,
+            peak,
+            0,
+            0,
+            _compute_window_mean(list(tension_scores), 0, total),
+        )
 
-    best_start = scan_start
+    window_char = max(0.08 * span, _char_span_of_n_points(positions, min(8, total)))
+    max_window_char = _char_span_of_n_points(positions, min(24, total))
+    if max_window_char > 0:
+        window_char = min(window_char, max_window_char)
+
+    scan_start_pos = positions[-1] - 0.45 * span
+    last_start_pos = positions[-1] - window_char
+    if scan_start_pos > last_start_pos:
+        scan_start_pos = last_start_pos
+    candidate_starts = [
+        i for i in range(total) if positions[i] >= scan_start_pos and positions[i] <= last_start_pos + 1e-9
+    ]
+    if not candidate_starts:
+        # 点过于稀疏：退化为最后一个可放下窗口的起点。
+        candidate_starts = [i for i in range(total) if positions[i] <= last_start_pos + 1e-9]
+    if not candidate_starts:
+        candidate_starts = [total - 1]
+
+    best_start = -1
     best_conflicts = -1
     best_plot_flags = -1
     best_mean_tension = -1.0
-    for start_idx in range(scan_start, last_start + 1):
-        end_idx = start_idx + window_size
-        conflict_count = _count_conflicts(event_types, start_idx, end_idx)
-        plot_flag_count = _count_plot_flags(cliffhangers, pivot_moments, start_idx, end_idx)
-        mean_tension = _compute_window_mean(tension_composite_scores, start_idx, end_idx)
+    for start_idx in candidate_starts:
+        window = _indices_in_position_range(
+            positions,
+            positions[start_idx],
+            positions[start_idx] + window_char,
+            include_lower=True,
+            include_upper=False,
+        )
+        if not window:
+            continue
+        conflict_count = sum(1 for j in window if event_types[j] == "冲突")
+        plot_flag_count = sum(cliffhangers[j] for j in window) + sum(pivot_moments[j] for j in window)
+        mean_tension = sum(tension_scores[j] for j in window) / len(window)
         candidate_key = (conflict_count, plot_flag_count, mean_tension, start_idx)
         best_key = (best_conflicts, best_plot_flags, best_mean_tension, best_start)
         if candidate_key > best_key:
@@ -207,10 +253,17 @@ def _select_climax_region(
             best_mean_tension = mean_tension
 
     climax_region_start = best_start
-    climax_region_end = min(total, best_start + window_size)
+    best_window = _indices_in_position_range(
+        positions,
+        positions[best_start],
+        positions[best_start] + window_char,
+        include_lower=True,
+        include_upper=False,
+    )
+    climax_region_end = best_window[-1] + 1 if best_window else min(total, best_start + 1)
     representative_peak_idx = max(
         range(climax_region_start, climax_region_end),
-        key=lambda idx: (tension_composite_scores[idx], idx),
+        key=lambda idx: (tension_scores[idx], idx),
     )
     return (
         climax_region_start,
@@ -223,61 +276,80 @@ def _select_climax_region(
 
 
 def _select_act1_boundary(
-    event_types: list[str],
-    cliffhangers: list[int],
-    pivot_moments: list[int],
-    tension_composite_scores: list[float],
+    positions: Sequence[float],
+    event_types: Sequence[str],
+    cliffhangers: Sequence[int],
+    pivot_moments: Sequence[int],
+    tension_scores: Sequence[float],
     *,
     climax_region_start: int,
     representative_peak_idx: int,
 ) -> tuple[int, bool, list[ThreeActBoundaryCandidate]]:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2
-    新建原因: 第一幕结束点不再取峰前绝对最低谷，而是选能稳定识别“进入持续上升段”的结构切分点。
-    """
-    total = len(tension_composite_scores)
+    """第一幕边界选择（§10/§19.8 字符坐标版）：6% 跨度双窗口择优。"""
+    total = len(tension_scores)
     if total < 3:
         return 0, True, []
 
-    boundary_window_size = min(max(climax_region_start, 1), _clamp(round(total * 0.06), 6, 18))
-    if boundary_window_size <= 0:
-        return find_valley_before_peak(tension_composite_scores, representative_peak_idx), True, []
+    span = positions[-1] - positions[0]
+    if span <= 0:
+        return find_valley_before_peak(list(tension_scores), representative_peak_idx), True, []
+
+    min_window_char = _char_span_of_n_points(positions, min(6, total))
+    max_window_char = _char_span_of_n_points(positions, min(18, total))
+    window_char = max(0.06 * span, min_window_char)
+    if max_window_char > min_window_char:
+        window_char = min(window_char, max_window_char)
+    if climax_region_start > 0:
+        window_char = min(window_char, positions[climax_region_start] - positions[0])
+    if window_char <= 0:
+        return find_valley_before_peak(list(tension_scores), representative_peak_idx), True, []
+
+    # 第一幕结束点不应早于主高潮区起点的一半（字符中点），且要能放下完整前窗；
+    # 也不应紧贴主高潮区，主高潮区前留出两个后窗的缓冲带。
+    earliest_boundary_pos = max(
+        positions[0] + window_char,
+        (positions[0] + positions[climax_region_start]) / 2,
+    )
+    latest_boundary_pos = positions[climax_region_start] - 2 * window_char
 
     candidates: list[ThreeActBoundaryCandidate] = []
-    # 三幕里的第一幕结束点不应早于主高潮区起点的一半，
-    # 否则前段任意一次小抬升都可能被误判成“正式进入第二幕”。
-    earliest_boundary = max(boundary_window_size, climax_region_start // 2)
-    # 第一幕结束点不应该落到“紧贴主高潮区”的最后一跳上，
-    # 因此给主高潮区前再留出一个完整后窗缓冲带，避免边界直接吃进第三幕前沿。
-    latest_boundary = climax_region_start - (2 * boundary_window_size)
-    for boundary_idx in range(earliest_boundary, latest_boundary + 1):
-        before_start = boundary_idx - boundary_window_size
-        before_end = boundary_idx
-        after_start = boundary_idx
-        after_end = boundary_idx + boundary_window_size
-        before_mean_tension = _compute_window_mean(tension_composite_scores, before_start, before_end)
-        after_mean_tension = _compute_window_mean(tension_composite_scores, after_start, after_end)
-        before_structure_density, conflict_before, plot_flag_before = _compute_structure_density(
-            event_types,
-            cliffhangers,
-            pivot_moments,
-            before_start,
-            before_end,
+    for boundary_idx in range(total):
+        boundary_pos = positions[boundary_idx]
+        if boundary_pos < earliest_boundary_pos or boundary_pos > latest_boundary_pos:
+            continue
+        before_indices = _indices_in_position_range(
+            positions,
+            boundary_pos - window_char,
+            boundary_pos,
+            include_lower=False,
+            include_upper=False,
         )
-        after_structure_density, conflict_after, plot_flag_after = _compute_structure_density(
-            event_types,
-            cliffhangers,
-            pivot_moments,
-            after_start,
-            after_end,
+        after_indices = _indices_in_position_range(
+            positions,
+            boundary_pos,
+            boundary_pos + window_char,
+            include_lower=True,
+            include_upper=False,
         )
+        if not before_indices or not after_indices:
+            continue
+        before_mean_tension = sum(tension_scores[j] for j in before_indices) / len(before_indices)
+        after_mean_tension = sum(tension_scores[j] for j in after_indices) / len(after_indices)
+        before_conflict_count = sum(1 for j in before_indices if event_types[j] == "冲突")
+        after_conflict_count = sum(1 for j in after_indices if event_types[j] == "冲突")
+        before_plot_flag_count = sum(cliffhangers[j] for j in before_indices) + sum(
+            pivot_moments[j] for j in before_indices
+        )
+        after_plot_flag_count = sum(cliffhangers[j] for j in after_indices) + sum(
+            pivot_moments[j] for j in after_indices
+        )
+        before_structure_density = (before_conflict_count + before_plot_flag_count) / len(before_indices)
+        after_structure_density = (after_conflict_count + after_plot_flag_count) / len(after_indices)
         if after_mean_tension <= before_mean_tension or after_structure_density <= before_structure_density:
             continue
 
-        combined_uplift = (
-            (after_mean_tension - before_mean_tension)
-            + (after_structure_density - before_structure_density)
+        combined_uplift = (after_mean_tension - before_mean_tension) + (
+            after_structure_density - before_structure_density
         )
         candidates.append(
             ThreeActBoundaryCandidate(
@@ -286,16 +358,16 @@ def _select_act1_boundary(
                 after_mean_tension=after_mean_tension,
                 before_structure_density=before_structure_density,
                 after_structure_density=after_structure_density,
-                conflict_count_before=conflict_before,
-                conflict_count_after=conflict_after,
-                plot_flag_count_before=plot_flag_before,
-                plot_flag_count_after=plot_flag_after,
+                conflict_count_before=before_conflict_count,
+                conflict_count_after=after_conflict_count,
+                plot_flag_count_before=before_plot_flag_count,
+                plot_flag_count_after=after_plot_flag_count,
                 combined_uplift=combined_uplift,
             )
         )
 
     if not candidates:
-        return find_valley_before_peak(tension_composite_scores, representative_peak_idx), True, []
+        return find_valley_before_peak(list(tension_scores), representative_peak_idx), True, []
 
     best_candidate = max(candidates, key=lambda candidate: (candidate.combined_uplift, -candidate.boundary_idx))
     candidates.sort(key=lambda candidate: (-candidate.combined_uplift, candidate.boundary_idx))
@@ -303,18 +375,16 @@ def _select_act1_boundary(
 
 
 def analyze_three_act_structure(
-    event_types: list[str],
-    cliffhangers: list[int],
-    pivot_moments: list[int],
-    tension_composite_scores: list[float],
+    positions: Sequence[float],
+    event_types: Sequence[str],
+    cliffhangers: Sequence[int],
+    pivot_moments: Sequence[int],
+    tension_scores: Sequence[float],
+    min_act_ratio: float = 0.05,
 ) -> ThreeActStructureDiagnostics:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2
-    新建原因: aggregate 主链需要从现有注解信号和张力曲线联合计算三幕比例，
-              并保留可解释的主高潮区与结构切分点诊断结果。
-    """
-    if not tension_composite_scores:
+    """三幕结构诊断（字符进度轴）：8%/6% 窗口选区，字符位置算比例。"""
+    _validate_position_inputs(positions, tension_scores)
+    if not tension_scores:
         return ThreeActStructureDiagnostics(
             act1_ratio=0.0,
             act2_ratio=0.0,
@@ -330,8 +400,9 @@ def analyze_three_act_structure(
             candidate_boundaries=[],
         )
 
-    total = len(tension_composite_scores)
-    if total < 3:
+    total = len(tension_scores)
+    span = positions[-1] - positions[0]
+    if total < 3 or span <= 0:
         equal_ratio = round(1 / 3, 4)
         return ThreeActStructureDiagnostics(
             act1_ratio=equal_ratio,
@@ -339,12 +410,12 @@ def analyze_three_act_structure(
             act3_ratio=equal_ratio,
             climax_region_start=0,
             climax_region_end=max(total - 1, 0),
-            representative_peak_idx=find_global_peak(tension_composite_scores),
+            representative_peak_idx=find_global_peak(list(tension_scores)),
             act1_boundary_idx=0,
             boundary_fallback_used=True,
             climax_window_conflicts=0,
             climax_window_plot_flags=0,
-            climax_window_mean_tension=_compute_window_mean(tension_composite_scores, 0, total),
+            climax_window_mean_tension=_compute_window_mean(list(tension_scores), 0, total),
             candidate_boundaries=[],
         )
 
@@ -356,29 +427,31 @@ def analyze_three_act_structure(
         climax_window_plot_flags,
         climax_window_mean_tension,
     ) = _select_climax_region(
+        positions,
         event_types,
         cliffhangers,
         pivot_moments,
-        tension_composite_scores,
+        tension_scores,
     )
     act1_boundary_idx, boundary_fallback_used, candidate_boundaries = _select_act1_boundary(
+        positions,
         event_types,
         cliffhangers,
         pivot_moments,
-        tension_composite_scores,
+        tension_scores,
         climax_region_start=climax_region_start,
         representative_peak_idx=representative_peak_idx,
     )
 
-    act1_raw = act1_boundary_idx / total
+    act1_raw = (positions[act1_boundary_idx] - positions[0]) / span
     if representative_peak_idx == total - 1:
-        act2_raw = (total - act1_boundary_idx) / total
+        act2_raw = (positions[-1] - positions[act1_boundary_idx]) / span
         act3_raw = 0.0
     else:
-        act2_raw = (representative_peak_idx - act1_boundary_idx) / total
-        act3_raw = (total - representative_peak_idx) / total
+        act2_raw = (positions[representative_peak_idx] - positions[act1_boundary_idx]) / span
+        act3_raw = (positions[-1] - positions[representative_peak_idx]) / span
 
-    ratio_result = _build_min_ratio_normalized_result(act1_raw, act2_raw, act3_raw)
+    ratio_result = _build_min_ratio_normalized_result(act1_raw, act2_raw, act3_raw, min_ratio=min_act_ratio)
     return ThreeActStructureDiagnostics(
         act1_ratio=ratio_result["act1_ratio"],
         act2_ratio=ratio_result["act2_ratio"],
@@ -396,17 +469,15 @@ def analyze_three_act_structure(
 
 
 def compute_three_act_ratio_v2(
+    positions: Sequence[float],
     event_types: list[str],
     cliffhangers: list[int],
     pivot_moments: list[int],
     tension_composite_scores: list[float],
 ) -> dict[str, float]:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2
-    新建原因: aggregate 主链需要三幕比例新口径，但保留旧的单曲线函数给回归对照和简单调用方。
-    """
+    """三幕比例：归一化字符进度轴。"""
     return analyze_three_act_structure(
+        positions,
         event_types,
         cliffhangers,
         pivot_moments,
@@ -421,57 +492,56 @@ def compute_three_act_ratio(
 
 
 def compute_climax_spacing(
-    chunk_ids: list[int],
-    tension_composite_scores: list[float],
-) -> float:
-    if not chunk_ids or not tension_composite_scores:
-        return 0.0
-    if len(chunk_ids) != len(tension_composite_scores):
-        return 0.0
+    positions: Sequence[float],
+    tension_scores: Sequence[float],
+) -> float | None:
+    """高潮间距：相邻峰的归一化进度差均值；峰 <2 时 null。"""
+    if not positions or not tension_scores:
+        return None
+    if len(positions) != len(tension_scores):
+        return None
+    _validate_position_inputs(positions, tension_scores)
 
-    peak_indices = find_local_peaks(tension_composite_scores, len(chunk_ids))
-
+    peak_indices = find_local_peaks(positions, tension_scores)
     if len(peak_indices) < 2:
-        return 0.0
+        return None
 
-    spacings = []
-    for i in range(1, len(peak_indices)):
-        spacing = chunk_ids[peak_indices[i]] - chunk_ids[peak_indices[i - 1]]
-        spacings.append(spacing)
-
-    return sum(spacings) / len(spacings) if spacings else 0.0
+    spacings = [positions[peak_indices[i]] - positions[peak_indices[i - 1]] for i in range(1, len(peak_indices))]
+    return sum(spacings) / len(spacings) if spacings else None
 
 
 def compute_middle_collapse_index(
-    chunk_ids: list[int],
-    tension_composite_scores: list[float],
-) -> float:
-    if not chunk_ids or not tension_composite_scores:
-        return 0.0
+    positions: Sequence[float],
+    tension_scores: Sequence[float],
+) -> float | None:
+    """中段塌陷：进度 [0.3,0.7) 区间均值 / 首尾区间均值。"""
+    if not positions or not tension_scores:
+        return None
+    if len(positions) != len(tension_scores):
+        return None
+    if len(positions) < settings.metrics.middle_collapse_min_chunks:
+        return None
+    _validate_position_inputs(positions, tension_scores)
 
-    if len(chunk_ids) != len(tension_composite_scores):
-        return 0.0
+    span = positions[-1] - positions[0]
+    if span <= 0:
+        return None
 
-    total = len(chunk_ids)
-    if total < settings.metrics.middle_collapse_min_chunks:
-        return 0.0
+    def avg_in_range(lo: float, hi: float) -> float | None:
+        vals = [tension_scores[i] for i, pos in enumerate(positions) if lo <= (pos - positions[0]) / span < hi]
+        if not vals:
+            return None
+        return sum(vals) / len(vals)
 
-    start_idx = int(total * 0.3)
-    end_idx = int(total * 0.7)
-
-    def compute_avg_score(indices: range) -> float:
-        scores = [tension_composite_scores[i] for i in indices if i < len(tension_composite_scores)]
-        return sum(scores) / len(scores) if scores else 0.0
-
-    head_score = compute_avg_score(range(0, start_idx))
-    middle_score = compute_avg_score(range(start_idx, end_idx))
-    tail_score = compute_avg_score(range(end_idx, total))
-
-    head_tail_avg = (head_score + tail_score) / 2
+    head = avg_in_range(0.0, 0.3)
+    middle = avg_in_range(0.3, 0.7)
+    tail = avg_in_range(0.7, 1.0000001)
+    if head is None or middle is None or tail is None:
+        return None
+    head_tail_avg = (head + tail) / 2
     if head_tail_avg == 0:
-        return 0.0
-
-    return middle_score / head_tail_avg
+        return None
+    return middle / head_tail_avg
 
 
 def compute_event_density(
@@ -497,21 +567,11 @@ def compute_cliffhanger_rate(
 
 
 def compute_climax_profile(
-    tension_composite_scores: list[float],
+    positions: Sequence[float],
+    tension_scores: Sequence[float],
 ) -> dict:
-    """
-    计算多高潮剖面
-
-    在 climax_interval 的基础上增加分布信息，作为三幕比例的补充指标
-
-    返回字段:
-    - climax_count: 高潮数量
-    - climax_positions: 各高潮位于全书的百分比位置
-    - climax_heights: 各高潮的张力值（归一化）
-    - peak_escalation: 是否逐步升级（ascending/descending/flat）
-    - dominant_climax_pos: 最强高潮的位置百分比
-    """
-    if not tension_composite_scores:
+    """多高潮剖面（§10/§19.8 字符坐标版）：真实位置三位小数。"""
+    if not tension_scores:
         return {
             "climax_count": 0,
             "climax_positions": [],
@@ -519,9 +579,9 @@ def compute_climax_profile(
             "peak_escalation": None,
             "dominant_climax_pos": None,
         }
+    _validate_position_inputs(positions, tension_scores)
 
-    total = len(tension_composite_scores)
-    peaks = find_local_peaks(tension_composite_scores, total)
+    peaks = find_local_peaks(positions, tension_scores)
 
     if not peaks:
         return {
@@ -532,12 +592,12 @@ def compute_climax_profile(
             "dominant_climax_pos": None,
         }
 
-    max_val = max(tension_composite_scores)
+    max_val = max(tension_scores)
     if max_val == 0:
         max_val = 1.0
 
-    positions = [round(p / total, 3) for p in peaks]
-    heights = [round(tension_composite_scores[p] / max_val, 3) for p in peaks]
+    climax_positions = [round(positions[p], 3) for p in peaks]
+    heights = [round(tension_scores[p] / max_val, 3) for p in peaks]
 
     escalation = None
     if len(heights) >= 3:
@@ -556,11 +616,11 @@ def compute_climax_profile(
                 escalation = "flat"
 
     dominant_idx = heights.index(max(heights))
-    dominant_pos = positions[dominant_idx]
+    dominant_pos = climax_positions[dominant_idx]
 
     return {
         "climax_count": len(peaks),
-        "climax_positions": positions,
+        "climax_positions": climax_positions,
         "climax_heights": heights,
         "peak_escalation": escalation,
         "dominant_climax_pos": dominant_pos,

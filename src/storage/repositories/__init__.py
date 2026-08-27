@@ -11,15 +11,13 @@ from .annotation import (
 )
 from .base import BaseRepository, T
 from .chapter_repository import ChapterRepository
-from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
 from .graph import EntitySnapshotRow, GraphChangeRow, GraphRepository, GraphSnapshotRow, RelationSnapshotRow
+from .paragraph_repository import ParagraphRepository
 from .protocols import (
     AnnotationRepositoryProtocol,
-    ChunkRepositoryProtocol,
     DiagnosisRepositoryProtocol,
     RunRepositoryProtocol,
-    StatsRepositoryProtocol,
 )
 from .run_repository import RunRepository
 from .stats import StatsRepository
@@ -36,12 +34,8 @@ __all__ = [
     "ForeshadowingRepository",
     "CaseResolutionMappingRepository",
     "DatabaseAnnotationQueryService",
-    "ChunkRepository",
-    "ChunkStyleData",
     "RunRepositoryProtocol",
-    "ChunkRepositoryProtocol",
     "AnnotationRepositoryProtocol",
-    "StatsRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "GraphRepository",
     "EntitySnapshotRow",
@@ -49,5 +43,6 @@ __all__ = [
     "GraphSnapshotRow",
     "GraphChangeRow",
     "DiagnosisRepository",
+    "ParagraphRepository",
     "StatsRepository",
 ]

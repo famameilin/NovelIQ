@@ -2,128 +2,48 @@
 预处理辅助函数模块 (workflows层)
 
 包含预处理的核心业务逻辑函数，纯业务逻辑、不依赖入口层，可被多个入口点复用。
+
+2026-08-14 M8b：_compute_chunk_style_metrics（chunk_style 链）已删除——
+风格指标以 paragraph_metrics 的充分统计量为事实源。
+2026-08-15 词表 v3：词表数据在 src/lexicons/tables 模块级加载为常量，
+本函数仅按段落链契约组装，不再经 registry 读取。
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-from src.chunking.chunker import Chunk
-from src.lexicons.registry import LexiconRegistry
-from src.metrics.style_metrics import (
-    dialogue_ratio,
-    function_word_distribution,
-    metaphor_density,
-    mtld,
-    parse_semantic_category_lexicon,
-    pause_density,
-    semantic_category_densities,
-    sentence_length_stats,
-    ttr,
+from src.lexicons.tables import (
+    COMBAT_TERMS,
+    FUNCTION_WORDS_TERMS,
+    IMAGERY_TERMS,
+    NEGATIVE_TERMS,
+    POSITIVE_TERMS,
+    SEMANTIC_CATEGORIES,
+    SENSORY_TERMS,
 )
-from src.storage.repositories import ChunkStyleData
 
 
-def _load_all_lexicons_for_preprocess(
-    lexicon_dir: Path,
-) -> dict[str, list[str] | dict[str, Any]]:
+def _load_all_lexicons_for_preprocess() -> dict[str, list[str] | dict[str, Any]]:
     """
     加载所有词典用于预处理
 
-    从 run_preprocess 中提取，负责加载所有需要的词典
-
+    词表数据来自 tables 常量（registry 一次性读取）：
+    - pos/neg 为加权 dict（M4 弃用权重后改词条集合统一 1.0）
+    - 战斗词条只取词条键，权重不参与密度计算，统一按 1.0 登记
+    - semantic_categories 为类别标题解析后的分类字典
     """
-    registry = LexiconRegistry(base_dir=lexicon_dir)
-    registry.load()
-
     lexicons: dict[str, list[str] | dict[str, Any]] = {}
-    lexicons["sensory"] = registry.get("style.sensory_5sense")
-    lexicons["function_words"] = registry.get("style.function_words")
-    lexicons["imagery"] = registry.get("culture.imagery")
-    # 2026-08-13 P2-4 战斗词条用于 fight_density（tension_proxy 只取词条键，
+    lexicons["sensory"] = SENSORY_TERMS
+    lexicons["function_words"] = FUNCTION_WORDS_TERMS
+    lexicons["imagery"] = IMAGERY_TERMS
+    # 战斗词条用于 fight_density（tension_proxy 只取词条键，
     # 权重不参与密度计算，统一按 1.0 登记）
-    lexicons["fight_terms"] = dict.fromkeys(registry.get("tension.action_terms"), 1.0)
-
-    # semantic_category 需要解析为分类字典
-
-    semantic_category_file = lexicon_dir / "semantic_category.txt"
-    if semantic_category_file.exists():
-        lexicons["semantic_categories"] = parse_semantic_category_lexicon(str(semantic_category_file))
-    else:
-        lexicons["semantic_categories"] = {}
+    lexicons["fight_terms"] = dict.fromkeys(COMBAT_TERMS, 1.0)
+    # 段落情绪分子（§5.3 positive/negative_weight_sum）：加权词表（v3 过渡期，
+    # M4 弃用权重后改词条集合统一 1.0）
+    lexicons["pos_terms"] = POSITIVE_TERMS
+    lexicons["neg_terms"] = NEGATIVE_TERMS
+    lexicons["semantic_categories"] = SEMANTIC_CATEGORIES
 
     return lexicons
-
-
-def _compute_chunk_style_metrics(
-    chunk: Chunk,
-    tokens: list[str],
-    sensory_terms: list[str],
-    function_words: list[str],
-    semantic_categories: dict,
-    imagery_terms: list[str],
-    fight_terms: dict[str, float] | None = None,
-) -> ChunkStyleData:
-    """
-    计算单个chunk的风格指标
-
-    从 run_preprocess 中提取，负责计算chunk的风格指标
-
-    """
-    from src.metrics.rhythm_metrics import tension_proxy
-    from src.metrics.style_metrics import imagery_density, sensory_density
-
-    mtld_val = mtld(tokens)
-    ttr_val = ttr(tokens)
-    sent_stats = sentence_length_stats(chunk.text)
-    pause_val = pause_density(chunk.text)
-    dialogue_val = dialogue_ratio(chunk.text)
-    metaphor_val = metaphor_density(chunk.text)
-
-    # 2026-08-13 P2-4 战斗/感叹/问句密度接入 rhythm_metrics.tension_proxy，
-    # 替换原先硬编码 0.0（无战斗词条时 fight_density 自然为 0）
-    proxy = tension_proxy(chunk.text, fight_terms or {})
-
-    sensory_val = 0.0
-    if sensory_terms:
-        sensory_val = sensory_density(chunk.text, sensory_terms)
-    imagery_lexicon_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else None
-
-    fw_dist = {}
-    if function_words:
-        fw_dist = function_word_distribution(tokens, function_words)
-    fw_vector_json = json.dumps(fw_dist, ensure_ascii=False) if fw_dist else "{}"
-
-    cat_densities = {}
-    if semantic_categories:
-        cat_densities = semantic_category_densities(chunk.text, semantic_categories)
-
-    return ChunkStyleData(
-        chunk_id=chunk.index,
-        mtld=mtld_val,
-        ttr=ttr_val,
-        avg_sent_len=sent_stats["avg_sent_len"],
-        sent_len_std=sent_stats["sent_len_std"],
-        d_value=sent_stats["d_value"],
-        pause_density=pause_val,
-        fight_density=proxy["fight_density"],
-        exclaim_density=proxy["exclaim_density"],
-        dialogue_ratio=dialogue_val,
-        question_density=proxy["question_density"],
-        sensory_density=sensory_val,
-        metaphor_density=metaphor_val,
-        function_word_vector=fw_vector_json,
-        category_density_combat=cat_densities.get("combat", 0.0),
-        category_density_body=cat_densities.get("body", 0.0),
-        category_density_relation=cat_densities.get("relation", 0.0),
-        category_density_faction=cat_densities.get("faction", 0.0),
-        category_density_command=cat_densities.get("command", 0.0),
-        category_density_action=cat_densities.get("action", 0.0),
-        category_density_psychology=cat_densities.get("psychology", 0.0),
-        category_density_measure=cat_densities.get("measure", 0.0),
-        category_density_emotion=cat_densities.get("emotion", 0.0),
-        category_density_color=cat_densities.get("color", 0.0),
-        imagery_lexicon_density=imagery_lexicon_val,
-    )

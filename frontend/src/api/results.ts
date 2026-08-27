@@ -1,18 +1,21 @@
 import { apiClient } from "./client";
 import type {
   Character,
-  ChunkAnnotation,
-  ChunkCurvePoint,
+  ChapterAnnotation,
+  ParagraphCurvePoint,
+  ChapterMetricsResponse,
+  GlobalStats,
   Topic,
   DiagnosisResult,
   ForeshadowingThread,
   GraphData,
   GraphChangesPageResponse,
-  TimelineResponse,
+  EventTimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
   CharacterStatsMetrics,
   StyleStatsMetrics,
+  EmotionTrendWindow,
 } from "./types";
 
 export async function getCharacters(
@@ -33,30 +36,76 @@ export async function getCharacters(
   return data;
 }
 
-export async function getChunkCurves(
+// 段落粒度曲线：x 轴使用 0-1 position 数字坐标，max_points 用于 LTTB 抽稀
+export async function getParagraphCurves(
   novelId: string,
   taskId: string,
-  options?: { page?: number; page_size?: number }
-): Promise<ChunkCurvePoint[]> {
-  const { data } = await apiClient.get<ChunkCurvePoint[]>(
-    `/api/novels/${novelId}/chunk-curves`,
+  options?: { maxPoints?: number }
+): Promise<ParagraphCurvePoint[]> {
+  const { data } = await apiClient.get<ParagraphCurvePoint[]>(
+    `/api/novels/${novelId}/paragraph-curves`,
     {
       params: {
         task_id: taskId,
-        ...(options?.page != null && { page: options.page }),
-        ...(options?.page_size != null && { page_size: options.page_size }),
+        ...(options?.maxPoints != null && { max_points: options.maxPoints }),
       },
     }
   );
   return data;
 }
 
-export async function getChunkAnnotations(
+// 情绪趋势窗口聚合：window_paragraphs 作用于 range 区间内（缺省=全书）
+export async function getEmotionTrend(
+  novelId: string,
+  taskId: string,
+  options?: { range?: [number, number]; windowParagraphs?: number }
+): Promise<EmotionTrendWindow[]> {
+  const { data } = await apiClient.get<EmotionTrendWindow[]>(
+    `/api/novels/${novelId}/emotion-trend`,
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.range && { range: options.range.join(",") }),
+        ...(options?.windowParagraphs != null && { window_paragraphs: options.windowParagraphs }),
+      },
+    }
+  );
+  return data;
+}
+
+// 章节指标汇总（由段落充分统计量聚合）
+export async function getChapterMetrics(
   novelId: string,
   taskId: string
-): Promise<ChunkAnnotation[]> {
-  const { data } = await apiClient.get<ChunkAnnotation[]>(
-    `/api/novels/${novelId}/chunk-annotations`,
+): Promise<ChapterMetricsResponse> {
+  const { data } = await apiClient.get<ChapterMetricsResponse>(
+    `/api/novels/${novelId}/chapter-metrics`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+/**
+ * 2026-08-16 获取全书波动统计
+ * 读取后端持久化的全书情绪与节奏聚合，供详情概览展示
+ */
+export async function getGlobalStats(
+  novelId: string,
+  taskId: string,
+): Promise<GlobalStats> {
+  const { data } = await apiClient.get<GlobalStats>(
+    `/api/novels/${novelId}/metrics/global-stats`,
+    { params: { task_id: taskId } },
+  );
+  return data;
+}
+
+export async function getChapterAnnotations(
+  novelId: string,
+  taskId: string
+): Promise<ChapterAnnotation[]> {
+  const { data } = await apiClient.get<ChapterAnnotation[]>(
+    `/api/novels/${novelId}/chapter-annotations`,
     { params: { task_id: taskId } }
   );
   return data;
@@ -99,7 +148,7 @@ export async function getForeshadowingThreads(
 export async function getGraph(
   novelId: string,
   taskId: string,
-  options?: { chapterId?: number; graphVersionId?: string }
+  options?: { chapterId?: number }
 ): Promise<GraphData> {
   const { data } = await apiClient.get<GraphData>(
     `/api/novels/${novelId}/graph`,
@@ -107,7 +156,6 @@ export async function getGraph(
       params: {
         task_id: taskId,
         ...(options?.chapterId != null ? { chapter_id: options.chapterId } : {}),
-        ...(options?.graphVersionId ? { graph_version_id: options.graphVersionId } : {}),
       },
     }
   );
@@ -134,13 +182,13 @@ export async function getGraphChanges(
   return data;
 }
 
-// 获取叙事时间轴数据，支持 include_curve 参数
+// 获取叙事时间轴数据，支持 include_curve 参数（仅新森林合同 EventTimelineResponse）
 export async function getTimeline(
   novelId: string,
   taskId: string,
   options?: { includeCurve?: boolean }
-): Promise<TimelineResponse> {
-  const { data } = await apiClient.get<TimelineResponse>(
+): Promise<EventTimelineResponse> {
+  const { data } = await apiClient.get<EventTimelineResponse>(
     `/api/novels/${novelId}/timeline`,
     {
       params: {

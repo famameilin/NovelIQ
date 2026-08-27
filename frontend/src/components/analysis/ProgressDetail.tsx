@@ -153,7 +153,7 @@ function ProgressBar({ stage, phase, current, total, percent, message }: Progres
         <span className="text-sm font-medium text-text-primary">{displayLabel}</span>
         <div className="flex items-center gap-4">
           <span className="text-xs text-text-muted">
-            chunk {current}/{total}
+            章 {current}/{total}
           </span>
           <span className="text-xs font-medium tabular-nums text-primary">
             {(percent ?? 0).toFixed(1)}%

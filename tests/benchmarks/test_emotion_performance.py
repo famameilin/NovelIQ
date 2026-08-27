@@ -16,14 +16,20 @@ from __future__ import annotations
 
 import time
 
-from src.lexicons.registry import LexiconRegistry, get_weighted_lexicon_set
-from src.metrics.emotion_metrics import (
-    count_negations_before,
-    lexical_sentiment_density,
-    load_negation_words,
-)
+from src.lexicons.registry import LexiconRegistry
+from src.metrics.emotion_metrics import lexical_sentiment_density
 from src.metrics.lexicon_metrics import count_weighted_hits, get_emotion_spans
-from src.metrics.text_utils import tokenize_words
+from src.metrics.negation import is_flipped, load_negation_spec
+from src.utils.text_utils import tokenize_words
+
+
+def _lexicon_set(registry: LexiconRegistry) -> dict[str, dict[str, int]]:
+    """v3：registry 直接组装加权词表集合（get_weighted_lexicon_set 已删除）"""
+    return {
+        "pos_terms": registry.get_weighted("positive.txt"),
+        "neg_terms": registry.get_weighted("negative.txt"),
+        "fight_terms": dict.fromkeys(registry.get("combat.txt"), 1.0),
+    }
 
 
 def generate_test_text(length: int = 1000) -> str:
@@ -44,17 +50,17 @@ def test_negation_detection_performance():
     print("否定词检测性能测试")
     print("=" * 60)
 
-    negation_words = load_negation_words()
+    spec = load_negation_spec()
     test_text = "不是不快乐，而是充满了希望和喜悦"
     emotion_pos = test_text.find("快乐")
 
     iterations = 10000
     start = time.time()
     for _ in range(iterations):
-        count_negations_before(test_text, emotion_pos, negation_words, window=6)
+        is_flipped(test_text, emotion_pos, spec)
     elapsed = time.time() - start
 
-    print(f"否定词数量: {len(negation_words)}")
+    print(f"否定词数量: {len(spec.hard) + len(spec.modal) + len(spec.double)}")
     print(f"测试次数: {iterations}")
     print(f"总耗时: {elapsed:.3f}秒")
     print(f"平均耗时: {elapsed / iterations * 1000:.3f}毫秒/次")
@@ -73,8 +79,8 @@ def test_lexicon_matching_performance():
     registry = LexiconRegistry()
     registry.load()
 
-    pos_terms = get_weighted_lexicon_set(registry).pos_terms
-    neg_terms = get_weighted_lexicon_set(registry).neg_terms
+    pos_terms = _lexicon_set(registry)["pos_terms"]
+    neg_terms = _lexicon_set(registry)["neg_terms"]
 
     print(f"正面词条数: {len(pos_terms)}")
     print(f"负面词条数: {len(neg_terms)}")
@@ -105,7 +111,7 @@ def test_emotion_spans_performance():
     registry = LexiconRegistry()
     registry.load()
 
-    pos_terms = get_weighted_lexicon_set(registry).pos_terms
+    pos_terms = _lexicon_set(registry)["pos_terms"]
     test_text = generate_test_text(1000)
     tokens = tokenize_words(test_text)
 
@@ -131,9 +137,9 @@ def test_full_emotion_density_performance():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
-    neg_terms = lexicon_set.neg_terms
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
+    neg_terms = lexicon_set["neg_terms"]
 
     for text_length in [100, 500, 1000, 5000]:
         test_text = generate_test_text(text_length)
@@ -161,14 +167,11 @@ def test_weighted_multi_type_performance():
     registry = LexiconRegistry()
     registry.load()
 
-    weighted_lexicons = [
-        get_weighted_lexicon_set(registry, pos_domains=["wuxia"], neg_domains=["wuxia"]),
-        get_weighted_lexicon_set(registry, pos_domains=["urban"], neg_domains=["urban"]),
-        get_weighted_lexicon_set(registry, pos_domains=["xuanhuan"], neg_domains=["xuanhuan"]),
-    ]
+    # v3：domain 扩展词表已删，多类型演示基于 registry 单集合
+    weighted_lexicons = [_lexicon_set(registry), _lexicon_set(registry)]
 
     for i, lex in enumerate(weighted_lexicons):
-        print(f"类型{i + 1}: pos={len(lex.pos_terms)}, neg={len(lex.neg_terms)}")
+        print(f"类型{i + 1}: pos={len(lex['pos_terms'])}, neg={len(lex['neg_terms'])}")
 
     test_text = generate_test_text(1000)
 
@@ -177,7 +180,7 @@ def test_weighted_multi_type_performance():
         weighted_pos = 0.0
         weighted_neg = 0.0
         for lex_set in weighted_lexicons:
-            result = lexical_sentiment_density(test_text, lex_set.pos_terms, lex_set.neg_terms)
+            result = lexical_sentiment_density(test_text, lex_set["pos_terms"], lex_set["neg_terms"])
             weighted_pos += result["pos_density"]
             weighted_neg += result["neg_density"]
     elapsed = time.time() - start
@@ -200,9 +203,9 @@ def test_end_to_end_performance():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
-    neg_terms = lexicon_set.neg_terms
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
+    neg_terms = lexicon_set["neg_terms"]
 
     chunk_count = 100
     chunk_length = 500
@@ -235,10 +238,10 @@ def profile_hotspot():
     registry = LexiconRegistry()
     registry.load()
 
-    lexicon_set = get_weighted_lexicon_set(registry)
-    pos_terms = lexicon_set.pos_terms
-    neg_terms = lexicon_set.neg_terms
-    negation_words = load_negation_words()
+    lexicon_set = _lexicon_set(registry)
+    pos_terms = lexicon_set["pos_terms"]
+    neg_terms = lexicon_set["neg_terms"]
+    neg_spec = load_negation_spec()
 
     test_text = generate_test_text(1000)
 
@@ -267,10 +270,10 @@ def profile_hotspot():
         pos_spans = get_emotion_spans(test_text, tokens, pos_terms.keys())
         neg_spans = get_emotion_spans(test_text, tokens, neg_terms.keys())
         for start_pos, _, _ in pos_spans:
-            count_negations_before(test_text, start_pos, negation_words)
+            is_flipped(test_text, start_pos, neg_spec)
             total_negation_checks += 1
         for start_pos, _, _ in neg_spans:
-            count_negations_before(test_text, start_pos, negation_words)
+            is_flipped(test_text, start_pos, neg_spec)
             total_negation_checks += 1
     elapsed = time.time() - start
     print(f"   耗时: {elapsed / 10 * 1000:.2f}毫秒/次")

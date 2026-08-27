@@ -166,7 +166,7 @@ def test_insert_token_usage_writes_cache_cost_and_accounting_source() -> None:
         prompt_tokens=100,
         total_tokens=120,
         completion_tokens=20,
-        chunk_id=5,
+        chapter_id=5,
         cache_read_tokens=30,
         cost=0.42,
         accounting_source="reported",

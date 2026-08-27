@@ -1,52 +1,73 @@
 """
-词表注册中心 (Lexicon Registry v2)
+词表注册中心 (Lexicon Registry v3)
 
-基于 registry.yaml + conflict_matrix.yaml 的分层词表加载系统
+基于 registry.yaml 的登记式词表加载系统，唯一事实源。
 
-核心能力:
-  - 从 registry.yaml 读取词表分层归属与元信息
-  - 从 conflict_matrix.yaml 加载跨表冲突声明
-  - 支持领域扩展词表（domain/ 子目录）的增量叠加
-  - 支持排除借用词（exclude_borrowed）避免重复计数
-  - 提供版本 hash 用于报告和审计
+设计（2026-08-15 按用户要求）：
+  - 表目标识即文件名（data/lexicons/ 下无语义 key 层），元数据登记
+    kind / status / weight_policy / consumers。
+  - 消费方经 src.config.constants 的 LEXICON_* 常量引用文件名，不写魔法字符串。
+  - 加载报错保留（fail-fast）：registry.yaml 缺失、注册词表文件缺失 -> 加载即报错，
+    防止分析链静默拿到空词表降级。
+  - 内容与声明类校验宽容：非法元数据（kind/status/weight_policy）
+    / consumers 异常 -> warning + 空结果/默认值，词表与注册表可自由迭代；
+     count/file_hash 声明校验已删除。
+  - version_hash 为与加载状态无关的确定性 hash：
+    覆盖 registry.yaml + conflict_matrix.yaml + 全部注册文件原文
+  - consumers 登记真实消费点（信息性字段，由测试侧校验登记完整性）
 
 使用方式::
 
     reg = LexiconRegistry()
-    pos_terms = reg.get("emotion.positive")           # 基础词表
-    neg_ext = reg.get_with_domains("emotion.negative", ["xianxia"])  # 带修仙扩展
-
+    pos_terms = reg.get(LEXICON_POSITIVE)               # 词条列表
+    pos_weighted = reg.get_weighted(LEXICON_POSITIVE)    # 加权 dict（M4 弃用权重前过渡用）
+    sem_files = reg.get_file_paths(LEXICON_SEMANTIC_CATEGORY)
 """
 
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 from loguru import logger
 
 from src.utils.lexicon_parser import load_lexicon_terms, load_weighted_lexicon
 
-if TYPE_CHECKING:
-    from src.workflows.curve_metrics import WeightedLexiconSet
-
 _DEFAULT_LEXICON_DIR = Path("data/lexicons")
 _REGISTRY_FILE = "registry.yaml"
 _CONFLICT_MATRIX_FILE = "conflict_matrix.yaml"
-_DOMAIN_DIR = "domain"
+
+_ALLOWED_KINDS = frozenset({"emotion", "tension", "style", "tokenizer"})
+_ALLOWED_STATUSES = frozenset({"active", "deprecated"})
+_ALLOWED_WEIGHT_POLICIES = frozenset({"weighted", "uniform", "count"})
+
+
+@dataclass(frozen=True)
+class LexiconSpec:
+    """词表表目（registry.yaml 单条记录的解析结果；key 即 data/lexicons 下的文件名）"""
+
+    key: str
+    kind: str
+    consumers: tuple[str, ...] = ()
+    status: str = "active"
+    weight_policy: str = "uniform"
+    tier: str | None = None
+    polarity: str | None = None
+    description: str = ""
 
 
 class LexiconRegistry:
-    """分层词表注册中心"""
+    """登记式词表注册中心（key 即文件名；加载报错保留，内容/声明类校验宽容）"""
 
     def __init__(self, base_dir: Path | str | None = None) -> None:
         self._base_dir = Path(base_dir) if base_dir else _DEFAULT_LEXICON_DIR
-        self._registry: dict[str, Any] = {}
+        self._specs: dict[str, LexiconSpec] = {}
         self._conflicts: list[dict[str, Any]] = []
         self._cache: dict[str, list[str]] = {}
-        self._domain_cache: dict[str, list[str]] = {}
+        self._weighted_cache: dict[str, dict[str, int]] = {}
         self._loaded = False
 
     @property
@@ -57,15 +78,23 @@ class LexiconRegistry:
     def is_loaded(self) -> bool:
         return self._loaded
 
+    @property
+    def specs(self) -> dict[str, LexiconSpec]:
+        """已登记的全部表目（只读快照）"""
+        return dict(self._specs)
+
     def load(self) -> None:
-        """加载注册表与冲突矩阵"""
+        """加载注册表与冲突矩阵；注册表缺失 / 注册词表文件缺失 -> 报错（fail-fast）"""
         self._load_registry()
         self._load_conflict_matrix()
+        for key, spec in self._specs.items():
+            if spec.status == "active":
+                self._validate_file(key, spec)
         self._loaded = True
         logger.info(
-            "LexiconRegistry loaded: base_dir={}, layers={}, conflicts={}",
+            "LexiconRegistry loaded: base_dir={}, lexicons={}, conflicts={}",
             self._base_dir,
-            len(self._registry.get("layers", {})),
+            len(self._specs),
             len(self._conflicts),
         )
 
@@ -74,105 +103,148 @@ class LexiconRegistry:
         if not self._loaded:
             self.load()
 
-    def get(self, key: str, exclude_borrowed: bool = False) -> list[str]:
+    def get(self, key: str) -> list[str]:
         """
-        获取指定词表
+        获取词表词条（key 即文件名，去重保序）
 
-        Args:
-            key: 词表标识，格式 "layer.lexicon"，如 "emotion.positive"
-            exclude_borrowed: 是否排除被其他表借用的词条
-
-        Returns:
-            词条列表
+        key 均为代码内写死的注册表目（无未知 key 场景，不做专门处理）；
+        词表文件缺失：报错（fail-fast）。
         """
         self.ensure_loaded()
-
-        if key in self._cache and not exclude_borrowed:
+        if key in self._cache:
             return self._cache[key]
 
-        terms = self._load_lexicon_file(key)
+        path = self._base_dir / key
+        if not path.exists():
+            raise FileNotFoundError(f"词表 '{key}' 的文件缺失: {path}")
+        terms = load_lexicon_terms(path)
 
-        if exclude_borrowed:
-            terms = self._exclude_borrowed(key, terms)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for term in terms:
+            if term not in seen:
+                seen.add(term)
+                deduped.append(term)
+        self._cache[key] = deduped
+        return deduped
 
-        self._cache[key] = terms
-        return terms
-
-    def get_with_domains(
-        self, key: str, domain_tags: list[str] | None = None, exclude_borrowed: bool = False
-    ) -> list[str]:
+    def get_weighted(self, key: str) -> dict[str, int]:
         """
-        获取词表 + 领域扩展
+        获取加权词表（"词条\\t权重" 格式；纯词条按默认权重 1）
 
-        基础词表与 domain 扩展的并集去重，domain 是增量叠加而非替换
-
-        Args:
-            key: 词表标识
-            domain_tags: 领域标签列表，如 ["xianxia", "shuwen"]
-            exclude_borrowed: 是否排除借用词
+        key 均为代码内写死的注册表目（无未知 key 场景，不做专门处理）；
+        词表文件缺失：报错（fail-fast）。
         """
-        base_terms = self.get(key, exclude_borrowed=exclude_borrowed)
+        self.ensure_loaded()
+        if key in self._weighted_cache:
+            return self._weighted_cache[key]
 
-        if not domain_tags:
-            return base_terms
+        path = self._base_dir / key
+        if not path.exists():
+            raise FileNotFoundError(f"词表 '{key}' 的文件缺失: {path}")
+        merged = load_weighted_lexicon(path)
+        self._weighted_cache[key] = merged
+        return merged
 
-        cache_key = f"{key}+{','.join(sorted(domain_tags))}"
-        if cache_key in self._domain_cache:
-            return self._domain_cache[cache_key]
-
-        extended = set(base_terms)
-        for tag in domain_tags:
-            domain_terms = self._load_domain_lexicon(tag)
-            if domain_terms:
-                extended.update(domain_terms)
-                logger.debug("Domain '{}' added {} terms to '{}'", tag, len(domain_terms), key)
-
-        result = sorted(extended)
-        self._domain_cache[cache_key] = result
-        return result
+    def get_file_paths(self, key: str) -> list[Path]:
+        """返回词表文件路径（如 semantic_category 的类别解析需要原文）；文件缺失报错"""
+        self.ensure_loaded()
+        path = self._base_dir / key
+        if not path.exists():
+            raise FileNotFoundError(f"词表 '{key}' 的文件缺失: {path}")
+        return [path]
 
     def get_conflicts_for(self, key: str) -> list[dict[str, Any]]:
-        """获取指定词表的跨表冲突声明"""
+        """获取指定词表的跨表冲突声明（仅审计用途，不影响加载结果）"""
         self.ensure_loaded()
         return [c for c in self._conflicts if c.get("primary") == key or key in c.get("referenced_by", [])]
 
     def version_hash(self) -> str:
-        """计算当前词表版本的 SHA256 摘要（用于报告和审计）"""
+        """
+        当前词表版本的 SHA256 摘要（与加载状态无关的确定性 hash）
+
+        覆盖：registry.yaml 原文 + conflict_matrix.yaml 原文 + 每个注册文件全文
+        （缺失文件跳过）。未加载/从未 get 过的词表同样参与 hash。
+        """
         self.ensure_loaded()
         hasher = hashlib.sha256()
-
-        hasher.update(yaml.safe_dump(self._registry).encode())
-
-        for key in sorted(self._cache.keys()):
-            terms_str = ",".join(self._cache[key])
-            hasher.update(f"{key}:{terms_str}".encode())
-
-        hasher.update(yaml.safe_dump(self._conflicts).encode())
-
+        reg_path = self._base_dir / _REGISTRY_FILE
+        if reg_path.exists():
+            hasher.update(reg_path.read_bytes())
+        conflict_path = self._base_dir / _CONFLICT_MATRIX_FILE
+        if conflict_path.exists():
+            hasher.update(conflict_path.read_bytes())
+        for key in sorted(self._specs):
+            path = self._base_dir / key
+            hasher.update(f"{key}:".encode())
+            if path.exists():
+                hasher.update(path.read_bytes())
         return hasher.hexdigest()[:16]
 
     def list_all_keys(self) -> list[str]:
-        """列出所有已注册的词表 key（layer.lexicon 格式）"""
+        """列出所有已登记的词表 key（文件名）"""
         self.ensure_loaded()
-        keys = []
-        for layer_name, layer_data in self._registry.get("layers", {}).items():
-            for lex_name in layer_data.get("lexicons", {}):
-                keys.append(f"{layer_name}.{lex_name}")
-        return keys
+        return sorted(self._specs)
 
     def _load_registry(self) -> None:
-        """读取 registry.yaml"""
         path = self._base_dir / _REGISTRY_FILE
         if not path.exists():
-            logger.warning("registry.yaml not found at {}, using empty registry", path)
-            self._registry = {"layers": {}, "version": "1.0-fallback"}
-            return
+            raise FileNotFoundError(f"registry.yaml not found at {path}")
 
-        with open(path, encoding="utf-8") as f:
-            self._registry = yaml.safe_load(f) or {}
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for key, data in raw.get("lexicons", {}).items():
+            spec = self._parse_spec(key, data)
+            if spec is not None:
+                self._specs[key] = spec
+
+    def _validate_file(self, key: str, spec: LexiconSpec) -> None:
+        """校验词表文件存在（fail-fast：加载不存在的词表报错，防静默空跑）"""
+        path = self._base_dir / key
+        if not path.exists():
+            raise FileNotFoundError(f"词表 '{key}' 的文件缺失: {path}")
+
+    @staticmethod
+    def _parse_spec(key: str, data: Any) -> LexiconSpec | None:
+        """宽容解析：非法表目仅 warning + 跳过/默认，不 raise"""
+        if not isinstance(data, dict):
+            logger.warning("词表 '{}' 的表目不是 mapping，跳过", key)
+            return None
+
+        kind = data.get("kind")
+        if kind not in _ALLOWED_KINDS:
+            logger.warning("词表 '{}' 的 kind 非法 {!r}，跳过", key, kind)
+            return None
+
+        status = data.get("status", "active")
+        if status not in _ALLOWED_STATUSES:
+            logger.warning("词表 '{}' 的 status 非法 {!r}，按 active 处理", key, status)
+            status = "active"
+
+        weight_policy = data.get("weight_policy", "uniform")
+        if weight_policy not in _ALLOWED_WEIGHT_POLICIES:
+            logger.warning("词表 '{}' 的 weight_policy 非法 {!r}，按 uniform 处理", key, weight_policy)
+            weight_policy = "uniform"
+
+        consumers = data.get("consumers", [])
+        if isinstance(consumers, str):
+            consumers = [consumers]
+        if not isinstance(consumers, list) or not all(isinstance(c, str) and c for c in consumers):
+            logger.warning("词表 '{}' 的 consumers 非法，按空处理", key)
+            consumers = []
+
+        return LexiconSpec(
+            key=key,
+            kind=kind,
+            consumers=tuple(consumers),
+            status=status,
+            weight_policy=weight_policy,
+            tier=data.get("tier"),
+            polarity=data.get("polarity"),
+            description=data.get("description", ""),
+        )
 
     def _load_conflict_matrix(self) -> None:
-        """读取 conflict_matrix.yaml"""
+        """读取 conflict_matrix.yaml（仅审计声明，不参与加载逻辑）"""
         path = self._base_dir / _CONFLICT_MATRIX_FILE
         if not path.exists():
             logger.debug("conflict_matrix.yaml not found, no overlap tracking")
@@ -182,85 +254,6 @@ class LexiconRegistry:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
             self._conflicts = data.get("conflicts", [])
-
-    def _resolve_file_path(self, key: str) -> Path | None:
-        """从 key 解析出 .txt 文件路径"""
-        parts = key.split(".", 1)
-        if len(parts) != 2:
-            return None
-
-        layer_name, lex_name = parts
-        layer_data = self._registry.get("layers", {}).get(layer_name, {})
-        lexicon_info = layer_data.get("lexicons", {}).get(lex_name, {})
-        file_name = lexicon_info.get("file")
-
-        if file_name:
-            return self._base_dir / file_name
-
-        return self._base_dir / f"{lex_name}.txt"
-
-    def _load_lexicon_file(self, key: str) -> list[str]:
-        """
-        从 .txt 文件加载原始词条
-
-        支持两种格式：
-        - 纯词条格式：每行一个词条
-        - 加权格式：每行 "词条\t权重"，只取词条部分
-
-
-        """
-        path = self._resolve_file_path(key)
-        if path is None or not path.exists():
-            logger.warning("Lexicon file not found for key='{}': {}", key, path)
-            return []
-
-        return load_lexicon_terms(path)
-
-    def _load_domain_lexicon(self, tag: str) -> list[str]:
-        """
-        加载领域扩展词表
-
-        支持两种格式：
-        - 纯词条格式：每行一个词条
-        - 加权格式：每行 "词条\t权重"，只取词条部分
-
-
-        """
-        domain_dir = self._base_dir / _DOMAIN_DIR
-        path = domain_dir / f"{tag}.txt"
-        if not path.exists():
-            logger.debug("Domain lexicon '{}' not found: {}", tag, path)
-            return []
-
-        return load_lexicon_terms(path)
-
-    def _exclude_borrowed(self, primary_key: str, terms: list[str]) -> list[str]:
-        """
-        排除被声明为「从主属表借用」的词条
-
-        当 A 表是某词条的主属表、B 表只是借用时，
-        如果调用方请求 B 表且 exclude_borrowed=True，
-        则该词条从 B 的返回结果中移除
-
-        """
-        borrowed: set[str] = set()
-
-        for entry in self._conflicts:
-            if primary_key in entry.get("referenced_by", []):
-                borrowed.add(entry["term"])
-
-        if not borrowed:
-            return terms
-
-        filtered = [t for t in terms if t not in borrowed]
-        if len(filtered) != len(terms):
-            logger.debug(
-                "Excluded {} borrowed terms from '{}'",
-                len(terms) - len(filtered),
-                primary_key,
-            )
-
-        return filtered
 
 
 _global_registry: LexiconRegistry | None = None
@@ -278,49 +271,3 @@ def reset_registry() -> None:
     """重置全局单例（测试用）"""
     global _global_registry
     _global_registry = None
-
-
-def get_weighted_lexicon_set(
-    registry: LexiconRegistry,
-    pos_domains: list[str] | None = None,
-    neg_domains: list[str] | None = None,
-    fight_domains: list[str] | None = None,
-) -> WeightedLexiconSet:
-    """
-    获取完整的加权词表集合
-
-    使用 load_weighted_lexicon 加载词典
-
-    """
-    from src.workflows.curve_metrics import WeightedLexiconSet
-
-    pos_terms = load_weighted_lexicon(str(registry.base_dir / "positive.txt"))
-    neg_terms = load_weighted_lexicon(str(registry.base_dir / "negative.txt"))
-    fight_terms = load_weighted_lexicon(str(registry.base_dir / "combat.txt"))
-
-    if pos_domains:
-        for tag in pos_domains:
-            domain_file = registry.base_dir / "domain" / f"{tag}.txt"
-            if domain_file.exists():
-                domain_terms = load_weighted_lexicon(str(domain_file))
-                pos_terms.update(domain_terms)
-
-    if neg_domains:
-        for tag in neg_domains:
-            domain_file = registry.base_dir / "domain" / f"{tag}.txt"
-            if domain_file.exists():
-                domain_terms = load_weighted_lexicon(str(domain_file))
-                neg_terms.update(domain_terms)
-
-    if fight_domains:
-        for tag in fight_domains:
-            domain_file = registry.base_dir / "domain" / f"{tag}.txt"
-            if domain_file.exists():
-                domain_terms = load_weighted_lexicon(str(domain_file))
-                fight_terms.update(domain_terms)
-
-    return WeightedLexiconSet(
-        pos_terms=pos_terms,
-        neg_terms=neg_terms,
-        fight_terms=fight_terms,
-    )

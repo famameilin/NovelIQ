@@ -382,9 +382,7 @@ def test_diagnosis_context_summary_carries_evidence_keys() -> None:
     from src.agents.diagnosis.runner import _context_summary
 
     ledger = DiagnosisEvidenceLedger(tool_calls=["get_aggregate_signals"])
-    summary = _context_summary(ledger)(
-        {"attempts": 2, "tool_iterations": 3, "output": None, "error": None}
-    )
+    summary = _context_summary(ledger)({"attempts": 2, "tool_iterations": 3, "output": None, "error": None})
 
     assert summary["phase"] == "diagnosis"
     assert summary["attempts"] == 2

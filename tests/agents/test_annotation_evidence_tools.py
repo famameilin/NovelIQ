@@ -17,10 +17,10 @@ from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
     CharacterObservationInput,
+    ChunkParagraphInfo,
+    CreateEventInput,
     DialogueInput,
     EntityInput,
-    EventInput,
-    ForeshadowingInput,
     ForeshadowingSearchResult,
     RelationInput,
     SearchResult,
@@ -69,21 +69,21 @@ class _QueryService:
         return SearchResult(results=[self._case()])
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-08-07 用于记录范围并返回原文候选"""
+        """2026-08-07 用于记录范围并返回原文候选（M6：候选定位到段落）"""
         del limit
         self.text_queries.append((query, range_name))
         return [
             TextSearchResult(
                 chapter_id=2,
-                chunk_id=20,
+                paragraph_id=20,
                 excerpt="顾霜喝道",
                 keyword_score=1.0,
             )
         ]
 
-    def read_text(self, chunk_id):
-        """2026-08-07 用于记录已由文本搜索候选授权的原文读取"""
-        self.reads.append(chunk_id)
+    def read_text(self, paragraph_id):
+        """2026-08-07 用于记录已由文本搜索候选授权的原文段落读取"""
+        self.reads.append(paragraph_id)
         return "顾霜喝道"
 
     def fetch_active_case_details(self, case_id):
@@ -160,21 +160,21 @@ class _ForeignChunkQueryService(_QueryService):
         )
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-08-11 用于返回旧 chunk 原文候选"""
+        """2026-08-11 用于返回旧章段落原文候选"""
         del limit
         self.text_queries.append((query, range_name))
         return [
             TextSearchResult(
                 chapter_id=9,
-                chunk_id=99,
+                paragraph_id=99,
                 excerpt="顾霜喝道",
                 keyword_score=1.0,
             )
         ]
 
-    def read_text(self, chunk_id):
-        """2026-08-11 用于记录旧 chunk 原文读取"""
-        self.reads.append(chunk_id)
+    def read_text(self, paragraph_id):
+        """2026-08-11 用于记录旧章段落原文读取"""
+        self.reads.append(paragraph_id)
         return "顾霜喝道"
 
 
@@ -205,13 +205,23 @@ def _find_tool(tools: list, name: str):
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
-    """2026-08-07 用于构造带唯一 current 原文和后文开关的工具账本"""
+    """2026-08-07 用于构造带唯一 current 原文和后文开关的工具账本
+
+    2026-08-18：注入 paragraph_info 供事件锚点校验和证据派生使用。
+    """
+    chunk_text = "\u201c住手\u201d回荡"
+    paragraph_info = ChunkParagraphInfo(
+        paragraph_ids=[0],
+        char_spans=[(0, len(chunk_text))],
+        texts=[chunk_text],
+    )
     return AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
         current_chunk_id=10,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
+        paragraph_info=paragraph_info,
     )
 
 
@@ -226,6 +236,13 @@ def _graph_with_entities(names: dict[str, str]) -> FactGraph:
 def _tools(service: _QueryService, ledger: AnnotationToolLedger) -> list:
     """2026-08-07 用于构建绑定查询服务与账本的测试工具"""
     return build_annotation_tools(service, ledger)
+
+
+def _tools_with_entities(service: _QueryService, ledger: AnnotationToolLedger) -> list:
+    """2026-08-22 用于构建已声明顾霜实体的测试工具（create_event 前置要求）"""
+    tools = build_annotation_tools(service, ledger)
+    _call(tools, "write_entities", _write_entities_args())
+    return tools
 
 
 def _write_metrics_args() -> dict:
@@ -255,7 +272,11 @@ def _write_dialogues_args() -> dict:
 
 
 def _write_remaining_args() -> dict:
-    """2026-08-11 用于构造剩余五个领域的最小合法参数"""
+    """2026-08-11 用于构造剩余事实领域的最小合法参数
+
+    2026-08-22 事件契约：events/foreshadowings 不再走 write_* 批量替换，
+    由 create_event(isforeshadowing) 增量写入，此处只保留观察与关系。
+    """
     return {
         "character_observations": {
             "items": [
@@ -267,19 +288,18 @@ def _write_remaining_args() -> dict:
                 }
             ]
         },
-        "events": {
-            "items": [
-                {
-                    "description": "顾霜喝止众人",
-                    "participants": [
-                        {"entity": "顾霜", "role": "主体"}
-                    ],
-                }
-            ]
-        },
         "relations": {"items": []},
-        "foreshadowings": {"items": []},
     }
+
+
+def _create_event_args(**overrides) -> dict:
+    """2026-08-22 用于构造合法 create_event 参数（服务端派发全部 id）"""
+    payload = {
+        "description": "顾霜喝止众人",
+        "participants": [{"entity": "顾霜", "role": "主体"}],
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _call(tools: list, name: str, args: dict):
@@ -288,14 +308,13 @@ def _call(tools: list, name: str, args: dict):
 
 
 def _write_all_domains(tools: list) -> None:
-    """2026-08-11 用于写入全部七个领域"""
+    """2026-08-11 用于写入全部六个领域（事件契约后伏笔并入 create_event）"""
     _call(tools, "write_metrics", _write_metrics_args())
     _call(tools, "write_entities", _write_entities_args())
     _call(tools, "write_character_observations", _write_remaining_args()["character_observations"])
     _call(tools, "write_dialogues", _write_dialogues_args())
-    _call(tools, "write_events", _write_remaining_args()["events"])
+    _call(tools, "create_event", _create_event_args())
     _call(tools, "write_relations", _write_remaining_args()["relations"])
-    _call(tools, "write_foreshadowings", _write_remaining_args()["foreshadowings"])
 
 
 def test_schema_rejects_deleted_contract_fields() -> None:
@@ -342,21 +361,12 @@ def test_schema_rejects_deleted_contract_fields() -> None:
             }
         )
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        EventInput.model_validate(
+        CreateEventInput.model_validate(
             {
                 "description": "进入山门",
+                "anchor_paragraph_ids": [0],
                 "event_type": "进入",
                 "location": "山门",
-            }
-        )
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        ForeshadowingInput.model_validate(
-            {
-                "description": "伏笔",
-                "confidence": "high",
-                "setup_kind": "其他",
-                "setup_summary": "伏笔",
-                "is_new_setup": True,
             }
         )
 
@@ -364,9 +374,7 @@ def test_schema_rejects_deleted_contract_fields() -> None:
 def test_schema_rejects_non_closed_enums() -> None:
     """2026-08-11 用于验证所有保留分类字段只接受中央闭合枚举"""
     with pytest.raises(ValidationError):
-        EntityInput.model_validate(
-            {"name": "顾霜", "entity_type": "object"}
-        )
+        EntityInput.model_validate({"name": "顾霜", "entity_type": "object"})
     with pytest.raises(ValidationError):
         RelationInput.model_validate(
             {
@@ -536,7 +544,7 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
     dialogue = chunk.dialogues[0]
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.content == "住手"
-    assert "“住手”回荡"[dialogue.start : dialogue.end] == "住手"
+    assert "\u201c住手\u201d回荡"[dialogue.start : dialogue.end] == "住手"
     assert dialogue.is_inner_monologue is False
 
 
@@ -552,7 +560,6 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "accepted",
         "tool",
         "domain",
-        "revision",
         "item_count",
         "state_digest",
     }
@@ -560,7 +567,6 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "accepted": True,
         "tool": "write_entities",
         "domain": "entities",
-        "revision": 1,
         "item_count": 1,
         "state_digest": receipt["state_digest"],
     }
@@ -586,14 +592,12 @@ def test_failed_write_keeps_other_domain_receipts_and_revisions() -> None:
     assert "metrics" in ledger.domain_receipts
     assert "entities" in ledger.domain_receipts
     assert "character_observations" not in ledger.domain_receipts
-    assert ledger.domain_revision_counts["metrics"] == 1
-    assert ledger.domain_revision_counts["entities"] == 1
-    assert "character_observations" not in ledger.domain_revision_counts
+    assert [record["domain"] for record in ledger.write_records] == ["metrics", "entities"]
     assert ledger.ready_chunk is None
 
 
-def test_replacement_write_rebuilds_ready_chunk_revision() -> None:
-    """2026-08-11 用于验证七领域齐全后重写领域会重建 ready_chunk 且 complete 冻结新值"""
+def test_update_event_appends_and_rebuilds_ready_chunk() -> None:
+    """2026-08-22 事件契约：update_event 追加节点后重建 ready_chunk 且 complete 冻结新值"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -601,40 +605,36 @@ def test_replacement_write_rebuilds_ready_chunk_revision() -> None:
     _write_all_domains(tools)
     assert ledger.ready_chunk is not None
 
-    replaced = _write_remaining_args()["events"]
-    replaced["items"][0]["description"] = "新事件描述"
-    _call(tools, "write_events", replaced)
-    assert ledger.ready_chunk.events[0].description == "新事件描述"
+    tree_id = _call(tools, "create_event", _create_event_args())["tree_id"]
+    _call(
+        tools,
+        "update_event",
+        {"tree_id": tree_id, "items": [{"type": "main", "description": "新事件描述"}]},
+    )
+    assert ledger.ready_chunk.events[-1].description == "新事件描述"
 
     ledger.complete_active_chunk()
-    assert ledger.completed_chunks[0].events[0].description == "新事件描述"
+    assert ledger.completed_chunks[0].events[-1].description == "新事件描述"
 
 
-def test_domain_reinvocation_completely_replaces_payload() -> None:
-    """2026-08-11 用于验证领域重新调用完整替换旧暂存值"""
+def test_create_event_appends_new_tree_per_call() -> None:
+    """2026-08-22 事件契约：事件只增不改——每次 create_event 追加一棵独立树"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
     _call(tools, "write_entities", _write_entities_args())
-    first = _write_remaining_args()["events"]
-    first["items"] = [
-        {
-            "description": "旧事件",
-        }
-    ]
-    _call(tools, "write_events", first)
-    second = _write_remaining_args()["events"]
-    _call(tools, "write_events", second)
+    first = _call(tools, "create_event", _create_event_args())
+    second = _call(tools, "create_event", _create_event_args(description="顾霜收势"))
 
-    stored = ledger.domain_payloads["events"]
-    assert len(stored) == 1
-    assert stored[0].description == "顾霜喝止众人"
-    assert ledger.domain_revision_counts["events"] == 2
-    assert len([item for item in ledger.write_revisions if item["domain"] == "events"]) == 2
+    assert first["tree_id"] != second["tree_id"]
+    stored = ledger.bound_payloads["events"]
+    assert len(stored) == 2
+    assert stored[-1].description == "顾霜收势"
+    assert len([item for item in ledger.write_records if item["domain"] == "events"]) == 2
 
 
-def test_complete_chunk_requires_all_seven_domains() -> None:
+def test_complete_chunk_requires_all_six_domains() -> None:
     """2026-08-11 用于验证未调用领域无法完成 chunk"""
     service = _QueryService()
     ledger = _ledger()
@@ -656,9 +656,8 @@ def test_write_dialogues_defaults_missing_candidates_to_not_dialogue() -> None:
     _call(tools, "write_metrics", _write_metrics_args())
     _call(tools, "write_entities", _write_entities_args())
     _call(tools, "write_character_observations", _write_remaining_args()["character_observations"])
-    _call(tools, "write_events", _write_remaining_args()["events"])
+    _call(tools, "create_event", _create_event_args())
     _call(tools, "write_relations", _write_remaining_args()["relations"])
-    _call(tools, "write_foreshadowings", _write_remaining_args()["foreshadowings"])
 
     # 空提交不再拒绝：候选 1 默认 not_dialogue，回执列出
     response = _call(tools, "write_dialogues", {"items": []})
@@ -673,10 +672,16 @@ def test_write_dialogues_defaults_missing_candidates_to_not_dialogue() -> None:
 
     # 重复仍拒绝
     with pytest.raises(ValueError, match="重复"):
-        _call(tools, "write_dialogues", {"items": [
-            [1, "dialogue", None, None],
-            [1, "dialogue", None, None],
-        ]})
+        _call(
+            tools,
+            "write_dialogues",
+            {
+                "items": [
+                    [1, "dialogue", None, None],
+                    [1, "dialogue", None, None],
+                ]
+            },
+        )
     # 越界仍拒绝
     with pytest.raises(ValueError, match="超出系统候选范围"):
         _call(tools, "write_dialogues", {"items": [[9, "dialogue", None, None]]})
@@ -723,12 +728,9 @@ def test_event_location_participant_role_requires_location_type() -> None:
 
     _call(tools, "write_metrics", _write_metrics_args())
     _call(tools, "write_entities", _write_entities_args())
-    args = _write_remaining_args()["events"]
-    args["items"][0]["participants"] = [
-        {"entity": "顾霜", "role": "地点"}
-    ]
-    with pytest.raises(ValueError, match="端点类型必须属于"):
-        _call(tools, "write_events", args)
+    args = _create_event_args(participants=[{"entity": "顾霜", "role": "地点"}])
+    with pytest.raises(ValueError, match="地点角色端点必须是 location"):
+        _call(tools, "create_event", args)
     assert "events" not in ledger.domain_receipts
 
 
@@ -810,22 +812,22 @@ def test_unresolved_speaker_no_longer_auto_creates_case() -> None:
     assert ledger.pushed_cases == []
 
 
-def test_write_foreshadowings_only_accepts_description_and_confidence() -> None:
-    """2026-08-11 用于验证伏笔合同只含 description 与 confidence"""
+def test_create_event_isforeshadowing_binds_setup_node() -> None:
+    """2026-08-22 事件契约：isforeshadowing=true 自动生成伏笔绑定并拒绝多余字段"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    args = {"items": [{"description": "玉戒尺异常发光", "confidence": "high"}]}
-    response = _call(tools, "write_foreshadowings", args)
+    entities_response = _call(tools, "write_entities", _write_entities_args())
+    assert entities_response["accepted"] is True
+    response = _call(tools, "create_event", _create_event_args(isforeshadowing=True))
     assert response["accepted"] is True
-    stored = ledger.domain_payloads["foreshadowings"]
-    assert stored[0].description == "玉戒尺异常发光"
-    assert stored[0].confidence == "high"
+    stored = ledger.bound_payloads["foreshadowings"]
+    assert stored[0].description == "顾霜喝止众人"
+    assert stored[0].confidence == "medium"
+    assert stored[0].setup_node_id == response["root_node_id"]
     with pytest.raises(ValidationError):
-        _find_tool(tools, "write_foreshadowings").invoke(
-            {"items": [{"description": "伏笔", "setup_kind": "其他"}]}
-        )
+        CreateEventInput.model_validate({"description": "伏笔", "setup_kind": "其他"})
 
 
 def test_future_disabled_limits_search_to_previous() -> None:
@@ -836,9 +838,7 @@ def test_future_disabled_limits_search_to_previous() -> None:
     ledger = _ledger(allow_future_context=False)
     tools = _tools(service, ledger)
 
-    payload = json.loads(
-        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
-    )
+    payload = json.loads(asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"})))
     assert payload[0]["result_number"] == 1
     assert service.text_queries == [("顾霜", "previous")]
 
@@ -851,17 +851,18 @@ def test_future_enabled_searches_all_and_read_permission_follows_config() -> Non
     ledger = _ledger(allow_future_context=True)
     tools = _tools(service, ledger)
 
-    payload = json.loads(
-        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
-    )
+    payload = json.loads(asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"})))
     assert service.text_queries == [("顾霜", "all")]
     assert payload[0]["result_number"] == 1
     assert "chunk_id" not in payload[0]
-    read_receipt = json.loads(
-        _find_tool(tools, "read_text").invoke({"result_number": 1})
-    )
+    assert "paragraph_id" not in payload[0]
+    read_receipt = json.loads(_find_tool(tools, "read_text").invoke({"result_number": 1}))
     assert read_receipt == {"content": "顾霜喝道"}
     assert service.reads == [20]
+    # M6：read 授权实际返回的段落及上下文各 1 段（与查询服务上下文契约对齐）
+    assert 20 in ledger.authorized_text_paragraph_ids
+    assert 19 in ledger.authorized_text_paragraph_ids
+    assert 21 in ledger.authorized_text_paragraph_ids
 
     # 关闭开关后，已检索的后文结果不再可读（权限随配置收放）
     ledger.allow_future_context = False
@@ -912,9 +913,7 @@ def test_resolve_case_rejects_unknown_case_number() -> None:
     tools = _tools(service, ledger)
 
     with pytest.raises(AnnotationAuthorizationError, match="未由初始候选或 search_pool 返回"):
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {"case_number": 999, "speaker": "顾霜", "reason": "猜测"}
-        )
+        _find_tool(tools, "resolve_dialogue_case").invoke({"case_number": 999, "speaker": "顾霜", "reason": "猜测"})
 
 
 def test_resolve_dialogue_case_requires_declared_character_speaker() -> None:
@@ -950,18 +949,14 @@ def test_close_case_only_closes_alias_case() -> None:
 
     case_number = ledger.case_number_by_id["alias-1"]
     response = json.loads(
-        _find_tool(tools, "close_case").invoke(
-            {"case_number": case_number, "reason": "夫妻关系非同一人物"}
-        )
+        _find_tool(tools, "close_case").invoke({"case_number": case_number, "reason": "夫妻关系非同一人物"})
     )
     assert response["accepted"] is True
     assert ledger.resolved_cases[0].case_id == "alias-1"
     assert ledger.resolved_cases[0].action == "close"
 
     with pytest.raises(AnnotationInputError, match="已经解决"):
-        _find_tool(tools, "close_case").invoke(
-            {"case_number": case_number, "reason": "重复"}
-        )
+        _find_tool(tools, "close_case").invoke({"case_number": case_number, "reason": "重复"})
 
 
 def test_resolve_fact_case_asserts_same_character_relation() -> None:
@@ -1017,14 +1012,14 @@ def test_resolve_fact_case_rejects_unregistered_entity() -> None:
 
 
 def test_resolve_case_authorized_on_initial_display() -> None:
-    """2026-08-12 用于验证初始案例展示即授权其源 chunk，无需先 read_text 即可解决"""
+    """2026-08-12 用于验证初始案例展示即授权其源章，无需先 read_text 即可解决"""
     service = _ForeignChunkQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     ledger.graph_queried = True
     initial_cases, rotation_ids = service.find_initial_case_candidates("current")
     ledger.register_initial_cases(initial_cases, rotation_ids)
-    assert 99 in ledger.authorized_text_chunk_ids
+    assert 99 in ledger.authorized_chapter_ids
     tools = _tools(service, ledger)
 
     case_number = ledger.case_number_by_id["foreign-1"]
@@ -1045,7 +1040,7 @@ def test_resolve_case_authorized_on_initial_display() -> None:
 
 
 def test_resolve_case_allowed_after_read_authorization() -> None:
-    """2026-08-11 用于验证读取旧 chunk 原文后解决案例成功"""
+    """2026-08-11 用于验证读取旧章段落原文后解决案例成功"""
     import asyncio
 
     service = _ForeignChunkQueryService()
@@ -1056,11 +1051,13 @@ def test_resolve_case_allowed_after_read_authorization() -> None:
     ledger.register_initial_cases(initial_cases, rotation_ids)
     tools = _tools(service, ledger)
 
-    search = json.loads(
-        asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"}))
-    )
+    search = json.loads(asyncio.run(_find_tool(tools, "search_text").ainvoke({"query": "顾霜"})))
     _find_tool(tools, "read_text").invoke({"result_number": search[0]["result_number"]})
-    assert 99 in ledger.authorized_text_chunk_ids
+    # 展示授权源章；read 授权实际返回的段落（含上下文）
+    assert 99 in ledger.authorized_chapter_ids
+    assert 99 in ledger.authorized_text_paragraph_ids
+    assert 98 in ledger.authorized_text_paragraph_ids
+    assert 100 in ledger.authorized_text_paragraph_ids
 
     case_number = ledger.case_number_by_id["foreign-1"]
     response = json.loads(
@@ -1335,9 +1332,7 @@ def test_search_graph_returns_one_hop_neighborhood() -> None:
     tools = _tools(service, ledger)
 
     payload = json.loads(
-        _find_tool(tools, "search_graph").invoke(
-            {"entities": ["顾霜", "贺老"], "relation_type": None}
-        )
+        _find_tool(tools, "search_graph").invoke({"entities": ["顾霜", "贺老"], "relation_type": None})
     )
     assert payload["matches"][0]["name"] == "顾霜"
     assert payload["missing"] == ["贺老"]
@@ -1366,9 +1361,7 @@ def test_search_graph_queries_live_fact_graph_without_database() -> None:
     tools = _tools(service, ledger)
 
     payload = json.loads(
-        _find_tool(tools, "search_graph").invoke(
-            {"entities": ["顾霜", "铁帅"], "relation_type": None}
-        )
+        _find_tool(tools, "search_graph").invoke({"entities": ["顾霜", "铁帅"], "relation_type": None})
     )
 
     assert [item["name"] for item in payload["matches"]] == ["顾霜"]
@@ -1404,7 +1397,7 @@ def test_finish_chapter_generates_summary_from_chunk_summaries() -> None:
     ledger.complete_active_chunk()
     annotation = ledger.finish()
     assert annotation.chapter_summary == "住手回荡"
-    assert annotation.contract_version == "agent-semantic-v1"
+    assert len(annotation.chunks) == 1
 
 
 def test_resolve_fact_case_rejects_foreign_change_kind() -> None:
@@ -1478,3 +1471,25 @@ def test_resolve_dialogue_case_accepts_closed_tone_enum() -> None:
     )
     assert response["accepted"] is True
     assert ledger.resolved_cases[0].tone == "愤怒"
+
+
+def test_text_search_result_accepts_paragraph_id_zero() -> None:
+    """2026-08-15 H1 回归：paragraph_id 按设计 §5.1 从 0 起算，全书第一段是合法检索命中"""
+    result = TextSearchResult(
+        chapter_id=1,
+        paragraph_id=0,
+        excerpt="开篇第一段",
+        keyword_score=2.0,
+    )
+    assert result.paragraph_id == 0
+
+
+def test_text_search_result_rejects_negative_paragraph_id() -> None:
+    """2026-08-15 H1 回归：负 paragraph_id 仍应被约束拒绝"""
+    with pytest.raises(ValidationError):
+        TextSearchResult(
+            chapter_id=1,
+            paragraph_id=-1,
+            excerpt="非法段落",
+            keyword_score=0.0,
+        )

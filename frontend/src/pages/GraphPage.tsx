@@ -10,7 +10,7 @@ import {
   Network,
   RefreshCw,
 } from "lucide-react";
-import { isAnalysisNotCompleteError, isDiagnosisRerunRequiredError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getCharacters, getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
@@ -59,7 +59,7 @@ export function GraphPage() {
   const { currentNovelId, currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
-  const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlSelectedChapter = searchParams.get("selected_chapter");
   const urlChangeId = searchParams.get("change_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
@@ -113,15 +113,13 @@ export function GraphPage() {
     staleTime: STALE_TIME,
   });
 
-  const graphRerunRequired = isDiagnosisRerunRequiredError(graphQuery.error);
-
   const charactersQuery = useQuery({
     queryKey: ["characters", novelId, taskScopeId],
     queryFn: () => getCharacters(novelId!, taskScopeId!),
     // appearanceCountMap 是图谱页面正式视觉语义的一部分；
     // 这里只在 `/graph` 主查询成功后再请求 `/characters`，避免旧 run 或主查询失败时
     // 并发打出第二条旁路状态链
-    enabled: enabled && graphQuery.isSuccess && !graphRerunRequired,
+    enabled: enabled && graphQuery.isSuccess,
     staleTime: STALE_TIME,
   });
 
@@ -179,7 +177,6 @@ export function GraphPage() {
           related.push({
             node: targetNode,
             relationType: edge.relation_type,
-            relationRevision: edge.relation_revision,
           });
         }
       } else if (edge.target_entity_id === selectedNode.entity_id) {
@@ -188,13 +185,12 @@ export function GraphPage() {
           related.push({
             node: sourceNode,
             relationType: edge.relation_type,
-            relationRevision: edge.relation_revision,
           });
         }
       }
     });
 
-    return related.sort((left, right) => right.relationRevision - left.relationRevision);
+    return related.sort((left, right) => left.relationType.localeCompare(right.relationType));
   }, [selectedNode, graphData]);
 
   const {
@@ -216,7 +212,7 @@ export function GraphPage() {
     activeSelectedChangeId,
     graphSelectionHint,
     handleGoTimeline,
-    handleOpenTimelineChunk,
+    handleOpenTimelineChapter,
     handleSelectChange,
     selectedChange,
   } = useGraphDeepLinkSelection({
@@ -224,7 +220,7 @@ export function GraphPage() {
     taskScopeId,
     timelineUrl,
     urlChangeId,
-    urlSelectedChunk,
+    urlSelectedChapter,
     loadedChanges,
     sortedChanges,
     navigate,
@@ -269,7 +265,7 @@ export function GraphPage() {
     getAnalysisNotCompleteRunStatus(graphQuery.error) === "failed" ||
     getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed";
   const isLoading = graphQuery.isLoading || charactersQuery.isLoading;
-  const isError = (graphQuery.isError || charactersQuery.isError) && !graphRerunRequired && !isAnalysisNotComplete;
+  const isError = (graphQuery.isError || charactersQuery.isError) && !isAnalysisNotComplete;
   const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
 
   const handleZoomIn = useCallback(() => {
@@ -336,7 +332,7 @@ export function GraphPage() {
     onGoTimeline: handleGoTimeline,
     timelineUrl,
     selectedNode,
-    onOpenTimelineChunk: handleOpenTimelineChunk,
+    onOpenTimelineChapter: handleOpenTimelineChapter,
     selectedChange,
     pageSectionVariants,
     getChangeTypeLabel,
@@ -424,25 +420,6 @@ export function GraphPage() {
                       className="h-32 animate-pulse rounded-xl border border-border bg-surface-hover/60"
                     />
                   ))}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.section>
-        ) : graphRerunRequired ? (
-          <motion.section
-            variants={pageSectionVariants}
-            initial="hidden"
-            animate="visible"
-            transition={{ duration: 0.28, delay: 0.05 }}
-          >
-            <Card variant="elevated" className="rounded-2xl">
-              <CardContent className="flex flex-col items-center gap-4 p-10 text-center">
-                <AlertTriangle className="h-10 w-10 text-chart-negative" />
-                <div className="space-y-1">
-                  <p className="text-base font-semibold text-text">图谱结果需要重跑</p>
-                  <p className="text-sm text-text-muted">
-                    当前任务的 diagnosis 焦点合同已失效，请重新分析后再查看图谱页面。
-                  </p>
                 </div>
               </CardContent>
             </Card>

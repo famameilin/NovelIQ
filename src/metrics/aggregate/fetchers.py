@@ -10,13 +10,15 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from sqlalchemy import func, select
+
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
+from src.storage.models import Chapter
 
 from .types import (
     AnnotationData,
     CharacterData,
-    CultureData,
     DialogueData,
     EmotionData,
     RelationData,
@@ -27,11 +29,42 @@ from .types import (
 )
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from src.storage.repositories import (
         AnnotationRepository,
-        ChunkRepository,
+        ChapterRepository,
         StatsRepository,
     )
+
+
+def _fetch_chapter_progress_map(session: Session, run_id: str) -> dict[int, float]:
+    """章起点归一化进度：char_offset / max(char_end_offset)。缺 offset 的章不入表。"""
+    total = session.execute(
+        select(func.max(Chapter.char_end_offset)).where(Chapter.run_id == run_id)
+    ).scalar_one_or_none()
+    if total is None or int(total) <= 0:
+        # 回退：用 max(char_offset)+1，避免全空
+        total = session.execute(
+            select(func.max(Chapter.char_offset)).where(Chapter.run_id == run_id)
+        ).scalar_one_or_none()
+        if total is None or int(total) <= 0:
+            return {}
+        total_chars = float(int(total) + 1)
+    else:
+        total_chars = float(int(total))
+
+    rows = session.execute(
+        select(Chapter.chapter_id, Chapter.char_offset)
+        .where(Chapter.run_id == run_id, Chapter.char_offset.is_not(None))
+        .order_by(Chapter.sequence, Chapter.chapter_id)
+    ).all()
+    progress: dict[int, float] = {}
+    for chapter_id, offset in rows:
+        if offset is None:
+            continue
+        progress[int(chapter_id)] = float(offset) / total_chars
+    return progress
 
 
 def _build_aggregate_graph_view(
@@ -78,7 +111,7 @@ def fetch_annotation_data(
     rows = annotation_repo.fetch_full_annotations(run_id)
 
     return AnnotationData(
-        chunk_ids=[row.chunk_id for row in rows],
+        chapter_ids=[row.chapter_id for row in rows],
         event_types=[row.event_type or "铺垫" for row in rows],
         cliffhangers=[row.cliffhanger or 0 for row in rows],
         pivot_moments=[row.pivot_moment or 0 for row in rows],
@@ -91,20 +124,41 @@ def fetch_emotion_data(
     run_id: str,
 ) -> EmotionData:
     """
-    提取 chunk_curves 表数据
+    提取每章（chunk）情绪密度（§9.1 守恒聚合，2026-08-14 M8b 段落化）
 
+    章情绪密度 = 章内段落分子之和 / 分母之和（Σpos/Σtoken、Σneg/Σtoken、
+    (Σpos − Σneg)/Σtoken）；token 为 0 的章无有效密度，直接跳过。
     """
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
-    emotion_values = [row.net_density for row in rows]
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
 
-    density_rows = stats_repo.fetch_emotion_densities(run_id)
-    pos_densities = [row.pos_density for row in density_rows if row.pos_density is not None]
-    neg_densities = [row.neg_density for row in density_rows if row.neg_density is not None]
+    aggregates = ParagraphRepository(stats_repo.session).fetch_chapter_metric_aggregates(run_id)
+    progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
+    emotion_values: list[float] = []
+    pos_densities: list[float] = []
+    neg_densities: list[float] = []
+    chapter_ids: list[int] = []
+    positions: list[float] = []
+    for chapter_id, totals in aggregates:
+        token_count = totals.get("token_count", 0.0)
+        if token_count <= 0:
+            continue
+        position = progress_map.get(int(chapter_id))
+        if position is None:
+            continue
+        pos_total = totals.get("positive_weight_sum", 0.0)
+        neg_total = totals.get("negative_weight_sum", 0.0)
+        chapter_ids.append(int(chapter_id))
+        positions.append(position)
+        pos_densities.append(pos_total / token_count)
+        neg_densities.append(neg_total / token_count)
+        emotion_values.append((pos_total - neg_total) / token_count)
 
     return EmotionData(
         emotion_values=emotion_values,
         pos_densities=pos_densities,
         neg_densities=neg_densities,
+        chapter_ids=chapter_ids,
+        positions=positions,
     )
 
 
@@ -166,16 +220,22 @@ def fetch_character_data(
     )
 
 
-# 2026-04-28，任务：统一关系图谱密度口径。
-# 修改原因：aggregate 之前只看有边的节点，导致孤立参与者不会进入密度分母，
-# 和 graph page 基于整张参与者子图的展示口径对不上。
+# 关系聚合使用完整角色子图，孤立参与者也进入统计口径
 def fetch_relation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> RelationData:
     """提取 graph_* 关系数据（权威来源）"""
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
-    current_relations = list(graph_view.confirmed_relations)
+    # P4：人物网络只消费 entity_type=character 的角色子图，不再把地点/物品等全实体节点计入
+    character_names = {
+        state.name for state in graph_view.participant_states if state.entity_type == "character" and state.name
+    }
+    current_relations = [
+        relation
+        for relation in graph_view.confirmed_relations
+        if relation.from_name in character_names and relation.to_name in character_names
+    ]
     relation_changes = [
         change
         for change in graph_view.graph_changes
@@ -183,6 +243,8 @@ def fetch_relation_data(
         and change.from_name
         and change.to_name
         and change.relation_type
+        and change.from_name in character_names
+        and change.to_name in character_names
     ]
 
     return RelationData(
@@ -193,22 +255,20 @@ def fetch_relation_data(
                 change.to_name or "",
                 change.relation_type or "",
                 # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
-                str(change.changes[0].get("change_kind") or "refine")
-                if change.changes
-                else "refine",
+                str(change.changes[0].get("change_kind") or "refine") if change.changes else "refine",
             )
             for change in relation_changes
         ],
-        participant_names=[state.name for state in graph_view.participant_states if state.name],
+        participant_names=sorted(character_names),
     )
 
 
 def fetch_text_data(
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
     run_id: str,
 ) -> TextData:
     """提取 chunks 表文本数据"""
-    texts = chunk_repo.fetch_all_chunk_texts(run_id)
+    texts = chapter_repo.fetch_all_chapter_texts(run_id)
 
     all_tokens: list[str] = []
     for text in texts:
@@ -218,34 +278,24 @@ def fetch_text_data(
     return TextData(texts=texts, all_tokens=all_tokens)
 
 
-def fetch_culture_data(
-    stats_repo: StatsRepository,
-    run_id: str,
-) -> CultureData:
-    """
-    提取 chunk_culture 表数据
-
-    """
-    culture_rows = stats_repo.fetch_chunk_culture(run_id)
-    imagery_densities = [row.imagery_lexicon_density for row in culture_rows if row.imagery_lexicon_density is not None]
-
-    return CultureData(
-        imagery_densities=imagery_densities,
-    )
-
-
 def fetch_tension_data(
     stats_repo: StatsRepository,
     run_id: str,
 ) -> TensionData:
     """
-    提取 chunk_curves 表的 tension_composite 数据
+    提取每章（chunk）张力（2026-08-14 M8b 段落化）
 
+    章张力 = 章内段落 surface_tension 均值（段落值已为 run 内稳健标准化 +
+    sigmoid 的 [0,1] 值，直接取均值；无张力数据的章不输出，由调用方兜底）。
     """
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
+
+    rows = ParagraphRepository(stats_repo.session).fetch_chapter_tension_scores(run_id)
+    progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
     return TensionData(
-        chunk_ids=[row.chunk_id for row in rows],
-        tension_composite_scores=[row.tension_composite for row in rows],
+        chapter_ids=[chapter_id for chapter_id, _tension in rows],
+        tension_composite_scores=[tension for _chapter_id, tension in rows],
+        positions=[progress_map.get(int(chapter_id)) for chapter_id, _tension in rows],
     )
 
 
@@ -256,24 +306,33 @@ def fetch_dialogue_data(
     """
     从数据库图对话事实提取 tone 数据
 
-    按事实中的 chunk_id 展开语气类型用于聚合计算
+    按事实中的 chapter_id 展开语气类型用于聚合计算
 
     """
-    rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
+    rows = annotation_repo.fetch_chapter_dialogues_full(run_id)
     tones = [row.tone for row in rows if row.tone is not None]
     return DialogueData(tones=tones)
 
 
 def fetch_style_data(
-    chunk_repo: ChunkRepository,
+    chapter_repo: ChapterRepository,
     run_id: str,
 ) -> StyleData:
     """
-    提取 chunk_styles 表的风格指标数据
+    提取全书风格指标（§9.1 守恒聚合，2026-08-14 M8b 段落化）
 
-    从 chunk_styles 表获取 dialogue_ratio 和 avg_sent_len 数据用于聚合计算
+    从段落充分统计量计算全书守恒值：dialogue_ratio = Σdialogue_char_count /
+    Σchar_count；avg_sent_len = Σsentence_char_sum / Σsentence_count。
     """
-    rows = chunk_repo.fetch_chunk_styles(run_id)
-    dialogue_ratios = [row.dialogue_ratio for row in rows if row.dialogue_ratio is not None]
-    avg_sent_lens = [row.avg_sent_len for row in rows if row.avg_sent_len is not None]
-    return StyleData(dialogue_ratios=dialogue_ratios, avg_sent_lens=avg_sent_lens)
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
+
+    aggregates = ParagraphRepository(chapter_repo.session).fetch_chapter_metric_aggregates(run_id)
+    dialogue_char_total = sum(item.get("dialogue_char_count", 0.0) for _cid, item in aggregates)
+    char_total = sum(item.get("char_count", 0.0) for _cid, item in aggregates)
+    sentence_char_total = sum(item.get("sentence_char_sum", 0.0) for _cid, item in aggregates)
+    sentence_total = sum(item.get("sentence_count", 0.0) for _cid, item in aggregates)
+
+    return StyleData(
+        dialogue_ratio=(dialogue_char_total / char_total) if char_total > 0 else None,
+        avg_sent_len=(sentence_char_total / sentence_total) if sentence_total > 0 else None,
+    )

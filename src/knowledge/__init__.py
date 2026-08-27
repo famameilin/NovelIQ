@@ -1,5 +1,4 @@
 from .authority import (
-    ActiveEntityContext,
     CanonicalEntity,
     ConfirmedRelation,
     EntityLifecycle,
@@ -16,7 +15,6 @@ from .authority import (
 )
 
 __all__ = [
-    "ActiveEntityContext",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityLifecycle",

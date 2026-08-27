@@ -3,12 +3,9 @@
 
 本模块定义分析结果相关的数据表：
 - CloudAnalysis: 云端分析结果表
-- ChunkCurve: 分块曲线表（情绪 + 节奏）
 - GlobalStats: 全局统计表
 - GlobalContext: 全局上下文表
-- ChunkSummary: 分块摘要表
-
-将 EmotionCurve, RhythmCurve, ChunkSummary 的主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+- ChapterSummary: 章节摘要表
 """
 
 from __future__ import annotations
@@ -20,20 +17,7 @@ from .base import Base
 
 
 class CloudAnalysis(Base):
-    """
-    云端分析结果表
-
-    存储云端模型的分析结果
-
-    为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表
-
-    废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
-    以持久化 single / dual / ensemble 三类叙事焦点结构。
-
-    2026-05-02，任务：split-diagnosis-genre-and-style-labels
-    修改原因：`genre_labels` 只保留真正题材；`权谋/爽文` 这类非题材标签改收口到 `style_labels`，
-    避免继续把题材与附加定位混在同一个字段里。
-    """
+    """存储云端分析结果、叙事焦点结构以及分离的题材和风格标签"""
 
     __tablename__ = "cloud_analysis"
 
@@ -74,42 +58,6 @@ class CloudAnalysis(Base):
 
     def __repr__(self) -> str:
         return f"<CloudAnalysis(id={self.id}, novel_id={self.novel_id})>"
-
-
-class ChunkCurve(Base):
-    """
-    分块曲线表（合并情绪曲线 + 节奏曲线）
-
-    将 emotion_curve 和 rhythm_curve 合并为 chunk_curves，统一管理所有分块级曲线数据
-    """
-
-    __tablename__ = "chunk_curves"
-
-    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    pos_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    neg_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    smoothed_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    tension_proxy: Mapped[float | None] = mapped_column(Float, nullable=True)
-    tension_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["analysis_runs.run_id"],
-            ondelete="CASCADE",
-        ),
-        Index("idx_chunk_curves_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ChunkCurve(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
 class GlobalStats(Base):
@@ -163,26 +111,26 @@ class GlobalContext(Base):
         return f"<GlobalContext(novel_id={self.novel_id})>"
 
 
-class ChunkSummary(Base):
+class ChapterSummary(Base):
     """
     分块摘要表
 
     存储分块的摘要信息
 
-    将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+    将主键改为复合主键 (chapter_id, run_id)，使用复合外键引用 chunks 表
     """
 
-    __tablename__ = "chunk_summaries"
+    __tablename__ = "chapter_summaries"
 
-    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
@@ -190,11 +138,11 @@ class ChunkSummary(Base):
             ["analysis_runs.run_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_chunk_summaries_run_id", "run_id"),
+        Index("idx_chapter_summaries_run_id", "run_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<ChunkSummary(chunk_id={self.chunk_id}, run_id={self.run_id})>"
+        return f"<ChapterSummary(chapter_id={self.chapter_id}, run_id={self.run_id})>"
 
 
 class StageSummary(Base):
@@ -215,21 +163,21 @@ class StageSummary(Base):
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
     )
-    start_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    end_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
-        # 2026-08-13 P2：补齐指向 chunks 的复合 FK，防止孤儿 chunk 引用
+        # 2026-08-13 P2：补齐指向 章节s 的复合 FK，防止孤儿 章节 引用
         ForeignKeyConstraint(
-            ["start_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["start_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["end_chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
+            ["end_chapter_id", "run_id"],
+            ["chapters.chapter_id", "chapters.run_id"],
             ondelete="CASCADE",
         ),
         Index("idx_stage_summaries_run_id", "run_id"),

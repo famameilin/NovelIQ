@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
+from src.config import settings
 
 from ..character_metrics import (
     build_character_graph,
@@ -44,17 +44,13 @@ from ..narrative_metrics import (
 from ..style_metrics_extra import (
     compute_avg_word_len,
     compute_category_density,
-    compute_classical_sentence_ratio,
     compute_function_word_vector,
-    compute_idiom_density,
-    compute_imagery_density,
     compute_sent_len_std,
-    compute_vocab_breadth,
+    compute_string_token_diversity,
 )
 from .types import (
     AnnotationData,
     CharacterData,
-    CultureData,
     EmotionData,
     RelationData,
     StyleData,
@@ -65,57 +61,68 @@ from .types import (
 
 @dataclass(slots=True)
 class _AlignedNarrativeStructureInputs:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2-cleanup
-    新建原因: 三幕结构 v2 需要把 annotation 与 tension 按 chunk_id 对齐，
-              不能继续默认两条序列在过滤空值后仍然天然同位。
-    """
+    """annotation ∩ tension 按 chapter_id 对齐，并附归一化进度轴。"""
 
-    chunk_ids: list[int]
+    chapter_ids: list[int]
     event_types: list[str]
     cliffhangers: list[int]
     pivot_moments: list[int]
     tension_scores: list[float]
+    positions: list[float]
 
 
 def _align_narrative_structure_inputs(
     annotation_data: AnnotationData,
     tension_data: TensionData,
 ) -> _AlignedNarrativeStructureInputs:
-    tension_by_chunk_id: dict[int, float] = {}
-    for chunk_id, tension_score in zip(
-        tension_data.chunk_ids,
+    tension_by_chapter_id: dict[int, tuple[float, float]] = {}
+    positions = tension_data.positions or [None] * len(tension_data.chapter_ids)
+    for chapter_id, tension_score, position in zip(
+        tension_data.chapter_ids,
         tension_data.tension_composite_scores,
+        positions,
         strict=True,
     ):
-        if tension_score is None or chunk_id in tension_by_chunk_id:
+        if tension_score is None or position is None or chapter_id in tension_by_chapter_id:
             continue
-        tension_by_chunk_id[chunk_id] = float(tension_score)
+        tension_by_chapter_id[chapter_id] = (float(tension_score), float(position))
 
-    aligned_chunk_ids: list[int] = []
+    aligned_chapter_ids: list[int] = []
     aligned_event_types: list[str] = []
     aligned_cliffhangers: list[int] = []
     aligned_pivot_moments: list[int] = []
     aligned_tension_scores: list[float] = []
+    aligned_positions: list[float] = []
 
-    for index, chunk_id in enumerate(annotation_data.chunk_ids):
-        tension_score = tension_by_chunk_id.get(chunk_id)
-        if tension_score is None:
+    for index, chapter_id in enumerate(annotation_data.chapter_ids):
+        packed = tension_by_chapter_id.get(chapter_id)
+        if packed is None:
             continue
-        aligned_chunk_ids.append(chunk_id)
+        tension_score, position = packed
+        aligned_chapter_ids.append(chapter_id)
         aligned_event_types.append(annotation_data.event_types[index])
         aligned_cliffhangers.append(annotation_data.cliffhangers[index])
         aligned_pivot_moments.append(annotation_data.pivot_moments[index])
         aligned_tension_scores.append(tension_score)
+        aligned_positions.append(position)
 
     return _AlignedNarrativeStructureInputs(
-        chunk_ids=aligned_chunk_ids,
+        chapter_ids=aligned_chapter_ids,
         event_types=aligned_event_types,
         cliffhangers=aligned_cliffhangers,
         pivot_moments=aligned_pivot_moments,
         tension_scores=aligned_tension_scores,
+        positions=aligned_positions,
     )
+
+
+def _positions_are_usable(positions: list[float]) -> bool:
+    if len(positions) < 2:
+        return False
+    for prev, curr in zip(positions[:-1], positions[1:], strict=True):
+        if curr <= prev:
+            return False
+    return True
 
 
 def _compute_tone_distribution(dialogue_tones: list[str] | None) -> dict[str, float]:
@@ -138,42 +145,65 @@ def _compute_tone_distribution(dialogue_tones: list[str] | None) -> dict[str, fl
     return {tone: count / total for tone, count in counts.items()}
 
 
+def _null_narrative_structure(event_types: list[str]) -> dict[str, Any]:
+    return {
+        "act1_ratio": None,
+        "act2_ratio": None,
+        "act3_ratio": None,
+        "climax_spacing": None,
+        "middle_collapse_index": None,
+        "cliffhanger_rate": None,
+        **{f"chapter_narrative_function_share_{k}": v for k, v in compute_event_density(event_types).items()},
+        "climax_count": 0,
+        "climax_positions": [],
+        "climax_heights": [],
+        "peak_escalation": None,
+        "dominant_climax_pos": None,
+    }
+
+
 def compute_narrative_structure_metrics(
     annotation_data: AnnotationData,
     tension_data: TensionData,
 ) -> dict[str, Any]:
-    """
-    计算叙事结构聚合指标
-
-    """
+    """叙事结构聚合：归一化字符进度轴；小样本/无进度 → null。"""
     aligned_inputs = _align_narrative_structure_inputs(annotation_data, tension_data)
+    small_sample = len(aligned_inputs.chapter_ids) < settings.metrics.small_sample_min_chapters
+    if small_sample or not _positions_are_usable(aligned_inputs.positions):
+        # 叙事功能占比分母为全部有效标注章节，不随张力交集收缩（契约：分母=有效标注章数）
+        return _null_narrative_structure(annotation_data.event_types)
+
     diagnostics = analyze_three_act_structure(
+        aligned_inputs.positions,
         aligned_inputs.event_types,
         aligned_inputs.cliffhangers,
         aligned_inputs.pivot_moments,
         aligned_inputs.tension_scores,
     )
-    climax_profile = compute_climax_profile(aligned_inputs.tension_scores)
+    climax_profile = compute_climax_profile(aligned_inputs.positions, aligned_inputs.tension_scores)
+    peak_idx = diagnostics.representative_peak_idx
     dominant_climax_pos = None
-    if aligned_inputs.tension_scores:
-        dominant_climax_pos = round(
-            diagnostics.representative_peak_idx / len(aligned_inputs.tension_scores),
-            3,
-        )
+    if 0 <= peak_idx < len(aligned_inputs.positions):
+        dominant_climax_pos = round(aligned_inputs.positions[peak_idx], 3)
     return {
         **diagnostics.ratio_dict(),
-        "climax_spacing": compute_climax_spacing(aligned_inputs.chunk_ids, aligned_inputs.tension_scores),
+        "climax_spacing": compute_climax_spacing(aligned_inputs.positions, aligned_inputs.tension_scores),
         "middle_collapse_index": compute_middle_collapse_index(
-            aligned_inputs.chunk_ids,
+            aligned_inputs.positions,
             aligned_inputs.tension_scores,
         ),
         "cliffhanger_rate": compute_cliffhanger_rate(aligned_inputs.cliffhangers),
-        **{f"event_density_{k}": v for k, v in compute_event_density(aligned_inputs.event_types).items()},
+        **{
+            f"chapter_narrative_function_share_{k}": v
+            for k, v in compute_event_density(annotation_data.event_types).items()
+        },
         "climax_count": climax_profile["climax_count"],
         "climax_positions": climax_profile["climax_positions"],
         "climax_heights": climax_profile["climax_heights"],
         "peak_escalation": climax_profile["peak_escalation"],
-        "dominant_climax_pos": dominant_climax_pos,
+        "dominant_climax_pos": (
+            dominant_climax_pos if dominant_climax_pos is not None else climax_profile.get("dominant_climax_pos")
+        ),
     }
 
 
@@ -182,29 +212,31 @@ def compute_emotion_curve_metrics(
     annotation_data: AnnotationData,
     char_data: CharacterData,
 ) -> dict[str, Any]:
-    """
-    计算情感曲线聚合指标
-
-    """
+    """情感曲线聚合：恢复速度/词表趋势走进度轴。"""
+    positions = emotion_data.positions
+    values = emotion_data.emotion_values
+    can_use_progress = len(positions) == len(values) and len(values) >= 2 and _positions_are_usable(list(positions))
     return {
-        "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),
-        "pivot_moment_density": compute_pivot_moment_density(annotation_data.pivot_moments),
+        "emotion_recovery_speed": (compute_emotion_recovery_speed(positions, values) if can_use_progress else None),
+        "chapter_pivot_rate": (
+            compute_pivot_moment_density(annotation_data.pivot_moments)
+            if len(annotation_data.chapter_ids) >= settings.metrics.small_sample_min_chapters
+            else None
+        ),
         **compute_emotion_polarity_distribution(annotation_data.emotional_valences),
-        "pos_neg_ratio": compute_pos_neg_ratio(emotion_data.pos_densities, emotion_data.neg_densities),
+        "lexical_pos_neg_ratio": compute_pos_neg_ratio(emotion_data.pos_densities, emotion_data.neg_densities),
         "arc_delta": compute_arc_delta(char_data.char_emotion_scores),
-        "lexical_emotion_trend": compute_lexical_emotion_trend(emotion_data.emotion_values),
+        "lexical_emotion_trend": (compute_lexical_emotion_trend(positions, values) if can_use_progress else None),
     }
 
 
-# 2026-04-28，任务：统一关系图谱密度口径。
-# 修改原因：人物聚合指标里的 `network_density` 需要和 graph page 共享同一批参与者，
-# 避免孤点被排除后把密度抬高。
+# 人物聚合的 network_density 与 graph page 使用同一批参与者
 def compute_character_relation_metrics(
     relation_data: RelationData,
     char_data: CharacterData,
-    total_chunks: int,
+    total_chars: int,
 ) -> dict[str, Any]:
-    """计算人物关系聚合指标"""
+    """计算人物关系聚合指标（total_chars 为全书总字符数，用于每万字关系变化频率，§19.10）"""
     relation_input = relation_data.relations
     relation_graph = build_character_graph(relation_input) if relation_input else None
     result: dict[str, Any] = {
@@ -216,7 +248,7 @@ def compute_character_relation_metrics(
         "average_clustering": compute_average_clustering(relation_input, graph=relation_graph),
         "num_connected_components": float(compute_number_of_connected_components(relation_input, graph=relation_graph)),
         "largest_component_size": float(compute_largest_component_size(relation_input, graph=relation_graph)),
-        **compute_relation_change_frequency(relation_data.full_relations, total_chunks),
+        **compute_relation_change_frequency(relation_data.full_relations, total_chars),
     }
 
     degree_centrality = compute_character_degree_centrality(relation_input, graph=relation_graph)
@@ -243,35 +275,23 @@ def compute_language_style_metrics(
 
 
     """
-    result = {
+    result: dict[str, Any] = {
         "tone_distribution": _compute_tone_distribution(dialogue_tones),
-        "vocab_breadth": compute_vocab_breadth(text_data.all_tokens),
+        "string_token_diversity": compute_string_token_diversity(text_data.all_tokens),
         "avg_word_len": compute_avg_word_len(text_data.texts),
         "sent_len_std": compute_sent_len_std(text_data.texts),
-        **{f"function_word_{k}": v for k, v in compute_function_word_vector(text_data.texts).items()},
         **{f"category_density_{k}": v for k, v in compute_category_density(text_data.texts).items()},
     }
+    function_word_vector = compute_function_word_vector(text_data.texts)
+    if function_word_vector is not None:
+        result.update({f"function_word_{k}": v for k, v in function_word_vector.items()})
 
     if style_data:
-        result["dialogue_ratio"] = float(np.mean(style_data.dialogue_ratios)) if style_data.dialogue_ratios else None
-        result["avg_sent_len"] = float(np.mean(style_data.avg_sent_lens)) if style_data.avg_sent_lens else None
+        # §9.1 守恒：全书比率 = 分子之和 / 分母之和，禁止对章节比值等权平均
+        result["dialogue_ratio"] = style_data.dialogue_ratio
+        result["avg_sent_len"] = style_data.avg_sent_len
     else:
         result["dialogue_ratio"] = None
         result["avg_sent_len"] = None
 
     return result
-
-
-def compute_traditional_culture_metrics(
-    culture_data: CultureData,
-    texts: list[str],
-) -> dict[str, float | None]:
-    """
-    计算传统文化聚合指标
-
-    """
-    return {
-        "idiom_density": compute_idiom_density(texts),
-        "classical_sentence_ratio": compute_classical_sentence_ratio(texts),
-        "imagery_density": compute_imagery_density(texts),
-    }

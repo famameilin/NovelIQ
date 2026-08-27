@@ -4,17 +4,20 @@
 import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
-  createChunkCurves,
+  createParagraphCurves,
+  createEmotionTrendWindows,
+  createChapterMetrics,
   createForeshadowingThreads,
   createTopics,
   createDiagnosis,
   createGraph,
   createGraphChangesPage,
-  createTimeline,
+  createEventTimeline,
   createNarrativeStructure,
   createEmotionStats,
   createCharacterStats,
   createStyleStats,
+  createGlobalStats,
   taskDb,
 } from "../data";
 
@@ -59,9 +62,49 @@ export const charactersHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/chunk-curves
-export const chunkCurvesHandler = http.get(
-  `${BASE}/api/novels/:novelId/chunk-curves`,
+// 获取 /api/novels/:novelId/paragraph-curves（M4：段落粒度曲线，支持 max_points 抽稀）
+export const paragraphCurvesHandler = http.get(
+  `${BASE}/api/novels/:novelId/paragraph-curves`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("task_id") ?? "";
+
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(400);
+    const maxPoints = Number(url.searchParams.get("max_points"));
+    const count = Number.isFinite(maxPoints) && maxPoints > 0 ? Math.min(maxPoints, 5000) : 300;
+    return HttpResponse.json(createParagraphCurves(count));
+  }
+);
+
+// 获取 /api/novels/:novelId/emotion-trend（窗口情绪趋势，支持 position range）
+export const emotionTrendHandler = http.get(
+  `${BASE}/api/novels/:novelId/emotion-trend`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("task_id") ?? "";
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    const windowParagraphs = Number(url.searchParams.get("window_paragraphs")) || 20;
+    const rawRange = url.searchParams.get("range");
+    const rangeParts = rawRange?.split(",").map(Number);
+    const range =
+      rangeParts && rangeParts.length === 2 && rangeParts.every(Number.isFinite)
+        ? ([rangeParts[0], rangeParts[1]] as [number, number])
+        : null;
+    await delay(400);
+    return HttpResponse.json(createEmotionTrendWindows(windowParagraphs, range));
+  },
+);
+
+// 获取 /api/novels/:novelId/chapter-metrics（M4：章节指标汇总）
+export const chapterMetricsHandler = http.get(
+  `${BASE}/api/novels/:novelId/chapter-metrics`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
@@ -70,7 +113,7 @@ export const chunkCurvesHandler = http.get(
     if (err) return err;
 
     await delay(400);
-    return HttpResponse.json(createChunkCurves());
+    return HttpResponse.json(createChapterMetrics());
   }
 );
 
@@ -158,7 +201,7 @@ export const graphChangesHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/timeline
+// 获取 /api/novels/:novelId/timeline（2026-08-20 事件森林一树一节点）
 export const timelineHandler = http.get(
   `${BASE}/api/novels/:novelId/timeline`,
   async ({ request, params }) => {
@@ -170,7 +213,7 @@ export const timelineHandler = http.get(
     if (err) return err;
 
     await delay(400);
-    const data = createTimeline();
+    const data = createEventTimeline();
     data.meta.novel_id = novelId as string;
     return HttpResponse.json(data);
   }
@@ -234,4 +277,19 @@ export const styleStatsHandler = http.get(
     await delay(200);
     return HttpResponse.json(createStyleStats());
   }
+);
+
+// 获取 /api/novels/:novelId/metrics/global-stats
+export const globalStatsHandler = http.get(
+  `${BASE}/api/novels/:novelId/metrics/global-stats`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
+
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(200);
+    return HttpResponse.json(createGlobalStats());
+  },
 );

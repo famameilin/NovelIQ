@@ -16,8 +16,8 @@ from .continuity import (
 )
 from .repository import (
     AnnotationRepository,
+    ChapterAnnotationRow,
     CharacterFactRow,
-    ChunkAnnotationRow,
     DialogueFactRow,
     ForeshadowingThreadView,
 )
@@ -25,7 +25,7 @@ from .repository import (
 __all__ = [
     "AnnotationRepository",
     "CharacterFactRow",
-    "ChunkAnnotationRow",
+    "ChapterAnnotationRow",
     "DialogueFactRow",
     "ForeshadowingThreadView",
     "CasePoolRepository",

@@ -71,7 +71,7 @@ def _fetch_character_relations(
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list[CharacterRelation]:
-    """2026-08-07 用于从最新章节关系版本生成角色关系导出数据"""
+    """2026-08-19 用于从当前章节关系状态生成角色关系导出数据"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     authority_service.assert_graph_ready(run_id)
     if export_graph_view is None:
@@ -87,10 +87,10 @@ def _fetch_character_relations(
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
             continue
-        chunk_id = relation.last_seen_chunk or relation.first_seen_chunk
-        if chunk_id is None:
+        chapter_id = relation.last_seen_chapter or relation.first_seen_chapter
+        if chapter_id is None:
             logger.warning(
-                "跳过缺少 chunk_id 的当前关系快照: from_char={}, to_char={}, type={}",
+                "跳过缺少 chapter_id 的当前关系快照: from_char={}, to_char={}, type={}",
                 from_char,
                 to_char,
                 relation.relation_type,
@@ -98,7 +98,7 @@ def _fetch_character_relations(
             continue
         result.append(
             CharacterRelation(
-                chunk_id=chunk_id,
+                chapter_id=chapter_id,
                 from_char=from_char,
                 to_char=to_char,
                 type=relation.relation_type,
@@ -113,12 +113,10 @@ def _fetch_hierarchical_relations(
     export_graph_view: ExportGraphAuthorityView,
     valid_character_names: set[str] | None = None,
 ) -> list[HierarchicalRelation]:
-    """2026-08-07 用于从最新章节关系版本生成层级关系导出数据"""
+    """2026-08-19 用于从当前章节关系状态生成层级关系导出数据"""
     del run_id
     hierarchical_types = HIERARCHICAL_RELATION_TYPES
-    valid_entity_names = {
-        entity.name for entity in export_graph_view.canonical_entities if entity.name
-    }
+    valid_entity_names = {entity.name for entity in export_graph_view.canonical_entities if entity.name}
     result: list[HierarchicalRelation] = []
     for relation in export_graph_view.current_relations:
         if not relation.is_active or relation.relation_type not in hierarchical_types:
@@ -134,8 +132,8 @@ def _fetch_hierarchical_relations(
             HierarchicalRelation(
                 rel_id=relation.relation_id,
                 rel_type=relation.relation_type,
-                first_chunk=relation.first_seen_chunk,
-                last_chunk=relation.last_seen_chunk,
+                first_chapter=relation.first_seen_chapter,
+                last_chapter=relation.last_seen_chapter,
                 from_entity=relation.from_name,
                 to_entity=relation.to_name,
             )
@@ -148,17 +146,12 @@ def _fetch_graph_snapshot(
     annotation_repo: AnnotationRepository,
     *,
     chapter_id: int | None = None,
-    graph_version_id: str | None = None,
 ) -> dict[str, Any]:
     """2026-08-07 用于直接返回目标章节图版本的实体状态和有效关系"""
-    snapshot = GraphRepository(annotation_repo.session).fetch_snapshot(
-        run_id,
-        chapter_id=chapter_id,
-        graph_version_id=graph_version_id,
-    )
+    snapshot = GraphRepository(annotation_repo.session).fetch_snapshot(run_id, chapter_id=chapter_id)
     if snapshot is None:
         raise LookupError("当前 run 尚无匹配的章节图版本")
-    version = snapshot.graph_version
+    boundary = snapshot.chapter_boundary
     resolution = build_alias_resolution(snapshot.relations, entities=snapshot.entities)
     nodes = [
         {
@@ -167,9 +160,9 @@ def _fetch_graph_snapshot(
             "entity_type": entity.entity_type,
             "tags": entity.tags,
             "aliases": resolution.aliases_by_representative.get(entity.entity_id, []),
-            "first_seen_chunk": entity.first_seen_chunk,
-            "last_seen_chunk": entity.last_seen_chunk,
-            "state_revision": entity.state_revision,
+            "first_seen_chapter": entity.first_seen_chapter,
+            "last_seen_chapter": entity.last_seen_chapter,
+            "state_chapter_id": entity.state_chapter_id,
             "state": entity.state,
         }
         for entity in snapshot.entities
@@ -181,11 +174,13 @@ def _fetch_graph_snapshot(
             continue
         from_entity_id = resolution.resolve_entity_id(relation.from_entity_id)
         to_entity_id = resolution.resolve_entity_id(relation.to_entity_id)
+        # 别名归并（含 P11 启发式）后两端落到同一代表时丢弃自环
+        if from_entity_id is not None and from_entity_id == to_entity_id:
+            continue
         edges.append(
             {
                 "relation_id": relation.relation_id,
-                "relation_version_id": relation.relation_version_id,
-                "relation_revision": relation.relation_revision,
+                "state_chapter_id": relation.chapter_id,
                 "source_entity_id": from_entity_id,
                 "target_entity_id": to_entity_id,
                 "source_name": resolution.resolve_name(relation.from_name),
@@ -199,11 +194,10 @@ def _fetch_graph_snapshot(
             }
         )
     return {
-        "graph_version_id": version.graph_version_id,
-        "chapter_id": version.chapter_id,
-        "chapter_order": version.chapter_order,
-        "first_chunk_id": version.first_chunk_id,
-        "last_chunk_id": version.last_chunk_id,
+        "chapter_id": boundary.chapter_id,
+        "chapter_order": boundary.chapter_order,
+        "first_chapter_id": boundary.first_chapter_id,
+        "last_chapter_id": boundary.last_chapter_id,
         "nodes": nodes,
         "edges": edges,
     }
@@ -233,18 +227,14 @@ def _fetch_graph_changes_page(
             {
                 "change_id": row.change_id,
                 "change_kind": row.change_kind,
-                "graph_version_id": row.graph_version_id,
                 "chapter_id": row.chapter_id,
                 "chapter_order": row.chapter_order,
                 "fact_id": row.fact_id,
-                "fact_revision": row.fact_revision,
-                "effective_chunk_id": row.effective_chunk_id,
+                "effective_chapter_id": row.effective_chapter_id,
                 "changes": row.changes,
                 "entity_id": row.entity_id,
                 "entity_name": row.entity_name,
                 "relation_id": row.relation_id,
-                "relation_version_id": row.relation_version_id,
-                "relation_revision": row.relation_revision,
                 "from_entity_id": row.from_entity_id,
                 "to_entity_id": row.to_entity_id,
                 "from_name": row.from_name,

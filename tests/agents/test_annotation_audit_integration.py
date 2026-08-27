@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
+from src.agents.annotation.schema import ChunkParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from src.agents.audit.observer import AgentTurnObserver
 from src.agents.audit.recorder import AgentAuditRecorder
@@ -28,21 +29,27 @@ from tests.agents.test_annotation_agent import (
 )
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
+
+def _chunk_paragraph_info(text: str) -> ChunkParagraphInfo:
+    """2026-08-18 用于构造单段落 ChunkParagraphInfo（事件锚点派生所需）"""
+    return ChunkParagraphInfo(
+        paragraph_ids=[0],
+        char_spans=[(0, len(text))],
+        texts=[text],
+    )
+
+
 pytestmark = pytest.mark.asyncio
 
 
 def _count(db_session, model, run_id: str) -> int:
     """2026-08-10 用于按 run 统计审计行数"""
-    return int(
-        db_session.execute(
-            select(func.count()).select_from(model).where(model.run_id == run_id)
-        ).scalar_one()
-    )
+    return int(db_session.execute(select(func.count()).select_from(model).where(model.run_id == run_id)).scalar_one())
 
 
 @pytest.mark.asyncio
-async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
-    """2026-08-11 用于验证无工具回复的协议错误回合同样闭合 turn_ms"""
+async def test_no_tool_reply_closes_turns_then_fails(db_session) -> None:
+    """2026-08-22 用于验证无工具回复逐回合闭合计时，调用层重试耗尽后按失败收口"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["“住手”回荡"])
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
@@ -68,10 +75,11 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
-    llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 3)
+    llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 5)
     graph = build_annotation_graph(
         llm,
         build_annotation_tools(_QueryService(), ledger),
@@ -79,31 +87,25 @@ async def test_protocol_error_round_closes_turn_timing(db_session) -> None:
         max_iterations=30,
         observer=observer,
     )
-    result_state = await graph.ainvoke(
-        {
-            "messages": [
-                SystemMessage(content="test"),
-                HumanMessage(content="标注这段"),
-            ],
-            "phase": "chunk_open",
-            "iterations": 0,
-            "protocol_errors": 0,
-            "error": None,
-        }
-    )
-    recorder.finish_invocation(invocation_id, status="error", final_error=str(result_state["error"]))
+    with pytest.raises(RuntimeError, match="未正常结束"):
+        await graph.ainvoke(
+            {
+                "messages": [
+                    SystemMessage(content="test"),
+                    HumanMessage(content="标注这段"),
+                ],
+                "phase": "chunk_open",
+                "iterations": 0,
+                "error": None,
+            }
+        )
+    recorder.finish_invocation(invocation_id, status="error", final_error="模型调用未正常结束")
 
-    assert "协议错误" in (result_state.get("error") or "")
     db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)
-        ).scalars()
-    )
-    # 2026-08-14 P1-4：协议错误预算内重试（2 次重试 = 3 个回合），每个回合都闭合计时
-    assert len(turns) == 3
-    for turn in turns:
-        assert turn.turn_ms is not None and turn.turn_ms >= 0
+    turns = list(db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalars())
+    # 调用层重试预算默认 3 次：每次尝试的回合都闭合计时，末尾另有一条 provider_call_failed 失败行
+    assert len(turns) == 4
+    assert all(turn.turn_ms is not None and turn.turn_ms >= 0 for turn in turns)
 
 
 @pytest.mark.asyncio
@@ -134,8 +136,9 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     llm = _SequenceLLM([])
     graph = build_annotation_graph(
@@ -161,11 +164,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
 
     recorder.finish_invocation(invocation_id, status="error", final_error="IndexError")
     db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)
-        ).scalars()
-    )
+    turns = list(db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalars())
     assert len(turns) == 1
     assert turns[0].status == "error"
     assert turns[0].error is not None
@@ -203,17 +202,17 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
     )
     llm = _SequenceLLM(
         [
-                _tool_message(
-                    [
-                        _entities_call(),
-                        _observations_call(),
-                        _dialogues_call(),
-                        _events_call(),
-                        _write_call("write_relations", {"items": []}, call_id="call-relations"),
-                        invalid_metrics,
-                        *_empty_domain_calls()[-1:],
-                    ]
-                ),
+            _tool_message(
+                [
+                    _entities_call(),
+                    _observations_call(),
+                    _dialogues_call(),
+                    _events_call(),
+                    _write_call("write_relations", {"items": []}, call_id="call-relations"),
+                    invalid_metrics,
+                    *_empty_domain_calls()[-1:],
+                ]
+            ),
             _tool_message([_metrics_call(call_id="call-metrics-fixed")]),
         ]
     )
@@ -221,8 +220,9 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -247,7 +247,6 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
             ],
             "phase": "chunk_open",
             "iterations": 0,
-            "protocol_errors": 0,
             "error": None,
         }
     )
@@ -256,17 +255,11 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
     assert result_state["phase"] == "completed"
     db_session.rollback()
     assert _count(db_session, AgentInvocation, run_id) == 1
-    invocation = db_session.execute(
-        select(AgentInvocation).where(AgentInvocation.run_id == run_id)
-    ).scalar_one()
+    invocation = db_session.execute(select(AgentInvocation).where(AgentInvocation.run_id == run_id)).scalar_one()
     assert invocation.status == "success"
     assert invocation.finished_at is not None
 
-    turn_rows = list(
-        db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)
-        ).scalars()
-    )
+    turn_rows = list(db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalars())
     assert len(turn_rows) == 2
     assert [row.turn_index for row in turn_rows] == [1, 2]
     for turn in turn_rows:
@@ -298,11 +291,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
     assert all(row.receipt["accepted"] is True for row in write_rows)
     assert all(row.receipt["state_digest"].startswith("sha256:") for row in write_rows)
 
-    token_rows = list(
-        db_session.execute(
-            select(TokenUsage).where(TokenUsage.run_id == run_id)
-        ).scalars()
-    )
+    token_rows = list(db_session.execute(select(TokenUsage).where(TokenUsage.run_id == run_id)).scalars())
     assert len(token_rows) == 2
     assert all(row.agent_turn_id is not None for row in token_rows)
     assert {row.agent_turn_id for row in token_rows} == {row.id for row in turn_rows}

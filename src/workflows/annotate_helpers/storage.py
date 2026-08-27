@@ -25,8 +25,9 @@ from src.storage.models import (
     DialogueRecord,
     ForeshadowingThread,
     GraphFact,
-    GraphVersion,
+    Paragraph,
 )
+from src.storage.models.graph import ChapterBoundary
 from src.storage.repositories import (
     CasePoolRepository,
     CaseResolutionMappingRepository,
@@ -59,8 +60,7 @@ def _validate_locked_cases(
             raise ValueError(f"resolved case 已不再 active: {row.id}")
         if row.case_type != result.type:
             raise ValueError(
-                f"resolved case 类型已变化: case_id={row.id} "
-                f"expected={row.case_type} actual={result.type}"
+                f"resolved case 类型已变化: case_id={row.id} expected={row.case_type} actual={result.type}"
             )
         if row.target_key != result.target_key or dict(row.target_ref) != result.target_ref:
             raise ValueError(f"resolved case 稳定目标已变化: {row.id}")
@@ -72,7 +72,7 @@ def load_completion_result(
     run_id: str,
     chapter_id: int,
 ) -> CompletionResult | None:
-    """2026-08-07 用于按最新合同标注案例和解决映射回读完成结果"""
+    """2026-08-19 用于按章节标注和解决映射回读完成结果"""
     annotation = session.execute(
         select(ChapterAnnotationRecord).where(
             ChapterAnnotationRecord.run_id == run_id,
@@ -81,22 +81,6 @@ def load_completion_result(
     ).scalar_one_or_none()
     if annotation is None:
         return None
-    if annotation.payload.get("contract_version") != "agent-semantic-v1":
-        raise ValueError(
-            "章节标注使用旧合同，必须重新运行 annotation: "
-            f"run_id={run_id} chapter_id={chapter_id}"
-        )
-    graph_version = session.execute(
-        select(GraphVersion).where(
-            GraphVersion.run_id == run_id,
-            GraphVersion.chapter_id == chapter_id,
-            GraphVersion.annotation_id == annotation.annotation_id,
-        )
-    ).scalar_one_or_none()
-    if graph_version is None:
-        raise ValueError(
-            f"章节标注缺少唯一图版本: run_id={run_id} chapter_id={chapter_id}"
-        )
     created_rows = list(
         session.execute(
             select(CasePoolCase)
@@ -122,22 +106,20 @@ def load_completion_result(
             case_id=row.case_id,
             action=cast(
                 CaseAction,
-                row.resolution.get("action")
-                if isinstance(row.resolution.get("action"), str)
-                else "close",
+                row.resolution.get("action") if isinstance(row.resolution.get("action"), str) else "close",
             ),
             type=row.case_type,
             reason=str(row.resolution.get("reason") or ""),
             target_dialogue_id=row.target_dialogue_id,
             target_setup_id=row.target_setup_id,
             target_fact_id=row.target_fact_id,
-            target_fact_revision=row.target_fact_revision,
+            target_setup_event_id=row.target_setup_event_id,
+            target_payoff_event_id=row.target_payoff_event_id,
         )
         for row in mapping_rows
     ]
     return CompletionResult(
         annotation_id=annotation.annotation_id,
-        graph_version_id=graph_version.graph_version_id,
         chapter_id=annotation.chapter_id,
         created_cases=[completion_case_view(row) for row in created_rows],
         resolved_cases=resolved,
@@ -149,14 +131,34 @@ def _persist_dialogue_records(
     *,
     result: AgentRunResult,
 ) -> None:
-    """2026-08-11 用于把最终系统绑定对话投影到对话记录表"""
+    """2026-08-11 用于把最终系统绑定对话投影到对话记录表
+
+    2026-08-18 P3：按事件锚点列表写入，对话弱关联到完全包含其字符区间的事件。
+    2026-08-22锚点直接取服务端生成的 event.node_id。
+    2026-08-22 重构：BoundEvent 不再携带字符区间，弱关联改用章级原文区间。
+    """
     repository = DialogueRecordRepository(session)
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(
+                Paragraph.run_id == result.run_id,
+                Paragraph.chapter_id == result.chapter_id,
+            )
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
+    )
+    if not paragraphs:
+        raise ValueError(f"对话落库缺少章节段落: run_id={result.run_id} chapter_id={result.chapter_id}")
+    char_start = min(int(row.local_start_char) for row in paragraphs)
+    char_end = max(int(row.local_end_char) for row in paragraphs)
     for chunk in result.annotation.chunks:
+        event_anchors = [(event.node_id, char_start, char_end) for event in chunk.events]
         repository.sync_dialogues(
             run_id=result.run_id,
             chapter_id=result.chapter_id,
-            chunk_id=chunk.chunk_id,
             dialogues=chunk.dialogues,
+            event_anchors=event_anchors,
         )
 
 
@@ -165,14 +167,20 @@ def _persist_foreshadowing(
     *,
     result: AgentRunResult,
 ) -> None:
-    """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表"""
+    """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表
+
+    2026-08-18：伏笔按 setup_event_id 去重——同一 setup 事件只建一条线程。
+    2026-08-22setup_event_id 直接取服务端生成的 setup_node_id，
+    不再按序号重算。
+    """
     repository = ForeshadowingRepository(session)
     for chunk in result.annotation.chunks:
         for foreshadowing in chunk.foreshadowings:
             repository.sync(
                 run_id=result.run_id,
-                chunk_id=chunk.chunk_id,
+                chapter_id=chunk.chunk_id,
                 foreshadowing=foreshadowing,
+                setup_event_id=foreshadowing.setup_node_id,
             )
 
 
@@ -185,9 +193,7 @@ def _persist_pushed_cases(
     """2026-08-10 用于把模型 push_case 创建的新案例登记进案例池"""
     repository = CasePoolRepository(session)
     existing_keys = set(
-        session.execute(
-            select(CasePoolCase.target_key).where(CasePoolCase.run_id == result.run_id)
-        ).scalars()
+        session.execute(select(CasePoolCase.target_key).where(CasePoolCase.run_id == result.run_id)).scalars()
     )
     completion_cases: list[CompletionCase] = []
     for pushed_case in result.pushed_cases:
@@ -208,20 +214,16 @@ def _persist_alias_pending_cases(
     *,
     run_id: str,
     annotation_id: str,
-    graph_version: GraphVersion,
+    chapter_boundary: ChapterBoundary,
 ) -> list[CompletionCase]:
     """2026-08-09 用于把图验证器疑似同一人物对写入案例池待仲裁"""
     repository = CasePoolRepository(session)
-    existing_keys = set(
-        session.execute(
-            select(CasePoolCase.target_key).where(CasePoolCase.run_id == run_id)
-        ).scalars()
-    )
+    existing_keys = set(session.execute(select(CasePoolCase.target_key).where(CasePoolCase.run_id == run_id)).scalars())
     completion_cases: list[CompletionCase] = []
     for pending_case in build_alias_pending_cases(
         session,
         run_id=run_id,
-        graph_version=graph_version,
+        chapter_boundary=chapter_boundary,
         existing_target_keys=existing_keys,
     ):
         row = repository.create_case(
@@ -240,7 +242,11 @@ def _persist_resolution_mappings(
     annotation_id: str,
     resolved_targets_by_case_id: dict,
 ) -> list[CompletionResolvedCase]:
-    """2026-08-11 用于按案例动作保存解决结果与对应目标（对话/线程/事实版本）"""
+    """2026-08-11 用于按案例动作保存解决结果与对应目标（对话/线程/事实版本）
+
+    2026-08-18：foreshadowing 动作返回 dict（含 thread + event 目标），
+    其他动作返回 GraphFact / DialogueRecord / None。
+    """
     repository = CaseResolutionMappingRepository(session)
     completion_results: list[CompletionResolvedCase] = []
     for resolved_case in result.resolved_cases:
@@ -248,11 +254,19 @@ def _persist_resolution_mappings(
         target_fact = target if isinstance(target, GraphFact) else None
         if resolved_case.action in {"dialogue", "foreshadowing"} and target is None:
             raise ValueError(f"{resolved_case.action} 动作未生成解决目标: {resolved_case.case_id}")
-        target_dialogue_id = None
-        target_setup_id = None
+        target_dialogue_id: str | None = None
+        target_setup_id: str | None = None
+        target_setup_event_id: str | None = None
+        target_payoff_event_id: str | None = None
         if isinstance(target, DialogueRecord):
             target_dialogue_id = target.dialogue_id
-        if isinstance(target, ForeshadowingThread):
+        if isinstance(target, dict) and "thread" in target:
+            # 2026-08-18 foreshadowing 动作返回 dict
+            thread = target["thread"]
+            target_setup_id = thread.setup_id
+            target_setup_event_id = target.get("target_setup_event_id")
+            target_payoff_event_id = target.get("target_payoff_event_id")
+        elif isinstance(target, ForeshadowingThread):
             target_setup_id = target.setup_id
         repository.add_mapping(
             run_id=result.run_id,
@@ -261,6 +275,8 @@ def _persist_resolution_mappings(
             target_fact=target_fact,
             target_dialogue_id=target_dialogue_id,
             target_setup_id=target_setup_id,
+            target_setup_event_id=target_setup_event_id,
+            target_payoff_event_id=target_payoff_event_id,
         )
         completion_results.append(
             CompletionResolvedCase(
@@ -271,9 +287,8 @@ def _persist_resolution_mappings(
                 target_dialogue_id=target_dialogue_id,
                 target_setup_id=target_setup_id,
                 target_fact_id=target_fact.fact_id if target_fact is not None else None,
-                target_fact_revision=(
-                    target_fact.fact_revision if target_fact is not None else None
-                ),
+                target_setup_event_id=target_setup_event_id,
+                target_payoff_event_id=target_payoff_event_id,
             )
         )
     return completion_results
@@ -285,50 +300,16 @@ def _reelect_representatives(
     run_id: str,
 ) -> None:
     """2026-08-11 用于每章完成后全量清空并重选规范名标记写入实体属性"""
-    from sqlalchemy import func
-
-    from src.storage.models.graph import GraphEntity, GraphRelation, GraphRelationVersion
+    from src.storage.models.graph import GraphEntity
     from src.storage.repositories.graph.election import elect_representatives
+    from src.storage.repositories.graph.repository import GraphRepository
 
-    entities = list(
-        session.execute(
-            select(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalars()
-    )
-    latest_revision = (
-        select(
-            GraphRelationVersion.relation_id,
-            func.max(GraphRelationVersion.relation_revision).label("max_revision"),
-        )
-        .where(GraphRelationVersion.run_id == run_id)
-        .group_by(GraphRelationVersion.relation_id)
-        .subquery()
-    )
-    relation_rows = (
-        session.execute(
-            select(GraphRelation.from_entity_id, GraphRelation.to_entity_id)
-            .join(
-                GraphRelationVersion,
-                GraphRelationVersion.relation_id == GraphRelation.relation_id,
-            )
-            # 2026-08-13 P1-3 防御：只取每关系最新版本参与选举，历史残留的
-            # active 版本（关系已被后续章节 break/retract）混入会让已解绑的
-            # 实体对被错误选为代表
-            .join(
-                latest_revision,
-                (latest_revision.c.relation_id == GraphRelationVersion.relation_id)
-                & (latest_revision.c.max_revision == GraphRelationVersion.relation_revision),
-            )
-            .where(
-                GraphRelation.run_id == run_id,
-                GraphRelationVersion.run_id == run_id,
-                GraphRelationVersion.is_active.is_(True),
-                GraphRelation.relation_semantics == "same_character",
-            )
-            .distinct()
-        ).all()
-    )
-    pairs = [(int(row[0]), int(row[1])) for row in relation_rows]
+    entities = list(session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
+    pairs = [
+        (int(row.from_entity_id), int(row.to_entity_id))
+        for row in GraphRepository(session).fetch_latest_relations(run_id, active_only=True)
+        if row.relation_semantics == "same_character"
+    ]
     flags = elect_representatives(entities, pairs=pairs)
     for entity in entities:
         attributes = dict(entity.attributes or {})
@@ -379,7 +360,9 @@ def complete_annotation_run(
                 session,
                 annotation=annotation,
                 resolved_cases=result.resolved_cases,
-                authorized_text_chunk_ids=set(result.audit.authorized_text_chunk_ids),
+                # 2026-08-18：完成事务同时复核 Agent 实际读取过的段落授权
+                authorized_text_chapter_ids=set(result.audit.authorized_chapter_ids),
+                authorized_text_paragraph_ids=set(result.audit.authorized_text_paragraph_ids),
             )
             _reelect_representatives(session, run_id=result.run_id)
             resolved_completion = _persist_resolution_mappings(
@@ -398,7 +381,7 @@ def complete_annotation_run(
                 session,
                 run_id=result.run_id,
                 annotation_id=annotation.annotation_id,
-                graph_version=graph_result.graph_version,
+                chapter_boundary=graph_result.chapter_boundary,
             )
             case_repository.mark_surfaced(
                 run_id=result.run_id,
@@ -407,7 +390,6 @@ def complete_annotation_run(
             )
             completion = CompletionResult(
                 annotation_id=annotation.annotation_id,
-                graph_version_id=graph_result.graph_version.graph_version_id,
                 chapter_id=result.chapter_id,
                 created_cases=[*pushed_completion, *alias_completion],
                 resolved_cases=resolved_completion,

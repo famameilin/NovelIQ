@@ -3,7 +3,7 @@
 # 明确标注哪些词条被多个词表引用（跨表重叠）。
 # 每个条目声明:
 #   - term: 词条文本
-#   - primary: 主属表 (layer.lexicon 格式，如 style.semantic_10cat)
+#   - primary: 主属表 (file 名格式，如 semantic_category.txt)
 #   - referenced_by: 被哪些其他表引用
 #   - note: 重叠原因说明
 #
@@ -17,78 +17,78 @@
 conflicts:
   # ===== combat ↔ semantic_category (武功武器类) =====
   - term: "剑气"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
     note: "语义上属风格维度的武功武器类，张力维度借用"
 
   - term: "灵力"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
     note: "语义上属武功武器类"
 
   - term: "剑光"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "剑意"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "剑芒"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "刀气"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "刀光"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "刀意"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "罡气"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "真气"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "内力"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   - term: "法力"
-    primary: "style.semantic_10cat"
-    referenced_by: ["tension.action_terms"]
+    primary: "semantic_category.txt"
+    referenced_by: ["combat.txt"]
 
   # ===== combat ↔ sensory (听觉/触觉重叠) =====
   - term: "轰隆"
-    primary: "style.sensory_5sense"
-    referenced_by: ["tension.action_terms"]
+    primary: "sensory.txt"
+    referenced_by: ["combat.txt"]
     note: "听觉词，战斗场景高频使用"
 
   - term: "轰隆隆"
-    primary: "style.sensory_5sense"
-    referenced_by: ["tension.action_terms"]
+    primary: "sensory.txt"
+    referenced_by: ["combat.txt"]
     note: "同上变体"
 
   - term: "轰轰轰"
-    primary: "style.sensory_5sense"
-    referenced_by: ["tension.action_terms"]
+    primary: "sensory.txt"
+    referenced_by: ["combat.txt"]
     note: "同上变体"
 
   # ===== sensory ↔ negative (身体感觉重叠) =====
   - term: "刺痛"
-    primary: "emotion.negative"
-    referenced_by: ["style.sensory_5sense"]
+    primary: "negative.txt"
+    referenced_by: ["sensory.txt"]
     note: "可指物理刺痛或心理痛苦"
 
   - term: "剧痛"
-    primary: "emotion.negative"
-    referenced_by: ["style.sensory_5sense"]
+    primary: "negative.txt"
+    referenced_by: ["sensory.txt"]
     note: "同上"

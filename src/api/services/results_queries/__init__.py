@@ -4,13 +4,8 @@
 说明: 为 route 与 service 提供统一的结果查询组装器，纠正原先 service 反向依赖 route 的问题
 """
 
+from .chapters import _fetch_chapter_annotations
 from .characters import _fetch_characters
-from .chunks import (
-    _fetch_chunk_annotations,
-    _fetch_chunk_curves,
-    _fetch_chunk_styles,
-    _fetch_raw_chunk_curves,
-)
 from .common import (
     _calculate_narrative_focus_scores,
     _normalize_arc_scores,
@@ -33,6 +28,7 @@ from .metadata import (
     _fetch_novel_name,
     _fetch_token_usage_stats,
 )
+from .paragraphs import _fetch_chapter_metrics, _fetch_paragraph_curves
 from .topics import _fetch_topics
 
 __all__ = [
@@ -40,8 +36,6 @@ __all__ = [
     "_parse_json_field",
     "_parse_int_field",
     "_normalize_name_list",
-    "_fetch_chunk_curves",
-    "_fetch_raw_chunk_curves",
     "_fetch_characters",
     "_calculate_narrative_focus_scores",
     "_fetch_topics",
@@ -50,12 +44,13 @@ __all__ = [
     "_fetch_graph_changes_page",
     "_fetch_graph_snapshot",
     "_normalize_arc_scores",
-    "_fetch_chunk_styles",
-    "_fetch_chunk_annotations",
+    "_fetch_chapter_annotations",
     "_fetch_character_relations",
     "_fetch_hierarchical_relations",
     "_fetch_global_stats",
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
     "_fetch_known_characters",
+    "_fetch_paragraph_curves",
+    "_fetch_chapter_metrics",
 ]

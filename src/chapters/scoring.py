@@ -53,10 +53,7 @@ def _score_basic(candidate: ChapterCandidate, config: ChapterConfig) -> None:
     if candidate.display_title.startswith(config.filler_prefix_chars):
         confidence *= config.score_filler_prefix
 
-    if (
-        candidate.level in (ChapterLevel.ESSAY, ChapterLevel.VOLUME, ChapterLevel.PART)
-        and candidate.number is None
-    ):
+    if candidate.level in (ChapterLevel.ESSAY, ChapterLevel.VOLUME, ChapterLevel.PART) and candidate.number is None:
         confidence *= config.score_named_volume
 
     candidate.confidence = confidence

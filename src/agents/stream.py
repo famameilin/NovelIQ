@@ -65,6 +65,16 @@ def _retry_backoff_seconds(attempt: int) -> float:
     return min(0.5 * (2 ** max(attempt, 1)), 3.0)
 
 
+def _is_call_complete(message: Any) -> bool:
+    """2026-08-22 用于判定一次模型调用是否正常结束：响应包含至少一个工具调用
+
+    本项目所有 agent（标注/诊断）的有效产出均经工具调用产生，纯文本回复不推进任何状态。
+    网关在思考阶段静默截断流式响应时，聚合结果正是"仅推理、无正文、无工具调用"的空回复；
+    该形态与断流统一走调用层重发，不再进入上层协议处理，避免传输故障冒充模型行为问题。
+    """
+    return bool(getattr(message, "tool_calls", None))
+
+
 def _truncate(text: str, limit: int = _MAX_TOOL_SUMMARY_CHARS) -> str:
     """截断过长摘要，避免工具结果刷爆事件负载"""
     if len(text) <= limit:
@@ -98,10 +108,12 @@ class AgentStream:
         *,
         chunk_id: int = 0,
         sub_stage: str = "",
+        stream_id: str | None = None,
     ) -> None:
         self._emitter = emitter
         self._chunk_id = chunk_id
         self._sub_stage = sub_stage
+        self._stream_id = stream_id or f"{sub_stage or 'agent'}-{chunk_id}"
 
     async def thinking(self, text: str) -> None:
         """发送思考/推理状态事件（仅状态消息，不推送推理 token 内容）"""
@@ -139,8 +151,9 @@ class AgentStream:
             StreamEvent(
                 action=action,
                 content=text,
-                chunk_id=self._chunk_id,
+                chapter_id=self._chunk_id,
                 sub_stage=self._sub_stage,
+                stream_id=self._stream_id,
             )
         )
 
@@ -151,8 +164,9 @@ class AgentStream:
                 content=name,
                 message=message,
                 status=status,
-                chunk_id=self._chunk_id,
+                chapter_id=self._chunk_id,
                 sub_stage=self._sub_stage,
+                stream_id=self._stream_id,
             )
         )
 
@@ -204,12 +218,21 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
     OpenAI 兼容流式接口把工具调用拆成多个分片：name 首片完整、args 为 JSON 片段增量，
     需要按 index 拼接后再解析。JSON 解析失败说明流被截断（Provider 丢尾包/模型截断），
     不再静默包装 {"_raw": ...} 执行，而是打 truncated 标记并保留原文供诊断与拒绝执行。
+    2026-08-22 修复：部分网关（muse-spark via zen）并发工具返回 index 均为 0，
+    需按 name/id 冲突自动分配新 index，避免名串接成单条（如 get_a+get_b）。
     """
     merged: dict[int, dict[str, str]] = {}
     for raw in tool_call_chunks:
         index = int(raw.get("index", len(merged)))
+        # 若 index 已被不同 name 占用，分配新 index
+        raw_name = raw.get("name") or ""
+        if index in merged and raw_name and merged[index]["name"] and merged[index]["name"] != raw_name:
+            index = max(merged.keys()) + 1
+            # 同时检查新 index 是否仍冲突（极端情况）
+            while index in merged and merged[index]["name"] and merged[index]["name"] != raw_name:
+                index += 1
         entry = merged.setdefault(index, {"name": "", "args": "", "id": ""})
-        name = raw.get("name") or ""
+        name = raw_name
         if name:
             entry["name"] += name
         args = raw.get("args") or ""
@@ -317,9 +340,7 @@ class StreamChunkAggregator:
         if isinstance(content, str) and content:
             # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出。
             # 重叠部分进消息链（保留重试输出全文）但不推 SSE，非重叠部分正常推送。
-            overlap, content, self._skip_output_prefix = self._split_overlap(
-                content, self._skip_output_prefix
-            )
+            overlap, content, self._skip_output_prefix = self._split_overlap(content, self._skip_output_prefix)
             if overlap:
                 self._content_parts.append(overlap)
             if content:
@@ -414,11 +435,7 @@ class StreamChunkAggregator:
         elif reasoning_ms is None:
             notes.append("reasoning_not_streamed")
         return ModelCallTiming(
-            ttft_ms=(
-                round((self._ttft_ns - self._started_ns) / 1_000_000)
-                if self._ttft_ns is not None
-                else None
-            ),
+            ttft_ms=(round((self._ttft_ns - self._started_ns) / 1_000_000) if self._ttft_ns is not None else None),
             first_visible_ms=(
                 round((self._first_visible_ns - self._started_ns) / 1_000_000)
                 if self._first_visible_ns is not None
@@ -467,16 +484,15 @@ async def run_model_call(
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
     非流式路径同样遵守 total_attempts 重试语义，但只对网络/限流等瞬态错误
     （_is_transient_model_error）重发请求，其余错误直接失败。
+    2026-08-22 把"响应不含任何工具调用"视同调用未正常结束（涵盖网关思考阶段
+    静默截断产生的空回复），与瞬态错误共用 total_attempts 预算退避重发；
+    耗尽后上抛 RuntimeError。回合审计回调先于该判定执行，截断回合仍留痕。
     on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
     """
     from src.config import settings
 
     started_ns = perf_counter_ns()
-    total_attempts = (
-        total_attempts
-        if total_attempts is not None
-        else settings.models.annotation.total_attempts
-    )
+    total_attempts = total_attempts if total_attempts is not None else settings.models.annotation.total_attempts
     if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
         retries_remaining = max(0, total_attempts - 1)
         if stream is not None:
@@ -489,11 +505,10 @@ async def run_model_call(
         while True:
             try:
                 response = await model.ainvoke(messages)
-                break
             except StreamEmitError:
                 # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # 2026-08-13 P2-6 非流式路径只对网络/限流瞬态错误重试，
                 # 参数/鉴权等确定性错误重试无意义
                 if retries_remaining <= 0 or not _is_transient_model_error(exc):
@@ -506,20 +521,34 @@ async def run_model_call(
                     retries_remaining,
                 )
                 if stream is not None:
-                    await stream.thinking(
-                        f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）"
-                    )
+                    await stream.thinking(f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）")
                 await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
                 continue
-        timing = ModelCallTiming(
-            model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
-            timing_notes=("provider_non_streaming",),
-        )
-        if stream is not None:
-            await emit_completed_model_call(stream, response)
-        if on_turn_complete is not None:
-            on_turn_complete(response, timing)
-        return response
+            timing = ModelCallTiming(
+                model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
+                timing_notes=("provider_non_streaming",),
+            )
+            if stream is not None:
+                await emit_completed_model_call(stream, response)
+            if on_turn_complete is not None:
+                on_turn_complete(response, timing)
+            # 2026-08-22 调用未正常结束（响应不含工具调用）视同调用层故障：
+            # 与瞬态错误共用 total_attempts 预算退避重发，耗尽后上抛
+            if not _is_call_complete(response):
+                if retries_remaining <= 0:
+                    logger.warning("模型调用未正常结束且重试已耗尽")
+                    raise RuntimeError("模型调用未正常结束：响应未包含任何工具调用，重发后仍未恢复")
+                failed_attempt = total_attempts - retries_remaining
+                retries_remaining -= 1
+                logger.warning(
+                    "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
+                    retries_remaining,
+                )
+                if stream is not None:
+                    await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
+                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+                continue
+            return response
 
     retries_remaining = max(0, total_attempts - 1)
     skip_output_prefix = ""
@@ -538,7 +567,7 @@ async def run_model_call(
         except StreamEmitError:
             # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if retries_remaining <= 0:
                 logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
                 raise
@@ -550,9 +579,7 @@ async def run_model_call(
                 retries_remaining,
             )
             if stream is not None:
-                await stream.thinking(
-                    f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）"
-                )
+                await stream.thinking(f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）")
             if aggregator._usage_metadata:
                 _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
             skip_output_prefix = "".join(aggregator._content_parts)
@@ -568,6 +595,26 @@ async def run_model_call(
             response.usage_metadata = cast(UsageMetadata, retried_usage)
         if on_turn_complete is not None:
             on_turn_complete(response, aggregator.timing())
+        # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）
+        # 视同调用层故障：退避重发同一请求，耗尽后上抛交由上层失败审计收口
+        if not _is_call_complete(response):
+            if retries_remaining <= 0:
+                logger.warning("模型调用未正常结束且重试已耗尽")
+                raise RuntimeError("模型调用未正常结束：响应未包含任何工具调用，重发后仍未恢复")
+            failed_attempt = total_attempts - retries_remaining
+            retries_remaining -= 1
+            logger.warning(
+                "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
+                retries_remaining,
+            )
+            if aggregator._usage_metadata:
+                _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
+            skip_output_prefix = "".join(aggregator._content_parts)
+            announced_tools = set(aggregator._announced_tools)
+            if stream is not None:
+                await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
+            await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+            continue
         return response
 
 
@@ -581,12 +628,7 @@ async def emit_tool_results(stream: AgentStream, tool_messages: list[Any]) -> No
         name = getattr(message, "name", "") or "unknown"
         content = getattr(message, "content", "") or ""
         text = str(content)
-        is_failed = (
-            text.startswith("Error:")
-            or '"error"' in text
-            or "执行失败" in text
-            or "校验失败" in text
-        )
+        is_failed = text.startswith("Error:") or '"error"' in text or "执行失败" in text or "校验失败" in text
         if is_failed:
             await stream.tool_call_failed(name, text)
         else:

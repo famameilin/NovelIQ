@@ -80,6 +80,16 @@ def test_count_chapters(db_session) -> None:
     run_id = _create_run(db_session)
     repo = ChapterRepository(db_session)
     repo.insert_chapters(run_id, _make_chapters())
+    # M9a-2：count_chapters 只统计有正文的章节（结构行不算）
+    from src.chunking.chunker import Chunk
+
+    repo.insert_chapter_texts(
+        run_id,
+        [
+            Chunk(index=0, text="第一章正文。", start=0, end=6, chapter_id=1),
+            Chunk(index=1, text="第二章正文。", start=6, end=12, chapter_id=2),
+        ],
+    )
     assert repo.count_chapters(run_id) == 2
     assert repo.count_chapters("no-such-run") == 0
 

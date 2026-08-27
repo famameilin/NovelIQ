@@ -1,3 +1,12 @@
+from .event_forest import (
+    EventEdgeRow,
+    EventForestRepository,
+    EventForestSnapshot,
+    EventNodeRow,
+    EventSecondaryGroupRow,
+    EventTreeRow,
+    ForeshadowingEdgeRow,
+)
 from .persistence import (
     PersistedGraphResult,
     persist_completion_graph,
@@ -20,4 +29,11 @@ __all__ = [
     "PersistedGraphResult",
     "persist_completion_graph",
     "stable_annotation_fact_id",
+    "EventForestRepository",
+    "EventForestSnapshot",
+    "EventNodeRow",
+    "EventEdgeRow",
+    "EventSecondaryGroupRow",
+    "EventTreeRow",
+    "ForeshadowingEdgeRow",
 ]

@@ -1,53 +1,48 @@
-"""
-章节级事实图版本查询仓储
-"""
+"""章节图谱查询仓储"""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
-from typing import cast as type_cast
 
-from sqlalchemy import String, func, or_, select, text
-from sqlalchemy import cast as sql_cast
+from sqlalchemy import select
 
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
-    EntityStateVersion,
+    Chapter,
+    ChapterAnnotationRecord,
+    EntityState,
     GraphEntity,
     GraphFact,
     GraphRelation,
-    GraphRelationVersion,
-    GraphVersion,
+    RelationState,
 )
+from src.storage.models.graph import ChapterBoundary
 from src.storage.repositories.base import BaseRepository
 
 
 @dataclass(frozen=True, slots=True)
 class EntitySnapshotRow:
-    """2026-08-08 用于返回目标章节边界的实体身份与完整状态"""
+    """2026-08-19 用于返回目标章节边界的实体身份与完整状态"""
 
     entity_id: int
     name: str
     entity_type: str
     tags: list[str]
     attributes: dict[str, Any]
-    first_seen_chunk: int
-    last_seen_chunk: int
-    state_revision: int
+    first_seen_chapter: int
+    last_seen_chapter: int
+    state_chapter_id: int | None
     state: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
 class RelationSnapshotRow:
-    """2026-08-07 用于返回目标章节边界的稳定关系最新版本"""
+    """2026-08-19 用于返回目标章节边界的稳定关系状态"""
 
-    relation_version_id: int
-    graph_version_id: str
     chapter_id: int
     relation_id: str
-    relation_revision: int
     from_entity_id: int
     to_entity_id: int
     from_name: str
@@ -58,30 +53,26 @@ class RelationSnapshotRow:
     attributes: dict[str, Any]
     is_active: bool
     changes: list[dict[str, Any]]
-    first_seen_chunk: int
-    last_seen_chunk: int
+    first_seen_chapter: int
+    last_seen_chapter: int
 
 
 @dataclass(frozen=True, slots=True)
 class GraphChangeRow:
-    """2026-08-07 用于返回按原因事实拆分的实体或关系章节变化"""
+    """2026-08-19 用于返回按章节与事实拆分的实体或关系变化"""
 
     change_id: str
     change_kind: Literal["state", "relation"]
-    graph_version_id: str
     chapter_id: int
     chapter_order: int
     fact_id: str
-    fact_revision: int
-    effective_chunk_id: int
+    effective_chapter_id: int
     confidence: str
     changes: list[dict[str, Any]]
     entity_id: int | None = None
     entity_name: str | None = None
     entity_type: str | None = None
     relation_id: str | None = None
-    relation_version_id: int | None = None
-    relation_revision: int | None = None
     from_entity_id: int | None = None
     to_entity_id: int | None = None
     from_name: str | None = None
@@ -93,258 +84,223 @@ class GraphChangeRow:
 
 @dataclass(frozen=True, slots=True)
 class GraphSnapshotRow:
-    """2026-08-07 用于承载一个章节图版本的实体与有效关系"""
+    """2026-08-19 用于承载一个章节边界的实体与有效关系"""
 
-    graph_version: GraphVersion
+    chapter_boundary: ChapterBoundary
     entities: list[EntitySnapshotRow]
     relations: list[RelationSnapshotRow]
 
 
 class GraphRepository(BaseRepository[GraphFact]):
-    """2026-08-07 用于按章节图版本直接查询事实实体状态和关系版本"""
+    """2026-08-19 用于按章节身份查询事实、实体状态和关系状态"""
 
-    def resolve_graph_version(
-        self,
-        run_id: str,
-        *,
-        chapter_id: int | None = None,
-        graph_version_id: str | None = None,
-    ) -> GraphVersion | None:
-        """2026-08-07 用于解析显式章节图版本或当前 run 最新章节版本"""
-        if chapter_id is not None and graph_version_id is not None:
-            raise ValueError("chapter_id 与 graph_version_id 只能选择一个")
-        stmt = select(GraphVersion).where(GraphVersion.run_id == run_id)
-        if graph_version_id is not None:
-            stmt = stmt.where(GraphVersion.graph_version_id == graph_version_id)
-        elif chapter_id is not None:
-            stmt = stmt.where(GraphVersion.chapter_id == chapter_id)
-        else:
-            stmt = stmt.order_by(GraphVersion.chapter_order.desc()).limit(1)
-        return self.session.execute(stmt).scalar_one_or_none()
-
-    def previous_graph_version(
-        self,
-        run_id: str,
-        *,
-        chapter_order: int,
-    ) -> GraphVersion | None:
-        """2026-08-07 用于按章节顺序读取最近已完成的上一章节图版本"""
-        return self.session.execute(
-            select(GraphVersion)
-            .where(
-                GraphVersion.run_id == run_id,
-                GraphVersion.chapter_order < chapter_order,
-            )
-            .order_by(GraphVersion.chapter_order.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-
-    def fetch_fact_version(
-        self,
-        run_id: str,
-        fact_id: str,
-        fact_revision: int,
-    ) -> GraphFact | None:
-        """2026-08-07 用于按同 run 事实 ID 与修订号读取不可变事实版本"""
-        return self.session.execute(
-            select(GraphFact).where(
-                GraphFact.run_id == run_id,
-                GraphFact.fact_id == fact_id,
-                GraphFact.fact_revision == fact_revision,
-            )
-        ).scalar_one_or_none()
-
-    def _latest_state_rows(self, boundary: GraphVersion) -> dict[int, EntityStateVersion]:
-        """2026-08-07 用于读取目标章节及以前每个实体最近的状态版本"""
-        rows = self.session.execute(
-            select(EntityStateVersion)
-            .join(GraphVersion, GraphVersion.graph_version_id == EntityStateVersion.graph_version_id)
-            .where(
-                EntityStateVersion.run_id == boundary.run_id,
-                GraphVersion.chapter_order <= boundary.chapter_order,
-            )
-            .distinct(EntityStateVersion.entity_id)
-            .order_by(
-                EntityStateVersion.entity_id,
-                GraphVersion.chapter_order.desc(),
-                EntityStateVersion.state_revision.desc(),
-            )
-        ).scalars()
-        return {int(row.entity_id): row for row in rows}
-
-    def fetch_entity_snapshots(self, boundary: GraphVersion) -> list[EntitySnapshotRow]:
-        """2026-08-07 用于选择目标章节及以前最近状态并继承无变化实体"""
-        latest_states = self._latest_state_rows(boundary)
-        entities = self.session.execute(
-            select(GraphEntity)
-            .where(
-                GraphEntity.run_id == boundary.run_id,
-                GraphEntity.first_seen_chunk <= boundary.last_chunk_id,
-            )
-            .order_by(GraphEntity.entity_id)
-        ).scalars()
-        return [
-            EntitySnapshotRow(
-                entity_id=int(entity.entity_id),
-                name=str(entity.canonical_name),
-                entity_type=str(entity.entity_type),
-                tags=list(entity.tags or []),
-                attributes=dict(entity.attributes or {}),
-                first_seen_chunk=int(entity.first_seen_chunk),
-                last_seen_chunk=min(int(entity.last_seen_chunk), int(boundary.last_chunk_id)),
-                state_revision=(
-                    int(latest_states[entity.entity_id].state_revision)
-                    if entity.entity_id in latest_states
-                    else 0
-                ),
-                state=(
-                    dict(latest_states[entity.entity_id].state)
-                    if entity.entity_id in latest_states
-                    else {}
-                ),
-            )
-            for entity in entities
-        ]
-
-    def _latest_relation_versions(
-        self,
-        boundary: GraphVersion,
-    ) -> list[tuple[GraphRelationVersion, GraphRelation, GraphVersion]]:
-        """2026-08-07 用于读取目标章节及以前每条稳定关系最近的关系版本"""
-        statement = (
-            select(GraphRelationVersion, GraphRelation, GraphVersion)
-            .join(GraphRelation, GraphRelation.relation_id == GraphRelationVersion.relation_id)
-            .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
-            .where(
-                GraphRelationVersion.run_id == boundary.run_id,
-                GraphVersion.chapter_order <= boundary.chapter_order,
-            )
-            .distinct(GraphRelationVersion.relation_id)
-            .order_by(
-                GraphRelationVersion.relation_id,
-                GraphVersion.chapter_order.desc(),
-                GraphRelationVersion.relation_revision.desc(),
-            )
+    def _chapter_rows(self, run_id: str) -> list[Chapter]:
+        """2026-08-19 用于读取当前运行的有正文章节并确定顺序"""
+        return list(
+            self.session.execute(
+                select(Chapter)
+                .where(Chapter.run_id == run_id, Chapter.text.isnot(None))
+                .order_by(Chapter.sequence, Chapter.chapter_id)
+            ).scalars()
         )
-        return list(self.session.execute(statement).tuples().all())
+
+    def _chapter_order_map(self, run_id: str) -> dict[int, int]:
+        """2026-08-19 用于把章节身份映射为历史排序"""
+        return {int(chapter.chapter_id): index for index, chapter in enumerate(self._chapter_rows(run_id), start=1)}
+
+    def resolve_chapter_boundary(self, run_id: str, *, chapter_id: int | None = None) -> ChapterBoundary | None:
+        """2026-08-19 用于解析显式章节或当前运行最后章节"""
+        chapters = self._chapter_rows(run_id)
+        target = (
+            chapters[-1]
+            if chapter_id is None and chapters
+            else next((chapter for chapter in chapters if int(chapter.chapter_id) == chapter_id), None)
+        )
+        if target is None:
+            return None
+        annotation = self.session.execute(
+            select(ChapterAnnotationRecord).where(
+                ChapterAnnotationRecord.run_id == run_id,
+                ChapterAnnotationRecord.chapter_id == target.chapter_id,
+            )
+        ).scalar_one_or_none()
+        if annotation is None:
+            return None
+        order = chapters.index(target) + 1
+        return ChapterBoundary(
+            run_id=run_id,
+            chapter_id=int(target.chapter_id),
+            chapter_order=order,
+            first_chapter_id=int(target.chapter_id),
+            last_chapter_id=int(target.chapter_id),
+            annotation_id=str(annotation.annotation_id),
+        )
+
+    def resolve_persisted_boundary(self, run_id: str) -> ChapterBoundary | None:
+        """2026-08-23 用于构造覆盖全部已提交数据的历史边界（不依赖 annotation record）"""
+        chapters = self._chapter_rows(run_id)
+        if not chapters:
+            return None
+        return ChapterBoundary(
+            run_id=run_id,
+            chapter_id=int(chapters[-1].chapter_id),
+            chapter_order=len(chapters),
+            first_chapter_id=int(chapters[0].chapter_id),
+            last_chapter_id=int(chapters[-1].chapter_id),
+            annotation_id="",
+        )
+
+    def previous_chapter_boundary(self, run_id: str, *, chapter_order: int) -> ChapterBoundary | None:
+        """2026-08-19 用于按章节顺序读取最近的前一章节边界"""
+        chapters = self._chapter_rows(run_id)
+        if chapter_order <= 1 or chapter_order > len(chapters) + 1:
+            return None
+        return self.resolve_chapter_boundary(run_id, chapter_id=int(chapters[chapter_order - 2].chapter_id))
+
+    def fetch_fact(self, run_id: str, fact_id: str, *, chapter_id: int | None = None) -> GraphFact | None:
+        """2026-08-19 用于按稳定事实 ID 与章节身份读取事实"""
+        statement = select(GraphFact).where(GraphFact.run_id == run_id, GraphFact.fact_id == fact_id)
+        if chapter_id is not None:
+            statement = statement.where(GraphFact.chapter_id == chapter_id)
+            return self.session.execute(statement).scalar_one_or_none()
+        facts = list(self.session.execute(statement).scalars())
+        order_map = self._chapter_order_map(run_id)
+        return max(facts, key=lambda row: order_map.get(int(row.chapter_id), 0), default=None)
+
+    def _latest_state_rows(self, boundary: ChapterBoundary) -> dict[int, EntityState]:
+        """2026-08-19 用于读取目标章节及以前每个实体最近的状态"""
+        order_map = self._chapter_order_map(boundary.run_id)
+        rows = self.session.execute(select(EntityState).where(EntityState.run_id == boundary.run_id)).scalars()
+        latest: dict[int, EntityState] = {}
+        for row in rows:
+            row_order = order_map.get(int(row.chapter_id), 0)
+            if row_order > boundary.chapter_order:
+                continue
+            current = latest.get(int(row.entity_id))
+            if current is None or order_map.get(int(current.chapter_id), 0) < row_order:
+                latest[int(row.entity_id)] = row
+        return latest
+
+    def fetch_entity_snapshots(self, boundary: ChapterBoundary) -> list[EntitySnapshotRow]:
+        """2026-08-19 用于选择目标章节以前最近状态并继承无变化实体"""
+        order_map = self._chapter_order_map(boundary.run_id)
+        latest_states = self._latest_state_rows(boundary)
+        entities = self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
+        result: list[EntitySnapshotRow] = []
+        for entity in sorted(entities, key=lambda row: int(row.entity_id)):
+            first_order = order_map.get(int(entity.first_seen_chapter), 0)
+            if first_order == 0 or first_order > boundary.chapter_order:
+                continue
+            state = latest_states.get(int(entity.entity_id))
+            result.append(
+                EntitySnapshotRow(
+                    entity_id=int(entity.entity_id),
+                    name=str(entity.canonical_name),
+                    entity_type=str(entity.entity_type),
+                    tags=list(entity.tags or []),
+                    attributes=dict(entity.attributes or {}),
+                    first_seen_chapter=int(entity.first_seen_chapter),
+                    last_seen_chapter=int(entity.last_seen_chapter),
+                    state_chapter_id=int(state.chapter_id) if state is not None else None,
+                    state=dict(state.state) if state is not None else {},
+                )
+            )
+        return result
+
+    def _latest_relation_states(self, boundary: ChapterBoundary) -> dict[str, RelationState]:
+        """2026-08-19 用于读取目标章节及以前每条关系最近状态"""
+        order_map = self._chapter_order_map(boundary.run_id)
+        rows = self.session.execute(select(RelationState).where(RelationState.run_id == boundary.run_id)).scalars()
+        latest: dict[str, RelationState] = {}
+        for row in rows:
+            row_order = order_map.get(int(row.chapter_id), 0)
+            if row_order > boundary.chapter_order:
+                continue
+            current = latest.get(str(row.relation_id))
+            if current is None or order_map.get(int(current.chapter_id), 0) < row_order:
+                latest[str(row.relation_id)] = row
+        return latest
 
     def fetch_relation_snapshots(
-        self,
-        boundary: GraphVersion,
-        *,
-        active_only: bool = True,
+        self, boundary: ChapterBoundary, *, active_only: bool = True
     ) -> list[RelationSnapshotRow]:
-        """2026-08-07 用于选择目标章节及以前最近关系版本并过滤活动状态"""
+        """2026-08-19 用于选择目标章节以前最近关系状态并过滤活动状态"""
         entity_names = {
             int(row.entity_id): str(row.canonical_name)
+            for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
+        }
+        relations = {
+            str(row.relation_id): row
             for row in self.session.execute(
-                select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)
+                select(GraphRelation).where(GraphRelation.run_id == boundary.run_id)
             ).scalars()
         }
-        first_seen_by_relation = {
-            str(row.relation_id): int(row.first_seen_chunk)
-            for row in self.session.execute(
-                select(
-                    GraphRelationVersion.relation_id,
-                    func.min(GraphVersion.first_chunk_id).label("first_seen_chunk"),
-                )
-                .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
-                .where(
-                    GraphRelationVersion.run_id == boundary.run_id,
-                    GraphVersion.chapter_order <= boundary.chapter_order,
-                )
-                .group_by(GraphRelationVersion.relation_id)
-            ).all()
-        }
-        rows: list[RelationSnapshotRow] = []
-        for version, relation, graph_version in self._latest_relation_versions(boundary):
-            if active_only and not version.is_active:
+        first_seen: dict[str, int] = {}
+        for state in self.session.execute(
+            select(RelationState).where(RelationState.run_id == boundary.run_id)
+        ).scalars():
+            relation_id = str(state.relation_id)
+            first_seen[relation_id] = min(first_seen.get(relation_id, state.chapter_id), state.chapter_id)
+        result: list[RelationSnapshotRow] = []
+        for relation_id, state in self._latest_relation_states(boundary).items():
+            if active_only and not state.is_active:
                 continue
-            rows.append(
+            relation = relations.get(relation_id)
+            if relation is None:
+                continue
+            result.append(
                 RelationSnapshotRow(
-                    relation_version_id=int(version.relation_version_id),
-                    graph_version_id=str(version.graph_version_id),
-                    chapter_id=int(version.chapter_id),
-                    relation_id=str(relation.relation_id),
-                    relation_revision=int(version.relation_revision),
+                    chapter_id=int(state.chapter_id),
+                    relation_id=relation_id,
                     from_entity_id=int(relation.from_entity_id),
                     to_entity_id=int(relation.to_entity_id),
                     from_name=entity_names[int(relation.from_entity_id)],
                     to_name=entity_names[int(relation.to_entity_id)],
-                    relation_type=str(version.relation_type),
+                    relation_type=str(state.relation_type),
                     directionality=str(relation.directionality),
                     relation_semantics=str(relation.relation_semantics),
-                    attributes=dict(version.attributes),
-                    is_active=bool(version.is_active),
-                    changes=list(version.changes),
-                    first_seen_chunk=first_seen_by_relation[str(relation.relation_id)],
-                    last_seen_chunk=int(graph_version.last_chunk_id),
+                    attributes=dict(state.attributes),
+                    is_active=bool(state.is_active),
+                    changes=list(state.changes),
+                    first_seen_chapter=int(first_seen.get(relation_id, state.chapter_id)),
+                    last_seen_chapter=int(state.chapter_id),
                 )
             )
-        return rows
+        return result
 
-    def fetch_snapshot(
-        self,
-        run_id: str,
-        *,
-        chapter_id: int | None = None,
-        graph_version_id: str | None = None,
-    ) -> GraphSnapshotRow | None:
-        """2026-08-07 用于返回目标章节边界的实体状态与有效关系快照"""
-        boundary = self.resolve_graph_version(
-            run_id,
-            chapter_id=chapter_id,
-            graph_version_id=graph_version_id,
-        )
+    def fetch_snapshot(self, run_id: str, *, chapter_id: int | None = None) -> GraphSnapshotRow | None:
+        """2026-08-19 用于返回目标章节边界的实体状态与有效关系"""
+        boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
         if boundary is None:
             return None
         return GraphSnapshotRow(
-            graph_version=boundary,
+            chapter_boundary=boundary,
             entities=self.fetch_entity_snapshots(boundary),
             relations=self.fetch_relation_snapshots(boundary, active_only=True),
         )
 
     def fetch_visible_facts(
-        self,
-        boundary: GraphVersion,
-        *,
-        query: str | None = None,
-        limit: int = 50,
+        self, boundary: ChapterBoundary, *, query: str | None = None, limit: int = 50
     ) -> list[GraphFact]:
-        """2026-08-07 用于读取目标章节边界可见的每个事实最新修订"""
-        stmt = (
-            select(GraphFact)
-            .join(GraphVersion, GraphVersion.graph_version_id == GraphFact.graph_version_id)
-            .where(
-                GraphFact.run_id == boundary.run_id,
-                GraphVersion.chapter_order <= boundary.chapter_order,
-            )
-        )
+        """2026-08-19 用于读取目标章节边界可见事实"""
+        order_map = self._chapter_order_map(boundary.run_id)
+        rows = self.session.execute(select(GraphFact).where(GraphFact.run_id == boundary.run_id)).scalars()
         normalized_query = (query or "").strip()
-        if normalized_query:
-            tokens = [token for token in re.split(r"[\s,，、；;]+", normalized_query) if token]
-            if tokens:
-                stmt = stmt.where(
-                    or_(
-                        *[
-                            or_(
-                                GraphFact.predicate.ilike(f"%{token}%"),
-                                sql_cast(GraphFact.content, String).ilike(f"%{token}%"),
-                            )
-                            for token in tokens
-                        ]
-                    )
+        tokens = [token for token in re.split(r"[\s,，、；;]+", normalized_query) if token]
+        visible = [
+            row
+            for row in rows
+            if order_map.get(int(row.chapter_id), 0) <= boundary.chapter_order
+            and (
+                not tokens
+                or any(
+                    token.casefold() in str(row.predicate).casefold() or token.casefold() in str(row.content).casefold()
+                    for token in tokens
                 )
-        stmt = (
-            stmt.distinct(GraphFact.fact_id)
-            .order_by(
-                GraphFact.fact_id,
-                GraphFact.fact_revision.desc(),
-                GraphVersion.chapter_order.desc(),
             )
-            .limit(max(1, limit))
-        )
-        return list(self.session.execute(stmt).scalars().all())
+        ]
+        visible.sort(key=lambda row: (order_map.get(int(row.chapter_id), 0), int(row.graph_fact_id)), reverse=True)
+        return visible[: max(1, limit)]
 
     def fetch_changes(
         self,
@@ -354,340 +310,143 @@ class GraphRepository(BaseRepository[GraphFact]):
         offset: int = 0,
         limit: int | None = 200,
     ) -> tuple[list[GraphChangeRow], int]:
-        """2026-08-07 用于在 PostgreSQL 中按章节倒序分页返回变化及根事实"""
+        """2026-08-19 用于按章节倒序分页返回状态和关系变化"""
         if offset < 0:
             raise ValueError("graph changes offset 不能小于 0")
-        page_limit = None if limit is None else max(1, min(limit, 200))
-        chapter_filter = ""
-        parameters: dict[str, Any] = {"run_id": run_id, "offset": offset}
-        if chapter_id is not None:
-            chapter_filter = "AND graph_version.chapter_id = :chapter_id"
-            parameters["chapter_id"] = chapter_id
-        limit_clause = ""
-        if page_limit is not None:
-            limit_clause = "AND numbered_rows.row_number <= :page_end"
-            parameters["page_end"] = offset + page_limit
-
-        # 变化原因直接在数据库中按事实版本聚合，避免先装载完整历史再在 Python 中切页
-        statement = text(
-            f"""
-            WITH state_causes AS (
-                SELECT
-                    'state:' || state_version.state_version_id::text
-                        || ':' || (cause.change ->> 'fact_id')
-                        || ':' || ((cause.change ->> 'fact_revision')::integer)::text AS change_id,
-                    'state'::text AS change_kind,
-                    graph_version.graph_version_id,
-                    graph_version.chapter_id,
-                    graph_version.chapter_order,
-                    cause.change ->> 'fact_id' AS fact_id,
-                    (cause.change ->> 'fact_revision')::integer AS fact_revision,
-                    MIN(cause.ordinality) AS cause_order,
-                    jsonb_agg(cause.change ORDER BY cause.ordinality) AS changes,
-                    0 AS kind_order,
-                    state_version.state_version_id AS version_row_id,
-                    entity.entity_id,
-                    entity.canonical_name AS entity_name,
-                    entity.entity_type,
-                    NULL::varchar AS relation_id,
-                    NULL::integer AS relation_version_id,
-                    NULL::integer AS relation_revision,
-                    NULL::integer AS from_entity_id,
-                    NULL::integer AS to_entity_id,
-                    NULL::varchar AS from_name,
-                    NULL::varchar AS to_name,
-                    NULL::varchar AS relation_type,
-                    NULL::varchar AS directionality,
-                    NULL::varchar AS relation_semantics
-                FROM graph_versions AS graph_version
-                JOIN entity_state_versions AS state_version
-                  ON state_version.graph_version_id = graph_version.graph_version_id
-                JOIN graph_entities AS entity
-                  ON entity.entity_id = state_version.entity_id
-                 AND entity.run_id = graph_version.run_id
-                CROSS JOIN LATERAL jsonb_array_elements(state_version.changes)
-                    WITH ORDINALITY AS cause(change, ordinality)
-                WHERE graph_version.run_id = :run_id
-                {chapter_filter}
-                GROUP BY
-                    state_version.state_version_id,
-                    graph_version.graph_version_id,
-                    graph_version.chapter_id,
-                    graph_version.chapter_order,
-                    cause.change ->> 'fact_id',
-                    (cause.change ->> 'fact_revision')::integer,
-                    entity.entity_id,
-                    entity.canonical_name,
-                    entity.entity_type
-            ),
-            relation_causes AS (
-                SELECT
-                    'relation:' || relation_version.relation_version_id::text
-                        || ':' || (cause.change ->> 'fact_id')
-                        || ':' || ((cause.change ->> 'fact_revision')::integer)::text AS change_id,
-                    'relation'::text AS change_kind,
-                    graph_version.graph_version_id,
-                    graph_version.chapter_id,
-                    graph_version.chapter_order,
-                    cause.change ->> 'fact_id' AS fact_id,
-                    (cause.change ->> 'fact_revision')::integer AS fact_revision,
-                    MIN(cause.ordinality) AS cause_order,
-                    jsonb_agg(cause.change ORDER BY cause.ordinality) AS changes,
-                    1 AS kind_order,
-                    relation_version.relation_version_id AS version_row_id,
-                    NULL::integer AS entity_id,
-                    NULL::varchar AS entity_name,
-                    NULL::varchar AS entity_type,
-                    relation.relation_id,
-                    relation_version.relation_version_id,
-                    relation_version.relation_revision,
-                    relation.from_entity_id,
-                    relation.to_entity_id,
-                    from_entity.canonical_name AS from_name,
-                    to_entity.canonical_name AS to_name,
-                    relation_version.relation_type,
-                    relation.directionality,
-                    relation.relation_semantics
-                FROM graph_versions AS graph_version
-                JOIN graph_relation_versions AS relation_version
-                  ON relation_version.graph_version_id = graph_version.graph_version_id
-                JOIN graph_relations AS relation
-                  ON relation.relation_id = relation_version.relation_id
-                 AND relation.run_id = graph_version.run_id
-                JOIN graph_entities AS from_entity
-                  ON from_entity.entity_id = relation.from_entity_id
-                 AND from_entity.run_id = graph_version.run_id
-                JOIN graph_entities AS to_entity
-                  ON to_entity.entity_id = relation.to_entity_id
-                 AND to_entity.run_id = graph_version.run_id
-                CROSS JOIN LATERAL jsonb_array_elements(relation_version.changes)
-                    WITH ORDINALITY AS cause(change, ordinality)
-                WHERE graph_version.run_id = :run_id
-                {chapter_filter}
-                GROUP BY
-                    relation_version.relation_version_id,
-                    graph_version.graph_version_id,
-                    graph_version.chapter_id,
-                    graph_version.chapter_order,
-                    cause.change ->> 'fact_id',
-                    (cause.change ->> 'fact_revision')::integer,
-                    relation.relation_id,
-                    relation_version.relation_revision,
-                    relation.from_entity_id,
-                    relation.to_entity_id,
-                    from_entity.canonical_name,
-                    to_entity.canonical_name,
-                    relation_version.relation_type,
-                    relation.directionality,
-                    relation.relation_semantics
-            ),
-            cause_rows AS (
-                SELECT * FROM state_causes
-                UNION ALL
-                SELECT * FROM relation_causes
-            ),
-            enriched_rows AS (
-                SELECT
-                    cause_rows.*,
-                    fact.effective_chunk_id,
-                    fact.confidence
-                FROM cause_rows
-                LEFT JOIN graph_facts AS fact
-                  ON fact.run_id = :run_id
-                 AND fact.fact_id = cause_rows.fact_id
-                 AND fact.fact_revision = cause_rows.fact_revision
-            ),
-            numbered_rows AS (
-                SELECT
-                    enriched_rows.*,
-                    row_number() OVER (
-                        ORDER BY
-                            chapter_order DESC,
-                            kind_order,
-                            version_row_id,
-                            cause_order
-                    ) AS row_number
-                FROM enriched_rows
-            ),
-            total_row AS (
-                SELECT count(*)::integer AS total
-                FROM enriched_rows
-            ),
-            page_rows AS (
-                SELECT *
-                FROM numbered_rows
-                WHERE numbered_rows.row_number > :offset
-                {limit_clause}
-            )
-            SELECT page_rows.*, total_row.total
-            FROM total_row
-            LEFT JOIN page_rows ON TRUE
-            ORDER BY page_rows.row_number
-            """
-        )
-        result_rows = list(self.session.execute(statement, parameters).mappings())
-        total = int(result_rows[0]["total"]) if result_rows else 0
-        rows: list[GraphChangeRow] = []
-        for result in result_rows:
-            if result["change_id"] is None:
+        boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
+        if boundary is None:
+            return [], 0
+        order_map = self._chapter_order_map(run_id)
+        facts = {
+            (int(row.chapter_id), str(row.fact_id)): row
+            for row in self.session.execute(select(GraphFact).where(GraphFact.run_id == run_id)).scalars()
+        }
+        entity_map = {
+            int(row.entity_id): row
+            for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
+        }
+        relation_map = {
+            str(row.relation_id): row
+            for row in self.session.execute(select(GraphRelation).where(GraphRelation.run_id == run_id)).scalars()
+        }
+        changes: list[GraphChangeRow] = []
+        for state in self.session.execute(select(EntityState).where(EntityState.run_id == run_id)).scalars():
+            state_order = order_map.get(int(state.chapter_id), 0)
+            if state_order == 0 or state_order > boundary.chapter_order:
                 continue
-            if result["effective_chunk_id"] is None:
-                reference = (str(result["fact_id"]), int(result["fact_revision"]))
-                raise ValueError(f"图变化引用了不存在的事实版本: {reference}")
-            rows.append(
-                GraphChangeRow(
-                    change_id=str(result["change_id"]),
-                    change_kind=type_cast(Literal["state", "relation"], str(result["change_kind"])),
-                    graph_version_id=str(result["graph_version_id"]),
-                    chapter_id=int(result["chapter_id"]),
-                    chapter_order=int(result["chapter_order"]),
-                    fact_id=str(result["fact_id"]),
-                    fact_revision=int(result["fact_revision"]),
-                    effective_chunk_id=int(result["effective_chunk_id"]),
-                    confidence=str(result["confidence"]),
-                    changes=list(result["changes"]),
-                    entity_id=int(result["entity_id"]) if result["entity_id"] is not None else None,
-                    entity_name=str(result["entity_name"]) if result["entity_name"] is not None else None,
-                    entity_type=str(result["entity_type"]) if result["entity_type"] is not None else None,
-                    relation_id=str(result["relation_id"]) if result["relation_id"] is not None else None,
-                    relation_version_id=(
-                        int(result["relation_version_id"])
-                        if result["relation_version_id"] is not None
-                        else None
-                    ),
-                    relation_revision=(
-                        int(result["relation_revision"])
-                        if result["relation_revision"] is not None
-                        else None
-                    ),
-                    from_entity_id=(
-                        int(result["from_entity_id"])
-                        if result["from_entity_id"] is not None
-                        else None
-                    ),
-                    to_entity_id=(
-                        int(result["to_entity_id"])
-                        if result["to_entity_id"] is not None
-                        else None
-                    ),
-                    from_name=str(result["from_name"]) if result["from_name"] is not None else None,
-                    to_name=str(result["to_name"]) if result["to_name"] is not None else None,
-                    relation_type=(
-                        str(result["relation_type"])
-                        if result["relation_type"] is not None
-                        else None
-                    ),
-                    directionality=(
-                        str(result["directionality"])
-                        if result["directionality"] is not None
-                        else None
-                    ),
-                    relation_semantics=(
-                        str(result["relation_semantics"])
-                        if result["relation_semantics"] is not None
-                        else None
-                    ),
+            if chapter_id is not None and int(state.chapter_id) != chapter_id:
+                continue
+            entity = entity_map.get(int(state.entity_id))
+            if entity is None:
+                continue
+            for index, change in enumerate(state.changes):
+                fact_id = str(change.get("fact_id", ""))
+                fact = facts.get((int(change.get("chapter_id", state.chapter_id)), fact_id))
+                if fact is None:
+                    continue
+                changes.append(
+                    GraphChangeRow(
+                        change_id=f"state:{run_id}:{state.chapter_id}:{state.entity_id}:{fact_id}:{index}",
+                        change_kind="state",
+                        chapter_id=int(state.chapter_id),
+                        chapter_order=state_order,
+                        fact_id=fact_id,
+                        effective_chapter_id=int(fact.effective_chapter_id),
+                        confidence=str(fact.confidence),
+                        changes=[dict(change)],
+                        entity_id=int(entity.entity_id),
+                        entity_name=str(entity.canonical_name),
+                        entity_type=str(entity.entity_type),
+                    )
                 )
-            )
-        return rows, total
+        for relation_state in self.session.execute(
+            select(RelationState).where(RelationState.run_id == run_id)
+        ).scalars():
+            state_order = order_map.get(int(relation_state.chapter_id), 0)
+            if state_order == 0 or state_order > boundary.chapter_order:
+                continue
+            if chapter_id is not None and int(relation_state.chapter_id) != chapter_id:
+                continue
+            relation = relation_map.get(str(relation_state.relation_id))
+            if relation is None:
+                continue
+            from_entity = entity_map.get(int(relation.from_entity_id))
+            to_entity = entity_map.get(int(relation.to_entity_id))
+            for index, change in enumerate(relation_state.changes):
+                fact_id = str(change.get("fact_id", ""))
+                fact = facts.get((int(change.get("chapter_id", relation_state.chapter_id)), fact_id))
+                if fact is None:
+                    continue
+                changes.append(
+                    GraphChangeRow(
+                        change_id=f"relation:{run_id}:{relation_state.chapter_id}:{relation_state.relation_id}:{fact_id}:{index}",
+                        change_kind="relation",
+                        chapter_id=int(relation_state.chapter_id),
+                        chapter_order=state_order,
+                        fact_id=fact_id,
+                        effective_chapter_id=int(fact.effective_chapter_id),
+                        confidence=str(fact.confidence),
+                        changes=[dict(change)],
+                        relation_id=str(relation.relation_id),
+                        from_entity_id=int(relation.from_entity_id),
+                        to_entity_id=int(relation.to_entity_id),
+                        from_name=str(from_entity.canonical_name) if from_entity else None,
+                        to_name=str(to_entity.canonical_name) if to_entity else None,
+                        relation_type=str(relation_state.relation_type),
+                        directionality=str(relation.directionality),
+                        relation_semantics=str(relation.relation_semantics),
+                    )
+                )
+        changes.sort(key=lambda row: (row.chapter_order, row.change_kind, row.change_id), reverse=True)
+        total = len(changes)
+        end = None if limit is None else offset + max(1, min(limit, 200))
+        return changes[offset:end], total
 
-    def fetch_latest_entities(
-        self,
-        run_id: str,
-        *,
-        entity_type: str | None = None,
-    ) -> list[EntitySnapshotRow]:
-        """2026-08-07 用于读取最新章节图版本中的实体状态"""
-        boundary = self.resolve_graph_version(run_id)
+    def fetch_latest_entities(self, run_id: str, *, entity_type: str | None = None) -> list[EntitySnapshotRow]:
+        """2026-08-19 用于读取当前章节边界的实体状态"""
+        boundary = self.resolve_persisted_boundary(run_id)
         if boundary is None:
             return []
-        rows = self.fetch_entity_snapshots(boundary)
         return [
             row
-            for row in rows
+            for row in self.fetch_entity_snapshots(boundary)
             if (entity_type is None or row.entity_type == entity_type)
-            and (
-                row.entity_type != "character"
-                or is_global_character_surface_name(row.name)
-            )
+            and (row.entity_type != "character" or is_global_character_surface_name(row.name))
         ]
 
-    def fetch_latest_relations(
-        self,
-        run_id: str,
-        *,
-        active_only: bool = True,
-    ) -> list[RelationSnapshotRow]:
-        """2026-08-07 用于读取最新章节图版本中的关系快照"""
-        boundary = self.resolve_graph_version(run_id)
-        if boundary is None:
-            return []
-        return self.fetch_relation_snapshots(boundary, active_only=active_only)
+    def fetch_latest_relations(self, run_id: str, *, active_only: bool = True) -> list[RelationSnapshotRow]:
+        """2026-08-19 用于读取当前章节边界的关系状态"""
+        boundary = self.resolve_persisted_boundary(run_id)
+        return [] if boundary is None else self.fetch_relation_snapshots(boundary, active_only=active_only)
 
     def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:
-        """2026-08-07 用于按章节顺序读取全部不可变关系版本"""
-        entity_names = {
-            int(row.entity_id): str(row.canonical_name)
-            for row in self.session.execute(
-                select(GraphEntity).where(GraphEntity.run_id == run_id)
-            ).scalars()
-        }
-        first_seen_by_relation: dict[str, int] = {}
+        """2026-08-19 用于按章节顺序读取关系状态历史"""
         rows: list[RelationSnapshotRow] = []
-        statement = (
-            select(GraphRelationVersion, GraphRelation, GraphVersion)
-            .join(GraphRelation, GraphRelation.relation_id == GraphRelationVersion.relation_id)
-            .join(GraphVersion, GraphVersion.graph_version_id == GraphRelationVersion.graph_version_id)
-            .where(GraphRelationVersion.run_id == run_id)
-            .order_by(
-                GraphVersion.chapter_order,
-                GraphRelationVersion.relation_version_id,
+        order_map = self._chapter_order_map(run_id)
+        states = list(self.session.execute(select(RelationState).where(RelationState.run_id == run_id)).scalars())
+        for state in sorted(states, key=lambda row: order_map.get(int(row.chapter_id), 0)):
+            boundary = ChapterBoundary(
+                run_id=run_id,
+                chapter_id=int(state.chapter_id),
+                chapter_order=order_map.get(int(state.chapter_id), 0),
+                first_chapter_id=int(state.chapter_id),
+                last_chapter_id=int(state.chapter_id),
+                annotation_id="",
             )
-        )
-        for version, relation, graph_version in self.session.execute(statement).all():
-            relation_id = str(relation.relation_id)
-            first_seen_by_relation.setdefault(relation_id, int(graph_version.first_chunk_id))
-            rows.append(
-                RelationSnapshotRow(
-                    relation_version_id=int(version.relation_version_id),
-                    graph_version_id=str(version.graph_version_id),
-                    chapter_id=int(version.chapter_id),
-                    relation_id=relation_id,
-                    relation_revision=int(version.relation_revision),
-                    from_entity_id=int(relation.from_entity_id),
-                    to_entity_id=int(relation.to_entity_id),
-                    from_name=entity_names[int(relation.from_entity_id)],
-                    to_name=entity_names[int(relation.to_entity_id)],
-                    relation_type=str(version.relation_type),
-                    directionality=str(relation.directionality),
-                    relation_semantics=str(relation.relation_semantics),
-                    attributes=dict(version.attributes),
-                    is_active=bool(version.is_active),
-                    changes=list(version.changes),
-                    first_seen_chunk=first_seen_by_relation[relation_id],
-                    last_seen_chunk=int(graph_version.last_chunk_id),
-                )
+            snapshots = self.fetch_relation_snapshots(boundary, active_only=False)
+            rows.extend(
+                row
+                for row in snapshots
+                if row.relation_id == str(state.relation_id) and row.chapter_id == state.chapter_id
             )
         return rows
 
-    def fetch_relation_changes(
-        self,
-        run_id: str,
-        *,
-        limit: int | None = None,
-    ) -> list[GraphChangeRow]:
-        """2026-08-07 用于读取诊断时间轴需要的关系变化事实"""
+    def fetch_relation_changes(self, run_id: str, *, limit: int | None = None) -> list[GraphChangeRow]:
+        """2026-08-19 用于读取诊断时间轴所需的关系变化事实"""
         rows, _total = self.fetch_changes(run_id, limit=None)
         relation_rows = [row for row in rows if row.change_kind == "relation"]
         return relation_rows if limit is None else relation_rows[:limit]
 
-    def count_graph_versions(self, run_id: str) -> int:
-        """2026-08-07 用于统计当前 run 已成功提交的章节图版本数量"""
-        return int(
-            self.session.execute(
-                select(func.count())
-                .select_from(GraphVersion)
-                .where(GraphVersion.run_id == run_id)
-            ).scalar_one()
-            or 0
-        )
+    def count_chapters(self, run_id: str) -> int:
+        """2026-08-19 用于统计当前运行已提交的章节数量"""
+        return len(self._chapter_rows(run_id))

@@ -11,7 +11,6 @@ import { CharacterRankingBar } from "@/components/charts/CharacterRankingBar";
 import { RoleFunctionPie } from "@/components/charts/RoleFunctionPie";
 import { CharacterTable } from "@/components/characters/CharacterTable";
 import { FocusCastCard } from "@/components/characters/FocusCastCard";
-import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Users } from "lucide-react";
@@ -55,26 +54,6 @@ function SkeletonGrid() {
         </Card>
       </div>
     </motion.div>
-  );
-}
-
-/**
- * 角色页依赖完整 focus contract 才能解释“焦点人物”和“叙事中心度”；
- * 若 diagnosis 只有半成品焦点数据，就必须明确提示重跑，而不是继续渲染空焦点区
- */
-function IncompleteFocusContractState() {
-  return (
-    <DashboardCardShell
-      title="角色焦点结果需要重跑"
-      icon={<AlertCircle className="h-4 w-4" />}
-      accent="chart-5"
-      className="min-h-[240px]"
-      bodyClassName="items-center justify-center gap-3 text-center"
-    >
-      <p className="text-sm text-text-muted">
-        当前任务缺少完整的焦点结构合同，请重新分析后再查看角色焦点结果。
-      </p>
-    </DashboardCardShell>
   );
 }
 
@@ -130,10 +109,7 @@ export function CharactersPage() {
   });
 
   const diagnosis = diagnosisQuery.data;
-  const hasFocusContract = hasCompleteFocusContract(diagnosis);
-  const isDiagnosisRerunRequired =
-    diagnosis?.rerun_required === true || (diagnosisQuery.isSuccess && diagnosis !== null && !hasFocusContract);
-  const shouldFetchCharacters = enabled && diagnosisQuery.isSuccess && diagnosis !== null && !isDiagnosisRerunRequired;
+  const shouldFetchCharacters = enabled;
 
   const charactersQuery = useQuery({
     queryKey: ["results", novelId, storeTaskId, "characters"],
@@ -166,19 +142,13 @@ export function CharactersPage() {
   };
 
   const { data: characters } = charactersQuery;
-  const focusCharacters = hasFocusContract ? diagnosis.focus_characters : [];
+  const focusCharacters = diagnosis?.focus_characters ?? [];
   const hasNullDiagnosis =
     enabled &&
     diagnosisQuery.isFetched &&
     !diagnosisQuery.isLoading &&
     !diagnosisQuery.isError &&
     diagnosis === null;
-  const shouldShowIncompleteFocusContractState =
-    diagnosisQuery.isSuccess &&
-    diagnosis !== null &&
-    !isLoading &&
-    !isError &&
-    isDiagnosisRerunRequired;
 
   // ---------- 渲染 ----------
 
@@ -243,11 +213,8 @@ export function CharactersPage() {
       {/* diagnosis 为空时的状态 */}
       {hasNullDiagnosis && !isLoading && !isError && <EmptyDiagnosisState />}
 
-      {/* 合同缺失状态 */}
-      {shouldShowIncompleteFocusContractState && <IncompleteFocusContractState />}
-
       {/* 主内容 */}
-      {characters && characters.length > 0 && !isLoading && !shouldShowIncompleteFocusContractState && (
+      {characters && characters.length > 0 && !isLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -267,7 +234,7 @@ export function CharactersPage() {
                 <RoleFunctionPie characters={characters} className="h-full min-h-[320px]" />
                 <FocusCastCard
                   characters={characters}
-                  focusStructure={hasFocusContract ? diagnosis.focus_structure : undefined}
+                  focusStructure={diagnosis?.focus_structure ?? undefined}
                   focusCharacters={focusCharacters}
                   arcScores={diagnosis?.arc_scores}
                   className="h-full min-h-[320px]"

@@ -12,7 +12,12 @@ import { Card } from "@/components/ui/card";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
-import type { ChunkCurvePoint } from "@/api/types";
+import type { EmotionTrendWindow } from "@/api/types";
+import {
+  EMOTION_TREND_SERIES_CONFIG,
+  formatEmotionTrendTooltipValue,
+  getEmotionTrendSeriesValue,
+} from "./emotionTrendSeries";
 
 echarts.use([
   GridComponent,
@@ -26,7 +31,7 @@ echarts.use([
 /* ------------------------------------------------------------------ */
 
 export interface MiniCurvePreviewProps {
-  data: ChunkCurvePoint[];
+  data: EmotionTrendWindow[];
   novelId: string;
   className?: string;
 }
@@ -51,11 +56,22 @@ export function MiniCurvePreview({
   const option = useMemo(() => {
     if (!data.length) return {};
 
-    const xData = data.map((d) => d.chunk_id);
-    const posData = data.map((d) => d.pos_density ?? null);
-    const negData = data.map((d) => d.neg_density ?? null);
-    const netData = data.map((d) => d.net_density ?? null);
-    const smoothedData = data.map((d) => d.smoothed_density ?? null);
+    const seriesData = EMOTION_TREND_SERIES_CONFIG.map((config) =>
+      data.map((window) => [window.position, getEmotionTrendSeriesValue(window, config)] as [number, number | null]),
+    );
+    const colorMap: Record<string, string> = {
+      "--chart-positive": positiveColor,
+      "--chart-negative": negativeColor,
+      "--chart-1": neutralColor,
+      "--primary": primaryColor,
+    };
+    const densityValues = seriesData.flatMap((series) =>
+      series.flatMap(([, value]) => (typeof value === "number" && Number.isFinite(value) ? [value] : [])),
+    );
+    const densityMin = densityValues.length > 0 ? Math.min(0, ...densityValues) : -0.001;
+    const densityMax = densityValues.length > 0 ? Math.max(0, ...densityValues) : 0.001;
+    const densitySpan = Math.max(densityMax - densityMin, 0.001);
+    const densityPadding = densitySpan * 0.15;
 
     return {
       grid: { top: 10, right: 10, bottom: 10, left: 10, containLabel: false },
@@ -65,66 +81,58 @@ export function MiniCurvePreview({
         backgroundColor: "hsl(var(--surface))",
         borderColor: "hsl(var(--border))",
         textStyle: { color: "hsl(var(--text))", fontSize: 11 },
-        formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; axisValue?: string }>) => {
+        formatter: (params: Array<{ seriesName: string; value: unknown; marker: string; dataIndex?: number }>) => {
           if (!Array.isArray(params)) return "";
-          return `分块 ${params[0]?.axisValue ?? ""}<br/>`
-            + params.map((p) => `${p.marker} ${p.seriesName}: ${typeof p.value === "number" ? p.value.toFixed(4) : "-"}`).join("<br/>");
+          const point = data[params[0]?.dataIndex ?? -1];
+          if (!point) return "";
+          const chapterLabel =
+            point.chapter_start === point.chapter_end
+              ? `第 ${point.chapter_start} 章`
+              : `第 ${point.chapter_start}~${point.chapter_end} 章`;
+          return `${chapterLabel} · 第 ${point.paragraph_start + 1}~${point.paragraph_end + 1} 段（共 ${point.paragraph_total} 段）<br/>`
+            + params.map((p) => `${p.marker} ${p.seriesName}: ${formatEmotionTrendTooltipValue(p.value)}`).join("<br/>");
         },
       },
       xAxis: {
-        type: "category",
-        data: xData,
+        type: "value",
+        min: 0,
+        max: 1,
         show: false,
-        boundaryGap: false,
       },
-      yAxis: { type: "value", show: false, min: -1, max: 1 },
-      series: [
-        {
-          name: "正向强度",
-          type: "line",
-          data: posData,
+      yAxis: {
+        type: "value",
+        show: false,
+        min: densityMin - densityPadding,
+        max: densityMax + densityPadding,
+      },
+      series: EMOTION_TREND_SERIES_CONFIG.map((config, index) => {
+        const color = colorMap[config.colorVar];
+        const isMainSeries = config.role === "main";
+        const isSupportSeries = config.role === "support";
+        const lineOpacity = isMainSeries ? 1 : isSupportSeries ? 0.55 : 0.38;
+        return {
+          name: config.name,
+          type: "line" as const,
+          data: seriesData[index],
           smooth: true,
           showSymbol: false,
-          lineStyle: { width: 1.2, color: hslToHsla(positiveColor, 0.28) },
-          animationDuration: 800,
-        },
-        {
-          name: "负向强度",
-          type: "line",
-          data: negData,
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { width: 1.2, color: hslToHsla(negativeColor, 0.28) },
-          animationDuration: 800,
-          animationDelay: 100,
-        },
-        {
-          name: "原始趋势",
-          type: "line",
-          data: netData,
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { width: 1.4, color: hslToHsla(neutralColor, 0.5), type: "dashed" },
-          animationDuration: 800,
-          animationDelay: 140,
-        },
-        {
-          name: "平滑趋势",
-          type: "line",
-          data: smoothedData,
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { width: 2.4, color: primaryColor },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: hslToHsla(primaryColor, 0.12) },
-              { offset: 1, color: hslToHsla(primaryColor, 0.01) },
-            ]),
+          z: isMainSeries ? 4 : isSupportSeries ? 3 : 2,
+          lineStyle: {
+            width: isMainSeries ? 3 : isSupportSeries ? 2 : 1.5,
+            color: hslToHsla(color, lineOpacity),
+            type: isSupportSeries ? "dashed" : "solid",
           },
+          areaStyle: isMainSeries
+            ? {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: hslToHsla(color, 0.12) },
+                  { offset: 1, color: hslToHsla(color, 0.01) },
+                ]),
+              }
+            : undefined,
           animationDuration: 800,
-          animationDelay: 180,
-        },
-      ],
+        };
+      }),
     };
   }, [data, negativeColor, neutralColor, positiveColor, primaryColor]);
 

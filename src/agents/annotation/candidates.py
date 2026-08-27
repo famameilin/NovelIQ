@@ -32,9 +32,7 @@ class _CandidateSpan:
 
 def _candidate_key(chunk_id: int, span: _CandidateSpan) -> str:
     """2026-08-07 用于根据系统位置和原文生成稳定对话候选键"""
-    digest = hashlib.sha256(
-        f"{chunk_id}:{span.start}:{span.end}:{span.content}".encode()
-    ).hexdigest()
+    digest = hashlib.sha256(f"{chunk_id}:{span.start}:{span.end}:{span.content}".encode()).hexdigest()
     return f"dlg_{digest}"
 
 

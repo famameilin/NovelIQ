@@ -1,6 +1,5 @@
 from src.api.models.responses import (
     CharacterStats,
-    ChunkCurvePoint,
     DiagnosisResult,
     ErrorResponse,
     NovelResultsResponse,
@@ -14,7 +13,6 @@ __all__ = [
     "TaskStatus",
     "UploadResponse",
     "StatusResponse",
-    "ChunkCurvePoint",
     "CharacterStats",
     "TopicInfo",
     "DiagnosisResult",

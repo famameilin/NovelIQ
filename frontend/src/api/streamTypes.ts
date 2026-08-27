@@ -3,7 +3,7 @@
 // 所有进行中事件共用同一套数据结构
 //   - 所有事件使用同一个 StreamEventData 结构
 //   - 通过 action 字段区分事件类型（start/progress/complete/output/thinking）
-//   - LLM 输出不再使用独立类型，自动获得 stage/sub_stage/chunk_id 上下文
+//   - LLM 输出不再使用独立类型，自动获得 stage/sub_stage/chapter_id 上下文
 
 export type SSEEventType =
   | "stage_start"      // action="start"（开始）
@@ -23,12 +23,12 @@ export interface StreamEventData {
   action: string;        // 开始 / 进度 / 完成 / 输出 / 思考 / 工具调用
   stage: string;         // 预处理 / 标注 / 聚合 / 主题建模 / 诊断
   sub_stage: string;     // 第一阶段 / 第二阶段 / 第三阶段 / 第四阶段
-  chunk_id: number;      // 当前 chunk ID（annotate 阶段有效）
-  stream_id?: string | null; // 并行 LLM 流分组标识（Phase3 并行 batch 时使用）
-  current: number;       // 当前 chunk 编号
-  total: number;        // 总 chunk 数
+  chapter_id?: number | null;  // 当前章节 ID（annotate 阶段有效）；HTTP 回填/终态事件不携带真实章节
+  stream_id?: string | null; // llm_output/llm_thinking/tool_call 事件的显式流标识
+  current: number;       // 当前章节编号
+  total: number;        // 总章节数
   percent: number;      // 全局进度（stage 级别百分比）
-  sub_percent: number;  // 子阶段进度（chunk 内 phase 进度，0-100）
+  sub_percent: number;  // 子阶段进度（章节内 phase 进度，0-100）
   content: string;      // LLM 输出内容（output/thinking 时有值）；tool_call 时为工具名
   message: string;       // 可读描述
   status?: ToolCallStatus | null; // 工具调用状态（tool_call 事件专用）

@@ -14,20 +14,16 @@ vi.mock("@/api/results", () => ({
  * 2026-08-12 用于锁住章节图变化分页 hook 的首屏加载、load-more 合并去重、
  * 任务切换清空与快速双击防抖行为
  */
-function createChange(changeId: string, effectiveChunkId: number): GraphChange {
+function createChange(changeId: string, effectiveChapterId: number): GraphChange {
   return {
     change_id: changeId,
     change_kind: "relation",
-    graph_version_id: "graph-version-1",
     chapter_id: 1,
     chapter_order: 1,
     fact_id: `fact-${changeId}`,
-    fact_revision: 1,
-    effective_chunk_id: effectiveChunkId,
+    effective_chapter_id: effectiveChapterId,
     changes: [{ change_kind: "assert" }],
     relation_id: `relation-${changeId}`,
-    relation_version_id: 1,
-    relation_revision: 1,
     from_entity_id: 1,
     to_entity_id: 2,
     from_name: "甲",
@@ -72,7 +68,7 @@ describe("useGraphChangePagination", () => {
     getGraphChangesMock.mockReset();
   });
 
-  it("首屏加载变化列表并按 effective_chunk_id 倒序展示", async () => {
+  it("首屏加载变化列表并按 effective_chapter_id 倒序展示", async () => {
     getGraphChangesMock.mockResolvedValue(
       createPage([createChange("c1", 12), createChange("c2", 13)], { total: 2 }),
     );
