@@ -183,7 +183,10 @@ async def run_diagnosis_agent(
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    system_prompt = build_diagnosis_system_prompt(novel_title)
+    system_prompt = build_diagnosis_system_prompt(
+        novel_title,
+        topic_label_count=expected_topic_label_count,
+    )
     initial_messages: list[Any] = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=f"请对小说 {novel_title or novel_id} 完成整体诊断。"),
