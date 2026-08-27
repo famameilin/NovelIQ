@@ -18,6 +18,32 @@ from src.storage.models import AnalysisRun, Base
 
 from .base import BaseRepository
 
+
+def _naive_utcnow() -> datetime:
+    """2026-08-26 无时区列统一落 naive UTC 挂钟
+
+    与 2026-08-13 heartbeat_at 修复同口径：aware UTC 直接赋给
+    timestamp without time zone 列会被 PG 按会话时区（如 Asia/Shanghai）
+    转换，导致 completed_at 等时间戳虚增 8 小时。
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    """2026-08-26 无时区 UTC 挂钟序列化为 ISO 字符串并标注 Z 后缀
+
+    DB 各列统一存 naive UTC 墙钟，序列化显式带 Z 后前端
+    new Date() 可按 UTC 解析并正确显示本地时间。
+    """
+    return value.isoformat() + "Z" if value is not None else None
+
+
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    """2026-08-26 归一化调用方传入的时间戳为 naive UTC 挂钟"""
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
 _UNSET = object()
 T = TypeVar("T")
 
@@ -98,11 +124,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "request_payload": request_payload_dict,
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
-            "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-            "created_at": run.created_at.isoformat() if run.created_at else None,
-            "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+            "heartbeat_at": _utc_isoformat(run.heartbeat_at),
+            "started_at": _utc_isoformat(run.started_at),
+            "completed_at": _utc_isoformat(run.completed_at),
+            "created_at": _utc_isoformat(run.created_at),
+            "updated_at": _utc_isoformat(run.updated_at),
         }
 
     def create_run(
@@ -118,7 +144,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """创建新的分析运行记录。Args: novel_id/source_path/title/author/run_id；Returns: 运行ID。"""
         if run_id is None:
             run_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
 
         run = AnalysisRun(
             run_id=run_id,
@@ -160,7 +186,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             status: 新状态
         """
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -180,7 +206,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             progress: 进度值 (0-100)
         """
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -198,7 +224,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             stage: 阶段名称
         """
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -228,7 +254,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
             .where(AnalysisRun.cancel_requested.is_(False))
-            .values(cancel_requested=True, updated_at=datetime.now(UTC))
+            .values(cancel_requested=True, updated_at=_naive_utcnow())
         )
         result = self.session.execute(stmt)
         self.session.commit()
@@ -245,7 +271,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -300,7 +326,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
         # 2026-08-13 P2：heartbeat_at 列无时区，默认值统一落 naive UTC 挂钟
         # （避免 aware UTC 被 PG 按会话时区转换，导致 resume 窗口/孤儿回收误判）
-        now = heartbeat_at or datetime.now(UTC).replace(tzinfo=None)
+        now = heartbeat_at or _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -326,7 +352,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -371,7 +397,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if not run:
             return
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         if _is_set(status):
             run.status = status
         if _is_set(progress):
@@ -397,11 +423,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if _is_set(worker_id):
             run.worker_id = worker_id
         if _is_set(heartbeat_at):
-            run.heartbeat_at = heartbeat_at
+            run.heartbeat_at = _as_naive_utc(heartbeat_at)
         if _is_set(started_at):
-            run.started_at = started_at
+            run.started_at = _as_naive_utc(started_at)
         if _is_set(completed_at):
-            run.completed_at = completed_at
+            run.completed_at = _as_naive_utc(completed_at)
         run.updated_at = now
         self.session.commit()
 
@@ -478,7 +504,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "running")
@@ -512,7 +538,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(UTC)
+        now = _naive_utcnow()
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")

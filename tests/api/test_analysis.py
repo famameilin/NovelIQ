@@ -49,6 +49,43 @@ class TestTestDatabaseIsolation:
         assert actual_url == expected_url
 
 
+class TestRunTimestampContract:
+    """2026-08-26 运行时间戳口径回归：无时区列统一 naive UTC，序列化带 Z 后缀"""
+
+    def test_aware_completed_at_persists_as_naive_utc_with_z_suffix(self, api_client: TestClient):
+        """验证 aware UTC 写入不会按会话时区虚增 8 小时，且 API 侧带 Z 后缀"""
+        _insert_test_novel("tz_run1")
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_id = run_repo.create_run(novel_id="tz_run1", title="tz-regression")
+            run_repo.update_run_task_fields(
+                run_id,
+                status="completed",
+                completed_at=datetime.now(UTC),  # 此前 aware UTC 被 PG 按 Asia/Shanghai 转换虚增 8h
+            )
+            run = run_repo.get_run(run_id)
+        assert run["status"] == "completed"
+        completed_serialized = run["completed_at"]
+        assert completed_serialized is not None
+        assert completed_serialized.endswith("Z")
+        persisted = datetime.fromisoformat(completed_serialized[:-1])
+        assert persisted.tzinfo is None
+        delta = abs((datetime.now(UTC).replace(tzinfo=None) - persisted).total_seconds())
+        assert delta < 5, f"completed_at 与当前时刻偏差过大（可能仍被时区污染）: {delta}s"
+
+    def test_update_run_status_completed_at_is_consistent_with_started_at(self, api_client: TestClient):
+        """验证 update_run_status 终态时间与 started_at 同口径，无 8 小时跨度假象"""
+        _insert_test_novel("tz_run2")
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_id = run_repo.create_run(novel_id="tz_run2", title="tz-regression-2")
+            run_repo.update_run_status(run_id, "completed")
+            run = run_repo.get_run(run_id)
+        assert run["started_at"] is None
+        assert run["completed_at"] is not None and run["completed_at"].endswith("Z")
+        assert run["updated_at"] is not None and run["updated_at"].endswith("Z")
+
+
 class TestAnalysis:
     """测试分析端点"""
 
