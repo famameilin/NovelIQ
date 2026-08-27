@@ -605,6 +605,10 @@ class AnnotationToolLedger:
                         }
                     )
         self.domain_payloads[domain] = payload
+        if domain == "entities":
+            # 2026-08-26 追加与更新语义落地最终载荷：与已接受目录合并，
+            # 避免较早 write_entities 声明的实体在事实端点解析时缺失
+            bound = self._merge_entity_catalog(bound)
         self.bound_payloads[domain] = bound
         self.domain_receipts.add(domain)
         dumped = (
@@ -754,6 +758,36 @@ class AnnotationToolLedger:
         return BoundEntityDirectory(
             entities=[BoundEntity(**item.model_dump(mode="python")) for item in directory.entities]
         )
+
+    def _merge_entity_catalog(self, update: BoundEntityDirectory) -> BoundEntityDirectory:
+        """2026-08-26 用于把本次 write_entities 与已接受实体目录按追加与更新语义合并
+
+        提示词契约约定 write_entities 为追加与更新（新名注册、同名提交的属性覆盖）。
+        此前仅图内登记（graph.register_entities）是累积的，最终载荷只保留最后一次
+        调用，导致模型分两次提交（先新实体、后补别名）时较早实体在持久化层
+        事实端点解析中缺失。
+        """
+        previous = self.bound_payloads.get("entities")
+        if previous is None:
+            return update
+        merged: list[BoundEntity] = []
+        index_by_key: dict[str, int] = {}
+        for entity in (*previous.entities, *update.entities):
+            key = unicodedata.normalize("NFC", entity.name).strip().casefold()
+            existing_index = index_by_key.get(key)
+            if existing_index is None:
+                index_by_key[key] = len(merged)
+                merged.append(entity)
+                continue
+            existing = merged[existing_index]
+            merged[existing_index] = existing.model_copy(
+                update={
+                    "tags": entity.tags or existing.tags,
+                    "description": entity.description if entity.description is not None else existing.description,
+                    "attributes": {**existing.attributes, **entity.attributes},
+                }
+            )
+        return BoundEntityDirectory(entities=merged)
 
     # ------------------------------------------------------------------
     # ready_chunk 构造与冻结
