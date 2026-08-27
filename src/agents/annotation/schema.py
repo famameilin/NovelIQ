@@ -354,7 +354,7 @@ class CharacterObservationInput(StrictModel):
 
     character: str = Field(min_length=1, description="人物名称（已登记实体用登记名）")
     role_function: RoleFunction = Field(description="人物在本动作中的功能角色：主体/客体/发送者/接收者/帮助者/反对者")
-    action: str = Field(min_length=1, description="动作描述，一句话概括人物做了什么")
+    action: str = Field(min_length=1, description="动作描述，一句话概括人物做了什么（不超过 15 字）")
     emotion: EmotionalValence = Field(description="动作伴随的情绪方向与强度（英文枚举）")
 
     @field_validator("role_function", mode="before")
@@ -553,7 +553,7 @@ class CreateEventInput(StrictModel):
     cause_tree_id（必须指向已存在的树），环在构造上不可能。
     """
 
-    description: str = Field(min_length=1, description="事件的完整一句话描述（树的根）")
+    description: str = Field(min_length=1, description="事件的完整一句话描述（树的根，不超过 30 字）")
     participants: list[EventParticipantInput] = Field(default_factory=list)
     isforeshadowing: bool = Field(
         default=False,
@@ -579,7 +579,7 @@ class EventAppendItem(StrictModel):
     """2026-08-22向事件树追加的子节点"""
 
     type: Literal["main", "secondary"] = Field(description="main=顺延主因链（成为新的链尾）；secondary=当前链尾的分支")
-    description: str = Field(min_length=1, description="子事件描述")
+    description: str = Field(min_length=1, description="子事件描述（不超过 30 字）")
 
     @model_validator(mode="after")
     def normalize_item(self) -> EventAppendItem:
