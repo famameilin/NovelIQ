@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import Chapter, CloudAnalysis, GlobalStats, ParagraphTopic
+from src.storage.models import (
+    Chapter,
+    CloudAnalysis,
+    GlobalStats,
+    ParagraphTopic,
+    TopicModelRun,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -117,17 +123,26 @@ def has_aggregated_data(session: Session, run_id: str) -> bool:
 
 
 def has_topic_data(session: Session, run_id: str) -> bool:
-    """检查指定运行是否有主题数据（段落粒度 §11.1，查 paragraph_topics）。
+    """检查指定运行是否有主题数据。
 
-    Args: session/run_id；Returns: 是否存在（chunk_topics 已废弃）。
+    新契约（§5.8）以 topic_model_runs 契约行存在判定主题阶段完成；
+    旧 Top-5 运行无契约行时回退查 paragraph_topics 行数，避免迁移期误判。
     """
-    count = (
+    model_count = (
+        session.execute(
+            select(func.count()).select_from(TopicModelRun).where(TopicModelRun.run_id == run_id)
+        ).scalar()
+        or 0
+    )
+    if model_count > 0:
+        return True
+    topic_count = (
         session.execute(
             select(func.count()).select_from(ParagraphTopic).where(ParagraphTopic.run_id == run_id)
         ).scalar()
         or 0
     )
-    return count > 0
+    return topic_count > 0
 
 
 def has_diagnosis_data(session: Session, run_id: str) -> bool:

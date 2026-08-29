@@ -8,6 +8,7 @@
 paragraph_curves（chunk_topics 已删除），高张力素材来自段落曲线 surface_tension。
 """
 
+import hashlib
 import sys
 import uuid
 from dataclasses import replace
@@ -82,10 +83,37 @@ class TestDiagnosisRoutes:
         paragraph_repo = ParagraphRepository(self.db_session)
         spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
         paragraph_repo.insert_paragraphs(self.run_id, spans)
-        paragraph_repo.insert_paragraph_topics(
+        # 主题三表契约（§5.8-5.10）：模型契约 + 每段一行状态 + 完整分布
+        paragraph_repo.insert_topic_model_run(
             self.run_id,
-            [(span.paragraph_id, 0, 1.0, 1) for span in spans],
+            model_key="gensim-lda",
+            library_version="4.4.0",
+            pipeline_version="1.0",
+            num_topics=1,
+            parameters={"num_topics": 1},
+            dictionary_size=5,
+            training_corpus_hash="0" * 64,
+            training_document_count=len(spans),
+            inference_paragraph_count=len(spans),
+            artifact_key=f"models/topic/{self.run_id}",
+            artifact_sha256="0" * 64,
         )
+        paragraph_repo.insert_paragraph_topic_inferences(
+            self.run_id,
+            [
+                (
+                    span.paragraph_id,
+                    1,
+                    1,
+                    "complete",
+                    None,
+                    1.0,
+                    hashlib.sha256(span.text.encode("utf-8")).hexdigest(),
+                )
+                for span in spans
+            ],
+        )
+        paragraph_repo.insert_paragraph_topics(self.run_id, [(span.paragraph_id, 0, 1.0) for span in spans])
         paragraph_repo.insert_paragraph_curves(
             self.run_id,
             [

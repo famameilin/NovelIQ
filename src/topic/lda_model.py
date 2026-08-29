@@ -11,7 +11,7 @@ from loguru import logger
 
 from src.config import settings
 
-from .schema import TopicModel, TopicResult
+from .schema import ParagraphInferenceResult, TopicModel, TopicResult
 
 
 @dataclass
@@ -50,6 +50,23 @@ class LDAConfig:
             passes=settings.topic_model.passes,
             iterations=settings.topic_model.iterations,
         )
+
+    def to_parameters_dict(self) -> dict[str, Any]:
+        """输出非空参数快照（topic_model_runs.parameters，§5.8）"""
+        return {
+            key: value
+            for key, value in {
+                "num_topics": self.num_topics,
+                "passes": self.passes,
+                "iterations": self.iterations,
+                "alpha": self.alpha,
+                "eta": self.eta,
+                "random_state": self.random_state,
+                "lda_batch_size": self.lda_batch_size,
+                "minimum_probability": self.minimum_probability,
+            }.items()
+            if value is not None
+        }
 
 
 class LDATrainer:
@@ -142,6 +159,14 @@ def infer_document_topics(
     top_n: int = 5,
 ) -> list[TopicResult]:
     return topic_model.infer_document_topics(doc_tokens, top_n)
+
+
+def infer_paragraph_topics(
+    topic_model: TopicModel,
+    doc_tokens: list[str],
+) -> ParagraphInferenceResult:
+    """推断单个段落的完整主题分布（持久化入口，§5.9/§5.10）"""
+    return topic_model.infer_full_distribution(doc_tokens)
 
 
 def get_topic_words(

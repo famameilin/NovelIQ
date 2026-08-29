@@ -10,7 +10,14 @@ from typing import Any
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chapter, Paragraph, ParagraphCurve, ParagraphTopic, StageSummary
+from src.storage.models import (
+    Chapter,
+    Paragraph,
+    ParagraphCurve,
+    ParagraphTopic,
+    ParagraphTopicInference,
+    StageSummary,
+)
 from src.storage.path_resolver import resolve_model_dir
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
 from src.storage.repositories.base import BaseRepository
@@ -148,11 +155,17 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         与 /topics 端点及 export 的聚合口径一致。
         """
         row_limit = top_n if top_n is not None else 10
-        weighted_sum = func.sum(ParagraphTopic.topic_weight * ParagraphTopic.inference_token_count)
+        # §5.11：分母/token 从每段一行的推断状态读取，不在此表重复保存
+        weighted_sum = func.sum(ParagraphTopic.topic_weight * ParagraphTopicInference.inference_token_count)
         stmt = (
             select(
                 ParagraphTopic.topic_id,
                 weighted_sum.label("weighted_total"),
+            )
+            .join(
+                ParagraphTopicInference,
+                (ParagraphTopicInference.run_id == ParagraphTopic.run_id)
+                & (ParagraphTopicInference.paragraph_id == ParagraphTopic.paragraph_id),
             )
             .where(ParagraphTopic.run_id == run_id)
             .group_by(ParagraphTopic.topic_id)
