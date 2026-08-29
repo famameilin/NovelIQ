@@ -30,7 +30,14 @@ from src.api.models.responses import (
     TopicShiftCandidate,
     Word2VecStatsResponse,
 )
-from src.api.models.tabs import LinguisticEntitiesTabResponse, TopicsOverviewTabResponse
+from src.api.models.tabs import (
+    CharacterFunctionTabResponse,
+    DashboardTabResponse,
+    GraphNetworkTabResponse,
+    LinguisticEntitiesTabResponse,
+    RhythmTabResponse,
+    TopicsOverviewTabResponse,
+)
 from src.metrics.contracts import load_metric_contracts
 
 # endpoint 片段 → 承载字段的 response model(可多模型:字段取并集校验)
@@ -78,6 +85,10 @@ _REVERSE_SCOPE_MODELS: tuple[type[BaseModel], ...] = (
     KeywordsResponse,
     TopicsOverviewTabResponse,
     LinguisticEntitiesTabResponse,
+    DashboardTabResponse,
+    RhythmTabResponse,
+    CharacterFunctionTabResponse,
+    GraphNetworkTabResponse,
 )
 
 # 基本数据字段:计数/坐标/标识/Agent 标注原值/元数据/散文,不入契约
@@ -93,6 +104,10 @@ _BASIC_FIELDS: frozenset[str] = frozenset({
     "name", "main_characters", "focus_characters", "core_cast", "diagnosis",
     "value_logic_reason", "dignity_reason", "power_stance_reason", "cultural_depth_reason",
     "topics", "chapters", "total_hits", "total_char_count",
+    # tab 包装模型的 section 容器字段（内部模型自身已在反向校验范围）
+    "narrative_structure", "emotion_stats", "character_stats", "style_stats",
+    "chapter_metrics", "emotion_trend", "curves", "characters",
+    "snapshot", "character_appearances", "graph_metrics", "change_total",
 })
 
 
