@@ -1,4 +1,11 @@
-"""主题建模工作流（段落粒度 §11.1）：paragraphs 为唯一事实源，训练排除短段，推断覆盖所有有 token 段落。"""
+"""主题建模工作流（段落粒度 §11.1 + 分析能力扩展路线图 §5.8-5.10）。
+
+paragraphs 为唯一事实源；训练排除短段，推断覆盖所有有 token 段落。
+结果按三表契约落库：
+- topic_model_runs：模型与管线版本、参数快照、语料摘要、artifact 哈希
+- paragraph_topic_inference：每个段落一行推断状态与 token 分母
+- paragraph_topics：完整 K 维主题分布（top_n 只属于 API 展示裁剪）
+"""
 
 from __future__ import annotations
 
@@ -10,8 +17,14 @@ from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.config import settings
-from src.storage.path_resolver import resolve_model_dir
+from src.storage.path_resolver import resolve_model_dir, resolve_project_root
 from src.storage.repositories import ParagraphRepository
+from src.topic import (
+    INFERENCE_COMPLETE,
+    INFERENCE_EMPTY_AFTER_PREPROCESS,
+    TOPIC_PIPELINE_VERSION,
+)
+from src.topic.artifacts import compute_artifact_directory_sha256, compute_training_corpus_hash
 
 
 def resolve_num_topics(
@@ -43,7 +56,11 @@ async def run_topic_model(
     force: bool = False,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int]:
-    """执行主题建模（段落粒度 §11.1），训练用达标段落，推断覆盖所有有 token 段落，结果写入 paragraph_topics。"""
+    """执行主题建模（§5.8-5.10），训练用达标段落，推断覆盖所有有 token 段落。
+
+    写库顺序：模型契约 topic_model_runs → 段落推断状态 paragraph_topic_inference
+    → 完整分布 paragraph_topics；同 run 重跑先清本阶段旧行，不允许新旧结果混合。
+    """
     _num_topics = num_topics if num_topics is not None else settings.topic_model.num_topics
     _passes = passes if passes is not None else settings.topic_model.passes
     _iterations = iterations if iterations is not None else settings.topic_model.iterations
@@ -58,6 +75,7 @@ async def run_topic_model(
         return 0, 0
 
     if force:
+        paragraph_repo.clear_paragraph_topic_inferences(run_id)
         paragraph_repo.clear_paragraph_topics(run_id)
         logger.info("cleared existing topic data")
 
@@ -123,22 +141,83 @@ async def run_topic_model(
     logger.info(f"LDA model trained with {topic_model.num_topics} topics")
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
 
-    # 推断覆盖所有预处理后有 token 的段落，权重分母使用段落事实源的原始 token_count
-    topic_rows: list[tuple[int, int, float, int]] = []
-    for row, tokens in zip(paragraph_rows, tokenized_docs, strict=True):
-        if not tokens:
-            continue
-        results = topic_model.infer_document_topics(tokens, top_n=top_n)
-        for result in results:
-            topic_rows.append((row.paragraph_id, result.topic_id, result.weight, row.token_count))
-
-    paragraph_repo.insert_paragraph_topics(run_id, topic_rows)
-    logger.info(f"inserted {len(topic_rows)} topic assignments")
-
-    # 保存主题模型到磁盘
+    # 模型 artifact 落盘后先生成目录清单哈希，再写模型契约；
+    # 目录缺失时快速失败，不写入不完整的契约行
     model_dir = resolve_model_dir(run_id)
     trainer.save_model(topic_model, model_dir)
-    logger.info(f"saved topic model to {model_dir}")
+    artifact_sha256 = compute_artifact_directory_sha256(model_dir)
+    artifact_key = str(model_dir.relative_to(resolve_project_root()).as_posix())
+    training_corpus_hash = compute_training_corpus_hash(paragraph_rows)
+
+    # 推断覆盖全部段落：完整 K 维分布 + 每段一行推断状态（§5.9/§5.10）
+    inference_rows: list[tuple[int, int, int, str, str | None, float | None, str]] = []
+    topic_rows: list[tuple[int, int, float]] = []
+    complete_count = 0
+    for row, tokens in zip(paragraph_rows, tokenized_docs, strict=True):
+        if not tokens:
+            inference_rows.append(
+                (
+                    row.paragraph_id,
+                    row.token_count,
+                    0,
+                    INFERENCE_EMPTY_AFTER_PREPROCESS,
+                    "empty_after_preprocess: 预处理后无词元",
+                    None,
+                    row.content_hash,
+                )
+            )
+            continue
+        result = topic_model.infer_full_distribution(tokens)
+        if result.inference_status != INFERENCE_COMPLETE or result.distribution is None:
+            inference_rows.append(
+                (
+                    row.paragraph_id,
+                    row.token_count,
+                    result.inference_token_count,
+                    result.inference_status,
+                    result.unavailable_reason,
+                    None,
+                    row.content_hash,
+                )
+            )
+            continue
+        for topic_id, weight in result.distribution:
+            topic_rows.append((row.paragraph_id, topic_id, weight))
+        complete_count += 1
+        inference_rows.append(
+            (
+                row.paragraph_id,
+                row.token_count,
+                result.inference_token_count,
+                INFERENCE_COMPLETE,
+                None,
+                result.distribution_sum,
+                row.content_hash,
+            )
+        )
+
+    parameters = dict(config.to_parameters_dict())
+    parameters["filter_extremes"] = False
+    parameters["no_below"] = None
+    parameters["no_above"] = None
+
+    paragraph_repo.insert_topic_model_run(
+        run_id,
+        model_key="gensim-lda",
+        library_version=_gensim_version(),
+        pipeline_version=TOPIC_PIPELINE_VERSION,
+        num_topics=topic_model.num_topics,
+        parameters=parameters,
+        dictionary_size=len(topic_model.dictionary),
+        training_corpus_hash=training_corpus_hash,
+        training_document_count=len(valid_docs),
+        inference_paragraph_count=complete_count,
+        artifact_key=artifact_key,
+        artifact_sha256=artifact_sha256,
+    )
+    paragraph_repo.insert_paragraph_topic_inferences(run_id, inference_rows)
+    paragraph_repo.insert_paragraph_topics(run_id, topic_rows)
+    logger.info(f"inserted {len(topic_rows)} topic assignments for {complete_count}/{total_paragraphs} paragraphs")
 
     logger.info("\n=== Topic Summary ===")
     for topic_id in range(topic_model.num_topics):
@@ -152,8 +231,9 @@ async def run_topic_model(
     )
     logger.info("\n=== Topic Model Statistics ===")
     logger.info(f"Total paragraphs: {total_paragraphs}")
+    logger.info(f"Completed topic distributions: {complete_count}")
     logger.info(f"Topics: {topic_model.num_topics}")
-    logger.info(f"Topic assignments: {len(topic_rows)}")
+    logger.info(f"Topic assignments (K*complete): {len(topic_rows)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if emitter:
@@ -162,3 +242,13 @@ async def run_topic_model(
         )
 
     return total_paragraphs, topic_model.num_topics
+
+
+def _gensim_version() -> str:
+    """gensim 版本（契约库版本列）；导入失败时回落 unknown"""
+    try:
+        import gensim
+
+        return gensim.__version__
+    except ImportError:
+        return "unknown"
