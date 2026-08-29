@@ -25,20 +25,12 @@ import {
 } from "./handlers/analysis";
 import {
   charactersHandler,
-  paragraphCurvesHandler,
   emotionTrendHandler,
-  chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
-  graphHandler,
   graphChangesHandler,
   timelineHandler,
-  narrativeStructureHandler,
-  emotionStatsHandler,
-  characterStatsHandler,
-  styleStatsHandler,
-  globalStatsHandler,
 } from "./handlers/results";
 import {
   characterFunctionTabHandler,
@@ -66,22 +58,14 @@ export const worker = setupWorker(
   deleteTaskHandler,
   batchDeleteTasksHandler,
   cancelTaskHandler,
-  // 结果
+  // 结果（单源 tab 数据源）
   charactersHandler,
-  paragraphCurvesHandler,
   emotionTrendHandler,
-  chapterMetricsHandler,
   topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
-  graphHandler,
   graphChangesHandler,
   timelineHandler,
-  narrativeStructureHandler,
-  emotionStatsHandler,
-  characterStatsHandler,
-  styleStatsHandler,
-  globalStatsHandler,
   // Tab 级聚合
   dashboardTabHandler,
   rhythmTabHandler,

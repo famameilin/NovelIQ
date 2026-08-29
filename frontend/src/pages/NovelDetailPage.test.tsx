@@ -15,14 +15,7 @@ const resumeAnalysisTaskMock = vi.fn();
 const batchDeleteTasksMock = vi.fn();
 const cancelAnalysisTaskMock = vi.fn();
 const getTaskStatusMock = vi.fn();
-const getNarrativeStructureMock = vi.fn();
-const getEmotionStatsMock = vi.fn();
-const getCharacterStatsMock = vi.fn();
-const getStyleStatsMock = vi.fn();
-const getChapterMetricsMock = vi.fn();
-const getTopicsMock = vi.fn();
-const getDiagnosisMock = vi.fn();
-const getEmotionTrendMock = vi.fn();
+const getDashboardTabMock = vi.fn();
 const navigateMock = vi.fn();
 const confirmSpy = vi.spyOn(window, "confirm");
 
@@ -84,15 +77,10 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("@/api/results", () => ({
-  getNarrativeStructure: (...args: unknown[]) => getNarrativeStructureMock(...args),
-  getEmotionStats: (...args: unknown[]) => getEmotionStatsMock(...args),
-  getCharacterStats: (...args: unknown[]) => getCharacterStatsMock(...args),
-  getStyleStats: (...args: unknown[]) => getStyleStatsMock(...args),
-  getChapterMetrics: (...args: unknown[]) => getChapterMetricsMock(...args),
-  getTopics: (...args: unknown[]) => getTopicsMock(...args),
-  getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
-  getEmotionTrend: (...args: unknown[]) => getEmotionTrendMock(...args),
+vi.mock("@/api/tabs", () => ({
+  getDashboardTab: (...args: unknown[]) => getDashboardTabMock(...args),
+  tabQueryKey: (tab: string, novelId: string | undefined, taskId: string | null, ...rest: unknown[]) =>
+    ["tabs", novelId, taskId, tab, ...rest],
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -198,14 +186,7 @@ describe("NovelDetailPage", () => {
     batchDeleteTasksMock.mockReset();
     cancelAnalysisTaskMock.mockReset();
     getTaskStatusMock.mockReset();
-    getNarrativeStructureMock.mockReset();
-    getEmotionStatsMock.mockReset();
-    getCharacterStatsMock.mockReset();
-    getStyleStatsMock.mockReset();
-    getChapterMetricsMock.mockReset();
-    getTopicsMock.mockReset();
-    getDiagnosisMock.mockReset();
-    getEmotionTrendMock.mockReset();
+    getDashboardTabMock.mockReset();
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
       title: "测试小说",
@@ -238,24 +219,27 @@ describe("NovelDetailPage", () => {
       progress: 100,
       current_step: "done",
     });
-    getNarrativeStructureMock.mockResolvedValue({});
-    getEmotionStatsMock.mockResolvedValue({});
-    getCharacterStatsMock.mockResolvedValue({});
-    getStyleStatsMock.mockResolvedValue({});
-    getChapterMetricsMock.mockResolvedValue({
-      chapters: [],
-      book: { pos_density: null, neg_density: null },
+    getDashboardTabMock.mockResolvedValue({
+      run_id: "task-ready",
+      narrative_structure: {},
+      emotion_stats: {},
+      character_stats: {},
+      style_stats: {},
+      chapter_metrics: {
+        chapters: [],
+        book: { pos_density: null, neg_density: null },
+      },
+      topics: [],
+      diagnosis: {
+        arc_scores: { 沈砚: 8.2 },
+        focus_structure: "single",
+        focus_characters: ["沈砚"],
+        topic_labels: ["成长"],
+        main_characters: ["沈砚"],
+        core_cast: ["沈砚"],
+      },
+      emotion_trend: [],
     });
-    getTopicsMock.mockResolvedValue([]);
-    getDiagnosisMock.mockResolvedValue({
-      arc_scores: { 沈砚: 8.2 },
-      focus_structure: "single",
-      focus_characters: ["沈砚"],
-      topic_labels: ["成长"],
-      main_characters: ["沈砚"],
-      core_cast: ["沈砚"],
-    });
-    getEmotionTrendMock.mockResolvedValue([]);
     confirmSpy.mockReset();
     confirmSpy.mockReturnValue(true);
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
@@ -400,15 +384,25 @@ describe("NovelDetailPage", () => {
       progress: 100,
       current_step: "done",
     });
-    getNarrativeStructureMock.mockResolvedValue({
-      act1_ratio: 0.1,
-      act2_ratio: 0.6,
-      act3_ratio: 0.3,
-      chapter_narrative_function_share: {
-        冲突: 0.5,
-        铺垫: 0.3,
-        转折: 0.2,
+    getDashboardTabMock.mockResolvedValue({
+      run_id: "task-ready",
+      narrative_structure: {
+        act1_ratio: 0.1,
+        act2_ratio: 0.6,
+        act3_ratio: 0.3,
+        chapter_narrative_function_share: {
+          冲突: 0.5,
+          铺垫: 0.3,
+          转折: 0.2,
+        },
       },
+      emotion_stats: {},
+      character_stats: {},
+      style_stats: {},
+      chapter_metrics: { chapters: [], book: {} },
+      topics: [],
+      diagnosis: {},
+      emotion_trend: [],
     });
 
     renderNovelDetailPage();
@@ -434,13 +428,17 @@ describe("NovelDetailPage", () => {
       progress: 100,
       current_step: "done",
     });
-    getDiagnosisMock.mockResolvedValue(null);
-    getNarrativeStructureMock.mockResolvedValue({});
-    getEmotionStatsMock.mockResolvedValue({});
-    getCharacterStatsMock.mockResolvedValue({});
-    getStyleStatsMock.mockResolvedValue({});
-    getTopicsMock.mockResolvedValue([]);
-    getEmotionTrendMock.mockResolvedValue([]);
+    getDashboardTabMock.mockResolvedValue({
+      run_id: "task-ready",
+      narrative_structure: {},
+      emotion_stats: {},
+      character_stats: {},
+      style_stats: {},
+      chapter_metrics: { chapters: [], book: {} },
+      topics: [],
+      diagnosis: null,
+      emotion_trend: [],
+    });
 
     renderNovelDetailPage();
 
@@ -466,13 +464,7 @@ describe("NovelDetailPage", () => {
     renderNovelDetailPage();
 
     expect(await screen.findByTestId("analysis-progress-panel")).toBeInTheDocument();
-    expect(getNarrativeStructureMock).not.toHaveBeenCalled();
-    expect(getEmotionStatsMock).not.toHaveBeenCalled();
-    expect(getCharacterStatsMock).not.toHaveBeenCalled();
-    expect(getStyleStatsMock).not.toHaveBeenCalled();
-    expect(getTopicsMock).not.toHaveBeenCalled();
-    expect(getDiagnosisMock).not.toHaveBeenCalled();
-    expect(getEmotionTrendMock).not.toHaveBeenCalled();
+    expect(getDashboardTabMock).not.toHaveBeenCalled();
   });
 
   it("已失败任务应显示友好失败提示而非数据加载失败", async () => {
@@ -497,13 +489,7 @@ describe("NovelDetailPage", () => {
         },
       },
     };
-    getNarrativeStructureMock.mockRejectedValue(notCompleteError);
-    getEmotionStatsMock.mockRejectedValue(notCompleteError);
-    getCharacterStatsMock.mockRejectedValue(notCompleteError);
-    getStyleStatsMock.mockRejectedValue(notCompleteError);
-    getTopicsMock.mockRejectedValue(notCompleteError);
-    getDiagnosisMock.mockRejectedValue(notCompleteError);
-    getEmotionTrendMock.mockRejectedValue(notCompleteError);
+    getDashboardTabMock.mockRejectedValue(notCompleteError);
 
     renderNovelDetailPage();
 

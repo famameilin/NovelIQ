@@ -10,8 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { GraphPage } from "@/pages/GraphPage";
 import { useNovelStore } from "@/store/novelStore";
 
-const getGraphMock = vi.fn();
-const getCharactersMock = vi.fn();
+const getGraphNetworkTabMock = vi.fn();
 const getGraphChangesMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
@@ -81,9 +80,13 @@ vi.mock("@/components/charts/GraphLegend", () => ({
 }));
 
 vi.mock("@/api/results", () => ({
-  getGraph: (...args: unknown[]) => getGraphMock(...args),
-  getCharacters: (...args: unknown[]) => getCharactersMock(...args),
   getGraphChanges: (...args: unknown[]) => getGraphChangesMock(...args),
+}));
+
+vi.mock("@/api/tabs", () => ({
+  getGraphNetworkTab: (...args: unknown[]) => getGraphNetworkTabMock(...args),
+  tabQueryKey: (tab: string, novelId: string | undefined, taskId: string | null, ...rest: unknown[]) =>
+    ["tabs", novelId, taskId, tab, ...rest],
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -166,8 +169,14 @@ describe("GraphPage integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
-    getGraphMock.mockResolvedValue(createGraphData());
-    getCharactersMock.mockResolvedValue([{ name: "顾霜", appearance_count: 5 }]);
+    getGraphNetworkTabMock.mockResolvedValue({
+      run_id: "task-a",
+      snapshot: createGraphData(),
+      character_appearances: [{ name: "顾霜", appearance_count: 5 }],
+      graph_metrics: { run_id: "task-a", unavailable_reason: null, algorithm: {}, pagerank: {}, hits: {}, communities: {} },
+      change_total: 9,
+      unavailable_reason: null,
+    });
     getGraphChangesMock.mockResolvedValue(createGraphChanges());
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
