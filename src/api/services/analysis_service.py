@@ -159,6 +159,21 @@ class AnalysisService:
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
+        # ── 语言结构基础数据 ──
+        if not skip_stages["skip_linguistic"]:
+            await bus.emit_stage_start(
+                "linguistic", message="开始语言结构分析", percent=settings.progress.linguistic.start
+            )
+
+            await self.stage_executor.run_linguistic(
+                run_id, session, self._make_stage_emitter(bus, "linguistic")
+            )
+            await bus.emit_stage_complete("linguistic")
+
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
+            return
+
         # ── 主题建模 ──
         if not skip_stages["skip_topic_model"]:
             await bus.emit_stage_start(
@@ -225,6 +240,7 @@ class AnalysisService:
             skip_stages["skip_preprocess"]
             and skip_stages["skip_annotate"]
             and skip_stages["skip_aggregate"]
+            and skip_stages["skip_linguistic"]
             and skip_stages["skip_topic_model"]
             and skip_stages["skip_diagnose"]
         )
@@ -305,6 +321,7 @@ class AnalysisService:
                 "skip_preprocess": False,
                 "skip_annotate": False,
                 "skip_aggregate": False,
+                "skip_linguistic": False,
                 "skip_topic_model": False,
                 "skip_diagnose": False,
             }
@@ -314,12 +331,14 @@ class AnalysisService:
             and not request.force_aggregate
             and not request.force_topic_model
             and not request.force_diagnose
+            and not request.force_linguistic
         )
         if all_force_false:
             return {
                 "skip_preprocess": False,
                 "skip_annotate": False,
                 "skip_aggregate": False,
+                "skip_linguistic": False,
                 "skip_topic_model": False,
                 "skip_diagnose": False,
             }
@@ -327,6 +346,7 @@ class AnalysisService:
             "skip_preprocess": not request.force_preprocess,
             "skip_annotate": not request.force_annotate,
             "skip_aggregate": not request.force_aggregate,
+            "skip_linguistic": not request.force_linguistic,
             "skip_topic_model": not request.force_topic_model,
             "skip_diagnose": not request.force_diagnose,
         }

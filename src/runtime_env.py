@@ -42,6 +42,11 @@ _MODEL_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+#: LTP 语言结构服务环境字段（2026-08-28：离线模型目录）
+_LTP_FIELD_NAMES: tuple[tuple[str, str], ...] = (
+    ("model_dir", "LTP_MODEL_DIR"),
+)
+
 
 @dataclass(frozen=True)
 class DatabaseEnvironment:
@@ -59,6 +64,13 @@ class ModelEnvironment:
     base_url: str
     model: str
     api_key: str
+
+
+@dataclass(frozen=True)
+class LtpEnvironment:
+    """LTP 语言结构服务环境配置"""
+
+    model_dir: str
 
 
 def _load_flat_fields(
@@ -154,3 +166,17 @@ def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironme
         model=_get_value(validated_values, "model"),
         api_key=_get_value(validated_values, "api_key", preserve_whitespace=True),
     )
+
+
+def load_ltp_environment() -> LtpEnvironment | None:
+    """
+    加载 LTP 平铺环境变量（当前仅 LTP_MODEL_DIR）。
+
+    整组未配置（缺失或空白）返回 None，model_dir 保持为空（LTP 加载时报错）；
+    字段存在且有值时覆盖之。LTP 模型目录不走 settings.json，仅由环境变量提供。
+    """
+
+    values = _load_flat_fields("LTP", _LTP_FIELD_NAMES, required=False)
+    if values is None:
+        return None
+    return LtpEnvironment(model_dir=_get_value(values, "model_dir"))

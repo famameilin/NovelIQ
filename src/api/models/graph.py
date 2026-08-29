@@ -87,3 +87,28 @@ class GraphChangesResponse(BaseModel):
 
     changes: list[GraphChange]
     page_info: GraphChangesPageInfo
+
+
+class GraphMetricsResponse(BaseModel):
+    """Agent 关系图结构指标（赛道 A1/A2）：PageRank/HITS/Louvain 查询时计算"""
+
+    run_id: str
+    unavailable_reason: str | None = None
+    algorithm: dict[str, Any] = Field(default_factory=dict)
+    pagerank: dict[str, float] = Field(default_factory=dict)
+    hits: dict[str, Any] = Field(default_factory=dict)
+    communities: dict[str, Any] = Field(default_factory=dict)
+
+
+class KeywordItem(BaseModel):
+    word: str
+    score: float
+
+
+class KeywordsResponse(BaseModel):
+    """TextRank 关键词（赛道 A3）：独立词共现图 + PageRank"""
+
+    run_id: str
+    keywords: list[KeywordItem] = Field(default_factory=list)
+    algorithm: dict[str, Any] = Field(default_factory=dict)
+    unavailable_reason: str | None = None

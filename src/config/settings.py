@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from src.runtime_env import load_model_environment
+from src.runtime_env import load_ltp_environment, load_model_environment
 
 from .schemas import (
+    LinguisticSettings,
     LoggingSettings,
     MetricsSettings,
     ModelsSettings,
@@ -15,13 +16,14 @@ from .schemas import (
     PathSettings,
     ProgressSettings,
     TopicModelSettings,
+    _parse_linguistic_settings,
     _parse_logging_settings,
     _parse_metrics_settings,
     _parse_models_settings,
     _parse_paragraph_settings,
     _parse_path_settings,
-    _parse_progress_settings,
     _parse_topic_model_settings,
+    apply_linguistic_environment,
 )
 from .schemas.model import apply_model_environment
 
@@ -37,6 +39,8 @@ class Settings:
     paths: PathSettings = field(default_factory=PathSettings)
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     topic_model: TopicModelSettings = field(default_factory=TopicModelSettings)
+    # 2026-08-28：语言结构基础数据阶段（LTP/固定短语/Word2Vec，§3.1 B/C 赛道）
+    linguistic: LinguisticSettings = field(default_factory=LinguisticSettings)
     metrics: MetricsSettings = field(default_factory=MetricsSettings)
     # 2026-08-14：段落事实源配置（max_chars/版本号），见 schemas.analysis.ParagraphSettings
     paragraphs: ParagraphSettings = field(default_factory=ParagraphSettings)
@@ -63,6 +67,7 @@ class Settings:
             load_model_environment("MODEL"),
             load_model_environment("EMBEDDING_MODEL"),
         )
+        apply_linguistic_environment(base.linguistic, load_ltp_environment())
         return base
 
     @classmethod
@@ -72,8 +77,8 @@ class Settings:
             models=_parse_models_settings(data.get("models")),
             logging=_parse_logging_settings(data.get("logging")),
             paths=_parse_path_settings(data.get("paths")),
-            progress=_parse_progress_settings(data.get("progress")),
             topic_model=_parse_topic_model_settings(data.get("topic_model")),
+            linguistic=_parse_linguistic_settings(data.get("linguistic")),
             metrics=_parse_metrics_settings(data.get("metrics")),
             paragraphs=_parse_paragraph_settings(data.get("paragraphs")),
         )

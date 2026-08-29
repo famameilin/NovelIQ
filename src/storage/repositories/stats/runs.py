@@ -19,6 +19,7 @@ from src.storage.models import (
     Chapter,
     CloudAnalysis,
     GlobalStats,
+    ParagraphLinguisticFeature,
     ParagraphTopic,
     TopicModelRun,
 )
@@ -143,6 +144,19 @@ def has_topic_data(session: Session, run_id: str) -> bool:
         or 0
     )
     return topic_count > 0
+
+
+def has_linguistic_data(session: Session, run_id: str) -> bool:
+    """检查指定运行是否有语言结构基础数据（paragraph_linguistic_features 行）"""
+    count = (
+        session.execute(
+            select(func.count())
+            .select_from(ParagraphLinguisticFeature)
+            .where(ParagraphLinguisticFeature.run_id == run_id)
+        ).scalar()
+        or 0
+    )
+    return count > 0
 
 
 def has_diagnosis_data(session: Session, run_id: str) -> bool:

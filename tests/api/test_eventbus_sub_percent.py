@@ -189,9 +189,9 @@ async def test_eventbus_calculates_percent_from_current_total():
         # 第一个事件应该有正确的 percent
         assert call1_kwargs["data"]["percent"] == 49.7
         # 第二个事件应该根据 current/total 自动计算 percent
-        # annotate 阶段范围是 10-80，current=21, total=37
-        # percent = 10 + (21/37) * 70 ≈ 49.73
-        expected_percent = 10 + (21 / 37) * 70
+        # annotate 阶段范围是 10-75，current=21, total=37
+        # percent = 10 + (21/37) * 65 ≈ 46.89
+        expected_percent = 10 + (21 / 37) * 65
         assert abs(call2_kwargs["data"]["percent"] - expected_percent) < 0.1
 
 
@@ -209,8 +209,8 @@ async def test_eventbus_calculates_percent_for_different_stages():
     # 预处理：0-10%
     assert bus._calculate_percent_for_stage("preprocess", 5, 10) == 5.0
 
-    # 标注：10-80%
-    assert bus._calculate_percent_for_stage("annotate", 5, 10) == 45.0
+    # 标注：10-75%（linguistic 75-80 插入后调整）
+    assert bus._calculate_percent_for_stage("annotate", 5, 10) == 42.5
 
     # 聚合：80-90%
     assert bus._calculate_percent_for_stage("aggregate", 5, 10) == 85.0
@@ -348,7 +348,7 @@ async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100(
     annotate_update = task_manager.update_task.call_args_list[1].kwargs
 
     assert preprocess_update["progress"] == 10.0
-    assert annotate_update["progress"] == 80.0
+    assert annotate_update["progress"] == 75.0
 
 
 @pytest.mark.asyncio

@@ -387,7 +387,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.has_topic_data(run_id)
 
     def test_is_topic_model_complete_with_data(self, db_session):
-        """有paragraph_topics时topic_model完成（§11.1 主题判定改查段落主题）"""
+        """有契约表与段落主题时topic_model完成（§5.8 主题判定改查契约行）"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -401,7 +401,25 @@ class TestStageCompleteChecks:
         chunks = _create_chunks(1)
         chapter_repo.insert_chapter_texts(run_id, chunks)
         _insert_paragraphs(db_session, run_id, chunks)
-        ParagraphRepository(db_session).insert_paragraph_topics(run_id, [(0, 1, 0.5, 10)])
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_repo.insert_topic_model_run(
+            run_id,
+            model_key="gensim-lda",
+            library_version="4.4.0",
+            pipeline_version="1.0",
+            num_topics=1,
+            parameters={"num_topics": 1},
+            dictionary_size=10,
+            training_corpus_hash="0" * 64,
+            training_document_count=1,
+            inference_paragraph_count=1,
+            artifact_key=f"models/topic/{run_id}",
+            artifact_sha256="0" * 64,
+        )
+        paragraph_repo.insert_paragraph_topic_inferences(
+            run_id, [(0, 10, 10, "complete", None, 1.0, "a" * 64)]
+        )
+        paragraph_repo.insert_paragraph_topics(run_id, [(0, 0, 1.0)])
         assert stats_repo.has_topic_data(run_id)
 
     def test_is_diagnose_complete_no_data(self, db_session):

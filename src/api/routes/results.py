@@ -27,7 +27,7 @@ from src.api.models.event_forest import (
     EventTreeResponse,
     ForeshadowingEdgeResponse,
 )
-from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
+from src.api.models.graph import GraphChangesResponse, GraphMetricsResponse, GraphSnapshotResponse, KeywordsResponse
 from src.api.models.responses import (
     ChapterAnnotation as ChapterAnnotationResponse,
 )
@@ -61,6 +61,8 @@ from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
+from src.api.services.results_queries.graph_metrics import compute_graph_metrics
+from src.api.services.results_queries.keywords import compute_keywords
 from src.api.services.results_queries.paragraphs import (
     _fetch_chapter_metrics,
     _fetch_emotion_trend,
@@ -594,6 +596,39 @@ async def get_graph_changes(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return GraphChangesResponse.model_validate(payload)
 
+
+@router.get("/{novel_id}/graph/metrics", response_model=GraphMetricsResponse)
+async def get_graph_metrics(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> GraphMetricsResponse:
+    """
+    人物关系图结构指标（赛道 A1/A2）：PageRank / HITS / Louvain
+
+    查询时计算；输入为代表性人物子图（别名归并、边权=关系计数），
+    结构社区不直接等同于故事阵营。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    return GraphMetricsResponse(**compute_graph_metrics(run_id, session))
+
+
+@router.get("/{novel_id}/keywords", response_model=KeywordsResponse)
+async def get_keywords(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    top_n: int = Query(default=10, ge=1, le=50),
+) -> KeywordsResponse:
+    """
+    TextRank 关键词（赛道 A3）：独立词共现图 + PageRank
+
+    与 LDA 主题词口径独立，可对照不可混用。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    return KeywordsResponse(**compute_keywords(run_id, session, top_n=top_n))
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")

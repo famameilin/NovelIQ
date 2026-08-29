@@ -70,6 +70,17 @@ class StageExecutor:
 
         await run_aggregate(run_id=run_id, session=session, emitter=emitter)
 
+    async def run_linguistic(
+        self,
+        run_id: str,
+        session: Session,
+        emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    ) -> None:
+        """执行语言结构基础数据阶段（LTP 词法/句法/实体 + 固定短语 + Word2Vec）"""
+        from src.workflows import run_linguistic
+
+        await run_linguistic(run_id=run_id, session=session, emitter=emitter)
+
     async def run_topic_model(
         self,
         run_id: str,
