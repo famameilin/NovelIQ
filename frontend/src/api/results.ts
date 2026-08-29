@@ -1,12 +1,14 @@
 import { apiClient } from "./client";
 import type {
   Character,
-  Topic,
   DiagnosisResult,
   ForeshadowingThread,
   GraphChangesPageResponse,
   EventTimelineResponse,
   EmotionTrendWindow,
+  TopicEmotionResponse,
+  TopicSeriesResponse,
+  TopicShiftResponse,
 } from "./types";
 
 // 角色：角色排行/角色表 tab 的数据源（单源端点直接作为 tab API）
@@ -44,18 +46,6 @@ export async function getEmotionTrend(
         ...(options?.windowParagraphs != null && { window_paragraphs: options.windowParagraphs }),
       },
     }
-  );
-  return data;
-}
-
-// 主题 Top-5 口径（含主题词）：主题总览 tab 的词云数据源
-export async function getTopics(
-  novelId: string,
-  taskId: string
-): Promise<Topic[]> {
-  const { data } = await apiClient.get<Topic[]>(
-    `/api/novels/${novelId}/topics`,
-    { params: { task_id: taskId } }
   );
   return data;
 }
@@ -119,6 +109,56 @@ export async function getTimeline(
         include_curve: options?.includeCurve ?? true,
       },
     }
+  );
+  return data;
+}
+
+// 主题演进 tab 数据源：段落完整 K 维权重，横轴真实字符位置（echarts sampling 降采样在前端）
+export async function getTopicSeries(
+  novelId: string,
+  taskId: string
+): Promise<TopicSeriesResponse> {
+  const { data } = await apiClient.get<TopicSeriesResponse>(
+    `/api/novels/${novelId}/topics/series`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+// 主题迁移 tab 数据源：相邻窗口分布的 JS 散度候选点（参数为版本化配置的显式覆盖）
+export async function getTopicShifts(
+  novelId: string,
+  taskId: string,
+  options?: {
+    windowSize?: number;
+    minTokensPerWindow?: number;
+    scoreThreshold?: number;
+    maxCandidates?: number;
+  }
+): Promise<TopicShiftResponse> {
+  const { data } = await apiClient.get<TopicShiftResponse>(
+    `/api/novels/${novelId}/topics/shifts`,
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.windowSize != null && { window_size: options.windowSize }),
+        ...(options?.minTokensPerWindow != null && { min_tokens_per_window: options.minTokensPerWindow }),
+        ...(options?.scoreThreshold != null && { score_threshold: options.scoreThreshold }),
+        ...(options?.maxCandidates != null && { max_candidates: options.maxCandidates }),
+      },
+    }
+  );
+  return data;
+}
+
+// 主题情绪 tab 数据源：sum(w*t*net_density)/sum(w*t)，空值段落双向排除
+export async function getTopicEmotion(
+  novelId: string,
+  taskId: string
+): Promise<TopicEmotionResponse> {
+  const { data } = await apiClient.get<TopicEmotionResponse>(
+    `/api/novels/${novelId}/topics/emotion`,
+    { params: { task_id: taskId } }
   );
   return data;
 }

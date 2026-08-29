@@ -8,7 +8,6 @@ import {
   createCharacters,
   createEmotionTrendWindows,
   createForeshadowingThreads,
-  createTopics,
   createDiagnosis,
   createGraphChangesPage,
   createEventTimeline,
@@ -76,21 +75,6 @@ export const emotionTrendHandler = http.get(
     await delay(400);
     return HttpResponse.json(createEmotionTrendWindows(windowParagraphs, range));
   },
-);
-
-// 获取 /api/novels/:novelId/topics（主题词数据源）
-export const topicsHandler = http.get(
-  `${BASE}/api/novels/:novelId/topics`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(300);
-    return HttpResponse.json(createTopics());
-  }
 );
 
 // 获取 /api/novels/:novelId/diagnosis（诊断摘要/价值与主题 tab 数据源）
@@ -162,5 +146,103 @@ export const timelineHandler = http.get(
     const data = createEventTimeline();
     data.meta.novel_id = novelId as string;
     return HttpResponse.json(data);
+  }
+);
+
+// 主题全量分布 mock（赛道 D）：4 主题 × 60 段，权重和为 1
+const MOCK_NUM_TOPICS = 4;
+const MOCK_SERIES_POINTS = Array.from({ length: 60 }, (_, index) => {
+  const base = index / 60;
+  const raw = [0.4 * Math.cos(base * Math.PI) + 0.3, 0.25 + 0.2 * Math.sin(base * 2 * Math.PI), 0.18, 0.12].map(
+    (value) => Math.max(0.02, value)
+  );
+  const total = raw.reduce((sum, value) => sum + value, 0);
+  return {
+    paragraph_id: index,
+    chapter_id: Math.floor(index / 15) + 1,
+    chapter_sequence: Math.floor(index / 15) + 1,
+    start_position: index * 960,
+    token_count: 240,
+    weights: raw.map((value) => Number((value / total).toFixed(6))),
+  };
+});
+
+// 获取 /api/novels/:novelId/topics/series（主题演进 tab 数据源）
+export const topicSeriesHandler = http.get(
+  `${BASE}/api/novels/:novelId/topics/series`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(400);
+    return HttpResponse.json({
+      run_id: taskId,
+      model: {
+        model_key: "gensim-lda",
+        library_version: "4.4.0",
+        pipeline_version: "1.0",
+        num_topics: MOCK_NUM_TOPICS,
+        artifact_key: "models/topic/mock-run",
+        artifact_sha256: "a".repeat(64),
+      },
+      num_topics: MOCK_NUM_TOPICS,
+      points: MOCK_SERIES_POINTS,
+      unavailable_reason: null,
+    });
+  }
+);
+
+// 获取 /api/novels/:novelId/topics/shifts（主题迁移 tab 数据源）
+export const topicShiftsHandler = http.get(
+  `${BASE}/api/novels/:novelId/topics/shifts`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(300);
+    return HttpResponse.json({
+      candidates: [
+        { position: 14400, paragraph_start: 14, paragraph_end: 19, score: 0.6123, window_token_total: 1440 },
+        { position: 28800, paragraph_start: 29, paragraph_end: 34, score: 0.4811, window_token_total: 1440 },
+        { position: 43200, paragraph_start: 44, paragraph_end: 49, score: 0.3564, window_token_total: 1440 },
+      ],
+      config: { window_size: 6, min_tokens_per_window: 800, score_threshold: 0.3, max_candidates: 20 },
+      unavailable_reason: null,
+    });
+  }
+);
+
+// 获取 /api/novels/:novelId/topics/emotion（主题情绪 tab 数据源）
+export const topicEmotionHandler = http.get(
+  `${BASE}/api/novels/:novelId/topics/emotion`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(300);
+    return HttpResponse.json({
+      run_id: taskId,
+      model: {
+        model_key: "gensim-lda",
+        library_version: "4.4.0",
+        pipeline_version: "1.0",
+        num_topics: MOCK_NUM_TOPICS,
+        artifact_key: "models/topic/mock-run",
+        artifact_sha256: "a".repeat(64),
+      },
+      emotion: [
+        { topic_id: 0, emotion: 0.2136, weighted_token_total: 9820.5 },
+        { topic_id: 1, emotion: -0.1421, weighted_token_total: 8410.2 },
+        { topic_id: 2, emotion: 0.0384, weighted_token_total: 6120.8 },
+        { topic_id: 3, emotion: null, weighted_token_total: null },
+      ],
+      unavailable_reason: null,
+    });
   }
 );

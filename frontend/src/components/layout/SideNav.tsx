@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Clock,
   FileText,
+  Languages,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const navItems = [
   { to: "/characters", icon: Users, label: "角色分析" },
   { to: "/graph", icon: Network, label: "人物关系图谱" },
   { to: "/topics", icon: MessageSquare, label: "主题分布" },
+  { to: "/linguistic", icon: Languages, label: "语言特征" },
   { to: "/timeline", icon: Clock, label: "叙事时间轴" },
   { to: "/diagnosis", icon: FileText, label: "诊断报告" },
 ];
