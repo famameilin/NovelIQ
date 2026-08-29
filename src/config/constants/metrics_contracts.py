@@ -532,6 +532,23 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         ],
     },
     {
+        'id': 'linguistic_entity_surface_frequency',
+        'concept': '实体候选',
+        'problem': '高频实体名聚合（前端 tab 展示用，不含 span 明细）',
+        'fields': [
+            'surface_top',
+        ],
+        'endpoint': '/tabs/linguistic-entities',
+        'category': 'C',
+        'objective_subjective': 'subjective',
+        'authoritative': True,
+        'null_semantics': '无候选时返回空列表',
+        'computation_chain': 'paragraph_entities 归一类型候选 → surface_text+归一类型 group-by 计数 → Top-N',
+        'invariants': [
+            '候选不代表图谱事实；仅回聚合计数，不透出段落定位与字符区间',
+        ],
+    },
+    {
         'id': 'word2vec_pos_coverage',
         'concept': '词向量',
         'problem': '按词性聚合的词向量覆盖率与语义组成',
@@ -549,6 +566,23 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         ),
         'invariants': [
             '同维度内比较；维度与模型元数据一致；预训练文件经显式配置 model_dir 登记使用',
+        ],
+    },
+    {
+        'id': 'word2vec_pos_similarity',
+        'concept': '词向量',
+        'problem': '词性组语义空间的相对位置（质心余弦相似度矩阵，供热力图展示）',
+        'fields': [
+            'pos_similarity_matrix',
+        ],
+        'endpoint': '/linguistic/word2vec',
+        'category': 'C',
+        'objective_subjective': 'subjective',
+        'authoritative': True,
+        'null_semantics': '质心少于 2 组、维度不一致或存在零向量时返回 null',
+        'computation_chain': 'paragraph_pos_embeddings 质心（词表内词数加权均值）→ 组间余弦相似度矩阵',
+        'invariants': [
+            '矩阵对称、对角线为 1；行序与 pos_centroids 一致（pos_group 升序）；同维度内比较',
         ],
     },
     {

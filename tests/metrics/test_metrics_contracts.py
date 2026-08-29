@@ -30,6 +30,7 @@ from src.api.models.responses import (
     TopicShiftCandidate,
     Word2VecStatsResponse,
 )
+from src.api.models.tabs import LinguisticEntitiesTabResponse, TopicsOverviewTabResponse
 from src.metrics.contracts import load_metric_contracts
 
 # endpoint 片段 → 承载字段的 response model(可多模型:字段取并集校验)
@@ -53,6 +54,7 @@ _ENDPOINT_MODELS: dict[str, tuple[type[BaseModel], ...]] = {
     "/linguistic/entities": (LinguisticEntitiesResponse,),
     "/linguistic/phrases": (LinguisticPhrasesResponse,),
     "/linguistic/word2vec": (Word2VecStatsResponse,),
+    "/tabs/linguistic-entities": (LinguisticEntitiesTabResponse,),
 }
 
 # 反向校验范围:承载复合数据的 stats 模型(基本数据透出模型不入范围)
@@ -74,6 +76,8 @@ _REVERSE_SCOPE_MODELS: tuple[type[BaseModel], ...] = (
     Word2VecStatsResponse,
     GraphMetricsResponse,
     KeywordsResponse,
+    TopicsOverviewTabResponse,
+    LinguisticEntitiesTabResponse,
 )
 
 # 基本数据字段:计数/坐标/标识/Agent 标注原值/元数据/散文,不入契约
@@ -88,6 +92,7 @@ _BASIC_FIELDS: frozenset[str] = frozenset({
     "narrative_function", "pivot_moment", "cliffhanger", "emotional_valence",
     "name", "main_characters", "focus_characters", "core_cast", "diagnosis",
     "value_logic_reason", "dignity_reason", "power_stance_reason", "cultural_depth_reason",
+    "topics", "chapters", "total_hits", "total_char_count",
 })
 
 

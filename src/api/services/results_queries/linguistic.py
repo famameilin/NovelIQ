@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from src.storage.repositories import ParagraphRepository
@@ -133,6 +134,7 @@ def fetch_entity_candidates(run_id: str, session: Session) -> dict[str, Any]:
             "run_id": run_id,
             "source_kind": "ltp",
             "entities": [],
+            "count_by_type": {},
             "unavailable_reason": "no_entities: 无 LTP 实体候选",
         }
     by_type: dict[str, int] = {}
@@ -181,7 +183,7 @@ def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
 
 
 def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
-    """词向量契约 + 词性覆盖率 + POS 质心（§5.6/§5.11）"""
+    """词向量契约 + 词性覆盖率 + POS 质心与组间余弦相似度（§5.6/§5.11）"""
     ling_repo = LinguisticRepository(session)
     model_run = ling_repo.fetch_word2vec_model_run(run_id)
     if model_run is None:
@@ -190,6 +192,7 @@ def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
             "model": None,
             "pos_coverage": [],
             "pos_centroids": [],
+            "pos_similarity_matrix": None,
             "unavailable_reason": "word2vec_unavailable: 该运行未启用 Word2Vec",
         }
     coverage = ling_repo.fetch_pos_embedding_coverage(run_id)
@@ -209,13 +212,33 @@ def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
         "vocabulary_size": model_run.vocabulary_size,
         "artifact_scope": model_run.artifact_scope,
     }
+    centroids = fetch_pos_centroids(run_id, session)
     return {
         "run_id": run_id,
         "model": model_meta,
         "pos_coverage": pos_coverage,
-        "pos_centroids": fetch_pos_centroids(run_id, session),
+        "pos_centroids": centroids,
+        "pos_similarity_matrix": _pos_similarity_matrix(centroids),
         "unavailable_reason": None,
     }
+
+
+def _pos_similarity_matrix(centroids: list[dict[str, Any]]) -> list[list[float]] | None:
+    """POS 质心两两余弦相似度矩阵（行序与 centroids 一致，对称、对角线 1）
+
+    质心少于 2 组、维度不一致或存在零向量时返回 None，不用平凡值伪造。
+    """
+    if len(centroids) < 2:
+        return None
+    dimensions = {len(centroid["embedding_vector"]) for centroid in centroids}
+    if len(dimensions) != 1 or dimensions == {0}:
+        return None
+    vectors = np.asarray([centroid["embedding_vector"] for centroid in centroids], dtype=np.float64)
+    norms = np.linalg.norm(vectors, axis=1)
+    if np.any(norms == 0):
+        return None
+    matrix = (vectors @ vectors.T) / np.outer(norms, norms)
+    return [[round(float(value), 6) for value in row] for row in matrix]
 
 
 def fetch_pos_centroids(run_id: str, session: Session) -> list[dict[str, Any]]:

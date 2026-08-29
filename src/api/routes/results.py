@@ -18,7 +18,12 @@ from src.api.dependencies import (
     get_novel_service,
     resolve_run_id,
 )
-from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
+from src.api.dependencies import (
+    require_readable_run_status as _require_readable_run_status,
+)
+from src.api.dependencies import (
+    require_run_for_novel as _require_run_for_novel,
+)
 from src.api.models.event_forest import (
     EventEdgeResponse,
     EventForestResponse,
@@ -80,39 +85,10 @@ from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
     ParagraphRepository,
-    RunRepository,
     StatsRepository,
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-READABLE_RUN_STATUSES = ("completed",)
-
-
-def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
-    """
-    校验 run_id 存在且属于当前小说
-    """
-    run_repo = RunRepository(session)
-    run = run_repo.get_run(run_id)
-    if not run:
-        raise NovelNotFoundError(novel_id=novel_id, message=f"运行记录不存在: {run_id}")
-
-    if run.get("novel_id") != novel_id:
-        actual_task_id = run_id[:8] if len(run_id) >= 8 else run_id
-        raise NovelNotFoundError(
-            novel_id=novel_id,
-            message=f"任务 {actual_task_id} 不属于小说 {novel_id}",
-        )
-
-    return run
-
-
-def _require_readable_run_status(run: dict[str, Any]) -> None:
-    if run["status"] not in READABLE_RUN_STATUSES:
-        raise AnalysisNotCompleteError(
-            f"分析未完成，当前状态: {run['status']}",
-            run_status=run["status"],
-        )
 
 
 def _parse_emotion_trend_range(
