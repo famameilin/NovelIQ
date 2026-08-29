@@ -70,28 +70,6 @@
     "log_dir": "logs",
     "lexicons_dir": "data/lexicons"
   },
-  "progress": {
-    "preprocess": {
-      "start": 0,
-      "end": 10
-    },
-    "annotate": {
-      "start": 10,
-      "end": 80
-    },
-    "aggregate": {
-      "start": 80,
-      "end": 90
-    },
-    "topic_model": {
-      "start": 90,
-      "end": 95
-    },
-    "diagnose": {
-      "start": 95,
-      "end": 100
-    }
-  },
   "topic_model": {
     "num_topics": 25,
     "passes": 10,
@@ -107,6 +85,12 @@
       "minimum_probability": 0.01,
       "no_below": 5,
       "no_above": 0.5
+    },
+    "topic_shift": {
+      "window_size": 10,
+      "min_tokens_per_window": 50,
+      "score_threshold": 0.3,
+      "max_candidates": 50
     }
   },
   "metrics": {
@@ -115,5 +99,19 @@
     "small_sample_min_chapters": 10,
     "function_word_min_chars": 100000,
     "character_max_iter": 100
+  },
+  "linguistic": {
+    "ltp": {
+      "enabled": true,
+      "max_length": 512,
+      "dep_root_index": 0
+    },
+    "word2vec": {
+      "enabled": true,
+      "model_dir": "models/word2vec/pretrained",
+      "window": 5,
+      "min_count": 2,
+      "epochs": 5
+    }
   }
 }

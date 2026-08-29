@@ -27,6 +27,8 @@ dependencies = [
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3,<2",
     "langchain-openai>=1.4.1,<2",
+    "tokenizers>=0.20,<0.21",
+    "ltp>=4.2,<5",
 ]
 
 [dependency-groups]

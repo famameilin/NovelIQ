@@ -621,3 +621,89 @@ class TopicEmotionResponse(BaseModel):
     emotion: list[TopicEmotionEntry] = Field(default_factory=list)
     unavailable_reason: str | None = None
 
+
+class LinguisticGroupStats(BaseModel):
+    """书/章聚合的守恒比例与充分统计量（§5.11）；语言阶段未运行时字段为空"""
+
+    token_total: int | None = None
+    sentence_total: int | None = None
+    word_length_ratios: dict[str, float] | None = None
+    pos_ratios: dict[str, float] | None = None
+    sentence_pattern_ratios: dict[str, float] | None = None
+    avg_dependency_depth: float | None = None
+    max_dependency_depth: int | None = None
+    dependency_relation_ratios: dict[str, float] | None = None
+    dependency_root_count: int | None = None
+
+
+class ChapterLinguisticStats(LinguisticGroupStats):
+    chapter_id: int
+
+
+class LinguisticFeaturesResponse(LinguisticGroupStats):
+    """词性/词长/句式/依存聚合（书级字段 + 章节序列）"""
+
+    run_id: str
+    paragraph_count: int = 0
+    chapters: list[ChapterLinguisticStats] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+
+class EntityCandidate(BaseModel):
+    paragraph_id: int
+    surface_text: str
+    raw_entity_type: str
+    normalized_entity_type: str | None
+    local_start_char: int
+    local_end_char: int
+
+
+class LinguisticEntitiesResponse(BaseModel):
+    """LTP 实体候选（§5.4/§6.1 审核面数据源）"""
+
+    run_id: str
+    source_kind: str = "ltp"
+    entities: list[EntityCandidate] = Field(default_factory=list)
+    count_by_type: dict[str, int] = Field(default_factory=dict)
+    unavailable_reason: str | None = None
+
+
+class LinguisticPhrasesResponse(BaseModel):
+    """固定短语命中统计（§5.11）：正式密度与四字候选分开"""
+
+    run_id: str
+    total_char_count: int = 0
+    metric_hit_count: int = 0
+    fixed_phrase_density: float | None = None
+    four_char_candidate_count: int = 0
+    total_hits: int = 0
+    unavailable_reason: str | None = None
+
+
+class Word2VecModelInfo(BaseModel):
+    embedding_dimension: int
+    vocabulary_size: int
+    artifact_scope: str
+
+
+class PosCoverageEntry(BaseModel):
+    pos_group: str
+    source_token_total: int
+    in_vocabulary_token_total: int
+    coverage_ratio: float | None = None
+
+
+class PosCentroidEntry(BaseModel):
+    pos_group: str
+    weighted_token_total: int
+    embedding_vector: list[float]
+
+
+class Word2VecStatsResponse(BaseModel):
+    """词向量契约与词性覆盖率/质心（§5.6/§5.11）"""
+
+    run_id: str
+    model: Word2VecModelInfo | None = None
+    pos_coverage: list[PosCoverageEntry] = Field(default_factory=list)
+    pos_centroids: list[PosCentroidEntry] = Field(default_factory=list)
+    unavailable_reason: str | None = None

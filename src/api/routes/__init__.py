@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ["novels_router", "analysis_router", "results_router", "timeline_router"]
+__all__ = ["novels_router", "analysis_router", "results_router", "timeline_router", "linguistic_router"]
 
 
 def __getattr__(name: str):
@@ -22,4 +22,8 @@ def __getattr__(name: str):
         from src.api.routes.timeline import router as timeline_router
 
         return timeline_router
+    if name == "linguistic_router":
+        from src.api.routes.linguistic import router as linguistic_router
+
+        return linguistic_router
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
