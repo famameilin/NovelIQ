@@ -700,10 +700,15 @@ class PosCentroidEntry(BaseModel):
 
 
 class Word2VecStatsResponse(BaseModel):
-    """词向量契约与词性覆盖率/质心（§5.6/§5.11）"""
+    """词向量契约与词性覆盖率/质心（§5.6/§5.11）
+
+    pos_similarity_matrix 与 pos_centroids 行序一致（按 pos_group 升序），
+    为组间余弦相似度对称矩阵（对角线为 1）；质心少于 2 组时为 null。
+    """
 
     run_id: str
     model: Word2VecModelInfo | None = None
     pos_coverage: list[PosCoverageEntry] = Field(default_factory=list)
     pos_centroids: list[PosCentroidEntry] = Field(default_factory=list)
+    pos_similarity_matrix: list[list[float]] | None = None
     unavailable_reason: str | None = None

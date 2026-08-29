@@ -254,6 +254,68 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
     assert body["pos_centroids"][0]["pos_group"] == "noun"
 
 
+def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_session) -> None:
+    """两组以上质心时返回与 pos_centroids 行序一致的余弦相似度矩阵"""
+    novel_id, run_id = _create_run_with_paragraphs(db_session)
+    _seed_linguistic(db_session, run_id)
+    repo = LinguisticRepository(db_session)
+    repo.insert_word2vec_model_run(
+        run_id,
+        {
+            "run_id": run_id,
+            "embedding_dimension": 4,
+            "vocabulary_size": 100,
+            "parameters": {"vector_size": 4},
+            "source_uri": None,
+            "license_name": None,
+            "training_corpus_hash": "0" * 64,
+            "training_document_count": 2,
+            "training_token_count": 10,
+            "artifact_key": "models/word2vec/t.model",
+            "artifact_sha256": "1" * 64,
+            "artifact_scope": "run_owned",
+        },
+    )
+    from math import sqrt
+
+    from sqlalchemy import insert as _insert
+
+    from src.storage.models import ParagraphPosEmbedding as _M
+
+    unit_x = [1.0, 0.0, 0.0, 0.0]
+    unit_y = [0.0, 1.0, 0.0, 0.0]
+    db_session.execute(
+        _insert(_M),
+        [
+            {
+                "run_id": run_id,
+                "paragraph_id": paragraph_id,
+                "pos_group": pos_group,
+                "embedding_vector": vector,
+                "source_token_count": 2,
+                "in_vocabulary_token_count": 1,
+                "source_content_hash": "f" * 64,
+            }
+            for paragraph_id, pos_group, vector in [(0, "noun", unit_x), (1, "verb", unit_y)]
+        ],
+    )
+    db_session.commit()
+
+    response = api_client.get(f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": run_id[:8]})
+    assert response.status_code == 200
+    body = response.json()
+    matrix = body["pos_similarity_matrix"]
+    assert matrix is not None
+    assert len(matrix) == 2 and len(matrix[0]) == 2
+    assert matrix[0][0] == pytest.approx(1.0, abs=1e-6)
+    assert matrix[1][1] == pytest.approx(1.0, abs=1e-6)
+    assert matrix[0][1] == pytest.approx(0.0, abs=1e-6)
+    assert matrix[1][0] == pytest.approx(0.0, abs=1e-6)
+    # 正交单位向量加权均值仍为单位向量（权重不改变方向）
+    assert body["pos_centroids"][0]["embedding_vector"] == pytest.approx(unit_x, abs=1e-6)
+    assert sqrt(sum(v * v for v in body["pos_centroids"][0]["embedding_vector"])) == pytest.approx(1.0, abs=1e-6)
+
+
 def test_linguistic_endpoints_require_completed_run(api_client: TestClient, db_session) -> None:
 
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["甲。\n乙。"], status="failed")

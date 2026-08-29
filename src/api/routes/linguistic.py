@@ -16,14 +16,22 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db_session, resolve_run_id
+from src.api.dependencies import (
+    get_db_session,
+    resolve_run_id,
+)
+from src.api.dependencies import (
+    require_readable_run_status as _require_readable_run_status,
+)
+from src.api.dependencies import (
+    require_run_for_novel as _require_run_for_novel,
+)
 from src.api.models.responses import (
     LinguisticEntitiesResponse,
     LinguisticFeaturesResponse,
     LinguisticPhrasesResponse,
     Word2VecStatsResponse,
 )
-from src.api.routes.results import _require_readable_run_status, _require_run_for_novel
 from src.api.services.results_queries.linguistic import (
     aggregate_linguistic_features,
     aggregate_phrase_stats,
