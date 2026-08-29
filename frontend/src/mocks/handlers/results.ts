@@ -1,23 +1,17 @@
 /**
- * MSW Handler — 分析结果：角色、曲线、主题、诊断、图谱、时间轴、指标
+ * MSW Handler — 分析结果：角色、情绪趋势、主题、诊断、伏笔、图谱变化、时间轴
+ *
+ * 仅保留前端仍在直调的单源端点；tab 级聚合 mock 见 ./tabs.ts。
  */
 import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
-  createParagraphCurves,
   createEmotionTrendWindows,
-  createChapterMetrics,
   createForeshadowingThreads,
   createTopics,
   createDiagnosis,
-  createGraph,
   createGraphChangesPage,
   createEventTimeline,
-  createNarrativeStructure,
-  createEmotionStats,
-  createCharacterStats,
-  createStyleStats,
-  createGlobalStats,
   taskDb,
 } from "../data";
 
@@ -47,7 +41,7 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
   return null;
 }
 
-// 获取 /api/novels/:novelId/characters
+// 获取 /api/novels/:novelId/characters（角色排行/角色表 tab 数据源）
 export const charactersHandler = http.get(
   `${BASE}/api/novels/:novelId/characters`,
   async ({ request, params }) => {
@@ -62,25 +56,7 @@ export const charactersHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/paragraph-curves（M4：段落粒度曲线，支持 max_points 抽稀）
-export const paragraphCurvesHandler = http.get(
-  `${BASE}/api/novels/:novelId/paragraph-curves`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const url = new URL(request.url);
-    const taskId = url.searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    const maxPoints = Number(url.searchParams.get("max_points"));
-    const count = Number.isFinite(maxPoints) && maxPoints > 0 ? Math.min(maxPoints, 5000) : 300;
-    return HttpResponse.json(createParagraphCurves(count));
-  }
-);
-
-// 获取 /api/novels/:novelId/emotion-trend（窗口情绪趋势，支持 position range）
+// 获取 /api/novels/:novelId/emotion-trend（情绪趋势 tab 数据源，支持 position range）
 export const emotionTrendHandler = http.get(
   `${BASE}/api/novels/:novelId/emotion-trend`,
   async ({ request, params }) => {
@@ -102,22 +78,7 @@ export const emotionTrendHandler = http.get(
   },
 );
 
-// 获取 /api/novels/:novelId/chapter-metrics（M4：章节指标汇总）
-export const chapterMetricsHandler = http.get(
-  `${BASE}/api/novels/:novelId/chapter-metrics`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    return HttpResponse.json(createChapterMetrics());
-  }
-);
-
-// 获取 /api/novels/:novelId/topics
+// 获取 /api/novels/:novelId/topics（主题词数据源）
 export const topicsHandler = http.get(
   `${BASE}/api/novels/:novelId/topics`,
   async ({ request, params }) => {
@@ -132,7 +93,7 @@ export const topicsHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/diagnosis
+// 获取 /api/novels/:novelId/diagnosis（诊断摘要/价值与主题 tab 数据源）
 export const diagnosisHandler = http.get(
   `${BASE}/api/novels/:novelId/diagnosis`,
   async ({ request, params }) => {
@@ -147,7 +108,7 @@ export const diagnosisHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/foreshadowing-threads
+// 获取 /api/novels/:novelId/foreshadowing-threads（Setup 台账 tab 数据源）
 export const foreshadowingThreadsHandler = http.get(
   `${BASE}/api/novels/:novelId/foreshadowing-threads`,
   async ({ request, params }) => {
@@ -162,22 +123,7 @@ export const foreshadowingThreadsHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/graph
-export const graphHandler = http.get(
-  `${BASE}/api/novels/:novelId/graph`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    return HttpResponse.json(createGraph());
-  }
-);
-
-// 获取 /api/novels/:novelId/graph/changes
+// 获取 /api/novels/:novelId/graph/changes（图谱变化 tab 数据源）
 export const graphChangesHandler = http.get(
   `${BASE}/api/novels/:novelId/graph/changes`,
   async ({ request, params }) => {
@@ -217,79 +163,4 @@ export const timelineHandler = http.get(
     data.meta.novel_id = novelId as string;
     return HttpResponse.json(data);
   }
-);
-
-// 获取 /api/novels/:novelId/metrics/narrative-structure
-export const narrativeStructureHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/narrative-structure`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createNarrativeStructure());
-  }
-);
-
-// 获取 /api/novels/:novelId/metrics/emotion-stats
-export const emotionStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/emotion-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createEmotionStats());
-  }
-);
-
-// 获取 /api/novels/:novelId/metrics/character-stats
-export const characterStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/character-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createCharacterStats());
-  }
-);
-
-// 获取 /api/novels/:novelId/metrics/style-stats
-export const styleStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/style-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createStyleStats());
-  }
-);
-
-// 获取 /api/novels/:novelId/metrics/global-stats
-export const globalStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/global-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createGlobalStats());
-  },
 );

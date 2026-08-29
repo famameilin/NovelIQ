@@ -8,7 +8,7 @@ import { CharactersPage } from "@/pages/CharactersPage";
 import { useNovelStore } from "@/store/novelStore";
 
 const getCharactersMock = vi.fn();
-const getDiagnosisMock = vi.fn();
+const getCharacterFunctionTabMock = vi.fn();
 
 let currentNovelId = "novel-1";
 let currentSearchParams = "task_id=task-1";
@@ -61,7 +61,12 @@ vi.mock("framer-motion", () => ({
 
 vi.mock("@/api/results", () => ({
   getCharacters: (...args: unknown[]) => getCharactersMock(...args),
-  getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
+}));
+
+vi.mock("@/api/tabs", () => ({
+  getCharacterFunctionTab: (...args: unknown[]) => getCharacterFunctionTabMock(...args),
+  tabQueryKey: (tab: string, novelId: string | undefined, taskId: string | null, ...rest: unknown[]) =>
+    ["tabs", novelId, taskId, tab, ...rest],
 }));
 
 vi.mock("@/components/layout/PageContainer", () => ({
@@ -126,42 +131,58 @@ describe("CharactersPage", () => {
     currentNovelId = "novel-1";
     currentSearchParams = "task_id=task-1";
     getCharactersMock.mockReset();
-    getDiagnosisMock.mockReset();
+    getCharacterFunctionTabMock.mockReset();
     getCharactersMock.mockResolvedValue([]);
+    getCharacterFunctionTabMock.mockResolvedValue({
+      run_id: "task-1",
+      characters: [],
+      focus_structure: null,
+      focus_characters: null,
+      arc_scores: null,
+    });
     useNovelStore.getState().clear();
   });
 
-  it("renders characters when diagnosis has only partial fields", async () => {
-    getDiagnosisMock.mockResolvedValue({
-      foreshadow_expectation: 0.42,
-    });
+  it("排行/角色表 tab 走 /characters，功能与焦点 tab 走专用端点", async () => {
     getCharactersMock.mockResolvedValue([
       {
         name: "沈砚",
-        mention_count: 12,
-        role_function: "protagonist",
-        importance_score: 0.9,
+        appearance_count: 12,
+        dominant_role_function: "protagonist",
+      },
+    ]);
+    getCharacterFunctionTabMock.mockResolvedValue({
+      run_id: "task-1",
+      characters: [],
+      focus_structure: "single",
+      focus_characters: ["沈砚"],
+      arc_scores: { 沈砚: 8.2 },
+    });
+
+    renderCharactersPage();
+
+    expect(await screen.findByTestId("character-ranking-bar")).toBeInTheDocument();
+    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getCharacterFunctionTabMock).toHaveBeenCalledWith("novel-1", "task-1");
+  });
+
+  it("功能与焦点切片为空值时仍渲染排行主内容", async () => {
+    getCharactersMock.mockResolvedValue([
+      {
+        name: "沈砚",
+        appearance_count: 12,
+        dominant_role_function: "protagonist",
       },
     ]);
 
     renderCharactersPage();
 
     expect(await screen.findByTestId("character-ranking-bar")).toBeInTheDocument();
-    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
-  });
-
-  it("renders empty diagnosis state when diagnosis is still missing", async () => {
-    getDiagnosisMock.mockResolvedValue(null);
-
-    renderCharactersPage();
-
-    expect(await screen.findByText("角色焦点结果暂未生成")).toBeInTheDocument();
-    expect(screen.getByText("当前任务暂时还没有可展示的角色焦点结果。")).toBeInTheDocument();
-    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(screen.getByTestId("focus-cast-card")).toBeInTheDocument();
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {
-    getDiagnosisMock.mockRejectedValue({
+    getCharacterFunctionTabMock.mockRejectedValue({
       isAxiosError: true,
       response: {
         status: 400,

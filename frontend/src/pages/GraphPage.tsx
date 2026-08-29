@@ -11,7 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { getCharacters, getGraph } from "@/api/results";
+import { getGraphNetworkTab, tabQueryKey } from "@/api/tabs";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
@@ -106,20 +106,11 @@ export function GraphPage() {
 
   const enabled = !!novelId && !!taskScopeId;
 
-  const graphQuery = useQuery({
-    queryKey: ["graph", novelId, taskScopeId],
-    queryFn: () => getGraph(novelId!, taskScopeId!),
+  // 图谱 tab：快照 + 登场次数 + 图算法指标 + 变化总数一次拉取（2026-08-29 tab 级 API 统一）
+  const graphNetworkQuery = useQuery({
+    queryKey: tabQueryKey("graph-network", novelId, taskScopeId),
+    queryFn: () => getGraphNetworkTab(novelId!, taskScopeId!),
     enabled,
-    staleTime: STALE_TIME,
-  });
-
-  const charactersQuery = useQuery({
-    queryKey: ["characters", novelId, taskScopeId],
-    queryFn: () => getCharacters(novelId!, taskScopeId!),
-    // appearanceCountMap 是图谱页面正式视觉语义的一部分；
-    // 这里只在 `/graph` 主查询成功后再请求 `/characters`，避免旧 run 或主查询失败时
-    // 并发打出第二条旁路状态链
-    enabled: enabled && graphQuery.isSuccess,
     staleTime: STALE_TIME,
   });
 
@@ -131,15 +122,16 @@ export function GraphPage() {
   });
 
   const novelTitle = novelQuery.data?.title ?? "小说详情";
-  const graphData = graphQuery.data;
+  const graphData = graphNetworkQuery.data?.snapshot ?? undefined;
   const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
-    if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
+    const appearances = graphNetworkQuery.data?.character_appearances;
+    if (!appearances || appearances.length === 0) return undefined;
     const map = new Map<string, number>();
-    charactersQuery.data.forEach((character) => {
-      map.set(character.name, character.appearance_count);
+    appearances.forEach((appearance) => {
+      map.set(appearance.name, appearance.appearance_count);
     });
     return map;
-  }, [charactersQuery.data]);
+  }, [graphNetworkQuery.data]);
 
   const relationTypes = useMemo(() => {
     if (!graphData?.edges) return [];
@@ -259,13 +251,10 @@ export function GraphPage() {
     return activeRelationCount / ((nodeCount * (nodeCount - 1)) / 2);
   }, [activeRelationCount, graphData]);
 
-  const isAnalysisNotComplete =
-    isAnalysisNotCompleteError(graphQuery.error) || isAnalysisNotCompleteError(charactersQuery.error);
-  const analysisFailed =
-    getAnalysisNotCompleteRunStatus(graphQuery.error) === "failed" ||
-    getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed";
-  const isLoading = graphQuery.isLoading || charactersQuery.isLoading;
-  const isError = (graphQuery.isError || charactersQuery.isError) && !isAnalysisNotComplete;
+  const isAnalysisNotComplete = isAnalysisNotCompleteError(graphNetworkQuery.error);
+  const analysisFailed = getAnalysisNotCompleteRunStatus(graphNetworkQuery.error) === "failed";
+  const isLoading = graphNetworkQuery.isLoading;
+  const isError = graphNetworkQuery.isError && !isAnalysisNotComplete;
   const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
 
   const handleZoomIn = useCallback(() => {
@@ -298,9 +287,8 @@ export function GraphPage() {
   }, []);
 
   const handleRetry = useCallback(() => {
-    graphQuery.refetch();
-    charactersQuery.refetch();
-  }, [charactersQuery, graphQuery]);
+    graphNetworkQuery.refetch();
+  }, [graphNetworkQuery]);
 
   // 2026-04-28，任务：分析详情页单屏 Tabs 改造
   // 修改原因：图谱页默认展示关系画布，关系变化和摘要拆入后续 tab，避免 overview 把画布挤到首屏之外

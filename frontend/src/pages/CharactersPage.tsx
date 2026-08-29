@@ -2,7 +2,8 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { getCharacters, getDiagnosis } from "@/api/results";
+import { getCharacters } from "@/api/results";
+import { getCharacterFunctionTab, tabQueryKey } from "@/api/tabs";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
@@ -57,25 +58,6 @@ function SkeletonGrid() {
   );
 }
 
-/**
- * 角色页现在以 diagnosis 新合同为前置条件；
- * diagnosis 尚未产出时，不再提前渲染仅靠 annotation 聚合得到的角色表，
- * 避免页面继续对“无 diagnosis 的旧路径”做静默兼容
- */
-function EmptyDiagnosisState() {
-  return (
-    <DashboardCardShell
-      title="角色焦点结果暂未生成"
-      icon={<Users className="h-4 w-4" />}
-      accent="chart-2"
-      className="min-h-[240px]"
-      bodyClassName="items-center justify-center gap-3 text-center"
-    >
-      <p className="text-sm text-text-muted">当前任务暂时还没有可展示的角色焦点结果。</p>
-    </DashboardCardShell>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /*  主组件                                                             */
 /* ------------------------------------------------------------------ */
@@ -98,57 +80,40 @@ export function CharactersPage() {
   // 不得用于新小说的查询/SSE（模式同 GraphPage）
   const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
 
-  // 数据获取
+  // 数据获取：排行/角色表 tab 用 /characters，功能与焦点 tab 用专用端点（2026-08-29 tab 级 API 统一）
   const enabled = !!novelId && !!storeTaskId;
 
-  const diagnosisQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
-    queryFn: () => getDiagnosis(novelId!, storeTaskId!),
+  const charactersQuery = useQuery({
+    queryKey: ["characters", novelId, storeTaskId],
+    queryFn: () => getCharacters(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
-  const diagnosis = diagnosisQuery.data;
-  const shouldFetchCharacters = enabled;
-
-  const charactersQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "characters"],
-    queryFn: () => getCharacters(novelId!, storeTaskId!),
-    enabled: shouldFetchCharacters,
+  const focusQuery = useQuery({
+    queryKey: tabQueryKey("character-function", novelId, storeTaskId),
+    queryFn: () => getCharacterFunctionTab(novelId!, storeTaskId!),
+    enabled,
     staleTime: STALE_TIME,
   });
 
-  const isLoading =
-    enabled &&
-    (diagnosisQuery.isLoading || (shouldFetchCharacters && charactersQuery.isLoading));
+  const isLoading = enabled && (charactersQuery.isLoading || focusQuery.isLoading);
   const isAnalysisNotComplete =
-    enabled &&
-    (isAnalysisNotCompleteError(diagnosisQuery.error) ||
-      (shouldFetchCharacters && isAnalysisNotCompleteError(charactersQuery.error)));
+    enabled && (isAnalysisNotCompleteError(charactersQuery.error) || isAnalysisNotCompleteError(focusQuery.error));
   const analysisFailed =
     enabled &&
-    (getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed" ||
-      (shouldFetchCharacters && getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed"));
-  const isError =
-    enabled &&
-    (diagnosisQuery.isError || (shouldFetchCharacters && charactersQuery.isError)) &&
-    !isAnalysisNotComplete;
+    (getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed" ||
+      getAnalysisNotCompleteRunStatus(focusQuery.error) === "failed");
+  const isError = enabled && (charactersQuery.isError || focusQuery.isError) && !isAnalysisNotComplete;
 
   const retry = () => {
-    if (shouldFetchCharacters) {
-      charactersQuery.refetch();
-    }
-    diagnosisQuery.refetch();
+    charactersQuery.refetch();
+    focusQuery.refetch();
   };
 
   const { data: characters } = charactersQuery;
-  const focusCharacters = diagnosis?.focus_characters ?? [];
-  const hasNullDiagnosis =
-    enabled &&
-    diagnosisQuery.isFetched &&
-    !diagnosisQuery.isLoading &&
-    !diagnosisQuery.isError &&
-    diagnosis === null;
+  const focusData = focusQuery.data;
+  const focusCharacters = focusData?.focus_characters ?? [];
 
   // ---------- 渲染 ----------
 
@@ -210,9 +175,6 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
-      {/* diagnosis 为空时的状态 */}
-      {hasNullDiagnosis && !isLoading && !isError && <EmptyDiagnosisState />}
-
       {/* 主内容 */}
       {characters && characters.length > 0 && !isLoading && (
         <motion.div
@@ -234,9 +196,9 @@ export function CharactersPage() {
                 <RoleFunctionPie characters={characters} className="h-full min-h-[320px]" />
                 <FocusCastCard
                   characters={characters}
-                  focusStructure={diagnosis?.focus_structure ?? undefined}
+                  focusStructure={focusData?.focus_structure ?? undefined}
                   focusCharacters={focusCharacters}
-                  arcScores={diagnosis?.arc_scores}
+                  arcScores={focusData?.arc_scores ?? undefined}
                   className="h-full min-h-[320px]"
                 />
               </div>
