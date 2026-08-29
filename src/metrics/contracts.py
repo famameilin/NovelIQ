@@ -1,15 +1,11 @@
-"""指标契约 registry：从 config/metrics_contracts.yaml 加载可执行契约。"""
+"""指标契约 registry:从 src/config/constants 的 METRIC_CONTRACTS 加载可执行契约。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import yaml
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_CONTRACTS_PATH = _PROJECT_ROOT / "config" / "metrics_contracts.yaml"
+from src.config.constants import METRIC_CONTRACTS
 
 
 @dataclass(frozen=True)
@@ -43,12 +39,10 @@ def _parse_contract(raw: dict[str, Any]) -> MetricContract:
     )
 
 
-def load_metric_contracts(path: Path | None = None) -> list[MetricContract]:
-    contracts_path = path or _CONTRACTS_PATH
-    if not contracts_path.exists():
-        raise FileNotFoundError(f"metrics contracts file not found: {contracts_path}")
-    raw_data = yaml.safe_load(contracts_path.read_text(encoding="utf-8")) or {}
-    return [_parse_contract(item) for item in raw_data.get("metrics", [])]
+def load_metric_contracts(raw: list[dict[str, Any]] | None = None) -> list[MetricContract]:
+    """读取指标契约;raw 为可选的契约声明列表(缺省用 constants 内置注册表)"""
+    source = METRIC_CONTRACTS if raw is None else raw
+    return [_parse_contract(item) for item in source]
 
 
 __all__ = ["MetricContract", "load_metric_contracts"]

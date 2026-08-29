@@ -6,7 +6,8 @@ lexicons suggest 模块测试
 2026-08-12 创建，补齐 0% 覆盖率模块。
 2026-08-15 词表 v3：loader.py 已删除（仅测试引用），相关用例移除；
 expand_lexicons 不再产出 proper_nouns 类别（词表已删）；
-无 registry.yaml 的目录直接报错（v3 强约束，禁止 fallback）。
+2026-08-28 词表元数据常量化（src/config/constants/lexicons.py）：临时词表目录测试
+改为 monkeypatch registry 模块的注册文件声明注入自定义词表集合。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+import src.lexicons.registry as registry_module
 from src.lexicons.suggest import (
     _extract_combat_terms,
     _extract_proper_nouns,
@@ -104,24 +106,20 @@ def test_extract_semantic_terms_from_full_text() -> None:
 
 
 # ============================================================================
-# suggest.py 集成（临时词表目录，v3 要求目录内带 registry.yaml）
+# suggest.py 集成（临时词表目录，注册表声明来自常量 monkeypatch）
 # ============================================================================
 
-_REGISTRY_TEMPLATE = """\
-version: "3.0"
-lexicons:
-  combat.txt:
-    kind: tension
-  sensory.txt:
-    kind: style
-  semantic_category.txt:
-    kind: style
-"""
+_REGISTRY_FILES = ["combat.txt", "sensory.txt", "semantic_category.txt"]
+
+
+def _bind_specs(monkeypatch: pytest.MonkeyPatch, files: list[str]) -> None:
+    """monkeypatch 注册中心的生产注册来源（expand_lexicons 自建 registry）"""
+    monkeypatch.setattr(registry_module, "LEXICON_FILES", {f.removesuffix(".txt"): f for f in files})
 
 
 @pytest.fixture
-def lexicon_dir(tmp_path: Path) -> Path:
-    (tmp_path / "registry.yaml").write_text(_REGISTRY_TEMPLATE, encoding="utf-8")
+def lexicon_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    _bind_specs(monkeypatch, _REGISTRY_FILES)
     (tmp_path / "combat.txt").write_text("斩杀\n", encoding="utf-8")
     (tmp_path / "sensory.txt").write_text("香气\n", encoding="utf-8")
     (tmp_path / "semantic_category.txt").write_text("救赎\n", encoding="utf-8")
@@ -138,14 +136,20 @@ def test_expand_lexicons_detects_semantic_combat_sensory(lexicon_dir: Path) -> N
     assert "proper_nouns" not in additions
 
 
-def test_expand_lexicons_without_registry_yaml_raises(tmp_path: Path) -> None:
-    # v3 强约束：目录无 registry.yaml 直接报错，不再回退
+def test_expand_lexicons_missing_registered_file_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 强约束保留：注册词表的文件缺失 -> fail-fast（防静默空跑）
+    _bind_specs(monkeypatch, _REGISTRY_FILES)
+    (tmp_path / "combat.txt").write_text("斩杀\n", encoding="utf-8")
     with pytest.raises(FileNotFoundError):
         expand_lexicons(["一段普通的中文测试文本"], tmp_path)
 
 
-def test_update_lexicons_from_texts_applies_merge(tmp_path: Path) -> None:
-    (tmp_path / "registry.yaml").write_text(_REGISTRY_TEMPLATE, encoding="utf-8")
+def test_update_lexicons_from_texts_applies_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _bind_specs(monkeypatch, _REGISTRY_FILES)
     path = tmp_path / "semantic_category.txt"
     path.write_text("已有词\n", encoding="utf-8")
     (tmp_path / "combat.txt").write_text("斩杀\n", encoding="utf-8")
@@ -158,8 +162,10 @@ def test_update_lexicons_from_texts_applies_merge(tmp_path: Path) -> None:
         assert additions["semantic_category"][0] in content
 
 
-def test_update_lexicons_from_texts_without_apply(tmp_path: Path) -> None:
-    (tmp_path / "registry.yaml").write_text(_REGISTRY_TEMPLATE, encoding="utf-8")
+def test_update_lexicons_from_texts_without_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _bind_specs(monkeypatch, _REGISTRY_FILES)
     path = tmp_path / "semantic_category.txt"
     path.write_text("已有词\n", encoding="utf-8")
     (tmp_path / "combat.txt").write_text("斩杀\n", encoding="utf-8")

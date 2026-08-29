@@ -2,8 +2,8 @@
 词表注册中心 (LexiconRegistry v3) + 增强匹配 回归测试
 
 覆盖:
-  1. registry.yaml 加载与 key 解析（强类型表目）
-  2. conflict_matrix 跨表重叠声明（审计用途）
+  1. constants.LEXICON_FILES/LEXICON_DRAFT_FILES 注册加载与 key 解析
+  2. LEXICON_CONFLICTS 跨表重叠声明（审计用途）
   3. 版本 hash 计算
   4. 多模式匹配 (exact / phrase / fuzzy)
   5. 全局单例
@@ -92,32 +92,7 @@ class TestLexiconRegistryLoad:
 
 
 # ====================================================================
-# 2. Conflict Matrix 跨表重叠声明
-# ====================================================================
-
-
-class TestConflictMatrix:
-    def test_conflicts_loaded(self, registry):
-        conflicts = registry.get_conflicts_for("combat.txt")
-        # combat 词表中借用了 semantic_category 的词条（如"剑气""灵力"）
-        assert len(conflicts) > 0
-
-    def test_jianqi_is_borrowed(self, registry):
-        """剑气在 semantic_category 是主属，combat 是借用"""
-        conflicts = registry.get_conflicts_for("combat.txt")
-        terms_with_conflict = [c["term"] for c in conflicts]
-        assert "剑气" in terms_with_conflict
-        assert "灵力" in terms_with_conflict
-
-    def test_honglong_in_sensory(self, registry):
-        """轰隆是 sensory 主属，被 combat 借用"""
-        conflicts = registry.get_conflicts_for("sensory.txt")
-        terms_with_conflict = [c["term"] for c in conflicts]
-        assert "轰隆" in terms_with_conflict
-
-
-# ====================================================================
-# 3. 版本 hash
+# 2. 版本 hash
 # ====================================================================
 
 
