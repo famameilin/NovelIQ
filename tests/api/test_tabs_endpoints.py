@@ -313,3 +313,207 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
         )
         db_session.commit()
     return novel_id, run_id
+
+
+# ------------------------------------------------------------------
+# dashboard / rhythm / character-function / graph-network
+# ------------------------------------------------------------------
+
+
+from src.api.models.responses import DiagnosisResult  # noqa: E402
+from src.storage.repositories import GraphRepository, RunRepository  # noqa: E402
+from tests.support.chapter_annotation_helpers import (  # noqa: E402
+    character_fact,
+    create_run_with_chunks,
+    persist_chapter_annotation,
+    relation_fact,
+)
+from tests.support.paragraph_fixtures import insert_metrics, make_metric_row  # noqa: E402
+
+_CHAPTER_TEXTS = ["林渡与顾霜并肩迎敌。", "萧遥前来助阵。", "三人共商大计。"]
+
+
+def _create_metrics_fixture_run(db_session) -> tuple[str, str]:
+    """三章六段：段落 + 指标 + 曲线 + 主题三表 + 章节图事实
+
+    图事实必填：/metrics/* 聚合与图谱族查询在无章节图数据时统一 409
+    （GraphReadinessError），tab 端点沿用同一语义。
+    """
+    novel_id, run_id = create_completed_run(db_session, chapter_texts=_CHAPTER_TEXTS)
+    spans = []
+    paragraph_id = 0
+    offset = 0
+    for chapter_id, chapter_text in enumerate(_CHAPTER_TEXTS, start=1):
+        for paragraph_index in range(2):
+            text = "对话"
+            spans.append(
+                make_span(
+                    paragraph_id=paragraph_id,
+                    chapter_id=chapter_id,
+                    paragraph_index=paragraph_index,
+                    text=text,
+                    local_start=paragraph_index * len(text),
+                    chunk_offset=offset,
+                    token_count=2,
+                )
+            )
+            paragraph_id += 1
+        offset += len(chapter_text)
+    insert_spans(db_session, run_id, spans)
+    _insert_topic_fixture(db_session, run_id)
+    insert_metrics(
+        db_session,
+        run_id,
+        [
+            make_metric_row(
+                paragraph_id,
+                token_count=2,
+                char_count=2,
+                sentence_count=1,
+                sentence_char_sum=2.0,
+                sentence_char_sum_sq=4.0,
+                positive_weight_sum=0.5,
+                negative_weight_sum=0.2,
+            )
+            for paragraph_id in range(6)
+        ],
+    )
+    _seed_graph(db_session, run_id)
+    return novel_id, run_id
+
+
+def _seed_graph(db_session, run_id: str) -> None:
+    """三章人物三角图（与 test_graph_metrics_endpoints 相同口径）"""
+    for chapter_id, relations in {
+        1: [("林渡", "顾霜"), ("林渡", "萧遥")],
+        2: [("林渡", "顾霜"), ("顾霜", "萧遥")],
+        3: [("林渡", "萧遥"), ("顾霜", "萧遥")],
+    }.items():
+        persist_chapter_annotation(
+            db_session,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            characters=[
+                character_fact(chunk_id=chapter_id, name=name, action="同行")
+                for name in ("林渡", "顾霜", "萧遥")
+            ],
+            relations=[
+                relation_fact(chunk_id=chapter_id, from_name=from_name, to_name=to_name, relation_type="盟友")
+                for from_name, to_name in relations
+            ],
+        )
+    db_session.commit()
+
+
+def _create_graph_fixture_run(db_session, *, seed_graph: bool = True) -> tuple[str, str]:
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌", "萧遥前来助阵", "三人共商大计"],
+        chapter_ids=[1, 2, 3],
+        title="图谱tab",
+    )
+    if seed_graph:
+        _seed_graph(db_session, run_id)
+    RunRepository(db_session).update_run_status(run_id, "completed")
+    db_session.commit()
+    if seed_graph:
+        assert GraphRepository(db_session).fetch_snapshot(run_id) is not None
+    return novel_id, run_id
+
+
+def test_dashboard_tab_bundles_eight_sections(api_client: TestClient, db_session, monkeypatch) -> None:
+    novel_id, run_id = _create_metrics_fixture_run(db_session)
+    _mock_lda_model(monkeypatch)
+
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/dashboard", params={"task_id": run_id[:8]})
+    assert response.status_code == 200
+    body = response.json()
+
+    assert set(body) == {
+        "run_id",
+        "narrative_structure",
+        "emotion_stats",
+        "character_stats",
+        "style_stats",
+        "chapter_metrics",
+        "topics",
+        "diagnosis",
+        "emotion_trend",
+    }
+    assert body["run_id"] == run_id
+    assert body["chapter_metrics"]["book"]["total_paragraphs"] == 6
+    assert len(body["emotion_trend"]) >= 1
+    assert {topic["topic_id"] for topic in body["topics"]} == {0, 1}
+    assert body["diagnosis"] is None
+
+
+def test_rhythm_tab_returns_curves_with_max_points(api_client: TestClient, db_session) -> None:
+    novel_id, run_id = _create_metrics_fixture_run(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/rhythm", params={"task_id": run_id[:8], "max_points": 5}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # 每章两段时全部 6 点均为章节边界强制保留点，max_points 不得裁掉边界
+    assert len(body["curves"]) == 6
+    assert set(body["curves"][0]) >= {"position", "net_density", "surface_tension", "chapter_id"}
+    assert "narrative_structure" in body
+
+
+def test_character_function_tab_without_diagnosis(api_client: TestClient, db_session) -> None:
+    novel_id, run_id = _create_graph_fixture_run(db_session)
+
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/character-function", params={"task_id": run_id[:8]})
+    assert response.status_code == 200
+    body = response.json()
+    names = {character["name"] for character in body["characters"]}
+    assert names == {"林渡", "顾霜", "萧遥"}
+    assert body["characters"][0]["appearance_count"] >= 1
+    # 无诊断时焦点切片为空值，不以空结构伪造
+    assert body["focus_structure"] is None
+    assert body["focus_characters"] is None
+    assert body["arc_scores"] is None
+
+
+def test_character_function_tab_slices_focus_fields(api_client: TestClient, db_session, monkeypatch) -> None:
+    novel_id, run_id = _create_graph_fixture_run(db_session)
+    diagnosis = DiagnosisResult(
+        focus_structure="dual",
+        focus_characters=["林渡", "顾霜"],
+        arc_scores={"林渡": 0.9, "顾霜": 0.7},
+        main_characters=["林渡", "顾霜"],
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_queries.tabs.graph._fetch_diagnosis", lambda *args, **kwargs: diagnosis
+    )
+
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/character-function", params={"task_id": run_id[:8]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["focus_structure"] == "dual"
+    assert body["focus_characters"] == ["林渡", "顾霜"]
+    assert body["arc_scores"] == {"林渡": 0.9, "顾霜": 0.7}
+
+
+def test_graph_network_tab_bundles_snapshot_metrics_and_change_total(api_client: TestClient, db_session) -> None:
+    novel_id, run_id = _create_graph_fixture_run(db_session)
+
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": run_id[:8]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["unavailable_reason"] is None
+    node_names = {node["name"] for node in body["snapshot"]["nodes"]}
+    assert {"林渡", "顾霜", "萧遥"} <= node_names
+    appearance_names = {entry["name"] for entry in body["character_appearances"]}
+    assert appearance_names == {"林渡", "顾霜", "萧遥"}
+    assert body["graph_metrics"]["pagerank"]
+    assert body["change_total"] >= 1
+
+
+def test_graph_network_tab_requires_graph_data(api_client: TestClient, db_session) -> None:
+    """无章节图数据时与 /graph 族端点一致返回 409（GraphReadinessError 透传）"""
+    novel_id, run_id = _create_graph_fixture_run(db_session, seed_graph=False)
+
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": run_id[:8]})
+    assert response.status_code == 409
