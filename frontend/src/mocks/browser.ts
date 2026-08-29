@@ -40,6 +40,14 @@ import {
   styleStatsHandler,
   globalStatsHandler,
 } from "./handlers/results";
+import {
+  characterFunctionTabHandler,
+  dashboardTabHandler,
+  graphNetworkTabHandler,
+  linguisticEntitiesTabHandler,
+  rhythmTabHandler,
+  topicsOverviewTabHandler,
+} from "./handlers/tabs";
 
 export const worker = setupWorker(
   // 小说
@@ -74,4 +82,11 @@ export const worker = setupWorker(
   characterStatsHandler,
   styleStatsHandler,
   globalStatsHandler,
+  // Tab 级聚合
+  dashboardTabHandler,
+  rhythmTabHandler,
+  characterFunctionTabHandler,
+  graphNetworkTabHandler,
+  topicsOverviewTabHandler,
+  linguisticEntitiesTabHandler,
 );

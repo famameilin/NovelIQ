@@ -539,6 +539,122 @@ export interface ApiError {
   detail: string;
 }
 
+// Tab 级聚合（前端每 tab 一个 API；响应只含复合数据与展示主体，
+// 与后端 src/api/models/tabs.py 严格对齐）
+
+export interface TopicModelMetaInfo {
+  model_key: string;
+  library_version: string;
+  pipeline_version: string;
+  num_topics: number;
+  artifact_key: string;
+  artifact_sha256: string;
+}
+
+export interface TopicDistributionEntry {
+  topic_id: number;
+  weight: number;
+}
+
+export interface ChapterTopicDistribution {
+  chapter_id: number;
+  chapter_sequence: number;
+  chapter_title: string;
+  token_total: number | null;
+  distribution: TopicDistributionEntry[] | null;
+}
+
+export interface KeywordScoreItem {
+  word: string;
+  score: number;
+}
+
+/** 主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词 */
+export interface TopicsOverviewTabResponse {
+  run_id: string;
+  model: TopicModelMetaInfo | null;
+  topics: Topic[];
+  distribution: TopicDistributionEntry[] | null;
+  chapters: ChapterTopicDistribution[];
+  keywords: KeywordScoreItem[];
+  unavailable_reason: string | null;
+  keyword_unavailable_reason: string | null;
+}
+
+/** 实体与短语 tab：仅聚合统计，不含实体候选 span 明细 */
+export interface EntitySurfaceCount {
+  surface_text: string;
+  entity_type: string;
+  count: number;
+}
+
+export interface LinguisticEntitiesTabResponse {
+  run_id: string;
+  count_by_type: Record<string, number>;
+  surface_top: EntitySurfaceCount[];
+  total_char_count: number;
+  metric_hit_count: number;
+  fixed_phrase_density: number | null;
+  four_char_candidate_count: number;
+  total_hits: number;
+  unavailable_reason: string | null;
+}
+
+/** 仪表盘 tab：原 8 个并发请求合并为一次拉取 */
+export interface DashboardTabResponse {
+  run_id: string;
+  narrative_structure: NarrativeStructureMetrics | null;
+  emotion_stats: EmotionStatsMetrics | null;
+  character_stats: CharacterStatsMetrics | null;
+  style_stats: StyleStatsMetrics | null;
+  chapter_metrics: ChapterMetricsResponse | null;
+  topics: Topic[];
+  diagnosis: DiagnosisResult | null;
+  emotion_trend: EmotionTrendWindow[];
+}
+
+/** 节奏张力 tab：段落曲线 + 叙事结构高潮参数 */
+export interface RhythmTabResponse {
+  run_id: string;
+  curves: ParagraphCurvePoint[];
+  narrative_structure: NarrativeStructureMetrics | null;
+}
+
+/** 功能与焦点 tab：角色功能分布 + 诊断焦点结构切片 */
+export interface CharacterFunctionTabResponse {
+  run_id: string;
+  characters: Character[];
+  focus_structure: "single" | "dual" | "ensemble" | null;
+  focus_characters: string[] | null;
+  arc_scores: Record<string, number> | null;
+}
+
+/** 图谱页登场次数切片 */
+export interface CharacterAppearance {
+  name: string;
+  appearance_count: number;
+}
+
+/** 图结构指标（PageRank/HITS/Louvain，查询时计算） */
+export interface GraphAlgorithmMetrics {
+  run_id: string;
+  unavailable_reason: string | null;
+  algorithm: Record<string, unknown>;
+  pagerank: Record<string, number>;
+  hits: Record<string, unknown>;
+  communities: Record<string, unknown>;
+}
+
+/** 图谱 tab：图快照 + 登场次数 + 图算法指标 + 变化总数 */
+export interface GraphNetworkTabResponse {
+  run_id: string;
+  snapshot: GraphData | null;
+  character_appearances: CharacterAppearance[];
+  graph_metrics: GraphAlgorithmMetrics | null;
+  change_total: number;
+  unavailable_reason: string | null;
+}
+
 // 分页
 
 export interface PaginatedResponse<T> {
