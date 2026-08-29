@@ -105,7 +105,7 @@ async def get_topics_overview_tab(
     """主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    return TopicsOverviewTabResponse(**build_topics_overview(run_id, session))
+    return TopicsOverviewTabResponse(**build_topics_overview(run_id, session, novel_id))
 
 
 @router.get("/tabs/linguistic-entities", response_model=LinguisticEntitiesTabResponse)

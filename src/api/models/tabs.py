@@ -34,10 +34,11 @@ from src.api.models.responses import (
 
 
 class TopicsOverviewTabResponse(BaseModel):
-    """主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词一次拉取
+    """主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词 + 诊断主题标签
 
     - topics/distribution/chapters 缺模型契约行时为空且 unavailable_reason 非空
     - keywords 口径独立于 LDA（TextRank），不可用原因单独回显
+    - topic_labels 为诊断切片（LLM 主题命名，按 topic_id 顺序对齐 topics）
     """
 
     run_id: str
@@ -46,6 +47,7 @@ class TopicsOverviewTabResponse(BaseModel):
     distribution: list[TopicDistributionEntry] | None = None
     chapters: list[ChapterTopicDistribution] = Field(default_factory=list)
     keywords: list[KeywordItem] = Field(default_factory=list)
+    topic_labels: list[str] | None = None
     unavailable_reason: str | None = None
     keyword_unavailable_reason: str | None = None
 
