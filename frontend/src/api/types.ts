@@ -569,7 +569,7 @@ export interface KeywordScoreItem {
   score: number;
 }
 
-/** 主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词 */
+/** 主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词 + 诊断主题标签 */
 export interface TopicsOverviewTabResponse {
   run_id: string;
   model: TopicModelMetaInfo | null;
@@ -577,6 +577,8 @@ export interface TopicsOverviewTabResponse {
   distribution: TopicDistributionEntry[] | null;
   chapters: ChapterTopicDistribution[];
   keywords: KeywordScoreItem[];
+  /** 诊断切片：LLM 主题命名，按 topic_id 顺序对齐 topics */
+  topic_labels: string[] | null;
   unavailable_reason: string | null;
   keyword_unavailable_reason: string | null;
 }
@@ -652,6 +654,115 @@ export interface GraphNetworkTabResponse {
   character_appearances: CharacterAppearance[];
   graph_metrics: GraphAlgorithmMetrics | null;
   change_total: number;
+  unavailable_reason: string | null;
+}
+
+// 主题全量分布（赛道 D 单源端点：演进/迁移/情绪 tab 数据源）
+
+export interface TopicSeriesPoint {
+  paragraph_id: number;
+  chapter_id: number;
+  chapter_sequence: number;
+  start_position: number;
+  token_count: number;
+  /** 完整 K 维权重，下标即 topic_id */
+  weights: number[];
+}
+
+export interface TopicSeriesResponse {
+  run_id: string;
+  model: TopicModelMetaInfo | null;
+  num_topics: number | null;
+  points: TopicSeriesPoint[];
+  unavailable_reason: string | null;
+}
+
+export interface TopicShiftConfig {
+  window_size: number;
+  min_tokens_per_window: number;
+  score_threshold: number;
+  max_candidates: number;
+}
+
+export interface TopicShiftCandidate {
+  position: number;
+  paragraph_start: number;
+  paragraph_end: number;
+  /** 以 2 为底的 JS 散度，值域 [0,1] */
+  score: number;
+  window_token_total: number;
+}
+
+export interface TopicShiftResponse {
+  candidates: TopicShiftCandidate[];
+  config: TopicShiftConfig;
+  unavailable_reason: string | null;
+}
+
+export interface TopicEmotionEntry {
+  topic_id: number;
+  emotion: number | null;
+  weighted_token_total: number | null;
+}
+
+export interface TopicEmotionResponse {
+  run_id: string;
+  model: TopicModelMetaInfo | null;
+  emotion: TopicEmotionEntry[];
+  unavailable_reason: string | null;
+}
+
+// 语言特征（赛道 A/B/C 单源端点：词法句法/词向量 tab 数据源）
+
+export interface LinguisticGroupStats {
+  token_total: number | null;
+  sentence_total: number | null;
+  word_length_ratios: Record<string, number> | null;
+  pos_ratios: Record<string, number> | null;
+  sentence_pattern_ratios: Record<string, number> | null;
+  avg_dependency_depth: number | null;
+  max_dependency_depth: number | null;
+  dependency_relation_ratios: Record<string, number> | null;
+  dependency_root_count: number | null;
+}
+
+export interface ChapterLinguisticStats extends LinguisticGroupStats {
+  chapter_id: number;
+}
+
+export interface LinguisticFeaturesResponse extends LinguisticGroupStats {
+  run_id: string;
+  paragraph_count: number;
+  chapters: ChapterLinguisticStats[];
+  unavailable_reason: string | null;
+}
+
+export interface Word2VecModelInfo {
+  embedding_dimension: number;
+  vocabulary_size: number;
+  artifact_scope: string;
+}
+
+export interface PosCoverageEntry {
+  pos_group: string;
+  source_token_total: number;
+  in_vocabulary_token_total: number;
+  coverage_ratio: number | null;
+}
+
+export interface PosCentroidEntry {
+  pos_group: string;
+  weighted_token_total: number;
+  embedding_vector: number[];
+}
+
+export interface Word2VecStatsResponse {
+  run_id: string;
+  model: Word2VecModelInfo | null;
+  pos_coverage: PosCoverageEntry[];
+  pos_centroids: PosCentroidEntry[];
+  /** POS 质心余弦相似度矩阵，行序与 pos_centroids 一致；质心不足 2 组时为 null */
+  pos_similarity_matrix: number[][] | null;
   unavailable_reason: string | null;
 }
 

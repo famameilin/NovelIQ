@@ -343,6 +343,7 @@ export function GraphPage() {
             graphDensity={graphDensity}
             loadedChangeCount={loadedChangeCount}
             totalChangeCount={totalChangeCount}
+            graphMetrics={graphNetworkQuery.data?.graph_metrics ?? null}
             pageSectionVariants={pageSectionVariants}
           />
         </div>

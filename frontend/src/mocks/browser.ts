@@ -26,12 +26,15 @@ import {
 import {
   charactersHandler,
   emotionTrendHandler,
-  topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
   graphChangesHandler,
   timelineHandler,
+  topicSeriesHandler,
+  topicShiftsHandler,
+  topicEmotionHandler,
 } from "./handlers/results";
+import { linguisticFeaturesHandler, linguisticWord2vecHandler } from "./handlers/linguistic";
 import {
   characterFunctionTabHandler,
   dashboardTabHandler,
@@ -61,11 +64,15 @@ export const worker = setupWorker(
   // 结果（单源 tab 数据源）
   charactersHandler,
   emotionTrendHandler,
-  topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
   graphChangesHandler,
   timelineHandler,
+  topicSeriesHandler,
+  topicShiftsHandler,
+  topicEmotionHandler,
+  linguisticFeaturesHandler,
+  linguisticWord2vecHandler,
   // Tab 级聚合
   dashboardTabHandler,
   rhythmTabHandler,

@@ -10,6 +10,7 @@ const CurvesPage = lazy(() => import("@/pages/CurvesPage").then((m) => ({ defaul
 const CharactersPage = lazy(() => import("@/pages/CharactersPage").then((m) => ({ default: m.CharactersPage })));
 const GraphPage = lazy(() => import("@/pages/GraphPage").then((m) => ({ default: m.GraphPage })));
 const TopicsPage = lazy(() => import("@/pages/TopicsPage").then((m) => ({ default: m.TopicsPage })));
+const LinguisticPage = lazy(() => import("@/pages/LinguisticPage").then((m) => ({ default: m.LinguisticPage })));
 const TimelinePage = lazy(() => import("@/pages/TimelinePage").then((m) => ({ default: m.TimelinePage })));
 const DiagnosisPage = lazy(() => import("@/pages/DiagnosisPage").then((m) => ({ default: m.DiagnosisPage })));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })));
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
       { path: "/novels/:novelId/characters", element: withSuspense(CharactersPage) },
       { path: "/novels/:novelId/graph", element: withSuspense(GraphPage) },
       { path: "/novels/:novelId/topics", element: withSuspense(TopicsPage) },
+      { path: "/novels/:novelId/linguistic", element: withSuspense(LinguisticPage) },
       { path: "/novels/:novelId/timeline", element: withSuspense(TimelinePage) },
       { path: "/novels/:novelId/diagnosis", element: withSuspense(DiagnosisPage) },
     ],
