@@ -1,24 +1,22 @@
 import pytest
 
+from src.config.constants import STAGE_PROGRESS_MILESTONES
 from src.config.schemas import (
     _parse_metrics_settings,
-    _parse_progress_settings,
     _parse_topic_model_settings,
 )
+from src.config.schemas.analysis import ProgressSettings
 
 
-def test_parse_progress_settings_reads_stage_ranges() -> None:
-    settings = _parse_progress_settings(
-        {
-            "preprocess": {"start": 0, "end": 10},
-            "annotate": {"start": 10, "end": 80},
-            "diagnose": {"start": 95, "end": 100},
-        }
-    )
+def test_progress_settings_defaults_from_constants() -> None:
+    settings = ProgressSettings()
 
-    assert settings.annotate.start == 10
-    assert settings.annotate.end == 80
-    assert settings.diagnose.start == 95
+    expected_start = 0.0
+    for stage, expected_end in STAGE_PROGRESS_MILESTONES.items():
+        stage_range = getattr(settings, stage)
+        assert stage_range.start == expected_start
+        assert stage_range.end == expected_end
+        expected_start = expected_end
 
 
 def test_parse_topic_model_settings_reads_flat_and_lda_fields() -> None:
