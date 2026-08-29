@@ -126,6 +126,7 @@ def test_topics_overview_tab_composites_all_sections(api_client: TestClient, db_
     assert weights[0] == 0.5 and weights[1] == 0.5
     assert [chapter["chapter_sequence"] for chapter in body["chapters"]] == [1, 2]
     assert body["unavailable_reason"] is None
+    assert body["topic_labels"] is None  # 无诊断行时标签为空
 
     # TextRank 关键词：结构存在且口径独立（无共现图时单独回显原因）
     assert isinstance(body["keywords"], list)
