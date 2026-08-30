@@ -135,7 +135,7 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
     assert results[0].similarity == 0.93
 
 
-def test_search_similar_paragraphs_pushes_paragraph_bounds_and_limit() -> None:
+def test_search_similar_paragraphs_pushes_paragraph_and_chapter_sequence_bounds_and_limit() -> None:
     """2026-08-14 用于验证段落边界、排除集合与 top_k 仍进入 SQL"""
     session = MagicMock()
     session.execute.return_value.all.return_value = []
@@ -149,14 +149,22 @@ def test_search_similar_paragraphs_pushes_paragraph_bounds_and_limit() -> None:
         exclude_paragraph_ids=[5],
         min_paragraph_id=1,
         max_paragraph_id=10,
+        before_chapter_sequence=7,
+        after_chapter_sequence=9,
     )
 
     stmt = session.execute.call_args.args[0]
     compiled_sql = str(stmt.compile())
+    compiled_params = stmt.compile().params
+    assert "JOIN chapters" in compiled_sql
     assert "LIMIT :param_3" in compiled_sql
     assert "NOT IN" in compiled_sql
     assert re.search(r"paragraph_id >= :paragraph_id_\d+", compiled_sql) is not None
     assert re.search(r"paragraph_id <= :paragraph_id_\d+", compiled_sql) is not None
+    assert re.search(r"chapters.sequence < :sequence_\d+", compiled_sql) is not None
+    assert re.search(r"chapters.sequence > :sequence_\d+", compiled_sql) is not None
+    assert 7 in compiled_params.values()
+    assert 9 in compiled_params.values()
 
 
 def test_get_incomplete_paragraph_embedding_paragraph_ids_combines_missing_and_null_vector() -> None:

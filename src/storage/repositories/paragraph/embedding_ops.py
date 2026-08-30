@@ -13,7 +13,7 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.models import Paragraph, ParagraphEmbedding
+from src.storage.models import Chapter, Paragraph, ParagraphEmbedding
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,8 @@ def search_similar_paragraphs(
     exclude_paragraph_ids: Sequence[int] | None = None,
     min_paragraph_id: int | None = None,
     max_paragraph_id: int | None = None,
+    before_chapter_sequence: int | None = None,
+    after_chapter_sequence: int | None = None,
 ) -> list[SimilarParagraphRow]:
     """2026-08-14 同 run 原文自然段 pgvector 检索（段落边界）。
 
@@ -104,6 +106,10 @@ def search_similar_paragraphs(
             (ParagraphEmbedding.run_id == Paragraph.run_id)
             & (ParagraphEmbedding.paragraph_id == Paragraph.paragraph_id),
         )
+        .join(
+            Chapter,
+            (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
+        )
         .where(
             ParagraphEmbedding.run_id == run_id,
             ParagraphEmbedding.embedding_vector.is_not(None),
@@ -116,6 +122,10 @@ def search_similar_paragraphs(
         statement = statement.where(Paragraph.paragraph_id >= min_paragraph_id)
     if max_paragraph_id is not None:
         statement = statement.where(Paragraph.paragraph_id <= max_paragraph_id)
+    if before_chapter_sequence is not None:
+        statement = statement.where(Chapter.sequence < before_chapter_sequence)
+    if after_chapter_sequence is not None:
+        statement = statement.where(Chapter.sequence > after_chapter_sequence)
     statement = statement.order_by(
         distance_expr.asc(),
         Paragraph.paragraph_id.asc(),

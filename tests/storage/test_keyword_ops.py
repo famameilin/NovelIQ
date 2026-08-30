@@ -141,7 +141,7 @@ def test_search_paragraphs_by_keywords_scans_paragraphs_table() -> None:
     assert results[0].match_count == 1
 
 
-def test_search_paragraphs_by_keywords_pushes_paragraph_bounds_into_sql() -> None:
+def test_search_paragraphs_by_keywords_pushes_paragraph_and_chapter_sequence_bounds_into_sql() -> None:
     """
     2026-08-14 二期段落化：exclude/min/max 边界全部改为 paragraph_id 并进入 SQL
     """
@@ -156,13 +156,21 @@ def test_search_paragraphs_by_keywords_pushes_paragraph_bounds_into_sql() -> Non
         exclude_paragraph_ids=[5],
         min_paragraph_id=1,
         max_paragraph_id=10,
+        before_chapter_sequence=7,
+        after_chapter_sequence=9,
     )
 
     stmt = session.execute.call_args.args[0]
     compiled_sql = str(stmt.compile())
+    compiled_params = stmt.compile().params
+    assert "JOIN chapters" in compiled_sql
     assert "paragraph_id NOT IN" in compiled_sql
     assert re.search(r"paragraph_id >= :paragraph_id_\d+", compiled_sql) is not None
     assert re.search(r"paragraph_id <= :paragraph_id_\d+", compiled_sql) is not None
+    assert re.search(r"chapters.sequence < :sequence_\d+", compiled_sql) is not None
+    assert re.search(r"chapters.sequence > :sequence_\d+", compiled_sql) is not None
+    assert 7 in compiled_params.values()
+    assert 9 in compiled_params.values()
 
 
 def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() -> None:

@@ -205,6 +205,35 @@ async def test_read_returns_target_with_context_paragraphs(db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_forwards_chapter_sequence_bounds_to_keyword_and_semantic_searches() -> None:
+    """2026-08-30 用于验证章节序号前后边界同时下推关键词与语义检索"""
+    session = MagicMock()
+    embedding_client = AsyncMock()
+    embedding_client.get_embedding.return_value = [0.1, 0.2]
+    service = TextSearchService(
+        session,
+        run_id="run-1",
+        embedding_client=embedding_client,
+        semantic_enabled=True,
+    )
+    with (
+        patch("src.text_search.service.search_paragraphs_by_keywords", return_value=[]) as keyword_search,
+        patch("src.text_search.service.search_similar_paragraphs", return_value=[]) as semantic_search,
+    ):
+        result = await service.search(
+            "顾霜",
+            before_chapter_sequence=7,
+            after_chapter_sequence=9,
+        )
+
+    assert result == []
+    assert keyword_search.call_args.kwargs["before_chapter_sequence"] == 7
+    assert semantic_search.call_args.kwargs["before_chapter_sequence"] == 7
+    assert keyword_search.call_args.kwargs["after_chapter_sequence"] == 9
+    assert semantic_search.call_args.kwargs["after_chapter_sequence"] == 9
+
+
+@pytest.mark.asyncio
 async def test_search_with_missing_paragraph_meta_skips_candidate(db_session) -> None:
     """2026-08-14 二期段落化：候选段落元数据（章节/chunk）查不到时跳过该候选"""
     session = MagicMock()
