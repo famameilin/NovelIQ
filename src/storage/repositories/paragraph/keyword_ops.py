@@ -40,6 +40,8 @@ def search_paragraphs_by_keywords(
     exclude_paragraph_ids: Sequence[int] | None = None,
     min_paragraph_id: int | None = None,
     max_paragraph_id: int | None = None,
+    before_chapter_sequence: int | None = None,
+    after_chapter_sequence: int | None = None,
 ) -> list[KeywordMatchRow]:
     """
     2026-08-14 二期段落化：直接扫 paragraphs 事实源（不再扫 chunks + Python 重切段），
@@ -66,6 +68,10 @@ def search_paragraphs_by_keywords(
             Paragraph.global_start_char,
             Paragraph.global_end_char,
         )
+        .join(
+            Chapter,
+            (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
+        )
         .where(
             Paragraph.run_id == run_id,
             or_(*match_expressions),
@@ -78,6 +84,10 @@ def search_paragraphs_by_keywords(
         stmt = stmt.where(Paragraph.paragraph_id >= min_paragraph_id)
     if max_paragraph_id is not None:
         stmt = stmt.where(Paragraph.paragraph_id <= max_paragraph_id)
+    if before_chapter_sequence is not None:
+        stmt = stmt.where(Chapter.sequence < before_chapter_sequence)
+    if after_chapter_sequence is not None:
+        stmt = stmt.where(Chapter.sequence > after_chapter_sequence)
 
     results: list[KeywordMatchRow] = []
     for row in session.execute(stmt).all():

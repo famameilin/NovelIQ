@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.local.embedding import EmbeddingClient
-from src.storage.models import Paragraph
+from src.storage.models import Chapter, Paragraph
 from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
 
 _WHOLE_QUERY_MAX_CHARS = 20
@@ -94,6 +94,8 @@ class TextSearchService:
         *,
         min_paragraph_id: int | None = None,
         max_paragraph_id: int | None = None,
+        before_chapter_sequence: int | None = None,
+        after_chapter_sequence: int | None = None,
         limit: int = 50,
     ) -> list[TextSearchCandidate]:
         """2026-08-14 用于合并关键词与 pgvector 分数并按段落返回候选
@@ -111,6 +113,8 @@ class TextSearchService:
             top_k=max(limit * 2, 10),
             min_paragraph_id=min_paragraph_id,
             max_paragraph_id=max_paragraph_id,
+            before_chapter_sequence=before_chapter_sequence,
+            after_chapter_sequence=after_chapter_sequence,
         )
         merged: dict[int, _MergedCandidate] = {}
         for keyword_row in keyword_rows:
@@ -136,6 +140,8 @@ class TextSearchService:
                 similarity_threshold=0.0,
                 min_paragraph_id=min_paragraph_id,
                 max_paragraph_id=max_paragraph_id,
+                before_chapter_sequence=before_chapter_sequence,
+                after_chapter_sequence=after_chapter_sequence,
             )
             for semantic_row in semantic_rows:
                 candidate = merged.setdefault(
@@ -156,18 +162,28 @@ class TextSearchService:
                     candidate["semantic_score"] = semantic_score
                     candidate["excerpt"] = semantic_row.paragraph_text
 
-        chapter_and_chunk_by_paragraph = {
+        metadata_statement = (
+            select(Paragraph.paragraph_id, Paragraph.chapter_id)
+            .join(
+                Chapter,
+                (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
+            )
+            .where(
+                Paragraph.run_id == self._run_id,
+                Paragraph.paragraph_id.in_(list(merged)),
+            )
+        )
+        if before_chapter_sequence is not None:
+            metadata_statement = metadata_statement.where(Chapter.sequence < before_chapter_sequence)
+        if after_chapter_sequence is not None:
+            metadata_statement = metadata_statement.where(Chapter.sequence > after_chapter_sequence)
+        chapter_by_paragraph = {
             int(row.paragraph_id): int(row.chapter_id)
-            for row in self._session.execute(
-                select(Paragraph.paragraph_id, Paragraph.chapter_id).where(
-                    Paragraph.run_id == self._run_id,
-                    Paragraph.paragraph_id.in_(list(merged)),
-                )
-            ).all()
+            for row in self._session.execute(metadata_statement).all()
         }
         candidates: list[TextSearchCandidate] = []
         for paragraph_id, payload in merged.items():
-            meta = chapter_and_chunk_by_paragraph.get(paragraph_id)
+            meta = chapter_by_paragraph.get(paragraph_id)
             if meta is None:
                 continue
             candidates.append(
