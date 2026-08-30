@@ -68,4 +68,28 @@ describe("ProgressDetail", () => {
     // 2026-08-13 P2：paragraph_embedding 子阶段应展示中文标签而非原始英文串
     expect(screen.getByText("段落向量")).toBeInTheDocument();
   });
+
+  it("应展示 linguistic 阶段（6 阶段）与中文标签", () => {
+    useStreamStore.getState().updateProgress({
+      action: "progress",
+      stage: "linguistic",
+      sub_stage: "",
+      chapter_id: 0,
+      current: 1,
+      total: 1,
+      percent: 78,
+      sub_percent: 0,
+      content: "",
+      message: "语言结构分析进行中",
+    });
+
+    render(<ProgressDetail />);
+
+    // ProgressBar 显示中文标签而非原始英文串
+    expect(screen.getAllByText("语言结构分析").length).toBeGreaterThan(0);
+    // 6 个阶段全部渲染，linguistic 为当前阶段
+    expect(screen.getByTestId("stage-item-linguistic")).toHaveAttribute("data-status", "current");
+    expect(screen.getByTestId("stage-item-annotate")).toHaveAttribute("data-status", "completed");
+    expect(screen.getByTestId("stage-item-aggregate")).toHaveAttribute("data-status", "pending");
+  });
 });
