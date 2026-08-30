@@ -207,7 +207,7 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
             "license_name": None,
             "training_document_count": 2,
             "training_token_count": 10,
-            "artifact_key": "models/word2vec/t.model",
+            "artifact_key": f"models/word2vec/{run_id}/word2vec.model",
             "artifact_scope": "run_owned",
         },
     )
@@ -255,7 +255,7 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
             "license_name": None,
             "training_document_count": 2,
             "training_token_count": 10,
-            "artifact_key": "models/word2vec/t.model",
+            "artifact_key": f"models/word2vec/{run_id}/word2vec.model",
             "artifact_scope": "run_owned",
         },
     )
