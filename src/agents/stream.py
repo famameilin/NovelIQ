@@ -12,12 +12,14 @@ Agent 层只需持有 AgentStream 即可获得完整过程可见性。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from langchain_core.messages import AIMessage, ToolCall, UsageMetadata
 
@@ -91,6 +93,106 @@ class ModelCallTiming:
     reasoning_ms: int | None = None
     model_ms: int | None = None
     timing_notes: tuple[str, ...] = ()
+
+
+def _safe_base_url(value: Any) -> str | None:
+    """2026-08-30 用于清除模型地址中可能出现的认证信息后再写入审计"""
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(str(value))
+    except ValueError:
+        return "invalid-url"
+    if not parsed.scheme or not parsed.netloc:
+        return "invalid-url"
+    return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", ""))
+
+
+def _sanitize_audit_value(value: Any) -> Any:
+    """2026-08-30 用于递归移除工具合同中可能出现的认证字段后再计算指纹"""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _sanitize_audit_value(item)
+            for key, item in value.items()
+            if not _is_sensitive_audit_key(str(key))
+        }
+    if isinstance(value, list | tuple):
+        return [_sanitize_audit_value(item) for item in value]
+    return value
+
+
+def _is_sensitive_audit_key(key: str) -> bool:
+    """2026-08-30 用于识别下划线连字符前缀等变体的认证字段名称"""
+    normalized = "".join(character for character in key.lower() if character.isalnum())
+    return any(
+        marker in normalized
+        for marker in ("apikey", "authorization", "accesstoken", "clientsecret", "password", "secret", "token")
+    )
+
+
+def _safe_tool_contract(tools: Any) -> tuple[list[str], str]:
+    """2026-08-30 用于生成脱敏的绑定工具合同摘要和稳定指纹"""
+    if not isinstance(tools, list):
+        return [], hashlib.sha256(b"[]").hexdigest()
+    normalized: list[Any] = []
+    names: list[str] = []
+    for tool in tools:
+        if isinstance(tool, Mapping):
+            function = tool.get("function")
+            name = function.get("name") if isinstance(function, Mapping) else tool.get("name")
+            if name:
+                names.append(str(name))
+            normalized.append(_sanitize_audit_value(tool))
+            continue
+        name = getattr(tool, "name", None)
+        if name:
+            names.append(str(name))
+        args_schema = getattr(tool, "args_schema", None)
+        model_json_schema = getattr(args_schema, "model_json_schema", None)
+        schema = model_json_schema() if callable(model_json_schema) else None
+        normalized.append(_sanitize_audit_value({"name": str(name or "unknown"), "parameters": schema}))
+    canonical = json.dumps(normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
+    return sorted(set(names)), hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _provider_request_metadata(model: Any, *, transport: str, attempt: int) -> dict[str, Any]:
+    """2026-08-30 用于生成不含密钥的物理 Provider 请求参数与配置指纹"""
+    bound_model = getattr(model, "bound", model)
+    model_kwargs = getattr(bound_model, "model_kwargs", None) or {}
+    extra_body = model_kwargs.get("extra_body") if isinstance(model_kwargs, Mapping) else None
+    if not isinstance(extra_body, Mapping):
+        extra_body = getattr(bound_model, "extra_body", None) or {}
+    binding_kwargs = getattr(model, "kwargs", None) or {}
+    tools = binding_kwargs.get("tools") if isinstance(binding_kwargs, Mapping) else None
+    tool_names, tool_contract_fingerprint = _safe_tool_contract(tools)
+    thinking = bool(extra_body.get("think")) if isinstance(extra_body, Mapping) else False
+    parameters: dict[str, Any] = {
+        "model": str(
+            getattr(bound_model, "model_name", None) or getattr(bound_model, "model", "") or "unknown"
+        ),
+        "base_url": _safe_base_url(
+            getattr(bound_model, "base_url", None) or getattr(bound_model, "openai_api_base", None)
+        ),
+        "temperature": getattr(bound_model, "temperature", None),
+        "top_p": getattr(bound_model, "top_p", None),
+        "timeout_s": getattr(bound_model, "request_timeout", None) or getattr(bound_model, "timeout", None),
+        "streaming": bool(getattr(bound_model, "streaming", transport == "stream")),
+        "extra_body": {"think": thinking},
+        "tool_names": tool_names,
+        "tool_contract_fingerprint": tool_contract_fingerprint,
+    }
+    canonical = json.dumps(parameters, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
+    return {
+        "request_index": attempt,
+        "attempt": attempt,
+        "transport": transport,
+        "parameters": parameters,
+        "config_fingerprint": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "timing_contract": {
+            "ttft_ms": "本物理请求从发送到首个 reasoning正文或工具 payload 的毫秒数",
+            "model_ms": "本物理请求从发送到流结束或错误的墙钟毫秒数",
+        },
+    }
 
 
 class AgentStream:
@@ -467,6 +569,8 @@ async def run_model_call(
     stream: AgentStream | None,
     *,
     on_turn_complete: Callable[[AIMessage, ModelCallTiming], None] | None = None,
+    on_turn_started: Callable[[dict[str, Any], int], None] | None = None,
+    on_turn_failed: Callable[[str, ModelCallTiming, AIMessage | None], None] | None = None,
     total_attempts: int | None = None,
 ) -> AIMessage:
     """
@@ -480,21 +584,22 @@ async def run_model_call(
     total_attempts=1 时关闭重试；缺省对齐 settings.models.annotation.total_attempts
     （默认 3 次，即最多重试 2 次）；
     重试期间推送 thinking 事件，并跳过与上次已推送内容重叠的前缀，避免重复输出；
-    已失败尝试的用量（如有）与最终用量合并记账，避免重试丢弃已消耗的 token。
+    已失败尝试的用量与最终用量分别交给物理请求审计记账，避免跨请求混合。
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
     非流式路径同样遵守 total_attempts 重试语义，但只对网络/限流等瞬态错误
     （_is_transient_model_error）重发请求，其余错误直接失败。
     2026-08-22 把"响应不含任何工具调用"视同调用未正常结束（涵盖网关思考阶段
     静默截断产生的空回复），与瞬态错误共用 total_attempts 预算退避重发；
     耗尽后上抛 RuntimeError。回合审计回调先于该判定执行，截断回合仍留痕。
-    on_turn_complete 在模型流结束后回调（消息 + 逐项计时），供审计落库。
+    on_turn_started/on_turn_complete/on_turn_failed 以每次物理 Provider 请求为粒度回调，
+    供审计把成功、断流、空工具回复分别落库，绝不合并跨请求的计时或 token。
     """
     from src.config import settings
 
-    started_ns = perf_counter_ns()
     total_attempts = total_attempts if total_attempts is not None else settings.models.annotation.total_attempts
     if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
         retries_remaining = max(0, total_attempts - 1)
+        attempt = 0
         if stream is not None:
             hint = (
                 "模型不支持流式输出，等待完整回复..."
@@ -503,12 +608,21 @@ async def run_model_call(
             )
             await stream.thinking(hint)
         while True:
+            attempt += 1
+            started_ns = perf_counter_ns()
+            if on_turn_started is not None:
+                on_turn_started(_provider_request_metadata(model, transport="non_stream", attempt=attempt), started_ns)
             try:
                 response = await model.ainvoke(messages)
-            except StreamEmitError:
-                # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
-                raise
             except Exception as exc:
+                timing = ModelCallTiming(
+                    model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
+                    timing_notes=("provider_call_failed",),
+                )
+                if on_turn_failed is not None:
+                    on_turn_failed(str(exc), timing, None)
+                if isinstance(exc, StreamEmitError):
+                    raise
                 # 2026-08-13 P2-6 非流式路径只对网络/限流瞬态错误重试，
                 # 参数/鉴权等确定性错误重试无意义
                 if retries_remaining <= 0 or not _is_transient_model_error(exc):
@@ -528,16 +642,15 @@ async def run_model_call(
                 model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
                 timing_notes=("provider_non_streaming",),
             )
-            if stream is not None:
-                await emit_completed_model_call(stream, response)
-            if on_turn_complete is not None:
-                on_turn_complete(response, timing)
             # 2026-08-22 调用未正常结束（响应不含工具调用）视同调用层故障：
             # 与瞬态错误共用 total_attempts 预算退避重发，耗尽后上抛
             if not _is_call_complete(response):
+                error = "模型调用未正常结束：响应未包含任何工具调用"
+                if on_turn_failed is not None:
+                    on_turn_failed(error, timing, response)
                 if retries_remaining <= 0:
                     logger.warning("模型调用未正常结束且重试已耗尽")
-                    raise RuntimeError("模型调用未正常结束：响应未包含任何工具调用，重发后仍未恢复")
+                    raise RuntimeError(f"{error}，重发后仍未恢复")
                 failed_attempt = total_attempts - retries_remaining
                 retries_remaining -= 1
                 logger.warning(
@@ -548,13 +661,26 @@ async def run_model_call(
                     await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
                 await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
                 continue
+            try:
+                if stream is not None:
+                    await emit_completed_model_call(stream, response)
+            except Exception as exc:
+                if on_turn_failed is not None:
+                    on_turn_failed(str(exc), timing, response)
+                raise
+            if on_turn_complete is not None:
+                on_turn_complete(response, timing)
             return response
 
     retries_remaining = max(0, total_attempts - 1)
     skip_output_prefix = ""
     announced_tools: set[str] = set()
-    retried_usage: dict[str, Any] = {}
+    attempt = 0
     while True:
+        attempt += 1
+        started_ns = perf_counter_ns()
+        if on_turn_started is not None:
+            on_turn_started(_provider_request_metadata(model, transport="stream", attempt=attempt), started_ns)
         aggregator = StreamChunkAggregator(
             stream,
             started_ns=started_ns,
@@ -564,10 +690,14 @@ async def run_model_call(
         try:
             async for chunk in model.astream(messages):
                 await aggregator.add_chunk(chunk)
-        except StreamEmitError:
+        except StreamEmitError as exc:
             # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
+            if on_turn_failed is not None:
+                on_turn_failed(str(exc), aggregator.timing(), aggregator.finish())
             raise
         except Exception as exc:
+            if on_turn_failed is not None:
+                on_turn_failed(str(exc), aggregator.timing(), aggregator.finish())
             if retries_remaining <= 0:
                 logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
                 raise
@@ -580,8 +710,6 @@ async def run_model_call(
             )
             if stream is not None:
                 await stream.thinking(f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）")
-            if aggregator._usage_metadata:
-                _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
             skip_output_prefix = "".join(aggregator._content_parts)
             announced_tools = set(aggregator._announced_tools)
             # 2026-08-13 P2-12 仅 429/连接类瞬态错误在重试前退避，避免压垮网关
@@ -589,32 +717,30 @@ async def run_model_call(
                 await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
             continue
         response = aggregator.finish()
-        if retried_usage:
-            # 已失败尝试的用量与最终成功尝试的用量合并，避免断流重试丢弃已消耗 token
-            _accumulate_usage_metadata(retried_usage, dict(response.usage_metadata or {}))
-            response.usage_metadata = cast(UsageMetadata, retried_usage)
-        if on_turn_complete is not None:
-            on_turn_complete(response, aggregator.timing())
+        timing = aggregator.timing()
         # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）
         # 视同调用层故障：退避重发同一请求，耗尽后上抛交由上层失败审计收口
         if not _is_call_complete(response):
+            error = "模型调用未正常结束：响应未包含任何工具调用"
+            if on_turn_failed is not None:
+                on_turn_failed(error, timing, response)
             if retries_remaining <= 0:
                 logger.warning("模型调用未正常结束且重试已耗尽")
-                raise RuntimeError("模型调用未正常结束：响应未包含任何工具调用，重发后仍未恢复")
+                raise RuntimeError(f"{error}，重发后仍未恢复")
             failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
             logger.warning(
                 "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
                 retries_remaining,
             )
-            if aggregator._usage_metadata:
-                _accumulate_usage_metadata(retried_usage, aggregator._usage_metadata)
             skip_output_prefix = "".join(aggregator._content_parts)
             announced_tools = set(aggregator._announced_tools)
             if stream is not None:
                 await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
             await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
             continue
+        if on_turn_complete is not None:
+            on_turn_complete(response, timing)
         return response
 
 

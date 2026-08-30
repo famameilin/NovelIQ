@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -11,6 +12,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from src.agents.stream import (
     AgentStream,
     StreamChunkAggregator,
+    _provider_request_metadata,
     emit_tool_results,
     run_model_call,
 )
@@ -32,6 +34,84 @@ def _tool_call_message(content: str = "完整回复") -> AIMessage:
         content=content,
         tool_calls=[{"name": "finish", "args": {}, "id": "call-1", "type": "tool_call"}],
     )
+
+
+def test_provider_request_metadata_keeps_thinking_and_excludes_credentials() -> None:
+    """2026-08-30 用于验证请求审计快照保留 think 开关且不含 URL 凭据或查询密钥"""
+    chat_model = SimpleNamespace(
+        model_name="glm-test",
+        base_url="https://user:secret@provider.example/v1?api_key=hidden",
+        temperature=0.7,
+        top_p=0.95,
+        request_timeout=180,
+        streaming=True,
+        model_kwargs={"extra_body": {"think": True}},
+    )
+    bound_model = SimpleNamespace(bound=chat_model, kwargs={"tools": [{"name": "write_metrics"}]})
+
+    metadata = _provider_request_metadata(bound_model, transport="stream", attempt=1)
+
+    assert metadata["parameters"]["extra_body"] == {"think": True}
+    assert metadata["parameters"]["base_url"] == "https://provider.example/v1"
+    assert metadata["parameters"]["tool_names"] == ["write_metrics"]
+    assert len(metadata["parameters"]["tool_contract_fingerprint"]) == 64
+    assert "secret" not in str(metadata)
+    assert "api_key" not in str(metadata)
+    assert len(metadata["config_fingerprint"]) == 64
+
+
+def test_provider_request_metadata_rejects_unparseable_url() -> None:
+    """2026-08-30 用于验证无协议地址不会原样进入审计快照泄露查询认证信息"""
+    chat_model = SimpleNamespace(
+        model_name="glm-test",
+        base_url="provider.example/v1?api_key=hidden",
+        streaming=True,
+        model_kwargs={"extra_body": {"think": True}},
+    )
+
+    metadata = _provider_request_metadata(SimpleNamespace(bound=chat_model, kwargs={}), transport="stream", attempt=1)
+
+    assert metadata["parameters"]["base_url"] == "invalid-url"
+    assert "hidden" not in str(metadata)
+
+
+def test_provider_request_metadata_redacts_sensitive_tool_key_variants() -> None:
+    """2026-08-30 用于验证工具合同指纹忽略常见认证字段名变体"""
+    chat_model = SimpleNamespace(model_name="glm-test", streaming=True, model_kwargs={})
+    clean_tools = [
+        {
+            "type": "function",
+            "function": {"name": "write_metrics", "parameters": {"type": "object", "properties": {}}},
+        }
+    ]
+    sensitive_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "write_metrics",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "x-api-key": "hidden-a",
+                    "api-key": "hidden-b",
+                    "access_token": "hidden-c",
+                    "client_secret": "hidden-d",
+                    "authorization": "hidden-e",
+                    "password": "hidden-f",
+                },
+            },
+        }
+    ]
+
+    clean = _provider_request_metadata(
+        SimpleNamespace(bound=chat_model, kwargs={"tools": clean_tools}), transport="stream", attempt=1
+    )
+    sensitive = _provider_request_metadata(
+        SimpleNamespace(bound=chat_model, kwargs={"tools": sensitive_tools}), transport="stream", attempt=1
+    )
+
+    assert sensitive["parameters"]["tool_contract_fingerprint"] == clean["parameters"]["tool_contract_fingerprint"]
+    assert "hidden-" not in str(sensitive)
 
 
 def _tool_call_chunk() -> AIMessageChunk:
@@ -321,8 +401,7 @@ async def test_run_model_call_total_attempts_one_disables_retries() -> None:
 @pytest.mark.asyncio
 async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
     """
-    2026-08-12 用于验证断流重试时已失败尝试的 token 用量与最终用量合并记账，
-    避免重试丢弃已消耗的 token。
+    2026-08-30 用于验证断流重试不再把失败物理请求的 token 合并到成功请求。
     """
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
@@ -348,10 +427,49 @@ async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
     assert response.content == "你好世界"
     assert len(model.captured_messages) == 2
     assert response.usage_metadata == {
-        "input_tokens": 22,
-        "output_tokens": 10,
-        "total_tokens": 32,
+        "input_tokens": 12,
+        "output_tokens": 8,
+        "total_tokens": 20,
     }
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_reports_each_physical_stream_request_separately() -> None:
+    """2026-08-30 用于验证断流重试按物理请求分别回调开始失败与成功审计"""
+    model = _RetryWithUsageLLM(
+        failing_chunks=[
+            AIMessageChunk(
+                content="",
+                usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            )
+        ],
+        success_chunks=[
+            AIMessageChunk(
+                content="正文",
+                usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
+            ),
+            _tool_call_chunk(),
+        ],
+    )
+    started: list[dict] = []
+    failed: list[tuple[str, object, object]] = []
+    completed: list[object] = []
+
+    await run_model_call(
+        model,
+        [AIMessage(content="问")],
+        None,
+        total_attempts=2,
+        on_turn_started=lambda request, _started_ns: started.append(request),
+        on_turn_failed=lambda error, timing, response: failed.append((error, timing, response)),
+        on_turn_complete=lambda response, _timing: completed.append(response),
+    )
+
+    assert [request["attempt"] for request in started] == [1, 2]
+    assert len(failed) == 1
+    assert failed[0][2].usage_metadata == {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
+    assert len(completed) == 1
+    assert completed[0].usage_metadata == {"input_tokens": 12, "output_tokens": 8, "total_tokens": 20}
 
 
 @pytest.mark.asyncio
