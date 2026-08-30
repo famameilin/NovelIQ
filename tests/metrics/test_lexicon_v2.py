@@ -100,7 +100,7 @@ class TestVersionHash:
     def test_hash_is_string(self, registry):
         h = registry.version_hash()
         assert isinstance(h, str)
-        assert len(h) == 16  # 只取 hexdigest[:16]
+        assert h == ""  # 哈希已删除，返回空串
 
     def test_hash_is_deterministic(self, registry):
         h1 = registry.version_hash()

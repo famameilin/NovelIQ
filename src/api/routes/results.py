@@ -713,7 +713,6 @@ async def get_event_forest(
                 anchor_paragraph_ids=node.anchor_paragraph_ids,
                 char_start=node.char_start,
                 char_end=node.char_end,
-                text_hash=node.text_hash,
                 evidence=node.evidence,
                 causal_event_refs=node.causal_event_refs,
                 tree_id=node.tree_id,

@@ -29,7 +29,7 @@ def test_paragraph_embedding_model_has_paragraph_identity_columns() -> None:
     """
     columns = set(ParagraphEmbedding.__table__.c.keys())
     assert {"run_id", "paragraph_id", "embedding_vector"} <= columns
-    assert {"embedding_model_key", "embedding_dimension", "source_content_hash"} <= columns
+    assert {"embedding_model_key", "embedding_dimension"} <= columns
     for legacy_column in (
         "chunk_id",
         "paragraph_index",
@@ -45,13 +45,11 @@ def test_paragraph_embedding_model_has_paragraph_identity_columns() -> None:
 def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
     """
     2026-08-14 二期段落化：写入行携带 paragraph_id 与向量，embedding_model_key/
-    embedding_dimension 从 settings 取，source_content_hash 对照 paragraphs 表查询。
+    embedding_dimension 从 settings 取。
     """
     session = MagicMock()
-    hash_rows = [SimpleNamespace(paragraph_id=7, content_hash="hash-7")]
     session.execute.side_effect = [
         MagicMock(),  # delete 同 run 旧行
-        MagicMock(all=MagicMock(return_value=hash_rows)),  # 查 paragraphs content_hash
         MagicMock(),  # insert
     ]
 
@@ -70,32 +68,11 @@ def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
     # 先删后插：第一条 execute 是 delete 同 run 行
     delete_statement = session.execute.call_args_list[0].args[0]
     assert "DELETE FROM paragraph_embeddings" in str(delete_statement.compile())
-    _, rows = session.execute.call_args_list[2].args
+    _, rows = session.execute.call_args_list[1].args
     assert rows[0]["paragraph_id"] == 7
     assert rows[0]["embedding_vector"] == [0.3, 0.4]
-    assert rows[0]["source_content_hash"] == "hash-7"
     assert rows[0]["embedding_dimension"] is not None
     assert rows[0]["created_at"]
-
-
-def test_insert_paragraph_embeddings_missing_paragraph_hash_is_none() -> None:
-    """2026-08-14 用于验证 paragraphs 表缺行时 source_content_hash 不伪造（None）"""
-    session = MagicMock()
-    session.execute.side_effect = [
-        MagicMock(),
-        MagicMock(all=MagicMock(return_value=[])),
-        MagicMock(),
-    ]
-
-    inserted = insert_paragraph_embeddings(
-        session,
-        run_id="run-1",
-        rows=[ParagraphEmbeddingRow(paragraph_id=99, embedding_vector=[0.1])],
-    )
-
-    assert inserted == 1
-    _, rows = session.execute.call_args_list[2].args
-    assert rows[0]["source_content_hash"] is None
 
 
 def test_insert_paragraph_embeddings_empty_rows_returns_zero() -> None:

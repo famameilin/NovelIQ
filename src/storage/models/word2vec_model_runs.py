@@ -35,11 +35,9 @@ class Word2VecModelRun(Base):
     parameters: Mapped[dict] = mapped_column(JSONB, nullable=False)
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     license_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    training_corpus_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     training_document_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     training_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     artifact_key: Mapped[str] = mapped_column(Text, nullable=False)
-    artifact_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     artifact_scope: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 

@@ -289,7 +289,6 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
     assert len(accepted_rows) == 7
     write_rows = [row for row in accepted_rows if row.tool_name.startswith("write_")]
     assert all(row.receipt["accepted"] is True for row in write_rows)
-    assert all(row.receipt["state_digest"].startswith("sha256:") for row in write_rows)
 
     token_rows = list(db_session.execute(select(TokenUsage).where(TokenUsage.run_id == run_id)).scalars())
     assert len(token_rows) == 2

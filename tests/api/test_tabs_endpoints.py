@@ -40,16 +40,14 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
         num_topics=2,
         parameters={"num_topics": 2},
         dictionary_size=20,
-        training_corpus_hash="a" * 64,
         training_document_count=6,
         inference_paragraph_count=6,
         artifact_key=f"models/topic/{run_id}",
-        artifact_sha256="b" * 64,
     )
     repo.insert_paragraph_topic_inferences(
         run_id,
         [
-            (paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0, "c" * 64)
+            (paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0)
             for paragraph_id in range(6)
         ],
     )
@@ -208,7 +206,6 @@ def _make_feature_row(paragraph_id: int, *, tokens_count: int) -> dict:
     return {
         "run_id": None,
         "paragraph_id": paragraph_id,
-        "source_content_hash": "f" * 64,
         "ltp_token_count": tokens_count,
         "tokens": tokens,
         "word_length_counts": {"1": tokens_count},
@@ -253,15 +250,10 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
     )
     if seed:
         repo = LinguisticRepository(db_session)
-        paragraph_hashes = {
-            int(row.paragraph_id): row.content_hash
-            for row in ParagraphRepository(db_session).fetch_paragraph_rows(run_id)
-        }
         feature_rows = []
         for paragraph_id in (0, 1):
             feature_row = _make_feature_row(paragraph_id, tokens_count=4)
             feature_row["run_id"] = run_id
-            feature_row["source_content_hash"] = paragraph_hashes[paragraph_id]
             feature_rows.append(feature_row)
         repo.insert_linguistic_features(run_id, feature_rows)
         repo.insert_entities(
@@ -277,7 +269,6 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                     "local_end_char": 4,
                     "confidence": None,
                     "source_kind": "ltp",
-                    "source_content_hash": paragraph_hashes[0],
                 }
             ],
         )
@@ -293,9 +284,7 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                     "local_end_char": 4,
                     "match_kind": "lexicon",
                     "lexicon_key": "fixed_phrases.txt",
-                    "lexicon_version_hash": "h" * 64,
                     "is_metric_hit": False,
-                    "source_content_hash": "f" * 64,
                 },
                 {
                     "run_id": run_id,
@@ -306,9 +295,7 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                     "local_end_char": 4,
                     "match_kind": "four_char_candidate",
                     "lexicon_key": None,
-                    "lexicon_version_hash": None,
                     "is_metric_hit": False,
-                    "source_content_hash": "f" * 64,
                 },
             ],
         )

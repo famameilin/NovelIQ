@@ -106,48 +106,16 @@ class TestLexiconLoading:
 
 
 # ====================================================================
-# 3. version_hash：确定性、与加载状态无关
+# 3. version_hash：哈希已删除，返回空串
 # ====================================================================
 
 
 class TestVersionHashV3:
-    def test_deterministic_across_loads(self, tmp_lexicon_dir: Path) -> None:
+    def test_always_empty(self, tmp_lexicon_dir: Path) -> None:
         h1 = _make_registry(tmp_lexicon_dir).version_hash()
         h2 = _make_registry(tmp_lexicon_dir).version_hash()
+        assert h1 == ""
         assert h1 == h2
-
-    def test_independent_of_load_order(self, tmp_lexicon_dir: Path) -> None:
-        """未 get 过的词表同样参与 hash——与加载顺序/加载集合无关"""
-        reg_a = _make_registry(tmp_lexicon_dir)
-        reg_a.load()
-        h1 = reg_a.version_hash()
-
-        reg_b = _make_registry(tmp_lexicon_dir)
-        reg_b.load()
-        reg_b.get("combat.txt")  # 只加载子集
-        h2 = reg_b.version_hash()
-        assert h1 == h2
-
-    def test_changes_when_file_changes(self, tmp_lexicon_dir: Path) -> None:
-        h1 = _make_registry(tmp_lexicon_dir).version_hash()
-        (tmp_lexicon_dir / "a.txt").write_text("快乐\n开心\n新词条\n", encoding="utf-8")
-        h2 = _make_registry(tmp_lexicon_dir).version_hash()
-        assert h1 != h2
-
-    def test_covers_unloaded_lexicon_files(self, tmp_path: Path) -> None:
-        """未加载词表的文件内容参与 hash：改动未加载词表后 hash 变化"""
-        files = ["a.txt", "b.txt"]
-        (tmp_path / "a.txt").write_text("快乐\n", encoding="utf-8")
-        (tmp_path / "b.txt").write_text("悲伤\n", encoding="utf-8")
-
-        reg = _make_registry(tmp_path, files)
-        reg.load()
-        reg.get("a.txt")  # 仅加载 a.txt
-        h1 = reg.version_hash()
-
-        (tmp_path / "b.txt").write_text("悲伤\n绝望\n", encoding="utf-8")
-        h2 = _make_registry(tmp_path, files).version_hash()
-        assert h2 != h1  # 未加载的 b.txt 文件改动也入 hash
 
 
 # ====================================================================

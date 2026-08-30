@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.storage.repositories import ParagraphRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
 from tests.support.paragraph_fixtures import create_completed_run, create_run_with_status, insert_spans, make_span
 
@@ -30,7 +29,6 @@ def _make_feature_row(
     return {
         "run_id": None,
         "paragraph_id": paragraph_id,
-        "source_content_hash": "f" * 64,
         "ltp_token_count": tokens_count,
         "tokens": tokens,
         "word_length_counts": {"1": tokens_count},
@@ -48,17 +46,12 @@ def _make_feature_row(
 
 def _seed_linguistic(db_session, run_id: str) -> None:
     repo = LinguisticRepository(db_session)
-    paragraph_hashes = {
-        int(row.paragraph_id): row.content_hash
-        for row in ParagraphRepository(db_session).fetch_paragraph_rows(run_id)
-    }
     rows = [
         _make_feature_row(0, tokens_count=4, pos_counts={"noun": 2, "verb": 2}),
         _make_feature_row(1, tokens_count=6, pos_counts={"noun": 3, "verb": 3}),
     ]
     for row in rows:
         row["run_id"] = run_id
-        row["source_content_hash"] = paragraph_hashes[row["paragraph_id"]]
     repo.insert_linguistic_features(run_id, rows)
     repo.insert_entities(
         run_id,
@@ -73,7 +66,6 @@ def _seed_linguistic(db_session, run_id: str) -> None:
                 "local_end_char": 4,
                 "confidence": None,
                 "source_kind": "ltp",
-                "source_content_hash": paragraph_hashes[0],
             }
         ],
     )
@@ -89,9 +81,7 @@ def _seed_linguistic(db_session, run_id: str) -> None:
                 "local_end_char": 4,
                 "match_kind": "lexicon",
                 "lexicon_key": "fixed_phrases.txt",
-                "lexicon_version_hash": "h" * 64,
                 "is_metric_hit": False,
-                "source_content_hash": "f" * 64,
             },
             {
                 "run_id": run_id,
@@ -102,9 +92,7 @@ def _seed_linguistic(db_session, run_id: str) -> None:
                 "local_end_char": 4,
                 "match_kind": "four_char_candidate",
                 "lexicon_key": None,
-                "lexicon_version_hash": None,
                 "is_metric_hit": False,
-                "source_content_hash": "f" * 64,
             },
         ],
     )
@@ -217,11 +205,9 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
             "parameters": {"vector_size": 128},
             "source_uri": None,
             "license_name": None,
-            "training_corpus_hash": "0" * 64,
             "training_document_count": 2,
             "training_token_count": 10,
             "artifact_key": "models/word2vec/t.model",
-            "artifact_sha256": "1" * 64,
             "artifact_scope": "run_owned",
         },
     )
@@ -239,7 +225,6 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
                 "embedding_vector": [0.1] * 128,
                 "source_token_count": 2,
                 "in_vocabulary_token_count": 1,
-                "source_content_hash": "f" * 64,
             }
         ],
     )
@@ -268,11 +253,9 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
             "parameters": {"vector_size": 4},
             "source_uri": None,
             "license_name": None,
-            "training_corpus_hash": "0" * 64,
             "training_document_count": 2,
             "training_token_count": 10,
             "artifact_key": "models/word2vec/t.model",
-            "artifact_sha256": "1" * 64,
             "artifact_scope": "run_owned",
         },
     )
@@ -294,7 +277,6 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
                 "embedding_vector": vector,
                 "source_token_count": 2,
                 "in_vocabulary_token_count": 1,
-                "source_content_hash": "f" * 64,
             }
             for paragraph_id, pos_group, vector in [(0, "noun", unit_x), (1, "verb", unit_y)]
         ],

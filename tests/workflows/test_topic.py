@@ -129,15 +129,13 @@ class TestTopicModel:
         assert all(row.source_token_count == token_counts[row.paragraph_id] for row in inference_rows)
         assert all(row.distribution_sum == pytest.approx(1.0, abs=1e-6) for row in inference_rows)
 
-        # §5.8 模型契约单行：参数快照、语料摘要与 artifact 哈希齐备
+        # §5.8 模型契约单行：参数快照与 artifact key 齐备
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
         assert model_run.num_topics == 3
         assert model_run.model_key == "gensim-lda"
         assert model_run.parameters["num_topics"] == 3
         assert model_run.parameters["passes"] == 5
-        assert len(model_run.artifact_sha256) == 64
-        assert len(model_run.training_corpus_hash) == 64
         assert model_run.training_document_count == 10
         assert model_run.inference_paragraph_count == 10
         assert model_run.dictionary_size > 0

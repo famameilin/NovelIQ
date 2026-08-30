@@ -2,13 +2,12 @@
 章节标注语义写入工具与系统运行账本
 
 核心合同: 每个 write_* 调用完成该领域的全部业务校验并写入当前候选，
-返回固定压缩回执 {accepted, tool, domain, item_count, state_digest}。
+返回固定压缩回执 {accepted, tool, domain, item_count}。
 完整参数和完整结果只进入审计库，不回到模型上下文。
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import unicodedata
 from copy import deepcopy
@@ -137,13 +136,6 @@ class AnnotationQueryService(Protocol):
 
     def thread_exists(self, setup_id: str) -> bool:
         """2026-08-11 用于校验 push_case 携带的伏笔线程 id 属于当前 run 活跃线程"""
-
-
-def _content_digest(value: Any) -> str:
-    """2026-08-10 用于生成确定性内容摘要标识"""
-    return hashlib.sha256(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
 
 
 @dataclass(slots=True)
@@ -381,6 +373,9 @@ class AnnotationToolLedger:
                     description=payload.description,
                     confidence="medium",
                     setup_node_id=root_node_id,
+                    setup_kind=payload.setup_kind,
+                    expected_payoff_family=payload.expected_payoff_family,
+                    payoff_likelihood=payload.payoff_likelihood,
                 )
             )
             self.bound_payloads["foreshadowings"] = bound_foreshadowings
@@ -402,7 +397,6 @@ class AnnotationToolLedger:
             "root_node_id": root_node_id,
             "cause_role": "root",
             "cross_chapter": cross_chapter,
-            "state_digest": f"sha256:{_content_digest(bound_root.model_dump(mode='json'))}",
         }
         if foreshadow_receipt_node is not None:
             receipt["foreshadowing_setup_node_id"] = foreshadow_receipt_node
@@ -646,17 +640,11 @@ class AnnotationToolLedger:
             item_count = len(payload.entities)
         else:
             item_count = len(payload)
-        dumped = (
-            payload.model_dump(mode="json")
-            if hasattr(payload, "model_dump")
-            else [item.model_dump(mode="json") for item in payload]
-        )
         receipt: dict[str, Any] = {
             "accepted": True,
             "tool": tool_name,
             "domain": domain,
             "item_count": item_count,
-            "state_digest": f"sha256:{_content_digest(dumped)}",
         }
         if relation_outcomes is not None:
             receipt["relations"] = relation_outcomes
@@ -1189,6 +1177,9 @@ def build_annotation_tools(
         participants: list[dict[str, Any]] | None = None,
         isforeshadowing: bool = False,
         cause_tree_id: str | None = None,
+        setup_kind: str | None = None,
+        expected_payoff_family: str | None = None,
+        payoff_likelihood: PayoffLikelihood | None = None,
     ) -> str:
         """2026-08-22 用于创建新事件树（服务端派发 tree_id，返回后即可 update_event 续写）"""
         payload = CreateEventInput(
@@ -1196,6 +1187,9 @@ def build_annotation_tools(
             participants=[EventParticipantInput(**item) for item in (participants or [])],
             isforeshadowing=isforeshadowing,
             cause_tree_id=cause_tree_id,
+            setup_kind=setup_kind,
+            expected_payoff_family=expected_payoff_family,
+            payoff_likelihood=payoff_likelihood,
         )
         return json.dumps(
             ledger.create_event_tree(payload),
@@ -1252,7 +1246,7 @@ def build_annotation_tools(
                 "tool": "search_graph",
                 "query": list(normalized_entities),
                 "hits": [item["name"] for item in response["matches"]],
-                "digest": f"sha256:{_content_digest(response)}",
+                "digest": "",
             }
         )
         return json.dumps(response, ensure_ascii=False)
@@ -1292,7 +1286,7 @@ def build_annotation_tools(
                 "tool": "search_text",
                 "query": normalized_query,
                 "hits": result_numbers,
-                "digest": f"sha256:{_content_digest(views)}",
+                "digest": "",
             }
         )
         return json.dumps(views, ensure_ascii=False)
@@ -1349,7 +1343,7 @@ def build_annotation_tools(
                 "tool": "search_event",
                 "query": normalized_query,
                 "hits": [item["tree_id"] for item in views],
-                "digest": f"sha256:{_content_digest(views)}",
+                "digest": "",
             }
         )
         return json.dumps({"trees": views}, ensure_ascii=False)
@@ -1395,7 +1389,7 @@ def build_annotation_tools(
                 "tool": "search_pool",
                 "query": normalized_query,
                 "hits": case_numbers,
-                "digest": f"sha256:{_content_digest(views)}",
+                "digest": "",
             }
         )
         return json.dumps({"results": views}, ensure_ascii=False)

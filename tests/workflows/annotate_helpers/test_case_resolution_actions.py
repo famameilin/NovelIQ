@@ -462,6 +462,9 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
         description="顾霜承诺护佑山门",
         confidence="high",
         setup_node_id="evt-setup-1",
+        setup_kind="承诺",
+        expected_payoff_family="守护",
+        payoff_likelihood="high",
     )
     first = complete_annotation_run(
         result=_result(
@@ -478,11 +481,11 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     db_session.rollback()
     thread = db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalar_one()
     assert thread.setup_summary == "顾霜承诺护佑山门"
-    # P3：create_event(isforeshadowing) 仅写 description+confidence，其余枚举不再填哨兵默认值
+    # 伏笔埋设点必填三字段：LLM 埋设时即给出判断，不再以 None 冒充
     assert thread.foreshadowing_type is None
-    assert thread.setup_kind is None
-    assert thread.expected_payoff_family is None
-    assert thread.payoff_likelihood is None
+    assert thread.setup_kind == "承诺"
+    assert thread.expected_payoff_family == "守护"
+    assert thread.payoff_likelihood == "high"
     assert thread.confidence == "high"
     assert thread.status == "open"
     assert thread.active is True
@@ -560,6 +563,9 @@ def test_foreshadowing_same_setup_event_creates_single_thread(db_session) -> Non
         description="顾霜承诺护佑山门",
         confidence="high",
         setup_node_id="evt-setup-1",
+        setup_kind="承诺",
+        expected_payoff_family="守护",
+        payoff_likelihood="high",
     )
     # 章 1 同一伏笔连续两次完成事务（模拟重跑）：setup_event_id 相同 → 只建一条线程
     for _ in range(2):

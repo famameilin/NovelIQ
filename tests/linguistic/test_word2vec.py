@@ -13,7 +13,6 @@ from gensim.models import KeyedVectors
 
 from src.linguistic import (
     build_pos_embeddings,
-    compute_corpus_hash,
     resolve_pretrained_file,
     train_book_model,
 )
@@ -70,7 +69,6 @@ class TestTrainBookModel(unittest.TestCase):
             self.assertEqual(train_result.training_document_count, 5)
             total = sum(len(sentence) for sentence in _SENTENCES)
             self.assertEqual(train_result.training_token_count, total)
-            self.assertEqual(len(train_result.artifact_sha256), 64)
             self.assertTrue((Path(tmp) / "test-run.model").exists())
 
     def test_empty_corpus_raises(self) -> None:
@@ -78,14 +76,6 @@ class TestTrainBookModel(unittest.TestCase):
             pretrained = _write_pretrained_file(Path(tmp))
             with self.assertRaises(ValueError):
                 train_book_model([[], []], "test-run", pretrained_path=pretrained, output_dir=Path(tmp))
-
-
-class TestComputeCorpusHash(unittest.TestCase):
-    def test_deterministic_and_order_sensitive(self) -> None:
-        first = compute_corpus_hash(_SENTENCES)
-        second = compute_corpus_hash(_SENTENCES)
-        self.assertEqual(first, second)
-        self.assertNotEqual(first, compute_corpus_hash(list(reversed(_SENTENCES))))
 
 
 class TestBuildPosEmbeddings(unittest.TestCase):
@@ -112,7 +102,7 @@ class TestBuildPosEmbeddings(unittest.TestCase):
             {"text": "白衣", "pos_group": "noun"},
             {"text": "不存在词", "pos_group": "verb"},
         ]
-        rows = build_pos_embeddings(tokens, self.vectors, paragraph_id=0, source_content_hash="a" * 64)
+        rows = build_pos_embeddings(tokens, self.vectors, paragraph_id=0)
         by_group = {row.pos_group: row for row in rows}
         noun = by_group["noun"]
         self.assertEqual(noun.source_token_count, 3)

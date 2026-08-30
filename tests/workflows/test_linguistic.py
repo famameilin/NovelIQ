@@ -101,9 +101,8 @@ class TestRunLinguistic:
         assert all(not row.is_metric_hit for row in candidate_rows)
 
         rows = self._feature_rows()
-        assert rows[0].source_content_hash.startswith(("d", "e", "f", "9", "a", "b", "c")) or len(
-            rows[0].source_content_hash
-        ) == 64
+        assert len(rows) == 2
+        assert all(row.paragraph_id in (0, 1) for row in rows)
 
     @pytest.mark.asyncio()
     async def test_word2vec_enabled_trains_and_writes_contract(self, monkeypatch, tmp_path) -> None:
@@ -155,6 +154,21 @@ class TestRunLinguistic:
         assert features == 0
         assert self._count("paragraph_linguistic_features") == 0
         assert self._count("paragraph_phrase_hits") == 0
+
+    @pytest.mark.asyncio()
+    async def test_batch_size_one_produces_same_rows_as_full_batch(self) -> None:
+        """分批落库与一次全量落库结果一致（clear_first 只在首批生效，后续批追加）"""
+        await run_linguistic(self.run_id, self.db_session, batch_size=1)
+        batched_features = self._count("paragraph_linguistic_features")
+        batched_entities = self._count("paragraph_entities")
+        batched_phrases = self._count("paragraph_phrase_hits")
+
+        # 清空后按默认大 batch 重跑，验证完全一致
+        await run_linguistic(self.run_id, self.db_session)
+        assert self._count("paragraph_linguistic_features") == batched_features
+        assert self._count("paragraph_entities") == batched_entities
+        assert self._count("paragraph_phrase_hits") == batched_phrases
+        assert batched_features == 2
 
     @pytest.mark.asyncio()
     async def test_empty_run_returns_zero(self) -> None:

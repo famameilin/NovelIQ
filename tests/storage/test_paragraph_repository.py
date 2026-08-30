@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from dataclasses import replace
 
@@ -102,7 +101,6 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.char_count == span.char_count == len(span.text)
         assert row.token_count == span.token_count
         assert row.text == span.text
-        assert row.content_hash == hashlib.sha256(span.text.encode("utf-8")).hexdigest()
 
 
 def test_insert_paragraphs_with_nonzero_chunk_offset(db_session) -> None:
@@ -279,7 +277,6 @@ def test_db_constraint_rejects_invalid_local_order(db_session) -> None:
             char_count=5,
             token_count=1,
             text="abcde",
-            content_hash=hashlib.sha256(b"abcde").hexdigest(),
         )
     )
     with pytest.raises(IntegrityError):

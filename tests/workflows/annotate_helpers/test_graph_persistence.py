@@ -131,6 +131,9 @@ def _full_annotation(
                         description="天衡宗将庇护顾霜",
                         confidence="high",
                         setup_node_id=event_node_id,
+                        setup_kind="承诺",
+                        expected_payoff_family="庇护",
+                        payoff_likelihood="high",
                     )
                 ],
             )

@@ -57,7 +57,6 @@ def test_ensure_paragraph_embeddings_schema_creates_table_in_runtime_schema(db_s
         "embedding_vector",
         "embedding_model_key",
         "embedding_dimension",
-        "source_content_hash",
         "created_at",
     } <= columns
     # 旧列全部移除

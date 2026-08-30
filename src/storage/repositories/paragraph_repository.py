@@ -13,7 +13,6 @@ paragraph_topics 只保存完整 K 维主题权重。
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -86,7 +85,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         先删后插写入 run 的段落行（同 run 不可重跑前序阶段的语义）
 
         插入前校验段落身份、token 计数与坐标不变量，违反时抛 ValueError。
-        content_hash 按 span.text 的 UTF-8 字节 sha256 计算
 
         Returns:
             本次写入的段落行数
@@ -111,7 +109,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 "char_count": span.char_count,
                 "token_count": span.token_count,
                 "text": span.text,
-                "content_hash": hashlib.sha256(span.text.encode("utf-8")).hexdigest(),
             }
             for span in spans
         ]
@@ -209,6 +206,21 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         Returns:
             sqlalchemy.engine.Row 序列，支持字段名访问
         """
+        return self.fetch_paragraph_rows_batch(run_id, limit=None)
+
+    def fetch_paragraph_rows_batch(
+        self,
+        run_id: str,
+        *,
+        after_id: int | None = None,
+        limit: int | None = 128,
+    ) -> Sequence[Row]:
+        """
+        按 paragraph_id keyset 游标分批读取段落行
+
+        after_id 为上一批最后一条 paragraph_id（不含），limit 为每批行数；
+        limit=None 时返回全部行（等价 fetch_paragraph_rows）。
+        """
         statement = (
             select(
                 Paragraph.paragraph_id,
@@ -223,11 +235,14 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 Paragraph.char_count,
                 Paragraph.token_count,
                 Paragraph.text,
-                Paragraph.content_hash,
             )
             .where(Paragraph.run_id == run_id)
             .order_by(Paragraph.paragraph_id)
         )
+        if after_id is not None:
+            statement = statement.where(Paragraph.paragraph_id > after_id)
+        if limit is not None:
+            statement = statement.limit(limit)
         return self.session.execute(statement).all()
 
     def get_incomplete_paragraph_chapter_ids(self, run_id: str) -> list[int]:
@@ -361,11 +376,9 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         num_topics: int,
         parameters: dict[str, Any],
         dictionary_size: int,
-        training_corpus_hash: str,
         training_document_count: int,
         inference_paragraph_count: int,
         artifact_key: str,
-        artifact_sha256: str,
     ) -> None:
         """先清后插写入 run 的主题模型契约（同 run 重跑语义是"重新计算"）"""
         self.session.execute(delete(TopicModelRun).where(TopicModelRun.run_id == run_id))
@@ -379,11 +392,9 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 "num_topics": num_topics,
                 "parameters": parameters,
                 "dictionary_size": dictionary_size,
-                "training_corpus_hash": training_corpus_hash,
                 "training_document_count": training_document_count,
                 "inference_paragraph_count": inference_paragraph_count,
                 "artifact_key": artifact_key,
-                "artifact_sha256": artifact_sha256,
             },
         )
 
@@ -395,13 +406,13 @@ class ParagraphRepository(BaseRepository[Paragraph]):
     def insert_paragraph_topic_inferences(
         self,
         run_id: str,
-        rows: Sequence[tuple[int, int, int, str, str | None, float | None, str]],
+        rows: Sequence[tuple[int, int, int, str, str | None, float | None]],
     ) -> int:
         """
         先清后插写入 run 的段落推断状态（每段一行）
 
         rows: (paragraph_id, source_token_count, inference_token_count,
-               inference_status, unavailable_reason, distribution_sum, source_content_hash)
+               inference_status, unavailable_reason, distribution_sum)
 
         """
         inference_rows = [
@@ -413,7 +424,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 "inference_status": inference_status,
                 "unavailable_reason": unavailable_reason,
                 "distribution_sum": distribution_sum,
-                "source_content_hash": source_content_hash,
             }
             for (
                 paragraph_id,
@@ -422,7 +432,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 inference_status,
                 unavailable_reason,
                 distribution_sum,
-                source_content_hash,
             ) in rows
         ]
         if not inference_rows:
@@ -447,7 +456,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 ParagraphTopicInference.inference_status,
                 ParagraphTopicInference.unavailable_reason,
                 ParagraphTopicInference.distribution_sum,
-                ParagraphTopicInference.source_content_hash,
             )
             .where(ParagraphTopicInference.run_id == run_id)
             .order_by(ParagraphTopicInference.paragraph_id)
@@ -618,11 +626,11 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
     def fetch_paragraph_topic_rows(self, run_id: str) -> Sequence[Row]:
         """
-        段落主题序列数据（§5.11）：段落真实字符位置、章节序列、内容哈希与
+        段落主题序列数据（§5.11）：段落真实字符位置、章节序列与
         推断 token 数齐备
 
         返回: (paragraph_id, chapter_id, chapter_sequence, global_start_char,
-               content_hash, inference_token_count, topic_id, topic_weight)
+               inference_token_count, topic_id, topic_weight)
         """
         stmt = (
             select(
@@ -630,7 +638,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 Paragraph.chapter_id,
                 Chapter.sequence,
                 Paragraph.global_start_char,
-                Paragraph.content_hash,
                 ParagraphTopicInference.inference_token_count,
                 ParagraphTopic.topic_id,
                 ParagraphTopic.topic_weight,

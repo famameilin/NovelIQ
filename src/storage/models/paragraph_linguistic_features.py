@@ -32,7 +32,6 @@ class ParagraphLinguisticFeature(Base):
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    source_content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     ltp_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     tokens: Mapped[list] = mapped_column(JSONB, nullable=False)
     word_length_counts: Mapped[dict] = mapped_column(JSONB, nullable=False)

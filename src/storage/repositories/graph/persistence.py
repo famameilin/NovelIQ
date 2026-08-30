@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -115,7 +114,6 @@ def _chapter_text_evidence(session: Session, *, run_id: str, chapter_id: int) ->
             "paragraph_ids": [int(row.paragraph_id) for row in paragraphs],
             "char_start": start,
             "char_end": end,
-            "text_hash": hashlib.sha256(chapter.text[start:end].encode("utf-8")).hexdigest(),
         }
     ]
 
@@ -543,7 +541,6 @@ def _persist_event_nodes(
                     anchor_paragraph_ids=list(chapter_evidence["paragraph_ids"]),
                     char_start=int(chapter_evidence["char_start"]),
                     char_end=int(chapter_evidence["char_end"]),
-                    text_hash=str(chapter_evidence["text_hash"]),
                     evidence=[dict(chapter_evidence)],
                     causal_event_refs=list(event.causal_event_refs),
                     tree_id=event.tree_id,

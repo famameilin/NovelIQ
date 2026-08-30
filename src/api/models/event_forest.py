@@ -22,7 +22,6 @@ class EventNodeResponse(BaseModel):
     anchor_paragraph_ids: list[int] = Field(min_length=1)
     char_start: int = Field(ge=0)
     char_end: int = Field(gt=0)
-    text_hash: str
     evidence: list[dict[str, Any]] = Field(min_length=1)
     causal_event_refs: list[str] = Field(default_factory=list)
     tree_id: str = Field(min_length=1)

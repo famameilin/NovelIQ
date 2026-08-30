@@ -387,6 +387,9 @@ def persist_chapter_annotation(
                     description=fs_spec["description"],
                     confidence=fs_spec.get("confidence", "high"),
                     setup_node_id=bound_events[int(fs_spec["setup_event_index"]) - 1].node_id,
+                    setup_kind=fs_spec.get("setup_kind", "悬念"),
+                    expected_payoff_family=fs_spec.get("expected_payoff_family", "身份揭露"),
+                    payoff_likelihood=fs_spec.get("payoff_likelihood", "medium"),
                 )
             )
         chunks.append(

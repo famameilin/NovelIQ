@@ -168,13 +168,27 @@ def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
     first_thread, first_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜持 Sword", confidence="high", setup_node_id="event-setup-1"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜持 Sword",
+                        confidence="high",
+                        setup_node_id="event-setup-1",
+                        setup_kind="悬念",
+                        expected_payoff_family="身份揭露",
+                        payoff_likelihood="medium",
+                    ),
         setup_event_id="event-setup-1",
     )
     second_thread, second_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high", setup_node_id="event-setup-1"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜持 sword",
+                        confidence="high",
+                        setup_node_id="event-setup-1",
+                        setup_kind="悬念",
+                        expected_payoff_family="身份揭露",
+                        payoff_likelihood="medium",
+                    ),
         setup_event_id="event-setup-1",
     )
     db_session.commit()
@@ -196,7 +210,14 @@ def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
     third_thread, third_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜持 sword", confidence="high", setup_node_id="event-setup-2"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜持 sword",
+                        confidence="high",
+                        setup_node_id="event-setup-2",
+                        setup_kind="悬念",
+                        expected_payoff_family="身份揭露",
+                        payoff_likelihood="medium",
+                    ),
         setup_event_id="event-setup-2",
     )
     db_session.commit()
@@ -220,7 +241,14 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter
     first_thread, first_hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜承诺护佑山门",
+                        confidence="high",
+                        setup_node_id="event-护佑",
+                        setup_kind="承诺",
+                        expected_payoff_family="守护",
+                        payoff_likelihood="high",
+                    ),
         setup_event_id="event-护佑",
     )
     assert first_thread.last_chapter_id == 1
@@ -229,7 +257,14 @@ def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter
     second_thread, second_hit = repository.sync(
         run_id=run_id,
         chapter_id=2,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜承诺护佑山门",
+                        confidence="high",
+                        setup_node_id="event-护佑",
+                        setup_kind="承诺",
+                        expected_payoff_family="守护",
+                        payoff_likelihood="high",
+                    ),
         setup_event_id="event-护佑",
     )
     db_session.commit()
@@ -263,14 +298,28 @@ def test_foreshadowing_sync_existing_thread_noop_on_same_chunk(db_session) -> No
     first_thread, _first_hit = repository.sync(
         run_id=run_id,
         chapter_id=2,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜承诺护佑山门",
+                        confidence="high",
+                        setup_node_id="event-护佑",
+                        setup_kind="承诺",
+                        expected_payoff_family="守护",
+                        payoff_likelihood="high",
+                    ),
         setup_event_id="event-护佑",
     )
     # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chapter_id
     thread, hit = repository.sync(
         run_id=run_id,
         chapter_id=1,
-        foreshadowing=BoundForeshadowing(description="顾霜承诺护佑山门", confidence="high", setup_node_id="event-护佑"),
+        foreshadowing=BoundForeshadowing(
+                        description="顾霜承诺护佑山门",
+                        confidence="high",
+                        setup_node_id="event-护佑",
+                        setup_kind="承诺",
+                        expected_payoff_family="守护",
+                        payoff_likelihood="high",
+                    ),
         setup_event_id="event-护佑",
     )
     db_session.commit()

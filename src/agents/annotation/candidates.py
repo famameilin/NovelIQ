@@ -4,9 +4,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
+from uuid import NAMESPACE_DNS, uuid5
 
 from .schema import DialogueCandidate, DialogueParseStatus
 
@@ -32,8 +32,7 @@ class _CandidateSpan:
 
 def _candidate_key(chunk_id: int, span: _CandidateSpan) -> str:
     """2026-08-07 用于根据系统位置和原文生成稳定对话候选键"""
-    digest = hashlib.sha256(f"{chunk_id}:{span.start}:{span.end}:{span.content}".encode()).hexdigest()
-    return f"dlg_{digest}"
+    return f"dlg_{uuid5(NAMESPACE_DNS, f'{chunk_id}:{span.start}:{span.end}:{span.content}').hex}"
 
 
 def _extract_paired_quotes(text: str) -> list[_CandidateSpan]:

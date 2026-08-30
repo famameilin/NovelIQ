@@ -15,7 +15,6 @@ from .word2vec import (
     PosEmbeddingRow,
     TrainResult,
     build_pos_embeddings,
-    compute_corpus_hash,
     resolve_pretrained_file,
     train_book_model,
 )
@@ -32,7 +31,6 @@ __all__ = [
     "analyze_paragraph",
     "analyze_paragraph_batch",
     "build_pos_embeddings",
-    "compute_corpus_hash",
     "resolve_pretrained_file",
     "match_fixed_phrases",
     "train_book_model",

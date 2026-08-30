@@ -36,6 +36,17 @@ def _tools_with_entities_service(service, ledger) -> list:
 
 def _create_args(**overrides) -> dict:
     payload = {"description": "顾霜拔剑"}
+    # 非 isforeshadowing 的事件不需要三字段；isforeshadowing 时由调用方补
+    if not overrides.get("isforeshadowing"):
+        payload.update(overrides)
+        return payload
+    payload.update(
+        {
+            "setup_kind": "悬念",
+            "expected_payoff_family": "身份揭露",
+            "payoff_likelihood": "medium",
+        }
+    )
     payload.update(overrides)
     return payload
 

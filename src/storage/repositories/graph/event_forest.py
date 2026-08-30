@@ -25,7 +25,6 @@ class EventNodeRow:
     anchor_paragraph_ids: list[int]
     char_start: int
     char_end: int
-    text_hash: str
     evidence: list[dict[str, Any]]
     causal_event_refs: list[str]
     tree_id: str
@@ -205,7 +204,6 @@ class EventForestRepository:
                 anchor_paragraph_ids=list(node.anchor_paragraph_ids),
                 char_start=node.char_start,
                 char_end=node.char_end,
-                text_hash=node.text_hash,
                 evidence=list(node.evidence),
                 causal_event_refs=list(node.causal_event_refs),
                 tree_id=node.tree_id,
