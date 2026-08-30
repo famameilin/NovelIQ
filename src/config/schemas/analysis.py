@@ -88,13 +88,14 @@ class LtpSettings:
 class Word2VecSettings:
     """词向量能力配置（《分析能力扩展路线图》赛道 C3）
 
-    单流水线：预训练词向量初始化 + 本书语料微调（warm-start）。
-    默认关闭；开启时 model_dir 必须指向预训练词向量目录，维度以
-    预训练文件头为准。
+    单流水线：预训练共享向量初始化 + 本书语料微调（warm-start）。
+    默认关闭；开启时 model_dir 必须指向转换后的预训练共享模型目录
+    （.kv，由 scripts/tools/convert_word2vec_pretrained.py 生成），
+    维度以预训练共享向量为准。
     """
 
     enabled: bool = False
-    model_dir: str | None = None  # 预训练词向量目录
+    model_dir: str | None = "models/word2vec/shared"  # 预训练共享模型目录（.kv 所在目录）
     window: int = 5
     min_count: int = 2
     epochs: int = 5
@@ -212,12 +213,12 @@ def _parse_ltp_settings(data: dict[str, Any] | None) -> LtpSettings:
 
 
 def _parse_word2vec_settings(data: dict[str, Any] | None) -> Word2VecSettings:
-    """解析词向量能力配置"""
+    """2026-08-30 用于解析词向量配置并提供共享模型目录默认值"""
     if not data:
         return Word2VecSettings()
     return Word2VecSettings(
         enabled=data.get("enabled", False),
-        model_dir=data.get("model_dir"),
+        model_dir=data.get("model_dir", "models/word2vec/shared"),
         window=data.get("window", 5),
         min_count=data.get("min_count", 2),
         epochs=data.get("epochs", 5),

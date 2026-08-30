@@ -108,7 +108,7 @@
     },
     "word2vec": {
       "enabled": true,
-      "model_dir": "models/word2vec/pretrained",
+      "model_dir": "models/word2vec/shared",
       "window": 5,
       "min_count": 2,
       "epochs": 5

@@ -15,7 +15,9 @@ from .word2vec import (
     PosEmbeddingRow,
     TrainResult,
     build_pos_embeddings,
-    resolve_pretrained_file,
+    load_shared_pretrained_vectors,
+    reset_pretrained_cache,
+    resolve_shared_pretrained_path,
     train_book_model,
 )
 
@@ -31,7 +33,9 @@ __all__ = [
     "analyze_paragraph",
     "analyze_paragraph_batch",
     "build_pos_embeddings",
-    "resolve_pretrained_file",
+    "load_shared_pretrained_vectors",
     "match_fixed_phrases",
+    "resolve_shared_pretrained_path",
+    "reset_pretrained_cache",
     "train_book_model",
 ]

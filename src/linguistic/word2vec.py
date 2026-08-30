@@ -3,31 +3,76 @@
 单流水线：公开预训练中文词向量做初始化，再用本书 LTP 词元继续训练
 （warm-start 微调）——书内词站在预训练语义底子上微调，预训练未覆盖的
 书内新词（人名等）随机初始化后由本书语料训练；模型产物保存为
-models/word2vec/{run_id}.model（run 私有 artifact，随 run 删除）。
+models/word2vec/{run_id}/word2vec.model（run 私有 artifact）。
+
+预训练共享向量由 scripts/tools/convert_word2vec_pretrained.py 一次性
+转成 .kv 落盘，运行时直接加载共享 KeyedVectors（进程级只加载一次），
+不再重复解析 4.3GB 文本文件。
 
 - POS 聚合向量：按段落、词性分组的词向量均值（word2vec_model_runs 的
   维度约束），覆盖率 = 词表内词数 / 该组原始词数，由查询层计算
 - 默认关闭（settings.linguistic.word2vec.enabled=false），开启时预训练
-  文件缺失或语料为空则明确报错，不静默回退
+  共享模型缺失或语料为空则明确报错，不静默回退
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from gensim.models import Word2Vec
+from gensim.models import KeyedVectors, Word2Vec
 
 from src.config import settings
 
 #: 词列表接口（Word2Vec 训练与查询的输入面）
 TokenizedSentence = Sequence[str]
 
-#: 预训练词向量文件后缀 → 是否 word2vec 二进制格式（.bin 二进制，其余按文本解析）
-_PRETRAINED_SUFFIXES = {".bin": True, ".vec": False, ".txt": False}
+#: 预训练共享 KeyedVectors 进程级缓存（按绝对路径 key，只加载一次）
+_PRETRAINED_CACHE: dict[str, KeyedVectors] = {}
+_PRETRAINED_CACHE_LOCK = threading.Lock()
+
+#: 预训练共享模型文件后缀（转换脚本产物）
+_KV_SUFFIX = ".kv"
+
+
+def resolve_shared_pretrained_path(model_dir: Path) -> Path:
+    """2026-08-30 用于解析共享模型目录中唯一的 KeyedVectors 主文件"""
+    if not model_dir.is_dir():
+        raise FileNotFoundError(
+            f"预训练共享模型目录不存在: {model_dir}（请先执行 "
+            f"python -m scripts.tools.convert_word2vec_pretrained）"
+        )
+    kv_files = sorted(path.resolve() for path in model_dir.glob(f"*{_KV_SUFFIX}") if path.is_file())
+    if not kv_files:
+        raise FileNotFoundError(
+            f"预训练共享模型目录中没有 .kv 文件: {model_dir}（请先执行 "
+            f"python -m scripts.tools.convert_word2vec_pretrained）"
+        )
+    if len(kv_files) != 1:
+        raise ValueError(f"预训练共享模型目录必须恰好包含一个 .kv 文件: {model_dir}（当前 {len(kv_files)} 个）")
+    return kv_files[0]
+
+
+def load_shared_pretrained_vectors(model_dir: Path) -> KeyedVectors:
+    """2026-08-30 用于以只读内存映射加载并缓存唯一的共享预训练向量"""
+    kv_path = resolve_shared_pretrained_path(model_dir)
+    with _PRETRAINED_CACHE_LOCK:
+        cached = _PRETRAINED_CACHE.get(str(kv_path))
+        if cached is not None:
+            return cached
+        vectors = KeyedVectors.load(str(kv_path), mmap="r")
+        _PRETRAINED_CACHE[str(kv_path)] = vectors
+        return vectors
+
+
+def reset_pretrained_cache() -> None:
+    """2026-08-30 用于在测试之间清除共享预训练向量进程级缓存"""
+    with _PRETRAINED_CACHE_LOCK:
+        _PRETRAINED_CACHE.clear()
 
 
 @dataclass(frozen=True)
@@ -42,47 +87,25 @@ class TrainResult:
     artifact_key: str
 
 
-def resolve_pretrained_file(model_dir: Path) -> tuple[Path, bool]:
-    """解析预训练词向量文件：目录下按可加载后缀取首个（.bin 二进制 / .vec、.txt 文本）"""
-    if not model_dir.is_dir():
-        raise FileNotFoundError(f"预训练词向量目录不存在: {model_dir}")
-    candidates = sorted(path for path in model_dir.glob("*") if path.suffix in _PRETRAINED_SUFFIXES)
-    if not candidates:
-        raise FileNotFoundError(f"预训练词向量目录中无可加载的词向量文件: {model_dir}")
-    path = candidates[0]
-    return path, _PRETRAINED_SUFFIXES[path.suffix]
-
-
-def read_vector_size(path: Path) -> int:
-    """从 word2vec 格式文件头（首行 "词数 维度"）读维度，避免整文件解析"""
-    with path.open("rb") as fin:
-        header = fin.readline()
-    parts = header.split()
-    if len(parts) < 2 or not parts[-1].isdigit():
-        raise ValueError(f"预训练词向量文件头无法解析维度: {path}（首行 {header[:64]!r}）")
-    return int(parts[-1])
-
-
 def train_book_model(
     sentences: Sequence[TokenizedSentence],
     run_id: str,
     *,
-    pretrained_path: Path,
-    pretrained_binary: bool = False,
+    pretrained_vectors: KeyedVectors,
     window: int | None = None,
     min_count: int | None = None,
     epochs: int | None = None,
-    output_dir: Path | None = None,
 ) -> TrainResult:
-    """预训练词向量初始化 + 本书语料继续训练（warm-start 微调）
+    """2026-08-30 用于以共享预训练向量初始化并微调 run 私有模型
 
-    - 先按本书词表 build_vocab，再用 intersect_word2vec_format 把预训练
-      向量写入交集词（lockf=1.0 允许微调更新），预训练未覆盖的书内词
-      保持随机初始化由本书语料训练
-    - 维度以预训练文件头为准；模型保存到 models/word2vec/{run_id}.model
+    - 先按本书词表 build_vocab，再把共享预训练向量按词索引拷贝进交集词
+      （全部词可微调，与旧 intersect lockf=1.0 语义等价），预训练未覆盖的
+      书内词保持随机初始化由本书语料训练
+    - 维度以预训练共享向量为准；模型保存到
+      models/word2vec/{run_id}/word2vec.model（run 私有）
     - training_token_count 为全部文档的有效词元总数（含重复词元）
     """
-    from src.storage.path_resolver import resolve_project_root
+    from src.storage.path_resolver import resolve_run_model_dir
 
     w2v_settings = settings.linguistic.word2vec
     window = window if window is not None else w2v_settings.window
@@ -94,7 +117,7 @@ def train_book_model(
         raise ValueError("Word2Vec 按书训练需要至少一个有词元的文档")
     total_tokens = sum(len(s) for s in non_empty)
 
-    vector_size = read_vector_size(pretrained_path)
+    vector_size = pretrained_vectors.vector_size
     model = Word2Vec(
         vector_size=vector_size,
         window=window,
@@ -103,15 +126,18 @@ def train_book_model(
         workers=1,
     )
     model.build_vocab(non_empty)
-    # gensim 4.4 的 vectors_lockf 默认 ones(1)（广播），intersect 按词索引赋值会越界，先展开到词表全长；
-    # lockf=1.0 表示交集词微调期可更新
+    # 预训练共享向量按词索引拷贝进交集词；
+    # gensim 4.4 的 vectors_lockf 默认 ones(1)（广播），按词索引赋值会越界，先展开到词表全长；
+    # 全 1 表示微调期所有词都可更新（与旧 intersect_word2vec_format lockf=1.0 等价）
     model.wv.vectors_lockf = np.ones(len(model.wv))
-    model.wv.intersect_word2vec_format(str(pretrained_path), binary=pretrained_binary, lockf=1.0)
+    for idx, word in enumerate(model.wv.index_to_key):
+        if word in pretrained_vectors:
+            model.wv.vectors[idx] = pretrained_vectors[word]
     model.train(non_empty, total_examples=model.corpus_count, epochs=epochs)
 
-    output_dir = output_dir or (resolve_project_root() / "models" / "word2vec")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / f"{run_id}.model"
+    run_model_dir = resolve_run_model_dir(run_id, "word2vec")
+    run_model_dir.mkdir(parents=True, exist_ok=True)
+    model_path = run_model_dir / "word2vec.model"
     model.save(str(model_path))
 
     parameters = {
@@ -120,7 +146,7 @@ def train_book_model(
         "min_count": min_count,
         "epochs": epochs,
         "seed": 42,
-        "pretrained_file": pretrained_path.name,
+        "pretrained_vocabulary_size": len(pretrained_vectors),
     }
     return TrainResult(
         embedding_dimension=int(model.wv.vector_size),
@@ -128,7 +154,7 @@ def train_book_model(
         parameters=parameters,
         training_document_count=len(non_empty),
         training_token_count=total_tokens,
-        artifact_key=f"models/word2vec/{run_id}.model",
+        artifact_key=f"models/word2vec/{run_id}/word2vec.model",
     )
 
 

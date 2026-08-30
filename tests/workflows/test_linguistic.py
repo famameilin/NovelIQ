@@ -106,15 +106,25 @@ class TestRunLinguistic:
 
     @pytest.mark.asyncio()
     async def test_word2vec_enabled_trains_and_writes_contract(self, monkeypatch, tmp_path) -> None:
+        """2026-08-30 用于验证共享 kv 初始化后写入实际来源与 run 私有模型契约"""
 
         from src.config import settings as _settings
+        from src.linguistic import reset_pretrained_cache
 
-        # 极小预训练词向量文件（dim=4，含书内词元"江/湖/刀/剑"供微调命中）
+        reset_pretrained_cache()
+
+        # 极小预训练词向量文件（dim=4，含书内词元"江/湖/刀/剑"供微调命中），转成 .kv
         fixture = tmp_path / "fixture.vec"
         rows = ["4 4"]
         for i, word in enumerate(["江", "湖", "刀", "剑"]):
             rows.append(f"{word} " + " ".join(f"{(i + j) / 10:.1f}" for j in range(4)))
         fixture.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        from gensim.models import KeyedVectors
+
+        vectors = KeyedVectors.load_word2vec_format(str(fixture), binary=False)
+        kv_path = tmp_path / "fixture.kv"
+        vectors.save(str(kv_path))
 
         w2v = _settings.linguistic.word2vec
         monkeypatch.setattr(w2v, "enabled", True)
@@ -122,7 +132,23 @@ class TestRunLinguistic:
         monkeypatch.setattr(w2v, "min_count", 1)
         monkeypatch.setattr(w2v, "epochs", 1)
 
-        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        run_model_dir = tmp_path / "run-models" / self.run_id
+
+        def resolve_test_run_model_dir(candidate_run_id: str, kind: str) -> Path:
+            """2026-08-30 用于把工作流 run 模型路径隔离到临时目录"""
+            assert candidate_run_id == self.run_id
+            assert kind == "word2vec"
+            return run_model_dir
+
+        monkeypatch.setattr(
+            "src.storage.path_resolver.resolve_run_model_dir",
+            resolve_test_run_model_dir,
+        )
+
+        try:
+            paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        finally:
+            reset_pretrained_cache()
         assert paragraphs == 2
         assert features == 2
 
@@ -130,6 +156,9 @@ class TestRunLinguistic:
         assert model_run is not None
         assert model_run.embedding_dimension == 4
         assert model_run.artifact_scope == "run_owned"
+        assert model_run.artifact_key == f"models/word2vec/{self.run_id}/word2vec.model"
+        assert Path(model_run.source_uri) == kv_path.resolve()
+        assert (run_model_dir / "word2vec.model").is_file()
         assert self._count("paragraph_pos_embeddings") > 0
 
     @pytest.mark.asyncio()

@@ -18,6 +18,7 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from gensim.models import KeyedVectors, Word2Vec
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -36,9 +37,9 @@ async def run_linguistic(
     *,
     batch_size: int = 128,
 ) -> tuple[int, int]:
-    """执行语言结构基础数据阶段，返回 (段落数, 词法特征段落数)。
+    """2026-08-30 用于执行语言结构阶段并返回段落数与词法特征段落数
 
-    batch_size 控制每批处理的段落数（测试可传小值验证分批路径）。
+    batch_size 控制每批处理的段落数并限制阶段内存峰值
     """
     start_time = time.time()
     paragraph_repo = ParagraphRepository(session)
@@ -154,24 +155,24 @@ async def run_linguistic(
     # Word2Vec：预训练初始化 + 按书微调（依赖 LTP 词元）
     # ------------------------------------------------------------------
     if w2v_settings.enabled and ltp_settings.enabled:
-        from src.linguistic import resolve_pretrained_file
+        from src.linguistic import load_shared_pretrained_vectors, resolve_shared_pretrained_path
         from src.storage.path_resolver import resolve_project_root
 
         if not w2v_settings.model_dir:
-            raise ValueError("linguistic.word2vec.enabled=true 需要配置 model_dir（预训练词向量目录）")
+            raise ValueError("linguistic.word2vec.enabled=true 需要配置 model_dir（预训练共享模型目录）")
         model_dir = Path(w2v_settings.model_dir)
         if not model_dir.is_absolute():
             model_dir = resolve_project_root() / model_dir
-        pretrained_path, pretrained_binary = resolve_pretrained_file(model_dir)
+        pretrained_path = resolve_shared_pretrained_path(model_dir)
+        pretrained_vectors = load_shared_pretrained_vectors(model_dir)
 
         train_result, pos_rows_count = _train_and_build(
             run_id,
             ling_repo,
             token_sequences,
             paragraph_tokens,
-            pretrained_path=pretrained_path,
-            pretrained_binary=pretrained_binary,
-            output_dir=resolve_project_root() / "models" / "word2vec",
+            pretrained_vectors=pretrained_vectors,
+            pretrained_source=str(pretrained_path),
         )
         logger.info(
             f"Word2Vec 预训练微调：vocab={train_result.vocabulary_size} "
@@ -198,21 +199,17 @@ def _train_and_build(
     token_sequences: list[list[str]],
     paragraph_tokens: dict[int, list[dict[str, str]]],
     *,
-    pretrained_path: Path,
-    pretrained_binary: bool,
-    output_dir: Path,
+    pretrained_vectors: KeyedVectors,
+    pretrained_source: str,
 ) -> tuple[TrainResult, int]:
-    """预训练初始化 + 按书微调 + 契约落库 + 词性聚合向量；返回 (TrainResult, pos 向量行数)"""
-    from gensim.models import KeyedVectors
-
+    """2026-08-30 用于完成预训练微调落库并构建词性聚合向量"""
     from src.linguistic import build_pos_embeddings, train_book_model
+    from src.storage.path_resolver import resolve_run_model_dir
 
     train_result = train_book_model(
         token_sequences,
         run_id,
-        pretrained_path=pretrained_path,
-        pretrained_binary=pretrained_binary,
-        output_dir=output_dir,
+        pretrained_vectors=pretrained_vectors,
     )
     ling_repo.insert_word2vec_model_run(
         run_id,
@@ -221,7 +218,7 @@ def _train_and_build(
             "embedding_dimension": train_result.embedding_dimension,
             "vocabulary_size": train_result.vocabulary_size,
             "parameters": train_result.parameters,
-            "source_uri": str(pretrained_path),
+            "source_uri": pretrained_source,
             "license_name": None,
             "training_document_count": train_result.training_document_count,
             "training_token_count": train_result.training_token_count,
@@ -229,7 +226,8 @@ def _train_and_build(
             "artifact_scope": "run_owned",
         },
     )
-    vectors = KeyedVectors.load(str(output_dir / f"{run_id}.model"))
+    run_model_dir = resolve_run_model_dir(run_id, "word2vec")
+    vectors = Word2Vec.load(str(run_model_dir / "word2vec.model"))
     pos_rows: list[dict] = []
     for paragraph_id, tokens in paragraph_tokens.items():
         for entry in build_pos_embeddings(
