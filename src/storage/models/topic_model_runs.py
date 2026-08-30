@@ -43,11 +43,9 @@ class TopicModelRun(Base):
     num_topics: Mapped[int] = mapped_column(Integer, nullable=False)
     parameters: Mapped[dict] = mapped_column(JSONB, nullable=False)
     dictionary_size: Mapped[int] = mapped_column(Integer, nullable=False)
-    training_corpus_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     training_document_count: Mapped[int] = mapped_column(Integer, nullable=False)
     inference_paragraph_count: Mapped[int] = mapped_column(Integer, nullable=False)
     artifact_key: Mapped[str] = mapped_column(Text, nullable=False)
-    artifact_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     def __repr__(self) -> str:

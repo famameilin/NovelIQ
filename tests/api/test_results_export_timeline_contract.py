@@ -761,6 +761,9 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
             description="顾霜承诺护佑山门",
             confidence="high",
             setup_node_id=eid1,
+            setup_kind="承诺",
+            expected_payoff_family="守护",
+            payoff_likelihood="high",
         ),
         setup_event_id=eid1,
     )

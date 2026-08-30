@@ -24,7 +24,6 @@ from src.topic import (
     INFERENCE_EMPTY_AFTER_PREPROCESS,
     TOPIC_PIPELINE_VERSION,
 )
-from src.topic.artifacts import compute_artifact_directory_sha256, compute_training_corpus_hash
 
 
 def resolve_num_topics(
@@ -141,16 +140,13 @@ async def run_topic_model(
     logger.info(f"LDA model trained with {topic_model.num_topics} topics")
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
 
-    # 模型 artifact 落盘后先生成目录清单哈希，再写模型契约；
-    # 目录缺失时快速失败，不写入不完整的契约行
+    # 模型 artifact 落盘后先确定 artifact_key，再写模型契约
     model_dir = resolve_model_dir(run_id)
     trainer.save_model(topic_model, model_dir)
-    artifact_sha256 = compute_artifact_directory_sha256(model_dir)
     artifact_key = str(model_dir.relative_to(resolve_project_root()).as_posix())
-    training_corpus_hash = compute_training_corpus_hash(paragraph_rows)
 
     # 推断覆盖全部段落：完整 K 维分布 + 每段一行推断状态（§5.9/§5.10）
-    inference_rows: list[tuple[int, int, int, str, str | None, float | None, str]] = []
+    inference_rows: list[tuple[int, int, int, str, str | None, float | None]] = []
     topic_rows: list[tuple[int, int, float]] = []
     complete_count = 0
     for row, tokens in zip(paragraph_rows, tokenized_docs, strict=True):
@@ -163,7 +159,6 @@ async def run_topic_model(
                     INFERENCE_EMPTY_AFTER_PREPROCESS,
                     "empty_after_preprocess: 预处理后无词元",
                     None,
-                    row.content_hash,
                 )
             )
             continue
@@ -177,7 +172,6 @@ async def run_topic_model(
                     result.inference_status,
                     result.unavailable_reason,
                     None,
-                    row.content_hash,
                 )
             )
             continue
@@ -192,7 +186,6 @@ async def run_topic_model(
                 INFERENCE_COMPLETE,
                 None,
                 result.distribution_sum,
-                row.content_hash,
             )
         )
 
@@ -209,11 +202,9 @@ async def run_topic_model(
         num_topics=topic_model.num_topics,
         parameters=parameters,
         dictionary_size=len(topic_model.dictionary),
-        training_corpus_hash=training_corpus_hash,
         training_document_count=len(valid_docs),
         inference_paragraph_count=complete_count,
         artifact_key=artifact_key,
-        artifact_sha256=artifact_sha256,
     )
     paragraph_repo.insert_paragraph_topic_inferences(run_id, inference_rows)
     paragraph_repo.insert_paragraph_topics(run_id, topic_rows)

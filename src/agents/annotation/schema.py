@@ -443,17 +443,11 @@ class EventParticipantInput(StrictModel):
 
 # 2026-08-18 事件森林/DAG 证据类型：统一非空列表，仅允许 GraphEvidence 或 TextEvidence
 class TextEvidence(StrictModel):
-    """2026-08-18 用于保存原文段落锚点证据（段落 ID + 字符范围 + 文本哈希）"""
+    """2026-08-18 用于保存原文段落锚点证据（段落 ID + 字符范围）"""
 
     paragraph_ids: list[int] = Field(min_length=1, description="全局段落 ID 列表")
     char_start: int = Field(ge=0, description="锚点文本在章文本中的起始字符偏移")
     char_end: int = Field(gt=0, description="锚点文本在章文本中的结束字符偏移")
-    text_hash: str = Field(
-        min_length=64,
-        max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
-        description="锚点文本 sha256 哈希",
-    )
 
     @model_validator(mode="after")
     def validate_span(self) -> TextEvidence:
@@ -564,6 +558,18 @@ class CreateEventInput(StrictModel):
         description="因果前驱事件树 id（可选）。本章新树填 create_event 返回的 tree_id；"
         "延续前文剧情先 search_event 检索历史树再填其 tree_id",
     )
+    setup_kind: str | None = Field(
+        default=None,
+        description="伏笔类型（如人物秘密/道具/预言/悬念），isforeshadowing=true 时应提供",
+    )
+    expected_payoff_family: str | None = Field(
+        default=None,
+        description="预期的回收方向/家族，isforeshadowing=true 时应提供",
+    )
+    payoff_likelihood: PayoffLikelihood | None = Field(
+        default=None,
+        description="回收可能性，isforeshadowing=true 时应提供",
+    )
 
     @model_validator(mode="after")
     def normalize_create(self) -> CreateEventInput:
@@ -572,6 +578,26 @@ class CreateEventInput(StrictModel):
         if self.cause_tree_id is not None:
             cleaned = normalize_semantic_text(self.cause_tree_id, label="create_event.cause_tree_id")
             self.cause_tree_id = cleaned or None
+        return self
+
+    @model_validator(mode="after")
+    def require_foreshadowing_fields(self) -> CreateEventInput:
+        """伏笔埋设时必须提供全部三字段，避免入库默认值冒充 LLM 判断"""
+        if not self.isforeshadowing:
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("setup_kind", self.setup_kind),
+                ("expected_payoff_family", self.expected_payoff_family),
+                ("payoff_likelihood", self.payoff_likelihood),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(
+                f"isforeshadowing=true 时必须提供全部三字段，缺失: {', '.join(missing)}"
+            )
         return self
 
 
@@ -702,6 +728,34 @@ class BoundForeshadowing(StrictModel):
     description: str = Field(min_length=1)
     confidence: Confidence = Field(default="medium")
     setup_node_id: str = Field(min_length=1, description="埋设事件树节点 id（=落库 setup_event_id）")
+    setup_kind: str | None = Field(
+        default=None,
+        description="伏笔类型（如人物秘密/道具/预言/悬念），LLM 埋设时判断",
+    )
+    expected_payoff_family: str | None = Field(
+        default=None,
+        description="预期的回收方向/家族，LLM 埋设时判断",
+    )
+    payoff_likelihood: PayoffLikelihood | None = Field(
+        default=None,
+        description="回收可能性，LLM 埋设时判断",
+    )
+
+    @model_validator(mode="after")
+    def require_foreshadowing_fields(self) -> BoundForeshadowing:
+        """伏笔埋设必须给出三字段，避免入库默认值冒充 LLM 判断"""
+        missing = [
+            name
+            for name, value in (
+                ("setup_kind", self.setup_kind),
+                ("expected_payoff_family", self.expected_payoff_family),
+                ("payoff_likelihood", self.payoff_likelihood),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(f"伏笔埋设必须提供全部三字段，缺失: {', '.join(missing)}")
+        return self
 
 
 class BoundChunkAnnotation(StrictModel):

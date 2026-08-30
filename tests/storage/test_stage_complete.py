@@ -410,14 +410,12 @@ class TestStageCompleteChecks:
             num_topics=1,
             parameters={"num_topics": 1},
             dictionary_size=10,
-            training_corpus_hash="0" * 64,
             training_document_count=1,
             inference_paragraph_count=1,
             artifact_key=f"models/topic/{run_id}",
-            artifact_sha256="0" * 64,
         )
         paragraph_repo.insert_paragraph_topic_inferences(
-            run_id, [(0, 10, 10, "complete", None, 1.0, "a" * 64)]
+            run_id, [(0, 10, 10, "complete", None, 1.0)]
         )
         paragraph_repo.insert_paragraph_topics(run_id, [(0, 0, 1.0)])
         assert stats_repo.has_topic_data(run_id)

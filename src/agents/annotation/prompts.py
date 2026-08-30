@@ -100,7 +100,9 @@ SYSTEM_PROMPT_TEMPLATE = """你是小说章节语义标注 Agent。本轮由系�
 - 跨章因果延续：先 search_event 检索前文事件树拿到 tree_id，再 create_event 时填
   cause_tree_id=该 tree_id，系统自动建立跨章因果边；不允许猜测任何 id
 - isforeshadowing=true 标记该事件为伏笔埋设：系统自动创建伏笔线程，
-  无需也不可再调用伏笔创建工具
+  无需也不可再调用伏笔创建工具；埋设时必须同时提供 setup_kind（伏笔类型）、
+  expected_payoff_family（预期回收方向）、payoff_likelihood（回收可能性 high/medium），
+  三者缺一即拒绝
 - 关系类型的方向、端点类型与语义目录（端点必须符合目录约束，否则拒绝）：
 
 {relation_catalog}

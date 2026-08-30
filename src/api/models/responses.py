@@ -526,7 +526,6 @@ class TopicModelMetaInfo(BaseModel):
     pipeline_version: str
     num_topics: int
     artifact_key: str
-    artifact_sha256: str
 
 
 class TopicDistributionEntry(BaseModel):

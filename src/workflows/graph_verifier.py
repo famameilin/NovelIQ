@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
+from uuid import NAMESPACE_DNS, uuid5
 
 from sqlalchemy.orm import Session
 
@@ -116,7 +116,7 @@ def build_alias_pending_cases(
     """2026-08-09 用于把疑似同一人物对转换为待仲裁案例"""
     pending_cases: list[PendingCase] = []
     for suspicion in detect_alias_suspicions(session, chapter_boundary=chapter_boundary):
-        target_key = sha256(f"{run_id}:entity_alias:{suspicion.name_a}:{suspicion.name_b}".encode()).hexdigest()
+        target_key = uuid5(NAMESPACE_DNS, f"{run_id}:entity_alias:{suspicion.name_a}:{suspicion.name_b}").hex
         if target_key in existing_target_keys:
             continue
         pending_cases.append(

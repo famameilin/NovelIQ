@@ -43,7 +43,6 @@ class EventNode(Base):
     anchor_paragraph_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
     char_start: Mapped[int] = mapped_column(Integer, nullable=False)
     char_end: Mapped[int] = mapped_column(Integer, nullable=False)
-    text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     causal_event_refs: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     tree_id: Mapped[str] = mapped_column(String(255), nullable=False)

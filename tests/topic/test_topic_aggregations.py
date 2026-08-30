@@ -187,17 +187,15 @@ class TestTopicAggregations:
             num_topics=2,
             parameters={"num_topics": 2, "passes": 5},
             dictionary_size=20,
-            training_corpus_hash="a" * 64,
             training_document_count=6,
             inference_paragraph_count=6,
             artifact_key=f"models/topic/{self.run_id}",
-            artifact_sha256="b" * 64,
         )
         # 章1 全主题0、章2 全主题1；inference_token_count 用于加权验证
         tokens = [10, 10, 20, 10, 10, 20]
         distributions = [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0], [0.0, 1.0]]
         inference_rows = [
-            (paragraph_id, 2, tokens[paragraph_id], "complete", None, 1.0, "c" * 64)
+            (paragraph_id, 2, tokens[paragraph_id], "complete", None, 1.0)
             for paragraph_id in range(6)
         ]
         repo.insert_paragraph_topic_inferences(self.run_id, inference_rows)

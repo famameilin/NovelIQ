@@ -3,7 +3,7 @@
 
 管理五个段落派生基础表：paragraph_linguistic_features、paragraph_entities、
 paragraph_phrase_hits、word2vec_model_runs、paragraph_pos_embeddings。
-全部按 run 先清后插（同 run 重跑语义是重新计算），content_hash 溯源到
+全部按 run 先清后插（同 run 重跑语义是重新计算），按 paragraph_id 溯源到
 paragraphs 事实源。
 """
 
@@ -38,13 +38,19 @@ class LinguisticRepository(BaseRepository[ParagraphLinguisticFeature]):
         self,
         run_id: str,
         rows: Sequence[dict[str, Any]],
+        *,
+        clear_first: bool = True,
     ) -> int:
-        """先清后插写入 run 的段落语言结构行（rows 为 result.to_dict() + 元数据）"""
+        """先清后插写入 run 的段落语言结构行（rows 为 result.to_dict() + 元数据）
+
+        clear_first=False 用于分批落库：首批清空该 run 旧数据，后续批只追加。
+        """
         if not rows:
             return 0
-        self.session.execute(
-            delete(ParagraphLinguisticFeature).where(ParagraphLinguisticFeature.run_id == run_id)
-        )
+        if clear_first:
+            self.session.execute(
+                delete(ParagraphLinguisticFeature).where(ParagraphLinguisticFeature.run_id == run_id)
+            )
         self.session.bulk_insert_mappings(cast(Mapper[Any], ParagraphLinguisticFeature), rows)
         return len(rows)
 
@@ -70,11 +76,21 @@ class LinguisticRepository(BaseRepository[ParagraphLinguisticFeature]):
     # paragraph_entities（§5.4）
     # ------------------------------------------------------------------
 
-    def insert_entities(self, run_id: str, rows: Sequence[dict[str, Any]]) -> int:
-        """先清后插写入 run 的实体候选行（LTP NER 输出，非图谱事实）"""
+    def insert_entities(
+        self,
+        run_id: str,
+        rows: Sequence[dict[str, Any]],
+        *,
+        clear_first: bool = True,
+    ) -> int:
+        """先清后插写入 run 的实体候选行（LTP NER 输出，非图谱事实）
+
+        clear_first=False 用于分批落库：首批清空该 run 旧数据，后续批只追加。
+        """
         if not rows:
             return 0
-        self.session.execute(delete(ParagraphEntity).where(ParagraphEntity.run_id == run_id))
+        if clear_first:
+            self.session.execute(delete(ParagraphEntity).where(ParagraphEntity.run_id == run_id))
         self.session.bulk_insert_mappings(cast(Mapper[Any], ParagraphEntity), rows)
         return len(rows)
 
@@ -98,11 +114,21 @@ class LinguisticRepository(BaseRepository[ParagraphLinguisticFeature]):
     # paragraph_phrase_hits（§5.5）
     # ------------------------------------------------------------------
 
-    def insert_phrase_hits(self, run_id: str, rows: Sequence[dict[str, Any]]) -> int:
-        """先清后插写入 run 的固定短语命中行（词表命中 + 四字候选）"""
+    def insert_phrase_hits(
+        self,
+        run_id: str,
+        rows: Sequence[dict[str, Any]],
+        *,
+        clear_first: bool = True,
+    ) -> int:
+        """先清后插写入 run 的固定短语命中行（词表命中 + 四字候选）
+
+        clear_first=False 用于分批落库：首批清空该 run 旧数据，后续批只追加。
+        """
         if not rows:
             return 0
-        self.session.execute(delete(ParagraphPhraseHit).where(ParagraphPhraseHit.run_id == run_id))
+        if clear_first:
+            self.session.execute(delete(ParagraphPhraseHit).where(ParagraphPhraseHit.run_id == run_id))
         self.session.bulk_insert_mappings(cast(Mapper[Any], ParagraphPhraseHit), rows)
         return len(rows)
 

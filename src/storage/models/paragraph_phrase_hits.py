@@ -46,9 +46,7 @@ class ParagraphPhraseHit(Base):
     local_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
     match_kind: Mapped[str] = mapped_column(String(30), nullable=False)
     lexicon_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    lexicon_version_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_metric_hit: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    source_content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

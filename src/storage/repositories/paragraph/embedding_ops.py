@@ -46,22 +46,12 @@ def insert_paragraph_embeddings(
     """2026-08-14 用于重新生成当前 run 的全部自然段向量
 
     先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key /
-    embedding_dimension 从 settings.models.paragraph_embedding 读取；
-    source_content_hash 对照 paragraphs 表按 paragraph_id 一次性查询，
-    缺失段落返回 None（不伪造溯源）。
+    embedding_dimension 从 settings.models.paragraph_embedding 读取。
     """
     materialized = list(rows)
     session.execute(delete(ParagraphEmbedding).where(ParagraphEmbedding.run_id == run_id))
     if not materialized:
         return 0
-    paragraph_ids = [row.paragraph_id for row in materialized]
-    hash_rows = session.execute(
-        select(Paragraph.paragraph_id, Paragraph.content_hash).where(
-            Paragraph.run_id == run_id,
-            Paragraph.paragraph_id.in_(paragraph_ids),
-        )
-    ).all()
-    content_hash_by_paragraph = {int(row.paragraph_id): str(row.content_hash) for row in hash_rows}
     model_settings = settings.models.paragraph_embedding
     created_at = datetime.now().isoformat()
     insert_rows = [
@@ -71,7 +61,6 @@ def insert_paragraph_embeddings(
             "embedding_vector": row.embedding_vector,
             "embedding_model_key": getattr(model_settings, "model", None),
             "embedding_dimension": getattr(model_settings, "embedding_dim", None),
-            "source_content_hash": content_hash_by_paragraph.get(row.paragraph_id),
             "created_at": created_at,
         }
         for row in materialized

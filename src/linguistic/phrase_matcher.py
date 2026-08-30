@@ -28,7 +28,6 @@ class PhraseMatch:
     local_end_char: int
     match_kind: str
     lexicon_key: str | None
-    lexicon_version_hash: str | None
     is_metric_hit: bool
 
 
@@ -73,7 +72,6 @@ def match_fixed_phrases(
     lexicon_terms: list[str],
     *,
     lexicon_key: str,
-    lexicon_version_hash: str,
     metric_enabled: bool = False,
     phrase_type: str | None = None,
     four_char_candidate_enabled: bool = True,
@@ -99,7 +97,6 @@ def match_fixed_phrases(
             local_end_char=end,
             match_kind="lexicon",
             lexicon_key=lexicon_key,
-            lexicon_version_hash=lexicon_version_hash,
             is_metric_hit=metric_enabled,
         )
         for surface, start, end in lexicon_hits
@@ -115,7 +112,6 @@ def match_fixed_phrases(
                     local_end_char=end,
                     match_kind="four_char_candidate",
                     lexicon_key=None,
-                    lexicon_version_hash=None,
                     is_metric_hit=False,
                 )
             )

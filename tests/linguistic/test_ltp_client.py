@@ -105,6 +105,38 @@ class TestAnalyzeParagraph(unittest.TestCase):
         self.assertEqual(entity.normalized_entity_type, "person")
         self.assertEqual(text[entity.local_start_char : entity.local_end_char], "汤姆")
 
+    def test_multi_sentence_dep_head_global_coordinate(self) -> None:
+        """双句段：第二句 dep head 换算为段落全局索引，不落在第一句区间"""
+        text = "他走了。她跑了。"
+        output = LtpPipelineOutput(
+            cws=[["他", "走", "了", "。"], ["她", "跑", "了", "。"]],
+            pos=[["r", "v", "u", "wp"], ["r", "v", "u", "wp"]],
+            ner=[[], []],
+            dep=[
+                {"head": [2, 0, 2, 2], "label": ["SBV", "HED", "RAD", "WP"]},
+                # 第二句：head=3 原本是句内索引（指向"跑了"），换算后应为全局索引
+                {"head": [2, 0, 2, 2], "label": ["SBV", "HED", "RAD", "WP"]},
+            ],
+        )
+        result = analyze_paragraph(text, output)
+        # 第一句：token_index 1-4，head 换算后不变（第一句 sent_token_start=1）
+        # 第二句：token_index 5-8，sent_token_start=5，head 换算后 +4
+        # 第二句各个弧的 head_index 应 >= 5（第二句范围内）
+        arcs = result.dependency_arcs
+        # 找出第二句的词元（dependent_index >= 5）
+        second_arcs = [a for a in arcs if a.dependent_index >= 5]
+        self.assertTrue(len(second_arcs) > 0, "第二句应有依存弧")
+        for arc in second_arcs:
+            if arc.head_index == 0:
+                continue  # ROOT 永远正确
+            self.assertGreaterEqual(
+                arc.head_index, 5,
+                f"dependent_index={arc.dependent_index} 的 head_index={arc.head_index} 应在第二句区间",
+            )
+        # 全句统计：节点数=8，根数=2（每句一个 ROOT）
+        self.assertEqual(result.dependency_node_count, 8)
+        self.assertEqual(result.dependency_root_count, 2)
+
     def test_empty_input_returns_zero_result(self) -> None:
         result = analyze_paragraph("", LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[]))
         self.assertEqual(result.ltp_token_count, 0)

@@ -42,7 +42,6 @@ class ParagraphTopicInference(Base):
     inference_status: Mapped[str] = mapped_column(String(30), nullable=False)
     unavailable_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     distribution_sum: Mapped[float | None] = mapped_column(Float, nullable=True)
-    source_content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

@@ -19,7 +19,6 @@ class TestMatchFixedPhrases(unittest.TestCase):
             text,
             _TERMS,
             lexicon_key="fixed_phrases.txt",
-            lexicon_version_hash="h" * 64,
             metric_enabled=metric_enabled,
         )
 
@@ -53,7 +52,7 @@ class TestMatchFixedPhrases(unittest.TestCase):
 
     def test_empty_text_or_terms(self) -> None:
         self.assertEqual(self._match(""), [])
-        self.assertEqual(match_fixed_phrases("文本", [], lexicon_key="k", lexicon_version_hash="h"), [])
+        self.assertEqual(match_fixed_phrases("文本", [], lexicon_key="k"), [])
 
     def test_hit_span_matches_original_slice(self) -> None:
         text = "起点一帆风顺，之后每况愈下。"

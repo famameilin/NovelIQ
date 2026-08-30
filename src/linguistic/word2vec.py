@@ -13,7 +13,6 @@ models/word2vec/{run_id}.model（run 私有 artifact，随 run 删除）。
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,18 +39,7 @@ class TrainResult:
     parameters: dict[str, Any]
     training_document_count: int
     training_token_count: int
-    training_corpus_hash: str
     artifact_key: str
-    artifact_sha256: str
-
-
-def compute_corpus_hash(sentences: Sequence[TokenizedSentence]) -> str:
-    """训练语料摘要：按文档顺序的 token 序列 sha256（内容或顺序变化即变）"""
-    digest = hashlib.sha256()
-    for sentence in sentences:
-        digest.update(" ".join(sentence).encode("utf-8"))
-        digest.update(b"\n")
-    return digest.hexdigest()
 
 
 def resolve_pretrained_file(model_dir: Path) -> tuple[Path, bool]:
@@ -120,7 +108,6 @@ def train_book_model(
     model.wv.vectors_lockf = np.ones(len(model.wv))
     model.wv.intersect_word2vec_format(str(pretrained_path), binary=pretrained_binary, lockf=1.0)
     model.train(non_empty, total_examples=model.corpus_count, epochs=epochs)
-    corpus_hash = compute_corpus_hash(non_empty)
 
     output_dir = output_dir or (resolve_project_root() / "models" / "word2vec")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -141,9 +128,7 @@ def train_book_model(
         parameters=parameters,
         training_document_count=len(non_empty),
         training_token_count=total_tokens,
-        training_corpus_hash=corpus_hash,
         artifact_key=f"models/word2vec/{run_id}.model",
-        artifact_sha256=hashlib.sha256(model_path.read_bytes()).hexdigest(),
     )
 
 
@@ -156,7 +141,6 @@ class PosEmbeddingRow:
     embedding_vector: list[float] | None
     source_token_count: int
     in_vocabulary_token_count: int
-    source_content_hash: str
 
 
 def build_pos_embeddings(
@@ -164,7 +148,6 @@ def build_pos_embeddings(
     vectors,
     *,
     paragraph_id: int,
-    source_content_hash: str,
 ) -> list[PosEmbeddingRow]:
     """按词性分组聚合段落词向量（组内词向量简单平均）。"""
     groups: dict[str, list[str]] = {}
@@ -194,7 +177,6 @@ def build_pos_embeddings(
                 ),
                 source_token_count=len(token_texts),
                 in_vocabulary_token_count=len(vectors_found),
-                source_content_hash=source_content_hash,
             )
         )
     return rows

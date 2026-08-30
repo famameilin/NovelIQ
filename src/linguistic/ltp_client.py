@@ -268,6 +268,9 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
             sent_start = text_pos
         cursor = sent_start
         sent_arcs = output.dep[sent_idx] if sent_idx < len(output.dep) else None
+        # LTP 的 head 是句内坐标（ROOT=0，句内词元 1..n）；dependent_index 是段内全局
+        # 坐标，head 侧必须加本句起始偏移才能与 dependent 落在同一空间（跨句错位修复）。
+        sent_token_start = token_index
         for word_idx, word in enumerate(words):
             pos_tag = pos_tags[word_idx] if word_idx < len(pos_tags) else "o"
             local_start = cursor
@@ -288,10 +291,12 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
                 head_list = sent_arcs["head"]
                 label_list = sent_arcs["label"]
                 if word_idx < len(head_list):
+                    head = int(head_list[word_idx])
+                    head_index = head if head == 0 else head + sent_token_start - 1
                     arcs.append(
                         LtpDependencyArc(
                             dependent_index=token_index,
-                            head_index=int(head_list[word_idx]),
+                            head_index=head_index,
                             relation=str(label_list[word_idx]),
                         )
                     )

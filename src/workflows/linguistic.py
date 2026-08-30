@@ -33,106 +33,125 @@ async def run_linguistic(
     run_id: str,
     session: Session,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    *,
+    batch_size: int = 128,
 ) -> tuple[int, int]:
-    """执行语言结构基础数据阶段，返回 (段落数, 词法特征段落数)。"""
+    """执行语言结构基础数据阶段，返回 (段落数, 词法特征段落数)。
+
+    batch_size 控制每批处理的段落数（测试可传小值验证分批路径）。
+    """
     start_time = time.time()
     paragraph_repo = ParagraphRepository(session)
     ling_repo = LinguisticRepository(session)
 
-    paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
-    if not paragraph_rows:
-        logger.warning(f"no paragraphs found for run_id={run_id}")
-        return 0, 0
-
     ltp_settings = settings.linguistic.ltp
     w2v_settings = settings.linguistic.word2vec
 
-    # ------------------------------------------------------------------
-    # 1. LTP 词法/句法/实体
-    # ------------------------------------------------------------------
-    if ltp_settings.enabled:
-        from src.linguistic import analyze_paragraph_batch
+    # 分批处理控制内存峰值：段落文本、LTP 输出、feature/entity/phrase 行都只保留当前批，
+    # 不随全书段落数线性增长。Word2Vec 需要全书词元训练，token_sequences 仍全量累积。
+    total_paragraphs = paragraph_repo.count_paragraphs(run_id)
+    if total_paragraphs == 0:
+        logger.warning(f"no paragraphs found for run_id={run_id}")
+        return 0, 0
+    total_feature_paragraphs = 0
+    token_sequences: list[list[str]] = []
+    paragraph_tokens: dict[int, list[dict[str, str]]] = {}
 
-        logger.info(f"LTP 分析 {len(paragraph_rows)} 个段落...")
-        results = analyze_paragraph_batch([row.text for row in paragraph_rows])
-
-        feature_rows: list[dict] = []
-        entity_rows: list[dict] = []
-        for row, result in zip(paragraph_rows, results, strict=True):
-            data = result.to_dict()
-            data.update(
-                {
-                    "run_id": run_id,
-                    "paragraph_id": row.paragraph_id,
-                    "source_content_hash": row.content_hash,
-                }
-            )
-            feature_rows.append(data)
-            for entity in result.entities:
-                entity_rows.append(
-                    {
-                        "run_id": run_id,
-                        "paragraph_id": row.paragraph_id,
-                        "surface_text": entity.surface_text,
-                        "raw_entity_type": entity.raw_entity_type,
-                        "normalized_entity_type": entity.normalized_entity_type,
-                        "local_start_char": entity.local_start_char,
-                        "local_end_char": entity.local_end_char,
-                        "confidence": None,
-                        "source_kind": "ltp",
-                        "source_content_hash": row.content_hash,
-                    }
-                )
-        ling_repo.insert_linguistic_features(run_id, feature_rows)
-        ling_repo.insert_entities(run_id, entity_rows)
-        logger.info(f"LTP 特征落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
-    else:
-        feature_rows = []
-        logger.info("linguistic.ltp.enabled=false，跳过词法/句法/实体")
-
-    # ------------------------------------------------------------------
-    # 2. 固定短语匹配（依赖 LTP 词法特征行：§5.5 双向 FK 要求 phrase_hits
-    #    同时指向 paragraphs 与 paragraph_linguistic_features）
-    # ------------------------------------------------------------------
     if ltp_settings.enabled:
         from src.lexicons import LexiconRegistry
-        from src.linguistic import match_fixed_phrases
+        from src.linguistic import analyze_paragraph_batch, match_fixed_phrases
 
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
-        version_hash = registry.version_hash()
-        phrase_rows: list[dict] = []
-        for row in paragraph_rows:
-            hits = match_fixed_phrases(
-                row.text,
-                terms,
-                lexicon_key=LEXICON_FILES["fixed_phrases"],
-                lexicon_version_hash=version_hash,
-                metric_enabled=True,
+
+        last_id: int | None = None
+        first_batch = True
+        while True:
+            batch = paragraph_repo.fetch_paragraph_rows_batch(
+                run_id, after_id=last_id, limit=batch_size
             )
-            for hit in hits:
-                phrase_rows.append(
+            if not batch:
+                break
+            last_id = batch[-1].paragraph_id
+
+            logger.info(
+                f"LTP 分析 {len(batch)} 个段落（游标 after={last_id}）..."
+            )
+            results = analyze_paragraph_batch([row.text for row in batch])
+
+            feature_rows: list[dict] = []
+            entity_rows: list[dict] = []
+            for row, result in zip(batch, results, strict=True):
+                data = result.to_dict()
+                data.update(
                     {
                         "run_id": run_id,
                         "paragraph_id": row.paragraph_id,
-                        "surface_text": hit.surface_text,
-                        "phrase_type": hit.phrase_type,
-                        "local_start_char": hit.local_start_char,
-                        "local_end_char": hit.local_end_char,
-                        "match_kind": hit.match_kind,
-                        "lexicon_key": hit.lexicon_key,
-                        "lexicon_version_hash": hit.lexicon_version_hash,
-                        "is_metric_hit": hit.is_metric_hit,
-                        "source_content_hash": row.content_hash,
                     }
                 )
-        ling_repo.insert_phrase_hits(run_id, phrase_rows)
-        logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {LEXICON_FILES['fixed_phrases']}）")
+                feature_rows.append(data)
+                for entity in result.entities:
+                    entity_rows.append(
+                        {
+                            "run_id": run_id,
+                            "paragraph_id": row.paragraph_id,
+                            "surface_text": entity.surface_text,
+                            "raw_entity_type": entity.raw_entity_type,
+                            "normalized_entity_type": entity.normalized_entity_type,
+                            "local_start_char": entity.local_start_char,
+                            "local_end_char": entity.local_end_char,
+                            "confidence": None,
+                            "source_kind": "ltp",
+                        }
+                    )
+                # Word2Vec 按书微调需要全书词元序列，逐批累积
+                tokens = [t for t in data["tokens"] if t.get("text")]
+                paragraph_tokens[row.paragraph_id] = tokens
+                token_sequences.append([t["text"] for t in tokens])
+
+            ling_repo.insert_linguistic_features(run_id, feature_rows, clear_first=first_batch)
+            ling_repo.insert_entities(run_id, entity_rows, clear_first=first_batch)
+            total_feature_paragraphs += len(feature_rows)
+            logger.info(
+                f"LTP 特征落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}"
+            )
+
+            # 固定短语匹配：词表命中 + 四字候选（依赖 LTP 词法特征行）
+            phrase_rows: list[dict] = []
+            for row in batch:
+                hits = match_fixed_phrases(
+                    row.text,
+                    terms,
+                    lexicon_key=LEXICON_FILES["fixed_phrases"],
+                    metric_enabled=True,
+                )
+                for hit in hits:
+                    phrase_rows.append(
+                        {
+                            "run_id": run_id,
+                            "paragraph_id": row.paragraph_id,
+                            "surface_text": hit.surface_text,
+                            "phrase_type": hit.phrase_type,
+                            "local_start_char": hit.local_start_char,
+                            "local_end_char": hit.local_end_char,
+                            "match_kind": hit.match_kind,
+                            "lexicon_key": hit.lexicon_key,
+                            "is_metric_hit": hit.is_metric_hit,
+                        }
+                    )
+            ling_repo.insert_phrase_hits(run_id, phrase_rows, clear_first=first_batch)
+            logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {LEXICON_FILES['fixed_phrases']}）")
+            first_batch = False
+
+        if total_paragraphs == 0:
+            logger.warning(f"no paragraphs found for run_id={run_id}")
+            return 0, 0
+        logger.info(f"LTP 全库完成：段落={total_paragraphs} 词法特征段落={total_feature_paragraphs}")
     else:
-        logger.info("ltp.enabled=false，跳过固定短语")
+        logger.info("linguistic.ltp.enabled=false，跳过词法/句法/实体与固定短语")
 
     # ------------------------------------------------------------------
-    # 3. Word2Vec：预训练初始化 + 按书微调（依赖 LTP 词元）
+    # Word2Vec：预训练初始化 + 按书微调（依赖 LTP 词元）
     # ------------------------------------------------------------------
     if w2v_settings.enabled and ltp_settings.enabled:
         from src.linguistic import resolve_pretrained_file
@@ -145,19 +164,11 @@ async def run_linguistic(
             model_dir = resolve_project_root() / model_dir
         pretrained_path, pretrained_binary = resolve_pretrained_file(model_dir)
 
-        token_sequences: list[list[str]] = []
-        paragraph_tokens: dict[int, list[dict[str, str]]] = {}
-        for row, feature in zip(paragraph_rows, feature_rows, strict=True):
-            tokens = [t for t in feature["tokens"] if t.get("text")]
-            paragraph_tokens[row.paragraph_id] = tokens
-            token_sequences.append([t["text"] for t in tokens])
-
         train_result, pos_rows_count = _train_and_build(
             run_id,
             ling_repo,
             token_sequences,
             paragraph_tokens,
-            paragraph_rows,
             pretrained_path=pretrained_path,
             pretrained_binary=pretrained_binary,
             output_dir=resolve_project_root() / "models" / "word2vec",
@@ -172,13 +183,13 @@ async def run_linguistic(
         logger.info("linguistic.word2vec.enabled=false，跳过词向量")
 
     elapsed = time.time() - start_time
-    logger.info(f"linguistic completed paragraphs={len(paragraph_rows)} time={elapsed:.2f}s")
+    logger.info(f"linguistic completed paragraphs={total_paragraphs} time={elapsed:.2f}s")
 
     if emitter:
         await emitter(
             StreamEvent(action="complete", stage="linguistic", current=1, total=1, percent=100.0, sub_percent=100.0)
         )
-    return len(paragraph_rows), len(feature_rows)
+    return total_paragraphs, total_feature_paragraphs
 
 
 def _train_and_build(
@@ -186,7 +197,6 @@ def _train_and_build(
     ling_repo: LinguisticRepository,
     token_sequences: list[list[str]],
     paragraph_tokens: dict[int, list[dict[str, str]]],
-    paragraph_rows,
     *,
     pretrained_path: Path,
     pretrained_binary: bool,
@@ -213,23 +223,19 @@ def _train_and_build(
             "parameters": train_result.parameters,
             "source_uri": str(pretrained_path),
             "license_name": None,
-            "training_corpus_hash": train_result.training_corpus_hash,
             "training_document_count": train_result.training_document_count,
             "training_token_count": train_result.training_token_count,
             "artifact_key": train_result.artifact_key,
-            "artifact_sha256": train_result.artifact_sha256,
             "artifact_scope": "run_owned",
         },
     )
     vectors = KeyedVectors.load(str(output_dir / f"{run_id}.model"))
     pos_rows: list[dict] = []
-    for row in paragraph_rows:
-        tokens = paragraph_tokens.get(row.paragraph_id, [])
+    for paragraph_id, tokens in paragraph_tokens.items():
         for entry in build_pos_embeddings(
             tokens,
             vectors,
-            paragraph_id=row.paragraph_id,
-            source_content_hash=row.content_hash,
+            paragraph_id=paragraph_id,
         ):
             pos_rows.append(
                 {
@@ -239,7 +245,6 @@ def _train_and_build(
                     "embedding_vector": entry.embedding_vector,
                     "source_token_count": entry.source_token_count,
                     "in_vocabulary_token_count": entry.in_vocabulary_token_count,
-                    "source_content_hash": entry.source_content_hash,
                 }
             )
     ling_repo.insert_pos_embeddings(run_id, pos_rows)

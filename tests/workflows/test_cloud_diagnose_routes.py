@@ -8,7 +8,6 @@
 paragraph_curves（chunk_topics 已删除），高张力素材来自段落曲线 surface_tension。
 """
 
-import hashlib
 import sys
 import uuid
 from dataclasses import replace
@@ -92,11 +91,9 @@ class TestDiagnosisRoutes:
             num_topics=1,
             parameters={"num_topics": 1},
             dictionary_size=5,
-            training_corpus_hash="0" * 64,
             training_document_count=len(spans),
             inference_paragraph_count=len(spans),
             artifact_key=f"models/topic/{self.run_id}",
-            artifact_sha256="0" * 64,
         )
         paragraph_repo.insert_paragraph_topic_inferences(
             self.run_id,
@@ -108,7 +105,6 @@ class TestDiagnosisRoutes:
                     "complete",
                     None,
                     1.0,
-                    hashlib.sha256(span.text.encode("utf-8")).hexdigest(),
                 )
                 for span in spans
             ],
@@ -155,6 +151,9 @@ class TestDiagnosisRoutes:
                 description="测试伏笔",
                 confidence="medium",
                 setup_node_id="event-test-setup",
+                setup_kind="悬念",
+                expected_payoff_family="身份揭露",
+                payoff_likelihood="medium",
             ),
             setup_event_id="event-test-setup",
         )

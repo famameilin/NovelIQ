@@ -65,7 +65,6 @@ _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS = {
     "embedding_vector",
     "embedding_model_key",
     "embedding_dimension",
-    "source_content_hash",
     "created_at",
 }
 
@@ -101,7 +100,6 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
                     embedding_vector vector({embedding_dim}),
                     embedding_model_key VARCHAR,
                     embedding_dimension INTEGER,
-                    source_content_hash VARCHAR(64),
                     created_at VARCHAR(50),
                     PRIMARY KEY (run_id, paragraph_id),
                     FOREIGN KEY (run_id) REFERENCES {schema}.analysis_runs(run_id) ON DELETE CASCADE,

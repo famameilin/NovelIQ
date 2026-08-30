@@ -34,8 +34,6 @@ class ParagraphEmbedding(Base):
     embedding_model_key: Mapped[str | None] = mapped_column(String, nullable=True)
     # 生成该向量的嵌入维度（settings.models.paragraph_embedding.embedding_dim）
     embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # 段落内容 sha256 hex，供派生数据校验段落内容未变（对照 paragraphs.content_hash）
-    source_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (

@@ -549,7 +549,7 @@ def test_multiple_write_tools_same_round_then_complete_chunk() -> None:
 
 
 def test_write_receipts_carry_fixed_compact_shape() -> None:
-    """2026-08-10 用于验证成功 write 的模型回执固定压缩为 accepted/tool/domain/revision/item_count/state_digest"""
+    """2026-08-10 用于验证成功 write 的模型回执固定压缩为 accepted/tool/domain/item_count"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -561,16 +561,13 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "tool",
         "domain",
         "item_count",
-        "state_digest",
     }
     assert receipt == {
         "accepted": True,
         "tool": "write_entities",
         "domain": "entities",
         "item_count": 1,
-        "state_digest": receipt["state_digest"],
     }
-    assert receipt["state_digest"].startswith("sha256:")
     metrics_receipt = _call(tools, "write_metrics", _write_metrics_args())
     assert metrics_receipt["item_count"] == 1
     assert metrics_receipt["tool"] == "write_metrics"
@@ -820,14 +817,28 @@ def test_create_event_isforeshadowing_binds_setup_node() -> None:
 
     entities_response = _call(tools, "write_entities", _write_entities_args())
     assert entities_response["accepted"] is True
-    response = _call(tools, "create_event", _create_event_args(isforeshadowing=True))
+    response = _call(
+        tools,
+        "create_event",
+        _create_event_args(
+            isforeshadowing=True,
+            setup_kind="悬念",
+            expected_payoff_family="身份揭露",
+            payoff_likelihood="medium",
+        ),
+    )
     assert response["accepted"] is True
     stored = ledger.bound_payloads["foreshadowings"]
     assert stored[0].description == "顾霜喝止众人"
     assert stored[0].confidence == "medium"
     assert stored[0].setup_node_id == response["root_node_id"]
+    assert stored[0].setup_kind == "悬念"
+    assert stored[0].expected_payoff_family == "身份揭露"
+    assert stored[0].payoff_likelihood == "medium"
     with pytest.raises(ValidationError):
-        CreateEventInput.model_validate({"description": "伏笔", "setup_kind": "其他"})
+        CreateEventInput.model_validate(
+            {"description": "伏笔", "isforeshadowing": True, "setup_kind": "其他"}
+        )
 
 
 def test_future_disabled_limits_search_to_previous() -> None:

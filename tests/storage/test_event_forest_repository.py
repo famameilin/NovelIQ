@@ -166,6 +166,9 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
             description="顾霜承诺护佑山门",
             confidence="high",
             setup_node_id=setup_eid,
+            setup_kind="承诺",
+            expected_payoff_family="守护",
+            payoff_likelihood="high",
         ),
         setup_event_id=setup_eid,
     )

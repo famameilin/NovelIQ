@@ -60,7 +60,7 @@ def validate_bound_annotation(
     """2026-08-07 用于复核系统绑定标注完整覆盖真实 chunk 和对话原文
 
     2026-08-18：增加事件锚点校验——每个事件的 char_start/char_end 必须落在
-    chunk 文本范围内，text_hash 必须与 chunk 文本对应切片的哈希一致。
+    chunk 文本范围内。
     """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须为正整数")

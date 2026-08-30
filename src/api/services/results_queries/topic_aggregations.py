@@ -25,7 +25,6 @@ def _model_meta(dict_row: Any | None) -> dict[str, Any] | None:
         "pipeline_version": dict_row.pipeline_version,
         "num_topics": dict_row.num_topics,
         "artifact_key": dict_row.artifact_key,
-        "artifact_sha256": dict_row.artifact_sha256,
     }
 
 

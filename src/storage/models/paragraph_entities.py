@@ -47,7 +47,6 @@ class ParagraphEntity(Base):
     local_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
-    source_content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

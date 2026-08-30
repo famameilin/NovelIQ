@@ -41,16 +41,14 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
         num_topics=2,
         parameters={"num_topics": 2},
         dictionary_size=20,
-        training_corpus_hash="a" * 64,
         training_document_count=6,
         inference_paragraph_count=6,
         artifact_key=f"models/topic/{run_id}",
-        artifact_sha256="b" * 64,
     )
     repo.insert_paragraph_topic_inferences(
         run_id,
         [
-            (paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0, "c" * 64)
+            (paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0)
             for paragraph_id in range(6)
         ],
     )

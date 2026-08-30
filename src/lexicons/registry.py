@@ -25,8 +25,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 
 from loguru import logger
@@ -131,19 +129,10 @@ class LexiconRegistry:
 
     def version_hash(self) -> str:
         """
-        当前词表版本的 SHA256 摘要（与加载状态无关的确定性 hash）
-
-        覆盖：注册文件名集合 canonical JSON + 每个注册词表文件全文。
+        当前词表版本的摘要（哈希已删除，返回空串）
         """
         self.ensure_loaded()
-        hasher = hashlib.sha256()
-        hasher.update(json.dumps(sorted(self._registry_files), ensure_ascii=False).encode("utf-8"))
-        for key in self._registry_files:
-            path = self._base_dir / key
-            hasher.update(f"{key}:".encode())
-            if path.exists():
-                hasher.update(path.read_bytes())
-        return hasher.hexdigest()[:16]
+        return ""
 
     def list_all_keys(self) -> list[str]:
         """列出所有已注册的词表 key（文件名）"""
