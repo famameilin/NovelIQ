@@ -17,6 +17,7 @@ from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.config import settings
 from src.preprocess.tokenize import tokenize
 from src.storage.models import (
+    Chapter,
     DialogueRecord,
     ForeshadowingThread,
     ForeshadowingThreadHit,
@@ -122,38 +123,42 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
 
 
 @pytest.mark.asyncio
-async def test_text_search_returns_only_matching_later_paragraphs(db_session, monkeypatch) -> None:
-    """2026-08-14 二期段落化：后文搜索按段落边界返回当前位置之后的匹配段落"""
+async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order(db_session, monkeypatch) -> None:
+    """2026-08-30 用于验证 previous/future/all 不依赖 chapter_id 或 paragraph_id 排序"""
     monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜在当前章现身", "第二章没有目标内容", "第三章顾霜身份揭晓"],
-        chapter_ids=[1, 2, 3],
-        title="后文动态检索",
+        # 段落 ID 将按输入顺序为 0/1/2，故后文章的段落 ID 反而最小
+        texts=["后文顾霜身份揭晓", "前文顾霜初次现身", "当前章顾霜入城"],
+        chapter_ids=[900, 100, 500],
+        title="章节序号严格前文检索",
     )
-    _insert_paragraphs(
-        db_session,
-        run_id,
-        ["顾霜在当前章现身", "第二章没有目标内容", "第三章顾霜身份揭晓"],
-        chapter_ids=[1, 2, 3],
-    )
+    sequence_by_chapter_id = {100: 1, 500: 2, 900: 3}
+    chapters = db_session.execute(select(Chapter).where(Chapter.run_id == run_id)).scalars().all()
+    for chapter in chapters:
+        chapter.sequence = sequence_by_chapter_id[chapter.chapter_id]
+    db_session.commit()
     service = DatabaseAnnotationQueryService(
         db_session,
         run_id=run_id,
-        current_chapter_id=1,
-        # 当前章（chapter 1）的段落边界：只有 paragraph_id=0
-        current_first_paragraph_id=0,
-        current_last_paragraph_id=0,
+        current_chapter_id=500,
+        current_first_paragraph_id=2,
+        current_last_paragraph_id=2,
     )
 
-    results = await service.search_text("顾霜", range_name="future")
+    previous = await service.search_text("顾霜", range_name="previous")
+    future = await service.search_text("顾霜", range_name="future")
+    all_results = await service.search_text("顾霜", range_name="all")
 
-    assert [(item.chapter_id, item.paragraph_id) for item in results] == [(3, 2)]
-    assert "顾霜" in results[0].excerpt
-    # read_text 按 paragraph_id 读目标段 + 默认上下文（前后各一段，换行分隔）
-    assert service.read_text(2) == "第二章没有目标内容\n第三章顾霜身份揭晓"
-    with pytest.raises(ValueError, match="原文段落不存在或跨 run"):
-        service.read_text(999)
+    assert [(item.chapter_id, item.paragraph_ids) for item in previous] == [(100, [1])]
+    assert previous[0].content == "前文顾霜初次现身"
+    assert [(item.chapter_id, item.paragraph_ids) for item in future] == [(900, [0])]
+    assert future[0].content == "后文顾霜身份揭晓"
+    assert {(item.chapter_id, tuple(item.paragraph_ids), item.content) for item in all_results} == {
+        (100, (1,), "前文顾霜初次现身"),
+        (500, (2,), "当前章顾霜入城"),
+        (900, (0,), "后文顾霜身份揭晓"),
+    }
 
 
 def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
@@ -438,19 +443,27 @@ def test_sync_dialogues_no_event_anchor_keeps_null(db_session) -> None:
     assert rows[0].event_id is None
 
 
-def test_search_event_history_returns_events_within_chapter_boundary(db_session, monkeypatch) -> None:
-    """2026-08-19 用于验证事件历史检索按章节边界过滤"""
+def test_search_event_history_excludes_future_events_by_chapter_sequence_when_ids_are_out_of_order(
+    db_session,
+    monkeypatch,
+) -> None:
+    """2026-08-30 用于验证事件历史只返回当前章节序号之前的树根"""
     monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜进入山门。", "顾霜拔剑迎敌。"],
-        chapter_ids=[1, 2],
-        title="事件历史检索",
+        texts=["顾霜在后文拔剑迎敌。", "顾霜进入山门。", "顾霜在当前章入城。"],
+        chapter_ids=[900, 100, 500],
+        title="事件历史章节序号边界",
     )
+    sequence_by_chapter_id = {100: 1, 500: 2, 900: 3}
+    chapters = db_session.execute(select(Chapter).where(Chapter.run_id == run_id)).scalars().all()
+    for chapter in chapters:
+        chapter.sequence = sequence_by_chapter_id[chapter.chapter_id]
+    db_session.commit()
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
-        chapter_id=1,
+        chapter_id=100,
         events=[
             {
                 "description": "顾霜进入山门",
@@ -463,7 +476,7 @@ def test_search_event_history_returns_events_within_chapter_boundary(db_session,
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
-        chapter_id=2,
+        chapter_id=900,
         events=[
             {
                 "description": "顾霜拔剑迎敌",
@@ -476,23 +489,16 @@ def test_search_event_history_returns_events_within_chapter_boundary(db_session,
     service = DatabaseAnnotationQueryService(
         db_session,
         run_id=run_id,
-        current_chapter_id=2,
-        current_first_paragraph_id=0,
-        current_last_paragraph_id=0,
+        current_chapter_id=500,
+        current_first_paragraph_id=2,
+        current_last_paragraph_id=2,
     )
 
-    # search_event_history 返回事件树根视图
-    prior = service.search_event_history("顾霜", max_chapter_order=1)
+    prior = service.search_event_history("顾霜")
     assert [item.description for item in prior] == ["顾霜进入山门"]
     assert prior[0].root_node_id == "evt-history-gate"
     assert prior[0].cross_chapter is False
-
-    visible = service.search_event_history("顾霜", max_chapter_order=2)
-    by_desc = {item.description: item for item in visible}
-    assert set(by_desc) == {"顾霜进入山门", "顾霜拔剑迎敌"}
-    assert len(visible) == 2
-    latest_payoff = by_desc["顾霜拔剑迎敌"]
-    assert latest_payoff.root_node_id == "evt-history-draw"
+    assert all(item.root_node_id != "evt-history-draw" for item in prior)
 
 
 def test_search_event_history_returns_empty_when_no_match(db_session, monkeypatch) -> None:
@@ -525,4 +531,4 @@ def test_search_event_history_returns_empty_when_no_match(db_session, monkeypatc
         current_last_paragraph_id=0,
     )
 
-    assert service.search_event_history("不存在的关键词", max_chapter_order=1) == []
+    assert service.search_event_history("不存在的关键词") == []

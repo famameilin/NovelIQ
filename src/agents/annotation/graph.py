@@ -2,7 +2,7 @@
 章节标注逐 chunk 语义写入 LangGraph
 
 消息链采用 messages + add_messages 累积；每次模型请求携带完整历史消息。
-complete_chunk 与 finish_chapter 由程序自动执行：七个领域全部写入成功后
+complete_chunk 与 finish_chapter 由程序自动执行：五个写入工具覆盖六领域后
 图节点自动冻结 chunk 并完成章节，模型不需要调用完成工具。
 """
 
@@ -36,6 +36,22 @@ _DOMAIN_NAMES = (
 )
 _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
 
+_FORMAL_WRITE_ORDER = (
+    ("entities", "write_entities"),
+    ("metrics", "write_metrics"),
+    ("events", "create_event"),
+    ("relations", "write_relations"),
+    ("dialogues", "write_dialogues"),
+)
+_FORMAL_WRITE_TOOL_NAMES = frozenset(tool_name for _domain, tool_name in _FORMAL_WRITE_ORDER)
+_FORMAL_WRITE_DEPENDENCIES = {
+    "entities": frozenset(),
+    "metrics": frozenset(),
+    "events": frozenset({"entities"}),
+    "relations": frozenset({"entities"}),
+    "dialogues": frozenset({"entities"}),
+}
+
 
 class AnnotationGraphState(TypedDict):
     """2026-08-10 用于保存逐 chunk 工具循环的累积消息链"""
@@ -44,6 +60,59 @@ class AnnotationGraphState(TypedDict):
     phase: AnnotationPhase
     iterations: int
     error: str | None
+
+
+def _active_write_tools(ledger: AnnotationToolLedger) -> tuple[str, ...]:
+    """2026-08-30 用于按真实领域依赖开放前两个可执行的待写工具"""
+    eligible = tuple(
+        tool_name
+        for domain, tool_name in _FORMAL_WRITE_ORDER
+        if domain not in ledger.domain_receipts
+        and _FORMAL_WRITE_DEPENDENCIES[domain] <= ledger.domain_receipts
+    )
+    return eligible[:2]
+
+
+def _active_write_tool(ledger: AnnotationToolLedger) -> str | None:
+    """2026-08-30 用于返回当前开放窗口中的首个待写工具供审计展示"""
+    active_write_tools = _active_write_tools(ledger)
+    return active_write_tools[0] if active_write_tools else None
+
+
+def _tools_for_turn(tools: list[Any], ledger: AnnotationToolLedger) -> list[Any]:
+    """2026-08-30 用于保留非正式工具并暴露依赖就绪的至多两个正式写入工具"""
+    tools_by_name = {candidate.name: candidate for candidate in tools}
+    active_write_tools = [
+        tools_by_name[name] for name in _active_write_tools(ledger) if name in tools_by_name
+    ]
+    nonformal_tools = [candidate for candidate in tools if candidate.name not in _FORMAL_WRITE_TOOL_NAMES]
+    return [*active_write_tools, *nonformal_tools]
+
+
+def _tool_batch_protocol_error(
+    calls: list[dict[str, Any]],
+    *,
+    allowed_tool_names: frozenset[str],
+) -> str | None:
+    """2026-08-30 用于校验单轮至多两种正式写入且允许重复追加多棵事件树"""
+    if not calls:
+        return "每个模型回合必须调用工具"
+    call_names = tuple(str(call.get("name")) for call in calls)
+    unavailable = [name for name in call_names if name not in allowed_tool_names]
+    if unavailable:
+        return f"本轮未开放工具: {unavailable}"
+    formal_names = tuple(name for name in call_names if name in _FORMAL_WRITE_TOOL_NAMES)
+    if not formal_names:
+        if len(call_names) > 1:
+            return "检索和案例工具必须单独占用模型回合"
+        return None
+    if len(formal_names) != len(call_names):
+        return "正式写入不得与检索或案例工具在同一模型回合调用"
+    duplicate_names = {name for name in formal_names if formal_names.count(name) > 1}
+    unsupported_duplicates = duplicate_names - {"create_event"}
+    if unsupported_duplicates:
+        return f"同一模型回合只允许 create_event 重复调用: {sorted(unsupported_duplicates)}"
+    return None
 
 
 def _build_agent_node(
@@ -69,41 +138,50 @@ def _build_agent_node(
         from src.agents.stream import run_model_call
 
         request_messages = list(state["messages"])
-        context_summary = ledger.context_summary()
-        turn_started_ns = time.perf_counter_ns()
+        active_write_tool = _active_write_tool(ledger)
+        active_write_tools = _active_write_tools(ledger)
+        turn_tools = _tools_for_turn(tools, ledger)
+        context_summary = {
+            **ledger.context_summary(),
+            "active_write_tool": active_write_tool,
+            "active_write_tools": list(active_write_tools),
+            "allowed_tool_names": [candidate.name for candidate in turn_tools],
+        }
 
-        def on_turn_complete(message: AIMessage, timing: Any) -> None:
-            """2026-08-10 用于在模型流结束后写入回合审计"""
+        def on_turn_started(provider_request: dict[str, Any], started_ns: int) -> None:
+            """2026-08-30 用于在物理 Provider 请求发送前写入独立审计行"""
             if observer is None:
                 return
-            observer.record_turn(
+            observer.begin_provider_turn(
                 context_summary=context_summary,
                 request_messages=request_messages,
-                response_message=message,
-                timing=timing,
-                started_ns=turn_started_ns,
+                provider_request=provider_request,
+                started_ns=started_ns,
             )
-            if not getattr(message, "tool_calls", None):
-                # 2026-08-22 无工具回复由调用层判定未正常结束并重发，
-                # 本回合审计在此闭合，避免重发期间留下悬空计时
-                observer.close_turn()
+
+        def on_turn_complete(message: AIMessage, timing: Any) -> None:
+            """2026-08-30 用于收口成功的物理 Provider 请求审计"""
+            if observer is None:
+                return
+            observer.complete_provider_turn(response_message=message, timing=timing)
+
+        def on_turn_failed(error: str, timing: Any, message: AIMessage | None) -> None:
+            """2026-08-30 用于收口断流超时和无工具回复的物理 Provider 请求审计"""
+            if observer is None:
+                return
+            observer.fail_provider_turn(error=error, timing=timing, response_message=message)
 
         try:
             response = await run_model_call(
-                llm.bind_tools(tools),
+                llm.bind_tools(turn_tools),
                 request_messages,
                 stream,
                 on_turn_complete=on_turn_complete,
+                on_turn_started=on_turn_started,
+                on_turn_failed=on_turn_failed,
                 total_attempts=retries,
             )
-        except Exception as exc:
-            if observer is not None:
-                observer.record_failed_turn(
-                    context_summary=context_summary,
-                    error=str(exc),
-                    started_ns=turn_started_ns,
-                    request_messages=request_messages,
-                )
+        except Exception:
             raise
         return {"messages": [response], "iterations": iterations + 1}
 
@@ -166,7 +244,7 @@ def _build_tool_batch_node(
     tool_map = {candidate.name: candidate for candidate in tools}
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-10 用于按调用顺序执行工具；失败只恢复该调用前的 Ledger 与 FactGraph"""
+        """2026-08-30 用于独立串行执行至多两种正式写入并按单次调用边界回滚"""
 
         async def _emit_tool_status(name: str, status: str, message: str) -> None:
             """2026-08-12 用于推送工具结果状态事件；SSE 推送失败时先闭合回合审计计时再上抛"""
@@ -184,6 +262,46 @@ def _build_tool_batch_node(
 
         calls = _tool_calls(state)
         messages: list[ToolMessage] = []
+        allowed_tool_names = frozenset(candidate.name for candidate in _tools_for_turn(tools, ledger))
+        protocol_error = _tool_batch_protocol_error(
+            calls,
+            allowed_tool_names=allowed_tool_names,
+        )
+
+        async def _append_failed_call(call_index: int, call: dict[str, Any], error_text: str) -> None:
+            """2026-08-30 用于把协议或顺序错误作为独立失败回执和审计记录返回模型"""
+            name = str(call.get("name"))
+            result = _failed_receipt(name, error_text)
+            started_ns = time.perf_counter_ns()
+            if observer is not None:
+                observer.record_tool_call(
+                    call_index=call_index,
+                    tool_name=name,
+                    request_args=dict(call.get("args") or {}),
+                    raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
+                    response=json.loads(result),
+                    receipt=json.loads(result),
+                    status="error",
+                    error=error_text,
+                    tool_duration_ms=0,
+                    started_ns=started_ns,
+                )
+            await _emit_tool_status(name, "error", error_text)
+            messages.append(
+                ToolMessage(
+                    content=result,
+                    tool_call_id=str(call["id"]),
+                    name=name,
+                )
+            )
+
+        if protocol_error is not None:
+            ledger.errors.append(protocol_error)
+            for call_index, call in enumerate(calls):
+                await _append_failed_call(call_index, call, protocol_error)
+            if observer is not None:
+                observer.close_turn()
+            return {"messages": messages, "phase": ledger.phase}
         for call_index, call in enumerate(calls):
             name = str(call.get("name"))
             if call.get("truncated"):
@@ -273,10 +391,10 @@ def _build_auto_finalize_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
 ):
-    """2026-08-10 用于七领域写入成功后自动 complete_chunk 并 finish_chapter"""
+    """2026-08-30 用于六个内部数据领域就绪后自动完成章节"""
 
     async def auto_finalize(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-10 用于在七领域 receipt 齐全时程序冻结 chunk 并完成章节"""
+        """2026-08-30 用于在六领域回执齐全时冻结 chunk 并完成章节"""
         if ledger.phase != "chunk_open":
             return {"phase": ledger.phase}
         if not _DOMAIN_NAMES_SET <= ledger.domain_receipts:

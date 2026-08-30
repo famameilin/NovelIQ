@@ -207,25 +207,3 @@ class TextSearchService:
             )
         )
         return candidates[: max(1, limit)]
-
-    def read(self, paragraph_id: int, context_paragraphs: int = 1) -> str:
-        """2026-08-14 用于读取同 run 候选段落的原文
-
-        段落顺序按 paragraph_id；context_paragraphs > 0 时返回目标段 +
-        前后各 N 段的拼接文本（边界处自然截断），段落文本用换行分隔。
-        context_paragraphs = 0 时只返回目标段本身。
-        """
-        start = paragraph_id - max(0, context_paragraphs)
-        end = paragraph_id + max(0, context_paragraphs)
-        rows = self._session.execute(
-            select(Paragraph.paragraph_id, Paragraph.text)
-            .where(
-                Paragraph.run_id == self._run_id,
-                Paragraph.paragraph_id >= start,
-                Paragraph.paragraph_id <= end,
-            )
-            .order_by(Paragraph.paragraph_id.asc())
-        ).all()
-        if not any(int(row.paragraph_id) == paragraph_id for row in rows):
-            raise ValueError(f"原文段落不存在或跨 run: paragraph_id={paragraph_id}")
-        return "\n".join(str(row.text) for row in rows)

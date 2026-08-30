@@ -109,6 +109,15 @@ class DatabaseAnnotationQueryService:
         self.current_chapter_id = current_chapter_id
         self.current_first_paragraph_id = current_first_paragraph_id
         self.current_last_paragraph_id = current_last_paragraph_id
+        current_chapter_sequence = self.session.execute(
+            select(Chapter.sequence).where(
+                Chapter.run_id == run_id,
+                Chapter.chapter_id == current_chapter_id,
+            )
+        ).scalar_one_or_none()
+        if current_chapter_sequence is None:
+            raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
+        self.current_chapter_sequence = int(current_chapter_sequence)
         chapter_ids = list(
             self.session.execute(
                 select(Chapter.chapter_id)
@@ -229,57 +238,53 @@ class DatabaseAnnotationQueryService:
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchResult]:
-        """2026-08-14 用于按 previous/future/all 范围联合定位原文候选（段落边界）"""
+        """2026-08-30 用于按 Chapter.sequence 在 SQL 层执行配置授权的正文范围检索"""
+        before_chapter_sequence: int | None = None
+        after_chapter_sequence: int | None = None
         if range_name == "previous":
-            min_paragraph_id = None
-            max_paragraph_id = self.current_first_paragraph_id - 1
+            before_chapter_sequence = self.current_chapter_sequence
         elif range_name == "future":
-            min_paragraph_id = self.current_last_paragraph_id + 1
-            max_paragraph_id = None
-        elif range_name == "all":
-            min_paragraph_id = None
-            max_paragraph_id = None
-        else:
+            after_chapter_sequence = self.current_chapter_sequence
+        elif range_name != "all":
             raise ValueError("search_text.range 只能是 previous、future 或 all")
         candidates = await self.text_search_service.search(
             query,
-            min_paragraph_id=min_paragraph_id,
-            max_paragraph_id=max_paragraph_id,
+            before_chapter_sequence=before_chapter_sequence,
+            after_chapter_sequence=after_chapter_sequence,
             limit=limit,
         )
         return [
             TextSearchResult(
                 chapter_id=row.chapter_id,
-                paragraph_id=row.paragraph_id,
-                excerpt=row.excerpt,
+                paragraph_ids=[row.paragraph_id],
+                content=row.excerpt,
                 keyword_score=row.keyword_score,
                 semantic_score=row.semantic_score,
             )
             for row in candidates
         ]
 
-    def read_text(self, paragraph_id: int) -> str:
-        """2026-08-14 用于读取本轮文本搜索候选段落的同 run 原文（带默认上下文）"""
-        return self.text_search_service.read(paragraph_id)
-
     def search_event_history(
         self,
         query: str,
         *,
-        max_chapter_order: int,
         limit: int = 20,
     ) -> list[EventTreeHistoryResult]:
-        """2026-08-22 用于在历史章节边界内检索事件树（根视图）并授权 tree_id
+        """2026-08-30 用于按当前 Chapter.sequence 在 SQL 层检索严格前文事件树
 
         只返回每棵树的主链根节点视图；cross_chapter 由该树的因果入边派生。
         """
-        if max_chapter_order <= 0 or limit <= 0:
+        if limit <= 0:
             return []
         rows = self.session.execute(
             select(EventNode)
+            .join(
+                Chapter,
+                (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
+            )
             .where(
                 EventNode.run_id == self.run_id,
-                EventNode.chapter_order <= max_chapter_order,
+                Chapter.sequence < self.current_chapter_sequence,
             )
             .order_by(EventNode.chapter_order.desc(), EventNode.event_id)
         ).scalars()
