@@ -55,6 +55,27 @@ class _FailingLLM:
         raise RuntimeError("provider timeout")
 
 
+class _RetryingLLM:
+    """2026-08-30 用于模拟一次瞬态失败后成功的非流式 Provider"""
+
+    def __init__(self) -> None:
+        """2026-08-30 用于初始化物理请求计数"""
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        """2026-08-30 用于保持测试模型绑定接口与生产模型一致"""
+        del tools
+        return self
+
+    async def ainvoke(self, messages):
+        """2026-08-30 用于首请求抛超时并在第二请求返回 finish"""
+        del messages
+        self.calls += 1
+        if self.calls == 1:
+            raise TimeoutError("provider timeout")
+        return AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])
+
+
 def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserver, int, str]:
     """构造与测试库绑定的审计 recorder/observer 并开启 invocation"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
@@ -356,7 +377,45 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
     assert turn.request_messages is not None
     assert {"system", "human"} == {m["role"] for m in turn.request_messages}
     assert turn.request_messages[-1]["content"] == "诊断"
-    assert turn.timing_notes == ["provider_call_failed"]
+    assert turn.timing_notes == ["provider_call_failed", "provider_request_failed"]
+
+
+async def test_graph_retries_are_audited_as_separate_provider_requests(db_session) -> None:
+    """2026-08-30 用于验证通用 Agent 的失败重试分别形成独立物理请求审计行"""
+    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    llm = _RetryingLLM()
+    graph = build_agent_graph(
+        llm,
+        [],
+        max_attempts=5,
+        response_model=CloudAnalysis,
+        first_hint="完成诊断",
+        observer=observer,
+        model_retries=2,
+    )
+
+    result = await graph.ainvoke(_initial_state())
+
+    recorder.finish_invocation(invocation_id, status="success")
+    assert result.get("error") is None
+    assert llm.calls == 2
+    db_session.rollback()
+    turns = list(
+        db_session.execute(
+            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id).order_by(AgentTurn.turn_index)
+        ).scalars()
+    )
+    assert [turn.status for turn in turns] == ["error", "success"]
+    assert [turn.context_summary["provider_request"]["attempt"] for turn in turns] == [1, 2]
+    assert [turn.context_summary["provider_request"]["request_index"] for turn in turns] == [1, 2]
+    finish_rows = list(
+        db_session.execute(
+            select(AgentToolCall).where(AgentToolCall.turn_id.in_([turn.id for turn in turns]))
+        ).scalars()
+    )
+    assert len(finish_rows) == 1
+    assert finish_rows[0].tool_name == "finish"
+    assert finish_rows[0].turn_id == turns[1].id
 
 
 async def test_graph_finish_emits_tool_call_succeeded_event() -> None:

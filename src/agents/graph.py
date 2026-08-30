@@ -325,20 +325,30 @@ def _build_agent_node(
             messages = [HumanMessage(content=first_hint)] + messages
         if stream is not None:
             await stream.thinking("正在推理，规划下一步动作...")
-        turn_started_ns = time.perf_counter_ns()
         summary = context_summary(state) if context_summary is not None else {"phase": "agent_loop"}
 
-        def on_turn_complete(message: AIMessage, timing: Any) -> None:
-            """2026-08-10 用于在模型流结束后写入回合审计"""
+        def on_turn_started(provider_request: dict[str, Any], started_ns: int) -> None:
+            """2026-08-30 用于在通用 Agent 的物理 Provider 请求发送前写入独立审计行"""
             if observer is None:
                 return
-            observer.record_turn(
+            observer.begin_provider_turn(
                 context_summary=summary,
                 request_messages=messages,
-                response_message=message,
-                timing=timing,
-                started_ns=turn_started_ns,
+                provider_request=provider_request,
+                started_ns=started_ns,
             )
+
+        def on_turn_complete(message: AIMessage, timing: Any) -> None:
+            """2026-08-30 用于收口通用 Agent 的成功物理 Provider 请求审计"""
+            if observer is None:
+                return
+            observer.complete_provider_turn(response_message=message, timing=timing)
+
+        def on_turn_failed(error: str, timing: Any, message: AIMessage | None) -> None:
+            """2026-08-30 用于收口通用 Agent 的断流超时和无工具物理请求审计"""
+            if observer is None:
+                return
+            observer.fail_provider_turn(error=error, timing=timing, response_message=message)
 
         try:
             response = await run_model_call(
@@ -346,16 +356,11 @@ def _build_agent_node(
                 messages,
                 stream,
                 on_turn_complete=on_turn_complete,
+                on_turn_started=on_turn_started,
+                on_turn_failed=on_turn_failed,
                 total_attempts=retries,
             )
-        except Exception as exc:
-            if observer is not None:
-                observer.record_failed_turn(
-                    context_summary=summary,
-                    error=str(exc),
-                    started_ns=turn_started_ns,
-                    request_messages=messages,
-                )
+        except Exception:
             raise
         return {"messages": [response]}
 
