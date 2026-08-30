@@ -4,12 +4,10 @@ import pytest
 
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import (
-    CharacterObservationInput,
+    CreateEventInput,
     DialogueInput,
     DialogueVerdict,
-    EmotionalValence,
     RelationInput,
-    RoleFunction,
 )
 from src.agents.annotation.tools import AnnotationToolLedger
 
@@ -39,32 +37,37 @@ def test_relation_endpoint_errors_collected_with_indexes() -> None:
     assert "[1] relation.from_entity 未在当前 chunk 的 write_entities 中声明: 丙" in message
 
 
-def test_character_observation_errors_collected_with_indexes() -> None:
+def test_event_participant_errors_collected_with_indexes() -> None:
+    """2026-08-30 用于一次返回事件树全部未登记参与者错误"""
     ledger = _ledger()
-    payload = [
-        CharacterObservationInput(
-            character="甲",
-            role_function=RoleFunction.SUBJECT,
-            action="出手救人",
-            emotion=EmotionalValence.STRONG_POSITIVE,
-        ),
-        CharacterObservationInput(
-            character="乙",
-            role_function=RoleFunction.OPPONENT,
-            action="拦路截杀",
-            emotion=EmotionalValence.STRONG_NEGATIVE,
-        ),
-    ]
+    payload = CreateEventInput.model_validate(
+        {
+            "description": "甲乙交战",
+            "finalize_events": True,
+            "participants": [
+                {
+                    "entity": "甲",
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "出手救人",
+                    "emotion": "strong_positive",
+                },
+                {
+                    "entity": "乙",
+                    "role": "反对者",
+                    "narrative_role": "反对者",
+                    "action": "拦路截杀",
+                    "emotion": "strong_negative",
+                },
+            ],
+        }
+    )
     with pytest.raises(ValueError) as excinfo:
-        ledger.write_domain(
-            "character_observations",
-            payload,
-            tool_name="write_character_observations",
-        )
+        ledger.create_event_tree(payload)
     message = str(excinfo.value)
-    assert "character_observations 校验失败" in message
-    assert "[0] character_observation.character 未在当前 chunk 的 write_entities 中声明: 甲" in message
-    assert "[1] character_observation.character 未在当前 chunk 的 write_entities 中声明: 乙" in message
+    assert "create_event 校验失败" in message
+    assert "create_event.root.participants[0] 未在 write_entities 中声明: 甲" in message
+    assert "create_event.root.participants[1] 未在 write_entities 中声明: 乙" in message
 
 
 def test_dialogue_speaker_error_collected_with_index() -> None:

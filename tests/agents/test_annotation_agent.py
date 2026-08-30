@@ -54,11 +54,6 @@ class _QueryService:
         del query, range_name, limit
         return []
 
-    def read_text(self, chunk_id):
-        """2026-08-07 用于返回测试原文"""
-        del chunk_id
-        return "后文"
-
     def fetch_active_case_details(self, case_id):
         """2026-08-07 用于表示测试中没有 active 案例"""
         del case_id
@@ -73,10 +68,11 @@ class _SequenceLLM:
         self.responses = list(responses)
         self.calls = 0
         self.captured_messages: list[list] = []
+        self.captured_tool_names: list[list[str]] = []
 
     def bind_tools(self, tools):
-        """2026-08-07 用于模拟 LangChain 工具绑定"""
-        del tools
+        """2026-08-30 用于记录每个模型回合实际绑定的工具合同"""
+        self.captured_tool_names.append([tool.name for tool in tools])
         return self
 
     async def ainvoke(self, messages):
@@ -130,24 +126,6 @@ def _entities_call(call_id: str = "call-entities") -> dict:
     )
 
 
-def _observations_call(call_id: str = "call-observations") -> dict:
-    """2026-08-07 用于构造合法 write_character_observations 调用"""
-    return _write_call(
-        "write_character_observations",
-        {
-            "items": [
-                {
-                    "character": "顾霜",
-                    "role_function": "主体",
-                    "action": "喝止",
-                    "emotion": "mild_negative",
-                }
-            ]
-        },
-        call_id=call_id,
-    )
-
-
 def _dialogues_call(call_id: str = "call-dialogues") -> dict:
     """2026-08-12 用于构造数组格式的 write_dialogues 调用（[序号, 三态, 说话人, 语气]）"""
     return _write_call(
@@ -163,7 +141,16 @@ def _events_call(call_id: str = "call-events") -> dict:
         "create_event",
         {
             "description": "顾霜喝止众人",
-            "participants": [{"entity": "顾霜", "role": "主体"}],
+            "participants": [
+                {
+                    "entity": "顾霜",
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝止",
+                    "emotion": "mild_negative",
+                }
+            ],
+            "finalize_events": True,
         },
         call_id=call_id,
     )
@@ -176,19 +163,13 @@ def _empty_domain_calls() -> list[dict]:
     ]
 
 
-def _full_write_calls(
-    *,
-    dialogues: dict | None = None,
-) -> list[dict]:
-    """2026-08-07 用于构造同一回复的全部七个领域写入调用"""
+def _serial_write_messages(*, dialogues: dict | None = None) -> list[AIMessage]:
+    """2026-08-30 用于按真实依赖和每轮至多两种 write 构造三轮正式写入回复"""
     resolved_dialogues = dialogues if dialogues is not None else _dialogues_call()
     return [
-        _metrics_call(),
-        _entities_call(),
-        _observations_call(),
-        resolved_dialogues,
-        _events_call(),
-        *_empty_domain_calls(),
+        _tool_message([_entities_call(), _metrics_call()]),
+        _tool_message([_events_call(), *_empty_domain_calls()]),
+        _tool_message([resolved_dialogues]),
     ]
 
 
@@ -341,128 +322,216 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
 @pytest.mark.asyncio
 async def test_single_chunk_chapter_completes_via_write_and_auto_finalize() -> None:
     """2026-08-07 用于验证单 chunk 章节经领域写入后由系统自动冻结完成"""
-    llm = _SequenceLLM(
-        [
-            _tool_message(_full_write_calls()),
-        ]
-    )
+    llm = _SequenceLLM(_serial_write_messages())
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
     assert result.get("error") is None
-    assert llm.calls == 1
+    assert llm.calls == 3
 
 
 @pytest.mark.asyncio
-async def test_seven_writes_make_auto_finalize_always_succeed() -> None:
-    """2026-08-10 用于验证七个 write 全部成功后系统自动冻结并完成章节"""
+async def test_five_writes_make_auto_finalize_always_succeed() -> None:
+    """2026-08-30 用于验证实体依赖就绪后其余 write 按每轮两种在三轮内完成"""
+    llm = _SequenceLLM(_serial_write_messages())
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "completed"
+    assert llm.calls == 3
+    formal_writes = {"write_entities", "write_dialogues", "create_event", "write_relations", "write_metrics"}
+    assert [
+        [name for name in tool_names if name in formal_writes]
+        for tool_names in llm.captured_tool_names
+    ] == [
+        ["write_entities", "write_metrics"],
+        ["create_event", "write_relations"],
+        ["write_dialogues"],
+    ]
+    assert [len(messages) for messages in llm.captured_messages] == [2, 5, 8]
+
+
+@pytest.mark.asyncio
+async def test_cross_batch_write_calls_in_one_round_are_all_rejected() -> None:
+    """2026-08-30 用于验证同一回复跨正式写入批次时全部拒绝且不推进当前批次"""
     llm = _SequenceLLM(
         [
-            _tool_message(_full_write_calls()),
+            _tool_message([_entities_call(), _dialogues_call(), _metrics_call()]),
+            *_serial_write_messages(),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
-    assert llm.calls == 1
-
-
-@pytest.mark.asyncio
-async def test_six_success_one_failure_keeps_six_receipts() -> None:
-    """2026-08-10 用于验证一个 write 失败只回滚该调用，其余六个 receipt 全部保留"""
-    invalid_metrics = _write_call(
-        "write_metrics",
-        {
-            "summary": " ",
-            "emotional_valence": "neutral",
-            "narrative_function": "铺垫",
-        },
-        call_id="call-metrics-bad",
-    )
-    llm = _SequenceLLM(
-        [
-            _tool_message(
-                [
-                    _entities_call(),
-                    _observations_call(),
-                    _dialogues_call(),
-                    _events_call(),
-                    _write_call("write_relations", {"items": []}, call_id="call-relations"),
-                    invalid_metrics,
-                ]
-            ),
-            _tool_message(
-                [
-                    _metrics_call(call_id="call-metrics-fixed"),
-                ]
-            ),
-        ]
-    )
-    result = await _invoke_graph(llm, allow_future_context=False)
-
-    assert result["phase"] == "completed"
-    assert llm.calls == 2
+    assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
-    accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
-    rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
-    assert len(accepted) == 5
-    assert len(rejected) == 1
-    assert '"tool": "write_metrics"' in rejected[0]
+    assert len(receipts) == 3
+    assert all('"accepted": false' in receipt for receipt in receipts)
+    assert all("本轮未开放工具" in receipt for receipt in receipts)
+    assert "write_entities" in llm.captured_tool_names[0]
+    assert "write_entities" in llm.captured_tool_names[1]
 
 
 @pytest.mark.asyncio
 async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
-    """2026-08-10 用于验证失败调用恢复该调用前账本而其他成功 write 修订保留"""
-    invalid_metrics = _write_call(
-        "write_metrics",
+    """2026-08-30 用于验证当前正式写入失败后保持原阶段并允许下一轮修正"""
+    invalid_entities = _write_call(
+        "write_entities",
         {
-            "summary": " ",
-            "emotional_valence": "neutral",
-            "narrative_function": "铺垫",
+            "entities": [{"name": " ", "entity_type": "character"}],
         },
-        call_id="call-metrics-bad",
+        call_id="call-entities-bad",
     )
     llm = _SequenceLLM(
         [
-            _tool_message([invalid_metrics, _metrics_call(call_id="call-metrics-2")]),
-            _tool_message(_full_write_calls()),
+            _tool_message([invalid_entities]),
+            *_serial_write_messages(),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
-    assert llm.calls == 2
+    assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
-    accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
-    rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
-    assert len(accepted) == 1
-    assert len(rejected) == 1
-    assert '"revision"' not in accepted[0]
-    assert '"tool": "write_metrics"' in rejected[0]
+    assert len(receipts) == 1
+    assert '"accepted": false' in receipts[0]
+    assert '"tool": "write_entities"' in receipts[0]
+    assert "write_entities" in llm.captured_tool_names[0]
+    assert "write_entities" in llm.captured_tool_names[1]
 
 
 @pytest.mark.asyncio
-async def test_partial_writes_do_not_auto_finalize() -> None:
-    """2026-08-07 用于验证领域未写完时不会触发自动完成，补齐后才完成"""
+async def test_failed_entity_write_keeps_dependent_writes_unexposed() -> None:
+    """2026-08-30 用于验证实体失败不阻断指标但继续隐藏对话事件和关系写入"""
+    invalid_entities = _write_call(
+        "write_entities",
+        {"entities": [{"name": " ", "entity_type": "character"}]},
+        call_id="call-entities-invalid",
+    )
     llm = _SequenceLLM(
         [
-            _tool_message(
-                [
-                    _metrics_call(),
-                    _entities_call(),
-                    _observations_call(),
-                    _dialogues_call(),
-                    _events_call(),
-                ]
-            ),
-            _tool_message(_empty_domain_calls()),
+            _tool_message([invalid_entities, _metrics_call()]),
+            _tool_message([_entities_call(call_id="call-entities-fixed")]),
+            _tool_message([_events_call(), *_empty_domain_calls()]),
+            _tool_message([_dialogues_call()]),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
     assert result.get("error") is None
-    assert llm.calls == 2
+    assert llm.calls == 4
+    formal_writes = {"write_entities", "write_dialogues", "create_event", "write_relations", "write_metrics"}
+    assert [name for name in llm.captured_tool_names[0] if name in formal_writes] == [
+        "write_entities",
+        "write_metrics",
+    ]
+    assert [name for name in llm.captured_tool_names[1] if name in formal_writes] == ["write_entities"]
+    assert [name for name in llm.captured_tool_names[2] if name in formal_writes] == [
+        "create_event",
+        "write_relations",
+    ]
+    first_round_receipts = _tool_receipts(llm.captured_messages[1])[-2:]
+    assert '"tool": "write_entities"' in first_round_receipts[0]
+    assert '"accepted": false' in first_round_receipts[0]
+    assert '"domain": "metrics"' in first_round_receipts[1]
+    assert '"accepted": true' in first_round_receipts[1]
+
+
+@pytest.mark.asyncio
+async def test_partial_writes_do_not_auto_finalize() -> None:
+    """2026-08-30 用于验证非末事件树不阻断同轮独立关系写入且事件阶段保持开放"""
+    first_event = _events_call(call_id="call-events-first")
+    first_event["args"]["finalize_events"] = False
+    second_event = _write_call(
+        "create_event",
+        {
+            "description": "顾霜收势",
+            "participants": [
+                {
+                    "entity": "顾霜",
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "收势",
+                    "emotion": "neutral",
+                }
+            ],
+            "finalize_events": True,
+        },
+        call_id="call-events-final",
+    )
+    llm = _SequenceLLM(
+        [
+            _tool_message([_entities_call(), _metrics_call()]),
+            _tool_message([first_event, *_empty_domain_calls()]),
+            _tool_message([second_event, _dialogues_call()]),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "completed"
+    assert result.get("error") is None
+    assert llm.calls == 3
+    assert [name for name in llm.captured_tool_names[1] if name in {"create_event", "write_relations"}] == [
+        "create_event",
+        "write_relations",
+    ]
+    assert [name for name in llm.captured_tool_names[2] if name in {"create_event", "write_relations"}] == [
+        "create_event"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_three_create_event_calls_and_relation_write_succeed_in_one_round() -> None:
+    """2026-08-30 用于验证一轮可重复调用三次 create_event 并独立提交关系写入"""
+    first_event = _events_call(call_id="call-events-first")
+    first_event["args"]["finalize_events"] = False
+    second_event = _events_call(call_id="call-events-second")
+    second_event["args"]["description"] = "顾霜追击"
+    second_event["args"]["participants"][0]["action"] = "追击"
+    second_event["args"]["finalize_events"] = False
+    final_event = _events_call(call_id="call-events-final")
+    final_event["args"]["description"] = "顾霜收势"
+    final_event["args"]["participants"][0]["action"] = "收势"
+    llm = _SequenceLLM(
+        [
+            _tool_message([_entities_call(), _metrics_call()]),
+            _tool_message([first_event, second_event, final_event, *_empty_domain_calls()]),
+            _tool_message([_dialogues_call()]),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "completed"
+    assert result.get("error") is None
+    assert llm.calls == 3
+    event_round_receipts = _tool_receipts(llm.captured_messages[2])[-4:]
+    assert sum('"tool": "create_event"' in receipt for receipt in event_round_receipts) == 3
+    assert all('"accepted": true' in receipt for receipt in event_round_receipts)
+    assert '"domain": "relations"' in event_round_receipts[-1]
+
+
+@pytest.mark.asyncio
+async def test_failed_event_write_does_not_block_relation_write_in_same_round() -> None:
+    """2026-08-30 用于验证事件写入失败时同轮关系写入仍独立执行并保留成功回执"""
+    invalid_event = _events_call(call_id="call-events-invalid")
+    invalid_event["args"]["participants"][0]["role"] = "发送者"
+    llm = _SequenceLLM(
+        [
+            _tool_message([_entities_call(), _metrics_call()]),
+            _tool_message([invalid_event, *_empty_domain_calls()]),
+            _tool_message([_events_call(call_id="call-events-fixed"), _dialogues_call()]),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    assert result["phase"] == "completed"
+    assert result.get("error") is None
+    assert llm.calls == 3
+    event_round_receipts = _tool_receipts(llm.captured_messages[2])[-2:]
+    assert '"tool": "create_event"' in event_round_receipts[0]
+    assert '"accepted": false' in event_round_receipts[0]
+    assert '"domain": "relations"' in event_round_receipts[1]
+    assert '"accepted": true' in event_round_receipts[1]
 
 
 @pytest.mark.asyncio
@@ -471,56 +540,44 @@ async def test_truncated_tool_call_skips_business_tool_and_feeds_error_receipt()
     2026-08-11 用于验证带截断标记的工具调用不执行业务写入，
     只回喂"参数不完整"错误回执，模型补全后章节仍能完成。
     """
-    truncated_metrics = {
-        "name": "write_metrics",
+    truncated_entities = {
+        "name": "write_entities",
         "args": {},
-        "id": "call-metrics-truncated",
+        "id": "call-entities-truncated",
         "type": "tool_call",
         "truncated": True,
-        "truncated_args": '{"summary": "住手回荡", "emotional_va',
+        "truncated_args": '{"entities": [{"name": "顾霜"',
     }
     # 聚合器在运行时以属性赋值挂载截断标记（绕过 create_tool_call 重建），测试同样模拟
     first_message = AIMessage(content="")
-    first_message.tool_calls = [truncated_metrics, _entities_call()]
+    first_message.tool_calls = [truncated_entities]
     llm = _SequenceLLM(
         [
             first_message,
-            _tool_message(
-                [
-                    _metrics_call(),
-                    _observations_call(),
-                    _dialogues_call(),
-                    _events_call(),
-                    *_empty_domain_calls(),
-                ]
-            ),
+            *_serial_write_messages(),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
     assert result.get("error") is None
-    assert llm.calls == 2
+    assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
     accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
     assert len(rejected) == 1
-    assert len(accepted) == 1
-    assert '"tool": "write_metrics"' in rejected[0]
+    assert len(accepted) == 0
+    assert '"tool": "write_entities"' in rejected[0]
     assert "截断" in rejected[0]
 
 
 @pytest.mark.asyncio
 async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
     """2026-08-10 用于验证 receipt 齐全但 ready_chunk 缺失时按不变量错误终止而非回环修正"""
-    llm = _SequenceLLM(
-        [
-            _tool_message(_full_write_calls()),
-        ]
-    )
+    llm = _SequenceLLM(_serial_write_messages())
 
     class _BrokenLedger(AnnotationToolLedger):
-        """2026-08-10 用于模拟 7 个 receipt 齐全但 ready_chunk 被破坏"""
+        """2026-08-30 用于模拟六领域回执齐全但 ready_chunk 被破坏"""
 
         def _rebuild_ready_chunk_if_complete(self) -> None:
             super()._rebuild_ready_chunk_if_complete()
@@ -565,7 +622,7 @@ async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
                 "error": None,
             }
         )
-    assert llm.calls == 1
+    assert llm.calls == 3
     assert ledger.annotation is None
     assert ledger.completed_chunks == []
 
@@ -904,7 +961,7 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
     llm = _SequenceLLM(
         [
             _tool_message([_resolve_fact_case_call()]),
-            _tool_message(_full_write_calls()),
+            *_serial_write_messages(),
         ]
     )
     graph = build_annotation_graph(
@@ -934,7 +991,7 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
 
     assert result["phase"] == "completed"
     assert result.get("error") is None
-    assert llm.calls == 2
+    assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
     assert len(rejected) == 1

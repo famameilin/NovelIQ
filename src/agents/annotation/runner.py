@@ -165,13 +165,7 @@ async def _run_single_attempt(
         retries=settings.models.annotation.total_attempts,
     )
     initial_messages = [
-        SystemMessage(
-            content=build_system_prompt(
-                novel_title=novel_title,
-                initial_cases=ledger.initial_case_views(),
-                allow_future_context=allow_future_context,
-            )
-        ),
+        SystemMessage(content=build_system_prompt()),
         HumanMessage(
             content=build_chunk_message(
                 chunk_index=1,

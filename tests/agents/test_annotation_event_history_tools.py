@@ -34,7 +34,7 @@ class _EventHistoryService:
     ) -> None:
         self.trees = trees or []
         self.current_chapter_order = current_chapter_order
-        self.calls: list[tuple[str, int, int]] = []
+        self.calls: list[tuple[str, int]] = []
 
     def find_initial_case_candidates(self, current_text, *, semantic_limit=50, rotation_limit=50):
         del current_text, semantic_limit, rotation_limit
@@ -60,9 +60,9 @@ class _EventHistoryService:
             target_ref={"kind": "foreshadowing", "chunk_id": 10, "setup_id": "thread-1"},
         )
 
-    def search_event_history(self, query, *, max_chapter_order, limit=50):
-        """2026-08-22记录检索范围并返回预设树根视图"""
-        self.calls.append((query, max_chapter_order, limit))
+    def search_event_history(self, query, *, limit=50):
+        """2026-08-30 用于记录严格历史检索并返回预设树根视图"""
+        self.calls.append((query, limit))
         return list(self.trees)
 
 
@@ -117,8 +117,7 @@ def test_search_event_registers_authorized_tree_ids() -> None:
     assert view["trees"][0]["tree_id"] == "tree-h"
     assert ledger.authorized_event_ids == {"tree-h", "node-h-root"}
     assert ledger.history_tree_views["tree-h"]["root_node_id"] == "node-h-root"
-    # current_chapter_order=2 → 只检索第 1 章
-    assert service.calls == [("顾霜", 1, 20)]
+    assert service.calls == [("顾霜", 20)]
     assert ledger.search_log[-1]["tool"] == "search_event"
     assert ledger.search_log[-1]["hits"] == ["tree-h"]
 
@@ -143,7 +142,7 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match="setup_event_id 未由 create_event/update_event 回执或 search_event 授权: event-x",
+        match="setup_event_id 未由 create_event 回执或 search_event 授权: event-x",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {

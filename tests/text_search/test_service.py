@@ -183,28 +183,6 @@ async def test_search_respects_paragraph_bounds(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_returns_target_with_context_paragraphs(db_session) -> None:
-    """2026-08-14 二期段落化：read 按 paragraph_id 读段落，默认带前后各一段上下文"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["第一段。\n第二段。\n第三段。"],
-        title="上下文读取",
-    )
-    _insert_paragraphs(db_session, run_id, ["第一段。\n第二段。\n第三段。"])
-    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=False)
-
-    # context_paragraphs=1：目标段 + 前后各一段，换行分隔
-    assert service.read(1) == "第一段。\n第二段。\n第三段。"
-    # context_paragraphs=0：只返回目标段
-    assert service.read(1, context_paragraphs=0) == "第二段。"
-    # 边界截断：首段无前文
-    assert service.read(0) == "第一段。\n第二段。"
-    assert service.read(2) == "第二段。\n第三段。"
-    with pytest.raises(ValueError, match="原文段落不存在或跨 run"):
-        service.read(999)
-
-
-@pytest.mark.asyncio
 async def test_search_forwards_chapter_sequence_bounds_to_keyword_and_semantic_searches() -> None:
     """2026-08-30 用于验证章节序号前后边界同时下推关键词与语义检索"""
     session = MagicMock()

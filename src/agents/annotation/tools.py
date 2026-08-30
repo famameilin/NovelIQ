@@ -1,7 +1,7 @@
 """
 章节标注语义写入工具与系统运行账本
 
-核心合同: 每个 write_* 调用完成该领域的全部业务校验并写入当前候选，
+核心合同: 每个写入工具完成对应领域的全部业务校验并写入当前候选，
 返回固定压缩回执 {accepted, tool, domain, item_count}。
 完整参数和完整结果只进入审计库，不回到模型上下文。
 """
@@ -38,7 +38,6 @@ from .schema import (
     BoundForeshadowing,
     BoundRelation,
     CaseSearchResult,
-    CharacterObservationInput,
     ChunkMetricsInput,
     ChunkParagraphInfo,
     Confidence,
@@ -64,7 +63,6 @@ from .schema import (
     SetupStatus,
     TextSearchResult,
     Tone,
-    UpdateEventInput,
     normalize_semantic_text,
 )
 
@@ -78,6 +76,7 @@ _DOMAIN_NAMES = (
     "relations",
 )
 _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
+_DIRECT_WRITE_DOMAIN_NAMES = frozenset({"metrics", "entities", "dialogues", "relations"})
 _INTERNAL_GRAPH_KEYS = {
     "candidate_key",
     "chunk_id",
@@ -117,19 +116,15 @@ class AnnotationQueryService(Protocol):
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchResult]:
-        """2026-08-07 用于定位前文或后文原文候选（M6：候选携带 paragraph_id）"""
-
-    def read_text(self, paragraph_id: int) -> str:
-        """2026-08-07 用于读取系统已登记的原文候选段落（含上下文，M6 段落化）"""
+        """2026-08-30 用于按配置范围返回有限正文命中"""
 
     def search_event_history(
         self,
         query: str,
         *,
-        max_chapter_order: int,
         limit: int = 50,
     ) -> list[EventTreeHistoryResult]:
-        """2026-08-22按章节可见边界检索已完成章节的事件树（根视图）"""
+        """2026-08-30 用于检索当前章之前已完成章节的事件树根视图"""
 
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于读取活动案例内部稳定目标"""
@@ -159,15 +154,12 @@ class AnnotationToolLedger:
     rotation_case_ids: list[str] = field(default_factory=list)
     case_number_registry: dict[int, str] = field(default_factory=dict)
     case_number_by_id: dict[str, int] = field(default_factory=dict)
-    text_result_registry: dict[int, TextSearchResult] = field(default_factory=dict)
-    text_result_range: dict[int, str] = field(default_factory=dict)
     next_case_number: int = 1
-    next_text_result_number: int = 1
     resolved_cases: list[ResolvedCase] = field(default_factory=list)
     pushed_cases: list[PendingCase] = field(default_factory=list)
     # 2026-08-14 M6：案例展示/解决授权章（案例源是章级定位，§12.3）
     authorized_chapter_ids: set[int] = field(default_factory=set)
-    # 2026-08-14 M6：read_text 实际返回的段落（含上下文各 1 段）
+    # 2026-08-30：search_text 返回正文时登记真实 SQL 命中段落
     authorized_text_paragraph_ids: set[int] = field(default_factory=set)
     # 2026-08-12 最近一次 write_dialogues 未提交候选序号（系统默认按 not_dialogue 处理）
     dialogue_missing_indexes: list[int] = field(default_factory=list)
@@ -217,10 +209,7 @@ class AnnotationToolLedger:
                 "ready_chunk": self.ready_chunk,
                 "case_number_registry": self.case_number_registry,
                 "case_number_by_id": self.case_number_by_id,
-                "text_result_registry": self.text_result_registry,
-                "text_result_range": self.text_result_range,
                 "next_case_number": self.next_case_number,
-                "next_text_result_number": self.next_text_result_number,
                 "resolved_cases": self.resolved_cases,
                 "pushed_cases": self.pushed_cases,
                 "authorized_chapter_ids": self.authorized_chapter_ids,
@@ -283,7 +272,7 @@ class AnnotationToolLedger:
         return str(uuid4())
 
     # ------------------------------------------------------------------
-    # 事件树写入（create_event / update_event）
+    # 事件树写入（create_event）
     # ------------------------------------------------------------------
 
     def _resolve_cause_tree(self, cause_tree_id: str | None) -> dict[str, Any] | None:
@@ -298,28 +287,77 @@ class AnnotationToolLedger:
             )
         return cause
 
+    def _finalize_event_domain(self) -> None:
+        """2026-08-30 用于在最后一棵事件树后完成事件及人物动态状态领域"""
+        events_bound = list(self.bound_payloads.get("events") or [])
+        observations_bound = list(self.bound_payloads.get("character_observations") or [])
+        self.domain_payloads["events"] = events_bound
+        self.bound_payloads["events"] = events_bound
+        self.domain_payloads["character_observations"] = observations_bound
+        self.bound_payloads["character_observations"] = observations_bound
+        self.domain_receipts.update({"events", "character_observations"})
+
     def create_event_tree(self, payload: CreateEventInput, *, tool_name: str = "create_event") -> dict[str, Any]:
-        """2026-08-22创建新事件树，系统派发 id 并盖章当前章，返回模型回执"""
+        """2026-08-30 用于原子创建单棵事件树并按显式标记完成事件领域"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许创建事件")
+        if "events" in self.domain_receipts:
+            raise AnnotationProtocolError("事件领域已经完成，不允许继续 create_event")
+        if payload.description is None:
+            self._finalize_event_domain()
+            self.write_records.append(
+                {
+                    "chunk_id": self.current_chunk_id,
+                    "domain": "events",
+                    "payload": {
+                        "tool": tool_name,
+                        "tree_id": None,
+                        "description": None,
+                        "children": [],
+                        "character_observation_count": 0,
+                        "finalized": True,
+                    },
+                }
+            )
+            self._rebuild_ready_chunk_if_complete()
+            return {
+                "accepted": True,
+                "tool": tool_name,
+                "domain": "events",
+                "item_count": 0,
+                "finalized": True,
+                "derived_domains": ["character_observations"],
+                "character_observation_count": 0,
+            }
         cause = self._resolve_cause_tree(payload.cause_tree_id)
 
         entity_types = self._fact_entity_catalog()
         errors: list[str] = []
-        for index, participant in enumerate(payload.participants):
-            name = participant.entity
-            key = unicodedata.normalize("NFC", name).strip().casefold()
-            resolved_key = _norm_graph_name(self.graph.resolve_name(name)) if self.graph is not None else key
-            actual_type = entity_types.get(resolved_key) or entity_types.get(key)
-            if actual_type is None:
-                errors.append(
-                    f"[{index}] event.participant 未在 write_entities 中声明: {name}"
-                    "（请先在 write_entities 声明该实体，或改用已登记实体名）"
-                )
-            elif participant.role == "地点" and actual_type != "location":
-                errors.append(
-                    f"[{index}] event.participant 地点角色端点必须是 location: {name}（登记类型 {actual_type}）"
-                )
+        participant_groups = [("root", payload.participants)]
+        participant_groups.extend(
+            (f"children[{child_index}]", child.participants)
+            for child_index, child in enumerate(payload.children)
+        )
+        for node_label, participants in participant_groups:
+            for participant_index, participant in enumerate(participants):
+                name = participant.entity
+                key = unicodedata.normalize("NFC", name).strip().casefold()
+                resolved_key = _norm_graph_name(self.graph.resolve_name(name)) if self.graph is not None else key
+                actual_type = entity_types.get(resolved_key) or entity_types.get(key)
+                label = f"create_event.{node_label}.participants[{participant_index}]"
+                if actual_type is None:
+                    errors.append(
+                        f"{label} 未在 write_entities 中声明: {name}"
+                        "（请先在 write_entities 声明该实体，或改用已登记实体名）"
+                    )
+                    continue
+                if participant.role == "地点" and actual_type != "location":
+                    errors.append(f"{label} 地点角色端点必须是 location: {name}（登记类型 {actual_type}）")
+                observation_fields = (participant.narrative_role, participant.action, participant.emotion)
+                if actual_type == "character" and not all(value is not None for value in observation_fields):
+                    errors.append(f"{label} 是 character，必须同时提供 narrative_role/action/emotion: {name}")
+                elif actual_type != "character" and any(value is not None for value in observation_fields):
+                    errors.append(f"{label} 不是 character，不得提供 narrative_role/action/emotion: {name}")
         if errors:
             raise ValueError("create_event 校验失败: " + "；".join(errors))
 
@@ -344,40 +382,109 @@ class AnnotationToolLedger:
             is_foreshadow_setup=payload.isforeshadowing,
             causal_event_refs=causal_refs,
         )
+        planned_nodes: list[BoundEvent] = [bound_root]
+        tree_nodes: dict[str, dict[str, str | None]] = {
+            root_node_id: {
+                "node_id": root_node_id,
+                "parent_node_id": None,
+                "cause_role": "root",
+            }
+        }
+        trunk_tail = root_node_id
+        appended: list[dict[str, str]] = []
+        for child in payload.children:
+            node_id = self._node_id()
+            parent_node_id = trunk_tail
+            role = child.type
+            planned_nodes.append(
+                BoundEvent(
+                    node_id=node_id,
+                    tree_id=tree_id,
+                    parent_node_id=parent_node_id,
+                    cause_role=role,
+                    description=child.description,
+                    participants=[
+                        EventParticipantInput(**participant.model_dump(mode="python"))
+                        for participant in child.participants
+                    ],
+                    is_foreshadow_setup=False,
+                    causal_event_refs=[],
+                )
+            )
+            tree_nodes[node_id] = {
+                "node_id": node_id,
+                "parent_node_id": parent_node_id,
+                "cause_role": role,
+            }
+            appended.append(
+                {
+                    "node_id": node_id,
+                    "type": role,
+                    "parent_node_id": parent_node_id,
+                }
+            )
+            if role == "main":
+                trunk_tail = node_id
+
+        bound_foreshadowing: BoundForeshadowing | None = None
+        if payload.isforeshadowing:
+            bound_foreshadowing = BoundForeshadowing(
+                description=payload.description,
+                confidence=Confidence.MEDIUM,
+                setup_node_id=root_node_id,
+                setup_kind=payload.setup_kind,
+                expected_payoff_family=payload.expected_payoff_family,
+                payoff_likelihood=payload.payoff_likelihood,
+            )
+
+        new_observations: list[BoundCharacterObservation] = []
+        for node in planned_nodes:
+            for participant in node.participants:
+                if participant.narrative_role is None or participant.action is None or participant.emotion is None:
+                    continue
+                new_observations.append(
+                    BoundCharacterObservation(
+                        character=participant.entity,
+                        role_function=participant.narrative_role,
+                        action=participant.action,
+                        emotion=participant.emotion,
+                    )
+                )
+        observations_bound = list(self.bound_payloads.get("character_observations") or [])
+        observations_bound.extend(new_observations)
+        observation_keys: set[tuple[str, str]] = set()
+        duplicate_observations: list[tuple[str, str]] = []
+        for observation in observations_bound:
+            observation_key = (observation.character, observation.action)
+            if observation_key in observation_keys:
+                duplicate_observations.append(observation_key)
+            observation_keys.add(observation_key)
+        if duplicate_observations:
+            raise ValueError(f"create_event 人物动态状态重复: {duplicate_observations}")
+
         self.event_trees[tree_id] = {
             "tree_id": tree_id,
             "chapter_id": self.current_chapter_id,
             "chapter_order": self.current_chapter_order,
             "root_node_id": root_node_id,
-            "trunk_tail": root_node_id,
+            "trunk_tail": trunk_tail,
             "isforeshadowing": payload.isforeshadowing,
-            "nodes": {
-                root_node_id: {
-                    "node_id": root_node_id,
-                    "parent_node_id": None,
-                    "cause_role": "root",
-                }
-            },
+            "nodes": tree_nodes,
         }
-        self.authorized_event_ids.add(root_node_id)
+        self.authorized_event_ids.update(node.node_id for node in planned_nodes)
         events_bound = list(self.bound_payloads.get("events") or [])
-        events_bound.append(bound_root)
+        events_bound.extend(planned_nodes)
+        self.domain_payloads["events"] = events_bound
         self.bound_payloads["events"] = events_bound
-        self.domain_receipts.add("events")
+        self.domain_payloads["character_observations"] = observations_bound
+        self.bound_payloads["character_observations"] = observations_bound
+        if payload.finalize_events:
+            self._finalize_event_domain()
 
         foreshadow_receipt_node: str | None = None
-        if payload.isforeshadowing:
+        if bound_foreshadowing is not None:
             bound_foreshadowings = list(self.bound_payloads.get("foreshadowings") or [])
-            bound_foreshadowings.append(
-                BoundForeshadowing(
-                    description=payload.description,
-                    confidence="medium",
-                    setup_node_id=root_node_id,
-                    setup_kind=payload.setup_kind,
-                    expected_payoff_family=payload.expected_payoff_family,
-                    payoff_likelihood=payload.payoff_likelihood,
-                )
-            )
+            bound_foreshadowings.append(bound_foreshadowing)
             self.bound_payloads["foreshadowings"] = bound_foreshadowings
             foreshadow_receipt_node = root_node_id
 
@@ -385,7 +492,14 @@ class AnnotationToolLedger:
             {
                 "chunk_id": self.current_chunk_id,
                 "domain": "events",
-                "payload": {"tool": tool_name, "tree_id": tree_id, "description": payload.description},
+                "payload": {
+                    "tool": tool_name,
+                    "tree_id": tree_id,
+                    "description": payload.description,
+                    "children": appended,
+                    "character_observation_count": len(new_observations),
+                    "finalized": payload.finalize_events,
+                },
             }
         )
         self._rebuild_ready_chunk_if_complete()
@@ -397,64 +511,15 @@ class AnnotationToolLedger:
             "root_node_id": root_node_id,
             "cause_role": "root",
             "cross_chapter": cross_chapter,
+            "children": appended,
+            "trunk_tail": trunk_tail,
+            "derived_domains": ["character_observations"],
+            "character_observation_count": len(new_observations),
+            "finalized": payload.finalize_events,
         }
         if foreshadow_receipt_node is not None:
             receipt["foreshadowing_setup_node_id"] = foreshadow_receipt_node
         return receipt
-
-    def update_event_tree(self, payload: UpdateEventInput, *, tool_name: str = "update_event") -> dict[str, Any]:
-        """2026-08-22向本章已有事件树追加子节点（单章闭环，历史树不可更新）"""
-        if self.phase != "chunk_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许更新事件")
-        tree = self.event_trees.get(payload.tree_id)
-        if tree is None:
-            hint = "属于前文章节的树已闭环，不能 update_event；如需延续请 create_event 并填 cause_tree_id"
-            raise ValueError(f"update_event.tree_id 不存在或不可更新: {payload.tree_id}（{hint}）")
-
-        appended: list[dict[str, Any]] = []
-        for item in payload.items:
-            node_id = self._node_id()
-            parent = str(tree["trunk_tail"])
-            role = str(item.type)
-            bound_node = BoundEvent(
-                node_id=node_id,
-                tree_id=str(tree["tree_id"]),
-                parent_node_id=parent,
-                cause_role=role,
-                description=item.description,
-                participants=[],
-                is_foreshadow_setup=False,
-                causal_event_refs=[],
-            )
-            tree["nodes"][node_id] = {
-                "node_id": node_id,
-                "parent_node_id": parent,
-                "cause_role": role,
-            }
-            if role == "main":
-                tree["trunk_tail"] = node_id
-            self.authorized_event_ids.add(node_id)
-            events_bound = list(self.bound_payloads.get("events") or [])
-            events_bound.append(bound_node)
-            self.bound_payloads["events"] = events_bound
-            appended.append({"node_id": node_id, "type": role})
-
-        self.write_records.append(
-            {
-                "chunk_id": self.current_chunk_id,
-                "domain": "events",
-                "payload": {"tool": tool_name, "tree_id": payload.tree_id, "appended": appended},
-            }
-        )
-        self._rebuild_ready_chunk_if_complete()
-        return {
-            "accepted": True,
-            "tool": tool_name,
-            "domain": "events",
-            "tree_id": str(tree["tree_id"]),
-            "appended": appended,
-            "trunk_tail": str(tree["trunk_tail"]),
-        }
 
     # ------------------------------------------------------------------
     # 领域写入核心合同
@@ -464,7 +529,7 @@ class AnnotationToolLedger:
         """2026-08-20 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入当前候选（优化：内联验证）"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
-        if domain not in _DOMAIN_NAMES:
+        if domain not in _DIRECT_WRITE_DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
 
         # 2026-08-20 内联端点验证与领域绑定逻辑，扁平化调用链
@@ -491,10 +556,7 @@ class AnnotationToolLedger:
                     "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
                 )
 
-        if domain == "character_observations":
-            for index, item in enumerate(payload):
-                check_entity(item.character, ("character",), "character_observation.character", index)
-        elif domain == "dialogues":
+        if domain == "dialogues":
             for index, item in enumerate(payload):
                 if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
                     check_entity(item.speaker, ("character",), "dialogue.speaker", index)
@@ -522,8 +584,6 @@ class AnnotationToolLedger:
                         '"圣城朝堂"是 organization，不要互相改类）'
                     )
             bound = self._bound_entities(payload)
-        elif domain == "character_observations":
-            bound = [BoundCharacterObservation(**item.model_dump(mode="python")) for item in payload]
         elif domain == "dialogues":
             candidates = self.dialogue_candidates
             candidate_by_index = dict(enumerate(candidates, start=1))
@@ -772,7 +832,7 @@ class AnnotationToolLedger:
                 update={
                     "tags": entity.tags or existing.tags,
                     "description": entity.description if entity.description is not None else existing.description,
-                    "attributes": {**existing.attributes, **entity.attributes},
+                    "attributes": {**(existing.attributes or {}), **(entity.attributes or {})},
                 }
             )
         return BoundEntityDirectory(entities=merged)
@@ -782,7 +842,7 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
 
     def _rebuild_ready_chunk_if_complete(self) -> None:
-        """2026-08-10 用于在第七个领域写入成功后同步构造并缓存 ready_chunk"""
+        """2026-08-30 用于在六个内部数据领域就绪后构造并缓存 ready_chunk"""
         if not _DOMAIN_NAMES_SET <= self.domain_receipts:
             return
         self.ready_chunk = self._build_ready_chunk()
@@ -852,14 +912,14 @@ class AnnotationToolLedger:
         )
 
     def complete_active_chunk(self) -> BoundChunkAnnotation:
-        """2026-08-10 用于只检查阶段、七个 receipt 与 ready_chunk，然后冻结当前 chunk"""
+        """2026-08-30 用于检查六领域回执与 ready_chunk 后冻结当前 chunk"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chunk")
         missing = [domain for domain in _DOMAIN_NAMES if domain not in self.domain_receipts]
         if missing:
             raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
         if self.ready_chunk is None:
-            raise AnnotationInvariantError("七个领域均已写入但 ready_chunk 缺失，系统不变量被破坏")
+            raise AnnotationInvariantError("六个领域均已写入但 ready_chunk 缺失，系统不变量被破坏")
         chunk = self.ready_chunk
         self.completed_chunks.append(chunk)
         # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
@@ -984,14 +1044,6 @@ class AnnotationToolLedger:
                     for item in self.resolved_cases
                 ],
             },
-            "text_results": [
-                {
-                    "result_number": number,
-                    "range": self.text_result_range.get(number),
-                    "excerpt": item.excerpt[:80],
-                }
-                for number, item in sorted(self.text_result_registry.items())
-            ],
             "search_log": list(self.search_log[-8:]),
         }
 
@@ -1140,18 +1192,6 @@ def build_annotation_tools(
         )
 
     @tool
-    def write_character_observations(items: list[CharacterObservationInput]) -> str:
-        """2026-08-07 用于完整替换当前 chunk 人物动作观察"""
-        return json.dumps(
-            ledger.write_domain(
-                "character_observations",
-                items,
-                tool_name="write_character_observations",
-            ),
-            ensure_ascii=False,
-        )
-
-    @tool
     def write_dialogues(items: list[DialogueSubmissionItem]) -> str:
         """2026-08-12 用于按系统候选序号提交对话三态判断（数组格式）
         （items 每条为 [candidate_index, verdict, speaker, tone]，speaker/tone 未知时 null；
@@ -1171,40 +1211,32 @@ def build_annotation_tools(
             ensure_ascii=False,
         )
 
-    @tool
+    @tool(args_schema=CreateEventInput)
     def create_event(
-        description: str,
-        participants: list[dict[str, Any]] | None = None,
+        finalize_events: bool,
+        description: str | None = None,
+        participants: list[EventParticipantInput] | None = None,
+        children: list[EventAppendItem] | None = None,
         isforeshadowing: bool = False,
         cause_tree_id: str | None = None,
         setup_kind: str | None = None,
         expected_payoff_family: str | None = None,
         payoff_likelihood: PayoffLikelihood | None = None,
     ) -> str:
-        """2026-08-22 用于创建新事件树（服务端派发 tree_id，返回后即可 update_event 续写）"""
+        """2026-08-30 用于一次提交单棵事件树并声明是否结束事件阶段"""
         payload = CreateEventInput(
             description=description,
-            participants=[EventParticipantInput(**item) for item in (participants or [])],
+            participants=participants or [],
+            children=children or [],
             isforeshadowing=isforeshadowing,
             cause_tree_id=cause_tree_id,
             setup_kind=setup_kind,
             expected_payoff_family=expected_payoff_family,
             payoff_likelihood=payoff_likelihood,
+            finalize_events=finalize_events,
         )
         return json.dumps(
             ledger.create_event_tree(payload),
-            ensure_ascii=False,
-        )
-
-    @tool
-    def update_event(tree_id: str, items: list[dict[str, Any]]) -> str:
-        """2026-08-22 用于向本章事件树追加子节点（type=main 延伸主链 / secondary 分支）"""
-        payload = UpdateEventInput(
-            tree_id=tree_id,
-            items=[EventAppendItem(**item) for item in items],
-        )
-        return json.dumps(
-            ledger.update_event_tree(payload),
             ensure_ascii=False,
         )
 
@@ -1253,30 +1285,24 @@ def build_annotation_tools(
 
     @tool
     async def search_text(query: str) -> str:
-        """2026-08-14 用于返回运行内编号而不暴露真实 paragraph ID（范围由 allow_future_context 决定）"""
+        """2026-08-30 用于一次返回有限正文且不暴露内部段落标识"""
         normalized_query = _normalize_query(query, tool_name="search_text")
         if ledger.phase != "chunk_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_text")
-        # 2026-08-14 D1：不再有 continuity_open 阶段；allow_future_context 直接控制检索范围，
-        # 开启时前后文都可检索，关闭时仅限当前章节之前的原文
         expected_range = "all" if ledger.allow_future_context else "previous"
         results = await query_service.search_text(
             normalized_query,
             range_name=expected_range,
-            limit=50,
+            limit=8,
         )
         views: list[dict[str, Any]] = []
-        result_numbers: list[int] = []
-        for item in results:
-            result_number = ledger.next_text_result_number
-            ledger.next_text_result_number += 1
-            ledger.text_result_registry[result_number] = item
-            ledger.text_result_range[result_number] = expected_range
-            result_numbers.append(result_number)
+        for item in results[:8]:
+            visible_content = item.content[:2000]
+            ledger.authorized_text_paragraph_ids.update(item.paragraph_ids)
             views.append(
                 {
-                    "result_number": result_number,
-                    "excerpt": item.excerpt,
+                    "content": visible_content,
+                    "truncated": len(item.content) > len(visible_content),
                     "keyword_score": item.keyword_score,
                     "semantic_score": item.semantic_score,
                 }
@@ -1285,35 +1311,11 @@ def build_annotation_tools(
             {
                 "tool": "search_text",
                 "query": normalized_query,
-                "hits": result_numbers,
+                "hits": [f"result-{index}" for index in range(1, len(views) + 1)],
                 "digest": "",
             }
         )
         return json.dumps(views, ensure_ascii=False)
-
-    @tool
-    def read_text(result_number: int) -> str:
-        """2026-08-07 用于通过运行内编号读取真实原文（目标段落及前后各 1 段上下文）
-
-        2026-08-14 M6：授权实际返回的段落——ledger 按确定性规则登记
-        {paragraph_id - 1, paragraph_id, paragraph_id + 1}，与查询服务
-        read_text 的上下文契约（前后各 1 段）对齐；负 ID 与不存在的段落
-        ID 无害（读不到自然不算授权）。
-        """
-        item = ledger.text_result_registry.get(result_number)
-        if item is None:
-            raise AnnotationAuthorizationError(f"read_text.result_number 未由本轮 search_text 返回: {result_number}")
-        if ledger.phase != "chunk_open":
-            raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 read_text")
-        stored_range = ledger.text_result_range.get(result_number)
-        allowed_ranges = {"previous"} | ({"future", "all"} if ledger.allow_future_context else set())
-        if stored_range not in allowed_ranges:
-            raise AnnotationAuthorizationError(
-                f"read_text.result_number 超出当前权限范围（allow_future_context={ledger.allow_future_context}）"
-            )
-        content = query_service.read_text(item.paragraph_id)
-        ledger.authorized_text_paragraph_ids.update({item.paragraph_id - 1, item.paragraph_id, item.paragraph_id + 1})
-        return json.dumps({"content": content}, ensure_ascii=False)
 
     @tool
     def search_event(keyword: str) -> str:
@@ -1323,12 +1325,6 @@ def build_annotation_tools(
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_event")
         results = query_service.search_event_history(
             normalized_query,
-            max_chapter_order=getattr(
-                query_service,
-                "current_chapter_order",
-                1,
-            )
-            - 1,
             limit=20,
         )
         views: list[dict[str, Any]] = []
@@ -1416,7 +1412,7 @@ def build_annotation_tools(
         if details.chunk_id not in allowed_chapter_ids:
             raise AnnotationAuthorizationError(
                 f"案例 {details.id} 原文所在章 {details.chunk_id} 未经本轮展示授权，"
-                "请先 search_text + read_text 读取原文后再解决"
+                "请先 search_text 查询已授权前文后再解决"
             )
         return details
 
@@ -1559,7 +1555,7 @@ def build_annotation_tools(
         """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）
 
         2026-08-18：setup_event_id/payoff_event_id 用于伏笔续接/回收时绑定事件。
-        2026-08-22事件 id 由 create_event/update_event 回执或 search_event
+        2026-08-30事件 id 由 create_event 回执或 search_event
         检索获得，须先经授权集合校验。
         """
         details = _resolve_case_details(
@@ -1592,7 +1588,7 @@ def build_annotation_tools(
                 continue
             if event_id not in ledger.authorized_event_ids:
                 raise AnnotationAuthorizationError(
-                    f"{field_name} 未由 create_event/update_event 回执或 search_event 授权: {event_id}"
+                    f"{field_name} 未由 create_event 回执或 search_event 授权: {event_id}"
                 )
         return _append_resolved(ledger, details, resolved)
 
@@ -1679,14 +1675,11 @@ def build_annotation_tools(
     return [
         write_metrics,
         write_entities,
-        write_character_observations,
         write_dialogues,
         create_event,
-        update_event,
         write_relations,
         search_graph,
         search_text,
-        read_text,
         search_event,
         search_pool,
         resolve_dialogue_case,

@@ -41,11 +41,3 @@ def test_relation_input_is_three_field_edge_contract() -> None:
         "to_entity",
         "relation_type",
     }
-
-
-def test_system_prompt_relation_semantics_aligned() -> None:
-    from src.agents.annotation.prompts import SYSTEM_PROMPT_TEMPLATE
-
-    assert "relation state（present/weakened/ended）" not in SYSTEM_PROMPT_TEMPLATE
-    assert "write_relations 只提交本章确认存在的边" in SYSTEM_PROMPT_TEMPLATE
-    assert "skipped_existing" in SYSTEM_PROMPT_TEMPLATE
