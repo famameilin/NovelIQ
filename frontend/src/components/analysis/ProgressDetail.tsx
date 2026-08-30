@@ -9,11 +9,12 @@ interface StageConfig {
   range: [number, number];
 }
 
-type StageKey = "preprocess" | "annotate" | "aggregate" | "topic-model" | "diagnose";
+type StageKey = "preprocess" | "annotate" | "linguistic" | "aggregate" | "topic-model" | "diagnose";
 
 const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   preprocess: { label: "预处理", range: [0, 10] },
-  annotate: { label: "标注分析", range: [10, 80] },
+  annotate: { label: "标注分析", range: [10, 75] },
+  linguistic: { label: "语言结构分析", range: [75, 80] },
   aggregate: { label: "数据聚合", range: [80, 90] },
   "topic-model": { label: "主题建模", range: [90, 95] },
   diagnose: { label: "诊断报告", range: [95, 100] },
@@ -29,7 +30,7 @@ const PHASE_CONFIG: Record<string, { label: string }> = {
   diagnosis: { label: "诊断" },
 };
 
-const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];
+const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "linguistic", "aggregate", "topic-model", "diagnose"];
 
 function getStageStatus(
   stageKey: StageKey,

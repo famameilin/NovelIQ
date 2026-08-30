@@ -52,7 +52,6 @@ function buildTopicModelMeta(numTopics: number) {
     pipeline_version: "1.0",
     num_topics: numTopics,
     artifact_key: "models/topic/mock-run",
-    artifact_sha256: "a".repeat(64),
   };
 }
 

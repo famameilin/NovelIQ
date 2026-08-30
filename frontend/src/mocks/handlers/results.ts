@@ -185,7 +185,6 @@ export const topicSeriesHandler = http.get(
         pipeline_version: "1.0",
         num_topics: MOCK_NUM_TOPICS,
         artifact_key: "models/topic/mock-run",
-        artifact_sha256: "a".repeat(64),
       },
       num_topics: MOCK_NUM_TOPICS,
       points: MOCK_SERIES_POINTS,
@@ -234,7 +233,6 @@ export const topicEmotionHandler = http.get(
         pipeline_version: "1.0",
         num_topics: MOCK_NUM_TOPICS,
         artifact_key: "models/topic/mock-run",
-        artifact_sha256: "a".repeat(64),
       },
       emotion: [
         { topic_id: 0, emotion: 0.2136, weighted_token_total: 9820.5 },

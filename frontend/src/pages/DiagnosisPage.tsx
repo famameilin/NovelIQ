@@ -85,10 +85,10 @@ function ForeshadowingThreadsSection(props: {
     last_chapter_id: number;
     anchor_chapter_ids: number[];
     setup_summary: string;
-    setup_kind: string;
-    expected_payoff_family: string;
-    payoff_likelihood: string;
-    strength: string;
+    setup_kind: string | null;
+    expected_payoff_family: string | null;
+    payoff_likelihood: string | null;
+    strength: string | null;
     status: string;
     latest_reason?: string | null;
   }>;
@@ -114,8 +114,8 @@ function ForeshadowingThreadsSection(props: {
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                    <Badge variant="outline">{thread.setup_kind}</Badge>
-                    <Badge variant="outline">{thread.expected_payoff_family}</Badge>
+                    <Badge variant="outline">{thread.setup_kind ?? "—"}</Badge>
+                    <Badge variant="outline">{thread.expected_payoff_family ?? "—"}</Badge>
                   </div>
                   <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
                 </div>
@@ -127,11 +127,11 @@ function ForeshadowingThreadsSection(props: {
               <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
                 <div>
                   <span className="font-medium text-text">回收预期：</span>
-                  {thread.payoff_likelihood}
+                  {thread.payoff_likelihood ?? "—"}
                 </div>
                 <div>
                   <span className="font-medium text-text">强度：</span>
-                  {thread.strength}
+                  {thread.strength ?? "—"}
                 </div>
                 <div>
                   <span className="font-medium text-text">锚点章节：</span>

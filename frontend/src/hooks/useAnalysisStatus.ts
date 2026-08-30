@@ -378,7 +378,7 @@ export function useAnalysisStatus(
 
   const sseUrl =
     enabled && !!taskId && !isMockEnabled()
-      ? `${SSE_URL}/api/events/tasks/${taskId}`
+      ? `${SSE_URL}/api/novels/${novelId}/events/tasks/${taskId}`
       : null;
 
   const { isConnected, disconnect } = useSSEListener(sseUrl, {

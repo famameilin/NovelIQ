@@ -307,11 +307,11 @@ export interface ForeshadowingThread {
   last_chapter_id: number;
   anchor_chapter_ids: number[];
   setup_summary: string;
-  setup_kind: ForeshadowingSetupKind | string;
-  expected_payoff_family: string;
-  payoff_likelihood: ForeshadowingPayoffLikelihood;
+  setup_kind: ForeshadowingSetupKind | string | null;
+  expected_payoff_family: string | null;
+  payoff_likelihood: ForeshadowingPayoffLikelihood | string | null;
   confidence: string | null;
-  strength: "high" | "medium" | string;
+  strength: "high" | "medium" | string | null;
   status: "open" | "reinforced" | "likely_paid_off" | "archived" | string;
   active: boolean;
   latest_reason?: string | null;
@@ -548,7 +548,6 @@ export interface TopicModelMetaInfo {
   pipeline_version: string;
   num_topics: number;
   artifact_key: string;
-  artifact_sha256: string;
 }
 
 export interface TopicDistributionEntry {
