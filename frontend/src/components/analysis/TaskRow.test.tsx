@@ -5,12 +5,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TaskRow } from "@/components/analysis/TaskRow";
 
-const useStreamStoreMock = vi.fn((selector: (state: { progress: null; currentTaskId: null }) => unknown) =>
+interface StreamStoreState {
+  progress: { stage: string } | null;
+  currentTaskId: string | null;
+}
+
+const useStreamStoreMock = vi.fn((selector: (state: StreamStoreState) => unknown) =>
   selector({ progress: null, currentTaskId: null })
 );
 
 vi.mock("@/store/streamStore", () => ({
-  useStreamStore: (selector: (state: { progress: null; currentTaskId: null }) => unknown) =>
+  useStreamStore: (selector: (state: StreamStoreState) => unknown) =>
     useStreamStoreMock(selector),
 }));
 
