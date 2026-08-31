@@ -294,7 +294,7 @@ export function CurvesPage() {
                   value={String(windowParagraphs)}
                   onValueChange={(value) => setWindowParagraphs(Number(value))}
                 >
-                  <SelectTrigger className="h-8 w-[112px]" aria-label="窗口粒度">
+                  <SelectTrigger className="h-8 w-32" aria-label="窗口粒度">
                     <SelectValue placeholder="窗口粒度" />
                   </SelectTrigger>
                   <SelectContent>
