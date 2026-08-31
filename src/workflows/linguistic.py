@@ -124,7 +124,7 @@ async def run_linguistic(
                     row.text,
                     terms,
                     lexicon_key=LEXICON_FILES["fixed_phrases"],
-                    metric_enabled=True,
+                    metric_enabled=False,
                 )
                 for hit in hits:
                     phrase_rows.append(
