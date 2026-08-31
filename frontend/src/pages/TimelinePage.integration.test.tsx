@@ -106,8 +106,8 @@ vi.mock("@/components/timeline", () => ({
       ))}
     </div>
   ),
-  TimelineNodeDetail: ({ node }: { node: TimelineEventNode | null }) => (
-    <div>{node ? node.tree_id : "none"}</div>
+  TimelineEventInspector: ({ node }: { node: TimelineEventNode }) => (
+    <div>{node.tree_id}</div>
   ),
 }));
 

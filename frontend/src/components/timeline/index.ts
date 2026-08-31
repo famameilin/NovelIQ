@@ -20,6 +20,7 @@ export { TensionOverlay } from "./TensionOverlay";
 export type { TensionOverlayProps } from "./TensionOverlay";
 
 export { TimelineNodeDetail } from "./TimelineNodeDetail";
+export { TimelineEventInspector } from "./TimelineEventInspector";
 export type { TimelineNodeDetailProps } from "./TimelineNodeDetail";
 
 export { TimelineControls } from "./TimelineControls";
