@@ -10,7 +10,7 @@
 
 ## 项目简介
 
-一个面向中文网络小说的智能分析平台，将自然语言处理、大语言模型与图计算结合，提供从文本导入到诊断报告的全链路自动化分析。系统接收 txt 格式小说，自动完成编码检测、清洗、分词和章节优先分块，经五阶段流水线（预处理→标注→聚合→主题建模→诊断）产出分析结果，每阶段独立持久化、可断点恢复。
+一个面向中文网络小说的智能分析平台，将自然语言处理、大语言模型与图计算结合，提供从文本导入到诊断报告的全链路自动化分析。系统接收 txt 格式小说，自动完成编码检测、清洗、分词和章节优先分块，经六阶段流水线（预处理→标注→语言结构→聚合→主题建模→诊断）产出分析结果，每阶段独立持久化、可断点恢复。
 
 ### 核心能力
 
@@ -36,13 +36,28 @@
 
 ## 快速开始
 
+### 离线模型准备
+
+语言结构阶段默认启用 LTP 和 Word2Vec，运行时不会自动联网下载模型。启动分析前需要准备：
+
+- `models/ltp/small/`：完整 LTP 离线模型目录，至少包含模型配置、词表和权重文件
+- `models/word2vec/shared/`：恰好一个转换后的 `.kv` 主文件，以及 Gensim 生成的同名数组旁路文件
+
+`models/` 不进入 Git，Docker Compose 会把宿主机该目录挂载到容器 `/app/models`。已有 `.vec`、`.bin` 或 `.txt` 格式的预训练词向量时，可在源码依赖安装完成后执行：
+
+```powershell
+uv run python -m scripts.tools.convert_word2vec_pretrained
+```
+
+转换器默认从 `models/word2vec/pretrained/` 读取源文件，并写入 `models/word2vec/shared/`。
+
 ### Docker部署（推荐）
 
 1. 配置环境变量
 
    ```powershell
    Copy-Item .env.docker.example .env.docker
-   # 编辑 .env.docker，配置模型API地址和密钥
+   # 编辑 .env.docker，配置模型API地址、密钥和 LTP_MODEL_DIR
    ```
 
 2. 启动服务
@@ -112,6 +127,7 @@ MODEL_KEY=...
 EMBEDDING_MODEL_BASE_URL=...
 EMBEDDING_MODEL_ID=...
 EMBEDDING_MODEL_KEY=...
+LTP_MODEL_DIR=models/ltp/small
 ```
 
 数据库账号密码保持在独立变量中，不写入 `DATABASE_URL`；模型密钥、模型 ID 和服务地址也分别配置。文本标注、标注兜底和诊断任务共用 `MODEL` 这一组变量。完整格式参考 `.env.example` 和 `.env.docker.example`。
@@ -168,7 +184,7 @@ analysis_response = requests.post(
 │  任务生命周期编排、阶段调度、取消/删除状态机、结果查询    │
 ├─────────────────────────────────────────────────────────┤
 │  Workflow 层 (src/workflows)                            │
-│  核心业务逻辑：预处理、标注、聚合、主题建模、诊断        │
+│  核心业务逻辑：预处理、标注、语言结构、聚合、主题、诊断  │
 │  不感知 HTTP 层，由 API 层调度                          │
 ├─────────────────────────────────────────────────────────┤
 │  Domain + Storage 层 (src/storage, agents, chapters, ...) │
@@ -185,21 +201,24 @@ analysis_response = requests.post(
 ```mermaid
 flowchart LR
     A[预处理] --> B[标注]
-    B --> C[聚合]
-    C --> D[主题建模]
-    D --> E[诊断]
+    B --> C[语言结构]
+    C --> D[聚合]
+    D --> E[主题建模]
+    E --> F[诊断]
 
     A --- A1[文本清洗分块\n风格指标\n向量嵌入]
     B --- B1[标注 Agent\n按需取证与身份记忆\n图投影]
-    C --- C1[情感/节奏曲线\n全局统计\n质量门]
-    D --- D1[LDA 主题推断\n模型持久化]
-    E --- E1[云端 LLM 诊断\n诊断报告]
+    C --- C1[LTP 词法句法与实体\n固定短语\nWord2Vec]
+    D --- D1[情感/节奏曲线\n全局统计\n质量门]
+    E --- E1[LDA 主题推断\n模型持久化]
+    F --- F1[云端 LLM 诊断\n诊断报告]
 ```
 
 | 阶段 | 入口 | 产出 |
 |------|------|------|
 | **预处理** | `run_preprocess` | 文本清洗分块、风格指标、向量嵌入 |
 | **标注** | `run_annotate` | 标注 Agent 生成合并标注、身份决策和图投影 |
+| **语言结构** | `run_linguistic` | LTP 词法句法与实体、固定短语、Word2Vec 词性向量 |
 | **聚合** | `run_aggregate` | 情感/节奏曲线、全局统计、质量门检查 |
 | **主题建模** | `run_topic_model` | LDA 主题推断与模型持久化 |
 | **诊断** | `run_diagnose` | 诊断 Agent 基于工具取证生成诊断报告 |
