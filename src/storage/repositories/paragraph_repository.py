@@ -475,6 +475,8 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         stmt = (
             select(
                 Chapter.chapter_id,
+                Chapter.sequence,
+                Chapter.title,
                 func.sum(ParagraphTopicInference.inference_token_count).label("token_total"),
             )
             .select_from(Chapter)
@@ -485,7 +487,8 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 & (ParagraphTopicInference.paragraph_id == Paragraph.paragraph_id),
             )
             .where(Paragraph.run_id == run_id)
-            .group_by(Chapter.chapter_id)
+            .group_by(Chapter.chapter_id, Chapter.sequence, Chapter.title)
+            .order_by(Chapter.sequence)
         )
         return self.session.execute(stmt).all()
 

@@ -415,14 +415,18 @@ async def get_topic_shifts(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-    window_size: Annotated[int | None, Query(description="窗口段落数，缺省取 topic_shift 配置")] = None,
+    window_size: Annotated[
+        int | None, Query(ge=1, description="窗口段落数，缺省取 topic_shift 配置")
+    ] = None,
     min_tokens_per_window: Annotated[
-        int | None, Query(description="窗口最小实际入模 token 数，缺省取配置")
+        int | None, Query(ge=1, description="窗口最小实际入模 token 数，缺省取配置")
     ] = None,
     score_threshold: Annotated[
-        float | None, Query(description="候选点 JS 散度阈值，缺省取配置")
+        float | None, Query(gt=0, le=1, description="候选点 JS 散度阈值，缺省取配置")
     ] = None,
-    max_candidates: Annotated[int | None, Query(description="候选点数量上限，缺省取配置")] = None,
+    max_candidates: Annotated[
+        int | None, Query(ge=1, description="候选点数量上限，缺省取配置")
+    ] = None,
 ) -> TopicShiftResponse:
     """
     主题变化候选点（D2）：相邻不重叠窗口分布（入模 token 加权）的 JS 散度
