@@ -1,13 +1,9 @@
 /**
- * TopicsPage - 主题分布页面（2026-08-29 tab 级 API 统一）
+ * TopicsPage - 主题脉络页面（2026-08-31 合并式文档流）
  *
- * 四个 tab，每 tab 一个 API：
- * - 主题总览  → GET /tabs/topics-overview（主题词 + 全书/章节完整分布 + TextRank 关键词 + 诊断标签）
- * - 主题演进  → GET /topics/series（段落完整 K 维堆积面积图）
- * - 主题迁移  → GET /topics/shifts（JS 散度滑窗候选点）
- * - 主题情绪  → GET /topics/emotion（主题净情绪关联）
+ * 单页保留主题总览、主题演进、主题迁移和主题情绪四类接口指标
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -21,6 +17,8 @@ import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotComplet
 import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { AnalysisDetails } from "@/components/common/AnalysisDetails";
+import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { Button } from "@/components/ui/button";
 import {
   TopicWordCloud,
@@ -33,25 +31,52 @@ import {
   TopicEmotionPanel,
 } from "@/components/topics";
 import { RefreshCw, AlertCircle } from "lucide-react";
+import type { ChapterTopicDistribution, Topic, TopicEmotionEntry } from "@/api/types";
+import { formatAnalysisLabel } from "@/lib/analysisLabels";
 
 const STALE_TIME = 5 * 60 * 1000;
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.1,
-    },
-  },
-};
+/**
+ * 2026-08-31，作用：展示所选主题的核心分析字段
+ * 简要说明：将占比、代表词、净情绪、加权文本量和最高章节放在同一信息面
+ */
+function TopicDetailPanel({
+  topic,
+  emotion,
+  topChapter,
+}: {
+  topic: Topic | null;
+  emotion: TopicEmotionEntry | undefined;
+  topChapter: ChapterTopicDistribution | undefined;
+}) {
+  return (
+    <DashboardCardShell title={topic ? `主题详情 · ${topic.label || `主题 ${topic.topic_id + 1}`}` : "主题详情"} accent="chart-2" className="h-full" bodyClassName="gap-4">
+      {topic ? (
+        <>
+          <AnalysisMetricStrip
+            items={[
+              { label: "主题占比", value: `${(topic.weight * 100).toFixed(1)}%` },
+              { label: "净情绪", value: emotion?.emotion != null ? emotion.emotion.toFixed(4) : "—" },
+              { label: "加权文本量", value: emotion?.weighted_token_total != null ? Math.round(emotion.weighted_token_total).toLocaleString() : "—" },
+              { label: "占比最高章节", value: topChapter ? `第 ${topChapter.chapter_sequence} 章` : "—", description: topChapter ? `${((topChapter.distribution?.find((entry) => entry.topic_id === topic.topic_id)?.weight ?? 0) * 100).toFixed(1)}%` : "暂无章节分布" },
+            ]}
+            className="grid-cols-4"
+          />
+          <div className="rounded-xl border border-border/60 bg-surface/70 p-4">
+            <p className="text-xs font-medium text-text-muted">代表词</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {topic.words.length > 0 ? topic.words.map((word) => <span key={word} className="rounded-md bg-primary/10 px-2 py-1 text-xs text-primary">{word}</span>) : <span className="text-sm text-text-muted">暂无代表词</span>}
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-text-muted">选择主题后查看详细指标。</p>
+      )}
+    </DashboardCardShell>
+  );
+}
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0 },
-};
-
-/** 单 tab 的加载/错误态统一门禁：通过后渲染数据内容 */
+/** 单数据视图的加载、错误和不可用状态门禁 */
 function renderTabGate<T>(
   query: UseQueryResult<T>,
   title: string,
@@ -164,10 +189,12 @@ export function TopicsPage() {
     overview.topic_labels?.forEach((label, idx) => {
       if (label && !labelMap.has(idx)) labelMap.set(idx, label);
     });
-    return overview.topics.map((topic) => ({
-      ...topic,
-      label: labelMap.get(topic.topic_id),
-    }));
+    return overview.topics
+      .map((topic) => ({
+        ...topic,
+        label: labelMap.get(topic.topic_id),
+      }))
+      .sort((left, right) => right.weight - left.weight);
   }, [overviewQuery.data]);
 
   const overviewUnavailable =
@@ -177,106 +204,98 @@ export function TopicsPage() {
       ? overviewQuery.data.unavailable_reason
       : null;
 
+  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null);
+  const activeSelectedTopicId = topics.some((topic) => topic.topic_id === selectedTopicId)
+    ? selectedTopicId
+    : topics[0]?.topic_id ?? null;
+  const selectedTopic = topics.find((topic) => topic.topic_id === activeSelectedTopicId) ?? null;
+  const selectedEmotion = emotionQuery.data?.emotion.find((entry) => entry.topic_id === activeSelectedTopicId);
+  const primaryTopics = topics.slice(0, 8);
+  const topChapter = useMemo(() => {
+    if (!selectedTopic || !overviewQuery.data) return undefined;
+    return overviewQuery.data.chapters
+      .filter((chapter) => chapter.distribution != null)
+      .reduce<ChapterTopicDistribution | undefined>((top, chapter) => {
+        const weight = chapter.distribution?.find((entry) => entry.topic_id === selectedTopic.topic_id)?.weight ?? 0;
+        const topWeight = top?.distribution?.find((entry) => entry.topic_id === selectedTopic.topic_id)?.weight ?? -1;
+        return weight > topWeight ? chapter : top;
+      }, undefined);
+  }, [overviewQuery.data, selectedTopic]);
+
   return (
-    <AnalysisWorkspace title="主题分布">
+    <AnalysisWorkspace title="主题脉络" documentFlow>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="flex min-h-0 flex-1 flex-col"
+        className="flex min-h-0 flex-col gap-6"
       >
-        <AnalysisWorkspace.Tabs defaultValue="overview">
-          <AnalysisWorkspace.Tab value="overview" label="主题总览">
-            <motion.div
-              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1"
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-            >
-              {renderTabGate(
-                overviewQuery,
-                "主题总览",
-                overviewUnavailable,
-                (overview) => (
+        {renderTabGate(overviewQuery, "主题总览", overviewUnavailable, (overview) => (
+          <div className="flex flex-col gap-6">
+            <section className="grid grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)] gap-4">
+              <DashboardCardShell title="主题列表" accent="chart-1" bodyClassName="gap-2">
+                {primaryTopics.length > 0 ? primaryTopics.map((topic) => (
+                  <button key={topic.topic_id} type="button" onClick={() => setSelectedTopicId(topic.topic_id)} aria-pressed={activeSelectedTopicId === topic.topic_id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${activeSelectedTopicId === topic.topic_id ? "border-primary/40 bg-primary/10" : "border-border/60 hover:bg-surface-hover"}`}>
+                    <span className="min-w-0 truncate text-sm font-medium text-text">{topic.label || `主题 ${topic.topic_id + 1}`}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-text-muted">{(topic.weight * 100).toFixed(1)}%</span>
+                  </button>
+                )) : <p className="text-sm text-text-muted">暂无主题数据</p>}
+                {topics.length > primaryTopics.length ? (
+                  <p className="pt-1 text-xs text-text-muted">其余 {topics.length - primaryTopics.length} 个主题收纳在完整主题分布中</p>
+                ) : null}
+              </DashboardCardShell>
+              <TopicDetailPanel topic={selectedTopic} emotion={selectedEmotion} topChapter={topChapter} />
+            </section>
+
+            <AnalysisDetails lazy title="完整主题分布" description="词云、权重排行、主题表、章节分布与全书关键词">
+              <div className="space-y-4">
+                {topics.length > 0 ? (
                   <>
-                    {topics.length > 0 && (
-                      <>
-                        <motion.div variants={itemVariants} className="min-h-[300px]">
-                          <TopicWordCloud topics={topics} maxWords={100} className="h-[300px]" />
-                        </motion.div>
-                        <div className="grid min-h-[256px] grid-cols-1 gap-4 lg:grid-cols-2">
-                          <motion.div variants={itemVariants} className="min-h-[256px]">
-                            <TopicBarChart topics={topics} className="h-64" />
-                          </motion.div>
-                          <motion.div variants={itemVariants} className="min-h-[256px]">
-                            <TopicTable topics={topics} className="h-64" />
-                          </motion.div>
-                        </div>
-                      </>
-                    )}
-                    <div className="grid min-h-[280px] grid-cols-1 gap-4 lg:grid-cols-2">
-                      <motion.div variants={itemVariants} className="min-h-[280px] rounded-2xl border border-border/60 bg-surface/70 p-4">
-                        <TopicDistributionChart
-                          distribution={overview.distribution}
-                          chapters={overview.chapters}
-                          className="h-[260px]"
-                        />
-                      </motion.div>
-                      <motion.div variants={itemVariants} className="min-h-[280px]">
-                        <TopicKeywordsCard
-                          keywords={overview.keywords}
-                          unavailableReason={overview.keyword_unavailable_reason}
-                          className="h-[280px]"
-                        />
-                      </motion.div>
-                    </div>
+                    <TopicWordCloud topics={topics} maxWords={100} className="h-[300px]" />
+                    <TopicBarChart topics={topics} className="h-[360px]" />
+                    <TopicTable topics={topics} />
                   </>
-                ),
-              )}
-            </motion.div>
-          </AnalysisWorkspace.Tab>
-
-          <AnalysisWorkspace.Tab value="series" label="主题演进">
-            {renderTabGate(
-              seriesQuery,
-              "主题演进",
-              seriesQuery.data?.unavailable_reason ?? null,
-              (series) => (
-                <div className="flex h-full min-h-0 flex-col gap-2">
-                  <p className="text-xs text-text-muted">
-                    段落级完整 {series.num_topics} 维主题权重堆积图（横轴为真实字符位置，滚轮缩放）；
-                    展示层 LTTB 抽稀，不改后端口径。
-                  </p>
-                  <div className="min-h-[360px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-3">
-                    <TopicSeriesChart
-                      points={series.points}
-                      numTopics={series.num_topics ?? 0}
-                      className="h-[380px]"
-                    />
+                ) : null}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="min-h-[280px] rounded-lg border border-border/60 bg-surface/70 p-4">
+                    <TopicDistributionChart distribution={overview.distribution} chapters={overview.chapters} className="h-[260px]" />
                   </div>
+                  <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} className="min-h-[280px]" />
                 </div>
-              ),
-            )}
-          </AnalysisWorkspace.Tab>
+              </div>
+            </AnalysisDetails>
+          </div>
+        ))}
 
-          <AnalysisWorkspace.Tab value="shifts" label="主题迁移">
-            {renderTabGate(
-              shiftsQuery,
-              "主题迁移",
-              shiftsQuery.data?.unavailable_reason ?? null,
-              (shifts) => <TopicShiftsPanel candidates={shifts.candidates} config={shifts.config} />,
-            )}
-          </AnalysisWorkspace.Tab>
+        <AnalysisDetails title="分析详情" description="模型元数据与主题迁移配置">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <span className="text-text-muted">主题模型</span><span className="text-text">{formatAnalysisLabel(overviewQuery.data?.model?.model_key, "topicModel")}</span>
+              <span className="text-text-muted">库版本</span><span className="text-text">{overviewQuery.data?.model?.library_version ?? "—"}</span>
+              <span className="text-text-muted">流水线版本</span><span className="text-text">{overviewQuery.data?.model?.pipeline_version ?? "—"}</span>
+              <span className="text-text-muted">主题数量</span><span className="text-text">{overviewQuery.data?.model?.num_topics ?? "—"}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <span className="text-text-muted">窗口段数</span><span className="text-text">{shiftsQuery.data?.config.window_size ?? "—"}</span>
+              <span className="text-text-muted">每窗最少词元</span><span className="text-text">{shiftsQuery.data?.config.min_tokens_per_window ?? "—"}</span>
+              <span className="text-text-muted">散度阈值</span><span className="text-text">{shiftsQuery.data?.config.score_threshold ?? "—"}</span>
+              <span className="text-text-muted">候选上限</span><span className="text-text">{shiftsQuery.data?.config.max_candidates ?? "—"}</span>
+            </div>
+          </div>
+        </AnalysisDetails>
 
-          <AnalysisWorkspace.Tab value="emotion" label="主题情绪">
-            {renderTabGate(
-              emotionQuery,
-              "主题情绪",
-              emotionQuery.data?.unavailable_reason ?? null,
-              (topicEmotion) => <TopicEmotionPanel emotion={topicEmotion.emotion} />,
-            )}
-          </AnalysisWorkspace.Tab>
-        </AnalysisWorkspace.Tabs>
+        {renderTabGate(seriesQuery, "主题演进", seriesQuery.data?.unavailable_reason ?? null, (series) => (
+          <DashboardCardShell title="主题演进" accent="chart-2" bodyClassName="gap-2">
+            <p className="text-xs text-text-muted">段落级完整 {series.num_topics} 维主题权重堆积图，横轴为真实字符位置。</p>
+            <TopicSeriesChart points={series.points} numTopics={series.num_topics ?? 0} className="h-[380px]" />
+          </DashboardCardShell>
+        ))}
+        {renderTabGate(shiftsQuery, "主题迁移", shiftsQuery.data?.unavailable_reason ?? null, (shifts) => (
+          <TopicShiftsPanel candidates={shifts.candidates} config={shifts.config} showConfig={false} />
+        ))}
+        {renderTabGate(emotionQuery, "主题情绪", emotionQuery.data?.unavailable_reason ?? null, (topicEmotion) => (
+          <TopicEmotionPanel emotion={topicEmotion.emotion} />
+        ))}
       </motion.div>
     </AnalysisWorkspace>
   );
