@@ -8,13 +8,16 @@ AnalysisService 服务级状态机测试。
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
 
+from src.api.services.analysis.environment_initializer import EnvironmentInitializer
 from src.api.services.analysis_service import AnalysisService
 from src.api.services.task_manager import TaskManager
+from src.config import settings
 from src.storage.models import Novel
 from src.storage.repositories import RunRepository
 from src.storage.session import DatabaseSession
@@ -56,6 +59,86 @@ def _make_service(db_session, *, worker_id: str = "worker-state-machine") -> Ana
         task_manager=TaskManager(worker_id=worker_id),
         session_factory=_StaticSessionFactory(db_session),
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_stages_runs_linguistic_before_aggregate(db_session, monkeypatch) -> None:
+    """2026-08-31 用于验证执行顺序与全局进度里程碑保持一致"""
+    service = _make_service(db_session)
+    monkeypatch.setattr(service, "_is_cancelled", MagicMock(return_value=False))
+    tracker = MagicMock()
+    bus = MagicMock(task_id="task-1")
+    bus.emit_stage_start = AsyncMock()
+    bus.emit_stage_complete = AsyncMock()
+    service.stage_executor.run_linguistic = AsyncMock()
+    service.stage_executor.run_aggregate = AsyncMock()
+    tracker.attach_mock(bus.emit_stage_start, "stage_start")
+    tracker.attach_mock(service.stage_executor.run_linguistic, "run_linguistic")
+    tracker.attach_mock(bus.emit_stage_complete, "stage_complete")
+    tracker.attach_mock(service.stage_executor.run_aggregate, "run_aggregate")
+
+    await service._execute_analysis_stages(
+        bus=bus,
+        session=db_session,
+        run_id="run-1",
+        source_path=Path("novel.txt"),
+        novel_id="novel-1",
+        novel_title="测试小说",
+        analysis_logger=None,
+        skip_stages={
+            "skip_preprocess": True,
+            "skip_annotate": True,
+            "skip_linguistic": False,
+            "skip_aggregate": False,
+            "skip_topic_model": True,
+            "skip_diagnose": True,
+        },
+        num_topics=2,
+    )
+
+    assert [item.args[0] for item in bus.emit_stage_start.await_args_list] == ["linguistic", "aggregate"]
+    assert [call[0] for call in tracker.mock_calls] == [
+        "stage_start",
+        "run_linguistic",
+        "stage_complete",
+        "stage_start",
+        "run_aggregate",
+        "stage_complete",
+    ]
+
+
+def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
+    """2026-08-31 用于验证关闭 LTP 时恢复链仍能识别后续已完成阶段"""
+    initializer = EnvironmentInitializer(MagicMock())
+    chapter_repo = MagicMock()
+    chapter_repo.is_preprocess_complete.return_value = True
+    annotation_repo = MagicMock()
+    annotation_repo.is_annotate_complete.return_value = True
+    stats_repo = MagicMock()
+    stats_repo.is_aggregate_complete.return_value = True
+    stats_repo.has_topic_data.return_value = True
+    stats_repo.has_diagnosis_data.return_value = True
+    monkeypatch.setattr(settings.linguistic.ltp, "enabled", False)
+
+    with (
+        patch("src.storage.repositories.ChapterRepository", return_value=chapter_repo),
+        patch("src.storage.repositories.AnnotationRepository", return_value=annotation_repo),
+        patch(
+            "src.api.services.analysis.environment_initializer.StatsRepository",
+            return_value=stats_repo,
+        ),
+    ):
+        result = initializer.check_stage_completion_status(MagicMock(), "run-1")
+
+    assert result == {
+        "skip_preprocess": True,
+        "skip_annotate": True,
+        "skip_aggregate": True,
+        "skip_linguistic": True,
+        "skip_topic_model": True,
+        "skip_diagnose": True,
+    }
+    stats_repo.has_linguistic_data.assert_not_called()
 
 
 def test_prepare_task_execution_claim_claims_pending_run(db_session) -> None:
