@@ -321,7 +321,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
       onSeriesToggle(newSet);
     };
 
-    const handleDataZoomEnd = (params: { batch?: Array<{ start: number; end: number }> }) => {
+    const handleDataZoom = (params: { batch?: Array<{ start: number; end: number }> }) => {
       if (!onZoomChange || !data.length) return;
 
       if (params.batch && params.batch.length > 0) {
@@ -354,7 +354,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           lazyUpdate
           onEvents={{
             legendClick: handleLegendClick,
-            datazoomend: handleDataZoomEnd,
+            datazoom: handleDataZoom,
           }}
         />
       </div>
