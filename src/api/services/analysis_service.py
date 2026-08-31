@@ -148,17 +148,6 @@ class AnalysisService:
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
-        # ── 聚合 ──
-        if not skip_stages["skip_aggregate"]:
-            await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start)
-
-            await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
-            await bus.emit_stage_complete("aggregate")
-
-        if self._is_cancelled(task_id):
-            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
-            return
-
         # ── 语言结构基础数据 ──
         if not skip_stages["skip_linguistic"]:
             await bus.emit_stage_start(
@@ -169,6 +158,17 @@ class AnalysisService:
                 run_id, session, self._make_stage_emitter(bus, "linguistic")
             )
             await bus.emit_stage_complete("linguistic")
+
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
+            return
+
+        # ── 聚合 ──
+        if not skip_stages["skip_aggregate"]:
+            await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start)
+
+            await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
+            await bus.emit_stage_complete("aggregate")
 
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
@@ -239,8 +239,8 @@ class AnalysisService:
         return (
             skip_stages["skip_preprocess"]
             and skip_stages["skip_annotate"]
-            and skip_stages["skip_aggregate"]
             and skip_stages["skip_linguistic"]
+            and skip_stages["skip_aggregate"]
             and skip_stages["skip_topic_model"]
             and skip_stages["skip_diagnose"]
         )

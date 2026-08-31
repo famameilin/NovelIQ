@@ -138,13 +138,16 @@ class EnvironmentInitializer:
         if skip_preprocess and ann_repo.is_annotate_complete(run_id):
             logger.info("Annotate complete, skipping")
             skip_annotate = True
-        if skip_annotate and stats_repo.is_aggregate_complete(run_id):
-            logger.info("Aggregate complete, skipping")
-            skip_aggregate = True
-        if skip_aggregate and stats_repo.has_linguistic_data(run_id):
+        if skip_annotate and not settings.linguistic.ltp.enabled:
+            logger.info("Linguistic disabled, treating stage as complete")
+            skip_linguistic = True
+        elif skip_annotate and stats_repo.has_linguistic_data(run_id):
             logger.info("Linguistic complete, skipping")
             skip_linguistic = True
-        if skip_linguistic and stats_repo.has_topic_data(run_id):
+        if skip_linguistic and stats_repo.is_aggregate_complete(run_id):
+            logger.info("Aggregate complete, skipping")
+            skip_aggregate = True
+        if skip_aggregate and stats_repo.has_topic_data(run_id):
             logger.info("Topic model complete, skipping")
             skip_topic_model = True
         if skip_topic_model and stats_repo.has_diagnosis_data(run_id):
