@@ -62,7 +62,7 @@ export async function getDiagnosis(
   return data;
 }
 
-// 伏笔线程台账：Setup 台账 tab 的数据源（展示主体原样透传）
+// 伏笔追踪：跨章节线索状态的数据源（展示主体原样透传）
 export async function getForeshadowingThreads(
   novelId: string,
   taskId: string
