@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopicsPage } from "@/pages/TopicsPage";
@@ -181,7 +181,7 @@ describe("TopicsPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("总览 tab 走 /tabs/topics-overview 并渲染词云与分布", async () => {
+  it("主题文档流走总览 API 并渲染词云与分布", async () => {
     getTopicsOverviewTabMock.mockResolvedValue({
       run_id: "task-1",
       model: null,
@@ -215,6 +215,7 @@ describe("TopicsPage", () => {
 
     renderTopicsPage();
 
+    fireEvent.click(await screen.findByText("完整主题分布"));
     expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
     expect(screen.getByTestId("topic-distribution-chart")).toBeInTheDocument();
     expect(screen.getByTestId("topic-keywords-card")).toBeInTheDocument();
@@ -236,12 +237,13 @@ describe("TopicsPage", () => {
 
     renderTopicsPage();
 
+    fireEvent.click(await screen.findByText("完整主题分布"));
     expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
     expect(screen.getByTestId("topic-bar-chart")).toBeInTheDocument();
     expect(screen.getByTestId("topic-table")).toBeInTheDocument();
   });
 
-  it("演进/迁移/情绪 tab 各自走独立端点", async () => {
+  it("主题文档流保留演进、迁移、情绪三个独立端点", async () => {
     getTopicsOverviewTabMock.mockResolvedValue({
       run_id: "task-1",
       model: null,

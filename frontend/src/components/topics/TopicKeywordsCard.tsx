@@ -19,15 +19,15 @@ export function TopicKeywordsCard({ keywords, unavailableReason, className }: To
 
   return (
     <DashboardCardShell
-      title="TextRank 关键词"
+      title="全书关键词"
       icon={<Hash className="h-4 w-4" />}
       accent="chart-3"
       className={className}
-      bodyClassName="min-h-0 overflow-y-auto"
+      bodyClassName="min-h-0"
     >
       {keywords.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-muted">
-          {unavailableReason ?? "暂无可建图的词元"}
+          {unavailableReason ? "当前任务暂时无法生成全书关键词" : "暂无可用关键词"}
         </p>
       ) : (
         <ul className="space-y-2">
