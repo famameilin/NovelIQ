@@ -16,6 +16,8 @@ interface RatioBarChartProps {
   className?: string;
   /** 值格式化（默认百分比一位小数） */
   formatValue?: (value: number) => string;
+  /** 标签格式化；原始键仍通过 title 保留，便于定位未知枚举 */
+  formatLabel?: (key: string) => string;
 }
 
 export function RatioBarChart({
@@ -26,6 +28,7 @@ export function RatioBarChart({
   emptyText = "暂无数据",
   className,
   formatValue,
+  formatLabel,
 }: RatioBarChartProps) {
   const entries = Object.entries(ratios ?? {}).sort((left, right) => right[1] - left[1]);
   const max = entries.length > 0 ? Math.max(...entries.map(([, value]) => value)) : 0;
@@ -37,7 +40,7 @@ export function RatioBarChart({
       icon={IconComponent ? <IconComponent className="h-4 w-4" /> : undefined}
       accent={accent}
       className={className}
-      bodyClassName="min-h-0 overflow-y-auto"
+      bodyClassName="min-h-0"
     >
       {entries.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-muted">{emptyText}</p>
@@ -46,7 +49,7 @@ export function RatioBarChart({
           {entries.map(([key, value]) => (
             <li key={key} className="flex items-center gap-3">
               <span className="w-28 shrink-0 truncate text-sm text-text" title={key}>
-                {key}
+                {formatLabel ? formatLabel(key) : key}
               </span>
               <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover">
                 <div

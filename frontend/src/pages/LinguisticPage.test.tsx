@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LinguisticPage } from "@/pages/LinguisticPage";
@@ -186,6 +186,19 @@ describe("LinguisticPage", () => {
     expect(getLinguisticFeaturesMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getLinguisticEntitiesTabMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getLinguisticWord2vecMock).toHaveBeenCalledWith("novel-1", "task-1");
+  });
+
+  it("在表达结构与词汇与语义视图间切换，并保留模型详情", async () => {
+    renderLinguisticPage();
+
+    expect(await screen.findByText("表达结构")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "词汇与语义" }));
+
+    expect(await screen.findByText("高频实体名（前 20 名）")).toBeInTheDocument();
+    expect(screen.getByText("预训练微调词向量")).toBeInTheDocument();
+    expect(screen.getByText(/92\.5%/)).toBeInTheDocument();
+    expect(screen.getAllByText(/加权词元/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("run-id")).not.toBeInTheDocument();
   });
 
   it("语言阶段未运行时展示 unavailable_reason 空态", async () => {

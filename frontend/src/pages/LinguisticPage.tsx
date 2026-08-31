@@ -1,10 +1,6 @@
 /**
- * LinguisticPage - 语言特征页面（2026-08-29 新增，赛道 A/B/C 数据落地）
- *
- * 三个 tab，每 tab 一个 API：
- * - 词法句法   → GET /linguistic/features（词性/句式/词长/依存聚合，book + chapters）
- * - 实体与短语 → GET /tabs/linguistic-entities（实体类型计数 + 高频实体 + 短语统计，仅聚合）
- * - 词向量     → GET /linguistic/word2vec（POS 覆盖率 + 质心相似度矩阵）
+ * 2026-08-29，作用：展示语言特征分析页面
+ * 简要说明：表达结构整合词性、句式、词长和依存统计，词汇与语义整合实体、固定表达和词向量聚合
  */
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -14,14 +10,18 @@ import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getLinguisticFeatures, getLinguisticWord2vec } from "@/api/linguistic";
 import { getLinguisticEntitiesTab, tabQueryKey } from "@/api/tabs";
-import type { LinguisticFeaturesResponse } from "@/api/types";
+import type { LinguisticEntitiesTabResponse, LinguisticFeaturesResponse, Word2VecStatsResponse } from "@/api/types";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { AnalysisDetails } from "@/components/common/AnalysisDetails";
+import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
+import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { RatioBarChart } from "@/components/linguistic/RatioBarChart";
 import { PosSimilarityHeatmap } from "@/components/linguistic/PosSimilarityHeatmap";
+import { formatAnalysisLabel } from "@/lib/analysisLabels";
 import {
   AlignLeft,
   Braces,
@@ -31,6 +31,8 @@ import {
   Sigma,
   Tag,
   Tags,
+  BarChart3,
+  BookOpen,
 } from "lucide-react";
 import {
   Select,
@@ -42,7 +44,7 @@ import {
 
 const STALE_TIME = 5 * 60 * 1000;
 
-/** 单 tab 的加载/错误态统一门禁（与 TopicsPage 同款语义） */
+/** 单数据视图的加载、错误和不可用状态门禁 */
 function renderTabGate<T>(
   query: UseQueryResultLike<T>,
   title: string,
@@ -89,7 +91,23 @@ interface UseQueryResultLike<T> {
   refetch: () => unknown;
 }
 
-function LexiconTab({ query }: { query: UseQueryResultLike<LinguisticFeaturesResponse> }) {
+/**
+ * 2026-08-31，作用：将后端不可用原因转换为用户可读文案
+ * 简要说明：隐藏内部字段名，保留实际原因中的中文说明
+ */
+function formatUnavailableReason(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return reason
+    .replace(/^\s*linguistic_unavailable\s*:\s*/i, "")
+    .replace(/paragraph_linguistic_features/g, "段落语言特征数据")
+    .replace(/word2vec/g, "词向量数据");
+}
+
+/**
+ * 2026-08-31，作用：展示表达结构视图的章节级语言统计
+ * 简要说明：统一承载四类比例分布、六项聚合指标和章节切换
+ */
+function ExpressionStructureView({ query }: { query: UseQueryResultLike<LinguisticFeaturesResponse> }) {
   const [selectedChapter, setSelectedChapter] = useState<string>("book");
 
   const stats = useMemo(() => {
@@ -101,15 +119,15 @@ function LexiconTab({ query }: { query: UseQueryResultLike<LinguisticFeaturesRes
 
   return (
     <motion.div
-      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1"
+      className="flex flex-col gap-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
     >
-      {renderTabGate(query, "词法句法", query.data?.unavailable_reason ?? null, () => (
+      {renderTabGate(query, "表达结构", formatUnavailableReason(query.data?.unavailable_reason), () => (
         <>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-text-muted">
-              比例分母为有效 LTP 词元数或句子数；切换章节查看局部风格。
+              比例分母为有效词元数或句子数；切换章节查看局部表达结构。
             </p>
             <Select value={selectedChapter} onValueChange={setSelectedChapter}>
               <SelectTrigger className="h-8 w-[160px]" aria-label="聚合层级">
@@ -126,29 +144,158 @@ function LexiconTab({ query }: { query: UseQueryResultLike<LinguisticFeaturesRes
             </Select>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <RatioBarChart title="词性比例" icon={Tag} ratios={stats?.pos_ratios ?? null} className="min-h-[280px]" />
-            <RatioBarChart title="句式比例" icon={Quote} ratios={stats?.sentence_pattern_ratios ?? null} className="min-h-[280px]" />
-            <RatioBarChart title="词长分布" icon={AlignLeft} ratios={stats?.word_length_ratios ?? null} className="min-h-[280px]" />
-            <RatioBarChart title="依存关系分布" icon={Layers} ratios={stats?.dependency_relation_ratios ?? null} className="min-h-[280px]" />
-          </div>
+          <AnalysisMetricStrip
+            items={[
+              { label: "全书段落数", value: query.data?.paragraph_count ?? "—" },
+              { label: "有效词元数", value: stats?.token_total ?? "—" },
+              { label: "句子数", value: stats?.sentence_total ?? "—" },
+              { label: "依存根节点数", value: stats?.dependency_root_count ?? "—" },
+              { label: "平均依存深度", value: stats?.avg_dependency_depth?.toFixed(3) ?? "—" },
+              { label: "最大依存深度", value: stats?.max_dependency_depth ?? "—" },
+            ]}
+            className="grid-cols-3"
+          />
 
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <DashboardCardShell title="平均依存深度" accent="primary" className="min-h-[120px]" bodyClassName="items-center justify-center">
-              <p className="text-2xl font-semibold text-text">{stats?.avg_dependency_depth?.toFixed(3) ?? "—"}</p>
-            </DashboardCardShell>
-            <DashboardCardShell title="最大依存深度" accent="chart-2" className="min-h-[120px]" bodyClassName="items-center justify-center">
-              <p className="text-2xl font-semibold text-text">{stats?.max_dependency_depth ?? "—"}</p>
-            </DashboardCardShell>
-            <DashboardCardShell title="有效词元数" accent="chart-3" className="min-h-[120px]" bodyClassName="items-center justify-center">
-              <p className="text-2xl font-semibold text-text">{stats?.token_total ?? "—"}</p>
-            </DashboardCardShell>
-            <DashboardCardShell title="句子数" accent="chart-4" className="min-h-[120px]" bodyClassName="items-center justify-center">
-              <p className="text-2xl font-semibold text-text">{stats?.sentence_total ?? "—"}</p>
-            </DashboardCardShell>
+          <div className="grid grid-cols-2 gap-4">
+            <RatioBarChart title="词性比例" icon={Tag} ratios={stats?.pos_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "pos")} className="min-h-[280px]" />
+            <RatioBarChart title="句式比例" icon={Quote} ratios={stats?.sentence_pattern_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "sentence")} className="min-h-[280px]" />
+            <RatioBarChart title="词长分布" icon={AlignLeft} ratios={stats?.word_length_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "wordLength")} className="min-h-[280px]" />
+            <RatioBarChart title="依存关系分布" icon={Layers} ratios={stats?.dependency_relation_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "dependency")} className="min-h-[280px]" />
           </div>
         </>
       ))}
+    </motion.div>
+  );
+}
+
+/**
+ * 2026-08-31，作用：展示词汇与语义视图的实体、固定表达和词向量聚合
+ * 简要说明：不输出向量数组或运行标识，将模型信息收纳到可展开详情
+ */
+function VocabularySemanticView({
+  entitiesQuery,
+  word2vecQuery,
+}: {
+  entitiesQuery: UseQueryResultLike<LinguisticEntitiesTabResponse>;
+  word2vecQuery: UseQueryResultLike<Word2VecStatsResponse>;
+}) {
+  const coverage = word2vecQuery.data?.pos_coverage ?? [];
+  const maxCoverage = coverage.length > 0 ? Math.max(...coverage.map((entry) => entry.coverage_ratio ?? 0)) : 0;
+  const word2vecData = word2vecQuery.data;
+
+  return (
+    <motion.div className="flex flex-col gap-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      {renderTabGate(
+        entitiesQuery,
+        "词汇与语义",
+        formatUnavailableReason(entitiesQuery.data?.unavailable_reason),
+        (data) => (
+          <div className="flex flex-col gap-4">
+            <AnalysisMetricStrip
+              items={[
+                { label: "固定表达密度（‰）", value: data.fixed_phrase_density?.toFixed(4) ?? "—" },
+                { label: "正式命中次数", value: data.metric_hit_count },
+                { label: "四字候选数", value: data.four_char_candidate_count },
+                { label: "全书字符数", value: data.total_char_count },
+                { label: "实体命中总数", value: data.total_hits },
+              ]}
+              className="grid-cols-5"
+            />
+            <div className="grid grid-cols-2 gap-4">
+              <RatioBarChart
+                title="实体类型计数"
+                icon={Tags}
+                accent="chart-2"
+                ratios={data.count_by_type}
+                formatValue={(value) => String(Math.round(value))}
+                formatLabel={(key) => formatAnalysisLabel(key, "entity")}
+                className="min-h-[280px]"
+              />
+              <DashboardCardShell title="高频实体名（前 20 名）" icon={<ScanText className="h-4 w-4" />} accent="chart-3" className="min-h-[280px]">
+                {data.surface_top.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-text-muted">暂无实体候选</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {data.surface_top.map((entry) => (
+                      <li key={`${entry.entity_type}-${entry.surface_text}`} className="flex items-center gap-3">
+                        <span className="w-28 shrink-0 truncate text-sm text-text" title={entry.surface_text}>{entry.surface_text}</span>
+                        <span className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs text-primary">
+                          {formatAnalysisLabel(entry.entity_type, "entity")}
+                        </span>
+                        <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover">
+                          <div className="h-full rounded-full bg-chart-3" style={{ width: `${data.surface_top[0].count > 0 ? (entry.count / data.surface_top[0].count) * 100 : 0}%` }} />
+                        </div>
+                        <span className="w-10 shrink-0 text-right text-xs text-text-muted">{entry.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </DashboardCardShell>
+            </div>
+          </div>
+        ),
+      )}
+
+      {renderTabGate(
+        word2vecQuery,
+        "词汇与语义",
+        formatUnavailableReason(word2vecData?.unavailable_reason),
+        (data) => (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <DashboardCardShell title="词性覆盖率" icon={<Sigma className="h-4 w-4" />} accent="chart-2" className="min-h-[280px]">
+                {coverage.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-text-muted">暂无覆盖率数据</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {coverage.map((entry) => (
+                      <li key={entry.pos_group} className="flex items-center gap-3">
+                        <span className="w-24 shrink-0 truncate text-sm text-text">
+                          {formatAnalysisLabel(entry.pos_group, "pos")}
+                        </span>
+                        <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover">
+                          <div className="h-full rounded-full bg-chart-2" style={{ width: `${maxCoverage > 0 && entry.coverage_ratio != null ? (entry.coverage_ratio / maxCoverage) * 100 : 0}%` }} />
+                        </div>
+                        <span className="w-28 shrink-0 text-right text-xs text-text-muted">
+                          {entry.coverage_ratio != null ? `${(entry.coverage_ratio * 100).toFixed(1)}%` : "—"} · {entry.in_vocabulary_token_total}/{entry.source_token_total}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </DashboardCardShell>
+
+              <DashboardCardShell title="词性组语义相似度" icon={<Braces className="h-4 w-4" />} accent="chart-4" className="min-h-[320px]" bodyClassName="min-h-[280px]">
+                {data.pos_similarity_matrix && data.pos_centroids.length >= 2 ? (
+                  <PosSimilarityHeatmap
+                    groups={data.pos_centroids.map((centroid) => formatAnalysisLabel(centroid.pos_group, "pos"))}
+                    matrix={data.pos_similarity_matrix}
+                    className="h-[280px]"
+                  />
+                ) : (
+                  <p className="flex h-full items-center justify-center text-sm text-text-muted">质心不足 2 组，无法计算相似度矩阵</p>
+                )}
+              </DashboardCardShell>
+            </div>
+
+            <AnalysisDetails title="词汇与语义详情" description="模型信息、覆盖率和质心加权词元统计">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">向量维度</p><p className="mt-1 text-sm font-semibold text-text">{data.model?.embedding_dimension ?? "—"}</p></div>
+                <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">词表规模</p><p className="mt-1 text-sm font-semibold text-text">{data.model?.vocabulary_size ?? "—"}</p></div>
+                <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">词表来源</p><p className="mt-1 truncate text-sm font-semibold text-text">{formatAnalysisLabel(data.model?.artifact_scope, "artifactScope")}</p></div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {data.pos_centroids.map((centroid) => (
+                  <div key={centroid.pos_group} className="flex items-center justify-between rounded-md border border-border/60 bg-surface/70 px-3 py-2 text-xs">
+                    <span>{formatAnalysisLabel(centroid.pos_group, "pos")}</span>
+                    <span className="text-text-muted">加权词元 {centroid.weighted_token_total}</span>
+                  </div>
+                ))}
+              </div>
+            </AnalysisDetails>
+          </>
+        ),
+      )}
     </motion.div>
   );
 }
@@ -190,160 +337,25 @@ export function LinguisticPage() {
     staleTime: STALE_TIME,
   });
 
-  const coverage = word2vecQuery.data?.pos_coverage ?? [];
-  const maxCoverage = coverage.length > 0 ? Math.max(...coverage.map((entry) => entry.coverage_ratio ?? 0)) : 0;
+  const [view, setView] = useState<"structure" | "vocabulary">("structure");
 
   return (
-    <AnalysisWorkspace title="语言特征">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        <AnalysisWorkspace.Tabs defaultValue="lexicon">
-          <AnalysisWorkspace.Tab value="lexicon" label="词法句法">
-            <LexiconTab query={featuresQuery} />
-          </AnalysisWorkspace.Tab>
-
-          <AnalysisWorkspace.Tab value="entities" label="实体与短语">
-            {renderTabGate(
-              entitiesQuery,
-              "实体与短语",
-              entitiesQuery.data != null &&
-                entitiesQuery.data.count_by_type && Object.keys(entitiesQuery.data.count_by_type).length === 0 &&
-                entitiesQuery.data.total_hits === 0
-                ? entitiesQuery.data.unavailable_reason
-                : null,
-              (data) => (
-                <motion.div
-                  className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                >
-                  <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                    <DashboardCardShell title="固定短语密度(‰)" accent="primary" className="min-h-[120px]" bodyClassName="items-center justify-center">
-                      <p className="text-2xl font-semibold text-text">{data.fixed_phrase_density?.toFixed(4) ?? "—"}</p>
-                    </DashboardCardShell>
-                    <DashboardCardShell title="正式命中次数" accent="chart-2" className="min-h-[120px]" bodyClassName="items-center justify-center">
-                      <p className="text-2xl font-semibold text-text">{data.metric_hit_count}</p>
-                    </DashboardCardShell>
-                    <DashboardCardShell title="四字候选" accent="chart-3" className="min-h-[120px]" bodyClassName="items-center justify-center">
-                      <p className="text-2xl font-semibold text-text">{data.four_char_candidate_count}</p>
-                    </DashboardCardShell>
-                    <DashboardCardShell title="全书字符数" accent="chart-4" className="min-h-[120px]" bodyClassName="items-center justify-center">
-                      <p className="text-2xl font-semibold text-text">{data.total_char_count}</p>
-                    </DashboardCardShell>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <RatioBarChart
-                      title="实体类型计数"
-                      icon={Tags}
-                      accent="chart-2"
-                      ratios={data.count_by_type}
-                      formatValue={(value) => String(Math.round(value))}
-                      className="min-h-[280px]"
-                    />
-                    <DashboardCardShell title="高频实体名 Top-20" icon={<ScanText className="h-4 w-4" />} accent="chart-3" className="min-h-[280px]" bodyClassName="min-h-0 overflow-y-auto">
-                      {data.surface_top.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-text-muted">暂无实体候选</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {data.surface_top.map((entry) => (
-                            <li key={`${entry.entity_type}-${entry.surface_text}`} className="flex items-center gap-3">
-                              <span className="w-28 shrink-0 truncate text-sm text-text">{entry.surface_text}</span>
-                              <span className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs text-primary">{entry.entity_type}</span>
-                              <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover">
-                                <div
-                                  className="h-full rounded-full bg-chart-3"
-                                  style={{
-                                    width: `${
-                                      data.surface_top[0].count > 0 ? (entry.count / data.surface_top[0].count) * 100 : 0
-                                    }%`,
-                                  }}
-                                />
-                              </div>
-                              <span className="w-10 shrink-0 text-right text-xs text-text-muted">{entry.count}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </DashboardCardShell>
-                  </div>
-                </motion.div>
-              ),
-            )}
-          </AnalysisWorkspace.Tab>
-
-          <AnalysisWorkspace.Tab value="word2vec" label="词向量">
-            {renderTabGate(
-              word2vecQuery,
-              "词向量",
-              word2vecQuery.data?.unavailable_reason ?? null,
-              (data) => (
-                <motion.div
-                  className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                >
-                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                    <DashboardCardShell title="向量维度" accent="primary" className="min-h-[110px]" bodyClassName="items-center justify-center">
-                      <p className="text-2xl font-semibold text-text">{data.model?.embedding_dimension ?? "—"}</p>
-                    </DashboardCardShell>
-                    <DashboardCardShell title="词表规模" accent="chart-2" className="min-h-[110px]" bodyClassName="items-center justify-center">
-                      <p className="text-2xl font-semibold text-text">{data.model?.vocabulary_size ?? "—"}</p>
-                    </DashboardCardShell>
-                    <DashboardCardShell title="词表来源" accent="chart-3" className="min-h-[110px]" bodyClassName="items-center justify-center">
-                      <p className="truncate text-lg font-semibold text-text">{data.model?.artifact_scope ?? "—"}</p>
-                    </DashboardCardShell>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <DashboardCardShell title="词性覆盖率" icon={<Sigma className="h-4 w-4" />} accent="chart-2" className="min-h-[280px]" bodyClassName="min-h-0 overflow-y-auto">
-                      {coverage.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-text-muted">暂无覆盖率数据</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {coverage.map((entry) => (
-                            <li key={entry.pos_group} className="flex items-center gap-3">
-                              <span className="w-24 shrink-0 truncate text-sm text-text">{entry.pos_group}</span>
-                              <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover">
-                                <div
-                                  className="h-full rounded-full bg-chart-2"
-                                  style={{
-                                    width: `${maxCoverage > 0 && entry.coverage_ratio != null ? (entry.coverage_ratio / maxCoverage) * 100 : 0}%`,
-                                  }}
-                                />
-                              </div>
-                              <span className="w-32 shrink-0 text-right text-xs text-text-muted">
-                                {entry.in_vocabulary_token_total} / {entry.source_token_total}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </DashboardCardShell>
-
-                    <DashboardCardShell title="词性组语义相似度" icon={<Braces className="h-4 w-4" />} accent="chart-4" className="min-h-[320px]" bodyClassName="min-h-[280px]">
-                      {data.pos_similarity_matrix && data.pos_centroids.length >= 2 ? (
-                        <PosSimilarityHeatmap
-                          groups={data.pos_centroids.map((centroid) => centroid.pos_group)}
-                          matrix={data.pos_similarity_matrix}
-                          className="h-[280px]"
-                        />
-                      ) : (
-                        <p className="flex h-full items-center justify-center text-sm text-text-muted">
-                          质心不足 2 组，无法计算相似度矩阵
-                        </p>
-                      )}
-                    </DashboardCardShell>
-                  </div>
-                </motion.div>
-              ),
-            )}
-          </AnalysisWorkspace.Tab>
-        </AnalysisWorkspace.Tabs>
+    <AnalysisWorkspace title="语言特征" documentFlow>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex flex-col gap-4">
+        <AnalysisViewSwitcher
+          value={view}
+          onValueChange={setView}
+          label="语言特征分析视图"
+          options={[
+            { value: "structure", label: "表达结构", icon: BookOpen },
+            { value: "vocabulary", label: "词汇与语义", icon: BarChart3 },
+          ]}
+        />
+        {view === "structure" ? (
+          <ExpressionStructureView query={featuresQuery} />
+        ) : (
+          <VocabularySemanticView entitiesQuery={entitiesQuery} word2vecQuery={word2vecQuery} />
+        )}
       </motion.div>
     </AnalysisWorkspace>
   );
