@@ -105,6 +105,9 @@ function AnalysisWorkspaceTabs({
   const activeValue = tabItems.some((tabItem) => tabItem.props.value === candidateValue)
     ? candidateValue
     : firstValue;
+  const [mountedValues, setMountedValues] = useState<ReadonlySet<string>>(
+    () => new Set(activeValue ? [activeValue] : []),
+  );
 
   useEffect(() => {
     if (!isControlled && internalValue !== activeValue) {
@@ -112,6 +115,19 @@ function AnalysisWorkspaceTabs({
       setInternalValue(activeValue);
     }
   }, [activeValue, internalValue, isControlled]);
+
+  /**
+   * 2026-08-31，作用：页签首次激活时再挂载内容，并在后续切换中保留局部状态
+   * 简要说明：避免 ECharts 在初始隐藏面板中以 0x0 容器初始化
+   */
+  useEffect(() => {
+    if (!activeValue) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional lazy mount registry sync
+    setMountedValues((current) => {
+      if (current.has(activeValue)) return current;
+      return new Set([...current, activeValue]);
+    });
+  }, [activeValue]);
 
   /**
    * 2026-04-28，任务：分析详情页 slot 工作区收口
@@ -155,18 +171,22 @@ function AnalysisWorkspaceTabs({
           panelsClassName,
         )}
       >
-        {tabItems.map((tabItem) => (
-          <TabsContent key={tabItem.props.value} value={tabItem.props.value} forceMount asChild>
-            <motion.div
-              initial={tabItem.props.value === activeValue ? { opacity: 0, y: 8 } : false}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.16, ease: "easeOut" }}
-              className="!mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] px-2 pb-2 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden"
-            >
-              <div className="flex min-h-0 flex-1 flex-col">{tabItem.props.children}</div>
-            </motion.div>
-          </TabsContent>
-        ))}
+        {tabItems
+          .filter(
+            (tabItem) => mountedValues.has(tabItem.props.value) || tabItem.props.value === activeValue,
+          )
+          .map((tabItem) => (
+            <TabsContent key={tabItem.props.value} value={tabItem.props.value} forceMount asChild>
+              <motion.div
+                initial={tabItem.props.value === activeValue ? { opacity: 0, y: 8 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className="!mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] px-2 pb-2 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden"
+              >
+                <div className="flex min-h-0 flex-1 flex-col">{tabItem.props.children}</div>
+              </motion.div>
+            </TabsContent>
+          ))}
       </div>
     </Tabs>
   );
