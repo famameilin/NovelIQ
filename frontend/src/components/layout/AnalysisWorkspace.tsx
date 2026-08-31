@@ -5,6 +5,8 @@ import {
   useEffect,
   useMemo,
   useState,
+  createContext,
+  useContext,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -18,6 +20,7 @@ interface AnalysisWorkspaceProps {
   title: string;
   headerProps?: Omit<NovelHeaderProps, "title" | "className">;
   children: ReactNode;
+  documentFlow?: boolean;
   className?: string;
   headerClassName?: string;
   contentClassName?: string;
@@ -39,6 +42,8 @@ export interface AnalysisWorkspaceTabProps {
   children: ReactNode;
 }
 
+const AnalysisWorkspaceDocumentFlowContext = createContext(false);
+
 /**
  * 2026-04-28，任务：分析详情页 slot 工作区收口
  * 新建原因：把单屏页面根布局和分析工作区统一成复合组件，页面只声明 header 与 slot 内容。
@@ -47,19 +52,32 @@ function AnalysisWorkspaceRoot({
   title,
   headerProps,
   children,
+  documentFlow = false,
   className,
   headerClassName,
   contentClassName,
 }: AnalysisWorkspaceProps) {
   return (
-    <AnalysisPageViewport
-      title={title}
-      headerProps={headerProps}
-      className={className}
-      headerClassName={headerClassName}
-    >
-      <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden py-1", contentClassName)}>{children}</div>
-    </AnalysisPageViewport>
+    <AnalysisWorkspaceDocumentFlowContext.Provider value={documentFlow}>
+      <AnalysisPageViewport
+        title={title}
+        headerProps={headerProps}
+        documentFlow={documentFlow}
+        className={className}
+        headerClassName={headerClassName}
+      >
+        <div
+          className={cn(
+            documentFlow
+              ? "flex min-h-0 flex-col overflow-visible py-1"
+              : "flex min-h-0 flex-1 flex-col overflow-hidden py-1",
+            contentClassName,
+          )}
+        >
+          {children}
+        </div>
+      </AnalysisPageViewport>
+    </AnalysisWorkspaceDocumentFlowContext.Provider>
   );
 }
 
@@ -94,6 +112,7 @@ function AnalysisWorkspaceTabs({
   listClassName,
   panelsClassName,
 }: AnalysisWorkspaceTabsProps) {
+  const documentFlow = useContext(AnalysisWorkspaceDocumentFlowContext);
   const tabItems = useMemo(
     () => Children.toArray(children).filter(isAnalysisWorkspaceTabElement),
     [children],
@@ -148,7 +167,12 @@ function AnalysisWorkspaceTabs({
     <Tabs
       value={activeValue}
       onValueChange={handleValueChange}
-      className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", className)}
+      className={cn(
+        documentFlow
+          ? "flex min-h-0 flex-col overflow-visible"
+          : "flex min-h-0 flex-1 flex-col overflow-hidden",
+        className,
+      )}
     >
       <div className="shrink-0 px-2 pb-2 pt-1">
         <TabsList
@@ -167,7 +191,9 @@ function AnalysisWorkspaceTabs({
 
       <div
         className={cn(
-          "relative min-h-0 flex-1 overflow-hidden px-2 pb-3 pt-0",
+          documentFlow
+            ? "relative min-h-0 px-2 pb-3 pt-0"
+            : "relative min-h-0 flex-1 overflow-hidden px-2 pb-3 pt-0",
           panelsClassName,
         )}
       >
@@ -181,9 +207,19 @@ function AnalysisWorkspaceTabs({
                 initial={tabItem.props.value === activeValue ? { opacity: 0, y: 8 } : false}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.16, ease: "easeOut" }}
-                className="!mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] px-2 pb-2 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden"
+                className={cn(
+                  documentFlow
+                    ? "!mt-0 flex min-h-0 flex-col overflow-visible rounded-[28px] px-2 pb-2 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden"
+                    : "!mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] px-2 pb-2 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden",
+                )}
               >
-                <div className="flex min-h-0 flex-1 flex-col">{tabItem.props.children}</div>
+                <div
+                  className={cn(
+                    documentFlow ? "flex min-h-0 flex-col" : "flex min-h-0 flex-1 flex-col",
+                  )}
+                >
+                  {tabItem.props.children}
+                </div>
               </motion.div>
             </TabsContent>
           ))}
