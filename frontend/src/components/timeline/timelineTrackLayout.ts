@@ -267,6 +267,7 @@ export function getEventSpanWidth(
   canvasWidth: number,
   _totalChapters?: number,
 ): number {
+  void _totalChapters;
   const labelWidth = estimateLabelWidth(node.summary ?? (node as TimelineEventNode).title ?? "");
   const start = (node as TimelineEventNode).start_progress;
   const end = (node as TimelineEventNode).end_progress;

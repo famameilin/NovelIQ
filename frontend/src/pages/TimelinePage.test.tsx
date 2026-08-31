@@ -122,14 +122,14 @@ vi.mock("@/components/timeline", () => ({
       ))}
     </div>
   ),
-  TimelineNodeDetail: ({
+  TimelineEventInspector: ({
     node,
     onClose,
   }: {
     node: TimelineEventNode | null;
     onClose?: () => void;
   }) => (
-    <div data-testid="timeline-node-detail">
+    <div data-testid="timeline-event-inspector">
       <span>{node ? `selected-${node.tree_id}` : "selected-none"}</span>
       <span>{node?.participants?.[0] ? `participant-${node.participants[0].name}` : "participant-none"}</span>
       <button type="button" onClick={onClose}>
@@ -176,15 +176,6 @@ function renderPage() {
     </QueryClientProvider>
   );
   return { queryClient, ...view };
-}
-
-/**
- * 2026-08-31，作用：在页面测试中切换到节点详情页签
- * 简要说明：共享页签改为首次访问时挂载，详情断言必须基于真实可见面板
- */
-async function openNodeDetailTab() {
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("tab", { name: "节点详情" }));
 }
 
 function createEmptyEventTimelineResponse(totalChapters: number): EventTimelineResponse {
@@ -250,7 +241,6 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    await openNodeDetailTab();
     expect(await screen.findByText("selected-tree:1")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledWith("novel-1", "task-a", {
       includeCurve: true,
@@ -269,7 +259,6 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    await openNodeDetailTab();
     expect(await screen.findByText(`selected-${first!.tree_id}`)).toBeInTheDocument();
     expect(screen.getByText(`participant-${first!.participants[0]!.name}`)).toBeInTheDocument();
   });
@@ -299,7 +288,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    expect(await screen.findByText("该任务为历史版本，无事件森林数据，请重新分析")).toBeInTheDocument();
+    expect(await screen.findByText("该任务没有事件时间轴数据，请重新分析")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /重新分析/ })).toBeInTheDocument();
   });
 
@@ -309,7 +298,7 @@ describe("TimelinePage deep links (event forest)", () => {
     renderPage();
 
     expect(await screen.findByText("暂无时间轴节点")).toBeInTheDocument();
-    expect(screen.queryByText("该任务为历史版本，无事件森林数据，请重新分析")).not.toBeInTheDocument();
+    expect(screen.queryByText("该任务没有事件时间轴数据，请重新分析")).not.toBeInTheDocument();
   });
 
   it("filters nodes by maxLevel", async () => {
@@ -364,7 +353,6 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    await openNodeDetailTab();
     await screen.findByText("selected-tree:1");
     await user.click(screen.getByRole("button", { name: "关闭详情" }));
 
@@ -379,14 +367,13 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    expect(await screen.findByText("加载失败")).toBeInTheDocument();
+    expect(await screen.findByText("时间轴加载失败")).toBeInTheDocument();
     const retryButtons = await screen.findAllByRole("button", { name: /重试/ });
     retryButtons[0]?.click();
 
     await waitFor(() => {
       expect(getTimelineMock).toHaveBeenCalledTimes(2);
     });
-    await openNodeDetailTab();
     expect(await screen.findByText(/selected-tree/)).toBeInTheDocument();
   });
 
@@ -395,7 +382,6 @@ describe("TimelinePage deep links (event forest)", () => {
     getTimelineMock.mockResolvedValue(timeline);
     const view = renderPage();
 
-    await openNodeDetailTab();
     expect(await screen.findByText("selected-tree:1")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledTimes(1);
 
@@ -413,12 +399,13 @@ describe("TimelinePage deep links (event forest)", () => {
     expect(await screen.findByText(`selected-${second}`)).toBeInTheDocument();
   });
 
-  it("keeps node detail inside a vertical scroll viewport", async () => {
+  it("does not expose legacy English metrics or technical field names in the main view", async () => {
     renderPage();
 
-    await openNodeDetailTab();
-    const detail = await screen.findByTestId("timeline-node-detail");
+    const main = await screen.findByTestId("page-container");
+    const text = main.textContent ?? "";
 
-    expect(detail.parentElement).toHaveClass("h-full", "min-h-0", "overflow-y-auto");
+    expect(text).not.toMatch(/\bEvents\b|\bVisible\b|\bCausal\b/);
+    expect(text).not.toMatch(/\b(tree_id|event_id|level)\b/);
   });
 });

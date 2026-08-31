@@ -409,10 +409,15 @@ export interface TimelinePhase {
 // ── 事件森林新合同（一树一节点）与后端 src/api/models/event_timeline.py 严格对齐 ──
 
 export interface TimelineEventParticipant {
-  name: string;
+  name?: string;
   role: string;
   entity_id?: number | null;
   entity_type?: string | null;
+  entity?: {
+    name: string;
+    entity_id?: number | null;
+    entity_type?: string | null;
+  } | null;
   // 透传保留未知字段
   [key: string]: unknown;
 }

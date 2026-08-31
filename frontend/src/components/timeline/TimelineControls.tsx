@@ -1,8 +1,6 @@
 /**
- * TimelineControls - 时间轴控制面板组件（2026-08-20 事件森林版）
- *
- * 一树一节点体系下仅保留重要性级别筛选，移除 composite/atomic 视图切换
- * `maxLevel` 仅表示前端本地展示层级，按 importance_score/level 统一过滤
+ * 2026-08-20，作用：控制时间轴事件重要性筛选
+ * 简要说明：maxLevel 只作用于前端展示，界面统一使用中文重要度文案
  */
 
 import { cn } from "@/lib/cn";
@@ -18,10 +16,6 @@ export interface TimelineControlsProps {
   onMaxLevelChange: (level: 1 | 2 | 3) => void;
   className?: string;
   variant?: "card" | "inline";
-  /** @deprecated 事件森林体系已移除视图切换，保留仅为兼容旧调用 */
-  viewMode?: "composite" | "atomic";
-  /** @deprecated */
-  onViewModeChange?: (viewMode: "composite" | "atomic") => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -69,6 +63,7 @@ export function TimelineControls({
                 variant={isActive ? "default" : "outline"}
                 size="sm"
                 onClick={() => onMaxLevelChange(level)}
+                aria-pressed={isActive}
                 className={cn(
                   "h-7 px-3 text-xs",
                   isActive && "bg-primary text-primary-foreground"
@@ -81,7 +76,7 @@ export function TimelineControls({
           })}
         </div>
       </div>
-      <span className="text-xs text-text-muted">按重要度筛选（level ≤ {maxLevel}）</span>
+      <span className="text-xs text-text-muted">{LEVEL_CONFIG[maxLevel].description}</span>
     </div>
   );
 
