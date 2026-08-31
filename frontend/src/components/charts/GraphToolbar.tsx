@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
+import { formatAnalysisLabel } from "@/lib/analysisLabels";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -80,7 +81,7 @@ export function GraphToolbar({
       {/* 缩放按钮组 */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onZoomIn}>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onZoomIn} aria-label="放大关系图">
             <ZoomIn className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -89,7 +90,7 @@ export function GraphToolbar({
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onZoomOut}>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onZoomOut} aria-label="缩小关系图">
             <ZoomOut className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -98,7 +99,7 @@ export function GraphToolbar({
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onFitToScreen}>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onFitToScreen} aria-label="适应关系图范围">
             <Maximize className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -110,7 +111,7 @@ export function GraphToolbar({
       {/* 居中按钮 */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onCenter}>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onCenter} aria-label="居中关系图">
             <Crosshair className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -164,7 +165,7 @@ export function GraphToolbar({
                 onCheckedChange={() => handleRelationTypeToggle(type)}
                 onSelect={(e) => e.preventDefault()}
               >
-                {type}
+                <span>{formatAnalysisLabel(type, "relation")}</span>
               </DropdownMenuCheckboxItem>
             ))
           )}

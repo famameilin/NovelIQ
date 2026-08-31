@@ -165,7 +165,7 @@ function createGraphData(): GraphData {
         source_name: "顾霜",
         target_name: "司夜",
         relation_type: "盟友",
-        directionality: "bidirectional",
+        directionality: "directed",
         relation_semantics: "ordinary",
         attributes: {},
         is_active: true,
@@ -194,7 +194,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         to_name: "司夜",
         relation_type: "盟友",
         relation_change_kind: "assert",
-        directionality: "bidirectional",
+        directionality: "directed",
         relation_semantics: "ordinary",
       },
       {
@@ -253,20 +253,45 @@ describe("GraphPage", () => {
     } satisfies Novel);
   });
 
-  it("读取章节快照并独立加载实体与关系变化", async () => {
+  it("人物关系视图展示章节快照并支持同屏实体详情", async () => {
+    const user = userEvent.setup();
     renderPage();
 
-    expect((await screen.findAllByText(/第 13 章 · 顾霜/)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/第 12 章 · 顾霜 → 司夜/)).toBeInTheDocument();
-    expect(screen.getByText("盟友 · 建立")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "人物关系" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("当前人物关系")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
+
+    const inspector = await screen.findByRole("complementary", { name: "顾霜实体详情" });
+    expect(inspector).toHaveTextContent("顾霜");
+    expect(inspector).toHaveTextContent("司夜");
+    expect(inspector).not.toHaveTextContent("entity_id");
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
+  });
+
+  it("切换关系演变后展示关系密度和变化列表，并转换单向关系文案", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("button", { name: "关系演变" });
+    await user.click(screen.getByRole("button", { name: "关系演变" }));
+
+    expect(screen.getByText("关系密度")).toBeInTheDocument();
+    const relationChanges = screen.getAllByText(/第 12 章 · 顾霜 → 司夜/);
+    expect(relationChanges.length).toBeGreaterThan(0);
+    await user.click(relationChanges[0].closest("button")!);
+    expect(screen.getByText("单向关系")).toBeInTheDocument();
+    expect(screen.queryByText("关系集中度")).not.toBeInTheDocument();
+    expect(screen.queryByText("PageRank")).not.toBeInTheDocument();
+    expect(screen.queryByText("Louvain")).not.toBeInTheDocument();
   });
 
   it("使用稳定 change_id 记录图谱变化选择", async () => {
     const user = userEvent.setup();
     renderPage();
 
-    const relationChange = await screen.findByText(/第 12 章 · 顾霜 → 司夜/);
+    await screen.findByRole("button", { name: "关系演变" });
+    await user.click(screen.getByRole("button", { name: "关系演变" }));
+    const relationChange = (await screen.findAllByText(/第 12 章 · 顾霜 → 司夜/))[0];
     await user.click(relationChange.closest("button")!);
 
     expect(navigateMock).toHaveBeenCalledWith(
