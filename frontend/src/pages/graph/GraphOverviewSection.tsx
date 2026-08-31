@@ -1,8 +1,9 @@
 import { motion } from "framer-motion";
-import { Activity, History, Link2, Network, Sigma } from "lucide-react";
+import { Sigma, UsersRound } from "lucide-react";
 
 import type { GraphAlgorithmMetrics, GraphData } from "@/api/types";
-import { MetricCard } from "@/components/common/MetricCard";
+import { AnalysisDetails } from "@/components/common/AnalysisDetails";
+import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 
 interface GraphOverviewSectionProps {
   graphData: GraphData;
@@ -26,7 +27,7 @@ function PagerankList({ metrics }: { metrics: GraphAlgorithmMetrics }) {
   const maxScore = topEntries.length > 0 ? topEntries[0][1] : 0;
 
   if (topEntries.length === 0) {
-    return <p className="py-4 text-center text-sm text-text-muted">暂无 PageRank 数据</p>;
+    return <p className="py-4 text-center text-sm text-text-muted">暂无关系中心度数据</p>;
   }
 
   return (
@@ -70,47 +71,26 @@ export function GraphOverviewSection({
         initial="hidden"
         animate="visible"
         transition={{ duration: 0.28, delay: 0.05 }}
-        className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+        className="block"
       >
-        <MetricCard
-          label="图谱实体"
-          value={graphData.nodes.length}
-          format="raw"
-          decimals={0}
-          icon={<Network className="h-5 w-5" />}
-          description="当前识别到的人物、组织与群体"
-          accent="primary"
-        />
-        <MetricCard
-          label="关系连线"
-          value={activeRelationCount}
-          format="raw"
-          decimals={0}
-          icon={<Link2 className="h-5 w-5" />}
-          description="当前关系网络中的主要连接"
-          accent="chart-2"
-        />
-        <MetricCard
-          label="关系集中度"
-          value={graphDensity}
-          format="raw"
-          decimals={4}
-          icon={<Activity className="h-5 w-5" />}
-          description="度中心化口径：关系是否集中在少数核心角色身上"
-          accent="chart-4"
-        />
-        <MetricCard
-          label="图谱变化"
-          value={totalChangeCount}
-          format="raw"
-          decimals={0}
-          icon={<History className="h-5 w-5" />}
-          description={
-            totalChangeCount > loadedChangeCount
-              ? `已加载 ${loadedChangeCount} / ${totalChangeCount} 条变化记录`
-              : "已加载全部图谱变化"
-          }
-          accent="chart-5"
+        <AnalysisMetricStrip
+          items={[
+            { label: "图谱实体", value: graphData.nodes.length, description: "人物、地点、组织与物品" },
+            { label: "有效关系", value: activeRelationCount, description: "当前仍然成立的关系" },
+            {
+              label: "关系密度",
+              value: graphDensity.toFixed(4),
+              description: "有效关系占全部可能连接的比例",
+            },
+            {
+              label: "关系变化",
+              value: totalChangeCount,
+              description:
+                totalChangeCount > loadedChangeCount
+                  ? `已加载 ${loadedChangeCount} / ${totalChangeCount} 条`
+                  : "变化记录已全部加载",
+            },
+          ]}
         />
       </motion.section>
 
@@ -130,46 +110,53 @@ export function GraphOverviewSection({
         initial="hidden"
         animate="visible"
         transition={{ duration: 0.28, delay: 0.15 }}
-        className="grid gap-4 lg:grid-cols-2"
+        className="block"
       >
-        <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <Sigma className="h-4 w-4 text-chart-2" />
-            <h3 className="text-sm font-medium text-text">PageRank Top-5（图结构信号）</h3>
-          </div>
-          {graphMetrics && !graphMetrics.unavailable_reason ? (
-            <PagerankList metrics={graphMetrics} />
-          ) : (
-            <p className="py-4 text-center text-sm text-text-muted">
-              {graphMetrics?.unavailable_reason ?? "图结构指标暂不可用"}
-            </p>
-          )}
-        </div>
+        <AnalysisDetails description="关系中心度、关系群组、群组区分度与非活跃关系均保留在此">
+          <div className="grid grid-cols-2 gap-6">
+            <section>
+              <div className="mb-3 flex items-center gap-2">
+                <Sigma className="h-4 w-4 text-chart-2" aria-hidden="true" />
+                <h3 className="text-sm font-medium text-text">关系中心度前五</h3>
+              </div>
+              {graphMetrics && !graphMetrics.unavailable_reason ? (
+                <PagerankList metrics={graphMetrics} />
+              ) : (
+                <p className="py-4 text-sm text-text-muted">当前快照暂时无法计算关系中心度</p>
+              )}
+            </section>
 
-        <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-          <h3 className="mb-3 text-sm font-medium text-text">结构社区（Louvain）</h3>
-          {graphMetrics && !graphMetrics.unavailable_reason ? (
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-text-muted">社区数量</dt>
-                <dd className="font-medium text-text">{communityCount}</dd>
+            <section>
+              <div className="mb-3 flex items-center gap-2">
+                <UsersRound className="h-4 w-4 text-chart-4" aria-hidden="true" />
+                <h3 className="text-sm font-medium text-text">关系群组</h3>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-text-muted">模块度</dt>
-                <dd className="font-medium text-text">
-                  {typeof modularity === "number" ? modularity.toFixed(4) : "—"}
-                </dd>
-              </div>
-              <p className="pt-2 text-xs leading-5 text-text-muted">
-                结构社区仅表示关系网络的连接紧密程度，不直接等同于故事阵营。
-              </p>
-            </dl>
-          ) : (
-            <p className="py-4 text-center text-sm text-text-muted">
-              {graphMetrics?.unavailable_reason ?? "社区发现暂不可用"}
-            </p>
-          )}
-        </div>
+              {graphMetrics && !graphMetrics.unavailable_reason ? (
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-text-muted">群组数量</dt>
+                    <dd className="font-medium text-text">{communityCount}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-text-muted">群组区分度</dt>
+                    <dd className="font-medium text-text">
+                      {typeof modularity === "number" ? modularity.toFixed(4) : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-text-muted">已经结束的关系</dt>
+                    <dd className="font-medium text-text">{inactiveRelationCount}</dd>
+                  </div>
+                  <p className="pt-1 text-xs leading-5 text-text-muted">
+                    关系群组只表示连接紧密程度，不直接等同于故事阵营
+                  </p>
+                </dl>
+              ) : (
+                <p className="py-4 text-sm text-text-muted">当前快照暂时无法识别关系群组</p>
+              )}
+            </section>
+          </div>
+        </AnalysisDetails>
       </motion.section>
     </div>
   );

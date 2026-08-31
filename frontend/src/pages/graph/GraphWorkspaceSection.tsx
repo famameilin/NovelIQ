@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 
 import { motion } from "framer-motion";
 import { ArrowRight, History, Link2, Users } from "lucide-react";
@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
+import { formatAnalysisLabel } from "@/lib/analysisLabels";
 
 interface GraphWorkspaceSectionProps {
   view?: "full" | "graph" | "changes";
@@ -52,12 +53,23 @@ interface GraphWorkspaceSectionProps {
   getChangeTypeLabel: (changeType?: string | null) => string;
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
-// 把图谱工作区、分页事件侧栏和联动详情区块拆到独立组件，收缩 GraphPage 的 JSX 复杂度
-// 2026-04-28，任务：分析详情页单屏 Tabs 改造
-// 修改原因：同一工作区需要按 tab 分别渲染图谱画布或关系变化面板，避免复制两套图谱逻辑
-// 2026-04-29，任务：图谱页单屏工作台修正
-// 修改原因：关系变化页签不应依赖整页滚动，改为左侧记录列表 + 右侧详情侧栏的一屏布局
+const INITIAL_VISIBLE_CHANGE_COUNT = 8;
+const CHANGE_REVEAL_STEP = 20;
+
+/**
+ * 2026-08-31，作用：将图谱关系方向转换为中文文案
+ * 简要说明：关系变化详情不再直接显示后端英文枚举
+ */
+function getDirectionalityLabel(directionality?: "directed" | "bidirectional" | null): string {
+  if (directionality === "bidirectional") return "双向关系";
+  if (directionality === "directed") return "单向关系";
+  return "方向未标注";
+}
+
+/**
+ * 2026-04-23，作用：承载关系画布、变化记录和联动详情
+ * 简要说明：根据主视图组合画布与变化区域，并分批展示已经加载的变化记录
+ */
 export function GraphWorkspaceSection({
   view = "full",
   graphData,
@@ -92,6 +104,22 @@ export function GraphWorkspaceSection({
   pageSectionVariants,
   getChangeTypeLabel,
 }: GraphWorkspaceSectionProps) {
+  const [visibleChangeCount, setVisibleChangeCount] = useState(INITIAL_VISIBLE_CHANGE_COUNT);
+  const selectedChangeIndex = activeSelectedChangeId
+    ? sortedChanges.findIndex((change) => change.change_id === activeSelectedChangeId)
+    : -1;
+  const effectiveVisibleChangeCount = Math.max(visibleChangeCount, selectedChangeIndex + 1);
+  const visibleChanges = sortedChanges.slice(0, effectiveVisibleChangeCount);
+  const canRevealLoadedChanges = visibleChanges.length < sortedChanges.length;
+
+  /**
+   * 2026-08-31，作用：分批展开已经加载的图谱变化
+   * 简要说明：先控制页面长度，再在本地记录显示完后继续请求下一页
+   */
+  function handleRevealMoreChanges() {
+    setVisibleChangeCount((current) => current + CHANGE_REVEAL_STEP);
+  }
+
   return (
     <motion.section
       variants={pageSectionVariants}
@@ -99,42 +127,34 @@ export function GraphWorkspaceSection({
       animate="visible"
       transition={{ duration: 0.28, delay: 0.15 }}
       className={cn(
-        "h-full min-h-0",
-        view === "full" && "grid gap-6 xl:grid-cols-[minmax(0,1.55fr),380px]",
-        view !== "full" && "block overflow-hidden"
+        "min-h-0",
+        view === "full" && "grid grid-cols-[minmax(0,1.55fr)_380px] items-start gap-6",
+        view !== "full" && "block"
       )}
     >
       {view !== "changes" && (
-      <Card id="graph-workspace" variant="elevated" className="flex h-full min-h-[420px] flex-col rounded-2xl">
+      <Card id="graph-workspace" variant="elevated" className="flex min-h-[520px] flex-col rounded-lg">
         <CardHeader className="shrink-0 gap-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-base">关系工作区</CardTitle>
-              <CardDescription>在这里可以缩放、筛选和定位人物之间的关系连接。</CardDescription>
-            </div>
-            <div className="pb-1">
-              <GraphToolbar
-                onZoomIn={onZoomIn}
-                onZoomOut={onZoomOut}
-                onFitToScreen={onFitToScreen}
-                onCenter={onCenter}
-                relationTypes={relationTypes}
-                selectedRelationTypes={selectedRelationTypes}
-                onRelationTypeChange={onRelationTypeChange}
-                searchQuery={searchQuery}
-                onSearchChange={onSearchChange}
-                className="max-w-full"
-              />
-            </div>
+          <div className="space-y-1">
+            <CardTitle className="text-base">当前人物关系</CardTitle>
+            <CardDescription>截至第 {graphData.chapter_order} 章的有效实体与关系</CardDescription>
           </div>
+          <GraphToolbar
+            onZoomIn={onZoomIn}
+            onZoomOut={onZoomOut}
+            onFitToScreen={onFitToScreen}
+            onCenter={onCenter}
+            relationTypes={relationTypes}
+            selectedRelationTypes={selectedRelationTypes}
+            onRelationTypeChange={onRelationTypeChange}
+            searchQuery={searchQuery}
+            onSearchChange={onSearchChange}
+            className="w-full"
+          />
         </CardHeader>
 
-        <CardContent className="flex min-h-0 flex-1 flex-col space-y-4">
-          <div className="rounded-xl border border-border/70 bg-surface-hover/35 px-4 py-3 text-sm text-text-muted">
-            可以先从上方的关系概览进入，再在这里放大、筛选并查看具体角色节点。
-          </div>
-
-          <div className="relative min-h-[320px] flex-1 overflow-hidden rounded-xl border border-border bg-surface">
+        <CardContent className="flex min-h-0 flex-1 flex-col">
+          <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-border bg-surface">
             <ForceGraph
               ref={forceGraphRef}
               data={graphData}
@@ -145,7 +165,7 @@ export function GraphWorkspaceSection({
               className="absolute inset-0"
             />
 
-            <div className="absolute bottom-4 left-4 z-10 hidden md:block">
+            <div className="absolute bottom-4 left-4 z-10 block">
               <GraphLegend entityTypes={entityTypes} relationTypes={relationTypes} />
             </div>
           </div>
@@ -158,19 +178,19 @@ export function GraphWorkspaceSection({
         className={cn(
           "space-y-4",
           view === "changes"
-            ? "grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(340px,0.82fr)]"
-            : "max-h-full overflow-y-auto pr-1 xl:self-start",
+            ? "grid h-full min-h-0 grid-cols-[minmax(0,1.18fr)_minmax(340px,0.82fr)] gap-4"
+            : "self-start",
         )}
       >
         <DashboardCardShell
           title="图谱变化记录"
           icon={<History className="h-4 w-4" />}
           accent="chart-4"
-          className={cn(view === "changes" && "flex h-full min-h-[420px] flex-col")}
-          contentClassName={cn(view === "changes" && "flex h-full flex-col")}
+          className={cn(view === "changes" && "flex min-h-[420px] flex-col")}
+          contentClassName={cn(view === "changes" && "flex flex-col")}
           headerRight={
             <Badge variant="outline">
-              {loadedChangeCount < totalChangeCount ? `${loadedChangeCount} / ${totalChangeCount}` : totalChangeCount}
+              {visibleChanges.length < totalChangeCount ? `${visibleChanges.length} / ${totalChangeCount}` : totalChangeCount}
             </Badge>
           }
           footer={
@@ -179,7 +199,7 @@ export function GraphWorkspaceSection({
               <ArrowRight className="h-4 w-4" />
             </Button>
           }
-          bodyClassName={cn(view === "changes" ? "min-h-0 flex-1 gap-3" : "gap-3")}
+          bodyClassName="gap-3"
         >
           <p className="text-sm text-text-muted">
             按剧情推进查看实体状态和关系的稳定变化。
@@ -194,13 +214,12 @@ export function GraphWorkspaceSection({
                 {graphSelectionHint}
               </div>
             ) : null}
-            {sortedChanges.length ? (
+            {visibleChanges.length ? (
               <>
                 <div className={cn(
-                  "space-y-3 pr-1",
-                  view === "changes" ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[420px] overflow-y-auto"
+                  "space-y-3 pr-1"
                 )}>
-                  {sortedChanges.map((change) => {
+                  {visibleChanges.map((change) => {
                     const isSelected = activeSelectedChangeId === change.change_id;
                     return (
                       <button
@@ -222,7 +241,7 @@ export function GraphWorkspaceSection({
                             </p>
                             <p className="mt-1 text-xs leading-5 text-text-muted">
                               {change.change_kind === "relation"
-                                ? `${change.relation_type ?? "未标注关系"} · ${getChangeTypeLabel(change.relation_change_kind)}`
+                                ? `${formatAnalysisLabel(change.relation_type, "relation")} · ${getChangeTypeLabel(change.relation_change_kind)}`
                                 : `状态更新 · ${change.changes.length} 项变化`}
                             </p>
                           </div>
@@ -232,16 +251,23 @@ export function GraphWorkspaceSection({
                   })}
                 </div>
 
-                {(hasMoreChanges || isChangesLoading || changesLoadError) && (
+                {(canRevealLoadedChanges || hasMoreChanges || isChangesLoading || changesLoadError) && (
                   <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs leading-5 text-text-muted">
-                        {hasMoreChanges
-                          ? `已加载 ${loadedChangeCount} 条，仍有 ${Math.max(totalChangeCount - loadedChangeCount, 0)} 条变化可继续查看。`
-                          : "变化记录已全部加载。"}
+                        {canRevealLoadedChanges
+                          ? `当前展示 ${visibleChanges.length} 条，已加载的 ${loadedChangeCount} 条记录可继续展开。`
+                          : hasMoreChanges
+                            ? `已展示本批 ${loadedChangeCount} 条，仍有 ${Math.max(totalChangeCount - loadedChangeCount, 0)} 条可继续加载。`
+                            : "变化记录已全部展示。"}
                       </p>
-                      <Button variant="outline" size="sm" onClick={onLoadMoreChanges} disabled={!hasMoreChanges || isChangesLoading}>
-                        {isChangesLoading ? "加载中..." : "加载更多"}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={canRevealLoadedChanges ? handleRevealMoreChanges : onLoadMoreChanges}
+                        disabled={(!canRevealLoadedChanges && !hasMoreChanges) || isChangesLoading}
+                      >
+                        {isChangesLoading ? "加载中..." : canRevealLoadedChanges ? "显示更多" : "加载更多"}
                       </Button>
                     </div>
                     {changesLoadError ? <p className="mt-2 text-xs text-chart-negative">{changesLoadError}</p> : null}
@@ -254,7 +280,7 @@ export function GraphWorkspaceSection({
           </div>
         </DashboardCardShell>
 
-          <div className={cn(view === "changes" ? "flex min-h-0 flex-col gap-4 overflow-hidden" : "space-y-4")}>
+          <div className={cn(view === "changes" ? "flex min-h-0 flex-col gap-4" : "space-y-4")}>
           {selectedNode?.entity_type === "character" &&
           (selectedNode.first_seen_chapter != null || selectedNode.last_seen_chapter != null) ? (
             <DashboardCardShell title="角色生命周期联动" icon={<Users className="h-4 w-4" />} accent="chart-3" bodyClassName="gap-4">
@@ -311,13 +337,13 @@ export function GraphWorkspaceSection({
             icon={<Link2 className="h-4 w-4" />}
             accent="chart-2"
             className={cn(view === "changes" && "flex min-h-0 flex-1 flex-col")}
-            contentClassName={cn(view === "changes" && "flex h-full flex-col")}
-            bodyClassName={cn(view === "changes" ? "min-h-0 flex-1 gap-3" : "gap-3")}
+            contentClassName={cn(view === "changes" && "flex flex-col")}
+            bodyClassName="gap-3"
           >
-            <p className="text-sm text-text-muted">查看当前选中关系变化的上下文说明和原文摘录。</p>
+            <p className="text-sm text-text-muted">当前选中变化的章节、类型与关系方向</p>
             <div className={cn(
               "rounded-2xl border border-border/60 bg-surface/70 p-4",
-              view === "changes" && "min-h-0 flex-1 overflow-y-auto"
+              view === "changes" && "min-h-0 flex-1"
             )}>
               {selectedChange ? (
                 <div className="space-y-4">
@@ -332,14 +358,14 @@ export function GraphWorkspaceSection({
                           </p>
                           <p className="mt-1 text-xs leading-5 text-text-muted">
                            {selectedChange.change_kind === "relation"
-                             ? `${selectedChange.relation_type ?? "未标注关系"} · ${getChangeTypeLabel(selectedChange.relation_change_kind)}`
+                             ? `${formatAnalysisLabel(selectedChange.relation_type, "relation")} · ${getChangeTypeLabel(selectedChange.relation_change_kind)}`
                              : `状态更新 · ${selectedChange.changes.length} 项变化`}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-xl border border-border bg-surface p-4">
                       <p className="text-xs uppercase tracking-wide text-text-muted">变化类型</p>
                       <p className="mt-2 text-sm font-medium text-text">
@@ -351,7 +377,9 @@ export function GraphWorkspaceSection({
                     <div className="rounded-xl border border-border bg-surface p-4">
                       <p className="text-xs uppercase tracking-wide text-text-muted">关系方向</p>
                       <p className="mt-2 text-sm font-medium text-text">
-                        {selectedChange.change_kind === "relation" ? selectedChange.directionality ?? "未声明" : "实体状态"}
+                        {selectedChange.change_kind === "relation"
+                          ? getDirectionalityLabel(selectedChange.directionality)
+                          : "实体状态"}
                       </p>
                     </div>
                   </div>
