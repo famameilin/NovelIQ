@@ -65,6 +65,36 @@ def _series(points: list[dict]) -> dict:
 
 
 class TestComputeTopicShiftCandidates:
+    @pytest.mark.parametrize(
+        ("overrides", "message"),
+        [
+            ({"window_size": 0}, "window_size"),
+            ({"min_tokens_per_window": 0}, "min_tokens_per_window"),
+            ({"score_threshold": 0}, "score_threshold"),
+            ({"score_threshold": 1.1}, "score_threshold"),
+            ({"max_candidates": 0}, "max_candidates"),
+        ],
+    )
+    def test_rejects_invalid_overrides(self, overrides: dict[str, int | float], message: str) -> None:
+        """2026-08-31 用于验证直接调用无法绕过主题迁移参数边界"""
+        parameters: dict[str, int | float] = {
+            "window_size": 2,
+            "min_tokens_per_window": 1,
+            "score_threshold": 0.1,
+            "max_candidates": 10,
+        }
+        parameters.update(overrides)
+        with pytest.raises(ValueError, match=message):
+            compute_topic_shift_candidates(
+                _series(
+                    [
+                        {"paragraph_id": 0, "start_position": 0, "token_count": 1, "weights": [1.0]},
+                        {"paragraph_id": 1, "start_position": 1, "token_count": 1, "weights": [1.0]},
+                    ]
+                ),
+                **parameters,
+            )
+
     def test_insufficient_sample(self) -> None:
         result = compute_topic_shift_candidates(
             _series([]),
@@ -247,6 +277,34 @@ class TestTopicAggregations:
         assert second[1] == pytest.approx(1.0, abs=1e-6)
         assert chapters[0]["token_total"] == 40
         assert chapters[1]["token_total"] == 40
+
+    def test_chapter_aggregate_keeps_chapter_without_topic_rows(self) -> None:
+        """2026-08-31 用于验证空推断章节仍按真实章节顺序返回并使用空分布"""
+        repo = ParagraphRepository(self.db_session)
+        repo.insert_paragraph_topic_inferences(
+            self.run_id,
+            [
+                *((paragraph_id, 2, 10, "complete", None, 1.0) for paragraph_id in range(3)),
+                *(
+                    (paragraph_id, 2, 0, "empty_after_preprocess", "empty_after_preprocess", None)
+                    for paragraph_id in range(3, 6)
+                ),
+            ],
+        )
+        repo.insert_paragraph_topics(
+            self.run_id,
+            [
+                (paragraph_id, topic_id, 1.0 if topic_id == 0 else 0.0)
+                for paragraph_id in range(3)
+                for topic_id in range(2)
+            ],
+        )
+
+        chapters = aggregate_chapter_topics(self.run_id, self.db_session)["chapters"]
+
+        assert [chapter["chapter_sequence"] for chapter in chapters] == [1, 2]
+        assert chapters[1]["token_total"] == 0
+        assert chapters[1]["distribution"] is None
 
     def test_paragraph_series_returns_full_k_dimension(self) -> None:
         result = fetch_paragraph_topic_series(self.run_id, self.db_session)

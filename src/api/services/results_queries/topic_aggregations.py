@@ -91,22 +91,36 @@ def aggregate_chapter_topics(run_id: str, session: Session) -> dict[str, Any]:
     assert model_row is not None
     agg_rows = paragraph_repo.fetch_chapter_topic_aggregates(run_id)
     token_rows = paragraph_repo.fetch_chapter_inference_totals(run_id)
-    token_by_chapter = {int(row.chapter_id): int(row.token_total) for row in token_rows}
 
-    chapters: dict[int, dict[str, Any]] = {}
+    chapters: dict[int, dict[str, Any]] = {
+        int(row.chapter_id): {
+            "chapter_id": int(row.chapter_id),
+            "chapter_sequence": int(row.sequence),
+            "chapter_title": row.title,
+            "token_total": int(row.token_total or 0),
+            "distribution": {},
+        }
+        for row in token_rows
+    }
     for row in agg_rows:
         chapter_id = int(row.chapter_id)
         entry = chapters.setdefault(
             chapter_id,
-            {"chapter_id": chapter_id, "chapter_sequence": int(row.sequence), "chapter_title": row.title},
+            {
+                "chapter_id": chapter_id,
+                "chapter_sequence": int(row.sequence),
+                "chapter_title": row.title,
+                "token_total": 0,
+                "distribution": {},
+            },
         )
-        entry.setdefault("distribution", {})[int(row.topic_id)] = float(row.weighted_total)
+        entry["distribution"][int(row.topic_id)] = float(row.weighted_total)
 
     num_topics = model_row.num_topics
     result: list[dict[str, Any]] = []
     for chapter_id in sorted(chapters, key=lambda cid: chapters[cid]["chapter_sequence"]):
         entry = chapters[chapter_id]
-        token_total = token_by_chapter.get(chapter_id, 0)
+        token_total = entry["token_total"]
         distribution: list[dict[str, float]] | None = None
         if token_total > 0:
             distribution = [
@@ -219,6 +233,16 @@ def compute_topic_shift_candidates(
     min_tokens = min_tokens_per_window if min_tokens_per_window is not None else shift_settings.min_tokens_per_window
     threshold = score_threshold if score_threshold is not None else shift_settings.score_threshold
     max_candidates = max_candidates if max_candidates is not None else shift_settings.max_candidates
+
+    # 2026-08-31 API 参数虽有 FastAPI 约束，服务函数仍需保护直接调用入口
+    if isinstance(window_size, bool) or not isinstance(window_size, int) or window_size < 1:
+        raise ValueError(f"window_size 必须是 >=1 的整数，当前值: {window_size!r}")
+    if isinstance(min_tokens, bool) or not isinstance(min_tokens, int) or min_tokens < 1:
+        raise ValueError(f"min_tokens_per_window 必须是 >=1 的整数，当前值: {min_tokens!r}")
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0 < threshold <= 1:
+        raise ValueError(f"score_threshold 必须在 (0, 1] 区间内，当前值: {threshold!r}")
+    if isinstance(max_candidates, bool) or not isinstance(max_candidates, int) or max_candidates < 1:
+        raise ValueError(f"max_candidates 必须是 >=1 的整数，当前值: {max_candidates!r}")
 
     points = series.get("points") or []
     if len(points) < 2:

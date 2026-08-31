@@ -154,6 +154,33 @@ def test_shifts_endpoint_detects_abrupt_change(api_client: TestClient, db_sessio
     assert body["config"]["score_threshold"] == 0.3
 
 
+@pytest.mark.parametrize(
+    ("parameter", "value"),
+    [
+        ("window_size", 0),
+        ("min_tokens_per_window", 0),
+        ("score_threshold", 0),
+        ("score_threshold", 1.1),
+        ("max_candidates", 0),
+    ],
+)
+def test_shifts_endpoint_rejects_invalid_overrides(
+    api_client: TestClient,
+    db_session,
+    parameter: str,
+    value: int | float,
+) -> None:
+    """2026-08-31 用于验证主题迁移端点在进入计算前拒绝非法覆盖参数"""
+    novel_id, run_id = _create_fixture_run(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/topics/shifts",
+        params={"task_id": run_id[:8], parameter: value},
+    )
+
+    assert response.status_code == 422
+
+
 def test_emotion_endpoint_excludes_null_curves(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_fixture_run(db_session)
 
