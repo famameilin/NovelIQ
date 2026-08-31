@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import (
-    CHAR,
     BigInteger,
     DateTime,
     Float,

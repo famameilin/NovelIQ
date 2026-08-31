@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import CHAR, DateTime, ForeignKeyConstraint, Index, Integer, String
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base

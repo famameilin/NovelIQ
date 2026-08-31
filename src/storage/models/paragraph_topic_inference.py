@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import CHAR, DateTime, Float, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
