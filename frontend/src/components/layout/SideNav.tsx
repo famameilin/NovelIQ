@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
 import { useNovelStore } from "@/store/novelStore";
 
 const navItems = [
@@ -44,9 +45,12 @@ export function SideNav() {
       )}
     >
       <div className="flex h-10 items-center justify-end px-3">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => setCollapsed(!collapsed)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-surface-hover hover:text-text transition-colors"
+          className="h-8 w-8 text-text-muted"
           aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
         >
           {collapsed ? (
@@ -54,7 +58,7 @@ export function SideNav() {
           ) : (
             <PanelLeftClose className="h-4 w-4" />
           )}
-        </button>
+        </Button>
       </div>
 
       <nav className="flex-1 space-y-1 px-2">
