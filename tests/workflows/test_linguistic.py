@@ -93,10 +93,10 @@ class TestRunLinguistic:
         assert self._count("paragraph_entities") > 0  # 汤姆 Nh person
         assert self._count("paragraph_phrase_hits") > 0  # 快意恩仇/刀光剑影命中
 
-        # 词表命中计入正式密度；四字候选行不计
+        # draft 词表命中与四字候选都不计入正式密度
         phrase_rows = LinguisticRepository(self.db_session).fetch_phrase_hits(self.run_id)
         lexicon_rows = [row for row in phrase_rows if row.match_kind == "lexicon"]
-        assert lexicon_rows and all(row.is_metric_hit for row in lexicon_rows)
+        assert lexicon_rows and all(not row.is_metric_hit for row in lexicon_rows)
         candidate_rows = [row for row in phrase_rows if row.match_kind == "four_char_candidate"]
         assert all(not row.is_metric_hit for row in candidate_rows)
 
