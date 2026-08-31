@@ -92,7 +92,7 @@ export const diagnosisHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/foreshadowing-threads（Setup 台账 tab 数据源）
+// 获取 /api/novels/:novelId/foreshadowing-threads（跨章节伏笔追踪数据源）
 export const foreshadowingThreadsHandler = http.get(
   `${BASE}/api/novels/:novelId/foreshadowing-threads`,
   async ({ request, params }) => {

@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -5,6 +6,9 @@ import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/a
 import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
+import { AnalysisDetails } from "@/components/common/AnalysisDetails";
+import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
+import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { ScoreCard } from "@/components/common/ScoreCard";
@@ -17,7 +21,9 @@ import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, GitBranch, Tags } from "lucide-react";
+import { AlertCircle, FileText, GitBranch, Tags } from "lucide-react";
+import type { ForeshadowingThread } from "@/api/types";
+import { cn } from "@/lib/cn";
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -25,14 +31,27 @@ const STALE_TIME = 5 * 60 * 1000;
 function getThreadStatusMeta(status: string) {
   switch (status) {
     case "likely_paid_off":
-      return { label: "可能已回收", variant: "success" as const };
+      return { label: "疑似回收", variant: "success" as const };
     case "reinforced":
-      return { label: "已强化", variant: "secondary" as const };
+      return { label: "持续强化", variant: "secondary" as const };
     case "archived":
       return { label: "已归档", variant: "outline" as const };
     default:
-      return { label: "进行中", variant: "outline" as const };
+      return { label: "待回收", variant: "outline" as const };
   }
+}
+
+/**
+ * 2026-08-31，作用：将强度、置信度和回收可能性转换为中文
+ * 简要说明：未知英文枚举使用待确认兜底，中文原值直接保留
+ */
+function getLevelLabel(value: string | null): string {
+  if (!value) return "—";
+  if (/^[\u4e00-\u9fff]/.test(value)) return value;
+  if (value === "high") return "较高";
+  if (value === "medium") return "中等";
+  if (value === "low") return "较低";
+  return "待确认";
 }
 
 /**
@@ -53,99 +72,150 @@ function EmptyDiagnosisState() {
 }
 
 /**
- * setup thread 台账是独立查询，失败时必须显式告警，而不是静默吞掉
+ * 伏笔追踪是独立查询，失败时必须显式告警，而不是静默吞掉
  */
 function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
   return (
     <DashboardCardShell
-      title="Setup 台账加载失败"
+      title="伏笔追踪加载失败"
       icon={<AlertCircle className="h-4 w-4" />}
       accent="chart-5"
       bodyClassName="items-center justify-center gap-3 text-center"
     >
-      <p className="text-sm text-text-muted">伏笔 setup 台账暂时无法读取，请稍后重试。</p>
+      <p className="text-sm text-text-muted">伏笔线索暂时无法读取，请稍后重试。</p>
       <Button variant="outline" size="sm" onClick={props.onRetry}>
-        重试台账
+        重试
       </Button>
     </DashboardCardShell>
   );
 }
 
 /**
- * setup 台账是独立于云端 diagnosis 的主链结果；
- * 即便 diagnosis 为空，只要 ledger 已可用，也应该继续对用户可见
- *
- * 2026-04-29，任务：诊断页单屏工作台修正
- * 修改原因：Setup 台账在 tab 面板内不能依赖整页滚动，改为卡片内部列表滚动，避免底部被 panel 裁剪
+ * 2026-04-29，作用：展示独立于综合诊断正文的伏笔追踪结果
+ * 简要说明：诊断正文为空时仍保留可用线索，并在文档流中展示筛选、轨迹和详情
  */
-function ForeshadowingThreadsSection(props: {
-  foreshadowingThreads: Array<{
-    setup_id: string;
-    first_chapter_id: number;
-    last_chapter_id: number;
-    anchor_chapter_ids: number[];
-    setup_summary: string;
-    setup_kind: string | null;
-    expected_payoff_family: string | null;
-    payoff_likelihood: string | null;
-    strength: string | null;
-    status: string;
-    latest_reason?: string | null;
-  }>;
-}) {
-  return (
-    <DashboardCardShell
-      title="Setup 台账"
-      icon={<GitBranch className="h-4 w-4" />}
-      accent="chart-2"
-      className="flex h-full min-h-[240px] flex-col"
-      contentClassName="flex h-full flex-col"
-      bodyClassName="min-h-0 flex-1 gap-3"
-    >
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1">
-        {props.foreshadowingThreads.map((thread) => {
-          const statusMeta = getThreadStatusMeta(thread.status);
-          return (
-            <div
-              key={thread.setup_id}
-              className="rounded-2xl border border-border/70 bg-surface/75 p-4"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                    <Badge variant="outline">{thread.setup_kind ?? "—"}</Badge>
-                    <Badge variant="outline">{thread.expected_payoff_family ?? "—"}</Badge>
-                  </div>
-                  <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
-                </div>
-                <div className="text-right text-xs text-text-muted">
-                  <div>首次出现于第 {thread.first_chapter_id} 章</div>
-                  <div>最近命中于第 {thread.last_chapter_id} 章</div>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
-                <div>
-                  <span className="font-medium text-text">回收预期：</span>
-                  {thread.payoff_likelihood ?? "—"}
-                </div>
-                <div>
-                  <span className="font-medium text-text">强度：</span>
-                  {thread.strength ?? "—"}
-                </div>
-                <div>
-                  <span className="font-medium text-text">锚点章节：</span>
-                  {thread.anchor_chapter_ids.join(", ")}
-                </div>
-              </div>
-              {thread.latest_reason && (
-                <p className="mt-3 text-sm text-text-muted">{thread.latest_reason}</p>
-              )}
-            </div>
-          );
-        })}
+function ForeshadowingThreadsSection(props: { foreshadowingThreads: ForeshadowingThread[] }) {
+  const [filter, setFilter] = useState<"all" | "open" | "reinforced" | "likely_paid_off" | "archived">("all");
+  const [selectedSetupId, setSelectedSetupId] = useState<string | null>(props.foreshadowingThreads[0]?.setup_id ?? null);
+  const counts = useMemo(() => {
+    const result = { open: 0, reinforced: 0, likely_paid_off: 0, archived: 0 };
+    props.foreshadowingThreads.forEach((thread) => {
+      if (thread.status in result) result[thread.status as keyof typeof result] += 1;
+    });
+    return result;
+  }, [props.foreshadowingThreads]);
+  const visibleThreads = filter === "all"
+    ? props.foreshadowingThreads
+    : props.foreshadowingThreads.filter((thread) => thread.status === filter);
+  const selectedThread =
+    visibleThreads.find((thread) => thread.setup_id === selectedSetupId) ?? visibleThreads[0] ?? null;
+
+  if (props.foreshadowingThreads.length === 0) {
+    return (
+      <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm text-text-muted">
+        当前任务暂无伏笔线索
       </div>
-    </DashboardCardShell>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <AnalysisMetricStrip
+        items={[
+          { label: "待回收", value: counts.open },
+          { label: "持续强化", value: counts.reinforced },
+          { label: "疑似回收", value: counts.likely_paid_off },
+          { label: "已归档", value: counts.archived },
+        ]}
+      />
+
+      <AnalysisViewSwitcher
+        value={filter}
+        onValueChange={setFilter}
+        label="伏笔状态筛选"
+        options={[
+          { value: "all", label: "全部" },
+          { value: "open", label: "待回收" },
+          { value: "reinforced", label: "持续强化" },
+          { value: "likely_paid_off", label: "疑似回收" },
+          { value: "archived", label: "已归档" },
+        ]}
+      />
+
+      <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)] items-start gap-4">
+        <div className="space-y-3">
+          {visibleThreads.map((thread) => {
+            const statusMeta = getThreadStatusMeta(thread.status);
+            const isSelected = selectedThread?.setup_id === thread.setup_id;
+            const chapterIds = thread.anchor_chapter_ids.length > 0
+              ? thread.anchor_chapter_ids
+              : [thread.first_chapter_id, thread.last_chapter_id];
+            return (
+              <button
+                key={thread.setup_id}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => setSelectedSetupId(thread.setup_id)}
+                className={cn(
+                  "w-full rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                  isSelected ? "border-primary/35 bg-primary/5" : "border-border/70 bg-surface/70 hover:bg-surface-hover",
+                )}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                      <span className="text-xs text-text-muted">{thread.setup_kind ?? "类型待确认"}</span>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-text">{thread.setup_summary}</p>
+                    <p className="mt-1 text-xs text-text-muted">预计方向：{thread.expected_payoff_family ?? "待确认"}</p>
+                  </div>
+                  <div className="text-right text-xs text-text-muted">
+                    <div>回收可能性</div>
+                    <div className="mt-1 font-medium text-text">{getLevelLabel(thread.payoff_likelihood)}</div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {chapterIds.map((chapterId, index) => (
+                    <span key={`${thread.setup_id}-${chapterId}-${index}`} className="rounded-full border border-border/60 px-2.5 py-1 text-xs text-text-muted">
+                      第 {chapterId} 章 · {index === 0 ? "首次出现" : index === chapterIds.length - 1 ? "最近出现" : "再次出现"}
+                    </span>
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+          {visibleThreads.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/60 p-6 text-center text-sm text-text-muted">当前筛选下没有伏笔线索</div>
+          ) : null}
+        </div>
+
+        {selectedThread ? (
+          <aside className="rounded-lg border border-border/70 bg-surface/75 p-5" aria-label="伏笔详情">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={getThreadStatusMeta(selectedThread.status).variant}>{getThreadStatusMeta(selectedThread.status).label}</Badge>
+              <Badge variant="outline">{selectedThread.setup_kind ?? "类型待确认"}</Badge>
+            </div>
+            <h2 className="mt-3 text-base font-semibold leading-7 text-text">{selectedThread.setup_summary}</h2>
+            <dl className="mt-4 grid gap-3 text-sm">
+              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">预计回收方向</dt><dd className="mt-1 font-medium text-text">{selectedThread.expected_payoff_family ?? "待确认"}</dd></div>
+              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">最近判断依据</dt><dd className="mt-1 leading-6 text-text">{selectedThread.latest_reason ?? "暂无补充判断"}</dd></div>
+              {selectedThread.latest_why_unresolved_now ? (
+                <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">暂未回收原因</dt><dd className="mt-1 leading-6 text-text">{selectedThread.latest_why_unresolved_now}</dd></div>
+              ) : null}
+            </dl>
+            <AnalysisDetails className="mt-4" description="强度、置信度、活跃状态与全部锚点">
+              <dl className="grid grid-cols-1 gap-3 text-sm">
+                <div><dt className="text-text-muted">线索强度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedThread.strength)}</dd></div>
+                <div><dt className="text-text-muted">判断置信度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedThread.confidence)}</dd></div>
+                <div><dt className="text-text-muted">跟踪状态</dt><dd className="mt-1 font-medium text-text">{selectedThread.active ? "继续跟踪" : "已经结束"}</dd></div>
+                <div><dt className="text-text-muted">锚点章节</dt><dd className="mt-1 font-medium text-text">{selectedThread.anchor_chapter_ids.join("、") || "—"}</dd></div>
+              </dl>
+            </AnalysisDetails>
+          </aside>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -159,7 +229,7 @@ function SkeletonGrid() {
       <div className="h-8 w-48 animate-pulse rounded bg-surface-hover" />
 
       {/* 评分卡骨架屏 */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i} className="h-[140px]">
             <CardContent className="p-5">
@@ -176,7 +246,7 @@ function SkeletonGrid() {
       </div>
 
       {/* 文本与图表骨架屏 */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-2 gap-6">
         <Card className="h-[300px]">
           <CardContent className="p-5">
             <div className="space-y-3">
@@ -207,14 +277,8 @@ function SkeletonGrid() {
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：诊断页角色阵容展示改为焦点结构合同，允许单主角、双主角与群像三种结果稳定渲染
- *
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：诊断页内容拆成摘要、价值角色、Arc主题和台账四个 tab，统一交给单屏工作区编排
- *
- * 2026-04-29，任务：诊断页信息面收口
- * 修改原因：诊断页原先 4 个 tab 过于分散，除 Setup 台账外其余内容收口为 2 个更饱满的信息面
+ * 2026-04-27，作用：展示作品综合诊断和伏笔追踪
+ * 简要说明：综合诊断承载作品定位、价值表达和角色阵容，伏笔追踪承载线索状态与章节依据
  */
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -270,11 +334,12 @@ export function DiagnosisPage() {
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
   const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
   const primaryGenreLabel = diagnosis?.genre_labels?.[0] ?? null;
+  const [view, setView] = useState<"overview" | "foreshadowing">("overview");
 
   // ---------- 渲染 ----------
 
   return (
-    <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"}>
+    <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"} documentFlow>
       {/* 加载骨架屏 */}
       {isLoading && <SkeletonGrid />}
 
@@ -284,8 +349,8 @@ export function DiagnosisPage() {
           title={analysisFailed ? "诊断分析任务已失败" : "诊断结果尚未完成"}
           description={
             analysisFailed
-              ? "该分析任务已失败，诊断报告和 setup 台账无法读取，请重新发起分析后再查看。"
-              : "当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。"
+              ? "该分析任务已失败，诊断报告和伏笔追踪无法读取，请重新发起分析后再查看。"
+              : "当前任务仍在分析中，诊断报告和伏笔追踪暂时不可读，请等待任务进入完成态后再查看。"
           }
           failed={analysisFailed}
         />
@@ -308,10 +373,10 @@ export function DiagnosisPage() {
       {/* 空状态 */}
       {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
 
-      {/* 台账兜底展示 */}
-      {isThreadsError && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
+      {/* 伏笔追踪兜底展示 */}
+      {isThreadsError && !diagnosis && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
       {foreshadowingThreads.length > 0 && !diagnosis && !isLoading && !isAnalysisNotComplete && (
-        <div className="min-h-0">
+        <div className="pb-6">
           <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
         </div>
       )}
@@ -322,16 +387,30 @@ export function DiagnosisPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex min-h-0 flex-1 flex-col"
+          className="space-y-4 pb-6"
         >
-          {/*
-            2026-04-28，任务：分析详情页单屏 Tabs 改造
-            修改原因：诊断报告内容增长最快，改为摘要优先的 tab 结构，由单屏工作区统一约束边界。
-          */}
-          <AnalysisWorkspace.Tabs defaultValue="summary">
-            <AnalysisWorkspace.Tab value="summary" label="诊断摘要">
-              <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(520px,1.08fr)_minmax(0,0.92fr)]">
-                <div className="grid min-h-0 auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-surface/70 px-4 py-3">
+            <div>
+              <h1 className="text-base font-semibold text-text">{view === "overview" ? "综合诊断" : "伏笔追踪"}</h1>
+              <p className="mt-1 text-sm text-text-muted">
+                {view === "overview" ? "作品定位、价值表达、角色阵容与主题判断" : "线索状态、出现章节与最近判断依据"}
+              </p>
+            </div>
+            <AnalysisViewSwitcher
+              value={view}
+              onValueChange={setView}
+              label="诊断报告视图"
+              options={[
+                { value: "overview", label: "综合诊断", icon: FileText },
+                { value: "foreshadowing", label: "伏笔追踪", icon: GitBranch },
+              ]}
+            />
+          </div>
+
+          {view === "overview" ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <ScoreCard
                     title="伏笔回收预期"
                     type="percent"
@@ -342,14 +421,14 @@ export function DiagnosisPage() {
                   <ScoreCard title="文化深度" type="score" score={diagnosis.cultural_depth_score} reason={diagnosis.cultural_depth_reason} />
                 </div>
 
-                <div className="flex min-h-0 flex-col gap-4">
+                <div className="flex flex-col gap-4">
                   <DiagnosisHeader
                     genreLabels={diagnosis.genre_labels}
                     styleLabels={diagnosis.style_labels}
                     arcType={diagnosis.narrative_arc_type}
                   />
                   {diagnosis.diagnosis ? (
-                    <DiagnosisText diagnosisText={diagnosis.diagnosis} className="min-h-[320px] flex-1" />
+                    <DiagnosisText diagnosisText={diagnosis.diagnosis} className="min-h-[320px]" />
                   ) : (
                     <DashboardCardShell
                       title="综合诊断"
@@ -363,54 +442,41 @@ export function DiagnosisPage() {
                   )}
                 </div>
               </div>
-            </AnalysisWorkspace.Tab>
-            <AnalysisWorkspace.Tab value="insights" label="价值与主题">
-              <div className="grid h-full min-h-0 auto-rows-fr grid-cols-1 gap-4 lg:grid-cols-2">
+
+              <div className="grid grid-cols-2 gap-4">
                 <ValueLogicCard
                   valueLogicType={diagnosis.value_logic_type}
                   valueLogicReason={diagnosis.value_logic_reason}
-                  className="h-full min-h-[260px]"
+                  className="min-h-[260px]"
                 />
                 <CharacterCastCard
                   focusStructure={diagnosis.focus_structure ?? undefined}
                   focusCharacters={diagnosis.focus_characters}
                   coreCast={diagnosis.core_cast}
                   majorCast={diagnosis.main_characters}
-                  className="h-full min-h-[260px]"
+                  className="min-h-[260px]"
                 />
-                <ArcScoresChart arcScores={diagnosis.arc_scores} className="h-full min-h-[320px]" />
+                <ArcScoresChart arcScores={diagnosis.arc_scores} className="min-h-[320px]" />
                 <DashboardCardShell
                   title="主题标签"
                   icon={<Tags className="h-4 w-4" />}
                   accent="chart-4"
-                  contentClassName="flex h-full flex-col"
-                  bodyClassName="min-h-0 flex-1 gap-3"
-                  className="h-full min-h-[240px]"
+                  bodyClassName="gap-3"
+                  className="min-h-[240px]"
                 >
-                  <div className="min-h-0 flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
+                  <div className="rounded-lg border border-border/60 bg-surface/70 p-4">
                     <TopicLabels labels={diagnosis.topic_labels} />
                   </div>
                 </DashboardCardShell>
               </div>
-            </AnalysisWorkspace.Tab>
-            <AnalysisWorkspace.Tab value="threads" label="Setup 台账">
-              <div className="h-full min-h-0">
-                {foreshadowingThreads.length > 0 ? (
-                  <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
-                ) : (
-                  <DashboardCardShell
-                    title="Setup 台账"
-                    icon={<GitBranch className="h-4 w-4" />}
-                    accent="chart-2"
-                    className="min-h-[240px]"
-                    bodyClassName="items-center justify-center text-center"
-                  >
-                    <p className="text-sm text-text-muted">当前任务暂无 setup 台账记录。</p>
-                  </DashboardCardShell>
-                )}
-              </div>
-            </AnalysisWorkspace.Tab>
-          </AnalysisWorkspace.Tabs>
+            </div>
+          ) : isThreadsError ? (
+            <ForeshadowingThreadsErrorCard onRetry={retryThreads} />
+          ) : foreshadowingThreadsQuery.isLoading ? (
+            <div className="h-[320px] animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
+          ) : (
+            <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+          )}
         </motion.div>
       )}
     </AnalysisWorkspace>
