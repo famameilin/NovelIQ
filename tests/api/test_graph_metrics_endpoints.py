@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
 
+from src.api.services.results_queries.graph_metrics import compute_graph_metrics
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -69,6 +72,38 @@ def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient,
     assert set(body["hits"]["authority"].keys()) == set(body["hits"]["hub"].keys())
     assert body["communities"]["interpretation"] == "structural_community_only"
     assert body["communities"]["modularity"] is not None
+
+
+def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
+    """2026-08-31 用于验证双向端点进入无向图后累加权重而不是相互覆盖"""
+    snapshot = {
+        "nodes": [
+            {"name": "甲", "entity_type": "character"},
+            {"name": "乙", "entity_type": "character"},
+            {"name": "丙", "entity_type": "character"},
+        ],
+        "edges": [
+            {"source_name": "甲", "target_name": "乙"},
+            {"source_name": "乙", "target_name": "甲"},
+            {"source_name": "甲", "target_name": "丙"},
+        ],
+    }
+    captured: dict[str, int] = {}
+
+    def capture_pagerank(graph, *, weight: str) -> dict[str, float]:
+        """2026-08-31 用于读取 PageRank 收到的规范化无向边权"""
+        captured["甲乙"] = int(graph["甲"]["乙"][weight])
+        return dict.fromkeys(graph.nodes, 1 / 3)
+
+    monkeypatch.setattr(
+        "src.api.services.results_queries.graph_metrics._require_snapshot",
+        MagicMock(return_value=snapshot),
+    )
+    monkeypatch.setattr("src.api.services.results_queries.graph_metrics.nx.pagerank", capture_pagerank)
+
+    compute_graph_metrics("run-1", MagicMock())
+
+    assert captured["甲乙"] == 2
 
 
 def test_graph_metrics_insufficient_nodes(api_client: TestClient, db_session) -> None:

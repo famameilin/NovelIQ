@@ -21,6 +21,11 @@ from src.storage.repositories import AnnotationRepository
 _ALGORITHM_VERSION = "graph-metrics-v1"
 
 
+def _undirected_edge_key(source: str, target: str) -> tuple[str, str]:
+    """2026-08-31 用于把双向端点规范为同一个无向边键并保留并行关系计数"""
+    return (source, target) if source <= target else (target, source)
+
+
 def _require_snapshot(run_id: str, session: Session) -> dict[str, Any]:
     """读取最新图快照（无匹配章节版本时抛 LookupError）"""
     from src.api.services.results_queries.graph import _fetch_graph_snapshot
@@ -48,8 +53,8 @@ def compute_graph_metrics(run_id: str, session: Session) -> dict[str, Any]:
     character_names = {
         node["name"] for node in snapshot["nodes"] if node["entity_type"] == "character"
     }
-    edge_counts: Counter = Counter(
-        (edge["source_name"], edge["target_name"])
+    edge_counts: Counter[tuple[str, str]] = Counter(
+        _undirected_edge_key(edge["source_name"], edge["target_name"])
         for edge in snapshot["edges"]
         if edge["source_name"] in character_names and edge["target_name"] in character_names
     )
