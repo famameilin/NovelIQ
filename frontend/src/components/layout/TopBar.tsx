@@ -12,7 +12,7 @@ import { Link, useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useThemeStore } from "@/store/themeStore";
 import { useNovelStore } from "@/store/novelStore";
-import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
 import { Breadcrumb, getBreadcrumbLabel } from "./Breadcrumb";
 import { getNovel } from "@/api/novels";
 
@@ -103,16 +103,15 @@ export function TopBar() {
       )}
 
       <div className="flex items-center gap-3">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={toggleDark}
-          className={cn(
-            "inline-flex h-9 w-9 items-center justify-center rounded-md",
-            "text-text-secondary hover:bg-surface-hover hover:text-text transition-colors"
-          )}
           aria-label="切换深浅模式"
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
+        </Button>
       </div>
     </header>
   );
