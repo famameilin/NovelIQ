@@ -2,7 +2,6 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CharactersPage } from "@/pages/CharactersPage";
@@ -87,22 +86,6 @@ vi.mock("@/components/common/DashboardCardShell", () => ({
   ),
 }));
 
-vi.mock("@/components/charts/CharacterRankingBar", () => ({
-  CharacterRankingBar: passthroughComponent("character-ranking-bar"),
-}));
-
-vi.mock("@/components/charts/RoleFunctionPie", () => ({
-  RoleFunctionPie: passthroughComponent("role-function-pie"),
-}));
-
-vi.mock("@/components/characters/CharacterTable", () => ({
-  CharacterTable: passthroughComponent("character-table"),
-}));
-
-vi.mock("@/components/characters/FocusCastCard", () => ({
-  FocusCastCard: passthroughComponent("focus-cast-card"),
-}));
-
 vi.mock("@/components/ui/card", () => ({
   Card: passthroughComponent("card"),
   CardContent: passthroughComponent("card-content"),
@@ -144,12 +127,17 @@ describe("CharactersPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("排行/角色表 tab 走 /characters，功能与焦点 tab 走专用端点", async () => {
+  it("单文档流保留角色排行、功能焦点和角色表数据源", async () => {
     getCharactersMock.mockResolvedValue([
       {
         name: "沈砚",
         appearance_count: 12,
         dominant_role_function: "protagonist",
+        dominant_role_ratio: 0.75,
+        role_function_distribution: { protagonist: 0.75, helper: 0.25 },
+        narrative_focus_score: 0.91,
+        avg_emotion_score: 0.2,
+        is_focus_character: true,
       },
     ]);
     getCharacterFunctionTabMock.mockResolvedValue({
@@ -162,13 +150,19 @@ describe("CharactersPage", () => {
 
     renderCharactersPage();
 
-    expect(await screen.findByTestId("character-ranking-bar")).toBeInTheDocument();
+    expect(await screen.findByText("综合角色榜")).toBeInTheDocument();
+    expect(screen.getByText("角色功能构成")).toBeInTheDocument();
+    expect(screen.getByText("单主角")).toBeInTheDocument();
+    expect(screen.getByText("主导职责占比")).toBeInTheDocument();
+    expect(screen.getByText("75.0%")).toBeInTheDocument();
+    expect(screen.getByText("人物弧线 8.2")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("protagonist");
+    expect(document.body.textContent).not.toContain("single");
     expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getCharacterFunctionTabMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 
-  it("功能与焦点切片为空值时仍渲染排行主内容", async () => {
-    const user = userEvent.setup();
+  it("功能与焦点切片为空值时仍渲染角色文档流", async () => {
     getCharactersMock.mockResolvedValue([
       {
         name: "沈砚",
@@ -179,12 +173,9 @@ describe("CharactersPage", () => {
 
     renderCharactersPage();
 
-    expect(await screen.findByTestId("character-ranking-bar")).toBeInTheDocument();
-    expect(screen.queryByTestId("focus-cast-card")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "功能与焦点" }));
-
-    expect(await screen.findByTestId("focus-cast-card")).toBeInTheDocument();
+    expect(await screen.findByText("综合角色榜")).toBeInTheDocument();
+    expect(screen.getByText("角色功能构成")).toBeInTheDocument();
+    expect(screen.getByText("焦点人物")).toBeInTheDocument();
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {
