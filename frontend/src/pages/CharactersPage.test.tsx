@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CharactersPage } from "@/pages/CharactersPage";
@@ -167,6 +168,7 @@ describe("CharactersPage", () => {
   });
 
   it("功能与焦点切片为空值时仍渲染排行主内容", async () => {
+    const user = userEvent.setup();
     getCharactersMock.mockResolvedValue([
       {
         name: "沈砚",
@@ -178,7 +180,11 @@ describe("CharactersPage", () => {
     renderCharactersPage();
 
     expect(await screen.findByTestId("character-ranking-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("focus-cast-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("focus-cast-card")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "功能与焦点" }));
+
+    expect(await screen.findByTestId("focus-cast-card")).toBeInTheDocument();
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {

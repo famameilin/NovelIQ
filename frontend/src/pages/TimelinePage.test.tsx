@@ -178,6 +178,15 @@ function renderPage() {
   return { queryClient, ...view };
 }
 
+/**
+ * 2026-08-31，作用：在页面测试中切换到节点详情页签
+ * 简要说明：共享页签改为首次访问时挂载，详情断言必须基于真实可见面板
+ */
+async function openNodeDetailTab() {
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("tab", { name: "节点详情" }));
+}
+
 function createEmptyEventTimelineResponse(totalChapters: number): EventTimelineResponse {
   const base = createEventTimeline();
   return {
@@ -241,6 +250,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
+    await openNodeDetailTab();
     expect(await screen.findByText("selected-tree:1")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledWith("novel-1", "task-a", {
       includeCurve: true,
@@ -259,6 +269,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
+    await openNodeDetailTab();
     expect(await screen.findByText(`selected-${first!.tree_id}`)).toBeInTheDocument();
     expect(screen.getByText(`participant-${first!.participants[0]!.name}`)).toBeInTheDocument();
   });
@@ -340,7 +351,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    await screen.findByText(`selected-${first!.tree_id}`);
+    await screen.findByTestId("timeline-track");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
     expect(navigateMock).toHaveBeenLastCalledWith(
       expect.stringContaining(`tree_id=${encodeURIComponent(first!.tree_id)}`),
@@ -353,6 +364,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
+    await openNodeDetailTab();
     await screen.findByText("selected-tree:1");
     await user.click(screen.getByRole("button", { name: "关闭详情" }));
 
@@ -374,6 +386,7 @@ describe("TimelinePage deep links (event forest)", () => {
     await waitFor(() => {
       expect(getTimelineMock).toHaveBeenCalledTimes(2);
     });
+    await openNodeDetailTab();
     expect(await screen.findByText(/selected-tree/)).toBeInTheDocument();
   });
 
@@ -382,6 +395,7 @@ describe("TimelinePage deep links (event forest)", () => {
     getTimelineMock.mockResolvedValue(timeline);
     const view = renderPage();
 
+    await openNodeDetailTab();
     expect(await screen.findByText("selected-tree:1")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledTimes(1);
 
@@ -397,5 +411,14 @@ describe("TimelinePage deep links (event forest)", () => {
       expect(getTimelineMock).toHaveBeenCalledTimes(1);
     });
     expect(await screen.findByText(`selected-${second}`)).toBeInTheDocument();
+  });
+
+  it("keeps node detail inside a vertical scroll viewport", async () => {
+    renderPage();
+
+    await openNodeDetailTab();
+    const detail = await screen.findByTestId("timeline-node-detail");
+
+    expect(detail.parentElement).toHaveClass("h-full", "min-h-0", "overflow-y-auto");
   });
 });
