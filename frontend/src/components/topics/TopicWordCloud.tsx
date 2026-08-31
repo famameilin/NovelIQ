@@ -335,13 +335,13 @@ export function TopicWordCloud({
       icon={<Tags className="h-4 w-4" />}
       accent="chart-3"
       showOrb
-      className={cn(className)}
+      className={cn("min-h-[300px]", className)}
       contentClassName="flex h-full flex-col"
       bodyClassName="min-h-0 flex-1 gap-3"
     >
       <div
         ref={containerRef}
-        className="relative min-h-[300px] flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2"
+        className="relative min-h-0 flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2"
       >
         {hasData && isVisible && isLayoutReady ? (
           <>

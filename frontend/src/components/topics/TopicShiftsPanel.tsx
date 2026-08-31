@@ -11,6 +11,7 @@ import { ScatterChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { TopicShiftCandidate, TopicShiftConfig } from "@/api/types";
 
@@ -65,28 +66,28 @@ export function TopicShiftsPanel({ candidates, config, className }: TopicShiftsP
           {candidates.length === 0 ? (
             <p className="flex h-full items-center justify-center text-sm text-text-muted">暂无候选点</p>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="text-xs text-text-muted">
-                  <th className="pb-2">字符位置</th>
-                  <th className="pb-2">段落区间</th>
-                  <th className="pb-2">JS 散度</th>
-                  <th className="pb-2">窗口 token</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="text-left text-sm">
+              <TableHeader>
+                <TableRow className="text-xs text-text-muted hover:bg-transparent">
+                  <TableHead className="h-auto px-0 pb-2">字符位置</TableHead>
+                  <TableHead className="h-auto px-0 pb-2">段落区间</TableHead>
+                  <TableHead className="h-auto px-0 pb-2">JS 散度</TableHead>
+                  <TableHead className="h-auto px-0 pb-2">窗口 token</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {candidates.map((candidate) => (
-                  <tr key={`${candidate.position}-${candidate.paragraph_start}`} className="border-t border-border/40">
-                    <td className="py-1.5">{candidate.position}</td>
-                    <td className="py-1.5">
+                  <TableRow key={`${candidate.position}-${candidate.paragraph_start}`} className="border-border/40">
+                    <TableCell className="px-0 py-1.5">{candidate.position}</TableCell>
+                    <TableCell className="px-0 py-1.5">
                       {candidate.paragraph_start} – {candidate.paragraph_end}
-                    </td>
-                    <td className="py-1.5">{candidate.score.toFixed(4)}</td>
-                    <td className="py-1.5">{candidate.window_token_total}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="px-0 py-1.5">{candidate.score.toFixed(4)}</TableCell>
+                    <TableCell className="px-0 py-1.5">{candidate.window_token_total}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </DashboardCardShell>
       </div>

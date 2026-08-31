@@ -12,6 +12,7 @@ import { GridComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
+import { cn } from "@/lib/cn";
 import type { TopicEmotionEntry } from "@/api/types";
 
 echarts.use([GridComponent, TooltipComponent, BarChart, CanvasRenderer]);
@@ -53,10 +54,23 @@ export function TopicEmotionPanel({ emotion, className }: TopicEmotionPanelProps
   }, [emotion]);
 
   return (
-    <div className={className}>
-      <DashboardCardShell title="主题净情绪关联" accent="chart-5" bodyClassName="min-h-[320px]">
+    <div className={cn("h-full min-h-0", className)}>
+      <DashboardCardShell
+        title="主题净情绪关联"
+        accent="chart-5"
+        className="h-full"
+        contentClassName="flex h-full flex-col"
+        bodyClassName="min-h-0 flex-1"
+      >
         {emotion.some((entry) => entry.emotion != null) ? (
-          <ReactEChartsCore key={themeSignature} option={option} notMerge style={{ height: "100%", width: "100%" }} />
+          <div className="min-h-[320px] w-full flex-1">
+            <ReactEChartsCore
+              key={themeSignature}
+              option={option}
+              notMerge
+              style={{ height: "100%", width: "100%" }}
+            />
+          </div>
         ) : (
           <p className="flex h-full items-center justify-center text-sm text-text-muted">
             暂无带净情绪的段落曲线数据

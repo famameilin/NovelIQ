@@ -201,32 +201,32 @@ export function TopicsPage() {
                   <>
                     {topics.length > 0 && (
                       <>
-                        <motion.div variants={itemVariants} className="min-h-[280px]">
-                          <TopicWordCloud topics={topics} maxWords={100} className="h-[280px]" />
+                        <motion.div variants={itemVariants} className="min-h-[300px]">
+                          <TopicWordCloud topics={topics} maxWords={100} className="h-[300px]" />
                         </motion.div>
-                        <div className="grid min-h-[300px] grid-cols-1 gap-4 lg:grid-cols-2">
-                          <motion.div variants={itemVariants} className="min-h-[300px]">
-                            <TopicBarChart topics={topics} className="h-[300px]" />
+                        <div className="grid min-h-[256px] grid-cols-1 gap-4 lg:grid-cols-2">
+                          <motion.div variants={itemVariants} className="min-h-[256px]">
+                            <TopicBarChart topics={topics} className="h-64" />
                           </motion.div>
-                          <motion.div variants={itemVariants} className="min-h-[300px]">
-                            <TopicTable topics={topics} className="h-[300px]" />
+                          <motion.div variants={itemVariants} className="min-h-[256px]">
+                            <TopicTable topics={topics} className="h-64" />
                           </motion.div>
                         </div>
                       </>
                     )}
-                    <div className="grid min-h-[320px] grid-cols-1 gap-4 lg:grid-cols-2">
-                      <motion.div variants={itemVariants} className="min-h-[320px] rounded-2xl border border-border/60 bg-surface/70 p-4">
+                    <div className="grid min-h-[280px] grid-cols-1 gap-4 lg:grid-cols-2">
+                      <motion.div variants={itemVariants} className="min-h-[280px] rounded-2xl border border-border/60 bg-surface/70 p-4">
                         <TopicDistributionChart
                           distribution={overview.distribution}
                           chapters={overview.chapters}
-                          className="h-[300px]"
+                          className="h-[260px]"
                         />
                       </motion.div>
-                      <motion.div variants={itemVariants} className="min-h-[320px]">
+                      <motion.div variants={itemVariants} className="min-h-[280px]">
                         <TopicKeywordsCard
                           keywords={overview.keywords}
                           unavailableReason={overview.keyword_unavailable_reason}
-                          className="h-[320px]"
+                          className="h-[280px]"
                         />
                       </motion.div>
                     </div>
