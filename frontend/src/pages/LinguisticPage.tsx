@@ -17,7 +17,6 @@ import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { AnalysisDetails } from "@/components/common/AnalysisDetails";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
-import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { RatioBarChart } from "@/components/linguistic/RatioBarChart";
 import { PosSimilarityHeatmap } from "@/components/linguistic/PosSimilarityHeatmap";
@@ -31,8 +30,6 @@ import {
   Sigma,
   Tag,
   Tags,
-  BarChart3,
-  BookOpen,
 } from "lucide-react";
 import {
   Select,
@@ -119,7 +116,7 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
 
   return (
     <motion.div
-      className="flex flex-col gap-4"
+      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-2"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
     >
@@ -169,28 +166,14 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
 }
 
 /**
- * 2026-08-31，作用：展示词汇与语义视图的实体、固定表达和词向量聚合
- * 简要说明：不输出向量数组或运行标识，将模型信息收纳到可展开详情
+ * 2026-08-31，作用：展示实体与固定表达的聚合指标
+ * 简要说明：将长实体列表限制在当前页签卡片内部滚动
  */
-function VocabularySemanticView({
-  entitiesQuery,
-  word2vecQuery,
-}: {
-  entitiesQuery: UseQueryResultLike<LinguisticEntitiesTabResponse>;
-  word2vecQuery: UseQueryResultLike<Word2VecStatsResponse>;
-}) {
-  const coverage = word2vecQuery.data?.pos_coverage ?? [];
-  const maxCoverage = coverage.length > 0 ? Math.max(...coverage.map((entry) => entry.coverage_ratio ?? 0)) : 0;
-  const word2vecData = word2vecQuery.data;
-
+function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike<LinguisticEntitiesTabResponse> }) {
   return (
-    <motion.div className="flex flex-col gap-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      {renderTabGate(
-        entitiesQuery,
-        "词汇与语义",
-        formatUnavailableReason(entitiesQuery.data?.unavailable_reason),
-        (data) => (
-          <div className="flex flex-col gap-4">
+    <motion.div className="h-full min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      {renderTabGate(entitiesQuery, "实体与短语", formatUnavailableReason(entitiesQuery.data?.unavailable_reason), (data) => (
+        <div className="flex h-full min-h-0 flex-col gap-4">
             <AnalysisMetricStrip
               items={[
                 { label: "固定表达密度（‰）", value: data.fixed_phrase_density?.toFixed(4) ?? "—" },
@@ -201,7 +184,7 @@ function VocabularySemanticView({
               ]}
               className="grid-cols-5"
             />
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
               <RatioBarChart
                 title="实体类型计数"
                 icon={Tags}
@@ -211,11 +194,11 @@ function VocabularySemanticView({
                 formatLabel={(key) => formatAnalysisLabel(key, "entity")}
                 className="min-h-[280px]"
               />
-              <DashboardCardShell title="高频实体名（前 20 名）" icon={<ScanText className="h-4 w-4" />} accent="chart-3" className="min-h-[280px]">
+              <DashboardCardShell title="高频实体名（前 20 名）" icon={<ScanText className="h-4 w-4" />} accent="chart-3" className="min-h-[280px]" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1">
                 {data.surface_top.length === 0 ? (
                   <p className="py-8 text-center text-sm text-text-muted">暂无实体候选</p>
                 ) : (
-                  <ul className="space-y-2">
+                  <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                     {data.surface_top.map((entry) => (
                       <li key={`${entry.entity_type}-${entry.surface_text}`} className="flex items-center gap-3">
                         <span className="w-28 shrink-0 truncate text-sm text-text" title={entry.surface_text}>{entry.surface_text}</span>
@@ -232,10 +215,23 @@ function VocabularySemanticView({
                 )}
               </DashboardCardShell>
             </div>
-          </div>
-        ),
-      )}
+        </div>
+      ))}
+    </motion.div>
+  );
+}
 
+/**
+ * 2026-08-31，作用：展示词向量覆盖率与词性语义聚合
+ * 简要说明：模型详情与质心统计保留在独立页签中以避免和实体列表纵向堆叠
+ */
+function WordVectorSemanticView({ word2vecQuery }: { word2vecQuery: UseQueryResultLike<Word2VecStatsResponse> }) {
+  const coverage = word2vecQuery.data?.pos_coverage ?? [];
+  const maxCoverage = coverage.length > 0 ? Math.max(...coverage.map((entry) => entry.coverage_ratio ?? 0)) : 0;
+  const word2vecData = word2vecQuery.data;
+
+  return (
+    <motion.div className="h-full min-h-0 overflow-y-auto pr-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       {renderTabGate(
         word2vecQuery,
         "词汇与语义",
@@ -337,25 +333,20 @@ export function LinguisticPage() {
     staleTime: STALE_TIME,
   });
 
-  const [view, setView] = useState<"structure" | "vocabulary">("structure");
-
   return (
-    <AnalysisWorkspace title="语言特征" documentFlow>
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex flex-col gap-4">
-        <AnalysisViewSwitcher
-          value={view}
-          onValueChange={setView}
-          label="语言特征分析视图"
-          options={[
-            { value: "structure", label: "表达结构", icon: BookOpen },
-            { value: "vocabulary", label: "词汇与语义", icon: BarChart3 },
-          ]}
-        />
-        {view === "structure" ? (
-          <ExpressionStructureView query={featuresQuery} />
-        ) : (
-          <VocabularySemanticView entitiesQuery={entitiesQuery} word2vecQuery={word2vecQuery} />
-        )}
+    <AnalysisWorkspace title="语言特征">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex h-full min-h-0 flex-col">
+        <AnalysisWorkspace.Tabs defaultValue="structure">
+          <AnalysisWorkspace.Tab value="structure" label="表达结构">
+            <ExpressionStructureView query={featuresQuery} />
+          </AnalysisWorkspace.Tab>
+          <AnalysisWorkspace.Tab value="entities" label="实体与短语">
+            <EntityPhraseView entitiesQuery={entitiesQuery} />
+          </AnalysisWorkspace.Tab>
+          <AnalysisWorkspace.Tab value="semantics" label="词汇与语义">
+            <WordVectorSemanticView word2vecQuery={word2vecQuery} />
+          </AnalysisWorkspace.Tab>
+        </AnalysisWorkspace.Tabs>
       </motion.div>
     </AnalysisWorkspace>
   );
