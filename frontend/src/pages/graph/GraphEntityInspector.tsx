@@ -57,7 +57,7 @@ export function GraphEntityInspector({
     return (
       <aside
         className={cn(
-          "flex min-h-[320px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-surface/45 p-6 text-center",
+          "flex h-full min-h-0 items-center justify-center overflow-y-auto rounded-lg border border-dashed border-border/70 bg-surface/45 p-6 text-center",
           className,
         )}
       >
@@ -76,7 +76,7 @@ export function GraphEntityInspector({
   const hasChapterRange = node.first_seen_chapter != null || node.last_seen_chapter != null;
 
   return (
-    <aside className={cn("rounded-lg border border-border/70 bg-surface/75 p-5", className)} aria-label={`${node.name}实体详情`}>
+    <aside className={cn("flex h-full min-h-0 flex-col overflow-y-auto rounded-lg border border-border/70 bg-surface/75 p-5", className)} aria-label={`${node.name}实体详情`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

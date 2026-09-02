@@ -105,6 +105,7 @@ export function GraphWorkspaceSection({
   getChangeTypeLabel,
 }: GraphWorkspaceSectionProps) {
   const [visibleChangeCount, setVisibleChangeCount] = useState(INITIAL_VISIBLE_CHANGE_COUNT);
+  const isChangeWorkspace = view === "full" || view === "changes";
   const selectedChangeIndex = activeSelectedChangeId
     ? sortedChanges.findIndex((change) => change.change_id === activeSelectedChangeId)
     : -1;
@@ -128,12 +129,12 @@ export function GraphWorkspaceSection({
       transition={{ duration: 0.28, delay: 0.15 }}
       className={cn(
         "min-h-0",
-        view === "full" && "grid grid-cols-[minmax(0,1.55fr)_380px] items-start gap-6",
-        view !== "full" && "block"
+        view === "full" && "grid h-full min-h-0 grid-cols-[minmax(0,1.55fr)_380px] gap-4",
+        view !== "full" && "block h-full"
       )}
     >
       {view !== "changes" && (
-      <Card id="graph-workspace" variant="elevated" className="flex min-h-[520px] flex-col rounded-lg">
+      <Card id="graph-workspace" variant="elevated" className="flex h-full min-h-0 flex-col rounded-lg">
         <CardHeader className="shrink-0 gap-4">
           <div className="space-y-1">
             <CardTitle className="text-base">当前人物关系</CardTitle>
@@ -154,7 +155,7 @@ export function GraphWorkspaceSection({
         </CardHeader>
 
         <CardContent className="flex min-h-0 flex-1 flex-col">
-          <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="relative min-h-[320px] flex-1 overflow-hidden rounded-lg border border-border bg-surface">
             <ForceGraph
               ref={forceGraphRef}
               data={graphData}
@@ -176,18 +177,18 @@ export function GraphWorkspaceSection({
       {view !== "graph" && (
       <div
         className={cn(
-          "space-y-4",
+          "min-h-0",
           view === "changes"
             ? "grid h-full min-h-0 grid-cols-[minmax(0,1.18fr)_minmax(340px,0.82fr)] gap-4"
-            : "self-start",
+            : view === "full" ? "flex h-full min-h-0 flex-col gap-4" : "space-y-4",
         )}
       >
         <DashboardCardShell
           title="图谱变化记录"
           icon={<History className="h-4 w-4" />}
           accent="chart-4"
-          className={cn(view === "changes" && "flex min-h-[420px] flex-col")}
-          contentClassName={cn(view === "changes" && "flex flex-col")}
+          className={cn(isChangeWorkspace && "flex min-h-0 flex-1 flex-col")}
+          contentClassName={cn(isChangeWorkspace && "flex h-full flex-col")}
           headerRight={
             <Badge variant="outline">
               {visibleChanges.length < totalChangeCount ? `${visibleChanges.length} / ${totalChangeCount}` : totalChangeCount}
@@ -199,7 +200,7 @@ export function GraphWorkspaceSection({
               <ArrowRight className="h-4 w-4" />
             </Button>
           }
-          bodyClassName="gap-3"
+          bodyClassName={cn("min-h-0 gap-3", isChangeWorkspace && "flex-1 overflow-hidden")}
         >
           <p className="text-sm text-text-muted">
             按剧情推进查看实体状态和关系的稳定变化。
@@ -207,7 +208,7 @@ export function GraphWorkspaceSection({
           </p>
           <div className={cn(
             "space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4",
-            view === "changes" && "flex min-h-0 flex-1 flex-col"
+            isChangeWorkspace && "flex min-h-0 flex-1 flex-col"
           )}>
             {graphSelectionHint ? (
               <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
@@ -217,7 +218,8 @@ export function GraphWorkspaceSection({
             {visibleChanges.length ? (
               <>
                 <div className={cn(
-                  "space-y-3 pr-1"
+                  "space-y-3 pr-1",
+                  isChangeWorkspace && "min-h-0 flex-1 overflow-y-auto"
                 )}>
                   {visibleChanges.map((change) => {
                     const isSelected = activeSelectedChangeId === change.change_id;
@@ -280,7 +282,7 @@ export function GraphWorkspaceSection({
           </div>
         </DashboardCardShell>
 
-          <div className={cn(view === "changes" ? "flex min-h-0 flex-col gap-4" : "space-y-4")}>
+          <div className={cn(isChangeWorkspace ? "flex min-h-0 flex-1 flex-col gap-4" : "space-y-4")}>
           {selectedNode?.entity_type === "character" &&
           (selectedNode.first_seen_chapter != null || selectedNode.last_seen_chapter != null) ? (
             <DashboardCardShell title="角色生命周期联动" icon={<Users className="h-4 w-4" />} accent="chart-3" bodyClassName="gap-4">
@@ -336,14 +338,14 @@ export function GraphWorkspaceSection({
             title="关系变化详情"
             icon={<Link2 className="h-4 w-4" />}
             accent="chart-2"
-            className={cn(view === "changes" && "flex min-h-0 flex-1 flex-col")}
-            contentClassName={cn(view === "changes" && "flex flex-col")}
-            bodyClassName="gap-3"
+            className={cn(isChangeWorkspace && "flex min-h-0 flex-1 flex-col")}
+            contentClassName={cn(isChangeWorkspace && "flex h-full flex-col")}
+            bodyClassName={cn("min-h-0 gap-3", isChangeWorkspace && "flex-1 overflow-hidden")}
           >
             <p className="text-sm text-text-muted">当前选中变化的章节、类型与关系方向</p>
             <div className={cn(
               "rounded-2xl border border-border/60 bg-surface/70 p-4",
-              view === "changes" && "min-h-0 flex-1"
+              isChangeWorkspace && "min-h-0 flex-1 overflow-y-auto"
             )}>
               {selectedChange ? (
                 <div className="space-y-4">
