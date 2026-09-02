@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -107,10 +108,12 @@ export function CharactersPage() {
   const { data: characters } = charactersQuery;
   const focusData = focusQuery.data;
   const focusCharacters = focusData?.focus_characters ?? [];
+  const [sortMode, setSortMode] = useState<"appearance" | "focus">("appearance");
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   // ---------- 渲染 ----------
 
   return (
-    <AnalysisWorkspace title="角色格局" documentFlow>
+    <AnalysisWorkspace title="角色格局">
       {/* 未选择任务提示 */}
       {!storeTaskId && (
         <DashboardCardShell
@@ -173,14 +176,49 @@ export function CharactersPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex min-h-0 flex-col gap-6"
+          className="flex h-full min-h-0 flex-col"
         >
-          <CharacterLandscape
-            characters={characters}
-            focusStructure={focusData?.focus_structure}
-            focusCharacters={focusCharacters}
-            arcScores={focusData?.arc_scores}
-          />
+          <AnalysisWorkspace.Tabs defaultValue="overview">
+            <AnalysisWorkspace.Tab value="overview" label="格局概览">
+              <CharacterLandscape
+                characters={characters}
+                focusStructure={focusData?.focus_structure}
+                focusCharacters={focusCharacters}
+                arcScores={focusData?.arc_scores}
+                view="overview"
+                sortMode={sortMode}
+                selectedName={selectedName}
+                onSortModeChange={setSortMode}
+                onSelectName={setSelectedName}
+              />
+            </AnalysisWorkspace.Tab>
+            <AnalysisWorkspace.Tab value="ranking" label="角色排行">
+              <CharacterLandscape
+                characters={characters}
+                focusStructure={focusData?.focus_structure}
+                focusCharacters={focusCharacters}
+                arcScores={focusData?.arc_scores}
+                view="ranking"
+                sortMode={sortMode}
+                selectedName={selectedName}
+                onSortModeChange={setSortMode}
+                onSelectName={setSelectedName}
+              />
+            </AnalysisWorkspace.Tab>
+            <AnalysisWorkspace.Tab value="detail" label="角色详情">
+              <CharacterLandscape
+                characters={characters}
+                focusStructure={focusData?.focus_structure}
+                focusCharacters={focusCharacters}
+                arcScores={focusData?.arc_scores}
+                view="detail"
+                sortMode={sortMode}
+                selectedName={selectedName}
+                onSortModeChange={setSortMode}
+                onSelectName={setSelectedName}
+              />
+            </AnalysisWorkspace.Tab>
+          </AnalysisWorkspace.Tabs>
         </motion.div>
       )}
     </AnalysisWorkspace>

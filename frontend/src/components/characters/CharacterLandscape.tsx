@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Users } from "lucide-react";
 
 import type { Character, DiagnosisResult } from "@/api/types";
@@ -14,6 +14,11 @@ interface CharacterLandscapeProps {
   focusStructure?: DiagnosisResult["focus_structure"];
   focusCharacters: string[];
   arcScores?: Record<string, number> | null;
+  view: "overview" | "ranking" | "detail";
+  sortMode: CharacterSortMode;
+  selectedName: string | null;
+  onSortModeChange: (mode: CharacterSortMode) => void;
+  onSelectName: (name: string) => void;
 }
 
 type CharacterSortMode = "appearance" | "focus";
@@ -39,12 +44,20 @@ function formatEmotion(value: number | null | undefined): string {
 }
 
 /**
- * 2026-08-31，作用：在单一工作区整合角色功能、排行和详情
- * 简要说明：角色分析不再拆分页签或独立卡片，全部指标在同一上下文内联动
+ * 2026-08-31，作用：渲染角色分析工作区的当前页签内容
+ * 简要说明：概览、排行和详情共用页面级选择状态，避免在页签切换后丢失角色上下文
  */
-export function CharacterLandscape({ characters, focusStructure, focusCharacters, arcScores }: CharacterLandscapeProps) {
-  const [sortMode, setSortMode] = useState<CharacterSortMode>("appearance");
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+export function CharacterLandscape({
+  characters,
+  focusStructure,
+  focusCharacters,
+  arcScores,
+  view,
+  sortMode,
+  selectedName,
+  onSortModeChange,
+  onSelectName,
+}: CharacterLandscapeProps) {
   const sortedCharacters = useMemo(
     () => [...characters].sort((left, right) => sortMode === "focus"
       ? (right.narrative_focus_score ?? -1) - (left.narrative_focus_score ?? -1)
@@ -70,8 +83,16 @@ export function CharacterLandscape({ characters, focusStructure, focusCharacters
   );
   const selectedDistributionTotal = selectedDistribution.reduce((sum, [, value]) => sum + value, 0);
 
-  return (
-    <DashboardCardShell title="角色格局" icon={<Users className="h-4 w-4" aria-hidden="true" />} accent="primary" bodyClassName="gap-5">
+  if (view === "overview") {
+    return (
+      <DashboardCardShell
+        title="角色格局"
+        icon={<Users className="h-4 w-4" aria-hidden="true" />}
+        accent="primary"
+        className="h-full"
+        contentClassName="flex h-full flex-col"
+        bodyClassName="min-h-0 flex-1 gap-5 overflow-y-auto pr-1"
+      >
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="secondary">{formatAnalysisLabel(focusStructure, "focus")}</Badge>
         {focusCharacters.map((name) => <Badge key={name} variant="outline">{name}</Badge>)}
@@ -107,24 +128,39 @@ export function CharacterLandscape({ characters, focusStructure, focusCharacters
           </>
         ) : <p className="mt-3 text-sm text-text-muted">暂无角色功能构成</p>}
       </section>
+      </DashboardCardShell>
+    );
+  }
 
-      <section aria-labelledby="character-ranking-title">
+  if (view === "ranking") {
+    return (
+      <DashboardCardShell
+        title="综合角色榜"
+        icon={<Users className="h-4 w-4" aria-hidden="true" />}
+        accent="chart-2"
+        className="h-full"
+        contentClassName="flex h-full flex-col"
+        bodyClassName="min-h-0 flex-1 gap-3 overflow-hidden"
+      >
+      <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="character-ranking-title">
         <div className="flex items-center justify-between gap-3">
           <h2 id="character-ranking-title" className="text-sm font-medium text-text">综合角色榜</h2>
-          <AnalysisViewSwitcher value={sortMode} onValueChange={setSortMode} label="角色排序方式" options={[
+          <AnalysisViewSwitcher value={sortMode} onValueChange={onSortModeChange} label="角色排序方式" options={[
             { value: "appearance", label: "按出场" },
             { value: "focus", label: "按焦点" },
           ]} />
         </div>
-        <div className="mt-3 rounded-lg border border-border/70">
-          <div>
+        <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70">
+          <div className="shrink-0">
             <div className="grid grid-cols-[minmax(150px,1fr)_minmax(190px,1.35fr)_minmax(110px,.8fr)_80px_80px_70px] gap-3 bg-surface-hover/70 px-4 py-2 text-xs text-text-muted">
               <span>角色</span><span>出场强度</span><span>叙事职责</span><span>焦点</span><span>情绪</span><span>弧线</span>
             </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto" aria-label="角色排行列表">
             {sortedCharacters.map((character, index) => {
               const isSelected = selectedCharacter?.name === character.name;
               return (
-                <button key={character.name} type="button" aria-pressed={isSelected} onClick={() => setSelectedName(character.name)} className={`grid w-full grid-cols-[minmax(150px,1fr)_minmax(190px,1.35fr)_minmax(110px,.8fr)_80px_80px_70px] items-center gap-3 border-t border-border/55 px-4 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? "bg-primary/5" : "bg-surface/55 hover:bg-surface-hover"}`}>
+                <button key={character.name} type="button" aria-pressed={isSelected} onClick={() => onSelectName(character.name)} className={`grid w-full grid-cols-[minmax(150px,1fr)_minmax(190px,1.35fr)_minmax(110px,.8fr)_80px_80px_70px] items-center gap-3 border-t border-border/55 px-4 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? "bg-primary/5" : "bg-surface/55 hover:bg-surface-hover"}`}>
                   <span className="flex min-w-0 items-center gap-2 font-medium text-text">
                     <span className="w-5 shrink-0 text-xs tabular-nums text-text-muted">{index + 1}</span><span className="truncate">{character.name}</span>
                     {character.is_focus_character ? <Badge variant="secondary">焦点</Badge> : null}
@@ -143,7 +179,19 @@ export function CharacterLandscape({ characters, focusStructure, focusCharacters
           </div>
         </div>
       </section>
+      </DashboardCardShell>
+    );
+  }
 
+  return (
+    <DashboardCardShell
+      title="角色详情"
+      icon={<Users className="h-4 w-4" aria-hidden="true" />}
+      accent="chart-3"
+      className="h-full"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto pr-1"
+    >
       {selectedCharacter ? (
         <section className="rounded-lg border border-primary/20 bg-primary/5 p-4" aria-label={`${selectedCharacter.name}角色详情`}>
           <div className="flex items-center justify-between gap-3">
@@ -168,7 +216,7 @@ export function CharacterLandscape({ characters, focusStructure, focusCharacters
             </dl>
           </AnalysisDetails>
         </section>
-      ) : null}
+      ) : <p className="text-sm text-text-muted">暂无可查看的角色详情</p>}
     </DashboardCardShell>
   );
 }
