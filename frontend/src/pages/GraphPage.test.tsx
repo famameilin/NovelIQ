@@ -62,16 +62,6 @@ vi.mock("@/components/common/NovelHeader", () => ({
   NovelHeader: ({ title }: { title: string }) => <div>{title}</div>,
 }));
 
-vi.mock("@/components/layout/AnalysisWorkspace", () => ({
-  AnalysisWorkspace: Object.assign(
-    ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-    {
-      Tabs: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-      Tab: ({ children }: { children?: ReactNode }) => <section>{children}</section>,
-    },
-  ),
-}));
-
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -257,7 +247,7 @@ describe("GraphPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByRole("button", { name: "人物关系" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("tab", { name: "人物关系" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("当前人物关系")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
 
@@ -272,8 +262,8 @@ describe("GraphPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByRole("button", { name: "关系演变" });
-    await user.click(screen.getByRole("button", { name: "关系演变" }));
+    await screen.findByRole("tab", { name: "关系演变" });
+    await user.click(screen.getByRole("tab", { name: "关系演变" }));
 
     expect(screen.getByText("关系密度")).toBeInTheDocument();
     const relationChanges = screen.getAllByText(/第 12 章 · 顾霜 → 司夜/);
@@ -289,8 +279,8 @@ describe("GraphPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByRole("button", { name: "关系演变" });
-    await user.click(screen.getByRole("button", { name: "关系演变" }));
+    await screen.findByRole("tab", { name: "关系演变" });
+    await user.click(screen.getByRole("tab", { name: "关系演变" }));
     const relationChange = (await screen.findAllByText(/第 12 章 · 顾霜 → 司夜/))[0];
     await user.click(relationChange.closest("button")!);
 
@@ -298,5 +288,13 @@ describe("GraphPage", () => {
       "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1",
       { replace: true },
     );
+  });
+
+  it("带变化深链进入页面时直接打开关系演变页签", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1";
+    renderPage();
+
+    expect(await screen.findByRole("tab", { name: "关系演变" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findAllByText(/第 12 章 · 顾霜 → 司夜/)).not.toHaveLength(0);
   });
 });

@@ -54,16 +54,6 @@ vi.mock("@/components/common/NovelHeader", () => ({
   NovelHeader: ({ title }: { title: string }) => <div>{title}</div>,
 }));
 
-vi.mock("@/components/layout/AnalysisWorkspace", () => ({
-  AnalysisWorkspace: Object.assign(
-    ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-    {
-      Tabs: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-      Tab: ({ children }: { children?: ReactNode }) => <section>{children}</section>,
-    },
-  ),
-}));
-
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -224,8 +214,8 @@ describe("GraphPage integration", () => {
     const user = userEvent.setup();
     renderGraphPage();
 
-    await screen.findByRole("button", { name: "关系演变" });
-    await user.click(screen.getByRole("button", { name: "关系演变" }));
+    await screen.findByRole("tab", { name: "关系演变" });
+    await user.click(screen.getByRole("tab", { name: "关系演变" }));
 
     expect(screen.getByText("关系密度")).toBeInTheDocument();
     expect(screen.getAllByText(/第 2 章 · 顾霜 → 苏映雪/).length).toBeGreaterThan(0);
