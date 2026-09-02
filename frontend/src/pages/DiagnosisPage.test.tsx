@@ -175,6 +175,7 @@ describe("DiagnosisPage", () => {
     renderDiagnosisPage();
 
     expect(await screen.findByText("诊断报告暂未生成")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("tab", { name: "伏笔追踪" }));
     expect(screen.getAllByText("铜铃异响反复指向山门旧案").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/setup/i)).not.toBeInTheDocument();
   });
@@ -202,6 +203,12 @@ describe("DiagnosisPage", () => {
 
     expect(await screen.findByText("伏笔回收预期")).toBeInTheDocument();
     expect(screen.getByTestId("diagnosis-header")).toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "综合概览",
+      "价值主题",
+      "角色结构",
+      "伏笔追踪",
+    ]);
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {
@@ -308,8 +315,8 @@ describe("DiagnosisPage", () => {
 
     renderDiagnosisPage();
 
-    await user.click(await screen.findByRole("button", { name: "伏笔追踪" }));
-    expect(screen.getByRole("heading", { name: "伏笔追踪" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("tab", { name: "伏笔追踪" }));
+    expect(screen.getByRole("tab", { name: "伏笔追踪", selected: true })).toBeInTheDocument();
     const filterGroup = screen.getByRole("group", { name: "伏笔状态筛选" });
     expect(within(filterGroup).getByRole("button", { name: "待回收" })).toBeInTheDocument();
     expect(within(filterGroup).getByRole("button", { name: "持续强化" })).toBeInTheDocument();
