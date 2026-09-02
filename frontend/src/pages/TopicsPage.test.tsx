@@ -1,7 +1,7 @@
-import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopicsPage } from "@/pages/TopicsPage";
@@ -22,45 +22,10 @@ function passthroughComponent(displayName: string) {
   return Component;
 }
 
-function motionElement(tagName: string) {
-  const Component = (props: {
-    children?: ReactNode;
-    whileHover?: unknown;
-    whileTap?: unknown;
-    transition?: unknown;
-    variants?: unknown;
-    initial?: unknown;
-    animate?: unknown;
-    exit?: unknown;
-    [key: string]: unknown;
-  }) => {
-    const sanitizedProps = { ...props };
-    delete sanitizedProps.whileHover;
-    delete sanitizedProps.whileTap;
-    delete sanitizedProps.transition;
-    delete sanitizedProps.variants;
-    delete sanitizedProps.initial;
-    delete sanitizedProps.animate;
-    delete sanitizedProps.exit;
-    return createElement(tagName, sanitizedProps, props.children);
-  };
-  Component.displayName = `motion-${tagName}`;
-  return Component;
-}
-
 vi.mock("react-router-dom", () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ novelId: currentNovelId }),
   useSearchParams: () => [new URLSearchParams(currentSearchParams)],
-}));
-
-vi.mock("framer-motion", () => ({
-  motion: new Proxy(
-    {},
-    {
-      get: (_target, key: string) => motionElement(key),
-    },
-  ),
 }));
 
 vi.mock("@/api/results", () => ({
@@ -181,7 +146,7 @@ describe("TopicsPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("主题文档流走总览 API 并渲染词云与分布", async () => {
+  it("主题固定工作区在完整主题分布页签中保留词云与分布", async () => {
     getTopicsOverviewTabMock.mockResolvedValue({
       run_id: "task-1",
       model: null,
@@ -215,7 +180,8 @@ describe("TopicsPage", () => {
 
     renderTopicsPage();
 
-    fireEvent.click(await screen.findByText("完整主题分布"));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "完整主题分布" }));
     expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
     expect(screen.getByTestId("topic-distribution-chart")).toBeInTheDocument();
     expect(screen.getByTestId("topic-keywords-card")).toBeInTheDocument();
@@ -237,13 +203,14 @@ describe("TopicsPage", () => {
 
     renderTopicsPage();
 
-    fireEvent.click(await screen.findByText("完整主题分布"));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "完整主题分布" }));
     expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
     expect(screen.getByTestId("topic-bar-chart")).toBeInTheDocument();
     expect(screen.getByTestId("topic-table")).toBeInTheDocument();
   });
 
-  it("主题文档流保留演进、迁移、情绪三个独立端点", async () => {
+  it("主题固定工作区保留全部业务页签和独立端点", async () => {
     getTopicsOverviewTabMock.mockResolvedValue({
       run_id: "task-1",
       model: null,
@@ -258,8 +225,18 @@ describe("TopicsPage", () => {
 
     renderTopicsPage();
 
-    const unavailableStates = await screen.findAllByTestId("tab-unavailable-state");
-    expect(unavailableStates.length).toBeGreaterThanOrEqual(1);
+    await screen.findByTestId("tab-unavailable-state");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "完整主题分布" }));
+    await user.click(screen.getByRole("tab", { name: "主题演进" }));
+    await user.click(screen.getByRole("tab", { name: "主题迁移" }));
+    await user.click(screen.getByRole("tab", { name: "主题情绪" }));
+
+    expect(screen.getByRole("tab", { name: "主题总览" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "完整主题分布" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "主题演进" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "主题迁移" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "主题情绪" })).toBeInTheDocument();
     expect(getTopicSeriesMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getTopicShiftsMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getTopicEmotionMock).toHaveBeenCalledWith("novel-1", "task-1");
@@ -284,8 +261,7 @@ describe("TopicsPage", () => {
 
     renderTopicsPage();
 
-    const notCompleteTitles = await screen.findAllByText("主题结果尚未完成");
-    expect(notCompleteTitles.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。").length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText("主题结果尚未完成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
   });
 });

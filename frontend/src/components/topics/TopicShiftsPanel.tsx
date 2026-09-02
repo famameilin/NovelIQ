@@ -14,6 +14,7 @@ import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import { useInView } from "@/hooks/useInView";
+import { cn } from "@/lib/cn";
 import type { TopicShiftCandidate, TopicShiftConfig } from "@/api/types";
 
 echarts.use([GridComponent, TooltipComponent, ScatterChart, CanvasRenderer]);
@@ -62,10 +63,10 @@ export function TopicShiftsPanel({ candidates, config, showConfig = true, classN
   );
 
   return (
-    <div className={className}>
-      <div className="grid grid-cols-2 gap-4">
-        <DashboardCardShell title="主题变化位置" accent="chart-2" bodyClassName="min-h-[280px]">
-          <div ref={chartContainerRef} className="h-[280px] w-full">
+    <div className={cn("flex h-full min-h-0 flex-col", className)}>
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
+        <DashboardCardShell title="主题变化位置" accent="chart-2" className="h-full" contentClassName="flex h-full flex-col" bodyClassName="min-h-[280px] flex-1">
+          <div ref={chartContainerRef} className="h-full min-h-[280px] w-full">
             {candidates.length === 0 ? (
               <p className="flex h-full items-center justify-center text-sm text-text-muted">无达到阈值的候选点</p>
             ) : isChartVisible ? (
@@ -76,32 +77,34 @@ export function TopicShiftsPanel({ candidates, config, showConfig = true, classN
           </div>
         </DashboardCardShell>
 
-        <DashboardCardShell title="变化明细" accent="chart-4" bodyClassName="min-h-[280px]">
+        <DashboardCardShell title="变化明细" accent="chart-4" className="h-full" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1">
           {candidates.length === 0 ? (
             <p className="flex h-full items-center justify-center text-sm text-text-muted">暂无候选点</p>
           ) : (
-            <Table className="text-left text-sm">
-              <TableHeader>
-                <TableRow className="text-xs text-text-muted hover:bg-transparent">
-                  <TableHead className="h-auto px-0 pb-2">字符位置</TableHead>
-                  <TableHead className="h-auto px-0 pb-2">段落区间</TableHead>
-                  <TableHead className="h-auto px-0 pb-2">差异强度</TableHead>
-                  <TableHead className="h-auto px-0 pb-2">窗口词元</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleCandidates.map((candidate) => (
-                  <TableRow key={`${candidate.position}-${candidate.paragraph_start}`} className="border-border/40">
-                    <TableCell className="px-0 py-1.5">{candidate.position}</TableCell>
-                    <TableCell className="px-0 py-1.5">
-                      {candidate.paragraph_start} – {candidate.paragraph_end}
-                    </TableCell>
-                    <TableCell className="px-0 py-1.5">{candidate.score.toFixed(4)}</TableCell>
-                    <TableCell className="px-0 py-1.5">{candidate.window_token_total}</TableCell>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <Table className="text-left text-sm">
+                <TableHeader className="sticky top-0 z-10 bg-surface">
+                  <TableRow className="text-xs text-text-muted hover:bg-transparent">
+                    <TableHead className="h-auto px-0 pb-2">字符位置</TableHead>
+                    <TableHead className="h-auto px-0 pb-2">段落区间</TableHead>
+                    <TableHead className="h-auto px-0 pb-2">差异强度</TableHead>
+                    <TableHead className="h-auto px-0 pb-2">窗口词元</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {visibleCandidates.map((candidate) => (
+                    <TableRow key={`${candidate.position}-${candidate.paragraph_start}`} className="border-border/40">
+                      <TableCell className="px-0 py-1.5">{candidate.position}</TableCell>
+                      <TableCell className="px-0 py-1.5">
+                        {candidate.paragraph_start} – {candidate.paragraph_end}
+                      </TableCell>
+                      <TableCell className="px-0 py-1.5">{candidate.score.toFixed(4)}</TableCell>
+                      <TableCell className="px-0 py-1.5">{candidate.window_token_total}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
           {candidates.length > 8 ? (
             <button

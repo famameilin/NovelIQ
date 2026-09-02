@@ -1,7 +1,7 @@
 /**
- * TopicsPage - 主题脉络页面（2026-08-31 合并式文档流）
+ * TopicsPage - 主题脉络页面（2026-08-31 固定工作区）
  *
- * 单页保留主题总览、主题演进、主题迁移和主题情绪四类接口指标
+ * 以业务页签保留主题总览、完整分布、主题演进、主题迁移和主题情绪五类指标
  */
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -223,15 +223,18 @@ export function TopicsPage() {
   }, [overviewQuery.data, selectedTopic]);
 
   return (
-    <AnalysisWorkspace title="主题脉络" documentFlow>
+    <AnalysisWorkspace title="主题脉络">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="flex min-h-0 flex-col gap-6"
+        className="flex h-full min-h-0 flex-col"
       >
-        {renderTabGate(overviewQuery, "主题总览", overviewUnavailable, (overview) => (
-          <div className="flex flex-col gap-6">
+        <AnalysisWorkspace.Tabs defaultValue="overview">
+          <AnalysisWorkspace.Tab value="overview" label="主题总览">
+            <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-2">
+              {renderTabGate(overviewQuery, "主题总览", overviewUnavailable, () => (
+                <div className="flex flex-col gap-4">
             <section className="grid grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)] gap-4">
               <DashboardCardShell title="主题列表" accent="chart-1" bodyClassName="gap-2">
                 {primaryTopics.length > 0 ? primaryTopics.map((topic) => (
@@ -246,56 +249,76 @@ export function TopicsPage() {
               </DashboardCardShell>
               <TopicDetailPanel topic={selectedTopic} emotion={selectedEmotion} topChapter={topChapter} />
             </section>
-
-            <AnalysisDetails lazy title="完整主题分布" description="词云、权重排行、主题表、章节分布与全书关键词">
-              <div className="space-y-4">
-                {topics.length > 0 ? (
-                  <>
-                    <TopicWordCloud topics={topics} maxWords={100} className="h-[300px]" />
-                    <TopicBarChart topics={topics} className="h-[360px]" />
-                    <TopicTable topics={topics} />
-                  </>
-                ) : null}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="min-h-[280px] rounded-lg border border-border/60 bg-surface/70 p-4">
-                    <TopicDistributionChart distribution={overview.distribution} chapters={overview.chapters} className="h-[260px]" />
-                  </div>
-                  <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} className="min-h-[280px]" />
+            <AnalysisDetails title="分析详情" description="模型元数据与主题迁移配置">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <span className="text-text-muted">主题模型</span><span className="text-text">{formatAnalysisLabel(overviewQuery.data?.model?.model_key, "topicModel")}</span>
+                  <span className="text-text-muted">库版本</span><span className="text-text">{overviewQuery.data?.model?.library_version ?? "—"}</span>
+                  <span className="text-text-muted">流水线版本</span><span className="text-text">{overviewQuery.data?.model?.pipeline_version ?? "—"}</span>
+                  <span className="text-text-muted">主题数量</span><span className="text-text">{overviewQuery.data?.model?.num_topics ?? "—"}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <span className="text-text-muted">窗口段数</span><span className="text-text">{shiftsQuery.data?.config.window_size ?? "—"}</span>
+                  <span className="text-text-muted">每窗最少词元</span><span className="text-text">{shiftsQuery.data?.config.min_tokens_per_window ?? "—"}</span>
+                  <span className="text-text-muted">散度阈值</span><span className="text-text">{shiftsQuery.data?.config.score_threshold ?? "—"}</span>
+                  <span className="text-text-muted">候选上限</span><span className="text-text">{shiftsQuery.data?.config.max_candidates ?? "—"}</span>
                 </div>
               </div>
             </AnalysisDetails>
-          </div>
-        ))}
-
-        <AnalysisDetails title="分析详情" description="模型元数据与主题迁移配置">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <span className="text-text-muted">主题模型</span><span className="text-text">{formatAnalysisLabel(overviewQuery.data?.model?.model_key, "topicModel")}</span>
-              <span className="text-text-muted">库版本</span><span className="text-text">{overviewQuery.data?.model?.library_version ?? "—"}</span>
-              <span className="text-text-muted">流水线版本</span><span className="text-text">{overviewQuery.data?.model?.pipeline_version ?? "—"}</span>
-              <span className="text-text-muted">主题数量</span><span className="text-text">{overviewQuery.data?.model?.num_topics ?? "—"}</span>
+                </div>
+              ))}
             </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <span className="text-text-muted">窗口段数</span><span className="text-text">{shiftsQuery.data?.config.window_size ?? "—"}</span>
-              <span className="text-text-muted">每窗最少词元</span><span className="text-text">{shiftsQuery.data?.config.min_tokens_per_window ?? "—"}</span>
-              <span className="text-text-muted">散度阈值</span><span className="text-text">{shiftsQuery.data?.config.score_threshold ?? "—"}</span>
-              <span className="text-text-muted">候选上限</span><span className="text-text">{shiftsQuery.data?.config.max_candidates ?? "—"}</span>
-            </div>
-          </div>
-        </AnalysisDetails>
+          </AnalysisWorkspace.Tab>
 
-        {renderTabGate(seriesQuery, "主题演进", seriesQuery.data?.unavailable_reason ?? null, (series) => (
-          <DashboardCardShell title="主题演进" accent="chart-2" bodyClassName="gap-2">
-            <p className="text-xs text-text-muted">段落级完整 {series.num_topics} 维主题权重堆积图，横轴为真实字符位置。</p>
-            <TopicSeriesChart points={series.points} numTopics={series.num_topics ?? 0} className="h-[380px]" />
-          </DashboardCardShell>
-        ))}
-        {renderTabGate(shiftsQuery, "主题迁移", shiftsQuery.data?.unavailable_reason ?? null, (shifts) => (
-          <TopicShiftsPanel candidates={shifts.candidates} config={shifts.config} showConfig={false} />
-        ))}
-        {renderTabGate(emotionQuery, "主题情绪", emotionQuery.data?.unavailable_reason ?? null, (topicEmotion) => (
-          <TopicEmotionPanel emotion={topicEmotion.emotion} />
-        ))}
+          <AnalysisWorkspace.Tab value="distribution" label="完整主题分布">
+            <div className="h-full min-h-0 overflow-y-auto pr-2">
+              {renderTabGate(overviewQuery, "完整主题分布", overviewUnavailable, (overview) => (
+                <div className="space-y-4">
+                  {topics.length > 0 ? (
+                    <>
+                      <TopicWordCloud topics={topics} maxWords={100} className="h-[300px]" />
+                      <TopicBarChart topics={topics} className="h-[360px]" />
+                      <TopicTable topics={topics} />
+                    </>
+                  ) : null}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="min-h-[280px] rounded-lg border border-border/60 bg-surface/70 p-4">
+                      <TopicDistributionChart distribution={overview.distribution} chapters={overview.chapters} className="h-[260px]" />
+                    </div>
+                    <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} className="min-h-[280px]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </AnalysisWorkspace.Tab>
+
+          <AnalysisWorkspace.Tab value="series" label="主题演进">
+            <div className="h-full min-h-0">
+              {renderTabGate(seriesQuery, "主题演进", seriesQuery.data?.unavailable_reason ?? null, (series) => (
+                <DashboardCardShell title="主题演进" accent="chart-2" className="h-full" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-2">
+                  <p className="text-xs text-text-muted">段落级完整 {series.num_topics} 维主题权重堆积图，横轴为真实字符位置。</p>
+                  <TopicSeriesChart points={series.points} numTopics={series.num_topics ?? 0} className="min-h-[320px] flex-1" />
+                </DashboardCardShell>
+              ))}
+            </div>
+          </AnalysisWorkspace.Tab>
+
+          <AnalysisWorkspace.Tab value="shifts" label="主题迁移">
+            <div className="h-full min-h-0">
+              {renderTabGate(shiftsQuery, "主题迁移", shiftsQuery.data?.unavailable_reason ?? null, (shifts) => (
+                <TopicShiftsPanel candidates={shifts.candidates} config={shifts.config} showConfig className="h-full" />
+              ))}
+            </div>
+          </AnalysisWorkspace.Tab>
+
+          <AnalysisWorkspace.Tab value="emotion" label="主题情绪">
+            <div className="h-full min-h-0">
+              {renderTabGate(emotionQuery, "主题情绪", emotionQuery.data?.unavailable_reason ?? null, (topicEmotion) => (
+                <TopicEmotionPanel emotion={topicEmotion.emotion} />
+              ))}
+            </div>
+          </AnalysisWorkspace.Tab>
+        </AnalysisWorkspace.Tabs>
       </motion.div>
     </AnalysisWorkspace>
   );
