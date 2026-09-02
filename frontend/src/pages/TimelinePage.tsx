@@ -67,6 +67,7 @@ export function TimelinePage() {
   }, [urlMaxLevel]);
 
   const [activePhase, setActivePhase] = useState<string | undefined>();
+  const [activePanel, setActivePanel] = useState<"timeline" | "details">("timeline");
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
 
@@ -167,6 +168,13 @@ export function TimelinePage() {
   }, [selectedDetailNode, urlEventId, urlTreeId]);
 
   const selectedTrackNodeId = selectedDetailNode?.tree_id;
+
+  useEffect(() => {
+    if (selectedDetailNode && (urlTreeId || urlEventId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- URL 深链解析完成后需要同步打开事件详情页签
+      setActivePanel("details");
+    }
+  }, [selectedDetailNode, urlEventId, urlTreeId]);
 
   const eventCount = nodes.length;
   const causalCount = causalEdges.length;
@@ -270,26 +278,10 @@ export function TimelinePage() {
   }
 
   return (
-    <AnalysisWorkspace title="叙事时间轴" documentFlow>
-      <div className="space-y-4 pb-6">
-        {selectionHint ? (
-          <div className="flex items-start gap-3 rounded-lg border border-chart-negative/20 bg-chart-negative/5 p-4">
-            <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" aria-hidden="true" />
-            <p className="text-sm text-text-muted">{selectionHint}</p>
-          </div>
-        ) : null}
-
-        <AnalysisMetricStrip
-          items={[
-            { label: "事件总数", value: eventCount, description: "全书事件节点" },
-            { label: "当前可见", value: visibleCount, description: "符合重要性筛选" },
-            { label: "因果联系", value: causalCount, description: "包含有效与已失效联系" },
-            { label: "叙事阶段", value: phases.length, description: "按故事进程划分" },
-          ]}
-        />
-
+    <AnalysisWorkspace title="叙事时间轴">
+      <div className="flex h-full min-h-0 flex-col">
         {isLoading ? (
-          <div className="h-[560px] w-full animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
+          <div className="h-full w-full animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
         ) : isAnalysisNotComplete ? (
           <AnalysisNotCompleteState
             title={analysisFailed ? "时间轴分析任务已失败" : "时间轴结果尚未完成"}
@@ -301,7 +293,7 @@ export function TimelinePage() {
             failed={analysisFailed}
           />
         ) : isError ? (
-          <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
+          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
             <span>时间轴加载失败</span>
             <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -309,7 +301,7 @@ export function TimelinePage() {
             </Button>
           </div>
         ) : nodes.length === 0 && totalChapters === 0 ? (
-          <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
+          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
             <span>该任务没有事件时间轴数据，请重新分析</span>
             <Button variant="outline" size="sm" onClick={() => navigate(`/novels/${novelId}`)} className="gap-2">
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -317,14 +309,32 @@ export function TimelinePage() {
             </Button>
           </div>
         ) : nodes.length === 0 || displayNodes.length === 0 ? (
-          <div className="flex h-[360px] items-center justify-center rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
+          <div className="flex h-full items-center justify-center rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
             暂无时间轴节点
           </div>
         ) : (
-          <>
-            <section className="rounded-lg border border-border/60 bg-surface/75 px-3 py-3.5" aria-label="时间轴筛选">
-              <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} />
-              <div className="mt-3 flex gap-2">
+          <AnalysisWorkspace.Tabs value={activePanel} onValueChange={(value) => setActivePanel(value as "timeline" | "details")}>
+            <AnalysisWorkspace.Tab value="timeline" label="事件轨道">
+              <div className="flex h-full min-h-0 flex-col gap-3">
+                <AnalysisMetricStrip
+                  items={[
+                    { label: "事件总数", value: eventCount, description: "全书事件节点" },
+                    { label: "当前可见", value: visibleCount, description: "符合重要性筛选" },
+                    { label: "因果联系", value: causalCount, description: "包含有效与已失效联系" },
+                    { label: "叙事阶段", value: phases.length, description: "按故事进程划分" },
+                  ]}
+                />
+
+                {selectionHint ? (
+                  <div className="flex shrink-0 items-start gap-3 rounded-lg border border-chart-negative/20 bg-chart-negative/5 p-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" aria-hidden="true" />
+                    <p className="text-sm text-text-muted">{selectionHint}</p>
+                  </div>
+                ) : null}
+
+                <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/60 bg-surface/75 px-3 py-3.5" aria-label="时间轴筛选">
+                  <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} />
+                  <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-1">
                 {phases.length === 0 ? (
                   <p className="text-sm text-text-muted">暂无阶段数据</p>
                 ) : (
@@ -337,7 +347,7 @@ export function TimelinePage() {
                         aria-pressed={isActive}
                         onClick={() => handlePhaseClick(phase)}
                         className={[
-                          "rounded-full border px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                          "shrink-0 rounded-full border px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
                           isActive
                             ? "border-primary/35 bg-primary/10 text-text shadow-sm"
                             : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
@@ -350,25 +360,26 @@ export function TimelinePage() {
                   })
                 )}
               </div>
-              <TimelineLegend className="mt-3 justify-start" />
-            </section>
+                  <TimelineLegend className="mt-3 shrink-0 justify-start" />
+                  <section className="mt-3 min-h-0 flex-1" aria-label="事件轨道">
+                    <TimelineTrack
+                      nodes={displayNodes}
+                      derivedOrder={timelineData?.derived_event_order ?? []}
+                      phases={phases}
+                      activePhase={activePhase}
+                      selectedNodeId={selectedTrackNodeId}
+                      onNodeClick={handleNodeClick}
+                      tensionCurve={tensionCurve ?? null}
+                      totalChapters={totalChapters}
+                      className="h-full min-h-0"
+                    />
+                  </section>
+                </section>
+              </div>
+            </AnalysisWorkspace.Tab>
 
-            <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(360px,0.75fr)] items-start gap-4">
-              <section className="h-[560px] min-w-0" aria-label="事件轨道">
-                <TimelineTrack
-                  nodes={displayNodes}
-                  derivedOrder={timelineData?.derived_event_order ?? []}
-                  phases={phases}
-                  activePhase={activePhase}
-                  selectedNodeId={selectedTrackNodeId}
-                  onNodeClick={handleNodeClick}
-                  tensionCurve={tensionCurve ?? null}
-                  totalChapters={totalChapters}
-                  className="h-full min-h-0"
-                />
-              </section>
-
-              <aside aria-label="事件详情">
+            <AnalysisWorkspace.Tab value="details" label="事件详情">
+              <div className="h-full min-h-0 overflow-y-auto pr-1">
                 {selectedDetailNode ? (
                   <TimelineEventInspector
                     node={selectedDetailNode}
@@ -378,6 +389,7 @@ export function TimelinePage() {
                     causalEdges={causalEdges}
                     foreshadowingEdges={foreshadowingEdges}
                     onClose={() => {
+                      setActivePanel("timeline");
                       navigate(
                         buildTimelinePageUrl(novelId, taskScopeId, {
                           maxLevel,
@@ -389,15 +401,16 @@ export function TimelinePage() {
                     }}
                     onSelectChapter={handleSelectChapter}
                     onSelectTree={handleSelectTree}
+                    className="min-h-full"
                   />
                 ) : (
-                  <div className="flex min-h-[320px] items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm leading-6 text-text-muted">
+                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm leading-6 text-text-muted">
                     选择时间轴中的事件后，这里会显示事件摘要、涉及角色与因果联系
                   </div>
                 )}
-              </aside>
-            </div>
-          </>
+              </div>
+            </AnalysisWorkspace.Tab>
+          </AnalysisWorkspace.Tabs>
         )}
       </div>
     </AnalysisWorkspace>
