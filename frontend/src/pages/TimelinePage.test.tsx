@@ -360,6 +360,7 @@ describe("TimelinePage deep links (event forest)", () => {
       expect.not.stringContaining("tree_id="),
       expect.anything()
     );
+    expect(screen.getByRole("tab", { name: "事件轨道" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("shows error state and supports retry", async () => {
