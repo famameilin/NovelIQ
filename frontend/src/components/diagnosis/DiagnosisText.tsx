@@ -52,7 +52,7 @@ export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) 
       bodyClassName="min-h-0 flex-1 gap-3"
     >
       {formattedDiagnosisText ? (
-        <div className="min-h-[180px] flex-1 rounded-lg border border-border/60 bg-surface/70 p-4 prose prose-sm max-w-none prose-p:text-text-muted prose-p:leading-relaxed">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border/60 bg-surface/70 p-4 prose prose-sm max-w-none prose-p:text-text-muted prose-p:leading-relaxed">
           {formattedDiagnosisText.split("\n").map((line, i) => (
             <p key={i} className="mb-2 last:mb-0">
               {line.trim() || <br />}

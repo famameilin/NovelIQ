@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
@@ -21,7 +20,7 @@ import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, FileText, GitBranch, Tags } from "lucide-react";
+import { AlertCircle, Tags } from "lucide-react";
 import type { ForeshadowingThread } from "@/api/types";
 import { cn } from "@/lib/cn";
 
@@ -119,7 +118,7 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <AnalysisMetricStrip
         items={[
           { label: "待回收", value: counts.open },
@@ -142,8 +141,8 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
         ]}
       />
 
-      <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)] items-start gap-4">
-        <div className="space-y-3">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)] gap-4 overflow-hidden">
+        <div className="h-full min-h-0 space-y-3 overflow-y-auto pr-2">
           {visibleThreads.map((thread) => {
             const statusMeta = getThreadStatusMeta(thread.status);
             const isSelected = selectedThread?.setup_id === thread.setup_id;
@@ -191,7 +190,7 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
         </div>
 
         {selectedThread ? (
-          <aside className="rounded-lg border border-border/70 bg-surface/75 p-5" aria-label="伏笔详情">
+          <aside className="h-full min-h-0 overflow-y-auto rounded-lg border border-border/70 bg-surface/75 p-5" aria-label="伏笔详情">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={getThreadStatusMeta(selectedThread.status).variant}>{getThreadStatusMeta(selectedThread.status).label}</Badge>
               <Badge variant="outline">{selectedThread.setup_kind ?? "类型待确认"}</Badge>
@@ -224,12 +223,12 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
  */
 function SkeletonGrid() {
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
       {/* 标题骨架屏 */}
       <div className="h-8 w-48 animate-pulse rounded bg-surface-hover" />
 
       {/* 评分卡骨架屏 */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid shrink-0 grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i} className="h-[140px]">
             <CardContent className="p-5">
@@ -246,8 +245,8 @@ function SkeletonGrid() {
       </div>
 
       {/* 文本与图表骨架屏 */}
-      <div className="grid grid-cols-2 gap-6">
-        <Card className="h-[300px]">
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-6">
+        <Card className="h-full min-h-0">
           <CardContent className="p-5">
             <div className="space-y-3">
               <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
@@ -259,7 +258,7 @@ function SkeletonGrid() {
             </div>
           </CardContent>
         </Card>
-        <Card className="h-[300px]">
+        <Card className="h-full min-h-0">
           <CardContent className="p-5">
             <div className="space-y-3">
               <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
@@ -334,12 +333,10 @@ export function DiagnosisPage() {
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
   const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
   const primaryGenreLabel = diagnosis?.genre_labels?.[0] ?? null;
-  const [view, setView] = useState<"overview" | "foreshadowing">("overview");
-
   // ---------- 渲染 ----------
 
   return (
-    <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"} documentFlow>
+    <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"}>
       {/* 加载骨架屏 */}
       {isLoading && <SkeletonGrid />}
 
@@ -371,46 +368,27 @@ export function DiagnosisPage() {
       )}
 
       {/* 空状态 */}
-      {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
+      {hasNullDiagnosis && !isLoading && !isThreadsError && foreshadowingThreads.length === 0 && <EmptyDiagnosisState />}
 
       {/* 伏笔追踪兜底展示 */}
       {isThreadsError && !diagnosis && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
       {foreshadowingThreads.length > 0 && !diagnosis && !isLoading && !isAnalysisNotComplete && (
-        <div className="pb-6">
-          <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
-        </div>
+        <AnalysisWorkspace.Tabs defaultValue="overview">
+          <AnalysisWorkspace.Tab value="overview" label="综合概览">
+            <EmptyDiagnosisState />
+          </AnalysisWorkspace.Tab>
+          <AnalysisWorkspace.Tab value="foreshadowing" label="伏笔追踪">
+            <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+          </AnalysisWorkspace.Tab>
+        </AnalysisWorkspace.Tabs>
       )}
 
       {/* 主内容 */}
       {diagnosis && !isLoading && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="space-y-4 pb-6"
-        >
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-surface/70 px-4 py-3">
-            <div>
-              <h1 className="text-base font-semibold text-text">{view === "overview" ? "综合诊断" : "伏笔追踪"}</h1>
-              <p className="mt-1 text-sm text-text-muted">
-                {view === "overview" ? "作品定位、价值表达、角色阵容与主题判断" : "线索状态、出现章节与最近判断依据"}
-              </p>
-            </div>
-            <AnalysisViewSwitcher
-              value={view}
-              onValueChange={setView}
-              label="诊断报告视图"
-              options={[
-                { value: "overview", label: "综合诊断", icon: FileText },
-                { value: "foreshadowing", label: "伏笔追踪", icon: GitBranch },
-              ]}
-            />
-          </div>
-
-          {view === "overview" ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-4">
-                <div className="grid grid-cols-2 gap-4">
+        <AnalysisWorkspace.Tabs defaultValue="overview">
+          <AnalysisWorkspace.Tab value="overview" label="综合概览">
+            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-4">
+              <div className="grid min-h-0 grid-cols-2 gap-4">
                   <ScoreCard
                     title="伏笔回收预期"
                     type="percent"
@@ -419,50 +397,42 @@ export function DiagnosisPage() {
                   <ScoreCard title="权力立场" type="score" score={diagnosis.power_stance_score} reason={diagnosis.power_stance_reason} />
                   <ScoreCard title="平民尊严" type="score" score={diagnosis.common_people_dignity} reason={diagnosis.dignity_reason} />
                   <ScoreCard title="文化深度" type="score" score={diagnosis.cultural_depth_score} reason={diagnosis.cultural_depth_reason} />
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <DiagnosisHeader
-                    genreLabels={diagnosis.genre_labels}
-                    styleLabels={diagnosis.style_labels}
-                    arcType={diagnosis.narrative_arc_type}
-                  />
-                  {diagnosis.diagnosis ? (
-                    <DiagnosisText diagnosisText={diagnosis.diagnosis} className="min-h-[320px]" />
-                  ) : (
-                    <DashboardCardShell
-                      title="综合诊断"
-                      icon={<AlertCircle className="h-4 w-4" />}
-                      accent="chart-2"
-                      className="min-h-[240px]"
-                      bodyClassName="items-center justify-center text-center"
-                    >
-                      <p className="text-sm text-text-muted">当前任务暂无综合诊断文本。</p>
-                    </DashboardCardShell>
-                  )}
-                </div>
               </div>
+              <DiagnosisHeader
+                genreLabels={diagnosis.genre_labels}
+                styleLabels={diagnosis.style_labels}
+                arcType={diagnosis.narrative_arc_type}
+              />
+            </div>
+          </AnalysisWorkspace.Tab>
 
-              <div className="grid grid-cols-2 gap-4">
+          <AnalysisWorkspace.Tab value="value-topic" label="价值主题">
+            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-4">
+              {diagnosis.diagnosis ? (
+                <DiagnosisText diagnosisText={diagnosis.diagnosis} className="h-full min-h-0" />
+              ) : (
+                <DashboardCardShell
+                  title="综合诊断"
+                  icon={<AlertCircle className="h-4 w-4" />}
+                  accent="chart-2"
+                  className="h-full min-h-0"
+                  bodyClassName="items-center justify-center text-center"
+                >
+                  <p className="text-sm text-text-muted">当前任务暂无综合诊断文本。</p>
+                </DashboardCardShell>
+              )}
+              <div className="grid min-h-0 grid-rows-2 gap-4">
                 <ValueLogicCard
                   valueLogicType={diagnosis.value_logic_type}
                   valueLogicReason={diagnosis.value_logic_reason}
-                  className="min-h-[260px]"
+                  className="h-full min-h-0"
                 />
-                <CharacterCastCard
-                  focusStructure={diagnosis.focus_structure ?? undefined}
-                  focusCharacters={diagnosis.focus_characters}
-                  coreCast={diagnosis.core_cast}
-                  majorCast={diagnosis.main_characters}
-                  className="min-h-[260px]"
-                />
-                <ArcScoresChart arcScores={diagnosis.arc_scores} className="min-h-[320px]" />
                 <DashboardCardShell
                   title="主题标签"
                   icon={<Tags className="h-4 w-4" />}
                   accent="chart-4"
-                  bodyClassName="gap-3"
-                  className="min-h-[240px]"
+                  bodyClassName="min-h-0 gap-3 overflow-y-auto"
+                  className="h-full min-h-0"
                 >
                   <div className="rounded-lg border border-border/60 bg-surface/70 p-4">
                     <TopicLabels labels={diagnosis.topic_labels} />
@@ -470,14 +440,31 @@ export function DiagnosisPage() {
                 </DashboardCardShell>
               </div>
             </div>
-          ) : isThreadsError ? (
-            <ForeshadowingThreadsErrorCard onRetry={retryThreads} />
-          ) : foreshadowingThreadsQuery.isLoading ? (
-            <div className="h-[320px] animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
-          ) : (
-            <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
-          )}
-        </motion.div>
+          </AnalysisWorkspace.Tab>
+
+          <AnalysisWorkspace.Tab value="cast-structure" label="角色结构">
+            <div className="grid h-full min-h-0 grid-cols-2 gap-4">
+              <CharacterCastCard
+                focusStructure={diagnosis.focus_structure ?? undefined}
+                focusCharacters={diagnosis.focus_characters}
+                coreCast={diagnosis.core_cast}
+                majorCast={diagnosis.main_characters}
+                className="h-full min-h-0"
+              />
+              <ArcScoresChart arcScores={diagnosis.arc_scores} className="h-full min-h-0" />
+            </div>
+          </AnalysisWorkspace.Tab>
+
+          <AnalysisWorkspace.Tab value="foreshadowing" label="伏笔追踪">
+            {isThreadsError ? (
+              <ForeshadowingThreadsErrorCard onRetry={retryThreads} />
+            ) : foreshadowingThreadsQuery.isLoading ? (
+              <div className="h-full animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
+            ) : (
+              <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+            )}
+          </AnalysisWorkspace.Tab>
+        </AnalysisWorkspace.Tabs>
       )}
     </AnalysisWorkspace>
   );
