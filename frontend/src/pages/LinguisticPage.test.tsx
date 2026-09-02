@@ -1,7 +1,7 @@
-import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LinguisticPage } from "@/pages/LinguisticPage";
@@ -20,45 +20,10 @@ function passthroughComponent(displayName: string) {
   return Component;
 }
 
-function motionElement(tagName: string) {
-  const Component = (props: {
-    children?: ReactNode;
-    whileHover?: unknown;
-    whileTap?: unknown;
-    transition?: unknown;
-    variants?: unknown;
-    initial?: unknown;
-    animate?: unknown;
-    exit?: unknown;
-    [key: string]: unknown;
-  }) => {
-    const sanitizedProps = { ...props };
-    delete sanitizedProps.whileHover;
-    delete sanitizedProps.whileTap;
-    delete sanitizedProps.transition;
-    delete sanitizedProps.variants;
-    delete sanitizedProps.initial;
-    delete sanitizedProps.animate;
-    delete sanitizedProps.exit;
-    return createElement(tagName, sanitizedProps, props.children);
-  };
-  Component.displayName = `motion-${tagName}`;
-  return Component;
-}
-
 vi.mock("react-router-dom", () => ({
   useNavigate: () => vi.fn(),
   useParams: () => ({ novelId: currentNovelId }),
   useSearchParams: () => [new URLSearchParams(currentSearchParams)],
-}));
-
-vi.mock("framer-motion", () => ({
-  motion: new Proxy(
-    {},
-    {
-      get: (_target, key: string) => motionElement(key),
-    },
-  ),
 }));
 
 vi.mock("@/api/linguistic", () => ({
@@ -179,7 +144,7 @@ describe("LinguisticPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("词法句法 tab 走 /linguistic/features，实体与短语 tab 走聚合端点", async () => {
+  it("表达结构、实体与短语、词汇与语义页签分别保留三个聚合端点", async () => {
     renderLinguisticPage();
 
     expect((await screen.findAllByTestId("ratio-bar-chart")).length).toBeGreaterThanOrEqual(1);
@@ -188,13 +153,16 @@ describe("LinguisticPage", () => {
     expect(getLinguisticWord2vecMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 
-  it("在表达结构与词汇与语义视图间切换，并保留模型详情", async () => {
+  it("在固定工作区页签间切换，并保留实体和词向量详情", async () => {
     renderLinguisticPage();
 
-    expect(await screen.findByText("表达结构")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "词汇与语义" }));
+    expect(await screen.findByRole("tab", { name: "表达结构" })).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "实体与短语" }));
 
     expect(await screen.findByText("高频实体名（前 20 名）")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "词汇与语义" }));
+
     expect(screen.getByText("预训练微调词向量")).toBeInTheDocument();
     expect(screen.getByText(/92\.5%/)).toBeInTheDocument();
     expect(screen.getAllByText(/加权词元/).length).toBeGreaterThan(0);
