@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CharactersPage } from "@/pages/CharactersPage";
@@ -127,7 +128,8 @@ describe("CharactersPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("单文档流保留角色排行、功能焦点和角色表数据源", async () => {
+  it("分页保留角色排行、功能焦点和角色详情数据源", async () => {
+    const user = userEvent.setup();
     getCharactersMock.mockResolvedValue([
       {
         name: "沈砚",
@@ -150,9 +152,13 @@ describe("CharactersPage", () => {
 
     renderCharactersPage();
 
-    expect(await screen.findByText("综合角色榜")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "格局概览" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("角色功能构成")).toBeInTheDocument();
     expect(screen.getByText("单主角")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "角色排行" }));
+    expect(screen.getAllByText("综合角色榜").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /沈砚/ }));
+    await user.click(screen.getByRole("tab", { name: "角色详情" }));
     expect(screen.getByText("主导职责占比")).toBeInTheDocument();
     expect(screen.getByText("75.0%")).toBeInTheDocument();
     expect(screen.getByText("人物弧线 8.2")).toBeInTheDocument();
@@ -162,7 +168,7 @@ describe("CharactersPage", () => {
     expect(getCharacterFunctionTabMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 
-  it("功能与焦点切片为空值时仍渲染角色文档流", async () => {
+  it("功能与焦点切片为空值时仍渲染角色概览页签", async () => {
     getCharactersMock.mockResolvedValue([
       {
         name: "沈砚",
@@ -173,7 +179,7 @@ describe("CharactersPage", () => {
 
     renderCharactersPage();
 
-    expect(await screen.findByText("综合角色榜")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "格局概览" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("角色功能构成")).toBeInTheDocument();
     expect(screen.getByText("焦点人物")).toBeInTheDocument();
   });
