@@ -65,7 +65,7 @@ export function TopicEmotionPanel({ emotion, className }: TopicEmotionPanelProps
         bodyClassName="min-h-0 flex-1"
       >
         {emotion.some((entry) => entry.emotion != null) ? (
-          <div ref={chartContainerRef} className="h-[320px] w-full">
+          <div ref={chartContainerRef} className="h-full min-h-[320px] w-full">
             {isChartVisible ? (
               <ReactEChartsCore
                 key={themeSignature}
