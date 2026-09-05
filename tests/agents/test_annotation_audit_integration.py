@@ -357,13 +357,13 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     assert [row.turn_index for row in turn_rows] == [1, 2, 3]
     assert [row.context_summary["active_write_tool"] for row in turn_rows] == [
         "write_entities",
-        "write_metrics",
-        "write_relations",
+        "write_entities",
+        "write_entities",
     ]
     assert [row.context_summary["active_write_tools"] for row in turn_rows] == [
         ["write_entities", "write_metrics"],
-        ["write_metrics", "create_event"],
-        ["write_relations", "write_dialogues"],
+        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
+        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
     ]
     formal_writes = {"write_entities", "write_dialogues", "create_event", "write_relations", "write_metrics"}
     for turn in turn_rows:

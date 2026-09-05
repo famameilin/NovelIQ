@@ -127,7 +127,7 @@ def build_alias_pending_cases(
                 description=(
                     f"疑似同一人物：{suspicion.name_a} 与 {suspicion.name_b} "
                     f"共享邻居重叠度 {suspicion.overlap:.0%}，请查阅原文确认"
-                ),
+                )[:100],
                 target_key=target_key,
                 target_ref={
                     "kind": "entity_alias",

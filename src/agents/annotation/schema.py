@@ -998,7 +998,7 @@ class PendingCase(StrictModel):
     # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 映射回真实 chunk
     chunk_id: int
     keys: list[str] = Field(min_length=1)
-    description: str
+    description: str = Field(min_length=1, max_length=100)
     target_key: str
     target_ref: dict[str, Any]
 

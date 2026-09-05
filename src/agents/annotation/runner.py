@@ -172,6 +172,7 @@ async def _run_single_attempt(
                 chunk_total=1,
                 chunk_text=first_chunk_text,
                 candidates=ledger.dialogue_candidates,
+                initial_cases=ledger.initial_case_views(),
             )
         ),
     ]

@@ -12,7 +12,7 @@ import json
 import time
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -52,6 +52,27 @@ _FORMAL_WRITE_DEPENDENCIES = {
     "dialogues": frozenset({"entities"}),
 }
 
+# 2026-09-05 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
+TURN_BUDGET_REMINDER_WINDOW = 3
+
+
+def _turn_budget_reminder(remaining: int) -> str:
+    """2026-09-05 用于构造临近内部循环上限时模型可见的收尾提醒
+
+    2026-09-05 第3章死锁：模型空转 15 轮 40 次检索 0 写入后撞硬顶，
+    全程看不到轮次预算。此提醒为纯消息注入（不改工具开放与路由），
+    只对本次请求生效、不写入状态消息链，避免多轮提醒在历史中堆积。
+    """
+    if remaining <= 1:
+        return (
+            "【轮次预算】本轮是内部循环的最后一轮：请立即用写入工具提交全部已确认内容，"
+            "不要再发起新的检索。"
+        )
+    return (
+        f"【轮次预算】剩余 {remaining} 轮（含本轮）将触发内部循环上限："
+        "请尽快提交已确认内容，把剩余轮次留给写入收尾，不要再用新检索消耗轮次。"
+    )
+
 
 class AnnotationGraphState(TypedDict):
     """2026-08-10 用于保存逐 chunk 工具循环的累积消息链"""
@@ -63,14 +84,12 @@ class AnnotationGraphState(TypedDict):
 
 
 def _active_write_tools(ledger: AnnotationToolLedger) -> tuple[str, ...]:
-    """2026-08-30 用于按真实领域依赖开放前两个可执行的待写工具"""
-    eligible = tuple(
+    """2026-09-03 用于按依赖解锁正式写入工具：解锁后只追加进列表，已写入不移除、不设每轮上限"""
+    return tuple(
         tool_name
         for domain, tool_name in _FORMAL_WRITE_ORDER
-        if domain not in ledger.domain_receipts
-        and _FORMAL_WRITE_DEPENDENCIES[domain] <= ledger.domain_receipts
+        if _FORMAL_WRITE_DEPENDENCIES[domain] <= ledger.domain_receipts
     )
-    return eligible[:2]
 
 
 def _active_write_tool(ledger: AnnotationToolLedger) -> str | None:
@@ -80,7 +99,7 @@ def _active_write_tool(ledger: AnnotationToolLedger) -> str | None:
 
 
 def _tools_for_turn(tools: list[Any], ledger: AnnotationToolLedger) -> list[Any]:
-    """2026-08-30 用于保留非正式工具并暴露依赖就绪的至多两个正式写入工具"""
+    """2026-09-03 用于保留非正式工具并暴露依赖已解锁的正式写入工具（只追加不替换）"""
     tools_by_name = {candidate.name: candidate for candidate in tools}
     active_write_tools = [
         tools_by_name[name] for name in _active_write_tools(ledger) if name in tools_by_name
@@ -94,24 +113,12 @@ def _tool_batch_protocol_error(
     *,
     allowed_tool_names: frozenset[str],
 ) -> str | None:
-    """2026-08-30 用于校验单轮至多两种正式写入且允许重复追加多棵事件树"""
+    """2026-08-30 用于校验模型回合只调用本轮开放的工具"""
     if not calls:
         return "每个模型回合必须调用工具"
-    call_names = tuple(str(call.get("name")) for call in calls)
-    unavailable = [name for name in call_names if name not in allowed_tool_names]
+    unavailable = [str(call.get("name")) for call in calls if str(call.get("name")) not in allowed_tool_names]
     if unavailable:
         return f"本轮未开放工具: {unavailable}"
-    formal_names = tuple(name for name in call_names if name in _FORMAL_WRITE_TOOL_NAMES)
-    if not formal_names:
-        if len(call_names) > 1:
-            return "检索和案例工具必须单独占用模型回合"
-        return None
-    if len(formal_names) != len(call_names):
-        return "正式写入不得与检索或案例工具在同一模型回合调用"
-    duplicate_names = {name for name in formal_names if formal_names.count(name) > 1}
-    unsupported_duplicates = duplicate_names - {"create_event"}
-    if unsupported_duplicates:
-        return f"同一模型回合只允许 create_event 重复调用: {sorted(unsupported_duplicates)}"
     return None
 
 
@@ -138,6 +145,9 @@ def _build_agent_node(
         from src.agents.stream import run_model_call
 
         request_messages = list(state["messages"])
+        remaining_turns = max_iterations - iterations
+        if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
+            request_messages.append(HumanMessage(content=_turn_budget_reminder(remaining_turns)))
         active_write_tool = _active_write_tool(ledger)
         active_write_tools = _active_write_tools(ledger)
         turn_tools = _tools_for_turn(tools, ledger)
