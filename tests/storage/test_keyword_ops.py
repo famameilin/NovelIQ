@@ -173,9 +173,10 @@ def test_search_paragraphs_by_keywords_pushes_paragraph_and_chapter_sequence_bou
     assert 9 in compiled_params.values()
 
 
-def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() -> None:
+def test_search_paragraphs_by_keywords_treats_wildcards_as_globs_and_deduplicates() -> None:
     """
-    2026-08-02 用于保证百分号下划线按字面子串匹配且重复关键词不重复计分
+    2026-09-04 用于保证 %/_ 按 LIKE 通配符语义匹配（不再转义为字面量）
+    且重复关键词不重复计分
     """
     session = MagicMock()
     session.execute.return_value.all.return_value = [
@@ -200,9 +201,10 @@ def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() 
 
     stmt = session.execute.call_args.args[0]
     compiled_sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "ESCAPE" in compiled_sql
+    assert "ESCAPE" not in compiled_sql
     assert len(results) == 1
     # 2026-08-13 P2-6：词项统一小写归一后 matched_keywords 保留小写形式
+    # 100% → 前缀通配命中"100"；A_B → A+任意单字符+B 命中"A_B"
     assert results[0].matched_keywords == ("100%", "a_b")
     assert results[0].match_count == 2
 

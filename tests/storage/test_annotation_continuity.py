@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -532,3 +533,104 @@ def test_search_event_history_returns_empty_when_no_match(db_session, monkeypatc
     )
 
     assert service.search_event_history("不存在的关键词") == []
+
+
+def _persist_plot_tree(db_session, run_id: str) -> str:
+    """2026-09-04 用于在第 1 章落一棵根+子两节点的事件树（子节点含赤羽炽尾鸡），返回根节点 id
+
+    event_id 是全局主键，节点 id 必须每个用例唯一，否则跨用例插入冲突被跳过。
+    """
+    root_node_id = f"evt-plot-root-{uuid4().hex[:8]}"
+    tree_id = f"tree-plot-{uuid4().hex[:8]}"
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "伯安与发小在假山密谋偷灵兽",
+                "participants": ["伯安"],
+                "node_id": root_node_id,
+                "tree_id": tree_id,
+                "cause_role": "root",
+            },
+            {
+                "description": "伯安提议偷赤羽炽尾鸡",
+                "participants": ["伯安"],
+                "tree_id": tree_id,
+                "parent_node_id": root_node_id,
+                "cause_role": "main",
+            },
+        ],
+    )
+    return root_node_id
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_descriptions"),
+    [
+        pytest.param("赤羽炽尾鸡", ["伯安与发小在假山密谋偷灵兽"], id="子节点词命中返回树根"),
+        pytest.param("偷%鸡", ["伯安与发小在假山密谋偷灵兽"], id="百分号通配符命中子节点"),
+        pytest.param("赤羽_尾鸡", ["伯安与发小在假山密谋偷灵兽"], id="下划线通配符命中子节点"),
+        pytest.param("伯安 偷鸡", ["伯安与发小在假山密谋偷灵兽"], id="多词任一命中即返回"),
+        pytest.param("偷鸡", [], id="无词项命中返回空"),
+    ],
+)
+def test_search_event_history_recall_surface_and_wildcards(
+    db_session,
+    monkeypatch,
+    query: str,
+    expected_descriptions: list[str],
+) -> None:
+    """2026-09-04 用于验证召回面扩到树内任意节点且词项支持 %/_ 通配符与多词 OR"""
+    monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["第一章。", "第二章。"],
+        chapter_ids=[1, 2],
+        title="事件树召回面",
+    )
+    root_node_id = _persist_plot_tree(db_session, run_id)
+    service = DatabaseAnnotationQueryService(
+        db_session,
+        run_id=run_id,
+        current_chapter_id=2,
+        current_first_paragraph_id=1,
+        current_last_paragraph_id=1,
+    )
+
+    results = service.search_event_history(query)
+
+    assert [item.description for item in results] == expected_descriptions
+    if expected_descriptions:
+        assert results[0].root_node_id == root_node_id
+
+
+@pytest.mark.asyncio
+async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
+    db_session,
+    monkeypatch,
+) -> None:
+    """2026-09-04 用于验证原文关键词通道按通配符与多词 OR 命中段落"""
+    monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["伯安提议偷赤羽炽尾鸡，众人称好。", "贺兰山的风雪很大。"],
+        chapter_ids=[1, 2],
+        title="原文通配符检索",
+    )
+    service = DatabaseAnnotationQueryService(
+        db_session,
+        run_id=run_id,
+        current_chapter_id=2,
+        current_first_paragraph_id=1,
+        current_last_paragraph_id=1,
+    )
+
+    wildcard = await service.search_text("偷%鸡", range_name="previous", limit=8)
+    multi = await service.search_text("伯安 风雪", range_name="all", limit=8)
+    miss = await service.search_text("不存在词", range_name="previous", limit=8)
+
+    assert any("赤羽炽尾鸡" in item.content for item in wildcard)
+    assert {item.chapter_id for item in multi} == {1, 2}
+    assert miss == []
