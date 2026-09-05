@@ -131,6 +131,30 @@ class _AliasQueryService(_QueryService):
         return setup_id == "thread-1"
 
 
+class _ForeshadowingCaseQueryService(_QueryService):
+    """2026-09-04 用于提供已关联伏笔线程（target_ref 含 setup_id）的活动案例"""
+
+    def _case(self) -> CaseSearchResult:
+        """2026-09-04 用于构造伏笔疑点案例"""
+        return CaseSearchResult(
+            id="case-1",
+            type="foreshadowing_suspect",
+            chunk_id=10,
+            keys=["线索"],
+            description="伏笔疑点",
+        )
+
+    def fetch_active_case_details(self, case_id):
+        """2026-09-04 用于返回挂上 thread-1 的伏笔案例稳定目标"""
+        if case_id != "case-1":
+            return None
+        return ActiveCaseDetails(
+            **self._case().model_dump(mode="python"),
+            target_key="target-foreshadow-1",
+            target_ref={"kind": "foreshadowing", "chunk_id": 10, "setup_id": "thread-1"},
+        )
+
+
 class _ForeignChunkQueryService(_QueryService):
     """2026-08-11 用于提供锚定旧章节 chunk 的活动案例（需先读取授权）"""
 
@@ -1329,7 +1353,7 @@ def test_push_case_rejects_overlong_description() -> None:
 
 def test_push_case_accepts_setup_id_and_resolve_foreshadowing_case() -> None:
     """2026-08-11 用于验证伏笔疑点携带 setup_id 且可动作式解决"""
-    service = _QueryService()
+    service = _ForeshadowingCaseQueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 

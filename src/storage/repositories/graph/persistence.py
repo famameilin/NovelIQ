@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from src.storage.models import (
     EventEdge,
     EventNode,
     ForeshadowingThread,
+    ForeshadowingThreadHit,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -950,11 +951,61 @@ def _persist_foreshadowing_resolution(
     current_chapter_id: int,
     resolved_case: ResolvedCase,
 ) -> dict[str, Any]:
-    """2026-08-19 用于把 foreshadowing 动作更新到伏笔线程"""
+    """2026-08-19 用于把 foreshadowing 动作更新到伏笔线程
+
+    2026-09-04：未挂线程的疑点案例被确认为伏笔时（工具层已强制 setup_event_id
+    授权与 setup_summary 兜底），按去重键 (run_id, setup_event_id) 就地建线程
+    并补一条 new-setup 命中，与 ForeshadowingRepository.sync 建线程口径一致。
+    """
     setup_id = resolved_case.target_ref.get("setup_id")
-    thread = session.get(ForeshadowingThread, str(setup_id))
-    if thread is None or thread.run_id != run_id:
-        raise ValueError(f"案例目标伏笔线程不存在: {resolved_case.case_id}")
+    if setup_id is not None:
+        thread = session.get(ForeshadowingThread, str(setup_id))
+        if thread is None or thread.run_id != run_id:
+            raise ValueError(f"案例目标伏笔线程不存在: {resolved_case.case_id}")
+    else:
+        setup_event_id = str(resolved_case.setup_event_id)
+        thread = session.execute(
+            select(ForeshadowingThread).where(
+                ForeshadowingThread.run_id == run_id,
+                ForeshadowingThread.setup_event_id == setup_event_id,
+            )
+        ).scalar_one_or_none()
+        if thread is None:
+            setup_node = session.get(EventNode, setup_event_id)
+            now = datetime.now(UTC)
+            thread = ForeshadowingThread(
+                setup_id=str(uuid4()),
+                run_id=run_id,
+                first_chapter_id=setup_node.chapter_id if setup_node is not None else current_chapter_id,
+                last_chapter_id=current_chapter_id,
+                setup_summary=resolved_case.setup_summary or "",
+                foreshadowing_type=None,
+                setup_kind=resolved_case.setup_kind,
+                expected_payoff_family=resolved_case.expected_payoff_family,
+                payoff_likelihood=resolved_case.payoff_likelihood,
+                confidence=resolved_case.confidence or "high",
+                strength=resolved_case.strength,
+                status="open",
+                active=True,
+                setup_event_id=setup_event_id,
+                payoff_event_id=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(thread)
+            session.flush()
+            session.add(
+                ForeshadowingThreadHit(
+                    setup_id=thread.setup_id,
+                    run_id=run_id,
+                    chapter_id=thread.first_chapter_id,
+                    anchor_text=thread.setup_summary,
+                    is_new_setup=True,
+                    event_id=setup_event_id,
+                    created_at=now,
+                )
+            )
+            session.flush()
     for field_name in (
         "setup_summary",
         "setup_kind",
