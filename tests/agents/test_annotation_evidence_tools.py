@@ -197,8 +197,11 @@ def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
     """2026-08-30 用于构造带唯一当前原文和检索范围配置的工具账本
 
     2026-08-18：注入 paragraph_info 供事件锚点校验和证据派生使用。
+    2026-09-04 单一写面：图域写工具（write_entities/write_relations/resolve_fact_case）
+    以常驻 FactGraph 为唯一真相源，故默认注入空图；需要历史实体的用例随后覆盖
+    ledger.graph。
     """
-    chunk_text = "\u201c住手\u201d回荡"
+    chunk_text = "“住手”回荡"
     paragraph_info = ChunkParagraphInfo(
         paragraph_ids=[0],
         char_spans=[(0, len(chunk_text))],
@@ -210,15 +213,20 @@ def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
         current_chunk_id=10,
         current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
+        graph=FactGraph(),
         paragraph_info=paragraph_info,
     )
 
 
 def _graph_with_entities(names: dict[str, str]) -> FactGraph:
-    """2026-08-11 用于构造带历史实体的内存事实图"""
+    """2026-08-11 用于构造带历史实体的内存事实图
+
+    2026-09-04 修正：display 名必须传名字本身，此前误把 entity_types 同值传给
+    history_entity_names，search_graph 解析出的显示名变成 "character"。
+    """
     return FactGraph(
         history_entity_types=dict(names),
-        history_entity_names=dict(names),
+        history_entity_names={name: name for name in names},
     )
 
 
@@ -1065,10 +1073,59 @@ def test_resolve_fact_case_asserts_same_character_relation() -> None:
         )
     )
     assert response["accepted"] is True
-    resolved = ledger.resolved_cases[0]
-    assert resolved.action == "fact"
-    assert resolved.relation_type == "同一人物"
-    assert resolved.change_kind == "assert"
+    # 2026-09-04 单一写面：fact 裁决进 FactGraph 操作日志与终态，不再进 resolved_cases
+    assert ledger.resolved_cases == []
+    assert ledger.graph.relation_exists("顾霜", "顾老", "同一人物") is True
+    change_op = ledger.graph.relation_change_ops[0]
+    assert change_op["case_id"] == "alias-1"
+    assert change_op["relation_type"] == "同一人物"
+    assert change_op["change_kind"] == "assert"
+
+
+def test_resolve_fact_case_break_hides_edge_from_search_graph() -> None:
+    """2026-09-04 第4章死锁回归：break 裁决后内存图同步解除，search_graph 不得再显示该边
+
+    此前 resolve_fact_case 只写 ledger.resolved_cases、不动 FactGraph，模型"解除成功"
+    的回执后 search_graph 仍返回同一条边，导致修复-验证循环打满 15 轮上限。
+    """
+    service = _AliasQueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
+    ledger.graph.apply_relation(_graph_relation("顾霜", "顾老", "同一人物"))
+    ledger.graph_queried = True
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    # 先确认边在图中可见
+    before = json.loads(
+        _find_tool(tools, "search_graph").invoke({"entities": ["顾霜", "顾老"], "relation_type": None})
+    )
+    assert len(before["relations"]) == 1
+
+    case_number = ledger.case_number_by_id["alias-1"]
+    response = json.loads(
+        _find_tool(tools, "resolve_fact_case").invoke(
+            {
+                "case_number": case_number,
+                "from_entity": "顾霜",
+                "to_entity": "顾老",
+                "relation_type": "同一人物",
+                "change_kind": "break",
+                "reason": "两人并非同一人物，边为误判",
+            }
+        )
+    )
+    assert response["accepted"] is True
+
+    after = json.loads(
+        _find_tool(tools, "search_graph").invoke({"entities": ["顾霜", "顾老"], "relation_type": None})
+    )
+    assert after["relations"] == []
+    assert ledger.graph.relation_exists("顾霜", "顾老", "同一人物") is False
+    change_op = ledger.graph.relation_change_ops[0]
+    assert change_op["change_kind"] == "break"
+    assert change_op["case_id"] == "alias-1"
 
 
 def test_resolve_fact_case_rejects_unregistered_entity() -> None:
@@ -1118,7 +1175,9 @@ def test_resolve_case_authorized_on_initial_display() -> None:
         )
     )
     assert response["accepted"] is True
-    assert ledger.resolved_cases[0].case_id == "foreign-1"
+    # 2026-09-04 单一写面：fact 裁决只进 FactGraph 操作日志，不再进 resolved_cases
+    assert ledger.resolved_cases == []
+    assert ledger.graph.relation_change_ops[0]["case_id"] == "foreign-1"
 
 
 def test_resolve_case_allowed_after_text_search_authorization() -> None:
@@ -1153,7 +1212,9 @@ def test_resolve_case_allowed_after_text_search_authorization() -> None:
         )
     )
     assert response["accepted"] is True
-    assert ledger.resolved_cases[0].case_id == "foreign-1"
+    # 2026-09-04 单一写面：fact 裁决只进 FactGraph 操作日志，不再进 resolved_cases
+    assert ledger.resolved_cases == []
+    assert ledger.graph.relation_change_ops[0]["case_id"] == "foreign-1"
 
 
 def test_resolve_foreshadowing_case_rejects_foreign_enum_values() -> None:

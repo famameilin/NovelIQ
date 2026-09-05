@@ -15,8 +15,6 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
-    BoundEntity,
-    BoundEntityDirectory,
     ChunkMetricsInput,
     PendingCase,
     ResolvedCase,
@@ -36,17 +34,8 @@ def _annotation(
     chunk_id: int,
     text: str,
     unresolved_dialogue: bool = False,
-    speaker_entity: bool = False,
 ) -> BoundChapterAnnotation:
-    """2026-08-07 用于构造含未解决对话或确认人物的系统绑定章节标注"""
-    characters: list[BoundEntity] = []
-    if speaker_entity:
-        characters.append(
-            BoundEntity(
-                name="顾霜",
-                entity_type="character",
-            )
-        )
+    """2026-08-07 用于构造含未解决对话的系统绑定章节标注"""
     dialogues: list[BoundDialogue] = []
     if unresolved_dialogue:
         candidate = next(item for item in extract_dialogue_candidates(chunk_id, text) if item.content == "住手")
@@ -72,13 +61,9 @@ def _annotation(
                     emotional_valence="neutral",
                     narrative_function="铺垫",
                 ),
-                entities=BoundEntityDirectory(
-                    entities=characters,
-                ),
                 character_observations=[],
                 dialogues=dialogues,
                 events=[],
-                relations=[],
                 foreshadowings=[],
             )
         ],
@@ -130,14 +115,29 @@ def _result(
     resolved_cases: list[ResolvedCase] | None = None,
     pushed_cases: list[PendingCase] | None = None,
     authorized_chunk_ids: list[int] | None = None,
+    entity_names: list[str] | None = None,
 ) -> AgentRunResult:
-    """2026-08-07 用于构造新合同 AgentRunResult"""
+    """2026-08-07 用于构造新合同 AgentRunResult
+
+    2026-09-04 单一写面：实体经 entity_ops 走操作日志（不再有 payload 图副本）。
+    """
     return AgentRunResult(
         run_id=run_id,
         chapter_id=chapter_id,
         annotation=annotation,
         resolved_cases=resolved_cases or [],
         pushed_cases=pushed_cases or _pushed_case_for(annotation),
+        entity_ops=[
+            {
+                "name": name,
+                "entity_type": "character",
+                "tags": [],
+                "description": None,
+                "attributes": {},
+                "chapter_id": chapter_id,
+            }
+            for name in entity_names or []
+        ],
         audit=_audit(
             authorized_chunk_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
         ),
@@ -229,7 +229,6 @@ def test_dialogue_resolution_updates_dialogue_record(
     second_annotation = _annotation(
         chunk_id=2,
         text="顾霜喝道",
-        speaker_entity=True,
     )
     second = complete_annotation_run(
         result=_result(
@@ -238,6 +237,7 @@ def test_dialogue_resolution_updates_dialogue_record(
             annotation=second_annotation,
             resolved_cases=[resolved],
             authorized_chunk_ids=[1, 2],
+            entity_names=["顾霜"],
         ),
         session_factory=factory,
     )
@@ -304,9 +304,9 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
         title="完成结果回读",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=1, text="顾霜喝道", speaker_entity=True)
+    annotation = _annotation(chunk_id=1, text="顾霜喝道")
     expected = complete_annotation_run(
-        result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
+        result=_result(run_id=run_id, chapter_id=1, annotation=annotation, entity_names=["顾霜"]),
         session_factory=factory,
     )
 
@@ -326,7 +326,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         title="来源案例锁定失败",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=1, text="顾霜喝道", speaker_entity=True)
+    annotation = _annotation(chunk_id=1, text="顾霜喝道")
     missing = ResolvedCase(
         case_id="missing-case",
         action="close",
@@ -347,6 +347,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
                 chapter_id=1,
                 annotation=annotation,
                 resolved_cases=[missing],
+                entity_names=["顾霜"],
             ),
             session_factory=factory,
         )

@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import time
-import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -20,8 +19,6 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
-    BoundEntity,
-    BoundEntityDirectory,
     BoundEvent,
     ChunkParagraphInfo,
     EntityType,
@@ -122,20 +119,6 @@ def _build_sub_chunk_paragraph_info(
     )
 
 
-def _merge_sub_chunk_entities(directories: list[BoundEntityDirectory]) -> list[BoundEntity]:
-    """2026-08-14 M7 用于按规范化名称合并去重实体目录（同名保留先出现）"""
-    seen: set[str] = set()
-    merged: list[BoundEntity] = []
-    for directory in directories:
-        for entity in directory.entities:
-            key = unicodedata.normalize("NFC", entity.name).strip().casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(entity)
-    return merged
-
-
 def _merge_sub_chunk_annotations(
     annotations: list[BoundChapterAnnotation],
     *,
@@ -146,7 +129,10 @@ def _merge_sub_chunk_annotations(
 
     chapter_summary 按子块顺序换行拼接；chunks 收缩为单条
     BoundChunkAnnotation（chunk_id=章真实 chunk_id），metrics 取第一个子块，
-    实体目录同名去重（保留先出现），其余领域按子块顺序拼接。
+    其余领域按子块顺序拼接。
+
+    2026-09-04 单一写面：entities/relations 不再是 chunk 字段，图域合并
+    在 _merge_sub_chunk_results 按操作日志拼接完成。
 
     2026-08-15：第 2+ 子块的对话 start/end 是子块相对坐标，合并落库前按
     sub_chunk_offsets 加回子块在章文本内的起始偏移，与整章运行口径一致。
@@ -177,9 +163,6 @@ def _merge_sub_chunk_annotations(
             BoundChunkAnnotation(
                 chunk_id=chapter_chunk_id,
                 metrics=first_chunk.metrics,
-                entities=BoundEntityDirectory(
-                    entities=_merge_sub_chunk_entities([annotation.chunks[0].entities for annotation in annotations])
-                ),
                 character_observations=[
                     item for annotation in annotations for item in annotation.chunks[0].character_observations
                 ],
@@ -189,7 +172,6 @@ def _merge_sub_chunk_annotations(
                     for item in annotation.chunks[0].dialogues
                 ],
                 events=merged_events,
-                relations=[item for annotation in annotations for item in annotation.chunks[0].relations],
                 foreshadowings=merged_foreshadowings,
             )
         ],
@@ -222,6 +204,16 @@ def _remap_case_anchor[CaseT: (PendingCase, ResolvedCase)](
     return case
 
 
+def _remap_op_anchor(op: dict[str, Any], sub_chunk_ids: set[int], chapter_chunk_id: int) -> dict[str, Any]:
+    """2026-09-04 用于把图域操作日志的子块负 chunk_id 映射回章真实 chunk_id"""
+    if op.get("chapter_id") in sub_chunk_ids:
+        op["chapter_id"] = chapter_chunk_id
+    anchor = op.get("target_ref", {}).get("chunk_id") if isinstance(op.get("target_ref"), dict) else None
+    if anchor in sub_chunk_ids:
+        op["target_ref"]["chunk_id"] = chapter_chunk_id
+    return op
+
+
 def _merge_sub_chunk_results(
     results: list[AgentRunResult],
     *,
@@ -232,6 +224,10 @@ def _merge_sub_chunk_results(
 
     子块运行时负 chunk_id 一律映射回章真实 chunk_id（案例不落负 ID）；
     审计字段按并集/拼接合并，sub_chunk_index 归零（结果已合并为单章）。
+
+    2026-09-04 单一写面：三份图域操作日志按子块顺序拼接（entity_ops 追加、
+    relation_assert_ops 各子块独立完整集、relation_change_ops 按提交顺序），
+    供持久化层按序重放。
 
     2026-08-15：sub_chunk_offsets 为各子块在章文本内的起始偏移（与 results
     顺序一致），用于把第 2+ 子块的对话坐标重映射回章坐标。
@@ -265,6 +261,21 @@ def _merge_sub_chunk_results(
             )
             for result in results
             for case in result.pushed_cases
+        ],
+        entity_ops=[
+            _remap_op_anchor(op, sub_chunk_ids, chapter_chunk_id)
+            for result in results
+            for op in result.entity_ops
+        ],
+        relation_assert_ops=[
+            _remap_op_anchor(op, sub_chunk_ids, chapter_chunk_id)
+            for result in results
+            for op in result.relation_assert_ops
+        ],
+        relation_change_ops=[
+            _remap_op_anchor(op, sub_chunk_ids, chapter_chunk_id)
+            for result in results
+            for op in result.relation_change_ops
         ],
         audit=AgentRunAudit(
             allow_future_context=first.audit.allow_future_context,

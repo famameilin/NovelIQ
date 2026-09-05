@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
+from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chunk_message
 from src.agents.annotation.schema import ChunkParagraphInfo
@@ -168,6 +169,7 @@ async def test_no_tool_reply_closes_turns_then_fails(db_session) -> None:
         current_chunk_id=0,
         current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        graph=FactGraph(),
         paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     llm = _SequenceLLM([AIMessage(content="我不调用工具")] * 5)
@@ -230,6 +232,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
         current_chunk_id=0,
         current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        graph=FactGraph(),
         paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     llm = _SequenceLLM([])
@@ -309,6 +312,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         current_chunk_id=0,
         current_chunk_text="\u201c住手\u201d回荡",
         allow_future_context=False,
+        graph=FactGraph(),
         paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
     )
     tools = build_annotation_tools(_QueryService(), ledger)

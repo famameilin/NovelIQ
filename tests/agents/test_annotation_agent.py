@@ -26,7 +26,6 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
-    BoundEntityDirectory,
     CaseSearchResult,
     ChunkMetricsInput,
     ChunkParagraphInfo,
@@ -189,6 +188,7 @@ async def _invoke_graph(
         current_chunk_id=chunk_id,
         current_chunk_text=chunk_text,
         allow_future_context=allow_future_context,
+        graph=FactGraph(),
         paragraph_info=ChunkParagraphInfo(
             paragraph_ids=[0],
             char_spans=[(0, len(chunk_text))],
@@ -234,11 +234,9 @@ def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnn
                     emotional_valence="neutral",
                     narrative_function="铺垫",
                 ),
-                entities=BoundEntityDirectory(),
                 character_observations=[],
                 dialogues=[],
                 events=[],
-                relations=[],
                 foreshadowings=[],
             )
         ],
@@ -270,11 +268,10 @@ def _tool_receipts(captured_round: list) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
-    """2026-08-26 回归：write_entities 追加与更新语义必须落地最终载荷
+    """2026-08-26 回归（2026-09-04 单一写面改契约为 op log）：write_entities 追加语义必须落进 FactGraph
 
-    契约允许模型分两次提交实体（先新实体、后补别名），运行时图登记累积使
-    校验通过，但最终载荷此前只保留最后一次调用，导致较早声明实体在持久化
-    层事实端点解析时缺失（"事实端点实体未被系统解析"）。
+    契约允许模型分两次提交实体（先新实体、后补别名），op log 必须累积三次调用
+    的声明，最终由持久化层合并为实体目录；不再有 bound_payloads["entities"]。
     """
     ledger = AnnotationToolLedger(
         run_scope="run-1",
@@ -282,6 +279,7 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
         current_chunk_id=1,
         current_chunk_text="住手回荡",
         allow_future_context=False,
+        graph=FactGraph(),
         paragraph_info=ChunkParagraphInfo(
             paragraph_ids=[0],
             char_spans=[(0, 4)],
@@ -290,6 +288,7 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     by_name = {tool.name: tool for tool in tools}
+    await by_name["search_graph"].ainvoke({"entities": ["侯飞白", "褚大山", "猴子"]})
     await by_name["write_entities"].ainvoke(
         {
             "entities": [
@@ -312,11 +311,11 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
             ]
         }
     )
-    catalog = ledger.bound_payloads["entities"]
-    assert [entity.name for entity in catalog.entities] == ["侯飞白", "褚大山", "猴子"]
-    bound_hou = next(entity for entity in catalog.entities if entity.name == "侯飞白")
-    assert bound_hou.description == "贺军情报头子之子"
-    assert bound_hou.tags == ["小孩"]
+    assert "entities" not in ledger.bound_payloads
+    ops = ledger.graph.entity_ops
+    assert [op["name"] for op in ops] == ["侯飞白", "褚大山", "猴子", "侯飞白"]
+    assert ops[0]["description"] == "贺军情报头子之子"
+    assert ops[3]["tags"] == ["小孩"]
 
 
 @pytest.mark.asyncio
@@ -671,6 +670,7 @@ async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
         current_chunk_id=chunk_id,
         current_chunk_text=chunk_text,
         allow_future_context=False,
+        graph=FactGraph(),
         paragraph_info=ChunkParagraphInfo(
             paragraph_ids=[0],
             char_spans=[(0, len(chunk_text))],
@@ -910,7 +910,6 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
             emotional_valence="neutral",
             narrative_function="铺垫",
         ),
-        entities=BoundEntityDirectory(),
         character_observations=[],
         dialogues=[
             BoundDialogue(
@@ -922,7 +921,6 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
             )
         ],
         events=[],
-        relations=[],
         foreshadowings=[],
     )
     second = BoundChunkAnnotation(
@@ -932,7 +930,6 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
             emotional_valence="neutral",
             narrative_function="铺垫",
         ),
-        entities=BoundEntityDirectory(),
         character_observations=[],
         dialogues=[
             BoundDialogue(
@@ -944,7 +941,6 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
             )
         ],
         events=[],
-        relations=[],
         foreshadowings=[],
     )
     annotation = BoundChapterAnnotation(

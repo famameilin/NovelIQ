@@ -239,6 +239,7 @@ def _persist_resolution_mappings(
     session: Session,
     *,
     result: AgentRunResult,
+    resolved_cases: list[ResolvedCase],
     annotation_id: str,
     resolved_targets_by_case_id: dict,
 ) -> list[CompletionResolvedCase]:
@@ -246,10 +247,13 @@ def _persist_resolution_mappings(
 
     2026-08-18：foreshadowing 动作返回 dict（含 thread + event 目标），
     其他动作返回 GraphFact / DialogueRecord / None。
+
+    2026-09-04 单一写面：resolved_cases 由调用方传入（含从 relation_change_ops
+    还原的 fact 裁决），不再直接读 result.resolved_cases。
     """
     repository = CaseResolutionMappingRepository(session)
     completion_results: list[CompletionResolvedCase] = []
-    for resolved_case in result.resolved_cases:
+    for resolved_case in resolved_cases:
         target = resolved_targets_by_case_id.get(resolved_case.case_id)
         target_fact = target if isinstance(target, GraphFact) else None
         if resolved_case.action in {"dialogue", "foreshadowing"} and target is None:
@@ -319,6 +323,30 @@ def _reelect_representatives(
         entity.attributes = attributes
 
 
+def _graph_fact_resolved_cases(result: AgentRunResult) -> list[ResolvedCase]:
+    """2026-09-04 单一写面：把 FactGraph 关系变更操作日志还原为 fact 裁决 ResolvedCase
+
+    resolve_fact_case 不再向 resolved_cases 追加条目，图域裁决随 relation_change_ops
+    进入完成事务；此处按原 ResolvedCase 形状重建，使锁行校验、_persist_fact_resolution
+    与解决映射写入沿用既有链路。
+    """
+    return [
+        ResolvedCase(
+            case_id=op["case_id"],
+            action="fact",
+            type=op["case_type"],
+            reason=op["reason"],
+            target_key=op["target_key"],
+            target_ref=dict(op["target_ref"]),
+            from_entity=op["from_entity"],
+            to_entity=op["to_entity"],
+            relation_type=op["relation_type"],
+            change_kind=op["change_kind"],
+        )
+        for op in result.relation_change_ops
+    ]
+
+
 def complete_annotation_run(
     *,
     result: AgentRunResult,
@@ -327,6 +355,9 @@ def complete_annotation_run(
     """2026-08-10 用于原子提交正式标注图版本与连续性（审计由 AgentAuditRecorder 独立写入）
 
     2026-08-13 P2-5: 移除从未使用的 novel_id 参数（原实现立即 del，无任何消费点）。
+    2026-09-04 单一写面：图域输入改为 FactGraph 操作日志（entity_ops /
+    relation_assert_ops / relation_change_ops）；fact 裁决在边界还原为
+    ResolvedCase 后与 resolved_cases 合并，锁行/校验/映射链路不变。
     """
     session = session_factory()
     try:
@@ -340,13 +371,14 @@ def complete_annotation_run(
                 return existing
 
             case_repository = CasePoolRepository(session)
-            resolved_case_ids = [item.case_id for item in result.resolved_cases]
+            all_resolved_cases = [*result.resolved_cases, *_graph_fact_resolved_cases(result)]
+            resolved_case_ids = [item.case_id for item in all_resolved_cases]
             locked_rows = case_repository.lock_active_cases(
                 result.run_id,
                 resolved_case_ids,
             )
             _validate_locked_cases(
-                resolved_cases=result.resolved_cases,
+                resolved_cases=all_resolved_cases,
                 rows=locked_rows,
             )
             annotation = ChapterAnnotationRepository(session).add_annotation(
@@ -359,7 +391,9 @@ def complete_annotation_run(
             graph_result = persist_completion_graph(
                 session,
                 annotation=annotation,
-                resolved_cases=result.resolved_cases,
+                resolved_cases=all_resolved_cases,
+                entity_ops=result.entity_ops,
+                relation_assert_ops=result.relation_assert_ops,
                 # 2026-08-18：完成事务同时复核 Agent 实际读取过的段落授权
                 authorized_text_chapter_ids=set(result.audit.authorized_chapter_ids),
                 authorized_text_paragraph_ids=set(result.audit.authorized_text_paragraph_ids),
@@ -368,6 +402,7 @@ def complete_annotation_run(
             resolved_completion = _persist_resolution_mappings(
                 session,
                 result=result,
+                resolved_cases=all_resolved_cases,
                 annotation_id=annotation.annotation_id,
                 resolved_targets_by_case_id=graph_result.resolved_targets_by_case_id,
             )

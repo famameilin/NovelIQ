@@ -32,11 +32,8 @@ from .schema import (
     BoundCharacterObservation,
     BoundChunkAnnotation,
     BoundDialogue,
-    BoundEntity,
-    BoundEntityDirectory,
     BoundEvent,
     BoundForeshadowing,
-    BoundRelation,
     CaseSearchResult,
     ChunkMetricsInput,
     ChunkParagraphInfo,
@@ -191,8 +188,16 @@ class AnnotationToolLedger:
 
     @property
     def resolved_case_ids(self) -> set[str]:
-        """2026-08-07 用于返回本轮已经解决的真实案例 ID"""
-        return {item.case_id for item in self.resolved_cases}
+        """2026-08-07 用于返回本轮已经解决的真实案例 ID
+
+        2026-09-04 单一写面：fact 动作不再进 resolved_cases，改由 FactGraph 的
+        relation_change_ops 承载，此处合并两路案例 id（search_pool 隐藏与重复
+        解决校验依赖本集合）。
+        """
+        ids = {item.case_id for item in self.resolved_cases}
+        if self.graph is not None:
+            ids |= {op["case_id"] for op in self.graph.relation_change_ops}
+        return ids
 
     def set_phase(self, phase: str) -> None:
         """2026-08-07 用于同步 LangGraph 和工具账本阶段"""
@@ -574,6 +579,8 @@ class AnnotationToolLedger:
             raise ValueError(f"{domain} 校验失败: " + "；".join(errors))
 
         # 内联领域绑定逻辑（原 _bind_domain 实现）
+        # 2026-09-04 单一写面：entities/relations 不再构造 bound 副本——
+        # 图域登记与操作日志在下方 graph 分支完成，bound 仅服务非图领域
         if domain == "metrics":
             bound = payload
         elif domain == "entities":
@@ -587,7 +594,7 @@ class AnnotationToolLedger:
                         '同一词条的不同身份请使用区分性名称，如"圣城"是 location、'
                         '"圣城朝堂"是 organization，不要互相改类）'
                     )
-            bound = self._bound_entities(payload)
+            bound = None
         elif domain == "dialogues":
             candidates = self.dialogue_candidates
             candidate_by_index = dict(enumerate(candidates, start=1))
@@ -621,39 +628,30 @@ class AnnotationToolLedger:
                 )
             bound = bound_dialogues
         elif domain == "relations":
-            bound_relations: list[BoundRelation] = []
-            for item in payload:
-                resolved_from = (
-                    self.graph.resolve_name(item.from_entity) if self.graph is not None else item.from_entity
-                )
-                resolved_to = self.graph.resolve_name(item.to_entity) if self.graph is not None else item.to_entity
-                dumped = item.model_dump(mode="python")
-                dumped["from_entity"] = resolved_from
-                dumped["to_entity"] = resolved_to
-                bound_relations.append(
-                    BoundRelation(
-                        **dumped,
-                        directionality=RELATION_DEFINITIONS[str(item.relation_type)]["directionality"],
-                        relation_semantics=RELATION_DEFINITIONS[str(item.relation_type)]["semantics"],
-                    )
-                )
-            bound = bound_relations
+            bound = None
         else:
             raise AnnotationInputError(f"未知标注领域: {domain}")
 
         relation_outcomes: list[dict[str, Any]] = []
+        if domain in {"entities", "relations"} and self.graph is None:
+            # 2026-09-04 单一写面：图域写入必须有常驻事实图，否则操作日志无处登记
+            raise AnnotationInvariantError(f"write_{domain} 需要常驻事实图，graph 缺失")
         if self.graph is not None:
             if domain == "entities":
                 self.graph.register_entities(list(payload.entities))
+                self.graph.record_entity_ops(list(payload.entities), chapter_id=self.current_chunk_id)
             elif domain == "relations":
                 self.graph.reset_chapter_relations()
+                resolved_items: list[RelationInput] = []
                 for item in payload:
                     resolved_from = self.graph.resolve_name(item.from_entity)
                     resolved_to = self.graph.resolve_name(item.to_entity)
                     dumped = item.model_dump(mode="python")
                     dumped["from_entity"] = resolved_from
                     dumped["to_entity"] = resolved_to
-                    added = self.graph.apply_relation(RelationInput(**dumped))
+                    resolved_item = RelationInput(**dumped)
+                    resolved_items.append(resolved_item)
+                    added = self.graph.apply_relation(resolved_item)
                     relation_outcomes.append(
                         {
                             "from": resolved_from,
@@ -662,12 +660,11 @@ class AnnotationToolLedger:
                             "outcome": "assert" if added else "skipped_existing",
                         }
                     )
+                self.graph.record_relation_asserts(resolved_items, chapter_id=self.current_chunk_id)
         self.domain_payloads[domain] = payload
-        if domain == "entities":
-            # 2026-08-26 追加与更新语义落地最终载荷：与已接受目录合并，
-            # 避免较早 write_entities 声明的实体在事实端点解析时缺失
-            bound = self._merge_entity_catalog(bound)
-        self.bound_payloads[domain] = bound
+        # 2026-09-04 单一写面：entities/relations 不再进 bound_payloads（图真相源是 FactGraph）
+        if domain not in {"entities", "relations"}:
+            self.bound_payloads[domain] = bound
         self.domain_receipts.add(domain)
         dumped = (
             payload.model_dump(mode="json")
@@ -802,45 +799,6 @@ class AnnotationToolLedger:
         if errors:
             raise ValueError("；".join(errors))
 
-    def _bound_entities(
-        self,
-        directory: EntityDirectoryInput,
-    ) -> BoundEntityDirectory:
-        """2026-08-08 用于把当前 chunk 实体目录转换为系统绑定结果"""
-        return BoundEntityDirectory(
-            entities=[BoundEntity(**item.model_dump(mode="python")) for item in directory.entities]
-        )
-
-    def _merge_entity_catalog(self, update: BoundEntityDirectory) -> BoundEntityDirectory:
-        """2026-08-26 用于把本次 write_entities 与已接受实体目录按追加与更新语义合并
-
-        提示词契约约定 write_entities 为追加与更新（新名注册、同名提交的属性覆盖）。
-        此前仅图内登记（graph.register_entities）是累积的，最终载荷只保留最后一次
-        调用，导致模型分两次提交（先新实体、后补别名）时较早实体在持久化层
-        事实端点解析中缺失。
-        """
-        previous = self.bound_payloads.get("entities")
-        if previous is None:
-            return update
-        merged: list[BoundEntity] = []
-        index_by_key: dict[str, int] = {}
-        for entity in (*previous.entities, *update.entities):
-            key = unicodedata.normalize("NFC", entity.name).strip().casefold()
-            existing_index = index_by_key.get(key)
-            if existing_index is None:
-                index_by_key[key] = len(merged)
-                merged.append(entity)
-                continue
-            existing = merged[existing_index]
-            merged[existing_index] = existing.model_copy(
-                update={
-                    "tags": entity.tags or existing.tags,
-                    "description": entity.description if entity.description is not None else existing.description,
-                    "attributes": {**(existing.attributes or {}), **(entity.attributes or {})},
-                }
-            )
-        return BoundEntityDirectory(entities=merged)
-
     # ------------------------------------------------------------------
     # ready_chunk 构造与冻结
     # ------------------------------------------------------------------
@@ -904,14 +862,14 @@ class AnnotationToolLedger:
 
         self._validate_domain_duplicates(payloads)
         bound_dialogues = list(self.bound_payloads["dialogues"])
+        # 2026-09-04 单一写面：entities/relations 不进 ready_chunk，
+        # 图域真相源是 FactGraph 操作日志，持久化从其派生
         return BoundChunkAnnotation(
             chunk_id=self.current_chunk_id,
             metrics=payloads["metrics"],
-            entities=self.bound_payloads["entities"],
             character_observations=list(self.bound_payloads["character_observations"]),
             dialogues=bound_dialogues,
             events=list(self.bound_payloads["events"]),
-            relations=list(self.bound_payloads["relations"]),
             foreshadowings=list(self.bound_payloads.get("foreshadowings") or []),
         )
 
@@ -1046,6 +1004,14 @@ class AnnotationToolLedger:
                         "action": item.action,
                     }
                     for item in self.resolved_cases
+                ]
+                + [
+                    {
+                        "case_id": op["case_id"],
+                        "type": op["case_type"],
+                        "action": "fact",
+                    }
+                    for op in (self.graph.relation_change_ops if self.graph is not None else [])
                 ],
             },
             "search_log": list(self.search_log[-8:]),
@@ -1513,7 +1479,12 @@ def build_annotation_tools(
         relation_type: str,
         change_kind: str,
     ) -> str:
-        """2026-08-11 用于通过临时编号把案例解决为图关系建改删（change_kind 表达变化）"""
+        """2026-08-11 用于通过临时编号把案例解决为图关系建改删（change_kind 表达变化）
+
+        2026-09-04 单一写面：本工具只更新内存 FactGraph（终态即时生效 +
+        操作日志登记），不再向 resolved_cases 追加 fact 动作；持久化层从
+        操作日志派生关系事实。解除不存在的边会直接报错并回滚本回合，
+        避免"accepted 但 search_graph 不变"的空转。"""
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
@@ -1527,6 +1498,8 @@ def build_annotation_tools(
                 f"resolve_fact_case.change_kind 必须是闭合关系变化类型: {change_kind}，"
                 f"合法值: {[member.value for member in RelationChangeKind]}"
             )
+        from_entity = normalize_semantic_text(from_entity, label="resolve_fact_case.from_entity")
+        to_entity = normalize_semantic_text(to_entity, label="resolve_fact_case.to_entity")
         _require_action_entity(
             ledger,
             from_entity,
@@ -1539,19 +1512,25 @@ def build_annotation_tools(
             expected_types=tuple(definition["to_types"]),
             label="resolve_fact_case.to_entity",
         )
-        resolved = ResolvedCase(
-            case_id=details.id,
-            action="fact",
-            type=details.type,
-            reason=reason,
-            target_key=details.target_key,
-            target_ref=details.target_ref,
+        if ledger.graph is None:
+            raise AnnotationInvariantError("resolve_fact_case 需要常驻事实图，graph 缺失")
+        ledger.graph.apply_relation_change(
             from_entity=from_entity,
             to_entity=to_entity,
             relation_type=relation_type,
-            change_kind=RelationChangeKind(change_kind),
+            change_kind=change_kind,
+            reason=reason,
+            case_id=details.id,
+            case_type=details.type,
+            target_key=details.target_key,
+            target_ref=details.target_ref,
+            chapter_id=ledger.current_chunk_id,
         )
-        return _append_resolved(ledger, details, resolved)
+        case_number = ledger.case_number_by_id[details.id]
+        return json.dumps(
+            {"accepted": True, "case_number": case_number, "action": "fact"},
+            ensure_ascii=False,
+        )
 
     @tool
     def resolve_foreshadowing_case(

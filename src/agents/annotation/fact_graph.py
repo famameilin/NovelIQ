@@ -2,8 +2,15 @@
 章节 Agent 常驻事实图状态
 
 说明: run 级事实图在首个章节 Agent 启动时从库加载一次，之后所有章节 Agent 共享，
-每个 write 工具调用即时更新，章节完成时作为新图版本落库。中途恢复任务时重新加载。
+每个图域写工具（write_entities / write_relations / resolve_fact_case）即时更新本图，
+章节完成时由持久化层从本图的操作日志派生新图版本落库。中途恢复任务时重新加载。
 运行时所有图查询（search_graph、关系/实体校验）只访问本内存图，数据库仅参与持久化。
+
+2026-09-04 单一写面收敛：图域（实体+关系）的运行时真相源是本 FactGraph，
+不再是 BoundChunkAnnotation 的 entities/relations 副本。本图在终态
+（active_relations / entity_* 映射）之外维护一份按子块累积的有序操作日志
+（sub_chunk_ops），承载持久化派生逐条 graph_facts 所需的 reason/case_id/
+change_kind/ordinal 与 before/after 审计信息——终态装不下这些，故必须显式记录。
 """
 
 from __future__ import annotations
@@ -55,6 +62,15 @@ class FactGraph:
     relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict, init=False)
     chapter_registered_entities: dict[str, EntityType] = field(default_factory=dict, init=False)
     chapter_added_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
+    # 2026-09-04 单一写面：图域操作日志，按子块累积（begin_chapter 清空、drain_ops 取出），
+    # 持久化层从这三份日志派生实体行、关系 assert 事实与案例关系变更事实；
+    # BoundChunkAnnotation 不再持有 entities/relations 副本，resolved_cases 不再承载 fact 动作。
+    # entity_ops 追加语义，relation_assert_ops 完整替换语义（每次 write_relations 重填），
+    # relation_change_ops 记录 resolve_fact_case 的关系生命周期变化（含案例生命周期元数据，
+    # 供完成事务锁行/校验/写映射）。三者纳入 snapshot/restore，重放顺序=先 assert 后 change。
+    entity_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
+    relation_assert_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
+    relation_change_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         """2026-08-09 用于以历史快照初始化实时事实图状态"""
@@ -138,6 +154,106 @@ class FactGraph:
         attributes["support_count"] = int(attributes.get("support_count", 0)) + 1
         self.relation_attributes[key] = attributes
 
+    def record_entity_ops(self, entities: list, *, chapter_id: int) -> None:
+        """2026-09-04 登记本批实体注册操作（追加语义），供持久化派生实体行与属性事实
+
+        与 register_entities 的终态更新并行：终态供 search_graph 即时可见，
+        操作日志供持久化按提交顺序重放（同名合并、属性 before/after 由持久化层
+        对照数据库现值计算）。
+        """
+        for entity in entities:
+            self.entity_ops.append(
+                {
+                    "name": str(entity.name),
+                    "entity_type": str(entity.entity_type),
+                    "tags": list(getattr(entity, "tags", None) or []),
+                    "description": getattr(entity, "description", None),
+                    "attributes": dict(getattr(entity, "attributes", None) or {}),
+                    "chapter_id": chapter_id,
+                }
+            )
+
+    def record_relation_asserts(self, relations: list, *, chapter_id: int) -> None:
+        """2026-09-04 登记本批关系 assert 操作（完整替换语义：先清空再按本批重填）
+
+        端点名取 write_relations 已解析（resolve_name 后）的规范名，与 active_relations
+        存储键一致，保证持久化重放与运行时终态同源。
+        """
+        self.relation_assert_ops = [
+            {
+                "from_entity": str(item.from_entity),
+                "to_entity": str(item.to_entity),
+                "relation_type": str(item.relation_type),
+                "chapter_id": chapter_id,
+            }
+            for item in relations
+        ]
+
+    def apply_relation_change(
+        self,
+        *,
+        from_entity: str,
+        to_entity: str,
+        relation_type: str,
+        change_kind: str,
+        reason: str,
+        case_id: str,
+        case_type: str,
+        target_key: str,
+        target_ref: dict[str, Any],
+        chapter_id: int,
+    ) -> None:
+        """2026-09-04 案例驱动的关系生命周期变化：即时更新终态 + 记录变更操作
+
+        端点键按传入名原样构造、不过 resolve_name：search_graph 回显的 from/to 已是
+        入库规范名，与存储键一致；若在此再解析，同一人物分量内的两端会塌成代表节点
+        自环，要解除的边键自指导致永远删不掉（第 4 章空转的根因之一）。
+        break/retract 要求边当前活动，否则报错——静默 accepted 而终态不变正是上一轮
+        Agent 反复"撤销→复查→没变"空转的直接原因。
+
+        case_type/target_key/target_ref 随操作携带：完成事务据此锁定案例行、复核
+        稳定目标未变（防竞态），并按 target_ref["chunk_id"] 校验读取授权章节。
+        """
+        key = self._relation_key(from_entity, to_entity, relation_type)
+        if change_kind in {"assert", "reinforce", "refine", "supersede"}:
+            self.active_relations.add(key)
+            self._bump_support_count(key)
+        elif change_kind in {"break", "retract"}:
+            if key not in self.active_relations:
+                raise ValueError(
+                    f"关系变更目标不存在或已解除: {from_entity}—{to_entity}（{relation_type}）；"
+                    "请用 search_graph 确认边的规范端点名后再解除"
+                )
+            self.active_relations.discard(key)
+        elif change_kind != "weaken":
+            raise ValueError(f"不支持的关系变化类型: {change_kind}")
+        self.relation_change_ops.append(
+            {
+                "from_entity": str(from_entity),
+                "to_entity": str(to_entity),
+                "relation_type": str(relation_type),
+                "change_kind": str(change_kind),
+                "reason": reason,
+                "case_id": case_id,
+                "case_type": str(case_type),
+                "target_key": target_key,
+                "target_ref": dict(target_ref),
+                "chapter_id": chapter_id,
+            }
+        )
+
+    def drain_ops(self) -> dict[str, list[dict[str, Any]]]:
+        """2026-09-04 在子块结束时取出并清空累积的图域操作日志，供合并进完成事务输入"""
+        drained = {
+            "entity_ops": self.entity_ops,
+            "relation_assert_ops": self.relation_assert_ops,
+            "relation_change_ops": self.relation_change_ops,
+        }
+        self.entity_ops = []
+        self.relation_assert_ops = []
+        self.relation_change_ops = []
+        return drained
+
     def reset_chapter_relations(self) -> None:
         """2026-08-09 用于在完整替换语义下撤销当章 assert 的关系
 
@@ -177,9 +293,15 @@ class FactGraph:
         }
         self.chapter_added_relations.clear()
         self.chapter_registered_entities.clear()
+        self.entity_ops = []
+        self.relation_assert_ops = []
+        self.relation_change_ops = []
 
     def reset_chapter_changes(self) -> None:
-        """2026-08-09 用于在章节重试回滚时恢复历史快照"""
+        """2026-08-09 用于在章节重试回滚时恢复历史快照
+
+        2026-09-04：图域操作日志随本章增量一并清空（失败章不提交，日志无消费方）。
+        """
         self.entity_types = dict(self.history_entity_types)
         self.entity_names = dict(self.history_entity_names)
         self.entity_tags = dict(self.history_entity_tags)
@@ -189,6 +311,9 @@ class FactGraph:
         self.relation_attributes = dict(self.history_relation_attributes)
         self.chapter_registered_entities = {}
         self.chapter_added_relations = set()
+        self.entity_ops = []
+        self.relation_assert_ops = []
+        self.relation_change_ops = []
 
     def snapshot(self) -> dict:
         """2026-08-09 用于保存章节尝试前的完整事实图快照"""
@@ -202,6 +327,9 @@ class FactGraph:
             "relation_attributes": dict(self.relation_attributes),
             "chapter_registered_entities": dict(self.chapter_registered_entities),
             "chapter_added_relations": set(self.chapter_added_relations),
+            "entity_ops": [dict(op) for op in self.entity_ops],
+            "relation_assert_ops": [dict(op) for op in self.relation_assert_ops],
+            "relation_change_ops": [dict(op) for op in self.relation_change_ops],
         }
 
     def restore(self, snap: dict) -> None:

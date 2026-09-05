@@ -5,7 +5,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import select
@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from src.agents.annotation.schema import (
     RELATION_DEFINITIONS,
     BoundChapterAnnotation,
-    BoundEntity,
     EntityType,
     ResolvedCase,
 )
@@ -118,12 +117,15 @@ def _chapter_text_evidence(session: Session, *, run_id: str, chapter_id: int) ->
     ]
 
 
-def _entity_attributes(entity: BoundEntity, entity_type: EntityType) -> dict[str, Any]:
-    """2026-08-19 用于提取实体本次提交的属性"""
+def _entity_attributes(entity: dict[str, Any], entity_type: EntityType) -> dict[str, Any]:
+    """2026-08-19 用于提取实体本次提交的属性
+
+    2026-09-04 单一写面：输入从 BoundEntity 副本改为 FactGraph entity_ops 单条操作。
+    """
     attributes: dict[str, Any] = {"entity_type": entity_type}
-    if entity.description is not None:
-        attributes["description"] = entity.description
-    attributes.update(entity.attributes or {})
+    if entity.get("description") is not None:
+        attributes["description"] = entity["description"]
+    attributes.update(entity.get("attributes") or {})
     return attributes
 
 
@@ -131,18 +133,25 @@ def _resolve_entities(
     session: Session,
     *,
     annotation: ChapterAnnotationRecord,
-    payload: BoundChapterAnnotation,
+    entity_ops: list[dict[str, Any]],
 ) -> tuple[dict[str, GraphEntity], dict[int, list[dict[str, Any]]]]:
-    """2026-08-19 用于按规范化名称匹配或创建实体并记录属性变化"""
-    appearances: dict[str, list[tuple[int, EntityType, BoundEntity]]] = {}
+    """2026-08-19 用于按规范化名称匹配或创建实体并记录属性变化
+
+    2026-09-04 单一写面：输入从 payload 的实体目录副本改为 FactGraph 的 entity_ops
+    操作日志（write_entities 按提交顺序追加）；同名属性合并、tags 去重拼接、
+    before/after 审计的语义与原实现一致。
+    """
+    appearances: dict[str, list[tuple[int, EntityType, dict[str, Any]]]] = {}
     display_names: dict[str, str] = {}
-    for chunk in payload.chunks:
-        for item in chunk.entities.entities:
-            key = _normalized_name(item.name)
-            if key in display_names and display_names[key] != item.name:
-                raise ValueError(f"实体名称规范化后冲突: {display_names[key]} / {item.name}")
-            display_names[key] = item.name
-            appearances.setdefault(key, []).append((chunk.chunk_id, item.entity_type, item))
+    for op in entity_ops:
+        name = str(op["name"])
+        key = _normalized_name(name)
+        if key in display_names and display_names[key] != name:
+            raise ValueError(f"实体名称规范化后冲突: {display_names[key]} / {name}")
+        display_names[key] = name
+        appearances.setdefault(key, []).append(
+            (int(op["chapter_id"]), cast(EntityType, str(op["entity_type"])), op)
+        )
     existing = {
         _normalized_name(entity.canonical_name): entity
         for entity in session.execute(select(GraphEntity).where(GraphEntity.run_id == annotation.run_id)).scalars()
@@ -159,7 +168,7 @@ def _resolve_entities(
         tags: list[str] = []
         for _chapter, _item_type, item in items:
             attributes.update(_entity_attributes(item, entity_type))
-            tags.extend(tag for tag in item.tags if tag not in tags)
+            tags.extend(tag for tag in item.get("tags") or [] if tag not in tags)
         entity = existing.get(key)
         if entity is not None and entity.entity_type != entity_type:
             raise ValueError(f"实体名称已属于其他大类: {display_names[key]}")
@@ -587,8 +596,13 @@ def _persist_annotation_facts(
     payload: BoundChapterAnnotation,
     entities: dict[str, GraphEntity],
     attribute_changes: dict[int, list[dict[str, Any]]],
+    relation_assert_ops: list[dict[str, Any]],
 ) -> list[GraphFact]:
-    """2026-08-19 用于写入当前章节事实、事件和关系状态"""
+    """2026-08-19 用于写入当前章节事实、事件和关系状态
+
+    2026-09-04 单一写面：关系 assert 事实的输入从 payload 副本改为 FactGraph
+    操作日志 relation_assert_ops（按 chunk_id 归属到各 chunk）。
+    """
     facts: list[GraphFact] = []
     relation_drafts: dict[str, _RelationDraft] = {}
     for chunk in payload.chunks:
@@ -650,17 +664,24 @@ def _persist_annotation_facts(
                     event_id=event_ids[ordinal],
                 )
             )
-        for ordinal, relation_item in enumerate(chunk.relations, start=1):
-            from_entity = _entity(entities, relation_item.from_entity)
-            to_entity = _entity(entities, relation_item.to_entity)
+        # 2026-09-04 单一写面：关系 assert 事实从 FactGraph 操作日志派生，
+        # 不再读 chunk.relations 副本；端点名取 write_relations 已解析的规范名
+        for ordinal, relation_item in enumerate(
+            [op for op in relation_assert_ops if int(op["chapter_id"]) == chunk.chunk_id],
+            start=1,
+        ):
+            from_entity = _entity(entities, str(relation_item["from_entity"]))
+            to_entity = _entity(entities, str(relation_item["to_entity"]))
             if from_entity is None or to_entity is None:
                 raise ValueError("relation 端点缺少实体")
+            relation_type = str(relation_item["relation_type"])
+            definition = RELATION_DEFINITIONS[relation_type]
             relation_id = _relation_id(
                 annotation.run_id,
                 int(from_entity.entity_id),
                 int(to_entity.entity_id),
-                str(relation_item.relation_type),
-                str(relation_item.directionality),
+                relation_type,
+                str(definition["directionality"]),
             )
             relation = session.get(GraphRelation, relation_id)
             if relation is None:
@@ -669,8 +690,8 @@ def _persist_annotation_facts(
                     run_id=annotation.run_id,
                     from_entity_id=int(from_entity.entity_id),
                     to_entity_id=int(to_entity.entity_id),
-                    directionality=str(relation_item.directionality),
-                    relation_semantics=str(relation_item.relation_semantics),
+                    directionality=str(definition["directionality"]),
+                    relation_semantics=str(definition["semantics"]),
                 )
                 session.add(relation)
                 session.flush()
@@ -681,7 +702,7 @@ def _persist_annotation_facts(
                     run_id=annotation.run_id,
                     relation=relation,
                     chapter_order=boundary.chapter_order,
-                    relation_type=str(relation_item.relation_type),
+                    relation_type=relation_type,
                     current_chapter_id=annotation.chapter_id,
                 ),
             )
@@ -692,7 +713,7 @@ def _persist_annotation_facts(
                 domain="relation",
                 ordinal=ordinal,
                 subject=from_entity,
-                predicate=str(relation_item.relation_type),
+                predicate=relation_type,
                 object_value=_entity_descriptor(to_entity),
                 value=None,
                 participants=[
@@ -703,14 +724,14 @@ def _persist_annotation_facts(
                     "kind": "relation",
                     "chapter_id": chunk.chunk_id,
                     "relation_id": relation_id,
-                    "relation_type": str(relation_item.relation_type),
+                    "relation_type": relation_type,
                     "change_kind": change_kind,
                 },
                 evidence=evidence,
             )
             facts.append(fact)
             _apply_relation_change(
-                draft, fact=fact, change_kind=change_kind, relation_type=str(relation_item.relation_type)
+                draft, fact=fact, change_kind=change_kind, relation_type=relation_type
             )
         for ordinal, foreshadowing in enumerate(chunk.foreshadowings, start=1):
             # 2026-08-22setup_event_id 直接取服务端生成的 setup_node_id
@@ -1003,10 +1024,17 @@ def persist_completion_graph(
     *,
     annotation: ChapterAnnotationRecord,
     resolved_cases: list[ResolvedCase],
+    entity_ops: list[dict[str, Any]],
+    relation_assert_ops: list[dict[str, Any]],
     authorized_text_chapter_ids: set[int],
     authorized_text_paragraph_ids: set[int] | None = None,
 ) -> PersistedGraphResult:
-    """2026-08-20 扁平化图谱持久化链，内联章节边界生成和标注校验逻辑"""
+    """2026-08-20 扁平化图谱持久化链，内联章节边界生成和标注校验逻辑
+
+    2026-09-04 单一写面：实体与关系 assert 事实的输入是 FactGraph 操作日志
+    （entity_ops / relation_assert_ops），不再从 payload 图副本读取；
+    fact 裁决由存储边界从 relation_change_ops 还原为 ResolvedCase 传入。
+    """
     payload = BoundChapterAnnotation.model_validate(annotation.payload)
 
     # 内联章节和段落查询
@@ -1049,7 +1077,7 @@ def persist_completion_graph(
     _chapter_text_evidence(session, run_id=annotation.run_id, chapter_id=annotation.chapter_id)
 
     # 继续原有逻辑
-    entities, attribute_changes = _resolve_entities(session, annotation=annotation, payload=payload)
+    entities, attribute_changes = _resolve_entities(session, annotation=annotation, entity_ops=entity_ops)
     facts = _persist_annotation_facts(
         session,
         annotation=annotation,
@@ -1057,6 +1085,7 @@ def persist_completion_graph(
         payload=payload,
         entities=entities,
         attribute_changes=attribute_changes,
+        relation_assert_ops=relation_assert_ops,
     )
     _persist_state_rows(
         session,

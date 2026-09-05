@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import ChunkParagraphInfo, CreateEventInput
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from tests.agents.test_annotation_event_history_tools import (
@@ -291,6 +292,7 @@ def _offset_paragraph_ledger() -> AnnotationToolLedger:
         current_chunk_id=20,
         current_chunk_text=chunk_text,
         allow_future_context=False,
+        graph=FactGraph(),
         paragraph_info=ChunkParagraphInfo(
             paragraph_ids=[44, 45],
             char_spans=[(0, 4), (4, len(chunk_text))],
