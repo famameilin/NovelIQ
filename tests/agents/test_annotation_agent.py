@@ -330,6 +330,80 @@ async def test_single_chunk_chapter_completes_via_write_and_auto_finalize() -> N
     assert llm.calls == 3
 
 
+def test_initial_case_number_table_injected_into_first_message() -> None:
+    """2026-09-04 第7章死锁回归：初始案例编号表必须出现在首条 human 消息
+
+    cb4f96f1 压缩提示词时删掉了编号表注入但保留编号授权机制，模型看不到
+    编号便把对话候选 index 当 case_number，空转至回合上限。
+    """
+    from src.agents.annotation.schema import CaseSearchResult
+
+    ledger = AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text="住手回荡",
+        allow_future_context=False,
+        graph=FactGraph(),
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, 4)],
+            texts=["住手回荡"],
+        ),
+    )
+    ledger.register_initial_cases(
+        [
+            CaseSearchResult(
+                id="case-1",
+                type="对话案例",
+                chunk_id=0,
+                keys=["说话人"],
+                description="疑似对话：猴子瘫在游廊哀嚎",
+            )
+        ],
+        ["case-1"],
+    )
+    message = build_chunk_message(
+        chunk_index=1,
+        chunk_total=1,
+        chunk_text="住手回荡",
+        candidates=ledger.dialogue_candidates,
+        initial_cases=ledger.initial_case_views(),
+    )
+    assert "<ActiveCases>" in message
+    assert '"case_number": 1' in message
+    assert "疑似对话：猴子瘫在游廊哀嚎" in message
+
+
+@pytest.mark.asyncio
+async def test_turn_budget_reminder_injected_near_iteration_cap() -> None:
+    """2026-09-05 第3章死锁回归：临近内部循环上限的请求必须携带收尾提醒
+
+    ch3 空转 15 轮 40 次检索 0 写入后撞硬顶，模型全程看不到轮次预算。
+    提醒只进本次请求、不写入状态消息链（否则历史中逐轮堆积）。
+    """
+    search_call = _write_call("search_pool", {"query": "伯安"}, call_id="call-search")
+    llm = _SequenceLLM([_tool_message([search_call])] * 4)
+    result = await _invoke_graph(llm, allow_future_context=True, max_iterations=4)
+
+    assert result.get("error") == "annotation LangGraph 内部循环达到上限 4"
+    assert len(llm.captured_messages) == 4
+    for index, messages in enumerate(llm.captured_messages):
+        reminders = [
+            message
+            for message in messages
+            if isinstance(message, HumanMessage) and "轮次预算" in str(message.content)
+        ]
+        remaining = 4 - index
+        if remaining <= 3:
+            assert len(reminders) == 1, f"第 {index + 1} 次请求应恰好携带一条提醒"
+            assert messages[-1] is reminders[0]
+        else:
+            assert reminders == [], "远离上限的请求不得携带提醒"
+    assert "剩余 3 轮" in str(llm.captured_messages[1][-1].content)
+    assert "最后一轮" in str(llm.captured_messages[3][-1].content)
+
+
 @pytest.mark.asyncio
 async def test_five_writes_make_auto_finalize_always_succeed() -> None:
     """2026-08-30 用于验证实体依赖就绪后其余 write 按每轮两种在三轮内完成"""
@@ -344,8 +418,8 @@ async def test_five_writes_make_auto_finalize_always_succeed() -> None:
         for tool_names in llm.captured_tool_names
     ] == [
         ["write_entities", "write_metrics"],
-        ["create_event", "write_relations"],
-        ["write_dialogues"],
+        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
+        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
     ]
     assert [len(messages) for messages in llm.captured_messages] == [2, 5, 8]
 
@@ -400,8 +474,8 @@ async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_entity_write_keeps_dependent_writes_unexposed() -> None:
-    """2026-08-30 用于验证实体失败不阻断指标但继续隐藏对话事件和关系写入"""
+async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> None:
+    """2026-08-30 用于验证实体失败不阻断指标，实体被接受后依赖工具解锁且此后只追加不回收"""
     invalid_entities = _write_call(
         "write_entities",
         {"entities": [{"name": " ", "entity_type": "character"}]},
@@ -425,10 +499,16 @@ async def test_failed_entity_write_keeps_dependent_writes_unexposed() -> None:
         "write_entities",
         "write_metrics",
     ]
-    assert [name for name in llm.captured_tool_names[1] if name in formal_writes] == ["write_entities"]
+    assert [name for name in llm.captured_tool_names[1] if name in formal_writes] == [
+        "write_entities",
+        "write_metrics",
+    ]
     assert [name for name in llm.captured_tool_names[2] if name in formal_writes] == [
+        "write_entities",
+        "write_metrics",
         "create_event",
         "write_relations",
+        "write_dialogues",
     ]
     first_round_receipts = _tool_receipts(llm.captured_messages[1])[-2:]
     assert '"tool": "write_entities"' in first_round_receipts[0]
@@ -476,7 +556,8 @@ async def test_partial_writes_do_not_auto_finalize() -> None:
         "write_relations",
     ]
     assert [name for name in llm.captured_tool_names[2] if name in {"create_event", "write_relations"}] == [
-        "create_event"
+        "create_event",
+        "write_relations",
     ]
 
 

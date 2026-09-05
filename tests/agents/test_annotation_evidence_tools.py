@@ -1249,6 +1249,23 @@ def test_push_case_rejects_json_fragment_in_description() -> None:
         )
 
 
+def test_push_case_rejects_overlong_description() -> None:
+    """2026-09-04 用于验证 description 超过 100 字被拒绝（与 CaseSearchResult 读取上限对齐）"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    with pytest.raises(AnnotationInputError, match="100"):
+        _find_tool(tools, "push_case").invoke(
+            {
+                "description": "疑" * 101,
+                "keys": ["线索"],
+                "type": "疑点",
+            }
+        )
+    assert ledger.pushed_cases == []
+
+
 def test_push_case_accepts_setup_id_and_resolve_foreshadowing_case() -> None:
     """2026-08-11 用于验证伏笔疑点携带 setup_id 且可动作式解决"""
     service = _QueryService()

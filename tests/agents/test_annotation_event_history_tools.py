@@ -153,6 +153,34 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
         )
 
 
+def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
+    """2026-09-04 第6章教训回归：把 tree_id 误当 setup_event_id 时报错须点名这层混淆
+
+    create_event 回执同时含 tree_id 与 node_id，模型把 tree_id 传入后被泛化报错
+    拒绝，转而 search_event 查本章事件落空（树仅覆盖已完成章节）→ 空转至回合上限。
+    """
+    service = _EventHistoryService()
+    ledger = _ledger()
+    # 真实流程：create_event 只把节点 id 登记进 authorized_event_ids，
+    # tree_id 仅进 authorized_tree_ids（不授权 setup/payoff 引用）
+    ledger.authorized_tree_ids.add("tree-mixup")
+    tools = _tools(service, ledger)
+    case_number = _register_payoff_case(service, ledger)
+
+    with pytest.raises(
+        AnnotationAuthorizationError,
+        match=r"setup_event_id 未由 create_event 回执或 search_event 授权: tree-mixup"
+        r".*事件树 id 而非事件节点 id.*children\[\]\.node_id 或 root_node_id",
+    ):
+        _find_tool(tools, "resolve_foreshadowing_case").invoke(
+            {
+                "case_number": case_number,
+                "reason": "伏笔回收",
+                "setup_event_id": "tree-mixup",
+            }
+        )
+
+
 def test_resolve_foreshadowing_case_passes_authorized_event_ids() -> None:
     """2026-08-22先 search_event 授权后 resolve 可绑定 setup/payoff 节点"""
     service = _EventHistoryService(

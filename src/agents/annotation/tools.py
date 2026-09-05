@@ -172,6 +172,8 @@ class AnnotationToolLedger:
     paragraph_info: ChunkParagraphInfo | None = None
     # 2026-08-22已写事件节点 id（含历史树根），供伏笔 setup/payoff 授权
     authorized_event_ids: set[str] = field(default_factory=set)
+    # 2026-09-04事件树 id 集合：setup/payoff 误传 tree_id 时给出针对性纠错提示
+    authorized_tree_ids: set[str] = field(default_factory=set)
     # 2026-08-19 当前章节序号（跨章因果校验用）
     current_chapter_order: int | None = None
     # 2026-08-22本章事件树状态（单章闭环）；历史树视图缓存供 cause_tree_id 引用
@@ -472,6 +474,8 @@ class AnnotationToolLedger:
             "nodes": tree_nodes,
         }
         self.authorized_event_ids.update(node.node_id for node in planned_nodes)
+        # 2026-09-04 登记 tree_id 以便误传时给出针对性纠错提示（tree_id 不授权 setup/payoff）
+        self.authorized_tree_ids.add(tree_id)
         events_bound = list(self.bound_payloads.get("events") or [])
         events_bound.extend(planned_nodes)
         self.domain_payloads["events"] = events_bound
@@ -1339,6 +1343,7 @@ def build_annotation_tools(
             # tree_id 供 create_event(cause_tree_id)，root_node_id 供伏笔 setup/payoff
             ledger.authorized_event_ids.add(item.tree_id)
             ledger.authorized_event_ids.add(item.root_node_id)
+            ledger.authorized_tree_ids.add(item.tree_id)
             ledger.history_tree_views[item.tree_id] = item.model_dump(mode="json")
             views.append(item.model_dump(mode="json"))
         ledger.append_search_log(
@@ -1597,8 +1602,17 @@ def build_annotation_tools(
             if event_id is None:
                 continue
             if event_id not in ledger.authorized_event_ids:
+                # 2026-09-04 第6章教训：create_event 回执同时含 tree_id 与 node_id，
+                # 模型易把 tree_id 当节点 id 传（tree_id 只作 cause_tree_id 引用），
+                # 随后 search_event 查不到本章事件（树仅覆盖已完成章节）→ 空转至回合上限。
+                hint = (
+                    "（这是事件树 id 而非事件节点 id；setup_event_id/payoff_event_id 须传"
+                    " create_event 回执 children[].node_id 或 root_node_id）"
+                    if event_id in ledger.authorized_tree_ids
+                    else ""
+                )
                 raise AnnotationAuthorizationError(
-                    f"{field_name} 未由 create_event 回执或 search_event 授权: {event_id}"
+                    f"{field_name} 未由 create_event 回执或 search_event 授权: {event_id}{hint}"
                 )
         return _append_resolved(ledger, details, resolved)
 
@@ -1629,7 +1643,8 @@ def build_annotation_tools(
         setup_id: str | None = None,
     ) -> str:
         """2026-08-11 用于把分析中发现的新连续性疑点创建为新案例登记进案例池
-        （type 是任意描述字符串；description 只写人类可读说明，keys/type/dialogue_id/setup_id
+        （type 是任意描述字符串；description 只写人类可读说明且不超过 100 字，
+        keys/type/dialogue_id/setup_id
         必须作为独立参数提交，示例：push_case(description="玉戒尺在第 5 章异常发光",
         keys=["玉戒尺"], type="伏笔疑点", setup_id="S-123")）"""
         if ledger.phase != "chunk_open":
@@ -1640,6 +1655,11 @@ def build_annotation_tools(
         normalized_description = unicodedata.normalize("NFC", description).strip()
         if not normalized_description:
             raise AnnotationInputError("push_case.description 不能为空")
+        if len(normalized_description) > 100:
+            raise AnnotationInputError(
+                "push_case.description 不能超过 100 字，请精简为人类可读要点"
+                "（案例检索载荷有长度上限）"
+            )
         json_marker_fields = ('"keys"', '"type"', '"dialogue_id"', '"setup_id"')
         if any(marker in normalized_description for marker in json_marker_fields):
             raise AnnotationInputError(
