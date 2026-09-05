@@ -1551,12 +1551,22 @@ def build_annotation_tools(
         2026-08-18：setup_event_id/payoff_event_id 用于伏笔续接/回收时绑定事件。
         2026-08-30事件 id 由 create_event 回执或 search_event
         检索获得，须先经授权集合校验。
-        """
+        2026-09-04未挂伏笔线程的疑点案例被确认为伏笔时，须提供 setup_event_id
+        （埋设事件），系统据此就地建立伏笔线程记录确认；判断并非伏笔则用 close_case。"""
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
             tool_name="resolve_foreshadowing_case",
         )
+        if not details.target_ref.get("setup_id"):
+            if setup_event_id is None:
+                raise AnnotationInputError(
+                    "该案例未关联伏笔线程；确认其为伏笔须提供 setup_event_id"
+                    "（埋设事件，由 create_event 回执或 search_event 授权），"
+                    "系统会据此建立伏笔线程；若判断其并非伏笔，请改用 close_case"
+                )
+            if setup_summary is None:
+                setup_summary = details.description
         resolved = ResolvedCase(
             case_id=details.id,
             action="foreshadowing",

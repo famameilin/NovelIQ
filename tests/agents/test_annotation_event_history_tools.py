@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from src.agents.annotation.errors import AnnotationAuthorizationError
+from src.agents.annotation.errors import AnnotationAuthorizationError, AnnotationInputError
 from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
@@ -31,9 +31,11 @@ class _EventHistoryService:
         self,
         trees: list[EventTreeHistoryResult] | None = None,
         current_chapter_order: int = 2,
+        case_has_thread: bool = True,
     ) -> None:
         self.trees = trees or []
         self.current_chapter_order = current_chapter_order
+        self.case_has_thread = case_has_thread
         self.calls: list[tuple[str, int]] = []
 
     def find_initial_case_candidates(self, current_text, *, semantic_limit=50, rotation_limit=50):
@@ -54,10 +56,13 @@ class _EventHistoryService:
         """2026-08-18 用于返回包含稳定目标的 active 案例"""
         if case_id != "case-1":
             return None
+        target_ref: dict = {"kind": "foreshadowing", "chunk_id": 10}
+        if self.case_has_thread:
+            target_ref["setup_id"] = "thread-1"
         return ActiveCaseDetails(
             **self._case().model_dump(mode="python"),
             target_key="thread-1",
-            target_ref={"kind": "foreshadowing", "chunk_id": 10, "setup_id": "thread-1"},
+            target_ref=target_ref,
         )
 
     def search_event_history(self, query, *, limit=50):
@@ -211,3 +216,44 @@ def test_resolve_foreshadowing_case_passes_authorized_event_ids() -> None:
     assert ledger.resolved_cases[-1].action == "foreshadowing"
     assert ledger.resolved_cases[-1].setup_event_id == "node-setup"
     assert ledger.resolved_cases[-1].payoff_event_id == "node-payoff"
+
+
+def test_resolve_foreshadowing_case_requires_setup_event_for_threadless_case() -> None:
+    """2026-09-04 用于验证未挂线程案例确认伏笔必须给埋设事件，缺锚点拒绝、带锚点接受"""
+    service = _EventHistoryService(
+        trees=[_history_tree("tree-h", "node-h-root", "白芷承认精灵族身份")],
+        case_has_thread=False,
+    )
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+    case_number = _register_payoff_case(service, ledger)
+
+    with pytest.raises(
+        AnnotationInputError,
+        match="未关联伏笔线程.*setup_event_id.*close_case",
+    ):
+        _find_tool(tools, "resolve_foreshadowing_case").invoke(
+            {
+                "case_number": case_number,
+                "reason": "疑点强化",
+                "setup_status": "reinforced",
+            }
+        )
+    assert ledger.resolved_cases == []
+
+    _find_tool(tools, "search_event").invoke({"keyword": "白芷"})
+    resolved = json.loads(
+        _find_tool(tools, "resolve_foreshadowing_case").invoke(
+            {
+                "case_number": case_number,
+                "reason": "疑点被证实",
+                "setup_event_id": "node-h-root",
+                "setup_status": "reinforced",
+            }
+        )
+    )
+    assert resolved["accepted"] is True
+    assert ledger.resolved_cases[-1].action == "foreshadowing"
+    assert ledger.resolved_cases[-1].setup_event_id == "node-h-root"
+    # 未挂线程时 setup_summary 兜底为案例描述，确认信息不丢
+    assert ledger.resolved_cases[-1].setup_summary == "伏笔回收判断"
