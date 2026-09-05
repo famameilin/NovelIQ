@@ -1285,7 +1285,10 @@ def build_annotation_tools(
 
     @tool
     async def search_text(query: str) -> str:
-        """2026-08-30 用于一次返回有限正文且不暴露内部段落标识"""
+        """2026-08-30 用于一次返回有限正文且不暴露内部段落标识
+
+        查询支持多关键词（空格/标点分隔，任一命中即返回）与通配符
+        （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」或「赤羽_尾鸡」。"""
         normalized_query = _normalize_query(query, tool_name="search_text")
         if ledger.phase != "chunk_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_text")
@@ -1319,7 +1322,11 @@ def build_annotation_tools(
 
     @tool
     def search_event(keyword: str) -> str:
-        """2026-08-22 用于按关键词检索已完成章节的事件树并授权其 tree_id"""
+        """2026-08-22 用于按关键词检索已完成章节的事件树并授权其 tree_id
+
+        检索范围为树内任意节点的描述与参与者；查询支持多关键词
+        （空格/标点分隔，任一命中即返回）与通配符
+        （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」。"""
         normalized_query = _normalize_query(keyword, tool_name="search_event")
         if ledger.phase != "chunk_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_event")
@@ -1346,7 +1353,10 @@ def build_annotation_tools(
 
     @tool
     def search_pool(query: str) -> str:
-        """2026-08-07 用于返回临时案例编号和无 ID 伏笔语义"""
+        """2026-08-07 用于返回临时案例编号和无 ID 伏笔语义
+
+        查询支持多关键词（空格/标点分隔，任一命中即返回）与通配符
+        （% 匹配任意长度、_ 匹配单个字符）。"""
         if ledger.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_pool")
         normalized_query = _normalize_query(query, tool_name="search_pool")

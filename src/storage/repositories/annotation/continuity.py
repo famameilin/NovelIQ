@@ -8,7 +8,7 @@ import unicodedata
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import (
@@ -41,6 +41,7 @@ from src.storage.models import (
 )
 from src.storage.repositories.base import BaseRepository
 from src.text_search import TextSearchService, extract_query_terms
+from src.utils.text_utils import like_pattern, term_matches
 
 
 def normalize_text(value: str) -> str:
@@ -49,9 +50,9 @@ def normalize_text(value: str) -> str:
 
 
 def _text_matches(query: str, *values: str | None) -> bool:
-    """2026-08-05 用于判断 query 或拆分词项是否命中任一文本字段"""
+    """2026-08-05 用于判断 query 或拆分词项是否命中任一文本字段（词项支持 %/_ 通配符）"""
     haystack = "\n".join(normalize_text(value).lower() for value in values if value)
-    return any(term in haystack for term in extract_query_terms(query))
+    return any(term_matches(term, haystack) for term in extract_query_terms(query))
 
 
 def _match_event_anchor(
@@ -272,11 +273,29 @@ class DatabaseAnnotationQueryService:
     ) -> list[EventTreeHistoryResult]:
         """2026-08-30 用于按当前 Chapter.sequence 在 SQL 层检索严格前文事件树
 
-        只返回每棵树的主链根节点视图；cross_chapter 由该树的因果入边派生。
+        2026-09-03 召回面扩到树内全部节点的 description 与 participants：
+        任一节点命中即返回该树主链根节点视图；SQL 层 ILIKE 预过滤避免
+        长篇 run 的全量 Python 扫描。cross_chapter 由该树的因果入边派生。
+
+        2026-09-04 词项支持通配符：% 匹配任意长度、_ 匹配单字符；
+        多词项（空白/标点分隔）任一命中即算命中。
         """
         if limit <= 0:
             return []
-        rows = self.session.execute(
+        terms = extract_query_terms(query)
+        participant_text = cast(EventNode.participants, String)
+        if terms:
+            # 参与者是 JSONB，序列化后含实体名；ILIKE 走文本路径即可，命中行再由根视图归并
+            term_filters = [
+                or_(
+                    EventNode.description.ilike(like_pattern(term)),
+                    participant_text.ilike(like_pattern(term)),
+                )
+                for term in terms
+            ]
+        else:
+            term_filters = None
+        statement = (
             select(EventNode)
             .join(
                 Chapter,
@@ -287,7 +306,10 @@ class DatabaseAnnotationQueryService:
                 Chapter.sequence < self.current_chapter_sequence,
             )
             .order_by(EventNode.chapter_order.desc(), EventNode.event_id)
-        ).scalars()
+        )
+        if term_filters is not None:
+            statement = statement.where(or_(*term_filters))
+        rows = self.session.execute(statement).scalars().all()
         latest = {node.event_id: node for node in rows}
         edge_rows = list(
             self.session.execute(
@@ -304,17 +326,31 @@ class DatabaseAnnotationQueryService:
                 select(ForeshadowingThread.setup_event_id).where(ForeshadowingThread.run_id == self.run_id)
             ).scalars()
         )
+        if term_filters is not None:
+            hit_tree_ids = {node.tree_id for node in latest.values()}
+            root_rows = (
+                list(
+                    self.session.execute(
+                        select(EventNode).where(
+                            EventNode.run_id == self.run_id,
+                            EventNode.tree_id.in_(hit_tree_ids),
+                            EventNode.cause_role == "root",
+                        )
+                    ).scalars()
+                )
+                if hit_tree_ids
+                else []
+            )
+        else:
+            root_rows = [node for node in latest.values() if node.cause_role == "root"]
         matched: list[EventTreeHistoryResult] = []
         seen_trees: set[str] = set()
-        for node in latest.values():
-            if node.tree_id in seen_trees or node.cause_role != "root":
-                continue
-            participant_text = " ".join(
-                str(participant.get("entity") or participant.get("name") or "")
-                for participant in node.participants
-                if isinstance(participant, dict)
-            )
-            if not _text_matches(query, node.description, participant_text):
+        ordered_roots = sorted(
+            root_rows,
+            key=lambda node: (-node.chapter_order, node.event_id),
+        )
+        for node in ordered_roots:
+            if node.tree_id in seen_trees:
                 continue
             seen_trees.add(node.tree_id)
             node_edges = [
