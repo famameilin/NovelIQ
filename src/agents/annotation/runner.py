@@ -297,6 +297,10 @@ async def run_annotation_agent(
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise
     _close_read_session(read_session)
+    # 2026-09-04 单一写面：取出本子块累积的图域操作日志随结果返回，
+    # 由 workflow 合并进完成事务输入（失败路径已在上方 reset 清空）
+    if graph_state is not None:
+        result = result.model_copy(update=graph_state.drain_ops())
     recorder.finish_invocation(invocation_id, status="success")
     if stream is not None:
         await stream.output(f"章节 {chapter_label or chapter_id} 标注完成")

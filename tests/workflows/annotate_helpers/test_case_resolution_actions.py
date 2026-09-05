@@ -12,8 +12,6 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
-    BoundEntity,
-    BoundEntityDirectory,
     BoundEvent,
     BoundForeshadowing,
     ChunkMetricsInput,
@@ -37,22 +35,15 @@ def _annotation(
     *,
     chunk_id: int,
     text: str,
-    entity_names: list[str] | None = None,
     foreshadowing: BoundForeshadowing | None = None,
 ) -> BoundChapterAnnotation:
-    """2026-08-11 用于构造含实体目录或伏笔的章节标注
+    """2026-08-11 用于构造含伏笔的章节标注
 
     2026-08-18：伏笔需要绑定 setup 事件，因此当 foreshadowing 非 None 时
     自动构造一个锚定整个 chunk 文本的 BoundEvent；2026-08-22 下
     伏笔 setup_node_id 直接指向该事件节点 id。
+    2026-09-04 单一写面：实体不再进 payload，经 _result(entity_names=...) 走 entity_ops。
     """
-    entities = [
-        BoundEntity(
-            name=name,
-            entity_type="character",
-        )
-        for name in (entity_names or [])
-    ]
     events: list[BoundEvent] = []
     if foreshadowing is not None:
         # setup_node_id 直接指向本章事件节点 id
@@ -79,11 +70,9 @@ def _annotation(
                     emotional_valence="neutral",
                     narrative_function="铺垫",
                 ),
-                entities=BoundEntityDirectory(entities=entities),
                 character_observations=[],
                 dialogues=[],
                 events=events,
-                relations=[],
                 foreshadowings=[foreshadowing] if foreshadowing is not None else [],
             )
         ],
@@ -98,14 +87,29 @@ def _result(
     resolved_cases: list[ResolvedCase] | None = None,
     pushed_cases: list[PendingCase] | None = None,
     authorized_chunk_ids: list[int] | None = None,
+    entity_names: list[str] | None = None,
 ) -> AgentRunResult:
-    """2026-08-11 用于构造完成事务 AgentRunResult"""
+    """2026-08-11 用于构造完成事务 AgentRunResult
+
+    2026-09-04 单一写面：实体经 entity_ops 走操作日志（不再有 payload 图副本）。
+    """
     return AgentRunResult(
         run_id=run_id,
         chapter_id=chapter_id,
         annotation=annotation,
         resolved_cases=resolved_cases or [],
         pushed_cases=pushed_cases or [],
+        entity_ops=[
+            {
+                "name": name,
+                "entity_type": "character",
+                "tags": [],
+                "description": None,
+                "attributes": {},
+                "chapter_id": chapter_id,
+            }
+            for name in entity_names or []
+        ],
         audit=AgentRunAudit(
             allow_future_context=False,
             write_records=[],
@@ -157,7 +161,8 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -186,7 +191,8 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾霜自称顾老", entity_names=["顾霜"]),
+            annotation=_annotation(chunk_id=2, text="顾霜自称顾老"),
+            entity_names=["顾霜"],
             resolved_cases=[resolved],
             authorized_chunk_ids=[1, 2],
         ),
@@ -236,7 +242,8 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -296,7 +303,8 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -326,7 +334,8 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾霜自称顾老", entity_names=["顾霜"]),
+            annotation=_annotation(chunk_id=2, text="顾霜自称顾老"),
+            entity_names=["顾霜"],
             resolved_cases=[resolved],
             authorized_chunk_ids=[2],
         ),
@@ -354,7 +363,8 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现", entity_names=["顾霜", "顾老"]),
+            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -384,7 +394,8 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
             result=_result(
                 run_id=run_id,
                 chapter_id=2,
-                annotation=_annotation(chunk_id=2, text="顾霜自称顾老", entity_names=["顾霜"]),
+                annotation=_annotation(chunk_id=2, text="顾霜自称顾老"),
+                entity_names=["顾霜"],
                 resolved_cases=[resolved],
                 authorized_chunk_ids=[2],
             ),
@@ -405,7 +416,8 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜喝道", entity_names=["顾霜"]),
+            annotation=_annotation(chunk_id=1, text="顾霜喝道"),
+            entity_names=["顾霜"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -439,7 +451,8 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
             result=_result(
                 run_id=run_id,
                 chapter_id=2,
-                annotation=_annotation(chunk_id=2, text="顾霜喝道", entity_names=["顾霜"]),
+                annotation=_annotation(chunk_id=2, text="顾霜喝道"),
+                entity_names=["顾霜"],
                 resolved_cases=[resolved],
                 authorized_chunk_ids=[1, 2],
             ),
@@ -609,7 +622,6 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                     emotional_valence="neutral",
                     narrative_function="冲突",
                 ),
-                entities=BoundEntityDirectory(entities=[BoundEntity(name="顾霜", entity_type="character")]),
                 character_observations=[],
                 dialogues=[
                     BoundDialogue(
@@ -633,13 +645,12 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                         causal_event_refs=[],
                     )
                 ],
-                relations=[],
                 foreshadowings=[],
             )
         ],
     )
     complete_annotation_run(
-        result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
+        result=_result(run_id=run_id, chapter_id=1, annotation=annotation, entity_names=["顾霜"]),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()

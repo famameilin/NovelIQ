@@ -17,7 +17,6 @@ from src.agents.annotation.schema import (
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEntity,
-    BoundEntityDirectory,
     BoundEvent,
     BoundForeshadowing,
     BoundRelation,
@@ -402,14 +401,37 @@ def persist_chapter_annotation(
                     pivot_moment=chunk_id in (pivot_chunks or set()),
                     cliffhanger=chunk_id in (cliffhanger_chunks or set()),
                 ),
-                entities=BoundEntityDirectory.model_validate(directories[chunk_id]),
                 character_observations=observations_by_chunk[chunk_id],
                 dialogues=dialogues_by_chunk[chunk_id],
                 events=bound_events,
-                relations=relations_by_chunk[chunk_id],
                 foreshadowings=bound_foreshadowings,
             )
         )
+    # 2026-09-04 单一写面：实体/关系不再是 chunk 字段，改为派生 FactGraph 操作日志
+    # （在 chunk 循环之后收集，事件参与者登记的实体一并覆盖）
+    entity_ops: list[dict[str, Any]] = []
+    relation_assert_ops: list[dict[str, Any]] = []
+    for chunk_id, _chunk_text in chunk_text_by_id.items():
+        for entity in directories[chunk_id]["entities"]:
+            entity_ops.append(
+                {
+                    "name": entity.name,
+                    "entity_type": str(entity.entity_type),
+                    "tags": list(entity.tags or []),
+                    "description": entity.description,
+                    "attributes": dict(entity.attributes or {}),
+                    "chapter_id": chunk_id,
+                }
+            )
+        for relation in relations_by_chunk[chunk_id]:
+            relation_assert_ops.append(
+                {
+                    "from_entity": str(relation.from_entity),
+                    "to_entity": str(relation.to_entity),
+                    "relation_type": str(relation.relation_type),
+                    "chapter_id": chunk_id,
+                }
+            )
     annotation = BoundChapterAnnotation(
         chapter_summary=f"章节 {chapter_id} 测试摘要",
         chunks=chunks,
@@ -423,6 +445,8 @@ def persist_chapter_annotation(
         session=session,
         annotation=row,
         resolved_cases=resolved_cases or [],
+        entity_ops=entity_ops,
+        relation_assert_ops=relation_assert_ops,
         authorized_text_chapter_ids=set(chunk_text_by_id),
     )
     for chunk in annotation.chunks:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from sqlalchemy import select
 
@@ -11,11 +13,8 @@ from src.agents.annotation.schema import (
     BoundCharacterObservation,
     BoundChunkAnnotation,
     BoundDialogue,
-    BoundEntity,
-    BoundEntityDirectory,
     BoundEvent,
     BoundForeshadowing,
-    BoundRelation,
     ChunkMetricsInput,
     ResolvedCase,
 )
@@ -45,11 +44,14 @@ def _full_annotation(
     *,
     chunk_id: int = 1,
     event_node_id: str = "evt-persist-root",
-) -> BoundChapterAnnotation:
-    """2026-08-11 用于构造覆盖四类实体与全部领域事实的完整章节标注"""
+) -> tuple[BoundChapterAnnotation, list[dict[str, Any]], list[dict[str, Any]]]:
+    """2026-08-11 用于构造覆盖四类实体与全部领域事实的完整章节标注
+
+    2026-09-04 单一写面：同时返回从声明派生的 op log，供 persist_completion_graph 入参。
+    """
     candidates = extract_dialogue_candidates(chunk_id, text)
     dialogue_candidate = next(candidate for candidate in candidates if candidate.content == "住手")
-    return BoundChapterAnnotation(
+    annotation = BoundChapterAnnotation(
         chapter_summary="顾霜进入山门并受宗门庇护",
         chunks=[
             BoundChunkAnnotation(
@@ -60,28 +62,6 @@ def _full_annotation(
                     narrative_function="铺垫",
                     pivot_moment=False,
                     cliffhanger=False,
-                ),
-                entities=BoundEntityDirectory(
-                    entities=[
-                        BoundEntity(
-                            name="顾霜",
-                            entity_type="character",
-                        ),
-                        BoundEntity(
-                            name="山门",
-                            entity_type="location",
-                            description="青石山门",
-                        ),
-                        BoundEntity(
-                            name="玄剑",
-                            entity_type="item",
-                            tags=["宝剑"],
-                        ),
-                        BoundEntity(
-                            name="天衡宗",
-                            entity_type="organization",
-                        ),
-                    ]
                 ),
                 character_observations=[
                     BoundCharacterObservation(
@@ -117,15 +97,6 @@ def _full_annotation(
                         causal_event_refs=[],
                     )
                 ],
-                relations=[
-                    BoundRelation(
-                        from_entity="顾霜",
-                        to_entity="山门",
-                        relation_type="位于",
-                        directionality="directed",
-                        relation_semantics="ordinary",
-                    )
-                ],
                 foreshadowings=[
                     BoundForeshadowing(
                         description="天衡宗将庇护顾霜",
@@ -139,6 +110,49 @@ def _full_annotation(
             )
         ],
     )
+    entity_ops = [
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "tags": [],
+            "description": None,
+            "attributes": {},
+            "chapter_id": chunk_id,
+        },
+        {
+            "name": "山门",
+            "entity_type": "location",
+            "tags": [],
+            "description": "青石山门",
+            "attributes": {},
+            "chapter_id": chunk_id,
+        },
+        {
+            "name": "玄剑",
+            "entity_type": "item",
+            "tags": ["宝剑"],
+            "description": None,
+            "attributes": {},
+            "chapter_id": chunk_id,
+        },
+        {
+            "name": "天衡宗",
+            "entity_type": "organization",
+            "tags": [],
+            "description": None,
+            "attributes": {},
+            "chapter_id": chunk_id,
+        },
+    ]
+    relation_assert_ops = [
+        {
+            "from_entity": "顾霜",
+            "to_entity": "山门",
+            "relation_type": "位于",
+            "chapter_id": chunk_id,
+        }
+    ]
+    return annotation, entity_ops, relation_assert_ops
 
 
 def _persist(
@@ -149,12 +163,23 @@ def _persist(
     annotation: BoundChapterAnnotation | None = None,
     text: str | None = None,
     event_node_id: str = "evt-persist-root",
+    entity_ops: list[dict[str, Any]] | None = None,
+    relation_assert_ops: list[dict[str, Any]] | None = None,
 ):
     """2026-08-07 用于通过生产入口持久化测试章节标注"""
     if annotation is None:
         if text is None:
             raise ValueError("必须提供 annotation 或 text")
-        annotation = _full_annotation(text, chunk_id=chapter_id, event_node_id=event_node_id)
+        annotation, derived_entity_ops, derived_relation_assert_ops = _full_annotation(
+            text, chunk_id=chapter_id, event_node_id=event_node_id
+        )
+        entity_ops = derived_entity_ops if entity_ops is None else entity_ops
+        relation_assert_ops = (
+            derived_relation_assert_ops if relation_assert_ops is None else relation_assert_ops
+        )
+    else:
+        entity_ops = entity_ops or []
+        relation_assert_ops = relation_assert_ops or []
     row = ChapterAnnotationRepository(db_session).add_annotation(
         run_id=run_id,
         chapter_id=chapter_id,
@@ -164,6 +189,8 @@ def _persist(
         db_session,
         annotation=row,
         resolved_cases=[],
+        entity_ops=entity_ops,
+        relation_assert_ops=relation_assert_ops,
         authorized_text_chapter_ids={chunk.chunk_id for chunk in annotation.chunks},
     )
     for chunk in annotation.chunks:
@@ -577,10 +604,16 @@ def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
         texts=[text],
         title="未解析端点",
     )
-    annotation = _full_annotation(text, event_node_id="evt-flush-check")
-    annotation.chunks[0].entities.entities[0].name = "无名客"
+    annotation, entity_ops, relation_assert_ops = _full_annotation(text, event_node_id="evt-flush-check")
+    entity_ops[0]["name"] = "无名客"
     with pytest.raises(ValueError, match="事实端点实体未被系统解析"):
-        _persist(db_session, run_id=run_id, annotation=annotation)
+        _persist(
+            db_session,
+            run_id=run_id,
+            annotation=annotation,
+            entity_ops=entity_ops,
+            relation_assert_ops=relation_assert_ops,
+        )
 
 
 def test_persist_completion_graph_only_flushes_caller_transaction(db_session) -> None:

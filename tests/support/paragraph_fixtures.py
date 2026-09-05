@@ -12,7 +12,6 @@ import uuid
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
-    BoundEntityDirectory,
     ChunkMetricsInput,
     EmotionalValence,
     NarrativeFunction,
@@ -205,11 +204,9 @@ def insert_chapter_annotation(
                     pivot_moment=pivot_moment,
                     cliffhanger=cliffhanger,
                 ),
-                entities=BoundEntityDirectory.model_validate({"entities": []}),
                 character_observations=[],
                 dialogues=[],
                 events=[],
-                relations=[],
                 foreshadowings=[],
             )
         ],

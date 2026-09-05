@@ -791,16 +791,20 @@ class BoundForeshadowing(StrictModel):
 
 
 class BoundChunkAnnotation(StrictModel):
-    """2026-08-07 用于保存系统完成绑定的单个 chunk 正式标注"""
+    """2026-08-07 用于保存系统完成绑定的单个 chunk 正式标注
+
+    2026-09-04 单一写面：图域（entities/relations）不再是本模型的字段——
+    实体与关系的运行时真相源是 FactGraph，持久化从其操作日志
+    （entity_ops / relation_assert_ops / relation_change_ops）派生。
+    resolve_fact_case 只更新 FactGraph，resolved_cases 不再承载 fact 动作。
+    """
 
     # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 合并为真实 chunk
     chunk_id: int
     metrics: ChunkMetricsInput
-    entities: BoundEntityDirectory
     character_observations: list[BoundCharacterObservation]
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
-    relations: list[BoundRelation]
     foreshadowings: list[BoundForeshadowing]
 
 
@@ -1021,13 +1025,21 @@ class AgentRunAudit(StrictModel):
 
 
 class AgentRunResult(StrictModel):
-    """2026-08-07 用于承载章节 Agent 完成后的正式系统结果"""
+    """2026-08-07 用于承载章节 Agent 完成后的正式系统结果
+
+    2026-09-04 单一写面：图域（实体/关系/案例关系变更）的运行时真相源是 FactGraph，
+    本结果携带子块 drain 出的三份操作日志，持久化据此派生实体行、关系 assert 事实与
+    案例关系变更事实；resolved_cases 只保留非图裁决（dialogue/foreshadowing/close）。
+    """
 
     run_id: str
     chapter_id: int = Field(gt=0)
     annotation: BoundChapterAnnotation
     resolved_cases: list[ResolvedCase]
     pushed_cases: list[PendingCase] = Field(default_factory=list)
+    entity_ops: list[dict[str, Any]] = Field(default_factory=list)
+    relation_assert_ops: list[dict[str, Any]] = Field(default_factory=list)
+    relation_change_ops: list[dict[str, Any]] = Field(default_factory=list)
     audit: AgentRunAudit
 
 
