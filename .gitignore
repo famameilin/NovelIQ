@@ -136,9 +136,6 @@ celerybeat.pid
 # mkdocs documentation
 /site
 
-# mypy
-.mypy_cache/
-
 # Pyre type checker
 .pyre/
 
@@ -251,4 +248,7 @@ data/viking/
 
 # opencode 本地 MCP 配置
 opencode.json
+.opencode/
+.uv-cache/
+.uv-python/
 
