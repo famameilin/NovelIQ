@@ -166,7 +166,15 @@ async def run_linguistic(
             )
 
             # 固定短语匹配：词表命中 + 四字候选（依赖 LTP 词法特征行）
+            # 2026-09-05 C 批：draft 词表（body_reaction/colloquial 扩表候选）
+            # 同扫描，命中行 is_metric_hit=false——审定门，不计入正式密度
             phrase_rows: list[dict] = []
+            draft_terms: dict[str, list[str]] = {
+                LEXICON_FILES["body_reaction_draft"]: registry.get(LEXICON_FILES["body_reaction_draft"]),
+                LEXICON_FILES["colloquial_expansion_draft"]: registry.get(
+                    LEXICON_FILES["colloquial_expansion_draft"]
+                ),
+            }
             for row in batch:
                 hits = match_fixed_phrases(
                     row.text,
@@ -174,6 +182,16 @@ async def run_linguistic(
                     lexicon_key=LEXICON_FILES["fixed_phrases"],
                     metric_enabled=False,
                 )
+                for draft_key, draft_list in draft_terms.items():
+                    hits.extend(
+                        match_fixed_phrases(
+                            row.text,
+                            draft_list,
+                            lexicon_key=draft_key,
+                            metric_enabled=False,
+                            four_char_candidate_enabled=False,
+                        )
+                    )
                 for hit in hits:
                     phrase_rows.append(
                         {

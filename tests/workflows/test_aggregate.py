@@ -70,6 +70,7 @@ def _build_paragraph_rows(
                 sensory_hit_count=0,
                 imagery_hit_count=1,
                 metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
                 function_word_counts={},
                 semantic_category_counts={},
                 surface_tension_z=0.0,

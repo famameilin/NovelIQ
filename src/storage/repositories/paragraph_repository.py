@@ -67,6 +67,8 @@ class ParagraphMetricRow:
     sensory_hit_count: int
     imagery_hit_count: int
     metaphor_sentence_count: int
+    # 2026-09-05 C 批：身体反应转喻命中（独立计数，不进正负极性）
+    body_reaction_hit_count: int
     function_word_counts: dict[str, int]
     semantic_category_counts: dict[str, int]
     surface_tension_z: float | None = None
@@ -319,6 +321,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 "sensory_hit_count": row.sensory_hit_count,
                 "imagery_hit_count": row.imagery_hit_count,
                 "metaphor_sentence_count": row.metaphor_sentence_count,
+                "body_reaction_hit_count": row.body_reaction_hit_count,
                 "function_word_counts": row.function_word_counts,
                 "semantic_category_counts": row.semantic_category_counts,
                 "surface_tension_z": row.surface_tension_z,
@@ -349,6 +352,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 ParagraphMetric.sensory_hit_count,
                 ParagraphMetric.imagery_hit_count,
                 ParagraphMetric.metaphor_sentence_count,
+                ParagraphMetric.body_reaction_hit_count,
                 ParagraphMetric.surface_tension_z,
                 ParagraphMetric.surface_tension,
             )
