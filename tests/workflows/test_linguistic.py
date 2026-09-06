@@ -36,7 +36,7 @@ class FakeLtpSession:
         ner: list[list[tuple[str, str, int, int]]] = []
         dep: list[dict[str, list]] = []
         for sentence in sentences:
-            words = list(sentence)
+            words = list(self._WORDS) if "高兴" in sentence else list(sentence)
             cws.append(words)
             pos.append(["n" if w != "，" and w != "。" else "wp" for w in words])
             dep.append({"head": [0] * len(words), "label": ["HED"] * len(words)})
@@ -208,3 +208,122 @@ class TestRunLinguistic:
         paragraphs, features = await run_linguistic(empty_run, self.db_session)
         assert paragraphs == 0
         assert features == 0
+
+
+class FakeSdpLtpSession:
+    """带 sdp 输出的 Fake：对"高兴"谓词注入 mNEG 弧（模型习得否定辖域）"""
+
+    _WORDS = ("他", "很", "高兴")
+
+    def pipeline(self, sentences, tasks):
+        cws: list[list[str]] = []
+        pos: list[list[str]] = []
+        ner: list[list[tuple[str, str, int, int]]] = []
+        dep: list[dict[str, list]] = []
+        sdp: list[dict[str, list]] = []
+        for sentence in sentences:
+            words = list(self._WORDS) if "高兴" in sentence else list(sentence)
+            cws.append(words)
+            pos.append(["n"] * len(words))
+            dep.append({"head": [0] * len(words), "label": ["HED"] * len(words)})
+            ner.append([])
+            heads: list[int] = []
+            dependents: list[int] = []
+            labels: list[str] = []
+            for idx, word in enumerate(words, start=1):
+                if word == "高兴":
+                    # mNEG 弧：高兴(head=3) ←句首词元——fake 用句首词元充当否定词
+                    heads.append(idx)
+                    dependents.append(1)
+                    labels.append("mNEG")
+            sdp.append({"head": heads, "dependent": dependents, "label": labels})
+        return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep, sdp=sdp)
+
+
+class TestMnegCorrection:
+    """2026-09-05 B 批：mNEG 接管词典否定翻转——paragraph_metrics 回写 + 曲线重算"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, db_session, monkeypatch):
+        self.db_session = db_session
+        self.novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(self.novel_id, session=db_session)
+        run_repo = RunRepository(db_session)
+        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Mneg Novel")
+
+        text = "他很高兴"
+        chapters = [Chunk(index=0, start=0, end=len(text), text=text, chapter_id=1)]
+        ChapterRepository(db_session).insert_chapter_texts(self.run_id, chapters)
+        spans = [replace(span, token_count=4) for span in split_chunk_paragraphs(chapters)]
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_repo.insert_paragraphs(self.run_id, spans)
+
+        from src.linguistic import ltp_client
+
+        monkeypatch.setattr(ltp_client.LtpSession, "get_instance", lambda: FakeSdpLtpSession())
+        from src.config import settings as _settings
+
+        monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
+
+        # 预置窗口规则口径的情绪计数（模拟 preprocess 产物：未翻转 → 正 1 负 0）
+        from src.storage.repositories.paragraph_repository import ParagraphMetricRow
+
+        paragraph_repo.insert_paragraph_metrics(
+            self.run_id,
+            [
+                ParagraphMetricRow(
+                    paragraph_id=spans[0].paragraph_id,
+                    token_count=4,
+                    char_count=spans[0].char_count,
+                    sentence_count=1,
+                    sentence_char_sum=4.0,
+                    sentence_char_sum_sq=16.0,
+                    positive_weight_sum=1.0,
+                    negative_weight_sum=0.0,
+                    fight_weight_sum=0.0,
+                    exclaim_count=0,
+                    question_count=0,
+                    pause_count=0,
+                    dialogue_char_count=0,
+                    sensory_hit_count=0,
+                    imagery_hit_count=0,
+                    metaphor_sentence_count=0,
+                    function_word_counts={},
+                    semantic_category_counts={},
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio()
+    async def test_mneg_flip_rewrites_metrics_and_stores_comparison(self) -> None:
+        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        assert (paragraphs, features) == (1, 1)
+
+        metric_row = self.db_session.execute(
+            text(
+                "SELECT positive_weight_sum, negative_weight_sum FROM paragraph_metrics "
+                "WHERE run_id = :run_id AND paragraph_id = 0"
+            ),
+            {"run_id": self.run_id},
+        ).one()
+        # sdp mNEG 把"高兴"翻转为负：正 1→0、负 0→1
+        assert float(metric_row.positive_weight_sum) == 0.0
+        assert float(metric_row.negative_weight_sum) == 1.0
+
+        feature = LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)[0]
+        assert float(feature.lexicon_pos_count) == 1.0
+        assert float(feature.mneg_neg_count) == 1.0
+        assert feature.emotion_event_count == 1
+        event = feature.emotion_events[0]
+        assert event["predicate"] == "高兴"
+        assert event["negated"] is True
+        assert event["holder"] is None
+
+        # 曲线按修正分子重算：net_density = (0 - 1) / 4
+        curve_row = self.db_session.execute(
+            text(
+                "SELECT net_density FROM paragraph_curves WHERE run_id = :run_id AND paragraph_id = 0"
+            ),
+            {"run_id": self.run_id},
+        ).one()
+        assert float(curve_row.net_density) == -0.25

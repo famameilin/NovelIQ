@@ -1,11 +1,15 @@
 """语言结构基础数据阶段（《分析能力扩展路线图》§3.1 B/C 赛道）
 
 执行顺序与落库契约：
-1. LTP 词法/句法/实体：analyze_paragraph_batch → paragraph_linguistic_features
-   （每段一行）+ paragraph_entities（实体候选，非图谱事实）
+1. LTP 词法/句法/实体/语义：analyze_paragraph_batch（cws/pos/ner/dep/sdp）→
+   paragraph_linguistic_features（每段一行）+ paragraph_entities（实体候选，非图谱事实）
 2. 固定短语：fixed_phrases.txt 词表匹配 → paragraph_phrase_hits
    （draft 词表不计入正式密度，is_metric_hit=false）
-3. Word2Vec（可开关）：预训练词向量初始化 + 本书语料微调（warm-start）→
+3. 情绪事件与 mNEG 修正（2026-09-05 B 批，2026-09-05 ltp.enabled 时生效）：
+   情绪词典只做谓词极性候选标记，持有者/对象/否定/程度取 sdp 的 AGT/DATV/
+   mNEG/mDEPD；mNEG 接管词典否定翻转后回写 paragraph_metrics 情绪计数并
+   整卷重算段落曲线（对照计数留痕在 paragraph_linguistic_features）
+4. Word2Vec（可开关）：预训练词向量初始化 + 本书语料微调（warm-start）→
    word2vec_model_runs 契约 + paragraph_pos_embeddings（按词性聚合向量）
 
 同 run 重跑先清后插（仓储层），不允许新旧结果混合；LTP 关闭时词法
@@ -17,6 +21,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import cast
 
 from gensim.models import KeyedVectors, Word2Vec
 from loguru import logger
@@ -60,10 +65,28 @@ async def run_linguistic(
 
     if ltp_settings.enabled:
         from src.lexicons import LexiconRegistry
-        from src.linguistic import analyze_paragraph_batch, match_fixed_phrases
+        from src.lexicons.tables import NEGATIVE_TERMS, POSITIVE_TERMS
+        from src.linguistic import (
+            analyze_paragraph_batch,
+            extract_emotion_events,
+            match_fixed_phrases,
+            mneg_corrected_counts,
+        )
 
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
+
+        # 2026-09-05 B 批：词典情绪计数对照基线（命中集与 preprocess 同源，
+        # 读 paragraph_metrics 现值作为窗口规则口径）
+        lexicon_counts = {
+            int(metric_row.paragraph_id): (
+                float(metric_row.positive_weight_sum or 0.0),
+                float(metric_row.negative_weight_sum or 0.0),
+            )
+            for metric_row in paragraph_repo.fetch_paragraph_metrics(run_id)
+        }
+        # mNEG 修正回写清单（paragraph_id → 修正后计数）
+        mneg_corrections: list[dict[str, float | int]] = []
 
         last_id: int | None = None
         first_batch = True
@@ -84,6 +107,24 @@ async def run_linguistic(
             entity_rows: list[dict] = []
             for row, result in zip(batch, results, strict=True):
                 data = result.to_dict()
+                # 2026-09-05 B 批：词典极性候选标记 × sdp 结构 → 情绪事件 + mNEG 修正计数
+                events = extract_emotion_events(result, POSITIVE_TERMS, NEGATIVE_TERMS)
+                mneg_pos, mneg_neg = mneg_corrected_counts(
+                    row.text,
+                    result.tokens,
+                    result.sdp_arcs,
+                    POSITIVE_TERMS,
+                    NEGATIVE_TERMS,
+                )
+                lexicon_pos, lexicon_neg = lexicon_counts.get(int(row.paragraph_id), (0.0, 0.0))
+                data["emotion_events"] = [event.to_dict() for event in events]
+                data["emotion_event_count"] = len(events)
+                data["emotion_pos_event_count"] = sum(1 for event in events if event.polarity == "positive")
+                data["emotion_neg_event_count"] = sum(1 for event in events if event.polarity == "negative")
+                data["lexicon_pos_count"] = lexicon_pos
+                data["lexicon_neg_count"] = lexicon_neg
+                data["mneg_pos_count"] = mneg_pos
+                data["mneg_neg_count"] = mneg_neg
                 data.update(
                     {
                         "run_id": run_id,
@@ -91,6 +132,13 @@ async def run_linguistic(
                     }
                 )
                 feature_rows.append(data)
+                mneg_corrections.append(
+                    {
+                        "paragraph_id": int(row.paragraph_id),
+                        "mneg_pos": mneg_pos,
+                        "mneg_neg": mneg_neg,
+                    }
+                )
                 for entity in result.entities:
                     entity_rows.append(
                         {
@@ -148,6 +196,12 @@ async def run_linguistic(
             logger.warning(f"no paragraphs found for run_id={run_id}")
             return 0, 0
         logger.info(f"LTP 全库完成：段落={total_paragraphs} 词法特征段落={total_feature_paragraphs}")
+
+        # 2026-09-05 B 批：mNEG 接管词典否定翻转——回写 paragraph_metrics 情绪
+        # 计数并按新分子整卷重算段落曲线（聚合/曲线/零信号占比随之切换口径）
+        corrected = _apply_mneg_correction(session, run_id, paragraph_repo, mneg_corrections)
+        if corrected:
+            logger.info(f"mNEG 情绪修正回写：{corrected} 段（sdp 否定辖域替代窗口规则），段落曲线已重算")
     else:
         logger.info("linguistic.ltp.enabled=false，跳过词法/句法/实体与固定短语")
 
@@ -191,6 +245,60 @@ async def run_linguistic(
             StreamEvent(action="complete", stage="linguistic", current=1, total=1, percent=100.0, sub_percent=100.0)
         )
     return total_paragraphs, total_feature_paragraphs
+
+
+def _apply_mneg_correction(
+    session: Session,
+    run_id: str,
+    paragraph_repo: ParagraphRepository,
+    corrections: list[dict[str, float | int]],
+) -> int:
+    """2026-09-05 B 批：mNEG 情绪修正回写（sdp 否定辖域接管窗口规则）
+
+    命中集与 preprocess 完全一致（同一 get_emotion_spans 短语匹配），唯一差异
+    是翻转判定由 sdp mNEG 决定；回写 paragraph_metrics 两列后按新分子整卷重算
+    段落曲线（compute_paragraph_curves 与 preprocess 同一函数，LOWESS 参数同源），
+    聚合层 emotion_avg / lexicon_zero_hit_share 与前端曲线随之切换口径。
+    """
+    if not corrections:
+        return 0
+
+    from sqlalchemy import bindparam, update
+    from sqlalchemy.sql.schema import Table as SaTable
+
+    from src.storage.models import ParagraphMetric
+    from src.workflows.paragraph_curves import compute_paragraph_curves
+
+    # Core 表对象（绕开 ORM 按主键批量更新拦截）；synchronize_session=False 同理
+    metric_table = cast(SaTable, ParagraphMetric.__table__)
+    statement = (
+        update(metric_table)
+        .where(
+            metric_table.c.run_id == bindparam("b_run_id"),
+            metric_table.c.paragraph_id == bindparam("b_paragraph_id"),
+        )
+        .values(
+            positive_weight_sum=bindparam("b_pos"),
+            negative_weight_sum=bindparam("b_neg"),
+        )
+    )
+    params = [
+        {
+            "b_run_id": run_id,
+            "b_paragraph_id": row["paragraph_id"],
+            "b_pos": float(row["mneg_pos"]),
+            "b_neg": float(row["mneg_neg"]),
+        }
+        for row in corrections
+    ]
+    session.execute(statement, params, execution_options={"synchronize_session": False})
+
+    paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
+    metric_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
+    total_chars = sum(int(row.char_count or 0) for row in paragraph_rows)
+    curve_rows = compute_paragraph_curves(paragraph_rows, metric_rows, total_chars)
+    paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
+    return len(params)
 
 
 def _train_and_build(

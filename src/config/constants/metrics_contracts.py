@@ -514,6 +514,60 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         ],
     },
     {
+        'id': 'linguistic_emotion_events',
+        'concept': '文风基础数据',
+        'problem': '谁对谁产生情绪、被否定/程度修饰的结构化情绪事件（与词典情绪对应）',
+        'fields': [
+            'emotion_event_count',
+            'emotion_pos_event_count',
+            'emotion_neg_event_count',
+            'emotion_negated_event_count',
+            'emotion_event_density',
+            'emotion_event_holders',
+            'emotion_top_predicates',
+        ],
+        'endpoint': '/linguistic/features',
+        'category': 'B',
+        'objective_subjective': 'objective',
+        'authoritative': True,
+        'null_semantics': 'sdp 未运行或无命中事件时为 0/空列表，density 为 null（不伪造）',
+        'computation_chain': (
+            '情绪词典只做谓词极性候选标记 → LTP sdp AGT/DATV/mNEG/mDEPD 提供'
+            '持有者/对象/否定/程度 → 词典命中谓词展开为事件（B 类本地模型判定）'
+        ),
+        'invariants': [
+            '事件数 = 正面 + 负面事件数（守恒）',
+            '持有者/对象/否定/程度全部来自 sdp 模型判定，词典不参与结构判定',
+        ],
+    },
+    {
+        'id': 'linguistic_mneg_correction',
+        'concept': '文风基础数据',
+        'problem': '词典否定翻转的窗口规则误差（模型习得否定辖域修正与对照）',
+        'fields': [
+            'lexicon_pos_count',
+            'lexicon_neg_count',
+            'mneg_pos_count',
+            'mneg_neg_count',
+            'lexicon_net',
+            'mneg_net',
+            'mneg_net_delta',
+        ],
+        'endpoint': '/linguistic/features',
+        'category': 'A',
+        'objective_subjective': 'objective',
+        'authoritative': True,
+        'null_semantics': '语言阶段未运行时为 null；命中集与 paragraph_metrics 同源',
+        'computation_chain': (
+            '同一 get_emotion_spans 命中集 → 翻转判定由 sdp mNEG（模型习得辖域）'
+            '替代 negation.py 窗口规则 → 回写 paragraph_metrics 并重算段落曲线'
+        ),
+        'invariants': [
+            'lexicon_* 与 mneg_* 命中集一致，差异仅来自翻转判定',
+            'ltp.enabled=false 时不回写（paragraph_metrics 维持窗口规则口径）',
+        ],
+    },
+    {
         'id': 'linguistic_phrase_density',
         'concept': '固定短语',
         'problem': '成语/惯用语密度（典雅典/口语/武侠风格信号）',

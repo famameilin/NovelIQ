@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclasses_field
 from pathlib import Path
 
 from loguru import logger
@@ -22,6 +23,7 @@ from src.utils.text_utils import split_sentences
 from .schema import (
     LtpDependencyArc,
     LtpEntityCandidate,
+    LtpSdpArc,
     LtpToken,
     ParagraphLinguisticResult,
 )
@@ -75,12 +77,17 @@ _SENTENCE_PATTERN_KEYS = ("short", "medium", "long", "compound", "parallel_candi
 
 @dataclass(frozen=True)
 class LtpPipelineOutput:
-    """LTP pipeline 原始输出（mock 测试面）"""
+    """LTP pipeline 原始输出（mock 测试面）
+
+    2026-09-05 B 批：新增 sdp（语义依存，逐句 dict {'head','dependent','label'}）；
+    旧构造（无 sdp）按空列表处理，sdp 未运行时情绪事件为空。
+    """
 
     cws: list[list[str]]
     pos: list[list[str]]
     ner: list[list[tuple[str, str, int, int]]]
     dep: list[dict[str, list]]
+    sdp: list[dict[str, list]] = dataclasses_field(default_factory=list)
 
 
 class LtpSession:
@@ -128,6 +135,7 @@ class LtpSession:
             pos=out["pos"],
             ner=out["ner"],
             dep=out["dep"],
+            sdp=out.get("sdp", []),
         )
 
 
@@ -246,6 +254,7 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
     tokens: list[LtpToken] = []
     flat_pos: list[str] = []
     arcs: list[LtpDependencyArc] = []
+    sdp_arcs: list[LtpSdpArc] = []
     entities: list[LtpEntityCandidate] = []
 
     text_pos = 0
@@ -303,6 +312,25 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
             token_index += 1
         text_pos = sent_start + len(sentence)
 
+        # 2026-09-05 B 批：sdp 语义弧（句内坐标 → 段内全局 token_index，与 dep 同规则）
+        sent_sdp = output.sdp[sent_idx] if sent_idx < len(output.sdp) else None
+        if sent_sdp:
+            sdp_heads = sent_sdp.get("head") or []
+            sdp_dependents = sent_sdp.get("dependent") or []
+            for label, head_local, dependent_local in zip(
+                sent_sdp.get("label") or [], sdp_heads, sdp_dependents, strict=False
+            ):
+                head_global = int(head_local)
+                if head_global > 0:
+                    head_global += sent_token_start - 1
+                sdp_arcs.append(
+                    LtpSdpArc(
+                        head_index=head_global,
+                        dependent_index=int(dependent_local) + sent_token_start - 1,
+                        label=str(label),
+                    )
+                )
+
         # NER 词元索引 → 字符区间（该句词元起点 = sent_start + 词元前缀字符和）
         for entity_type, surface, start_idx, _end_idx in output.ner[sent_idx]:
             entity_start = sent_start + sum(len(w) for w in words[:start_idx])
@@ -344,6 +372,7 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
         dependency_depth_max=depth_max,
         dependency_relation_counts=relation_counts,
         entities=entities,
+        sdp_arcs=sdp_arcs,
     )
 
 
@@ -358,6 +387,6 @@ def analyze_paragraph_batch(texts: Sequence[str]) -> list[ParagraphLinguisticRes
                 analyze_paragraph(text, LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[]))
             )
             continue
-        output = session.pipeline(sentences, tasks=("cws", "pos", "ner", "dep"))
+        output = session.pipeline(sentences, tasks=("cws", "pos", "ner", "dep", "sdp"))
         results.append(analyze_paragraph(text, output))
     return results

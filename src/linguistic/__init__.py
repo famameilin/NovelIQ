@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from .emotion_events import EmotionEvent, extract_emotion_events, mneg_corrected_counts
 from .ltp_client import LtpSession, analyze_paragraph, analyze_paragraph_batch
 from .phrase_matcher import PhraseMatch, match_fixed_phrases
 from .schema import (
     LtpDependencyArc,
     LtpEntityCandidate,
+    LtpSdpArc,
     LtpToken,
     ParagraphLinguisticResult,
 )
@@ -22,8 +24,10 @@ from .word2vec import (
 )
 
 __all__ = [
+    "EmotionEvent",
     "LtpDependencyArc",
     "LtpEntityCandidate",
+    "LtpSdpArc",
     "LtpSession",
     "LtpToken",
     "ParagraphLinguisticResult",
@@ -33,8 +37,10 @@ __all__ = [
     "analyze_paragraph",
     "analyze_paragraph_batch",
     "build_pos_embeddings",
+    "extract_emotion_events",
     "load_shared_pretrained_vectors",
     "match_fixed_phrases",
+    "mneg_corrected_counts",
     "resolve_shared_pretrained_path",
     "reset_pretrained_cache",
     "train_book_model",

@@ -625,6 +625,23 @@ class TopicEmotionResponse(BaseModel):
     unavailable_reason: str | None = None
 
 
+class EmotionEventHolderCount(BaseModel):
+    """情绪事件持有者计数（2026-09-05 B 批，sdp AGT）"""
+
+    holder: str
+    event_count: int
+    positive_count: int
+    negative_count: int
+
+
+class EmotionEventPredicateCount(BaseModel):
+    """情绪事件谓词计数（2026-09-05 B 批）"""
+
+    predicate: str
+    polarity: str
+    event_count: int
+
+
 class LinguisticGroupStats(BaseModel):
     """书/章聚合的守恒比例与充分统计量（§5.11）；语言阶段未运行时字段为空"""
 
@@ -637,6 +654,15 @@ class LinguisticGroupStats(BaseModel):
     max_dependency_depth: int | None = None
     dependency_relation_ratios: dict[str, float] | None = None
     dependency_root_count: int | None = None
+    # 2026-09-05 B 批：LTP sdp 情绪事件与 mNEG 修正对照（可加计数，比例查询时算）
+    emotion_event_count: int | None = None
+    emotion_pos_event_count: int | None = None
+    emotion_neg_event_count: int | None = None
+    emotion_negated_event_count: int | None = None
+    lexicon_pos_count: float | None = None
+    lexicon_neg_count: float | None = None
+    mneg_pos_count: float | None = None
+    mneg_neg_count: float | None = None
 
 
 class ChapterLinguisticStats(LinguisticGroupStats):
@@ -650,6 +676,13 @@ class LinguisticFeaturesResponse(LinguisticGroupStats):
     paragraph_count: int = 0
     chapters: list[ChapterLinguisticStats] = Field(default_factory=list)
     unavailable_reason: str | None = None
+    # 2026-09-05 B 批：书级情绪事件明细聚合（人物 × 事件计数等）
+    emotion_event_density: float | None = None
+    emotion_event_holders: list[EmotionEventHolderCount] = Field(default_factory=list)
+    emotion_top_predicates: list[EmotionEventPredicateCount] = Field(default_factory=list)
+    mneg_net_delta: float | None = None
+    lexicon_net: float | None = None
+    mneg_net: float | None = None
 
 
 class EntityCandidate(BaseModel):

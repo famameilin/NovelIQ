@@ -163,3 +163,48 @@ def test_ltp_session_requires_local_model_dir(monkeypatch) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestSdpArcParsing:
+    """2026-09-05 B 批：sdp 语义弧解析（句内坐标 → 段内全局 token_index）"""
+
+    def test_sdp_arcs_parsed_with_global_coordinates(self) -> None:
+        # 单句：pred(1) 带 AGT→施事(2)，mNEG→不(3)
+        output = LtpPipelineOutput(
+            cws=[["生气", "贺伯安", "不"]],
+            pos=[["v", "nh", "d"]],
+            ner=[[]],
+            dep=[{"head": [0, 1, 1], "label": ["HED", "SBV", "ADV"]}],
+            sdp=[{"head": [1, 1], "dependent": [2, 3], "label": ["AGT", "mNEG"]}],
+        )
+        result = analyze_paragraph("生气的贺伯安不", output)
+        assert [(a.head_index, a.dependent_index, a.label) for a in result.sdp_arcs] == [
+            (1, 2, "AGT"),
+            (1, 3, "mNEG"),
+        ]
+
+    def test_sdp_arcs_second_sentence_offsets(self) -> None:
+        """双句段：第二句 sdp 坐标必须加句起始偏移"""
+        output = LtpPipelineOutput(
+            cws=[["他", "走", "了", "。"], ["担心", "安危"]],
+            pos=[["r", "v", "u", "wp"], ["v", "n"]],
+            ner=[[], []],
+            dep=[
+                {"head": [2, 0, 2, 2], "label": ["SBV", "HED", "RAD", "WP"]},
+                {"head": [0, 1], "label": ["HED", "VOB"]},
+            ],
+            sdp=[[], {"head": [1], "dependent": [2], "label": ["DATV"]}],
+        )
+        result = analyze_paragraph("他走了。担心安危", output)
+        # 第二句 token_index 5-6：head=1（担心）→ 全局 5，dependent=2（安危）→ 全局 6
+        assert [(a.head_index, a.dependent_index, a.label) for a in result.sdp_arcs] == [(5, 6, "DATV")]
+
+    def test_missing_sdp_output_defaults_to_empty(self) -> None:
+        """旧构造（无 sdp 键）不报错，弧为空"""
+        output = LtpPipelineOutput(
+            cws=[["他", "走"]],
+            pos=[["r", "v"]],
+            ner=[[]],
+            dep=[{"head": [2, 0], "label": ["SBV", "HED"]}],
+        )
+        result = analyze_paragraph("他走", output)
+        assert result.sdp_arcs == []
