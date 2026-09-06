@@ -160,6 +160,8 @@ class AnnotationToolLedger:
     authorized_text_paragraph_ids: set[int] = field(default_factory=set)
     # 2026-08-12 最近一次 write_dialogues 未提交候选序号（系统默认按 not_dialogue 处理）
     dialogue_missing_indexes: list[int] = field(default_factory=list)
+    # 2026-09-05 冻结时系统确定性覆盖告警（仅留痕不阻断），随 chunk 持久化
+    coverage_warnings: list[str] = field(default_factory=list)
     annotation: BoundChapterAnnotation | None = None
     errors: list[str] = field(default_factory=list)
     search_log: list[dict[str, Any]] = field(default_factory=list)
@@ -873,6 +875,25 @@ class AnnotationToolLedger:
             foreshadowings=list(self.bound_payloads.get("foreshadowings") or []),
         )
 
+    def _dialogue_coverage_warnings(self) -> list[str]:
+        """2026-09-05 用于在冻结前确定性登记对话候选覆盖缺口（仅告警不阻断冻结）
+
+        空载荷回执（write_dialogues([])）同样算已写领域，但候选检出数与载荷的
+        差值属于静默判定，这里把最终态缺口随 chunk 留痕，供报告附录 B 展示。
+        """
+        candidates = len(self.dialogue_candidates)
+        if candidates == 0:
+            return []
+        payload = self.domain_payloads.get("dialogues")
+        if not payload:
+            return [f"对话覆盖: 检出 {candidates} 条系统对话候选但 write_dialogues 未提交任何判定"]
+        if self.dialogue_missing_indexes:
+            return [
+                f"对话覆盖: {len(self.dialogue_missing_indexes)} 条候选未提交判定"
+                f"（序号 {self.dialogue_missing_indexes}），按 not_dialogue 默认处理"
+            ]
+        return []
+
     def complete_active_chunk(self) -> BoundChunkAnnotation:
         """2026-08-30 用于检查六领域回执与 ready_chunk 后冻结当前 chunk"""
         if self.phase != "chunk_open":
@@ -882,7 +903,8 @@ class AnnotationToolLedger:
             raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
         if self.ready_chunk is None:
             raise AnnotationInvariantError("六个领域均已写入但 ready_chunk 缺失，系统不变量被破坏")
-        chunk = self.ready_chunk
+        warnings = self._dialogue_coverage_warnings()
+        chunk = self.ready_chunk.model_copy(update={"coverage_warnings": warnings}) if warnings else self.ready_chunk
         self.completed_chunks.append(chunk)
         # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
         # 相等校验），不再登记文本授权集合

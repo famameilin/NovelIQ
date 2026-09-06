@@ -1682,3 +1682,85 @@ def test_text_search_result_rejects_invalid_paragraph_ids() -> None:
             content="重复段落",
             keyword_score=0.0,
         )
+
+
+def _ledger_with_text(text: str) -> AnnotationToolLedger:
+    """2026-09-05 用于构造指定 chunk 原文的账本（覆盖告警用例需要多条对话候选）"""
+    paragraph_info = ChunkParagraphInfo(
+        paragraph_ids=[0],
+        char_spans=[(0, len(text))],
+        texts=[text],
+    )
+    return AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=10,
+        current_chunk_text=text,
+        allow_future_context=False,
+        graph=FactGraph(),
+        paragraph_info=paragraph_info,
+    )
+
+
+def _write_all_domains_with_dialogues(tools: list, dialogues_args: dict) -> None:
+    """2026-09-05 用于以自定义对话判定完成六个内部领域"""
+    _call(tools, "write_metrics", _write_metrics_args())
+    _call(tools, "write_entities", _write_entities_args())
+    _call(tools, "write_dialogues", dialogues_args)
+    _call(tools, "create_event", _create_event_args())
+    _call(tools, "write_relations", _write_relations_args())
+
+
+def test_empty_dialogue_payload_freezes_with_coverage_warning() -> None:
+    """2026-09-05 A1：候选>0 但 write_dialogues 空载荷时冻结 chunk 留痕覆盖告警"""
+    ledger = _ledger_with_text("“住手”她喝止，“退下。”")
+    tools = _tools(_QueryService(), ledger)
+    assert len(ledger.dialogue_candidates) >= 1
+
+    _write_all_domains_with_dialogues(tools, {"items": []})
+    chunk = ledger.complete_active_chunk()
+
+    assert ledger.phase == "completed"
+    assert chunk.dialogues == []
+    assert chunk.coverage_warnings == ["对话覆盖: 检出 2 条系统对话候选但 write_dialogues 未提交任何判定"]
+
+
+def test_partial_dialogue_judgement_freezes_with_defaulted_warning() -> None:
+    """2026-09-05 A1：候选未逐条提交（按 not_dialogue 默认）时冻结 chunk 留痕告警"""
+    ledger = _ledger_with_text("“住手”她喝止，“退下。”")
+    tools = _tools(_QueryService(), ledger)
+
+    _write_all_domains_with_dialogues(tools, {"items": [[1, "dialogue", None, None]]})
+    chunk = ledger.complete_active_chunk()
+
+    assert len(chunk.dialogues) == 1
+    assert chunk.coverage_warnings == [
+        "对话覆盖: 1 条候选未提交判定（序号 [2]），按 not_dialogue 默认处理"
+    ]
+
+
+def test_full_dialogue_judgement_freezes_without_coverage_warning() -> None:
+    """2026-09-05 A1：候选全部逐条判定时冻结 chunk 不产生覆盖告警"""
+    ledger = _ledger_with_text("“住手”她喝止，“退下。”")
+    tools = _tools(_QueryService(), ledger)
+
+    _write_all_domains_with_dialogues(
+        tools,
+        {"items": [[1, "dialogue", None, None], [2, "dialogue", None, None]]},
+    )
+    chunk = ledger.complete_active_chunk()
+
+    assert len(chunk.dialogues) == 2
+    assert chunk.coverage_warnings == []
+
+
+def test_chunk_without_candidates_freezes_without_coverage_warning() -> None:
+    """2026-09-05 A1：无对话候选的 chunk 不产生覆盖告警"""
+    ledger = _ledger_with_text("山门静默，无人应答。")
+    tools = _tools(_QueryService(), ledger)
+    assert ledger.dialogue_candidates == []
+
+    _write_all_domains_with_dialogues(tools, {"items": []})
+    chunk = ledger.complete_active_chunk()
+
+    assert chunk.coverage_warnings == []

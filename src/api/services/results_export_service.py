@@ -135,6 +135,12 @@ def load_chapter_bundle(
     # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
     paragraph_repo = ParagraphRepository(annotation_repo.session)
     topics = _fetch_topics(run_id, paragraph_repo)
+    # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
+    if not topics:
+        from src.api.services.results_queries.topics import describe_topics_unavailability
+
+        reason = describe_topics_unavailability(run_id)
+        missing_fields.append(f"topics（{reason}）" if reason else "topics")
 
     chapter_annotations = _fetch_chapter_annotations(
         run_id,

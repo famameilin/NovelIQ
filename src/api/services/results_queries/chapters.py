@@ -209,6 +209,7 @@ def _fetch_chapter_annotations(
                 linked_setup_id=(
                     str(annotation_row.linked_setup_id) if getattr(annotation_row, "linked_setup_id", None) else None
                 ),
+                coverage_warnings=list(getattr(annotation_row, "coverage_warnings", None) or []),
                 characters=characters_by_chunk.get(chapter_id, []),
                 relations=relations_by_chunk.get(chapter_id, []),
                 dialogues=dialogues_by_chunk.get(chapter_id, []),

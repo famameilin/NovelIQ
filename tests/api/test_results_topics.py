@@ -20,7 +20,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.api.services.results_queries.topics import _fetch_topics, _validate_agg_row
+from src.api.services.results_queries.topics import (
+    _fetch_topics,
+    _validate_agg_row,
+    describe_topics_unavailability,
+)
 
 
 def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
@@ -156,3 +160,37 @@ def test_validate_agg_row_rejects_invalid_weight(weighted_total: float) -> None:
     """2026-08-20 验证聚合权重必须是非负有限数"""
     with pytest.raises(RuntimeError, match="weighted_total"):
         _validate_agg_row(SimpleNamespace(topic_id=1, weighted_total=weighted_total))
+
+
+def test_describe_topics_unavailability_reports_missing_artifact() -> None:
+    """2026-09-05 A6：模型 artifact 缺失给出显式原因（不再静默过滤聚合行）"""
+    reason = describe_topics_unavailability("run-no-model")
+    assert reason is not None
+    assert reason.startswith("topic_model_artifact_missing:")
+    assert "run-no-model" in reason
+
+
+def test_describe_topics_unavailability_reports_load_failure() -> None:
+    trainer = MagicMock()
+    trainer.load_model.side_effect = FileNotFoundError("model missing")
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("src.topic.LDATrainer", return_value=trainer),
+    ):
+        reason = describe_topics_unavailability("run-broken")
+
+    assert reason is not None
+    assert reason.startswith("topic_model_load_failed:")
+
+
+def test_describe_topics_unavailability_none_when_model_loads() -> None:
+    trainer = _make_trainer_with_model()
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("src.topic.LDATrainer", return_value=trainer),
+    ):
+        reason = describe_topics_unavailability("run-1")
+
+    assert reason is None

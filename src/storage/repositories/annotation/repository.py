@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from sqlalchemy import func, select
@@ -47,6 +47,8 @@ class ChapterAnnotationRow:
     expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     linked_setup_id: str | None = None
+    # 2026-09-05 A1：冻结时系统覆盖告警（旧 payload 无此字段时为空）
+    coverage_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -189,6 +191,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                         event_type=chunk.metrics.narrative_function,
                         pivot_moment=chunk.metrics.pivot_moment,
                         cliffhanger=chunk.metrics.cliffhanger,
+                        coverage_warnings=list(chunk.coverage_warnings),
                         **foreshadowing_by_chapter.get(chunk.chunk_id, {}),
                     )
                 )

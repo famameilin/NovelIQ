@@ -40,6 +40,7 @@ def _fetch_global_stats(
         rhythm_std=stats.get("rhythm_std"),
         rhythm_max=stats.get("rhythm_max"),
         rhythm_min=stats.get("rhythm_min"),
+        lexicon_zero_hit_share=stats.get("lexicon_zero_hit_share"),
     )
 
 

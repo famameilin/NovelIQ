@@ -313,6 +313,27 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         ],
     },
     {
+        'id': 'lexicon_zero_hit_share',
+        'concept': '全局统计',
+        'problem': '情绪词典对全书真实文本的覆盖缺口有多大',
+        'fields': [
+            'lexicon_zero_hit_share',
+        ],
+        'endpoint': 'export/global_stats',
+        'category': 'A',
+        'objective_subjective': 'objective',
+        'authoritative': True,
+        'null_semantics': '全书无段落指标行时不输出（数据缺失不冒充零信号）',
+        'computation_chain': (
+            'paragraph_metrics.positive_weight_sum/negative_weight_sum + paragraphs.char_count → '
+            '零信号段（两加权和均为 0）字符数 ÷ 有指标行段落字符数'
+        ),
+        'invariants': [
+            '仅统计有指标行的段落；分母=有指标行段落字符和',
+            '零信号≠未覆盖（确为无情绪词的段也算零信号），口径为覆盖审计线索而非质量分',
+        ],
+    },
+    {
         'id': 'topic_distribution',
         'concept': '主题内容',
         'problem': '段落主题分布',

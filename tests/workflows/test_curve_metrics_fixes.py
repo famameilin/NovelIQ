@@ -29,6 +29,7 @@ def _insert_paragraph_curves(
     *,
     net_densities: list[float | None],
     surface_tensions: list[float | None],
+    positive_sums: list[float] | None = None,
 ) -> str:
     """构造 4 章 4 段的 run（chapter_id = 1..4），写入段落曲线与基础指标。"""
     from dataclasses import replace
@@ -60,7 +61,7 @@ def _insert_paragraph_curves(
             sentence_count=1,
             sentence_char_sum=2.0,
             sentence_char_sum_sq=4.0,
-            positive_weight_sum=0.0,
+            positive_weight_sum=(positive_sums[index] if positive_sums is not None else 0.0),
             negative_weight_sum=0.0,
             fight_weight_sum=0.0,
             exclaim_count=0,
@@ -73,7 +74,7 @@ def _insert_paragraph_curves(
             function_word_counts={},
             semantic_category_counts={},
         )
-        for span in spans
+        for index, span in enumerate(spans)
     ]
     paragraph_repo.insert_paragraph_metrics(run_id, metric_rows)
 
@@ -183,3 +184,41 @@ class TestGlobalStatsExtremes:
         assert stats["rhythm_peak_chapter_id"] == 1.0
         assert stats["rhythm_min"] == 2.0
         assert stats["rhythm_min_chapter_id"] == 4.0
+
+
+class TestLexiconZeroHitShare:
+    """2026-09-05 A2：词典零信号段落字符加权占比（覆盖缺口审计口径）"""
+
+    def test_zero_hit_share_is_char_weighted(self, db_session) -> None:
+        # 4 段各 2 字符；仅首段有正向信号 → 零信号字符 6/8
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[1.0, 0.0, 0.0, 2.0],
+            surface_tensions=[None, None, None, None],
+            positive_sums=[4.0, 0.0, 0.0, 0.0],
+        )
+
+        stats = dict(compute_global_stats(db_session, run_id))
+
+        assert stats["lexicon_zero_hit_share"] == 6 / 8
+
+    def test_all_zero_hit_when_no_signal_anywhere(self, db_session) -> None:
+        run_id = _insert_paragraph_curves(
+            db_session,
+            net_densities=[0.0, 0.0, 0.0, 0.0],
+            surface_tensions=[None, None, None, None],
+        )
+
+        stats = dict(compute_global_stats(db_session, run_id))
+
+        assert stats["lexicon_zero_hit_share"] == 1.0
+
+    def test_not_emitted_when_no_metric_rows(self, db_session) -> None:
+        """无指标行=数据缺失，不得冒充零信号（不输出该统计）"""
+        novel_id = uuid.uuid4().hex[:8]
+        insert_test_novel(novel_id, session=db_session)
+        run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="No Metrics")
+
+        stats = dict(compute_global_stats(db_session, run_id))
+
+        assert "lexicon_zero_hit_share" not in stats
