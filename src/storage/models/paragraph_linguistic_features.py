@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKeyConstraint, Index, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -44,6 +44,17 @@ class ParagraphLinguisticFeature(Base):
     dependency_depth_sum: Mapped[int] = mapped_column(Integer, nullable=False)
     dependency_depth_max: Mapped[int] = mapped_column(Integer, nullable=False)
     dependency_relation_counts: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # 2026-09-05 B 批：sdp 语义弧与词典情绪事件（sdp 未运行时为空数组/0）
+    sdp_arcs: Mapped[list] = mapped_column(JSONB, nullable=False)
+    emotion_events: Mapped[list] = mapped_column(JSONB, nullable=False)
+    emotion_event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    emotion_pos_event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    emotion_neg_event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 词典情绪计数对照（命中集=paragraph_metrics 同源短语匹配；翻转判定不同）
+    lexicon_pos_count: Mapped[float] = mapped_column(Float, nullable=False)
+    lexicon_neg_count: Mapped[float] = mapped_column(Float, nullable=False)
+    mneg_pos_count: Mapped[float] = mapped_column(Float, nullable=False)
+    mneg_neg_count: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

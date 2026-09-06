@@ -6,6 +6,7 @@ LTP 有效词元数或句子数，缺失或无样本时返回空值与不可用�
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -29,6 +30,14 @@ def _feature_dict(row) -> dict[str, Any]:
         "dependency_depth_sum": row.dependency_depth_sum,
         "dependency_depth_max": row.dependency_depth_max,
         "dependency_relation_counts": row.dependency_relation_counts or {},
+        "emotion_event_count": getattr(row, "emotion_event_count", None) or 0,
+        "emotion_pos_event_count": getattr(row, "emotion_pos_event_count", None) or 0,
+        "emotion_neg_event_count": getattr(row, "emotion_neg_event_count", None) or 0,
+        "emotion_events": getattr(row, "emotion_events", None) or [],
+        "lexicon_pos_count": float(getattr(row, "lexicon_pos_count", None) or 0.0),
+        "lexicon_neg_count": float(getattr(row, "lexicon_neg_count", None) or 0.0),
+        "mneg_pos_count": float(getattr(row, "mneg_pos_count", None) or 0.0),
+        "mneg_neg_count": float(getattr(row, "mneg_neg_count", None) or 0.0),
         "chapter_id": None,
     }
 
@@ -56,7 +65,21 @@ def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, An
             "max_dependency_depth": None,
             "dependency_relation_ratios": None,
             "dependency_root_count": None,
+            "emotion_event_count": None,
+            "emotion_pos_event_count": None,
+            "emotion_neg_event_count": None,
+            "emotion_negated_event_count": None,
+            "lexicon_pos_count": None,
+            "lexicon_neg_count": None,
+            "mneg_pos_count": None,
+            "mneg_neg_count": None,
             "chapters": [],
+            "emotion_event_density": None,
+            "emotion_event_holders": [],
+            "emotion_top_predicates": [],
+            "mneg_net_delta": None,
+            "lexicon_net": None,
+            "mneg_net": None,
             "unavailable_reason": "linguistic_unavailable: 无 paragraph_linguistic_features 行（语言阶段未运行）",
         }
     # 章节归属（paragraphs.chapter_id）
@@ -82,6 +105,7 @@ def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, An
         "paragraph_count": len(rows),
         **book,
         "chapters": chapters,
+        **_aggregate_emotion_events(rows, book.get("token_total")),
         "unavailable_reason": None,
     }
 
@@ -122,6 +146,60 @@ def _aggregate_group(features: list[dict[str, Any]]) -> dict[str, Any]:
             {k: round(v / dep_node_total, 6) for k, v in total_relations.items()} if dep_node_total else {}
         ),
         "dependency_root_count": sum(f["dependency_root_count"] for f in features),
+        "emotion_event_count": sum(f["emotion_event_count"] for f in features),
+        "emotion_pos_event_count": sum(f["emotion_pos_event_count"] for f in features),
+        "emotion_neg_event_count": sum(f["emotion_neg_event_count"] for f in features),
+        "emotion_negated_event_count": sum(
+            1 for f in features for event in f["emotion_events"] if event.get("negated")
+        ),
+        "lexicon_pos_count": round(sum(f["lexicon_pos_count"] for f in features), 6),
+        "lexicon_neg_count": round(sum(f["lexicon_neg_count"] for f in features), 6),
+        "mneg_pos_count": round(sum(f["mneg_pos_count"] for f in features), 6),
+        "mneg_neg_count": round(sum(f["mneg_neg_count"] for f in features), 6),
+    }
+
+
+def _aggregate_emotion_events(
+    rows: Sequence[Any],
+    token_total: int | None,
+) -> dict[str, Any]:
+    """2026-09-05 B 批：书级情绪事件明细聚合（事件密度 / 持有者 × 事件 / 谓词 Top / net 对照）"""
+    events = [event for row in rows for event in (_feature_dict(row)["emotion_events"])]
+
+    holders: dict[str, dict[str, int]] = {}
+    predicates: dict[tuple[str, str], int] = {}
+    for event in events:
+        holder = event.get("holder")
+        polarity = str(event.get("polarity"))
+        if holder:
+            bucket = holders.setdefault(str(holder), {"event_count": 0, "positive_count": 0, "negative_count": 0})
+            bucket["event_count"] += 1
+            bucket["positive_count" if polarity == "positive" else "negative_count"] += 1
+        key = (str(event.get("predicate")), polarity)
+        predicates[key] = predicates.get(key, 0) + 1
+
+    lexicon_net = round(
+        sum(float(row.lexicon_pos_count or 0.0) - float(row.lexicon_neg_count or 0.0) for row in rows), 6
+    )
+    mneg_net = round(
+        sum(float(row.mneg_pos_count or 0.0) - float(row.mneg_neg_count or 0.0) for row in rows), 6
+    )
+    density = (
+        round(len(events) * 10000 / token_total, 6) if token_total and token_total > 0 else None
+    )
+    return {
+        "emotion_event_density": density,
+        "emotion_event_holders": [
+            {"holder": name, **counts}
+            for name, counts in sorted(holders.items(), key=lambda item: -item[1]["event_count"])[:20]
+        ],
+        "emotion_top_predicates": [
+            {"predicate": predicate, "polarity": polarity, "event_count": count}
+            for (predicate, polarity), count in sorted(predicates.items(), key=lambda item: -item[1])[:20]
+        ],
+        "lexicon_net": lexicon_net,
+        "mneg_net": mneg_net,
+        "mneg_net_delta": round(mneg_net - lexicon_net, 6),
     }
 
 

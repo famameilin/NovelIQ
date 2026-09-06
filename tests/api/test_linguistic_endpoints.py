@@ -41,6 +41,16 @@ def _make_feature_row(
         "dependency_depth_sum": tokens_count - 1,
         "dependency_depth_max": 1,
         "dependency_relation_counts": {"HED": 1},
+        # 2026-09-05 B 批：sdp/情绪事件列（测试种子默认空事件）
+        "sdp_arcs": [],
+        "emotion_events": [],
+        "emotion_event_count": 0,
+        "emotion_pos_event_count": 0,
+        "emotion_neg_event_count": 0,
+        "lexicon_pos_count": 0.0,
+        "lexicon_neg_count": 0.0,
+        "mneg_pos_count": 0.0,
+        "mneg_neg_count": 0.0,
     }
 
 

@@ -61,6 +61,57 @@ class LtpEntityCandidate:
 
 
 @dataclass(frozen=True)
+class LtpSdpArc:
+    """语义依存弧（sdp，2026-09-05 B 批）：head/dependent 均为段内全局 token_index
+
+    LTP sdp 输出为逐句 dict {'head','dependent','label'}；head 侧为谓词，
+    dependent 侧为论元/修饰（AGT=施事、DATV=对象、mNEG=否定、mDEPD=程度）。
+    """
+
+    head_index: int
+    dependent_index: int
+    label: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "head_index": self.head_index,
+            "dependent_index": self.dependent_index,
+            "label": self.label,
+        }
+
+
+@dataclass(frozen=True)
+class EmotionEvent:
+    """LTP 语义情绪事件（2026-09-05 B 批）
+
+    情绪词典只承担谓词极性候选标记；持有者/对象/否定/程度全部来自 sdp 模型判定。
+    """
+
+    predicate: str
+    predicate_token_index: int
+    polarity: str  # "positive" | "negative"
+    holder: str | None
+    target: str | None
+    negated: bool
+    degree_words: tuple[str, ...]
+    local_start_char: int
+    local_end_char: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "predicate": self.predicate,
+            "predicate_token_index": self.predicate_token_index,
+            "polarity": self.polarity,
+            "holder": self.holder,
+            "target": self.target,
+            "negated": self.negated,
+            "degree_words": list(self.degree_words),
+            "local_start_char": self.local_start_char,
+            "local_end_char": self.local_end_char,
+        }
+
+
+@dataclass(frozen=True)
 class ParagraphLinguisticResult:
     """单个段落的语言结构基础结果"""
 
@@ -77,6 +128,9 @@ class ParagraphLinguisticResult:
     dependency_depth_max: int
     dependency_relation_counts: dict[str, int]
     entities: list[LtpEntityCandidate] = field(default_factory=list)
+    # 2026-09-05 B 批：sdp 语义弧与词典情绪事件（sdp 任务关闭时为空）
+    sdp_arcs: list[LtpSdpArc] = field(default_factory=list)
+    emotion_events: list[EmotionEvent] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,4 +156,6 @@ class ParagraphLinguisticResult:
                 }
                 for e in self.entities
             ],
+            "sdp_arcs": [a.to_dict() for a in self.sdp_arcs],
+            "emotion_events": [e.to_dict() for e in self.emotion_events],
         }
