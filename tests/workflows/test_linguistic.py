@@ -288,6 +288,7 @@ class TestMnegCorrection:
                     sensory_hit_count=0,
                     imagery_hit_count=0,
                     metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
                     function_word_counts={},
                     semantic_category_counts={},
                 )

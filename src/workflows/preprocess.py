@@ -197,6 +197,7 @@ def _insert_paragraph_metrics(
                 sensory_hit_count=counts.sensory_hit_count,
                 imagery_hit_count=counts.imagery_hit_count,
                 metaphor_sentence_count=counts.metaphor_sentence_count,
+                body_reaction_hit_count=counts.body_reaction_hit_count,
                 function_word_counts=counts.function_word_counts,
                 semantic_category_counts=counts.semantic_category_counts,
                 surface_tension_z=z_value,

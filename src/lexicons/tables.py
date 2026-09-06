@@ -34,6 +34,8 @@ COMBAT_TERMS: list[str] = _registry.get(LEXICON_FILES["combat"])
 SENSORY_TERMS: list[str] = _registry.get(LEXICON_FILES["sensory"])
 FUNCTION_WORDS_TERMS: list[str] = _registry.get(LEXICON_FILES["function_words"])
 IMAGERY_TERMS: list[str] = _registry.get(LEXICON_FILES["imagery"])
+# 2026-09-05 C 批：身体反应转喻（独立命中计数，不进正负极性）
+BODY_REACTION_TERMS: list[str] = _registry.get(LEXICON_FILES["body_reaction"])
 SEMANTIC_CATEGORY_FILE: Path = _registry.get_file_paths(LEXICON_FILES["semantic_category"])[0]
 SEMANTIC_CATEGORIES: dict[str, list[str]] = parse_semantic_category_lexicon(str(SEMANTIC_CATEGORY_FILE))
 

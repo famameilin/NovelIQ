@@ -178,3 +178,21 @@ def test_semantic_categories_without_hits() -> None:
         {"semantic_categories": {"emotion": ["快乐"], "combat": ["战斗"]}},
     )
     assert counts.semantic_category_counts == {"emotion": 0, "combat": 0}
+
+
+def test_body_reaction_hit_count_independent_of_polarity() -> None:
+    """2026-09-05 C 批：身体反应转喻独立计数，不进 positive/negative 极性"""
+    counts = compute_paragraph_metric_counts(
+        "他皱起眉头，浑身颤抖，牙关紧咬。",
+        ["他", "皱起眉头", "，", "浑身", "颤抖", "，", "牙关", "紧咬", "。"],
+        {"body_reaction": ["皱起眉头", "颤抖", "牙关", "紧咬"]},
+    )
+    assert counts.body_reaction_hit_count == 4
+    # 无正负词表 → 极性计数为 0，体态命中不冒充情绪极性
+    assert counts.positive_weight_sum == 0.0
+    assert counts.negative_weight_sum == 0.0
+
+
+def test_body_reaction_missing_lexicon_key_treated_as_empty() -> None:
+    counts = compute_paragraph_metric_counts("他皱眉。", ["他", "皱眉", "。"], {})
+    assert counts.body_reaction_hit_count == 0

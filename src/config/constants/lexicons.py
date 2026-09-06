@@ -20,4 +20,10 @@ LEXICON_FILES: dict[str, str] = {
     "jieba_user_dict": "jieba_user_dict.txt",
     "negation_words": "negation_words.txt",
     "fixed_phrases": "fixed_phrases.txt",
+    # 2026-09-05 C 批：身体反应转喻（皱眉/颤抖等体态情绪信号，独立计数不进正负极性）
+    "body_reaction": "body_reaction.txt",
+    # 审定门（draft 词表）：命中行 is_metric_hit=false，不计入任何正式密度，
+    # 逐条人工审定后再提升进 body_reaction.txt / colloquial_negative.txt
+    "body_reaction_draft": "body_reaction_draft.txt",
+    "colloquial_expansion_draft": "colloquial_expansion_draft.txt",
 }
