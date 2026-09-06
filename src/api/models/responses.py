@@ -246,6 +246,8 @@ class ChapterAnnotation(BaseModel):
     expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     linked_setup_id: str | None = None
+    # 2026-09-05 A1：冻结时系统覆盖告警（如对话候选>0但载荷为空），报告附录 B 展示
+    coverage_warnings: list[str] = []
     characters: list[ChapterCharacter] = []
     relations: list[ChapterRelation] = []
     dialogues: list[ChapterDialogue] = []
@@ -308,6 +310,8 @@ class GlobalStats(BaseModel):
     rhythm_std: float | None = None
     rhythm_max: float | None = None
     rhythm_min: float | None = None
+    # 2026-09-05 A2：词典情绪零信号段落字符加权占比（lexicon 覆盖缺口审计）
+    lexicon_zero_hit_share: float | None = None
 
 
 class NarrativeStructureStats(BaseModel):
