@@ -16,6 +16,7 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundDialogue,
     BoundForeshadowing,
+    BoundSentenceLabel,
     CaseSearchResult,
     CompletionCase,
     EventTreeHistoryResult,
@@ -441,6 +442,22 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         self.session.add(row)
         self.session.flush()
         return row
+
+    def fetch_sentence_labels(self, run_id: str) -> list[BoundSentenceLabel]:
+        """2026-09-07 用于读取全书自选句情绪标签（句级监督按书边界）
+
+        标签随章节标注 payload 落库；旧 payload 无该字段时 model_validate
+        默认空列表，天然跳过。
+        """
+        records = self.session.execute(
+            select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
+        ).scalars()
+        labels: list[BoundSentenceLabel] = []
+        for record in records:
+            annotation = BoundChapterAnnotation.model_validate(record.payload)
+            for chunk in annotation.chunks:
+                labels.extend(chunk.sentence_labels)
+        return labels
 
 
 class CasePoolRepository(BaseRepository[CasePoolCase]):

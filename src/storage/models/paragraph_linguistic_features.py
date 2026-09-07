@@ -55,6 +55,9 @@ class ParagraphLinguisticFeature(Base):
     lexicon_neg_count: Mapped[float] = mapped_column(Float, nullable=False)
     mneg_pos_count: Mapped[float] = mapped_column(Float, nullable=False)
     mneg_neg_count: Mapped[float] = mapped_column(Float, nullable=False)
+    # 2026-09-07 句级监督边界打分（按书边界；标签不足或类别单一时为 NULL）
+    boundary_pos_score_sum: Mapped[float | None] = mapped_column(Float, nullable=True)
+    boundary_neg_score_sum: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

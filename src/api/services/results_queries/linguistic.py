@@ -38,6 +38,8 @@ def _feature_dict(row) -> dict[str, Any]:
         "lexicon_neg_count": float(getattr(row, "lexicon_neg_count", None) or 0.0),
         "mneg_pos_count": float(getattr(row, "mneg_pos_count", None) or 0.0),
         "mneg_neg_count": float(getattr(row, "mneg_neg_count", None) or 0.0),
+        "boundary_pos_score_sum": getattr(row, "boundary_pos_score_sum", None),
+        "boundary_neg_score_sum": getattr(row, "boundary_neg_score_sum", None),
         "chapter_id": None,
     }
 
@@ -73,6 +75,8 @@ def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, An
             "lexicon_neg_count": None,
             "mneg_pos_count": None,
             "mneg_neg_count": None,
+            "boundary_pos_score_sum": None,
+            "boundary_neg_score_sum": None,
             "chapters": [],
             "emotion_event_density": None,
             "emotion_event_holders": [],
@@ -156,7 +160,17 @@ def _aggregate_group(features: list[dict[str, Any]]) -> dict[str, Any]:
         "lexicon_neg_count": round(sum(f["lexicon_neg_count"] for f in features), 6),
         "mneg_pos_count": round(sum(f["mneg_pos_count"] for f in features), 6),
         "mneg_neg_count": round(sum(f["mneg_neg_count"] for f in features), 6),
+        "boundary_pos_score_sum": _sum_optional(features, "boundary_pos_score_sum"),
+        "boundary_neg_score_sum": _sum_optional(features, "boundary_neg_score_sum"),
     }
+
+
+def _sum_optional(features: list[dict[str, Any]], key: str) -> float | None:
+    """可空数值列求和：全 NULL 返回 None（边界未拟合），否则求和（不伪造 0）"""
+    values = [feature[key] for feature in features if feature.get(key) is not None]
+    if not values:
+        return None
+    return round(sum(float(value) for value in values), 6)
 
 
 def _aggregate_emotion_events(

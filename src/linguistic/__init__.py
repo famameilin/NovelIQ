@@ -13,6 +13,12 @@ from .schema import (
     LtpToken,
     ParagraphLinguisticResult,
 )
+from .sentence_boundary import (
+    SentenceBoundary,
+    fit_sentence_boundary,
+    score_sentences,
+    strong_negative_share,
+)
 from .word2vec import (
     PosEmbeddingRow,
     TrainResult,
@@ -33,15 +39,19 @@ __all__ = [
     "ParagraphLinguisticResult",
     "PhraseMatch",
     "PosEmbeddingRow",
+    "SentenceBoundary",
     "TrainResult",
     "analyze_paragraph",
     "analyze_paragraph_batch",
     "build_pos_embeddings",
     "extract_emotion_events",
+    "fit_sentence_boundary",
     "load_shared_pretrained_vectors",
     "match_fixed_phrases",
     "mneg_corrected_counts",
     "resolve_shared_pretrained_path",
     "reset_pretrained_cache",
+    "score_sentences",
+    "strong_negative_share",
     "train_book_model",
 ]
