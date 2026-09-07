@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
-from langchain_core.messages import AIMessage, ToolCall, UsageMetadata
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, UsageMetadata
 
 from src.api.models.events import StreamEvent, StreamEventAction
 
@@ -44,6 +44,15 @@ _TRANSIENT_ERROR_MARKERS = (
 
 class StreamEmitError(RuntimeError):
     """2026-08-12 用于区分 SSE 推送失败与模型输出流中断：推送失败不触发模型请求重试"""
+
+
+CompletionHintProvider = Callable[[], str | None]
+"""2026-09-08 无工具回复重发前向本次请求注入的提示工厂
+
+返回 None 表示不注入（调用方无上下文可提示）。提示会追加进重发的 messages
+列表（调用方须传自有副本），使重试物理请求的审计 request_messages 与实发一致；
+不写入 LangGraph 状态消息链，与 09-05 轮次预算提醒同构。
+"""
 
 
 def _is_transient_model_error(exc: BaseException) -> bool:
@@ -572,6 +581,7 @@ async def run_model_call(
     on_turn_started: Callable[[dict[str, Any], int], None] | None = None,
     on_turn_failed: Callable[[str, ModelCallTiming, AIMessage | None], None] | None = None,
     total_attempts: int | None = None,
+    completion_hint: CompletionHintProvider | None = None,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
@@ -591,12 +601,29 @@ async def run_model_call(
     2026-08-22 把"响应不含任何工具调用"视同调用未正常结束（涵盖网关思考阶段
     静默截断产生的空回复），与瞬态错误共用 total_attempts 预算退避重发；
     耗尽后上抛 RuntimeError。回合审计回调先于该判定执行，截断回合仍留痕。
+    2026-09-08 无工具回复重发前调用 completion_hint 工厂取提示（整个 run_model_call
+    周期内只取一次、只注入一次——重试间隔内无工具执行，账本状态不会变化），
+    追加进重发请求让模型看到缺域清单；工厂缺省或返回 None 时维持原样重发。
     on_turn_started/on_turn_complete/on_turn_failed 以每次物理 Provider 请求为粒度回调，
     供审计把成功、断流、空工具回复分别落库，绝不合并跨请求的计时或 token。
     """
     from src.config import settings
 
     total_attempts = total_attempts if total_attempts is not None else settings.models.annotation.total_attempts
+
+    hint_resolved = False
+
+    def _apply_completion_hint() -> None:
+        """2026-09-08 首次无工具回复时向重发请求注入一次提示（原地追加调用方副本）"""
+        nonlocal hint_resolved
+        if hint_resolved or completion_hint is None:
+            return
+        hint_resolved = True
+        hint = completion_hint()
+        if hint:
+            messages.append(HumanMessage(content=hint))
+            logger.warning("无工具回复重发前注入补齐提示: hint_chars=%s", len(hint))
+
     if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
         retries_remaining = max(0, total_attempts - 1)
         attempt = 0
@@ -653,6 +680,7 @@ async def run_model_call(
                     raise RuntimeError(f"{error}，重发后仍未恢复")
                 failed_attempt = total_attempts - retries_remaining
                 retries_remaining -= 1
+                _apply_completion_hint()
                 logger.warning(
                     "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
                     retries_remaining,
@@ -729,6 +757,7 @@ async def run_model_call(
                 raise RuntimeError(f"{error}，重发后仍未恢复")
             failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
+            _apply_completion_hint()
             logger.warning(
                 "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
                 retries_remaining,

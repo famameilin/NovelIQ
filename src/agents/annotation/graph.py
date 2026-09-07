@@ -74,6 +74,35 @@ def _turn_budget_reminder(remaining: int) -> str:
     )
 
 
+# 2026-09-08 六域回执对应的补齐工具与空提交写法
+_MISSING_DOMAIN_TOOL_HINTS = {
+    "entities": "write_entities（无实体时提交 {\"entities\": []}）",
+    "metrics": "write_metrics",
+    "events": "create_event（无事件时提交 {\"description\": null, \"finalize_events\": true}）",
+    "character_observations": "create_event（随事件域一并完成，无需单独提交）",
+    "relations": "write_relations（无关系变化时提交 {\"relations\": []}）",
+    "dialogues": "write_dialogues（无对话时提交 {\"dialogues\": []}）",
+}
+
+
+def _missing_domains_reminder(missing: list[str]) -> str:
+    """2026-09-08 用于构造无工具回复重发前的缺域补齐提醒
+
+    第13章死锁：模型写完自认为"已完成"的领域后改用纯文本汇报收尾，
+    调用层把无工具回复视同调用故障原样重发，模型看不到任何缺域信息、
+    必然继续汇报，三次耗尽即章失败。此提醒只注入重发请求（不写入状态
+    消息链、不改工具开放与路由），把"还缺什么、怎么补"直接交给模型。
+    """
+    ordered = [domain for domain, _ in _FORMAL_WRITE_ORDER if domain in missing]
+    ordered += [domain for domain in missing if domain not in ordered]
+    detail = "、".join(f"{domain}（{_MISSING_DOMAIN_TOOL_HINTS[domain]}）" for domain in ordered)
+    head = "【缺域提醒】当前 chunk 仍有领域未提交回执，纯文本汇报不算写入："
+    tail = "。全部领域回执齐全后 chunk 会自动冻结完成。"
+    if "entities" in ordered:
+        return f"{head}{detail}。write_entities 是其余写入工具的解锁前提，请先补齐它{tail}"
+    return f"{head}{detail}。请立即调用对应写入工具补齐{tail}"
+
+
 class AnnotationGraphState(TypedDict):
     """2026-08-10 用于保存逐 chunk 工具循环的累积消息链"""
 
@@ -148,6 +177,14 @@ def _build_agent_node(
         remaining_turns = max_iterations - iterations
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(HumanMessage(content=_turn_budget_reminder(remaining_turns)))
+
+        def _completion_hint() -> str | None:
+            """2026-09-08 无工具回复重发前按账本当前缺域生成一次性提醒"""
+            missing = [
+                domain for domain in _DOMAIN_NAMES if domain not in ledger.domain_receipts
+            ]
+            return _missing_domains_reminder(missing) if missing else None
+
         active_write_tool = _active_write_tool(ledger)
         active_write_tools = _active_write_tools(ledger)
         turn_tools = _tools_for_turn(tools, ledger)
@@ -190,6 +227,7 @@ def _build_agent_node(
                 on_turn_started=on_turn_started,
                 on_turn_failed=on_turn_failed,
                 total_attempts=retries,
+                completion_hint=_completion_hint,
             )
         except Exception:
             raise
