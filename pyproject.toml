@@ -69,6 +69,8 @@ exclude_lines = [
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+# tests/report/ 整目录不纳入版本库（.gitignore 240），本地存在但 lint 门不扫
+extend-exclude = ["tests/report"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "UP"]
