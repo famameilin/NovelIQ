@@ -71,6 +71,21 @@ class TestRunLinguistic:
 
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
 
+        # draft 审定门验证：draft 文件经 2026-09-07 审定后为空，注入非空 draft
+        # 词条保持"draft 命中不计入正式密度"的门路径始终被测试覆盖
+        from src.config.constants import LEXICON_FILES
+        from src.lexicons.registry import LexiconRegistry
+
+        self._draft_key = LEXICON_FILES["body_reaction_draft"]
+        _orig_reg_get = LexiconRegistry.get
+
+        def _reg_get_with_injected_draft(self_: LexiconRegistry, key: str) -> list[str]:
+            if key == self._draft_key:
+                return ["外衣"]
+            return _orig_reg_get(self_, key)
+
+        monkeypatch.setattr(LexiconRegistry, "get", _reg_get_with_injected_draft)
+
     def _count(self, table: str) -> int:
         return int(
             self.db_session.execute(
@@ -97,6 +112,9 @@ class TestRunLinguistic:
         phrase_rows = LinguisticRepository(self.db_session).fetch_phrase_hits(self.run_id)
         lexicon_rows = [row for row in phrase_rows if row.match_kind == "lexicon"]
         assert lexicon_rows and all(not row.is_metric_hit for row in lexicon_rows)
+        # 注入的 draft 词条命中留痕（外衣不在任何正式表，只能来自 draft 门）
+        draft_rows = [row for row in lexicon_rows if row.surface_text == "外衣"]
+        assert draft_rows and all(not row.is_metric_hit for row in draft_rows)
         candidate_rows = [row for row in phrase_rows if row.match_kind == "four_char_candidate"]
         assert all(not row.is_metric_hit for row in candidate_rows)
 
