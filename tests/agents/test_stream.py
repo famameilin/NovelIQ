@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from src.agents.stream import (
     AgentStream,
@@ -1199,3 +1199,61 @@ async def test_run_model_call_non_streaming_retries_missing_tool_call(monkeypatc
 
     assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
     assert len(model.captured_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monkeypatch) -> None:
+    """2026-09-08 用于验证无工具回复重发前注入缺域提醒且只注入一次"""
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
+    text_only = AIMessageChunk(content="本章标注已完成")
+    complete = AIMessageChunk(
+        content="",
+        tool_call_chunks=[{"name": "write_relations", "args": "{}", "id": "call-1", "index": 0}],
+    )
+    model = _ScriptedStreamingLLM([[text_only], [text_only], [complete]])
+    hints: list[str | None] = []
+
+    def completion_hint() -> str | None:
+        """2026-09-08 用于模拟账本按当前缺域生成提醒"""
+        hint = f"【缺域提醒】缺 {len(hints) + 1} 个领域" if len(hints) < 2 else None
+        hints.append(hint)
+        return hint
+
+    response = await run_model_call(model, [AIMessage(content="问")], None, completion_hint=completion_hint)
+
+    assert [call["name"] for call in response.tool_calls] == ["write_relations"]
+    assert len(model.captured_messages) == 3
+    assert len(hints) == 1 and hints[0] is not None
+    first_retry = model.captured_messages[1]
+    assert isinstance(first_retry[-1], HumanMessage)
+    assert "缺域提醒" in str(first_retry[-1].content)
+    # 第二次重发沿用已注入的提示（同一 run 内账本状态不变，工厂只取一次）
+    assert isinstance(model.captured_messages[2][-1], HumanMessage)
+    assert model.captured_messages[2][-1] is first_retry[-1]
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_skips_hint_when_factory_returns_none(monkeypatch) -> None:
+    """2026-09-08 用于验证工厂返回 None 时维持原样重发、消息列表不被改动"""
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
+    text_only = AIMessageChunk(content="纯文本")
+    complete = AIMessageChunk(
+        content="",
+        tool_call_chunks=[{"name": "write_metrics", "args": "{}", "id": "call-1", "index": 0}],
+    )
+    model = _ScriptedStreamingLLM([[text_only], [complete]])
+    calls: list[bool] = []
+
+    def completion_hint() -> str | None:
+        """2026-09-08 用于模拟调用方无上下文可提示"""
+        calls.append(True)
+        return None
+
+    original = [AIMessage(content="问")]
+    response = await run_model_call(model, list(original), None, completion_hint=completion_hint)
+
+    assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
+    assert len(model.captured_messages) == 2
+    assert len(calls) == 1
+    assert len(model.captured_messages[1]) == 1
+    assert isinstance(model.captured_messages[1][-1], AIMessage)

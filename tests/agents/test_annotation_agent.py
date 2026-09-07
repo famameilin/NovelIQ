@@ -1196,3 +1196,53 @@ def test_validate_bound_annotation_verifies_sentence_label_spans() -> None:
             chapter_id=1,
             current_chunks=[(1, "顾霜“住手”回荡")],
         )
+
+
+@pytest.mark.asyncio
+async def test_graph_reinjects_missing_domain_hint_after_plain_text_reply(monkeypatch) -> None:
+    """2026-09-08 用于验证模型纯文本汇报后被重发请求带上缺域提醒并补齐写入
+
+    第13章死锁回归：模型写完 entities+metrics 后改用纯文本汇报，
+    调用层重发时注入缺域清单，模型据此补齐剩余领域，章节正常完成。
+    """
+    async def _skip_sleep(_seconds: float) -> None:
+        """2026-09-08 用于跳过重试退避等待"""
+
+    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _skip_sleep)
+    llm = _SequenceLLM(
+        [
+            _tool_message([_entities_call(), _metrics_call()]),
+            AIMessage(content="本章语义标注已完成，汇总如下……"),
+            _tool_message(
+                [
+                    _events_call(),
+                    _write_call("write_relations", {"items": []}, call_id="call-relations"),
+                ]
+            ),
+            _tool_message(
+                [
+                    _dialogues_call(),
+                    _metrics_call(
+                        call_id="call-metrics-labels",
+                        sentence_labels=[
+                            {"sentence": "住手", "emotion": "strong_negative"},
+                            {"sentence": "回荡", "emotion": "mild_negative"},
+                        ],
+                    ),
+                ]
+            ),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=True)
+
+    assert result["error"] is None
+    assert llm.calls == 4
+    # 重发请求（第 3 次调用）末尾是缺域提醒，指出剩余领域与补齐写法
+    resent = llm.captured_messages[2]
+    last = resent[-1]
+    assert isinstance(last, HumanMessage)
+    assert "缺域提醒" in str(last.content)
+    assert "relations" in str(last.content) and "dialogues" in str(last.content)
+    # 首次请求与状态消息链都不含提醒：注入只对重发请求生效
+    assert all("缺域提醒" not in str(m.content) for m in llm.captured_messages[1])
+    assert all("缺域提醒" not in str(m.content) for m in result["messages"])
