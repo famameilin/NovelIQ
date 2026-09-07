@@ -197,3 +197,52 @@ def test_merge_keeps_event_ids_and_refs_unmapped() -> None:
     # 引用原样保留，不做任何序号重排
     assert events[1].causal_event_refs == ["evt-upstream-root"]
     assert events[3].causal_event_refs == ["evt-local-prev"]
+
+
+def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
+    """2026-09-07 句级监督：第 2+ 子块的自选句情绪标签坐标平移回章坐标，首块不变"""
+    from src.agents.annotation.schema import BoundSentenceLabel
+
+    def _make_label_sub_annotation(chunk_id: int, summary: str, label: BoundSentenceLabel) -> BoundChapterAnnotation:
+        return BoundChapterAnnotation(
+            chapter_summary=summary,
+            chunks=[
+                BoundChunkAnnotation(
+                    chunk_id=chunk_id,
+                    metrics=ChunkMetricsInput(
+                        summary=summary,
+                        emotional_valence=EmotionalValence.NEUTRAL,
+                        narrative_function=NarrativeFunction.SETUP,
+                    ),
+                    character_observations=[],
+                    dialogues=[],
+                    events=[],
+                    foreshadowings=[],
+                    sentence_labels=[label],
+                )
+            ],
+        )
+
+    first_label = BoundSentenceLabel(sentence="甲说", emotion=EmotionalValence.NEUTRAL, start=1, end=4)
+    second_label = BoundSentenceLabel(
+        sentence="乙说",
+        emotion=EmotionalValence.STRONG_NEGATIVE,
+        start=2,
+        end=5,
+    )
+    merged = _merge_sub_chunk_annotations(
+        [
+            _make_label_sub_annotation(-1, "第一块", first_label),
+            _make_label_sub_annotation(-2, "第二块", second_label),
+        ],
+        chapter_chunk_id=7,
+        sub_chunk_offsets=[0, 20],
+    )
+
+    merged_labels = merged.chunks[0].sentence_labels
+    assert [(label.sentence, str(label.emotion)) for label in merged_labels] == [
+        ("甲说", "neutral"),
+        ("乙说", "strong_negative"),
+    ]
+    assert (merged_labels[0].start, merged_labels[0].end) == (1, 4)
+    assert (merged_labels[1].start, merged_labels[1].end) == (22, 25)

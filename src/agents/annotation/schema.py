@@ -790,6 +790,42 @@ class BoundForeshadowing(StrictModel):
         return self
 
 
+class SentenceLabelInput(StrictModel):
+    """2026-09-07 用于提交 agent 自选句子的句级情绪标签（句级监督信号）
+
+    随既有 write_metrics 工具的可选参数 sentence_labels 提交，不设独立工具。
+    """
+
+    sentence: str = Field(
+        min_length=2,
+        max_length=2000,
+        description="从当前章节正文原样摘录的完整句子（系统按原文定位绑定）",
+    )
+    emotion: EmotionalValence = Field(description="整句情绪方向与强度（英文枚举，与人物 emotion 同一取值）")
+
+    @model_validator(mode="after")
+    def normalize_sentence(self) -> SentenceLabelInput:
+        """2026-09-07 用于规范化自选句原文"""
+        self.sentence = normalize_semantic_text(self.sentence, label="sentence_label.sentence")
+        return self
+
+
+class BoundSentenceLabel(StrictModel):
+    """2026-09-07 用于保存系统定位绑定后的自选句情绪标签（章文本内字符区间）"""
+
+    sentence: str = Field(min_length=1)
+    emotion: EmotionalValence
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_span(self) -> BoundSentenceLabel:
+        """2026-09-07 用于保证句区间有效且与原文一致"""
+        if self.end <= self.start:
+            raise ValueError("BoundSentenceLabel end 必须大于 start")
+        return self
+
+
 class BoundChunkAnnotation(StrictModel):
     """2026-08-07 用于保存系统完成绑定的单个 chunk 正式标注
 
@@ -797,6 +833,9 @@ class BoundChunkAnnotation(StrictModel):
     实体与关系的运行时真相源是 FactGraph，持久化从其操作日志
     （entity_ops / relation_assert_ops / relation_change_ops）派生。
     resolve_fact_case 只更新 FactGraph，resolved_cases 不再承载 fact 动作。
+
+    2026-09-07 句级监督：agent 自选句情绪标签随本模型落库；默认空列表保持
+    旧 run payload 反序列化兼容（fetch_chapter_annotations_full 会重校验）。
     """
 
     # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 合并为真实 chunk
@@ -806,6 +845,9 @@ class BoundChunkAnnotation(StrictModel):
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
     foreshadowings: list[BoundForeshadowing]
+    # 2026-09-07 句级监督：agent 自选句情绪标签（随 write_metrics 的 sentence_labels
+    # 可选参数搭车提交，服务端定位绑定，不设独立工具）
+    sentence_labels: list[BoundSentenceLabel] = Field(default_factory=list)
     # 2026-09-05 冻结时系统确定性覆盖告警（如候选>0但载荷为空），仅留痕不阻断
     coverage_warnings: list[str] = Field(default_factory=list)
 

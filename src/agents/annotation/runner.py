@@ -77,6 +77,10 @@ def validate_bound_annotation(
             actual = chunk_text[dialogue.start : dialogue.end]
             if actual != dialogue.content:
                 raise ValueError(f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}")
+        # 2026-09-07 句级监督：自选句情绪标签按原文精确定位复核（与对话同款系统绑定）
+        for label in chunk.sentence_labels:
+            if label.end > len(chunk_text) or chunk_text[label.start : label.end] != label.sentence:
+                raise ValueError(f"系统自选句绑定不一致: chunk_id={chunk.chunk_id} sentence={label.sentence[:50]}")
         # 2026-08-22 重构：事件不再携带锚点/字符区间/哈希，章级证据由持久化层盖章
 
 

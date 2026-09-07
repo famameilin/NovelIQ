@@ -324,9 +324,21 @@ def _call(tools: list, name: str, args: dict):
     return json.loads(_find_tool(tools, name).invoke(args))
 
 
+def _sentence_labels_args(chunk_text: str = "“住手”回荡") -> list[dict]:
+    """2026-09-07 用于构造两句自选句情绪标签（满足每章 2 句软下限，无覆盖告警）
+
+    句标签随 write_metrics 的 sentence_labels 参数提交（不设独立工具）；
+    整句 + 前缀子串保证两句 span 不同且都能在原文定位。
+    """
+    return [
+        {"sentence": chunk_text, "emotion": "strong_negative"},
+        {"sentence": chunk_text[: max(2, len(chunk_text) // 2)], "emotion": "mild_negative"},
+    ]
+
+
 def _write_all_domains(tools: list) -> None:
-    """2026-08-30 用于通过五个写入工具完成六个内部数据领域"""
-    _call(tools, "write_metrics", _write_metrics_args())
+    """2026-08-30 用于通过既有写入工具完成六个内部数据领域（句标签随 metrics 搭车）"""
+    _call(tools, "write_metrics", {**_write_metrics_args(), "sentence_labels": _sentence_labels_args()})
     _call(tools, "write_entities", _write_entities_args())
     _call(tools, "write_dialogues", _write_dialogues_args())
     _call(tools, "create_event", _create_event_args())
@@ -334,7 +346,7 @@ def _write_all_domains(tools: list) -> None:
 
 
 def test_business_write_tool_contract_has_exactly_five_tools() -> None:
-    """2026-08-30 用于锁定模型侧仅暴露五个业务写入工具"""
+    """2026-09-07 用于锁定模型侧仅暴露五个业务写入工具（句标签随 write_metrics 搭车，不新增工具）"""
     tools = _tools(_QueryService(), _ledger())
     business_writes = {
         tool.name
@@ -658,7 +670,7 @@ def test_create_event_children_rebuild_ready_chunk() -> None:
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    _call(tools, "write_metrics", _write_metrics_args())
+    _call(tools, "write_metrics", {**_write_metrics_args(), "sentence_labels": _sentence_labels_args()})
     _call(tools, "write_entities", _write_entities_args())
     _call(tools, "write_dialogues", _write_dialogues_args())
     _call(tools, "write_relations", _write_relations_args())
@@ -1702,9 +1714,15 @@ def _ledger_with_text(text: str) -> AnnotationToolLedger:
     )
 
 
-def _write_all_domains_with_dialogues(tools: list, dialogues_args: dict) -> None:
-    """2026-09-05 用于以自定义对话判定完成六个内部领域"""
-    _call(tools, "write_metrics", _write_metrics_args())
+def _write_all_domains_with_dialogues(tools: list, dialogues_args: dict, ledger=None) -> None:
+    """2026-09-05 用于以自定义对话判定完成六个内部领域
+
+    2026-09-07：句标签随 write_metrics 搭车提交，默认取自账本章文本的前缀
+    （各测试账本文本不同；不传 ledger 时退回默认章文本），两句满足每章
+    2 句软下限，不产生句标签覆盖告警。
+    """
+    chunk_text = ledger.current_chunk_text if ledger is not None else "“住手”回荡"
+    _call(tools, "write_metrics", {**_write_metrics_args(), "sentence_labels": _sentence_labels_args(chunk_text)})
     _call(tools, "write_entities", _write_entities_args())
     _call(tools, "write_dialogues", dialogues_args)
     _call(tools, "create_event", _create_event_args())
@@ -1717,7 +1735,7 @@ def test_empty_dialogue_payload_freezes_with_coverage_warning() -> None:
     tools = _tools(_QueryService(), ledger)
     assert len(ledger.dialogue_candidates) >= 1
 
-    _write_all_domains_with_dialogues(tools, {"items": []})
+    _write_all_domains_with_dialogues(tools, {"items": []}, ledger=ledger)
     chunk = ledger.complete_active_chunk()
 
     assert ledger.phase == "completed"
@@ -1730,7 +1748,7 @@ def test_partial_dialogue_judgement_freezes_with_defaulted_warning() -> None:
     ledger = _ledger_with_text("“住手”她喝止，“退下。”")
     tools = _tools(_QueryService(), ledger)
 
-    _write_all_domains_with_dialogues(tools, {"items": [[1, "dialogue", None, None]]})
+    _write_all_domains_with_dialogues(tools, {"items": [[1, "dialogue", None, None]]}, ledger=ledger)
     chunk = ledger.complete_active_chunk()
 
     assert len(chunk.dialogues) == 1
@@ -1747,6 +1765,7 @@ def test_full_dialogue_judgement_freezes_without_coverage_warning() -> None:
     _write_all_domains_with_dialogues(
         tools,
         {"items": [[1, "dialogue", None, None], [2, "dialogue", None, None]]},
+        ledger=ledger,
     )
     chunk = ledger.complete_active_chunk()
 
@@ -1760,7 +1779,88 @@ def test_chunk_without_candidates_freezes_without_coverage_warning() -> None:
     tools = _tools(_QueryService(), ledger)
     assert ledger.dialogue_candidates == []
 
-    _write_all_domains_with_dialogues(tools, {"items": []})
+    _write_all_domains_with_dialogues(tools, {"items": []}, ledger=ledger)
     chunk = ledger.complete_active_chunk()
 
     assert chunk.coverage_warnings == []
+
+
+def test_write_metrics_sentence_labels_bind_spans_and_freeze() -> None:
+    """2026-09-07 用于验证随 write_metrics 提交的自选句按原文定位绑定区间并进入冻结 chunk"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    # 句标签随 metrics 可选参数提交（先绑定后写域，绑定失败整次调用不落写入）
+    args = {**_write_metrics_args(), "sentence_labels": [
+        {"sentence": "“住手”回荡", "emotion": "strong_negative"},
+        {"sentence": "回荡", "emotion": "mild_negative"},
+    ]}
+    response = _call(tools, "write_metrics", args)
+    assert response["accepted"] is True
+    assert response["item_count"] == 1
+    labels = ledger.bound_payloads["sentence_labels"]
+    chunk_text = ledger.current_chunk_text
+    assert [label.start for label in labels] == [0, chunk_text.index("回荡")]
+    assert [str(label.emotion) for label in labels] == ["strong_negative", "mild_negative"]
+
+    # 整体重交（完整替换语义，最后写入生效）
+    _call(tools, "write_metrics", {**_write_metrics_args(), "sentence_labels": [
+        {"sentence": "“住手”回荡", "emotion": "strong_negative"},
+        {"sentence": "住手", "emotion": "mild_negative"},
+    ]})
+    labels = ledger.bound_payloads["sentence_labels"]
+    assert [label.sentence for label in labels] == ["“住手”回荡", "住手"]
+
+    _call(tools, "write_entities", _write_entities_args())
+    _call(tools, "write_dialogues", _write_dialogues_args())
+    _call(tools, "create_event", _create_event_args())
+    _call(tools, "write_relations", _write_relations_args())
+    chunk = ledger.complete_active_chunk()
+    assert [label.sentence for label in chunk.sentence_labels] == ["“住手”回荡", "住手"]
+    assert chunk.coverage_warnings == []
+
+
+def test_write_metrics_sentence_labels_reject_missing_and_duplicate() -> None:
+    """2026-09-07 用于验证非原文句与重复句直接报错自纠（绑定失败不落 metrics 写入）"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    with pytest.raises(ValueError, match="未在当前章节原文中找到唯一匹配"):
+        _call(
+            tools,
+            "write_metrics",
+            {**_write_metrics_args(), "sentence_labels": [{"sentence": "不存在的句子", "emotion": "neutral"}]},
+        )
+    assert "metrics" not in ledger.domain_receipts
+    with pytest.raises(ValueError, match="句子重复"):
+        _call(
+            tools,
+            "write_metrics",
+            {
+                **_write_metrics_args(),
+                "sentence_labels": [
+                    {"sentence": "住手", "emotion": "strong_negative"},
+                    {"sentence": "住手", "emotion": "mild_negative"},
+                ],
+            },
+        )
+    assert "metrics" not in ledger.domain_receipts
+
+
+def test_sentence_label_coverage_warning_below_two() -> None:
+    """2026-09-07 用于验证每章不足 2 句时冻结留痕覆盖告警（软下限不阻断）"""
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    _write_all_domains(tools)
+    # 整体重交为单句（完整替换语义），触发句标签覆盖告警
+    _call(
+        tools,
+        "write_metrics",
+        {**_write_metrics_args(), "sentence_labels": [{"sentence": "住手", "emotion": "neutral"}]},
+    )
+    chunk = ledger.complete_active_chunk()
+    assert "句标签覆盖: 仅标注 1 句（每章应自选 2-3 句）" in chunk.coverage_warnings

@@ -303,7 +303,19 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         [
             _tool_message([_entities_call(), invalid_metrics]),
             _tool_message([_metrics_call(call_id="call-metrics-fixed"), _events_call()]),
-            _tool_message([*_empty_domain_calls(), _dialogues_call()]),
+            _tool_message(
+                [
+                    *_empty_domain_calls(),
+                    _dialogues_call(),
+                    _metrics_call(
+                        call_id="call-metrics-labels",
+                        sentence_labels=[
+                            {"sentence": "住手", "emotion": "strong_negative"},
+                            {"sentence": "回荡", "emotion": "mild_negative"},
+                        ],
+                    ),
+                ]
+            ),
         ]
     )
     ledger = AnnotationToolLedger(
@@ -364,12 +376,19 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         "write_entities",
         "write_entities",
     ]
+    unlocked_all = [
+        "write_entities",
+        "write_metrics",
+        "create_event",
+        "write_relations",
+        "write_dialogues",
+    ]
     assert [row.context_summary["active_write_tools"] for row in turn_rows] == [
         ["write_entities", "write_metrics"],
         ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
-        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
+        unlocked_all,
     ]
-    formal_writes = {"write_entities", "write_dialogues", "create_event", "write_relations", "write_metrics"}
+    formal_writes = set(unlocked_all)
     for turn in turn_rows:
         assert turn.model_ms is not None and turn.model_ms >= 0
         assert turn.turn_ms is not None and turn.turn_ms >= 0
@@ -387,7 +406,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
             .order_by(AgentToolCall.call_index, AgentToolCall.id)
         ).scalars()
     )
-    assert len(tool_rows) == 6
+    assert len(tool_rows) == 7
     failed_rows = [row for row in tool_rows if row.status == "error"]
     assert len(failed_rows) == 1
     assert failed_rows[0].tool_name == "write_metrics"
@@ -397,7 +416,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         assert tool.tool_duration_ms is not None and tool.tool_duration_ms >= 0
         assert tool.request_args is not None
     accepted_rows = [row for row in tool_rows if row.status == "success"]
-    assert len(accepted_rows) == 5
+    assert len(accepted_rows) == 6
     write_rows = [row for row in accepted_rows if row.tool_name.startswith("write_")]
     assert all(row.receipt["accepted"] is True for row in write_rows)
 
