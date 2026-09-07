@@ -568,6 +568,34 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         ],
     },
     {
+        'id': 'linguistic_sentence_boundary',
+        'concept': '文风基础数据',
+        'problem': '词典词级边界不可见的整句情绪（语气/标点强度）——句级监督按书边界',
+        'fields': [
+            'boundary_pos_score_sum',
+            'boundary_neg_score_sum',
+        ],
+        'endpoint': '/linguistic/features',
+        'category': 'C',
+        'objective_subjective': 'subjective',
+        'authoritative': True,
+        'null_semantics': (
+            '自选句标签 <2 或分值无变化（无边界可学）时为 null（不伪造 0）；'
+            '逐段有分值但全正/全负时另一侧为 0（真实求和）'
+        ),
+        'computation_chain': (
+            '标注 agent 逐章自选 2-3 句整句情绪标签（随 chapter_annotations 落库）→ '
+            'LTP backbone 句向量（与 pipeline 同一模型，零新文件）→ 该书标签现算岭回归'
+            '线性边界 → 全书段落逐句打分按段求和（本地 CPU，零 API 成本；按书边界，'
+            '跨书曲线口径不同不可比）'
+        ),
+        'invariants': [
+            '边界只由该书自己的标签拟合（按书自监督，无全局标定集）',
+            '无标签 run 两列 NULL，段落曲线维持 mNEG 口径',
+            '有分值段落两侧至少一侧非零（分值 0 不产生贡献）',
+        ],
+    },
+    {
         'id': 'linguistic_phrase_density',
         'concept': '固定短语',
         'problem': '成语/惯用语密度（典雅典/口语/武侠风格信号）',

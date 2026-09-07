@@ -663,6 +663,9 @@ class LinguisticGroupStats(BaseModel):
     lexicon_neg_count: float | None = None
     mneg_pos_count: float | None = None
     mneg_neg_count: float | None = None
+    # 2026-09-07 句级监督边界（按书边界；标签不足/类别单一时为 null）
+    boundary_pos_score_sum: float | None = None
+    boundary_neg_score_sum: float | None = None
 
 
 class ChapterLinguisticStats(LinguisticGroupStats):

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclasses_field
 from pathlib import Path
 
+import numpy as np
 from loguru import logger
 
 from src.config import settings
@@ -137,6 +138,39 @@ class LtpSession:
             dep=out["dep"],
             sdp=out.get("sdp", []),
         )
+
+    def sentence_embeddings(self, sentences: Sequence[str]) -> np.ndarray:
+        """2026-09-07 用于计算 backbone 语境化句向量（句级监督按书边界）
+
+        与 pipeline 共用同一 tokenizer/backbone：batch_encode_plus（max_length=512、
+        truncation=longest_first、padding=longest）→ backbone last_hidden_state →
+        attention 掩码平均池化 → 行 L2 归一化。返回 (N, hidden) float32；
+        空输入返回 (0, 0)。CPU 批量前向，逐句打分本地免费（零 API 成本）。
+        """
+        import torch
+
+        if not sentences:
+            return np.zeros((0, 0), dtype=np.float32)
+        vectors: list[np.ndarray] = []
+        batch_size = 64
+        with torch.no_grad():
+            for start in range(0, len(sentences), batch_size):
+                batch = list(sentences[start : start + batch_size])
+                tokenized = self._ltp.tokenizer.batch_encode_plus(
+                    batch,
+                    max_length=512,
+                    padding="longest",
+                    truncation="longest_first",
+                    return_tensors="pt",
+                )
+                model_kwargs = {key: value.to(self._ltp.device) for key, value in tokenized.items()}
+                outputs = self._ltp.model.backbone(**model_kwargs)
+                hidden = outputs.last_hidden_state
+                mask = model_kwargs["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+                pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0)
+                normalized = torch.nn.functional.normalize(pooled, p=2, dim=-1)
+                vectors.append(normalized.cpu().numpy().astype(np.float32))
+        return np.concatenate(vectors, axis=0)
 
 
 def _normalize_pos(pos_tag: str) -> str:
