@@ -34,6 +34,7 @@ from .schema import (
     BoundDialogue,
     BoundEvent,
     BoundForeshadowing,
+    BoundSentenceLabel,
     CaseSearchResult,
     ChunkMetricsInput,
     ChunkParagraphInfo,
@@ -57,6 +58,7 @@ from .schema import (
     RelationInput,
     ResolvedCase,
     SearchResult,
+    SentenceLabelInput,
     SetupStatus,
     TextSearchResult,
     Tone,
@@ -64,6 +66,8 @@ from .schema import (
 )
 
 # 2026-08-22伏笔并入事件树（isforeshadowing），不再是独立领域
+# 2026-09-07 句级监督：句标签随既有 write_metrics 可选参数提交（不新增工具），
+# 系统在 metrics 写入时按原文定位绑定，落在 bound_payloads["sentence_labels"]
 _DOMAIN_NAMES = (
     "metrics",
     "entities",
@@ -74,6 +78,8 @@ _DOMAIN_NAMES = (
 )
 _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
 _DIRECT_WRITE_DOMAIN_NAMES = frozenset({"metrics", "entities", "dialogues", "relations"})
+# 2026-09-07 句标签冻结软下限（每章 2-3 句定稿）：低于 2 留痕覆盖告警，不阻断冻结
+_SENTENCE_LABEL_MIN_PER_CHUNK = 2
 _INTERNAL_GRAPH_KEYS = {
     "candidate_key",
     "chunk_id",
@@ -536,6 +542,36 @@ class AnnotationToolLedger:
     # 领域写入核心合同
     # ------------------------------------------------------------------
 
+    def bind_sentence_labels(self, items: list[SentenceLabelInput]) -> None:
+        """2026-09-07 用于把随 write_metrics 提交的自选句情绪标签定位绑定到章文本区间
+
+        句标签不设独立工具（随既有 write_metrics 的可选参数搭车提交）；整体替换
+        语义：每次调用以本列表为准。定位失败（非原句/改写）整次调用报错自纠。
+        """
+        bound_labels: list[BoundSentenceLabel] = []
+        seen_spans: set[tuple[int, int]] = set()
+        for item in items:
+            located = _locate_sentence(self.current_chunk_text, item.sentence)
+            if located is None:
+                raise ValueError(
+                    "write_metrics.sentence_labels.sentence 未在当前章节原文中找到唯一匹配: "
+                    f"{item.sentence[:50]}"
+                    "（请从正文原样摘录完整句子，不要改写或缩写）"
+                )
+            span = (located[0], located[1])
+            if span in seen_spans:
+                raise ValueError(f"write_metrics.sentence_labels 句子重复: {item.sentence[:50]}")
+            seen_spans.add(span)
+            bound_labels.append(
+                BoundSentenceLabel(
+                    sentence=located[2],
+                    emotion=item.emotion,
+                    start=span[0],
+                    end=span[1],
+                )
+            )
+        self.bound_payloads["sentence_labels"] = bound_labels
+
     def write_domain(self, domain: str, payload: Any, *, tool_name: str) -> dict[str, Any]:
         """2026-08-20 用于校验、绑定并完整替换当前 chunk 单个领域，成功即写入当前候选（优化：内联验证）"""
         if self.phase != "chunk_open":
@@ -873,6 +909,7 @@ class AnnotationToolLedger:
             dialogues=bound_dialogues,
             events=list(self.bound_payloads["events"]),
             foreshadowings=list(self.bound_payloads.get("foreshadowings") or []),
+            sentence_labels=list(self.bound_payloads.get("sentence_labels") or []),
         )
 
     def _dialogue_coverage_warnings(self) -> list[str]:
@@ -894,6 +931,17 @@ class AnnotationToolLedger:
             ]
         return []
 
+    def _sentence_label_coverage_warnings(self) -> list[str]:
+        """2026-09-07 用于在冻结前确定性登记句级监督覆盖缺口（仅告警不阻断冻结）
+
+        每章 2-3 句为用户定稿密度；低于 2 句（含空载荷）随 chunk 留痕，
+        供 linguistic 阶段边界拟合的样本量判断与报告附录展示。
+        """
+        labels = self.bound_payloads.get("sentence_labels") or []
+        if len(labels) >= _SENTENCE_LABEL_MIN_PER_CHUNK:
+            return []
+        return [f"句标签覆盖: 仅标注 {len(labels)} 句（每章应自选 2-3 句）"]
+
     def complete_active_chunk(self) -> BoundChunkAnnotation:
         """2026-08-30 用于检查六领域回执与 ready_chunk 后冻结当前 chunk"""
         if self.phase != "chunk_open":
@@ -903,7 +951,7 @@ class AnnotationToolLedger:
             raise ValueError(f"当前 chunk 尚未写入全部领域: {missing}")
         if self.ready_chunk is None:
             raise AnnotationInvariantError("六个领域均已写入但 ready_chunk 缺失，系统不变量被破坏")
-        warnings = self._dialogue_coverage_warnings()
+        warnings = [*self._dialogue_coverage_warnings(), *self._sentence_label_coverage_warnings()]
         chunk = self.ready_chunk.model_copy(update={"coverage_warnings": warnings}) if warnings else self.ready_chunk
         self.completed_chunks.append(chunk)
         # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
@@ -1052,6 +1100,22 @@ def _normalize_query(query: str, *, tool_name: str) -> str:
     return normalized
 
 
+def _locate_sentence(chunk_text: str, sentence: str) -> tuple[int, int, str] | None:
+    """2026-09-07 用于把 agent 摘录句定位绑定到章文本唯一区间
+
+    NFC 归一后精确匹配；命中多处（重复句）取第一处并仍算唯一合法绑定，
+    句子本体以原文命中文本为准（NFC 等价差异归一）。
+    """
+    normalized_text = unicodedata.normalize("NFC", chunk_text)
+    normalized_sentence = unicodedata.normalize("NFC", sentence).strip()
+    if not normalized_sentence:
+        return None
+    index = normalized_text.find(normalized_sentence)
+    if index < 0:
+        return None
+    return index, index + len(normalized_sentence), normalized_sentence
+
+
 def _semantic_graph_value(value: Any) -> Any:
     """2026-08-07 用于递归移除图查询结果中的数据库定位字段"""
     if isinstance(value, dict):
@@ -1158,8 +1222,17 @@ def build_annotation_tools(
         narrative_function: NarrativeFunction,
         pivot_moment: bool = False,
         cliffhanger: bool = False,
+        sentence_labels: list[SentenceLabelInput] | None = None,
     ) -> str:
-        """2026-08-11 用于完整替换当前 chunk 摘要和叙事指标，章节摘要由系统用各 chunk summary 自动生成"""
+        """2026-08-11 用于完整替换当前 chunk 摘要和叙事指标，章节摘要由系统用各 chunk summary 自动生成
+
+        2026-09-07 句级监督：可选 sentence_labels 参数随本工具提交从当前章正文自选的
+        2-3 句整句情绪标签（每条 {sentence, emotion}；sentence 必须原样摘录完整句子
+        不得改写，emotion 英文枚举 strong_positive/mild_positive/neutral/mild_negative/
+        strong_negative）。选句标准由模型自行判断——优先选情绪表达有代表性或语气/标点
+        有区分度的句子，也允许选 neutral 句。系统按原文定位绑定字符区间，找不到的句子
+        整次调用报错自纠；重复调用 write_metrics 时句标签以最后一次提交为准。
+        """
         payload = ChunkMetricsInput(
             summary=summary,
             emotional_valence=emotional_valence,
@@ -1167,6 +1240,8 @@ def build_annotation_tools(
             pivot_moment=pivot_moment,
             cliffhanger=cliffhanger,
         )
+        # 2026-09-07 句标签先绑定后写域：绑定失败整次调用报错，metrics 不落任何写入
+        ledger.bind_sentence_labels(list(sentence_labels) if sentence_labels else [])
         return json.dumps(
             ledger.write_domain("metrics", payload, tool_name="write_metrics"),
             ensure_ascii=False,

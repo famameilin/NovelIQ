@@ -20,6 +20,7 @@ from src.agents.annotation.schema import (
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
+    BoundSentenceLabel,
     ChunkParagraphInfo,
     EntityType,
     PendingCase,
@@ -173,6 +174,13 @@ def _merge_sub_chunk_annotations(
                 ],
                 events=merged_events,
                 foreshadowings=merged_foreshadowings,
+                # 2026-09-07 句级监督：子块句标签按子块偏移平移回章文本坐标
+                # （首块偏移 0 不变；句子文本与情绪不变，仅 start/end 平移）
+                sentence_labels=[
+                    _remap_bound_sentence_label(item, sub_chunk_offsets[index])
+                    for index, annotation in enumerate(annotations)
+                    for item in annotation.chunks[0].sentence_labels
+                ],
             )
         ],
     )
@@ -186,6 +194,18 @@ def _remap_bound_dialogue(dialogue: BoundDialogue, sub_chunk_offset: int) -> Bou
         update={
             "start": dialogue.start + sub_chunk_offset,
             "end": dialogue.end + sub_chunk_offset,
+        }
+    )
+
+
+def _remap_bound_sentence_label(label: BoundSentenceLabel, sub_chunk_offset: int) -> BoundSentenceLabel:
+    """2026-09-07 用于把子块相对句标签坐标平移回章文本坐标（首块偏移 0 不变）"""
+    if sub_chunk_offset <= 0:
+        return label
+    return label.model_copy(
+        update={
+            "start": label.start + sub_chunk_offset,
+            "end": label.end + sub_chunk_offset,
         }
     )
 

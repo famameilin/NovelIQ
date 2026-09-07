@@ -26,9 +26,11 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     BoundDialogue,
+    BoundSentenceLabel,
     CaseSearchResult,
     ChunkMetricsInput,
     ChunkParagraphInfo,
+    EmotionalValence,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -96,17 +98,20 @@ def _write_call(
     return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
 
 
-def _metrics_call(call_id: str = "call-metrics") -> dict:
-    """2026-08-07 用于构造合法 write_metrics 调用"""
-    return _write_call(
-        "write_metrics",
-        {
-            "summary": "住手回荡",
-            "emotional_valence": "neutral",
-            "narrative_function": "铺垫",
-        },
-        call_id=call_id,
-    )
+def _metrics_call(call_id: str = "call-metrics", *, sentence_labels: list[dict] | None = None) -> dict:
+    """2026-08-07 用于构造合法 write_metrics 调用
+
+    2026-09-07 句级监督：句标签随 write_metrics 的 sentence_labels 参数搭车
+    （不设独立工具）；默认两句满足每章 2 句软下限。
+    """
+    payload = {
+        "summary": "住手回荡",
+        "emotional_valence": "neutral",
+        "narrative_function": "铺垫",
+    }
+    if sentence_labels is not None:
+        payload["sentence_labels"] = sentence_labels
+    return _write_call("write_metrics", payload, call_id=call_id)
 
 
 def _entities_call(call_id: str = "call-entities") -> dict:
@@ -168,7 +173,18 @@ def _serial_write_messages(*, dialogues: dict | None = None) -> list[AIMessage]:
     return [
         _tool_message([_entities_call(), _metrics_call()]),
         _tool_message([_events_call(), *_empty_domain_calls()]),
-        _tool_message([resolved_dialogues]),
+        _tool_message(
+            [
+                resolved_dialogues,
+                _metrics_call(
+                    call_id="call-metrics-labels",
+                    sentence_labels=[
+                        {"sentence": "住手", "emotion": "strong_negative"},
+                        {"sentence": "回荡", "emotion": "mild_negative"},
+                    ],
+                ),
+            ]
+        ),
     ]
 
 
@@ -485,7 +501,18 @@ async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> N
             _tool_message([invalid_entities, _metrics_call()]),
             _tool_message([_entities_call(call_id="call-entities-fixed")]),
             _tool_message([_events_call(), *_empty_domain_calls()]),
-            _tool_message([_dialogues_call()]),
+            _tool_message(
+                [
+                    _dialogues_call(),
+                    _metrics_call(
+                        call_id="call-metrics-labels",
+                        sentence_labels=[
+                            {"sentence": "住手", "emotion": "strong_negative"},
+                            {"sentence": "回荡", "emotion": "mild_negative"},
+                        ],
+                    ),
+                ]
+            ),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
@@ -542,7 +569,19 @@ async def test_partial_writes_do_not_auto_finalize() -> None:
         [
             _tool_message([_entities_call(), _metrics_call()]),
             _tool_message([first_event, *_empty_domain_calls()]),
-            _tool_message([second_event, _dialogues_call()]),
+            _tool_message(
+                [
+                    second_event,
+                    _dialogues_call(),
+                    _metrics_call(
+                        call_id="call-metrics-labels",
+                        sentence_labels=[
+                            {"sentence": "住手", "emotion": "strong_negative"},
+                            {"sentence": "回荡", "emotion": "mild_negative"},
+                        ],
+                    ),
+                ]
+            ),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
@@ -576,7 +615,18 @@ async def test_three_create_event_calls_and_relation_write_succeed_in_one_round(
         [
             _tool_message([_entities_call(), _metrics_call()]),
             _tool_message([first_event, second_event, final_event, *_empty_domain_calls()]),
-            _tool_message([_dialogues_call()]),
+            _tool_message(
+                [
+                    _dialogues_call(),
+                    _metrics_call(
+                        call_id="call-metrics-labels",
+                        sentence_labels=[
+                            {"sentence": "住手", "emotion": "strong_negative"},
+                            {"sentence": "回荡", "emotion": "mild_negative"},
+                        ],
+                    ),
+                ]
+            ),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
@@ -599,7 +649,19 @@ async def test_failed_event_write_does_not_block_relation_write_in_same_round() 
         [
             _tool_message([_entities_call(), _metrics_call()]),
             _tool_message([invalid_event, *_empty_domain_calls()]),
-            _tool_message([_events_call(call_id="call-events-fixed"), _dialogues_call()]),
+            _tool_message(
+                [
+                    _events_call(call_id="call-events-fixed"),
+                    _dialogues_call(),
+                    _metrics_call(
+                        call_id="call-metrics-labels",
+                        sentence_labels=[
+                            {"sentence": "住手", "emotion": "strong_negative"},
+                            {"sentence": "回荡", "emotion": "mild_negative"},
+                        ],
+                    ),
+                ]
+            ),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
@@ -1112,3 +1174,25 @@ async def test_runner_resets_fact_graph_chapter_state_on_failure() -> None:
     assert graph_state.active_relations == {("顾老", "顾霜", "同一人物")}
     assert graph_state.chapter_added_relations == set()
     assert graph_state.entity_types == {"顾霜": "character"}
+
+
+def test_validate_bound_annotation_verifies_sentence_label_spans() -> None:
+    """2026-09-07 用于验证句标签坐标与原文绑定一致可回查"""
+    annotation = _bound_annotation()
+    chunk = annotation.chunks[0]
+    chunk.sentence_labels = [
+        BoundSentenceLabel(sentence="住手", emotion=EmotionalValence.NEUTRAL, start=3, end=5)
+    ]
+    validate_bound_annotation(
+        annotation,
+        chapter_id=1,
+        current_chunks=[(1, "顾霜“住手”回荡")],
+    )
+    mismatched = BoundSentenceLabel(sentence="住手", emotion=EmotionalValence.NEUTRAL, start=0, end=2)
+    chunk.sentence_labels = [mismatched]
+    with pytest.raises(ValueError, match="系统自选句绑定不一致"):
+        validate_bound_annotation(
+            annotation,
+            chapter_id=1,
+            current_chunks=[(1, "顾霜“住手”回荡")],
+        )

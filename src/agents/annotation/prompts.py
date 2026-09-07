@@ -45,6 +45,8 @@ def build_chunk_message(
 
     2026-08-22事件不再携带段落锚点，移除 ¶N 段落标记注入。
     2026-09-04恢复初始案例编号表注入（cb4f96f1 误删，见 build_system_prompt）。
+    2026-09-07 句级监督：新增自选句标签区块（提交渠道=write_metrics 的
+    sentence_labels 可选参数，不新增工具；选句标准见 write_metrics docstring）。
     """
     candidate_views = [
         {
@@ -63,6 +65,11 @@ def build_chunk_message(
         "<DialogueCandidates>\n"
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
+        "<SentenceLabels>\n"
+        "请从上方正文中自选 2-3 个完整句子（原样摘录，不改写），随 write_metrics 的 "
+        "sentence_labels 参数为每句提交整句情绪标签（emotion 英文枚举）。选择权在模型："
+        "优先选情绪表达有代表性、或语气/标点有区分度的句子；也允许选 neutral 句。\n"
+        "</SentenceLabels>",
     ]
     return "\n\n".join(sections)
 
