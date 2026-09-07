@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.config import settings
-from src.config.constants import LEXICON_FILES
+from src.config.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.linguistic import TrainResult
 from src.storage.repositories import ParagraphRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
@@ -170,10 +170,7 @@ async def run_linguistic(
             # 同扫描，命中行 is_metric_hit=false——审定门，不计入正式密度
             phrase_rows: list[dict] = []
             draft_terms: dict[str, list[str]] = {
-                LEXICON_FILES["body_reaction_draft"]: registry.get(LEXICON_FILES["body_reaction_draft"]),
-                LEXICON_FILES["colloquial_expansion_draft"]: registry.get(
-                    LEXICON_FILES["colloquial_expansion_draft"]
-                ),
+                LEXICON_FILES[k]: registry.get(LEXICON_FILES[k]) for k in LEXICON_DRAFT_KEYS
             }
             for row in batch:
                 hits = match_fixed_phrases(

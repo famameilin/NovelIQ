@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 import src
-from src.config.constants import LEXICON_FILES
+from src.config.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.lexicons.registry import LexiconRegistry
 from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 
@@ -125,10 +125,14 @@ class TestVersionHashV3:
 
 class TestRegistryIsSingleSourceOfTruth:
     def test_all_registered_keys_loadable(self) -> None:
-        """注册的 key 必须可加载（生产注册表，load 即全量校验）"""
+        """注册的 key 必须可加载（生产注册表，load 即全量校验）；
+        draft 审定队列为空=无待审词条，是合法稳态，豁免非空断言"""
         reg = LexiconRegistry()
         reg.load()
+        draft_files = {LEXICON_FILES[k] for k in LEXICON_DRAFT_KEYS}
         for key in reg.list_all_keys():
+            if key in draft_files:
+                continue
             assert len(reg.get(key)) > 0, f"注册表目 {key} 加载为空"
 
     def test_no_hardcoded_lexicon_paths_in_src(self) -> None:

@@ -27,3 +27,8 @@ LEXICON_FILES: dict[str, str] = {
     "body_reaction_draft": "body_reaction_draft.txt",
     "colloquial_expansion_draft": "colloquial_expansion_draft.txt",
 }
+
+# draft 审定队列 key 子集：无待审词条时文件为空是合法稳态（区别于正式表——
+# 正式表空即降级，registry 测试据此豁免非空断言）；linguistic 阶段按此集合
+# 挂审定门，下一轮扩表新增 draft 表只需同时登记于此。
+LEXICON_DRAFT_KEYS: tuple[str, ...] = ("body_reaction_draft", "colloquial_expansion_draft")
