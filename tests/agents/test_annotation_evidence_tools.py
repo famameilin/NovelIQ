@@ -151,7 +151,7 @@ class _ForeshadowingCaseQueryService(_QueryService):
         return ActiveCaseDetails(
             **self._case().model_dump(mode="python"),
             target_key="target-foreshadow-1",
-            target_ref={"kind": "foreshadowing", "chunk_id": 10, "setup_id": "thread-1"},
+            target_ref={"kind": "伏笔疑点", "chunk_id": 10, "setup_id": "thread-1"},
         )
 
 
@@ -1864,3 +1864,39 @@ def test_sentence_label_coverage_warning_below_two() -> None:
     )
     chunk = ledger.complete_active_chunk()
     assert "句标签覆盖: 仅标注 1 句（每章应自选 2-3 句）" in chunk.coverage_warnings
+
+
+def test_resolve_dialogue_case_rejects_non_dialogue_case() -> None:
+    """2026-09-08 用于验证无 dialogue_id 的案例（伏笔疑点等）被拒并指引正确通道
+
+    第16章死锁回归：模型把编号表里的伏笔疑点案例误当对话疑点解决，
+    工具层须按 target_ref 结构拒绝，否则持久化按对话路径找不到记录直接崩溃。
+    """
+    service = _ForeshadowingCaseQueryService()
+    ledger = _ledger()
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["case-1"]
+    with pytest.raises(AnnotationInputError, match="含 dialogue_id 的对话类案例"):
+        _find_tool(tools, "resolve_dialogue_case").invoke(
+            {"case_number": case_number, "speaker": "顾霜", "reason": "误用"}
+        )
+    assert ledger.resolved_cases == []
+
+
+def test_resolve_foreshadowing_case_rejects_alias_case() -> None:
+    """2026-09-08 用于验证实体别名案例不能走伏笔确认路径（防凭空建线程）"""
+    service = _AliasQueryService()
+    ledger = _ledger()
+    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
+    ledger.register_initial_cases(initial_cases, rotation_ids)
+    tools = _tools(service, ledger)
+
+    case_number = ledger.case_number_by_id["alias-1"]
+    with pytest.raises(AnnotationInputError, match="只能解决疑点类案例"):
+        _find_tool(tools, "resolve_foreshadowing_case").invoke(
+            {"case_number": case_number, "reason": "误用", "setup_status": "reinforced"}
+        )
+    assert ledger.resolved_cases == []

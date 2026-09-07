@@ -56,7 +56,7 @@ class _EventHistoryService:
         """2026-08-18 用于返回包含稳定目标的 active 案例"""
         if case_id != "case-1":
             return None
-        target_ref: dict = {"kind": "foreshadowing", "chunk_id": 10}
+        target_ref: dict = {"kind": "伏笔疑点", "chunk_id": 10}
         if self.case_has_thread:
             target_ref["setup_id"] = "thread-1"
         return ActiveCaseDetails(

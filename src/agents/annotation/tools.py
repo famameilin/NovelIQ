@@ -1494,6 +1494,39 @@ def build_annotation_tools(
             )
         return details
 
+    def _require_dialogue_case(details: ActiveCaseDetails) -> None:
+        """2026-09-08 用于校验案例确为带对话目标的对话类案例
+
+        第16章死锁：模型把编号表里的 entity_alias/伏笔疑点案例误当对话疑点
+        用 resolve_dialogue_case 解决，工具硬编码 action="dialogue" 入账，
+        持久化按对话路径找不到对话记录直接崩溃。对话类案例的稳定判据是
+        target_ref 含 dialogue_id（push_case(dialogue_id=...) 登记时写入），
+        这里按结构拒绝，回执直接告诉模型正文候选的正确通道。
+        """
+        if details.target_ref.get("dialogue_id") or details.target_ref.get("candidate_key"):
+            return
+        raise AnnotationInputError(
+            f"resolve_dialogue_case 只能解决含 dialogue_id 的对话类案例，案例 {details.id}"
+            f"（{details.target_ref.get('kind') or '未知'}）没有对话目标："
+            "正文对话候选的说话人/语气请用 write_dialogues 提交；"
+            "疑点案例用 resolve_foreshadowing_case，关系事实用 resolve_fact_case，仅需关闭用 close_case"
+        )
+
+    def _require_suspicion_case(details: ActiveCaseDetails, tool_name: str) -> None:
+        """2026-09-08 用于校验案例确为疑点类（伏笔线程确认只对疑点案例开放）
+
+        关系事实/实体别名不是疑点：前者走 resolve_fact_case 建改删关系，
+        后者确认后用 close_case 关闭；误走伏笔路径会凭空建立伏笔线程。
+        """
+        kind = details.target_ref.get("kind") or ""
+        if kind.endswith("疑点"):
+            return
+        raise AnnotationInputError(
+            f"{tool_name} 只能解决疑点类案例（伏笔疑点/连续性疑点等），"
+            f"案例 {details.id} 的类型是 {kind or '未知'}："
+            "关系事实用 resolve_fact_case，实体别名确认后用 close_case 关闭"
+        )
+
     def _append_resolved(
         ledger: AnnotationToolLedger,
         details: ActiveCaseDetails,
@@ -1538,6 +1571,7 @@ def build_annotation_tools(
             case_number=case_number,
             tool_name="resolve_dialogue_case",
         )
+        _require_dialogue_case(details)
         if speaker is not None:
             _require_action_entity(
                 ledger,
@@ -1655,6 +1689,7 @@ def build_annotation_tools(
             case_number=case_number,
             tool_name="resolve_foreshadowing_case",
         )
+        _require_suspicion_case(details, "resolve_foreshadowing_case")
         if not details.target_ref.get("setup_id"):
             if setup_event_id is None:
                 raise AnnotationInputError(
