@@ -113,6 +113,8 @@ describe("LinguisticPage", () => {
       max_dependency_depth: 9,
       dependency_relation_ratios: { HED: 0.18, SBV: 0.24 },
       dependency_root_count: 4800,
+      boundary_pos_score_sum: 14.27,
+      boundary_neg_score_sum: 2447.93,
       chapters: [],
       unavailable_reason: null,
     });
@@ -182,6 +184,8 @@ describe("LinguisticPage", () => {
       max_dependency_depth: null,
       dependency_relation_ratios: null,
       dependency_root_count: null,
+      boundary_pos_score_sum: null,
+      boundary_neg_score_sum: null,
       chapters: [],
       unavailable_reason: "linguistic_unavailable: 无 paragraph_linguistic_features 行（语言阶段未运行）",
     });
@@ -189,5 +193,35 @@ describe("LinguisticPage", () => {
     renderLinguisticPage();
 
     expect(await screen.findByTestId("tab-unavailable-state")).toBeInTheDocument();
+  });
+
+  it("表达结构指标条展示句级监督边界两列，未拟合时回退占位符", async () => {
+    renderLinguisticPage();
+
+    expect(await screen.findByText("边界正向分和")).toBeInTheDocument();
+    expect(screen.getByText("14.27")).toBeInTheDocument();
+    expect(screen.getByText("2447.93")).toBeInTheDocument();
+
+    getLinguisticFeaturesMock.mockResolvedValue({
+      run_id: "task-1",
+      paragraph_count: 420,
+      token_total: 72000,
+      sentence_total: 4800,
+      word_length_ratios: { 1: 0.18 },
+      pos_ratios: { noun: 0.32 },
+      sentence_pattern_ratios: { short: 0.42 },
+      avg_dependency_depth: 2.84,
+      max_dependency_depth: 9,
+      dependency_relation_ratios: { HED: 0.18 },
+      dependency_root_count: 4800,
+      boundary_pos_score_sum: null,
+      boundary_neg_score_sum: null,
+      chapters: [],
+      unavailable_reason: null,
+    });
+    renderLinguisticPage();
+
+    expect(await screen.findAllByText("边界负向分和").then((nodes) => nodes.length)).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("—")).length).toBeGreaterThan(0);
   });
 });

@@ -149,8 +149,18 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
               { label: "依存根节点数", value: stats?.dependency_root_count ?? "—" },
               { label: "平均依存深度", value: stats?.avg_dependency_depth?.toFixed(3) ?? "—" },
               { label: "最大依存深度", value: stats?.max_dependency_depth ?? "—" },
+              {
+                label: "边界正向分和",
+                value: stats?.boundary_pos_score_sum != null ? stats.boundary_pos_score_sum.toFixed(2) : "—",
+                description: "句级监督边界逐段正向分按段求和",
+              },
+              {
+                label: "边界负向分和",
+                value: stats?.boundary_neg_score_sum != null ? stats.boundary_neg_score_sum.toFixed(2) : "—",
+                description: "句级监督边界逐段负向分按段求和",
+              },
             ]}
-            className="grid-cols-3"
+            className="grid-cols-4"
           />
 
           <div className="grid grid-cols-2 gap-4">

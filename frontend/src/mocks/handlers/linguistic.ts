@@ -44,6 +44,8 @@ function buildGroupStats(scale = 1) {
     max_dependency_depth: 9,
     dependency_relation_ratios: RELATIONS,
     dependency_root_count: Math.round(1600 * scale),
+    boundary_pos_score_sum: Math.round(14.27 * scale * 100) / 100,
+    boundary_neg_score_sum: Math.round(2447.93 * scale * 100) / 100,
   };
 }
 
