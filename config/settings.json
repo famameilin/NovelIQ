@@ -9,7 +9,7 @@
       "structured_output": "json_object",
       "max_iterations": 15,
       "total_attempts": 3,
-      "allow_future_context": true
+      "allow_future_context": false
     },
     "paragraph_embedding": {
       "timeout_s": 120,
