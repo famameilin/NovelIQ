@@ -728,6 +728,9 @@ export interface LinguisticGroupStats {
   max_dependency_depth: number | null;
   dependency_relation_ratios: Record<string, number> | null;
   dependency_root_count: number | null;
+  // 句级监督边界（按书边界；标签不足/类别单一时为 null，跨书口径不可比）
+  boundary_pos_score_sum: number | null;
+  boundary_neg_score_sum: number | null;
 }
 
 export interface ChapterLinguisticStats extends LinguisticGroupStats {
