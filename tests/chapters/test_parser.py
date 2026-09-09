@@ -102,6 +102,25 @@ def test_body_noise_filtered_by_confidence() -> None:
     assert [ch.title for ch in chapters] == ["第一章 起点", "第二章 入城", "第三章 拜师"]
 
 
+def test_body_sentence_masquerading_as_hui_not_split() -> None:
+    """
+    2026-09-09 重明传形态回归：正文句"第二回合。马骁欺身而上…"不再被切成
+    独立回目章（截断后标题退化为"合"），整句并入前一章正文。
+    """
+    text = (
+        "第十六章 演武场上有真章\n"
+        "前情内容。\n"
+        "第二回合。马骁欺身而上，脚下连踩三个方位，身形在粗砂地上晃出两道虚影。\n"
+        "后续内容。\n"
+        "第十七章 经义堂中起争辩\n"
+        "收尾内容。"
+    )
+    chapters = parse_chapters(text)
+    assert [ch.title for ch in chapters] == ["第十六章 演武场上有真章", "第十七章 经义堂中起争辩"]
+    body = text[chapters[0].start_char : chapters[0].end_char]
+    assert "第二回合。马骁欺身而上" in body
+
+
 def test_custom_config_fallback_chunk_size() -> None:
     config = ChapterConfig()
     config.fallback_chunk_size = 100
