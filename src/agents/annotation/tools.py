@@ -1585,7 +1585,11 @@ def build_annotation_tools(
         description: str | None = None,
         is_inner_monologue: bool | None = None,
     ) -> str:
-        """2026-08-11 用于通过临时编号把案例解决为对话记录更新（至少提供一个更新字段）"""
+        """2026-08-11 用于通过临时编号把案例解决为对话记录更新（至少提供一个更新字段）
+
+        2026-09-10 编号判据：case_number 仅指 ActiveCases/search_pool 展示的
+        案例（含 push_case 登记的对话疑点）；正文 DialogueCandidates 无编号，
+        说话人/语气经 write_dialogues 按 candidate_index 提交，两类编号互不通用。"""
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
