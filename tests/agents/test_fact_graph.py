@@ -292,3 +292,26 @@ def test_resolve_name_after_duplicate_relation_submission() -> None:
     graph = _alias_graph()
     assert graph.apply_relation(_relation("石轩", "小石头", "同一人物")) is False
     assert graph.resolve_name("小石头") == "石轩"
+
+
+def test_apply_relation_change_rejects_same_endpoint_self_loop() -> None:
+    """2026-09-10 用于验证案例关系变更裸同名端点直接报错，不进操作日志炸持久化约束
+
+    run a83fae3d 第9章实锤：两端归一后同名的关系行持久化时违反
+    ck_graph_relations_distinct_endpoints，整个完成事务回滚致 run 失败。
+    """
+    graph = _alias_graph()
+    with pytest.raises(ValueError, match="不允许自环"):
+        graph.apply_relation_change(
+            from_entity="石轩",
+            to_entity="石轩",
+            relation_type="同一人物",
+            change_kind="assert",
+            reason="归并重申",
+            case_id="case-1",
+            case_type="relation_fact",
+            target_key="key",
+            target_ref={},
+            chapter_id=9,
+        )
+    assert graph.relation_change_ops == []

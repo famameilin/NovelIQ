@@ -1489,6 +1489,61 @@ def test_relation_existing_edge_skipped_existing_receipt() -> None:
     assert ledger.graph.relation_exists("顾霜", "顾老", "友情") is True
 
 
+def test_relation_alias_resolved_to_same_entity_skipped_self_loop() -> None:
+    """2026-09-10 用于验证解析后两端同实体的边跳过不入图
+
+    "同一人物"边解析后塌环（含同批双向重申、跨章重申、传递归并）= 归并已成立，
+    按合同接受为 skipped_existing；普通关系类型塌成自环才是退化输入，标
+    skipped_self_loop。照常入图都会在持久化插入 from_entity_id=to_entity_id
+    自环行，违反 ck_graph_relations_distinct_endpoints 炸掉完成事务
+    （run a83fae3d 第9章实锤：同批双向重申的第二条经 resolve_name 键变形
+    逃逸了 existing 去重）。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = FactGraph(
+        history_entity_types={"猴子": "character", "侯飞白": "character"},
+        history_entity_names={"猴子": "猴子", "侯飞白": "侯飞白"},
+        history_relations={("猴子", "侯飞白", "同一人物")},
+    )
+    ledger.graph_queried = True
+    tools = _tools(service, ledger)
+
+    same_character_args = {
+        "items": [
+            {
+                "from_entity": "猴子",
+                "to_entity": "侯飞白",
+                "relation_type": "同一人物",
+            }
+        ]
+    }
+    response = _call(tools, "write_relations", same_character_args)
+    assert response["accepted"] is True
+    assert response["relations"][0]["outcome"] == "skipped_existing"
+    assert response["relations"][0]["from"] == response["relations"][0]["to"]
+
+    ordinary_args = {
+        "items": [
+            {
+                "from_entity": "猴子",
+                "to_entity": "侯飞白",
+                "relation_type": "友情",
+            }
+        ]
+    }
+    response = _call(tools, "write_relations", ordinary_args)
+    assert response["accepted"] is True
+    assert response["relations"][0]["outcome"] == "skipped_self_loop"
+
+    # 退化边不入操作日志（持久化重放源），图中也不得出现自环键
+    assert ledger.graph.relation_assert_ops == []
+    assert not any(
+        from_key == to_key
+        for from_key, to_key, _relation_type in ledger.graph.active_relations
+    )
+
+
 def test_relation_state_field_rejected_from_contract() -> None:
     """2026-08-12 用于验证关系合同已删除 state 字段（三字段边，extra=forbid 拒绝）"""
     service = _QueryService()
