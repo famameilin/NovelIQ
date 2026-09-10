@@ -7,7 +7,7 @@
  * - 优化数据获取配置，添加缓存和错误重试
  * - 优化面包屑布局，改为左对齐
  */
-import { Moon, Sun } from "lucide-react";
+import { Moon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { Link, useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useThemeStore } from "@/store/themeStore";
@@ -103,6 +103,11 @@ export function TopBar() {
       )}
 
       <div className="flex items-center gap-3">
+        <Link to="/settings" aria-label="打开设置">
+          <Button type="button" variant="ghost" size="icon" aria-label="设置">
+            <SettingsIcon className="h-4 w-4" />
+          </Button>
+        </Link>
         <Button
           type="button"
           variant="ghost"

@@ -35,6 +35,7 @@ import {
   topicEmotionHandler,
 } from "./handlers/results";
 import { linguisticFeaturesHandler, linguisticWord2vecHandler } from "./handlers/linguistic";
+import { settingsEnvHandler, settingsSchemaHandler, settingsTestHandler, settingsUpdateHandler, settingsViewHandler } from "./handlers/settings";
 import {
   characterFunctionTabHandler,
   dashboardTabHandler,
@@ -80,4 +81,10 @@ export const worker = setupWorker(
   graphNetworkTabHandler,
   topicsOverviewTabHandler,
   linguisticEntitiesTabHandler,
+  // 设置
+  settingsSchemaHandler,
+  settingsViewHandler,
+  settingsUpdateHandler,
+  settingsEnvHandler,
+  settingsTestHandler,
 );
