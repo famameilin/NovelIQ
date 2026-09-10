@@ -22,6 +22,7 @@ from src.api.app_bootstrap import (
     register_exception_handlers,
     register_middlewares,
     results_router,
+    settings_router,
     sse_router,
     tabs_router,
     timeline_router,
@@ -173,6 +174,7 @@ app.include_router(results_router, prefix="/api")
 app.include_router(linguistic_router, prefix="/api")
 app.include_router(tabs_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
+app.include_router(settings_router, prefix="/api", tags=["settings"])
 app.include_router(sse_router, prefix="/api", tags=["SSE"])
 
 register_exception_handlers(app)

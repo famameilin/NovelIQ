@@ -20,6 +20,7 @@ from src.api.exceptions import (
     GraphReadinessError,
     InvalidFileError,
     NovelNotFoundError,
+    SettingsValidationError,
 )
 from src.storage.id_mapping import IDMappingError, TaskIDNotFoundError
 
@@ -116,6 +117,16 @@ async def graph_readiness_error_handler(request: Request, exc: GraphReadinessErr
     return error_response.to_json_response()
 
 
+async def settings_validation_error_handler(request: Request, exc: SettingsValidationError) -> JSONResponse:
+    logger.error(f"SettingsValidationError: {exc.message}")
+    error_response = create_error_response(
+        detail=exc.message,
+        error_type="SettingsValidationError",
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+    )
+    return error_response.to_json_response()
+
+
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception(f"Unhandled exception: {str(exc)}")
     error_response = create_error_response(
@@ -187,6 +198,7 @@ def register_exception_handlers(app) -> None:
     app.add_exception_handler(AnalysisError, analysis_error_handler)
     app.add_exception_handler(FileStorageError, file_storage_error_handler)
     app.add_exception_handler(GraphReadinessError, graph_readiness_error_handler)
+    app.add_exception_handler(SettingsValidationError, settings_validation_error_handler)
 
     # ID转换相关异常处理器
     app.add_exception_handler(TaskIDNotFoundError, task_id_not_found_handler)
