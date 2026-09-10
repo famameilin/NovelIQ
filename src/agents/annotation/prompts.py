@@ -47,10 +47,13 @@ def build_chunk_message(
     2026-09-04恢复初始案例编号表注入（cb4f96f1 误删，见 build_system_prompt）。
     2026-09-07 句级监督：新增自选句标签区块（提交渠道=write_metrics 的
     sentence_labels 可选参数，不新增工具；选句标准见 write_metrics docstring）。
+    2026-09-10 候选字段 index 改名 candidate_index：与 write_dialogues 参数名
+    字面对齐，消除与 ActiveCases case_number 两套小编号空间的混同
+    （run a83fae3d 思考实测映射推理 1725 次、显式困惑 39 次）。
     """
     candidate_views = [
         {
-            "index": index,
+            "candidate_index": index,
             "id": candidate.candidate_key,
             "text": candidate.content,
             "parse_status": candidate.parse_status,

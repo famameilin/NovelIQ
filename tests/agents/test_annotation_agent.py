@@ -390,6 +390,37 @@ def test_initial_case_number_table_injected_into_first_message() -> None:
     assert "疑似对话：猴子瘫在游廊哀嚎" in message
 
 
+def test_dialogue_candidate_view_field_aligned_with_write_param() -> None:
+    """2026-09-10 候选渲染字段名与 write_dialogues 参数名对齐
+
+    旧字段名 index 与 ActiveCases 的 case_number 同为小整数，模型每章重新
+    推理两套编号关系（run a83fae3d 思考实测映射推理 1725 次）；改名后
+    candidate_index 与 write_dialogues 参数字面一致，映射自明。
+    """
+    chunk_text = "“住手”回荡"
+    ledger = AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text=chunk_text,
+        allow_future_context=False,
+        graph=FactGraph(),
+        paragraph_info=ChunkParagraphInfo(
+            paragraph_ids=[0],
+            char_spans=[(0, len(chunk_text))],
+            texts=[chunk_text],
+        ),
+    )
+    message = build_chunk_message(
+        chunk_index=1,
+        chunk_total=1,
+        chunk_text=chunk_text,
+        candidates=ledger.dialogue_candidates,
+    )
+    assert '"candidate_index": 1' in message
+    assert '"index":' not in message
+
+
 @pytest.mark.asyncio
 async def test_turn_budget_reminder_injected_near_iteration_cap() -> None:
     """2026-09-05 第3章死锁回归：临近内部循环上限的请求必须携带收尾提醒

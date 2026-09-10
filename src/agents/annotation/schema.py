@@ -352,7 +352,9 @@ class ChunkMetricsInput(StrictModel):
 class DialogueInput(StrictModel):
     """2026-08-11 用于按候选序号提交对话三态判断"""
 
-    candidate_index: int = Field(gt=0, description="候选序号，从 1 开始，与系统候选列表的 index 一致")
+    candidate_index: int = Field(
+        gt=0, description="候选序号，从 1 开始，与 DialogueCandidates 区块的 candidate_index 一致"
+    )
     verdict: DialogueVerdict = Field(
         description="判断结果：dialogue=真实对话；inner_monologue=内心独白；"
         "not_dialogue=误判候选（如题字/描写被引号包裹）"
