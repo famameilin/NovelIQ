@@ -2,39 +2,28 @@
   "models": {
     "annotation": {
       "timeout_s": 180,
-      "temperature": 0.7,
       "top_p": 0.95,
       "thinking": true,
       "streaming": true,
       "structured_output": "json_object",
       "max_iterations": 15,
-      "total_attempts": 3,
       "allow_future_context": true
     },
     "paragraph_embedding": {
       "timeout_s": 120,
       "embedding_dim": 1024,
-      "batch_size": 4,
-      "semantic_enabled": true,
-      "top_k": 5
+      "batch_size": 4
     },
     "diagnosis": {
       "timeout_s": 180,
-      "temperature": 0.7,
       "top_p": 0.95,
       "thinking": true,
       "streaming": true,
       "structured_output": "json_object",
-      "max_iterations": 30,
-      "total_attempts": 3
+      "max_iterations": 30
     }
   },
   "logging": {
-    "console_level": "INFO",
-    "log_dir": "logs",
-    "rotation": "10 MB",
-    "retention": "7 days",
-    "compression": "zip",
     "modules": {
       "src.api": {
         "file": "api.log",
@@ -60,9 +49,7 @@
         "file": "agents.log",
         "level": "DEBUG"
       }
-    },
-    "third_party_level": "WARNING",
-    "json_parse_preview_chars": 200
+    }
   },
   "paths": {
     "upload_dir": "data/uploads",
@@ -70,48 +57,9 @@
     "log_dir": "logs",
     "lexicons_dir": "data/lexicons"
   },
-  "topic_model": {
-    "num_topics": 25,
-    "passes": 10,
-    "iterations": 500,
-    "num_topics_min": 3,
-    "num_topics_max": 25,
-    "num_topics_scaling_divisor": 30,
-    "lda": {
-      "alpha": "auto",
-      "eta": "auto",
-      "random_state": 42,
-      "lda_batch_size": 2000,
-      "minimum_probability": 0.01,
-      "no_below": 5,
-      "no_above": 0.5
-    },
-    "topic_shift": {
-      "window_size": 10,
-      "min_tokens_per_window": 50,
-      "score_threshold": 0.3,
-      "max_candidates": 50
-    }
-  },
-  "metrics": {
-    "mtld_threshold": 0.72,
-    "middle_collapse_min_chunks": 10,
-    "small_sample_min_chapters": 10,
-    "function_word_min_chars": 100000,
-    "character_max_iter": 100
-  },
   "linguistic": {
-    "ltp": {
-      "enabled": true,
-      "max_length": 512,
-      "dep_root_index": 0
-    },
     "word2vec": {
-      "enabled": true,
-      "model_dir": "models/word2vec/shared",
-      "window": 5,
-      "min_count": 2,
-      "epochs": 5
+      "enabled": true
     }
   }
 }
