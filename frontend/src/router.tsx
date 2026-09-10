@@ -13,6 +13,7 @@ const TopicsPage = lazy(() => import("@/pages/TopicsPage").then((m) => ({ defaul
 const LinguisticPage = lazy(() => import("@/pages/LinguisticPage").then((m) => ({ default: m.LinguisticPage })));
 const TimelinePage = lazy(() => import("@/pages/TimelinePage").then((m) => ({ default: m.TimelinePage })));
 const DiagnosisPage = lazy(() => import("@/pages/DiagnosisPage").then((m) => ({ default: m.DiagnosisPage })));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })));
 const ComponentShowcase = lazy(() => import("@/pages/ComponentShowcase").then((m) => ({ default: m.ComponentShowcase })));
 
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
     element: <AppLayout mode="default" />,
     children: [
       { path: "/dev/components", element: withSuspense(ComponentShowcase) },
+      { path: "/settings", element: withSuspense(SettingsPage) },
     ],
   },
   { path: "*", element: withSuspense(NotFoundPage) },

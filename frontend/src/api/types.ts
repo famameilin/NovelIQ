@@ -791,3 +791,63 @@ export interface BatchDeleteResponse {
   deleted: string[];
   failed: string[];
 }
+
+// 设置模块（/api/settings）
+
+export type SettingFieldType = "number" | "integer" | "boolean" | "enum" | "string";
+
+export interface SettingSectionSpec {
+  id: string;
+  title: string;
+  description: string;
+  order: number;
+}
+
+export interface SettingFieldSpec {
+  /** settings.json 中的结构化路径，如 ["models", "annotation", "temperature"] */
+  path: string[];
+  field_type: SettingFieldType;
+  label: string;
+  description: string;
+  min_value: number | null;
+  max_value: number | null;
+  step: number | null;
+  enum_values: string[];
+  nullable: boolean;
+  editable: boolean;
+}
+
+export interface SettingsSchemaResponse {
+  sections: SettingSectionSpec[];
+  fields: SettingFieldSpec[];
+}
+
+export type SettingSource = "default" | "file";
+
+export interface SettingsViewResponse {
+  /** 当前生效值（默认值 ← settings.json ← env 凭据）；api_key 为打码值（"••••" 前缀） */
+  values: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  /** 键为 path.join("/") */
+  sources: Record<string, SettingSource>;
+}
+
+export interface TaskEnvPatch {
+  base_url?: string | null;
+  model?: string | null;
+  /** null/缺省=不修改；""=整组清空；非空=设置 */
+  api_key?: string | null;
+}
+
+export interface ModelEnvUpdate {
+  model?: TaskEnvPatch | null;
+  embedding_model?: TaskEnvPatch | null;
+  ltp_model_dir?: string | null;
+}
+
+export interface ModelProviderTestResponse {
+  ok: boolean;
+  latency_ms: number | null;
+  model_ids: string[];
+  error: string | null;
+}
