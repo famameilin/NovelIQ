@@ -214,6 +214,16 @@ class FactGraph:
         case_type/target_key/target_ref 随操作携带：完成事务据此锁定案例行、复核
         稳定目标未变（防竞态），并按 target_ref["chunk_id"] 校验读取授权章节。
         """
+        if _norm(from_entity) == _norm(to_entity):
+            # 两端归一后同名：持久化会插入 from_entity_id=to_entity_id 的自环行，
+            # 违反 graph_relations 端点互异约束炸掉完成事务（run a83fae3d 第9章实锤）。
+            # 同一人物归并只经 write_relations 的"同一人物"边表达，案例变更按原样端点
+            # 构造键、不过 resolve_name，此处裸同名即退化输入，直接报错回滚本回合
+            raise ValueError(
+                f"关系两端解析为同一实体，不允许自环: {from_entity}—{to_entity}（{relation_type}）；"
+                "同一人物归并请用 write_relations 提交「同一人物」边，关系变更请先 search_graph "
+                "取边的规范端点名"
+            )
         key = self._relation_key(from_entity, to_entity, relation_type)
         if change_kind in {"assert", "reinforce", "refine", "supersede"}:
             self.active_relations.add(key)

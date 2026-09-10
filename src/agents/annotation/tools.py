@@ -684,6 +684,26 @@ class AnnotationToolLedger:
                 for item in payload:
                     resolved_from = self.graph.resolve_name(item.from_entity)
                     resolved_to = self.graph.resolve_name(item.to_entity)
+                    if _norm_graph_name(resolved_from) == _norm_graph_name(resolved_to):
+                        # 两端沿同一人物分量解析到同一实体：
+                        # "同一人物"边（含同批双向重申、跨章重申、传递归并）= 归并已
+                        # 成立，按合同接受为 skipped_existing；普通关系类型塌成自环
+                        # 才是退化输入，标 skipped_self_loop。两者照常入图都会在持久化
+                        # 插入 from_entity_id=to_entity_id 的自环行，违反
+                        # graph_relations 端点互异约束炸掉完成事务（run a83fae3d
+                        # 第9章实锤），一律跳过不入图不入操作日志
+                        is_same_character = (
+                            RELATION_DEFINITIONS[str(item.relation_type)]["semantics"] == "same_character"
+                        )
+                        relation_outcomes.append(
+                            {
+                                "from": resolved_from,
+                                "to": resolved_to,
+                                "relation_type": str(item.relation_type),
+                                "outcome": "skipped_existing" if is_same_character else "skipped_self_loop",
+                            }
+                        )
+                        continue
                     dumped = item.model_dump(mode="python")
                     dumped["from_entity"] = resolved_from
                     dumped["to_entity"] = resolved_to
