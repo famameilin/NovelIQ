@@ -56,6 +56,9 @@ _FORMAL_WRITE_DEPENDENCIES = {
 # 2026-09-05 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
 TURN_BUDGET_REMINDER_WINDOW = 3
 
+# 2026-09-11 章内并行：区分"未传 completion_hint"（用六域缺域提醒）与显式传 None（无提醒）
+_HINT_SENTINEL = object()
+
 
 def _turn_budget_reminder(remaining: int) -> str:
     """2026-09-05 用于构造临近内部循环上限时模型可见的收尾提醒
@@ -161,8 +164,24 @@ def _build_agent_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
+    completion_hint: Any = _HINT_SENTINEL,
+    require_tool_call: bool = True,
 ):
-    """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点"""
+    """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点
+
+    2026-09-11 章内并行：completion_hint 显式传入（含 None）即按传入使用，缺省
+    保持六域缺域提醒；require_tool_call=False 供读者面使用——读者没有写入工具，
+    无工具回复是"上报完毕"的正常完成信号（§8.5），不得按调用故障重发。
+    """
+
+    if completion_hint is _HINT_SENTINEL:
+
+        def completion_hint() -> str | None:
+            """2026-09-08 无工具回复重发前按账本当前缺域生成一次性提醒"""
+            missing = [
+                domain for domain in _DOMAIN_NAMES if domain not in ledger.domain_receipts
+            ]
+            return _missing_domains_reminder(missing) if missing else None
 
     async def agent_node(state: AnnotationGraphState) -> dict[str, Any]:
         """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
@@ -178,13 +197,6 @@ def _build_agent_node(
         remaining_turns = max_iterations - iterations
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(HumanMessage(content=_turn_budget_reminder(remaining_turns)))
-
-        def _completion_hint() -> str | None:
-            """2026-09-08 无工具回复重发前按账本当前缺域生成一次性提醒"""
-            missing = [
-                domain for domain in _DOMAIN_NAMES if domain not in ledger.domain_receipts
-            ]
-            return _missing_domains_reminder(missing) if missing else None
 
         active_write_tool = _active_write_tool(ledger)
         active_write_tools = _active_write_tools(ledger)
@@ -228,7 +240,8 @@ def _build_agent_node(
                 on_turn_started=on_turn_started,
                 on_turn_failed=on_turn_failed,
                 total_attempts=retries,
-                completion_hint=_completion_hint,
+                completion_hint=completion_hint,
+                require_tool_call=require_tool_call,
             )
         except Exception:
             raise
@@ -556,4 +569,66 @@ def build_annotation_graph(
     return graph.compile()
 
 
-__all__ = ["AnnotationGraphState", "build_annotation_graph"]
+def _route_after_reader_agent(state: AnnotationGraphState) -> str:
+    """2026-09-11 用于读者循环路由：错误收口、工具批次、无工具回复即上报完毕（§8.5）"""
+    if state.get("error"):
+        return "end"
+    if not _tool_calls(state):
+        return "end"
+    return "tool_batch"
+
+
+def build_reader_graph(
+    llm: Any,
+    tools: list[Any],
+    *,
+    ledger: AnnotationToolLedger,
+    max_iterations: int,
+    stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
+    retries: int | None = None,
+) -> Any:
+    """2026-09-11 章内并行（§6/§8.1 Phase A）：构建读者循环状态机
+
+    读者只有检索与 send_message，无写入工具、无领域冻结：轮次预算提醒保留
+    （防单块空转），缺域提醒移除（读者没有六域合同），无工具回复即视为该读者
+    上报完毕正常收束。
+    """
+    graph = StateGraph(AnnotationGraphState)
+    graph.add_node(
+        "agent",
+        _build_agent_node(
+            llm,
+            tools,
+            ledger=ledger,
+            max_iterations=max_iterations,
+            stream=stream,
+            observer=observer,
+            retries=retries,
+            completion_hint=None,
+            require_tool_call=False,
+        ),
+    )
+    graph.add_node(
+        "tool_batch",
+        _build_tool_batch_node(
+            tools,
+            ledger=ledger,
+            observer=observer,
+            stream=stream,
+        ),
+    )
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges(
+        "agent",
+        _route_after_reader_agent,
+        {
+            "tool_batch": "tool_batch",
+            "end": END,
+        },
+    )
+    graph.add_edge("tool_batch", "agent")
+    return graph.compile()
+
+
+__all__ = ["AnnotationGraphState", "build_annotation_graph", "build_reader_graph"]

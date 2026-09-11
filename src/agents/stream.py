@@ -582,6 +582,7 @@ async def run_model_call(
     on_turn_failed: Callable[[str, ModelCallTiming, AIMessage | None], None] | None = None,
     total_attempts: int | None = None,
     completion_hint: CompletionHintProvider | None = None,
+    require_tool_call: bool = True,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
@@ -671,7 +672,9 @@ async def run_model_call(
             )
             # 2026-08-22 调用未正常结束（响应不含工具调用）视同调用层故障：
             # 与瞬态错误共用 total_attempts 预算退避重发，耗尽后上抛
-            if not _is_call_complete(response):
+            # 2026-09-11 章内并行读者面 require_tool_call=False：读者没有写入工具，
+            # 无工具回复是"上报完毕"的正常完成信号而非调用故障（设计文档 §8.5）
+            if require_tool_call and not _is_call_complete(response):
                 error = "模型调用未正常结束：响应未包含任何工具调用"
                 if on_turn_failed is not None:
                     on_turn_failed(error, timing, response)
@@ -748,7 +751,8 @@ async def run_model_call(
         timing = aggregator.timing()
         # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）
         # 视同调用层故障：退避重发同一请求，耗尽后上抛交由上层失败审计收口
-        if not _is_call_complete(response):
+        # 2026-09-11 读者面 require_tool_call=False：无工具回复即上报完毕，正常返回
+        if require_tool_call and not _is_call_complete(response):
             error = "模型调用未正常结束：响应未包含任何工具调用"
             if on_turn_failed is not None:
                 on_turn_failed(error, timing, response)

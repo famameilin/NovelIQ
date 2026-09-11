@@ -9,14 +9,20 @@ from .errors import (
     AnnotationProtocolError,
     AnnotationRetryableError,
 )
-from .graph import build_annotation_graph
+from .graph import build_annotation_graph, build_reader_graph
+from .messages import ReaderMessagePool
+from .reader import ReaderBlockContext, ReaderRunOutcome, run_reader_agent
 from .runner import run_annotation_agent, validate_bound_annotation
 from .schema import (
     AgentRunResult,
     BoundChapterAnnotation,
     CompletionResult,
 )
-from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
+from .tools import (
+    AnnotationQueryService,
+    AnnotationToolLedger,
+    build_annotation_tools,
+)
 
 __all__ = [
     "AgentRunResult",
@@ -29,8 +35,13 @@ __all__ = [
     "AnnotationToolLedger",
     "BoundChapterAnnotation",
     "CompletionResult",
+    "ReaderBlockContext",
+    "ReaderMessagePool",
+    "ReaderRunOutcome",
     "build_annotation_graph",
     "build_annotation_tools",
+    "build_reader_graph",
     "run_annotation_agent",
+    "run_reader_agent",
     "validate_bound_annotation",
 ]

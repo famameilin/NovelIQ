@@ -131,6 +131,20 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 field_type="boolean",
                 label="允许读取未来文本",
             ),
+            SettingFieldSpec(
+                path=("models", "annotation", "sub_chunk_min_tail_chars"),
+                field_type="integer",
+                label="超长章尾块并入阈值（字）",
+                description="切分后尾块小于该字数并入前一块，不再单独起一次标注调用；0 保持旧行为",
+                min_value=0,
+            ),
+            SettingFieldSpec(
+                path=("models", "annotation", "writer_max_ask_rounds"),
+                field_type="integer",
+                label="写者追问读者轮数上限",
+                description="超长章两段式标注中写者向读者追问的轮数上限；0 不限（仍受标注最大回合数兜底）",
+                min_value=0,
+            ),
             # ---- models.diagnosis（诊断任务）----
             SettingFieldSpec(
                 path=("models", "diagnosis", "timeout_s"),

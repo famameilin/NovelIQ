@@ -35,6 +35,12 @@ class TaskModelSettings:
     max_tokens: int = 131072
     # 2026-08-14 M7（§20）：章文本超过该字符数时在段落边界切成 Agent 运行时子块
     sub_chunk_max_chars: int = 5000
+    # 2026-09-11 章内并行（§9）：切分后尾块小于该字数并入前一块，不再单独起
+    # 完整 Agent 调用（实测 84 字尾块烧 109s）；0 = 现行行为
+    sub_chunk_min_tail_chars: int = 1000
+    # 2026-09-11 章内并行（§17 用户裁决）：两段式写者向读者追问的轮数上限，
+    # 0 = 不限（仍受写者 max_iterations 兜底）
+    writer_max_ask_rounds: int = 0
 
 
 @dataclass
@@ -168,6 +174,8 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         allow_future_context=json_data.get("allow_future_context", False),
         max_tokens=json_data.get("max_tokens", 131072),
         sub_chunk_max_chars=json_data.get("sub_chunk_max_chars", 5000),
+        sub_chunk_min_tail_chars=json_data.get("sub_chunk_min_tail_chars", 1000),
+        writer_max_ask_rounds=json_data.get("writer_max_ask_rounds", 0),
     )
 
 
