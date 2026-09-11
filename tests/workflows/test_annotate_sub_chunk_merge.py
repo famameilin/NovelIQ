@@ -114,6 +114,50 @@ def test_split_chapter_sub_chunks_within_limit_returns_single_block_offset_zero(
     assert sub_chunks == [(7, chapter_text, 0)]
 
 
+def test_split_chapter_sub_chunks_tail_below_min_tail_merges_into_previous_block() -> None:
+    """2026-09-11 章内并行 §9：尾块小于 min_tail_chars 并入前一块（ch13 尾块 84 字实测）"""
+    chapter_text = "第一段。" * 15  # 60 字符，段落边界 0/20/40
+    paragraphs = [
+        SimpleNamespace(local_start_char=0),
+        SimpleNamespace(local_start_char=20),
+        SimpleNamespace(local_start_char=40),
+    ]
+
+    # max_chars=30：40 处成块，尾块 [40, 60) 只有 20 字
+    merged = _split_chapter_sub_chunks(
+        chapter_text,
+        paragraphs,
+        chapter_chunk_id=7,
+        max_chars=30,
+        min_tail_chars=1000,
+    )
+    assert len(merged) == 1
+    assert merged[0][0] == -1
+    assert merged[0][1] == chapter_text  # 尾块文本并入，内容完整
+    assert merged[0][2] == 0
+
+    # min_tail_chars=0 保持现行行为（两块）
+    legacy = _split_chapter_sub_chunks(
+        chapter_text,
+        paragraphs,
+        chapter_chunk_id=7,
+        max_chars=30,
+        min_tail_chars=0,
+    )
+    assert [chunk_id for chunk_id, _, _ in legacy] == [-1, -2]
+
+    # 尾块 ≥ min_tail_chars 时保持独立
+    kept = _split_chapter_sub_chunks(
+        chapter_text,
+        paragraphs,
+        chapter_chunk_id=7,
+        max_chars=30,
+        min_tail_chars=20,
+    )
+    assert [chunk_id for chunk_id, _, _ in kept] == [-1, -2]
+    assert kept[1][1] == chapter_text[40:]
+
+
 def test_merge_remaps_dialogues_of_later_sub_chunks() -> None:
     """第 2+ 子块的对话坐标平移回章坐标，首块坐标不变"""
     first = _make_sub_annotation(

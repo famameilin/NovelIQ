@@ -22,9 +22,10 @@ from .errors import (
 )
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
+from .messages import ReaderMessagePool
 from .prompts import build_chunk_message, build_system_prompt
 from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChunkParagraphInfo
-from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
+from .tools import AnnotationQueryService, AnnotationToolLedger, AskReaderDispatcher, build_annotation_tools
 
 if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
@@ -128,11 +129,17 @@ async def _run_single_attempt(
     observer: AgentTurnObserver | None = None,
     sub_chunk_index: int = 0,
     paragraph_info: ChunkParagraphInfo | None = None,
+    reader_message_pool: ReaderMessagePool | None = None,
+    ask_reader_dispatcher: AskReaderDispatcher | None = None,
+    initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
 ) -> AgentRunResult:
     """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试
 
     2026-08-14 M7：sub_chunk_index 记录子块协议运行序号（§20 审计合同）。
     2026-08-18：paragraph_info 提供段落坐标映射，用于事件锚点校验和证据派生。
+    2026-09-11 章内并行（§7）：reader_message_pool 与 ask_reader_dispatcher 仅供
+    两段式写者使用（取值域准入 + 反问通道），单块章不传、行为不变；
+    initial_messages_override 供写者注入 <ReaderMessages> 替代正文直读。
     """
     from src.config import settings
 
@@ -150,8 +157,9 @@ async def _run_single_attempt(
         paragraph_info=paragraph_info,
         # 2026-08-19供因果引用全局偏序校验使用
         current_chapter_order=getattr(query_service, "current_chapter_order", None),
+        reader_message_pool=reader_message_pool,
     )
-    tools = build_annotation_tools(query_service, ledger)
+    tools = build_annotation_tools(query_service, ledger, ask_reader_dispatcher=ask_reader_dispatcher)
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
         llm,
@@ -162,17 +170,20 @@ async def _run_single_attempt(
         observer=observer,
         retries=settings.models.annotation.total_attempts,
     )
-    initial_messages = [
-        SystemMessage(content=build_system_prompt()),
-        HumanMessage(
-            content=build_chunk_message(
-                chunk_index=1,
-                chunk_total=1,
-                chunk_text=first_chunk_text,
-                candidates=ledger.dialogue_candidates,
-            )
-        ),
-    ]
+    if initial_messages_override is not None:
+        initial_messages = initial_messages_override
+    else:
+        initial_messages = [
+            SystemMessage(content=build_system_prompt()),
+            HumanMessage(
+                content=build_chunk_message(
+                    chunk_index=1,
+                    chunk_total=1,
+                    chunk_text=first_chunk_text,
+                    candidates=ledger.dialogue_candidates,
+                )
+            ),
+        ]
     result_state = await graph.ainvoke(
         {
             "messages": initial_messages,
@@ -225,11 +236,15 @@ async def run_annotation_agent(
     chapter_label: str | None = None,
     sub_chunk_index: int = 0,
     paragraph_info: ChunkParagraphInfo | None = None,
+    reader_message_pool: ReaderMessagePool | None = None,
+    ask_reader_dispatcher: AskReaderDispatcher | None = None,
+    initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
 ) -> AgentRunResult:
     """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出
 
     2026-08-14 M7（§20）：sub_chunk_index 标记子块协议运行序号，写入 AgentRunAudit。
     2026-08-18：paragraph_info 提供当前 chunk 段落坐标映射，用于事件锚点校验和证据派生。
+    2026-09-11 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
     """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
@@ -284,6 +299,9 @@ async def run_annotation_agent(
             observer=observer,
             sub_chunk_index=sub_chunk_index,
             paragraph_info=paragraph_info,
+            reader_message_pool=reader_message_pool,
+            ask_reader_dispatcher=ask_reader_dispatcher,
+            initial_messages_override=initial_messages_override,
         )
     except Exception as exc:
         _close_read_session(read_session)

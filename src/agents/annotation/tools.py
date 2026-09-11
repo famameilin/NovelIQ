@@ -25,6 +25,7 @@ from .errors import (
     AnnotationProtocolError,
 )
 from .fact_graph import FactGraph
+from .messages import ReaderMessagePool, normalize_message_name
 from .schema import (
     RELATION_CHANGE_KIND_LABELS,
     RELATION_DEFINITIONS,
@@ -207,6 +208,9 @@ class AnnotationToolLedger:
     # 2026-09-11 write_event 草稿补丁：校验失败的整份提交缓存于此供 patches 增量修正；
     # 刻意不进 snapshot/restore——补丁合并结果跨单次调用失败保留，随 chunk 生命周期消亡
     pending_event_draft: dict[str, Any] | None = None
+    # 2026-09-11 章内并行两段式（§7）：写者的读者消息池，用于写入取值域准入。
+    # 消息是观察不是写入，刻意不进 snapshot/restore；单块章与读者为 None，行为不变
+    reader_message_pool: ReaderMessagePool | None = None
 
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一 chunk 的对话候选"""
@@ -629,6 +633,9 @@ class AnnotationToolLedger:
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
         if domain not in _DIRECT_WRITE_DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
+        if domain == "entities":
+            # 2026-09-11 两段式写者准入（§7）：消息池外的实体名拒绝写入
+            self.admit_entity_directory(list(payload.entities))
 
         # 2026-08-20 内联端点验证与领域绑定逻辑，扁平化调用链
         entity_types = self._fact_entity_catalog()
@@ -1179,6 +1186,61 @@ class AnnotationToolLedger:
         """2026-08-10 用于登记搜索结果压缩条目（查询、命中编号与 digest）"""
         self.search_log.append(entry)
 
+    # ------------------------------------------------------------------
+    # 章内并行两段式：写者取值域准入（设计文档 §7，防写者发明）
+
+    def admit_entity_directory(self, entities: list[EntityInput]) -> None:
+        """2026-09-11 用于校验 write_entities 实体名 ∈ 消息池并集 ∪ 图中已登记名
+
+        写者看不到正文，实体名的唯一合法来源是读者消息（entity/event_tree/
+        relation/dialogue/case 各 kind）或历史已登记实体；消息池外的名字一律
+        拒绝并给出可自纠报错。单块章（reader_message_pool=None）不受限。
+        """
+        if self.reader_message_pool is None:
+            return
+        pool_keys = self.reader_message_pool.entity_name_keys()
+        invented = [
+            entity.name
+            for entity in entities
+            if normalize_message_name(entity.name) not in pool_keys
+            and not (self.graph is not None and normalize_message_name(entity.name) in self.graph.entity_types)
+        ]
+        if invented:
+            raise ValueError(
+                "write_entities 准入失败，以下实体名未出现在任何读者消息、也未在图中登记: "
+                + "、".join(invented)
+                + "（写者只能写读者消息已陈述的内容：请原样使用消息中的实体名，"
+                "或在读者上报过的实体名范围内提交）"
+            )
+
+    def admit_case_reason(self, reason: str, *, tool_name: str) -> None:
+        """2026-09-11 用于校验案例裁决 reason 含至少一条案例消息引文片段（§7）
+
+        reason 必须用消息引文拼装：包含任一 case 消息引文的原文或其 ≥12 字连续
+        片段即通过；读者未上报任何案例消息时禁止一切裁决。单块章不受限。
+        """
+        if self.reader_message_pool is None:
+            return
+        quotes = self.reader_message_pool.case_quotes()
+        normalized_reason = unicodedata.normalize("NFC", reason)
+        min_fragment = 12
+        for quote in quotes:
+            if quote in normalized_reason:
+                return
+            for start in range(0, len(quote) - min_fragment + 1):
+                if quote[start : start + min_fragment] in normalized_reason:
+                    return
+        if quotes:
+            raise ValueError(
+                f"{tool_name}.reason 准入失败：案例裁决理由必须包含读者案例消息的引文片段"
+                f"（原文或其 ≥{min_fragment} 字连续片段），不得自行转写。"
+                "请从 <ReaderMessages> 的 case 消息 evidence 中摘录原文"
+            )
+        raise ValueError(
+            f"{tool_name} 准入失败：读者未上报任何案例消息，写者不得凭空裁决案例；"
+            "若正文确有案例线索，请先用 ask_reader 向对应块读者追问"
+        )
+
 
 def _normalize_query(query: str, *, tool_name: str) -> str:
     """2026-08-07 用于统一校验查询工具输入长度与空白"""
@@ -1368,152 +1430,18 @@ def _live_graph_response(
     }
 
 
-def build_annotation_tools(
+class AskReaderDispatcher(Protocol):
+    """2026-09-11 章内并行两段式：写者 ask_reader 的后端（工作流层实现，含轮数上限与读者续跑）"""
+
+    async def ask(self, block: int, question: str) -> str:
+        """2026-09-11 用于向指定子块（1 基）读者追问并同步取回新观察消息摘要"""
+
+
+def build_search_tools(
     query_service: AnnotationQueryService,
     ledger: AnnotationToolLedger,
 ) -> list[Any]:
-    """2026-08-07 用于构建语义写入搜索解决和完成工具集"""
-
-    @tool
-    def write_metrics(
-        summary: str,
-        emotional_valence: int,
-        narrative_function: NarrativeFunction,
-        pivot_moment: bool = False,
-        cliffhanger: bool = False,
-        sentence_labels: list[SentenceLabelInput] | None = None,
-    ) -> str:
-        """2026-08-11 用于完整替换当前 chunk 摘要和叙事指标，章节摘要由系统用各 chunk summary 自动生成
-
-        emotional_valence 为情绪分值整数 -2..2（-2 强烈负面 / -1 轻微负面 / 0 中性 /
-        1 轻微正面 / 2 强烈正面）。
-
-        2026-09-07 句级监督：可选 sentence_labels 参数随本工具提交从当前章正文自选的
-        2-3 句整句情绪标签（每条 {sentence, emotion}；sentence 必须原样摘录完整句子
-        不得改写，emotion 为同一套 -2..2 整数分值）。选句标准由模型自行判断——优先选
-        情绪表达有代表性或语气/标点有区分度的句子，也允许选 0 分句。系统按原文定位
-        绑定字符区间，找不到的句子整次调用报错自纠；重复调用 write_metrics 时句标签
-        以最后一次提交为准。
-        """
-        payload = ChunkMetricsInput(
-            summary=summary,
-            emotional_valence=emotional_valence,
-            narrative_function=narrative_function,
-            pivot_moment=pivot_moment,
-            cliffhanger=cliffhanger,
-        )
-        # 2026-09-07 句标签先绑定后写域：绑定失败整次调用报错，metrics 不落任何写入
-        ledger.bind_sentence_labels(list(sentence_labels) if sentence_labels else [])
-        return json.dumps(
-            ledger.write_domain("metrics", payload, tool_name="write_metrics"),
-            ensure_ascii=False,
-        )
-
-    @tool
-    def write_entities(entities: list[EntityInput]) -> str:
-        """2026-08-08 创建；2026-08-23 用于向当前 chunk 追加新实体或更新已有实体（单列表，不撤销已登记）
-
-        回执 numbers 给出每个实体在本 run 的运行期编号；events/relations/dialogues
-        的实体引用一律填该编号。"""
-        if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried:
-            raise AnnotationAuthorizationError("提交 write_entities 前必须先调用 search_graph 查询已登记实体")
-        payload = EntityDirectoryInput(entities=entities)
-        receipt = ledger.write_domain("entities", payload, tool_name="write_entities")
-        if ledger.graph is not None:
-            receipt["numbers"] = [
-                [ledger.graph.entity_number(entity.name), entity.name] for entity in entities
-            ]
-        return json.dumps(receipt, ensure_ascii=False)
-
-    @tool
-    def write_dialogues(items: list[DialogueSubmissionItem]) -> str:
-        """2026-08-12 用于按系统候选序号提交对话三态判断（数组格式）
-        （items 每条为 [candidate_index, verdict, speaker, tone]；speaker 为运行期
-        实体编号（write_entities 回执 numbers / search_graph 回执 n），未知时 null；
-        tone 为语气闭合枚举：见参数说明，未知时 null；
-        只提交 dialogue 与 inner_monologue 候选，未提交的候选系统默认按 not_dialogue
-        处理，回执会列出被默认处理的候选序号，可再次调用补充）"""
-        if ledger.graph is None and any(speaker is not None for (_i, _v, speaker, _t) in items):
-            raise AnnotationInvariantError("write_dialogues 说话人编号解析需要常驻事实图，graph 缺失")
-        payload = [
-            DialogueInput(
-                candidate_index=index,
-                verdict=verdict,
-                speaker=(
-                    ledger.graph.resolve_number(speaker, label=f"write_dialogues[{index}].speaker")
-                    if speaker is not None and ledger.graph is not None
-                    else None
-                ),
-                tone=tone,
-            )
-            for (index, verdict, speaker, tone) in items
-        ]
-        return json.dumps(
-            ledger.write_domain("dialogues", payload, tool_name="write_dialogues"),
-            ensure_ascii=False,
-        )
-
-    @tool(args_schema=WriteEventPatchArgs)
-    def write_event(
-        finalize_events: bool = False,
-        description: str | None = None,
-        participants: list[EventParticipantArg] | None = None,
-        children: list[EventAppendItemArg] | None = None,
-        isforeshadowing: bool = False,
-        cause_tree_id: str | None = None,
-        setup_kind: str | None = None,
-        expected_payoff_family: str | None = None,
-        payoff_likelihood: PayoffLikelihood | None = None,
-        patches: list[list[Any]] | None = None,
-    ) -> str:
-        """2026-08-30 用于一次提交单棵事件树并声明是否结束事件阶段
-
-        2026-09-11 实体编号：参与者的 entity 是运行期编号（write_entities 回执
-        numbers / search_graph 回执 n），不接受实体名称。
-
-        2026-09-11 草稿补丁：上次 write_event 校验失败后，重调只需 patches=
-        [[字段路径, 新值], ...]（路径与报错中的路径一致，如
-        children.0.participants.0.emotion），系统在缓存的草稿上增量修正后整体校验，
-        已正确的部分无需重发；带 patches 时其余字段忽略。无草稿场景（如流截断后）
-        必须整体重交完整参数。
-        """
-        if patches:
-            merged = ledger.merge_event_patches(patches)
-            patch_arg = WriteEventPatchArgs.model_validate(merged)
-            payload = _resolve_write_event_arg(patch_arg, graph=ledger.graph)
-            receipt = ledger.write_event_tree(payload, tool_name="write_event")
-            receipt["draft_repaired"] = True
-            return json.dumps(receipt, ensure_ascii=False)
-        arg = WriteEventArg(
-            description=description,
-            participants=participants or [],
-            children=children or [],
-            isforeshadowing=isforeshadowing,
-            cause_tree_id=cause_tree_id,
-            setup_kind=setup_kind,
-            expected_payoff_family=expected_payoff_family,
-            payoff_likelihood=payoff_likelihood,
-            finalize_events=finalize_events,
-        )
-        payload = _resolve_write_event_arg(arg, graph=ledger.graph)
-        return json.dumps(
-            ledger.write_event_tree(payload),
-            ensure_ascii=False,
-        )
-
-    @tool
-    def write_relations(items: list[RelationArg]) -> str:
-        """2026-08-12 用于完整替换当前 chunk 确认存在的闭合类型关系边
-
-        2026-09-11 实体编号：两端 from_entity/to_entity 是运行期编号（write_entities
-        回执 numbers / search_graph 回执 n），不接受实体名称。
-        （新边建图 assert，已存在的同一条边自动接受为 skipped_existing；
-        强化/削弱/解除一律走 resolve_fact_case，不通过本工具表达变化）"""
-        payload = _resolve_relation_args(items, graph=ledger.graph)
-        return json.dumps(
-            ledger.write_domain("relations", payload, tool_name="write_relations"),
-            ensure_ascii=False,
-        )
+    """2026-09-11 用于构建读者与写者共用的四个只读检索工具（章内并行拆分面）"""
 
     @tool
     def search_graph(entities: list[str], relation_type: str | None = None) -> str:
@@ -1709,6 +1637,176 @@ def build_annotation_tools(
             )
         return json.dumps(response, ensure_ascii=False)
 
+    return [search_graph, search_text, search_event, search_pool]
+
+
+def build_annotation_tools(
+    query_service: AnnotationQueryService,
+    ledger: AnnotationToolLedger,
+    *,
+    ask_reader_dispatcher: AskReaderDispatcher | None = None,
+) -> list[Any]:
+    """2026-08-07 用于构建语义写入搜索解决和完成工具集
+
+    2026-09-11 章内并行两段式：ask_reader_dispatcher 仅在写者面传入（§7 反问通道，
+    用户裁决追问轮数进配置）；单块章不传，工具面与历史行为完全一致。"""
+
+    @tool
+    def write_metrics(
+        summary: str,
+        emotional_valence: int,
+        narrative_function: NarrativeFunction,
+        pivot_moment: bool = False,
+        cliffhanger: bool = False,
+        sentence_labels: list[SentenceLabelInput] | None = None,
+    ) -> str:
+        """2026-08-11 用于完整替换当前 chunk 摘要和叙事指标，章节摘要由系统用各 chunk summary 自动生成
+
+        emotional_valence 为情绪分值整数 -2..2（-2 强烈负面 / -1 轻微负面 / 0 中性 /
+        1 轻微正面 / 2 强烈正面）。
+
+        2026-09-07 句级监督：可选 sentence_labels 参数随本工具提交从当前章正文自选的
+        2-3 句整句情绪标签（每条 {sentence, emotion}；sentence 必须原样摘录完整句子
+        不得改写，emotion 为同一套 -2..2 整数分值）。选句标准由模型自行判断——优先选
+        情绪表达有代表性或语气/标点有区分度的句子，也允许选 0 分句。系统按原文定位
+        绑定字符区间，找不到的句子整次调用报错自纠；重复调用 write_metrics 时句标签
+        以最后一次提交为准。
+        """
+        payload = ChunkMetricsInput(
+            summary=summary,
+            emotional_valence=emotional_valence,
+            narrative_function=narrative_function,
+            pivot_moment=pivot_moment,
+            cliffhanger=cliffhanger,
+        )
+        # 2026-09-07 句标签先绑定后写域：绑定失败整次调用报错，metrics 不落任何写入
+        ledger.bind_sentence_labels(list(sentence_labels) if sentence_labels else [])
+        return json.dumps(
+            ledger.write_domain("metrics", payload, tool_name="write_metrics"),
+            ensure_ascii=False,
+        )
+
+    @tool
+    def write_entities(entities: list[EntityInput]) -> str:
+        """2026-08-08 创建；2026-08-23 用于向当前 chunk 追加新实体或更新已有实体（单列表，不撤销已登记）
+
+        回执 numbers 给出每个实体在本 run 的运行期编号；events/relations/dialogues
+        的实体引用一律填该编号。"""
+        if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried:
+            raise AnnotationAuthorizationError("提交 write_entities 前必须先调用 search_graph 查询已登记实体")
+        payload = EntityDirectoryInput(entities=entities)
+        receipt = ledger.write_domain("entities", payload, tool_name="write_entities")
+        if ledger.graph is not None:
+            receipt["numbers"] = [
+                [ledger.graph.entity_number(entity.name), entity.name] for entity in entities
+            ]
+        return json.dumps(receipt, ensure_ascii=False)
+
+    @tool
+    def write_dialogues(items: list[DialogueSubmissionItem]) -> str:
+        """2026-08-12 用于按系统候选序号提交对话三态判断（数组格式）
+        （items 每条为 [candidate_index, verdict, speaker, tone]；speaker 为运行期
+        实体编号（write_entities 回执 numbers / search_graph 回执 n），未知时 null；
+        tone 为语气闭合枚举：见参数说明，未知时 null；
+        只提交 dialogue 与 inner_monologue 候选，未提交的候选系统默认按 not_dialogue
+        处理，回执会列出被默认处理的候选序号，可再次调用补充）"""
+        if ledger.graph is None and any(speaker is not None for (_i, _v, speaker, _t) in items):
+            raise AnnotationInvariantError("write_dialogues 说话人编号解析需要常驻事实图，graph 缺失")
+        payload = [
+            DialogueInput(
+                candidate_index=index,
+                verdict=verdict,
+                speaker=(
+                    ledger.graph.resolve_number(speaker, label=f"write_dialogues[{index}].speaker")
+                    if speaker is not None and ledger.graph is not None
+                    else None
+                ),
+                tone=tone,
+            )
+            for (index, verdict, speaker, tone) in items
+        ]
+        return json.dumps(
+            ledger.write_domain("dialogues", payload, tool_name="write_dialogues"),
+            ensure_ascii=False,
+        )
+
+    @tool(args_schema=WriteEventPatchArgs)
+    def write_event(
+        finalize_events: bool = False,
+        description: str | None = None,
+        participants: list[EventParticipantArg] | None = None,
+        children: list[EventAppendItemArg] | None = None,
+        isforeshadowing: bool = False,
+        cause_tree_id: str | None = None,
+        setup_kind: str | None = None,
+        expected_payoff_family: str | None = None,
+        payoff_likelihood: PayoffLikelihood | None = None,
+        patches: list[list[Any]] | None = None,
+    ) -> str:
+        """2026-08-30 用于一次提交单棵事件树并声明是否结束事件阶段
+
+        2026-09-11 实体编号：参与者的 entity 是运行期编号（write_entities 回执
+        numbers / search_graph 回执 n），不接受实体名称。
+
+        2026-09-11 草稿补丁：上次 write_event 校验失败后，重调只需 patches=
+        [[字段路径, 新值], ...]（路径与报错中的路径一致，如
+        children.0.participants.0.emotion），系统在缓存的草稿上增量修正后整体校验，
+        已正确的部分无需重发；带 patches 时其余字段忽略。无草稿场景（如流截断后）
+        必须整体重交完整参数。
+        """
+        if patches:
+            merged = ledger.merge_event_patches(patches)
+            patch_arg = WriteEventPatchArgs.model_validate(merged)
+            payload = _resolve_write_event_arg(patch_arg, graph=ledger.graph)
+            receipt = ledger.write_event_tree(payload, tool_name="write_event")
+            receipt["draft_repaired"] = True
+            return json.dumps(receipt, ensure_ascii=False)
+        arg = WriteEventArg(
+            description=description,
+            participants=participants or [],
+            children=children or [],
+            isforeshadowing=isforeshadowing,
+            cause_tree_id=cause_tree_id,
+            setup_kind=setup_kind,
+            expected_payoff_family=expected_payoff_family,
+            payoff_likelihood=payoff_likelihood,
+            finalize_events=finalize_events,
+        )
+        payload = _resolve_write_event_arg(arg, graph=ledger.graph)
+        return json.dumps(
+            ledger.write_event_tree(payload),
+            ensure_ascii=False,
+        )
+
+    @tool
+    def write_relations(items: list[RelationArg]) -> str:
+        """2026-08-12 用于完整替换当前 chunk 确认存在的闭合类型关系边
+
+        2026-09-11 实体编号：两端 from_entity/to_entity 是运行期编号（write_entities
+        回执 numbers / search_graph 回执 n），不接受实体名称。
+        （新边建图 assert，已存在的同一条边自动接受为 skipped_existing；
+        强化/削弱/解除一律走 resolve_fact_case，不通过本工具表达变化）"""
+        payload = _resolve_relation_args(items, graph=ledger.graph)
+        return json.dumps(
+            ledger.write_domain("relations", payload, tool_name="write_relations"),
+            ensure_ascii=False,
+        )
+
+    if ask_reader_dispatcher is not None:
+
+        @tool
+        async def ask_reader(block: int, question: str) -> str:
+            """2026-09-11 用于向指定子块读者追问并同步取回新观察（§7 反问通道）
+
+            block 取 <message> 标签的 block 编号（1 基）。追问会把对应读者带着
+            完整原文上下文重新唤起，新观察经 send_message 入池并随本回执返回；
+            轮数上限由设置 writer_max_ask_rounds 控制（0 不限）。
+            没有想清楚不要问，同一疑问不要重复问。"""
+            normalized_question = unicodedata.normalize("NFC", question).strip()
+            if not normalized_question:
+                raise AnnotationInputError("ask_reader.question 不能为空")
+            return await ask_reader_dispatcher.ask(block, normalized_question)
+
     def _resolve_case_details(
         *,
         ledger: AnnotationToolLedger,
@@ -1818,6 +1916,7 @@ def build_annotation_tools(
 
         2026-09-11 speaker 为运行期实体编号（write_entities 回执 numbers /
         search_graph 回执 n）。"""
+        ledger.admit_case_reason(reason, tool_name="resolve_dialogue_case")
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
@@ -1878,6 +1977,7 @@ def build_annotation_tools(
         操作日志登记），不再向 resolved_cases 追加 fact 动作；持久化层从
         操作日志派生关系事实。解除不存在的边会直接报错并回滚本回合，
         避免"accepted 但 search_graph 不变"的空转。"""
+        ledger.admit_case_reason(reason, tool_name="resolve_fact_case")
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
@@ -1943,6 +2043,7 @@ def build_annotation_tools(
         检索获得，须先经授权集合校验。
         2026-09-04未挂伏笔线程的疑点案例被确认为伏笔时，须提供 setup_event_id
         （埋设事件），系统据此就地建立伏笔线程记录确认；判断并非伏笔则用 close_case。"""
+        ledger.admit_case_reason(reason, tool_name="resolve_foreshadowing_case")
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
@@ -1999,6 +2100,7 @@ def build_annotation_tools(
     @tool
     def close_case(case_number: int, reason: str) -> str:
         """2026-08-11 用于通过临时编号关闭案例（不产生任何语义变化，仅标记已解决）"""
+        ledger.admit_case_reason(reason, tool_name="close_case")
         details = _resolve_case_details(
             ledger=ledger,
             case_number=case_number,
@@ -2082,22 +2184,22 @@ def build_annotation_tools(
         response = {"accepted": True, "target_key": target_key}
         return json.dumps(response, ensure_ascii=False)
 
-    return [
+    tools = [
         write_metrics,
         write_entities,
         write_dialogues,
         write_event,
         write_relations,
-        search_graph,
-        search_text,
-        search_event,
-        search_pool,
+        *build_search_tools(query_service, ledger),
         resolve_dialogue_case,
         resolve_fact_case,
         resolve_foreshadowing_case,
         close_case,
         push_case,
     ]
+    if ask_reader_dispatcher is not None:
+        tools.append(ask_reader)
+    return tools
 
 
 __all__ = [

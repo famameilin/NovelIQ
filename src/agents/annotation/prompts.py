@@ -6,9 +6,27 @@ from __future__ import annotations
 
 import json
 
-from .schema import DialogueCandidate
+from .schema import ChunkParagraphInfo, DialogueCandidate
 
 SYSTEM_PROMPT = "你是小说章节语义标注 Agent，请依据当前提供的小说正文完成语义标注。"
+
+# 2026-09-11 章内并行（§6）：读者单行职责声明（与标注 SYSTEM_PROMPT 同款单行裁决）
+READER_SYSTEM_PROMPT = (
+    "你是小说章节语义标注的读者子代理，请细读分配到的正文片段，把有正文证据支撑的观察逐条上报。"
+)
+
+
+def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
+    """2026-09-11 用于渲染对话候选表（读者块切片与写者全章表共用）"""
+    return [
+        {
+            "candidate_index": index,
+            "id": candidate.candidate_key,
+            "text": candidate.content,
+            "parse_status": candidate.parse_status,
+        }
+        for index, candidate in enumerate(candidates, start=1)
+    ]
 
 
 def build_system_prompt() -> str:
@@ -83,4 +101,82 @@ def build_chunk_message(
     return "\n\n".join(sections)
 
 
-__all__ = ["build_case_pool_notice", "build_chunk_message", "build_system_prompt"]
+def build_reader_block_message(
+    *,
+    block_number: int,
+    block_total: int,
+    paragraph_info: ChunkParagraphInfo,
+    candidates: list[DialogueCandidate],
+) -> str:
+    """2026-09-11 章内并行（§6）用于构建读者唯一一次的正文注入
+
+    正文以段落清单形态注入（paragraph id 即 send_message 证据锚点），候选为本块
+    切片；上报合同（逐字引文/名字/不裁决/句标签不限条数）由 send_message 工具
+    docstring 与服务端校验承载，此处只陈述通道与编号边界。
+    """
+    paragraph_views = "\n".join(
+        f'<paragraph id="{paragraph_id}">{text}</paragraph>'
+        for paragraph_id, text in zip(paragraph_info.paragraph_ids, paragraph_info.texts, strict=True)
+    )
+    sections = [
+        f'<CurrentSubBlock block="{block_number}/{block_total}">\n'
+        f"{paragraph_views}\n"
+        "</CurrentSubBlock>",
+        build_case_pool_notice(),
+        "<DialogueCandidates>\n"
+        f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
+        "</DialogueCandidates>",
+        "<ReportingContract>\n"
+        "观察一律经 send_message 上报：每条消息必须带至少一条本块段落内的逐字引文"
+        "（evidence.paragraph_id + 原样 quote），没有引文支撑的观察不得上报；\n"
+        "一律用名字，绝不把案例编号或实体编号写进消息（编号是会话局部句柄，"
+        "写者拿不到也不认）；\n"
+        "案例相关只陈述文本侧事实（新疑点/埋设/加强/坐实/回收/证伪），"
+        "可用 search_pool 匹配并原样带上案例描述（matched_case），但不裁决；\n"
+        "句标签不限条数：把本块内值得打标的句子全部经 kind=sentence_label 上报，"
+        "最终提交哪几句由写者决定；\n"
+        "块边界处疑似与相邻块共构的线索用 kind=note 上报，不做跨块推断。\n"
+        "</ReportingContract>",
+    ]
+    return "\n\n".join(sections)
+
+
+def build_writer_chapter_message(
+    *,
+    reader_messages_view: str,
+    candidates: list[DialogueCandidate],
+) -> str:
+    """2026-09-11 章内并行（§7）用于构建写者首条请求（不注入全章正文）
+
+    消息池按块序渲染；正文取证走既有 search_text。写入取值域=消息池并集
+    ∪已授权历史对象，由服务端准入校验兜底。
+    """
+    sections = [
+        "<ReaderMessages>\n"
+        "以下是各子块读者上报的观察（已按块序排列）。你的写入取值域=这些消息的并集"
+        "∪已授权历史对象；跨块同一条线索（如前块埋设+后块坐实）合并为一次裁决，"
+        "理由用两段引文拼装；对某条消息需要补充正文证据时用 search_text 取证。\n"
+        f"{reader_messages_view}\n"
+        "</ReaderMessages>",
+        build_case_pool_notice(),
+        "<DialogueCandidates>\n"
+        f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
+        "</DialogueCandidates>",
+        "<SentenceLabels>\n"
+        "请从读者上报的 sentence_label 消息中自选 2-3 个句子，随 write_metrics 的 "
+        "sentence_labels 参数提交整句情绪标签（emotion 为 -2..2 整数分值）。"
+        "选择由你裁量：优先选情绪表达有代表性、或语气/标点有区分度的句子，"
+        "兼顾跨块分布；句子必须原样摘录不改写。\n"
+        "</SentenceLabels>",
+    ]
+    return "\n\n".join(sections)
+
+
+__all__ = [
+    "build_case_pool_notice",
+    "build_chunk_message",
+    "build_reader_block_message",
+    "build_system_prompt",
+    "build_writer_chapter_message",
+    "READER_SYSTEM_PROMPT",
+]

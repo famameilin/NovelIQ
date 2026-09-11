@@ -65,10 +65,14 @@ def _split_chapter_sub_chunks(
     *,
     chapter_chunk_id: int,
     max_chars: int,
+    min_tail_chars: int = 0,
 ) -> list[tuple[int, str, int]]:
     """2026-08-14 M7(§20)在段落边界切超长章为运行时子块(不落库/不进指标/不重建段落边界)，
     边界取 paragraphs.local_start_char，ID -1,-2…；≤max_chars或无边界原样返回，单段超长允许略超(≥max_chars成块)。
     2026-08-15 返回(子块ID, 文本, 章内偏移)供对话 start/end 重映射回章坐标。
+    2026-09-11 章内并行(§9)：尾块 < min_tail_chars 时并入前一块（该块允许略超
+    max_chars，与"单段超长允许略超"既有例外同性质），不为几十字的尾巴白起一次
+    完整 Agent 调用（实测 run e84339d1 第 13 章尾块 84 字烧 109s）；0 = 现行行为。
     """
     if len(chapter_text) <= max_chars:
         return [(chapter_chunk_id, chapter_text, 0)]
@@ -89,6 +93,12 @@ def _split_chapter_sub_chunks(
             block_start = boundary
     if block_start < len(chapter_text) or not sub_chunks:
         sub_chunks.append((-sub_index, chapter_text[block_start:], block_start))
+    if min_tail_chars > 0 and len(sub_chunks) >= 2:
+        tail_id, tail_text, tail_offset = sub_chunks[-1]
+        if len(tail_text) < min_tail_chars:
+            prev_id, prev_text, prev_offset = sub_chunks[-2]
+            sub_chunks[-2] = (prev_id, prev_text + tail_text, prev_offset)
+            sub_chunks.pop()
     return sub_chunks
 
 
@@ -532,46 +542,78 @@ async def run_annotate(
                     chapter_paragraph_rows,
                     chapter_chunk_id=chapter_chunk_id,
                     max_chars=settings.models.annotation.sub_chunk_max_chars,
+                    min_tail_chars=settings.models.annotation.sub_chunk_min_tail_chars,
                 )
-                sub_results: list[AgentRunResult] = []
-                sub_chunk_offsets: list[int] = []
-                for sub_chunk_index, (sub_chunk_id, sub_chunk_text, sub_chunk_offset) in enumerate(sub_chunks):
-                    sub_chunk_offsets.append(sub_chunk_offset)
-                    sub_paragraph_info = _build_sub_chunk_paragraph_info(
-                        chapter_paragraph_rows,
-                        sub_chunk_offset=sub_chunk_offset,
-                        sub_chunk_text=sub_chunk_text,
-                    )
-                    sub_results.append(
-                        await run_annotation_agent(
+                if len(sub_chunks) >= 2:
+                    # 2026-09-11 章内并行（§8/§10）：仅超长章走两段式——N 个只读读者
+                    # 并行上报观察（消息池按块序），单写者盲写正文并独占案例裁决，
+                    # 从结构上消除"两个子块各自解决同一案例"的整章回滚
+                    from src.workflows.annotate_helpers.two_phase import run_chapter_two_phase
+
+                    chapter_result = await run_chapter_two_phase(
+                        run_id=run_id,
+                        chapter_id=chapter_id,
+                        chapter_chunk_id=chapter_chunk_id,
+                        chapter_text=chapter_text,
+                        chapter_paragraph_rows=chapter_paragraph_rows,
+                        sub_chunks=sub_chunks,
+                        llm=llm,
+                        sql_session_factory=sql_session_factory,
+                        query_service_factory=partial(
+                            DatabaseAnnotationQueryService,
                             run_id=run_id,
-                            chapter_id=chapter_id,
-                            current_chunks=[(sub_chunk_id, sub_chunk_text)],
-                            sub_chunk_index=sub_chunk_index,
-                            novel_title=novel_title,
-                            novel_id=novel_id,
-                            llm=llm,
-                            session_factory=sql_session_factory,
-                            query_service_factory=partial(
-                                DatabaseAnnotationQueryService,
-                                run_id=run_id,
-                                current_chapter_id=chapter_id,
-                                current_first_paragraph_id=chapter_first_paragraph_id,
-                                current_last_paragraph_id=chapter_last_paragraph_id,
-                                embedding_client=embedding_client,
-                            ),
-                            stream=agent_stream,
-                            graph_state=graph_state,
-                            chapter_label=chapter_labels.get(chapter_id),
-                            paragraph_info=sub_paragraph_info,
-                        )
+                            current_chapter_id=chapter_id,
+                            current_first_paragraph_id=chapter_first_paragraph_id,
+                            current_last_paragraph_id=chapter_last_paragraph_id,
+                            embedding_client=embedding_client,
+                        ),
+                        graph_state=graph_state,
+                        stream=agent_stream,
+                        novel_id=novel_id,
+                        novel_title=novel_title,
+                        chapter_label=chapter_labels.get(chapter_id),
                     )
-                complete_annotation_run(
-                    result=_merge_sub_chunk_results(
+                else:
+                    sub_results: list[AgentRunResult] = []
+                    sub_chunk_offsets: list[int] = []
+                    for sub_chunk_index, (sub_chunk_id, sub_chunk_text, sub_chunk_offset) in enumerate(sub_chunks):
+                        sub_chunk_offsets.append(sub_chunk_offset)
+                        sub_paragraph_info = _build_sub_chunk_paragraph_info(
+                            chapter_paragraph_rows,
+                            sub_chunk_offset=sub_chunk_offset,
+                            sub_chunk_text=sub_chunk_text,
+                        )
+                        sub_results.append(
+                            await run_annotation_agent(
+                                run_id=run_id,
+                                chapter_id=chapter_id,
+                                current_chunks=[(sub_chunk_id, sub_chunk_text)],
+                                sub_chunk_index=sub_chunk_index,
+                                novel_title=novel_title,
+                                novel_id=novel_id,
+                                llm=llm,
+                                session_factory=sql_session_factory,
+                                query_service_factory=partial(
+                                    DatabaseAnnotationQueryService,
+                                    run_id=run_id,
+                                    current_chapter_id=chapter_id,
+                                    current_first_paragraph_id=chapter_first_paragraph_id,
+                                    current_last_paragraph_id=chapter_last_paragraph_id,
+                                    embedding_client=embedding_client,
+                                ),
+                                stream=agent_stream,
+                                graph_state=graph_state,
+                                chapter_label=chapter_labels.get(chapter_id),
+                                paragraph_info=sub_paragraph_info,
+                            )
+                        )
+                    chapter_result = _merge_sub_chunk_results(
                         sub_results,
                         chapter_chunk_id=chapter_chunk_id,
                         sub_chunk_offsets=sub_chunk_offsets,
-                    ),
+                    )
+                complete_annotation_run(
+                    result=chapter_result,
                     session_factory=sql_session_factory,
                 )
                 success_count += 1
