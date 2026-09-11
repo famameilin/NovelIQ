@@ -1,14 +1,16 @@
 /**
  * 设置页 —— schema 驱动表单 + 模型凭据编辑 + 恢复默认
  *
- * 三条数据通道（与后端 /api/settings/* 契约一致）：
+ * 两条数据通道（与后端 /api/settings/* 契约一致）：
  * - 参数表单：按字段注册表自动渲染，保存 PUT /api/settings（稀疏化写 settings.json，热生效）
  * - 模型凭据：.env 单源的受控编辑器，保存 PUT /api/settings/env（api_key 只写不读，回显打码）
- * - JSON 预览：当前表单值的只读快照 + 复制
+ *
+ * 表单常驻可编辑：首次修改/恢复默认时从服务端值懒创建草稿，
+ * 保存前不落盘；建库维度字段不可编辑也不提供恢复默认。
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RotateCcw, PlugZap, Copy } from "lucide-react";
+import { Loader2, RotateCcw, PlugZap } from "lucide-react";
 import { toast } from "sonner";
 import {
   getSettings,
@@ -25,7 +27,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 
 type Json = Record<string, unknown>;
 
@@ -67,7 +68,6 @@ const EMPTY_PROVIDER: ProviderFormState = { base_url: "", model: "", api_key: ""
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Json | null>(null);
-  const [showJson, setShowJson] = useState(false);
   const [textProvider, setTextProvider] = useState<ProviderFormState>(EMPTY_PROVIDER);
   const [embeddingProvider, setEmbeddingProvider] = useState<ProviderFormState>(EMPTY_PROVIDER);
   const [ltpModelDir, setLtpModelDir] = useState("");
@@ -85,7 +85,6 @@ export function SettingsPage() {
 
   const values = viewQuery.data?.values ?? null;
   const defaults = viewQuery.data?.defaults ?? null;
-  const sources = viewQuery.data?.sources ?? {};
 
   const model = useMemo(() => values as Json | null, [values]);
 
@@ -122,6 +121,15 @@ export function SettingsPage() {
     if (!draft || !values) return false;
     return JSON.stringify(draft) !== JSON.stringify(values);
   }, [draft, values]);
+
+  /** 常驻可编辑：首次修改/恢复默认时从服务端值懒创建草稿 */
+  const ensureDraft = (): Json | null => {
+    if (draft) return draft;
+    if (!values) return null;
+    const base = deepClone(values);
+    setDraft(base);
+    return base;
+  };
 
   const saveMutation = useMutation({
     mutationFn: () => updateSettings(draft as Json),
@@ -177,28 +185,28 @@ export function SettingsPage() {
     },
   });
 
-  const startEditing = () => {
-    if (values) setDraft(deepClone(values));
-  };
-
   const resetField = (spec: SettingFieldSpec) => {
-    if (!draft) return;
+    const base = ensureDraft();
+    if (!base) return;
     const fallback = fieldFallback(spec);
     const defaultValue = getPath(defaults, spec.path) ?? fallback;
-    setDraft(setPath(deepClone(draft), spec.path, defaultValue));
+    setDraft(setPath(deepClone(base), spec.path, defaultValue));
   };
 
   const resetSection = (sectionId: string) => {
-    if (!draft || !defaults) return;
-    let next = deepClone(draft);
+    const base = ensureDraft();
+    if (!base || !defaults) return;
+    let next = deepClone(base);
     for (const spec of fieldsBySection[sectionId] ?? []) {
+      if (!spec.editable) continue;
       next = setPath(next, spec.path, getPath(defaults, spec.path) ?? fieldFallback(spec));
     }
     setDraft(next);
   };
 
   const updateField = (spec: SettingFieldSpec, raw: string | boolean) => {
-    if (!draft) return;
+    const base = ensureDraft();
+    if (!base) return;
     let value: unknown = raw;
     if (spec.field_type === "number" || spec.field_type === "integer") {
       if (raw === "") {
@@ -209,13 +217,7 @@ export function SettingsPage() {
       }
     }
     if (value === undefined) return;
-    setDraft(setPath(deepClone(draft), spec.path, value));
-  };
-
-  const copyJson = async () => {
-    if (!draft) return;
-    await navigator.clipboard.writeText(JSON.stringify(draft, null, 2));
-    toast.success("已复制当前表单值 JSON");
+    setDraft(setPath(deepClone(base), spec.path, value));
   };
 
   if (schemaQuery.isLoading || viewQuery.isLoading) {
@@ -248,12 +250,18 @@ export function SettingsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" onClick={() => setShowJson((v) => !v)}>
-            {showJson ? "隐藏 JSON" : "JSON 预览"}
-          </Button>
-          <Button type="button" onClick={() => (draft ? saveMutation.mutate() : startEditing())} disabled={saveMutation.isPending}>
+          {isDirty && (
+            <Button type="button" variant="ghost" onClick={() => setDraft(null)} disabled={saveMutation.isPending}>
+              放弃修改
+            </Button>
+          )}
+          <Button
+            type="button"
+            onClick={() => saveMutation.mutate()}
+            disabled={!isDirty || saveMutation.isPending}
+          >
             {saveMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            {draft ? "保存设置" : "编辑参数"}
+            保存设置
           </Button>
         </div>
       </div>
@@ -262,20 +270,6 @@ export function SettingsPage() {
         <div className="rounded-md border border-primary/40 bg-primary-subtle px-4 py-2 text-sm text-text">
           有未保存的修改，保存后立即生效。
         </div>
-      )}
-
-      {showJson && draft && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">当前表单值（JSON）</CardTitle>
-            <Button type="button" variant="ghost" size="icon" aria-label="复制 JSON" onClick={copyJson}>
-              <Copy className="h-4 w-4" />
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <Textarea readOnly rows={16} className="font-mono text-xs" value={JSON.stringify(draft, null, 2)} />
-          </CardContent>
-        </Card>
       )}
 
       <ProviderCard
@@ -328,13 +322,7 @@ export function SettingsPage() {
                 <CardTitle className="text-base">{section.title}</CardTitle>
                 <CardDescription>{section.description}</CardDescription>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={!draft}
-                onClick={() => resetSection(section.id)}
-              >
+              <Button type="button" variant="ghost" size="sm" onClick={() => resetSection(section.id)}>
                 <RotateCcw className="mr-1 h-3.5 w-3.5" />
                 恢复默认
               </Button>
@@ -346,8 +334,6 @@ export function SettingsPage() {
                   spec={spec}
                   values={draft ?? values}
                   defaults={defaults}
-                  sources={sources}
-                  editable={Boolean(draft)}
                   onChange={(raw) => updateField(spec, raw)}
                   onReset={() => resetField(spec)}
                 />
@@ -444,16 +430,13 @@ interface SettingFieldRowProps {
   spec: SettingFieldSpec;
   values: Json;
   defaults: Json;
-  sources: Record<string, string>;
-  editable: boolean;
   onChange: (raw: string | boolean) => void;
   onReset: () => void;
 }
 
-function SettingFieldRow({ spec, values, defaults, sources, editable, onChange, onReset }: SettingFieldRowProps) {
+function SettingFieldRow({ spec, values, defaults, onChange, onReset }: SettingFieldRowProps) {
   const current = getPath(values, spec.path);
   const defaultValue = getPath(defaults, spec.path);
-  const isCustom = sources[spec.path.join("/")] === "file";
   const displayDefault =
     defaultValue === null || defaultValue === undefined ? fieldFallback(spec) : defaultValue;
 
@@ -464,21 +447,15 @@ function SettingFieldRow({ spec, values, defaults, sources, editable, onChange, 
         {spec.description && <span className="block text-xs text-text-muted">{spec.description}</span>}
       </div>
       <div className="flex items-center gap-2">
-        <FieldControl spec={spec} value={current} editable={editable} onChange={onChange} defaultValue={displayDefault} />
+        <FieldControl spec={spec} value={current} onChange={onChange} defaultValue={displayDefault} />
         {!spec.editable && <Badge variant="secondary">建库维度</Badge>}
       </div>
       <div className="flex items-center gap-1.5">
-        {isCustom && <Badge variant="secondary">已自定义</Badge>}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={`恢复默认：${spec.label}`}
-          disabled={!editable}
-          onClick={onReset}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
+        {spec.editable && (
+          <Button type="button" variant="ghost" size="icon" aria-label={`恢复默认：${spec.label}`} onClick={onReset}>
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -487,22 +464,19 @@ function SettingFieldRow({ spec, values, defaults, sources, editable, onChange, 
 interface FieldControlProps {
   spec: SettingFieldSpec;
   value: unknown;
-  editable: boolean;
   onChange: (raw: string | boolean) => void;
   defaultValue: unknown;
 }
 
-function FieldControl({ spec, value, editable, onChange, defaultValue }: FieldControlProps) {
+function FieldControl({ spec, value, onChange, defaultValue }: FieldControlProps) {
   const className = "max-w-[280px]";
   switch (spec.field_type) {
     case "boolean":
-      return (
-        <Switch checked={Boolean(value)} disabled={!editable} onCheckedChange={(checked) => onChange(checked)} />
-      );
+      return <Switch checked={Boolean(value)} onCheckedChange={(checked) => onChange(checked)} />;
     case "enum": {
       const stringValue = String(value ?? "");
       return (
-        <Select value={stringValue} disabled={!editable} onValueChange={(next) => onChange(next)}>
+        <Select value={stringValue} onValueChange={(next) => onChange(next)}>
           <SelectTrigger className={className}>
             <SelectValue placeholder="选择" />
           </SelectTrigger>
@@ -524,7 +498,6 @@ function FieldControl({ spec, value, editable, onChange, defaultValue }: FieldCo
           type="number"
           className={className}
           value={text}
-          disabled={!editable}
           min={spec.min_value ?? undefined}
           max={spec.max_value ?? undefined}
           step={spec.step ?? (spec.field_type === "integer" ? 1 : undefined)}
@@ -533,12 +506,11 @@ function FieldControl({ spec, value, editable, onChange, defaultValue }: FieldCo
         />
       );
     }
-      default:
+    default:
       return (
         <Input
           className={className}
           value={String(value ?? "")}
-          disabled={!editable}
           placeholder={`默认 ${String(defaultValue)}`}
           onChange={(e) => onChange(e.target.value)}
         />
