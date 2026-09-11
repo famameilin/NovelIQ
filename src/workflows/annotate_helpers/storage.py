@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -347,6 +347,39 @@ def _graph_fact_resolved_cases(result: AgentRunResult) -> list[ResolvedCase]:
     ]
 
 
+def _fold_resolved_cases(entries: list[ResolvedCase]) -> list[ResolvedCase]:
+    """2026-09-11 用于按 case_id 折叠重复裁决（章内并行设计 §14 过渡补丁）
+
+    现行串行子块协议下，两个子块可能各自解决同一案例（run e84339d1 第 20 章
+    两块对同一批 active 案例各裁决一次，合并拼接后撞唯一性校验整章失败）。
+    两条裁决都是真实观察（A 块拿到引入段写埋设、B 块拿到坐实段写确认），
+    因此折叠而非丢弃：字段级后值非空覆盖（与 _persist_foreshadowing_resolution
+    的覆盖语义一致）、reason 拼接、保持首次出现顺序。fact 路径
+    （_graph_fact_resolved_cases）与 foreshadowing/dialogue 路径的同 case_id
+    重复在同一暴露面处理。
+    """
+    folded: dict[str, ResolvedCase] = {}
+    order: list[str] = []
+    for entry in entries:
+        existing = folded.get(entry.case_id)
+        if existing is None:
+            folded[entry.case_id] = entry
+            order.append(entry.case_id)
+            continue
+        updates: dict[str, Any] = {}
+        for field_name in ResolvedCase.model_fields:
+            if field_name in {"case_id", "reason"}:
+                continue
+            later_value = getattr(entry, field_name)
+            if later_value is not None:
+                updates[field_name] = later_value
+        merged_reason = "\n".join(
+            reason for reason in (existing.reason, entry.reason) if reason
+        )
+        folded[entry.case_id] = existing.model_copy(update={**updates, "reason": merged_reason})
+    return [folded[case_id] for case_id in order]
+
+
 def complete_annotation_run(
     *,
     result: AgentRunResult,
@@ -371,7 +404,11 @@ def complete_annotation_run(
                 return existing
 
             case_repository = CasePoolRepository(session)
-            all_resolved_cases = [*result.resolved_cases, *_graph_fact_resolved_cases(result)]
+            # 2026-09-11 §14 过渡补丁：重复裁决按 case_id 折叠后再锁行校验；
+            # 两段式写者落地后单写者使重复不再产生，该折叠为串行子块的兜底
+            all_resolved_cases = _fold_resolved_cases(
+                [*result.resolved_cases, *_graph_fact_resolved_cases(result)]
+            )
             resolved_case_ids = [item.case_id for item in all_resolved_cases]
             locked_rows = case_repository.lock_active_cases(
                 result.run_id,
