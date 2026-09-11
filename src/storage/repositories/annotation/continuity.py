@@ -17,6 +17,7 @@ from src.agents.annotation.schema import (
     BoundDialogue,
     BoundForeshadowing,
     BoundSentenceLabel,
+    CasePoolSummary,
     CaseSearchResult,
     CompletionCase,
     EventTreeHistoryResult,
@@ -82,6 +83,7 @@ def _case_view(row: CasePoolCase) -> CaseSearchResult:
             "type": row.case_type,
             # M9a-2：运行时 CaseSearchResult 保留 chunk_id 字段（值即章 chunk_id）
             "chunk_id": row.chapter_id,
+            "created_chapter": row.chapter_id,
             "keys": list(row.keys),
             "description": row.description,
             "state": row.state,
@@ -147,91 +149,92 @@ class DatabaseAnnotationQueryService:
         )
         return list(self.session.execute(statement).scalars().all())
 
-    def find_initial_case_candidates(
-        self,
-        current_text: str,
-        *,
-        semantic_limit: int = 50,
-        rotation_limit: int = 50,
-    ) -> tuple[list[CaseSearchResult], list[str]]:
-        """2026-08-05 用于合并 current 相关候选与最久未展示活动案例"""
-        rows = self._active_case_rows()
-        semantic_rows = [
-            row
-            for row in rows
-            if any(normalize_text(key).lower() in current_text.lower() for key in row.keys)
-            or _text_matches(row.description, current_text)
-        ][:semantic_limit]
-        rotation_statement = (
-            select(CasePoolCase)
-            .where(CasePoolCase.run_id == self.run_id, CasePoolCase.state == "active")
-            .order_by(CasePoolCase.last_surfaced_at.asc().nullsfirst(), CasePoolCase.id)
-            .limit(rotation_limit)
-        )
-        rotation_rows = list(self.session.execute(rotation_statement).scalars().all())
-        merged: dict[str, CasePoolCase] = {row.id: row for row in semantic_rows}
-        for row in rotation_rows:
-            if len(merged) >= semantic_limit + rotation_limit:
-                break
-            merged.setdefault(row.id, row)
-        return (
-            [_case_view(row) for row in merged.values()],
-            [row.id for row in rotation_rows],
-        )
-
     def search_pool(
         self,
-        query: str,
+        query: str | None,
         *,
         hidden_case_ids: set[str],
+        case_type: str | None = None,
         limit: int = 50,
     ) -> SearchResult:
-        """2026-08-07 用于检索案例与伏笔池并原样转交根 Evidence"""
-        results: list[CaseSearchResult | ForeshadowingSearchResult] = []
-        for row in self._active_case_rows():
-            if row.id in hidden_case_ids:
-                continue
-            if _text_matches(query, *[str(key) for key in row.keys], row.description):
-                results.append(_case_view(row))
-            if len(results) >= limit:
-                return SearchResult(results=results)
+        """2026-08-07 用于检索案例与伏笔池并原样转交根 Evidence
 
-        thread_statement = (
-            select(ForeshadowingThread)
-            .join(
-                Chapter,
-                (Chapter.run_id == ForeshadowingThread.run_id)
-                & (Chapter.chapter_id == ForeshadowingThread.last_chapter_id),
+        2026-09-11 案例改检索制（正文不再注入案例表），本方法是案例的唯一发现通道：
+        - case_type 为 None：按 query 多词项文本匹配案例 keys/description 与活跃伏笔线程；
+        - case_type 为 "all" 或具体类型：不匹配文本，按最新创建优先枚举该范围全部案例，
+          使无正文词汇可锚定的案例（如 entity_alias）也能被检索到。
+        回执附带池内未被隐藏的 active 规模与类型分布，供模型判断还有多少未展示案例。
+        """
+        pool_rows = [row for row in self._active_case_rows() if row.id not in hidden_case_ids]
+        enumerate_cases = case_type is not None
+        wanted_type = normalize_text(case_type) if case_type is not None and case_type != "all" else None
+        normalized_query = unicodedata.normalize("NFC", query or "").strip()
+        results: list[CaseSearchResult | ForeshadowingSearchResult] = []
+        truncated = False
+        if enumerate_cases:
+            candidates = (
+                pool_rows
+                if wanted_type is None
+                else [row for row in pool_rows if normalize_text(row.case_type) == wanted_type]
             )
-            .where(
-                ForeshadowingThread.run_id == self.run_id,
-                ForeshadowingThread.active.is_(True),
-            )
-            .order_by(Chapter.sequence, ForeshadowingThread.last_chapter_id, ForeshadowingThread.setup_id)
-        )
-        for thread in self.session.execute(thread_statement).scalars().all():
-            if not _text_matches(
-                query,
-                thread.setup_summary,
-                thread.setup_kind,
-                thread.expected_payoff_family,
-            ):
-                continue
-            results.append(
-                ForeshadowingSearchResult(
-                    record_id=thread.setup_id,
-                    content={
-                        "setup_summary": thread.setup_summary,
-                        "setup_kind": thread.setup_kind,
-                        "expected_payoff_family": thread.expected_payoff_family,
-                        "payoff_likelihood": thread.payoff_likelihood,
-                        "status": thread.status,
-                    },
+            candidates = sorted(candidates, key=lambda row: (row.created_at, row.id), reverse=True)
+            if len(candidates) > limit:
+                truncated = True
+            results.extend(_case_view(row) for row in candidates[:limit])
+        else:
+            for row in pool_rows:
+                if _text_matches(normalized_query, *[str(key) for key in row.keys], row.description):
+                    results.append(_case_view(row))
+                if len(results) >= limit:
+                    truncated = True
+                    break
+
+        if not enumerate_cases and len(results) < limit:
+            thread_statement = (
+                select(ForeshadowingThread)
+                .join(
+                    Chapter,
+                    (Chapter.run_id == ForeshadowingThread.run_id)
+                    & (Chapter.chapter_id == ForeshadowingThread.last_chapter_id),
                 )
+                .where(
+                    ForeshadowingThread.run_id == self.run_id,
+                    ForeshadowingThread.active.is_(True),
+                )
+                .order_by(Chapter.sequence, ForeshadowingThread.last_chapter_id, ForeshadowingThread.setup_id)
             )
-            if len(results) >= limit:
-                break
-        return SearchResult(results=results)
+            for thread in self.session.execute(thread_statement).scalars().all():
+                if not _text_matches(
+                    normalized_query,
+                    thread.setup_summary,
+                    thread.setup_kind,
+                    thread.expected_payoff_family,
+                ):
+                    continue
+                results.append(
+                    ForeshadowingSearchResult(
+                        record_id=thread.setup_id,
+                        content={
+                            "setup_summary": thread.setup_summary,
+                            "setup_kind": thread.setup_kind,
+                            "expected_payoff_family": thread.expected_payoff_family,
+                            "payoff_likelihood": thread.payoff_likelihood,
+                            "status": thread.status,
+                        },
+                    )
+                )
+                if len(results) >= limit:
+                    truncated = True
+                    break
+
+        by_type: dict[str, int] = {}
+        for row in pool_rows:
+            by_type[row.case_type] = by_type.get(row.case_type, 0) + 1
+        return SearchResult(
+            results=results,
+            pool=CasePoolSummary(active_total=len(pool_rows), by_type=by_type),
+            truncated=truncated,
+        )
 
     async def search_text(
         self,
@@ -512,29 +515,6 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
             row.state = "resolved"
             row.updated_at = now
         self.session.flush()
-
-    def mark_surfaced(
-        self,
-        *,
-        run_id: str,
-        ids: list[str],
-        annotation_id: str,
-    ) -> None:
-        """2026-08-05 用于在完成事务成功路径推进活动案例轮转时间"""
-        if not ids:
-            return
-        statement = select(CasePoolCase).where(
-            CasePoolCase.run_id == run_id,
-            CasePoolCase.state == "active",
-            CasePoolCase.id.in_(ids),
-        )
-        now = datetime.now(UTC)
-        for row in self.session.execute(statement).scalars().all():
-            row.last_surfaced_annotation_id = annotation_id
-            row.last_surfaced_at = now
-            row.updated_at = now
-        self.session.flush()
-
 
 class DialogueRecordRepository(BaseRepository[DialogueRecord]):
     """2026-08-11 用于写入系统绑定对话记录并按案例目标定位更新"""

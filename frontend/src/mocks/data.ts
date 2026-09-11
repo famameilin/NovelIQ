@@ -397,7 +397,7 @@ export function createChapterMetrics(): ChapterMetricsResponse {
       narrative_function: narrativeFunctions[chapterIdx % narrativeFunctions.length] ?? null,
       pivot_moment: chapterIdx === 2 || chapterIdx === 5,
       cliffhanger: chapterIdx === 3 || chapterIdx === 6,
-      emotional_valence: base > 0.5 ? "积极" : base < 0.25 ? "消极" : "中性",
+      emotional_valence: base > 0.5 ? 2 : base < 0.25 ? -1 : 0,
     };
   });
   return {
@@ -428,9 +428,9 @@ export function createChapterMetrics(): ChapterMetricsResponse {
       chapter_pivot_rate: 0.25,
       chapter_cliffhanger_rate: 0.25,
       chapter_emotional_valence_share: {
-        积极: 0.4,
-        中性: 0.35,
-        消极: 0.25,
+        "2": 0.4,
+        "0": 0.35,
+        "-1": 0.25,
       },
     },
   };

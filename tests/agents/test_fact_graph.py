@@ -315,3 +315,56 @@ def test_apply_relation_change_rejects_same_endpoint_self_loop() -> None:
             chapter_id=9,
         )
     assert graph.relation_change_ops == []
+
+
+def test_entity_numbers_are_stable_and_monotonic() -> None:
+    """2026-09-11 编号合同：编号单调分配、重复注册不换号、跨章重载保持"
+
+    模型在整章内记住的编号必须始终指向同一实体；重试回滚不回收编号，
+    否则模型手里的编号会指向被撤销的登记（resolve_number 存活性校验兜底）。
+    """
+    graph = FactGraph(
+        history_entity_types={"贺伯安": "character"},
+        history_entity_names={"贺伯安": "贺伯安"},
+    )
+    assert graph.entity_number("贺伯安") == 1
+    graph.register_entities([_Entity("猴子", "character")])
+    assert graph.entity_number("猴子") == 2
+    # 同名重复登记不换号
+    graph.register_entities([_Entity("猴子", "character")])
+    assert graph.entity_number("猴子") == 2
+    assert graph.entity_number("未登记") is None
+    assert graph.resolve_number(2, label="t") == "猴子"
+    assert graph.display_for_number(2) == "猴子"
+
+
+def test_entity_number_resolution_does_not_alias_merge() -> None:
+    """2026-09-11 合同：编号只翻登记名，不做别名归并（别名解析留在各调用点）
+
+    resolve_fact_case 端点按合同不得重过 resolve_name——同人物分量内两端会
+    塌成代表节点自环，解除的边键自指导致永远删不掉（第 4 章空转根因）。
+    """
+    graph = _alias_graph()
+    number = graph.entity_number("小石头")
+    assert number is not None
+    assert graph.resolve_number(number, label="t") == "小石头"
+
+
+def test_entity_number_rejects_rolled_back_registration() -> None:
+    """2026-09-11 合同：章节回滚撤销的登记，其编号视为未登记（不解析到图外名字）"""
+    graph = FactGraph()
+    graph.begin_chapter()
+    graph.register_entities([_Entity("临时角色", "character")])
+    number = graph.entity_number("临时角色")
+    assert number is not None
+    graph.reset_chapter_changes()
+    with pytest.raises(ValueError, match=f"实体编号 {number} 未登记"):
+        graph.resolve_number(number, label="t")
+
+
+def test_entity_number_unregistered_reports_known_examples() -> None:
+    """2026-09-11 合同：未登记编号报错给出已登记编号示例，便于模型自纠"""
+    graph = FactGraph()
+    graph.register_entities([_Entity("顾霜", "character")])
+    with pytest.raises(ValueError, match=r"已登记编号示例: 1=顾霜"):
+        graph.resolve_number(99, label="write_event.participants.0")

@@ -123,6 +123,153 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
     assert details.type == "dialogue_speaker"
 
 
+def _create_case(
+    db_session,
+    *,
+    run_id: str,
+    annotation_id: str,
+    case_type: str,
+    keys: list[str],
+    description: str,
+    target_key: str,
+    chunk_id: int = 1,
+) -> str:
+    """2026-09-11 用于批量造案例行并返回 id（检索制测试的准备口）"""
+    row = CasePoolRepository(db_session).create_case(
+        run_id=run_id,
+        annotation_id=annotation_id,
+        pending_case=PendingCase(
+            type=case_type,
+            keys=keys,
+            description=description,
+            chunk_id=chunk_id,
+            target_key=target_key,
+            target_ref={"kind": case_type, "chunk_id": chunk_id},
+        ),
+    )
+    db_session.commit()
+    return row.id
+
+
+def test_search_pool_case_type_enumeration_and_summary(db_session) -> None:
+    """2026-09-11 案例改检索制：case_type 枚举不依赖关键词，回执带池内规模与类型分布
+
+    案例不再注入正文，无正文词汇可锚定的案例（如 entity_alias）只能靠枚举检索；
+    pool 汇报未被隐藏的 active 规模与类型分布，供模型判断是否还有未展示案例。
+    """
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="案例枚举")
+    annotation_id = persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
+    first_alias = _create_case(
+        db_session,
+        run_id=run_id,
+        annotation_id=annotation_id,
+        case_type="entity_alias",
+        keys=["同一人物"],
+        description="疑似同一人物：顾霜 与 顾老",
+        target_key="target-alias-1",
+    )
+    second_alias = _create_case(
+        db_session,
+        run_id=run_id,
+        annotation_id=annotation_id,
+        case_type="entity_alias",
+        keys=["同一人物"],
+        description="疑似同一人物：顾霜 与 顾母",
+        target_key="target-alias-2",
+    )
+    suspicion = _create_case(
+        db_session,
+        run_id=run_id,
+        annotation_id=annotation_id,
+        case_type="伏笔疑点",
+        keys=["玉戒尺"],
+        description="玉戒尺异动待察",
+        target_key="target-thread-1",
+    )
+    service = DatabaseAnnotationQueryService(
+        db_session,
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+
+    everything = service.search_pool(None, hidden_case_ids=set(), case_type="all")
+    only_alias = service.search_pool(None, hidden_case_ids=set(), case_type="entity_alias")
+    hidden_first = service.search_pool(None, hidden_case_ids={first_alias}, case_type="all")
+
+    assert {item.id for item in everything.results} == {first_alias, second_alias, suspicion}
+    # 枚举按最新创建优先（同为 entity_alias，后建的排在前面）
+    assert [item.id for item in only_alias.results] == [second_alias, first_alias]
+    assert all(item.created_chapter == 1 for item in everything.results)
+    assert everything.pool.active_total == 3
+    assert everything.pool.by_type == {"entity_alias": 2, "伏笔疑点": 1}
+    assert everything.truncated is False
+    # 隐藏（已解决）案例不计入枚举，也不计入池规模
+    assert {item.id for item in hidden_first.results} == {second_alias, suspicion}
+    assert hidden_first.pool.active_total == 2
+    assert hidden_first.pool.by_type == {"entity_alias": 1, "伏笔疑点": 1}
+
+
+def test_search_pool_enumeration_marks_truncation_at_limit(db_session) -> None:
+    """2026-09-11 枚举超过 limit 时只返回前 limit 条并标记 truncated"""
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="案例枚举截断")
+    annotation_id = persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
+    for index in range(3):
+        _create_case(
+            db_session,
+            run_id=run_id,
+            annotation_id=annotation_id,
+            case_type="entity_alias",
+            keys=["同一人物"],
+            description=f"疑似同一人物：第{index}对",
+            target_key=f"target-alias-{index}",
+        )
+    service = DatabaseAnnotationQueryService(
+        db_session,
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+
+    limited = service.search_pool(None, hidden_case_ids=set(), case_type="entity_alias", limit=2)
+
+    assert len(limited.results) == 2
+    assert limited.truncated is True
+    assert limited.pool.active_total == 3
+
+
+def test_search_pool_keyword_hit_marks_truncation_and_keeps_summary(db_session) -> None:
+    """2026-09-11 关键词检索命中达到 limit 时同样标记 truncated，池规模不受影响"""
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="案例关键词截断")
+    annotation_id = persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
+    for index in range(3):
+        _create_case(
+            db_session,
+            run_id=run_id,
+            annotation_id=annotation_id,
+            case_type="伏笔疑点",
+            keys=["玉戒尺"],
+            description=f"玉戒尺异动第{index}次",
+            target_key=f"target-thread-{index}",
+        )
+    service = DatabaseAnnotationQueryService(
+        db_session,
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+
+    limited = service.search_pool("玉戒尺", hidden_case_ids=set(), limit=2)
+
+    assert len(limited.results) == 2
+    assert limited.truncated is True
+    assert limited.pool.active_total == 3
+    assert limited.pool.by_type == {"伏笔疑点": 3}
+
+
 @pytest.mark.asyncio
 async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order(db_session, monkeypatch) -> None:
     """2026-08-30 用于验证 previous/future/all 不依赖 chapter_id 或 paragraph_id 排序"""

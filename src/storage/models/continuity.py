@@ -70,12 +70,6 @@ class CasePoolCase(Base):
         ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
         nullable=False,
     )
-    last_surfaced_annotation_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("chapter_annotations.annotation_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    last_surfaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -98,7 +92,6 @@ class CasePoolCase(Base):
         UniqueConstraint("run_id", "target_key", name="uq_case_pool_cases_run_target_key"),
         Index("idx_case_pool_cases_run_state", "run_id", "state"),
         Index("idx_case_pool_cases_run_type", "run_id", "type"),
-        Index("idx_case_pool_cases_rotation", "run_id", "state", "last_surfaced_at", "id"),
     )
 
 

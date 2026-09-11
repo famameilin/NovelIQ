@@ -954,7 +954,7 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         ),
         'computation_chain': (
             'focus_score=0.25×（appearance/max）+0.25×（主体占比）+0.25×（arc_score/10）+0.25×（∈main_characte'
-            'rs），输入经别名归一；is_focus=∈focus_characters；avg_emotion=EMOTION_SCORE_MAPPING 均值'
+            'rs），输入经别名归一；is_focus=∈focus_characters；avg_emotion=emotion 分值（-2..2）均值'
         ),
         'invariants': [
             '输入含云端诊断名单与 Agent 情绪标注，代码仅加权',

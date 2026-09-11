@@ -18,6 +18,7 @@ from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
     EventTreeHistoryResult,
+    SearchResult,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -38,9 +39,10 @@ class _EventHistoryService:
         self.case_has_thread = case_has_thread
         self.calls: list[tuple[str, int]] = []
 
-    def find_initial_case_candidates(self, current_text, *, semantic_limit=50, rotation_limit=50):
-        del current_text, semantic_limit, rotation_limit
-        return [self._case()], ["case-1"]
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+        """2026-09-11 案例改检索制：案例经 search_pool 展示取得编号（旧合同为注入候选）"""
+        del query, hidden_case_ids, case_type, limit
+        return SearchResult(results=[self._case()])
 
     def _case(self) -> CaseSearchResult:
         """2026-08-18 用于构造可严格解决的活动案例"""
@@ -105,10 +107,13 @@ def _find_tool(tools, name):
 
 
 def _register_payoff_case(service, ledger) -> int:
-    """2026-08-18 用于把活动案例登记进账本并返回临时编号"""
-    initial_cases, rotation_ids = service.find_initial_case_candidates("current")
-    ledger.register_initial_cases(initial_cases, rotation_ids)
-    return ledger.case_number_by_id["case-1"]
+    """2026-08-18 用于把活动案例登记进账本并返回临时编号
+
+    2026-09-11 案例改检索制：编号只能由 search_pool 回执产生，测试准备亦走该通道。
+    """
+    tools = _tools(service, ledger)
+    view = json.loads(_find_tool(tools, "search_pool").invoke({"query": "线索"}))
+    return int(view["results"][0]["case_number"])
 
 
 def test_search_event_registers_authorized_tree_ids() -> None:
@@ -147,7 +152,7 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match="setup_event_id 未由 create_event 回执或 search_event 授权: event-x",
+        match="setup_event_id 未由 write_event 回执或 search_event 授权: event-x",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
@@ -161,12 +166,12 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
     """2026-09-04 第6章教训回归：把 tree_id 误当 setup_event_id 时报错须点名这层混淆
 
-    create_event 回执同时含 tree_id 与 node_id，模型把 tree_id 传入后被泛化报错
+    write_event 回执同时含 tree_id 与 node_id，模型把 tree_id 传入后被泛化报错
     拒绝，转而 search_event 查本章事件落空（树仅覆盖已完成章节）→ 空转至回合上限。
     """
     service = _EventHistoryService()
     ledger = _ledger()
-    # 真实流程：create_event 只把节点 id 登记进 authorized_event_ids，
+    # 真实流程：write_event 只把节点 id 登记进 authorized_event_ids，
     # tree_id 仅进 authorized_tree_ids（不授权 setup/payoff 引用）
     ledger.authorized_tree_ids.add("tree-mixup")
     tools = _tools(service, ledger)
@@ -174,7 +179,7 @@ def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match=r"setup_event_id 未由 create_event 回执或 search_event 授权: tree-mixup"
+        match=r"setup_event_id 未由 write_event 回执或 search_event 授权: tree-mixup"
         r".*事件树 id 而非事件节点 id.*children\[\]\.node_id 或 root_node_id",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(

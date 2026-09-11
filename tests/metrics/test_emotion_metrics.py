@@ -61,7 +61,7 @@ class TestLexicalTrend(unittest.TestCase):
 
 class TestPolarityAndArc(unittest.TestCase):
     def test_polarity(self) -> None:
-        result = compute_emotion_polarity_distribution(["strong_positive", "mild_negative", "neutral"])
+        result = compute_emotion_polarity_distribution([2, -1, 0])
         self.assertAlmostEqual(result["positive_ratio"] + result["negative_ratio"] + result["neutral_ratio"], 1.0)
 
     def test_polarity_empty_returns_null_ratios(self) -> None:

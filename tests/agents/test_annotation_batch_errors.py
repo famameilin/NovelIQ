@@ -4,10 +4,10 @@ import pytest
 
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import (
-    CreateEventInput,
     DialogueInput,
     DialogueVerdict,
     RelationInput,
+    WriteEventInput,
 )
 from src.agents.annotation.tools import AnnotationToolLedger
 
@@ -40,7 +40,7 @@ def test_relation_endpoint_errors_collected_with_indexes() -> None:
 def test_event_participant_errors_collected_with_indexes() -> None:
     """2026-08-30 用于一次返回事件树全部未登记参与者错误"""
     ledger = _ledger()
-    payload = CreateEventInput.model_validate(
+    payload = WriteEventInput.model_validate(
         {
             "description": "甲乙交战",
             "finalize_events": True,
@@ -50,24 +50,24 @@ def test_event_participant_errors_collected_with_indexes() -> None:
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "出手救人",
-                    "emotion": "strong_positive",
+                    "emotion": 2,
                 },
                 {
                     "entity": "乙",
                     "role": "反对者",
                     "narrative_role": "反对者",
                     "action": "拦路截杀",
-                    "emotion": "strong_negative",
+                    "emotion": -2,
                 },
             ],
         }
     )
     with pytest.raises(ValueError) as excinfo:
-        ledger.create_event_tree(payload)
+        ledger.write_event_tree(payload)
     message = str(excinfo.value)
-    assert "create_event 校验失败" in message
-    assert "create_event.root.participants[0] 未在 write_entities 中声明: 甲" in message
-    assert "create_event.root.participants[1] 未在 write_entities 中声明: 乙" in message
+    assert "write_event 校验失败" in message
+    assert "write_event.participants.0 未在 write_entities 中声明: 甲" in message
+    assert "write_event.participants.1 未在 write_entities 中声明: 乙" in message
 
 
 def test_dialogue_speaker_error_collected_with_index() -> None:

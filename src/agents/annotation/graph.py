@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -39,7 +40,7 @@ _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
 _FORMAL_WRITE_ORDER = (
     ("entities", "write_entities"),
     ("metrics", "write_metrics"),
-    ("events", "create_event"),
+    ("events", "write_event"),
     ("relations", "write_relations"),
     ("dialogues", "write_dialogues"),
 )
@@ -78,8 +79,8 @@ def _turn_budget_reminder(remaining: int) -> str:
 _MISSING_DOMAIN_TOOL_HINTS = {
     "entities": "write_entities（无实体时提交 {\"entities\": []}）",
     "metrics": "write_metrics",
-    "events": "create_event（无事件时提交 {\"description\": null, \"finalize_events\": true}）",
-    "character_observations": "create_event（随事件域一并完成，无需单独提交）",
+    "events": "write_event（无事件时提交 {\"description\": null, \"finalize_events\": true}）",
+    "character_observations": "write_event（随事件域一并完成，无需单独提交）",
     "relations": "write_relations（无关系变化时提交 {\"relations\": []}）",
     "dialogues": "write_dialogues（无对话时提交 {\"dialogues\": []}）",
 }
@@ -281,6 +282,25 @@ def _truncated_error(name: str) -> str:
     )
 
 
+_CREATE_EVENT_PATCH_HINT = (
+    "；本次提交已缓存为草稿，重调 write_event 只需 patches=[[字段路径, 新值], ...] "
+    "修正上述路径对应字段（路径见报错，已正确的部分无需重发），"
+    "不带 patches 则表示整体重交并取代草稿"
+)
+
+
+def _stash_write_event_draft(ledger: AnnotationToolLedger, call: dict[str, Any], error_text: str) -> str:
+    """2026-09-11 用于把校验失败的 write_event 参数缓存为草稿并附增量修正提示
+
+    补丁式重调（args 含 patches）失败时草稿已由 merge_event_patches 更新为合并结果，
+    不得用本次的 patches 参数覆盖草稿。
+    """
+    args = call.get("args")
+    if isinstance(args, dict) and "patches" not in args:
+        ledger.stash_event_draft(deepcopy(args))
+    return error_text + _CREATE_EVENT_PATCH_HINT
+
+
 def _build_tool_batch_node(
     tools: list[Any],
     *,
@@ -397,9 +417,12 @@ def _build_tool_batch_node(
                 if graph_snapshot is not None and ledger.graph is not None:
                     ledger.graph.restore(graph_snapshot)
                 ledger.errors.append(str(exc))
-                result = _failed_receipt(name, str(exc))
+                error_text = str(exc)
+                if name == "write_event":
+                    error_text = _stash_write_event_draft(ledger, call, error_text)
+                result = _failed_receipt(name, error_text)
                 status = "error"
-                error = str(exc)
+                error = error_text
                 receipt = json.loads(result)
             tool_duration_ms = max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000))
             if observer is not None:

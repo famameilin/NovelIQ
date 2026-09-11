@@ -33,7 +33,7 @@ class ChapterAnnotationRow:
     """2026-08-05 用于向 章节消费者暴露章节 segment 的具名读模型"""
 
     chapter_id: int
-    emotional_valence: str
+    emotional_valence: int
     event_type: str
     pivot_moment: bool
     cliffhanger: bool

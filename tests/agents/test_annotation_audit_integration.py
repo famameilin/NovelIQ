@@ -294,7 +294,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         "write_metrics",
         {
             "summary": " ",
-            "emotional_valence": "neutral",
+            "emotional_valence": 0,
             "narrative_function": "铺垫",
         },
         call_id="call-metrics-bad",
@@ -310,8 +310,8 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
                     _metrics_call(
                         call_id="call-metrics-labels",
                         sentence_labels=[
-                            {"sentence": "住手", "emotion": "strong_negative"},
-                            {"sentence": "回荡", "emotion": "mild_negative"},
+                            {"sentence": "住手", "emotion": -2},
+                            {"sentence": "回荡", "emotion": -1},
                         ],
                     ),
                 ]
@@ -379,13 +379,13 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     unlocked_all = [
         "write_entities",
         "write_metrics",
-        "create_event",
+        "write_event",
         "write_relations",
         "write_dialogues",
     ]
     assert [row.context_summary["active_write_tools"] for row in turn_rows] == [
         ["write_entities", "write_metrics"],
-        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
+        ["write_entities", "write_metrics", "write_event", "write_relations", "write_dialogues"],
         unlocked_all,
     ]
     formal_writes = set(unlocked_all)

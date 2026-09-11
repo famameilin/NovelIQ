@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     JsonValue,
@@ -26,20 +27,46 @@ class StrictModel(BaseModel):
 
 
 # 2026-08-30 事件参与者专属角色词不能写进同一参与者的人物功能字段
-_EVENT_ONLY_ROLE_WORDS = frozenset({"见证者", "地点", "行动者", "承受者", "协助者", "对抗者"})
+# （2026-09-11 见证者已并入 RoleFunction 词表，从拒绝表移除）
+_EVENT_ONLY_ROLE_WORDS = frozenset({"地点", "行动者", "承受者", "协助者", "对抗者"})
 
-# 2026-08-12 对话 tone 中文枚举：模型常误写进 emotional_valence（该字段是英文枚举）
-_TONE_CHINESE_WORDS = frozenset({"平静", "愤怒", "悲伤", "喜悦", "恐惧", "紧张", "嘲讽", "恳求"})
+# 2026-09-11 emotion 合同：五档整数分值 -2..2（模型直接输出数字，删除词表映射的解码回合）
+EMOTION_SCORE_DESCRIPTION = (
+    "情绪方向与强度分值，整数 -2..2"
+    "（-2 强烈负面 / -1 轻微负面 / 0 中性 / 1 轻微正面 / 2 强烈正面）"
+)
 
 
-class EmotionalValence(StrEnum):
-    """2026-08-07 用于约束情绪方向与强度"""
+def coerce_emotion_score(value: object) -> int:
+    """emotion 分值容错读取：合同值本就是 -2..2 整数，历史遗留/异常取值按中性 0 计"""
+    if isinstance(value, int) and not isinstance(value, bool) and -2 <= value <= 2:
+        return value
+    return 0
 
-    STRONG_POSITIVE = "strong_positive"
-    MILD_POSITIVE = "mild_positive"
-    NEUTRAL = "neutral"
-    MILD_NEGATIVE = "mild_negative"
-    STRONG_NEGATIVE = "strong_negative"
+
+# 2026-09-11 实体引用一律用运行期编号（write_entities 回执 numbers / search_graph 回执 n）；
+# 名称是文本面的东西，进入写入合同前必须先换成编号，这里把"写名字"的失败直接转成可自纠报错
+ENTITY_NUMBER_FIELD_HINT = "（编号取自 write_entities 回执 numbers 或 search_graph 回执 n；不接受实体名称）"
+
+
+def _reject_entity_name_text(value: object) -> object:
+    """2026-09-11 用于编号字段收到实体名称时给出直接可自纠的报错（纯数字字符串放行给 int 解析）"""
+    if isinstance(value, str) and not value.strip().isdigit():
+        raise ValueError(
+            f"实体引用只接受编号（整数），收到名称 {value.strip()}："
+            "请先 search_graph 按名称查询（新实体先 write_entities 声明），用回执编号引用"
+        )
+    return value
+
+
+def entity_number_field_description(label: str) -> str:
+    """2026-09-11 用于统一渲染编号字段描述（编号来源与禁令同一文案）"""
+    return f"{label}{ENTITY_NUMBER_FIELD_HINT}"
+
+
+# 2026-09-11 可复用的编号字段类型：写名称时在参数校验层给出可自纠报错，
+# 供工具签名与 pydantic 模型共用（编号语义见 resolve_number）
+EntityNumber = Annotated[int, BeforeValidator(_reject_entity_name_text)]
 
 
 class NarrativeFunction(StrEnum):
@@ -59,7 +86,11 @@ class Confidence(StrEnum):
 
 
 class RoleFunction(StrEnum):
-    """2026-08-07 用于约束人物在当前叙事动作中的功能"""
+    """2026-08-07 用于约束人物在当前叙事动作中的功能
+
+    2026-09-11 并入"见证者"：模型在 narrative_role 槽位写"见证者"的实测失败 10 次，
+    旁观/见证类参与者确有人物功能语义，堵在枚举外只产生解码返工。
+    """
 
     SUBJECT = "主体"
     OBJECT = "客体"
@@ -67,6 +98,7 @@ class RoleFunction(StrEnum):
     RECEIVER = "接收者"
     HELPER = "帮助者"
     OPPONENT = "反对者"
+    WITNESS = "见证者"
 
 
 class DialogueVerdict(StrEnum):
@@ -78,7 +110,13 @@ class DialogueVerdict(StrEnum):
 
 
 class Tone(StrEnum):
-    """2026-08-11 用于约束对话语气的闭合枚举"""
+    """2026-08-11 用于约束对话语气的闭合枚举
+
+    2026-09-11 扩表：run e84339d1 实测 13 次 tone 失败全部是模型自造词
+    （得意/惊讶/疲惫/疑惑/绝望/无奈/心疼/关切/好奇/赞叹/惊恐/焦急/贪婪），
+    8 值词表与自然表达系统性错配；按实测高频词并入并加"其他"兜底。
+    合法值全表由 tone_catalog_text() 渲染，工具描述与报错共用同一来源。
+    """
 
     CALM = "平静"
     ANGRY = "愤怒"
@@ -88,6 +126,29 @@ class Tone(StrEnum):
     TENSE = "紧张"
     SARCASTIC = "嘲讽"
     PLEADING = "恳求"
+    SMUG = "得意"
+    SURPRISED = "惊讶"
+    CONFUSED = "疑惑"
+    TIRED = "疲惫"
+    RESIGNED = "无奈"
+    DISTRESSED = "心疼"
+    CONCERNED = "关切"
+    DESPAIRING = "绝望"
+    CURIOUS = "好奇"
+    ADMIRING = "赞叹"
+    PANICKED = "惊恐"
+    ANXIOUS = "焦急"
+    GREEDY = "贪婪"
+    OTHER = "其他"
+
+
+def tone_catalog_text() -> str:
+    """2026-09-11 用于渲染 Agent 可见的语气闭合枚举全表（工具描述与报错同源）"""
+    return "/".join(member.value for member in Tone)
+
+
+# 2026-09-11 语气词整表：emotion 分值字段拒绝语气词时按本表给出纠错信息
+_TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
 
 
 class EventParticipantRole(StrEnum):
@@ -103,7 +164,7 @@ class EventParticipantRole(StrEnum):
 
 
 class RelationChangeKind(StrEnum):
-    """2026-08-07 用于约束关系事实的生命周期变化（系统内部与案例解决使用）"""
+    """2026-08-07 用于约束关系事实的生命周期变化（系统内部、持久化与 API 使用的英文值域）"""
 
     ASSERT = "assert"
     REINFORCE = "reinforce"
@@ -112,6 +173,34 @@ class RelationChangeKind(StrEnum):
     REFINE = "refine"
     SUPERSEDE = "supersede"
     RETRACT = "retract"
+
+
+class RelationChangeKindArg(StrEnum):
+    """2026-09-11 模型面关系变化词（中文化）
+
+    run e84339d1 实测模型把 assert 写成 create/add/建——英文闭集要求模型先解码再
+    翻译；这里改成模型自然的汉语说法，工具层按 RELATION_CHANGE_KIND_LABELS 译回
+    内部英文值，落库/API/前端契约零变化。
+    """
+
+    CREATE = "新增"
+    REINFORCE = "强化"
+    WEAKEN = "削弱"
+    BREAK = "解除"
+    REFINE = "修正"
+    SUPERSEDE = "取代"
+    RETRACT = "撤回"
+
+
+RELATION_CHANGE_KIND_LABELS: dict[str, str] = {
+    RelationChangeKindArg.CREATE.value: RelationChangeKind.ASSERT.value,
+    RelationChangeKindArg.REINFORCE.value: RelationChangeKind.REINFORCE.value,
+    RelationChangeKindArg.WEAKEN.value: RelationChangeKind.WEAKEN.value,
+    RelationChangeKindArg.BREAK.value: RelationChangeKind.BREAK.value,
+    RelationChangeKindArg.REFINE.value: RelationChangeKind.REFINE.value,
+    RelationChangeKindArg.SUPERSEDE.value: RelationChangeKind.SUPERSEDE.value,
+    RelationChangeKindArg.RETRACT.value: RelationChangeKind.RETRACT.value,
+}
 
 
 class RelationType(StrEnum):
@@ -337,7 +426,7 @@ class ChunkMetricsInput(StrictModel):
     """2026-08-07 用于提交当前 chunk 摘要和叙事指标"""
 
     summary: str = Field(min_length=1)
-    emotional_valence: EmotionalValence
+    emotional_valence: int = Field(ge=-2, le=2, description=EMOTION_SCORE_DESCRIPTION)
     narrative_function: NarrativeFunction
     pivot_moment: bool = False
     cliffhanger: bool = False
@@ -382,11 +471,78 @@ class DialogueInput(StrictModel):
 
 # 2026-08-12 数组格式对话提交：位置 [candidate_index, verdict, speaker, tone]，
 # speaker/tone 未知时 null；比对象格式省去字段名 token，且未提交候选默认 not_dialogue
-DialogueSubmissionItem = tuple[int, DialogueVerdict, str | None, Tone | None]
+# 2026-09-11 第三位 speaker 从登记名称改为运行期实体编号（EntityNumber 给出写名称时的自纠引导）
+DialogueSubmissionItem = tuple[int, DialogueVerdict, EntityNumber | None, Tone | None]
+
+
+class EventParticipantArg(StrictModel):
+    """2026-09-11 模型面事件参与者（实体用运行期编号引用）
+
+    系统在 write_event 边界把编号翻成 FactGraph 规范名后转成内部
+    EventParticipantInput（角色校验、动态状态派生、落库路径全部沿用内部形态）。
+    """
+
+    entity: EntityNumber = Field(
+        gt=0,
+        description=entity_number_field_description("参与者实体的运行期编号"),
+    )
+    role: EventParticipantRole = Field(
+        description="参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点作为参与者角色）"
+    )
+    narrative_role: RoleFunction | None = Field(
+        default=None,
+        description="仅 character 参与者必填的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者",
+    )
+    action: str | None = Field(
+        default=None,
+        min_length=1,
+        description="仅 character 参与者必填：一句话概括人物在本事件中的动作（不超过 15 字）",
+    )
+    emotion: int | None = Field(
+        default=None,
+        ge=-2,
+        le=2,
+        description=f"仅 character 参与者必填：动作伴随的情绪分值。{EMOTION_SCORE_DESCRIPTION}",
+    )
+
+    @field_validator("narrative_role", mode="before")
+    @classmethod
+    def _reject_event_role_words(cls, value: object) -> object:
+        """2026-08-30 用于阻止事件专属角色词进入人物功能字段"""
+        if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
+            raise ValueError(
+                "narrative_role 不接受 "
+                f"{value.strip()}：地点、行动者等只用于事件参与者的 role 字段；"
+                "人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者"
+            )
+        return value
+
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def _reject_tone_words_in_emotion(cls, value: object) -> object:
+        """2026-08-30 用于阻止对话语气词进入人物情绪分值字段"""
+        if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
+            raise ValueError(
+                f"emotion 不接受 {value.strip()}：该字段是整数分值 -2..2"
+                "（-2 强烈负面 … 2 强烈正面），语气词是对话 tone 字段的取值"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def normalize_action(self) -> EventParticipantArg:
+        """2026-09-11 用于约束动作文本与人物动态字段成组提交"""
+        if self.action is not None:
+            self.action = normalize_semantic_text(self.action, label="event.participant.action")
+        observation_fields = (self.narrative_role, self.action, self.emotion)
+        if any(value is not None for value in observation_fields) and not all(
+            value is not None for value in observation_fields
+        ):
+            raise ValueError("character 参与者的 narrative_role/action/emotion 必须同时提供或同时省略")
+        return self
 
 
 class EventParticipantInput(StrictModel):
-    """2026-08-30 用于同时描述事件参与角色和人物动态状态"""
+    """2026-08-30 用于同时描述事件参与角色和人物动态状态（内部系统形态，实体=规范名）"""
 
     entity: str = Field(
         min_length=1,
@@ -397,16 +553,18 @@ class EventParticipantInput(StrictModel):
     )
     narrative_role: RoleFunction | None = Field(
         default=None,
-        description="仅 character 参与者必填的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者",
+        description="仅 character 参与者必填的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者",
     )
     action: str | None = Field(
         default=None,
         min_length=1,
         description="仅 character 参与者必填：一句话概括人物在本事件中的动作（不超过 15 字）",
     )
-    emotion: EmotionalValence | None = Field(
+    emotion: int | None = Field(
         default=None,
-        description="仅 character 参与者必填：动作伴随的情绪方向与强度",
+        ge=-2,
+        le=2,
+        description=f"仅 character 参与者必填：动作伴随的情绪分值。{EMOTION_SCORE_DESCRIPTION}",
     )
 
     @field_validator("narrative_role", mode="before")
@@ -416,20 +574,19 @@ class EventParticipantInput(StrictModel):
         if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
             raise ValueError(
                 "narrative_role 不接受 "
-                f"{value.strip()}：见证者、地点等只用于事件参与者的 role 字段；"
-                "人物功能使用 主体/客体/发送者/接收者/帮助者/反对者"
+                f"{value.strip()}：地点、行动者等只用于事件参与者的 role 字段；"
+                "人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者"
             )
         return value
 
     @field_validator("emotion", mode="before")
     @classmethod
     def _reject_tone_words_in_emotion(cls, value: object) -> object:
-        """2026-08-30 用于阻止对话语气枚举进入人物情绪字段"""
+        """2026-08-30 用于阻止对话语气词进入人物情绪分值字段"""
         if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
             raise ValueError(
-                f"emotion 不接受 {value.strip()}：该字段使用英文枚举"
-                "（strong_positive/mild_positive/neutral/mild_negative/strong_negative），"
-                "中文枚举（平静/愤怒/喜悦等）是对话 tone 字段的取值"
+                f"emotion 不接受 {value.strip()}：该字段是整数分值 -2..2"
+                "（-2 强烈负面 … 2 强烈正面），语气词是对话 tone 字段的取值"
             )
         return value
 
@@ -546,8 +703,25 @@ class ChunkParagraphInfo:
         return [self.paragraph_ids[i] for i in sorted(set(indices))]
 
 
+class EventAppendItemArg(StrictModel):
+    """2026-09-11 模型面事件子节点（参与者用运行期编号引用）"""
+
+    type: Literal["main", "secondary"] = Field(description="main=顺延主因链（成为新的链尾）；secondary=当前链尾的分支")
+    description: str = Field(min_length=1, description="子事件描述（不超过 30 字）")
+    participants: list[EventParticipantArg] = Field(
+        default_factory=list,
+        description="该子事件的参与者及人物动态状态",
+    )
+
+    @model_validator(mode="after")
+    def normalize_item(self) -> EventAppendItemArg:
+        """2026-09-11 用于规范化事件子节点描述"""
+        self.description = normalize_semantic_text(self.description, label="write_event.children.description")
+        return self
+
+
 class EventAppendItem(StrictModel):
-    """2026-08-30 用于在创建事件时按顺序提交主链或分支子节点"""
+    """2026-08-30 用于在创建事件时按顺序提交主链或分支子节点（内部系统形态）"""
 
     type: Literal["main", "secondary"] = Field(description="main=顺延主因链（成为新的链尾）；secondary=当前链尾的分支")
     description: str = Field(min_length=1, description="子事件描述（不超过 30 字）")
@@ -559,12 +733,103 @@ class EventAppendItem(StrictModel):
     @model_validator(mode="after")
     def normalize_item(self) -> EventAppendItem:
         """2026-08-30 用于规范化事件子节点描述"""
-        self.description = normalize_semantic_text(self.description, label="create_event.children.description")
+        self.description = normalize_semantic_text(self.description, label="write_event.children.description")
         return self
 
 
-class CreateEventInput(StrictModel):
-    """2026-08-30 用于创建单棵事件树并显式声明事件领域是否完成
+class WriteEventArg(StrictModel):
+    """2026-09-11 模型面事件树提交（实体引用一律运行期编号）
+
+    工具层在写域前把编号解析为规范名并转成内部 WriteEventInput；校验失败缓存草稿
+    时缓存的是本形态（编号），补丁路径与报错路径同源。
+    """
+
+    description: str | None = Field(
+        default=None,
+        min_length=1,
+        description="事件的完整一句话描述（树的根，不超过 30 字）；仅无事件完成提交时为 null",
+    )
+    participants: list[EventParticipantArg] = Field(default_factory=list)
+    children: list[EventAppendItemArg] = Field(
+        default_factory=list,
+        description="按输入顺序追加的子事件；main 顺延主因链，secondary 挂在当时主链尾",
+    )
+    isforeshadowing: bool = Field(
+        default=False,
+        description="标记该事件为伏笔埋设点（系统自动创建伏笔线程，无需再调用伏笔工具）",
+    )
+    cause_tree_id: str | None = Field(
+        default=None,
+        description="因果前驱事件树 id（可选）。本章新树填 write_event 返回的 tree_id；"
+        "延续前文剧情先 search_event 检索历史树再填其 tree_id",
+    )
+    setup_kind: str | None = Field(
+        default=None,
+        description="伏笔类型（如人物秘密/道具/预言/悬念），isforeshadowing=true 时应提供",
+    )
+    expected_payoff_family: str | None = Field(
+        default=None,
+        description="预期的回收方向/家族，isforeshadowing=true 时应提供",
+    )
+    payoff_likelihood: PayoffLikelihood | None = Field(
+        default=None,
+        description="回收可能性，isforeshadowing=true 时应提供",
+    )
+    finalize_events: bool = Field(
+        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 write_event",
+    )
+
+    @model_validator(mode="after")
+    def normalize_create(self) -> WriteEventArg:
+        """2026-09-11 用于规范化事件描述与前驱树 id"""
+        if self.description is not None:
+            self.description = normalize_semantic_text(self.description, label="write_event.description")
+        if self.cause_tree_id is not None:
+            cleaned = normalize_semantic_text(self.cause_tree_id, label="write_event.cause_tree_id")
+            self.cause_tree_id = cleaned or None
+        return self
+
+    @model_validator(mode="after")
+    def validate_empty_completion(self) -> WriteEventArg:
+        """2026-08-30 用于限制空事件只表达事件领域完成"""
+        if self.description is not None:
+            return self
+        has_event_fields = bool(
+            self.participants
+            or self.children
+            or self.isforeshadowing
+            or self.cause_tree_id
+            or self.setup_kind
+            or self.expected_payoff_family
+            or self.payoff_likelihood
+        )
+        if has_event_fields:
+            raise ValueError("description=null 时不得提交参与者、子事件、因果或伏笔字段")
+        if not self.finalize_events:
+            raise ValueError("description=null 只能用于 finalize_events=true 的空事件完成提交")
+        return self
+
+    @model_validator(mode="after")
+    def require_foreshadowing_fields(self) -> WriteEventArg:
+        """伏笔埋设时必须提供全部三字段，避免入库默认值冒充 LLM 判断"""
+        if not self.isforeshadowing:
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("setup_kind", self.setup_kind),
+                ("expected_payoff_family", self.expected_payoff_family),
+                ("payoff_likelihood", self.payoff_likelihood),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(f"isforeshadowing=true 时必须提供全部三字段，缺失: {', '.join(missing)}")
+        return self
+
+
+class WriteEventInput(StrictModel):
+    """2026-08-30 用于创建单棵事件树并显式声明事件领域是否完成（内部系统形态，实体=规范名）
 
     模型零结构输入：不给 id、不给边、不给段落锚点。跨章延续唯一出口是
     cause_tree_id（必须指向已存在的树），环在构造上不可能。
@@ -586,7 +851,7 @@ class CreateEventInput(StrictModel):
     )
     cause_tree_id: str | None = Field(
         default=None,
-        description="因果前驱事件树 id（可选）。本章新树填 create_event 返回的 tree_id；"
+        description="因果前驱事件树 id（可选）。本章新树填 write_event 返回的 tree_id；"
         "延续前文剧情先 search_event 检索历史树再填其 tree_id",
     )
     setup_kind: str | None = Field(
@@ -602,21 +867,21 @@ class CreateEventInput(StrictModel):
         description="回收可能性，isforeshadowing=true 时应提供",
     )
     finalize_events: bool = Field(
-        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 create_event",
+        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 write_event",
     )
 
     @model_validator(mode="after")
-    def normalize_create(self) -> CreateEventInput:
+    def normalize_create(self) -> WriteEventInput:
         """2026-08-30 用于规范化事件描述与前驱树 id"""
         if self.description is not None:
-            self.description = normalize_semantic_text(self.description, label="create_event.description")
+            self.description = normalize_semantic_text(self.description, label="write_event.description")
         if self.cause_tree_id is not None:
-            cleaned = normalize_semantic_text(self.cause_tree_id, label="create_event.cause_tree_id")
+            cleaned = normalize_semantic_text(self.cause_tree_id, label="write_event.cause_tree_id")
             self.cause_tree_id = cleaned or None
         return self
 
     @model_validator(mode="after")
-    def validate_empty_completion(self) -> CreateEventInput:
+    def validate_empty_completion(self) -> WriteEventInput:
         """2026-08-30 用于限制空事件只表达事件领域完成"""
         if self.description is not None:
             return self
@@ -636,7 +901,7 @@ class CreateEventInput(StrictModel):
         return self
 
     @model_validator(mode="after")
-    def require_foreshadowing_fields(self) -> CreateEventInput:
+    def require_foreshadowing_fields(self) -> WriteEventInput:
         """伏笔埋设时必须提供全部三字段，避免入库默认值冒充 LLM 判断"""
         if not self.isforeshadowing:
             return self
@@ -656,8 +921,67 @@ class CreateEventInput(StrictModel):
         return self
 
 
+class WriteEventPatchArgs(WriteEventArg):
+    """2026-09-11 用于支撑 write_event 的草稿补丁模式（增量修正，不整树重发）
+
+    上一次 write_event 提交校验失败时，系统把该次参数（编号形态）缓存为草稿；
+    模型重调时只需 patches=[[字段路径, 新值], ...]（路径形如
+    children.0.participants.0.emotion，与报错里的路径一致），系统在草稿基础上合并
+    后整体校验。patches 与完整树参数二选一：带 patches 时忽略其他树字段，
+    finalize_events 以草稿中的值为准。
+    """
+
+    finalize_events: bool = Field(
+        default=False,
+        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 write_event",
+    )
+    patches: list[tuple[str, Any]] | None = Field(
+        default=None,
+        description="草稿补丁列表，每条 [字段路径, 新值]；仅在校验失败后的修正提交时使用",
+    )
+
+    @model_validator(mode="after")
+    def validate_empty_completion(self) -> WriteEventPatchArgs:
+        """补丁提交允许省略全部树字段；整体重交沿用基类空提交限制（同名覆盖基类校验）"""
+        if self.patches:
+            return self
+        if self.description is not None:
+            return self
+        has_event_fields = bool(
+            self.participants
+            or self.children
+            or self.isforeshadowing
+            or self.cause_tree_id
+            or self.setup_kind
+            or self.expected_payoff_family
+            or self.payoff_likelihood
+        )
+        if has_event_fields:
+            raise ValueError("description=null 时不得提交参与者、子事件、因果或伏笔字段")
+        if not self.finalize_events:
+            raise ValueError("description=null 只能用于 finalize_events=true 的空事件完成提交")
+        return self
+
+
+class RelationArg(StrictModel):
+    """2026-09-11 模型面关系边（两端用运行期实体编号引用）
+
+    工具层在写域前把编号解析为规范名并转成内部 RelationInput。
+    """
+
+    from_entity: EntityNumber = Field(
+        gt=0,
+        description=entity_number_field_description("关系起点实体编号"),
+    )
+    to_entity: EntityNumber = Field(
+        gt=0,
+        description=entity_number_field_description("关系终点实体编号"),
+    )
+    relation_type: RelationType = Field(description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text())
+
+
 class RelationInput(StrictModel):
-    """2026-08-12 用于通过实体名称提交本章确认存在的闭合类型关系边"""
+    """2026-08-12 用于通过实体名称提交本章确认存在的闭合类型关系边（内部系统形态）"""
 
     from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
     to_entity: str = Field(min_length=1, description="关系终点实体（图上的登记名称）")
@@ -714,7 +1038,7 @@ class BoundCharacterObservation(StrictModel):
     character: str = Field(min_length=1)
     role_function: RoleFunction
     action: str = Field(min_length=1)
-    emotion: EmotionalValence
+    emotion: int = Field(ge=-2, le=2)
 
 
 class BoundDialogue(StrictModel):
@@ -733,7 +1057,7 @@ class BoundDialogue(StrictModel):
 class BoundEvent(StrictModel):
     """2026-08-22事件树节点（服务端派生角色、id；章级证据由持久化层盖章）
 
-    节点由 create_event 服务端生成：node_id 即最终落库 event_id，
+    节点由 write_event 服务端生成：node_id 即最终落库 event_id，
     因果边仅允许 root 携带跨章前驱（cause_tree_id 的根节点），环构造性不可能。
     2026-08-22 重构：证据升为章级单份，节点不再携带锚点/字符区间/哈希/证据。
     """
@@ -803,7 +1127,7 @@ class SentenceLabelInput(StrictModel):
         max_length=2000,
         description="从当前章节正文原样摘录的完整句子（系统按原文定位绑定）",
     )
-    emotion: EmotionalValence = Field(description="整句情绪方向与强度（英文枚举，与人物 emotion 同一取值）")
+    emotion: int = Field(ge=-2, le=2, description=f"整句情绪分值。{EMOTION_SCORE_DESCRIPTION}")
 
     @model_validator(mode="after")
     def normalize_sentence(self) -> SentenceLabelInput:
@@ -816,7 +1140,7 @@ class BoundSentenceLabel(StrictModel):
     """2026-09-07 用于保存系统定位绑定后的自选句情绪标签（章文本内字符区间）"""
 
     sentence: str = Field(min_length=1)
-    emotion: EmotionalValence
+    emotion: int
     start: int = Field(ge=0)
     end: int = Field(gt=0)
 
@@ -893,11 +1217,16 @@ class TextSearchResult(StrictModel):
 
 
 class CaseSearchResult(StrictModel):
-    """2026-08-07 用于查询服务内部返回活动连续性案例"""
+    """2026-08-07 用于查询服务内部返回活动连续性案例
+
+    2026-09-11 案例改检索制：created_chapter 供模型判断案例新旧
+    （池内时间轴只剩章节序号）。
+    """
 
     id: str = Field(min_length=1)
     type: CaseType
     chunk_id: int = Field(ge=0)
+    created_chapter: int = Field(default=0, ge=0)
     keys: list[str] = Field(min_length=1, max_length=20)
     description: str = Field(min_length=1, max_length=100)
     state: Literal["active"] = "active"
@@ -923,10 +1252,27 @@ SearchResultItem = Annotated[
 ]
 
 
+class CasePoolSummary(StrictModel):
+    """2026-09-11 用于在案例池检索回执中汇报可检索规模（案例本体不再随正文注入）
+
+    active_total/by_type 只统计未被本轮隐藏（未解决）的 active 案例，
+    即模型此刻用 search_pool 还能检索到的条目。
+    """
+
+    active_total: int = Field(default=0, ge=0)
+    by_type: dict[str, int] = Field(default_factory=dict)
+
+
 class SearchResult(StrictModel):
-    """2026-08-07 用于查询服务内部返回案例与伏笔结果"""
+    """2026-08-07 用于查询服务内部返回案例与伏笔结果
+
+    2026-09-11 案例改检索制：pool 汇报池内剩余规模与类型分布，truncated 表示
+    命中超过 limit 只返回了前 limit 条。
+    """
 
     results: list[SearchResultItem] = Field(default_factory=list, max_length=50)
+    pool: CasePoolSummary = Field(default_factory=CasePoolSummary)
+    truncated: bool = False
 
 
 class ResolvedCase(StrictModel):
@@ -1061,7 +1407,6 @@ class AgentRunAudit(StrictModel):
 
     allow_future_context: bool
     write_records: list[dict[str, Any]]
-    rotation_case_ids: list[str]
     authorized_chapter_ids: list[int]
     authorized_text_paragraph_ids: list[int]
     # 2026-08-18 P2：历史事件只能使用本轮 search_event_history 返回的稳定 ID

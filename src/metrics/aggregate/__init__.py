@@ -32,7 +32,6 @@ from .types import (
     StyleData,
     TensionData,
     TextData,
-    map_emotion_score,
 )
 
 
@@ -82,7 +81,6 @@ __all__ = [
     "StyleData",
     "TensionData",
     "TextData",
-    "map_emotion_score",
     "aggregate_all_metrics",
     # 数据提取
     "fetch_annotation_data",

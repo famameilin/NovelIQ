@@ -1,9 +1,9 @@
-"""事件层测试：create_event/search_event 树语义
+"""事件层测试：write_event/search_event 树语义
 
 覆盖：
-- tools：create_event 返回 tree_id/root_node_id 并登记授权；isforeshadowing 自动生成伏笔绑定
-- create_event.children：main 顺延主因链、secondary 挂当时主链尾
-- create_event(cause_tree_id)：经 search_event 授权的历史树可作跨章因果前驱（根携带引用）
+- tools：write_event 返回 tree_id/root_node_id 并登记授权；isforeshadowing 自动生成伏笔绑定
+- write_event.children：main 顺延主因链、secondary 挂当时主链尾
+- write_event(cause_tree_id)：经 search_event 授权的历史树可作跨章因果前驱（根携带引用）
 - 未授权 cause_tree_id 拒绝
 """
 
@@ -13,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.schema import ChunkParagraphInfo, CreateEventInput
+from src.agents.annotation.schema import ChunkParagraphInfo, SearchResult, WriteEventPatchArgs
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from tests.agents.test_annotation_event_history_tools import (
     _EventHistoryService,
@@ -43,11 +43,11 @@ def _create_args(**overrides) -> dict:
         "finalize_events": True,
         "participants": [
             {
-                "entity": "顾霜",
+                "entity": 1,
                 "role": "主体",
                 "narrative_role": "主体",
                 "action": "拔剑",
-                "emotion": "mild_negative",
+                "emotion": -1,
             }
         ],
     }
@@ -66,12 +66,12 @@ def _create_args(**overrides) -> dict:
     return payload
 
 
-def test_create_event_returns_tree_and_authorizes_root() -> None:
+def test_write_event_returns_tree_and_authorizes_root() -> None:
     """2026-08-22创建返回服务端派发的 tree_id/root_node_id 并登记授权"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
 
-    receipt = _call(tools, "create_event", _create_args())
+    receipt = _call(tools, "write_event", _create_args())
 
     tree_id = receipt["tree_id"]
     root_node_id = receipt["root_node_id"]
@@ -90,7 +90,7 @@ def test_create_event_returns_tree_and_authorizes_root() -> None:
     assert ledger.bound_payloads["character_observations"][0].action == "拔剑"
 
 
-def test_create_event_requires_character_participant_state_fields() -> None:
+def test_write_event_requires_character_participant_state_fields() -> None:
     """2026-08-30 用于拒绝未携带人物动态状态的角色参与者"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
@@ -98,10 +98,10 @@ def test_create_event_requires_character_participant_state_fields() -> None:
     with pytest.raises(ValueError, match="必须同时提供 narrative_role/action/emotion"):
         _call(
             tools,
-            "create_event",
+            "write_event",
             {
                 "description": "顾霜拔剑",
-                "participants": [{"entity": "顾霜", "role": "主体"}],
+                "participants": [{"entity": 1, "role": "主体"}],
                 "finalize_events": True,
             },
         )
@@ -111,26 +111,26 @@ def test_create_event_requires_character_participant_state_fields() -> None:
     assert "character_observations" not in ledger.domain_receipts
 
 
-def test_create_event_without_participants_binds_empty_character_domain() -> None:
+def test_write_event_without_participants_binds_empty_character_domain() -> None:
     """2026-08-30 用于允许无人物事件明确完成空人物动态领域"""
     ledger = _ledger()
     tools = build_annotation_tools(_QueryServiceShim(), ledger)
 
-    receipt = _call(tools, "create_event", {"description": "山门夜雨", "finalize_events": True})
+    receipt = _call(tools, "write_event", {"description": "山门夜雨", "finalize_events": True})
 
     assert receipt["character_observation_count"] == 0
     assert ledger.bound_payloads["character_observations"] == []
     assert ledger.domain_receipts >= {"events", "character_observations"}
 
 
-def test_create_event_empty_completion_does_not_invent_event() -> None:
+def test_write_event_empty_completion_does_not_invent_event() -> None:
     """2026-08-30 用于允许无事件章节通过同一工具显式完成事件领域"""
     ledger = _ledger()
     tools = build_annotation_tools(_QueryServiceShim(), ledger)
 
     receipt = _call(
         tools,
-        "create_event",
+        "write_event",
         {"description": None, "finalize_events": True},
     )
 
@@ -142,12 +142,12 @@ def test_create_event_empty_completion_does_not_invent_event() -> None:
     assert ledger.domain_receipts >= {"events", "character_observations"}
 
 
-def test_create_event_isforeshadowing_creates_thread_binding() -> None:
+def test_write_event_isforeshadowing_creates_thread_binding() -> None:
     """2026-08-22isforeshadowing=true 自动生成伏笔绑定（setup 指向树根）"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
 
-    receipt = _call(tools, "create_event", _create_args(isforeshadowing=True))
+    receipt = _call(tools, "write_event", _create_args(isforeshadowing=True))
 
     foreshadowings = ledger.bound_payloads["foreshadowings"]
     assert len(foreshadowings) == 1
@@ -155,16 +155,16 @@ def test_create_event_isforeshadowing_creates_thread_binding() -> None:
     assert receipt["foreshadowing_setup_node_id"] == receipt["root_node_id"]
 
 
-def test_create_event_exposes_pydantic_schema_and_creates_ordered_children() -> None:
+def test_write_event_exposes_pydantic_schema_and_creates_ordered_children() -> None:
     """2026-08-30 用于验证工具公开真实 Pydantic 合同并原子创建有序子节点"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
 
-    event_tool = _find_tool(tools, "create_event")
-    assert event_tool.args_schema is CreateEventInput
+    event_tool = _find_tool(tools, "write_event")
+    assert event_tool.args_schema is WriteEventPatchArgs
     created = _call(
         tools,
-        "create_event",
+        "write_event",
         {
             **_create_args(),
             "children": [
@@ -173,11 +173,11 @@ def test_create_event_exposes_pydantic_schema_and_creates_ordered_children() -> 
                     "description": "顾霜收势",
                     "participants": [
                         {
-                            "entity": "顾霜",
+                            "entity": 1,
                             "role": "主体",
                             "narrative_role": "主体",
                             "action": "收势",
-                            "emotion": "neutral",
+                            "emotion": 0,
                         }
                     ],
                 },
@@ -203,7 +203,7 @@ def test_create_event_exposes_pydantic_schema_and_creates_ordered_children() -> 
     assert len([record for record in ledger.write_records if record["domain"] == "events"]) == 1
 
 
-def test_create_event_rejects_invalid_children_without_mutating_ledger() -> None:
+def test_write_event_rejects_invalid_children_without_mutating_ledger() -> None:
     """2026-08-30 用于验证子节点合同失败时不会留下半棵事件树"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
@@ -211,7 +211,7 @@ def test_create_event_rejects_invalid_children_without_mutating_ledger() -> None
     with pytest.raises(ValidationError, match="children"):
         _call(
             tools,
-            "create_event",
+            "write_event",
             {**_create_args(), "children": [{"type": "invalid", "description": "续写"}]},
         )
     assert ledger.event_trees == {}
@@ -219,15 +219,15 @@ def test_create_event_rejects_invalid_children_without_mutating_ledger() -> None
     assert ledger.authorized_event_ids == set()
 
 
-def test_create_event_rejects_duplicate_character_action_atomically() -> None:
+def test_write_event_rejects_duplicate_character_action_atomically() -> None:
     """2026-08-30 用于保证重复人物动作不会部分写入第二棵事件树"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
-    first = _call(tools, "create_event", _create_args(finalize_events=False))
+    first = _call(tools, "write_event", _create_args(finalize_events=False))
     original_event_ids = set(ledger.authorized_event_ids)
 
     with pytest.raises(ValueError, match="人物动态状态重复"):
-        _call(tools, "create_event", _create_args(finalize_events=True))
+        _call(tools, "write_event", _create_args(finalize_events=True))
 
     assert list(ledger.event_trees) == [first["tree_id"]]
     assert len(ledger.bound_payloads["events"]) == 1
@@ -235,14 +235,14 @@ def test_create_event_rejects_duplicate_character_action_atomically() -> None:
     assert ledger.authorized_event_ids == original_event_ids
 
 
-def test_create_event_accepts_authorized_cause_tree() -> None:
+def test_write_event_accepts_authorized_cause_tree() -> None:
     """2026-08-22search_event 授权后的历史树可作跨章因果前驱"""
     service = _EventHistoryService(trees=[_history_tree("tree-h", "node-h-root", "前章旧事")])
     ledger = _ledger()
     tools = _tools_with_entities_service(service, ledger)
     _find_tool(tools, "search_event").invoke({"keyword": "旧事"})
 
-    receipt = _call(tools, "create_event", _create_args(cause_tree_id="tree-h"))
+    receipt = _call(tools, "write_event", _create_args(cause_tree_id="tree-h"))
 
     assert receipt["cross_chapter"] is True
     bound = ledger.bound_payloads["events"][0]
@@ -250,25 +250,21 @@ def test_create_event_accepts_authorized_cause_tree() -> None:
     assert bound.cause_role == "root"
 
 
-def test_create_event_rejects_unauthorized_cause_tree() -> None:
-    """2026-08-22未经 create_event 回执或 search_event 授权的 cause_tree_id 拒绝"""
+def test_write_event_rejects_unauthorized_cause_tree() -> None:
+    """2026-08-22未经 write_event 回执或 search_event 授权的 cause_tree_id 拒绝"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
 
     with pytest.raises(ValueError, match="cause_tree_id"):
-        _call(tools, "create_event", _create_args(cause_tree_id="unknown-tree"))
+        _call(tools, "write_event", _create_args(cause_tree_id="unknown-tree"))
 
 
 class _QueryServiceShim:
     """2026-08-19 用于为事件写入提供最小查询服务（无需检索历史）"""
 
-    def find_initial_case_candidates(self, current_text, *, semantic_limit=50, rotation_limit=50):
-        del current_text, semantic_limit, rotation_limit
-        return [], []
-
-    def search_pool(self, query, *, hidden_case_ids, limit=50):
-        del query, hidden_case_ids, limit
-        return []
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+        del query, hidden_case_ids, case_type, limit
+        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         del query, range_name, limit
@@ -301,16 +297,16 @@ def _offset_paragraph_ledger() -> AnnotationToolLedger:
     )
 
 
-def test_create_event_does_not_require_local_paragraph_indices() -> None:
-    """2026-08-22 回归：create_event 不再按段落锚点派生证据
+def test_write_event_does_not_require_local_paragraph_indices() -> None:
+    """2026-08-22 回归：write_event 不再按段落锚点派生证据
 
     节点不携带锚点/字符区间/哈希/证据；章级证据由持久化层盖章。
-    全局 paragraph_id 与局部下标错位时，create_event 仍应成功。
+    全局 paragraph_id 与局部下标错位时，write_event 仍应成功。
     """
     ledger = _offset_paragraph_ledger()
     tools = _tools_with_entities_shim(ledger)
 
-    receipt = _call(tools, "create_event", _create_args())
+    receipt = _call(tools, "write_event", _create_args())
 
     assert receipt["accepted"] is True
     bound = ledger.bound_payloads["events"][0]
@@ -319,3 +315,73 @@ def test_create_event_does_not_require_local_paragraph_indices() -> None:
     assert "evidence" not in dumped
     assert "char_start" not in dumped
     assert dumped["description"] == "顾霜拔剑"
+
+
+def test_write_event_failure_stashes_draft_and_patch_repairs() -> None:
+    """2026-09-11 草稿补丁：校验失败后缓存草稿，patches 只修正错误字段，不整树重发"""
+    ledger = _ledger()
+    tools = _tools_with_entities_shim(ledger)
+    bad_args = _create_args()
+    bad_args["participants"][0]["entity"] = 999
+
+    with pytest.raises(ValueError, match="write_event.participants.0 实体编号 999 未登记"):
+        _call(tools, "write_event", bad_args)
+
+    # graph 层失败即缓存草稿（此处模拟其行为后走补丁链路）
+    ledger.stash_event_draft(bad_args)
+    receipt = _call(tools, "write_event", {"patches": [["participants.0.entity", 1]]})
+
+    assert receipt["accepted"] is True
+    assert receipt["draft_repaired"] is True
+    assert receipt["finalized"] is True
+    assert list(ledger.event_trees) == [receipt["tree_id"]]
+    # 修复周期结束，草稿清空
+    assert ledger.pending_event_draft is None
+
+
+def test_write_event_patch_failure_keeps_merged_draft_as_new_base() -> None:
+    """2026-09-11 补丁后仍失败：合并结果成为新草稿基线，继续增量修正不丢已输出内容"""
+    ledger = _ledger()
+    tools = _tools_with_entities_shim(ledger)
+    bad_args = _create_args()
+    bad_args["participants"][0]["entity"] = 999
+    bad_args["participants"][0]["emotion"] = "愤怒"
+    ledger.stash_event_draft(bad_args)
+
+    # 第一次补丁修正实体编号但情绪仍填语气词 → 校验报错且报错路径指向分值字段
+    with pytest.raises(ValidationError, match="emotion 不接受 愤怒"):
+        _call(tools, "write_event", {"patches": [["participants.0.entity", 1]]})
+
+    # 合并结果已回写草稿：第二次补丁只需补情绪分值
+    receipt = _call(tools, "write_event", {"patches": [["participants.0.emotion", -2]]})
+
+    assert receipt["accepted"] is True
+    bound = ledger.bound_payloads["events"][0]
+    assert bound.participants[0].entity == "顾霜"
+    assert bound.participants[0].emotion == -2
+    assert ledger.pending_event_draft is None
+
+
+def test_merge_event_patches_rejects_bad_paths_without_draft() -> None:
+    """2026-09-11 补丁路径合同：无草稿、非法路径、越界路径均报错且不破坏原草稿"""
+    from src.agents.annotation.errors import AnnotationInputError
+
+    ledger = _ledger()
+
+    with pytest.raises(AnnotationInputError, match="没有可修正的 write_event 草稿"):
+        ledger.merge_event_patches([["description", "x"]])
+
+    draft = _create_args()
+    ledger.stash_event_draft(draft)
+
+    with pytest.raises(AnnotationInputError, match="必须是"):
+        ledger.merge_event_patches([["description"]])
+    with pytest.raises(AnnotationInputError, match="路径不存在"):
+        ledger.merge_event_patches([["children.9.participants.0.emotion", -1]])
+    with pytest.raises(AnnotationInputError, match="路径不存在"):
+        ledger.merge_event_patches([["nested.missing.key", -1]])
+
+    # 带 write_event. 前缀的报错路径可剥前缀后命中；补丁失败不改变原草稿
+    ledger.merge_event_patches([["write_event.description", "顾霜收剑入鞘"]])
+    assert ledger.pending_event_draft["description"] == "顾霜收剑入鞘"
+    assert draft["description"] == "顾霜拔剑"

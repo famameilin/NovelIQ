@@ -4,7 +4,7 @@
 边界 = 该书自己的句子现算的岭回归线性映射（backbone 句向量 → 情绪分值），
 零新模型文件、numpy 亚秒级、确定性；无标签 run 无边界（上层保留词典/mNEG 口径）。
 
-分值目标沿用 EMOTION_SCORE_MAPPING（strong_positive=2 … strong_negative=-2）；
+分值目标 = 标签自带的 -2..2 整数分值（强烈负面=-2 … 强烈正面=2）；
 p(负向) 由分值单调映射供分层（p≥0.8 强），跨书曲线口径不同不可比（用户已接受）。
 
 纯函数，不依赖模型实例；测试可直接构造句向量矩阵。
@@ -15,8 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-
-from src.config.constants import EMOTION_SCORE_MAPPING
 
 #: 岭正则强度：句向量已 L2 归一化、样本量小（每章 2-3 句），固定值保证数值稳定
 _RIDGE_LAMBDA = 1.0
@@ -41,21 +39,18 @@ class SentenceBoundary:
 
 def fit_sentence_boundary(
     vectors: np.ndarray,
-    emotions: list[str],
+    emotions: list[int],
 ) -> SentenceBoundary | None:
     """用全书自选句标签拟合线性边界（岭回归闭式解）
 
-    vectors: (N, D) 句向量（建议 L2 归一化）；emotions: 长度 N 的情绪枚举。
+    vectors: (N, D) 句向量（建议 L2 归一化）；emotions: 长度 N 的 -2..2 整数分值。
     样本 <2 或全同分值（无边可学）返回 None——上层保留既有口径，不伪造边界。
     """
     if vectors.ndim != 2 or vectors.shape[0] != len(emotions) or vectors.shape[0] < 2:
         return None
     if vectors.shape[1] < 1 or vectors.shape[1] > _MAX_DIM:
         return None
-    targets = np.array(
-        [float(EMOTION_SCORE_MAPPING.get(emotion, 0)) for emotion in emotions],
-        dtype=np.float64,
-    )
+    targets = np.array([float(emotion) for emotion in emotions], dtype=np.float64)
     if float(np.ptp(targets)) == 0.0:
         return None
     x = vectors.astype(np.float64)

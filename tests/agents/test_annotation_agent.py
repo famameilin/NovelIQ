@@ -30,7 +30,7 @@ from src.agents.annotation.schema import (
     CaseSearchResult,
     ChunkMetricsInput,
     ChunkParagraphInfo,
-    EmotionalValence,
+    SearchResult,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -38,16 +38,9 @@ from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_t
 class _QueryService:
     """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
 
-    def find_initial_case_candidates(self, current_text, *, semantic_limit=50, rotation_limit=50):
-        """2026-08-07 用于返回空初始案例集合"""
-        del current_text, semantic_limit, rotation_limit
-        return [], []
-
-    def search_pool(self, query, *, hidden_case_ids, limit=50):
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
         """2026-08-07 用于返回空案例与伏笔检索结果"""
-        from src.agents.annotation.schema import SearchResult
-
-        del query, hidden_case_ids, limit
+        del query, hidden_case_ids, case_type, limit
         return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
@@ -106,7 +99,7 @@ def _metrics_call(call_id: str = "call-metrics", *, sentence_labels: list[dict] 
     """
     payload = {
         "summary": "住手回荡",
-        "emotional_valence": "neutral",
+        "emotional_valence": 0,
         "narrative_function": "铺垫",
     }
     if sentence_labels is not None:
@@ -140,18 +133,18 @@ def _dialogues_call(call_id: str = "call-dialogues") -> dict:
 
 
 def _events_call(call_id: str = "call-events") -> dict:
-    """2026-08-22 用于构造合法 create_event 调用（服务端派发 id）"""
+    """2026-08-22 用于构造合法 write_event 调用（服务端派发 id）"""
     return _write_call(
-        "create_event",
+        "write_event",
         {
             "description": "顾霜喝止众人",
             "participants": [
                 {
-                    "entity": "顾霜",
+                    "entity": 1,
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝止",
-                    "emotion": "mild_negative",
+                    "emotion": -1,
                 }
             ],
             "finalize_events": True,
@@ -179,8 +172,8 @@ def _serial_write_messages(*, dialogues: dict | None = None) -> list[AIMessage]:
                 _metrics_call(
                     call_id="call-metrics-labels",
                     sentence_labels=[
-                        {"sentence": "住手", "emotion": "strong_negative"},
-                        {"sentence": "回荡", "emotion": "mild_negative"},
+                        {"sentence": "住手", "emotion": -2},
+                        {"sentence": "回荡", "emotion": -1},
                     ],
                 ),
             ]
@@ -247,7 +240,7 @@ def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnn
                 chunk_id=1,
                 metrics=ChunkMetricsInput(
                     summary="顾霜进入山门",
-                    emotional_valence="neutral",
+                    emotional_valence=0,
                     narrative_function="铺垫",
                 ),
                 character_observations=[],
@@ -270,7 +263,6 @@ def _agent_result() -> AgentRunResult:
         audit=AgentRunAudit(
             allow_future_context=False,
             write_records=[],
-            rotation_case_ids=[],
             authorized_chapter_ids=[1],
             authorized_text_paragraph_ids=[],
         ),
@@ -345,14 +337,13 @@ async def test_single_chunk_chapter_completes_via_write_and_auto_finalize() -> N
     assert llm.calls == 3
 
 
-def test_initial_case_number_table_injected_into_first_message() -> None:
-    """2026-09-04 第7章死锁回归：初始案例编号表必须出现在首条 human 消息
+def test_case_pool_notice_in_first_message_and_no_case_table_injected() -> None:
+    """2026-09-11 案例改检索制：首条消息声明检索通道，且不注入任何案例编号表
 
-    cb4f96f1 压缩提示词时删掉了编号表注入但保留编号授权机制，模型看不到
-    编号便把对话候选 index 当 case_number，空转至回合上限。
+    旧合同（09-04 起）把初始活动案例全量渲染为 <ActiveCases> 编号表随正文注入
+    （第7章死锁的产物）；新合同案例只经 search_pool 展示，注入块退化为通道说明，
+    正文中不再出现任何 case_number。
     """
-    from src.agents.annotation.schema import CaseSearchResult
-
     ledger = AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
@@ -366,28 +357,16 @@ def test_initial_case_number_table_injected_into_first_message() -> None:
             texts=["住手回荡"],
         ),
     )
-    ledger.register_initial_cases(
-        [
-            CaseSearchResult(
-                id="case-1",
-                type="对话案例",
-                chunk_id=0,
-                keys=["说话人"],
-                description="疑似对话：猴子瘫在游廊哀嚎",
-            )
-        ],
-        ["case-1"],
-    )
     message = build_chunk_message(
         chunk_index=1,
         chunk_total=1,
         chunk_text="住手回荡",
         candidates=ledger.dialogue_candidates,
-        initial_cases=ledger.initial_case_views(),
     )
     assert "<ActiveCases>" in message
-    assert '"case_number": 1' in message
-    assert "疑似对话：猴子瘫在游廊哀嚎" in message
+    assert "search_pool" in message
+    assert "case_number" in message
+    assert '"case_number"' not in message
 
 
 def test_dialogue_candidate_view_field_aligned_with_write_param() -> None:
@@ -458,14 +437,14 @@ async def test_five_writes_make_auto_finalize_always_succeed() -> None:
 
     assert result["phase"] == "completed"
     assert llm.calls == 3
-    formal_writes = {"write_entities", "write_dialogues", "create_event", "write_relations", "write_metrics"}
+    formal_writes = {"write_entities", "write_dialogues", "write_event", "write_relations", "write_metrics"}
     assert [
         [name for name in tool_names if name in formal_writes]
         for tool_names in llm.captured_tool_names
     ] == [
         ["write_entities", "write_metrics"],
-        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
-        ["write_entities", "write_metrics", "create_event", "write_relations", "write_dialogues"],
+        ["write_entities", "write_metrics", "write_event", "write_relations", "write_dialogues"],
+        ["write_entities", "write_metrics", "write_event", "write_relations", "write_dialogues"],
     ]
     assert [len(messages) for messages in llm.captured_messages] == [2, 5, 8]
 
@@ -538,8 +517,8 @@ async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> N
                     _metrics_call(
                         call_id="call-metrics-labels",
                         sentence_labels=[
-                            {"sentence": "住手", "emotion": "strong_negative"},
-                            {"sentence": "回荡", "emotion": "mild_negative"},
+                            {"sentence": "住手", "emotion": -2},
+                            {"sentence": "回荡", "emotion": -1},
                         ],
                     ),
                 ]
@@ -551,7 +530,7 @@ async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> N
     assert result["phase"] == "completed"
     assert result.get("error") is None
     assert llm.calls == 4
-    formal_writes = {"write_entities", "write_dialogues", "create_event", "write_relations", "write_metrics"}
+    formal_writes = {"write_entities", "write_dialogues", "write_event", "write_relations", "write_metrics"}
     assert [name for name in llm.captured_tool_names[0] if name in formal_writes] == [
         "write_entities",
         "write_metrics",
@@ -563,7 +542,7 @@ async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> N
     assert [name for name in llm.captured_tool_names[2] if name in formal_writes] == [
         "write_entities",
         "write_metrics",
-        "create_event",
+        "write_event",
         "write_relations",
         "write_dialogues",
     ]
@@ -580,16 +559,16 @@ async def test_partial_writes_do_not_auto_finalize() -> None:
     first_event = _events_call(call_id="call-events-first")
     first_event["args"]["finalize_events"] = False
     second_event = _write_call(
-        "create_event",
+        "write_event",
         {
             "description": "顾霜收势",
             "participants": [
                 {
-                    "entity": "顾霜",
+                    "entity": 1,
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "收势",
-                    "emotion": "neutral",
+                    "emotion": 0,
                 }
             ],
             "finalize_events": True,
@@ -607,8 +586,8 @@ async def test_partial_writes_do_not_auto_finalize() -> None:
                     _metrics_call(
                         call_id="call-metrics-labels",
                         sentence_labels=[
-                            {"sentence": "住手", "emotion": "strong_negative"},
-                            {"sentence": "回荡", "emotion": "mild_negative"},
+                            {"sentence": "住手", "emotion": -2},
+                            {"sentence": "回荡", "emotion": -1},
                         ],
                     ),
                 ]
@@ -620,19 +599,19 @@ async def test_partial_writes_do_not_auto_finalize() -> None:
     assert result["phase"] == "completed"
     assert result.get("error") is None
     assert llm.calls == 3
-    assert [name for name in llm.captured_tool_names[1] if name in {"create_event", "write_relations"}] == [
-        "create_event",
+    assert [name for name in llm.captured_tool_names[1] if name in {"write_event", "write_relations"}] == [
+        "write_event",
         "write_relations",
     ]
-    assert [name for name in llm.captured_tool_names[2] if name in {"create_event", "write_relations"}] == [
-        "create_event",
+    assert [name for name in llm.captured_tool_names[2] if name in {"write_event", "write_relations"}] == [
+        "write_event",
         "write_relations",
     ]
 
 
 @pytest.mark.asyncio
-async def test_three_create_event_calls_and_relation_write_succeed_in_one_round() -> None:
-    """2026-08-30 用于验证一轮可重复调用三次 create_event 并独立提交关系写入"""
+async def test_three_write_event_calls_and_relation_write_succeed_in_one_round() -> None:
+    """2026-08-30 用于验证一轮可重复调用三次 write_event 并独立提交关系写入"""
     first_event = _events_call(call_id="call-events-first")
     first_event["args"]["finalize_events"] = False
     second_event = _events_call(call_id="call-events-second")
@@ -652,8 +631,8 @@ async def test_three_create_event_calls_and_relation_write_succeed_in_one_round(
                     _metrics_call(
                         call_id="call-metrics-labels",
                         sentence_labels=[
-                            {"sentence": "住手", "emotion": "strong_negative"},
-                            {"sentence": "回荡", "emotion": "mild_negative"},
+                            {"sentence": "住手", "emotion": -2},
+                            {"sentence": "回荡", "emotion": -1},
                         ],
                     ),
                 ]
@@ -666,7 +645,7 @@ async def test_three_create_event_calls_and_relation_write_succeed_in_one_round(
     assert result.get("error") is None
     assert llm.calls == 3
     event_round_receipts = _tool_receipts(llm.captured_messages[2])[-4:]
-    assert sum('"tool": "create_event"' in receipt for receipt in event_round_receipts) == 3
+    assert sum('"tool": "write_event"' in receipt for receipt in event_round_receipts) == 3
     assert all('"accepted": true' in receipt for receipt in event_round_receipts)
     assert '"domain": "relations"' in event_round_receipts[-1]
 
@@ -687,8 +666,8 @@ async def test_failed_event_write_does_not_block_relation_write_in_same_round() 
                     _metrics_call(
                         call_id="call-metrics-labels",
                         sentence_labels=[
-                            {"sentence": "住手", "emotion": "strong_negative"},
-                            {"sentence": "回荡", "emotion": "mild_negative"},
+                            {"sentence": "住手", "emotion": -2},
+                            {"sentence": "回荡", "emotion": -1},
                         ],
                     ),
                 ]
@@ -701,7 +680,7 @@ async def test_failed_event_write_does_not_block_relation_write_in_same_round() 
     assert result.get("error") is None
     assert llm.calls == 3
     event_round_receipts = _tool_receipts(llm.captured_messages[2])[-2:]
-    assert '"tool": "create_event"' in event_round_receipts[0]
+    assert '"tool": "write_event"' in event_round_receipts[0]
     assert '"accepted": false' in event_round_receipts[0]
     assert '"domain": "relations"' in event_round_receipts[1]
     assert '"accepted": true' in event_round_receipts[1]
@@ -1000,7 +979,7 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
         chunk_id=-1,
         metrics=ChunkMetricsInput(
             summary="第一子块",
-            emotional_valence="neutral",
+            emotional_valence=0,
             narrative_function="铺垫",
         ),
         character_observations=[],
@@ -1020,7 +999,7 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
         chunk_id=-2,
         metrics=ChunkMetricsInput(
             summary="第二子块",
-            emotional_valence="neutral",
+            emotional_valence=0,
             narrative_function="铺垫",
         ),
         character_observations=[],
@@ -1066,15 +1045,10 @@ class _AliasCaseQueryService(_QueryService):
             description="疑似同一人物：顾霜 与 顾老",
         )
 
-    def find_initial_case_candidates(
-        self,
-        current_text,
-        *,
-        semantic_limit=50,
-        rotation_limit=50,
-    ):
-        del current_text, semantic_limit, rotation_limit
-        return [self._alias_case()], ["alias-1"]
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+        """2026-09-11 案例改检索制：alias 案例经 search_pool 展示取得编号（旧合同为注入候选）"""
+        del query, hidden_case_ids, case_type, limit
+        return SearchResult(results=[self._alias_case()])
 
     def fetch_active_case_details(self, case_id):
         del case_id
@@ -1091,8 +1065,8 @@ def _resolve_fact_case_call(call_id: str = "call-fact") -> dict:
         "resolve_fact_case",
         {
             "case_number": 1,
-            "from_entity": "顾霜",
-            "to_entity": "顾老",
+            "from_entity": 1,
+            "to_entity": 2,
             "relation_type": "同一人物",
             "change_kind": "强化关系",
             "reason": "指向同一人",
@@ -1125,9 +1099,9 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
     )
     ledger.graph_queried = True
     service = _AliasCaseQueryService()
-    initial_cases, rotation_ids = service.find_initial_case_candidates("当前")
-    ledger.register_initial_cases(initial_cases, rotation_ids)
     tools = build_annotation_tools(service, ledger)
+    # 2026-09-11 案例改检索制：先经 search_pool 展示取得编号 1（展示即授权）
+    next(candidate for candidate in tools if candidate.name == "search_pool").invoke({"query": "顾霜"})
     llm = _SequenceLLM(
         [
             _tool_message([_resolve_fact_case_call()]),
@@ -1212,14 +1186,14 @@ def test_validate_bound_annotation_verifies_sentence_label_spans() -> None:
     annotation = _bound_annotation()
     chunk = annotation.chunks[0]
     chunk.sentence_labels = [
-        BoundSentenceLabel(sentence="住手", emotion=EmotionalValence.NEUTRAL, start=3, end=5)
+        BoundSentenceLabel(sentence="住手", emotion=0, start=3, end=5)
     ]
     validate_bound_annotation(
         annotation,
         chapter_id=1,
         current_chunks=[(1, "顾霜“住手”回荡")],
     )
-    mismatched = BoundSentenceLabel(sentence="住手", emotion=EmotionalValence.NEUTRAL, start=0, end=2)
+    mismatched = BoundSentenceLabel(sentence="住手", emotion=0, start=0, end=2)
     chunk.sentence_labels = [mismatched]
     with pytest.raises(ValueError, match="系统自选句绑定不一致"):
         validate_bound_annotation(
@@ -1256,8 +1230,8 @@ async def test_graph_reinjects_missing_domain_hint_after_plain_text_reply(monkey
                     _metrics_call(
                         call_id="call-metrics-labels",
                         sentence_labels=[
-                            {"sentence": "住手", "emotion": "strong_negative"},
-                            {"sentence": "回荡", "emotion": "mild_negative"},
+                            {"sentence": "住手", "emotion": -2},
+                            {"sentence": "回荡", "emotion": -1},
                         ],
                     ),
                 ]
