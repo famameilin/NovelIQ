@@ -131,7 +131,7 @@ class TestDiagnosisRoutes:
                 self.db_session,
                 run_id=self.run_id,
                 chapter_id=i + 1,
-                emotional_valences={i + 1: "mild_positive" if i % 2 == 0 else "mild_negative"},
+                emotional_valences={i + 1: 1 if i % 2 == 0 else -1},
                 event_types={i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"},
                 pivot_chunks={i + 1} if i in {1, 2} else None,
                 cliffhanger_chunks={chunk_count} if i == chunk_count - 1 else None,

@@ -148,7 +148,7 @@ export interface ChapterMetricSummary {
   narrative_function: string | null;
   pivot_moment: boolean | null;
   cliffhanger: boolean | null;
-  emotional_valence: string | null;
+  emotional_valence: number | null;
 }
 
 export interface BookAggregateStats {
@@ -171,7 +171,7 @@ export interface BookAggregateStats {
   chapter_narrative_function_share: Record<string, number>;
   chapter_pivot_rate: number | null;
   chapter_cliffhanger_rate: number | null;
-  chapter_emotional_valence_share: Record<string, number>;
+  chapter_emotional_valence_share: Record<string, number>; // 键为分值 -2..2 的字符串形式
 }
 
 export interface ChapterMetricsResponse {
@@ -244,7 +244,7 @@ export type DiagnosisStyleLabel =
 
 export interface ChapterAnnotation {
   chapter_id: number;
-  emotional_valence?: string | null;
+  emotional_valence?: number | null;
   event_type?: string | null;
   pivot_moment?: boolean | null;
   cliffhanger?: boolean | null;

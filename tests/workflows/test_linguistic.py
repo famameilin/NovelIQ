@@ -401,7 +401,6 @@ class TestSentenceBoundary:
             BoundChunkAnnotation,
             BoundSentenceLabel,
             ChunkMetricsInput,
-            EmotionalValence,
             NarrativeFunction,
         )
         from src.storage.repositories import ChapterAnnotationRepository
@@ -413,7 +412,7 @@ class TestSentenceBoundary:
                     chunk_id=chapter_id,
                     metrics=ChunkMetricsInput(
                         summary="测试",
-                        emotional_valence=EmotionalValence.NEUTRAL,
+                        emotional_valence=0,
                         narrative_function=NarrativeFunction.SETUP,
                     ),
                     character_observations=[],
@@ -447,13 +446,13 @@ class TestSentenceBoundary:
             [
                 {
                     "sentence": "江湖快意恩仇，刀光剑影之间英雄辈出。",
-                    "emotion": "strong_positive",
+                    "emotion": 2,
                     "start": 0,
                     "end": 15,
                 },
                 {
                     "sentence": "他叫汤姆去拿外衣，但是天色已晚。",
-                    "emotion": "strong_negative",
+                    "emotion": -2,
                     "start": 0,
                     "end": 15,
                 },
@@ -478,13 +477,13 @@ class TestSentenceBoundary:
             [
                 {
                     "sentence": "江湖快意恩仇，刀光剑影之间英雄辈出。",
-                    "emotion": "neutral",
+                    "emotion": 0,
                     "start": 0,
                     "end": 15,
                 },
                 {
                     "sentence": "他叫汤姆去拿外衣，但是天色已晚。",
-                    "emotion": "neutral",
+                    "emotion": 0,
                     "start": 0,
                     "end": 15,
                 },

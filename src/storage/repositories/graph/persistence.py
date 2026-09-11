@@ -524,7 +524,7 @@ def _persist_event_nodes(
     """2026-08-19 用于写入事件节点及当前章节因果边
 
     2026-08-22event_id 直接取服务端生成的 node_id；因果边只存在于
-    跨章树根（cause_tree_id），由 create_event 结构性保证无环，DAG 校验删除。
+    跨章树根（cause_tree_id），由 write_event 结构性保证无环，DAG 校验删除。
     2026-08-22 重构：章级证据单份派生并盖章到每个节点（节点不再携带证据字段）。
     """
     chapter_evidence = _chapter_text_evidence(

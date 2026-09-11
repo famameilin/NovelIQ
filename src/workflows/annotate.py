@@ -300,9 +300,6 @@ def _merge_sub_chunk_results(
         audit=AgentRunAudit(
             allow_future_context=first.audit.allow_future_context,
             write_records=[record for result in results for record in result.audit.write_records],
-            rotation_case_ids=list(
-                dict.fromkeys(case_id for result in results for case_id in result.audit.rotation_case_ids)
-            ),
             authorized_chapter_ids=sorted(
                 {case_id for result in results for case_id in result.audit.authorized_chapter_ids}
             ),

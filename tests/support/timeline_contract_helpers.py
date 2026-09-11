@@ -171,7 +171,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=3,
-        emotional_valences={3: "strong_negative"},
+        emotional_valences={3: -2},
         event_types={3: "冲突"},
         pivot_chunks={3},
         cliffhanger_chunks={3},
@@ -180,7 +180,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 chunk_id=3,
                 name=hero_name,
                 action="结盟",
-                emotion="strong_negative",
+                emotion=-2,
                 chapter_id=3,
             ),
             character_fact(
@@ -219,7 +219,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=4,
-        emotional_valences={4: "mild_negative"},
+        emotional_valences={4: -1},
         event_types={4: "转折"},
         characters=[
             character_fact(
@@ -227,7 +227,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 name=rival_name,
                 action="离开",
                 role_function="帮助者",
-                emotion="mild_negative",
+                emotion=-1,
                 chapter_id=4,
             )
         ],

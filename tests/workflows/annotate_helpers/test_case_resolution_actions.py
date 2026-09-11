@@ -82,7 +82,7 @@ def _annotation(
                 chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary=text,
-                    emotional_valence="neutral",
+                    emotional_valence=0,
                     narrative_function="铺垫",
                 ),
                 character_observations=[],
@@ -128,7 +128,6 @@ def _result(
         audit=AgentRunAudit(
             allow_future_context=False,
             write_records=[],
-            rotation_case_ids=[],
             authorized_chapter_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
             authorized_text_paragraph_ids=[],
         ),
@@ -731,7 +730,7 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                 chunk_id=1,
                 metrics=ChunkMetricsInput(
                     summary="顾霜拔剑喝止",
-                    emotional_valence="neutral",
+                    emotional_valence=0,
                     narrative_function="冲突",
                 ),
                 character_observations=[],

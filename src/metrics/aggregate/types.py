@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.config.constants import EMOTION_SCORE_MAPPING
-
 
 @dataclass
 class AggregateResult:
@@ -30,7 +28,7 @@ class AnnotationData:
     event_types: list[str]
     cliffhangers: list[int]
     pivot_moments: list[int]
-    emotional_valences: list[str]
+    emotional_valences: list[int]
 
 
 @dataclass
@@ -101,13 +99,3 @@ class StyleData:
 
     dialogue_ratio: float | None
     avg_sent_len: float | None
-
-
-def map_emotion_score(score_raw: str | None) -> int:
-    """
-    将情绪分数字符串映射为数值
-
-    """
-    if score_raw in EMOTION_SCORE_MAPPING:
-        return EMOTION_SCORE_MAPPING[score_raw]
-    return 0

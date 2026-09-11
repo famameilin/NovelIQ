@@ -55,7 +55,7 @@ def _annotation(
                 chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary=f"chunk {chunk_id}",
-                    emotional_valence="neutral",
+                    emotional_valence=0,
                     narrative_function="铺垫",
                 ),
                 character_observations=[],
@@ -115,7 +115,6 @@ def _agent_result(
         audit=AgentRunAudit(
             allow_future_context=False,
             write_records=[],
-            rotation_case_ids=[],
             authorized_chapter_ids=[chunk_id],
             authorized_text_paragraph_ids=[],
         ),

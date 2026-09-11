@@ -17,7 +17,6 @@ from src.agents.annotation.schema import (
     BoundDialogue,
     BoundEvent,
     ChunkMetricsInput,
-    EmotionalValence,
     NarrativeFunction,
 )
 from src.workflows.annotate import _merge_sub_chunk_annotations, _split_chapter_sub_chunks
@@ -32,7 +31,7 @@ def _make_sub_annotation(chunk_id: int, *, summary: str, dialogue: BoundDialogue
                 chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary=summary,
-                    emotional_valence=EmotionalValence.NEUTRAL,
+                    emotional_valence=0,
                     narrative_function=NarrativeFunction.SETUP,
                 ),
                 character_observations=[],
@@ -66,7 +65,7 @@ def _make_event_sub_annotation(chunk_id: int, *, summary: str, events: list[Boun
                 chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary=summary,
-                    emotional_valence=EmotionalValence.NEUTRAL,
+                    emotional_valence=0,
                     narrative_function=NarrativeFunction.SETUP,
                 ),
                 character_observations=[],
@@ -211,7 +210,7 @@ def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
                     chunk_id=chunk_id,
                     metrics=ChunkMetricsInput(
                         summary=summary,
-                        emotional_valence=EmotionalValence.NEUTRAL,
+                        emotional_valence=0,
                         narrative_function=NarrativeFunction.SETUP,
                     ),
                     character_observations=[],
@@ -223,10 +222,10 @@ def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
             ],
         )
 
-    first_label = BoundSentenceLabel(sentence="甲说", emotion=EmotionalValence.NEUTRAL, start=1, end=4)
+    first_label = BoundSentenceLabel(sentence="甲说", emotion=0, start=1, end=4)
     second_label = BoundSentenceLabel(
         sentence="乙说",
-        emotion=EmotionalValence.STRONG_NEGATIVE,
+        emotion=-2,
         start=2,
         end=5,
     )
@@ -240,9 +239,9 @@ def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
     )
 
     merged_labels = merged.chunks[0].sentence_labels
-    assert [(label.sentence, str(label.emotion)) for label in merged_labels] == [
-        ("甲说", "neutral"),
-        ("乙说", "strong_negative"),
+    assert [(label.sentence, label.emotion) for label in merged_labels] == [
+        ("甲说", 0),
+        ("乙说", -2),
     ]
     assert (merged_labels[0].start, merged_labels[0].end) == (1, 4)
     assert (merged_labels[1].start, merged_labels[1].end) == (22, 25)

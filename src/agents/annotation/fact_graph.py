@@ -44,7 +44,13 @@ def _stable_relation_key(
 
 @dataclass(slots=True)
 class FactGraph:
-    """2026-08-09 用于保存实体与关系的实时事实图状态（历史+当章变更）"""
+    """2026-08-09 用于保存实体与关系的实时事实图状态（历史+当章变更）
+
+    2026-09-11 实体编号：模型面引用一律用运行期编号（整数），名称只出现在系统面。
+    编号在图生命周期内单调分配、永不重排、永不回收（含章失败重试与子块滚动），
+    故运行中"记住的编号"在整章内始终有效；编号不落库、不跨 run 复用，
+    持久化仍按规范名匹配。
+    """
 
     history_entity_types: dict[str, EntityType] = field(default_factory=dict)
     history_entity_names: dict[str, str] = field(default_factory=dict)
@@ -62,6 +68,10 @@ class FactGraph:
     relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict, init=False)
     chapter_registered_entities: dict[str, EntityType] = field(default_factory=dict, init=False)
     chapter_added_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
+    # 2026-09-11 实体编号注册表：编号 ↔ 归一化名称。跨章累积、失败重试不重排。
+    entity_numbers: dict[str, int] = field(default_factory=dict, init=False)
+    entity_number_names: dict[int, str] = field(default_factory=dict, init=False)
+    next_entity_number: int = field(default=1, init=False)
     # 2026-09-04 单一写面：图域操作日志，按子块累积（begin_chapter 清空、drain_ops 取出），
     # 持久化层从这三份日志派生实体行、关系 assert 事实与案例关系变更事实；
     # BoundChunkAnnotation 不再持有 entities/relations 副本，resolved_cases 不再承载 fact 动作。
@@ -87,6 +97,10 @@ class FactGraph:
         self.relation_attributes = {
             key: dict(attributes) for key, attributes in self.history_relation_attributes.items()
         }
+        # 2026-09-11 历史实体按登记顺序预分配编号：编号在整章运行内稳定，模型上下文
+        # 里出现的编号不会因章节推进而重排
+        for key in self.entity_names:
+            self._number_for(key)
 
     @staticmethod
     def _relation_key(
@@ -97,8 +111,12 @@ class FactGraph:
         """2026-08-09 用于生成双向归一化的关系稳定键"""
         return _stable_relation_key(from_name, to_name, relation_type)
 
-    def register_entities(self, entities: list) -> None:
-        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新，历史类型冲突仍拒绝）"""
+    def register_entities(self, entities: list) -> list[tuple[int, str]]:
+        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新，历史类型冲突仍拒绝）
+
+        2026-09-11 返回本批每个实体的 (编号, 显示名)，供工具回执把编号交给模型。
+        """
+        assigned: list[tuple[int, str]] = []
         for entity in entities:
             key = _norm(entity.name)
             if key in self.history_entity_types:
@@ -111,6 +129,7 @@ class FactGraph:
                     )
             self.entity_types[key] = entity.entity_type
             self.entity_names[key] = entity.name
+            assigned.append((self._number_for(key), entity.name))
             tags = list(getattr(entity, "tags", None) or [])
             if tags:
                 self.entity_tags[key] = list(dict.fromkeys(tags))
@@ -130,6 +149,60 @@ class FactGraph:
                         merged[field_name] = value
                 self.entity_attributes[key] = merged
             self.chapter_registered_entities[key] = entity.entity_type
+        return assigned
+
+    def _number_for(self, key: str) -> int:
+        """2026-09-11 用于为归一化名称分配或读取运行期编号（单调、不重排、不回收）"""
+        existing = self.entity_numbers.get(key)
+        if existing is not None:
+            return existing
+        number = self.next_entity_number
+        self.next_entity_number += 1
+        self.entity_numbers[key] = number
+        self.entity_number_names[number] = self.entity_names.get(key, key)
+        return number
+
+    def entity_number(self, name: str) -> int | None:
+        """2026-09-11 用于按实体名读取运行期编号（未登记返回 None）"""
+        key = _norm(name)
+        if key not in self.entity_names:
+            return None
+        return self._number_for(key)
+
+    def display_for_number(self, number: int) -> str | None:
+        """2026-09-11 用于按编号读取显示名（未分配返回 None）"""
+        return self.entity_number_names.get(number)
+
+    def resolve_number(self, number: int, *, label: str) -> str:
+        """2026-09-11 用于把模型提交的实体编号翻成登记名；未登记编号直接报错自纠
+
+        只做编号→登记名翻译，**不做别名归并**：别名解析仍留在各调用点原有的
+        resolve_name 位置（write_domain 的端点校验、write_relations 的塌环判决），
+        特别是 resolve_fact_case 的端点按合同不得重过 resolve_name——同人物分量内
+        两端会塌成代表节点自环，解除的边键自指导致永远删不掉（第 4 章空转根因）。
+        编号指向的登记若已被章节回滚撤销，视为未登记——防止解析到一个不在图上的名字。
+        """
+        display = self.entity_number_names.get(number)
+        if display is None or _norm(display) not in self.entity_names:
+            known = ", ".join(
+                f"{num}={name}"
+                for num, name in sorted(self.entity_number_names.items())
+                if _norm(name) in self.entity_names
+            )
+            visible = ", ".join(known.split(", ")[:20])
+            raise ValueError(
+                f"{label} 实体编号 {number} 未登记：编号取自 write_entities 回执 numbers 或 "
+                f"search_graph 回执 n（已登记编号示例: {visible or '无'}）"
+            )
+        return display
+
+    def entity_view(self, key: str) -> dict[str, Any]:
+        """2026-09-11 用于生成单个实体的模型可见视图（编号+名称+类型）"""
+        return {
+            "n": self._number_for(key),
+            "name": self.entity_names.get(key, key),
+            "entity_type": self.entity_types.get(key),
+        }
 
     def apply_relation(self, item: RelationInput) -> bool:
         """2026-08-12 用于登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
@@ -326,7 +399,12 @@ class FactGraph:
         self.relation_change_ops = []
 
     def snapshot(self) -> dict:
-        """2026-08-09 用于保存章节尝试前的完整事实图快照"""
+        """2026-08-09 用于保存章节尝试前的完整事实图快照
+
+        2026-09-11 实体编号注册表刻意不进快照：编号单调分配、失败回滚不回收也不重排，
+        保证同一实体在整章运行内编号恒定（回滚撤销的登记由 resolve_number 的
+        存活性校验兜底，不会把陈旧编号解析成别的实体）。
+        """
         return {
             "entity_types": dict(self.entity_types),
             "entity_names": dict(self.entity_names),

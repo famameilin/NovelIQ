@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import statistics
-from collections import Counter
 from collections.abc import Sequence
 
 
@@ -45,18 +44,16 @@ def compute_emotion_recovery_speed(
 
 
 def compute_emotion_polarity_distribution(
-    emotional_valences: list[str],
+    emotional_valences: list[int],
 ) -> dict[str, float | None]:
-    """计算正向、负向和中性情绪的占比；无有效情绪标注时三项均为 None（契约 null 语义）"""
+    """按 -2..2 分值符号计算正向、负向和中性占比；无输入时三项均为 None（契约 null 语义）"""
     if not emotional_valences:
         return {"positive_ratio": None, "negative_ratio": None, "neutral_ratio": None}
 
-    counts = Counter(emotional_valences)
     total = len(emotional_valences)
-
-    positive_count = counts.get("strong_positive", 0) + counts.get("mild_positive", 0)
-    negative_count = counts.get("strong_negative", 0) + counts.get("mild_negative", 0)
-    neutral_count = counts.get("neutral", 0)
+    positive_count = sum(1 for score in emotional_valences if score > 0)
+    negative_count = sum(1 for score in emotional_valences if score < 0)
+    neutral_count = total - positive_count - negative_count
 
     return {
         "positive_ratio": positive_count / total,

@@ -301,7 +301,7 @@ def _apply_sentence_boundary_scores(run_id: str, paragraph_repo: ParagraphReposi
 
     session_embedder = LtpSession.get_instance()
     vectors = session_embedder.sentence_embeddings([label.sentence for label in labels])
-    boundary = fit_sentence_boundary(vectors, [str(label.emotion) for label in labels])
+    boundary = fit_sentence_boundary(vectors, [int(label.emotion) for label in labels])
     if boundary is None:
         logger.info("句级边界跳过：标签分值无变化（全同情绪），无边界可学，两列保持 NULL")
         return 0

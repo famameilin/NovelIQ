@@ -58,7 +58,7 @@ def _full_annotation(
                 chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary="顾霜进入山门",
-                    emotional_valence="neutral",
+                    emotional_valence=0,
                     narrative_function="铺垫",
                     pivot_moment=False,
                     cliffhanger=False,
@@ -68,7 +68,7 @@ def _full_annotation(
                         character="顾霜",
                         role_function="主体",
                         action="进入山门",
-                        emotion="neutral",
+                        emotion=0,
                     )
                 ],
                 dialogues=[
@@ -345,7 +345,7 @@ def test_persistence_writes_state_and_relation_rows(db_session) -> None:
     assert state_rows[0].state["entity_type"] == "character"
     assert state_rows[0].state["role_function"] == "主体"
     assert state_rows[0].state["action"] == "进入山门"
-    assert state_rows[0].state["emotion"] == "neutral"
+    assert state_rows[0].state["emotion"] == 0
     assert state_rows[0].changes[0]["fact_id"] == observation_fact.fact_id
     assert relation_row.to_entity_id == next(
         entity.entity_id
@@ -951,7 +951,7 @@ def test_persist_does_not_materialize_contains_edges(db_session) -> None:
 
 
 def test_persist_writes_cross_chapter_causal_edge(db_session) -> None:
-    """2026-08-22跨章延续经 create_event(cause_tree_id) 落为跨章 causal 边"""
+    """2026-08-22跨章延续经 write_event(cause_tree_id) 落为跨章 causal 边"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓。", "顾霜兑现承诺。"],

@@ -157,7 +157,7 @@ class ChapterMetricSummary(BaseModel):
     narrative_function: str | None = None
     pivot_moment: bool | None = None
     cliffhanger: bool | None = None
-    emotional_valence: str | None = None
+    emotional_valence: int | None = None
 
 
 class BookAggregateStats(BaseModel):
@@ -182,7 +182,7 @@ class BookAggregateStats(BaseModel):
     chapter_narrative_function_share: dict[str, float] = Field(default_factory=dict)
     chapter_pivot_rate: float | None = None
     chapter_cliffhanger_rate: float | None = None
-    chapter_emotional_valence_share: dict[str, float] = Field(default_factory=dict)
+    chapter_emotional_valence_share: dict[int, float] = Field(default_factory=dict)
 
 
 class ChapterMetricsResponse(BaseModel):
@@ -224,7 +224,7 @@ class ChapterDialogue(BaseModel):
 
 class ChapterAnnotation(BaseModel):
     chapter_id: int
-    emotional_valence: str | None = None
+    emotional_valence: int | None = None
     event_type: str | None = None
     pivot_moment: bool | None = None
     cliffhanger: bool | None = None

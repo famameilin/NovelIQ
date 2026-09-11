@@ -17,15 +17,15 @@ from src.linguistic.sentence_boundary import (
 )
 
 
-def _deterministic_vectors(emotions: list[str], dim: int = 8) -> np.ndarray:
-    """按情绪构造可分句向量：正向沿 e0、负向沿 -e0、中性接近原点扰动"""
+def _deterministic_vectors(emotions: list[int], dim: int = 8) -> np.ndarray:
+    """按情绪分值构造可分句向量：正向沿 e0、负向沿 -e0、中性接近原点扰动"""
     vectors = []
     rng = np.random.default_rng(7)
     for emotion in emotions:
         vector = rng.normal(scale=0.01, size=dim)
-        if emotion.endswith("positive"):
+        if emotion > 0:
             vector[0] += 1.0
-        elif emotion.endswith("negative"):
+        elif emotion < 0:
             vector[0] -= 1.0
         vectors.append(vector)
     return np.array(vectors, dtype=np.float32)
@@ -34,9 +34,9 @@ def _deterministic_vectors(emotions: list[str], dim: int = 8) -> np.ndarray:
 @pytest.mark.parametrize(
     ("emotions", "expect_fits"),
     [
-        (["strong_positive", "mild_positive", "neutral", "strong_negative"], True),
-        (["neutral", "neutral"], False),
-        (["strong_negative"], False),
+        ([2, 1, 0, -2], True),
+        ([0, 0], False),
+        ([-2], False),
     ],
 )
 def test_fit_sentence_boundary_gatekeeping(emotions: list[str], *, expect_fits: bool) -> None:
@@ -47,7 +47,7 @@ def test_fit_sentence_boundary_gatekeeping(emotions: list[str], *, expect_fits: 
 
 def test_fit_and_score_recovers_polarity_order() -> None:
     """正类向量分值高、负类分值低、强负低于强正（分值方向单调）"""
-    emotions = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
+    emotions = [2, 1, 0, -1, -2]
     boundary = fit_sentence_boundary(_deterministic_vectors(emotions), emotions)
     assert boundary is not None
     scores = score_sentences(boundary, _deterministic_vectors(emotions))
@@ -60,8 +60,8 @@ def test_fit_and_score_recovers_polarity_order() -> None:
 def test_score_sentences_dimension_mismatch_returns_none() -> None:
     """维度不匹配按 None 处理，不伪造分值"""
     boundary = fit_sentence_boundary(
-        _deterministic_vectors(["strong_positive", "strong_negative"]),
-        ["strong_positive", "strong_negative"],
+        _deterministic_vectors([2, -2]),
+        [2, -2],
     )
     assert boundary is not None
     wrong_dim = np.zeros((1, len(boundary.weights) + 1), dtype=np.float32)

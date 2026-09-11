@@ -533,8 +533,8 @@ def test_fetch_diagnosis_preserves_distinct_graph_entity_names():
 
 def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
     rows = []
-    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
-    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score="neutral")] * 10)
+    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score=0)] * 20)
+    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score=0)] * 10)
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
@@ -559,9 +559,9 @@ def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
 
 def test_fetch_characters_returns_all_items_when_limit_is_none():
     rows = []
-    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score="neutral")] * 3)
-    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score="neutral")] * 2)
-    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score="neutral")] * 1)
+    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score=0)] * 3)
+    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score=0)] * 2)
+    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score=0)] * 1)
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
@@ -582,8 +582,8 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
     说明: 角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。
     """
     rows = [
-        _DummyRow(name="我", role_function="主体", emotion_score="neutral"),
-        _DummyRow(name="沈砚", role_function="主体", emotion_score="neutral"),
+        _DummyRow(name="我", role_function="主体", emotion_score=0),
+        _DummyRow(name="沈砚", role_function="主体", emotion_score=0),
     ]
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)

@@ -418,11 +418,6 @@ def complete_annotation_run(
                 annotation_id=annotation.annotation_id,
                 chapter_boundary=graph_result.chapter_boundary,
             )
-            case_repository.mark_surfaced(
-                run_id=result.run_id,
-                ids=result.audit.rotation_case_ids,
-                annotation_id=annotation.annotation_id,
-            )
             completion = CompletionResult(
                 annotation_id=annotation.annotation_id,
                 chapter_id=result.chapter_id,

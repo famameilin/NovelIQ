@@ -139,11 +139,6 @@ async def _run_single_attempt(
     _set_session_read_only(session)
     query_service = query_service_factory(session)
     first_chunk_id, first_chunk_text = current_chunks[0]
-    initial_cases, rotation_case_ids = query_service.find_initial_case_candidates(
-        first_chunk_text,
-        semantic_limit=50,
-        rotation_limit=50,
-    )
     allow_future_context = settings.models.annotation.allow_future_context
     ledger = AnnotationToolLedger(
         run_scope=run_id,
@@ -156,7 +151,6 @@ async def _run_single_attempt(
         # 2026-08-19供因果引用全局偏序校验使用
         current_chapter_order=getattr(query_service, "current_chapter_order", None),
     )
-    ledger.register_initial_cases(initial_cases, rotation_case_ids)
     tools = build_annotation_tools(query_service, ledger)
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
@@ -176,7 +170,6 @@ async def _run_single_attempt(
                 chunk_total=1,
                 chunk_text=first_chunk_text,
                 candidates=ledger.dialogue_candidates,
-                initial_cases=ledger.initial_case_views(),
             )
         ),
     ]
@@ -208,7 +201,6 @@ async def _run_single_attempt(
         audit=AgentRunAudit(
             allow_future_context=allow_future_context,
             write_records=list(ledger.write_records),
-            rotation_case_ids=ledger.rotation_case_ids,
             authorized_chapter_ids=sorted(ledger.authorized_chapter_ids),
             authorized_text_paragraph_ids=sorted(ledger.authorized_text_paragraph_ids),
             authorized_event_ids=sorted(ledger.authorized_event_ids),

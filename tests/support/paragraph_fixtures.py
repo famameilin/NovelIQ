@@ -13,7 +13,6 @@ from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundChunkAnnotation,
     ChunkMetricsInput,
-    EmotionalValence,
     NarrativeFunction,
 )
 from src.chunking.chunker import Chunk
@@ -188,7 +187,7 @@ def insert_chapter_annotation(
     *,
     chapter_id: int,
     narrative_function: str = "铺垫",
-    emotional_valence: str = "neutral",
+    emotional_valence: int = 0,
     pivot_moment: bool = False,
     cliffhanger: bool = False,
 ) -> None:
@@ -200,7 +199,7 @@ def insert_chapter_annotation(
                 chunk_id=chapter_id,
                 metrics=ChunkMetricsInput(
                     summary=f"章节 {chapter_id} 摘要",
-                    emotional_valence=EmotionalValence(emotional_valence),
+                    emotional_valence=emotional_valence,
                     narrative_function=NarrativeFunction(narrative_function),
                     pivot_moment=pivot_moment,
                     cliffhanger=cliffhanger,

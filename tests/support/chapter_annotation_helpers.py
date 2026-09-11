@@ -112,7 +112,7 @@ def character_fact(
     name: str,
     action: str,
     role_function: str = "主体",
-    emotion: str = "neutral",
+    emotion: int = 0,
     chapter_id: int = 1,
 ) -> dict[str, Any]:
     """2026-08-11 用于构造逐 chunk 人物观察输入测试值"""
@@ -234,7 +234,7 @@ def persist_chapter_annotation(
     *,
     run_id: str,
     chapter_id: int,
-    emotional_valences: dict[int, str] | None = None,
+    emotional_valences: dict[int, int] | None = None,
     event_types: dict[int, str] | None = None,
     pivot_chunks: set[int] | None = None,
     cliffhanger_chunks: set[int] | None = None,
@@ -396,7 +396,7 @@ def persist_chapter_annotation(
                 chunk_id=chunk_id,
                 metrics=ChunkMetricsInput(
                     summary=f"chunk {chunk_id} 摘要",
-                    emotional_valence=(emotional_valences or {}).get(chunk_id, "neutral"),
+                    emotional_valence=(emotional_valences or {}).get(chunk_id, 0),
                     narrative_function=(event_types or {}).get(chunk_id, "铺垫"),
                     pivot_moment=chunk_id in (pivot_chunks or set()),
                     cliffhanger=chunk_id in (cliffhanger_chunks or set()),

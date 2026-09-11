@@ -40,7 +40,7 @@ class TestAggregateAllMetrics:
             self.db_session,
             run_id=self.run_id,
             chapter_id=1,
-            emotional_valences={1: "mild_positive"},
+            emotional_valences={1: 1},
             event_types={1: "铺垫"},
             cliffhanger_chunks={1},
             characters=[
@@ -49,14 +49,14 @@ class TestAggregateAllMetrics:
                     name="主角",
                     action="与反派对峙",
                     role_function="主体",
-                    emotion="mild_positive",
+                    emotion=1,
                 ),
                 character_fact(
                     chunk_id=1,
                     name="反派",
                     action="阻拦主角",
                     role_function="反对者",
-                    emotion="mild_negative",
+                    emotion=-1,
                 ),
             ],
             dialogues=[
@@ -80,7 +80,7 @@ class TestAggregateAllMetrics:
             self.db_session,
             run_id=self.run_id,
             chapter_id=2,
-            emotional_valences={2: "mild_negative"},
+            emotional_valences={2: -1},
             event_types={2: "冲突"},
             pivot_chunks={2},
         )
@@ -167,7 +167,7 @@ class TestAggregateAllMetrics:
             event_types=["铺垫", "转折", "冲突"],
             cliffhangers=[0, 1, 0],
             pivot_moments=[0, 1, 0],
-            emotional_valences=["neutral", "neutral", "neutral"],
+            emotional_valences=[0, 0, 0],
         )
         tension_data = TensionData(
             chapter_ids=[1, 2, 3],

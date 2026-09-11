@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.agents.annotation.schema import coerce_emotion_score
 from src.api.models.responses import (
     ChapterAnnotation,
     ChapterCharacter,
@@ -169,7 +170,11 @@ def _fetch_chapter_annotations(
         result.append(
             ChapterAnnotation(
                 chapter_id=chapter_id,
-                emotional_valence=(str(annotation_row.emotional_valence) if annotation_row.emotional_valence else None),
+                emotional_valence=(
+                    coerce_emotion_score(annotation_row.emotional_valence)
+                    if annotation_row.emotional_valence is not None
+                    else None
+                ),
                 event_type=str(annotation_row.event_type) if annotation_row.event_type else None,
                 pivot_moment=(bool(annotation_row.pivot_moment) if annotation_row.pivot_moment is not None else None),
                 cliffhanger=(bool(annotation_row.cliffhanger) if annotation_row.cliffhanger is not None else None),
