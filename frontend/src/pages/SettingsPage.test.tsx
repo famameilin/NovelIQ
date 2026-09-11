@@ -134,7 +134,6 @@ describe("SettingsPage", () => {
     renderPage();
     await screen.findByText("文本模型（标注 / 诊断）");
 
-    await user.click(screen.getByRole("button", { name: "编辑参数" }));
     // number input 逐字符 type 会与受控值互相干扰，用 fireEvent 整值提交
     fireEvent.change(screen.getByDisplayValue("0.9"), { target: { value: "1.2" } });
     await user.click(screen.getByRole("button", { name: "保存设置" }));
@@ -143,17 +142,39 @@ describe("SettingsPage", () => {
     expect(at(updateSettingsMock.mock.calls[0][0], ["models", "annotation", "temperature"])).toBe(1.2);
   });
 
+  it("恢复默认按钮初始即可点（无需进入编辑态）且保存按钮无修改时禁用", async () => {
+    renderPage();
+    await screen.findByText("文本模型（标注 / 诊断）");
+
+    expect(screen.getByRole("button", { name: "恢复默认：标注温度" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+  });
+
   it("恢复默认按钮把字段值回退为代码默认", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("文本模型（标注 / 诊断）");
 
-    await user.click(screen.getByRole("button", { name: "编辑参数" }));
     await user.click(screen.getByRole("button", { name: "恢复默认：标注温度" }));
     await user.click(screen.getByRole("button", { name: "保存设置" }));
 
     await waitFor(() => expect(updateSettingsMock).toHaveBeenCalledTimes(1));
     expect(at(updateSettingsMock.mock.calls[0][0], ["models", "annotation", "temperature"])).toBe(0.7);
+  });
+
+  it("放弃修改清空草稿并回到服务端值", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("文本模型（标注 / 诊断）");
+
+    fireEvent.change(screen.getByDisplayValue("0.9"), { target: { value: "1.2" } });
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "放弃修改" }));
+
+    expect(screen.getByDisplayValue("0.9")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    expect(updateSettingsMock).not.toHaveBeenCalled();
   });
 
   it("凭据保存 api_key 留空表示不修改", async () => {
