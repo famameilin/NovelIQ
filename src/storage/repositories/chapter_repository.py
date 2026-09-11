@@ -207,9 +207,8 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         if not settings.models.paragraph_embedding.semantic_enabled:
             return True
 
-        expected_dim = settings.models.paragraph_embedding.embedding_dim
         try:
-            validate_paragraph_embeddings_schema(self.session, expected_dim)
+            validate_paragraph_embeddings_schema(self.session)
         except ValueError:
             # 只要当前运行环境要求语义原文定位，而 schema 尚未就绪，就不能跳过 preprocess；
             # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness

@@ -8,11 +8,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.config import settings
-
 from .base import Base
-
-EMBEDDING_DIM = settings.models.paragraph_embedding.embedding_dim
 
 
 class ParagraphEmbedding(Base):
@@ -23,16 +19,19 @@ class ParagraphEmbedding(Base):
     溯源元数据；旧结构（chunk_id/paragraph_index/paragraph_text/local/global
     坐标冗余列）已在 ensure_paragraph_embeddings_schema 中按不兼容策略
     DROP 重建，数据不回填。
+
+    2026-09-10：列维度不再是配置——真实列宽由 ensure_paragraph_embeddings_schema
+    按 preprocess 探测的模型实测维度建表固化，ORM 侧用无维度 Vector() 适配。
     """
 
     __tablename__ = "paragraph_embeddings"
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(), nullable=True)
     # 生成该向量的嵌入模型 key（settings.models.paragraph_embedding.model）
     embedding_model_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    # 生成该向量的嵌入维度（settings.models.paragraph_embedding.embedding_dim）
+    # 生成该向量的嵌入维度（preprocess 探测值，写入期随行落库）
     embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

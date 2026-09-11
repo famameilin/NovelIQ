@@ -30,7 +30,7 @@ from src.storage.models.graph import (
 from src.storage.models.novel import Novel
 from src.storage.models.paragraph import Paragraph
 from src.storage.models.paragraph_curves import ParagraphCurve
-from src.storage.models.paragraph_embedding import EMBEDDING_DIM, ParagraphEmbedding
+from src.storage.models.paragraph_embedding import ParagraphEmbedding
 from src.storage.models.paragraph_entities import ParagraphEntity
 from src.storage.models.paragraph_linguistic_features import ParagraphLinguisticFeature
 from src.storage.models.paragraph_metrics import ParagraphMetric
@@ -60,7 +60,6 @@ __all__ = [
     "ParagraphTopicInference",
     "TopicModelRun",
     "ParagraphCurve",
-    "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
     "CasePoolCase",
     "CaseResolutionMapping",

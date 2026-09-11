@@ -42,11 +42,13 @@ def insert_paragraph_embeddings(
     session: Session,
     run_id: str,
     rows: Iterable[ParagraphEmbeddingRow],
+    embedding_dimension: int | None = None,
 ) -> int:
     """2026-08-14 用于重新生成当前 run 的全部自然段向量
 
-    先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key /
-    embedding_dimension 从 settings.models.paragraph_embedding 读取。
+    先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key 从
+    settings.models.paragraph_embedding 读取，embedding_dimension 由调用方
+    传入（preprocess 传探测锁定的实测维度，2026-09-10 维度不再是配置）。
     """
     materialized = list(rows)
     session.execute(delete(ParagraphEmbedding).where(ParagraphEmbedding.run_id == run_id))
@@ -60,7 +62,7 @@ def insert_paragraph_embeddings(
             "paragraph_id": row.paragraph_id,
             "embedding_vector": row.embedding_vector,
             "embedding_model_key": getattr(model_settings, "model", None),
-            "embedding_dimension": getattr(model_settings, "embedding_dim", None),
+            "embedding_dimension": embedding_dimension,
             "created_at": created_at,
         }
         for row in materialized

@@ -15,7 +15,6 @@ def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
     settings = _parse_embedding_model_settings(
         {
             "timeout_s": 120,
-            "embedding_dim": 1024,
             "batch_size": 8,
             "semantic_enabled": False,
             "top_k": 9,
@@ -25,7 +24,6 @@ def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
     assert settings.base_url is None
     assert settings.model is None
     assert settings.timeout_s == 120
-    assert settings.embedding_dim == 1024
     assert settings.batch_size == 8
     assert settings.semantic_enabled is False
     assert settings.top_k == 9
@@ -94,12 +92,10 @@ def test_old_model_environment_variables_do_not_override_json(monkeypatch) -> No
 
     settings = _parse_embedding_model_settings(
         {
-            "embedding_dim": 1536,
             "batch_size": 8,
         }
     )
 
-    assert settings.embedding_dim == 1536
     assert settings.batch_size == 8
 
 

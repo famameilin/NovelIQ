@@ -88,7 +88,6 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
             base_url="http://test",
             model="test-model",
             api_key="test-key",
-            embedding_dim=3,
         )
         result = await client.get_embedding("测试文本")
 
@@ -121,21 +120,26 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         mock_openai.assert_not_called()
 
     @patch("src.models.local.embedding.AsyncOpenAI")
-    async def test_get_embedding_raises_on_dimension_mismatch(self, mock_openai: MagicMock) -> None:
+    async def test_get_embedding_raises_on_dimension_mismatch_after_probe_lock(self, mock_openai: MagicMock) -> None:
+        """2026-09-10 维度不再是配置：探针锁定 2 维后，后续 3 维响应必须快速失败"""
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
+
+        probe_response = MagicMock()
+        probe_response.data = [MagicMock(embedding=[0.1, 0.2])]
+        probe_response.usage = None
 
         mock_response = MagicMock()
         mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
         mock_response.usage = None
-        mock_client.embeddings.create = AsyncMock(return_value=mock_response)
+        mock_client.embeddings.create = AsyncMock(side_effect=[probe_response, mock_response])
 
         client = EmbeddingClient(
             base_url="http://test",
             model="test-model",
             api_key="test-key",
-            embedding_dim=4,
         )
+        self.assertEqual(await client.detect_embedding_dimension(), 2)
 
         with self.assertRaisesRegex(ValueError, "embedding dimension mismatch"):
             await client.get_embedding("测试文本")
@@ -163,7 +167,6 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
             base_url="http://test",
             model="test-model",
             api_key="test-key",
-            embedding_dim=2,
         )
         result = await client.embed_texts([f"文本{i}" for i in range(total_texts)])
 
@@ -199,7 +202,6 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
             base_url="http://test",
             model="test-model",
             api_key="test-key",
-            embedding_dim=2,
         )
         result = await client.embed_texts(["有效1", "", "  ", "有效2"])
 
@@ -228,7 +230,6 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
             base_url="http://test",
             model="test-model",
             api_key="test-key",
-            embedding_dim=2,
         )
         progress_calls: list[tuple[int, int, int]] = []
 

@@ -44,8 +44,8 @@ def test_paragraph_embedding_model_has_paragraph_identity_columns() -> None:
 
 def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
     """
-    2026-08-14 二期段落化：写入行携带 paragraph_id 与向量，embedding_model_key/
-    embedding_dimension 从 settings 取。
+    2026-08-14 二期段落化：写入行携带 paragraph_id 与向量，embedding_model_key 从
+    settings 取；2026-09-10 维度不再是配置，embedding_dimension 由调用方传探测值。
     """
     session = MagicMock()
     session.execute.side_effect = [
@@ -62,6 +62,7 @@ def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
                 embedding_vector=[0.3, 0.4],
             )
         ],
+        embedding_dimension=1024,
     )
 
     assert inserted == 1
@@ -71,7 +72,7 @@ def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
     _, rows = session.execute.call_args_list[1].args
     assert rows[0]["paragraph_id"] == 7
     assert rows[0]["embedding_vector"] == [0.3, 0.4]
-    assert rows[0]["embedding_dimension"] is not None
+    assert rows[0]["embedding_dimension"] == 1024
     assert rows[0]["created_at"]
 
 

@@ -36,13 +36,17 @@ class TaskModelSettings:
 
 @dataclass
 class EmbeddingModelSettings:
-    """嵌入模型配置"""
+    """嵌入模型配置
+
+    2026-09-10 embedding_dim 不再是配置：维度以嵌入服务实测输出为准
+    （preprocess 探测锁定，EmbeddingClient.detect_embedding_dimension），
+    pgvector 列宽在建表时按探测值固化。
+    """
 
     base_url: str | None = None
     model: str | None = None
     api_key: str | None = None
     timeout_s: float | None = None
-    embedding_dim: int = 1536
     batch_size: int = 8
     semantic_enabled: bool = True
     top_k: int = 5
@@ -172,7 +176,6 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None) -> EmbeddingMod
 
     return EmbeddingModelSettings(
         timeout_s=json_data.get("timeout_s"),
-        embedding_dim=json_data.get("embedding_dim", 1536),
         batch_size=json_data.get("batch_size", 8),
         semantic_enabled=json_data.get("semantic_enabled", True),
         top_k=json_data.get("top_k", 5),

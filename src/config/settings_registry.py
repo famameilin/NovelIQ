@@ -49,8 +49,9 @@ class SettingFieldSpec:
     step: float | None = None
     enum_values: tuple[str, ...] = ()
     nullable: bool = False
-    # embedding_dim 是 pgvector 建列维度（storage/models/paragraph_embedding.py
-    # 导入期固化），运行时修改只会造成列宽与配置不一致，标记为不可编辑
+    # 非可编辑字段（如建库维度类参数）不渲染输入控件也不提供恢复默认；
+    # 当前注册表已无可编辑=False 的字段（embedding_dim 配置链 2026-09-10 删除），
+    # 机制保留作通用能力
     editable: bool = True
 
 
@@ -183,13 +184,6 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 label="嵌入超时（秒）",
                 min_value=1,
                 nullable=True,
-            ),
-            SettingFieldSpec(
-                path=("models", "paragraph_embedding", "embedding_dim"),
-                field_type="integer",
-                label="向量维度",
-                description="pgvector 建列维度，运行时不可修改；如需变更须重建数据库",
-                editable=False,
             ),
             SettingFieldSpec(
                 path=("models", "paragraph_embedding", "batch_size"),
