@@ -20,6 +20,7 @@ class TaskModelConfig:
     top_p: float = 0.8
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
+    max_tokens: int | None = None
     stream_enabled: bool = False
 
     def validate(self) -> None:
@@ -57,5 +58,6 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
         top_p=task_settings.top_p,
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
+        max_tokens=getattr(task_settings, "max_tokens", None),
         stream_enabled=stream_enabled,
     )

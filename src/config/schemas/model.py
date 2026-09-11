@@ -30,6 +30,9 @@ class TaskModelSettings:
     max_iterations: int = 10
     total_attempts: int = 3
     allow_future_context: bool = False
+    # 2026-09-11 用户裁决 128K：思考模式补全上限的provider默认值不定（DeepSeek 文档
+    # 8K/64K 随模式漂移），截断长度实测 7.7K~61K 字符散布——显式封顶消除该变量
+    max_tokens: int = 131072
     # 2026-08-14 M7（§20）：章文本超过该字符数时在段落边界切成 Agent 运行时子块
     sub_chunk_max_chars: int = 5000
 
@@ -163,6 +166,7 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         max_iterations=json_data.get("max_iterations", 10),
         total_attempts=json_data.get("total_attempts", 3),
         allow_future_context=json_data.get("allow_future_context", False),
+        max_tokens=json_data.get("max_tokens", 131072),
         sub_chunk_max_chars=json_data.get("sub_chunk_max_chars", 5000),
     )
 
