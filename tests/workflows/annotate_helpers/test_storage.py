@@ -25,7 +25,11 @@ from src.storage.models import (
     ChapterAnnotationRecord,
     DialogueRecord,
 )
-from src.workflows.annotate_helpers.storage import complete_annotation_run, load_completion_result
+from src.workflows.annotate_helpers.storage import (
+    _fold_resolved_cases,
+    complete_annotation_run,
+    load_completion_result,
+)
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
@@ -354,3 +358,96 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
     db_session.rollback()
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 0
     assert _count(db_session, ChapterAnnotationRecord, run_id) == 0
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-11 章内并行 §14 过渡补丁：resolved_cases 按 case_id fold 合并
+# 背景：run e84339d1 第 20 章两个子块各自解决同一批案例（交集 3 条），
+# 合并直接拼接触发 _validate_locked_cases 唯一性校验整章回滚。
+# ---------------------------------------------------------------------------
+
+
+def _foreshadowing_case(case_id: str, *, reason: str, setup_event_id: str | None) -> ResolvedCase:
+    return ResolvedCase(
+        case_id=case_id,
+        action="foreshadowing",
+        type="伏笔疑点",
+        reason=reason,
+        target_key=f"key-{case_id}",
+        target_ref={"kind": "伏笔疑点", "chunk_id": 20},
+        setup_summary="禁碑伏笔",
+        setup_event_id=setup_event_id,
+    )
+
+
+def test_fold_resolved_cases_merges_duplicate_case_ids_from_two_blocks() -> None:
+    """同一案例被两子块各解决一次：字段级后值覆盖、reason 拼接、保持首现顺序"""
+    block_a = _foreshadowing_case("case-1", reason="A块引入段写埋设", setup_event_id="evt-a")
+    block_b = _foreshadowing_case("case-1", reason="B块坐实段写确认", setup_event_id="evt-b")
+    other = _foreshadowing_case("case-2", reason="仅A块解决", setup_event_id="evt-a2")
+
+    folded = _fold_resolved_cases([block_a, block_b, other])
+
+    assert [item.case_id for item in folded] == ["case-1", "case-2"]
+    merged = folded[0]
+    assert merged.reason == "A块引入段写埋设\nB块坐实段写确认"
+    assert merged.setup_event_id == "evt-b"  # setup_event_id 取后者
+    assert merged.target_key == "key-case-1"
+
+
+def test_fold_resolved_cases_keeps_empty_later_fields() -> None:
+    """后值仅在非空时覆盖：后块未填 setup_event_id 不清掉前块的值"""
+    block_a = _foreshadowing_case("case-1", reason="先到", setup_event_id="evt-a")
+    block_b = _foreshadowing_case("case-1", reason="后到", setup_event_id=None)
+
+    folded = _fold_resolved_cases([block_a, block_b])
+
+    assert len(folded) == 1
+    assert folded[0].setup_event_id == "evt-a"
+    assert folded[0].reason == "先到\n后到"
+
+
+def test_fold_resolved_cases_covers_fact_path_duplicate() -> None:
+    """fact 路径（relation_change_ops 还原）与 foreshadowing 路径同 case_id 在同一暴露面折叠"""
+    from src.workflows.annotate_helpers.storage import _graph_fact_resolved_cases
+
+    class _ResultStub:
+        relation_change_ops = [
+            {
+                "case_id": "case-1",
+                "case_type": "关系疑点",
+                "reason": "fact 路径裁决",
+                "target_key": "key-case-1",
+                "target_ref": {"kind": "关系疑点", "chunk_id": 20},
+                "from_entity": "白芷",
+                "to_entity": "秦穆",
+                "relation_type": "盟友",
+                "change_kind": "assert",
+            }
+        ]
+
+    foreshadowing = _foreshadowing_case("case-1", reason="伏笔路径裁决", setup_event_id="evt-a")
+    merged = _fold_resolved_cases([foreshadowing, *_graph_fact_resolved_cases(_ResultStub())])
+
+    assert len(merged) == 1
+    assert merged[0].action == "fact"  # 后值覆盖 action
+    assert merged[0].reason == "伏笔路径裁决\nfact 路径裁决"
+
+
+def test_folded_resolved_cases_pass_locked_case_validation() -> None:
+    """折叠后通过 _validate_locked_cases 唯一性校验（ch20 崩溃点的回归门）"""
+    from types import SimpleNamespace
+
+    from src.workflows.annotate_helpers.storage import _validate_locked_cases
+
+    block_a = _foreshadowing_case("case-1", reason="A", setup_event_id="evt-a")
+    block_b = _foreshadowing_case("case-1", reason="B", setup_event_id="evt-b")
+    folded = _fold_resolved_cases([block_a, block_b])
+    row = SimpleNamespace(
+        id="case-1",
+        state="active",
+        case_type="伏笔疑点",
+        target_key="key-case-1",
+        target_ref={"kind": "伏笔疑点", "chunk_id": 20},
+    )
+    _validate_locked_cases(resolved_cases=folded, rows=[row])
