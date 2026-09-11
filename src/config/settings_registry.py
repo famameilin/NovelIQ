@@ -8,6 +8,9 @@
 
 凭据字段（base_url/model/api_key）不在注册表：它们只存 .env，
 由设置页的 .env 编辑器通道单独处理。
+日志（logging）与存储路径（paths）是运营配置而非用户可调参数，
+同样不进注册表：settings.json 中的现存值照常生效，但不在设置页露出
+（2026-09-10 用户裁决）。
 """
 
 from __future__ import annotations
@@ -18,8 +21,6 @@ from typing import Literal
 SettingFieldType = Literal["number", "integer", "boolean", "enum", "string"]
 
 SETTING_FIELD_TYPES = ("number", "integer", "boolean", "enum", "string")
-
-LEVEL_VALUES = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 
 @dataclass(frozen=True)
@@ -36,8 +37,7 @@ class SettingSectionSpec:
 class SettingFieldSpec:
     """单个可调参数的声明
 
-    path: 结构化路径（settings.json 中的嵌套位置），dict 键本身可含点
-    （如 logging.modules 的 "src.api"），因此不做字符串点分约定
+    path: 结构化路径（settings.json 中的嵌套位置）
     """
 
     path: tuple[str, ...]
@@ -60,8 +60,6 @@ SETTING_SECTIONS: tuple[SettingSectionSpec, ...] = (
     SettingSectionSpec(id="topic_model", title="主题模型", description="LDA 训练与主题变化候选参数", order=2),
     SettingSectionSpec(id="metrics", title="指标计算", description="各量化指标的阈值与采样参数", order=3),
     SettingSectionSpec(id="linguistic", title="语言特征", description="LTP 与 Word2Vec 能力开关及参数", order=4),
-    SettingSectionSpec(id="logging", title="日志", description="日志级别、轮转与分模块落盘", order=5),
-    SettingSectionSpec(id="paths", title="存储路径", description="上传、结果输出与词表目录", order=6),
 )
 
 
@@ -329,52 +327,6 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("linguistic", "word2vec", "epochs"), field_type="integer", label="训练轮数", min_value=1
             ),
-            # ---- logging ----
-            SettingFieldSpec(
-                path=("logging", "console_level"),
-                field_type="enum",
-                label="控制台日志级别",
-                enum_values=LEVEL_VALUES,
-            ),
-            SettingFieldSpec(path=("logging", "log_dir"), field_type="string", label="日志目录"),
-            SettingFieldSpec(path=("logging", "rotation"), field_type="string", label="轮转大小"),
-            SettingFieldSpec(path=("logging", "retention"), field_type="string", label="日志保留时长"),
-            SettingFieldSpec(path=("logging", "compression"), field_type="string", label="轮转压缩格式"),
-            SettingFieldSpec(
-                path=("logging", "third_party_level"),
-                field_type="enum",
-                label="第三方库日志级别",
-                enum_values=LEVEL_VALUES,
-            ),
-            SettingFieldSpec(
-                path=("logging", "json_parse_preview_chars"),
-                field_type="integer",
-                label="JSON 解析预览长度",
-                min_value=0,
-            ),
-            # logging.modules：六个固定模块 × (file, level)
-            *[
-                spec
-                for module_id in ("src.api", "src.workflows", "src.models", "src.metrics", "src.storage", "src.agents")
-                for spec in (
-                    SettingFieldSpec(
-                        path=("logging", "modules", module_id, "file"),
-                        field_type="string",
-                        label=f"{module_id} 日志文件",
-                    ),
-                    SettingFieldSpec(
-                        path=("logging", "modules", module_id, "level"),
-                        field_type="enum",
-                        label=f"{module_id} 日志级别",
-                        enum_values=LEVEL_VALUES,
-                    ),
-                )
-            ],
-            # ---- paths ----
-            SettingFieldSpec(path=("paths", "upload_dir"), field_type="string", label="上传目录"),
-            SettingFieldSpec(path=("paths", "results_dir"), field_type="string", label="结果输出目录"),
-            SettingFieldSpec(path=("paths", "log_dir"), field_type="string", label="日志目录（paths）"),
-            SettingFieldSpec(path=("paths", "lexicons_dir"), field_type="string", label="词表目录"),
         ]
     )
 )
@@ -386,5 +338,4 @@ __all__ = [
     "MODEL_ENV_KEYS",
     "SettingSectionSpec",
     "SettingFieldSpec",
-    "LEVEL_VALUES",
 ]
