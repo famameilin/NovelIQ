@@ -65,8 +65,8 @@ def test_get_settings_schema(api_client: TestClient) -> None:
     temperature = next(field for field in data["fields"] if field["path"] == ["models", "annotation", "temperature"])
     assert temperature["field_type"] == "number"
     assert temperature["min_value"] == 0 and temperature["max_value"] == 2
-    dim = next(field for field in data["fields"] if field["path"] == ["models", "paragraph_embedding", "embedding_dim"])
-    assert dim["editable"] is False
+    # 2026-09-10：embedding_dim 配置链已删除（维度以模型实测为准），注册表不再有该字段
+    assert not any(field["path"] == ["models", "paragraph_embedding", "embedding_dim"] for field in data["fields"])
 
 
 def test_get_settings_view_masks_api_key(isolated_settings: Path, api_client: TestClient) -> None:

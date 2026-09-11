@@ -173,15 +173,9 @@ class TestStageCompleteChecks:
         chapter_repo.insert_chapter_texts(run_id, chunks)
         ensure_paragraph_embeddings_schema(db_session, 1024)
 
-        with (
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
-                True,
-            ),
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
-                1024,
-            ),
+        with patch(
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
+            True,
         ):
             assert not chapter_repo.is_preprocess_complete(run_id)
 
@@ -215,17 +209,12 @@ class TestStageCompleteChecks:
                 ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.3] * 1024),
                 ParagraphEmbeddingRow(paragraph_id=1, embedding_vector=[0.4] * 1024),
             ],
+            embedding_dimension=1024,
         )
 
-        with (
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
-                True,
-            ),
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
-                1024,
-            ),
+        with patch(
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
+            True,
         ):
             assert chapter_repo.is_preprocess_complete(run_id)
 
@@ -273,17 +262,12 @@ class TestStageCompleteChecks:
             db_session,
             run_id,
             [ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.3] * 1024)],
+            embedding_dimension=1024,
         )
 
-        with (
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
-                True,
-            ),
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
-                1024,
-            ),
+        with patch(
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
+            True,
         ):
             assert not chapter_repo.is_preprocess_complete(run_id)
 

@@ -47,13 +47,8 @@ def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[
 
 
 @pytest.mark.asyncio
-async def test_generate_paragraph_embeddings_uses_paragraph_only(db_session) -> None:
-    """
-    RAG 粒度固定为一个自然段：只生成 paragraph embedding，不再生成 chunk embedding
-
-    修改说明: 2026-08-14 段落事实源改造后 embedding 从 paragraphs 表读取，
-    不再从 all_chunks 内存对象切段
-    """
+async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_and_insert(db_session) -> None:
+    """2026-09-10 维度不再是配置：建表列宽与行溯源都取探针锁定的实测值"""
     chunks = [
         Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11, chapter_id=1),
     ]
@@ -79,11 +74,15 @@ async def test_generate_paragraph_embeddings_uses_paragraph_only(db_session) -> 
     # run 记录存在时 novel_id 从 analysis_runs 读取，与建 run 时一致
     assert mock_client_factory.call_args.kwargs["novel_id"] == novel_id
     mock_client.detect_embedding_dimension.assert_awaited_once()
+    # 建表列宽 = 探测值
     mock_ensure_paragraph_schema.assert_called_once()
+    assert mock_ensure_paragraph_schema.call_args.args[1] == 1024
     # 二期段落化：embedding 行只携带 paragraph_id + 向量（身份以 paragraphs 表为准）
     paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[2]
     assert [row.paragraph_id for row in paragraph_rows] == [0, 1]
     assert [row.embedding_vector for row in paragraph_rows] == [[0.5, 0.6], [0.7, 0.8]]
+    # 行溯源维度 = 探测值
+    assert mock_insert_paragraph_embeddings.call_args.kwargs["embedding_dimension"] == 1024
 
 
 @pytest.mark.asyncio
@@ -105,28 +104,6 @@ async def test_generate_paragraph_embeddings_skips_when_no_paragraphs(db_session
 
     assert inserted == 0
     mock_client_factory.assert_not_called()
-    mock_ensure_paragraph_schema.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_generate_paragraph_embeddings_fails_fast_on_dimension_mismatch(db_session) -> None:
-    chunks = [Chunk(index=1, text="测试文本", start=0, end=4, chapter_id=1)]
-    run_id, _ = _insert_chapter_texts_and_paragraphs(db_session, chunks)
-
-    mock_client = MagicMock()
-    mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
-
-    with (
-        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
-        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
-    ):
-        with pytest.raises(ValueError, match="dimension mismatch"):
-            await _generate_paragraph_embeddings(
-                session=db_session,
-                run_id=run_id,
-            )
-
-    mock_client.embed_texts.assert_not_called()
     mock_ensure_paragraph_schema.assert_not_called()
 
 

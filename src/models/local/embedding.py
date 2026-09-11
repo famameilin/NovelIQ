@@ -27,7 +27,6 @@ class EmbeddingClient:
         model: str | None = None,
         api_key: str | None = None,
         timeout_s: float | None = None,
-        embedding_dim: int | None = None,
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
     ) -> None:
@@ -36,24 +35,21 @@ class EmbeddingClient:
             self._base_url = base_url or semantic_config.base_url
             self._model = model or semantic_config.model
             self._timeout_s = timeout_s if timeout_s is not None else semantic_config.timeout_s
-            self._embedding_dim = embedding_dim if embedding_dim is not None else semantic_config.embedding_dim
             self._batch_size = semantic_config.batch_size
         else:
             self._base_url = base_url
             self._model = model
             self._timeout_s = timeout_s
-            self._embedding_dim = (
-                embedding_dim if embedding_dim is not None else settings.models.paragraph_embedding.embedding_dim
-            )
             self._batch_size = settings.models.paragraph_embedding.batch_size
 
         self._api_key = api_key if api_key is not None else semantic_config.api_key
         if not self._api_key:
             raise ValueError("EMBEDDING_MODEL_KEY 不能为空")
-        if self._embedding_dim <= 0:
-            raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")
         if self._batch_size <= 0:
             raise ValueError(f"embedding batch size must be positive, got {self._batch_size}")
+        # 维度不是配置：以嵌入服务实测输出为准，detect_embedding_dimension 探测后锁定；
+        # 锁定前逐条校验跳过（表级维度由 pgvector 列约束兜底）
+        self._embedding_dim: int | None = None
 
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
@@ -235,14 +231,18 @@ class EmbeddingClient:
             raise
 
     async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
+        """探测嵌入模型实测输出维度，并锁定为后续逐条校验的基准"""
         if not self._model:
             raise ValueError("embedding model is required")
 
         response = await self._create_embeddings_with_retry(probe_text)
         embedding = response.data[0].embedding
-        return len(embedding)
+        self._embedding_dim = len(embedding)
+        return self._embedding_dim
 
     def _validate_embedding_dimension(self, embedding: list[float]) -> None:
+        if self._embedding_dim is None:
+            return
         actual_dim = len(embedding)
         if actual_dim != self._embedding_dim:
             raise ValueError(
