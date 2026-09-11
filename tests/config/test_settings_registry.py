@@ -98,6 +98,14 @@ class TestRegistryContract:
         for spec in SETTING_FIELDS:
             assert spec.path[-1] not in forbidden, f"{'/'.join(spec.path)} 凭据字段不得进注册表"
 
+    def test_operational_sections_excluded(self) -> None:
+        """日志/存储路径是运营配置而非用户可调参数（2026-09-10 裁决），不得进注册表"""
+        excluded = {"logging", "paths"}
+        section_ids = {section.id for section in SETTING_SECTIONS}
+        assert not excluded & section_ids, f"运营分区混进注册表: {excluded & section_ids}"
+        for spec in SETTING_FIELDS:
+            assert spec.path[0] not in excluded, f"{'/'.join(spec.path)} 属运营配置，不得进注册表"
+
     def test_settings_dataclass_fields_all_serialized(self) -> None:
         """Settings 的每个 dataclass 字段都出现在序列化结果中"""
         serialized = serialize_settings(Settings())

@@ -61,7 +61,8 @@ def test_get_settings_schema(api_client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     section_ids = {section["id"] for section in data["sections"]}
-    assert {"models", "topic_model", "metrics", "linguistic", "logging", "paths"} <= section_ids
+    # 日志/存储路径是运营配置，不进设置页（2026-09-10 裁决）
+    assert section_ids == {"models", "topic_model", "metrics", "linguistic"}
     temperature = next(field for field in data["fields"] if field["path"] == ["models", "annotation", "temperature"])
     assert temperature["field_type"] == "number"
     assert temperature["min_value"] == 0 and temperature["max_value"] == 2

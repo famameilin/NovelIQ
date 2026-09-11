@@ -14,8 +14,6 @@ const sections = [
   { id: "topic_model", title: "主题模型", description: "LDA 训练与主题变化候选参数", order: 2 },
   { id: "metrics", title: "指标计算", description: "各量化指标的阈值与采样参数", order: 3 },
   { id: "linguistic", title: "语言特征", description: "LTP 与 Word2Vec 能力开关及参数", order: 4 },
-  { id: "logging", title: "日志", description: "日志级别、轮转与分模块落盘", order: 5 },
-  { id: "paths", title: "存储路径", description: "上传、结果输出与词表目录", order: 6 },
 ];
 
 const fields = [
@@ -103,30 +101,6 @@ const fields = [
     nullable: false,
     editable: true,
   },
-  {
-    path: ["logging", "console_level"],
-    field_type: "enum",
-    label: "控制台日志级别",
-    description: "",
-    min_value: null,
-    max_value: null,
-    step: null,
-    enum_values: ["DEBUG", "INFO", "WARNING", "ERROR"],
-    nullable: false,
-    editable: true,
-  },
-  {
-    path: ["paths", "results_dir"],
-    field_type: "string",
-    label: "结果输出目录",
-    description: "",
-    min_value: null,
-    max_value: null,
-    step: null,
-    enum_values: [],
-    nullable: false,
-    editable: true,
-  },
 ];
 
 const values: Record<string, unknown> = {
@@ -183,8 +157,6 @@ const sources: Record<string, "default" | "file"> = {
   "topic_model/num_topics": "default",
   "metrics/mtld_threshold": "default",
   "linguistic/word2vec/enabled": "file",
-  "logging/console_level": "default",
-  "paths/results_dir": "default",
 };
 
 export const settingsSchemaHandler = http.get(`${BASE}/api/settings/schema`, async () => {
