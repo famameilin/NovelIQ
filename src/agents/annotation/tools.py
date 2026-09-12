@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from langchain_core.tools import tool
+from pydantic import ValidationError
 
 from .candidates import extract_dialogue_candidates
 from .errors import (
@@ -1001,7 +1003,7 @@ class AnnotationToolLedger:
             return []
         payload = self.domain_payloads.get("dialogues")
         if not payload:
-            return [f"对话覆盖: 检出 {candidates} 条系统对话候选但 write_dialogues 未提交任何判定"]
+            return [f"对话覆盖: 检出 {candidates} 条系统对话候选但对话域回执未提交任何判定"]
         if self.dialogue_missing_indexes:
             return [
                 f"对话覆盖: {len(self.dialogue_missing_indexes)} 条候选未提交判定"
@@ -1190,27 +1192,34 @@ class AnnotationToolLedger:
     # 章内并行两段式：写者取值域准入（设计文档 §7，防写者发明）
 
     def admit_entity_directory(self, entities: list[EntityInput]) -> None:
-        """2026-09-12 用于校验 write_entities 实体名 ∈ 读者报告并集 ∪ 图中已登记名
+        """2026-09-12 用于校验 write_entities 实体名 ∈ 读者报告并集 ∪ 图中已登记名 ∪ 章正文逐字命中
 
-        写者看不到正文，实体名的唯一合法来源是读者报告（entities/event_trees/
-        relations/dialogues/cases 各组）或历史已登记实体；报告外的名字一律
-        拒绝并给出可自纠报错。单块章（reader_reports=None）不受限。
+        写者看不到正文，实体名的合法来源是读者报告（entities/event_trees/
+        relations/dialogues/cases 各组）、历史已登记实体，或本章正文的逐字
+        命中（09-12 放宽：报告并集是抽取面不是穷举面，实测 ch26 把写者从
+        正文观察到的合法实体挡在门外且无法自纠）。报告、图与正文都不见的
+        名字一律拒绝并给出可自纠报错。单块章（reader_reports=None）不受限。
         """
         if self.reader_reports is None:
             return
         report_keys = report_entity_name_keys(self.reader_reports)
-        invented = [
-            entity.name
-            for entity in entities
-            if normalize_message_name(entity.name) not in report_keys
-            and not (self.graph is not None and normalize_message_name(entity.name) in self.graph.entity_types)
-        ]
+        text_key = unicodedata.normalize("NFC", self.current_chunk_text).casefold()
+        invented: list[str] = []
+        for entity in entities:
+            name_key = normalize_message_name(entity.name)
+            if name_key in report_keys:
+                continue
+            if self.graph is not None and name_key in self.graph.entity_types:
+                continue
+            if name_key and name_key in text_key:
+                continue
+            invented.append(entity.name)
         if invented:
             raise ValueError(
-                "write_entities 准入失败，以下实体名未出现在任何读者上报、也未在图中登记: "
+                "write_entities 准入失败，以下实体名未出现在任何读者上报、图中登记或本章正文: "
                 + "、".join(invented)
-                + "（写者只能写读者报告已陈述的内容：请原样使用报告中的实体名，"
-                "或在读者上报过的实体名范围内提交）"
+                + "（请原样使用读者报告中的实体名，或提交本章正文逐字出现的实体名；"
+                "凭空拟造的名字不予接受）"
             )
 
     def admit_case_reason(self, reason: str, *, tool_name: str) -> None:
@@ -1307,6 +1316,122 @@ def _resolve_participant_numbers(
             )
         )
     return resolved
+
+
+_EVENT_ROLE_VALUES_TEXT = "主体/客体/接收者/帮助者/反对者/见证者/地点"
+_EVENT_NARRATIVE_ROLE_VALUES_TEXT = "主体/客体/发送者/接收者/帮助者/反对者/见证者"
+_EVENT_FORESHADOWING_FIELDS = frozenset(
+    {"isforeshadowing", "setup_kind", "expected_payoff_family", "payoff_likelihood"}
+)
+
+
+def _short_pydantic_message(msg: str) -> str:
+    """2026-09-12 用于剥离 pydantic 报错样板（Value error 前缀与文档链接尾注）"""
+    cleaned = msg
+    if cleaned.startswith("Value error, "):
+        cleaned = cleaned[len("Value error, ") :]
+    return re.sub(r"\s*\[type=[^\]]*\]$", "", cleaned)
+
+
+def translate_event_validation_error(exc: ValidationError) -> AnnotationInputError:
+    """2026-09-12 用于把 write_event 参数校验失败翻译成中文规则报错
+
+    真实 run 复盘（84866d6f，17 次失败）：pydantic 英文原文让模型逐字段对照
+    英文 type 码再猜规则，是事件域返工轮次的主要来源；这里按失败族直接给出
+    规则与修正。未收录族保留点分路径与清洗后的原始消息，不丢信息。草稿缓存
+    与 patches 提示由工具批次层统一追加，与本翻译无关。
+    """
+    lines: list[str] = []
+    for error in exc.errors():
+        path = ".".join(str(part) for part in error.get("loc") or ())
+        kind = str(error.get("type"))
+        msg = str(error.get("msg") or "")
+        field = path.rsplit(".", 1)[-1]
+        if kind == "extra_forbidden" and field in _EVENT_FORESHADOWING_FIELDS and path.startswith("children."):
+            lines.append(
+                f"{path}: 伏笔字段只能放在根事件上；子事件只接受 type/description/participants "
+                "三个字段（要声明埋设就在根事件提交 isforeshadowing=true 加全部三个伏笔字段）"
+            )
+        elif kind == "extra_forbidden" and field == "children":
+            lines.append(f"{path}: 子事件不得嵌套 children（每棵事件树只有根事件加一层子事件）")
+        elif kind == "enum" and field == "role":
+            lines.append(
+                f"{path}: role 只能取 {_EVENT_ROLE_VALUES_TEXT}；"
+                "发送者等人物功能词是 narrative_role 的取值，不要填进 role"
+            )
+        elif kind == "enum" and field == "narrative_role":
+            lines.append(f"{path}: narrative_role 只能取 {_EVENT_NARRATIVE_ROLE_VALUES_TEXT}")
+        elif kind == "enum" and field == "payoff_likelihood":
+            lines.append(f"{path}: payoff_likelihood 只能取 high 或 medium")
+        elif kind in {"missing", "literal_error"} and field == "type":
+            lines.append(f'{path}: 子事件 type 只能是 "main"（顺延主因链）或 "secondary"（分支）')
+        elif kind == "missing" and field == "finalize_events":
+            lines.append(
+                "finalize_events 必填：true 表示这是本章最后一棵树并完成事件域，"
+                "false 表示之后还要继续提交"
+            )
+        elif kind in {"greater_than_equal", "less_than_equal"} and field == "emotion":
+            lines.append(f"{path}: emotion 是 -2..2 的整数分值（-2 强烈负面 … 2 强烈正面）")
+        elif kind == "too_long" and path.startswith("patches."):
+            lines.append(
+                f'{path}: 每条补丁必须是 [字段路径, 新值] 二元数组，如 ["children.1.2.action", "注视"]'
+            )
+        else:
+            short = _short_pydantic_message(msg)
+            lines.append(f"{path}: {short}" if path else short)
+    return AnnotationInputError("write_event 参数不符合合同: " + "；".join(lines))
+
+
+def _annotate_alias_links(
+    response: dict[str, Any],
+    *,
+    ledger: AnnotationToolLedger,
+    query_service: AnnotationQueryService,
+) -> None:
+    """2026-09-12 用于在 search_graph 回执上标注未决实体别名案例的关联节点
+
+    同一对象的别名在案例确认前是图上两个独立节点，写者只更新其中一个时
+    另一个保持旧值。命中节点旁标注同案例的其他键（编号取自图），更新任一、
+    案例确认后由 resolve_name 塌环合并。展示即授权：被标注的案例按
+    search_pool 同款登记编号与源章。
+    """
+    pool_result = query_service.search_pool(
+        None,
+        hidden_case_ids=ledger.resolved_case_ids,
+        case_type="entity_alias",
+        limit=50,
+    )
+    alias_cases = [item for item in pool_result.results if isinstance(item, CaseSearchResult)]
+    if not alias_cases:
+        return
+    views = [*response["matches"], *response["neighbors"]]
+    annotated = False
+    for view in views:
+        name_key = normalize_message_name(str(view.get("name") or ""))
+        if not name_key:
+            continue
+        links: list[dict[str, Any]] = []
+        for case in alias_cases:
+            if not any(normalize_message_name(key) == name_key for key in case.keys):
+                continue
+            others = [key for key in case.keys if normalize_message_name(key) != name_key]
+            if not others:
+                continue
+            case_number = ledger.register_case_number(case.id)
+            ledger.authorized_chapter_ids.add(case.chunk_id)
+            linked = []
+            for other in others:
+                number = ledger.graph.entity_number(other) if ledger.graph is not None else None
+                linked.append({"n": number, "name": other} if number is not None else {"name": other})
+            links.append({"case_number": case_number, "linked": linked})
+        if links:
+            view["alias_linked"] = links
+            annotated = True
+    if annotated:
+        response["alias_note"] = (
+            "带 alias_linked 的节点存在未决的实体别名案例：更新任一关联节点即可，"
+            "别名案例确认后系统会自动合并。"
+        )
 
 
 def _resolve_write_event_arg(arg: WriteEventArg, *, graph: FactGraph | None) -> WriteEventInput:
@@ -1470,6 +1595,7 @@ def build_search_tools(
                 relation_type=relation_type,
                 limit=50,
             )
+            _annotate_alias_links(response, ledger=ledger, query_service=query_service)
         ledger.graph_queried = True
         ledger.append_search_log(
             {
@@ -1755,25 +1881,52 @@ def build_annotation_tools(
         children.0.participants.0.emotion），系统在缓存的草稿上增量修正后整体校验，
         已正确的部分无需重发；带 patches 时其余字段忽略。无草稿场景（如流截断后）
         必须整体重交完整参数。
+
+        2026-09-12 结构四则（违反即报错自纠）：
+        1. 伏笔四字段 isforeshadowing/setup_kind/expected_payoff_family/payoff_likelihood
+           只能放在根事件上；子事件只有 type/description/participants 三个字段，
+           且子事件不得嵌套 children。
+        2. 每个子事件必须带 type："main" 顺延主因链，"secondary" 挂当时主链尾。
+        3. character 参与者必须同时给 narrative_role/action/emotion；
+           item/organization/location 参与者一律不带这三个字段。
+        4. role 只用 主体/客体/接收者/帮助者/反对者/见证者/地点；narrative_role
+           只用 主体/客体/发送者/接收者/帮助者/反对者/见证者（"发送者"不属于 role）。
+
+        最小合法示例（根事件带伏笔声明 + 一个 main 子事件）：
+        {"description": "伯安夜入藏书房", "finalize_events": false,
+         "participants": [{"entity": 3, "role": "主体", "narrative_role": "主体",
+                           "action": "潜入藏书房翻阅密档", "emotion": 1},
+                          {"entity": 7, "role": "地点"}],
+         "children": [{"type": "main", "description": "伯安取得残页",
+                       "participants": [{"entity": 3, "role": "主体", "narrative_role": "主体",
+                                         "action": "攥走残页撤离", "emotion": 2}]}],
+         "isforeshadowing": true, "setup_kind": "道具",
+         "expected_payoff_family": "残页内容揭晓", "payoff_likelihood": "medium"}
         """
         if patches:
             merged = ledger.merge_event_patches(patches)
-            patch_arg = WriteEventPatchArgs.model_validate(merged)
+            try:
+                patch_arg = WriteEventPatchArgs.model_validate(merged)
+            except ValidationError as exc:
+                raise translate_event_validation_error(exc) from None
             payload = _resolve_write_event_arg(patch_arg, graph=ledger.graph)
             receipt = ledger.write_event_tree(payload, tool_name="write_event")
             receipt["draft_repaired"] = True
             return json.dumps(receipt, ensure_ascii=False)
-        arg = WriteEventArg(
-            description=description,
-            participants=participants or [],
-            children=children or [],
-            isforeshadowing=isforeshadowing,
-            cause_tree_id=cause_tree_id,
-            setup_kind=setup_kind,
-            expected_payoff_family=expected_payoff_family,
-            payoff_likelihood=payoff_likelihood,
-            finalize_events=finalize_events,
-        )
+        try:
+            arg = WriteEventArg(
+                description=description,
+                participants=participants or [],
+                children=children or [],
+                isforeshadowing=isforeshadowing,
+                cause_tree_id=cause_tree_id,
+                setup_kind=setup_kind,
+                expected_payoff_family=expected_payoff_family,
+                payoff_likelihood=payoff_likelihood,
+                finalize_events=finalize_events,
+            )
+        except ValidationError as exc:
+            raise translate_event_validation_error(exc) from None
         payload = _resolve_write_event_arg(arg, graph=ledger.graph)
         return json.dumps(
             ledger.write_event_tree(payload),
@@ -1853,7 +2006,7 @@ def build_annotation_tools(
         raise AnnotationInputError(
             f"resolve_dialogue_case 只能解决含 dialogue_id 的对话类案例，案例 {details.id}"
             f"（{details.target_ref.get('kind') or '未知'}）没有对话目标："
-            "正文对话候选的说话人/语气请用 write_dialogues 提交；"
+            "正文对话候选的说话人/语气属于对话域，按 candidate_index 经对话域回执提交；"
             "疑点案例用 resolve_foreshadowing_case，关系事实用 resolve_fact_case，仅需关闭用 close_case"
         )
 
@@ -1913,8 +2066,8 @@ def build_annotation_tools(
         """2026-08-11 用于通过临时编号把案例解决为对话记录更新（至少提供一个更新字段）
 
         2026-09-10 编号判据：case_number 仅指 search_pool 展示的案例
-        （含 push_case 登记的对话疑点）；正文 DialogueCandidates 无编号，
-        说话人/语气经 write_dialogues 按 candidate_index 提交，两类编号互不通用。
+        （含 push_case 登记的对话疑点）；正文 DialogueCandidates 无案例编号，
+        说话人/语气按 candidate_index 经对话域回执提交，两类编号互不通用。
 
         2026-09-11 speaker 为运行期实体编号（write_entities 回执 numbers /
         search_graph 回执 n）。"""
@@ -2041,7 +2194,7 @@ def build_annotation_tools(
         """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）
 
         2026-08-18：setup_event_id/payoff_event_id 用于伏笔续接/回收时绑定事件。
-        2026-08-30事件 id 由 write_event 回执或 search_event
+        2026-08-30事件 id 由事件域回执或 search_event
         检索获得，须先经授权集合校验。
         2026-09-04未挂伏笔线程的疑点案例被确认为伏笔时，须提供 setup_event_id
         （埋设事件），系统据此就地建立伏笔线程记录确认；判断并非伏笔则用 close_case。"""
@@ -2056,7 +2209,7 @@ def build_annotation_tools(
             if setup_event_id is None:
                 raise AnnotationInputError(
                     "该案例未关联伏笔线程；确认其为伏笔须提供 setup_event_id"
-                    "（埋设事件，由 write_event 回执或 search_event 授权），"
+                    "（埋设事件，由事件域回执或 search_event 授权），"
                     "系统会据此建立伏笔线程；若判断其并非伏笔，请改用 close_case"
                 )
             if setup_summary is None:
@@ -2090,12 +2243,12 @@ def build_annotation_tools(
                 # 随后 search_event 查不到本章事件（树仅覆盖已完成章节）→ 空转至回合上限。
                 hint = (
                     "（这是事件树 id 而非事件节点 id；setup_event_id/payoff_event_id 须传"
-                    " write_event 回执 children[].node_id 或 root_node_id）"
+                    " 事件域回执 children[].node_id 或 root_node_id）"
                     if event_id in ledger.authorized_tree_ids
                     else ""
                 )
                 raise AnnotationAuthorizationError(
-                    f"{field_name} 未由 write_event 回执或 search_event 授权: {event_id}{hint}"
+                    f"{field_name} 未由事件域回执或 search_event 授权: {event_id}{hint}"
                 )
         return _append_resolved(ledger, details, resolved)
 

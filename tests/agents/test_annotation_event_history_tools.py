@@ -152,7 +152,7 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match="setup_event_id 未由 write_event 回执或 search_event 授权: event-x",
+        match="setup_event_id 未由事件域回执或 search_event 授权: event-x",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
@@ -179,7 +179,7 @@ def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match=r"setup_event_id 未由 write_event 回执或 search_event 授权: tree-mixup"
+        match=r"setup_event_id 未由事件域回执或 search_event 授权: tree-mixup"
         r".*事件树 id 而非事件节点 id.*children\[\]\.node_id 或 root_node_id",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(

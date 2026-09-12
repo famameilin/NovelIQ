@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from pydantic import ValidationError
 
 from .errors import AnnotationInvariantError
-from .tools import AnnotationToolLedger
+from .tools import AnnotationToolLedger, translate_event_validation_error
 
 if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
@@ -89,16 +90,29 @@ _MISSING_DOMAIN_TOOL_HINTS = {
 }
 
 
-def _missing_domains_reminder(missing: list[str]) -> str:
+def _missing_domains_reminder(missing: list[str], *, unlocked_domains: frozenset[str]) -> str | None:
     """2026-09-08 用于构造无工具回复重发前的缺域补齐提醒
 
     第13章死锁：模型写完自认为"已完成"的领域后改用纯文本汇报收尾，
     调用层把无工具回复视同调用故障原样重发，模型看不到任何缺域信息、
     必然继续汇报，三次耗尽即章失败。此提醒只注入重发请求（不写入状态
     消息链、不改工具开放与路由），把"还缺什么、怎么补"直接交给模型。
+
+    2026-09-12 只提当前已解锁的缺域：未解锁域的补齐工具不在本轮工具面上，
+    报工具名即越界引用（工具相关内容只在工具暴露时进入上下文）。
     """
-    ordered = [domain for domain, _ in _FORMAL_WRITE_ORDER if domain in missing]
-    ordered += [domain for domain in missing if domain not in ordered]
+    ordered = [
+        domain
+        for domain, _tool_name in _FORMAL_WRITE_ORDER
+        if domain in missing and domain in unlocked_domains
+    ]
+    ordered += [
+        domain
+        for domain in missing
+        if domain not in ordered and domain in unlocked_domains
+    ]
+    if not ordered:
+        return None
     detail = "、".join(f"{domain}（{_MISSING_DOMAIN_TOOL_HINTS[domain]}）" for domain in ordered)
     head = "【缺域提醒】当前 chunk 仍有领域未提交回执，纯文本汇报不算写入："
     tail = "。全部领域回执齐全后 chunk 会自动冻结完成。"
@@ -129,6 +143,22 @@ def _active_write_tool(ledger: AnnotationToolLedger) -> str | None:
     """2026-08-30 用于返回当前开放窗口中的首个待写工具供审计展示"""
     active_write_tools = _active_write_tools(ledger)
     return active_write_tools[0] if active_write_tools else None
+
+
+def _unlocked_write_domains(ledger: AnnotationToolLedger) -> frozenset[str]:
+    """2026-09-12 用于返回补齐工具已出现在本轮工具面上的领域
+
+    缺域提醒只提这些域（见 _missing_domains_reminder）。character_observations
+    随事件域经 write_event 一并写入，跟随 events 解锁。
+    """
+    unlocked = {
+        domain
+        for domain, _tool_name in _FORMAL_WRITE_ORDER
+        if _FORMAL_WRITE_DEPENDENCIES[domain] <= ledger.domain_receipts
+    }
+    if "events" in unlocked:
+        unlocked.add("character_observations")
+    return frozenset(unlocked)
 
 
 def _tools_for_turn(tools: list[Any], ledger: AnnotationToolLedger) -> list[Any]:
@@ -181,7 +211,9 @@ def _build_agent_node(
             missing = [
                 domain for domain in _DOMAIN_NAMES if domain not in ledger.domain_receipts
             ]
-            return _missing_domains_reminder(missing) if missing else None
+            if not missing:
+                return None
+            return _missing_domains_reminder(missing, unlocked_domains=_unlocked_write_domains(ledger))
 
     async def agent_node(state: AnnotationGraphState) -> dict[str, Any]:
         """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
@@ -270,12 +302,22 @@ def _route_after_agent(state: AnnotationGraphState) -> str:
 
 
 async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
-    """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具"""
+    """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具
+
+    2026-09-12 write_event 的参数绑定发生在 langchain 工具 schema 层（先于
+    函数体），该层的 pydantic 失败同样翻译成中文规则报错；函数体层的根级
+    校验由 write_event 自己兜底。
+    """
     name = str(call.get("name"))
     candidate = tool_map.get(name)
     if candidate is None:
         raise ValueError(f"未知 annotation 工具: {name}")
-    result = await candidate.ainvoke(dict(call.get("args") or {}))
+    try:
+        result = await candidate.ainvoke(dict(call.get("args") or {}))
+    except ValidationError as exc:
+        if name == "write_event":
+            raise translate_event_validation_error(exc) from None
+        raise
     return str(result)
 
 

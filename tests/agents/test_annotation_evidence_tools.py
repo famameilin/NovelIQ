@@ -49,10 +49,17 @@ class _QueryService:
         )
 
     def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
-        """2026-08-07 用于验证已解决案例从后续池搜索隐藏"""
-        del case_type, limit
+        """2026-08-07 用于验证已解决案例从后续池搜索隐藏
+
+        2026-09-12 对齐服务合同：case_type 枚举不吃关键词（query 可为 None），
+        只返回该类型案例；search_graph 的别名标注按此通道检索 entity_alias。
+        """
+        del limit
         if "case-1" in hidden_case_ids:
             return SearchResult()
+        if case_type is not None:
+            matches_type = case_type == "all" or case_type == self._case().type
+            return SearchResult(results=[self._case()] if matches_type else [])
         if "线索" in query:
             return SearchResult(
                 results=[
@@ -1919,7 +1926,7 @@ def test_empty_dialogue_payload_freezes_with_coverage_warning() -> None:
 
     assert ledger.phase == "completed"
     assert chunk.dialogues == []
-    assert chunk.coverage_warnings == ["对话覆盖: 检出 2 条系统对话候选但 write_dialogues 未提交任何判定"]
+    assert chunk.coverage_warnings == ["对话覆盖: 检出 2 条系统对话候选但对话域回执未提交任何判定"]
 
 
 def test_partial_dialogue_judgement_freezes_with_defaulted_warning() -> None:
