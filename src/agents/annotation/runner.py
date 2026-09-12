@@ -22,8 +22,8 @@ from .errors import (
 )
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
-from .messages import ReaderMessagePool
 from .prompts import build_chunk_message, build_system_prompt
+from .reader_report import ReaderReport
 from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChunkParagraphInfo
 from .tools import AnnotationQueryService, AnnotationToolLedger, AskReaderDispatcher, build_annotation_tools
 
@@ -129,7 +129,7 @@ async def _run_single_attempt(
     observer: AgentTurnObserver | None = None,
     sub_chunk_index: int = 0,
     paragraph_info: ChunkParagraphInfo | None = None,
-    reader_message_pool: ReaderMessagePool | None = None,
+    reader_reports: list[ReaderReport] | None = None,
     ask_reader_dispatcher: AskReaderDispatcher | None = None,
     initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
 ) -> AgentRunResult:
@@ -137,9 +137,9 @@ async def _run_single_attempt(
 
     2026-08-14 M7：sub_chunk_index 记录子块协议运行序号（§20 审计合同）。
     2026-08-18：paragraph_info 提供段落坐标映射，用于事件锚点校验和证据派生。
-    2026-09-11 章内并行（§7）：reader_message_pool 与 ask_reader_dispatcher 仅供
+    2026-09-12 章内并行（§7）：reader_reports 与 ask_reader_dispatcher 仅供
     两段式写者使用（取值域准入 + 反问通道），单块章不传、行为不变；
-    initial_messages_override 供写者注入 <ReaderMessages> 替代正文直读。
+    initial_messages_override 供写者注入 <ReaderReports> 替代正文直读。
     """
     from src.config import settings
 
@@ -157,7 +157,7 @@ async def _run_single_attempt(
         paragraph_info=paragraph_info,
         # 2026-08-19供因果引用全局偏序校验使用
         current_chapter_order=getattr(query_service, "current_chapter_order", None),
-        reader_message_pool=reader_message_pool,
+        reader_reports=reader_reports,
     )
     tools = build_annotation_tools(query_service, ledger, ask_reader_dispatcher=ask_reader_dispatcher)
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
@@ -236,7 +236,7 @@ async def run_annotation_agent(
     chapter_label: str | None = None,
     sub_chunk_index: int = 0,
     paragraph_info: ChunkParagraphInfo | None = None,
-    reader_message_pool: ReaderMessagePool | None = None,
+    reader_reports: list[ReaderReport] | None = None,
     ask_reader_dispatcher: AskReaderDispatcher | None = None,
     initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
 ) -> AgentRunResult:
@@ -244,7 +244,7 @@ async def run_annotation_agent(
 
     2026-08-14 M7（§20）：sub_chunk_index 标记子块协议运行序号，写入 AgentRunAudit。
     2026-08-18：paragraph_info 提供当前 chunk 段落坐标映射，用于事件锚点校验和证据派生。
-    2026-09-11 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
+    2026-09-12 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
     """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
@@ -299,7 +299,7 @@ async def run_annotation_agent(
             observer=observer,
             sub_chunk_index=sub_chunk_index,
             paragraph_info=paragraph_info,
-            reader_message_pool=reader_message_pool,
+            reader_reports=reader_reports,
             ask_reader_dispatcher=ask_reader_dispatcher,
             initial_messages_override=initial_messages_override,
         )

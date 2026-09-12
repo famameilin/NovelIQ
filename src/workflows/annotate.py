@@ -546,7 +546,7 @@ async def run_annotate(
                 )
                 if len(sub_chunks) >= 2:
                     # 2026-09-11 章内并行（§8/§10）：仅超长章走两段式——N 个只读读者
-                    # 并行上报观察（消息池按块序），单写者盲写正文并独占案例裁决，
+                    # 一次性上报观察（报告按块序），单写者盲写正文并独占案例裁决，
                     # 从结构上消除"两个子块各自解决同一案例"的整章回滚
                     from src.workflows.annotate_helpers.two_phase import run_chapter_two_phase
 

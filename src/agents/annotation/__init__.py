@@ -10,8 +10,8 @@ from .errors import (
     AnnotationRetryableError,
 )
 from .graph import build_annotation_graph, build_reader_graph
-from .messages import ReaderMessagePool
 from .reader import ReaderBlockContext, ReaderRunOutcome, run_reader_agent
+from .reader_report import ReaderReport
 from .runner import run_annotation_agent, validate_bound_annotation
 from .schema import (
     AgentRunResult,
@@ -36,7 +36,7 @@ __all__ = [
     "BoundChapterAnnotation",
     "CompletionResult",
     "ReaderBlockContext",
-    "ReaderMessagePool",
+    "ReaderReport",
     "ReaderRunOutcome",
     "build_annotation_graph",
     "build_annotation_tools",
