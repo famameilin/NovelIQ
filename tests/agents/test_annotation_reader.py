@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from src.agents.annotation.errors import AnnotationRetryableError
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_reader_graph
+from src.agents.annotation.prompts import build_reader_block_message
 from src.agents.annotation.reader import ReaderBlockContext, build_reader_tools, run_reader_agent
 from src.agents.annotation.reader_report import (
     ReaderReport,
@@ -194,9 +195,25 @@ class TestSendMessageReport:
         )
 
         assert any("超出本块候选范围" in warning for warning in receipt["warnings"])
+        assert any("取本块 <DialogueCandidates> 表里展示的编号" in warning for warning in receipt["warnings"])
         item = delivered[0].report["dialogues"][0]
         assert item["candidate_index"] == 99
         assert "chapter_candidate_index" not in item
+
+    def test_candidate_index_block_local_numbering_stated_on_reader_surfaces(self) -> None:
+        """修复五（09-12）：读者面两处入口都明确 candidate_index 是块内 1 基编号"""
+        ledger = _reader_ledger()
+        send_message = _reader_tools(ledger, delivered=[])["send_message"]
+        assert send_message.description is not None
+        assert "块内 1 基" in send_message.description
+
+        message = build_reader_block_message(
+            block_number=1,
+            block_total=2,
+            paragraph_info=ledger.paragraph_info,
+            candidates=ledger.dialogue_candidates,
+        )
+        assert "块内 1 基" in message
 
     @pytest.mark.asyncio
     async def test_dialogue_valid_maps_chapter_candidate_index(self) -> None:
