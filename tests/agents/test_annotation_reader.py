@@ -1,10 +1,11 @@
-"""章内并行两段式：读者消息池、send_message 校验、读者图循环与写者准入测试
+"""章内并行两段式：读者一次性报告、send_message 合同、读者图循环与写者准入测试
 
-对应《章内并行设计-子代理只读顾问与主代理单写者》§5/§7/§16.1：
-- U1 引文不在段落/多处命中 → 报错且消息不入池；
-- U2 dialogue 候选序号越界 → 报错；
-- U6 池序按 (block_index, message_id) 与入池先后无关；
-- 写者取值域准入：write_entities 实体名、resolve/close reason 引文片段。
+对应《章内并行设计-子代理只读顾问与主代理单写者》§5/§7/§16.1，
+2026-09-12 用户裁决修订（一次性上报 + 校验失败不打回 + 消息池删除）：
+- send_message 每轮激活只允许调用一次，载荷按观察类分组复合上报；
+- 格式/枚举/引文核验失败不打回：观察照常送达，问题以 warnings 呈现，
+  未核验引文打 unverified 标记且不得用于写者案例取证；
+- 写者取值域准入：write_entities 实体名 ∈ 报告并集 ∪ 图中已登记名。
 """
 
 from __future__ import annotations
@@ -19,8 +20,13 @@ from langchain_core.messages import AIMessage, SystemMessage
 from src.agents.annotation.errors import AnnotationRetryableError
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_reader_graph
-from src.agents.annotation.messages import ReaderMessagePool
 from src.agents.annotation.reader import ReaderBlockContext, build_reader_tools, run_reader_agent
+from src.agents.annotation.reader_report import (
+    ReaderReport,
+    render_reader_reports,
+    report_case_quotes,
+    report_entity_name_keys,
+)
 from src.agents.annotation.schema import ChunkParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger
 
@@ -79,284 +85,299 @@ def _reader_ledger() -> AnnotationToolLedger:
     )
 
 
-def _reader_tools(ledger: AnnotationToolLedger, *, pool: ReaderMessagePool) -> dict[str, Any]:
+def _reader_tools(ledger: AnnotationToolLedger, *, delivered: list[ReaderReport]) -> dict[str, Any]:
     tools = build_reader_tools(
         _QueryServiceStub(),
         ledger,
-        pool=pool,
+        delivered=delivered,
         block_index=0,
         candidate_number_map={1: 7},
     )
     return {tool.name: tool for tool in tools}
 
 
-def _case_payload() -> dict[str, Any]:
+def _case_item() -> dict[str, Any]:
     return {
         "signal": "坐实",
         "entities": ["白芷", "秦穆"],
         "keywords": ["禁碑"],
         "observation": "秦穆重申禁碑禁令，案例坐实",
+        "evidence": [{"paragraph_id": 102, "quote": "秦穆重申禁碑以南不可进入"}],
     }
 
 
-class TestSendMessageValidation:
+class TestSendMessageReport:
     @pytest.mark.asyncio
-    async def test_valid_case_message_enqueued_with_message_id(self) -> None:
+    async def test_composite_report_delivered_once(self) -> None:
+        """复合载荷一次性送达：各观察组原样进报告，回执 accepted"""
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
         receipt = json.loads(
             await send_message.ainvoke(
                 {
-                    "kind": "case",
-                    "summary": "禁碑伏笔坐实",
-                    "payload": _case_payload(),
-                    "evidence": [{"paragraph_id": 102, "quote": "秦穆重申禁碑以南不可进入"}],
+                    "entities": [{"name": "白芷", "entity_type": "character"}],
+                    "cases": [_case_item()],
+                    "notes": [{"text": "蹄印方向指向下一块开头的禁碑段落"}],
                 }
             )
         )
 
         assert receipt["accepted"] is True
-        assert receipt["message_id"] == 1
-        assert pool.message_count() == 1
-        assert pool.ordered()[0].kind == "case"
+        assert receipt["report_delivered"] is True
+        assert receipt["block"] == 1
+        assert len(delivered) == 1
+        report = delivered[0]
+        assert report.block_index == 0
+        assert [item["name"] for item in report.report["entities"]] == ["白芷"]
+        assert report.report["cases"][0]["signal"] == "坐实"
+        assert report.report["notes"][0]["text"].startswith("蹄印")
 
     @pytest.mark.asyncio
-    async def test_quote_not_in_paragraph_rejected_and_not_enqueued(self) -> None:
-        """U1a：引文不在该段落 → 报错、消息不入池"""
+    async def test_quote_not_in_paragraph_delivered_with_unverified_flag(self) -> None:
+        """U1a 修订：引文不在该段落 → 不打回，观察照常送达并打 unverified 标记"""
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
-        with pytest.raises(Exception, match="不在段落"):
+        bad_evidence = [{"paragraph_id": 102, "quote": "禁碑以北不可进入"}]
+        receipt = json.loads(
+            await send_message.ainvoke({"cases": [{**_case_item(), "evidence": bad_evidence}]})
+        )
+
+        assert receipt["accepted"] is True
+        assert any("引文不在段落" in warning for warning in receipt["warnings"])
+        evidence = delivered[0].report["cases"][0]["evidence"]
+        assert evidence[0]["unverified"] is True
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_quote_marked_unverified(self) -> None:
+        """U1b 修订：引文多处命中 → unverified + 警告"""
+        ledger = _reader_ledger()
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
+
+        ambiguous_evidence = [{"paragraph_id": 103, "quote": "禁碑"}]
+        receipt = json.loads(
+            await send_message.ainvoke({"cases": [{**_case_item(), "evidence": ambiguous_evidence}]})
+        )
+
+        assert any("不唯一" in warning for warning in receipt["warnings"])
+        assert delivered[0].report["cases"][0]["evidence"][0]["unverified"] is True
+
+    @pytest.mark.asyncio
+    async def test_paragraph_id_outside_block_marked_unverified(self) -> None:
+        ledger = _reader_ledger()
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
+
+        outside_evidence = [{"paragraph_id": 999, "quote": "禁碑"}]
+        receipt = json.loads(
+            await send_message.ainvoke({"notes": [{"text": "相邻块线索", "evidence": outside_evidence}]})
+        )
+
+        assert any("不属于本子块" in warning for warning in receipt["warnings"])
+        assert delivered[0].report["notes"][0]["evidence"][0]["unverified"] is True
+
+    @pytest.mark.asyncio
+    async def test_dialogue_candidate_index_out_of_range_warns_and_delivers(self) -> None:
+        """U2 修订：候选序号越界 → 警告照常送达，不做章级折算"""
+        ledger = _reader_ledger()
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
+
+        receipt = json.loads(
             await send_message.ainvoke(
-                {
-                    "kind": "case",
-                    "summary": "编造引文",
-                    "payload": _case_payload(),
-                    "evidence": [{"paragraph_id": 102, "quote": "禁碑以北不可进入"}],
-                }
+                {"dialogues": [{"candidate_index": 99, "verdict": "dialogue", "speaker": "白芷"}]}
             )
-        assert pool.message_count() == 0
+        )
+
+        assert any("超出本块候选范围" in warning for warning in receipt["warnings"])
+        item = delivered[0].report["dialogues"][0]
+        assert item["candidate_index"] == 99
+        assert "chapter_candidate_index" not in item
 
     @pytest.mark.asyncio
-    async def test_ambiguous_quote_rejected(self) -> None:
-        """U1b：引文在段落内多处命中 → 报错要求加长"""
+    async def test_dialogue_valid_maps_chapter_candidate_index(self) -> None:
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
-
-        with pytest.raises(Exception, match="不唯一"):
-            await send_message.ainvoke(
-                {
-                    "kind": "case",
-                    "summary": "短引文歧义",
-                    "payload": _case_payload(),
-                    "evidence": [{"paragraph_id": 103, "quote": "禁碑"}],
-                }
-            )
-        assert pool.message_count() == 0
-
-    @pytest.mark.asyncio
-    async def test_paragraph_id_outside_block_rejected(self) -> None:
-        ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
-
-        with pytest.raises(Exception, match="不属于本子块"):
-            await send_message.ainvoke(
-                {
-                    "kind": "note",
-                    "summary": "越界段落",
-                    "payload": {"text": "相邻块线索"},
-                    "evidence": [{"paragraph_id": 999, "quote": "禁碑"}],
-                }
-            )
-        assert pool.message_count() == 0
-
-    @pytest.mark.asyncio
-    async def test_dialogue_candidate_index_out_of_range_rejected(self) -> None:
-        """U2：候选序号越界 → 报错"""
-        ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
-
-        with pytest.raises(Exception, match="超出本块候选范围"):
-            await send_message.ainvoke(
-                {
-                    "kind": "dialogue",
-                    "summary": "越界候选",
-                    "payload": {"candidate_index": 99, "verdict": "dialogue"},
-                }
-            )
-        assert pool.message_count() == 0
-
-    @pytest.mark.asyncio
-    async def test_dialogue_valid_message_resolves_chapter_candidate_index(self) -> None:
-        ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
         await send_message.ainvoke(
             {
-                "kind": "dialogue",
-                "summary": "白芷赠叶",
-                "payload": {"candidate_index": 1, "verdict": "dialogue", "speaker": "白芷", "tone": "平静"},
-                "evidence": [{"paragraph_id": 101, "quote": "槐叶赠你。"}],
+                "dialogues": [
+                    {
+                        "candidate_index": 1,
+                        "verdict": "dialogue",
+                        "speaker": "白芷",
+                        "tone": "平静",
+                        "evidence": [{"paragraph_id": 101, "quote": "槐叶赠你。"}],
+                    }
+                ]
             }
         )
 
-        message = pool.ordered()[0]
-        assert message.chapter_candidate_index == 7
+        assert delivered[0].report["dialogues"][0]["chapter_candidate_index"] == 7
 
     @pytest.mark.asyncio
-    async def test_sentence_label_emotion_out_of_range_rejected(self) -> None:
+    async def test_sentence_label_emotion_out_of_range_warns_and_delivers(self) -> None:
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
-        with pytest.raises(Exception, match="-2..2"):
+        receipt = json.loads(
             await send_message.ainvoke(
-                {
-                    "kind": "sentence_label",
-                    "summary": "越界情绪分",
-                    "payload": {"sentence": "秦穆重申禁碑以南不可进入。", "emotion": 5},
-                }
+                {"sentence_labels": [{"sentence": "秦穆重申禁碑以南不可进入。", "emotion": 5}]}
             )
-        assert pool.message_count() == 0
+        )
+
+        assert any("-2..2" in warning for warning in receipt["warnings"])
+        assert delivered[0].report["sentence_labels"][0]["emotion"] == 5
 
     @pytest.mark.asyncio
-    async def test_note_without_evidence_accepted(self) -> None:
+    async def test_note_without_evidence_no_warning(self) -> None:
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
+
+        receipt = json.loads(await send_message.ainvoke({"notes": [{"text": "块边界线索"}]}))
+
+        assert receipt["accepted"] is True
+        assert receipt["warnings"] == []
+        assert "evidence" not in delivered[0].report["notes"][0]
+
+    @pytest.mark.asyncio
+    async def test_non_note_without_evidence_warns(self) -> None:
+        ledger = _reader_ledger()
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
+
+        no_evidence_case = {key: value for key, value in _case_item().items() if key != "evidence"}
+        receipt = json.loads(await send_message.ainvoke({"cases": [no_evidence_case]}))
+
+        assert any("缺少 evidence" in warning for warning in receipt["warnings"])
+        assert delivered[0].report["cases"][0]["signal"] == "坐实"
+
+    @pytest.mark.asyncio
+    async def test_entity_extra_field_delivered_as_is_with_warning(self) -> None:
+        """09-12 实测高频违规：entity 多带 state 字段 → 警告但原样送达（写者读得懂）"""
+        ledger = _reader_ledger()
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
         receipt = json.loads(
             await send_message.ainvoke(
                 {
-                    "kind": "note",
-                    "summary": "块边界线索",
-                    "payload": {"text": "蹄印方向指向下一块开头的禁碑段落"},
+                    "entities": [
+                        {
+                            "name": "马骁",
+                            "entity_type": "character",
+                            "state": {"身份": "太学学子"},
+                            "evidence": [{"paragraph_id": 101, "quote": "白芷赠槐叶给顾霜"}],
+                        }
+                    ]
                 }
             )
         )
-        assert receipt["accepted"] is True
-        assert pool.ordered()[0].evidence == []
+
+        assert any("实体载荷不符合实体合同" in warning for warning in receipt["warnings"])
+        item = delivered[0].report["entities"][0]
+        assert item["state"] == {"身份": "太学学子"}
+        assert "unverified" not in item["evidence"][0]
 
     @pytest.mark.asyncio
-    async def test_non_note_kind_without_evidence_rejected(self) -> None:
+    async def test_second_call_rejected(self) -> None:
+        """一次性合同：同一激活内第二次调用被拒绝"""
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        send_message = _reader_tools(ledger, pool=pool)["send_message"]
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
-        with pytest.raises(Exception, match="至少一条 evidence"):
-            await send_message.ainvoke(
-                {"kind": "case", "summary": "无引文", "payload": _case_payload()}
-            )
-        assert pool.message_count() == 0
+        await send_message.ainvoke({"notes": [{"text": "第一条"}]})
+        with pytest.raises(Exception, match="只允许调用一次"):
+            await send_message.ainvoke({"notes": [{"text": "第二条"}]})
+        assert len(delivered) == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_call_delivers_nothing(self) -> None:
+        ledger = _reader_ledger()
+        delivered: list[ReaderReport] = []
+        send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
+
+        receipt = json.loads(await send_message.ainvoke({}))
+
+        assert receipt["accepted"] is True
+        assert receipt["report_delivered"] is False
+        assert delivered == []
 
 
-class TestReaderMessagePool:
-    def test_ordering_is_block_then_arrival_independent_of_completion_order(self) -> None:
-        """U6：池序按 (block_index, message_id)，与读者完成顺序无关"""
-        pool = ReaderMessagePool()
-        pool.append(block_index=1, kind="note", summary="块2先完成", payload={"text": "b2"}, evidence=[])
-        pool.append(block_index=0, kind="note", summary="块1后完成", payload={"text": "b1a"}, evidence=[])
-        pool.append(block_index=0, kind="note", summary="块1第二条", payload={"text": "b1b"}, evidence=[])
+class TestReaderReportHelpers:
+    def test_entity_name_keys_collects_all_groups(self) -> None:
+        report = ReaderReport(
+            block_index=0,
+            report={
+                "entities": [{"name": "白芷", "entity_type": "character"}],
+                "relations": [{"from_entity": "白芷", "to_entity": "顾霜", "relation_type": "赠予"}],
+                "event_trees": [
+                    {
+                        "description": "赠叶",
+                        "participants": [{"entity": "顾霜", "role": "主体"}],
+                        "children": [
+                            {
+                                "type": "main",
+                                "description": "收下",
+                                "participants": [{"entity": "秦穆", "role": "客体"}],
+                            }
+                        ],
+                    }
+                ],
+                "dialogues": [{"candidate_index": 1, "verdict": "dialogue", "speaker": "秦穆"}],
+                "cases": [{"signal": "坐实", "entities": ["禁碑"], "observation": "x"}],
+            },
+        )
 
-        ordered = pool.ordered()
-        assert [(message.block_index, message.message_id) for message in ordered] == [
-            (0, 2),
-            (0, 3),
-            (1, 1),
+        keys = report_entity_name_keys([report])
+
+        assert keys == {"白芷", "顾霜", "秦穆", "禁碑"}
+
+    def test_case_quotes_excludes_unverified(self) -> None:
+        report = ReaderReport(
+            block_index=0,
+            report={
+                "cases": [
+                    {
+                        "signal": "坐实",
+                        "observation": "x",
+                        "evidence": [
+                            {"paragraph_id": 102, "quote": "秦穆重申禁碑以南不可进入"},
+                            {"paragraph_id": 102, "quote": "编造的引文", "unverified": True},
+                        ],
+                    }
+                ],
+                "notes": [{"text": "n", "evidence": [{"paragraph_id": 102, "quote": "非案例引文"}]}],
+            },
+        )
+
+        assert report_case_quotes([report]) == ("秦穆重申禁碑以南不可进入",)
+
+    def test_writer_view_renders_reports_in_block_order_with_placeholder(self) -> None:
+        reports: list[ReaderReport | None] = [
+            ReaderReport(
+                block_index=1,
+                report={"dialogues": [{"candidate_index": 1, "verdict": "dialogue", "chapter_candidate_index": 7}]},
+                warnings=["dialogues[0] 某警告"],
+            ),
+            None,
+            ReaderReport(block_index=0, report={"cases": [_case_item()]}),
         ]
 
-    def test_discard_block_removes_only_that_block(self) -> None:
-        pool = ReaderMessagePool()
-        pool.append(block_index=0, kind="note", summary="a", payload={"text": "a"}, evidence=[])
-        pool.append(block_index=1, kind="note", summary="b", payload={"text": "b"}, evidence=[])
+        view = render_reader_reports(reports, block_total=3)
 
-        pool.discard_block(0)
-
-        assert pool.message_count() == 1
-        assert pool.ordered()[0].block_index == 1
-
-    def test_entity_name_keys_collects_all_kinds(self) -> None:
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="entity",
-            summary="实体",
-            payload={"name": "白芷", "entity_type": "character"},
-            evidence=[{"paragraph_id": 101, "quote": "白芷"}],
-        )
-        pool.append(
-            block_index=0,
-            kind="event_tree",
-            summary="事件",
-            payload={
-                "description": "赠叶",
-                "participants": [{"entity": "顾霜", "role": "主体"}],
-                "children": [
-                    {"type": "main", "description": "收下", "participants": [{"entity": "秦穆", "role": "客体"}]}
-                ],
-            },
-            evidence=[{"paragraph_id": 101, "quote": "白芷"}],
-        )
-        pool.append(
-            block_index=0,
-            kind="case",
-            summary="案例",
-            payload={"signal": "坐实", "entities": ["禁碑"], "observation": "x"},
-            evidence=[{"paragraph_id": 102, "quote": "禁碑"}],
-        )
-
-        assert pool.entity_name_keys() == {"白芷", "顾霜", "秦穆", "禁碑"}
-
-    def test_case_quotes_returns_normalized_evidence_quotes(self) -> None:
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="case",
-            summary="案例",
-            payload=_case_payload(),
-            evidence=[{"paragraph_id": 102, "quote": "秦穆重申禁碑以南不可进入"}],
-        )
-        pool.append(
-            block_index=0,
-            kind="note",
-            summary="非案例",
-            payload={"text": "n"},
-            evidence=[],
-        )
-
-        assert pool.case_quotes() == ("秦穆重申禁碑以南不可进入",)
-
-    def test_writer_view_renders_messages_in_block_order(self) -> None:
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="case",
-            summary="案例一",
-            payload=_case_payload(),
-            evidence=[{"paragraph_id": 102, "quote": "禁碑以南不可进入"}],
-        )
-        pool.append(
-            block_index=1,
-            kind="dialogue",
-            summary="对话判定",
-            payload={"candidate_index": 1, "verdict": "dialogue"},
-            evidence=[],
-            chapter_candidate_index=7,
-        )
-
-        view = pool.writer_view()
-
-        assert '<message id="1" block="1" kind="case">' in view
-        assert '<message id="2" block="2" kind="dialogue">' in view
+        assert view.index('block="1"') < view.index('block="2"') < view.index('block="3"')
+        assert "（本块读者未上报观察）" in view
         assert "chapter_candidate_index" in view
-        assert view.index('kind="case"') < view.index('kind="dialogue"')
+        assert "format_warnings" in view
+        assert "秦穆重申禁碑以南不可进入" in view
 
 
 class _SequenceLLM:
@@ -382,11 +403,11 @@ def _tool_call(name: str, args: dict[str, Any], call_id: str) -> dict[str, Any]:
 
 class TestReaderGraphLoop:
     @pytest.mark.asyncio
-    async def test_reader_completes_on_no_tool_response_and_enqueues_messages(self) -> None:
-        """读者无工具回复=上报完毕（require_tool_call=False 语义），消息全部入池"""
+    async def test_reader_completes_on_no_tool_response_after_single_report(self) -> None:
+        """读者无工具回复=上报完毕（require_tool_call=False 语义），一次性报告随产出返回"""
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        tools = _reader_tools(ledger, pool=pool)
+        delivered: list[ReaderReport] = []
+        tools = _reader_tools(ledger, delivered=delivered)
         llm = _SequenceLLM(
             [
                 AIMessage(
@@ -395,18 +416,11 @@ class TestReaderGraphLoop:
                         _tool_call(
                             "send_message",
                             {
-                                "kind": "case",
-                                "summary": "案例坐实",
-                                "payload": _case_payload(),
-                                "evidence": [{"paragraph_id": 102, "quote": "秦穆重申禁碑以南不可进入"}],
+                                "cases": [_case_item()],
+                                "notes": [{"text": "蹄印指向下一块"}],
                             },
                             "call-1",
-                        ),
-                        _tool_call(
-                            "send_message",
-                            {"kind": "note", "summary": "边界线索", "payload": {"text": "蹄印指向下一块"}},
-                            "call-2",
-                        ),
+                        )
                     ],
                 ),
                 AIMessage(content="本块观察已全部上报完毕。"),
@@ -419,26 +433,20 @@ class TestReaderGraphLoop:
         )
 
         assert result_state["error"] is None
-        assert pool.message_count() == 2
-        assert [message.kind for message in pool.ordered()] == ["case", "note"]
+        assert len(delivered) == 1
+        assert list(delivered[0].report.keys()) == ["cases", "notes"]
         assert llm.calls == 2
 
     @pytest.mark.asyncio
     async def test_reader_reports_error_when_iteration_cap_reached(self) -> None:
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        tools = _reader_tools(ledger, pool=pool)
+        delivered: list[ReaderReport] = []
+        tools = _reader_tools(ledger, delivered=delivered)
         llm = _SequenceLLM(
             [
                 AIMessage(
                     content="",
-                    tool_calls=[
-                        _tool_call(
-                            "send_message",
-                            {"kind": "note", "summary": "s", "payload": {"text": "t"}},
-                            "call-1",
-                        )
-                    ],
+                    tool_calls=[_tool_call("send_message", {"notes": [{"text": "t"}]}, "call-1")],
                 )
             ]
             * 1
@@ -455,20 +463,17 @@ class TestReaderGraphLoop:
 
 class TestWriterAdmission:
     @pytest.mark.asyncio
-    async def test_writer_rejects_entity_names_outside_message_pool(self) -> None:
-        """U4：写者写消息池外的实体名 → 拒绝"""
+    async def test_writer_rejects_entity_names_outside_reports(self) -> None:
+        """U4：写者写读者报告外的实体名 → 拒绝"""
         from src.agents.annotation.schema import EntityDirectoryInput, EntityInput
 
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="entity",
-            summary="实体",
-            payload={"name": "白芷", "entity_type": "character"},
-            evidence=[{"paragraph_id": 101, "quote": "白芷"}],
-        )
-        ledger.reader_message_pool = pool
+        ledger.reader_reports = [
+            ReaderReport(
+                block_index=0,
+                report={"entities": [{"name": "白芷", "entity_type": "character"}]},
+            )
+        ]
         payload = EntityDirectoryInput(
             entities=[
                 EntityInput(name="白芷", entity_type="character"),
@@ -480,19 +485,16 @@ class TestWriterAdmission:
             ledger.write_domain("entities", payload, tool_name="write_entities")
 
     @pytest.mark.asyncio
-    async def test_writer_accepts_entity_names_from_pool_or_graph(self) -> None:
+    async def test_writer_accepts_entity_names_from_reports_or_graph(self) -> None:
         from src.agents.annotation.schema import EntityDirectoryInput, EntityInput
 
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="entity",
-            summary="实体",
-            payload={"name": "白芷", "entity_type": "character"},
-            evidence=[{"paragraph_id": 101, "quote": "白芷"}],
-        )
-        ledger.reader_message_pool = pool
+        ledger.reader_reports = [
+            ReaderReport(
+                block_index=0,
+                report={"entities": [{"name": "白芷", "entity_type": "character"}]},
+            )
+        ]
         payload = EntityDirectoryInput(entities=[EntityInput(name="白芷", entity_type="character")])
 
         ledger.write_domain("entities", payload, tool_name="write_entities")
@@ -500,17 +502,22 @@ class TestWriterAdmission:
         assert "entities" in ledger.domain_receipts
 
     @pytest.mark.asyncio
-    async def test_case_reason_requires_quote_fragment_from_case_messages(self) -> None:
+    async def test_case_reason_requires_verified_quote_fragment_from_reports(self) -> None:
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="case",
-            summary="案例",
-            payload=_case_payload(),
-            evidence=[{"paragraph_id": 101, "quote": "白芷赠槐叶给顾霜，暗示旧约仍在"}],
-        )
-        ledger.reader_message_pool = pool
+        ledger.reader_reports = [
+            ReaderReport(
+                block_index=0,
+                report={
+                    "cases": [
+                        {
+                            "signal": "坐实",
+                            "observation": "x",
+                            "evidence": [{"paragraph_id": 101, "quote": "白芷赠槐叶给顾霜，暗示旧约仍在"}],
+                        }
+                    ]
+                },
+            )
+        ]
         ledger.case_number_registry[3] = "case-1"
 
         # 完整引文 → 通过
@@ -522,19 +529,36 @@ class TestWriterAdmission:
             ledger.admit_case_reason("我觉得这个案例可以关闭了", tool_name="close_case")
 
     @pytest.mark.asyncio
-    async def test_case_reason_rejected_when_pool_has_no_case_messages(self) -> None:
+    async def test_case_reason_rejects_unverified_quotes(self) -> None:
+        """09-12 裁决：unverified 引文不得支撑案例裁决"""
         ledger = _reader_ledger()
-        pool = ReaderMessagePool()
-        pool.append(
-            block_index=0,
-            kind="note",
-            summary="n",
-            payload={"text": "t"},
-            evidence=[],
-        )
-        ledger.reader_message_pool = pool
+        ledger.reader_reports = [
+            ReaderReport(
+                block_index=0,
+                report={
+                    "cases": [
+                        {
+                            "signal": "坐实",
+                            "observation": "x",
+                            "evidence": [
+                                {"paragraph_id": 101, "quote": "白芷赠槐叶给顾霜，暗示旧约仍在", "unverified": True}
+                            ],
+                        }
+                    ]
+                },
+            )
+        ]
+        ledger.case_number_registry[3] = "case-1"
 
-        with pytest.raises(ValueError, match="未上报任何案例消息"):
+        with pytest.raises(ValueError, match="已核验引文"):
+            ledger.admit_case_reason("原文：白芷赠槐叶给顾霜，暗示旧约仍在，故坐实", tool_name="close_case")
+
+    @pytest.mark.asyncio
+    async def test_case_reason_rejected_when_reports_have_no_cases(self) -> None:
+        ledger = _reader_ledger()
+        ledger.reader_reports = [ReaderReport(block_index=0, report={"notes": [{"text": "t"}]})]
+
+        with pytest.raises(ValueError, match="已核验引文"):
             ledger.admit_case_reason("随便一个理由", tool_name="close_case")
 
 
@@ -578,14 +602,12 @@ class TestRunReaderAgent:
             ),
             candidate_number_map={1: 7},
         )
-        pool = ReaderMessagePool()
 
         with pytest.raises(AnnotationRetryableError):
             await run_reader_agent(
                 run_id="run-1",
                 chapter_id=20,
                 context=context,
-                pool=pool,
                 query_service_factory=lambda session: session,
                 session_factory=lambda: _SessionStub(),
                 llm=_ExplodingLLM(),
@@ -601,3 +623,4 @@ class TestRunReaderAgent:
         assert '<paragraph id="101">' in first_human
         assert "CurrentSubBlock" in first_human
         assert "白芷赠槐叶给顾霜" in first_human
+        assert "一次性上报" in first_human

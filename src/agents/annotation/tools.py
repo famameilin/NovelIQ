@@ -25,7 +25,7 @@ from .errors import (
     AnnotationProtocolError,
 )
 from .fact_graph import FactGraph
-from .messages import ReaderMessagePool, normalize_message_name
+from .reader_report import ReaderReport, normalize_message_name, report_case_quotes, report_entity_name_keys
 from .schema import (
     RELATION_CHANGE_KIND_LABELS,
     RELATION_DEFINITIONS,
@@ -208,9 +208,9 @@ class AnnotationToolLedger:
     # 2026-09-11 write_event 草稿补丁：校验失败的整份提交缓存于此供 patches 增量修正；
     # 刻意不进 snapshot/restore——补丁合并结果跨单次调用失败保留，随 chunk 生命周期消亡
     pending_event_draft: dict[str, Any] | None = None
-    # 2026-09-11 章内并行两段式（§7）：写者的读者消息池，用于写入取值域准入。
-    # 消息是观察不是写入，刻意不进 snapshot/restore；单块章与读者为 None，行为不变
-    reader_message_pool: ReaderMessagePool | None = None
+    # 2026-09-12 章内并行两段式（§7）：写者的读者一次性报告，用于写入取值域准入。
+    # 报告是观察不是写入，刻意不进 snapshot/restore；单块章与读者为 None，行为不变
+    reader_reports: list[ReaderReport] | None = None
 
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一 chunk 的对话候选"""
@@ -634,7 +634,7 @@ class AnnotationToolLedger:
         if domain not in _DIRECT_WRITE_DOMAIN_NAMES:
             raise AnnotationInputError(f"未知标注领域: {domain}")
         if domain == "entities":
-            # 2026-09-11 两段式写者准入（§7）：消息池外的实体名拒绝写入
+            # 2026-09-12 两段式写者准入（§7）：读者报告外的实体名拒绝写入
             self.admit_entity_directory(list(payload.entities))
 
         # 2026-08-20 内联端点验证与领域绑定逻辑，扁平化调用链
@@ -1190,38 +1190,39 @@ class AnnotationToolLedger:
     # 章内并行两段式：写者取值域准入（设计文档 §7，防写者发明）
 
     def admit_entity_directory(self, entities: list[EntityInput]) -> None:
-        """2026-09-11 用于校验 write_entities 实体名 ∈ 消息池并集 ∪ 图中已登记名
+        """2026-09-12 用于校验 write_entities 实体名 ∈ 读者报告并集 ∪ 图中已登记名
 
-        写者看不到正文，实体名的唯一合法来源是读者消息（entity/event_tree/
-        relation/dialogue/case 各 kind）或历史已登记实体；消息池外的名字一律
-        拒绝并给出可自纠报错。单块章（reader_message_pool=None）不受限。
+        写者看不到正文，实体名的唯一合法来源是读者报告（entities/event_trees/
+        relations/dialogues/cases 各组）或历史已登记实体；报告外的名字一律
+        拒绝并给出可自纠报错。单块章（reader_reports=None）不受限。
         """
-        if self.reader_message_pool is None:
+        if self.reader_reports is None:
             return
-        pool_keys = self.reader_message_pool.entity_name_keys()
+        report_keys = report_entity_name_keys(self.reader_reports)
         invented = [
             entity.name
             for entity in entities
-            if normalize_message_name(entity.name) not in pool_keys
+            if normalize_message_name(entity.name) not in report_keys
             and not (self.graph is not None and normalize_message_name(entity.name) in self.graph.entity_types)
         ]
         if invented:
             raise ValueError(
-                "write_entities 准入失败，以下实体名未出现在任何读者消息、也未在图中登记: "
+                "write_entities 准入失败，以下实体名未出现在任何读者上报、也未在图中登记: "
                 + "、".join(invented)
-                + "（写者只能写读者消息已陈述的内容：请原样使用消息中的实体名，"
+                + "（写者只能写读者报告已陈述的内容：请原样使用报告中的实体名，"
                 "或在读者上报过的实体名范围内提交）"
             )
 
     def admit_case_reason(self, reason: str, *, tool_name: str) -> None:
-        """2026-09-11 用于校验案例裁决 reason 含至少一条案例消息引文片段（§7）
+        """2026-09-12 用于校验案例裁决 reason 含至少一条案例报告引文片段（§7）
 
-        reason 必须用消息引文拼装：包含任一 case 消息引文的原文或其 ≥12 字连续
-        片段即通过；读者未上报任何案例消息时禁止一切裁决。单块章不受限。
+        reason 必须用读者报告引文拼装：包含任一已核验案例引文的原文或其
+        ≥12 字连续片段即通过；unverified 引文不得支撑裁决（09-12 裁决，
+        防幻觉硬门槛）。读者未上报任何案例观察时禁止一切裁决。单块章不受限。
         """
-        if self.reader_message_pool is None:
+        if self.reader_reports is None:
             return
-        quotes = self.reader_message_pool.case_quotes()
+        quotes = report_case_quotes(self.reader_reports)
         normalized_reason = unicodedata.normalize("NFC", reason)
         min_fragment = 12
         for quote in quotes:
@@ -1232,12 +1233,13 @@ class AnnotationToolLedger:
                     return
         if quotes:
             raise ValueError(
-                f"{tool_name}.reason 准入失败：案例裁决理由必须包含读者案例消息的引文片段"
+                f"{tool_name}.reason 准入失败：案例裁决理由必须包含读者案例观察的已核验引文片段"
                 f"（原文或其 ≥{min_fragment} 字连续片段），不得自行转写。"
-                "请从 <ReaderMessages> 的 case 消息 evidence 中摘录原文"
+                "请从 <ReaderReports> 的 cases 观察 evidence 中摘录原文"
             )
         raise ValueError(
-            f"{tool_name} 准入失败：读者未上报任何案例消息，写者不得凭空裁决案例；"
+            f"{tool_name} 准入失败：读者未上报任何含已核验引文的案例观察，写者不得凭空裁决案例"
+            "（引文未通过核验的观察不能支撑裁决）；"
             "若正文确有案例线索，请先用 ask_reader 向对应块读者追问"
         )
 
@@ -1434,7 +1436,7 @@ class AskReaderDispatcher(Protocol):
     """2026-09-11 章内并行两段式：写者 ask_reader 的后端（工作流层实现，含轮数上限与读者续跑）"""
 
     async def ask(self, block: int, question: str) -> str:
-        """2026-09-11 用于向指定子块（1 基）读者追问并同步取回新观察消息摘要"""
+        """2026-09-12 用于向指定子块（1 基）读者追问并同步取回其一次性补查报告"""
 
 
 def build_search_tools(
@@ -1796,10 +1798,10 @@ def build_annotation_tools(
 
         @tool
         async def ask_reader(block: int, question: str) -> str:
-            """2026-09-11 用于向指定子块读者追问并同步取回新观察（§7 反问通道）
+            """2026-09-12 用于向指定子块读者追问并同步取回其补查报告（§7 反问通道）
 
-            block 取 <message> 标签的 block 编号（1 基）。追问会把对应读者带着
-            完整原文上下文重新唤起，新观察经 send_message 入池并随本回执返回；
+            block 取 <ReaderReport> 标签的 block 编号（1 基）。追问会把对应读者
+            带着完整原文上下文重新唤起，其补查的一次性报告随本回执直接返回；
             轮数上限由设置 writer_max_ask_rounds 控制（0 不限）。
             没有想清楚不要问，同一疑问不要重复问。"""
             normalized_question = unicodedata.normalize("NFC", question).strip()
