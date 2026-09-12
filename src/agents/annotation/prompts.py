@@ -135,6 +135,8 @@ def build_reader_block_message(
         "NFC 归一后必须唯一命中），notes 可省略；\n"
         "一律用名字，绝不把案例编号或实体编号写进上报（编号是会话局部句柄，"
         "写者拿不到也不认）；\n"
+        "dialogues 的 candidate_index 用本块 <DialogueCandidates> 表里展示的编号"
+        "（块内 1 基，不是全章序号）；\n"
         "案例相关只陈述文本侧事实（signal: 新疑点/埋设/加强/坐实/回收/证伪），"
         "可用 search_pool 匹配并原样带上案例描述（matched_case），但不裁决；\n"
         "句标签不限条数：把本块内值得打标的句子全部上报，最终提交哪几句由写者决定；\n"

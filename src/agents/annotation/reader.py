@@ -142,7 +142,10 @@ def _check_payload(group: str, item: dict[str, Any], *, ledger: AnnotationToolLe
             or not isinstance(candidate_index, int)
             or not 1 <= candidate_index <= candidate_count
         ):
-            raise ValueError(f"dialogues.candidate_index 超出本块候选范围: expected 1..{candidate_count}")
+            raise ValueError(
+                f"dialogues.candidate_index 超出本块候选范围: expected 1..{candidate_count}"
+                "（candidate_index 取本块 <DialogueCandidates> 表里展示的编号）"
+            )
         try:
             DialogueVerdict(str(item.get("verdict")))
         except ValueError:
@@ -215,6 +218,8 @@ def _build_send_message_tool(
         - 每条观察必须自带 evidence=[{paragraph_id, quote}]（本块段落内的逐字
           摘录，NFC 归一后必须唯一命中），notes 可省略；
         - 一律用名字，绝不把案例编号/实体编号写进上报；
+        - dialogues 的 candidate_index 必须取本块 <DialogueCandidates> 表里展示的
+          编号（块内 1 基，不是全章序号）；
         - 案例只陈述文本侧事实（signal: 新疑点/埋设/加强/坐实/回收/证伪）不裁决；
         - 句标签不限条数，本块值得打标的句子全部上报，选哪几句由写者决定；
         - 格式或枚举不符也照常送达（回执 warnings 指出问题），不需要重发。
