@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from src.agents.annotation.errors import AnnotationInputError
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import ChunkParagraphInfo, SearchResult, WriteEventPatchArgs
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
@@ -208,6 +209,8 @@ def test_write_event_rejects_invalid_children_without_mutating_ledger() -> None:
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
 
+    # 直连 .invoke 走 langchain schema 层（args_schema=WriteEventPatchArgs），保持裸
+    # ValidationError；生产路径经 graph._invoke_tool 时才翻译成中文规则报错（修复二）
     with pytest.raises(ValidationError, match="children"):
         _call(
             tools,
@@ -349,7 +352,8 @@ def test_write_event_patch_failure_keeps_merged_draft_as_new_base() -> None:
     ledger.stash_event_draft(bad_args)
 
     # 第一次补丁修正实体编号但情绪仍填语气词 → 校验报错且报错路径指向分值字段
-    with pytest.raises(ValidationError, match="emotion 不接受 愤怒"):
+    # （2026-09-12 修复二：write_event 边界的 pydantic 失败统一翻译成中文规则报错）
+    with pytest.raises(AnnotationInputError, match="emotion 不接受 愤怒"):
         _call(tools, "write_event", {"patches": [["participants.0.entity", 1]]})
 
     # 合并结果已回写草稿：第二次补丁只需补情绪分值
