@@ -61,7 +61,6 @@ def _annotation(
                 character_observations=[],
                 dialogues=dialogues,
                 events=[],
-                foreshadowings=[],
             )
         ],
     )

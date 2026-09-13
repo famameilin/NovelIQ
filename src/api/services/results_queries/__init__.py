@@ -14,7 +14,7 @@ from .common import (
     _parse_json_field,
 )
 from .diagnosis import _fetch_diagnosis
-from .foreshadowing_threads import _fetch_foreshadowing_threads
+from .foreshadowing_trees import _fetch_foreshadowing_trees
 from .graph import (
     GRAPH_CHANGE_LIMIT,
     _fetch_character_relations,
@@ -40,7 +40,7 @@ __all__ = [
     "_calculate_narrative_focus_scores",
     "_fetch_topics",
     "_fetch_diagnosis",
-    "_fetch_foreshadowing_threads",
+    "_fetch_foreshadowing_trees",
     "_fetch_graph_changes_page",
     "_fetch_graph_snapshot",
     "_normalize_arc_scores",

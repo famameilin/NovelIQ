@@ -18,7 +18,6 @@ from src.agents.annotation.schema import (
     BoundDialogue,
     BoundEntity,
     BoundEvent,
-    BoundForeshadowing,
     BoundRelation,
     ChunkMetricsInput,
     EntityType,
@@ -367,30 +366,27 @@ def persist_chapter_annotation(
                     name=p,
                     entity_type="character",
                 )
-            bound_events.append(
-                make_bound_event(
-                    description=event_spec["description"],
-                    participants=event_participants,
-                    causal_event_refs=event_spec.get("causal_event_refs"),
-                    tree_id=event_spec.get("tree_id"),
-                    node_id=event_spec.get("node_id"),
-                    parent_node_id=event_spec.get("parent_node_id"),
-                    cause_role=event_spec.get("cause_role", "root"),
-                )
+            bound_event = make_bound_event(
+                description=event_spec["description"],
+                participants=event_participants,
+                causal_event_refs=event_spec.get("causal_event_refs"),
+                tree_id=event_spec.get("tree_id"),
+                node_id=event_spec.get("node_id"),
+                parent_node_id=event_spec.get("parent_node_id"),
+                cause_role=event_spec.get("cause_role", "root"),
             )
-        # 构建伏笔列表（setup_node_id 直接指向本章事件节点 id；setup_event_index 为 1 基序号）
-        bound_foreshadowings: list[BoundForeshadowing] = []
+            # 2026-09-13 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
+            if event_spec.get("isforeshadowing"):
+                bound_event.is_foreshadow_setup = True
+                bound_event.expected_payoff_family = event_spec.get("expected_payoff_family", "身份揭露")
+                bound_event.payoff_likelihood = event_spec.get("payoff_likelihood", "medium")
+            bound_events.append(bound_event)
+        # 2026-09-13 伏笔即事件树：setup_event_index（1 基）指向的章内事件即伏笔树根
         for fs_spec in foreshadowings or []:
-            bound_foreshadowings.append(
-                BoundForeshadowing(
-                    description=fs_spec["description"],
-                    confidence=fs_spec.get("confidence", "high"),
-                    setup_node_id=bound_events[int(fs_spec["setup_event_index"]) - 1].node_id,
-                    setup_kind=fs_spec.get("setup_kind", "悬念"),
-                    expected_payoff_family=fs_spec.get("expected_payoff_family", "身份揭露"),
-                    payoff_likelihood=fs_spec.get("payoff_likelihood", "medium"),
-                )
-            )
+            root_event = bound_events[int(fs_spec["setup_event_index"]) - 1]
+            root_event.is_foreshadow_setup = True
+            root_event.expected_payoff_family = fs_spec.get("expected_payoff_family", "身份揭露")
+            root_event.payoff_likelihood = fs_spec.get("payoff_likelihood", "medium")
         chunks.append(
             BoundChunkAnnotation(
                 chunk_id=chunk_id,
@@ -404,7 +400,6 @@ def persist_chapter_annotation(
                 character_observations=observations_by_chunk[chunk_id],
                 dialogues=dialogues_by_chunk[chunk_id],
                 events=bound_events,
-                foreshadowings=bound_foreshadowings,
             )
         )
     # 2026-09-04 单一写面：实体/关系不再是 chunk 字段，改为派生 FactGraph 操作日志

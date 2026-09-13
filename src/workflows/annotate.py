@@ -148,8 +148,8 @@ def _merge_sub_chunk_annotations(
     2026-08-15：第 2+ 子块的对话 start/end 是子块相对坐标，合并落库前按
     sub_chunk_offsets 加回子块在章文本内的起始偏移，与整章运行口径一致。
 
-    2026-08-22事件 node_id/tree_id 与伏笔 setup_node_id 均为服务端
-    一次性 uuid，合并只平移文本坐标，不再重排事件序号。
+    2026-08-22事件 node_id/tree_id 均为服务端一次性 uuid，合并只平移文本
+    坐标，不再重排事件序号。2026-09-13 伏笔即事件树：无独立伏笔载荷。
     """
     if not annotations:
         raise ValueError("子块标注列表不能为空")
@@ -160,14 +160,13 @@ def _merge_sub_chunk_annotations(
             raise ValueError("子块标注必须恰好包含一个 chunk")
     first_chunk = annotations[0].chunks[0]
     merged_events: list[BoundEvent] = []
-    merged_foreshadowings = []
     for annotation in annotations:
         sub_chunk = annotation.chunks[0]
         # 2026-08-22 重构：事件不再携带锚点/字符区间/证据，章级证据由
-        # 持久化层按整章统一盖章，合并无需任何重排或坐标平移
+        # 持久化层按整章统一盖章，合并无需任何重排或坐标平移。
+        # 2026-09-13 伏笔即事件树：伏笔根是带 is_foreshadow_setup 的普通事件，
+        # 随 events 拼接即完成伏笔合并，无独立伏笔载荷。
         merged_events.extend(sub_chunk.events)
-        for foreshadowing in sub_chunk.foreshadowings:
-            merged_foreshadowings.append(foreshadowing.model_copy())
     return BoundChapterAnnotation(
         chapter_summary="\n".join(annotation.chapter_summary for annotation in annotations),
         chunks=[
@@ -183,7 +182,6 @@ def _merge_sub_chunk_annotations(
                     for item in annotation.chunks[0].dialogues
                 ],
                 events=merged_events,
-                foreshadowings=merged_foreshadowings,
                 # 2026-09-07 句级监督：子块句标签按子块偏移平移回章文本坐标
                 # （首块偏移 0 不变；句子文本与情绪不变，仅 start/end 平移）
                 sentence_labels=[

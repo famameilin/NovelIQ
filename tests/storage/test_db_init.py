@@ -31,7 +31,8 @@ def test_continuity_schema_uses_direct_graph_persistence_contract() -> None:
         "resolution",
         "target_fact_id",
         "target_dialogue_id",
-        "target_setup_id",
+        "target_root_event_id",
+        "target_event_id",
     } <= set(mapping_columns.keys())
     assert {"type", "chapter_id", "target_key", "target_ref"} <= set(case_columns.keys())
     assert {

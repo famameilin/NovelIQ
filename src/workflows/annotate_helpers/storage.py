@@ -23,7 +23,6 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     DialogueRecord,
-    ForeshadowingThread,
     GraphFact,
     Paragraph,
 )
@@ -33,7 +32,6 @@ from src.storage.repositories import (
     CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
     DialogueRecordRepository,
-    ForeshadowingRepository,
 )
 from src.storage.repositories.annotation.continuity import completion_case_view
 from src.storage.repositories.graph import persist_completion_graph
@@ -111,10 +109,9 @@ def load_completion_result(
             type=row.case_type,
             reason=str(row.resolution.get("reason") or ""),
             target_dialogue_id=row.target_dialogue_id,
-            target_setup_id=row.target_setup_id,
+            target_root_event_id=row.target_root_event_id,
+            target_event_id=row.target_event_id,
             target_fact_id=row.target_fact_id,
-            target_setup_event_id=row.target_setup_event_id,
-            target_payoff_event_id=row.target_payoff_event_id,
         )
         for row in mapping_rows
     ]
@@ -160,28 +157,6 @@ def _persist_dialogue_records(
             dialogues=chunk.dialogues,
             event_anchors=event_anchors,
         )
-
-
-def _persist_foreshadowing(
-    session: Session,
-    *,
-    result: AgentRunResult,
-) -> None:
-    """2026-08-07 用于把最终系统绑定伏笔投影到线程与命中表
-
-    2026-08-18：伏笔按 setup_event_id 去重——同一 setup 事件只建一条线程。
-    2026-08-22setup_event_id 直接取服务端生成的 setup_node_id，
-    不再按序号重算。
-    """
-    repository = ForeshadowingRepository(session)
-    for chunk in result.annotation.chunks:
-        for foreshadowing in chunk.foreshadowings:
-            repository.sync(
-                run_id=result.run_id,
-                chapter_id=chunk.chunk_id,
-                foreshadowing=foreshadowing,
-                setup_event_id=foreshadowing.setup_node_id,
-            )
 
 
 def _persist_pushed_cases(
@@ -243,9 +218,9 @@ def _persist_resolution_mappings(
     annotation_id: str,
     resolved_targets_by_case_id: dict,
 ) -> list[CompletionResolvedCase]:
-    """2026-08-11 用于按案例动作保存解决结果与对应目标（对话/线程/事实版本）
+    """2026-08-11 用于按案例动作保存解决结果与对应目标（对话/伏笔树/事实版本）
 
-    2026-08-18：foreshadowing 动作返回 dict（含 thread + event 目标），
+    2026-09-13：foreshadowing 动作返回 dict（含伏笔树根 + 挂树事件目标），
     其他动作返回 GraphFact / DialogueRecord / None。
 
     2026-09-04 单一写面：resolved_cases 由调用方传入（含从 relation_change_ops
@@ -259,28 +234,22 @@ def _persist_resolution_mappings(
         if resolved_case.action in {"dialogue", "foreshadowing"} and target is None:
             raise ValueError(f"{resolved_case.action} 动作未生成解决目标: {resolved_case.case_id}")
         target_dialogue_id: str | None = None
-        target_setup_id: str | None = None
-        target_setup_event_id: str | None = None
-        target_payoff_event_id: str | None = None
+        target_root_event_id: str | None = None
+        target_event_id: str | None = None
         if isinstance(target, DialogueRecord):
             target_dialogue_id = target.dialogue_id
-        if isinstance(target, dict) and "thread" in target:
-            # 2026-08-18 foreshadowing 动作返回 dict
-            thread = target["thread"]
-            target_setup_id = thread.setup_id
-            target_setup_event_id = target.get("target_setup_event_id")
-            target_payoff_event_id = target.get("target_payoff_event_id")
-        elif isinstance(target, ForeshadowingThread):
-            target_setup_id = target.setup_id
+        if isinstance(target, dict) and "root" in target:
+            # 2026-09-13 foreshadowing 动作返回 dict（伏笔树根 + 挂树事件）
+            target_root_event_id = target.get("target_root_event_id")
+            target_event_id = target.get("target_event_id")
         repository.add_mapping(
             run_id=result.run_id,
             annotation_id=annotation_id,
             resolved_case=resolved_case,
             target_fact=target_fact,
             target_dialogue_id=target_dialogue_id,
-            target_setup_id=target_setup_id,
-            target_setup_event_id=target_setup_event_id,
-            target_payoff_event_id=target_payoff_event_id,
+            target_root_event_id=target_root_event_id,
+            target_event_id=target_event_id,
         )
         completion_results.append(
             CompletionResolvedCase(
@@ -289,10 +258,9 @@ def _persist_resolution_mappings(
                 type=resolved_case.type,
                 reason=resolved_case.reason,
                 target_dialogue_id=target_dialogue_id,
-                target_setup_id=target_setup_id,
+                target_root_event_id=target_root_event_id,
+                target_event_id=target_event_id,
                 target_fact_id=target_fact.fact_id if target_fact is not None else None,
-                target_setup_event_id=target_setup_event_id,
-                target_payoff_event_id=target_payoff_event_id,
             )
         )
     return completion_results
@@ -353,8 +321,8 @@ def _fold_resolved_cases(entries: list[ResolvedCase]) -> list[ResolvedCase]:
     现行串行子块协议下，两个子块可能各自解决同一案例（run e84339d1 第 20 章
     两块对同一批 active 案例各裁决一次，合并拼接后撞唯一性校验整章失败）。
     两条裁决都是真实观察（A 块拿到引入段写埋设、B 块拿到坐实段写确认），
-    因此折叠而非丢弃：字段级后值非空覆盖（与 _persist_foreshadowing_resolution
-    的覆盖语义一致）、reason 拼接、保持首次出现顺序。fact 路径
+    因此折叠而非丢弃：字段级后值非空覆盖（与伏笔树根属性覆盖语义
+    一致）、reason 拼接、保持首次出现顺序。fact 路径
     （_graph_fact_resolved_cases）与 foreshadowing/dialogue 路径的同 case_id
     重复在同一暴露面处理。
     """
@@ -424,7 +392,6 @@ def complete_annotation_run(
                 annotation=result.annotation,
             )
             _persist_dialogue_records(session, result=result)
-            _persist_foreshadowing(session, result=result)
             graph_result = persist_completion_graph(
                 session,
                 annotation=annotation,

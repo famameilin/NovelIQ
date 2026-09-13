@@ -15,13 +15,11 @@ from src.agents.annotation.schema import (
     ActiveCaseDetails,
     BoundChapterAnnotation,
     BoundDialogue,
-    BoundForeshadowing,
     BoundSentenceLabel,
     CasePoolSummary,
     CaseSearchResult,
     CompletionCase,
     EventTreeHistoryResult,
-    ForeshadowingSearchResult,
     PendingCase,
     ResolvedCase,
     SearchResult,
@@ -37,8 +35,6 @@ from src.storage.models import (
     DialogueRecord,
     EventEdge,
     EventNode,
-    ForeshadowingThread,
-    ForeshadowingThreadHit,
     GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
@@ -169,7 +165,7 @@ class DatabaseAnnotationQueryService:
         enumerate_cases = case_type is not None
         wanted_type = normalize_text(case_type) if case_type is not None and case_type != "all" else None
         normalized_query = unicodedata.normalize("NFC", query or "").strip()
-        results: list[CaseSearchResult | ForeshadowingSearchResult] = []
+        results: list[CaseSearchResult] = []
         truncated = False
         if enumerate_cases:
             candidates = (
@@ -185,44 +181,6 @@ class DatabaseAnnotationQueryService:
             for row in pool_rows:
                 if _text_matches(normalized_query, *[str(key) for key in row.keys], row.description):
                     results.append(_case_view(row))
-                if len(results) >= limit:
-                    truncated = True
-                    break
-
-        if not enumerate_cases and len(results) < limit:
-            thread_statement = (
-                select(ForeshadowingThread)
-                .join(
-                    Chapter,
-                    (Chapter.run_id == ForeshadowingThread.run_id)
-                    & (Chapter.chapter_id == ForeshadowingThread.last_chapter_id),
-                )
-                .where(
-                    ForeshadowingThread.run_id == self.run_id,
-                    ForeshadowingThread.active.is_(True),
-                )
-                .order_by(Chapter.sequence, ForeshadowingThread.last_chapter_id, ForeshadowingThread.setup_id)
-            )
-            for thread in self.session.execute(thread_statement).scalars().all():
-                if not _text_matches(
-                    normalized_query,
-                    thread.setup_summary,
-                    thread.setup_kind,
-                    thread.expected_payoff_family,
-                ):
-                    continue
-                results.append(
-                    ForeshadowingSearchResult(
-                        record_id=thread.setup_id,
-                        content={
-                            "setup_summary": thread.setup_summary,
-                            "setup_kind": thread.setup_kind,
-                            "expected_payoff_family": thread.expected_payoff_family,
-                            "payoff_likelihood": thread.payoff_likelihood,
-                            "status": thread.status,
-                        },
-                    )
-                )
                 if len(results) >= limit:
                     truncated = True
                     break
@@ -327,7 +285,10 @@ class DatabaseAnnotationQueryService:
         incoming_causes = {edge.target_event_id for edge in edge_rows}
         foreshadow_setups = set(
             self.session.execute(
-                select(ForeshadowingThread.setup_event_id).where(ForeshadowingThread.run_id == self.run_id)
+                select(EventNode.event_id).where(
+                    EventNode.run_id == self.run_id,
+                    EventNode.is_foreshadowing_root.is_(True),
+                )
             ).scalars()
         )
         if term_filters is not None:
@@ -370,6 +331,9 @@ class DatabaseAnnotationQueryService:
                     description=node.description,
                     participants=list(node.participants),
                     is_foreshadow_setup=node.event_id in foreshadow_setups,
+                    foreshadowing_status=node.foreshadowing_status,
+                    expected_payoff_family=node.expected_payoff_family,
+                    payoff_likelihood=node.payoff_likelihood,
                     cross_chapter=node.event_id in incoming_causes,
                     root_node_id=node.event_id,
                     edges=[
@@ -402,30 +366,6 @@ class DatabaseAnnotationQueryService:
             target_key=row.target_key,
             target_ref=dict(row.target_ref),
         )
-
-    def thread_exists(self, setup_id: str) -> bool:
-        """2026-08-11 用于校验伏笔线程 id 属于当前 run 活跃线程"""
-        return (
-            self.session.execute(
-                select(ForeshadowingThread.setup_id).where(
-                    ForeshadowingThread.run_id == self.run_id,
-                    ForeshadowingThread.setup_id == setup_id,
-                    ForeshadowingThread.active.is_(True),
-                )
-            ).scalar_one_or_none()
-            is not None
-        )
-
-    def thread_id_for_setup_event(self, setup_event_id: str) -> str | None:
-        """2026-09-13 用于查询埋设事件已被哪条线程占用（含已回收线程；无占用返回 None）
-
-        不带 active 过滤：唯一约束覆盖全表，已回收线程同样占用其埋设事件。"""
-        return self.session.execute(
-            select(ForeshadowingThread.setup_id).where(
-                ForeshadowingThread.run_id == self.run_id,
-                ForeshadowingThread.setup_event_id == setup_event_id,
-            )
-        ).scalar_one_or_none()
 
 
 class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
@@ -609,96 +549,6 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
         self.session.flush()
 
 
-class ForeshadowingRepository(BaseRepository[ForeshadowingThread]):
-    """2026-08-07 用于从系统绑定标注写入或续接伏笔线程"""
-
-    def sync(
-        self,
-        *,
-        run_id: str,
-        chapter_id: int,
-        foreshadowing: BoundForeshadowing,
-        setup_event_id: str,
-    ) -> tuple[ForeshadowingThread, ForeshadowingThreadHit | None]:
-        """2026-08-18 用于创建或续接伏笔线程（按 setup_event_id 去重，不重复建线程）
-
-        2026-08-18：去重键从 setup_summary casefold 文本换为 UNIQUE(run_id, setup_event_id)
-        ——同一 setup 事件只允许一条线程。setup_summary 定义为 setup 事件的派生快照
-        （兼容字段，不再是独立判断源）。
-        """
-        normalized = normalize_text(foreshadowing.description)
-        # 2026-08-18 按 setup_event_id 查找已存在线程（UNIQUE(run_id, setup_event_id) 兜底）
-        thread = self.session.execute(
-            select(ForeshadowingThread).where(
-                ForeshadowingThread.run_id == run_id,
-                ForeshadowingThread.setup_event_id == setup_event_id,
-            )
-        ).scalar_one_or_none()
-        if thread is not None:
-            # 2026-08-13 P1-3：已存在 thread 时本次 sync 也是新的 Phase2 命中，
-            # 按合同（foreshadowing.py 注释"每次命中都落一条 hit"）补写 hit 行；
-            # 幂等：同 章节 同 thread 已有 hit 时视为纯 no-op，不重复写、不制造假命中。
-            existing_hit = self.session.execute(
-                select(ForeshadowingThreadHit.hit_id).where(
-                    ForeshadowingThreadHit.setup_id == thread.setup_id,
-                    ForeshadowingThreadHit.run_id == run_id,
-                    ForeshadowingThreadHit.chapter_id == chapter_id,
-                )
-            ).scalar_one_or_none()
-            if existing_hit is not None:
-                return thread, None
-            now = datetime.now(UTC)
-            hit = ForeshadowingThreadHit(
-                setup_id=thread.setup_id,
-                run_id=run_id,
-                chapter_id=chapter_id,
-                anchor_text=normalized,
-                is_new_setup=False,
-                event_id=setup_event_id,
-                created_at=now,
-            )
-            self.session.add(hit)
-            if chapter_id > thread.last_chapter_id:
-                thread.last_chapter_id = chapter_id
-                thread.updated_at = now
-            self.session.flush()
-            return thread, hit
-        now = datetime.now(UTC)
-        thread = ForeshadowingThread(
-            setup_id=str(uuid4()),
-            run_id=run_id,
-            first_chapter_id=chapter_id,
-            last_chapter_id=chapter_id,
-            setup_summary=normalized,
-            foreshadowing_type=None,
-            setup_kind=foreshadowing.setup_kind,
-            expected_payoff_family=foreshadowing.expected_payoff_family,
-            payoff_likelihood=foreshadowing.payoff_likelihood,
-            confidence=foreshadowing.confidence,
-            strength=None,
-            status="open",
-            active=True,
-            setup_event_id=setup_event_id,
-            payoff_event_id=None,
-            created_at=now,
-            updated_at=now,
-        )
-        self.session.add(thread)
-        self.session.flush()
-        hit = ForeshadowingThreadHit(
-            setup_id=thread.setup_id,
-            run_id=run_id,
-            chapter_id=chapter_id,
-            anchor_text=normalized,
-            is_new_setup=True,
-            event_id=setup_event_id,
-            created_at=now,
-        )
-        self.session.add(hit)
-        self.session.flush()
-        return thread, hit
-
-
 class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
     """2026-08-11 用于保存案例动作解决结果和实际目标（对话/线程/事实版本）"""
 
@@ -710,13 +560,12 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
         resolved_case: ResolvedCase,
         target_fact: GraphFact | None,
         target_dialogue_id: str | None,
-        target_setup_id: str | None,
-        target_setup_event_id: str | None = None,
-        target_payoff_event_id: str | None = None,
+        target_root_event_id: str | None = None,
+        target_event_id: str | None = None,
     ) -> CaseResolutionMapping:
         """2026-08-11 用于按 action 写入解决结果和对应目标标识
 
-        2026-08-18：foreshadowing 动作可产生 setup_event_id/payoff_event_id 目标。
+        2026-09-13：foreshadowing 动作的目标是伏笔树根与挂树事件。
         """
         resolution = {
             "action": resolved_case.action,
@@ -734,15 +583,10 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
                     resolution[field_name] = value
         elif resolved_case.action == "foreshadowing":
             for field_name in (
-                "setup_summary",
-                "setup_kind",
+                "foreshadowing_action",
                 "expected_payoff_family",
                 "payoff_likelihood",
-                "setup_status",
-                "confidence",
                 "strength",
-                "setup_event_id",
-                "payoff_event_id",
             ):
                 value = getattr(resolved_case, field_name)
                 if value is not None:
@@ -757,9 +601,8 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
             resolution=resolution,
             target_fact_id=target_fact.fact_id if target_fact is not None else None,
             target_dialogue_id=target_dialogue_id,
-            target_setup_id=target_setup_id,
-            target_setup_event_id=target_setup_event_id,
-            target_payoff_event_id=target_payoff_event_id,
+            target_root_event_id=target_root_event_id,
+            target_event_id=target_event_id,
         )
         self.session.add(row)
         self.session.flush()

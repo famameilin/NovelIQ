@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.annotation.schema import BoundForeshadowing
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -32,7 +31,6 @@ from src.knowledge.authority import (
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
-    ForeshadowingRepository,
     StatsRepository,
 )
 from tests.support.chapter_annotation_helpers import (
@@ -63,6 +61,9 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
+                "isforeshadowing": True,
+                "expected_payoff_family": "守护",
+                "payoff_likelihood": "high",
             },
             {
                 "description": "顾霜拔剑",
@@ -311,7 +312,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        "src.api.services.results_export_service._fetch_foreshadowing_trees",
         lambda *_args, **_kwargs: [],
     )
     monkeypatch.setattr(
@@ -671,7 +672,7 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        "src.api.services.results_export_service._fetch_foreshadowing_trees",
         lambda *_args, **_kwargs: [],
     )
     monkeypatch.setattr(
@@ -742,6 +743,9 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
+                "isforeshadowing": True,
+                "expected_payoff_family": "守护",
+                "payoff_likelihood": "high",
             },
             {
                 "description": "顾霜立誓",
@@ -753,19 +757,6 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "cause_role": "main",
             },
         ],
-    )
-    ForeshadowingRepository(db_session).sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门",
-            confidence="high",
-            setup_node_id=eid1,
-            setup_kind="承诺",
-            expected_payoff_family="守护",
-            payoff_likelihood="high",
-        ),
-        setup_event_id=eid1,
     )
     db_session.commit()
 
@@ -804,7 +795,7 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
     assert causal_edges == []
 
     assert len(forest["foreshadowing_edges"]) == 1
-    assert forest["foreshadowing_edges"][0]["setup_event_id"] == eid1
+    assert forest["foreshadowing_edges"][0]["root_event_id"] == eid1
     assert forest["foreshadowing_edges"][0]["payoff_event_id"] is None
 
 

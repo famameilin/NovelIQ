@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,8 +24,6 @@ from src.storage.models import (
     EntityState,
     EventEdge,
     EventNode,
-    ForeshadowingThread,
-    ForeshadowingThreadHit,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -555,6 +553,10 @@ def _persist_event_nodes(
                     causal_event_refs=list(event.causal_event_refs),
                     tree_id=event.tree_id,
                     cause_role=event.cause_role,
+                    is_foreshadowing_root=event.is_foreshadow_setup,
+                    foreshadowing_status="open" if event.is_foreshadow_setup else None,
+                    expected_payoff_family=event.expected_payoff_family,
+                    payoff_likelihood=str(event.payoff_likelihood) if event.payoff_likelihood else None,
                     annotation_id=annotation.annotation_id,
                     source_kind="annotation",
                     payload_path=f"chunks/{chunk.chunk_id}/events/{index}",
@@ -733,25 +735,6 @@ def _persist_annotation_facts(
             facts.append(fact)
             _apply_relation_change(
                 draft, fact=fact, change_kind=change_kind, relation_type=relation_type
-            )
-        for ordinal, foreshadowing in enumerate(chunk.foreshadowings, start=1):
-            # 2026-08-22setup_event_id 直接取服务端生成的 setup_node_id
-            setup_event_id = foreshadowing.setup_node_id
-            facts.append(
-                _new_fact(
-                    annotation=annotation,
-                    chapter_id=chunk.chunk_id,
-                    domain="foreshadowing",
-                    ordinal=ordinal,
-                    subject=None,
-                    predicate="其他",
-                    object_value=None,
-                    value={"description": foreshadowing.description, "setup_event_id": setup_event_id},
-                    participants=[],
-                    content={"kind": "foreshadowing", "chapter_id": chunk.chunk_id, "setup_event_id": setup_event_id},
-                    evidence=evidence,
-                    event_id=setup_event_id,
-                )
             )
     for entity_id, changes in attribute_changes.items():
         for ordinal, change in enumerate(changes, start=1):
@@ -948,105 +931,56 @@ def _persist_foreshadowing_resolution(
     session: Session,
     *,
     run_id: str,
-    current_chapter_id: int,
+    annotation_id: str,
     resolved_case: ResolvedCase,
 ) -> dict[str, Any]:
-    """2026-08-19 用于把 foreshadowing 动作更新到伏笔线程
+    """2026-09-13 用于把 foreshadowing 动作落成伏笔树挂边（伏笔即事件树）
 
-    2026-09-04：未挂线程的疑点案例被确认为伏笔时（工具层已强制 setup_event_id
-    授权与 setup_summary 兜底），按去重键 (run_id, setup_event_id) 就地建线程
-    并补一条 new-setup 命中，与 ForeshadowingRepository.sync 建线程口径一致。
+    解决动作 = 把挂树事件用 foreshadowing 边接进伏笔树（source=根/埋设事件，
+    target=挂入事件）；payoff 同时把根状态收束为 likely_paid_off，reinforce 把
+    open 根推进为 reinforced。可选更新根属性 expected_payoff_family/
+    payoff_likelihood/strength。同端点 foreshadowing 边已存在时幂等跳过建边。
     """
-    setup_id = resolved_case.target_ref.get("setup_id")
-    if setup_id is not None:
-        thread = session.get(ForeshadowingThread, str(setup_id))
-        if thread is None or thread.run_id != run_id:
-            raise ValueError(f"案例目标伏笔线程不存在: {resolved_case.case_id}")
-    else:
-        setup_event_id = str(resolved_case.setup_event_id)
-        thread = session.execute(
-            select(ForeshadowingThread).where(
-                ForeshadowingThread.run_id == run_id,
-                ForeshadowingThread.setup_event_id == setup_event_id,
-            )
-        ).scalar_one_or_none()
-        if thread is None:
-            setup_node = session.get(EventNode, setup_event_id)
-            now = datetime.now(UTC)
-            thread = ForeshadowingThread(
-                setup_id=str(uuid4()),
+    root_event_id = str(resolved_case.foreshadowing_root_event_id)
+    event_id = str(resolved_case.foreshadowing_event_id)
+    root = session.get(EventNode, root_event_id)
+    if root is None or root.run_id != run_id or not root.is_foreshadowing_root:
+        raise ValueError(f"案例目标伏笔树根不存在或非伏笔根: {resolved_case.case_id}")
+    node = session.get(EventNode, event_id)
+    if node is None or node.run_id != run_id:
+        raise ValueError(f"案例挂树事件不存在或跨 run: {resolved_case.case_id}")
+    if resolved_case.expected_payoff_family is not None:
+        root.expected_payoff_family = resolved_case.expected_payoff_family
+    if resolved_case.payoff_likelihood is not None:
+        root.payoff_likelihood = resolved_case.payoff_likelihood
+    if resolved_case.strength is not None:
+        root.strength = resolved_case.strength
+    if resolved_case.foreshadowing_action == "payoff":
+        root.foreshadowing_status = "likely_paid_off"
+    elif root.foreshadowing_status == "open":
+        root.foreshadowing_status = "reinforced"
+    edge_id = _event_edge_id(run_id, root_event_id, event_id)
+    if session.get(EventEdge, edge_id) is None:
+        session.add(
+            EventEdge(
+                edge_id=edge_id,
                 run_id=run_id,
-                first_chapter_id=setup_node.chapter_id if setup_node is not None else current_chapter_id,
-                last_chapter_id=current_chapter_id,
-                setup_summary=resolved_case.setup_summary or "",
-                foreshadowing_type=None,
-                setup_kind=resolved_case.setup_kind,
-                expected_payoff_family=resolved_case.expected_payoff_family,
-                payoff_likelihood=resolved_case.payoff_likelihood,
-                confidence=resolved_case.confidence or "high",
-                strength=resolved_case.strength,
-                status="open",
-                active=True,
-                setup_event_id=setup_event_id,
-                payoff_event_id=None,
-                created_at=now,
-                updated_at=now,
+                edge_type="foreshadowing",
+                source_event_id=root_event_id,
+                target_event_id=event_id,
+                source_chapter_id=root.chapter_id,
+                target_chapter_id=node.chapter_id,
+                is_active=True,
+                evidence=list(root.evidence),
+                annotation_id=annotation_id,
+                payload_path=f"foreshadowing/{root_event_id}/{event_id}",
             )
-            session.add(thread)
-            session.flush()
-            session.add(
-                ForeshadowingThreadHit(
-                    setup_id=thread.setup_id,
-                    run_id=run_id,
-                    chapter_id=thread.first_chapter_id,
-                    anchor_text=thread.setup_summary,
-                    is_new_setup=True,
-                    event_id=setup_event_id,
-                    created_at=now,
-                )
-            )
-            session.flush()
-    for field_name in (
-        "setup_summary",
-        "setup_kind",
-        "expected_payoff_family",
-        "payoff_likelihood",
-        "confidence",
-        "strength",
-    ):
-        value = getattr(resolved_case, field_name)
-        if value is not None:
-            setattr(thread, field_name, value)
-    if resolved_case.setup_status is not None:
-        thread.status = resolved_case.setup_status
-    if resolved_case.setup_event_id is not None:
-        if thread.setup_event_id != resolved_case.setup_event_id:
-            # 2026-09-13 ch20 崩溃回归：重指他人埋设事件此前直达唯一约束炸 run
-            # （裸 IntegrityError），这里先行预检给出可读合同报错，fail-closed 不变
-            owner_id = session.execute(
-                select(ForeshadowingThread.setup_id).where(
-                    ForeshadowingThread.run_id == run_id,
-                    ForeshadowingThread.setup_event_id == resolved_case.setup_event_id,
-                )
-            ).scalar_one_or_none()
-            if owner_id is not None:
-                raise ValueError(
-                    f"案例 {resolved_case.case_id} 的 setup_event_id "
-                    f"{resolved_case.setup_event_id} 已绑定伏笔线程 {owner_id}: "
-                    "同一埋设事件只允许绑定一条线程 (uq_foreshadowing_threads_run_setup_event)"
-                )
-        thread.setup_event_id = resolved_case.setup_event_id
-    if resolved_case.payoff_event_id is not None:
-        thread.payoff_event_id = resolved_case.payoff_event_id
-        thread.last_chapter_id = current_chapter_id
-        thread.active = False
-        thread.status = "likely_paid_off"
-    thread.updated_at = datetime.now(UTC)
+        )
     session.flush()
     return {
-        "thread": thread,
-        "target_setup_event_id": resolved_case.setup_event_id,
-        "target_payoff_event_id": resolved_case.payoff_event_id,
+        "root": root,
+        "target_root_event_id": root_event_id,
+        "target_event_id": event_id,
     }
 
 
@@ -1075,7 +1009,7 @@ def _persist_resolved_cases(
             )
         elif resolved_case.action == "foreshadowing":
             target = _persist_foreshadowing_resolution(
-                session, run_id=annotation.run_id, current_chapter_id=annotation.chapter_id, resolved_case=resolved_case
+                session, run_id=annotation.run_id, annotation_id=annotation.annotation_id, resolved_case=resolved_case
             )
         elif resolved_case.action == "close":
             target = None

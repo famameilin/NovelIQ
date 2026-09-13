@@ -10,7 +10,7 @@
 - 词法句法/词向量 tab → /linguistic/features|word2vec
 - 角色排行/角色表 tab → /characters
 - 图谱变化 tab → /graph/changes
-- 诊断摘要/价值与主题 tab → /diagnosis；Setup 台账 tab → /foreshadowing-threads
+- 诊断摘要/价值与主题 tab → /diagnosis；伏笔树 tab → /foreshadowing-trees
 """
 
 from __future__ import annotations

@@ -186,15 +186,8 @@ def _fetch_chapter_annotations(
                     if getattr(annotation_row, "is_strong_setup", None) is not None
                     else None
                 ),
-                foreshadowing_type=(
-                    str(annotation_row.foreshadowing_type) if annotation_row.foreshadowing_type else None
-                ),
-                setup_kind=(str(annotation_row.setup_kind) if getattr(annotation_row, "setup_kind", None) else None),
                 foreshadowing_desc=(
                     str(annotation_row.foreshadowing_desc) if annotation_row.foreshadowing_desc else None
-                ),
-                setup_summary=(
-                    str(annotation_row.setup_summary) if getattr(annotation_row, "setup_summary", None) else None
                 ),
                 why_unresolved_now=(
                     str(annotation_row.why_unresolved_now)
@@ -211,8 +204,10 @@ def _fetch_chapter_annotations(
                     if getattr(annotation_row, "payoff_likelihood", None)
                     else None
                 ),
-                linked_setup_id=(
-                    str(annotation_row.linked_setup_id) if getattr(annotation_row, "linked_setup_id", None) else None
+                foreshadowing_root_event_id=(
+                    str(annotation_row.foreshadowing_root_event_id)
+                    if getattr(annotation_row, "foreshadowing_root_event_id", None)
+                    else None
                 ),
                 coverage_warnings=list(getattr(annotation_row, "coverage_warnings", None) or []),
                 characters=characters_by_chunk.get(chapter_id, []),

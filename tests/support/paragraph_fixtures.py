@@ -207,7 +207,6 @@ def insert_chapter_annotation(
                 character_observations=[],
                 dialogues=[],
                 events=[],
-                foreshadowings=[],
             )
         ],
     )

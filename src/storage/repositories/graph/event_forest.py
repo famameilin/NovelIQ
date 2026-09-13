@@ -9,7 +9,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chapter, ChapterAnnotationRecord, EventEdge, EventNode, ForeshadowingThread
+from src.storage.models import (
+    CaseResolutionMapping,
+    Chapter,
+    ChapterAnnotationRecord,
+    EventEdge,
+    EventNode,
+)
 from src.storage.models.graph import ChapterBoundary
 
 
@@ -49,15 +55,15 @@ class EventEdgeRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    """2026-08-19 用于返回章节伏笔边"""
+    """2026-09-13 用于返回章节伏笔树视图（伏笔即事件树，一行一棵树）"""
 
-    setup_id: str
+    root_event_id: str
     run_id: str
-    setup_event_id: str
+    tree_id: str
     payoff_event_id: str | None
     first_chapter_id: int
     last_chapter_id: int
-    setup_summary: str
+    description: str
     status: str
     active: bool
 
@@ -280,32 +286,58 @@ class EventForestRepository:
     def _fetch_foreshadowing_edges_by_chapter_ids(
         self, run_id: str, chapter_ids: set[int]
     ) -> list[ForeshadowingEdgeRow]:
-        """内部：按已解析 chapter_ids 查询伏笔边"""
+        """内部：按已解析 chapter_ids 查询伏笔树（根在可见章节内的树）"""
         if not chapter_ids:
             return []
-        rows = self.session.execute(
-            select(ForeshadowingThread)
+        root_rows = self.session.execute(
+            select(EventNode)
             .join(
                 Chapter,
-                (Chapter.run_id == ForeshadowingThread.run_id)
-                & (Chapter.chapter_id == ForeshadowingThread.first_chapter_id),
+                (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
             )
-            .where(ForeshadowingThread.run_id == run_id, ForeshadowingThread.first_chapter_id.in_(chapter_ids))
-            .order_by(Chapter.sequence, ForeshadowingThread.first_chapter_id, ForeshadowingThread.setup_id)
+            .where(
+                EventNode.run_id == run_id,
+                EventNode.is_foreshadowing_root.is_(True),
+                EventNode.chapter_id.in_(chapter_ids),
+            )
+            .order_by(Chapter.sequence, EventNode.chapter_id, EventNode.event_id)
         ).scalars()
+        roots = list(root_rows)
+        if not roots:
+            return []
+        edges_by_root: dict[str, list[EventEdge]] = {}
+        for edge in self.session.execute(
+            select(EventEdge).where(
+                EventEdge.run_id == run_id,
+                EventEdge.edge_type == "foreshadowing",
+            )
+        ).scalars().all():
+            edges_by_root.setdefault(edge.source_event_id, []).append(edge)
+        root_ids = {root.event_id for root in roots}
+        payoff_by_root: dict[str, str] = {}
+        for mapping in self.session.execute(
+            select(CaseResolutionMapping).where(
+                CaseResolutionMapping.run_id == run_id,
+                CaseResolutionMapping.target_root_event_id.in_(root_ids),
+            )
+        ).scalars().all():
+            if mapping.resolution.get("foreshadowing_action") == "payoff" and mapping.target_event_id:
+                payoff_by_root[str(mapping.target_root_event_id)] = str(mapping.target_event_id)
         return [
             ForeshadowingEdgeRow(
-                setup_id=thread.setup_id,
-                run_id=thread.run_id,
-                setup_event_id=thread.setup_event_id,
-                payoff_event_id=thread.payoff_event_id,
-                first_chapter_id=thread.first_chapter_id,
-                last_chapter_id=thread.last_chapter_id,
-                setup_summary=thread.setup_summary,
-                status=thread.status,
-                active=thread.active,
+                root_event_id=root.event_id,
+                run_id=run_id,
+                tree_id=root.tree_id,
+                payoff_event_id=payoff_by_root.get(root.event_id),
+                first_chapter_id=root.chapter_id,
+                last_chapter_id=max(
+                    [root.chapter_id, *(edge.target_chapter_id for edge in edges_by_root.get(root.event_id, []))]
+                ),
+                description=root.description,
+                status=root.foreshadowing_status or "open",
+                active=(root.foreshadowing_status or "open") != "likely_paid_off",
             )
-            for thread in rows
+            for root in roots
         ]
 
     def _build_event_trees(self, event_nodes: list[EventNodeRow]) -> list[EventTreeRow]:
@@ -367,9 +399,9 @@ class EventForestRepository:
         visible_event_ids = {node.event_id for node in event_nodes}
         visible_threads = [
             ForeshadowingEdgeRow(
-                setup_id=edge.setup_id,
+                root_event_id=edge.root_event_id,
                 run_id=edge.run_id,
-                setup_event_id=edge.setup_event_id,
+                tree_id=edge.tree_id,
                 payoff_event_id=edge.payoff_event_id if edge.payoff_event_id in visible_event_ids else None,
                 first_chapter_id=edge.first_chapter_id,
                 last_chapter_id=(
@@ -377,7 +409,7 @@ class EventForestRepository:
                     if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
                     else edge.first_chapter_id
                 ),
-                setup_summary=edge.setup_summary,
+                description=edge.description,
                 status=edge.status
                 if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
                 else "open",

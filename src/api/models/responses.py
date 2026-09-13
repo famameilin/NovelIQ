@@ -236,16 +236,14 @@ class ChapterAnnotation(BaseModel):
     )
     is_strong_setup: bool | None = Field(
         default=None,
-        description="当前伏笔判断是否已经通过强伏笔门槛筛选，用于前端后续展示高精度 setup。",
+        description="当前伏笔树根是否强伏笔（strength=high），用于前端后续展示高精度伏笔。",
     )
-    foreshadowing_type: str | None = None
-    setup_kind: str | None = None
     foreshadowing_desc: str | None = None
-    setup_summary: str | None = None
     why_unresolved_now: str | None = None
     expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
-    linked_setup_id: str | None = None
+    # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
+    foreshadowing_root_event_id: str | None = None
     # 2026-09-05 A1：冻结时系统覆盖告警（如对话候选>0但载荷为空），报告附录 B 展示
     coverage_warnings: list[str] = []
     characters: list[ChapterCharacter] = []
@@ -253,22 +251,21 @@ class ChapterAnnotation(BaseModel):
     dialogues: list[ChapterDialogue] = []
 
 
-class ForeshadowingThreadResponse(BaseModel):
+class ForeshadowingTreeResponse(BaseModel):
     """
-    Setup thread 结果视图
+    伏笔树结果视图（2026-09-13 伏笔即事件树）
 
-    说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用
+    说明: 提供伏笔树的稳定 API 响应模型，供诊断 drill-down 和结果导出复用
     """
 
-    setup_id: str
+    root_event_id: str
+    tree_id: str
     first_chapter_id: int
     last_chapter_id: int
     anchor_chapter_ids: list[int] = []
-    setup_summary: str
-    setup_kind: str | None
+    description: str
     expected_payoff_family: str | None
     payoff_likelihood: str | None
-    confidence: str | None
     strength: str | None
     status: str
     active: bool

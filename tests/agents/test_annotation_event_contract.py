@@ -52,13 +52,12 @@ def _create_args(**overrides) -> dict:
             }
         ],
     }
-    # 非 isforeshadowing 的事件不需要三字段；isforeshadowing 时由调用方补
+    # 非 isforeshadowing 的事件不需要两字段；isforeshadowing 时由调用方补
     if not overrides.get("isforeshadowing"):
         payload.update(overrides)
         return payload
     payload.update(
         {
-            "setup_kind": "悬念",
             "expected_payoff_family": "身份揭露",
             "payoff_likelihood": "medium",
         }
@@ -144,16 +143,18 @@ def test_write_event_empty_completion_does_not_invent_event() -> None:
 
 
 def test_write_event_isforeshadowing_creates_thread_binding() -> None:
-    """2026-08-22isforeshadowing=true 自动生成伏笔绑定（setup 指向树根）"""
+    """2026-09-13 伏笔即事件树：isforeshadowing=true 根事件携带伏笔属性，回执暴露根节点 id"""
     ledger = _ledger()
     tools = _tools_with_entities_shim(ledger)
 
     receipt = _call(tools, "write_event", _create_args(isforeshadowing=True))
 
-    foreshadowings = ledger.bound_payloads["foreshadowings"]
-    assert len(foreshadowings) == 1
-    assert foreshadowings[0].setup_node_id == receipt["root_node_id"]
-    assert receipt["foreshadowing_setup_node_id"] == receipt["root_node_id"]
+    assert receipt["foreshadowing_root_node_id"] == receipt["root_node_id"]
+    bound = ledger.bound_payloads["events"]
+    root = next(node for node in bound if node.node_id == receipt["root_node_id"])
+    assert root.is_foreshadow_setup is True
+    assert root.expected_payoff_family == "身份揭露"
+    assert root.payoff_likelihood == "medium"
 
 
 def test_write_event_exposes_pydantic_schema_and_creates_ordered_children() -> None:

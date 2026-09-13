@@ -37,7 +37,6 @@ def _make_sub_annotation(chunk_id: int, *, summary: str, dialogue: BoundDialogue
                 character_observations=[],
                 dialogues=[dialogue],
                 events=[],
-                foreshadowings=[],
             )
         ],
     )
@@ -71,7 +70,6 @@ def _make_event_sub_annotation(chunk_id: int, *, summary: str, events: list[Boun
                 character_observations=[],
                 dialogues=[],
                 events=events,
-                foreshadowings=[],
             )
         ],
     )
@@ -260,7 +258,6 @@ def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
                     character_observations=[],
                     dialogues=[],
                     events=[],
-                    foreshadowings=[],
                     sentence_labels=[label],
                 )
             ],

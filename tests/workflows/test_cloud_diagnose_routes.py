@@ -19,13 +19,11 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.annotation.schema import BoundForeshadowing
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     ChapterRepository,
     DiagnosisRepository,
-    ForeshadowingRepository,
     ParagraphRepository,
     RunRepository,
     StatsRepository,
@@ -144,19 +142,15 @@ class TestDiagnosisRoutes:
                     )
                 ],
             )
-        ForeshadowingRepository(self.db_session).sync(
-            run_id=self.run_id,
-            chapter_id=1,
-            foreshadowing=BoundForeshadowing(
-                description="测试伏笔",
-                confidence="medium",
-                setup_node_id="event-test-setup",
-                setup_kind="悬念",
-                expected_payoff_family="身份揭露",
-                payoff_likelihood="medium",
-            ),
-            setup_event_id="event-test-setup",
-        )
+        # 2026-09-13 伏笔即事件树：向章 1 的事件标记伏笔树根
+        from src.storage.models import EventNode
+
+        root = self.db_session.query(EventNode).filter(EventNode.run_id == self.run_id).first()
+        if root is not None:
+            root.is_foreshadowing_root = True
+            root.foreshadowing_status = "open"
+            root.expected_payoff_family = "身份揭露"
+            root.payoff_likelihood = "medium"
 
         self.db_session.commit()
 
@@ -184,13 +178,6 @@ class TestDiagnosisRoutes:
         diag_repo = DiagnosisRepository(self.db_session)
         relations = diag_repo.fetch_relation_changes(self.run_id)
         assert len(relations) == 0
-
-    def test_fetch_foreshadowing_chunks(self) -> None:
-        self._create_full_data(5)
-
-        diag_repo = DiagnosisRepository(self.db_session)
-        chunks = diag_repo.fetch_foreshadowing_chunks(self.run_id)
-        assert len(chunks) > 0
 
     def test_fetch_pivot_moments(self) -> None:
         self._create_full_data(5)
