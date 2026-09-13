@@ -13,7 +13,7 @@ import type {
   ChapterMetricsResponse,
   Topic,
   DiagnosisResult,
-  ForeshadowingThread,
+  ForeshadowingTree,
   GraphData,
   GraphChange,
   GraphChangesPageInfo,
@@ -496,18 +496,17 @@ export function createDiagnosis(): DiagnosisResult {
   };
 }
 
-export function createForeshadowingThreads(): ForeshadowingThread[] {
+export function createForeshadowingTrees(): ForeshadowingTree[] {
   return [
     {
-      setup_id: "setup-thread-1",
+      root_event_id: "root-tree-1",
+      tree_id: "tree-1",
       first_chapter_id: 3,
       last_chapter_id: 12,
       anchor_chapter_ids: [3, 7, 12],
-      setup_summary: "主角在旧山门发现一枚残缺令牌，后续多次被提及。",
-      setup_kind: "伏笔",
+      description: "主角在旧山门发现一枚残缺令牌，后续多次被提及。",
       expected_payoff_family: "身份揭露",
       payoff_likelihood: "high",
-      confidence: "high",
       strength: "high",
       status: "reinforced",
       active: true,
@@ -801,12 +800,12 @@ export function createEventTimeline(): EventTimelineResponse {
   }
 
   const foreshadowing_edges: TimelineEventForeshadowingEdge[] = nodes.slice(0, 2).map((n, idx) => ({
-    setup_id: `setup:${n.tree_id}`,
-    setup_event_id: n.root_event_id,
+    root_event_id: n.root_event_id,
+    tree_id: n.tree_id,
     payoff_event_id: nodes[(idx + 1) % nodes.length]?.root_event_id ?? null,
     first_chapter_id: n.start_chapter_id,
     last_chapter_id: n.end_chapter_id,
-    setup_summary: `伏笔 ${idx + 1}：${n.title ?? n.summary.slice(0, 20)}`,
+    description: `伏笔 ${idx + 1}：${n.title ?? n.summary.slice(0, 20)}`,
     status: idx === 0 ? "open" : "reinforced",
     active: idx === 0,
   }));

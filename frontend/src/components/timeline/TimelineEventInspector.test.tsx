@@ -65,11 +65,12 @@ describe("TimelineEventInspector", () => {
         ]}
         foreshadowingEdges={[
           {
-            setup_id: "setup-internal",
-            setup_event_id: node.root_event_id,
+            root_event_id: "root-internal",
+            tree_id: "tree-internal",
+            payoff_event_id: node.root_event_id,
             first_chapter_id: 3,
             last_chapter_id: 8,
-            setup_summary: "铜铃异响指向山门旧案",
+            description: "铜铃异响指向山门旧案",
             status: "open",
             active: true,
           },

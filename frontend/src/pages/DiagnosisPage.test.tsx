@@ -9,7 +9,7 @@ import { DiagnosisPage } from "@/pages/DiagnosisPage";
 import { useNovelStore } from "@/store/novelStore";
 
 const getDiagnosisMock = vi.fn();
-const getForeshadowingThreadsMock = vi.fn();
+const getForeshadowingTreesMock = vi.fn();
 
 let currentNovelId = "novel-1";
 let currentSearchParams = "task_id=task-1";
@@ -62,7 +62,7 @@ vi.mock("framer-motion", () => ({
 
 vi.mock("@/api/results", () => ({
   getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
-  getForeshadowingThreads: (...args: unknown[]) => getForeshadowingThreadsMock(...args),
+  getForeshadowingTrees: (...args: unknown[]) => getForeshadowingTreesMock(...args),
 }));
 
 vi.mock("@/components/layout/PageContainer", () => ({
@@ -139,13 +139,13 @@ describe("DiagnosisPage", () => {
     currentNovelId = "novel-1";
     currentSearchParams = "task_id=task-1";
     getDiagnosisMock.mockReset();
-    getForeshadowingThreadsMock.mockReset();
+    getForeshadowingTreesMock.mockReset();
     useNovelStore.getState().clear();
   });
 
   it("renders a stable empty state when diagnosis returns null", async () => {
     getDiagnosisMock.mockResolvedValue(null);
-    getForeshadowingThreadsMock.mockResolvedValue([]);
+    getForeshadowingTreesMock.mockResolvedValue([]);
 
     renderDiagnosisPage();
 
@@ -155,14 +155,14 @@ describe("DiagnosisPage", () => {
 
   it("still renders foreshadowing tracking when diagnosis returns null but threads are available", async () => {
     getDiagnosisMock.mockResolvedValue(null);
-    getForeshadowingThreadsMock.mockResolvedValue([
+    getForeshadowingTreesMock.mockResolvedValue([
       {
-        setup_id: "setup-1",
+        root_event_id: "root-1",
+        tree_id: "tree-1",
         first_chapter_id: 3,
         last_chapter_id: 8,
         anchor_chapter_ids: [3, 8],
-        setup_summary: "铜铃异响反复指向山门旧案",
-        setup_kind: "异常物件",
+        description: "铜铃异响反复指向山门旧案",
         expected_payoff_family: "真相揭露",
         payoff_likelihood: "high",
         strength: "high",
@@ -182,7 +182,7 @@ describe("DiagnosisPage", () => {
 
   it("shows a visible warning when foreshadowing thread drill-down fails", async () => {
     getDiagnosisMock.mockResolvedValue(null);
-    getForeshadowingThreadsMock.mockRejectedValue(new Error("threads boom"));
+    getForeshadowingTreesMock.mockRejectedValue(new Error("threads boom"));
 
     renderDiagnosisPage();
 
@@ -197,7 +197,7 @@ describe("DiagnosisPage", () => {
       foreshadow_expectation: 0.42,
       topic_labels: ["成长"],
     });
-    getForeshadowingThreadsMock.mockResolvedValue([]);
+    getForeshadowingTreesMock.mockResolvedValue([]);
 
     renderDiagnosisPage();
 
@@ -223,7 +223,7 @@ describe("DiagnosisPage", () => {
         },
       },
     });
-    getForeshadowingThreadsMock.mockRejectedValue({
+    getForeshadowingTreesMock.mockRejectedValue({
       isAxiosError: true,
       response: {
         status: 400,
@@ -241,7 +241,7 @@ describe("DiagnosisPage", () => {
     expect(screen.getByText("当前任务仍在分析中，诊断报告和伏笔追踪暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
   });
 
-  it("切换伏笔追踪后支持四态筛选、章节轨迹和详情指标", async () => {
+  it("切换伏笔追踪后支持三态筛选、章节轨迹和详情指标", async () => {
     const user = userEvent.setup();
     getDiagnosisMock.mockResolvedValue({
       genre_labels: ["悬疑"],
@@ -249,32 +249,30 @@ describe("DiagnosisPage", () => {
       foreshadow_expectation: 0.62,
       diagnosis: "线索逐步收束",
     });
-    getForeshadowingThreadsMock.mockResolvedValue([
+    getForeshadowingTreesMock.mockResolvedValue([
       {
-        setup_id: "thread-open",
+        root_event_id: "root-open",
+        tree_id: "tree-open",
         first_chapter_id: 2,
         last_chapter_id: 4,
         anchor_chapter_ids: [2, 4],
-        setup_summary: "开放线索",
-        setup_kind: "异常规则",
+        description: "开放线索",
         expected_payoff_family: "规则揭示",
         payoff_likelihood: "medium",
-        confidence: "medium",
         strength: "medium",
         status: "open",
         active: true,
         latest_reason: "等待后续证据",
       },
       {
-        setup_id: "thread-reinforced",
+        root_event_id: "root-reinforced",
+        tree_id: "tree-reinforced",
         first_chapter_id: 3,
         last_chapter_id: 8,
         anchor_chapter_ids: [3, 5, 8],
-        setup_summary: "铜铃异响反复指向山门旧案",
-        setup_kind: "异常物件",
+        description: "铜铃异响反复指向山门旧案",
         expected_payoff_family: "真相揭露",
         payoff_likelihood: "high",
-        confidence: "high",
         strength: "high",
         status: "reinforced",
         active: true,
@@ -282,34 +280,18 @@ describe("DiagnosisPage", () => {
         latest_why_unresolved_now: "关键证人尚未现身",
       },
       {
-        setup_id: "thread-paid",
+        root_event_id: "root-paid",
+        tree_id: "tree-paid",
         first_chapter_id: 6,
         last_chapter_id: 10,
         anchor_chapter_ids: [6, 10],
-        setup_summary: "已回收线索",
-        setup_kind: "隐藏身份",
+        description: "已回收线索",
         expected_payoff_family: "身份揭示",
         payoff_likelihood: "high",
-        confidence: "high",
         strength: "high",
         status: "likely_paid_off",
         active: true,
         latest_reason: "身份已经得到解释",
-      },
-      {
-        setup_id: "thread-archived",
-        first_chapter_id: 1,
-        last_chapter_id: 1,
-        anchor_chapter_ids: [1],
-        setup_summary: "归档线索",
-        setup_kind: "其他",
-        expected_payoff_family: "待确认",
-        payoff_likelihood: "low",
-        confidence: "low",
-        strength: "low",
-        status: "archived",
-        active: false,
-        latest_reason: "线索已归档",
       },
     ]);
 
@@ -321,7 +303,6 @@ describe("DiagnosisPage", () => {
     expect(within(filterGroup).getByRole("button", { name: "待回收" })).toBeInTheDocument();
     expect(within(filterGroup).getByRole("button", { name: "持续强化" })).toBeInTheDocument();
     expect(within(filterGroup).getByRole("button", { name: "疑似回收" })).toBeInTheDocument();
-    expect(within(filterGroup).getByRole("button", { name: "已归档" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /铜铃异响反复指向山门旧案/ }));
     expect(screen.getByText("第 3 章 · 首次出现")).toBeInTheDocument();
     expect(screen.getByText("第 5 章 · 再次出现")).toBeInTheDocument();
@@ -335,8 +316,7 @@ describe("DiagnosisPage", () => {
     expect(screen.queryByText("开放线索")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("分析详情"));
-    expect(screen.getByText("判断置信度")).toBeInTheDocument();
     expect(screen.getByText("线索强度")).toBeInTheDocument();
-    expect(screen.getAllByText("较高").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("判断置信度")).not.toBeInTheDocument();
   });
 });
