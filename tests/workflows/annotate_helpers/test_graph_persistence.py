@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -24,6 +25,7 @@ from src.storage.models import (
     EntityState,
     EventEdge,
     EventNode,
+    ForeshadowingThread,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -1004,3 +1006,115 @@ def test_persist_writes_cross_chapter_causal_edge(db_session) -> None:
     assert edges[0].target_event_id == "evt-fulfill-root"
     assert edges[0].source_chapter_id == 1
     assert edges[0].target_chapter_id == 2
+
+
+def _add_thread(
+    db_session,
+    *,
+    run_id: str,
+    setup_id: str,
+    setup_event_id: str,
+    chapter_id: int = 1,
+    summary: str = "埋设线程",
+) -> ForeshadowingThread:
+    """2026-09-13 用于直接铺设伏笔线程行（绕过事件树建线链路）"""
+    now = datetime.now(UTC)
+    thread = ForeshadowingThread(
+        setup_id=setup_id,
+        run_id=run_id,
+        first_chapter_id=chapter_id,
+        last_chapter_id=chapter_id,
+        setup_summary=summary,
+        status="open",
+        active=True,
+        setup_event_id=setup_event_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(thread)
+    db_session.flush()
+    return thread
+
+
+def _foreshadow_resolution(case_id: str, *, setup_id: str, setup_event_id: str) -> ResolvedCase:
+    """2026-09-13 用于构造重指已有线程埋设事件的 foreshadowing 裁决"""
+    return ResolvedCase(
+        case_id=case_id,
+        action="foreshadowing",
+        type="foreshadowing_payoff",
+        reason="疑点续接确认",
+        target_key=setup_id,
+        target_ref={"kind": "伏笔疑点", "chunk_id": 1, "setup_id": setup_id},
+        setup_event_id=setup_event_id,
+        expected_payoff_family="后续回收",
+    )
+
+
+def _annotation_row(db_session, *, run_id: str, text: str):
+    """2026-09-13 用于构造已入库的章节标注行（图域入参最小集）"""
+    annotation, entity_ops, relation_assert_ops = _full_annotation(text)
+    row = ChapterAnnotationRepository(db_session).add_annotation(
+        run_id=run_id,
+        chapter_id=1,
+        annotation=annotation,
+    )
+    return row, entity_ops, relation_assert_ops
+
+
+def test_foreshadowing_resolution_repoint_to_owned_setup_event_rejected(db_session) -> None:
+    """2026-09-13 ch20 崩溃回归：重指他人埋设事件须可读合同报错，而非裸 IntegrityError 炸 run"""
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=[text], title="埋设事件唯一")
+    row, entity_ops, relation_assert_ops = _annotation_row(db_session, run_id=run_id, text=text)
+    _add_thread(db_session, run_id=run_id, setup_id="thread-a", setup_event_id="evt-owned")
+    _add_thread(db_session, run_id=run_id, setup_id="thread-b", setup_event_id="evt-b")
+
+    with pytest.raises(ValueError, match=r"已绑定伏笔线程 thread-a.*同一埋设事件只允许绑定一条线程"):
+        persist_completion_graph(
+            db_session,
+            annotation=row,
+            resolved_cases=[_foreshadow_resolution("case-1", setup_id="thread-b", setup_event_id="evt-owned")],
+            entity_ops=entity_ops,
+            relation_assert_ops=relation_assert_ops,
+            authorized_text_chapter_ids={1},
+        )
+
+
+def test_foreshadowing_resolution_repoint_to_unclaimed_setup_event_allowed(db_session) -> None:
+    """2026-09-13 重指未被占用的埋设事件保持既有续接语义（覆盖写）不变"""
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=[text], title="埋设事件未被占用")
+    row, entity_ops, relation_assert_ops = _annotation_row(db_session, run_id=run_id, text=text)
+    _add_thread(db_session, run_id=run_id, setup_id="thread-b", setup_event_id="evt-b")
+
+    persist_completion_graph(
+        db_session,
+        annotation=row,
+        resolved_cases=[_foreshadow_resolution("case-1", setup_id="thread-b", setup_event_id="evt-new")],
+        entity_ops=entity_ops,
+        relation_assert_ops=relation_assert_ops,
+        authorized_text_chapter_ids={1},
+    )
+    thread_b = db_session.get(ForeshadowingThread, "thread-b")
+    assert thread_b is not None
+    assert thread_b.setup_event_id == "evt-new"
+
+
+def test_foreshadowing_resolution_same_setup_event_is_noop(db_session) -> None:
+    """2026-09-13 幂等重申自己的埋设事件不触发占用检查（同值同线程不违规）"""
+    text = "顾霜进入山门，持有玄剑，受天衡宗庇护，“住手”回荡。"
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=[text], title="埋设事件幂等")
+    row, entity_ops, relation_assert_ops = _annotation_row(db_session, run_id=run_id, text=text)
+    _add_thread(db_session, run_id=run_id, setup_id="thread-b", setup_event_id="evt-b")
+
+    persist_completion_graph(
+        db_session,
+        annotation=row,
+        resolved_cases=[_foreshadow_resolution("case-1", setup_id="thread-b", setup_event_id="evt-b")],
+        entity_ops=entity_ops,
+        relation_assert_ops=relation_assert_ops,
+        authorized_text_chapter_ids={1},
+    )
+    thread_b = db_session.get(ForeshadowingThread, "thread-b")
+    assert thread_b is not None
+    assert thread_b.setup_event_id == "evt-b"

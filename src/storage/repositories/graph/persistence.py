@@ -1020,6 +1020,21 @@ def _persist_foreshadowing_resolution(
     if resolved_case.setup_status is not None:
         thread.status = resolved_case.setup_status
     if resolved_case.setup_event_id is not None:
+        if thread.setup_event_id != resolved_case.setup_event_id:
+            # 2026-09-13 ch20 崩溃回归：重指他人埋设事件此前直达唯一约束炸 run
+            # （裸 IntegrityError），这里先行预检给出可读合同报错，fail-closed 不变
+            owner_id = session.execute(
+                select(ForeshadowingThread.setup_id).where(
+                    ForeshadowingThread.run_id == run_id,
+                    ForeshadowingThread.setup_event_id == resolved_case.setup_event_id,
+                )
+            ).scalar_one_or_none()
+            if owner_id is not None:
+                raise ValueError(
+                    f"案例 {resolved_case.case_id} 的 setup_event_id "
+                    f"{resolved_case.setup_event_id} 已绑定伏笔线程 {owner_id}: "
+                    "同一埋设事件只允许绑定一条线程 (uq_foreshadowing_threads_run_setup_event)"
+                )
         thread.setup_event_id = resolved_case.setup_event_id
     if resolved_case.payoff_event_id is not None:
         thread.payoff_event_id = resolved_case.payoff_event_id
