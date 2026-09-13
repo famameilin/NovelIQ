@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -13,7 +15,6 @@ from src.agents.annotation.schema import (
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
-    BoundForeshadowing,
     ChunkMetricsInput,
     PendingCase,
     ResolvedCase,
@@ -22,8 +23,8 @@ from src.storage.models import (
     CasePoolCase,
     CaseResolutionMapping,
     DialogueRecord,
-    ForeshadowingThread,
-    ForeshadowingThreadHit,
+    EventEdge,
+    EventNode,
     GraphFact,
     RelationState,
 )
@@ -36,16 +37,12 @@ def _annotation(
     *,
     chunk_id: int,
     text: str,
-    foreshadowing: BoundForeshadowing | None = None,
+    foreshadowing: bool = False,
     event_node_ids: list[str] | None = None,
 ) -> BoundChapterAnnotation:
-    """2026-08-11 用于构造含伏笔的章节标注
+    """2026-09-13 用于构造章节标注（foreshadowing=True 时附带伏笔树根事件）
 
-    2026-08-18：伏笔需要绑定 setup 事件，因此当 foreshadowing 非 None 时
-    自动构造一个锚定整个 chunk 文本的 BoundEvent；2026-08-22 下
-    伏笔 setup_node_id 直接指向该事件节点 id。
-    2026-09-04：event_node_ids 允许只落事件不建伏笔线程（疑点未确认场景）。
-    2026-09-04 单一写面：实体不再进 payload，经 _result(entity_names=...) 走 entity_ops。
+    伏笔即事件树：根事件 is_foreshadow_setup=True 即伏笔树根，不再有独立伏笔载荷。
     """
     events: list[BoundEvent] = []
     for node_id in event_node_ids or []:
@@ -60,21 +57,23 @@ def _annotation(
                 causal_event_refs=[],
             )
         )
-    if foreshadowing is not None:
-        # setup_node_id 直接指向本章事件节点 id
-        setup_node_id = f"evt-setup-{chunk_id}"
+    if foreshadowing:
+        # EventNode.event_id 是全库主键（非按 run 隔离），测试间必须唯一，
+        # 否则 persist 的 session.get 会命中上一测试的节点而静默跳过写入
         events.append(
             BoundEvent(
-                node_id=setup_node_id,
-                tree_id=f"tree-{chunk_id}",
+                node_id=f"evt-setup-{chunk_id}-{uuid.uuid4().hex[:8]}",
+                tree_id=f"tree-{chunk_id}-{uuid.uuid4().hex[:8]}",
                 parent_node_id=None,
                 cause_role="root",
                 description=f"事件-{text[:6]}",
                 participants=[],
                 causal_event_refs=[],
+                is_foreshadow_setup=True,
+                expected_payoff_family="守护",
+                payoff_likelihood="high",
             )
         )
-        foreshadowing = foreshadowing.model_copy(update={"setup_node_id": setup_node_id})
     return BoundChapterAnnotation(
         chapter_summary=text,
         chunks=[
@@ -88,7 +87,6 @@ def _annotation(
                 character_observations=[],
                 dialogues=[],
                 events=events,
-                foreshadowings=[foreshadowing] if foreshadowing is not None else [],
             )
         ],
     )
@@ -300,7 +298,7 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
     assert resolved_case is not None and resolved_case.state == "resolved"
     assert mapping.target_fact_id is None
     assert mapping.target_dialogue_id is None
-    assert mapping.target_setup_id is None
+    assert mapping.target_root_event_id is None
     assert mapping.resolution["action"] == "close"
     assert second.resolved_cases[0].action == "close"
 
@@ -477,21 +475,13 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
     assert row is not None and row.state == "active"
 
 
-def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
-    """2026-08-11 用于验证伏笔线程默认字段与 foreshadowing 动作按 setup_id 更新"""
+def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
+    """2026-09-13 用于验证 foreshadowing 动作把本章事件挂进伏笔树（foreshadowing 边）"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓", "顾霜屡次立誓"],
         chapter_ids=[1, 2],
         title="伏笔解决",
-    )
-    foreshadowing = BoundForeshadowing(
-        description="顾霜承诺护佑山门",
-        confidence="high",
-        setup_node_id="evt-setup-1",
-        setup_kind="承诺",
-        expected_payoff_family="守护",
-        payoff_likelihood="high",
     )
     first = complete_annotation_run(
         result=_result(
@@ -500,22 +490,21 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
             annotation=_annotation(
                 chunk_id=1,
                 text="顾霜立誓",
-                foreshadowing=foreshadowing,
+                foreshadowing=True,
             ),
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
     db_session.rollback()
-    thread = db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalar_one()
-    assert thread.setup_summary == "顾霜承诺护佑山门"
-    # 伏笔埋设点必填三字段：LLM 埋设时即给出判断，不再以 None 冒充
-    assert thread.foreshadowing_type is None
-    assert thread.setup_kind == "承诺"
-    assert thread.expected_payoff_family == "守护"
-    assert thread.payoff_likelihood == "high"
-    assert thread.confidence == "high"
-    assert thread.status == "open"
-    assert thread.active is True
+    root = db_session.execute(
+        select(EventNode).where(
+            EventNode.run_id == run_id,
+            EventNode.is_foreshadowing_root.is_(True),
+        )
+    ).scalar_one()
+    assert root.foreshadowing_status == "open"
+    assert root.expected_payoff_family == "守护"
+    assert root.payoff_likelihood == "high"
     pushed = PendingCase(
         type="foreshadowing_suspect",
         chunk_id=1,
@@ -524,7 +513,6 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
         target_key="pushed-foreshadowing",
         target_ref={
             "kind": "foreshadowing_suspect",
-            "setup_id": thread.setup_id,
             "chunk_id": 1,
         },
     )
@@ -535,11 +523,14 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     )
     row.id = "foreshadowing-case"
     db_session.commit()
+    bind_event_id = f"evt-ch2-bind-{uuid.uuid4().hex[:8]}"
     resolved = ResolvedCase(
         case_id="foreshadowing-case",
         action="foreshadowing",
         type="foreshadowing_suspect",
-        setup_status="reinforced",
+        foreshadowing_action="reinforce",
+        foreshadowing_root_event_id=root.event_id,
+        foreshadowing_event_id=bind_event_id,
         payoff_likelihood="high",
         reason="后续章节强化承诺",
         target_key=pushed.target_key,
@@ -549,7 +540,7 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾霜屡次立誓"),
+            annotation=_annotation(chunk_id=2, text="顾霜屡次立誓", event_node_ids=[bind_event_id]),
             resolved_cases=[resolved],
             authorized_chunk_ids=[1, 2],
         ),
@@ -557,44 +548,37 @@ def test_foreshadowing_action_updates_thread_by_setup_id(db_session) -> None:
     )
 
     db_session.rollback()
-    updated = db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalar_one()
+    updated = db_session.get(EventNode, root.event_id)
+    edge = db_session.execute(
+        select(EventEdge).where(
+            EventEdge.run_id == run_id,
+            EventEdge.edge_type == "foreshadowing",
+        )
+    ).scalar_one()
     mapping = db_session.execute(
         select(CaseResolutionMapping).where(
             CaseResolutionMapping.run_id == run_id,
             CaseResolutionMapping.case_id == "foreshadowing-case",
         )
     ).scalar_one()
-    assert updated.setup_id == thread.setup_id
-    assert updated.status == "reinforced"
-    assert updated.payoff_likelihood == "high"
-    assert mapping.target_setup_id == thread.setup_id
-    assert mapping.resolution["action"] == "foreshadowing"
-    assert second.resolved_cases[0].target_setup_id == thread.setup_id
+    assert updated.foreshadowing_status == "reinforced"
+    assert edge.source_event_id == root.event_id
+    assert edge.target_event_id == bind_event_id
+    assert mapping.target_root_event_id == root.event_id
+    assert mapping.target_event_id == bind_event_id
+    assert mapping.resolution["foreshadowing_action"] == "reinforce"
+    assert second.resolved_cases[0].target_root_event_id == root.event_id
 
 
-def test_foreshadowing_same_setup_event_creates_single_thread(db_session) -> None:
-    """2026-08-18 用于验证同章同 setup_event_id 重复 sync 只建一条线程（去重键=setup_event_id）
-
-    新合同去重键从 description casefold 改为 setup_event_id：两章各自独立标注的
-    setup 事件（chunk_id 不同 → setup_event_id 不同）是不同线程，不再按描述去重。
-    此测试验证同章同事件重复 sync 的幂等行为。
-    """
+def test_foreshadowing_same_completion_replays_without_duplicate_edges(db_session) -> None:
+    """2026-09-13 用于验证同章完成事务重放（load_completion_result 命中）不重复建根/挂边"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["顾霜立誓", "顾霜再誓"],
-        chapter_ids=[1, 2],
+        texts=["顾霜立誓"],
+        chapter_ids=[1],
         title="伏笔去重",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    foreshadowing = BoundForeshadowing(
-        description="顾霜承诺护佑山门",
-        confidence="high",
-        setup_node_id="evt-setup-1",
-        setup_kind="承诺",
-        expected_payoff_family="守护",
-        payoff_likelihood="high",
-    )
-    # 章 1 同一伏笔连续两次完成事务（模拟重跑）：setup_event_id 相同 → 只建一条线程
     for _ in range(2):
         complete_annotation_run(
             result=_result(
@@ -603,34 +587,32 @@ def test_foreshadowing_same_setup_event_creates_single_thread(db_session) -> Non
                 annotation=_annotation(
                     chunk_id=1,
                     text="顾霜立誓",
-                    foreshadowing=foreshadowing,
+                    foreshadowing=True,
                 ),
             ),
             session_factory=factory,
         )
         db_session.rollback()
 
-    threads = list(
-        db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalars()
+    roots = list(
+        db_session.execute(
+            select(EventNode).where(
+                EventNode.run_id == run_id,
+                EventNode.is_foreshadowing_root.is_(True),
+            )
+        ).scalars()
     )
-    assert len(threads) == 1
-    assert threads[0].setup_summary == "顾霜承诺护佑山门"
-    assert threads[0].foreshadowing_type is None
-    assert threads[0].status == "open"
+    assert len(roots) == 1
+    assert roots[0].foreshadowing_status == "open"
 
 
-def test_foreshadowing_confirmation_of_threadless_case_creates_thread(db_session) -> None:
-    """2026-09-04 用于验证未挂线程的疑点案例被确认伏笔时就地建线程并记录确认信息
-
-    场景：第 1 章 push 疑点（target_ref 无 setup_id）且本章事件 evt-suspect-1 为埋设点；
-    第 2 章 resolve_foreshadowing_case 带 setup_event_id 确认——线程按去重键建立，
-    setup_summary/status/命中轨迹全部落库，确认信息不丢。
-    """
+def test_foreshadowing_payoff_resolution_closes_tree(db_session) -> None:
+    """2026-09-13 用于验证回收动作把伏笔树收束为 likely_paid_off 并记录映射"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
-        texts=["白芷对贺重明进行摸底", "白芷承认精灵族身份"],
+        texts=["白芷立下守护之誓", "誓言兑现挡下袭击"],
         chapter_ids=[1, 2],
-        title="疑点确认建线程",
+        title="疑点确认挂树",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     first = complete_annotation_run(
@@ -639,18 +621,24 @@ def test_foreshadowing_confirmation_of_threadless_case_creates_thread(db_session
             chapter_id=1,
             annotation=_annotation(
                 chunk_id=1,
-                text="白芷对贺重明进行摸底",
-                event_node_ids=["evt-suspect-1"],
+                text="白芷立下守护之誓",
+                foreshadowing=True,
             ),
         ),
         session_factory=factory,
     )
     db_session.rollback()
+    root = db_session.execute(
+        select(EventNode).where(
+            EventNode.run_id == run_id,
+            EventNode.is_foreshadowing_root.is_(True),
+        )
+    ).scalar_one()
     pushed = PendingCase(
         type="foreshadowing_suspect",
         chunk_id=1,
-        keys=["白芷", "精灵族"],
-        description="白芷真实身份疑点",
+        keys=["白芷", "守护之誓"],
+        description="白芷誓言疑点",
         target_key="pushed-threadless",
         target_ref={"kind": "foreshadowing_suspect", "chunk_id": 1},
     )
@@ -661,23 +649,23 @@ def test_foreshadowing_confirmation_of_threadless_case_creates_thread(db_session
     )
     row.id = "threadless-case"
     db_session.commit()
+    payoff_event_id = f"evt-ch2-payoff-{uuid.uuid4().hex[:8]}"
     resolved = ResolvedCase(
         case_id="threadless-case",
         action="foreshadowing",
         type="foreshadowing_suspect",
-        setup_summary="白芷为精灵族，摸底与身份相关",
-        setup_status="reinforced",
-        confidence="high",
-        reason="本章白芷承认精灵族身份，疑点证实",
+        foreshadowing_action="payoff",
+        foreshadowing_root_event_id=root.event_id,
+        foreshadowing_event_id=payoff_event_id,
+        reason="本章誓言兑现挡下袭击，疑点证实为伏笔回收",
         target_key=pushed.target_key,
         target_ref=dict(pushed.target_ref),
-        setup_event_id="evt-suspect-1",
     )
     second = complete_annotation_run(
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="白芷承认精灵族身份"),
+            annotation=_annotation(chunk_id=2, text="誓言兑现挡下袭击", event_node_ids=[payoff_event_id]),
             resolved_cases=[resolved],
             authorized_chunk_ids=[1, 2],
         ),
@@ -685,34 +673,24 @@ def test_foreshadowing_confirmation_of_threadless_case_creates_thread(db_session
     )
 
     db_session.rollback()
-    thread = db_session.execute(
-        select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)
+    updated = db_session.get(EventNode, root.event_id)
+    edge = db_session.execute(
+        select(EventEdge).where(
+            EventEdge.run_id == run_id,
+            EventEdge.edge_type == "foreshadowing",
+        )
     ).scalar_one()
-    assert thread.setup_event_id == "evt-suspect-1"
-    assert thread.setup_summary == "白芷为精灵族，摸底与身份相关"
-    assert thread.first_chapter_id == 1
-    assert thread.last_chapter_id == 2
-    assert thread.status == "reinforced"
-    assert thread.confidence == "high"
-    assert thread.active is True
-    hits = list(
-        db_session.execute(
-            select(ForeshadowingThreadHit).where(
-                ForeshadowingThreadHit.setup_id == thread.setup_id
-            )
-        ).scalars()
-    )
-    assert len(hits) == 1
-    assert hits[0].is_new_setup is True
-    assert hits[0].event_id == "evt-suspect-1"
     mapping = db_session.execute(
         select(CaseResolutionMapping).where(
             CaseResolutionMapping.run_id == run_id,
             CaseResolutionMapping.case_id == "threadless-case",
         )
     ).scalar_one()
-    assert mapping.target_setup_id == thread.setup_id
-    assert second.resolved_cases[0].target_setup_id == thread.setup_id
+    assert updated.foreshadowing_status == "likely_paid_off"
+    assert edge.target_event_id == payoff_event_id
+    assert mapping.target_root_event_id == root.event_id
+    assert mapping.resolution["foreshadowing_action"] == "payoff"
+    assert second.resolved_cases[0].target_event_id == payoff_event_id
     assert novel_id
 
 
@@ -756,7 +734,6 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                         causal_event_refs=[],
                     )
                 ],
-                foreshadowings=[],
             )
         ],
     )

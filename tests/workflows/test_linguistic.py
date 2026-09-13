@@ -418,7 +418,6 @@ class TestSentenceBoundary:
                     character_observations=[],
                     dialogues=[],
                     events=[],
-                    foreshadowings=[],
                     sentence_labels=[BoundSentenceLabel(**label) for label in labels],
                 )
             ],

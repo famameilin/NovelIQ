@@ -363,7 +363,7 @@ METRIC_CONTRACTS: list[dict[str, object]] = [
         'objective_subjective': 'subjective',
         'authoritative': True,
         'null_semantics': '无伏笔线程或全部线程枚举证据缺失时为 null',
-        'computation_chain': 'foreshadowing_threads（payoff_likelihood/status/strength）确定性加权',
+        'computation_chain': 'event_nodes 伏笔树根（payoff_likelihood/status/strength）确定性加权',
         'invariants': [
             '输入退化时 null，不输出恒 0.313',
         ],

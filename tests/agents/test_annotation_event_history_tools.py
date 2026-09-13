@@ -3,8 +3,8 @@
 覆盖：
 - 检索返回历史事件树根视图并把 tree_id/root_node_id 登记进授权集合
 - 非 chunk_open 阶段拒绝检索
-- resolve_foreshadowing_case 对未授权 event_id 拒绝
-- 先检索授权后 resolve 通过（setup/payoff 事件绑定写入 ResolvedCase）
+- resolve_foreshadowing_case 对未授权 root/event 拒绝、对非伏笔根拒绝
+- 先检索授权后 resolve 通过（根事件+挂树事件写入 ResolvedCase）
 """
 
 from __future__ import annotations
@@ -32,13 +32,9 @@ class _EventHistoryService:
         self,
         trees: list[EventTreeHistoryResult] | None = None,
         current_chapter_order: int = 2,
-        case_has_thread: bool = True,
-        setup_event_owner: str | None = None,
     ) -> None:
         self.trees = trees or []
         self.current_chapter_order = current_chapter_order
-        self.case_has_thread = case_has_thread
-        self.setup_event_owner = setup_event_owner
         self.calls: list[tuple[str, int]] = []
 
     def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
@@ -60,13 +56,10 @@ class _EventHistoryService:
         """2026-08-18 用于返回包含稳定目标的 active 案例"""
         if case_id != "case-1":
             return None
-        target_ref: dict = {"kind": "伏笔疑点", "chunk_id": 10}
-        if self.case_has_thread:
-            target_ref["setup_id"] = "thread-1"
         return ActiveCaseDetails(
             **self._case().model_dump(mode="python"),
             target_key="thread-1",
-            target_ref=target_ref,
+            target_ref={"kind": "伏笔疑点", "chunk_id": 10},
         )
 
     def search_event_history(self, query, *, limit=50):
@@ -74,14 +67,15 @@ class _EventHistoryService:
         self.calls.append((query, limit))
         return list(self.trees)
 
-    def thread_id_for_setup_event(self, setup_event_id):
-        """2026-09-13 用于返回埋设事件占用线程的预设值"""
-        del setup_event_id
-        return self.setup_event_owner
 
-
-def _history_tree(tree_id: str, root_node_id: str, description: str) -> EventTreeHistoryResult:
-    """2026-08-22 用于构造预设历史树根视图"""
+def _history_tree(
+    tree_id: str,
+    root_node_id: str,
+    description: str,
+    *,
+    foreshadow: bool = False,
+) -> EventTreeHistoryResult:
+    """2026-08-22 用于构造预设历史树根视图（foreshadow=True 即伏笔树根）"""
     return EventTreeHistoryResult(
         tree_id=tree_id,
         root_node_id=root_node_id,
@@ -90,6 +84,8 @@ def _history_tree(tree_id: str, root_node_id: str, description: str) -> EventTre
         description=description,
         participants=[{"entity": "顾霜", "role": "主体"}],
         cross_chapter=False,
+        is_foreshadow_setup=foreshadow,
+        foreshadowing_status="open" if foreshadow else None,
     )
 
 
@@ -151,7 +147,7 @@ def test_search_event_rejects_outside_chunk_open_phase() -> None:
 
 
 def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
-    """2026-08-18 用于验证未经授权的 event_id 不能被伏笔解决引用"""
+    """2026-09-13 用于验证未经授权的 root_event_id 不能被伏笔解决引用"""
     service = _EventHistoryService(trees=[_history_tree("tree-h", "node-h-root", "顾霜进入山门")])
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -159,19 +155,21 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match="setup_event_id 未由事件域回执或 search_event 授权: event-x",
+        match="root_event_id 未由事件域回执或 search_event 授权: event-x",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
                 "case_number": case_number,
                 "reason": "伏笔回收",
-                "setup_event_id": "event-x",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": "event-x",
+                "event_id": "node-h-root",
             }
         )
 
 
 def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
-    """2026-09-04 第6章教训回归：把 tree_id 误当 setup_event_id 时报错须点名这层混淆
+    """2026-09-04 第6章教训回归：把 tree_id 误当 root_event_id 时报错须点名这层混淆
 
     write_event 回执同时含 tree_id 与 node_id，模型把 tree_id 传入后被泛化报错
     拒绝，转而 search_event 查本章事件落空（树仅覆盖已完成章节）→ 空转至回合上限。
@@ -179,30 +177,33 @@ def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
     service = _EventHistoryService()
     ledger = _ledger()
     # 真实流程：write_event 只把节点 id 登记进 authorized_event_ids，
-    # tree_id 仅进 authorized_tree_ids（不授权 setup/payoff 引用）
+    # tree_id 仅进 authorized_tree_ids（不授权伏笔挂树引用）
     ledger.authorized_tree_ids.add("tree-mixup")
+    ledger.authorized_event_ids.update({"node-bind-1"})
     tools = _tools(service, ledger)
     case_number = _register_payoff_case(service, ledger)
 
     with pytest.raises(
         AnnotationAuthorizationError,
-        match=r"setup_event_id 未由事件域回执或 search_event 授权: tree-mixup"
-        r".*事件树 id 而非事件节点 id.*children\[\]\.node_id 或 root_node_id",
+        match=r"root_event_id 未由事件域回执或 search_event 授权: tree-mixup"
+        r".*事件树 id 而非事件节点 id.*children\[\]\.node_id 或 search_event 树根视图的 root_node_id",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
                 "case_number": case_number,
                 "reason": "伏笔回收",
-                "setup_event_id": "tree-mixup",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": "tree-mixup",
+                "event_id": "node-bind-1",
             }
         )
 
 
 def test_resolve_foreshadowing_case_passes_authorized_event_ids() -> None:
-    """2026-08-22先 search_event 授权后 resolve 可绑定 setup/payoff 节点"""
+    """2026-09-13 先 search_event 授权后 resolve 可把本章事件挂进伏笔树"""
     service = _EventHistoryService(
         trees=[
-            _history_tree("tree-setup", "node-setup", "顾霜立誓"),
+            _history_tree("tree-setup", "node-setup", "顾霜立誓", foreshadow=True),
             _history_tree("tree-payoff", "node-payoff", "顾霜兑现承诺"),
         ]
     )
@@ -218,89 +219,83 @@ def test_resolve_foreshadowing_case_passes_authorized_event_ids() -> None:
             {
                 "case_number": case_number,
                 "reason": "伏笔回收",
-                "setup_event_id": "node-setup",
-                "payoff_event_id": "node-payoff",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": "node-setup",
+                "event_id": "node-payoff",
             }
         )
     )
 
     assert resolved["accepted"] is True
-    assert ledger.resolved_cases[-1].action == "foreshadowing"
-    assert ledger.resolved_cases[-1].setup_event_id == "node-setup"
-    assert ledger.resolved_cases[-1].payoff_event_id == "node-payoff"
+    last = ledger.resolved_cases[-1]
+    assert last.action == "foreshadowing"
+    assert last.foreshadowing_action == "reinforce"
+    assert last.foreshadowing_root_event_id == "node-setup"
+    assert last.foreshadowing_event_id == "node-payoff"
 
 
-def test_resolve_foreshadowing_case_requires_setup_event_for_threadless_case() -> None:
-    """2026-09-04 用于验证未挂线程案例确认伏笔必须给埋设事件，缺锚点拒绝、带锚点接受"""
+def test_resolve_foreshadowing_case_rejects_non_foreshadow_root() -> None:
+    """2026-09-13 伏笔即事件树：root_event_id 非伏笔树根（埋设事件）时拒绝并指向发现通道"""
     service = _EventHistoryService(
-        trees=[_history_tree("tree-h", "node-h-root", "白芷承认精灵族身份")],
-        case_has_thread=False,
+        trees=[
+            _history_tree("tree-h", "node-h-root", "白芷承认精灵族身份", foreshadow=False),
+            _history_tree("tree-p", "node-payoff", "精灵身份当众揭示"),
+        ],
     )
     ledger = _ledger()
     tools = _tools(service, ledger)
     case_number = _register_payoff_case(service, ledger)
 
+    _find_tool(tools, "search_event").invoke({"keyword": "白芷"})
     with pytest.raises(
         AnnotationInputError,
-        match="未关联伏笔线程.*setup_event_id.*close_case",
+        match=r"root_event_id 不是伏笔树的根（埋设事件）: node-h-root",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
                 "case_number": case_number,
                 "reason": "疑点强化",
-                "setup_status": "reinforced",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": "node-h-root",
+                "event_id": "node-payoff",
             }
         )
     assert ledger.resolved_cases == []
 
-    _find_tool(tools, "search_event").invoke({"keyword": "白芷"})
-    resolved = json.loads(
-        _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {
-                "case_number": case_number,
-                "reason": "疑点被证实",
-                "setup_event_id": "node-h-root",
-                "setup_status": "reinforced",
-            }
-        )
-    )
-    assert resolved["accepted"] is True
-    assert ledger.resolved_cases[-1].action == "foreshadowing"
-    assert ledger.resolved_cases[-1].setup_event_id == "node-h-root"
-    # 未挂线程时 setup_summary 兜底为案例描述，确认信息不丢
-    assert ledger.resolved_cases[-1].setup_summary == "伏笔回收判断"
 
-
-def test_resolve_foreshadowing_case_rejects_setup_event_owned_by_other_thread() -> None:
-    """2026-09-13 ch20 崩溃回归：重指他人埋设事件须工具层即拒，而非完成事务撞唯一约束炸 run"""
+def test_resolve_foreshadowing_case_rejects_event_id_equal_to_root() -> None:
+    """2026-09-13 伏笔树合同：埋设事件自身不挂边，event_id == root_event_id 拒绝"""
     service = _EventHistoryService(
-        trees=[_history_tree("tree-setup", "node-setup", "贺重明烧叶求救")],
-        setup_event_owner="thread-other",
+        trees=[_history_tree("tree-h", "node-h-root", "白芷承认精灵族身份", foreshadow=True)],
     )
     ledger = _ledger()
     tools = _tools(service, ledger)
     case_number = _register_payoff_case(service, ledger)
-    _find_tool(tools, "search_event").invoke({"keyword": "贺重明"})
+    _find_tool(tools, "search_event").invoke({"keyword": "白芷"})
 
     with pytest.raises(
         AnnotationInputError,
-        match=r"已绑定伏笔线程 thread-other.*同一埋设事件只能属于一条线程",
+        match=r"event_id 不得与 root_event_id 相同（埋设事件自身不挂边）",
     ):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
                 "case_number": case_number,
                 "reason": "疑点续接",
-                "setup_event_id": "node-setup",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": "node-h-root",
+                "event_id": "node-h-root",
             }
         )
     assert ledger.resolved_cases == []
 
 
-def test_resolve_foreshadowing_case_allows_own_thread_setup_event() -> None:
-    """2026-09-13 埋设事件占用者就是案例目标线程时放行（幂等重申）"""
+def test_resolve_foreshadowing_case_binds_history_root_with_foreshadow_view() -> None:
+    """2026-09-13 伏笔树根经 search_event 树根视图授权后 resolve 通过"""
     service = _EventHistoryService(
-        trees=[_history_tree("tree-setup", "node-setup", "白芷承认精灵族身份")],
-        setup_event_owner="thread-1",
+        trees=[
+            _history_tree("tree-h", "node-h-root", "白芷承认精灵族身份", foreshadow=True),
+            _history_tree("tree-p", "node-payoff", "精灵身份当众揭示"),
+        ],
     )
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -312,10 +307,16 @@ def test_resolve_foreshadowing_case_allows_own_thread_setup_event() -> None:
             {
                 "case_number": case_number,
                 "reason": "疑点被证实",
-                "setup_event_id": "node-setup",
-                "setup_status": "reinforced",
+                "foreshadowing_action": "payoff",
+                "root_event_id": "node-h-root",
+                "event_id": "node-payoff",
+                "expected_payoff_family": "身份揭露",
             }
         )
     )
     assert resolved["accepted"] is True
-    assert ledger.resolved_cases[-1].setup_event_id == "node-setup"
+    last = ledger.resolved_cases[-1]
+    assert last.foreshadowing_action == "payoff"
+    assert last.foreshadowing_root_event_id == "node-h-root"
+    assert last.foreshadowing_event_id == "node-payoff"
+    assert last.expected_payoff_family == "身份揭露"

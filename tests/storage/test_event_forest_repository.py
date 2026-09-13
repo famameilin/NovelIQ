@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from uuid import NAMESPACE_URL, uuid5
 
-from src.agents.annotation.schema import BoundForeshadowing
-from src.storage.repositories import ForeshadowingRepository
 from src.storage.repositories.graph import EventForestRepository
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
@@ -140,7 +138,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
 
 
 def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
-    """2026-08-18 用于验证 fetch_snapshot 返回伏笔边（线程即边）"""
+    """2026-09-13 用于验证 fetch_snapshot 返回伏笔树视图（伏笔即事件树）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓"],
@@ -155,22 +153,11 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "isforeshadowing": True,
+                "expected_payoff_family": "守护",
+                "payoff_likelihood": "high",
             },
         ],
-    )
-    setup_eid = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
-    ForeshadowingRepository(db_session).sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门",
-            confidence="high",
-            setup_node_id=setup_eid,
-            setup_kind="承诺",
-            expected_payoff_family="守护",
-            payoff_likelihood="high",
-        ),
-        setup_event_id=setup_eid,
     )
     db_session.commit()
 
@@ -179,9 +166,10 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     assert snapshot is not None
     assert len(snapshot.foreshadowing_edges) == 1
     edge = snapshot.foreshadowing_edges[0]
-    assert edge.setup_summary == "顾霜承诺护佑山门"
-    assert edge.setup_event_id == setup_eid
+    assert edge.description == "顾霜立誓"
+    assert edge.root_event_id == snapshot.event_trees[0].root_event_id
     assert edge.payoff_event_id is None
+    assert edge.status == "open"
     assert edge.active is True
 
 

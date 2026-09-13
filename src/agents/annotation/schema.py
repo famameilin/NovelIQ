@@ -220,14 +220,6 @@ class RelationType(StrEnum):
     LEADER = "领导"
 
 
-class SetupStatus(StrEnum):
-    """2026-08-07 用于约束伏笔线程当前阶段（系统内部默认值使用）"""
-
-    OPEN = "open"
-    REINFORCED = "reinforced"
-    LIKELY_PAID_OFF = "likely_paid_off"
-
-
 class PayoffLikelihood(StrEnum):
     """2026-08-07 用于约束伏笔回收可能性（系统内部默认值使用）"""
 
@@ -649,6 +641,10 @@ class EventTreeHistoryResult(StrictModel):
     description: str = Field(min_length=1)
     participants: list[dict[str, Any]] = Field(default_factory=list)
     is_foreshadow_setup: bool = False
+    # 2026-09-13 伏笔入森林：树根视图携带伏笔属性（发现活跃伏笔的检索通道）
+    foreshadowing_status: str | None = None
+    expected_payoff_family: str | None = None
+    payoff_likelihood: str | None = None
     cross_chapter: bool = False
     root_node_id: str = Field(min_length=1, description="树根节点 id（落库 event_id）")
     edges: list[dict[str, Any]] = Field(default_factory=list)
@@ -756,16 +752,12 @@ class WriteEventArg(StrictModel):
     )
     isforeshadowing: bool = Field(
         default=False,
-        description="标记该事件为伏笔埋设点（系统自动创建伏笔线程，无需再调用伏笔工具）",
+        description="标记该事件为伏笔埋设点：整棵树成为事件森林里的伏笔树，根即埋设事件",
     )
     cause_tree_id: str | None = Field(
         default=None,
         description="因果前驱事件树 id（可选）。本章新树填 write_event 返回的 tree_id；"
         "延续前文剧情先 search_event 检索历史树再填其 tree_id",
-    )
-    setup_kind: str | None = Field(
-        default=None,
-        description="伏笔类型（如人物秘密/道具/预言/悬念），isforeshadowing=true 时应提供",
     )
     expected_payoff_family: str | None = Field(
         default=None,
@@ -799,7 +791,6 @@ class WriteEventArg(StrictModel):
             or self.children
             or self.isforeshadowing
             or self.cause_tree_id
-            or self.setup_kind
             or self.expected_payoff_family
             or self.payoff_likelihood
         )
@@ -811,20 +802,19 @@ class WriteEventArg(StrictModel):
 
     @model_validator(mode="after")
     def require_foreshadowing_fields(self) -> WriteEventArg:
-        """伏笔埋设时必须提供全部三字段，避免入库默认值冒充 LLM 判断"""
+        """伏笔埋设时必须提供回收家族与可能性，避免入库默认值冒充 LLM 判断"""
         if not self.isforeshadowing:
             return self
         missing = [
             name
             for name, value in (
-                ("setup_kind", self.setup_kind),
                 ("expected_payoff_family", self.expected_payoff_family),
                 ("payoff_likelihood", self.payoff_likelihood),
             )
             if value is None
         ]
         if missing:
-            raise ValueError(f"isforeshadowing=true 时必须提供全部三字段，缺失: {', '.join(missing)}")
+            raise ValueError(f"isforeshadowing=true 时必须提供全部两字段，缺失: {', '.join(missing)}")
         return self
 
 
@@ -847,16 +837,12 @@ class WriteEventInput(StrictModel):
     )
     isforeshadowing: bool = Field(
         default=False,
-        description="标记该事件为伏笔埋设点（系统自动创建伏笔线程，无需再调用伏笔工具）",
+        description="标记该事件为伏笔埋设点：整棵树成为事件森林里的伏笔树，根即埋设事件",
     )
     cause_tree_id: str | None = Field(
         default=None,
         description="因果前驱事件树 id（可选）。本章新树填 write_event 返回的 tree_id；"
         "延续前文剧情先 search_event 检索历史树再填其 tree_id",
-    )
-    setup_kind: str | None = Field(
-        default=None,
-        description="伏笔类型（如人物秘密/道具/预言/悬念），isforeshadowing=true 时应提供",
     )
     expected_payoff_family: str | None = Field(
         default=None,
@@ -890,7 +876,6 @@ class WriteEventInput(StrictModel):
             or self.children
             or self.isforeshadowing
             or self.cause_tree_id
-            or self.setup_kind
             or self.expected_payoff_family
             or self.payoff_likelihood
         )
@@ -902,13 +887,12 @@ class WriteEventInput(StrictModel):
 
     @model_validator(mode="after")
     def require_foreshadowing_fields(self) -> WriteEventInput:
-        """伏笔埋设时必须提供全部三字段，避免入库默认值冒充 LLM 判断"""
+        """伏笔埋设时必须提供回收家族与可能性，避免入库默认值冒充 LLM 判断"""
         if not self.isforeshadowing:
             return self
         missing = [
             name
             for name, value in (
-                ("setup_kind", self.setup_kind),
                 ("expected_payoff_family", self.expected_payoff_family),
                 ("payoff_likelihood", self.payoff_likelihood),
             )
@@ -916,7 +900,7 @@ class WriteEventInput(StrictModel):
         ]
         if missing:
             raise ValueError(
-                f"isforeshadowing=true 时必须提供全部三字段，缺失: {', '.join(missing)}"
+                f"isforeshadowing=true 时必须提供全部两字段，缺失: {', '.join(missing)}"
             )
         return self
 
@@ -952,7 +936,6 @@ class WriteEventPatchArgs(WriteEventArg):
             or self.children
             or self.isforeshadowing
             or self.cause_tree_id
-            or self.setup_kind
             or self.expected_payoff_family
             or self.payoff_likelihood
         )
@@ -1069,6 +1052,9 @@ class BoundEvent(StrictModel):
     description: str = Field(min_length=1)
     participants: list[EventParticipantInput] = Field(default_factory=list)
     is_foreshadow_setup: bool = False
+    # 2026-09-13 伏笔入森林：根事件携带伏笔属性（落库到 event_nodes 根列）
+    expected_payoff_family: str | None = None
+    payoff_likelihood: PayoffLikelihood | None = None
     # 仅跨章树的根节点携带 [cause_tree_id 根节点 id]，其余恒为空
     causal_event_refs: list[str] = Field(default_factory=list)
 
@@ -1078,42 +1064,6 @@ class BoundRelation(RelationInput):
 
     directionality: Directionality
     relation_semantics: RelationSemantics
-
-
-class BoundForeshadowing(StrictModel):
-    """2026-08-22系统绑定伏笔（setup 直接指向事件树节点 id）"""
-
-    description: str = Field(min_length=1)
-    confidence: Confidence = Field(default=Confidence.MEDIUM)
-    setup_node_id: str = Field(min_length=1, description="埋设事件树节点 id（=落库 setup_event_id）")
-    setup_kind: str | None = Field(
-        default=None,
-        description="伏笔类型（如人物秘密/道具/预言/悬念），LLM 埋设时判断",
-    )
-    expected_payoff_family: str | None = Field(
-        default=None,
-        description="预期的回收方向/家族，LLM 埋设时判断",
-    )
-    payoff_likelihood: PayoffLikelihood | None = Field(
-        default=None,
-        description="回收可能性，LLM 埋设时判断",
-    )
-
-    @model_validator(mode="after")
-    def require_foreshadowing_fields(self) -> BoundForeshadowing:
-        """伏笔埋设必须给出三字段，避免入库默认值冒充 LLM 判断"""
-        missing = [
-            name
-            for name, value in (
-                ("setup_kind", self.setup_kind),
-                ("expected_payoff_family", self.expected_payoff_family),
-                ("payoff_likelihood", self.payoff_likelihood),
-            )
-            if value is None
-        ]
-        if missing:
-            raise ValueError(f"伏笔埋设必须提供全部三字段，缺失: {', '.join(missing)}")
-        return self
 
 
 class SentenceLabelInput(StrictModel):
@@ -1170,7 +1120,6 @@ class BoundChunkAnnotation(StrictModel):
     character_observations: list[BoundCharacterObservation]
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
-    foreshadowings: list[BoundForeshadowing]
     # 2026-09-07 句级监督：agent 自选句情绪标签（随 write_metrics 的 sentence_labels
     # 可选参数搭车提交，服务端定位绑定，不设独立工具）
     sentence_labels: list[BoundSentenceLabel] = Field(default_factory=list)
@@ -1239,17 +1188,7 @@ class ActiveCaseDetails(CaseSearchResult):
     target_ref: dict[str, Any]
 
 
-class ForeshadowingSearchResult(StrictModel):
-    """2026-08-07 用于查询服务内部返回伏笔线程"""
-
-    record_id: str
-    content: dict[str, Any]
-
-
-SearchResultItem = Annotated[
-    CaseSearchResult | ForeshadowingSearchResult,
-    Field(union_mode="left_to_right"),
-]
+SearchResultItem = CaseSearchResult
 
 
 class CasePoolSummary(StrictModel):
@@ -1264,7 +1203,7 @@ class CasePoolSummary(StrictModel):
 
 
 class SearchResult(StrictModel):
-    """2026-08-07 用于查询服务内部返回案例与伏笔结果
+    """2026-08-07 用于查询服务内部返回案例结果
 
     2026-09-11 案例改检索制：pool 汇报池内剩余规模与类型分布，truncated 表示
     命中超过 limit 只返回了前 limit 条。
@@ -1294,17 +1233,13 @@ class ResolvedCase(StrictModel):
     to_entity: str | None = None
     relation_type: str | None = None
     change_kind: RelationChangeKind | None = None
-    # foreshadowing 动作：改伏笔线程（setup_id 定位，字段即更新值）
-    setup_summary: str | None = None
-    setup_kind: str | None = None
+    # 2026-09-13 伏笔入森林：把本章事件挂进伏笔树（foreshadowing 边），可选更新根属性
+    foreshadowing_action: Literal["reinforce", "payoff"] | None = None
+    foreshadowing_root_event_id: str | None = None
+    foreshadowing_event_id: str | None = None
     expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
-    setup_status: str | None = None
-    confidence: str | None = None
     strength: str | None = None
-    # 2026-08-18 伏笔续接/回收案例增加事件引用（新命中优先绑定事件）
-    setup_event_id: str | None = None
-    payoff_event_id: str | None = None
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> ResolvedCase:
@@ -1340,35 +1275,20 @@ class ResolvedCase(StrictModel):
             )
             return self
         if self.action == "foreshadowing":
-            if all(
-                value is None
-                for value in (
-                    self.setup_summary,
-                    self.setup_kind,
+            missing = [
+                name
+                for name in ("foreshadowing_action", "foreshadowing_root_event_id", "foreshadowing_event_id")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(f"foreshadowing 动作缺少字段: {missing}")
+            if self.expected_payoff_family is not None:
+                self.expected_payoff_family = normalize_semantic_text(
                     self.expected_payoff_family,
-                    self.payoff_likelihood,
-                    self.setup_status,
-                    self.confidence,
-                    self.strength,
-                    self.setup_event_id,
-                    self.payoff_event_id,
+                    label="resolve.expected_payoff_family",
                 )
-            ):
-                raise ValueError("foreshadowing 动作必须至少提供一个更新字段")
-            for field_name in ("setup_summary", "expected_payoff_family"):
-                value = getattr(self, field_name)
-                if value is not None:
-                    setattr(
-                        self,
-                        field_name,
-                        normalize_semantic_text(value, label=f"resolve.{field_name}"),
-                    )
             # 2026-08-16 P3：枚举字段不再降级为 "unknown"，非法值直接拦截入库
             for field_name, valid_values in (
-                (
-                    "setup_status",
-                    {status.value for status in SetupStatus},
-                ),
                 (
                     "payoff_likelihood",
                     {likelihood.value for likelihood in PayoffLikelihood},
@@ -1454,11 +1374,10 @@ class CompletionResolvedCase(StrictModel):
     type: CaseType
     reason: str
     target_dialogue_id: str | None = None
-    target_setup_id: str | None = None
     target_fact_id: str | None = None
-    # 2026-08-18 伏笔续接/回收案例解决可产生事件目标
-    target_setup_event_id: str | None = None
-    target_payoff_event_id: str | None = None
+    # 2026-09-13 伏笔入森林：解决目标是伏笔树根与挂进树的事件
+    target_root_event_id: str | None = None
+    target_event_id: str | None = None
 
 
 class CompletionResult(StrictModel):

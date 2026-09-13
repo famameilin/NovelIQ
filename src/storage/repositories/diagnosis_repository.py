@@ -19,7 +19,7 @@ from src.storage.models import (
     StageSummary,
 )
 from src.storage.path_resolver import resolve_model_dir
-from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingThreadView
+from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingTreeView
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph import GraphRepository
 
@@ -116,28 +116,9 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 )
         return rows[:row_limit]
 
-    def fetch_foreshadowing_chunks(
-        self, run_id: str, limit: int | None = None
-    ) -> list[tuple[int, str, str | None, str]]:
-        """2026-08-05 用于从伏笔 thread 与 hit 读取章节定位诊断素材"""
-        row_limit = limit if limit is not None else 30
-        text_by_chapter = self._text_by_chapter_id(run_id)
-        rows: list[tuple[int, str, str | None, str]] = []
-        for thread in AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id):
-            for chapter_id in thread.anchor_chapter_ids:
-                rows.append(
-                    (
-                        chapter_id,
-                        text_by_chapter.get(chapter_id, ""),
-                        thread.setup_kind,
-                        thread.setup_summary,
-                    )
-                )
-        return sorted(rows, key=lambda row: row[0])[:row_limit]
-
-    def fetch_foreshadowing_threads(self, run_id: str) -> list[ForeshadowingThreadView]:
-        """2026-08-05 用于读取伏笔线程最新汇总视图"""
-        return AnnotationRepository(self.session).fetch_foreshadowing_threads(run_id)
+    def fetch_foreshadowing_trees(self, run_id: str) -> list[ForeshadowingTreeView]:
+        """2026-09-13 用于读取伏笔树最新汇总视图"""
+        return AnnotationRepository(self.session).fetch_foreshadowing_trees(run_id)
 
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
         """2026-08-05 用于读取伏笔线程生命周期聚合预期"""

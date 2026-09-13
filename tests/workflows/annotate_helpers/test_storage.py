@@ -68,7 +68,6 @@ def _annotation(
                 character_observations=[],
                 dialogues=dialogues,
                 events=[],
-                foreshadowings=[],
             )
         ],
     )
@@ -275,7 +274,7 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
     annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
 
     with patch(
-        "src.workflows.annotate_helpers.storage._persist_foreshadowing",
+        "src.workflows.annotate_helpers.storage.persist_completion_graph",
         side_effect=RuntimeError("persist failed"),
     ):
         with pytest.raises(RuntimeError, match="persist failed"):
@@ -367,7 +366,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
 # ---------------------------------------------------------------------------
 
 
-def _foreshadowing_case(case_id: str, *, reason: str, setup_event_id: str | None) -> ResolvedCase:
+def _foreshadowing_case(case_id: str, *, reason: str, foreshadowing_event_id: str | None) -> ResolvedCase:
     return ResolvedCase(
         case_id=case_id,
         action="foreshadowing",
@@ -375,35 +374,38 @@ def _foreshadowing_case(case_id: str, *, reason: str, setup_event_id: str | None
         reason=reason,
         target_key=f"key-{case_id}",
         target_ref={"kind": "伏笔疑点", "chunk_id": 20},
-        setup_summary="禁碑伏笔",
-        setup_event_id=setup_event_id,
+        foreshadowing_action="reinforce",
+        foreshadowing_root_event_id="evt-root",
+        foreshadowing_event_id=foreshadowing_event_id,
     )
 
 
 def test_fold_resolved_cases_merges_duplicate_case_ids_from_two_blocks() -> None:
     """同一案例被两子块各解决一次：字段级后值覆盖、reason 拼接、保持首现顺序"""
-    block_a = _foreshadowing_case("case-1", reason="A块引入段写埋设", setup_event_id="evt-a")
-    block_b = _foreshadowing_case("case-1", reason="B块坐实段写确认", setup_event_id="evt-b")
-    other = _foreshadowing_case("case-2", reason="仅A块解决", setup_event_id="evt-a2")
+    block_a = _foreshadowing_case("case-1", reason="A块引入段写埋设", foreshadowing_event_id="evt-a")
+    block_b = _foreshadowing_case("case-1", reason="B块坐实段写确认", foreshadowing_event_id="evt-b")
+    other = _foreshadowing_case("case-2", reason="仅A块解决", foreshadowing_event_id="evt-a2")
 
     folded = _fold_resolved_cases([block_a, block_b, other])
 
     assert [item.case_id for item in folded] == ["case-1", "case-2"]
     merged = folded[0]
     assert merged.reason == "A块引入段写埋设\nB块坐实段写确认"
-    assert merged.setup_event_id == "evt-b"  # setup_event_id 取后者
+    assert merged.foreshadowing_event_id == "evt-b"  # 挂树事件 id 取后者
     assert merged.target_key == "key-case-1"
 
 
 def test_fold_resolved_cases_keeps_empty_later_fields() -> None:
-    """后值仅在非空时覆盖：后块未填 setup_event_id 不清掉前块的值"""
-    block_a = _foreshadowing_case("case-1", reason="先到", setup_event_id="evt-a")
-    block_b = _foreshadowing_case("case-1", reason="后到", setup_event_id=None)
+    """后值仅在非空时覆盖：后块未填期望回收族（可空字段）不清掉前块的值"""
+    block_a = _foreshadowing_case("case-1", reason="先到", foreshadowing_event_id="evt-a")
+    block_a = block_a.model_copy(update={"expected_payoff_family": "守护"})
+    block_b = _foreshadowing_case("case-1", reason="后到", foreshadowing_event_id="evt-b")
 
     folded = _fold_resolved_cases([block_a, block_b])
 
     assert len(folded) == 1
-    assert folded[0].setup_event_id == "evt-a"
+    assert folded[0].expected_payoff_family == "守护"
+    assert folded[0].foreshadowing_event_id == "evt-b"
     assert folded[0].reason == "先到\n后到"
 
 
@@ -426,7 +428,7 @@ def test_fold_resolved_cases_covers_fact_path_duplicate() -> None:
             }
         ]
 
-    foreshadowing = _foreshadowing_case("case-1", reason="伏笔路径裁决", setup_event_id="evt-a")
+    foreshadowing = _foreshadowing_case("case-1", reason="伏笔路径裁决", foreshadowing_event_id="evt-a")
     merged = _fold_resolved_cases([foreshadowing, *_graph_fact_resolved_cases(_ResultStub())])
 
     assert len(merged) == 1
@@ -440,8 +442,8 @@ def test_folded_resolved_cases_pass_locked_case_validation() -> None:
 
     from src.workflows.annotate_helpers.storage import _validate_locked_cases
 
-    block_a = _foreshadowing_case("case-1", reason="A", setup_event_id="evt-a")
-    block_b = _foreshadowing_case("case-1", reason="B", setup_event_id="evt-b")
+    block_a = _foreshadowing_case("case-1", reason="A", foreshadowing_event_id="evt-a")
+    block_b = _foreshadowing_case("case-1", reason="B", foreshadowing_event_id="evt-b")
     folded = _fold_resolved_cases([block_a, block_b])
     row = SimpleNamespace(
         id="case-1",

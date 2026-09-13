@@ -20,7 +20,6 @@ from src.agents.annotation.schema import (
     DialogueInput,
     EntityInput,
     EventParticipantInput,
-    ForeshadowingSearchResult,
     RelationInput,
     SearchResult,
     TextSearchResult,
@@ -60,15 +59,6 @@ class _QueryService:
         if case_type is not None:
             matches_type = case_type == "all" or case_type == self._case().type
             return SearchResult(results=[self._case()] if matches_type else [])
-        if "线索" in query:
-            return SearchResult(
-                results=[
-                    ForeshadowingSearchResult(
-                        record_id="thread-1",
-                        content={"setup_summary": "护佑山门", "setup_kind": "明确承诺"},
-                    )
-                ]
-            )
         return SearchResult(results=[self._case()])
 
     async def search_text(self, query, *, range_name, limit=50):
@@ -950,7 +940,7 @@ def test_unresolved_speaker_no_longer_auto_creates_case() -> None:
 
 
 def test_write_event_isforeshadowing_binds_setup_node() -> None:
-    """2026-08-22 事件契约：isforeshadowing=true 自动生成伏笔绑定并拒绝多余字段"""
+    """2026-09-13 伏笔即事件树：isforeshadowing=true 根事件携带伏笔属性并拒绝 setup_kind"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -962,19 +952,18 @@ def test_write_event_isforeshadowing_binds_setup_node() -> None:
         "write_event",
         _write_event_args(
             isforeshadowing=True,
-            setup_kind="悬念",
             expected_payoff_family="身份揭露",
             payoff_likelihood="medium",
+            children=[{"type": "main", "description": "身份线索再次出现"}],
         ),
     )
     assert response["accepted"] is True
-    stored = ledger.bound_payloads["foreshadowings"]
-    assert stored[0].description == "顾霜喝止众人"
-    assert stored[0].confidence == "medium"
-    assert stored[0].setup_node_id == response["root_node_id"]
-    assert stored[0].setup_kind == "悬念"
-    assert stored[0].expected_payoff_family == "身份揭露"
-    assert stored[0].payoff_likelihood == "medium"
+    assert response["foreshadowing_root_node_id"] == response["root_node_id"]
+    stored = ledger.bound_payloads["events"]
+    root = next(node for node in stored if node.node_id == response["root_node_id"])
+    assert root.is_foreshadow_setup is True
+    assert root.expected_payoff_family == "身份揭露"
+    assert root.payoff_likelihood == "medium"
     with pytest.raises(ValidationError):
         WriteEventInput.model_validate(
             {"description": "伏笔", "isforeshadowing": True, "setup_kind": "其他"}
@@ -1274,26 +1263,26 @@ def test_resolve_case_allowed_after_text_search_authorization() -> None:
 
 
 def test_resolve_foreshadowing_case_rejects_foreign_enum_values() -> None:
-    """2026-08-12 用于验证伏笔解决字段只接受闭合枚举（避免下游回收预期 KeyError）"""
+    """2026-09-13 用于验证伏笔解决字段只接受闭合枚举（setup_status 已随线程退役）"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
     _surface_case(service, ledger)
     case_number = ledger.case_number_by_id["case-1"]
-
-    with pytest.raises(ValidationError, match="setup_status"):
-        _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {"case_number": case_number, "setup_status": "已揭示", "reason": "伏笔回收"}
-        )
+    base = {
+        "case_number": case_number,
+        "reason": "伏笔回收",
+        "foreshadowing_action": "reinforce",
+        "root_event_id": "evt-root-1",
+        "event_id": "evt-bind-1",
+    }
     with pytest.raises(ValidationError, match="payoff_likelihood"):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {"case_number": case_number, "payoff_likelihood": "certain", "reason": "伏笔回收"}
+            {**base, "payoff_likelihood": "certain"}
         )
     with pytest.raises(ValidationError, match="strength"):
-        _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {"case_number": case_number, "strength": "very_high", "reason": "伏笔回收"}
-        )
+        _find_tool(tools, "resolve_foreshadowing_case").invoke({**base, "strength": "very_high"})
     assert ledger.resolved_cases == []
 
 
@@ -1323,8 +1312,8 @@ def test_push_case_accepts_arbitrary_type_and_dialogue_id() -> None:
     assert pushed.target_ref["chunk_id"] == 10
 
 
-def test_push_case_rejects_unknown_dialogue_or_thread_id() -> None:
-    """2026-08-11 用于验证 push_case 校验 dialogue_id 与 setup_id"""
+def test_push_case_rejects_unknown_dialogue_id() -> None:
+    """2026-09-13 用于验证 push_case 校验 dialogue_id（伏笔线程 setup_id 参数已退役）"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -1336,15 +1325,6 @@ def test_push_case_rejects_unknown_dialogue_or_thread_id() -> None:
                 "keys": ["住手"],
                 "type": "dialogue_speaker",
                 "dialogue_id": "dlg_not_exist",
-            }
-        )
-    with pytest.raises(AnnotationInputError, match="不是当前 run 的活跃伏笔线程"):
-        _find_tool(tools, "push_case").invoke(
-            {
-                "description": "伏笔疑点",
-                "keys": ["线索"],
-                "type": "foreshadowing_suspect",
-                "setup_id": "thread-not-exist",
             }
         )
 
@@ -1382,8 +1362,8 @@ def test_push_case_rejects_overlong_description() -> None:
     assert ledger.pushed_cases == []
 
 
-def test_push_case_accepts_setup_id_and_resolve_foreshadowing_case() -> None:
-    """2026-08-11 用于验证伏笔疑点携带 setup_id 且可动作式解决"""
+def test_push_case_then_resolve_foreshadowing_case_binds_tree() -> None:
+    """2026-09-13 伏笔即事件树：push_case 不再带 setup_id；resolve 以 root/event 挂树"""
     service = _ForeshadowingCaseQueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -1394,40 +1374,43 @@ def test_push_case_accepts_setup_id_and_resolve_foreshadowing_case() -> None:
                 "description": "伏笔疑点",
                 "keys": ["线索"],
                 "type": "foreshadowing_suspect",
-                "setup_id": "thread-1",
             }
         )
     )
     assert response["accepted"] is True
     pushed = ledger.pushed_cases[0]
-    assert pushed.target_ref["setup_id"] == "thread-1"
+    assert pushed.target_ref["kind"] == "foreshadowing_suspect"
 
     _surface_case(service, ledger)
     case_number = ledger.case_number_by_id["case-1"]
+    _call(tools, "write_entities", _write_entities_args())
+    event_response = _call(
+        tools,
+        "write_event",
+        _write_event_args(
+            isforeshadowing=True,
+            expected_payoff_family="守护",
+            payoff_likelihood="high",
+            children=[{"type": "main", "description": "守护誓言再次出现"}],
+        ),
+    )
     resolved = json.loads(
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
             {
                 "case_number": case_number,
-                "setup_status": "reinforced",
-                "reason": "后续章节强化",
+                "reason": "后续章节强化承诺",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": event_response["foreshadowing_root_node_id"],
+                "event_id": event_response["children"][0]["node_id"],
             }
         )
     )
     assert resolved["accepted"] is True
-    assert ledger.resolved_cases[-1].action == "foreshadowing"
-    assert ledger.resolved_cases[-1].setup_status == "reinforced"
-
-
-def test_search_pool_exposes_thread_id_for_foreshadowing_results() -> None:
-    """2026-08-11 用于验证伏笔线程视图携带 id 供 push_case 登记疑点"""
-    service = _QueryService()
-    ledger = _ledger()
-    tools = _tools(service, ledger)
-
-    view = json.loads(_find_tool(tools, "search_pool").invoke({"query": "线索"}))
-    assert view["results"][0]["result_kind"] == "foreshadowing"
-    assert view["results"][0]["id"] == "thread-1"
-    assert view["results"][0]["content"]["setup_summary"] == "护佑山门"
+    last = ledger.resolved_cases[-1]
+    assert last.action == "foreshadowing"
+    assert last.foreshadowing_action == "reinforce"
+    assert last.foreshadowing_root_event_id == event_response["foreshadowing_root_node_id"]
+    assert last.foreshadowing_event_id == event_response["children"][0]["node_id"]
 
 
 def test_search_pool_requires_query_or_case_type() -> None:
@@ -2081,7 +2064,13 @@ def test_resolve_foreshadowing_case_rejects_alias_case() -> None:
     case_number = ledger.case_number_by_id["alias-1"]
     with pytest.raises(AnnotationInputError, match="只能解决疑点类案例"):
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {"case_number": case_number, "reason": "误用", "setup_status": "reinforced"}
+            {
+                "case_number": case_number,
+                "reason": "误用",
+                "foreshadowing_action": "reinforce",
+                "root_event_id": "evt-root-1",
+                "event_id": "evt-bind-1",
+            }
         )
     assert ledger.resolved_cases == []
 

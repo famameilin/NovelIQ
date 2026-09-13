@@ -9,13 +9,13 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_diagnosis,
-    _fetch_foreshadowing_threads,
+    _fetch_foreshadowing_trees,
     _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
-from src.storage.repositories.annotation import ForeshadowingThreadView
+from src.storage.repositories.annotation import ForeshadowingTreeView
 
 
 class _DummyRow:
@@ -141,21 +141,22 @@ def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
     assert result.foreshadow_expectation == 0.3
 
 
-def test_fetch_foreshadowing_threads_preserves_confidence_field():
+def test_fetch_foreshadowing_trees_preserves_status_field():
+    """2026-09-13 伏笔树视图经 fetchers 透传（伏笔即事件树）"""
+
     class DummyRepo:
-        def fetch_foreshadowing_threads(self, run_id):
+        def fetch_foreshadowing_trees(self, run_id):
             assert run_id == "run-1"
             return [
-                ForeshadowingThreadView(
-                    setup_id="setup-1",
+                ForeshadowingTreeView(
+                    root_event_id="evt-root-1",
+                    tree_id="tree-1",
                     first_chapter_id=2,
                     last_chapter_id=5,
                     anchor_chapter_ids=[2, 5],
-                    setup_summary="黑伞只在雨夜自行张开",
-                    setup_kind="异常物件",
+                    description="黑伞只在雨夜自行张开",
                     expected_payoff_family="规则兑现",
                     payoff_likelihood="high",
-                    confidence="medium",
                     strength="medium",
                     status="reinforced",
                     active=True,
@@ -164,11 +165,11 @@ def test_fetch_foreshadowing_threads_preserves_confidence_field():
                 )
             ]
 
-    rows = _fetch_foreshadowing_threads("run-1", DummyRepo())
+    rows = _fetch_foreshadowing_trees("run-1", DummyRepo())
 
     assert len(rows) == 1
-    assert rows[0].setup_id == "setup-1"
-    assert rows[0].confidence == "medium"
+    assert rows[0].root_event_id == "evt-root-1"
+    assert rows[0].status == "reinforced"
 
 
 def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
@@ -878,8 +879,6 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
                     cliffhanger=False,
                     has_foreshadowing=False,
                     is_strong_setup=False,
-                    foreshadowing_type=None,
-                    setup_kind=None,
                     foreshadowing_desc=None,
                     why_unresolved_now=None,
                     expected_payoff_family=None,
@@ -931,7 +930,6 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
 
     assert len(result) == 1
     assert result[0].is_strong_setup is False
-    assert result[0].setup_kind is None
     assert result[0].why_unresolved_now is None
     assert result[0].expected_payoff_family is None
     assert len(result[0].relations) == 1
@@ -955,8 +953,6 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
                     cliffhanger=False,
                     has_foreshadowing=True,
                     is_strong_setup=True,
-                    foreshadowing_type="物件",
-                    setup_kind="异常物件",
                     foreshadowing_desc=(
                         "玉佩发热 - 具体钩子：玉佩出现异常发热。未闭合原因：当前还没有解释它为何会发热。"
                     ),
@@ -980,7 +976,6 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
     assert len(result) == 1
     assert result[0].chapter_id == 3
     assert result[0].is_strong_setup is True
-    assert result[0].setup_kind == "异常物件"
     assert result[0].relations == []
 
 
@@ -998,8 +993,6 @@ def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch
                     cliffhanger=False,
                     has_foreshadowing=False,
                     is_strong_setup=False,
-                    foreshadowing_type=None,
-                    setup_kind=None,
                     foreshadowing_desc=None,
                     why_unresolved_now=None,
                     expected_payoff_family=None,

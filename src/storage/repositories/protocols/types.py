@@ -108,16 +108,6 @@ class RelationChangeRow:
 
 
 @dataclass(frozen=True, slots=True)
-class ForeshadowingChunk:
-    """伏笔诊断分块"""
-
-    chapter_id: int
-    text: str
-    foreshadowing_type: str
-    foreshadowing_desc: str
-
-
-@dataclass(frozen=True, slots=True)
 class PivotMoment:
     """高潮时刻分块"""
 

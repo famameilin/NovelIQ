@@ -52,12 +52,12 @@ def _serialize_snapshot_edges(
     ]
     foreshadowing = [
         EventTimelineForeshadowingEdge(
-            setup_id=e.setup_id,
-            setup_event_id=e.setup_event_id,
+            root_event_id=e.root_event_id,
             payoff_event_id=e.payoff_event_id,
             first_chapter_id=e.first_chapter_id,
             last_chapter_id=e.last_chapter_id,
-            setup_summary=e.setup_summary,
+            tree_id=e.tree_id,
+            description=e.description,
             status=e.status,
             active=e.active,
         )

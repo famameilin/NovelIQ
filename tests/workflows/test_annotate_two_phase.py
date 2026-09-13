@@ -61,7 +61,6 @@ def _fake_writer_result() -> AgentRunResult:
                     character_observations=[],
                     dialogues=[],
                     events=[],
-                    foreshadowings=[],
                 )
             ],
         ),

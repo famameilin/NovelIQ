@@ -42,7 +42,7 @@ from src.api.models.responses import (
     CharacterStats,
     DiagnosisResult,
     EmotionTrendWindow,
-    ForeshadowingThreadResponse,
+    ForeshadowingTreeResponse,
     GlobalStats,
     ParagraphCurvePoint,
     ResultsWriteResponse,
@@ -56,7 +56,7 @@ from src.api.routes.results_fetchers import (
     _fetch_chapter_annotations,
     _fetch_characters,
     _fetch_diagnosis,
-    _fetch_foreshadowing_threads,
+    _fetch_foreshadowing_trees,
     _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_topics,
@@ -508,23 +508,23 @@ async def get_diagnosis(
 
 
 @router.get(
-    "/{novel_id}/foreshadowing-threads",
-    response_model=list[ForeshadowingThreadResponse],
+    "/{novel_id}/foreshadowing-trees",
+    response_model=list[ForeshadowingTreeResponse],
 )
-async def get_foreshadowing_threads(
+async def get_foreshadowing_trees(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> list[ForeshadowingThreadResponse]:
+) -> list[ForeshadowingTreeResponse]:
     """
-    获取跨 chunk 的 setup thread 台账
+    获取伏笔树台账（2026-09-13 伏笔即事件树）
 
-    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用
+    说明: 返回全部伏笔树 + active 状态，供 diagnosis drill-down 与导出复用
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    return _fetch_foreshadowing_threads(run_id, annotation_repo)
+    return _fetch_foreshadowing_trees(run_id, annotation_repo)
 
 
 @router.get("/{novel_id}/graph", response_model=GraphSnapshotResponse)
@@ -757,12 +757,12 @@ async def get_event_forest(
         ],
         foreshadowing_edges=[
             ForeshadowingEdgeResponse(
-                setup_id=fe.setup_id,
-                setup_event_id=fe.setup_event_id,
+                root_event_id=fe.root_event_id,
+                tree_id=fe.tree_id,
                 payoff_event_id=fe.payoff_event_id,
                 first_chapter_id=fe.first_chapter_id,
                 last_chapter_id=fe.last_chapter_id,
-                setup_summary=fe.setup_summary,
+                description=fe.description,
                 status=fe.status,
                 active=fe.active,
             )

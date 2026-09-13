@@ -1,7 +1,7 @@
 """GET /{novel_id}/event-forest 端点测试（事件森林/DAG 过程层 API）
 
 覆盖：
-- 200 全量快照：事件节点、contains/causal 边、伏笔边（线程即边）、章节根与可见边界、确定性 event_id
+- 200 全量快照：事件节点、causal 边、伏笔树（伏笔即事件树）、章节根与可见边界、确定性 event_id
 - chapter_id 按章边界截断
 - 404 无匹配章节图数据
 - 400 非 completed run
@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from src.agents.annotation.schema import BoundForeshadowing
-from src.storage.repositories import ForeshadowingRepository, RunRepository
+from src.storage.repositories import RunRepository
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
@@ -46,6 +45,10 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "node_id": gate_root,
                 "tree_id": "gate",
                 "cause_role": "root",
+                # 2026-09-13 伏笔即事件树：该事件即伏笔树根
+                "isforeshadowing": True,
+                "expected_payoff_family": "守护",
+                "payoff_likelihood": "high",
             },
             {
                 "description": "顾霜立誓",
@@ -58,20 +61,6 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "cause_role": "main",
             },
         ],
-    )
-    # 伏笔线程由 ForeshadowingRepository.sync 落库（持久化 helper 不代步）
-    ForeshadowingRepository(db_session).sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门",
-            confidence="high",
-            setup_node_id=gate_root,
-            setup_kind="承诺",
-            expected_payoff_family="守护",
-            payoff_likelihood="high",
-        ),
-        setup_event_id=gate_root,
     )
     persist_chapter_annotation(
         db_session,
@@ -147,7 +136,7 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
 
     assert len(payload["foreshadowing_edges"]) == 1
     foreshadowing = payload["foreshadowing_edges"][0]
-    assert foreshadowing["setup_event_id"] == gate_root
+    assert foreshadowing["root_event_id"] == gate_root
     assert foreshadowing["payoff_event_id"] is None
     assert foreshadowing["status"] == "open"
     assert foreshadowing["active"] is True

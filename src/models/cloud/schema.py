@@ -42,7 +42,7 @@ class CloudAnalysis(BaseModel):
         ge=0,
         le=1,
         description=(
-            "伏笔回收预期。该值由后端 setup thread ledger 确定性计算，"
+            "伏笔回收预期。该值由后端伏笔树根属性确定性计算，"
             "diagnosis LLM 不负责估算；持久化前会用 payload 值收口。"
         ),
     )

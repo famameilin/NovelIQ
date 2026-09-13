@@ -98,7 +98,7 @@ def _mock_pivot_repo(**kwargs) -> MagicMock:
     repo = MagicMock()
     repo.fetch_pivot_blocks.return_value = kwargs.get("pivot_blocks", [])
     repo.fetch_high_tension_chunks.return_value = kwargs.get("high_tension", [])
-    repo.fetch_foreshadowing_threads.return_value = kwargs.get("threads", [])
+    repo.fetch_foreshadowing_trees.return_value = kwargs.get("trees", [])
     repo.calculate_foreshadow_expectation.return_value = kwargs.get("expectation")
     return repo
 
@@ -107,7 +107,17 @@ def test_get_pivot_materials_with_all_sections() -> None:
     repo = _mock_pivot_repo(
         pivot_blocks=[(1, "转折文本内容", "高潮")],
         high_tension=[(2, "高张力文本", 0.95)],
-        threads=[SimpleNamespace(model_dump_json=lambda: '{"thread": 1}')],
+        trees=[
+            SimpleNamespace(
+                root_event_id="evt-root-1",
+                description="天衡宗将庇护顾霜",
+                expected_payoff_family="庇护",
+                payoff_likelihood="high",
+                strength="medium",
+                status="open",
+                anchor_chapter_ids=[1],
+            )
+        ],
         expectation=0.35,
     )
     with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
@@ -116,7 +126,7 @@ def test_get_pivot_materials_with_all_sections() -> None:
 
     assert "<转折块>" in out and "[chunk 1] (高潮)" in out
     assert "<高张力>" in out and "[paragraph 2] (tension=0.9500)" in out
-    assert "<伏笔线程>" in out and '{"thread": 1}' in out
+    assert "<伏笔树>" in out and "天衡宗将庇护顾霜" in out
     assert "伏笔兑现预期: 35.00%" in out
 
 

@@ -10,7 +10,6 @@ from sqlalchemy import select
 
 from src.agents.annotation.schema import (
     BoundDialogue,
-    BoundForeshadowing,
     CaseSearchResult,
     PendingCase,
 )
@@ -20,10 +19,7 @@ from src.preprocess.tokenize import tokenize
 from src.storage.models import (
     Chapter,
     DialogueRecord,
-    ForeshadowingThread,
-    ForeshadowingThreadHit,
 )
-from src.storage.repositories import ForeshadowingRepository
 from src.storage.repositories.annotation.continuity import (
     CasePoolRepository,
     DatabaseAnnotationQueryService,
@@ -307,186 +303,6 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
         (500, (2,), "当前章顾霜入城"),
         (900, (0,), "后文顾霜身份揭晓"),
     }
-
-
-def test_foreshadowing_sync_dedupes_by_setup_event_id(db_session) -> None:
-    """2026-08-18 用于验证去重键为 setup_event_id：同事件不重复建线程，不同事件各建一条"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜持 Sword 现身"],
-        title="伏笔事件去重",
-    )
-    repository = ForeshadowingRepository(db_session)
-    # 同一 setup_event_id 两次 sync（描述大小写不同）→ 去重，仅 1 线程 1 hit
-    first_thread, first_hit = repository.sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜持 Sword",
-                        confidence="high",
-                        setup_node_id="event-setup-1",
-                        setup_kind="悬念",
-                        expected_payoff_family="身份揭露",
-                        payoff_likelihood="medium",
-                    ),
-        setup_event_id="event-setup-1",
-    )
-    second_thread, second_hit = repository.sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜持 sword",
-                        confidence="high",
-                        setup_node_id="event-setup-1",
-                        setup_kind="悬念",
-                        expected_payoff_family="身份揭露",
-                        payoff_likelihood="medium",
-                    ),
-        setup_event_id="event-setup-1",
-    )
-    db_session.commit()
-
-    assert second_thread.setup_id == first_thread.setup_id
-    assert first_hit is not None
-    # 同章节同 thread 重复 sync 是纯 no-op：不重复写 hit、不制造假命中
-    assert second_hit is None
-    threads = list(
-        db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalars()
-    )
-    assert len(threads) == 1
-    hits = list(
-        db_session.execute(select(ForeshadowingThreadHit).where(ForeshadowingThreadHit.run_id == run_id)).scalars()
-    )
-    assert len(hits) == 1
-
-    # 不同 setup_event_id 即使描述完全相同也各建一条线程
-    third_thread, third_hit = repository.sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜持 sword",
-                        confidence="high",
-                        setup_node_id="event-setup-2",
-                        setup_kind="悬念",
-                        expected_payoff_family="身份揭露",
-                        payoff_likelihood="medium",
-                    ),
-        setup_event_id="event-setup-2",
-    )
-    db_session.commit()
-    assert third_thread.setup_id != first_thread.setup_id
-    assert third_hit is not None and third_hit.is_new_setup is True
-    threads = list(
-        db_session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id)).scalars()
-    )
-    assert len(threads) == 2
-
-
-def test_foreshadowing_sync_existing_thread_writes_hit_and_advances_last_chapter(db_session) -> None:
-    """2026-08-13 P1-3 用于验证已存在 thread 在更大 chunk 再次命中时补写 hit 并推进 last_chapter_id"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜立誓", "顾霜再誓"],
-        chapter_ids=[1, 2],
-        title="伏笔续接命中",
-    )
-    repository = ForeshadowingRepository(db_session)
-    first_thread, first_hit = repository.sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜承诺护佑山门",
-                        confidence="high",
-                        setup_node_id="event-护佑",
-                        setup_kind="承诺",
-                        expected_payoff_family="守护",
-                        payoff_likelihood="high",
-                    ),
-        setup_event_id="event-护佑",
-    )
-    assert first_thread.last_chapter_id == 1
-    assert first_hit is not None and first_hit.is_new_setup is True
-
-    second_thread, second_hit = repository.sync(
-        run_id=run_id,
-        chapter_id=2,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜承诺护佑山门",
-                        confidence="high",
-                        setup_node_id="event-护佑",
-                        setup_kind="承诺",
-                        expected_payoff_family="守护",
-                        payoff_likelihood="high",
-                    ),
-        setup_event_id="event-护佑",
-    )
-    db_session.commit()
-
-    assert second_thread.setup_id == first_thread.setup_id
-    assert second_hit is not None
-    assert second_hit.is_new_setup is False
-    assert second_hit.chapter_id == 2
-    # 新 chunk 更大时推进 last_chapter_id
-    assert second_thread.last_chapter_id == 2
-    hits = list(
-        db_session.execute(
-            select(ForeshadowingThreadHit)
-            .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(ForeshadowingThreadHit.chapter_id)
-        ).scalars()
-    )
-    assert [hit.chapter_id for hit in hits] == [1, 2]
-    assert all(hit.setup_id == first_thread.setup_id for hit in hits)
-
-
-def test_foreshadowing_sync_existing_thread_noop_on_same_chunk(db_session) -> None:
-    """2026-08-13 P1-3 用于验证同 chunk 重复 sync 不推进 last_chapter_id 也不重复写 hit"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜立誓", "顾霜再誓", "顾霜三誓"],
-        chapter_ids=[1, 2, 3],
-        title="伏笔 no-op",
-    )
-    repository = ForeshadowingRepository(db_session)
-    first_thread, _first_hit = repository.sync(
-        run_id=run_id,
-        chapter_id=2,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜承诺护佑山门",
-                        confidence="high",
-                        setup_node_id="event-护佑",
-                        setup_kind="承诺",
-                        expected_payoff_family="守护",
-                        payoff_likelihood="high",
-                    ),
-        setup_event_id="event-护佑",
-    )
-    # 旧 chunk（0）再次 sync：新 chunk 更小，不得推进 last_chapter_id
-    thread, hit = repository.sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-                        description="顾霜承诺护佑山门",
-                        confidence="high",
-                        setup_node_id="event-护佑",
-                        setup_kind="承诺",
-                        expected_payoff_family="守护",
-                        payoff_likelihood="high",
-                    ),
-        setup_event_id="event-护佑",
-    )
-    db_session.commit()
-
-    assert hit is not None
-    assert thread.last_chapter_id == 2
-    hits = list(
-        db_session.execute(
-            select(ForeshadowingThreadHit)
-            .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(ForeshadowingThreadHit.chapter_id)
-        ).scalars()
-    )
-    assert [hit.chapter_id for hit in hits] == [1, 2]
 
 
 def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> None:

@@ -247,7 +247,7 @@ class TestResults:
         "/api/novels/{novel_id}/paragraph-curves",
         "/api/novels/{novel_id}/chapter-metrics",
         "/api/novels/{novel_id}/topics",
-        "/api/novels/{novel_id}/foreshadowing-threads",
+        "/api/novels/{novel_id}/foreshadowing-trees",
         "/api/novels/{novel_id}/metrics/narrative-structure",
         "/api/novels/{novel_id}/metrics/emotion-stats",
         "/api/novels/{novel_id}/metrics/character-stats",

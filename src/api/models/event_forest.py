@@ -42,14 +42,14 @@ class EventEdgeResponse(BaseModel):
 
 
 class ForeshadowingEdgeResponse(BaseModel):
-    """2026-08-18 用于返回伏笔边（线程即边）"""
+    """2026-09-13 用于返回伏笔树视图（伏笔即事件树）"""
 
-    setup_id: str
-    setup_event_id: str
+    root_event_id: str
+    tree_id: str
     payoff_event_id: str | None = None
     first_chapter_id: int = Field(gt=0)
     last_chapter_id: int = Field(gt=0)
-    setup_summary: str
+    description: str
     status: str
     active: bool
 

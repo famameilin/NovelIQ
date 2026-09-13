@@ -13,7 +13,7 @@ import re
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from langchain_core.tools import tool
@@ -37,7 +37,6 @@ from .schema import (
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
-    BoundForeshadowing,
     BoundSentenceLabel,
     CaseSearchResult,
     ChunkMetricsInput,
@@ -65,7 +64,6 @@ from .schema import (
     ResolvedCase,
     SearchResult,
     SentenceLabelInput,
-    SetupStatus,
     TextSearchResult,
     Tone,
     WriteEventArg,
@@ -155,12 +153,6 @@ class AnnotationQueryService(Protocol):
 
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于读取活动案例内部稳定目标"""
-
-    def thread_exists(self, setup_id: str) -> bool:
-        """2026-08-11 用于校验 push_case 携带的伏笔线程 id 属于当前 run 活跃线程"""
-
-    def thread_id_for_setup_event(self, setup_event_id: str) -> str | None:
-        """2026-09-13 用于查询埋设事件已被哪条线程占用（含已回收线程；无占用返回 None）"""
 
 
 @dataclass(slots=True)
@@ -453,6 +445,8 @@ class AnnotationToolLedger:
             description=payload.description,
             participants=[EventParticipantInput(**p.model_dump(mode="python")) for p in payload.participants],
             is_foreshadow_setup=payload.isforeshadowing,
+            expected_payoff_family=payload.expected_payoff_family,
+            payoff_likelihood=payload.payoff_likelihood,
             causal_event_refs=causal_refs,
         )
         planned_nodes: list[BoundEvent] = [bound_root]
@@ -498,17 +492,6 @@ class AnnotationToolLedger:
             )
             if role == "main":
                 trunk_tail = node_id
-
-        bound_foreshadowing: BoundForeshadowing | None = None
-        if payload.isforeshadowing:
-            bound_foreshadowing = BoundForeshadowing(
-                description=payload.description,
-                confidence=Confidence.MEDIUM,
-                setup_node_id=root_node_id,
-                setup_kind=payload.setup_kind,
-                expected_payoff_family=payload.expected_payoff_family,
-                payoff_likelihood=payload.payoff_likelihood,
-            )
 
         new_observations: list[BoundCharacterObservation] = []
         for node in planned_nodes:
@@ -556,13 +539,6 @@ class AnnotationToolLedger:
         if payload.finalize_events:
             self._finalize_event_domain()
 
-        foreshadow_receipt_node: str | None = None
-        if bound_foreshadowing is not None:
-            bound_foreshadowings = list(self.bound_payloads.get("foreshadowings") or [])
-            bound_foreshadowings.append(bound_foreshadowing)
-            self.bound_payloads["foreshadowings"] = bound_foreshadowings
-            foreshadow_receipt_node = root_node_id
-
         self.write_records.append(
             {
                 "chunk_id": self.current_chunk_id,
@@ -594,8 +570,8 @@ class AnnotationToolLedger:
             "character_observation_count": len(new_observations),
             "finalized": payload.finalize_events,
         }
-        if foreshadow_receipt_node is not None:
-            receipt["foreshadowing_setup_node_id"] = foreshadow_receipt_node
+        if payload.isforeshadowing:
+            receipt["foreshadowing_root_node_id"] = root_node_id
         return receipt
 
     # ------------------------------------------------------------------
@@ -991,7 +967,6 @@ class AnnotationToolLedger:
             character_observations=list(self.bound_payloads["character_observations"]),
             dialogues=bound_dialogues,
             events=list(self.bound_payloads["events"]),
-            foreshadowings=list(self.bound_payloads.get("foreshadowings") or []),
             sentence_labels=list(self.bound_payloads.get("sentence_labels") or []),
         )
 
@@ -1122,15 +1097,6 @@ class AnnotationToolLedger:
                     "relation_type": str(item.relation_type),
                 }
                 for item in payloads["relations"]
-            ]
-        if "foreshadowings" in payloads:
-            views["foreshadowings"] = [
-                {
-                    "description": item.description,
-                    "confidence": str(item.confidence),
-                    "setup_node_id": item.setup_node_id,
-                }
-                for item in payloads["foreshadowings"]
             ]
         return views
 
@@ -1323,9 +1289,7 @@ def _resolve_participant_numbers(
 
 _EVENT_ROLE_VALUES_TEXT = "主体/客体/接收者/帮助者/反对者/见证者/地点"
 _EVENT_NARRATIVE_ROLE_VALUES_TEXT = "主体/客体/发送者/接收者/帮助者/反对者/见证者"
-_EVENT_FORESHADOWING_FIELDS = frozenset(
-    {"isforeshadowing", "setup_kind", "expected_payoff_family", "payoff_likelihood"}
-)
+_EVENT_FORESHADOWING_FIELDS = frozenset({"isforeshadowing", "expected_payoff_family", "payoff_likelihood"})
 
 
 def _short_pydantic_message(msg: str) -> str:
@@ -1467,11 +1431,21 @@ def _resolve_write_event_arg(arg: WriteEventArg, *, graph: FactGraph | None) -> 
         children=children,
         isforeshadowing=arg.isforeshadowing,
         cause_tree_id=arg.cause_tree_id,
-        setup_kind=arg.setup_kind,
         expected_payoff_family=arg.expected_payoff_family,
         payoff_likelihood=arg.payoff_likelihood,
         finalize_events=arg.finalize_events,
     )
+
+
+def _is_foreshadowing_root(ledger: AnnotationToolLedger, root_event_id: str) -> bool:
+    """2026-09-13 用于判定节点 id 是否为已知伏笔树根（历史树根视图 + 当前章 event_trees）"""
+    for view in ledger.history_tree_views.values():
+        if view.get("root_node_id") == root_event_id and view.get("is_foreshadow_setup"):
+            return True
+    for tree in ledger.event_trees.values():
+        if tree.get("root_node_id") == root_event_id and tree.get("isforeshadowing"):
+            return True
+    return False
 
 
 def _resolve_relation_args(items: list[RelationArg], *, graph: FactGraph | None) -> list[RelationInput]:
@@ -1656,7 +1630,8 @@ def build_search_tools(
         （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」。
 
         参与者的实体描述含运行期编号 n（图中已登记时）；因果前驱填 tree_id，
-        伏笔 setup/payoff 填 root_node_id。"""
+        resolve_foreshadowing_case 的树根/挂树事件填节点 id（树根视图带
+        is_foreshadow_setup 与 foreshadowing_status，可据此发现活跃伏笔树）。"""
         normalized_query = _normalize_query(keyword, tool_name="search_event")
         if ledger.phase != "chunk_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_event")
@@ -1689,10 +1664,10 @@ def build_search_tools(
 
     @tool
     def search_pool(query: str | None = None, case_type: str | None = None) -> str:
-        """2026-08-07 用于检索案例池与伏笔线程并返回临时案例编号
+        """2026-08-07 用于检索案例池并返回临时案例编号
 
         案例不在正文中注入，本工具是发现案例的唯一通道：
-        - 只给 query：按关键词匹配案例 keys/description 与活跃伏笔线程；
+        - 只给 query：按关键词匹配案例 keys/description；
           查询支持多关键词（空格/标点分隔，任一命中即返回）与通配符
           （% 匹配任意长度、_ 匹配单个字符）。
         - 给 case_type（如 "entity_alias"/"伏笔疑点"，或 "all"）：按最新创建优先
@@ -1730,14 +1705,6 @@ def build_search_tools(
                         "created_chapter": item.created_chapter,
                         "description": item.description,
                         "keys": list(item.keys),
-                    }
-                )
-            else:
-                views.append(
-                    {
-                        "result_kind": "foreshadowing",
-                        "id": item.record_id,
-                        "content": item.content,
                     }
                 )
         ledger.append_search_log(
@@ -1869,7 +1836,6 @@ def build_annotation_tools(
         children: list[EventAppendItemArg] | None = None,
         isforeshadowing: bool = False,
         cause_tree_id: str | None = None,
-        setup_kind: str | None = None,
         expected_payoff_family: str | None = None,
         payoff_likelihood: PayoffLikelihood | None = None,
         patches: list[list[Any]] | None = None,
@@ -1885,8 +1851,11 @@ def build_annotation_tools(
         已正确的部分无需重发；带 patches 时其余字段忽略。无草稿场景（如流截断后）
         必须整体重交完整参数。
 
+        2026-09-13 伏笔即事件树：isforeshadowing=true 的树整体成为事件森林里的
+        伏笔树，根即埋设事件；后续章节用 resolve_foreshadowing_case 挂续接/回收事件。
+
         2026-09-12 结构四则（违反即报错自纠）：
-        1. 伏笔四字段 isforeshadowing/setup_kind/expected_payoff_family/payoff_likelihood
+        1. 伏笔三字段 isforeshadowing/expected_payoff_family/payoff_likelihood
            只能放在根事件上；子事件只有 type/description/participants 三个字段，
            且子事件不得嵌套 children。
         2. 每个子事件必须带 type："main" 顺延主因链，"secondary" 挂当时主链尾。
@@ -1903,7 +1872,7 @@ def build_annotation_tools(
          "children": [{"type": "main", "description": "伯安取得残页",
                        "participants": [{"entity": 3, "role": "主体", "narrative_role": "主体",
                                          "action": "攥走残页撤离", "emotion": 2}]}],
-         "isforeshadowing": true, "setup_kind": "道具",
+         "isforeshadowing": true,
          "expected_payoff_family": "残页内容揭晓", "payoff_likelihood": "medium"}
         """
         if patches:
@@ -1923,7 +1892,6 @@ def build_annotation_tools(
                 children=children or [],
                 isforeshadowing=isforeshadowing,
                 cause_tree_id=cause_tree_id,
-                setup_kind=setup_kind,
                 expected_payoff_family=expected_payoff_family,
                 payoff_likelihood=payoff_likelihood,
                 finalize_events=finalize_events,
@@ -2184,26 +2152,22 @@ def build_annotation_tools(
     def resolve_foreshadowing_case(
         case_number: int,
         reason: str,
-        setup_summary: str | None = None,
-        setup_kind: str | None = None,
+        foreshadowing_action: str,
+        root_event_id: str,
+        event_id: str,
         expected_payoff_family: str | None = None,
         payoff_likelihood: PayoffLikelihood | None = None,
-        setup_status: SetupStatus | None = None,
-        confidence: Confidence | None = None,
         strength: Confidence | None = None,
-        setup_event_id: str | None = None,
-        payoff_event_id: str | None = None,
     ) -> str:
-        """2026-08-11 用于通过临时编号把案例解决为伏笔线程字段更新（至少提供一个更新字段）
+        """2026-08-11 用于通过临时编号把伏笔疑点案例解决为：把本章事件挂进伏笔树
 
-        2026-08-18：setup_event_id/payoff_event_id 用于伏笔续接/回收时绑定事件。
-        2026-08-30事件 id 由事件域回执或 search_event
-        检索获得，须先经授权集合校验。
-        2026-09-04未挂伏笔线程的疑点案例被确认为伏笔时，须提供 setup_event_id
-        （埋设事件），系统据此就地建立伏笔线程记录确认；判断并非伏笔则用 close_case。
-        2026-09-13同一埋设事件全 run 只能属于一条线程：setup_event_id 已被其他
-        线程占用时本工具拒绝（占用线程 id 随报错给出）；若本章事件是回收请改传
-        payoff_event_id，若仅更新线程状态请去掉事件 id 只传字段。"""
+        2026-09-13 伏笔即事件树：root_event_id 是伏笔树的根（埋设事件，经
+        search_event 检索或事件域回执授权），event_id 是本章要挂进树的
+        事件（由事件域回执授权）。foreshadowing_action 只能是 "reinforce"（续接）
+        或 "payoff"（回收，挂入后伏笔树收束为 likely_paid_off）。可选更新根属性
+        expected_payoff_family/payoff_likelihood/strength；判断并非伏笔则用
+        close_case。活跃伏笔树的发现通道是 search_event（树根视图带
+        foreshadowing_status）；新伏笔树在事件域以 isforeshadowing=true 声明。"""
         ledger.admit_case_reason(reason, tool_name="resolve_foreshadowing_case")
         details = _resolve_case_details(
             ledger=ledger,
@@ -2211,15 +2175,37 @@ def build_annotation_tools(
             tool_name="resolve_foreshadowing_case",
         )
         _require_suspicion_case(details, "resolve_foreshadowing_case")
-        if not details.target_ref.get("setup_id"):
-            if setup_event_id is None:
-                raise AnnotationInputError(
-                    "该案例未关联伏笔线程；确认其为伏笔须提供 setup_event_id"
-                    "（埋设事件，由事件域回执或 search_event 授权），"
-                    "系统会据此建立伏笔线程；若判断其并非伏笔，请改用 close_case"
+        if foreshadowing_action not in ("reinforce", "payoff"):
+            raise AnnotationInputError(
+                f"resolve_foreshadowing_case.foreshadowing_action 只能是 \"reinforce\"（续接）"
+                f"或 \"payoff\"（回收）: {foreshadowing_action!r}"
+            )
+        # 收窄到 Literal 供 ResolvedCase 校验（上方成员检查保证二值）
+        action: Literal["reinforce", "payoff"] = (
+            "reinforce" if foreshadowing_action == "reinforce" else "payoff"
+        )
+        for field_name, value in (("root_event_id", root_event_id), ("event_id", event_id)):
+            if value not in ledger.authorized_event_ids:
+                # 2026-09-04 第6章教训：write_event 回执同时含 tree_id 与 node_id，
+                # 模型易把 tree_id 当节点 id 传（tree_id 只作 cause_tree_id 引用），
+                # 随后 search_event 查不到本章事件（树仅覆盖已完成章节）→ 空转至回合上限。
+                hint = (
+                    "（这是事件树 id 而非事件节点 id；须传事件域回执 children[].node_id"
+                    " 或 search_event 树根视图的 root_node_id）"
+                    if value in ledger.authorized_tree_ids
+                    else ""
                 )
-            if setup_summary is None:
-                setup_summary = details.description
+                raise AnnotationAuthorizationError(
+                    f"{field_name} 未由事件域回执或 search_event 授权: {value}{hint}"
+                )
+        if event_id == root_event_id:
+            raise AnnotationInputError("event_id 不得与 root_event_id 相同（埋设事件自身不挂边）")
+        if not _is_foreshadowing_root(ledger, root_event_id):
+            raise AnnotationInputError(
+                f"root_event_id 不是伏笔树的根（埋设事件）: {root_event_id}；"
+                "活跃伏笔树用 search_event 检索（树根视图 is_foreshadow_setup=true），"
+                "新伏笔树在事件域以 isforeshadowing=true 声明"
+            )
         resolved = ResolvedCase(
             case_id=details.id,
             action="foreshadowing",
@@ -2227,46 +2213,13 @@ def build_annotation_tools(
             reason=reason,
             target_key=details.target_key,
             target_ref=details.target_ref,
-            setup_summary=setup_summary,
-            setup_kind=setup_kind,
+            foreshadowing_action=action,
+            foreshadowing_root_event_id=root_event_id,
+            foreshadowing_event_id=event_id,
             expected_payoff_family=expected_payoff_family,
             payoff_likelihood=payoff_likelihood,
-            setup_status=setup_status,
-            confidence=confidence,
             strength=strength,
-            setup_event_id=setup_event_id,
-            payoff_event_id=payoff_event_id,
         )
-        for event_id, field_name in (
-            (setup_event_id, "setup_event_id"),
-            (payoff_event_id, "payoff_event_id"),
-        ):
-            if event_id is None:
-                continue
-            if event_id not in ledger.authorized_event_ids:
-                # 2026-09-04 第6章教训：write_event 回执同时含 tree_id 与 node_id，
-                # 模型易把 tree_id 当节点 id 传（tree_id 只作 cause_tree_id 引用），
-                # 随后 search_event 查不到本章事件（树仅覆盖已完成章节）→ 空转至回合上限。
-                hint = (
-                    "（这是事件树 id 而非事件节点 id；setup_event_id/payoff_event_id 须传"
-                    " 事件域回执 children[].node_id 或 root_node_id）"
-                    if event_id in ledger.authorized_tree_ids
-                    else ""
-                )
-                raise AnnotationAuthorizationError(
-                    f"{field_name} 未由事件域回执或 search_event 授权: {event_id}{hint}"
-                )
-        # 2026-09-13 ch20 崩溃回归：重指他人埋设事件此前只在完成事务撞唯一约束
-        # （裸 IntegrityError 炸 run），这里工具层即拒给写者当章自纠机会
-        target_setup_id = details.target_ref.get("setup_id")
-        if setup_event_id is not None and target_setup_id:
-            owner_id = query_service.thread_id_for_setup_event(setup_event_id)
-            if owner_id is not None and owner_id != str(target_setup_id):
-                raise AnnotationInputError(
-                    f"setup_event_id 冲突: 埋设事件 {setup_event_id} 已绑定伏笔线程 {owner_id}，"
-                    "同一埋设事件只能属于一条线程；"
-                    "若本章事件是回收请改传 payoff_event_id，若仅更新线程状态请去掉事件 id 只传字段"
-                )
         return _append_resolved(ledger, details, resolved)
 
     @tool
@@ -2294,13 +2247,11 @@ def build_annotation_tools(
         keys: list[str],
         type: str,
         dialogue_id: str | None = None,
-        setup_id: str | None = None,
     ) -> str:
         """2026-08-11 用于把分析中发现的新连续性疑点创建为新案例登记进案例池
         （type 是任意描述字符串；description 只写人类可读说明且不超过 100 字，
-        keys/type/dialogue_id/setup_id
-        必须作为独立参数提交，示例：push_case(description="玉戒尺在第 5 章异常发光",
-        keys=["玉戒尺"], type="伏笔疑点", setup_id="S-123")）"""
+        keys/type/dialogue_id 必须作为独立参数提交，示例：
+        push_case(description="玉戒尺在第 5 章异常发光", keys=["玉戒尺"], type="伏笔疑点")）"""
         if ledger.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push_case")
         normalized_type = unicodedata.normalize("NFC", type).strip()
@@ -2314,10 +2265,10 @@ def build_annotation_tools(
                 "push_case.description 不能超过 100 字，请精简为人类可读要点"
                 "（案例检索载荷有长度上限）"
             )
-        json_marker_fields = ('"keys"', '"type"', '"dialogue_id"', '"setup_id"')
+        json_marker_fields = ('"keys"', '"type"', '"dialogue_id"')
         if any(marker in normalized_description for marker in json_marker_fields):
             raise AnnotationInputError(
-                "push_case.description 只接受人类可读说明；keys/type/dialogue_id/setup_id"
+                "push_case.description 只接受人类可读说明；keys/type/dialogue_id"
                 " 必须作为独立参数提交，不能写入 description 字符串"
             )
         normalized_keys = [unicodedata.normalize("NFC", key).strip() for key in keys]
@@ -2338,11 +2289,6 @@ def build_annotation_tools(
                     f"push_case.dialogue_id 不是当前 chunk 的对话候选 id: {normalized_dialogue_id}"
                 )
             target_ref["dialogue_id"] = normalized_dialogue_id
-        if setup_id is not None:
-            normalized_setup_id = unicodedata.normalize("NFC", setup_id).strip()
-            if not query_service.thread_exists(normalized_setup_id):
-                raise AnnotationInputError(f"push_case.setup_id 不是当前 run 的活跃伏笔线程: {normalized_setup_id}")
-            target_ref["setup_id"] = normalized_setup_id
         target_key = uuid4().hex
         pushed = PendingCase(
             type=normalized_type,

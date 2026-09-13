@@ -246,7 +246,6 @@ def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnn
                 character_observations=[],
                 dialogues=[],
                 events=[],
-                foreshadowings=[],
             )
         ],
     )
@@ -993,7 +992,6 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
             )
         ],
         events=[],
-        foreshadowings=[],
     )
     second = BoundChunkAnnotation(
         chunk_id=-2,
@@ -1013,7 +1011,6 @@ def test_validate_bound_annotation_covers_multiple_sub_chunks() -> None:
             )
         ],
         events=[],
-        foreshadowings=[],
     )
     annotation = BoundChapterAnnotation(
         chapter_summary="子块合并摘要",

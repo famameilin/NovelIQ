@@ -38,7 +38,7 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         """批量插入章节目录，插入前先删除该 run_id 的旧数据
 
         2026-08-14 D8 契约：chapters 是 paragraphs/graph_facts/entity_states/
-        dialogue_records/case_pool_cases/foreshadowing_threads 等下游表的 FK 父表
+        dialogue_records/case_pool_cases/event_nodes 等下游表的 FK 父表
         （ON DELETE CASCADE），先删后插会级联清空同 run 的全部下游数据。
         **同 run 不允许重跑前序阶段**——重分析必须使用新 run_id（reanalysis 每次
         创建新 run）；若确需重建，应先显式 delete_run 清理整个 run。
