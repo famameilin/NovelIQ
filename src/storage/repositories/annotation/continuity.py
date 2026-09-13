@@ -416,6 +416,17 @@ class DatabaseAnnotationQueryService:
             is not None
         )
 
+    def thread_id_for_setup_event(self, setup_event_id: str) -> str | None:
+        """2026-09-13 用于查询埋设事件已被哪条线程占用（含已回收线程；无占用返回 None）
+
+        不带 active 过滤：唯一约束覆盖全表，已回收线程同样占用其埋设事件。"""
+        return self.session.execute(
+            select(ForeshadowingThread.setup_id).where(
+                ForeshadowingThread.run_id == self.run_id,
+                ForeshadowingThread.setup_event_id == setup_event_id,
+            )
+        ).scalar_one_or_none()
+
 
 class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
     """2026-08-07 用于查询和新增章节唯一系统绑定标注"""

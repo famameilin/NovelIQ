@@ -159,6 +159,9 @@ class AnnotationQueryService(Protocol):
     def thread_exists(self, setup_id: str) -> bool:
         """2026-08-11 用于校验 push_case 携带的伏笔线程 id 属于当前 run 活跃线程"""
 
+    def thread_id_for_setup_event(self, setup_event_id: str) -> str | None:
+        """2026-09-13 用于查询埋设事件已被哪条线程占用（含已回收线程；无占用返回 None）"""
+
 
 @dataclass(slots=True)
 class AnnotationToolLedger:
@@ -2197,7 +2200,10 @@ def build_annotation_tools(
         2026-08-30事件 id 由事件域回执或 search_event
         检索获得，须先经授权集合校验。
         2026-09-04未挂伏笔线程的疑点案例被确认为伏笔时，须提供 setup_event_id
-        （埋设事件），系统据此就地建立伏笔线程记录确认；判断并非伏笔则用 close_case。"""
+        （埋设事件），系统据此就地建立伏笔线程记录确认；判断并非伏笔则用 close_case。
+        2026-09-13同一埋设事件全 run 只能属于一条线程：setup_event_id 已被其他
+        线程占用时本工具拒绝（占用线程 id 随报错给出）；若本章事件是回收请改传
+        payoff_event_id，若仅更新线程状态请去掉事件 id 只传字段。"""
         ledger.admit_case_reason(reason, tool_name="resolve_foreshadowing_case")
         details = _resolve_case_details(
             ledger=ledger,
@@ -2249,6 +2255,17 @@ def build_annotation_tools(
                 )
                 raise AnnotationAuthorizationError(
                     f"{field_name} 未由事件域回执或 search_event 授权: {event_id}{hint}"
+                )
+        # 2026-09-13 ch20 崩溃回归：重指他人埋设事件此前只在完成事务撞唯一约束
+        # （裸 IntegrityError 炸 run），这里工具层即拒给写者当章自纠机会
+        target_setup_id = details.target_ref.get("setup_id")
+        if setup_event_id is not None and target_setup_id:
+            owner_id = query_service.thread_id_for_setup_event(setup_event_id)
+            if owner_id is not None and owner_id != str(target_setup_id):
+                raise AnnotationInputError(
+                    f"setup_event_id 冲突: 埋设事件 {setup_event_id} 已绑定伏笔线程 {owner_id}，"
+                    "同一埋设事件只能属于一条线程；"
+                    "若本章事件是回收请改传 payoff_event_id，若仅更新线程状态请去掉事件 id 只传字段"
                 )
         return _append_resolved(ledger, details, resolved)
 
