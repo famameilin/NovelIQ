@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
+import { getDiagnosis, getForeshadowingTrees } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisDetails } from "@/components/common/AnalysisDetails";
@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Tags } from "lucide-react";
-import type { ForeshadowingThread } from "@/api/types";
+import type { ForeshadowingTree } from "@/api/types";
 import { cn } from "@/lib/cn";
 
 const STALE_TIME = 5 * 60 * 1000;
@@ -73,7 +73,7 @@ function EmptyDiagnosisState() {
 /**
  * 伏笔追踪是独立查询，失败时必须显式告警，而不是静默吞掉
  */
-function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
+function ForeshadowingTreesErrorCard(props: { onRetry: () => void }) {
   return (
     <DashboardCardShell
       title="伏笔追踪加载失败"
@@ -93,23 +93,23 @@ function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
  * 2026-04-29，作用：展示独立于综合诊断正文的伏笔追踪结果
  * 简要说明：诊断正文为空时仍保留可用线索，并在文档流中展示筛选、轨迹和详情
  */
-function ForeshadowingThreadsSection(props: { foreshadowingThreads: ForeshadowingThread[] }) {
-  const [filter, setFilter] = useState<"all" | "open" | "reinforced" | "likely_paid_off" | "archived">("all");
-  const [selectedSetupId, setSelectedSetupId] = useState<string | null>(props.foreshadowingThreads[0]?.setup_id ?? null);
+function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTree[] }) {
+  const [filter, setFilter] = useState<"all" | "open" | "reinforced" | "likely_paid_off">("all");
+  const [selectedRootId, setSelectedRootId] = useState<string | null>(props.foreshadowingTrees[0]?.root_event_id ?? null);
   const counts = useMemo(() => {
-    const result = { open: 0, reinforced: 0, likely_paid_off: 0, archived: 0 };
-    props.foreshadowingThreads.forEach((thread) => {
-      if (thread.status in result) result[thread.status as keyof typeof result] += 1;
+    const result = { open: 0, reinforced: 0, likely_paid_off: 0 };
+    props.foreshadowingTrees.forEach((tree) => {
+      if (tree.status in result) result[tree.status as keyof typeof result] += 1;
     });
     return result;
-  }, [props.foreshadowingThreads]);
-  const visibleThreads = filter === "all"
-    ? props.foreshadowingThreads
-    : props.foreshadowingThreads.filter((thread) => thread.status === filter);
-  const selectedThread =
-    visibleThreads.find((thread) => thread.setup_id === selectedSetupId) ?? visibleThreads[0] ?? null;
+  }, [props.foreshadowingTrees]);
+  const visibleTrees = filter === "all"
+    ? props.foreshadowingTrees
+    : props.foreshadowingTrees.filter((tree) => tree.status === filter);
+  const selectedTree =
+    visibleTrees.find((tree) => tree.root_event_id === selectedRootId) ?? visibleTrees[0] ?? null;
 
-  if (props.foreshadowingThreads.length === 0) {
+  if (props.foreshadowingTrees.length === 0) {
     return (
       <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm text-text-muted">
         当前任务暂无伏笔线索
@@ -124,7 +124,6 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
           { label: "待回收", value: counts.open },
           { label: "持续强化", value: counts.reinforced },
           { label: "疑似回收", value: counts.likely_paid_off },
-          { label: "已归档", value: counts.archived },
         ]}
       />
 
@@ -137,24 +136,23 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
           { value: "open", label: "待回收" },
           { value: "reinforced", label: "持续强化" },
           { value: "likely_paid_off", label: "疑似回收" },
-          { value: "archived", label: "已归档" },
         ]}
       />
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)] gap-4 overflow-hidden">
         <div className="h-full min-h-0 space-y-3 overflow-y-auto pr-2">
-          {visibleThreads.map((thread) => {
-            const statusMeta = getThreadStatusMeta(thread.status);
-            const isSelected = selectedThread?.setup_id === thread.setup_id;
-            const chapterIds = thread.anchor_chapter_ids.length > 0
-              ? thread.anchor_chapter_ids
-              : [thread.first_chapter_id, thread.last_chapter_id];
+          {visibleTrees.map((tree) => {
+            const statusMeta = getThreadStatusMeta(tree.status);
+            const isSelected = selectedTree?.root_event_id === tree.root_event_id;
+            const chapterIds = tree.anchor_chapter_ids.length > 0
+              ? tree.anchor_chapter_ids
+              : [tree.first_chapter_id, tree.last_chapter_id];
             return (
               <button
-                key={thread.setup_id}
+                key={tree.root_event_id}
                 type="button"
                 aria-pressed={isSelected}
-                onClick={() => setSelectedSetupId(thread.setup_id)}
+                onClick={() => setSelectedRootId(tree.root_event_id)}
                 className={cn(
                   "w-full rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
                   isSelected ? "border-primary/35 bg-primary/5" : "border-border/70 bg-surface/70 hover:bg-surface-hover",
@@ -164,19 +162,18 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                      <span className="text-xs text-text-muted">{thread.setup_kind ?? "类型待确认"}</span>
                     </div>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-text">{thread.setup_summary}</p>
-                    <p className="mt-1 text-xs text-text-muted">预计方向：{thread.expected_payoff_family ?? "待确认"}</p>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-text">{tree.description}</p>
+                    <p className="mt-1 text-xs text-text-muted">预计方向：{tree.expected_payoff_family ?? "待确认"}</p>
                   </div>
                   <div className="text-right text-xs text-text-muted">
                     <div>回收可能性</div>
-                    <div className="mt-1 font-medium text-text">{getLevelLabel(thread.payoff_likelihood)}</div>
+                    <div className="mt-1 font-medium text-text">{getLevelLabel(tree.payoff_likelihood)}</div>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {chapterIds.map((chapterId, index) => (
-                    <span key={`${thread.setup_id}-${chapterId}-${index}`} className="rounded-full border border-border/60 px-2.5 py-1 text-xs text-text-muted">
+                    <span key={`${tree.root_event_id}-${chapterId}-${index}`} className="rounded-full border border-border/60 px-2.5 py-1 text-xs text-text-muted">
                       第 {chapterId} 章 · {index === 0 ? "首次出现" : index === chapterIds.length - 1 ? "最近出现" : "再次出现"}
                     </span>
                   ))}
@@ -184,31 +181,29 @@ function ForeshadowingThreadsSection(props: { foreshadowingThreads: Foreshadowin
               </button>
             );
           })}
-          {visibleThreads.length === 0 ? (
+          {visibleTrees.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/60 p-6 text-center text-sm text-text-muted">当前筛选下没有伏笔线索</div>
           ) : null}
         </div>
 
-        {selectedThread ? (
+        {selectedTree ? (
           <aside className="h-full min-h-0 overflow-y-auto rounded-lg border border-border/70 bg-surface/75 p-5" aria-label="伏笔详情">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={getThreadStatusMeta(selectedThread.status).variant}>{getThreadStatusMeta(selectedThread.status).label}</Badge>
-              <Badge variant="outline">{selectedThread.setup_kind ?? "类型待确认"}</Badge>
+              <Badge variant={getThreadStatusMeta(selectedTree.status).variant}>{getThreadStatusMeta(selectedTree.status).label}</Badge>
             </div>
-            <h2 className="mt-3 text-base font-semibold leading-7 text-text">{selectedThread.setup_summary}</h2>
+            <h2 className="mt-3 text-base font-semibold leading-7 text-text">{selectedTree.description}</h2>
             <dl className="mt-4 grid gap-3 text-sm">
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">预计回收方向</dt><dd className="mt-1 font-medium text-text">{selectedThread.expected_payoff_family ?? "待确认"}</dd></div>
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">最近判断依据</dt><dd className="mt-1 leading-6 text-text">{selectedThread.latest_reason ?? "暂无补充判断"}</dd></div>
-              {selectedThread.latest_why_unresolved_now ? (
-                <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">暂未回收原因</dt><dd className="mt-1 leading-6 text-text">{selectedThread.latest_why_unresolved_now}</dd></div>
+              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">预计回收方向</dt><dd className="mt-1 font-medium text-text">{selectedTree.expected_payoff_family ?? "待确认"}</dd></div>
+              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">最近判断依据</dt><dd className="mt-1 leading-6 text-text">{selectedTree.latest_reason ?? "暂无补充判断"}</dd></div>
+              {selectedTree.latest_why_unresolved_now ? (
+                <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">暂未回收原因</dt><dd className="mt-1 leading-6 text-text">{selectedTree.latest_why_unresolved_now}</dd></div>
               ) : null}
             </dl>
-            <AnalysisDetails className="mt-4" description="强度、置信度、活跃状态与全部锚点">
+            <AnalysisDetails className="mt-4" description="强度、活跃状态与全部锚点">
               <dl className="grid grid-cols-1 gap-3 text-sm">
-                <div><dt className="text-text-muted">线索强度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedThread.strength)}</dd></div>
-                <div><dt className="text-text-muted">判断置信度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedThread.confidence)}</dd></div>
-                <div><dt className="text-text-muted">跟踪状态</dt><dd className="mt-1 font-medium text-text">{selectedThread.active ? "继续跟踪" : "已经结束"}</dd></div>
-                <div><dt className="text-text-muted">锚点章节</dt><dd className="mt-1 font-medium text-text">{selectedThread.anchor_chapter_ids.join("、") || "—"}</dd></div>
+                <div><dt className="text-text-muted">线索强度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedTree.strength)}</dd></div>
+                <div><dt className="text-text-muted">跟踪状态</dt><dd className="mt-1 font-medium text-text">{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
+                <div><dt className="text-text-muted">锚点章节</dt><dd className="mt-1 font-medium text-text">{selectedTree.anchor_chapter_ids.join("、") || "—"}</dd></div>
               </dl>
             </AnalysisDetails>
           </aside>
@@ -298,9 +293,9 @@ export function DiagnosisPage() {
     enabled,
     staleTime: STALE_TIME,
   });
-  const foreshadowingThreadsQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "foreshadowing-threads"],
-    queryFn: () => getForeshadowingThreads(novelId!, storeTaskId!),
+  const foreshadowingTreesQuery = useQuery({
+    queryKey: ["results", novelId, storeTaskId, "foreshadowing-trees"],
+    queryFn: () => getForeshadowingTrees(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -308,13 +303,13 @@ export function DiagnosisPage() {
   const isLoading = enabled && diagnosisQuery.isLoading;
   const isAnalysisNotComplete =
     enabled &&
-    (isAnalysisNotCompleteError(diagnosisQuery.error) || isAnalysisNotCompleteError(foreshadowingThreadsQuery.error));
+    (isAnalysisNotCompleteError(diagnosisQuery.error) || isAnalysisNotCompleteError(foreshadowingTreesQuery.error));
   const analysisFailed =
     enabled &&
     (getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed" ||
-      getAnalysisNotCompleteRunStatus(foreshadowingThreadsQuery.error) === "failed");
+      getAnalysisNotCompleteRunStatus(foreshadowingTreesQuery.error) === "failed");
   const isDiagnosisError = enabled && diagnosisQuery.isError && !isAnalysisNotComplete;
-  const isThreadsError = enabled && foreshadowingThreadsQuery.isError && !isAnalysisNotComplete;
+  const isThreadsError = enabled && foreshadowingTreesQuery.isError && !isAnalysisNotComplete;
   const hasNullDiagnosis =
     enabled &&
     diagnosisQuery.isFetched &&
@@ -326,12 +321,12 @@ export function DiagnosisPage() {
     void diagnosisQuery.refetch();
   };
   const retryThreads = () => {
-    void foreshadowingThreadsQuery.refetch();
+    void foreshadowingTreesQuery.refetch();
   };
 
   const { data: diagnosis } = diagnosisQuery;
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
-  const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
+  const foreshadowingTrees = foreshadowingTreesQuery.data ?? [];
   const primaryGenreLabel = diagnosis?.genre_labels?.[0] ?? null;
   // ---------- 渲染 ----------
 
@@ -368,17 +363,17 @@ export function DiagnosisPage() {
       )}
 
       {/* 空状态 */}
-      {hasNullDiagnosis && !isLoading && !isThreadsError && foreshadowingThreads.length === 0 && <EmptyDiagnosisState />}
+      {hasNullDiagnosis && !isLoading && !isThreadsError && foreshadowingTrees.length === 0 && <EmptyDiagnosisState />}
 
       {/* 伏笔追踪兜底展示 */}
-      {isThreadsError && !diagnosis && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
-      {foreshadowingThreads.length > 0 && !diagnosis && !isLoading && !isAnalysisNotComplete && (
+      {isThreadsError && !diagnosis && !isLoading && <ForeshadowingTreesErrorCard onRetry={retryThreads} />}
+      {foreshadowingTrees.length > 0 && !diagnosis && !isLoading && !isAnalysisNotComplete && (
         <AnalysisWorkspace.Tabs defaultValue="overview">
           <AnalysisWorkspace.Tab value="overview" label="综合概览">
             <EmptyDiagnosisState />
           </AnalysisWorkspace.Tab>
           <AnalysisWorkspace.Tab value="foreshadowing" label="伏笔追踪">
-            <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+            <ForeshadowingTreesSection foreshadowingTrees={foreshadowingTrees} />
           </AnalysisWorkspace.Tab>
         </AnalysisWorkspace.Tabs>
       )}
@@ -457,11 +452,11 @@ export function DiagnosisPage() {
 
           <AnalysisWorkspace.Tab value="foreshadowing" label="伏笔追踪">
             {isThreadsError ? (
-              <ForeshadowingThreadsErrorCard onRetry={retryThreads} />
-            ) : foreshadowingThreadsQuery.isLoading ? (
+              <ForeshadowingTreesErrorCard onRetry={retryThreads} />
+            ) : foreshadowingTreesQuery.isLoading ? (
               <div className="h-full animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
             ) : (
-              <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+              <ForeshadowingTreesSection foreshadowingTrees={foreshadowingTrees} />
             )}
           </AnalysisWorkspace.Tab>
         </AnalysisWorkspace.Tabs>

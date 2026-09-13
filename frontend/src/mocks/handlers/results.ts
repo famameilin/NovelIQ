@@ -7,7 +7,7 @@ import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
   createEmotionTrendWindows,
-  createForeshadowingThreads,
+  createForeshadowingTrees,
   createDiagnosis,
   createGraphChangesPage,
   createEventTimeline,
@@ -92,9 +92,9 @@ export const diagnosisHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/foreshadowing-threads（跨章节伏笔追踪数据源）
+// 获取 /api/novels/:novelId/foreshadowing-trees（跨章节伏笔树数据源）
 export const foreshadowingThreadsHandler = http.get(
-  `${BASE}/api/novels/:novelId/foreshadowing-threads`,
+  `${BASE}/api/novels/:novelId/foreshadowing-trees`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
@@ -103,7 +103,7 @@ export const foreshadowingThreadsHandler = http.get(
     if (err) return err;
 
     await delay(250);
-    return HttpResponse.json(createForeshadowingThreads());
+    return HttpResponse.json(createForeshadowingTrees());
   }
 );
 

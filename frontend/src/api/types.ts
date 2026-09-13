@@ -213,17 +213,6 @@ export interface ChapterDialogue {
   length?: number | null;
 }
 
-export type ForeshadowingSetupKind =
-  | "异常物件"
-  | "异常规则"
-  | "隐藏身份"
-  | "明确承诺"
-  | "明确威胁"
-  | "倒计时"
-  | "未解释能力"
-  | "因果引线"
-  | "其他";
-
 export type ForeshadowingPayoffLikelihood = "high" | "medium" | "low";
 export type DiagnosisGenreLabel = "科幻" | "悬疑" | "历史" | "仙侠" | "玄幻" | "都市" | "通用";
 export type DiagnosisStyleLabel =
@@ -250,14 +239,12 @@ export interface ChapterAnnotation {
   cliffhanger?: boolean | null;
   has_foreshadowing?: boolean | null;
   is_strong_setup?: boolean | null;
-  foreshadowing_type?: string | null;
-  setup_kind?: ForeshadowingSetupKind | null;
   foreshadowing_desc?: string | null;
-  setup_summary?: string | null;
   why_unresolved_now?: string | null;
   expected_payoff_family?: string | null;
-  payoff_likelihood?: ForeshadowingPayoffLikelihood | null;
-  linked_setup_id?: string | null;
+  payoff_likelihood?: ForeshadowingPayoffLikelihood | string | null;
+  // 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
+  foreshadowing_root_event_id?: string | null;
   characters: ChapterCharacter[];
   relations: ChapterRelation[];
   dialogues: ChapterDialogue[];
@@ -301,18 +288,18 @@ export interface DiagnosisResult {
   theme_color?: string | null;
 }
 
-export interface ForeshadowingThread {
-  setup_id: string;
+// 2026-09-13 伏笔即事件树：伏笔树 = isforeshadowing 根事件 + foreshadowing 挂树边
+export interface ForeshadowingTree {
+  root_event_id: string;
+  tree_id: string;
   first_chapter_id: number;
   last_chapter_id: number;
   anchor_chapter_ids: number[];
-  setup_summary: string;
-  setup_kind: ForeshadowingSetupKind | string | null;
+  description: string;
   expected_payoff_family: string | null;
   payoff_likelihood: ForeshadowingPayoffLikelihood | string | null;
-  confidence: string | null;
   strength: "high" | "medium" | string | null;
-  status: "open" | "reinforced" | "likely_paid_off" | "archived" | string;
+  status: "open" | "reinforced" | "likely_paid_off" | string;
   active: boolean;
   latest_reason?: string | null;
   latest_why_unresolved_now?: string | null;
@@ -467,12 +454,12 @@ export interface TimelineEventCausalEdge {
 }
 
 export interface TimelineEventForeshadowingEdge {
-  setup_id: string;
-  setup_event_id: string;
+  root_event_id: string;
+  tree_id: string;
   payoff_event_id?: string | null;
   first_chapter_id: number;
   last_chapter_id: number;
-  setup_summary: string;
+  description: string;
   status: string;
   active: boolean;
 }

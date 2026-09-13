@@ -2,7 +2,7 @@ import { apiClient } from "./client";
 import type {
   Character,
   DiagnosisResult,
-  ForeshadowingThread,
+  ForeshadowingTree,
   GraphChangesPageResponse,
   EventTimelineResponse,
   EmotionTrendWindow,
@@ -62,13 +62,13 @@ export async function getDiagnosis(
   return data;
 }
 
-// 伏笔追踪：跨章节线索状态的数据源（展示主体原样透传）
-export async function getForeshadowingThreads(
+// 伏笔树：跨章节伏笔状态的数据源（展示主体原样透传）
+export async function getForeshadowingTrees(
   novelId: string,
   taskId: string
-): Promise<ForeshadowingThread[]> {
-  const { data } = await apiClient.get<ForeshadowingThread[]>(
-    `/api/novels/${novelId}/foreshadowing-threads`,
+): Promise<ForeshadowingTree[]> {
+  const { data } = await apiClient.get<ForeshadowingTree[]>(
+    `/api/novels/${novelId}/foreshadowing-trees`,
     { params: { task_id: taskId } }
   );
   return data;

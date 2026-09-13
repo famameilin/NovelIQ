@@ -3,7 +3,7 @@
  *
  * 响应只含复合数据与展示主体；既有单源端点（/emotion-trend、/timeline、
  * /topics/series|shifts|emotion、/linguistic/features|word2vec、/characters、
- * /graph/changes、/diagnosis、/foreshadowing-threads）直接作为所属 tab 的 API，
+ * /graph/changes、/diagnosis、/foreshadowing-trees）直接作为所属 tab 的 API，
  * 继续从 results.ts / linguistic.ts 调用，不在此重复包装。
  */
 import { apiClient } from "./client";

@@ -137,7 +137,7 @@ export function TimelineEventInspector({
   const causalOutEdges = causalEdges.filter((edge) => treeEventIds.has(edge.source_event_id));
   const relatedForeshadowing = foreshadowingEdges.filter(
     (edge) =>
-      treeEventIds.has(edge.setup_event_id) ||
+      treeEventIds.has(edge.root_event_id) ||
       (edge.payoff_event_id != null && treeEventIds.has(edge.payoff_event_id)),
   );
 
@@ -256,12 +256,12 @@ export function TimelineEventInspector({
             <h3 id="timeline-foreshadow-title" className="text-sm font-medium text-text">关联伏笔</h3>
             <div className="mt-3 space-y-2">
               {relatedForeshadowing.map((item) => (
-                <div key={item.setup_id} className="rounded-lg bg-surface-hover/55 p-3">
+                <div key={item.root_event_id} className="rounded-lg bg-surface-hover/55 p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{getForeshadowStatusLabel(item.status)}</Badge>
                     <span className="text-xs text-text-muted">第 {item.first_chapter_id} 至 {item.last_chapter_id} 章</span>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-text-muted">{item.setup_summary}</p>
+                  <p className="mt-2 text-sm leading-6 text-text-muted">{item.description}</p>
                 </div>
               ))}
             </div>
