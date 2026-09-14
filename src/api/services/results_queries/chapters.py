@@ -194,11 +194,6 @@ def _fetch_chapter_annotations(
                     if getattr(annotation_row, "why_unresolved_now", None)
                     else None
                 ),
-                expected_payoff_family=(
-                    str(annotation_row.expected_payoff_family)
-                    if getattr(annotation_row, "expected_payoff_family", None)
-                    else None
-                ),
                 payoff_likelihood=(
                     str(annotation_row.payoff_likelihood)
                     if getattr(annotation_row, "payoff_likelihood", None)

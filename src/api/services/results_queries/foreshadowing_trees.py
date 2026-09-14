@@ -25,7 +25,6 @@ def _fetch_foreshadowing_trees(
             last_chapter_id=row.last_chapter_id,
             anchor_chapter_ids=row.anchor_chapter_ids,
             description=row.description,
-            expected_payoff_family=row.expected_payoff_family,
             payoff_likelihood=row.payoff_likelihood,
             strength=row.strength,
             status=row.status,

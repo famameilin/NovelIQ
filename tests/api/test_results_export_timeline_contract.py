@@ -49,6 +49,8 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     )
     eid1 = "evt-tl-gate-root"
     eid2 = "evt-tl-gate-main"
+    palace_root = "evt-tl-palace-root"
+    strike_root = "evt-tl-strike-root"
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -62,7 +64,6 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "tree_id": "gate",
                 "cause_role": "root",
                 "isforeshadowing": True,
-                "expected_payoff_family": "守护",
                 "payoff_likelihood": "high",
             },
             {
@@ -76,7 +77,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             },
         ],
     )
-    persist_chapter_annotation(
+    ch2_annotation_id = persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
@@ -85,8 +86,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "宫主现身",
                 "participants": ["宫主"],
                 "anchor_paragraph_ids": [0],
-                "node_id": "evt-tl-palace-root",
-                "causal_event_refs": [eid2],
+                "node_id": palace_root,
                 "tree_id": "palace",
                 "cause_role": "root",
             },
@@ -94,22 +94,46 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "宫主出手",
                 "participants": ["宫主"],
                 "anchor_paragraph_ids": [0],
-                "node_id": "evt-tl-strike-root",
-                "causal_event_refs": ["evt-tl-palace-root"],
+                "node_id": strike_root,
                 "tree_id": "strike",
                 "cause_role": "root",
             },
         ],
     )
-    # 将其中一条因果边置为 inactive（含 expired_at），用于验证 is_active/expired_at 透传
+    # 2026-09-14 跨章因果链退役：写面不再产生 causal 边（旧经 causal_event_refs 派生），
+    # EventEdge 表保留读旧数据。按读侧现行为以遗留数据构造两条跨/内章因果边：
+    # 一条置 inactive（含 expired_at），一条保持活性，用于验证 is_active/expired_at 透传
     from datetime import UTC, datetime
+    from uuid import NAMESPACE_URL, uuid5
 
-    from src.storage.models.event_forest import EventEdge
+    from src.storage.models import EventEdge, EventNode
 
-    existing = db_session.query(EventEdge).filter_by(run_id=run_id).first()
-    assert existing is not None
-    existing.is_active = False
-    existing.expired_at = datetime.now(UTC)
+    def _legacy_edge(source_event_id: str, target_event_id: str, *, is_active: bool) -> EventEdge:
+        source_node = db_session.get(EventNode, source_event_id)
+        assert source_node is not None
+        return EventEdge(
+            edge_id=str(
+                uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}")
+            ),
+            run_id=run_id,
+            edge_type="causal",
+            source_event_id=source_event_id,
+            target_event_id=target_event_id,
+            source_chapter_id=source_node.chapter_id,
+            target_chapter_id=db_session.get(EventNode, target_event_id).chapter_id,
+            is_active=is_active,
+            evidence=list(source_node.evidence),
+            annotation_id=ch2_annotation_id,
+            payload_path=f"legacy/causal/{target_event_id}",
+            expired_at=None if is_active else datetime.now(UTC),
+        )
+
+    db_session.add_all(
+        [
+            _legacy_edge(eid2, palace_root, is_active=False),
+            _legacy_edge(palace_root, strike_root, is_active=True),
+        ]
+    )
     db_session.commit()
 
     chapter_repo = ChapterRepository(db_session)

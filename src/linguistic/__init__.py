@@ -3,6 +3,12 @@
 
 from __future__ import annotations
 
+from .emotion_boundary import (
+    EmotionBoundary,
+    fit_emotion_boundary,
+    score_items,
+    strong_negative_share,
+)
 from .emotion_events import EmotionEvent, extract_emotion_events, mneg_corrected_counts
 from .ltp_client import LtpSession, analyze_paragraph, analyze_paragraph_batch
 from .phrase_matcher import PhraseMatch, match_fixed_phrases
@@ -12,12 +18,6 @@ from .schema import (
     LtpSdpArc,
     LtpToken,
     ParagraphLinguisticResult,
-)
-from .sentence_boundary import (
-    SentenceBoundary,
-    fit_sentence_boundary,
-    score_sentences,
-    strong_negative_share,
 )
 from .word2vec import (
     PosEmbeddingRow,
@@ -31,6 +31,7 @@ from .word2vec import (
 
 __all__ = [
     "EmotionEvent",
+    "EmotionBoundary",
     "LtpDependencyArc",
     "LtpEntityCandidate",
     "LtpSdpArc",
@@ -39,19 +40,18 @@ __all__ = [
     "ParagraphLinguisticResult",
     "PhraseMatch",
     "PosEmbeddingRow",
-    "SentenceBoundary",
     "TrainResult",
     "analyze_paragraph",
     "analyze_paragraph_batch",
     "build_pos_embeddings",
     "extract_emotion_events",
-    "fit_sentence_boundary",
+    "fit_emotion_boundary",
     "load_shared_pretrained_vectors",
     "match_fixed_phrases",
     "mneg_corrected_counts",
     "resolve_shared_pretrained_path",
     "reset_pretrained_cache",
-    "score_sentences",
+    "score_items",
     "strong_negative_share",
     "train_book_model",
 ]

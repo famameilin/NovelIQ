@@ -155,7 +155,6 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
                     last_chapter_id=5,
                     anchor_chapter_ids=[2, 5],
                     description="黑伞只在雨夜自行张开",
-                    expected_payoff_family="规则兑现",
                     payoff_likelihood="high",
                     strength="medium",
                     status="reinforced",
@@ -881,7 +880,6 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
                     is_strong_setup=False,
                     foreshadowing_desc=None,
                     why_unresolved_now=None,
-                    expected_payoff_family=None,
                 )
             ]
 
@@ -931,7 +929,10 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
     assert len(result) == 1
     assert result[0].is_strong_setup is False
     assert result[0].why_unresolved_now is None
-    assert result[0].expected_payoff_family is None
+    # 2026-09-14 expected_payoff_family 全链退役（响应模型删字段）；按新合同换算为
+    # 保留字段 payoff_likelihood/foreshadowing_root_event_id 在无伏笔行时同样保持 None
+    assert result[0].payoff_likelihood is None
+    assert result[0].foreshadowing_root_event_id is None
     assert len(result[0].relations) == 1
     assert result[0].relations[0].from_char == "贺铮"
     assert result[0].relations[0].to_char == "伯安"

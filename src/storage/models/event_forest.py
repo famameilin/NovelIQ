@@ -48,9 +48,10 @@ class EventNode(Base):
     tree_id: Mapped[str] = mapped_column(String(255), nullable=False)
     cause_role: Mapped[str] = mapped_column(String(16), nullable=False)
     # 2026-09-13 伏笔入森林：伏笔树根事件标记与生命周期属性（仅根事件非空）
+    # 2026-09-14 expected_payoff_family 列退役（写入面收敛为 isforeshadowing+confidence，
+    # confidence 落 payoff_likelihood 列，值域 high/medium/low）
     is_foreshadowing_root: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     foreshadowing_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
     payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
     strength: Mapped[str | None] = mapped_column(String(20), nullable=True)
     annotation_id: Mapped[str] = mapped_column(

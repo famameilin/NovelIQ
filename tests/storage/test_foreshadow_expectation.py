@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.schema import Confidence, PayoffLikelihood, ResolvedCase
+from src.agents.annotation.schema import Confidence, ResolvedCase
 from src.storage.models import EventNode
 from src.storage.repositories.annotation.repository import (
     _EXPECTATION_BASE_SCORE_BY_PAYOFF,
@@ -40,7 +40,6 @@ def _create_foreshadow_root(
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
                 "isforeshadowing": True,
-                "expected_payoff_family": "主线",
                 "payoff_likelihood": payoff_likelihood or "medium",
             },
         ],
@@ -84,12 +83,13 @@ def test_calculate_expectation_low_scores_below_medium(db_session) -> None:
 
 
 def test_expectation_mappings_cover_enum_domains() -> None:
-    """所有期望映射字典都完整覆盖对应枚举值。"""
-    assert set(_EXPECTATION_BASE_SCORE_BY_PAYOFF) == {item.value for item in PayoffLikelihood}
+    """所有期望映射字典都完整覆盖对应枚举值（2026-09-14 起 payoff 与 strength 同为 Confidence 三档）。"""
+    confidence_values = {item.value for item in Confidence}
+    assert set(_EXPECTATION_BASE_SCORE_BY_PAYOFF) == confidence_values
     assert set(_EXPECTATION_STATUS_BONUS) == {"open", "reinforced", "likely_paid_off"}
     assert set(_EXPECTATION_STATUS_WEIGHT) == {"open", "reinforced", "likely_paid_off"}
-    assert set(_EXPECTATION_STRENGTH_BONUS) == {item.value for item in Confidence}
-    assert set(_EXPECTATION_STRENGTH_WEIGHT) == {item.value for item in Confidence}
+    assert set(_EXPECTATION_STRENGTH_BONUS) == confidence_values
+    assert set(_EXPECTATION_STRENGTH_WEIGHT) == confidence_values
 
 
 def test_resolved_case_rejects_invalid_foreshadowing_enums() -> None:
@@ -147,7 +147,7 @@ def test_calculate_expectation_returns_none_when_all_evidence_missing(db_session
 
 
 def test_calculate_expectation_returns_none_without_threads(db_session) -> None:
-    """无伏笔线程时返回 None。"""
+    """无伏笔树根时返回 None。"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
     result = AnnotationRepository(db_session).calculate_foreshadow_expectation(run_id)
     assert result is None

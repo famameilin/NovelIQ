@@ -367,8 +367,8 @@ class _EmbeddingFakeLtpSession(FakeLtpSession):
         return np.array(vectors, dtype=np.float32)
 
 
-class TestSentenceBoundary:
-    """2026-09-07 句级监督（按书边界）：标签→边界→逐段打分回写"""
+class TestParagraphBoundary:
+    """2026-09-14 段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
@@ -386,11 +386,22 @@ class TestSentenceBoundary:
         spans = [replace(span, token_count=2) for span in split_chunk_paragraphs(chapters)]
         ParagraphRepository(db_session).insert_paragraphs(self.run_id, spans)
 
-        from src.config import settings as _settings
-        from src.linguistic import ltp_client
+        # paragraph_embeddings 不在 init_db（preprocess 期才建表，列宽按实测维度固化）：
+        # 本类自造向量样本，先按 4 维建表；teardown 恢复原状——ensure 只比对列集合、
+        # 不比对维度，留下窄表会让用 1024 维的其他套件静默插库失败
+        from sqlalchemy import text as sa_text
 
-        monkeypatch.setattr(ltp_client.LtpSession, "get_instance", lambda: _EmbeddingFakeLtpSession())
+        from src.storage.vector_schema import _runtime_schema, ensure_paragraph_embeddings_schema
+
+        runtime_schema = _runtime_schema()
+        db_session.execute(sa_text(f"DROP TABLE IF EXISTS {runtime_schema}.paragraph_embeddings CASCADE"))
+        ensure_paragraph_embeddings_schema(db_session, embedding_dim=4)
+
+        from src.config import settings as _settings
+
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
+        yield
+        db_session.execute(sa_text(f"DROP TABLE IF EXISTS {runtime_schema}.paragraph_embeddings CASCADE"))
 
     def _feature_rows(self) -> list:
         return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
@@ -399,7 +410,7 @@ class TestSentenceBoundary:
         from src.agents.annotation.schema import (
             BoundChapterAnnotation,
             BoundChunkAnnotation,
-            BoundSentenceLabel,
+            BoundParagraphLabel,
             ChunkMetricsInput,
             NarrativeFunction,
         )
@@ -418,7 +429,7 @@ class TestSentenceBoundary:
                     character_observations=[],
                     dialogues=[],
                     events=[],
-                    sentence_labels=[BoundSentenceLabel(**label) for label in labels],
+                    paragraph_labels=[BoundParagraphLabel(**label) for label in labels],
                 )
             ],
         )
@@ -427,6 +438,21 @@ class TestSentenceBoundary:
             chapter_id=chapter_id,
             annotation=annotation,
         )
+
+    def _insert_paragraph_embeddings(self, vectors_by_id: dict[int, list[float]]) -> None:
+        from src.storage.models import ParagraphEmbedding
+
+        for paragraph_id, vector in vectors_by_id.items():
+            self.db_session.add(
+                ParagraphEmbedding(
+                    run_id=self.run_id,
+                    paragraph_id=paragraph_id,
+                    embedding_vector=vector,
+                    embedding_model_key="test-fake",
+                    embedding_dimension=len(vector),
+                )
+            )
+        self.db_session.flush()
 
     @pytest.mark.asyncio()
     async def test_no_labels_keeps_boundary_columns_null(self) -> None:
@@ -439,53 +465,66 @@ class TestSentenceBoundary:
 
     @pytest.mark.asyncio()
     async def test_labels_fit_boundary_and_fill_scores(self) -> None:
-        """标签齐全：边界拟合成功，两列随段落句分填充（正段正和>0，负段负和>0）"""
+        """标签齐全：边界拟合成功，两列为段落自身边界分值（正段正和>0，负段负和>0）"""
+        positive_id = next(i for i, text in enumerate(_TEST_TEXTS) if "江湖" in text)
+        negative_id = next(i for i, text in enumerate(_TEST_TEXTS) if "汤姆" in text)
+        self._insert_paragraph_embeddings(
+            {
+                positive_id: [1.0, 0.0, 0.0, 0.0],
+                negative_id: [-1.0, 0.0, 0.0, 0.0],
+            }
+        )
         self._insert_annotation_with_labels(
             1,
             [
-                {
-                    "sentence": "江湖快意恩仇，刀光剑影之间英雄辈出。",
-                    "emotion": 2,
-                    "start": 0,
-                    "end": 15,
-                },
-                {
-                    "sentence": "他叫汤姆去拿外衣，但是天色已晚。",
-                    "emotion": -2,
-                    "start": 0,
-                    "end": 15,
-                },
+                {"paragraph_id": positive_id, "emotion": 2},
+                {"paragraph_id": negative_id, "emotion": -2},
             ],
         )
         await run_linguistic(self.run_id, self.db_session)
 
         rows = {row.paragraph_id: row for row in self._feature_rows()}
         assert set(rows) == {0, 1}
-        # 段落 0 句子含"江湖"（正向向量），段落 1 含"汤姆"（负向向量）
-        positive_row = next(row for row in rows.values() if "江湖" in _TEST_TEXTS[row.paragraph_id])
-        negative_row = next(row for row in rows.values() if "汤姆" in _TEST_TEXTS[row.paragraph_id])
-        assert (positive_row.boundary_pos_score_sum or 0) > 0
-        assert (negative_row.boundary_neg_score_sum or 0) > 0
-        assert positive_row.boundary_neg_score_sum == pytest.approx(0.0, abs=1e-6)
+        assert (rows[positive_id].boundary_pos_score_sum or 0) > 0
+        assert rows[positive_id].boundary_neg_score_sum == pytest.approx(0.0, abs=1e-6)
+        assert (rows[negative_id].boundary_neg_score_sum or 0) > 0
+        assert rows[negative_id].boundary_pos_score_sum == pytest.approx(0.0, abs=1e-6)
+
+    @pytest.mark.asyncio()
+    async def test_labels_without_vectors_skip_boundary(self) -> None:
+        """标签能对上段落向量的不足 2 条：不拟合边界，两列维持 NULL 不伪造"""
+        positive_id = next(i for i, text in enumerate(_TEST_TEXTS) if "江湖" in text)
+        negative_id = next(i for i, text in enumerate(_TEST_TEXTS) if "汤姆" in text)
+        self._insert_paragraph_embeddings({positive_id: [1.0, 0.0, 0.0, 0.0]})
+        self._insert_annotation_with_labels(
+            1,
+            [
+                {"paragraph_id": positive_id, "emotion": 2},
+                # 第二标签指向无向量的段落：fit 只用能对上向量的样本
+                {"paragraph_id": negative_id, "emotion": -2},
+            ],
+        )
+        await run_linguistic(self.run_id, self.db_session)
+        rows = {row.paragraph_id: row for row in self._feature_rows()}
+        # 仅 1 条标签能对上向量（<2）→ 不拟合边界，两列维持 NULL
+        assert all(row.boundary_pos_score_sum is None for row in rows.values())
 
     @pytest.mark.asyncio()
     async def test_single_class_labels_skip_boundary(self) -> None:
         """标签全同分值（无类别差异）：边界不拟合，两列 NULL 不伪造"""
+        positive_id = next(i for i, text in enumerate(_TEST_TEXTS) if "江湖" in text)
+        negative_id = next(i for i, text in enumerate(_TEST_TEXTS) if "汤姆" in text)
+        self._insert_paragraph_embeddings(
+            {
+                positive_id: [1.0, 0.0, 0.0, 0.0],
+                negative_id: [-1.0, 0.0, 0.0, 0.0],
+            }
+        )
         self._insert_annotation_with_labels(
             1,
             [
-                {
-                    "sentence": "江湖快意恩仇，刀光剑影之间英雄辈出。",
-                    "emotion": 0,
-                    "start": 0,
-                    "end": 15,
-                },
-                {
-                    "sentence": "他叫汤姆去拿外衣，但是天色已晚。",
-                    "emotion": 0,
-                    "start": 0,
-                    "end": 15,
-                },
+                {"paragraph_id": positive_id, "emotion": 0},
+                {"paragraph_id": negative_id, "emotion": 0},
             ],
         )
         await run_linguistic(self.run_id, self.db_session)
