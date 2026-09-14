@@ -11,7 +11,7 @@ write_relation / write_dialogue），实体与事件节点用模型自定的 el 
 树内先后=调用顺序）；句标签收编进 write_metrics.labels（段落级监督）；实体
 引用增加 el 键空间；伏笔属性收敛为 isforeshadowing+confidence。
 2026-09-13 改造前是"一次大载荷 write 完成整个领域"（整树起草 + 整批返工）：
-先拆成同轮多个有类型小调用，再按用户裁决取消暂存概念——没有暂存区，
+先拆成同轮多个有类型小调用，再取消暂存概念——没有暂存区，
 没有逐域 finish，失败只指向一个语义单元，模型只重调那一条记录。
 """
 
@@ -298,11 +298,6 @@ class AnnotationToolLedger:
     annotation: BoundChapterAnnotation | None = None
     errors: list[str] = field(default_factory=list)
     search_log: list[dict[str, Any]] = field(default_factory=list)
-    graph_queried: bool = False
-    # 2026-09-13 实体准入闸门：小调用改造后 write_entity 一条一个实体，
-    # 闸门只对本章第一次登记生效（否则一轮登记多个实体会被自己的登记挡在门外）。
-    # 单调放行、刻意不进 snapshot：闸门讲的是"模型已被告知先查图"，不是账本事实
-    entity_gate_passed: bool = False
     graph: FactGraph | None = None
     # 2026-08-18 事件森林/DAG：当前 chunk 的段落坐标映射，用于事件锚点校验和证据派生
     paragraph_info: ChunkParagraphInfo | None = None
@@ -1157,7 +1152,7 @@ class AnnotationToolLedger:
             )
 
     # ------------------------------------------------------------------
-    # 2026-09-14 回执返回写入内容（用户裁决：所有 write 回执回显写入内容）：
+    # 2026-09-14 回执返回写入内容（所有 write 回执回显写入内容）：
     # content=本次写入的生效终值（服务端归一/端点解析已完成），不含 uuid
 
     def entity_content(self, entity: EntityInput) -> dict[str, Any]:
@@ -1208,7 +1203,7 @@ class AnnotationToolLedger:
         return content
 
     # ------------------------------------------------------------------
-    # 2026-09-14 进度账本数据源（用户裁决：每回合注入最新进展，不走回执 rollup）：
+    # 2026-09-14 进度账本数据源（每回合注入最新进展，不走回执 rollup）：
     # 服务端不把思考重放给模型，"已写到哪、还欠哪些"由系统逐回合直给——四个
     # *_ledger() 供 graph 侧渲染写者面【进度账本】注入块（局部键面，不露 uuid）。
 
@@ -2232,7 +2227,6 @@ def build_search_tools(
                 limit=50,
             )
             _annotate_alias_links(response, ledger=ledger, query_service=query_service)
-        ledger.graph_queried = True
         ledger.append_search_log(
             {
                 "tool": "search_graph",
@@ -2422,7 +2416,7 @@ def build_annotation_tools(
     """2026-08-07 用于构建语义写入搜索解决和完成工具集
 
     2026-09-11 章内并行两段式：ask_reader_dispatcher 仅在写者面传入（§7 反问通道，
-    用户裁决追问轮数进配置）；单块章不传，工具面与历史行为完全一致。"""
+    追问轮数进配置）；单块章不传，工具面与历史行为完全一致。"""
 
     @tool
     def write_metrics(
@@ -2485,14 +2479,12 @@ def build_annotation_tools(
         未提交的字段保留现值。
         实体大类一经登记不可变更；同一词条的不同身份用区分性名称
         （如"圣城"是 location、"圣城朝堂"是 organization）。
-        图中已有实体时，提交前必须先 search_graph 查询已登记实体。
         事件/关系/对话的实体引用用 el 键（同轮先登记后引用，不等回执）或
         回执/检索编号 n——write_event 的 characters[].entityid 等字段两者都收。
         回执 content 回显该实体合并后的生效记录（含服务端编号 n）。
         """
-        if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried \
-                and not ledger.entity_gate_passed:
-            raise AnnotationAuthorizationError("提交 write_entity 前必须先调用 search_graph 查询已登记实体")
+        # 2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸——
+        # 首写被检索挡在门外会迫使判定跨回合等待回执；登记序由 el 键承接，闸门删净
         entity = EntityInput(
             name=name,
             entity_type=entity_type,
@@ -2508,7 +2500,6 @@ def build_annotation_tools(
         if attributes is not None:
             present.add("attributes")
         number = ledger.apply_entity(entity, el=el, present=present)
-        ledger.entity_gate_passed = True
         bound_el = unicodedata.normalize("NFC", el).strip()
         return json.dumps(
             {

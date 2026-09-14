@@ -954,16 +954,17 @@ async def test_finish_chapter_protocol_guards() -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_entity_gate_requires_search_graph_once_per_chapter() -> None:
-    """2026-09-13 实体准入闸门只对本章第一次登记生效（同轮多条登记不被自己挡住）"""
+async def test_write_entity_no_longer_requires_search_graph_gate() -> None:
+    """2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸
+
+    旧行为：图中已有登记实体时首笔登记必须先检索。闸门删净后省去 search_graph
+    直接写入即生效，同轮多条登记照常各自独立。
+    """
     ledger = _ledger(graph=FactGraph(history_entity_types={"旧人": "character"}))
     tools = _tools(ledger)
-    with pytest.raises(Exception, match="search_graph"):
-        await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
-
-    await tools["search_graph"].ainvoke({"entities": ["顾霜"]})
     await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     await _call(tools, "write_entity", {"name": "众人", "entity_type": "organization", "el": "众人"})
+    assert set(ledger.written_entities) == {"顾霜", "众人"}
 
 
 # ---------------------------------------------------------------------------
@@ -1103,7 +1104,6 @@ async def test_same_round_small_calls_counts_as_single_iteration() -> None:
 
     ledger = _ledger()
     tools = build_annotation_tools(_QueryService(), ledger)
-    ledger.graph_queried = True
     parallel_calls = [
         {
             "name": "write_entity",
