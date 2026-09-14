@@ -713,6 +713,45 @@ async def test_dialogue_replay_updates_verdict_in_place() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dialogue_speaker_nullish_string_is_read_as_unattributed() -> None:
+    """2026-09-14 null 字面串统一容错（run a8c29ec8 实锤：ch1 t6/ch4 t6/t7 白烧 3 个调用）
+
+    模型把 JSON null 写成字符串 "null"，落到 el 键校验面报 unknown_el，白烧一回合才自愈。
+    转换收口在生产调用入口（graph._invoke_tool）：可空参数一律按留空读取，
+    必填参数不改、仍严格拒绝。
+    """
+    ledger = _ledger()
+    tools = _tools(ledger)
+    await _register_entities(tools)
+
+    receipt = await _call(
+        tools,
+        "write_dialogue",
+        {"candidate_index": 1, "verdict": "dialogue", "speaker": "null", "tone": "平静"},
+    )
+    assert receipt["status"] == "written"
+    assert ledger.written_dialogues[1].speaker is None
+    assert receipt["content"]["speaker"] is None
+    assert receipt["content"]["tone"] == "平静"
+
+    # 大小写与可空枚举参数同受转换（tone 不再以 null 串撞 enum 校验）
+    second = await _call(
+        tools,
+        "write_dialogue",
+        {"candidate_index": 2, "verdict": "dialogue", "speaker": "None", "tone": "null"},
+    )
+    assert second["content"]["speaker"] is None
+    assert second["content"]["tone"] is None
+
+    strict = await _rejection(
+        tools,
+        "write_relation",
+        {"from_entity": "null", "to_entity": "顾霜", "relation_type": "敌对"},
+    )
+    assert (strict.field, strict.code) == ("from_entity", "unknown_el")
+
+
+@pytest.mark.asyncio
 async def test_dialogue_receipt_reports_chapter_progress() -> None:
     """2026-09-13 对话回执带本章进度：判一条写一条时不必自己记已判到哪
 

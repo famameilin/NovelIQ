@@ -2533,9 +2533,9 @@ def build_annotation_tools(
         verdict: dialogue=真实对话 / inner_monologue=内心独白 /
         not_dialogue=误判候选（题字、描写被引号包裹等，此时只填 candidate_index 与 verdict）。
         speaker 是说话人的实体引用——本 chunk 自定的 el 键或回执编号 n，
-        无法确认时留 null；tone 取参数说明里的闭合枚举，没有贴合的用「其他」。
+        无法确认时留空；tone 取参数说明里的闭合枚举，没有贴合的用「其他」。
         归属判据：多人齐声或同一条引语混有多人发言时，二选一——定主喊者，或 speaker 留
-        null 承认归属不明；一次定案，后续回合不因再权衡"谁更合适"而改判。
+        空承认归属不明；一次定案，后续回合不因再权衡"谁更合适"而改判。
         判定与写入不必一轮做完：每条判定彼此独立、写入即生效，重写同序号按更新语义处理。
         回执 content 回显该候选的生效判定（speaker 已解析为登记名，含候选账本标识 candidate_key）。
         """
