@@ -643,6 +643,8 @@ class TestRunReaderAgent:
         assert "search_pool" in captured["tools"]
         assert "write_metrics" not in captured["tools"]
         assert "resolve_fact_case" not in captured["tools"]
+        # 2026-09-14 【进度账本】只注入写者面：读者没有写入域，不得携带注入块
+        assert not any("进度账本" in str(message.content) for message in captured["messages"])
         first_human = captured["messages"][1].content
         assert '<paragraph id="101">' in first_human
         assert "CurrentSubBlock" in first_human

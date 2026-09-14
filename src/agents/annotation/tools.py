@@ -1208,6 +1208,69 @@ class AnnotationToolLedger:
         return content
 
     # ------------------------------------------------------------------
+    # 2026-09-14 进度账本数据源（用户裁决：每回合注入最新进展，不走回执 rollup）：
+    # 服务端不把思考重放给模型，"已写到哪、还欠哪些"由系统逐回合直给——四个
+    # *_ledger() 供 graph 侧渲染写者面【进度账本】注入块（局部键面，不露 uuid）。
+
+    def entity_ledger(self) -> list[dict[str, Any]]:
+        """用于列举本章已写入实体的账本（el 绑定序）：{el, name, n}"""
+        rows: list[dict[str, Any]] = []
+        for el, key in self.entity_el_index.items():
+            stored = self.written_entities.get(key)
+            if stored is None:
+                continue
+            rows.append(
+                {
+                    "el": el,
+                    "name": stored.name,
+                    "n": self.graph.entity_number(stored.name) if self.graph is not None else None,
+                }
+            )
+        return rows
+
+    def relation_ledger(self) -> list[str]:
+        """用于列举本章当前生效关系边的账本："起-止/类型"（登记名）"""
+        return [f"{item.from_entity}-{item.to_entity}/{item.relation_type}" for item in self.written_relations.values()]
+
+    def event_ledger(self) -> dict[str, dict[str, Any]]:
+        """用于本章事件树的快照账本：树键 → 根描述/伏笔标记（含置信现值）/子键与类型/主链尾
+
+        键是模型侧的局部键（树键与子事件键），不露 uuid；trunk_tail=root 表示主链还没有子节点。
+        """
+        view: dict[str, dict[str, Any]] = {}
+        for tree_key, tree_id in self.tree_key_index.items():
+            tree = self.event_trees.get(tree_id) or {}
+            nodes: dict[str, str] = dict(tree.get("nodes") or {})
+            root_id = str(tree.get("root_node_id", ""))
+            root_event = self._bound_event(root_id)
+            children: dict[str, str] = {}
+            for node_key, node_id in nodes.items():
+                if node_key == _ROOT_NODE_KEY:
+                    continue
+                children[node_key] = str(self._bound_event(str(node_id)).cause_role)
+            entry: dict[str, Any] = {
+                "root": root_event.description,
+                "foreshadowing": bool(tree.get("isforeshadowing")),
+                "children": children,
+                "trunk_tail": next(
+                    (k for k, v in nodes.items() if str(v) == str(tree.get("trunk_tail"))), _ROOT_NODE_KEY
+                ),
+            }
+            if entry["foreshadowing"] and root_event.payoff_likelihood is not None:
+                entry["confidence"] = str(root_event.payoff_likelihood)
+            view[tree_key] = entry
+        return view
+
+    def dialogue_ledger(self) -> dict[str, Any]:
+        """用于对话域账本：候选总数/已判定写入数/未写入的候选编号名单"""
+        pending = sorted(set(range(1, len(self.dialogue_candidates) + 1)) - set(self.written_dialogues))
+        return {
+            "total": len(self.dialogue_candidates),
+            "written": len(self.written_dialogues),
+            "pending": pending,
+        }
+
+    # ------------------------------------------------------------------
     # 收尾声明：唯一 finish_chapter，系统据此校验并冻结当前 chunk（冻结单位=整章）
 
     def finish_chapter(self) -> dict[str, Any]:
