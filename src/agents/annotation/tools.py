@@ -677,10 +677,11 @@ class AnnotationToolLedger:
         from_ref: int | str,
         to_ref: int | str,
         relation_type: RelationType,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, dict[str, Any]]:
         """用于写入一条本章确认存在的闭合关系边（同一对端点换类型即整体替换）
 
-        返回 (记录键, 本条边的入图结果)：assert=新边入图 / skipped_existing=已在图上 /
+        返回 (记录键, 本条边的入图结果, 本次写入内容)：assert=新边入图 /
+        skipped_existing=已在图上 /
         skipped_self_loop=两端解析到同一实体且非"同一人物"语义（不入图）。
         """
         provisional = f"relation/{from_ref}-{to_ref}/{relation_type}"
@@ -731,7 +732,7 @@ class AnnotationToolLedger:
             ),
             "assert",
         )
-        return record, outcome
+        return record, outcome, item.model_dump(mode="json")
 
     def _flush_relations(self) -> list[dict[str, Any]]:
         """用于把本章关系完整集合重放到事实图（先清空本章 assert 再按序重放）
@@ -1123,6 +1124,57 @@ class AnnotationToolLedger:
                 code="duplicate_observation",
                 expected="同一人物在本 chunk 内的动作不得重复（改写动作或更新已记的那条）",
             )
+
+    # ------------------------------------------------------------------
+    # 2026-09-14 回执返回写入内容（用户裁决：所有 write 回执回显写入内容）：
+    # content=本次写入的生效终值（服务端归一/端点解析已完成），不含 uuid
+
+    def entity_content(self, entity: EntityInput) -> dict[str, Any]:
+        """用于回显 write_entity 登记/更新后该实体生效记录（含服务端编号 n）"""
+        stored = self.written_entities.get(_norm_entity_key(entity.name), entity)
+        content = stored.model_dump(mode="json")
+        content["n"] = self.graph.entity_number(stored.name) if self.graph is not None else None
+        return content
+
+    def metrics_content(self) -> dict[str, Any]:
+        """用于回显 write_metrics 提交后的整域生效指标（整域覆盖，以最新回执为准）"""
+        if self.metrics_payload is None:
+            raise AnnotationInvariantError("write_metrics 回显需要 metrics_payload 已落账")
+        return self.metrics_payload.model_dump(mode="json")
+
+    def dialogue_content(self, candidate_index: int) -> dict[str, Any]:
+        """用于回显 write_dialogue 后该候选的生效判定（speaker 已解析为登记名，带 candidate_key）"""
+        content = self.written_dialogues[candidate_index].model_dump(mode="json")
+        content["candidate_key"] = self.dialogue_candidates[candidate_index - 1].candidate_key
+        return content
+
+    def event_content(self, *, el: str, isroot: bool) -> dict[str, Any]:
+        """用于回显 write_event 后该节点的服务端终值（id/描述/伏笔属性/参与者三态）
+
+        el 与 isroot 是模型侧提交别名、树上不存储，因此不进 content；寻址面唯一在 record。
+        """
+        cleaned = unicodedata.normalize("NFC", el).strip()
+        tree_key, _, node_key = cleaned.partition(_EL_PATH_SEP)
+        tree = self.event_trees.get(self.tree_key_index.get(tree_key.strip(), ""))
+        if tree is None:
+            raise AnnotationInvariantError(f"write_event 回显需要账本内事件树: {tree_key}")
+        if isroot or not node_key.strip():
+            event = self._bound_event(str(tree["root_node_id"]))
+        else:
+            event = self._bound_event(str(tree["nodes"][node_key.strip()]))
+        content: dict[str, Any] = {
+            "node_id": str(event.node_id),
+            "tree_id": str(event.tree_id),
+            "description": event.description,
+        }
+        if isroot:
+            content["isforeshadowing"] = bool(tree["isforeshadowing"])
+            confidence = event.payoff_likelihood
+            content["confidence"] = str(confidence) if confidence is not None else None
+        else:
+            content["type"] = str(event.cause_role)
+        content["characters"] = [p.model_dump(mode="json") for p in event.participants]
+        return content
 
     # ------------------------------------------------------------------
     # 收尾声明：唯一 finish_chapter，系统据此校验并冻结当前 chunk（冻结单位=整章）
@@ -2275,6 +2327,7 @@ def build_annotation_tools(
         （两段式取读者报告证据的 paragraph_id），emotion 同 emotional_valence；
         优先选情绪表达有代表性、或语气/标点有区分度的段落，也允许 0 分段。
         同一 chunk 重复提交整域按最后一次为准（labels 同理，按段号去重后覆盖）。
+        回执 content 回显当前整域生效指标。
         """
         payload = ChunkMetricsInput(
             summary=summary,
@@ -2285,7 +2338,10 @@ def build_annotation_tools(
             labels=list(labels or []),
         )
         ledger.apply_metrics(payload)
-        return json.dumps({"status": "written", "record": "metrics"}, ensure_ascii=False)
+        return json.dumps(
+            {"status": "written", "record": "metrics", "content": ledger.metrics_content()},
+            ensure_ascii=False,
+        )
 
     @tool
     def write_entity(
@@ -2308,6 +2364,7 @@ def build_annotation_tools(
         图中已有实体时，提交前必须先 search_graph 查询已登记实体。
         事件/关系/对话的实体引用用 el 键（同轮先登记后引用，不等回执）或
         回执/检索编号 n——write_event 的 characters[].entityid 等字段两者都收。
+        回执 content 回显该实体落账生效记录（含服务端编号 n，未提交字段以最新一次覆盖为准）。
         """
         if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried \
                 and not ledger.entity_gate_passed:
@@ -2323,7 +2380,13 @@ def build_annotation_tools(
         ledger.entity_gate_passed = True
         bound_el = unicodedata.normalize("NFC", el).strip()
         return json.dumps(
-            {"status": "written", "record": f"entity/{entity.name}", "el": bound_el, "n": number},
+            {
+                "status": "written",
+                "record": f"entity/{entity.name}",
+                "el": bound_el,
+                "n": number,
+                "content": ledger.entity_content(entity),
+            },
             ensure_ascii=False,
         )
 
@@ -2341,6 +2404,7 @@ def build_annotation_tools(
         speaker 是说话人的实体引用——本 chunk 自定的 el 键或回执编号 n，
         无法确认时留 null；tone 取参数说明里的闭合枚举，没有贴合的用「其他」。
         判定与写入不必一轮做完：每条判定彼此独立、写入即生效，重写同序号按更新语义处理。
+        回执 content 回显该候选的生效判定（speaker 已解析为登记名，含候选账本标识 candidate_key）。
         """
         record = ledger.apply_dialogue(
             candidate_index=candidate_index,
@@ -2352,6 +2416,7 @@ def build_annotation_tools(
             {
                 "status": "written",
                 "record": record,
+                "content": ledger.dialogue_content(candidate_index),
                 "progress": {
                     "written": len(ledger.written_dialogues),
                     "total": len(ledger.dialogue_candidates),
@@ -2379,14 +2444,15 @@ def build_annotation_tools(
         新边建图 assert，重复提交同一条边自动去重；强化/削弱/解除一律走
         resolve_fact_case，不通过本工具表达变化。
         同一对端点重写（含换关系类型）按整体替换处理，写入顺序不影响终态。
+        回执 content 回显该边当前生效内容（两端为登记名）。
         """
-        record, outcome = ledger.apply_relation(
+        record, outcome, content = ledger.apply_relation(
             from_ref=from_entity,
             to_ref=to_entity,
             relation_type=relation_type,
         )
         return json.dumps(
-            {"status": "written", "record": record, "outcome": outcome},
+            {"status": "written", "record": record, "outcome": outcome, "content": content},
             ensure_ascii=False,
         )
 
@@ -2415,6 +2481,7 @@ def build_annotation_tools(
         entityid 填本 chunk 的 el 键或回执/检索编号 n（编号引用历史实体）。
         同 el 重写按更新处理：根改描述/伏笔属性，子改描述（type 不可改写，要改换键）；
         characters 给出即整体替换该节点参与者列表，省略则保留。
+        回执 content 回显该节点落账记录（node_id/tree_id/描述/参与者三态，根带伏笔属性现值、子带 type）。
         """
         record = ledger.apply_event(
             el=el,
@@ -2425,7 +2492,10 @@ def build_annotation_tools(
             node_type=type,
             characters=characters,
         )
-        return json.dumps({"status": "written", "record": record}, ensure_ascii=False)
+        return json.dumps(
+            {"status": "written", "record": record, "content": ledger.event_content(el=el, isroot=isroot)},
+            ensure_ascii=False,
+        )
 
     @tool
     def finish_chapter() -> str:
