@@ -379,7 +379,20 @@ async def test_rejection_expected_carries_occupied_record_example() -> None:
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
     first = json.loads(tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character", "el": "a1"}))
-    assert first == {"status": "written", "record": "entity/顾霜", "el": "a1", "n": 1}
+    assert first == {
+        "status": "written",
+        "record": "entity/顾霜",
+        "el": "a1",
+        "n": 1,
+        "content": {
+            "name": "顾霜",
+            "entity_type": "character",
+            "tags": [],
+            "description": None,
+            "attributes": {},
+            "n": 1,
+        },
+    }
 
     receipt = await _write_rejection(
         tools,

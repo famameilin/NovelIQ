@@ -173,13 +173,19 @@ async def test_event_children_grow_in_call_order_with_trunk_rules() -> None:
     tools = _tools(ledger)
     await _register_entities(tools)
     root_receipt = await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    root_content = root_receipt.pop("content")
     assert root_receipt == {"status": "written", "record": "t1/root"}
+    assert root_content["description"] == "顾霜喝止众人"
+    assert root_content["characters"] == []
     first_receipt = await _call(
         tools,
         "write_event",
         {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
     )
+    first_content = first_receipt.pop("content")
     assert first_receipt == {"status": "written", "record": "t1/e1"}
+    assert first_content["type"] == "main"
+    assert first_content["tree_id"] == root_content["tree_id"]
     await _call(
         tools,
         "write_event",
@@ -363,7 +369,11 @@ async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None
             ],
         },
     )
+    first_content = first.pop("content")
     assert first == {"status": "written", "record": "t1/e1"}
+    assert first_content["characters"] == [
+        {"entity": "顾霜", "role": "主体", "narrative_role": "主体", "action": "喝道", "emotion": 0}
+    ]
 
     duplicate = await _rejection(
         tools,

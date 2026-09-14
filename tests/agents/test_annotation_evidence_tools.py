@@ -840,11 +840,35 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "write_entity",
         {"name": "顾霜", "entity_type": "character", "el": "顾霜"},
     )
-    assert set(entity_receipt) == {"status", "record", "el", "n"}
-    assert entity_receipt == {"status": "written", "record": "entity/顾霜", "el": "顾霜", "n": 1}
+    assert set(entity_receipt) == {"status", "record", "el", "n", "content"}
+    assert entity_receipt == {
+        "status": "written",
+        "record": "entity/顾霜",
+        "el": "顾霜",
+        "n": 1,
+        "content": {
+            "name": "顾霜",
+            "entity_type": "character",
+            "tags": [],
+            "description": None,
+            "attributes": {},
+            "n": 1,
+        },
+    }
 
     metrics_receipt = _call(tools, "write_metrics", _write_metrics_args())
-    assert metrics_receipt == {"status": "written", "record": "metrics"}
+    assert metrics_receipt == {
+        "status": "written",
+        "record": "metrics",
+        "content": {
+            "summary": "住手回荡",
+            "emotional_valence": 0,
+            "narrative_function": "铺垫",
+            "pivot_moment": False,
+            "cliffhanger": False,
+            "labels": [],
+        },
+    }
 
     domain_receipt = _finish_chapter(tools, ledger)
     assert set(domain_receipt) == {"status", "chunk_id", "records", "dialogue_defaulted"}
@@ -1008,7 +1032,10 @@ def test_event_root_appends_new_tree_per_tree_key_and_updates_on_replay() -> Non
     assert len(ledger.tree_key_index) == 2
     # 同树键重交按更新：根描述改写，不新增第三棵树
     replay = _call(tools, "write_event", {"el": "t2", "isroot": True, "description": "顾霜收势离场"})
+    replay_content = replay.pop("content")
     assert replay == {"status": "written", "record": "t2/root"}
+    assert replay_content["description"] == "顾霜收势离场"
+    assert replay_content["isforeshadowing"] is False
     assert len(ledger.tree_key_index) == 2
 
     _call(tools, "write_metrics", _write_metrics_args())
@@ -1219,7 +1246,11 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
             "characters": [{"entityid": 1, "role": "地点"}],
         },
     )
+    receipt_content = receipt.pop("content")
     assert receipt == {"status": "written", "record": "t1/root"}
+    assert receipt_content["characters"] == [
+        {"entity": "山门", "role": "地点", "narrative_role": None, "action": None, "emotion": None}
+    ]
     root_event = ledger.bound_payloads["events"][0]
     participant = root_event.participants[0]
     assert participant.entity == "山门"
@@ -1301,7 +1332,20 @@ def test_write_entity_allowed_after_search_graph() -> None:
     _call(tools, "search_graph", {"entities": ["顾霜"]})
     assert ledger.graph_queried is True
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
-    assert receipt == {"status": "written", "record": "entity/顾霜", "el": "顾霜", "n": 1}
+    assert receipt == {
+        "status": "written",
+        "record": "entity/顾霜",
+        "el": "顾霜",
+        "n": 1,
+        "content": {
+            "name": "顾霜",
+            "entity_type": "character",
+            "tags": [],
+            "description": None,
+            "attributes": {},
+            "n": 1,
+        },
+    }
 
 
 def test_complete_chunk_accepts_registered_entity_endpoint_without_declaration() -> None:
@@ -1445,7 +1489,10 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
             "confidence": "medium",
         },
     )
+    response_content = response.pop("content")
     assert response == {"status": "written", "record": "t1/root"}
+    assert response_content["isforeshadowing"] is True
+    assert response_content["confidence"] == "medium"
     _call(
         tools,
         "write_event",
@@ -2214,7 +2261,12 @@ def test_relation_write_asserts_new_edge_immediately() -> None:
     tools = _tools(service, ledger)
 
     receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
-    assert receipt == {"status": "written", "record": "relation/顾霜-顾老/友情", "outcome": "assert"}
+    assert receipt == {
+        "status": "written",
+        "record": "relation/顾霜-顾老/友情",
+        "outcome": "assert",
+        "content": {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情"},
+    }
     assert ledger.graph.relation_exists("顾霜", "顾老", "友情") is True
     ops = ledger.graph.relation_assert_ops
     assert [(op["from_entity"], op["to_entity"], op["relation_type"]) for op in ops] == [
@@ -2244,6 +2296,7 @@ def test_relation_existing_edge_skipped_existing_receipt() -> None:
         "status": "written",
         "record": "relation/顾霜-顾老/友情",
         "outcome": "skipped_existing",
+        "content": {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情"},
     }
     assert ledger.graph.relation_exists("顾霜", "顾老", "友情") is True
     # no-op 判据：已存在的边不进入本章新增集合（不重复累计支持度）
@@ -2276,7 +2329,12 @@ def test_relation_alias_resolved_to_same_entity_skipped_self_loop() -> None:
     _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "同一人物"})
     # 同一对端点换类型即整体替换：同一人物边被友情边替换
     receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
-    assert receipt == {"status": "written", "record": "relation/猴子-侯飞白/友情", "outcome": "skipped_self_loop"}
+    assert receipt == {
+        "status": "written",
+        "record": "relation/猴子-侯飞白/友情",
+        "outcome": "skipped_self_loop",
+        "content": {"from_entity": "猴子", "to_entity": "侯飞白", "relation_type": "友情"},
+    }
     assert len(ledger.written_relations) == 1
     assert ledger.written_relations[("猴子", "侯飞白")].relation_type == "友情"
 
@@ -2660,7 +2718,18 @@ def test_paragraph_labels_bind_and_freeze() -> None:
         "write_metrics",
         {**_write_metrics_args(), "labels": _paragraph_labels([(0, -2), (1, -1)])},
     )
-    assert first == {"status": "written", "record": "metrics"}
+    assert first == {
+        "status": "written",
+        "record": "metrics",
+        "content": {
+            "summary": "住手回荡",
+            "emotional_valence": 0,
+            "narrative_function": "铺垫",
+            "pivot_moment": False,
+            "cliffhanger": False,
+            "labels": [{"paragraph_id": 0, "emotion": -2}, {"paragraph_id": 1, "emotion": -1}],
+        },
+    }
     labels = ledger.bound_payloads["paragraph_labels"]
     assert [label.paragraph_id for label in labels] == [0, 1]
     assert [label.emotion for label in labels] == [-2, -1]
@@ -2672,7 +2741,18 @@ def test_paragraph_labels_bind_and_freeze() -> None:
         "write_metrics",
         {**_write_metrics_args(), "labels": _paragraph_labels([(0, -2), (1, -1), (1, 1)])},
     )
-    assert replay == {"status": "written", "record": "metrics"}
+    assert replay == {
+        "status": "written",
+        "record": "metrics",
+        "content": {
+            "summary": "住手回荡",
+            "emotional_valence": 0,
+            "narrative_function": "铺垫",
+            "pivot_moment": False,
+            "cliffhanger": False,
+            "labels": [{"paragraph_id": 0, "emotion": -2}, {"paragraph_id": 1, "emotion": 1}],
+        },
+    }
     labels = ledger.bound_payloads["paragraph_labels"]
     assert len(labels) == 2
     assert labels[-1].emotion == 1

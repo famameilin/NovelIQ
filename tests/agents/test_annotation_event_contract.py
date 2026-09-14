@@ -284,19 +284,36 @@ def test_write_event_returns_tree_and_authorizes_root() -> None:
     """2026-08-22 创建事件树由服务端派发 tree_id/root_node_id 并登记授权
 
     2026-09-14 单工具 write_event：根 el=t1、参与者内联 characters，回执
-    {status: written, record: t1/root / t1/e1}；真实 id 从账本读取——
+    {status: written, record: t1/root / t1/e1, content}；content 携带落库终值与
+    服务端 id（node_id/tree_id），真实 id 亦可从账本读取——
     授权集合仍登记根与子节点 id（resolve_foreshadowing_case 的授权来源）。
     """
     ledger = _ledger()
     tools = _tools(ledger)
     entity = _entity_number(tools, "顾霜")
     root_receipt = _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
+    root_content = root_receipt.pop("content")
     assert root_receipt == {"status": "written", "record": "t1/root"}
     child_receipt = _call(tools, "write_event", _child_args())
+    child_content = child_receipt.pop("content")
     assert child_receipt == {"status": "written", "record": "t1/e1"}
 
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     root_node_id = tree["root_node_id"]
+    assert root_content == {
+        "node_id": root_node_id,
+        "tree_id": tree["tree_id"],
+        "description": "顾霜拔剑",
+        "isforeshadowing": False,
+        "confidence": None,
+        "characters": [
+            {"entity": "顾霜", "role": "主体", "narrative_role": "主体", "action": "拔剑", "emotion": -1}
+        ],
+    }
+    assert child_content["node_id"] == tree["nodes"]["e1"]
+    assert child_content["tree_id"] == tree["tree_id"]
+    assert child_content["type"] == "main"
+    assert "isforeshadowing" not in child_content
     assert root_node_id in ledger.authorized_event_ids
     assert set(tree["nodes"].values()) <= ledger.authorized_event_ids
     bound = ledger.bound_payloads["events"]
