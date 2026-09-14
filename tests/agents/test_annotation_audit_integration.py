@@ -29,6 +29,15 @@ def _chunk_paragraph_info(text: str) -> ChunkParagraphInfo:
     )
 
 
+def _two_paragraph_info(text: str) -> ChunkParagraphInfo:
+    """2026-09-14 用于构造两段 ChunkParagraphInfo（write_metrics.labels 段落标签的段号取值域所需）"""
+    return ChunkParagraphInfo(
+        paragraph_ids=[0, 1],
+        char_spans=[(0, 2), (2, len(text))],
+        texts=[text[:2], text[2:]],
+    )
+
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -93,52 +102,53 @@ def _write_call(name: str, args: dict, *, call_id: str) -> dict:
     return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
 
 
-# 2026-09-13 实时写入：九个写入小调用从首轮起全部在工具面上（写者面全放开）
+# 2026-09-14 写入面重构：五个领域写入小调用从首轮起全部在工具面上（写者面全放开），
+# 唯一收尾 finish_chapter（旧名 finish_chunk）
 _ALL_WRITE_TOOLS = (
     "write_entity",
     "write_metrics",
-    "write_sentence_label",
-    "write_event_root",
-    "write_event_child",
-    "write_character_participation",
-    "write_noncharacter_participation",
+    "write_event",
     "write_relation",
     "write_dialogue",
 )
 
 
-def _finish_chunk_call(call_id: str = "call-finish-chunk") -> dict:
-    """2026-09-13 用于构造唯一收尾工具 finish_chunk 调用（判定并入本回合批次末尾）"""
-    return _write_call("finish_chunk", {}, call_id=call_id)
+def _finish_chapter_call(call_id: str = "call-finish-chapter") -> dict:
+    """2026-09-14 用于构造唯一收尾工具 finish_chapter 调用（判定并入本回合批次末尾）"""
+    return _write_call("finish_chapter", {}, call_id=call_id)
 
 
-def _metrics_calls(call_id: str = "call-metrics") -> list[dict]:
-    """2026-09-13 用于构造 write_metrics 小调用（指标整域一次提交）"""
+def _metrics_calls(
+    call_id: str = "call-metrics",
+    labels: list[dict] | None = None,
+) -> list[dict]:
+    """2026-09-14 用于构造 write_metrics 小调用（指标整域一次提交，段落标签随本域提交）"""
+    args: dict = {"summary": "住手回荡", "emotional_valence": 0, "narrative_function": "铺垫"}
+    if labels is not None:
+        args["labels"] = labels
+    return [_write_call("write_metrics", args, call_id=call_id)]
+
+
+def _paragraph_label_items() -> list[dict]:
+    """2026-09-14 用于构造两条段落标签（旧 write_sentence_label 逐句小调用收编进
+    write_metrics.labels；默认两条满足每章 2-3 段软下限）"""
+    return [{"paragraph_id": 0, "emotion": -2}, {"paragraph_id": 1, "emotion": -1}]
+
+
+def _entity_calls(
+    *,
+    name: str = "顾霜",
+    el: str | None = None,
+    call_id: str = "call-entity",
+) -> list[dict]:
+    """2026-09-14 用于构造 write_entity 小调用（一次登记一个实体，el=章内引用键）"""
     return [
         _write_call(
-            "write_metrics",
-            {"summary": "住手回荡", "emotional_valence": 0, "narrative_function": "铺垫"},
+            "write_entity",
+            {"name": name, "entity_type": "character", "el": el if el is not None else name},
             call_id=call_id,
         )
     ]
-
-
-def _sentence_label_calls(items: list[tuple[str, int]] | None = None) -> list[dict]:
-    """2026-09-13 用于构造 write_sentence_label 逐句小调用（默认两句满足每章软下限）"""
-    resolved = items if items is not None else [("住手", -2), ("回荡", -1)]
-    return [
-        _write_call(
-            "write_sentence_label",
-            {"sentence": sentence, "emotion": emotion},
-            call_id=f"call-label-{index}",
-        )
-        for index, (sentence, emotion) in enumerate(resolved, start=1)
-    ]
-
-
-def _entity_calls(*, name: str = "顾霜", call_id: str = "call-entity") -> list[dict]:
-    """2026-09-13 用于构造 write_entity 小调用（一次登记一个实体）"""
-    return [_write_call("write_entity", {"name": name, "entity_type": "character"}, call_id=call_id)]
 
 
 def _dialogue_calls(call_id: str = "call-dialogue") -> list[dict]:
@@ -158,54 +168,53 @@ def _event_calls(
     description: str = "顾霜喝止众人",
     action: str = "喝止",
     child_key: str = "e1",
-    order: int = 1,
     child_description: str = "顾霜收势",
     child_action: str = "收势",
     call_id: str = "call-events",
 ) -> list[dict]:
-    """2026-09-13 用于构造一棵事件树的小调用组（根 + 子事件 + 两条人物参与）"""
+    """2026-09-14 用于构造一棵事件树的小调用组（write_event 根 + 子事件，参与者内联 characters）
+
+    根 el=树键、子 el=树键/节点键；树内先后=调用顺序（无序号参数）；旧
+    write_event_root/write_event_child/write_character_participation 四调用合并为
+    两调用，参与者的 emotion 等三态内联进各自节点的 characters 数组。
+    """
     return [
         _write_call(
-            "write_event_root",
-            {"tree_key": tree_key, "description": description},
+            "write_event",
+            {
+                "el": tree_key,
+                "isroot": True,
+                "description": description,
+                "characters": [
+                    {
+                        "entityid": 1,
+                        "role": "主体",
+                        "narrative_role": "主体",
+                        "action": action,
+                        "emotion": -1,
+                    }
+                ],
+            },
             call_id=f"{call_id}-root",
         ),
         _write_call(
-            "write_event_child",
+            "write_event",
             {
-                "tree_key": tree_key,
-                "node_key": child_key,
-                "order": order,
+                "el": f"{tree_key}/{child_key}",
+                "isroot": False,
                 "type": "main",
                 "description": child_description,
+                "characters": [
+                    {
+                        "entityid": 1,
+                        "role": "主体",
+                        "narrative_role": "主体",
+                        "action": child_action,
+                        "emotion": 0,
+                    }
+                ],
             },
             call_id=f"{call_id}-child",
-        ),
-        _write_call(
-            "write_character_participation",
-            {
-                "tree_key": tree_key,
-                "node_key": "root",
-                "entity": 1,
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": action,
-                "emotion": -1,
-            },
-            call_id=f"{call_id}-p1",
-        ),
-        _write_call(
-            "write_character_participation",
-            {
-                "tree_key": tree_key,
-                "node_key": child_key,
-                "entity": 1,
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": child_action,
-                "emotion": 0,
-            },
-            call_id=f"{call_id}-p2",
         ),
     ]
 
@@ -433,9 +442,11 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     """2026-08-30 用于验证每个物理模型请求与工具调用都有独立耗时且落库
 
     2026-09-13 取消暂存：一个模型回合 = 多个有类型的小调用（写入即生效，回执
-    status=written），收尾由唯一 finish_chunk 表达，其校验/冻结推迟到本回合全部
-    调用处理完后执行，因此"每个模型回合一行、每个工具调用一行"的不变量在
-    新合同下逐调用验证（3 回合计 12 行，含 1 条被本回合失败记录拒绝的 finish_chunk）。
+    status=written）。2026-09-14 写入面重构：收尾由唯一 finish_chapter 表达（旧名
+    finish_chunk），段落标签随 write_metrics.labels 提交（旧 write_sentence_label
+    退役），参与者内联 write_event.characters；收尾判定推迟到本回合全部调用处理完
+    后执行，因此"每个模型回合一行、每个工具调用一行"的不变量在新合同下逐调用验证
+    （3 回合计 8 行，含 1 条被本回合失败记录拒绝的 finish_chapter）。
     """
     novel_id, run_id = create_run_with_chunks(db_session, texts=["“住手”回荡"])
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
@@ -467,15 +478,18 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         },
         call_id="call-metrics-bad",
     )
-    # 2026-09-13 三轮小调用组：实体+坏指标+finish_chunk（指标没提交，
-    # 收尾被拒 missing_record）→ 修正指标+事件树 → 对话+句标签+finish_chunk（收尾通过）
+    # 2026-09-14 三轮小调用组：实体+坏指标+finish_chapter（指标没提交，
+    # 收尾被拒 missing_record）→ 修正指标（随附两条段落标签）+事件树（参与者内联）→
+    # 对话+finish_chapter（收尾通过）
     rounds = [
-        [_entity_calls()[0], invalid_metrics, _finish_chunk_call("call-finish-round1")],
-        [*_metrics_calls(call_id="call-metrics-fixed"), *_event_calls()],
+        [*_entity_calls(), invalid_metrics, _finish_chapter_call("call-finish-round1")],
+        [
+            *_metrics_calls(call_id="call-metrics-fixed", labels=_paragraph_label_items()),
+            *_event_calls(),
+        ],
         [
             *_dialogue_calls(),
-            *_sentence_label_calls(),
-            _finish_chunk_call("call-finish-round3"),
+            _finish_chapter_call("call-finish-round3"),
         ],
     ]
     llm = _SequenceLLM([_tool_message(calls) for calls in rounds])
@@ -483,10 +497,10 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         run_scope=run_id,
         current_chapter_id=1,
         current_chunk_id=0,
-        current_chunk_text="\u201c住手\u201d回荡",
+        current_chunk_text="“住手”回荡",
         allow_future_context=False,
         graph=FactGraph(),
-        paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
+        paragraph_info=_two_paragraph_info("“住手”回荡"),
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     graph = build_annotation_graph(
@@ -537,7 +551,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         assert turn.turn_ms is not None and turn.turn_ms >= 0
         assert turn.raw_response["role"] == "ai"
         assert turn.context_summary["phase"] in {"chunk_open", "completed"}
-        # 2026-09-13 写者面全放开：每轮工具面都是九个写入小调用的全集
+        # 2026-09-14 写者面全放开：每轮工具面都是五个领域写入小调用的全集
         # （active_write_tool/active_write_tools 两个描述开放窗口的审计键已随解锁机制删除）
         assert set(_ALL_WRITE_TOOLS) <= set(turn.context_summary["allowed_tool_names"])
 
@@ -553,7 +567,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     rows_by_turn: dict[int, list[AgentToolCall]] = {}
     for row in tool_rows:
         rows_by_turn.setdefault(row.turn_id, []).append(row)
-    assert len(tool_rows) == sum(len(calls) for calls in rounds) == 12
+    assert len(tool_rows) == sum(len(calls) for calls in rounds) == 8
     for turn, calls in zip(turn_rows, rounds, strict=True):
         rows = rows_by_turn[turn.id]
         assert [row.tool_name for row in rows] == [call["name"] for call in calls]
@@ -567,10 +581,10 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     assert failed_metrics[0].receipt["status"] == "rejected"
     assert failed_metrics[0].receipt["record"] == "metrics"
     assert failed_metrics[0].error is not None
-    failed_finish = [row for row in failed_rows if row.tool_name == "finish_chunk"]
+    failed_finish = [row for row in failed_rows if row.tool_name == "finish_chapter"]
     assert len(failed_finish) == 1
     assert failed_finish[0].receipt["status"] == "rejected"
-    assert failed_finish[0].receipt["record"] == "finish_chunk"
+    assert failed_finish[0].receipt["record"] == "finish_chapter"
     # 收尾被拒的归因是指标没提交（硬前提），不是"同回合有失败调用"——后者已不再阻塞收尾
     assert failed_finish[0].receipt["code"] == "missing_record"
     assert failed_finish[0].receipt["field"] == "metrics"
@@ -578,13 +592,13 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         assert tool.tool_duration_ms is not None and tool.tool_duration_ms >= 0
         assert tool.request_args is not None
     accepted_rows = [row for row in tool_rows if row.status == "success"]
-    assert len(accepted_rows) == 10
+    assert len(accepted_rows) == 6
     # 写入即生效：小调用成功回执一律 written（领域落账不推迟到任何收尾结算）
     written_rows = [row for row in accepted_rows if row.tool_name.startswith("write_")]
-    assert len(written_rows) == 9
+    assert len(written_rows) == 5
     assert all(row.receipt["status"] == "written" for row in written_rows)
-    # 唯一收尾：通过的 finish_chunk 在批次末尾结算，回执携带各域条数
-    finish_rows = [row for row in accepted_rows if row.tool_name == "finish_chunk"]
+    # 唯一收尾：通过的 finish_chapter 在批次末尾结算，回执携带各域条数
+    finish_rows = [row for row in accepted_rows if row.tool_name == "finish_chapter"]
     assert len(finish_rows) == 1
     assert finish_rows[0].receipt["status"] == "completed"
     assert finish_rows[0].receipt["chunk_id"] == 0
@@ -595,7 +609,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         "relations": 0,
         "dialogues": 1,
         "character_observations": 2,
-        "sentence_labels": 2,
+        "paragraph_labels": 2,
     }
     assert finish_rows[0].receipt["dialogue_defaulted"] == []
 

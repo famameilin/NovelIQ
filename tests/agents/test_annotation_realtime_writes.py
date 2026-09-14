@@ -1,18 +1,21 @@
-"""2026-09-13 实时写入改造：小调用写入即生效、唯一 finish_chunk 收尾的合同测试
+"""2026-09-13 实时写入改造 / 2026-09-14 写入面重构后的合同测试（小调用写入即生效、唯一 finish_chapter 收尾）
 
 覆盖用户裁定的必要行为边界：同轮多调用只计一轮、失败不丢失已写入记录、
 逐条失败不阻塞收尾、重试按记录更新不重复、关系写入即入图、对话收尾时
 一次性默认否定、事件实时按调用顺序生长。
 
-2026-09-13 合同变化点（相对"暂存 + 逐域 finish_domain"旧合同）：
-- 取消暂存与逐域结束：每个小调用即时落到目标结构（write_entity/…/参与者），
-  成功回执 {"status": "written", "record": ...}；失败只回滚该调用自己；
-- 唯一收尾 finish_chunk：工具体只回 {"status": "pending"}，本回合全部调用处理完后
-  由 graph 判定（缺指标 → missing_record），通过则 ledger.finish_chunk() 冻结并回执
-  {"status": "completed", ...}；逐条写入失败已在调用点回执，不阻塞收尾；
-- 事件树实时生长：子节点 order 必须大于该树已有最大 order，同 node_key 只可改述。
+2026-09-14 合同变化点（相对 09-13 九工具面，见 docs/write-surface-2026-0914-test-contract.md）：
+- 写入面为五个领域工具（write_entity/write_metrics/write_event/write_relation/write_dialogue）
+  + 唯一 finish_chapter；事件根/子/参与者折叠进单工具 write_event：
+  el 层级键挂树（根 "t1"、子 "t1/e2"），树内先后=调用顺序，没有 order 参数；
+- 句标签收编进 write_metrics(labels=[{paragraph_id, emotion}])，绑定载荷键
+  sentence_labels → paragraph_labels；
+- 参与写从独立工具改为 write_event 的 characters 数组（给出即整节点替换）；
+  (人物, 动作) 重复、三态必填/非 character 不接受三态等校验全部保留；
+- 收尾声明 ledger.finish_chunk() → ledger.finish_chapter()，chunk_finished → chapter_finished；
+  快照/回滚语义保留（snapshot 含 entity_el_index，失败只回滚该条调用）。
 
-此处以账本层为主（tools + ledger 直调 apply_* / finish_chunk），
+此处以账本层为主（tools + ledger 直调 apply_* / finish_chapter），
 回合计数的图循环语义用本文件末尾的真实 LangGraph 用例覆盖；
 末尾另有一条漂移守卫：模型可见文案点名的工具必须在当前工具面上真实存在。
 """
@@ -80,12 +83,12 @@ class _QueryService:
 
 
 def _chunk_text() -> str:
-    """2026-09-13 用于提供含两个对话候选的章文本"""
+    """2026-09-13 用于提供含两个对话候选的单段章文本"""
     return "“住手！”顾霜喝道。“退下。”众人散去，夜色渐深。"
 
 
 def _ledger(**overrides) -> AnnotationToolLedger:
-    """2026-09-13 用于构造带事实图的账本"""
+    """2026-09-14 用于构造带事实图与段落坐标的账本（labels 段号校验依赖 paragraph_info）"""
     text = _chunk_text()
     kwargs = {
         "run_scope": "run-1",
@@ -94,6 +97,11 @@ def _ledger(**overrides) -> AnnotationToolLedger:
         "current_chunk_text": text,
         "allow_future_context": False,
         "graph": FactGraph(),
+        "paragraph_info": ChunkParagraphInfo(
+            paragraph_ids=[1],
+            char_spans=[(0, len(text))],
+            texts=[text],
+        ),
     }
     kwargs.update(overrides)
     return AnnotationToolLedger(**kwargs)
@@ -122,10 +130,14 @@ async def _rejection(tools: dict, name: str, args: dict) -> AnnotationStageRejec
 
 
 async def _register_entities(tools: dict) -> dict[str, int]:
-    """2026-09-13 用于登记测试用实体并返回编号表（编号供关系/对话/事件引用）"""
+    """2026-09-14 用于登记测试用实体并返回编号表（编号/el 键供关系、对话、事件引用）"""
     numbers = {}
     for name, entity_type in (("顾霜", "character"), ("众人", "organization"), ("山门", "location")):
-        receipt = await _call(tools, "write_entity", {"name": name, "entity_type": entity_type})
+        receipt = await _call(
+            tools,
+            "write_entity",
+            {"name": name, "entity_type": entity_type, "el": name},
+        )
         numbers[name] = receipt["n"]
     return numbers
 
@@ -140,9 +152,9 @@ async def _seed_metrics(tools: dict) -> None:
 
 
 async def _finish(ledger: AnnotationToolLedger, tools: dict) -> dict:
-    """2026-09-13 用于按生产路径收尾（写指标后调用唯一 finish_chunk 的结算汇点）"""
+    """2026-09-14 用于按生产路径收尾（写指标后调用唯一 finish_chapter 的结算汇点）"""
     await _seed_metrics(tools)
-    return ledger.finish_chunk()
+    return ledger.finish_chapter()
 
 
 # ---------------------------------------------------------------------------
@@ -152,24 +164,26 @@ async def _finish(ledger: AnnotationToolLedger, tools: dict) -> dict:
 
 @pytest.mark.asyncio
 async def test_event_children_grow_in_call_order_with_trunk_rules() -> None:
-    """2026-09-13 事件树实时生长：main 顺延主链、secondary 挂当时链尾
+    """2026-09-14 事件树实时生长：main 顺延主链、secondary 挂当时链尾
 
-    旧合同"子节点乱序暂存 + 领域结算按 order 升序组装"已废止：实时写入下
-    order 必须大于该树已有最大 order（乱序提交在写入点被拒，见下一个用例）。
+    树内先后=调用顺序（order 参数退役）：根 el=树键，子 el=树键/节点键，
+    同轮按序调用即按序挂树，参与者随节点的 characters 数组内联提交。
     """
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
-    await _call(
+    root_receipt = await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    assert root_receipt == {"status": "written", "record": "t1/root"}
+    first_receipt = await _call(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "顾霜喝道"},
+        "write_event",
+        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
     )
+    assert first_receipt == {"status": "written", "record": "t1/e1"}
     await _call(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e2", "order": 2, "type": "secondary", "description": "众人散去"},
+        "write_event",
+        {"el": "t1/e2", "isroot": False, "type": "secondary", "description": "众人散去"},
     )
 
     events = list(ledger.bound_payloads["events"])
@@ -188,92 +202,128 @@ async def test_event_children_grow_in_call_order_with_trunk_rules() -> None:
 
 @pytest.mark.asyncio
 async def test_character_participation_requires_all_three_state_fields() -> None:
-    """2026-09-13 人物三态必填、不自动填默认值；非人物入口不接受三态字段"""
+    """2026-09-14 人物三态必填、不自动填默认值；非 character 条目不接受三态字段
+
+    参与写并入 write_event 的 characters 数组后，分流规则不变：
+    character 条目缺三态→账本级 code=missing；只给部分三态→schema 级整条拒绝
+    （invalid_combination）；emotion 越界→out_of_range；非 character 带三态→
+    observation_on_noncharacter（旧 not_character/is_character 双向拒绝的合并面）。
+    """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
 
     missing = await _rejection(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "root",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "emotion": 1,
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [{"entityid": numbers["顾霜"], "role": "主体"}],
         },
     )
-    assert (missing.record, missing.field, missing.code) == ("t1/root/participant/1", "action", "missing")
+    assert (missing.record, missing.field, missing.code) == (
+        f"t1/root/participant/{numbers['顾霜']}",
+        "narrative_role",
+        "missing",
+    )
+    assert "三字段必填" in (missing.expected or "")
+
+    partial = await _rejection(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [
+                {"entityid": numbers["顾霜"], "role": "主体", "narrative_role": "主体", "emotion": 1}
+            ],
+        },
+    )
+    assert (partial.record, partial.code) == ("t1/root", "invalid_combination")
+    assert "必须同时提供" in (partial.expected or "")
 
     out_of_range = await _rejection(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "root",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": 3,
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": 3,
+                }
+            ],
         },
     )
-    assert (out_of_range.field, out_of_range.code, out_of_range.expected) == (
+    assert (out_of_range.record, out_of_range.field, out_of_range.code, out_of_range.expected) == (
+        "t1/root",
         "emotion",
         "out_of_range",
-        "-2..2 整数（-2 强烈负面 … 2 强烈正面）",
+        "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
     )
 
     not_character = await _rejection(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "root",
-            "entity": numbers["众人"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "退下",
-            "emotion": 0,
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [
+                {
+                    "entityid": numbers["众人"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "退下",
+                    "emotion": 0,
+                }
+            ],
         },
     )
-    assert not_character.code == "not_character"
-
-    is_character = await _rejection(
-        tools,
-        "write_noncharacter_participation",
-        {"tree_key": "t1", "node_key": "root", "entity": numbers["顾霜"], "role": "客体"},
+    assert (not_character.record, not_character.field, not_character.code) == (
+        f"t1/root/participant/{numbers['众人']}",
+        "narrative_role",
+        "observation_on_noncharacter",
     )
-    assert is_character.code == "is_character"
 
 
 @pytest.mark.asyncio
 async def test_noncharacter_participation_derives_no_observation() -> None:
-    """2026-09-13 只有 character 参与者派生人物动态状态，地点/组织只入参与列表"""
+    """2026-09-14 只有 character 参与者派生人物动态状态，地点/组织只入参与列表
+
+    旧两条参与写（write_character_participation + write_noncharacter_participation）
+    合并为一次 write_event 的 characters 完整集合，分流与派生语义不变。
+    """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
     await _call(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "root",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": -1,
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": -1,
+                },
+                {"entityid": numbers["山门"], "role": "地点"},
+            ],
         },
-    )
-    await _call(
-        tools,
-        "write_noncharacter_participation",
-        {"tree_key": "t1", "node_key": "root", "entity": numbers["山门"], "role": "地点"},
     )
 
     observations = list(ledger.bound_payloads["character_observations"])
@@ -285,58 +335,60 @@ async def test_noncharacter_participation_derives_no_observation() -> None:
 
 @pytest.mark.asyncio
 async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None:
-    """2026-09-13 同一 chunk 内 (人物, 动作) 重复：只拒绝后写的那一条，先写的照常保留
+    """2026-09-14 同一 chunk 内 (人物, 动作) 重复：只拒绝后写的那一条，先写的照常保留
 
-    2026-09-13 小调用改造：重复在校验时点即写入点拦下（旧合同在领域结算时整批拒绝），
-    拒绝 message 指出已记在哪条记录，修正那条后无需重交全树。
+    小调用合同下重复在校验时点即写入点拦下，拒绝 message 指出已记在哪条记录，
+    修正那条后无需重交全树；重复的参与条目不落账，节点其余内容不受影响。
     """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
-    await _call(
-        tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "子事件1"},
-    )
-    await _call(
-        tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e2", "order": 2, "type": "main", "description": "子事件2"},
-    )
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
     first = await _call(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "e1",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": 0,
+            "el": "t1/e1",
+            "isroot": False,
+            "type": "main",
+            "description": "子事件1",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": 0,
+                }
+            ],
         },
     )
-    assert first == {"status": "written", "record": f"t1/e1/participant/{numbers['顾霜']}"}
+    assert first == {"status": "written", "record": "t1/e1"}
 
     duplicate = await _rejection(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "e2",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": 0,
+            "el": "t1/e2",
+            "isroot": False,
+            "type": "main",
+            "description": "子事件2",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": 0,
+                }
+            ],
         },
     )
 
     assert duplicate.record == f"t1/e2/participant/{numbers['顾霜']}"
     assert duplicate.field == "action"
     assert duplicate.code == "duplicate_observation"
-    assert "t1/e1" in duplicate.receipt()["message"]
+    assert "t1/e1/participant" in duplicate.receipt()["message"]
     # 先写的那条与原节点结构都保留，重复记录没有落账
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     nodes_by_id = {event.node_id: event for event in ledger.bound_payloads["events"]}
@@ -346,111 +398,143 @@ async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None
     # 改成不同动作后正常落账，两条动态状态都在
     await _call(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "e2",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "退去",
-            "emotion": 0,
+            "el": "t1/e2",
+            "isroot": False,
+            "type": "main",
+            "description": "子事件2",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "退去",
+                    "emotion": 0,
+                }
+            ],
         },
     )
     assert [item.action for item in ledger.bound_payloads["character_observations"]] == ["喝道", "退去"]
 
 
 @pytest.mark.asyncio
-async def test_order_conflict_and_reserved_node_key_are_rejected_per_record() -> None:
-    """2026-09-13 order 必须大于该树已有最大 order、root 是保留节点键：拒绝只指向该条记录
+async def test_el_shape_reserved_key_and_unknown_tree_are_rejected_per_record() -> None:
+    """2026-09-14 el 层级键的形态约束：子必填 type、root 是保留节点键、树键必须先建，拒绝只指向该条记录
 
-    2026-09-13 实时写入：子节点按调用顺序生长，因此不再有"同 order 重复"的
-    占位拒绝，而是对乱序（含同序）提交统一返回 code=out_of_order。
+    order 参数退役（树内先后=调用顺序）后，事件写入点保留的形态校验是：
+    子缺 type→missing；t1/root 占用保留键→reserved；未建树→unknown_tree；
+    根带路径→bad_el。任一失败都不得动到同树已写入的根。
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
     await _call(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "顾霜喝道"},
+        "write_event",
+        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
     )
 
-    out_of_order = await _rejection(
+    missing_type = await _rejection(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e2", "order": 1, "type": "main", "description": "众人散去"},
+        "write_event",
+        {"el": "t1/e2", "isroot": False, "description": "众人散去"},
     )
-    assert (out_of_order.record, out_of_order.field, out_of_order.code) == ("t1/e2", "order", "out_of_order")
-    assert "≥ 2" in (out_of_order.expected or "")
+    assert (missing_type.record, missing_type.field, missing_type.code) == ("t1/e2", "type", "missing")
+    assert "main" in (missing_type.expected or "") and "secondary" in (missing_type.expected or "")
+
     reserved = await _rejection(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "root", "order": 2, "type": "main", "description": "众人散去"},
+        "write_event",
+        {"el": "t1/root", "isroot": False, "type": "main", "description": "众人散去"},
     )
-    assert reserved.code == "reserved"
+    assert (reserved.record, reserved.field, reserved.code) == ("t1/root", "el", "reserved")
 
     unknown_tree = await _rejection(
         tools,
-        "write_event_child",
-        {"tree_key": "t9", "node_key": "e1", "order": 1, "type": "main", "description": "众人散去"},
+        "write_event",
+        {"el": "t9/e1", "isroot": False, "type": "main", "description": "众人散去"},
     )
-    assert (unknown_tree.field, unknown_tree.code) == ("tree_key", "unknown_tree")
+    assert (unknown_tree.record, unknown_tree.field, unknown_tree.code) == ("t9/e1", "el", "unknown_tree")
+
+    bad_el = await _rejection(
+        tools,
+        "write_event",
+        {"el": "t1/e2", "isroot": True, "description": "众人散去"},
+    )
+    assert (bad_el.record, bad_el.field, bad_el.code) == ("t1/e2/root", "el", "bad_el")
+
+    # 四次失败全部只回滚自己：树里仍只有先写入的根与 e1
+    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
+    assert sorted(tree["nodes"]) == ["e1", "root"]
+    assert len(ledger.bound_payloads["events"]) == 2
 
 
 @pytest.mark.asyncio
 async def test_child_replay_updates_description_and_participant_replay_updates_state() -> None:
-    """2026-09-13 同键重放按更新语义：子节点只可改述、参与者重写三态不新增记录
+    """2026-09-14 同键重放按更新语义：子节点只可改述、参与者重写三态不新增记录
 
-    旧合同"子节点同键改序改述"已废止：实时写入下 order/type 一经确定不可改写
-    （code=immutable），同键重放只更新 description。
+    order 退役后结构位唯一不可改的字段是 type（code=immutable）；
+    characters 给出即整节点替换，同条目重写=更新动态状态。
     """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
     await _call(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "顾霜喝道"},
+        "write_event",
+        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
     )
     await _call(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "顾霜厉声喝道"},
+        "write_event",
+        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜厉声喝道"},
     )
 
     immutable = await _rejection(
         tools,
-        "write_event_child",
-        {"tree_key": "t1", "node_key": "e1", "order": 2, "type": "secondary", "description": "众人散去"},
+        "write_event",
+        {"el": "t1/e1", "isroot": False, "type": "secondary", "description": "众人散去"},
     )
-    assert (immutable.record, immutable.field, immutable.code) == ("t1/e1", "order", "immutable")
+    assert (immutable.record, immutable.field, immutable.code) == ("t1/e1", "type", "immutable")
 
     await _call(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "e1",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": 2,
+            "el": "t1/e1",
+            "isroot": False,
+            "type": "main",
+            "description": "顾霜厉声喝道",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": 2,
+                }
+            ],
         },
     )
     await _call(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "e1",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": -1,
+            "el": "t1/e1",
+            "isroot": False,
+            "type": "main",
+            "description": "顾霜厉声喝道",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": -1,
+                }
+            ],
         },
     )
 
@@ -462,60 +546,93 @@ async def test_child_replay_updates_description_and_participant_replay_updates_s
 
 
 @pytest.mark.asyncio
-async def test_cause_tree_requires_written_or_history_tree_and_is_immutable() -> None:
-    """2026-09-13 因果前驱只接受本 chunk 已写入的树或 search_event 授权的历史树，且一经确定不可改写
+async def test_root_foreshadowing_attributes_are_validated_at_write_and_updated_in_place() -> None:
+    """2026-09-14 伏笔属性只属于根、isforeshadowing=true 必填 confidence；根重放按更新语义改写属性
 
-    本 chunk 的 tree_key（如 t1）与历史树 id 都合法：前者解析到本次写入生成的
-    真实树根节点，后者用历史视图的 root_node_id；未授权/未知前驱在写入点返回
-    结构化拒绝（field=cause_tree_id, code=unknown_tree）。
+    跨章因果前驱（cause_tree_id）退役后，事件根在写入点强制的属性合同是：
+    根带 isforeshadowing 缺 confidence → missing；子带伏笔属性 → not_on_child；
+    根带 type → not_on_root；同键重放更新描述与伏笔属性（不新增节点），
+    取代旧"一经确定不可改写"的结算期校验。
     """
     ledger = _ledger()
-    ledger.history_tree_views["tree-h"] = {"tree_id": "tree-h", "root_node_id": "node-h-root"}
-    ledger.history_tree_views["tree-h2"] = {"tree_id": "tree-h2", "root_node_id": "node-h2-root"}
     tools = _tools(ledger)
     await _register_entities(tools)
-    unknown = await _rejection(
+
+    missing_confidence = await _rejection(
         tools,
-        "write_event_root",
-        {"tree_key": "t1", "description": "顾霜喝止众人", "cause_tree_id": "t9"},
+        "write_event",
+        {"el": "t1", "isroot": True, "description": "顾霜喝止众人", "isforeshadowing": True},
     )
-    assert (unknown.field, unknown.code) == ("cause_tree_id", "unknown_tree")
+    assert (missing_confidence.record, missing_confidence.field, missing_confidence.code) == (
+        "t1/root",
+        "confidence",
+        "missing",
+    )
+    assert "events" not in ledger.bound_payloads
 
     await _call(
         tools,
-        "write_event_root",
-        {"tree_key": "t1", "description": "顾霜喝止众人", "cause_tree_id": "tree-h"},
+        "write_event",
+        {
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "isforeshadowing": True,
+            "confidence": "high",
+        },
     )
     root = ledger.bound_payloads["events"][0]
-    assert root.causal_event_refs == ["node-h-root"]
+    assert root.is_foreshadow_setup is True
+    assert str(root.payoff_likelihood) == "high"
 
-    immutable = await _rejection(
+    not_on_child = await _rejection(
         tools,
-        "write_event_root",
-        {"tree_key": "t1", "description": "顾霜喝止众人", "cause_tree_id": "tree-h2"},
+        "write_event",
+        {
+            "el": "t1/e1",
+            "isroot": False,
+            "type": "main",
+            "description": "顾霜喝道",
+            "isforeshadowing": True,
+        },
     )
-    assert (immutable.record, immutable.field, immutable.code) == ("t1/root", "cause_tree_id", "immutable")
-    assert ledger.bound_payloads["events"][0].causal_event_refs == ["node-h-root"]
+    assert (not_on_child.record, not_on_child.field, not_on_child.code) == ("t1/e1", "isforeshadowing", "not_on_child")
 
-    # 本 chunk 已写入的 tree_key 作前驱：指向那棵树的真实根节点，不入历史视图
-    await _call(tools, "write_event_root", {"tree_key": "t2", "description": "顾霜追击", "cause_tree_id": "t1"})
-    later_root = ledger.bound_payloads["events"][-1]
-    assert later_root.causal_event_refs == [root.node_id]
-    assert later_root.tree_id == ledger.tree_key_index["t2"]
+    not_on_root = await _rejection(
+        tools,
+        "write_event",
+        {"el": "t1", "isroot": True, "type": "main", "description": "顾霜喝止众人"},
+    )
+    assert (not_on_root.record, not_on_root.field, not_on_root.code) == ("t1/root", "type", "not_on_root")
+
+    # 根重放更新语义：改描述与伏笔属性，不新增节点
+    replay = await _call(
+        tools,
+        "write_event",
+        {"el": "t1", "isroot": True, "description": "顾霜厉声喝止众人", "isforeshadowing": False},
+    )
+    assert replay["record"] == "t1/root"
+    assert len(ledger.bound_payloads["events"]) == 1
+    assert ledger.bound_payloads["events"][0].description == "顾霜厉声喝止众人"
+    assert ledger.bound_payloads["events"][0].payoff_likelihood is None
+    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
+    assert tree["isforeshadowing"] is False
+    assert tree["root_node_id"] == ledger.bound_payloads["events"][0].node_id
 
 
 @pytest.mark.asyncio
 async def test_second_root_with_same_tree_key_updates_description_in_place() -> None:
-    """2026-09-13 同 tree_key 重交按更新语义：只改描述与伏笔属性，不新增节点"""
+    """2026-09-14 同树键重交按更新语义：只改描述与伏笔属性，不新增节点"""
     ledger = _ledger()
     tools = _tools(ledger)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜厉声喝止众人"})
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜厉声喝止众人"})
 
     assert len(ledger.bound_payloads["events"]) == 1
     assert ledger.bound_payloads["events"][0].description == "顾霜厉声喝止众人"
     assert len(ledger.event_trees) == 1
-    assert ledger.event_trees[ledger.tree_key_index["t1"]]["root_node_id"] == ledger.bound_payloads["events"][0].node_id
+    root_node_id = ledger.event_trees[ledger.tree_key_index["t1"]]["root_node_id"]
+    assert root_node_id == ledger.bound_payloads["events"][0].node_id
 
 
 # ---------------------------------------------------------------------------
@@ -524,8 +641,8 @@ async def test_second_root_with_same_tree_key_updates_description_in_place() -> 
 
 
 @pytest.mark.asyncio
-async def test_dialogue_default_is_applied_once_at_chunk_finish() -> None:
-    """2026-09-12/13 未提交候选只在 finish_chunk 收尾时一次性默认 not_dialogue"""
+async def test_dialogue_default_is_applied_once_at_chapter_finish() -> None:
+    """2026-09-12/14 未提交候选只在 finish_chapter 收尾时一次性默认 not_dialogue"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -559,7 +676,9 @@ async def test_dialogue_replay_updates_verdict_in_place() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
-    await _call(tools, "write_dialogue", {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": "平静"})
+    await _call(
+        tools, "write_dialogue", {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": "平静"}
+    )
     await _call(
         tools,
         "write_dialogue",
@@ -654,7 +773,7 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
 
 @pytest.mark.asyncio
 async def test_relation_write_after_chunk_completed_is_rejected() -> None:
-    """2026-09-13 收尾并冻结后 chunk 关闭：再写关系被拒，收尾载荷保持不变"""
+    """2026-09-14 收尾并冻结后 chunk 关闭：再写关系被拒，收尾载荷保持不变"""
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
@@ -678,7 +797,7 @@ async def test_relation_write_after_chunk_completed_is_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 收尾：唯一 finish_chunk 的判定边界
+# 收尾：唯一 finish_chapter 的判定边界
 # ---------------------------------------------------------------------------
 
 
@@ -695,16 +814,16 @@ async def test_finish_ignores_failed_records_from_same_round() -> None:
     await _register_entities(tools)
     await _seed_metrics(tools)
 
-    receipt = ledger.finish_chunk()
+    receipt = ledger.finish_chapter()
 
     assert receipt["status"] == "completed"
     assert "warnings" not in receipt
-    assert ledger.chunk_finished
+    assert ledger.chapter_finished
 
 
 @pytest.mark.asyncio
-async def test_chunk_finish_requires_one_metrics_submission() -> None:
-    """2026-09-13 指标是收尾硬前提：缺 write_metrics 的 finish_chunk 被拒
+async def test_chapter_finish_requires_one_metrics_submission() -> None:
+    """2026-09-14 指标是收尾硬前提：缺 write_metrics 的 finish_chapter 被拒
 
     旧合同的"指标域必须显式结束"已废止：其他内容域可空（收尾回执给出各域条数），
     唯独指标必须有载荷，缺则 code=missing_record。
@@ -712,28 +831,29 @@ async def test_chunk_finish_requires_one_metrics_submission() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
     with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chunk()
+        ledger.finish_chapter()
     assert excinfo.value.code == "missing_record"
-    assert (excinfo.value.record, excinfo.value.field) == ("finish_chunk", "metrics")
+    assert (excinfo.value.record, excinfo.value.field) == ("finish_chapter", "metrics")
 
     await _seed_metrics(tools)
-    assert ledger.finish_chunk()["status"] == "completed"
+    assert ledger.finish_chapter()["status"] == "completed"
     assert isinstance(ledger.metrics_payload, ChunkMetricsInput)
 
 
 @pytest.mark.asyncio
-async def test_finish_chunk_protocol_guards() -> None:
-    """2026-09-13 收尾协议的调用点校验：逐域 finish_domain 已删除、未收尾不得冻结
+async def test_finish_chapter_protocol_guards() -> None:
+    """2026-09-14 收尾协议的调用点校验：逐域 finish_domain 已删除、未收尾不得冻结
 
     2026-09-13 取消暂存与逐域结束：工具面上没有 finish_domain，
-    未收尾时 complete_active_chunk 直接报错点名 finish_chunk。
+    未收尾时 complete_active_chunk 直接报错点名 finish_chapter。
     """
     ledger = _ledger()
     tools = _tools(ledger)
 
     assert "finish_domain" not in tools
-    assert "finish_chunk" in tools
-    with pytest.raises(ValueError, match="先调用 finish_chunk"):
+    assert "finish_chapter" in tools
+    assert "finish_chunk" not in tools
+    with pytest.raises(ValueError, match="先调用 finish_chapter"):
         ledger.complete_active_chunk()
 
     await _finish(ledger, tools)
@@ -749,73 +869,99 @@ async def test_event_entity_gate_requires_search_graph_once_per_chapter() -> Non
     ledger = _ledger(graph=FactGraph(history_entity_types={"旧人": "character"}))
     tools = _tools(ledger)
     with pytest.raises(Exception, match="search_graph"):
-        await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character"})
+        await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
 
     await tools["search_graph"].ainvoke({"entities": ["顾霜"]})
-    await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character"})
-    await _call(tools, "write_entity", {"name": "众人", "entity_type": "organization"})
+    await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
+    await _call(tools, "write_entity", {"name": "众人", "entity_type": "organization", "el": "众人"})
 
 
 # ---------------------------------------------------------------------------
-# 句标签与单条失败边界
+# 段落标签与单条失败边界
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_sentence_label_binds_span_and_replay_updates_emotion() -> None:
-    """2026-09-13 句标签按原文位置绑定，同区间重交覆盖分值，找不到原句只拒这一条"""
+async def test_paragraph_label_replay_updates_emotion_and_bad_submission_rejected() -> None:
+    """2026-09-14 段落标签随 write_metrics 整域提交：同段号重交覆盖分值，越界段号只拒这一次提交
+
+    句标签（write_sentence_label 按原文区间绑定）退役：paragraph_id 取
+    ledger.paragraph_info.paragraph_ids，越界段号在 apply_metrics 写入点整次
+    提交拒绝并指明是哪一条标签，此前已提交的标签照常保留。
+    """
     ledger = _ledger()
     tools = _tools(ledger)
-    first = await _call(tools, "write_sentence_label", {"sentence": "众人散去，夜色渐深。", "emotion": -1})
-    assert first["record"].startswith("sentence_label/")
-    replay = await _call(tools, "write_sentence_label", {"sentence": "众人散去，夜色渐深。", "emotion": 1})
+    base = {"summary": "顾霜喝止众人", "emotional_valence": 0, "narrative_function": "冲突"}
+    first = await _call(tools, "write_metrics", {**base, "labels": [{"paragraph_id": 1, "emotion": -1}]})
+    assert first["record"] == "metrics"
+    replay = await _call(tools, "write_metrics", {**base, "labels": [{"paragraph_id": 1, "emotion": 1}]})
     assert replay["record"] == first["record"]
 
-    labels = list(ledger.bound_payloads["sentence_labels"])
+    labels = list(ledger.bound_payloads["paragraph_labels"])
     assert len(labels) == 1
     assert labels[0].emotion == 1
-    assert ledger.current_chunk_text[labels[0].start : labels[0].end] == labels[0].sentence
+    assert labels[0].paragraph_id in ledger.paragraph_info.paragraph_ids
 
-    missing = await _rejection(tools, "write_sentence_label", {"sentence": "这句话不在正文里。", "emotion": 0})
-    assert (missing.record, missing.field, missing.code) == (
-        "sentence_label/这句话不在正文里。",
-        "sentence",
-        "not_found",
+    missing = await _rejection(
+        tools,
+        "write_metrics",
+        {**base, "labels": [{"paragraph_id": 99, "emotion": 0}]},
     )
-    assert len(ledger.bound_payloads["sentence_labels"]) == 1
+    assert (missing.record, missing.field, missing.code) == ("metrics", "paragraph_id", "out_of_range")
+    assert len(ledger.bound_payloads["paragraph_labels"]) == 1
 
 
 @pytest.mark.asyncio
 async def test_failed_call_keeps_previously_written_records_in_same_round() -> None:
-    """2026-09-13 失败不丢失已写入记录：同轮后面的失败调用只回滚自己"""
+    """2026-09-14 失败不丢失已写入记录：同轮后面的失败调用只回滚自己
+
+    参与者并入 write_event 的 characters 后，被拒数组在账本改写中途抛出：
+    snapshot/restore 必须把该节点已派生的动态状态原样带回，先写记录不受影响。
+    """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
     await _call(
         tools,
-        "write_character_participation",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "root",
-            "entity": numbers["顾霜"],
-            "role": "主体",
-            "narrative_role": "主体",
-            "action": "喝道",
-            "emotion": 1,
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [
+                {
+                    "entityid": numbers["顾霜"],
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝道",
+                    "emotion": 1,
+                }
+            ],
         },
     )
     snapshot = ledger.snapshot()
     with pytest.raises(AnnotationStageRejection):
-        await tools["write_character_participation"].ainvoke(
+        await tools["write_event"].ainvoke(
             {
-                "tree_key": "t1",
-                "node_key": "root",
-                "entity": numbers["众人"],
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "退下",
-                "emotion": 9,
+                "el": "t1",
+                "isroot": True,
+                "description": "顾霜喝止众人",
+                "characters": [
+                    {
+                        "entityid": numbers["众人"],
+                        "role": "主体",
+                        "narrative_role": "主体",
+                        "action": "退下",
+                        "emotion": 0,
+                    },
+                    {
+                        "entityid": numbers["顾霜"],
+                        "role": "主体",
+                        "narrative_role": "主体",
+                        "action": "喝止",
+                        "emotion": 1,
+                    },
+                ],
             }
         )
     ledger.restore(snapshot)
@@ -824,6 +970,9 @@ async def test_failed_call_keeps_previously_written_records_in_same_round() -> N
     root = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
     assert [participant.entity for participant in root.participants] == ["顾霜"]
     assert root.participants[0].emotion == 1
+    assert [(item.character, item.action, item.emotion) for item in ledger.observation_by_record.values()] == [
+        ("顾霜", "喝道", 1)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -855,7 +1004,7 @@ class _SingleReplyLLM:
 
 @pytest.mark.asyncio
 async def test_same_round_small_calls_counts_as_single_iteration() -> None:
-    """2026-09-13 同轮多个小调用 + 唯一 finish_chunk 整体只计一个模型回合
+    """2026-09-14 同轮多个小调用 + 唯一 finish_chapter 整体只计一个模型回合
 
     收尾在本回合调用处理完后判定成功 → 自动冻结并完成章节，
     因此循环不再有第二轮，"达到上限"错误也不触发（旧合同逐域结束需要多轮）。
@@ -866,10 +1015,15 @@ async def test_same_round_small_calls_counts_as_single_iteration() -> None:
     tools = build_annotation_tools(_QueryService(), ledger)
     ledger.graph_queried = True
     parallel_calls = [
-        {"name": "write_entity", "args": {"name": "顾霜", "entity_type": "character"}, "id": "c1", "type": "tool_call"},
         {
             "name": "write_entity",
-            "args": {"name": "众人", "entity_type": "organization"},
+            "args": {"name": "顾霜", "entity_type": "character", "el": "顾霜"},
+            "id": "c1",
+            "type": "tool_call",
+        },
+        {
+            "name": "write_entity",
+            "args": {"name": "众人", "entity_type": "organization", "el": "众人"},
             "id": "c2",
             "type": "tool_call",
         },
@@ -879,7 +1033,7 @@ async def test_same_round_small_calls_counts_as_single_iteration() -> None:
             "id": "c3",
             "type": "tool_call",
         },
-        {"name": "finish_chunk", "args": {}, "id": "c4", "type": "tool_call"},
+        {"name": "finish_chapter", "args": {}, "id": "c4", "type": "tool_call"},
     ]
     llm = _SingleReplyLLM(AIMessage(content="", tool_calls=parallel_calls))
     graph = build_annotation_graph(llm, tools, ledger=ledger, max_iterations=1)
@@ -900,7 +1054,7 @@ async def test_same_round_small_calls_counts_as_single_iteration() -> None:
     assert finish_receipt["status"] == "completed"
     assert finish_receipt["records"]["entities"] == 2
     assert state["phase"] == "completed"
-    assert ledger.chunk_finished
+    assert ledger.chapter_finished
 
 
 # ---------------------------------------------------------------------------
@@ -910,14 +1064,14 @@ async def test_same_round_small_calls_counts_as_single_iteration() -> None:
 
 @pytest.mark.asyncio
 async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
-    """2026-09-13 未声明参数被整条拒绝：多余字段不静默丢弃，字段名随回执回到模型"""
+    """2026-09-14 未声明参数被整条拒绝：多余字段不静默丢弃，字段名随回执回到模型"""
     ledger = _ledger()
     tools = _tools(ledger)
 
     extra_entity = await _rejection(
         tools,
         "write_entity",
-        {"name": "顾霜", "entity_type": "character", "aliases": ["顾姑娘"]},
+        {"name": "顾霜", "entity_type": "character", "el": "顾霜", "aliases": ["顾姑娘"]},
     )
     assert (extra_entity.record, extra_entity.field) == ("entity/顾霜", "aliases")
     assert extra_entity.code == "unknown_field"
@@ -925,40 +1079,47 @@ async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
     assert ledger.written_entities == {}
 
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event_root", {"tree_key": "t1", "description": "顾霜喝止众人"})
+    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
     extra_child = await _rejection(
         tools,
-        "write_event_child",
+        "write_event",
         {
-            "tree_key": "t1",
-            "node_key": "e1",
-            "order": 1,
+            "el": "t1/e1",
+            "isroot": False,
             "type": "main",
             "description": "众人散去",
-            "isforeshadowing": True,
+            "order": 1,
         },
     )
-    assert (extra_child.record, extra_child.field) == ("t1/e1", "isforeshadowing")
+    assert (extra_child.record, extra_child.field) == ("t1/e1", "order")
     assert extra_child.code == "unknown_field"
+
+    extra_participation = await _rejection(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [
+                {
+                    "entityid": numbers["众人"],
+                    "role": "客体",
+                    "aliases": ["众人甲"],
+                }
+            ],
+        },
+    )
+    assert (extra_participation.record, extra_participation.field) == ("t1/root", "aliases")
+    assert extra_participation.code == "unknown_field"
     assert ledger.event_trees[ledger.tree_key_index["t1"]]["nodes"] == {
         "root": ledger.event_trees[ledger.tree_key_index["t1"]]["root_node_id"]
     }
 
-    extra_participation = await _rejection(
-        tools,
-        "write_noncharacter_participation",
-        {"tree_key": "t1", "node_key": "root", "entity": numbers["众人"], "role": "客体", "emotion": 0},
-    )
-    assert (extra_participation.record, extra_participation.field) == (
-        "t1/root/participant/2",
-        "emotion",
-    )
-    assert extra_participation.code == "unknown_field"
-
 
 @pytest.mark.asyncio
-async def test_chunk_finish_is_atomic(monkeypatch) -> None:
-    """2026-09-13 finish_chunk 收尾自带事务边界：ready_chunk 构造失败即整体回滚，已写入记录保留
+async def test_chapter_finish_is_atomic(monkeypatch) -> None:
+    """2026-09-14 finish_chapter 收尾自带事务边界：ready_chunk 构造失败即整体回滚，已写入记录保留
 
     旧合同"事件域结算多棵树组装到一半失败即整体回滚暂存记录"已废止：
     现合同没有领域级结算，等价验证=唯一收尾的构造阶段失败时账本回到收尾前
@@ -968,18 +1129,22 @@ async def test_chunk_finish_is_atomic(monkeypatch) -> None:
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
     for tree_key, action in (("t1", "喝道"), ("t2", "退去")):
-        await _call(tools, "write_event_root", {"tree_key": tree_key, "description": f"{tree_key} 根事件"})
         await _call(
             tools,
-            "write_character_participation",
+            "write_event",
             {
-                "tree_key": tree_key,
-                "node_key": "root",
-                "entity": numbers["顾霜"],
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": action,
-                "emotion": 0,
+                "el": tree_key,
+                "isroot": True,
+                "description": f"{tree_key} 根事件",
+                "characters": [
+                    {
+                        "entityid": numbers["顾霜"],
+                        "role": "主体",
+                        "narrative_role": "主体",
+                        "action": action,
+                        "emotion": 0,
+                    }
+                ],
             },
         )
     await _seed_metrics(tools)
@@ -997,18 +1162,18 @@ async def test_chunk_finish_is_atomic(monkeypatch) -> None:
     monkeypatch.setattr(AnnotationToolLedger, "_build_ready_chunk", _flaky)
 
     with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chunk()
+        ledger.finish_chapter()
 
     assert excinfo.value.code == "assembly_failed"
-    # 收尾整体回滚：ready_chunk/chunk_finished 回到收尾前，已写入记录与两棵树都保留
+    # 收尾整体回滚：ready_chunk/chapter_finished 回到收尾前，已写入记录与两棵树都保留
     assert ledger.ready_chunk is None
-    assert not ledger.chunk_finished
+    assert not ledger.chapter_finished
     assert set(ledger.tree_key_index) == {"t1", "t2"}
     assert ledger.write_records == []
     assert [item.action for item in ledger.observation_by_record.values()] == ["喝道", "退去"]
 
     failing["on"] = False
-    receipt = ledger.finish_chunk()
+    receipt = ledger.finish_chapter()
 
     assert receipt["status"] == "completed"
     assert receipt["records"]["events"] == 2
@@ -1023,7 +1188,7 @@ async def test_chunk_finish_is_atomic(monkeypatch) -> None:
 
 
 _MODEL_VISIBLE_TOOL_NAME = re.compile(
-    r"\b(?:write|search|resolve|close|push|ask)_[a-z_]+|\bfinish_chunk\b|\bsend_message\b"
+    r"\b(?:write|search|resolve|close|push|ask)_[a-z_]+|\bfinish_chapter\b|\bsend_message\b"
 )
 # 模型可见文案里合法但不在写者工具面上的名字：send_message 是读者面的单次上报通道，
 # 写者只会经 ask_reader 反问，从不直接调用它。
@@ -1172,25 +1337,27 @@ def test_event_tools_declare_same_round_local_keys_on_schema() -> None:
     """2026-09-14 漂移守卫：事件树的同轮依赖必须写在模型可见面
 
     run 431a66d8 归因：模型把"先建树、再挂节点/参与者"当成依赖上一轮回执，
-    明明可以同批按序调用却拆成多轮，白烧回合。护栏锁住两层可见面——
-    参数说明（局部键由你指定、写入即生效、同轮直接可用）与根工具承诺
-    （一轮写完 + 同批收尾），防止文案漂移回"要等回执"。
+    明明可以同批按序调用却拆成多轮，白烧回合。写入面合并为单工具 write_event 后，
+    护栏锁住两层可见面——el 层级键承诺（由你指定、写入即生效、同轮直接可用）与
+    根/子/收尾文案承诺（一轮按顺序写完 + 同批收尾），防止文案漂移回"要等回执"。
     """
     tools = _tools(_ledger())
-    root_params = convert_to_openai_tool(tools["write_event_root"])["function"]["parameters"]["properties"]
-    assert "由你指定" in root_params["tree_key"]["description"]
-    assert "同轮后续调用直接可用" in root_params["tree_key"]["description"]
+    event_params = convert_to_openai_tool(tools["write_event"])["function"]["parameters"]["properties"]
+    el_description = event_params["el"]["description"]
+    for fragment in ("由你指定", "树键/节点键", "写入即生效", "同轮"):
+        assert fragment in el_description
 
-    child_params = convert_to_openai_tool(tools["write_event_child"])["function"]["parameters"]["properties"]
-    for key in ("tree_key", "node_key"):
-        assert "由你指定" in child_params[key]["description"]
-    assert "同轮参与者调用直接可用" in child_params["node_key"]["description"]
+    entity_params = convert_to_openai_tool(tools["write_entity"])["function"]["parameters"]["properties"]
+    entity_el = entity_params["el"]["description"]
+    for fragment in ("由你指定", "写入即生效", "同轮"):
+        assert fragment in entity_el
 
-    root_description = str(tools["write_event_root"].description)
-    assert "整棵树可以在一轮里按顺序写完" in root_description
-    assert "finish_chunk" in root_description
-    child_description = str(tools["write_event_child"].description)
-    assert "都可以在同一轮里按顺序调用" in child_description
+    event_description = str(tools["write_event"].description)
+    assert "整棵树可以在一轮里按顺序写完" in event_description
+    assert "写入即生效，同轮后面的调用直接可用" in event_description
+    finish_description = str(tools["finish_chapter"].description)
+    assert "同一批调用里按顺序写完" in finish_description
+    assert "finish_chapter" in event_description or "不等回执" in event_description
 
 
 def test_tool_surface_carries_constraints_enforced_on_server() -> None:
