@@ -41,14 +41,31 @@ def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
     ]
 
 
-def build_system_prompt() -> str:
+# 2026-09-15 程序面（CodeAct）处理规则：只在绑定面收成唯一 execute_code 时下发
+PROGRAM_RULES = (
+    "程序面规则：每轮只能提交一个 Python 程序（execute_code）来调用工具，工具调用写成"
+    "程序里的函数调用语句；变量在本章后续程序里保留（实体 el、事件键、工具返回值都可以"
+    "用变量承接，不必靠上下文回忆）。\n"
+    "一次程序不必覆盖整章：按阶段分多个有边界的增量程序即可（检索与实体登记 → 关系、"
+    "事件、参与者 → 对话、指标与收尾）。\n"
+    "工具的业务失败只回滚该条并继续执行后面的调用；语法或运行错误会停止程序，已成功的"
+    "调用保留——下一轮只补失败的那部分，不要重放整段程序。\n"
+    "回执只回报成功条数、新增句柄引用与失败清单；成功记录的明细用检索工具回查。"
+)
+
+
+def build_system_prompt(program_mode: bool = False) -> str:
     """2026-08-30 用于构建只声明章节标注职责的单行系统提示词
 
     2026-09-04 曾追加"案例编号"检索管道规则，2026-09-05 裁决删除：
     该规则把非案例疑点（如对话说话人）误导进 search_pool 空转至上限
     （第3章 15 轮 40 次检索 0 写入）。编号授权=编号表注入展示即授权
     + 工具层 case_number 校验（未授权编号直接报错自纠）。
+    2026-09-15 program_mode=True（单块章程序面）时追加程序面处理规则段——
+    按调用方传参决定，不由函数内部读全局开关（两段式写者不传、行为不变）。
     """
+    if program_mode:
+        return f"{SYSTEM_PROMPT}\n{PROGRAM_RULES}"
     return SYSTEM_PROMPT
 
 
@@ -205,6 +222,7 @@ def build_writer_chapter_message(
 
 
 __all__ = [
+    "PROGRAM_RULES",
     "build_case_pool_notice",
     "build_chunk_message",
     "build_reader_block_message",

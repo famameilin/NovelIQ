@@ -152,6 +152,12 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 description="超长章两段式标注中写者向读者追问的轮数上限；0 不限（仍受标注最大回合数兜底）",
                 min_value=0,
             ),
+            SettingFieldSpec(
+                path=("models", "annotation", "codeact_enabled"),
+                field_type="boolean",
+                label="写者程序面（单块章）",
+                description="单块章写者只暴露 execute_code，工具调用写成 Python 程序提交；关闭即回到原生工具面",
+            ),
             # ---- models.diagnosis（诊断任务）----
             SettingFieldSpec(
                 path=("models", "diagnosis", "timeout_s"),

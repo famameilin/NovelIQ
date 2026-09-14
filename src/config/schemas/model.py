@@ -41,6 +41,9 @@ class TaskModelSettings:
     # 2026-09-11 章内并行（§17）：两段式写者向读者追问的轮数上限，
     # 0 = 不限（仍受写者 max_iterations 兜底）
     writer_max_ask_rounds: int = 0
+    # 2026-09-15 程序面（CodeAct）：单块章写者对外只暴露 execute_code（程序内调用
+    # 既有工具）；false = 回到原生工具面。超长章两段式写者不启用该面
+    codeact_enabled: bool = True
 
 
 @dataclass
@@ -176,6 +179,7 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         sub_chunk_max_chars=json_data.get("sub_chunk_max_chars", 5000),
         sub_chunk_min_tail_chars=json_data.get("sub_chunk_min_tail_chars", 1000),
         writer_max_ask_rounds=json_data.get("writer_max_ask_rounds", 0),
+        codeact_enabled=json_data.get("codeact_enabled", True),
     )
 
 
