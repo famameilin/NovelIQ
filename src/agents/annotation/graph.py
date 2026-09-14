@@ -99,6 +99,64 @@ def _missing_domains_reminder(missing: list[str]) -> str | None:
     return f"{head}尚无内容的领域：{detail}{tail}"
 
 
+def _index_ranges(values: list[int]) -> str:
+    """2026-09-14 用于把候选编号列表压成区间文本（1,3,4,5,9 → "1,3-5,9"）"""
+    if not values:
+        return ""
+    parts: list[str] = []
+    start = prev = values[0]
+    for value in values[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = value
+    parts.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(parts)
+
+
+def _progress_block(ledger: AnnotationToolLedger) -> str:
+    """2026-09-14 构造写者面每回合注入的【进度账本】（用户裁决：每回合注入最新进展）
+
+    根因实证（run 5dd0c93c 对账）：服务端不把思考重放给模型，模型每回合看不见
+    自己上轮的判定与计划，被迫整卷重推（对话判定每章 3~4 遍）。当前态由系统直给，
+    局部键面不露 uuid；案例链不注入（09-11 "不注入案例"裁决）。与收尾提醒同款：
+    只对当次请求生效、不写入状态消息链。
+    """
+    lines = [
+        "【进度账本】本轮时刻的本章已写入状态，由系统注入。"
+        "当前值直接读这里，不必从旧回执回忆或重新推导判定。"
+    ]
+    entities = ledger.entity_ledger()
+    if entities:
+        rows = "；".join(f"{row['el']}={row['name']}(n={row['n']})" for row in entities)
+        lines.append(f"实体({len(entities)})：{rows}")
+    else:
+        lines.append("实体：未写入")
+    relations = ledger.relation_ledger()
+    if relations:
+        lines.append(f"关系({len(relations)})：" + "；".join(relations))
+    else:
+        lines.append("关系：未写入")
+    trees = ledger.event_ledger()
+    if trees:
+        parts = []
+        for tree_key, entry in trees.items():
+            flags = f"伏笔={str(bool(entry['foreshadowing'])).lower()}"
+            if entry.get("confidence"):
+                flags += f"·confidence={entry['confidence']}"
+            children = "，".join(f"{child} {child_type}" for child, child_type in entry["children"].items()) or "无子"
+            parts.append(f'{tree_key}="{entry["root"]}"({flags}；children: {children}；主链尾 {entry["trunk_tail"]})')
+        lines.append(f"事件树({len(trees)})：" + "；".join(parts))
+    else:
+        lines.append("事件树：未写入")
+    dialogue = ledger.dialogue_ledger()
+    pending = _index_ranges(dialogue["pending"]) or "无"
+    lines.append(f"对话：已判定 {dialogue['written']}/{dialogue['total']}；未判定编号：{pending}")
+    lines.append("指标：已写入" if ledger.metrics_payload is not None else "指标：未写入")
+    return "\n".join(lines)
+
+
 class AnnotationGraphState(TypedDict):
     """2026-08-10 用于保存逐 chunk 工具循环的累积消息链"""
 
@@ -133,12 +191,15 @@ def _build_agent_node(
     retries: int | None = None,
     completion_hint: Any = _HINT_SENTINEL,
     require_tool_call: bool = True,
+    inject_progress: bool = False,
 ):
     """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点
 
     2026-09-11 章内并行：completion_hint 显式传入（含 None）即按传入使用，缺省
     保持收尾提醒；require_tool_call=False 供读者面使用——读者没有写入工具，
     无工具回复是"上报完毕"的正常完成信号（§8.5），不得按调用故障重发。
+    2026-09-14 inject_progress=True（仅写者面）时每次请求尾部注入【进度账本】：
+    服务端不重放思考，模型看不到自己上轮的判定，当前态由系统逐回合直给。
     """
 
     if completion_hint is _HINT_SENTINEL:
@@ -159,6 +220,8 @@ def _build_agent_node(
 
         request_messages = list(state["messages"])
         remaining_turns = max_iterations - iterations
+        if inject_progress:
+            request_messages.append(HumanMessage(content=_progress_block(ledger)))
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(HumanMessage(content=_turn_budget_reminder(remaining_turns)))
 
@@ -535,7 +598,9 @@ def build_annotation_graph(
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
 ) -> Any:
-    """2026-08-10 用于构建逐 chunk 领域写入和章节自动完成状态机（消息链累积）"""
+    """2026-08-10 用于构建逐 chunk 领域写入和章节自动完成状态机（消息链累积）
+
+    2026-09-14 写者面每回合注入【进度账本】（inject_progress）；读者图不开。"""
     graph = StateGraph(AnnotationGraphState)
     graph.add_node(
         "agent",
@@ -547,6 +612,7 @@ def build_annotation_graph(
             stream=stream,
             observer=observer,
             retries=retries,
+            inject_progress=True,
         ),
     )
     graph.add_node(

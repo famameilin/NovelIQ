@@ -522,7 +522,28 @@ async def test_every_write_tool_is_on_the_surface_from_the_first_turn() -> None:
     ] == [list(_ALL_WRITE_TOOLS), list(_ALL_WRITE_TOOLS), list(_ALL_WRITE_TOOLS)]
     # 收尾工具是非正式工具：第一轮起就恒定开放（收尾判定由账本兜底）
     assert "finish_chapter" in llm.captured_tool_names[0]
-    assert [len(messages) for messages in llm.captured_messages] == [2, 5, 8]
+    # 2026-09-14 写者面每次请求尾部注入【进度账本】（跨回合失忆修复，仅本次请求生效）：
+    # 每请求比状态消息链多 1 条注入块
+    assert [len(messages) for messages in llm.captured_messages] == [3, 6, 9]
+
+    def _progress(messages: list) -> str:
+        blocks = [m for m in messages if isinstance(m, HumanMessage) and "进度账本" in str(m.content)]
+        assert len(blocks) == 1, "每次请求应恰好携带一条【进度账本】注入"
+        return str(blocks[0].content)
+
+    # 第 1 次请求：什么都还没写，五个域全部空白态
+    first = _progress(llm.captured_messages[0])
+    assert "实体：未写入" in first and "事件树：未写入" in first
+    assert "指标：未写入" in first
+    # 第 2 次请求：上一轮写入的实体与指标已进账本（局部键面：el、n、域现值）
+    second = _progress(llm.captured_messages[1])
+    assert "实体(1)：顾霜=顾霜(n=1)" in second
+    assert "指标：已写入" in second
+    # 第 3 次请求：第 2 轮写完的事件树结构进账本（根描述/子键类型/主链尾），
+    # 对话判定发生在第 3 轮调用里，注入仍显示未判定
+    third = _progress(llm.captured_messages[2])
+    assert 't1="顾霜喝止众人"' in third and "children: e1 main" in third and "主链尾 e1" in third
+    assert "对话：已判定 0/" in third
 
 
 @pytest.mark.asyncio
