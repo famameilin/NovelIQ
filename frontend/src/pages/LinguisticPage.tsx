@@ -152,12 +152,12 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
               {
                 label: "边界正向分和",
                 value: stats?.boundary_pos_score_sum != null ? stats.boundary_pos_score_sum.toFixed(2) : "—",
-                description: "句级监督边界逐段正向分按段求和",
+                description: "段落级监督边界正向分按段求和",
               },
               {
                 label: "边界负向分和",
                 value: stats?.boundary_neg_score_sum != null ? stats.boundary_neg_score_sum.toFixed(2) : "—",
-                description: "句级监督边界逐段负向分按段求和",
+                description: "段落级监督边界负向分按段求和",
               },
             ]}
             className="grid-cols-4"

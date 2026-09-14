@@ -164,7 +164,6 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
                       <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
                     </div>
                     <p className="mt-2 text-sm font-semibold leading-6 text-text">{tree.description}</p>
-                    <p className="mt-1 text-xs text-text-muted">预计方向：{tree.expected_payoff_family ?? "待确认"}</p>
                   </div>
                   <div className="text-right text-xs text-text-muted">
                     <div>回收可能性</div>
@@ -193,7 +192,6 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
             </div>
             <h2 className="mt-3 text-base font-semibold leading-7 text-text">{selectedTree.description}</h2>
             <dl className="mt-4 grid gap-3 text-sm">
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">预计回收方向</dt><dd className="mt-1 font-medium text-text">{selectedTree.expected_payoff_family ?? "待确认"}</dd></div>
               <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">最近判断依据</dt><dd className="mt-1 leading-6 text-text">{selectedTree.latest_reason ?? "暂无补充判断"}</dd></div>
               {selectedTree.latest_why_unresolved_now ? (
                 <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">暂未回收原因</dt><dd className="mt-1 leading-6 text-text">{selectedTree.latest_why_unresolved_now}</dd></div>
