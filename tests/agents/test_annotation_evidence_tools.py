@@ -1301,21 +1301,22 @@ def test_event_location_participant_role_requires_location_type() -> None:
     assert ledger.observation_by_record == {}
 
 
-def test_write_entity_requires_prior_search_graph_when_registered_entities_exist() -> None:
-    """2026-08-09 用于验证存在已登记实体时未先 search_graph 禁止登记实体
+def test_write_entity_without_prior_search_graph_is_allowed() -> None:
+    """2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸
 
-    2026-09-13 取消暂存：write_entities（整目录）改为 write_entity（一次一个），
-    准入闸门只对本章第一次登记生效（entity_gate_passed 单调放行）。
-    2026-09-14 写入面重构：write_entity 必填 el（章内引用键，写入即绑定）。
+    旧行为（2026-08-09 起）：图中存在已登记实体时未先 search_graph 禁止登记。
+    闸门（graph_queried / entity_gate_passed）删净后，首笔登记不再要求先检索——
+    模型判完即写，写入不被检索回执推后一个回合。
     """
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationAuthorizationError, match="必须先调用 search_graph"):
-        _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
-    assert ledger.written_entities == {}
+    receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
+    assert receipt["status"] == "written"
+    assert receipt["n"] == 1
+    assert list(ledger.written_entities) == ["顾霜"]
 
 
 def test_write_entity_allowed_after_search_graph() -> None:
@@ -1323,6 +1324,7 @@ def test_write_entity_allowed_after_search_graph() -> None:
 
     2026-09-13 取消暂存：提交形态变为单个实体，回执带运行期编号 n，写入即生效。
     2026-09-14 写入面重构：回执另带 el 绑定回显（NFC 归一键）。
+    2026-09-14 检索前置闸门删除后，本用例保留为"检索后登记照常可用"的回归面。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1330,7 +1332,6 @@ def test_write_entity_allowed_after_search_graph() -> None:
     tools = _tools(service, ledger)
 
     _call(tools, "search_graph", {"entities": ["顾霜"]})
-    assert ledger.graph_queried is True
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     assert receipt == {
         "status": "written",
@@ -1358,7 +1359,6 @@ def test_complete_chunk_accepts_registered_entity_endpoint_without_declaration()
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "伯安": "character"})
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     _write_all_domains(tools, ledger, entity_calls=[])
@@ -1379,7 +1379,6 @@ def test_write_entity_rejects_registered_entity_type_change() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     _call(tools, "write_metrics", _write_metrics_args())
@@ -1568,7 +1567,6 @@ def test_search_pool_uses_case_numbers_and_resolve_dialogue_case() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -1615,7 +1613,6 @@ def test_resolve_dialogue_case_requires_declared_character_speaker() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -1660,7 +1657,6 @@ def test_resolve_fact_case_asserts_same_character_relation() -> None:
     service = _AliasQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -1697,7 +1693,6 @@ def test_resolve_fact_case_break_hides_edge_from_search_graph() -> None:
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     ledger.graph.apply_relation(_graph_relation("顾霜", "顾老", "同一人物"))
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -1766,7 +1761,6 @@ def test_resolve_case_authorized_on_initial_display() -> None:
     service = _ForeignChunkQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     assert 99 in ledger.authorized_chapter_ids
     tools = _tools(service, ledger)
@@ -1797,7 +1791,6 @@ def test_resolve_case_allowed_after_text_search_authorization() -> None:
     service = _ForeignChunkQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -2219,7 +2212,6 @@ def test_resolve_dialogue_case_coerces_foreign_tone_word() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -2257,7 +2249,6 @@ def test_relation_write_asserts_new_edge_immediately() -> None:
         history_entity_types={"顾霜": "character", "顾老": "character"},
         history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
     )
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
@@ -2288,7 +2279,6 @@ def test_relation_existing_edge_skipped_existing_receipt() -> None:
         history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
         history_relations={("顾霜", "顾老", "友情")},
     )
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
@@ -2323,7 +2313,6 @@ def test_relation_alias_resolved_to_same_entity_skipped_self_loop() -> None:
         history_entity_names={"猴子": "猴子", "侯飞白": "侯飞白"},
         history_relations={("猴子", "侯飞白", "同一人物")},
     )
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "同一人物"})
@@ -2361,7 +2350,6 @@ def test_relation_state_field_rejected_from_contract() -> None:
         history_entity_types={"顾霜": "character", "顾老": "character"},
         history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
     )
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     relation_tool = _find_tool(tools, "write_relation")
@@ -2475,7 +2463,6 @@ def test_resolve_fact_case_rejects_foreign_change_kind() -> None:
     service = _AliasQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -2504,7 +2491,6 @@ def test_resolve_dialogue_case_rejects_foreign_tone() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -2526,7 +2512,6 @@ def test_resolve_dialogue_case_accepts_closed_tone_enum() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -2868,7 +2853,6 @@ def test_tone_catalog_accepts_extended_words_and_other_fallback() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
     _call(tools, "write_metrics", _write_metrics_args())
 
@@ -2927,7 +2911,6 @@ def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> 
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
 
     receipt = _reject(
@@ -2958,7 +2941,6 @@ def test_entity_ref_contract_rejects_name_as_el_with_guidance() -> None:
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
-    ledger.graph_queried = True
     tools = _tools(service, ledger)
     _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "a1"})
 
@@ -3019,7 +3001,6 @@ def test_resolve_fact_case_maps_chinese_change_kind_to_internal_value() -> None:
     service = _AliasQueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    ledger.graph_queried = True
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
