@@ -2888,6 +2888,15 @@ def test_tone_catalog_accepts_extended_words_and_other_fallback() -> None:
     )
     assert ledger.domain_payloads["dialogues"][0].tone == "得意"
 
+    # 2026-09-14 二次扩表：恭敬（师徒/拜谒的敬档）、戏谑（亲昵玩笑，嘲讽的反差档）入表即用
+    for new_tone in ("恭敬", "戏谑"):
+        _call(
+            tools,
+            "write_dialogue",
+            {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": new_tone},
+        )
+        assert ledger.domain_payloads["dialogues"][0].tone == new_tone
+
 
 def test_tone_enters_model_visible_tool_schema_as_closed_enum() -> None:
     """2026-09-14 语气枚举进工具 schema：取值域写在模型可见面（预防），不是只在被拒后可见
