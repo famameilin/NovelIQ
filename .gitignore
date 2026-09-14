@@ -255,3 +255,6 @@ opencode.json
 # 标注思考量归因 dump（逐回合思考原文，本地研究产物）
 /tmp_thinking/
 
+# 本地设置覆盖（各机器不同的运营/调优参数，不入库；默认值以 src/config/schemas 的 dataclass 为唯一事实源）
+config/settings.json
+
