@@ -210,7 +210,6 @@ def make_bound_event(
     *,
     description: str,
     participants: list[dict[str, str]] | None = None,
-    causal_event_refs: list[str] | None = None,
     tree_id: str | None = None,
     node_id: str | None = None,
     parent_node_id: str | None = None,
@@ -224,7 +223,6 @@ def make_bound_event(
         cause_role=cause_role,
         description=description,
         participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in (participants or [])],
-        causal_event_refs=causal_event_refs or [],
     )
 
 
@@ -250,8 +248,8 @@ def persist_chapter_annotation(
     M9a-2：chunks 表合并进 chapters 后，章节正文取自 chapters 表，
     运行时 chunk id 即章真实 chapter_id（payload 内 chunk_id == chapter_id）。
 
-    2026-08-19：events 每项含 description/participants/
-    causal_event_refs(全局 event_id)/tree_id/cause_role（缺省 tree-main/root）。
+    2026-08-19：events 每项含 description/participants/tree_id/cause_role
+    （缺省 root；2026-09-14 起 causal_event_refs 退役）。
     2026-08-22事件 id 由 uuid4 服务端派生，伏笔 setup_node_id
     直接指向本章事件节点（setup_event_index 为 1 基序号映射）。
     2026-08-22 重构：节点不再携带锚点；章级证据由持久化层盖章。
@@ -369,23 +367,21 @@ def persist_chapter_annotation(
             bound_event = make_bound_event(
                 description=event_spec["description"],
                 participants=event_participants,
-                causal_event_refs=event_spec.get("causal_event_refs"),
                 tree_id=event_spec.get("tree_id"),
                 node_id=event_spec.get("node_id"),
                 parent_node_id=event_spec.get("parent_node_id"),
                 cause_role=event_spec.get("cause_role", "root"),
             )
             # 2026-09-13 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
+            # （2026-09-14 伏笔属性收敛：expected_payoff_family 退役）
             if event_spec.get("isforeshadowing"):
                 bound_event.is_foreshadow_setup = True
-                bound_event.expected_payoff_family = event_spec.get("expected_payoff_family", "身份揭露")
                 bound_event.payoff_likelihood = event_spec.get("payoff_likelihood", "medium")
             bound_events.append(bound_event)
         # 2026-09-13 伏笔即事件树：setup_event_index（1 基）指向的章内事件即伏笔树根
         for fs_spec in foreshadowings or []:
             root_event = bound_events[int(fs_spec["setup_event_index"]) - 1]
             root_event.is_foreshadow_setup = True
-            root_event.expected_payoff_family = fs_spec.get("expected_payoff_family", "身份揭露")
             root_event.payoff_likelihood = fs_spec.get("payoff_likelihood", "medium")
         chunks.append(
             BoundChunkAnnotation(

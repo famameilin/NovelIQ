@@ -57,11 +57,15 @@ def validate_bound_annotation(
     *,
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
+    paragraph_info: ChunkParagraphInfo | None = None,
 ) -> None:
     """2026-08-07 用于复核系统绑定标注完整覆盖真实 chunk 和对话原文
 
     2026-08-18：增加事件锚点校验——每个事件的 char_start/char_end 必须落在
     chunk 文本范围内。
+    2026-09-14 段落级监督：自选段标签复核改段落号归属（账本写入点已按
+    paragraph_info 校验；此处给段落坐标映射时做同一不变量的二次校验，
+    替代旧"句文本逐字区间"复核——段号没有逐字复核的对象）。
     """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须为正整数")
@@ -70,6 +74,7 @@ def validate_bound_annotation(
     if actual_ids != expected_ids:
         raise ValueError(f"系统绑定 chunks 必须按原文顺序精确覆盖 current: expected={expected_ids} actual={actual_ids}")
     text_by_id = dict(current_chunks)
+    known_paragraph_ids = set(paragraph_info.paragraph_ids) if paragraph_info is not None else None
     for chunk in annotation.chunks:
         chunk_text = text_by_id[chunk.chunk_id]
         for dialogue in chunk.dialogues:
@@ -78,10 +83,13 @@ def validate_bound_annotation(
             actual = chunk_text[dialogue.start : dialogue.end]
             if actual != dialogue.content:
                 raise ValueError(f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}")
-        # 2026-09-07 句级监督：自选句情绪标签按原文精确定位复核（与对话同款系统绑定）
-        for label in chunk.sentence_labels:
-            if label.end > len(chunk_text) or chunk_text[label.start : label.end] != label.sentence:
-                raise ValueError(f"系统自选句绑定不一致: chunk_id={chunk.chunk_id} sentence={label.sentence[:50]}")
+        if known_paragraph_ids is not None:
+            for label in chunk.paragraph_labels:
+                if label.paragraph_id not in known_paragraph_ids:
+                    raise ValueError(
+                        f"系统自选段标签超出本 chunk 段落范围: chunk_id={chunk.chunk_id}"
+                        f" paragraph_id={label.paragraph_id}"
+                    )
         # 2026-08-22 重构：事件不再携带锚点/字符区间/哈希，章级证据由持久化层盖章
 
 
@@ -181,6 +189,7 @@ async def _run_single_attempt(
                     chunk_total=1,
                     chunk_text=first_chunk_text,
                     candidates=ledger.dialogue_candidates,
+                    paragraph_info=paragraph_info,
                 )
             ),
         ]
@@ -202,6 +211,7 @@ async def _run_single_attempt(
         ledger.annotation,
         chapter_id=chapter_id,
         current_chunks=current_chunks,
+        paragraph_info=paragraph_info,
     )
     return AgentRunResult(
         run_id=run_id,

@@ -97,7 +97,6 @@ def build_diagnosis_tools(
                         {
                             "root_event_id": tree.root_event_id,
                             "description": tree.description,
-                            "expected_payoff_family": tree.expected_payoff_family,
                             "payoff_likelihood": tree.payoff_likelihood,
                             "strength": tree.strength,
                             "status": tree.status,

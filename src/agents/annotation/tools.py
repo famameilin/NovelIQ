@@ -1,11 +1,15 @@
 """
 章节标注语义写入工具与系统运行账本
 
-核心合同: 写入拆成"同轮多个有类型的小调用"，每个小调用只承载一个完整语义单元、
-写入即生效并返回真实回执（{status: written, record}），领域不再有结束声明：
-全部写完后用唯一 finish_chunk 收尾，系统据此刻校验并冻结当前 chunk。
+核心合同: 写入面为五个领域工具（write_entity / write_metrics / write_event /
+write_relation / write_dialogue），实体与事件节点用模型自定的 el 局部键寻址、
+写入即生效并返回真实回执（{status: written, record}）；领域没有结束声明，
+全部写完后用唯一 finish_chapter 收尾，系统据此刻校验并冻结当前 chunk。
 完整参数和完整结果只进入审计库，不回到模型上下文。
 
+2026-09-14 写入面重构：根/子/两参与者五工具合并为 write_event（el 层级键挂树、
+树内先后=调用顺序）；句标签收编进 write_metrics.labels（段落级监督）；实体
+引用增加 el 键空间；伏笔属性收敛为 isforeshadowing+confidence。
 2026-09-13 改造前是"一次大载荷 write 完成整个领域"（整树起草 + 整批返工）：
 先拆成同轮多个有类型小调用，再按用户裁决取消暂存概念——没有暂存区，
 没有逐域 finish，失败只指向一个语义单元，模型只重调那一条记录。
@@ -19,7 +23,7 @@ import unicodedata
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, cast
 from uuid import uuid4
 
 from langchain_core.tools import tool
@@ -47,7 +51,7 @@ from .schema import (
     BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
-    BoundSentenceLabel,
+    BoundParagraphLabel,
     CaseSearchResult,
     ChunkMetricsInput,
     ChunkParagraphInfo,
@@ -57,21 +61,22 @@ from .schema import (
     DialogueVerdict,
     EntityDirectoryInput,
     EntityInput,
-    EntityNumber,
+    EntityRef,
     EntityType,
+    EventCauseRole,
+    EventChildType,
     EventParticipantInput,
     EventParticipantRole,
     EventTreeHistoryResult,
     NarrativeFunction,
-    PayoffLikelihood,
+    ParagraphLabelInput,
+    ParticipantArg,
     PendingCase,
     RelationChangeKindArg,
     RelationInput,
     RelationType,
     ResolvedCase,
-    RoleFunction,
     SearchResult,
-    SentenceLabelInput,
     TextSearchResult,
     Tone,
     relation_catalog_text,
@@ -79,8 +84,8 @@ from .schema import (
 )
 
 # 2026-08-22伏笔并入事件树（isforeshadowing），不再是独立领域
-# 2026-09-07 句级监督：句标签是章级监督信号，随 chunk 冻结留痕
-# 2026-09-13 小调用改造：句标签从 write_metrics 可选参数拆成 write_sentence_label
+# 2026-09-14 写入面重构：句/段标签收编进 write_metrics.labels，事件五工具合并为
+# write_event，收尾唯一 finish_chapter——五个领域写工具从首轮起全部开放。
 _DOMAIN_NAMES = (
     "metrics",
     "entities",
@@ -93,13 +98,8 @@ _DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
 # 2026-09-13 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
 _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
     "entities": ("write_entity",),
-    "metrics": ("write_metrics", "write_sentence_label"),
-    "events": (
-        "write_event_root",
-        "write_event_child",
-        "write_character_participation",
-        "write_noncharacter_participation",
-    ),
+    "metrics": ("write_metrics",),
+    "events": ("write_event",),
     "relations": ("write_relation",),
     "dialogues": ("write_dialogue",),
 }
@@ -115,17 +115,16 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
         "close_case",
     ]
 )
-# 失败归因表：句标签不是领域记录（失败不得阻塞收尾判定）
+# 失败归因表：领域 → 写入工具（2026-09-14 写入面合并后无例外项）
 _WRITE_TOOL_DOMAINS: dict[str, str] = {
     tool_name: domain
     for domain, tool_names in _DOMAIN_WRITE_TOOLS.items()
     for tool_name in tool_names
-    if tool_name != "write_sentence_label"
 }
 # 2026-09-13 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束声明）
 _DOMAIN_ORDER = ("entities", "metrics", "events", "relations", "dialogues")
-# 2026-09-07 句标签冻结软下限（每章 2-3 句定稿）：低于 2 留痕覆盖告警，不阻断冻结
-_SENTENCE_LABEL_MIN_PER_CHUNK = 2
+# 2026-09-07 监督标签冻结软下限（每章 2-3 段定稿）：低于 2 留痕覆盖告警，不阻断冻结
+_PARAGRAPH_LABEL_MIN_PER_CHUNK = 2
 _INTERNAL_GRAPH_KEYS = {
     "candidate_key",
     "chunk_id",
@@ -138,8 +137,10 @@ _INTERNAL_GRAPH_KEYS = {
 # 2026-09-11 历史事件视图里的数据库实体主键与运行期编号空间不同，模型只见编号：
 # 视图内嵌的 entity_id 一律剥掉，改配运行期编号 n
 _INTERNAL_ENTITY_KEYS = frozenset({"entity_id"})
-# 事件根节点在章内局部键空间里的固定名字（子节点不得占用）
+# 事件根节点在章内局部键空间里的固定名字（子事件键不得占用）
 _ROOT_NODE_KEY = "root"
+# 局部键路径分隔符：子事件 el = "<树键>/<节点键>"
+_EL_PATH_SEP = "/"
 
 
 def _norm_entity_key(name: str) -> str:
@@ -147,23 +148,26 @@ def _norm_entity_key(name: str) -> str:
     return unicodedata.normalize("NFC", name).strip().casefold()
 
 
-# 2026-09-13 章内局部键（事件树 tree_key / 节点 node_key）：非空即合法，键空间由账本管理
-# 2026-09-14 局部键由模型自行指定、写入即生效：同一轮里先建的键，后面的调用直接可用，
-# 不存在"等回执"或"跨轮才能引用"的约束，参数说明即按此声明。
-TreeLocalKey = Annotated[
-    str,
-    Field(
-        min_length=1,
-        description="本树的章内局部键，由你指定（如 t1）；write_event_root 写入即生效，同轮后续调用直接可用",
-    ),
-]
-NodeLocalKey = Annotated[
+# 2026-09-14 写入面重构：局部键由模型自行指定、写入即生效——同一轮里先建的键，
+# 后面的调用直接可用，不存在"等回执"或"跨轮才能引用"的约束，参数说明即按此声明。
+EntityLocalKey = Annotated[
     str,
     Field(
         min_length=1,
         description=(
-            "本树内的节点局部键，由你指定（如 e1，不得占用 root）；"
-            "write_event_child 写入即生效，同轮参与者调用直接可用"
+            "本实体的章内局部键（el），由你指定（如 a1）；write_entity 写入即生效，"
+            "同轮 write_event/write_relation/write_dialogue 的实体引用直接用它，不必等回执"
+        ),
+    ),
+]
+EventLocalKey = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description=(
+            "本节点的层级局部键，由你指定：根事件 el=树键（如 t1），"
+            "子事件 el=树键/节点键（如 t1/e2，节点键不得占用 root）；"
+            "写入即生效，同轮后面的调用（子事件、参与者、resolve_* 引用）直接可用"
         ),
     ),
 ]
@@ -180,24 +184,22 @@ def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
     参数可能是未过 schema 的原始值，此处只做展示级拼接、不做校验；
     键在 chunk 收尾前保持稳定，重写同键即更新同一条记录。
     """
-    tree_key = args.get("tree_key")
-    node_key = args.get("node_key")
     if tool_name == "write_entity":
         return f"entity/{args.get('name')}"
     if tool_name == "write_metrics":
         return "metrics"
-    if tool_name == "write_sentence_label":
-        return f"sentence_label/{args.get('sentence')}"
     if tool_name == "write_dialogue":
         return f"dialogue/{args.get('candidate_index')}"
     if tool_name == "write_relation":
         return f"relation/{args.get('from_entity')}-{args.get('to_entity')}/{args.get('relation_type')}"
-    if tool_name == "write_event_root":
-        return f"{tree_key}/{_ROOT_NODE_KEY}"
-    if tool_name == "write_event_child":
-        return f"{tree_key}/{node_key}"
-    if tool_name in {"write_character_participation", "write_noncharacter_participation"}:
-        return f"{tree_key}/{node_key}/participant/{args.get('entity')}"
+    if tool_name == "write_event":
+        el = str(args.get("el") or "")
+        if _EL_PATH_SEP not in el and not bool(args.get("isroot")):
+            # 子事件键写错形态时仍按原样回显，回执定位到被拒的那次调用
+            return el or "event"
+        if _EL_PATH_SEP in el:
+            return el
+        return f"{el}/{_ROOT_NODE_KEY}" if el else "event"
     return None
 
 
@@ -264,7 +266,7 @@ class AnnotationToolLedger:
     """2026-08-07 用于保存单 chunk 领域写入和系统绑定状态
 
     2026-09-13 实时写入：模型面的每个小调用即时落到目标结构（written_*），
-    全部写完后由唯一 finish_chunk 收尾冻结，没有暂存区也没有逐域结束声明。
+    全部写完后由唯一 finish_chapter 收尾冻结，没有暂存区也没有逐域结束声明。
     """
 
     run_scope: str
@@ -308,9 +310,9 @@ class AnnotationToolLedger:
     authorized_event_ids: set[str] = field(default_factory=set)
     # 2026-09-04事件树 id 集合：setup/payoff 误传 tree_id 时给出针对性纠错提示
     authorized_tree_ids: set[str] = field(default_factory=set)
-    # 2026-08-19 当前章节序号（跨章因果校验用）
+    # 2026-08-19 当前章节序号（写章指标与上下文摘要展示用）
     current_chapter_order: int | None = None
-    # 2026-08-22本章事件树状态（单章闭环）；历史树视图缓存供 cause_tree_id 引用
+    # 2026-08-22本章事件树状态（单章闭环）；历史树视图缓存供伏笔树根判定引用
     event_trees: dict[str, dict[str, Any]] = field(default_factory=dict)
     history_tree_views: dict[str, dict[str, Any]] = field(default_factory=dict)
     # 2026-09-12 章内并行两段式（§7）：写者的读者一次性报告，用于写入取值域准入。
@@ -327,8 +329,10 @@ class AnnotationToolLedger:
     observation_by_record: dict[str, BoundCharacterObservation] = field(default_factory=dict)
     # tree_key → tree_id：章内局部键是模型侧寻址面，真实 uuid 不外露
     tree_key_index: dict[str, str] = field(default_factory=dict)
-    # 2026-09-13 收尾声明：唯一 finish_chunk 置位后由系统冻结当前 chunk
-    chunk_finished: bool = False
+    # 2026-09-14 实体局部键索引：el → 归一化登记名（模型自定、写入即绑定、同轮可用）
+    entity_el_index: dict[str, str] = field(default_factory=dict)
+    # 2026-09-13 收尾声明：唯一 finish_chapter 置位后由系统冻结当前 chunk
+    chapter_finished: bool = False
 
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一 chunk 的对话候选"""
@@ -376,7 +380,7 @@ class AnnotationToolLedger:
                 "phase": self.phase,
                 "domain_payloads": self.domain_payloads,
                 "bound_payloads": self.bound_payloads,
-                "chunk_finished": self.chunk_finished,
+                "chapter_finished": self.chapter_finished,
                 "write_records": self.write_records,
                 "completed_chunks": self.completed_chunks,
                 "ready_chunk": self.ready_chunk,
@@ -400,6 +404,7 @@ class AnnotationToolLedger:
                 "written_relations": self.written_relations,
                 "observation_by_record": self.observation_by_record,
                 "tree_key_index": self.tree_key_index,
+                "entity_el_index": self.entity_el_index,
             }
         )
 
@@ -423,6 +428,46 @@ class AnnotationToolLedger:
         node_id = tree["nodes"].get(node_key or _ROOT_NODE_KEY)
         return str(node_id) if node_id else None
 
+    def resolve_entity_ref(self, ref: int | str, *, record: str, field: str) -> str:
+        """2026-09-14 用于把模型面实体引用（编号 n / 自定 el）解析成登记名
+
+        两种键空间同一条解析路径：整数（含纯数字字符串）走 FactGraph 编号，
+        字符串先查本 chunk 的 el 索引；未知 el 结构化拒绝并列出已知键。
+        """
+        if self.graph is None:
+            raise AnnotationInvariantError("实体引用解析需要常驻事实图，graph 缺失")
+        if isinstance(ref, str) and not ref.strip().isdigit():
+            key = self.entity_el_index.get(ref.strip())
+            if key is None:
+                known = ", ".join(sorted(self.entity_el_index)) or "（本 chunk 还没有实体用 el 登记）"
+                raise AnnotationStageRejection(
+                    f"el 键未由本 chunk 任何 write_entity 登记: {ref}",
+                    record=record,
+                    field=field,
+                    code="unknown_el",
+                    expected=f"已知 el 键: {known}；引用历史/其他章实体请改用编号 n（search_graph 回执）",
+                )
+            display_name = self.graph.entity_names.get(key)
+            if display_name is None:
+                raise AnnotationStageRejection(
+                    f"el 指向的实体尚未入图: {ref}",
+                    record=record,
+                    field=field,
+                    code="unregistered",
+                    expected="先用 write_entity 登记该实体（el 在登记当场绑定）",
+                )
+            return display_name
+        try:
+            return self.graph.resolve_number(int(ref), label=f"{record}.{field}")
+        except (ValueError, TypeError) as exc:
+            raise AnnotationStageRejection(
+                str(exc),
+                record=record,
+                field=field,
+                code="unregistered_number",
+                expected="已登记实体的运行期编号 n（write_entity / search_graph 回执）或本 chunk 自定的 el 键",
+            ) from None
+
     def register_case_number(self, case_id: str) -> int:
         """2026-08-07 用于为真实案例 ID 分配稳定运行内编号"""
         existing = self.case_number_by_id.get(case_id)
@@ -443,27 +488,6 @@ class AnnotationToolLedger:
         return str(uuid4())
 
     # ------------------------------------------------------------------
-    # 事件树写入（write_event_root/child/参与者）
-    # ------------------------------------------------------------------
-
-    def _resolve_cause_tree(self, cause_tree_id: str | None) -> dict[str, Any] | None:
-        """2026-08-22 用于解析因果前驱树（本 chunk 已建树或 search_event 授权的历史树）
-
-        2026-09-13 实时写入：模型面只给章内局部键（t1）或历史树 id，两种都接受；
-        未授权引用由调用点的结构化拒绝点名，此处只做解析。
-        """
-        if cause_tree_id is None:
-            return None
-        tree_id = self.tree_key_index.get(cause_tree_id, cause_tree_id)
-        cause = self.event_trees.get(tree_id) or self.history_tree_views.get(cause_tree_id)
-        if cause is None:
-            raise ValueError(
-                f"cause_tree_id 引用不存在的树: {cause_tree_id}"
-                "（本 chunk 新树填自己写的 tree_key；前文剧情先 search_event 检索再填历史树 id）"
-            )
-        return cause
-
-    # ------------------------------------------------------------------
     # 实时写入：每个小调用即时落到目标结构，回执即当前真相（2026-09-13 取消暂存区）
     # ------------------------------------------------------------------
 
@@ -477,27 +501,13 @@ class AnnotationToolLedger:
         tree = self.event_trees.get(self.tree_key_index.get(tree_key, ""))
         if tree is None:
             raise AnnotationStageRejection(
-                f"tree_key 未建树: {tree_key}",
+                f"树键未建: {tree_key}",
                 record=record,
-                field="tree_key",
+                field="el",
                 code="unknown_tree",
-                expected="先用 write_event_root 建树（tree_key 是本 chunk 的局部键，如 t1）",
+                expected="先用 write_event(isroot=true, el=\"t1\") 建树，子事件再用 t1/节点键（同轮先根后子即可）",
             )
         return tree
-
-    def _node_id_by_key(self, tree: dict[str, Any], tree_key: str, node_key: str, record: str) -> str:
-        """用于按树内节点键取真实节点 id（根节点键固定为 root）"""
-        node_id = tree["nodes"].get(node_key)
-        if node_id is None:
-            known = ", ".join([_ROOT_NODE_KEY, *[key for key in tree["nodes"] if key != _ROOT_NODE_KEY]])
-            raise AnnotationStageRejection(
-                f"node_key 不在该树上: {tree_key}/{node_key}",
-                record=record,
-                field="node_key",
-                code="unknown_node",
-                expected=f"已写的节点键: {known}（根为 root）",
-            )
-        return str(node_id)
 
     def _bound_event(self, node_id: str) -> BoundEvent:
         """用于在已落账事件里按节点 id 取节点对象（参与者挂在它上面）"""
@@ -507,12 +517,22 @@ class AnnotationToolLedger:
         raise AnnotationInvariantError(f"事件节点未落账: {node_id}")
 
     # ------------------------------------------------------------------
-    # 实体域：登记即入图并分配运行期编号
+    # 实体域：登记即入图并分配运行期编号；el 局部键当场绑定，同轮可用
 
-    def apply_entity(self, entity: EntityInput) -> int:
-        """用于登记或更新一个实体并即时返回运行期编号（同键同内容重放幂等）"""
+    def apply_entity(self, entity: EntityInput, *, el: str) -> int:
+        """用于登记或更新一个实体、绑定 el 局部键并即时返回运行期编号（同键同内容重放幂等）"""
         record = f"entity/{entity.name}"
         self._require_writable(record)
+        normalized_el = unicodedata.normalize("NFC", el).strip()
+        bound_key = self.entity_el_index.get(normalized_el)
+        if bound_key is not None and bound_key != _norm_entity_key(entity.name):
+            raise AnnotationStageRejection(
+                f"el 键已被另一实体占用: {normalized_el}",
+                record=record,
+                field="el",
+                code="duplicate_el",
+                expected="换一个 el 键（el 在 chunk 内一对一绑定实体）",
+            )
         self.admit_entity_directory([entity])
         if self.graph is None:
             raise AnnotationInvariantError("write_entity 需要常驻事实图，graph 缺失")
@@ -533,6 +553,7 @@ class AnnotationToolLedger:
             self.graph.record_entity_ops([entity], chapter_id=self.current_chunk_id)
             self.written_entities[key] = entity
             self._rebuild_entity_payload()
+        self.entity_el_index[normalized_el] = key
         number = self.graph.entity_number(entity.name)
         if number is None:
             raise AnnotationInvariantError(f"实体编号分配失败: {entity.name}")
@@ -545,46 +566,36 @@ class AnnotationToolLedger:
         )
 
     # ------------------------------------------------------------------
-    # 指标域：整域一次提交，重复提交按最后一次为准
+    # 指标域：整域一次提交，重复提交按最后一次为准；段落级监督标签随本域提交
 
     def apply_metrics(self, payload: ChunkMetricsInput) -> None:
-        """用于写入当前 chunk 摘要与叙事指标（重复提交覆盖）"""
+        """用于写入当前 chunk 摘要、叙事指标与段落情绪标签（重复提交整域覆盖）
+
+        labels 的 paragraph_id 必须属于本 chunk（正文 ¶ 号 / 报告证据段号同一
+        号码空间）；越界段号整次提交拒绝并指明是哪一条标签。
+        """
         self._require_writable("metrics")
+        if payload.labels:
+            known_ids = list(self.paragraph_info.paragraph_ids) if self.paragraph_info is not None else []
+            known = set(known_ids)
+            for label in payload.labels:
+                if label.paragraph_id not in known:
+                    preview = ", ".join(str(pid) for pid in known_ids[:12])
+                    raise AnnotationStageRejection(
+                        f"paragraph_id 不属于本 chunk: {label.paragraph_id}",
+                        record="metrics",
+                        field="paragraph_id",
+                        code="out_of_range",
+                        expected=f"本 chunk 可标注的段号（¶ 后的数字）: {preview}{'…' if len(known_ids) > 12 else ''}",
+                    )
+            self.bound_payloads["paragraph_labels"] = [
+                BoundParagraphLabel(paragraph_id=label.paragraph_id, emotion=label.emotion)
+                for label in payload.labels
+            ]
+        else:
+            self.bound_payloads["paragraph_labels"] = []
         self.metrics_payload = payload
         self.domain_payloads["metrics"] = payload
-
-    def apply_sentence_label(self, item: SentenceLabelInput) -> str:
-        """用于把自选句情绪标签定位绑定到章文本区间（按原文位置去重，重复句更新分值）
-
-        句标签不是独立领域：绑定成功即按原文位置存储，随 chunk 冻结留痕；
-        定位失败（非原句/改写）只拒绝本条记录。
-        """
-        self._require_writable("sentence_label")
-        located = _locate_sentence(self.current_chunk_text, item.sentence)
-        if located is None:
-            raise AnnotationStageRejection(
-                "sentence 未在当前章节原文中找到唯一匹配",
-                record=f"sentence_label/{item.sentence}",
-                field="sentence",
-                code="not_found",
-                expected=f"从正文原样摘录的完整句子（不改写、不缩写）：{item.sentence[:50]}",
-            )
-        span = (located[0], located[1])
-        labels = [
-            label
-            for label in (self.bound_payloads.get("sentence_labels") or [])
-            if (label.start, label.end) != span
-        ]
-        labels.append(
-            BoundSentenceLabel(
-                sentence=located[2],
-                emotion=item.emotion,
-                start=span[0],
-                end=span[1],
-            )
-        )
-        self.bound_payloads["sentence_labels"] = labels
-        return f"sentence_label/{span[0]}:{span[1]}"
 
     # ------------------------------------------------------------------
     # 对话域：按候选序号即时落账三态判定
@@ -594,7 +605,7 @@ class AnnotationToolLedger:
         *,
         candidate_index: int,
         verdict: DialogueVerdict,
-        speaker_number: int | None,
+        speaker_ref: int | str | None,
         tone: Tone | None,
     ) -> str:
         """用于按候选序号写入一条对话三态判断（同序号重写按更新语义）"""
@@ -610,26 +621,15 @@ class AnnotationToolLedger:
                 expected=f"1..{len(self.dialogue_candidates)}（见正文后的 DialogueCandidates 表）",
             )
         speaker_name: str | None = None
-        if speaker_number is not None:
-            if self.graph is None:
-                raise AnnotationInvariantError("write_dialogue 说话人编号解析需要常驻事实图，graph 缺失")
-            try:
-                speaker_name = self.graph.resolve_number(speaker_number, label=f"{record}.speaker")
-            except ValueError as exc:
-                raise AnnotationStageRejection(
-                    str(exc),
-                    record=record,
-                    field="speaker",
-                    code="unregistered_number",
-                    expected="已登记实体的运行期编号（write_entity 回执 n / search_graph 回执 n）",
-                ) from None
-            if self.graph.entity_type(speaker_name) != "character":
+        if speaker_ref is not None:
+            speaker_name = self.resolve_entity_ref(speaker_ref, record=record, field="speaker")
+            if self.graph is not None and self.graph.entity_type(speaker_name) != "character":
                 raise AnnotationStageRejection(
                     f"说话人必须是 character: {speaker_name}",
                     record=record,
                     field="speaker",
                     code="not_character",
-                    expected="character 类型的已登记实体编号",
+                    expected="character 类型的实体（编号 n 或 el 键）",
                 )
         try:
             item = DialogueInput(
@@ -674,8 +674,8 @@ class AnnotationToolLedger:
     def apply_relation(
         self,
         *,
-        from_number: int,
-        to_number: int,
+        from_ref: int | str,
+        to_ref: int | str,
         relation_type: RelationType,
     ) -> tuple[str, str]:
         """用于写入一条本章确认存在的闭合关系边（同一对端点换类型即整体替换）
@@ -683,23 +683,12 @@ class AnnotationToolLedger:
         返回 (记录键, 本条边的入图结果)：assert=新边入图 / skipped_existing=已在图上 /
         skipped_self_loop=两端解析到同一实体且非"同一人物"语义（不入图）。
         """
-        provisional = f"relation/{from_number}-{to_number}/{relation_type}"
+        provisional = f"relation/{from_ref}-{to_ref}/{relation_type}"
         self._require_writable(provisional)
         if self.graph is None:
             raise AnnotationInvariantError("write_relation 需要常驻事实图，graph 缺失")
-        for field_name, number in (("from_entity", from_number), ("to_entity", to_number)):
-            try:
-                self.graph.resolve_number(number, label=f"write_relation.{field_name}")
-            except ValueError as exc:
-                raise AnnotationStageRejection(
-                    str(exc),
-                    record=provisional,
-                    field=field_name,
-                    code="unregistered_number",
-                    expected="已登记实体的运行期编号（write_entity 回执 n / search_graph 回执 n）",
-                ) from None
-        from_name = self.graph.resolve_number(from_number, label="write_relation.from_entity")
-        to_name = self.graph.resolve_number(to_number, label="write_relation.to_entity")
+        from_name = self.resolve_entity_ref(from_ref, record=provisional, field="from_entity")
+        to_name = self.resolve_entity_ref(to_ref, record=provisional, field="to_entity")
         record = f"relation/{from_name}-{to_name}/{relation_type}"
         definition = RELATION_DEFINITIONS[str(relation_type)]
         entity_types = self._fact_entity_catalog()
@@ -797,75 +786,137 @@ class AnnotationToolLedger:
         return outcomes
 
     # ------------------------------------------------------------------
-    # 事件域：建树/加节点/挂参与者都即时落账（真实 id 服务端内部持有）
+    # 事件域：建树/加子事件/挂参与者一个调用写完（真实 id 服务端内部持有）
 
-    def apply_event_root(
+    def apply_event(
         self,
         *,
+        el: str,
+        isroot: bool,
+        description: str,
+        isforeshadowing: bool = False,
+        confidence: Confidence | None = None,
+        node_type: EventChildType | None = None,
+        characters: list[ParticipantArg] | None = None,
+    ) -> str:
+        """用于写入一个事件节点：isroot 建根（el=树键），子事件 el=树键/节点键
+
+        根节点键固定 root；子节点父=当时主链尾，main 推进链尾；树内先后=调用顺序。
+        伏笔属性（isforeshadowing/confidence）只属于根，isforeshadowing=true 时
+        confidence 必填；characters=None 保留该节点已有参与者，给出列表即整体替换。
+        """
+        record = self._event_record(el, isroot=isroot)
+        self._require_writable(record)
+        tree_key, _, node_key = el.partition(_EL_PATH_SEP)
+        tree_key = tree_key.strip()
+        node_key = node_key.strip()
+        if isroot:
+            if not tree_key or node_key:
+                raise AnnotationStageRejection(
+                    f"根事件的 el 必须是树键（不带路径）: {el}",
+                    record=record,
+                    field="el",
+                    code="bad_el",
+                    expected="根事件 el=树键（如 t1）；子事件才是 树键/节点键（如 t1/e2）",
+                )
+            if node_type is not None:
+                raise AnnotationStageRejection(
+                    "type 只属于子事件（根事件由 isroot=true 表达）",
+                    record=record,
+                    field="type",
+                    code="not_on_root",
+                    expected="根事件不填 type",
+                )
+            if isforeshadowing and confidence is None:
+                raise AnnotationStageRejection(
+                    "isforeshadowing=true 时必须提供 confidence",
+                    record=record,
+                    field="confidence",
+                    code="missing",
+                    expected="confidence=high / medium / low（伏笔回收可能性三档）",
+                )
+            node_id = self._apply_event_root(
+                record=record,
+                tree_key=tree_key,
+                description=description,
+                isforeshadowing=isforeshadowing,
+                confidence=confidence,
+            )
+        else:
+            if not tree_key or not node_key:
+                raise AnnotationStageRejection(
+                    f"子事件的 el 必须是 树键/节点键: {el}",
+                    record=record,
+                    field="el",
+                    code="bad_el",
+                    expected='形如 t1/e2（节点键不得占用 root）；建树请用 write_event(isroot=true, el="t1")',
+                )
+            if node_key == _ROOT_NODE_KEY:
+                raise AnnotationStageRejection(
+                    f"子事件不得占用节点键 {_ROOT_NODE_KEY}",
+                    record=record,
+                    field="el",
+                    code="reserved",
+                    expected="换一个节点键（root 固定指根事件）",
+                )
+            if isforeshadowing or confidence is not None:
+                raise AnnotationStageRejection(
+                    "伏笔属性（isforeshadowing/confidence）只属于根事件",
+                    record=record,
+                    field="isforeshadowing",
+                    code="not_on_child",
+                    expected="子事件只填 el/type/description/characters",
+                )
+            if node_type is None:
+                raise AnnotationStageRejection(
+                    "子事件必须提供 type",
+                    record=record,
+                    field="type",
+                    code="missing",
+                    expected='type="main"（顺延主因链）或 "secondary"（挂在当时主链尾）',
+                )
+            node_id = self._apply_event_child(
+                record=record,
+                tree_key=tree_key,
+                node_key=node_key,
+                node_type=node_type,
+                description=description,
+            )
+        if characters is not None:
+            self._apply_participants(
+                node_record=record,
+                node_id=node_id,
+                characters=characters,
+            )
+        return record
+
+    def _event_record(self, el: str, *, isroot: bool) -> str:
+        """用于把模型面 el 归一成记录键（根记录 = 树键/root）"""
+        cleaned = unicodedata.normalize("NFC", el).strip()
+        if isroot or _EL_PATH_SEP not in cleaned:
+            return f"{cleaned}/{_ROOT_NODE_KEY}"
+        return cleaned
+
+    def _apply_event_root(
+        self,
+        *,
+        record: str,
         tree_key: str,
         description: str,
-        cause_tree_id: str | None,
         isforeshadowing: bool,
-        expected_payoff_family: str | None,
-        payoff_likelihood: PayoffLikelihood | None,
-    ) -> None:
-        """用于建树并即时落账根事件（同 tree_key 重写按更新语义，因果前驱不可改）
-
-        根节点键固定为 root；伏笔两字段只属于根，子节点接口不接受它们。
-        cause_tree_id 引用本 chunk 已建的 tree_key 或 search_event 授权的历史树 id。
-        """
-        record = f"{tree_key}/{_ROOT_NODE_KEY}"
-        self._require_writable(record)
-        if isforeshadowing and (expected_payoff_family is None or payoff_likelihood is None):
-            missing = [
-                name
-                for name, value in (
-                    ("expected_payoff_family", expected_payoff_family),
-                    ("payoff_likelihood", payoff_likelihood),
-                )
-                if value is None
-            ]
-            raise AnnotationStageRejection(
-                f"isforeshadowing=true 时必须同时提供伏笔两字段，缺失: {', '.join(missing)}",
-                record=record,
-                field=missing[0],
-                code="missing",
-                expected="expected_payoff_family 与 payoff_likelihood 同时提供",
-            )
-        if cause_tree_id is not None and cause_tree_id not in self.tree_key_index \
-                and cause_tree_id not in self.event_trees \
-                and cause_tree_id not in self.history_tree_views:
-            raise AnnotationStageRejection(
-                f"cause_tree_id 引用不存在的树: {cause_tree_id}",
-                record=record,
-                field="cause_tree_id",
-                code="unknown_tree",
-                expected="本 chunk 已建的 tree_key，或 search_event 回执里的历史树 id",
-            )
+        confidence: Confidence | None,
+    ) -> str:
+        """用于建树并即时落账根事件（同树键重写按更新语义），返回根节点 id"""
         existing = self.event_trees.get(self.tree_key_index.get(tree_key, ""))
         if existing is not None:
-            if cause_tree_id != existing.get("cause"):
-                # 前驱树变化会改变本树在因果序里的位置：一经确定不再变更
-                raise AnnotationStageRejection(
-                    f"cause_tree_id 已定为 {existing.get('cause')}，不允许改写为 {cause_tree_id}",
-                    record=record,
-                    field="cause_tree_id",
-                    code="immutable",
-                    expected="删除重写需换 tree_key（因果前驱一经确定不再变更）",
-                )
             root_event = self._bound_event(existing["root_node_id"])
             root_event.description = description
             root_event.is_foreshadow_setup = isforeshadowing
-            root_event.expected_payoff_family = expected_payoff_family
-            root_event.payoff_likelihood = payoff_likelihood
+            root_event.payoff_likelihood = confidence
             existing["isforeshadowing"] = isforeshadowing
-            return
-        cause = self._resolve_cause_tree(cause_tree_id)
+            return str(existing["root_node_id"])
         tree_id = self._tree_id()
         root_node_id = self._node_id()
-        causal_refs: list[str] = []
-        if cause is not None:
-            causal_refs = [str(cause.get("root_node_id") or cause.get("tree_id"))]
         root_event = BoundEvent(
             node_id=root_node_id,
             tree_id=tree_id,
@@ -874,9 +925,7 @@ class AnnotationToolLedger:
             description=description,
             participants=[],
             is_foreshadow_setup=isforeshadowing,
-            expected_payoff_family=expected_payoff_family,
-            payoff_likelihood=payoff_likelihood,
-            causal_event_refs=causal_refs,
+            payoff_likelihood=confidence,
         )
         events_bound = list(self.bound_payloads.get("events") or [])
         events_bound.append(root_event)
@@ -888,79 +937,50 @@ class AnnotationToolLedger:
             "chapter_order": self.current_chapter_order,
             "root_node_id": root_node_id,
             "trunk_tail": root_node_id,
-            "cause": cause_tree_id,
             "isforeshadowing": isforeshadowing,
-            # node_key → node_id：模型侧只用章内局部键寻址
+            # node_key → node_id：模型侧只用章内局部键寻址（根键固定 root）
             "nodes": {_ROOT_NODE_KEY: root_node_id},
-            "orders": {_ROOT_NODE_KEY: 0},
-            "last_order": 0,
         }
         self.tree_key_index[tree_key] = tree_id
         self.authorized_event_ids.add(root_node_id)
         self.authorized_tree_ids.add(tree_id)
+        return root_node_id
 
-    def apply_event_child(
+    def _apply_event_child(
         self,
         *,
+        record: str,
         tree_key: str,
         node_key: str,
-        order: int,
-        node_type: Literal["main", "secondary"],
+        node_type: EventChildType,
         description: str,
-    ) -> None:
-        """用于在已建的树上追加一个子事件（同 node_key 重写按更新语义）
+    ) -> str:
+        """用于在已建的树上追加/更新一个子事件，返回节点 id
 
-        type: "main" 顺延主因链（成为新的链尾）/"secondary" 挂在当时主链尾。
-        order 表达同一棵树内的先后：实时建树按调用顺序生长，新节点的 order 必须
-        大于该树已有节点的最大 order。
+        "main" 顺延主因链（成为新的链尾）/"secondary" 挂在当时主链尾；
+        树内先后=调用顺序（order 参数已下线，无任何下游消费）。
         """
-        record = f"{tree_key}/{node_key}"
-        self._require_writable(record)
-        if node_key == _ROOT_NODE_KEY:
-            raise AnnotationStageRejection(
-                f"子事件不得占用节点键 {_ROOT_NODE_KEY}",
-                record=record,
-                field="node_key",
-                code="reserved",
-                expected="换一个节点键（root 固定指根事件）",
-            )
         tree = self._tree_by_key(tree_key, record)
         existing_node_id = tree["nodes"].get(node_key)
         if existing_node_id is not None:
-            if tree["orders"].get(node_key) != order:
-                raise AnnotationStageRejection(
-                    f"node_key 已建，order 不允许改写: {node_key}",
-                    record=record,
-                    field="order",
-                    code="immutable",
-                    expected=f"删除重写需换 node_key（该节点 order={tree['orders'].get(node_key)}）",
-                )
             event = self._bound_event(str(existing_node_id))
-            if str(event.cause_role) != node_type:
+            if str(event.cause_role) != str(node_type):
                 raise AnnotationStageRejection(
-                    f"node_key 已建，type 不允许改写: {node_key}",
+                    f"节点已建，type 不允许改写: {tree_key}/{node_key}",
                     record=record,
                     field="type",
                     code="immutable",
-                    expected=f"删除重写需换 node_key（该节点 type={event.cause_role}）",
+                    expected="删除重写需换节点键（该节点 type=已定的 main/secondary）",
                 )
             event.description = description
-            return
-        if order <= int(tree["last_order"]):
-            raise AnnotationStageRejection(
-                f"order 必须大于该树已有节点的最大序号: {order} <= {tree['last_order']}",
-                record=record,
-                field="order",
-                code="out_of_order",
-                expected=f"下一个可用序号 ≥ {int(tree['last_order']) + 1}（实时建树按调用顺序生长）",
-            )
+            return str(existing_node_id)
         parent_node_id = str(tree["trunk_tail"])
         node_id = self._node_id()
         event = BoundEvent(
             node_id=node_id,
             tree_id=str(tree["tree_id"]),
             parent_node_id=parent_node_id,
-            cause_role=node_type,
+            cause_role=cast("EventCauseRole", str(node_type)),
             description=description,
             participants=[],
         )
@@ -969,139 +989,111 @@ class AnnotationToolLedger:
         self.bound_payloads["events"] = events_bound
         self.domain_payloads["events"] = events_bound
         tree["nodes"][node_key] = node_id
-        tree["orders"][node_key] = order
-        tree["last_order"] = order
-        if node_type == "main":
+        if str(node_type) == "main":
             tree["trunk_tail"] = node_id
         self.authorized_event_ids.add(node_id)
+        return node_id
 
-    def apply_participation(
+    def _apply_participants(
         self,
         *,
-        tree_key: str,
-        node_key: str,
-        entity_number: int,
-        role: EventParticipantRole,
-        narrative_role: RoleFunction | None = None,
-        action: str | None = None,
-        emotion: int | None = None,
-        character: bool = False,
-        tool_name: str = "write_character_participation",
-    ) -> str:
-        """用于在指定节点上写入一条参与者记录（稳定记录键=树/节点/实体，同键即更新）
+        node_record: str,
+        node_id: str,
+        characters: list[ParticipantArg],
+    ) -> None:
+        """用于把 characters 数组整体替换到指定节点的参与者列表
 
-        character 入口强制三态齐备且不允许默认值；非 character 入口不接受三字段，
-        并按登记类型校验人物/非人物匹配，两个入口互不代劳。
+        按登记类型分流：character 三态必填并派生人物动态状态（人物榜/Greimas/
+        实体状态注入的唯一数据源）；非 character 不接受三态；同一实体在数组内
+        只允许出现一次；旧记录键下的动态状态先清后建（替换语义）。
         """
-        record = f"{tree_key}/{node_key}/participant/{entity_number}"
-        self._require_writable(record)
         if self.graph is None:
-            raise AnnotationInvariantError("参与者编号解析需要常驻事实图，graph 缺失")
-        try:
-            entity_name = self.graph.resolve_number(entity_number, label=record)
-        except ValueError as exc:
-            raise AnnotationStageRejection(
-                str(exc),
-                record=record,
-                field="entity",
-                code="unregistered_number",
-                expected="已登记实体的运行期编号（write_entity 回执 n / search_graph 回执 n）",
-            ) from None
-        actual_type = self.graph.entity_type(entity_name)
-        if actual_type is None:
-            raise AnnotationStageRejection(
-                f"参与者实体未登记: {entity_name}",
-                record=record,
-                field="entity",
-                code="unregistered",
-                expected="先用 write_entity 登记（或 search_graph 查已登记编号）",
-            )
-        if character:
-            if actual_type != "character":
-                raise AnnotationStageRejection(
-                    f"write_character_participation 只接受 character: {entity_name}（登记类型 {actual_type}）",
-                    record=record,
-                    field="entity",
-                    code="not_character",
-                    expected="character 用本工具；非 character 用 write_noncharacter_participation",
-                )
-            if narrative_role is None or action is None or emotion is None:
-                missing = [
-                    name
-                    for name, value in (
-                        ("narrative_role", narrative_role),
-                        ("action", action),
-                        ("emotion", emotion),
-                    )
-                    if value is None
-                ]
-                raise AnnotationStageRejection(
-                    f"character 参与者必须同时提供 narrative_role/action/emotion，缺失: {', '.join(missing)}",
-                    record=record,
-                    field=missing[0],
-                    code="missing",
-                    expected="三字段必填、不自动填默认值",
-                )
-            if not -2 <= emotion <= 2:
-                raise AnnotationStageRejection(
-                    f"emotion 超出取值域: {emotion}",
-                    record=record,
-                    field="emotion",
-                    code="out_of_range",
-                    expected="-2..2 整数（-2 强烈负面 … 2 强烈正面）",
-                )
-        elif actual_type == "character":
-            raise AnnotationStageRejection(
-                f"write_noncharacter_participation 不接受 character: {entity_name}",
-                record=record,
-                field="entity",
-                code="is_character",
-                expected="character 改用 write_character_participation（三态必填）",
-            )
-        if role == EventParticipantRole.LOCATION and actual_type != "location":
-            raise AnnotationStageRejection(
-                f"地点角色端点必须是 location: {entity_name}（登记类型 {actual_type}）",
-                record=record,
-                field="role",
-                code="role_type_mismatch",
-                expected="地点角色只用于 location 实体",
-            )
-        tree = self._tree_by_key(tree_key, record)
-        node_id = self._node_id_by_key(tree, tree_key, node_key, record)
-        observation: BoundCharacterObservation | None = None
-        if character:
-            if narrative_role is None or action is None or emotion is None:
-                raise AnnotationInvariantError("character 参与者三态在写入点必须齐备")
-            self._reject_duplicate_observation(record, entity_name, action)
-            observation = BoundCharacterObservation(
-                character=entity_name,
-                role_function=narrative_role,
-                action=action,
-                emotion=emotion,
-            )
-        try:
-            participant = EventParticipantInput(
-                entity=entity_name,
-                role=role,
-                narrative_role=narrative_role,
-                action=action,
-                emotion=emotion,
-            )
-        except ValidationError as exc:
-            raise _translate_record_validation(record, exc, tool_name=tool_name) from None
+            raise AnnotationInvariantError("参与者解析需要常驻事实图，graph 缺失")
         event = self._bound_event(node_id)
-        for index, existing in enumerate(event.participants):
-            if existing.entity == entity_name:
-                event.participants[index] = participant
-                break
-        else:
-            event.participants.append(participant)
-        if observation is not None:
-            self.observation_by_record[record] = observation
-        else:
-            self.observation_by_record.pop(record, None)
+        for stale in [key for key in self.observation_by_record if key.startswith(f"{node_record}/participant/")]:
+            del self.observation_by_record[stale]
+        seen: set[str] = set()
+        participants: list[EventParticipantInput] = []
+        for arg in characters:
+            participant_record = f"{node_record}/participant/{arg.entityid}"
+            entity_name = self.resolve_entity_ref(arg.entityid, record=participant_record, field="entityid")
+            key = _norm_entity_key(entity_name)
+            if key in seen:
+                raise AnnotationStageRejection(
+                    f"同一实体在 characters 数组内重复出现: {entity_name}",
+                    record=participant_record,
+                    field="entityid",
+                    code="duplicate_participant",
+                    expected="每个实体一次提交只出现一次（本数组即该节点参与者的完整集合）",
+                )
+            seen.add(key)
+            actual_type = self.graph.entity_type(entity_name)
+            if actual_type is None:
+                raise AnnotationStageRejection(
+                    f"参与者实体未登记: {entity_name}",
+                    record=participant_record,
+                    field="entityid",
+                    code="unregistered",
+                    expected="先用 write_entity 登记（或 search_graph 查已登记编号）",
+                )
+            if arg.role == EventParticipantRole.LOCATION and actual_type != EntityType.LOCATION.value:
+                raise AnnotationStageRejection(
+                    f"地点角色端点必须是 location: {entity_name}（登记类型 {actual_type}）",
+                    record=participant_record,
+                    field="role",
+                    code="role_type_mismatch",
+                    expected="地点角色只用于 location 实体",
+                )
+            has_observation = any(
+                value is not None for value in (arg.narrative_role, arg.action, arg.emotion)
+            )
+            if actual_type == EntityType.CHARACTER.value:
+                if arg.narrative_role is None or arg.action is None or arg.emotion is None:
+                    missing = [
+                        name
+                        for name, value in (
+                            ("narrative_role", arg.narrative_role),
+                            ("action", arg.action),
+                            ("emotion", arg.emotion),
+                        )
+                        if value is None
+                    ]
+                    raise AnnotationStageRejection(
+                        f"character 参与者必须同时提供 narrative_role/action/emotion，缺失: {', '.join(missing)}",
+                        record=participant_record,
+                        field=missing[0],
+                        code="missing",
+                        expected="三字段必填、不自动填默认值",
+                    )
+                self._reject_duplicate_observation(participant_record, entity_name, arg.action)
+                self.observation_by_record[participant_record] = BoundCharacterObservation(
+                    character=entity_name,
+                    role_function=arg.narrative_role,
+                    action=arg.action,
+                    emotion=arg.emotion,
+                )
+            elif has_observation:
+                raise AnnotationStageRejection(
+                    f"narrative_role/action/emotion 只属于 character 参与者: {entity_name}（登记类型 {actual_type}）",
+                    record=participant_record,
+                    field="narrative_role",
+                    code="observation_on_noncharacter",
+                    expected="非 character 条目只填 entityid/role",
+                )
+            try:
+                participants.append(
+                    EventParticipantInput(
+                        entity=entity_name,
+                        role=arg.role,
+                        narrative_role=arg.narrative_role,
+                        action=arg.action,
+                        emotion=arg.emotion,
+                    )
+                )
+            except ValidationError as exc:
+                raise _translate_record_validation(participant_record, exc, tool_name="write_event") from None
+        event.participants = participants
         self._rebuild_observation_payload()
-        return record
 
     def _rebuild_observation_payload(self) -> None:
         """用于按写入顺序重建人物动态状态载荷"""
@@ -1133,10 +1125,10 @@ class AnnotationToolLedger:
             )
 
     # ------------------------------------------------------------------
-    # 收尾声明：唯一 finish_chunk，系统据此校验并冻结当前 chunk
+    # 收尾声明：唯一 finish_chapter，系统据此校验并冻结当前 chunk（冻结单位=整章）
 
-    def finish_chunk(self) -> dict[str, Any]:
-        """用于声明当前 chunk 的语义写入已写完：补默认判定、校验并构造 ready_chunk
+    def finish_chapter(self) -> dict[str, Any]:
+        """用于声明本章的语义写入已写完：补默认判定、校验并构造 ready_chunk
 
         写入是实时的，收尾只管一件件"把这个 chunk 组装出来"该管的事：指标缺提交则
         拒绝（没载荷装不出 chunk）。逐条记录写入是否成功不在收尾判定里——失败的调用
@@ -1146,11 +1138,11 @@ class AnnotationToolLedger:
         构造失败整体回滚，已写入记录原样保留。
         """
         if self.phase != "chunk_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chunk")
+            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chapter")
         if self.metrics_payload is None:
             raise AnnotationStageRejection(
-                "chunk 指标尚未提交，不予收尾",
-                record="finish_chunk",
+                "本章指标尚未提交，不予收尾",
+                record="finish_chapter",
                 field="metrics",
                 code="missing_record",
                 expected="先 write_metrics 提交摘要与叙事指标",
@@ -1165,13 +1157,13 @@ class AnnotationToolLedger:
             if isinstance(exc, AnnotationStageRejection):
                 raise
             raise AnnotationStageRejection(
-                f"chunk 收尾校验失败: {exc}",
-                record="finish_chunk",
+                f"章节收尾校验失败: {exc}",
+                record="finish_chapter",
                 code="assembly_failed",
-                expected="按报错核对已写入的记录后重新 finish_chunk",
+                expected="按报错核对已写入的记录后重新 finish_chapter",
             ) from None
         self.write_records.extend(self._chunk_write_records())
-        self.chunk_finished = True
+        self.chapter_finished = True
         return {
             "status": "completed",
             "chunk_id": self.current_chunk_id,
@@ -1213,7 +1205,7 @@ class AnnotationToolLedger:
             list(self.domain_payloads["character_observations"]),
         )
         self.bound_payloads.setdefault("dialogues", [])
-        self.bound_payloads.setdefault("sentence_labels", [])
+        self.bound_payloads.setdefault("paragraph_labels", [])
 
     def _chunk_write_records(self) -> list[dict[str, Any]]:
         """用于收尾时把本次 chunk 的写入汇总成领域级审计记录（形状与此前一致）"""
@@ -1239,7 +1231,7 @@ class AnnotationToolLedger:
                 "chunk_id": self.current_chunk_id,
                 "domain": "events",
                 "payload": {
-                    "tool": "write_event_root",
+                    "tool": "write_event",
                     "trees": self._event_tree_records(),
                     "character_observation_count": len(self.observation_by_record),
                     "finalized": True,
@@ -1311,7 +1303,7 @@ class AnnotationToolLedger:
             "relations": len(self.written_relations),
             "dialogues": len(self.written_dialogues),
             "character_observations": len(self.observation_by_record),
-            "sentence_labels": len(self.bound_payloads.get("sentence_labels") or []),
+            "paragraph_labels": len(self.bound_payloads.get("paragraph_labels") or []),
         }
 
     def _entity_catalog(
@@ -1360,7 +1352,7 @@ class AnnotationToolLedger:
             )
         if expected_types is not None and actual_type not in expected_types:
             raise ValueError(
-                f"{label} 端点类型必须属于 {list(expected_types)}，实际为 {actual_type}"
+                f"{label} 端点类型必须属于 {[str(t) for t in expected_types]}，实际为 {actual_type}"
                 f"（该名称在图上的登记类型是 {actual_type}，"
                 "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
             )
@@ -1427,19 +1419,19 @@ class AnnotationToolLedger:
                 return
             if expected_types is not None and actual_type not in expected_types:
                 errors.append(
-                    f"[{index}] {label} 端点类型必须属于 {list(expected_types)}，"
+                    f"[{index}] {label} 端点类型必须属于 {[str(t) for t in expected_types]}，"
                     f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
                     "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
                 )
 
         # character_observations 端点校验
         for index, item in enumerate(payloads["character_observations"]):
-            check_entity(item.character, ("character",), "character_observation.character", index)
+            check_entity(item.character, (EntityType.CHARACTER,), "character_observation.character", index)
 
         # dialogues 端点校验
         for index, item in enumerate(payloads["dialogues"]):
             if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
-                check_entity(item.speaker, ("character",), "dialogue.speaker", index)
+                check_entity(item.speaker, (EntityType.CHARACTER,), "dialogue.speaker", index)
 
         # 2026-08-22 事件契约：write_event 已在写入时内联校验参与者端点，此处不再重查
 
@@ -1462,7 +1454,7 @@ class AnnotationToolLedger:
             character_observations=list(self.bound_payloads["character_observations"]),
             dialogues=bound_dialogues,
             events=list(self.bound_payloads["events"]),
-            sentence_labels=list(self.bound_payloads.get("sentence_labels") or []),
+            paragraph_labels=list(self.bound_payloads.get("paragraph_labels") or []),
         )
 
     def _dialogue_coverage_warnings(self) -> list[str]:
@@ -1479,26 +1471,26 @@ class AnnotationToolLedger:
             f"（序号 {self.dialogue_missing_indexes}），按 not_dialogue 默认处理"
         ]
 
-    def _sentence_label_coverage_warnings(self) -> list[str]:
-        """2026-09-07 用于在冻结前确定性登记句级监督覆盖缺口（仅告警不阻断冻结）
+    def _paragraph_label_coverage_warnings(self) -> list[str]:
+        """2026-09-07 用于在冻结前确定性登记段落级监督覆盖缺口（仅告警不阻断冻结）
 
-        每章 2-3 句为用户定稿密度；低于 2 句（含空载荷）随 chunk 留痕，
-        供 linguistic 阶段边界拟合的样本量判断与报告附录展示。
+        每章 2-3 段为定稿密度（2026-09-14 由句级改段级）；低于 2 段（含空载荷）
+        随 chunk 留痕，供 linguistic 阶段边界拟合的样本量判断与报告附录展示。
         """
-        labels = self.bound_payloads.get("sentence_labels") or []
-        if len(labels) >= _SENTENCE_LABEL_MIN_PER_CHUNK:
+        labels = self.bound_payloads.get("paragraph_labels") or []
+        if len(labels) >= _PARAGRAPH_LABEL_MIN_PER_CHUNK:
             return []
-        return [f"句标签覆盖: 仅标注 {len(labels)} 句（每章应自选 2-3 句）"]
+        return [f"情绪标签覆盖: 仅标注 {len(labels)} 段（每章应自选 2-3 段）"]
 
     def complete_active_chunk(self) -> BoundChunkAnnotation:
         """用于在收尾声明后冻结当前 chunk（覆盖率告警随 chunk 留痕）"""
         if self.phase != "chunk_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chunk")
-        if not self.chunk_finished:
-            raise ValueError("当前 chunk 尚未收尾：先调用 finish_chunk")
+        if not self.chapter_finished:
+            raise ValueError("当前 chunk 尚未收尾：先调用 finish_chapter")
         if self.ready_chunk is None:
             raise AnnotationInvariantError("已收尾但 ready_chunk 缺失，系统不变量被破坏")
-        warnings = [*self._dialogue_coverage_warnings(), *self._sentence_label_coverage_warnings()]
+        warnings = [*self._dialogue_coverage_warnings(), *self._paragraph_label_coverage_warnings()]
         chunk = self.ready_chunk.model_copy(update={"coverage_warnings": warnings}) if warnings else self.ready_chunk
         self.completed_chunks.append(chunk)
         # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
@@ -1574,7 +1566,6 @@ class AnnotationToolLedger:
                         }
                         for participant in item.participants
                     ],
-                    "causal_event_refs": list(item.causal_event_refs),
                 }
                 for item in payloads["events"]
             ]
@@ -1594,7 +1585,7 @@ class AnnotationToolLedger:
         return {
             "phase": self.phase,
             "chunk_id": self.current_chunk_id,
-            "chunk_finished": self.chunk_finished,
+            "chapter_finished": self.chapter_finished,
             # 2026-09-13 实时写入进度（仅供审计：模型看到的只有各小调用的回执）
             "written": self._written_counts(),
             "missing_content": self.missing_content_domains(),
@@ -1740,22 +1731,6 @@ def _normalize_query(query: str, *, tool_name: str) -> str:
     return normalized
 
 
-def _locate_sentence(chunk_text: str, sentence: str) -> tuple[int, int, str] | None:
-    """2026-09-07 用于把 agent 摘录句定位绑定到章文本唯一区间
-
-    NFC 归一后精确匹配；命中多处（重复句）取第一处并仍算唯一合法绑定，
-    句子本体以原文命中文本为准（NFC 等价差异归一）。
-    """
-    normalized_text = unicodedata.normalize("NFC", chunk_text)
-    normalized_sentence = unicodedata.normalize("NFC", sentence).strip()
-    if not normalized_sentence:
-        return None
-    index = normalized_text.find(normalized_sentence)
-    if index < 0:
-        return None
-    return index, index + len(normalized_sentence), normalized_sentence
-
-
 def _semantic_graph_value(value: Any) -> Any:
     """2026-08-07 用于递归移除图查询结果中的数据库定位字段"""
     if isinstance(value, dict):
@@ -1793,14 +1768,22 @@ _STAGE_FIELD_EXPECTATIONS: dict[str, str] = {
     "narrative_role": f"人物叙事功能：{_EVENT_NARRATIVE_ROLE_VALUES_TEXT}",
     "entity_type": "character / location / item / organization",
     "narrative_function": "冲突 / 铺垫 / 转折",
-    "payoff_likelihood": "high 或 medium",
-    "type": '"main"（顺延主因链）或 "secondary"（分支）',
+    "confidence": "high / medium / low（伏笔回收可能性三档）",
+    "payoff_likelihood": "high / medium / low",
+    "type": '"main"（顺延主因链）或 "secondary"（挂在当时主链尾）',
     "emotion": "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
     "emotional_valence": "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
-    "entity": "已登记实体的运行期编号（write_entity 回执 n / search_graph 回执 n）",
+    "entityid": "实体引用：整数=运行期编号 n（write_entity / search_graph 回执），字符串=本 chunk 自定的 el 键",
+    "speaker": "说话人实体引用：编号 n 或本 chunk 的 el 键",
     "candidate_index": "1 基候选序号（见 DialogueCandidates 表）",
-    "order": "同一棵树内未占用的序号",
-    "sentence": "从正文原样摘录的完整句子（不改写、不缩写）",
+    "el": "实体/事件节点的章内局部键（实体如 a1；事件根如 t1、子事件如 t1/e2），由你指定",
+    "isroot": "true=建事件树根（el=树键），false=子事件（el=树键/节点键）",
+    "characters": "参与者数组，每项 {entityid, role[, narrative_role, action, emotion]}（character 三态必填）",
+    "labels": "段落情绪标签数组，每项 {paragraph_id, emotion}（paragraph_id 取正文 ¶ 号）",
+    "paragraph_id": "本 chunk 内的段落号（正文 ¶ 后的数字）",
+    "tags": f"字符串数组，{ENTITY_TAGS_RULE_TEXT}",
+    "paragraph_ids": "全局段落 ID 列表",
+    "summary": "本章摘要（非空文本）",
 }
 _STAGE_FIELD_CODES: dict[str, str] = {
     "missing": "missing",
@@ -2151,7 +2134,7 @@ def build_search_tools(
         )
         views: list[dict[str, Any]] = []
         for item in results:
-            # tree_id 供 write_event_root(cause_tree_id)，root_node_id 供 resolve_foreshadowing_case
+            # root_node_id 供 resolve_foreshadowing_case 的树根/挂树事件引用
             ledger.authorized_event_ids.add(item.tree_id)
             ledger.authorized_event_ids.add(item.root_node_id)
             ledger.authorized_tree_ids.add(item.tree_id)
@@ -2282,13 +2265,16 @@ def build_annotation_tools(
         narrative_function: NarrativeFunction,
         pivot_moment: bool = False,
         cliffhanger: bool = False,
+        labels: list[ParagraphLabelInput] | None = None,
     ) -> str:
-        """写入当前 chunk 摘要与叙事指标（整域一次提交，写入即生效）
+        """写入当前章节摘要、叙事指标与段落情绪标签（整域一次提交，写入即生效）
 
         emotional_valence 为情绪分值整数 -2..2（-2 强烈负面 / -1 轻微负面 / 0 中性 /
         1 轻微正面 / 2 强烈正面）；summary 为本章该 chunk 的摘要（章节摘要由系统拼接）。
-        句级情绪标签不走本工具，用 write_sentence_label 逐句提交。
-        同一 chunk 重复提交按最后一次为准。
+        labels 为段落级情绪监督（每章自选 2-3 段）：paragraph_id 取正文 ¶ 后的数字
+        （两段式取读者报告证据的 paragraph_id），emotion 同 emotional_valence；
+        优先选情绪表达有代表性、或语气/标点有区分度的段落，也允许 0 分段。
+        同一 chunk 重复提交整域按最后一次为准（labels 同理，按段号去重后覆盖）。
         """
         payload = ChunkMetricsInput(
             summary=summary,
@@ -2296,6 +2282,7 @@ def build_annotation_tools(
             narrative_function=narrative_function,
             pivot_moment=pivot_moment,
             cliffhanger=cliffhanger,
+            labels=list(labels or []),
         )
         ledger.apply_metrics(payload)
         return json.dumps({"status": "written", "record": "metrics"}, ensure_ascii=False)
@@ -2304,6 +2291,7 @@ def build_annotation_tools(
     def write_entity(
         name: str,
         entity_type: EntityType,
+        el: EntityLocalKey,
         tags: Annotated[
             list[Annotated[str, Field(max_length=ENTITY_TAG_MAX_CHARS)]] | None,
             Field(max_length=ENTITY_TAG_MAX_COUNT, description=f"可空标签，{ENTITY_TAGS_RULE_TEXT}"),
@@ -2311,14 +2299,15 @@ def build_annotation_tools(
         description: str | None = None,
         attributes: dict[str, JsonValue | None] | None = None,
     ) -> str:
-        """登记或更新一个实体（一次一个），回执 n 是本 run 的运行期编号
+        """登记或更新一个实体（一次一个），el 是你自定的章内引用键、绑定即生效
 
         新实体用本章出现的名称；已登记实体用登记名，只提交本次变化的字段
         （description 一句话简介、tags 见参数说明、attributes 是 JSON Merge Patch）。
         实体大类一经登记不可变更；同一词条的不同身份用区分性名称
         （如"圣城"是 location、"圣城朝堂"是 organization）。
         图中已有实体时，提交前必须先 search_graph 查询已登记实体。
-        事件/关系/对话的实体引用一律用回执编号；编号即时可用。
+        事件/关系/对话的实体引用用 el 键（同轮先登记后引用，不等回执）或
+        回执/检索编号 n——write_event 的 characters[].entityid 等字段两者都收。
         """
         if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried \
                 and not ledger.entity_gate_passed:
@@ -2330,45 +2319,33 @@ def build_annotation_tools(
             description=description,
             attributes=attributes,
         )
-        number = ledger.apply_entity(entity)
+        number = ledger.apply_entity(entity, el=el)
         ledger.entity_gate_passed = True
+        bound_el = unicodedata.normalize("NFC", el).strip()
         return json.dumps(
-            {"status": "written", "record": f"entity/{entity.name}", "n": number},
+            {"status": "written", "record": f"entity/{entity.name}", "el": bound_el, "n": number},
             ensure_ascii=False,
         )
-
-    @tool
-    def write_sentence_label(sentence: str, emotion: int) -> str:
-        """写入一个自选句的整句情绪标签（一次一句；sentence 从正文原样摘录完整句子，不改写不缩写）
-
-        emotion 为 -2..2 整数分值（同 write_metrics.emotional_valence）。
-        每章自选 2-3 句：优先情绪表达有代表性、或语气/标点有区分度的句子，也允许 0 分句。
-        系统按原文定位绑定字符区间，找不到原句只拒绝这一条；同一句重复提交按最后一次为准。
-        """
-        record = ledger.apply_sentence_label(
-            SentenceLabelInput(sentence=sentence, emotion=emotion)
-        )
-        return json.dumps({"status": "written", "record": record}, ensure_ascii=False)
 
     @tool
     def write_dialogue(
         candidate_index: int,
         verdict: DialogueVerdict,
-        speaker: EntityNumber | None = None,
+        speaker: EntityRef | None = None,
         tone: Tone | None = None,
     ) -> str:
         """按候选编号写入一条对话候选的三态判断（一次一个候选，写入即生效）
 
         verdict: dialogue=真实对话 / inner_monologue=内心独白 /
         not_dialogue=误判候选（题字、描写被引号包裹等，此时只填 candidate_index 与 verdict）。
-        speaker 是说话人的运行期实体编号（write_entity 回执 n / search_graph 回执 n），
+        speaker 是说话人的实体引用——本 chunk 自定的 el 键或回执编号 n，
         无法确认时留 null；tone 取参数说明里的闭合枚举，没有贴合的用「其他」。
         判定与写入不必一轮做完：每条判定彼此独立、写入即生效，重写同序号按更新语义处理。
         """
         record = ledger.apply_dialogue(
             candidate_index=candidate_index,
             verdict=verdict,
-            speaker_number=speaker,
+            speaker_ref=speaker,
             tone=tone,
         )
         return json.dumps(
@@ -2385,14 +2362,14 @@ def build_annotation_tools(
 
     @tool
     def write_relation(
-        from_entity: EntityNumber,
-        to_entity: EntityNumber,
+        from_entity: EntityRef,
+        to_entity: EntityRef,
         relation_type: Annotated[
             RelationType,
             Field(description="闭合关系类型，方向与两端实体类型约束如下：\n" + relation_catalog_text()),
         ],
     ) -> str:
-        """写入一条本章确认存在的闭合关系边（一次一条，两端用运行期编号，写入即入图）
+        """写入一条本章确认存在的闭合关系边（一次一条，两端用 el 键或编号 n，写入即入图）
 
         关系类型是闭合词表：方向与两端实体类型约束见 relation_type 参数说明，端点类型
         不符会被拒（如 主从 只接受 character 起点、利益 两端都要 character/organization）；
@@ -2404,8 +2381,8 @@ def build_annotation_tools(
         同一对端点重写（含换关系类型）按整体替换处理，写入顺序不影响终态。
         """
         record, outcome = ledger.apply_relation(
-            from_number=from_entity,
-            to_number=to_entity,
+            from_ref=from_entity,
+            to_ref=to_entity,
             relation_type=relation_type,
         )
         return json.dumps(
@@ -2414,137 +2391,56 @@ def build_annotation_tools(
         )
 
     @tool
-    def write_event_root(
-        tree_key: TreeLocalKey,
+    def write_event(
+        el: EventLocalKey,
+        isroot: bool,
         description: str,
-        cause_tree_id: str | None = None,
         isforeshadowing: bool = False,
-        expected_payoff_family: str | None = None,
-        payoff_likelihood: PayoffLikelihood | None = None,
+        confidence: Confidence | None = None,
+        type: EventChildType | None = None,
+        characters: list[ParticipantArg] | None = None,
     ) -> str:
-        """创建一棵事件树的根事件（一次一棵，写入即生效）；tree_key 是本树的章内局部键（如 t1）
+        """写入一个事件节点：isroot=true 建事件树根（el=树键如 t1），false 加子事件（el=t1/e2）
 
-        description 是根事件的一句话描述（不超过 30 字）。
-        子事件用 write_event_child 挂在本树；参与者用 write_character_participation /
-        write_noncharacter_participation 挂到具体节点（根节点的 node_key 固定为 root）。
-        整棵树可以在一轮里按顺序写完：tree_key 由你指定、第一次写入即生效，
-        本轮后面的调用直接用它（不需要等回执，也不需要拆到下一轮）；
-        最后与全部写入同批调用 finish_chunk() 收尾即可。
-        cause_tree_id 只能填本章已建的 tree_key，或 search_event 回执里的历史树 id（可选），
-        一经确定不再变更。
-        伏笔三字段只属于根：isforeshadowing=true 时 expected_payoff_family 与
-        payoff_likelihood 必填，整棵树成为伏笔树、根即埋设事件。
-        同一 tree_key 重交按更新处理（根描述/伏笔属性改写，参与者保留）。
+        description 是一句话描述（根事件不超过 30 字）。整棵树可以在一轮里按顺序写完：
+        先根后子逐个调用，el 由你指定、写入即生效，同轮后面的调用直接可用（不等回执）；
+        树内先后=调用顺序，没有序号参数。子事件 type="main" 顺延主因链（成为新的
+        链尾）/"secondary" 挂在当时主链尾；伏笔属性（isforeshadowing/confidence）只属于根：
+        isforeshadowing=true 时 confidence 必填（high/medium/low），整棵树成为伏笔树、
+        根即埋设事件。
+        characters 是该节点的参与者数组（可省）：根节点也直接挂参与者。character 实体
+        每条必须带 narrative_role/action/emotion 三态（action 不超过 15 字、emotion
+        为 -2..2 整数；同一人物在本 chunk 内的动作不得重复），非 character（item/
+        organization/location）条目只填 entityid/role，"地点"角色只用于 location。
+        entityid 填本 chunk 的 el 键或回执/检索编号 n（编号引用历史实体）。
+        同 el 重写按更新处理：根改描述/伏笔属性，子改描述（type 不可改写，要改换键）；
+        characters 给出即整体替换该节点参与者列表，省略则保留。
         """
-        ledger.apply_event_root(
-            tree_key=tree_key,
+        record = ledger.apply_event(
+            el=el,
+            isroot=isroot,
             description=description,
-            cause_tree_id=cause_tree_id,
             isforeshadowing=isforeshadowing,
-            expected_payoff_family=expected_payoff_family,
-            payoff_likelihood=payoff_likelihood,
-        )
-        return json.dumps({"status": "written", "record": f"{tree_key}/{_ROOT_NODE_KEY}"}, ensure_ascii=False)
-
-    @tool
-    def write_event_child(
-        tree_key: TreeLocalKey,
-        node_key: NodeLocalKey,
-        order: int,
-        type: Literal["main", "secondary"],
-        description: str,
-    ) -> str:
-        """在已建的树上追加一个子事件（一次一个节点，写入即生效）
-
-        type: "main" 顺延主因链（成为新的链尾）/"secondary" 挂在当时主链尾。
-        node_key 是本树内该子事件的局部键（如 e1，不得占用 root），由你指定。
-        order 是同一棵树内的先后序号：新节点的 order 必须大于该树已有节点的最大 order
-        （实时建树按调用顺序生长，因此先写根、再按叙事顺序逐个写子事件；根与子事件、
-        各子事件之间都可以在同一轮里按顺序调用，回执不必等）。
-        子事件只有 type/description/参与者三个字段；伏笔字段与嵌套子事件都只在根上表达。
-        重交同一 node_key 只更新 description，type/order 不可改写（要改请换 node_key）。
-        """
-        ledger.apply_event_child(
-            tree_key=tree_key,
-            node_key=node_key,
-            order=order,
+            confidence=confidence,
             node_type=type,
-            description=description,
-        )
-        return json.dumps({"status": "written", "record": f"{tree_key}/{node_key}"}, ensure_ascii=False)
-
-    @tool
-    def write_character_participation(
-        tree_key: TreeLocalKey,
-        node_key: NodeLocalKey,
-        entity: EntityNumber,
-        role: EventParticipantRole,
-        narrative_role: RoleFunction,
-        action: str,
-        emotion: int,
-    ) -> str:
-        """登记一个 character 参与者及其人物动态状态（一次一条；三态必填，不自动填默认值）
-
-        node_key 取该树的节点键（根事件固定为 root）；根/子事件与本调用可以同轮按顺序提交。
-        role 是参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点；
-        narrative_role 是人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者；
-        action 是一句话概括人物在本事件中的动作（不超过 15 字）；
-        emotion 是 -2..2 整数分值（-2 强烈负面 … 2 强烈正面）。
-        只接受 character 实体；item/organization/location 用
-        write_noncharacter_participation。同一节点同一实体的重交按更新处理；
-        同一人物在本 chunk 内的动作不得重复（重复会被拒绝并指出已记在哪条记录）。
-        """
-        record = ledger.apply_participation(
-            tree_key=tree_key,
-            node_key=node_key,
-            entity_number=entity,
-            role=role,
-            narrative_role=narrative_role,
-            action=action,
-            emotion=emotion,
-            character=True,
-            tool_name="write_character_participation",
+            characters=characters,
         )
         return json.dumps({"status": "written", "record": record}, ensure_ascii=False)
 
     @tool
-    def write_noncharacter_participation(
-        tree_key: TreeLocalKey,
-        node_key: NodeLocalKey,
-        entity: EntityNumber,
-        role: EventParticipantRole,
-    ) -> str:
-        """登记一个非 character 参与者（item/organization/location，一次一条）
+    def finish_chapter() -> str:
+        """声明本章的语义写入已写完：本回合全部调用处理完后系统校验并冻结
 
-        node_key 取该树的节点键（根事件固定为 root）；根/子事件与本调用可以同轮按顺序提交。
-        role 是参与角色
-        （主体/客体/接收者/帮助者/反对者/见证者/地点，地点只用于 location 实体）。
-        本入口不接受 narrative_role/action/emotion——人物的动态状态只属于 character，
-        用 write_character_participation。
-        """
-        record = ledger.apply_participation(
-            tree_key=tree_key,
-            node_key=node_key,
-            entity_number=entity,
-            role=role,
-            character=False,
-            tool_name="write_noncharacter_participation",
-        )
-        return json.dumps({"status": "written", "record": record}, ensure_ascii=False)
-
-    @tool
-    def finish_chunk() -> str:
-        """声明当前 chunk 的语义写入已写完：本回合全部调用处理完后系统校验并冻结
-
-        本块的全部内容（含整棵事件树）都可以在同一批调用里按顺序写完，末尾直接跟本工具，
-        不必为了"先看回执"再拆一轮：局部键由你指定、写入即生效，同批后面的调用直接可用。
+        本章的全部内容（含整棵事件树）都可以在同一批调用里按顺序写完，末尾直接跟本工具，
+        不必为了"先看回执"再拆一轮：局部键（实体 el、事件树键）由你指定、写入即生效，
+        同批后面的调用直接可用。
         写入是实时生效的，本工具只做收尾：唯一会拒绝收尾的是指标（write_metrics）
         尚未提交——那时回执给出 missing_record，先补指标再收尾。
         本回合其他调用有没有失败与收尾无关：失败的那条只回滚它自己（回执已单独说明原因），
         没进图/没进载荷，收尾按已写入内容完成即可，不必为了收尾去重交失败记录。
         没有内容的领域不必造假数据，直接收尾即可（收尾回执给出各域写入条数）。
-        收尾判定在本回合全部调用处理完后生效，通过后本 chunk 冻结、不再接受写入；
-        不调用本工具，chunk 不会冻结。
+        收尾判定在本回合全部调用处理完后生效，通过后本章冻结、不再接受写入；
+        不调用本工具，本章不会冻结。
         """
         return json.dumps({"status": "pending"}, ensure_ascii=False)
 
@@ -2711,7 +2607,7 @@ def build_annotation_tools(
     def resolve_dialogue_case(
         case_number: CaseNumber,
         reason: str,
-        speaker: EntityNumber | None = None,
+        speaker: EntityRef | None = None,
         tone: Tone | None = None,
         description: str | None = None,
         is_inner_monologue: bool | None = None,
@@ -2722,8 +2618,8 @@ def build_annotation_tools(
         （含 push_case 登记的对话疑点）；正文 DialogueCandidates 无案例编号，
         说话人/语气按 candidate_index 经对话域回执提交，两类编号互不通用。
 
-        2026-09-11 speaker 为运行期实体编号（write_entity 回执 n /
-        search_graph 回执 n）；tone 取 write_dialogue 参数说明里的同一套闭合枚举。
+        2026-09-14 speaker 为实体引用（本 chunk 的 el 键或回执编号 n）；
+        tone 取参数说明里的同一套闭合枚举。
         """
         ledger.admit_case_reason(reason, tool_name="resolve_dialogue_case")
         details = _resolve_case_details(
@@ -2734,16 +2630,15 @@ def build_annotation_tools(
         _require_dialogue_case(details)
         resolved_speaker: str | None = None
         if speaker is not None:
-            if ledger.graph is None:
-                raise AnnotationInvariantError("resolve_dialogue_case speaker 编号解析需要常驻事实图，graph 缺失")
-            resolved_speaker = ledger.graph.resolve_number(
+            resolved_speaker = ledger.resolve_entity_ref(
                 speaker,
-                label="resolve_dialogue_case.speaker",
+                record=f"case/{case_number}",
+                field="speaker",
             )
             _require_action_entity(
                 ledger,
                 resolved_speaker,
-                expected_types=("character",),
+                expected_types=(EntityType.CHARACTER,),
                 label="resolve_dialogue_case.speaker",
             )
         resolved = ResolvedCase(
@@ -2764,8 +2659,8 @@ def build_annotation_tools(
     def resolve_fact_case(
         case_number: CaseNumber,
         reason: str,
-        from_entity: EntityNumber,
-        to_entity: EntityNumber,
+        from_entity: EntityRef,
+        to_entity: EntityRef,
         relation_type: Annotated[
             RelationType,
             Field(description="闭合关系类型，方向与两端实体类型约束如下：\n" + relation_catalog_text()),
@@ -2778,8 +2673,8 @@ def build_annotation_tools(
         本工具只解决案例池里已登记的关系疑点（案例编号来自 search_pool 或 push_case
         回执）；本章正文确认的关系直接用写边工具提交，不要为它先 push_case 再解决。
 
-        2026-09-11 端点 from_entity/to_entity 为运行期实体编号（write_entity 回执
-        numbers / search_graph 回执 n）；change_kind 取值：新增/强化/削弱/解除/修正/取代/撤回。
+        2026-09-14 端点 from_entity/to_entity 为实体引用（本 chunk 的 el 键或
+        write_entity/search_graph 回执编号 n）；change_kind 取值：新增/强化/削弱/解除/修正/取代/撤回。
         relation_type 的闭合词表与两端实体类型约束同在建边工具（见本参数说明）；
         解除/修正/取代/撤回要求该边当前活动，对不存在的边操作会报错并回滚本回合。
 
@@ -2800,8 +2695,8 @@ def build_annotation_tools(
             raise AnnotationInvariantError("resolve_fact_case 需要常驻事实图，graph 缺失")
         # 2026-09-11 模型面中文词 → 内部英文值域（持久化/API/前端契约零变化）
         internal_change_kind = RELATION_CHANGE_KIND_LABELS[str(change_kind)]
-        from_name = ledger.graph.resolve_number(from_entity, label="resolve_fact_case.from_entity")
-        to_name = ledger.graph.resolve_number(to_entity, label="resolve_fact_case.to_entity")
+        from_name = ledger.resolve_entity_ref(from_entity, record=f"case/{case_number}", field="from_entity")
+        to_name = ledger.resolve_entity_ref(to_entity, record=f"case/{case_number}", field="to_entity")
         _require_action_entity(
             ledger,
             from_name,
@@ -2848,8 +2743,7 @@ def build_annotation_tools(
         foreshadowing_action: str,
         root_event_id: str,
         event_id: str,
-        expected_payoff_family: str | None = None,
-        payoff_likelihood: PayoffLikelihood | None = None,
+        payoff_likelihood: Confidence | None = None,
         strength: Confidence | None = None,
     ) -> str:
         """2026-08-11 用于把本章事件挂进伏笔树（续接或回收）
@@ -2859,10 +2753,10 @@ def build_annotation_tools(
         search_event 树根视图的 root_node_id；章内局部键写入即生效，随时可用。
         foreshadowing_action 只能是 "reinforce"（续接）
         或 "payoff"（回收，挂入后伏笔树收束为 likely_paid_off）。可选更新根属性
-        expected_payoff_family/payoff_likelihood/strength；判断并非伏笔则用
+        payoff_likelihood/strength（high/medium/low）；判断并非伏笔则用
         close_case。活跃伏笔树的发现通道是 search_event（树根视图带
-        foreshadowing_status）；新伏笔树在事件域以 isforeshadowing=true 建根。
-        case_number 可以省略：挂树只认树根与挂树事件的键，案例仅是池内记账，
+        foreshadowing_status）；新伏笔树用 write_event(isroot=true, isforeshadowing=true)
+        建根。case_number 可以省略：挂树只认树根与挂树事件的键，案例仅是池内记账，
         省略时服务端自动登记一条「伏笔疑点」案例并随回执给出编号；池里已有
         对应疑点案例时把 search_pool 回执里的编号传进来即可。"""
         ledger.admit_case_reason(reason, tool_name="resolve_foreshadowing_case")
@@ -2911,7 +2805,7 @@ def build_annotation_tools(
             raise AnnotationInputError(
                 f"root_event_id 不是伏笔树的根（埋设事件）: {root_event_id}；"
                 "活跃伏笔树用 search_event 检索（树根视图 isforeshadow_setup=true），"
-                "新伏笔树在事件域以 isforeshadowing=true 声明"
+                "新伏笔树用 write_event(isroot=true, isforeshadowing=true) 建根"
             )
         # 全部挂树校验通过后才补登记案例：被拒的调用不得在池里留下孤儿活动案例
         if details is None:
@@ -2932,7 +2826,6 @@ def build_annotation_tools(
             foreshadowing_action=action,
             foreshadowing_root_event_id=root_event_id,
             foreshadowing_event_id=event_id,
-            expected_payoff_family=expected_payoff_family,
             payoff_likelihood=payoff_likelihood,
             strength=strength,
         )
@@ -3036,14 +2929,10 @@ def build_annotation_tools(
     tools = [
         write_entity,
         write_metrics,
-        write_sentence_label,
-        write_event_root,
-        write_event_child,
-        write_character_participation,
-        write_noncharacter_participation,
+        write_event,
         write_relation,
         write_dialogue,
-        finish_chunk,
+        finish_chapter,
         *build_search_tools(query_service, ledger),
         resolve_dialogue_case,
         resolve_fact_case,

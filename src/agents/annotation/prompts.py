@@ -58,47 +58,61 @@ def build_case_pool_notice() -> str:
     )
 
 
+def _render_paragraph_numbered_text(chunk_text: str, paragraph_info: ChunkParagraphInfo | None) -> str:
+    """2026-09-14 段落级监督：按 ChunkParagraphInfo 在每段前注入 ¶<全局段落号> 标记
+
+    号码=全局 paragraph_id（与读者报告 evidence.paragraph_id 同一空间）。
+    标记只用于展示，段落文本本体逐字保留；无 paragraph_info 时原样返回。
+    """
+    if paragraph_info is None:
+        return chunk_text
+    parts: list[str] = []
+    for paragraph_id, text in zip(paragraph_info.paragraph_ids, paragraph_info.texts, strict=True):
+        parts.append(f"¶{paragraph_id}\n{text}")
+    rendered = "".join(parts)
+    return rendered if parts else chunk_text
+
+
 def build_chunk_message(
     *,
     chunk_index: int,
     chunk_total: int,
     chunk_text: str,
     candidates: list[DialogueCandidate],
+    paragraph_info: ChunkParagraphInfo | None = None,
 ) -> str:
     """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选
 
     2026-08-22事件不再携带段落锚点，移除 ¶N 段落标记注入。
-    2026-09-07 句级监督：新增自选句标签区块（2026-09-13 起提交渠道=write_sentence_label
-    逐句小调用；选句标准见该工具 docstring）。
+    2026-09-14 段落级监督：¶ 标记以全局段落号回归，write_metrics.labels
+    按 ¶ 号提交整段情绪标签（选段标准见该工具 docstring）。
     2026-09-10 候选字段 index 改名 candidate_index，消除与案例编号空间的混同
     （run a83fae3d 思考实测映射推理 1725 次、显式困惑 39 次）。
     2026-09-11 案例改检索制：ActiveCases 区块从编号表降级为通道说明，案例
     编号只由 search_pool 回执产生。
     """
-    candidate_views = [
-        {
-            "candidate_index": index,
-            "id": candidate.candidate_key,
-            "text": candidate.content,
-            "parse_status": candidate.parse_status,
-        }
-        for index, candidate in enumerate(candidates, start=1)
-    ]
+    candidate_views = _candidate_views(candidates)
+    label_section = (
+        "<ParagraphLabels>\n"
+        "请从上方正文中自选 2-3 个段落，随 write_metrics 的 labels 参数提交整段情绪标签"
+        "（每项 {paragraph_id, emotion}，paragraph_id 取段首 ¶ 后的数字，emotion 为 -2..2"
+        " 整数分值，同 emotional_valence）。"
+        "选择权在模型：优先选情绪表达有代表性、或语气/标点有区分度的段落；也允许选 0 分段。\n"
+        "</ParagraphLabels>"
+        if paragraph_info is not None
+        else ""
+    )
     sections = [
         f'<CurrentChunk order="{chunk_index}/{chunk_total}">\n'
-        f"{chunk_text}\n"
+        f"{_render_paragraph_numbered_text(chunk_text, paragraph_info)}\n"
         "</CurrentChunk>",
         build_case_pool_notice(),
         "<DialogueCandidates>\n"
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
-        "<SentenceLabels>\n"
-        "请从上方正文中自选 2-3 个完整句子（原样摘录，不改写），用 write_sentence_label "
-        "逐句提交整句情绪标签（emotion 为 -2..2 整数分值，同 write_metrics.emotional_valence）。"
-        "选择权在模型：优先选情绪表达有代表性、或语气/标点有区分度的句子；也允许选 0 分句。\n"
-        "</SentenceLabels>",
+        label_section,
     ]
-    return "\n\n".join(sections)
+    return "\n\n".join(section for section in sections if section)
 
 
 def build_reader_block_message(
@@ -128,7 +142,7 @@ def build_reader_block_message(
         "</DialogueCandidates>",
         "<ReportingContract>\n"
         "读完本块后，把全部观察经一次 send_message 一次性上报：整个会话只允许调用一次，"
-        "载荷按观察类分组（entities/relations/sentence_labels/dialogues/cases/"
+        "载荷按观察类分组（entities/relations/paragraph_labels/dialogues/cases/"
         "event_trees/notes 为数组，metric 为单对象），没有观察的组省略；\n"
         "每条观察必须自带 evidence=[{paragraph_id, quote}]（本块段落内的逐字摘录，"
         "NFC 归一后必须唯一命中），notes 可省略；\n"
@@ -138,7 +152,8 @@ def build_reader_block_message(
         "（块内 1 基，不是全章序号）；\n"
         "案例相关只陈述文本侧事实（signal: 新疑点/埋设/加强/坐实/回收/证伪），"
         "可用 search_pool 匹配并原样带上案例描述（matched_case），但不裁决；\n"
-        "句标签不限条数：把本块内值得打标的句子全部上报，最终提交哪几句由写者决定；\n"
+        "段落标签不限条数：把本块内值得打标的段落全部上报（paragraph_id 取正文 ¶ 标记），"
+        "最终提交哪几段由写者决定；\n"
         "格式或枚举不符也照常送达（回执 warnings 会指出问题），不需要重发；\n"
         "块边界处疑似与相邻块共构的线索用 notes 上报，不做跨块推断。\n"
         "</ReportingContract>",
@@ -167,12 +182,13 @@ def build_writer_chapter_message(
         "<DialogueCandidates>\n"
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
-        "<SentenceLabels>\n"
-        "请从读者上报的 sentence_labels 观察中自选 2-3 个句子，用 write_sentence_label "
-        "逐句提交整句情绪标签（emotion 为 -2..2 整数分值）。"
-        "选择由你裁量：优先选情绪表达有代表性、或语气/标点有区分度的句子，"
-        "兼顾跨块分布；句子必须原样摘录不改写。\n"
-        "</SentenceLabels>",
+        "<ParagraphLabels>\n"
+        "请从读者上报的证据中自选 2-3 个段落，随 write_metrics 的 labels 参数提交整段"
+        "情绪标签（每项 {paragraph_id, emotion}，paragraph_id 取报告 evidence 里的"
+        " paragraph_id，emotion 为 -2..2 整数分值）。"
+        "选择由你裁量：优先选情绪表达有代表性、或语气/标点有区分度的段落，"
+        "兼顾跨块分布；标签的段落必须有报告证据支撑。\n"
+        "</ParagraphLabels>",
     ]
     return "\n\n".join(sections)
 

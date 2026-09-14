@@ -20,7 +20,7 @@ from typing import Any
 REPORT_LIST_GROUPS = (
     "entities",
     "relations",
-    "sentence_labels",
+    "paragraph_labels",
     "dialogues",
     "cases",
     "event_trees",

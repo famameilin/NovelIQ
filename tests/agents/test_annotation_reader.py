@@ -239,19 +239,19 @@ class TestSendMessageReport:
         assert delivered[0].report["dialogues"][0]["chapter_candidate_index"] == 7
 
     @pytest.mark.asyncio
-    async def test_sentence_label_emotion_out_of_range_warns_and_delivers(self) -> None:
+    async def test_paragraph_label_emotion_out_of_range_warns_and_delivers(self) -> None:
+        """2026-09-14 句标签退役：观察组改名 paragraph_labels（{paragraph_id, emotion}），
+        emotion 越界 -2..2 走 warnings、照常送达"""
         ledger = _reader_ledger()
         delivered: list[ReaderReport] = []
         send_message = _reader_tools(ledger, delivered=delivered)["send_message"]
 
         receipt = json.loads(
-            await send_message.ainvoke(
-                {"sentence_labels": [{"sentence": "秦穆重申禁碑以南不可进入。", "emotion": 5}]}
-            )
+            await send_message.ainvoke({"paragraph_labels": [{"paragraph_id": 102, "emotion": 5}]})
         )
 
         assert any("-2..2" in warning for warning in receipt["warnings"])
-        assert delivered[0].report["sentence_labels"][0]["emotion"] == 5
+        assert delivered[0].report["paragraph_labels"][0]["emotion"] == 5
 
     @pytest.mark.asyncio
     async def test_note_without_evidence_no_warning(self) -> None:
@@ -487,6 +487,7 @@ class TestWriterAdmission:
         2026-09-13 取消暂存：实体登记从整批 write_entities 改为一次一个 write_entity，
         准入改为逐条写入即判定——报告外的名字依旧被拒绝（准入失败），但同批合法的名字
         不再被整条失败牵连（失败不丢已写入记录），这是单条记录边界下最接近的等价物。
+        2026-09-14 write_entity 另必填模型自定的 el 章内引用键（apply_entity 的 el 参数）。
         """
         from src.agents.annotation.schema import EntityInput
 
@@ -498,9 +499,9 @@ class TestWriterAdmission:
             )
         ]
 
-        ledger.apply_entity(EntityInput(name="白芷", entity_type="character"))
+        ledger.apply_entity(EntityInput(name="白芷", entity_type="character"), el="白芷")
         with pytest.raises(ValueError, match="准入失败"):
-            ledger.apply_entity(EntityInput(name="从未上报的实体", entity_type="character"))
+            ledger.apply_entity(EntityInput(name="从未上报的实体", entity_type="character"), el="从未上报的实体")
 
         assert set(ledger.written_entities) == {"白芷"}
 
@@ -517,7 +518,7 @@ class TestWriterAdmission:
             )
         ]
 
-        number = ledger.apply_entity(EntityInput(name="白芷", entity_type="character"))
+        number = ledger.apply_entity(EntityInput(name="白芷", entity_type="character"), el="白芷")
 
         assert number is not None
         assert set(ledger.written_entities) == {"白芷"}

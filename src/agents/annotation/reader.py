@@ -30,7 +30,7 @@ from .schema import (
     DialogueVerdict,
     EntityInput,
     NarrativeFunction,
-    SentenceLabelInput,
+    ParagraphLabelInput,
     require_tone,
 )
 from .tools import (
@@ -156,12 +156,12 @@ def _check_payload(group: str, item: dict[str, Any], *, ledger: AnnotationToolLe
                 require_tone(tone)
             except ValueError as exc:
                 raise ValueError(f"dialogues.tone 不符合合同: {exc}") from None
-    elif group == "sentence_labels":
+    elif group == "paragraph_labels":
         try:
-            SentenceLabelInput.model_validate(item)
+            ParagraphLabelInput.model_validate(item)
         except Exception as exc:
             raise ValueError(
-                "sentence_labels 载荷不符合句标签合同（{sentence, emotion}，emotion 为 -2..2 整数）: "
+                "paragraph_labels 载荷不符合段落标签合同（{paragraph_id, emotion}，emotion 为 -2..2 整数）: "
                 f"{exc}"
             ) from None
     elif group == "relations":
@@ -203,7 +203,7 @@ def _build_send_message_tool(
     def send_message(
         entities: list[dict[str, Any]] | None = None,
         relations: list[dict[str, Any]] | None = None,
-        sentence_labels: list[dict[str, Any]] | None = None,
+        paragraph_labels: list[dict[str, Any]] | None = None,
         dialogues: list[dict[str, Any]] | None = None,
         cases: list[dict[str, Any]] | None = None,
         event_trees: list[dict[str, Any]] | None = None,
@@ -212,7 +212,7 @@ def _build_send_message_tool(
     ) -> str:
         """2026-09-12 章内并行用于把本块全部观察一次性上报给写者（整个会话只允许调用一次）
 
-        - 载荷按观察类分组：entities/relations/sentence_labels/dialogues/cases/
+        - 载荷按观察类分组：entities/relations/paragraph_labels/dialogues/cases/
           event_trees/notes 为数组，metric 为单对象；没有观察的组省略即可；
         - 每条观察必须自带 evidence=[{paragraph_id, quote}]（本块段落内的逐字
           摘录，NFC 归一后必须唯一命中），notes 可省略；
@@ -220,7 +220,8 @@ def _build_send_message_tool(
         - dialogues 的 candidate_index 必须取本块 <DialogueCandidates> 表里展示的
           编号（块内 1 基，不是全章序号）；
         - 案例只陈述文本侧事实（signal: 新疑点/埋设/加强/坐实/回收/证伪）不裁决；
-        - 句标签不限条数，本块值得打标的句子全部上报，选哪几句由写者决定；
+        - 段落标签不限条数，本块值得打标的段落全部上报（paragraph_id 取正文 ¶ 标记），
+          最终提交哪几段由写者决定；
         - 格式或枚举不符也照常送达（回执 warnings 指出问题），不需要重发。
         """
         if ledger.phase != "chunk_open":
@@ -234,7 +235,7 @@ def _build_send_message_tool(
         provided_groups: dict[str, Any] = {
             "entities": entities,
             "relations": relations,
-            "sentence_labels": sentence_labels,
+            "paragraph_labels": paragraph_labels,
             "dialogues": dialogues,
             "cases": cases,
             "event_trees": event_trees,

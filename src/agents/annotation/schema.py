@@ -44,29 +44,29 @@ def coerce_emotion_score(value: object) -> int:
     return 0
 
 
-# 2026-09-11 实体引用一律用运行期编号（write_entity 回执 n / search_graph 回执 n）；
-# 名称是文本面的东西，进入写入合同前必须先换成编号，这里把"写名字"的失败直接转成可自纠报错
-ENTITY_NUMBER_FIELD_HINT = "（编号取自 write_entity 回执 n 或 search_graph 回执 n；不接受实体名称）"
+# 2026-09-14 写入面重构：实体引用 = 运行期编号 n 或本 chunk 内 write_entity 自定的 el 键。
+# el 由模型指定、登记即绑定（同回合后面的调用直接可用，不等回执）；名称仍是非法引用，
+# 在账本解析点按 unknown_el 拒绝并列出已知键。
+ENTITY_REF_FIELD_HINT = (
+    "（整数=write_entity 回执 n / search_graph 回执 n 的运行期编号；"
+    "字符串=本 chunk write_entity 自定的 el 键；不接受实体名称）"
+)
 
 
-def _reject_entity_name_text(value: object) -> object:
-    """2026-09-11 用于编号字段收到实体名称时给出直接可自纠的报错（纯数字字符串放行给 int 解析）"""
-    if isinstance(value, str) and not value.strip().isdigit():
-        raise ValueError(
-            f"实体引用只接受编号（整数），收到名称 {value.strip()}："
-            "请先 search_graph 按名称查询（新实体先 write_entity 登记），用回执编号引用"
-        )
+def _reject_blank_entity_ref(value: object) -> object:
+    """用于拒绝空引用；数字字符串放行给 int 解析，其余字符串按 el 键进入账本解析"""
+    if isinstance(value, str) and not value.strip():
+        raise ValueError("实体引用不能为空")
     return value
 
 
-def entity_number_field_description(label: str) -> str:
-    """2026-09-11 用于统一渲染编号字段描述（编号来源与禁令同一文案）"""
-    return f"{label}{ENTITY_NUMBER_FIELD_HINT}"
+def entity_ref_field_description(label: str) -> str:
+    """2026-09-14 用于统一渲染实体引用字段描述（两种键空间与禁令同一文案）"""
+    return f"{label}{ENTITY_REF_FIELD_HINT}"
 
 
-# 2026-09-11 可复用的编号字段类型：写名称时在参数校验层给出可自纠报错，
-# 供工具签名与 pydantic 模型共用（编号语义见 resolve_number）
-EntityNumber = Annotated[int, BeforeValidator(_reject_entity_name_text)]
+# 可复用的实体引用类型：供工具签名与参与者数组模型共用（解析见 ledger.resolve_entity_ref）
+EntityRef = Annotated[int | str, BeforeValidator(_reject_blank_entity_ref)]
 
 
 class NarrativeFunction(StrEnum):
@@ -78,7 +78,12 @@ class NarrativeFunction(StrEnum):
 
 
 class Confidence(StrEnum):
-    """2026-08-07 用于约束伏笔置信度（Agent 可见合同仅伏笔使用）"""
+    """2026-08-07 用于约束伏笔置信度
+
+    2026-09-14 写入面重构：成为伏笔唯一的可能性词表——write_event 根的 confidence
+    与 resolve_foreshadowing_case.strength 共用（旧 PayoffLikelihood 二值枚举退役，
+    落库列名 payoff_likelihood 不变，值域扩为三档）。
+    """
 
     HIGH = "high"
     MEDIUM = "medium"
@@ -242,14 +247,29 @@ class RelationType(StrEnum):
     LEADER = "领导"
 
 
-class PayoffLikelihood(StrEnum):
-    """2026-08-07 用于约束伏笔回收可能性（系统内部默认值使用）"""
+class EntityType(StrEnum):
+    """实体大类闭合取值域（2026-09-14 由 Literal 转真 enum，与 tone 回枚举同一裁决）
 
-    HIGH = "high"
-    MEDIUM = "medium"
+    character=有生命的（含人/动物/灵兽/妖/器灵），item=无生命物品，
+    location=地点，organization=组织；有生命就是 character，不要按戏份调整。
+    """
+
+    CHARACTER = "character"
+    LOCATION = "location"
+    ITEM = "item"
+    ORGANIZATION = "organization"
 
 
-EntityType = Literal["character", "location", "item", "organization"]
+class EventChildType(StrEnum):
+    """子事件在树内的位置（2026-09-14 由 Literal 转真 enum）
+
+    main=顺延主因链（成为新的链尾）；secondary=挂在当时主链尾（次因分支）。
+    """
+
+    MAIN = "main"
+    SECONDARY = "secondary"
+
+
 Directionality = Literal["directed", "bidirectional"]
 RelationSemantics = Literal["ordinary", "same_character"]
 CaseType = str
@@ -259,16 +279,18 @@ DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 
 # 2026-08-19 事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
 # 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
+# 2026-09-14 模型面 type 参数用 EventChildType（root 由 isroot=true 表达，不外露）
 EventCauseRole = Literal["root", "main", "secondary"]
 
-_ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = ("character", "organization")
-_CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = ("character",)
-_LOCATION_ENTITY_TYPES: tuple[EntityType, ...] = ("location",)
+_ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.CHARACTER, EntityType.ORGANIZATION)
+_CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.CHARACTER,)
+_ORGANIZATION_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.ORGANIZATION,)
+_LOCATION_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.LOCATION,)
 _POSITIONED_ENTITY_TYPES: tuple[EntityType, ...] = (
-    "character",
-    "item",
-    "organization",
-    "location",
+    EntityType.CHARACTER,
+    EntityType.ITEM,
+    EntityType.ORGANIZATION,
+    EntityType.LOCATION,
 )
 
 
@@ -346,7 +368,7 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
         "directionality": "directed",
         "semantics": "ordinary",
         "from_types": _ACTOR_ENTITY_TYPES,
-        "to_types": ("organization",),
+        "to_types": _ORGANIZATION_ENTITY_TYPES,
     },
     "位于": {
         "directionality": "directed",
@@ -445,6 +467,17 @@ class EntityDirectoryInput(StrictModel):
     entities: list[EntityInput] = Field(default_factory=list)
 
 
+class ParagraphLabelInput(StrictModel):
+    """2026-09-14 段落级情绪监督条目（随 write_metrics.labels 提交，句级口径退役）
+
+    paragraph_id 是全局段落号：单块章正文每段以 ¶<id> 标号，两段式写者取读者
+    报告 evidence 的 paragraph_id——两条通道同一个号码空间。
+    """
+
+    paragraph_id: int = Field(ge=0, description="全局段落号（正文 ¶ 后的数字 / 报告证据的 paragraph_id）")
+    emotion: int = Field(ge=-2, le=2, description=f"整段情绪分值。{EMOTION_SCORE_DESCRIPTION}")
+
+
 class ChunkMetricsInput(StrictModel):
     """2026-08-07 用于提交当前 chunk 摘要和叙事指标"""
 
@@ -453,11 +486,19 @@ class ChunkMetricsInput(StrictModel):
     narrative_function: NarrativeFunction
     pivot_moment: bool = False
     cliffhanger: bool = False
+    labels: list[ParagraphLabelInput] = Field(
+        default_factory=list,
+        description="段落级情绪标签（每章自选 2-3 段；按 paragraph_id 去重，重复提交以最后一次为准）",
+    )
 
     @model_validator(mode="after")
     def normalize_summary(self) -> ChunkMetricsInput:
-        """2026-08-07 用于规范化当前 chunk 摘要"""
+        """2026-08-07 用于规范化当前 chunk 摘要；labels 按 paragraph_id 去重（后写覆盖）"""
         self.summary = normalize_semantic_text(self.summary, label="summary")
+        deduped: dict[int, ParagraphLabelInput] = {}
+        for label in self.labels:
+            deduped[label.paragraph_id] = label
+        self.labels = list(deduped.values())
         return self
 
 
@@ -497,9 +538,9 @@ class DialogueInput(StrictModel):
 class EventParticipantInput(StrictModel):
     """2026-08-30 用于同时描述事件参与角色和人物动态状态（内部系统形态，实体=规范名）
 
-    2026-09-13 小调用改造后只保留内部形态：模型面参与记录由
-    write_character_participation / write_noncharacter_participation 逐条提交，
-    服务端在领域结束时把编号翻成规范名并组装成本形态。
+    2026-09-13 小调用改造后只保留内部形态；2026-09-14 模型面参与记录由
+    write_event 的 characters 数组提交（ParticipantArg），服务端在写入点把
+    实体引用翻成规范名并组装成本形态。
     """
 
     entity: str = Field(
@@ -562,6 +603,69 @@ class EventParticipantInput(StrictModel):
         return self
 
 
+class ParticipantArg(StrictModel):
+    """2026-09-14 模型面事件参与者条目（write_event.characters 数组元素）
+
+    character 实体必填三态（narrative_role/action/emotion，人物动态状态的唯一
+    数据源），非 character 只填 entityid/role——两形态在账本按登记类型强制分流。
+    """
+
+    entityid: EntityRef = Field(description=entity_ref_field_description("参与者实体引用"))
+    role: EventParticipantRole = Field(
+        description="参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点角色只用于 location 实体）"
+    )
+    narrative_role: RoleFunction | None = Field(
+        default=None,
+        description="仅 character 参与者必填的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者",
+    )
+    action: str | None = Field(
+        default=None,
+        min_length=1,
+        description="仅 character 参与者必填：一句话概括人物在本事件中的动作（不超过 15 字）",
+    )
+    emotion: int | None = Field(
+        default=None,
+        ge=-2,
+        le=2,
+        description=f"仅 character 参与者必填：动作伴随的情绪分值。{EMOTION_SCORE_DESCRIPTION}",
+    )
+
+    @field_validator("narrative_role", mode="before")
+    @classmethod
+    def _reject_event_role_words(cls, value: object) -> object:
+        """2026-08-30 用于阻止事件专属角色词进入人物功能字段"""
+        if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
+            raise ValueError(
+                "narrative_role 不接受 "
+                f"{value.strip()}：地点、行动者等只用于事件参与者的 role 字段；"
+                "人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者"
+            )
+        return value
+
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def _reject_tone_words_in_emotion(cls, value: object) -> object:
+        """2026-08-30 用于阻止对话语气词进入人物情绪分值字段"""
+        if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
+            raise ValueError(
+                f"emotion 不接受 {value.strip()}：该字段是整数分值 -2..2"
+                "（-2 强烈负面 … 2 强烈正面），语气词是对话 tone 字段的取值"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def normalize_participant(self) -> ParticipantArg:
+        """2026-09-14 用于规范化动作并按组校验三态字段"""
+        if self.action is not None:
+            self.action = normalize_semantic_text(self.action, label="characters[].action")
+        observation_fields = (self.narrative_role, self.action, self.emotion)
+        if any(value is not None for value in observation_fields) and not all(
+            value is not None for value in observation_fields
+        ):
+            raise ValueError("character 参与者的 narrative_role/action/emotion 必须同时提供；非 character 三者都不填")
+        return self
+
+
 # 2026-08-18 事件森林/DAG 证据类型：统一非空列表，仅允许 GraphEvidence 或 TextEvidence
 class TextEvidence(StrictModel):
     """2026-08-18 用于保存原文段落锚点证据（段落 ID + 字符范围）"""
@@ -598,7 +702,8 @@ EvidenceItem = Annotated[
 class EventTreeHistoryResult(StrictModel):
     """2026-08-22search_event 暴露的历史事件树视图
 
-    一棵树 = 一个完整事件；跨章树（大事件）通过 cause_tree_id 因果链跨越多章。
+    一棵树 = 一个完整事件；2026-09-14 起跨章因果链（cause_tree_id）退役，
+    树不跨章，root_event_id/tree_id 仅服务于伏笔挂树。
     """
 
     tree_id: str = Field(min_length=1)
@@ -609,7 +714,6 @@ class EventTreeHistoryResult(StrictModel):
     is_foreshadow_setup: bool = False
     # 2026-09-13 伏笔入森林：树根视图携带伏笔属性（发现活跃伏笔的检索通道）
     foreshadowing_status: str | None = None
-    expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     cross_chapter: bool = False
     root_node_id: str = Field(min_length=1, description="树根节点 id（落库 event_id）")
@@ -620,9 +724,10 @@ class EventTreeHistoryResult(StrictModel):
 class ChunkParagraphInfo:
     """2026-08-18 用于保存当前 chunk 内段落坐标映射（注入 prompt 标记和派生事件锚点）
 
-    段落标记方案：prompt 在每个段落起始处注入 ¶N 标记（N 为 0 基 chunk 内序号）；
-    Agent 提交 anchor_paragraph_ids 时使用这些 0 基序号，服务端按本映射校验并派生
-    字符范围、文本哈希和 TextEvidence。
+    2026-09-14 段落级监督：prompt 在每个段落起始处注入 ¶<全局paragraph_id> 标记
+    （与读者报告 evidence.paragraph_id 同一号码空间），write_metrics.labels 提交
+    的 paragraph_id 即该号码，服务端按本映射校验归属；三组列表内部仍按 0 基
+    chunk 内序号索引。
     """
 
     # 0 基 chunk 内序号 → 全局 paragraph_id
@@ -742,9 +847,11 @@ class BoundDialogue(StrictModel):
 class BoundEvent(StrictModel):
     """2026-08-22事件树节点（服务端派生角色、id；章级证据由持久化层盖章）
 
-    节点由 write_event 服务端生成：node_id 即最终落库 event_id，
-    因果边仅允许 root 携带跨章前驱（cause_tree_id 的根节点），环构造性不可能。
+    节点由 write_event 服务端生成：node_id 即最终落库 event_id。
     2026-08-22 重构：证据升为章级单份，节点不再携带锚点/字符区间/哈希/证据。
+    2026-09-14 写入面重构：cause_tree_id 退役（跨章因果边产生源下线，
+    causal_event_refs 随之删除）；伏笔属性收敛为 is_foreshadow_setup +
+    payoff_likelihood（值域 Confidence 三档，expected_payoff_family 列删）。
     """
 
     node_id: str = Field(min_length=1, description="服务端派生的节点 id（=落库 event_id）")
@@ -755,10 +862,7 @@ class BoundEvent(StrictModel):
     participants: list[EventParticipantInput] = Field(default_factory=list)
     is_foreshadow_setup: bool = False
     # 2026-09-13 伏笔入森林：根事件携带伏笔属性（落库到 event_nodes 根列）
-    expected_payoff_family: str | None = None
-    payoff_likelihood: PayoffLikelihood | None = None
-    # 仅跨章树的根节点携带 [cause_tree_id 根节点 id]，其余恒为空
-    causal_event_refs: list[str] = Field(default_factory=list)
+    payoff_likelihood: Confidence | None = None
 
 
 class BoundRelation(RelationInput):
@@ -768,41 +872,11 @@ class BoundRelation(RelationInput):
     relation_semantics: RelationSemantics
 
 
-class SentenceLabelInput(StrictModel):
-    """2026-09-07 用于提交 agent 自选句子的句级情绪标签（句级监督信号）
+class BoundParagraphLabel(StrictModel):
+    """2026-09-14 段落级情绪监督绑定结果（paragraph_id 已在账本校验属于本章，无需再绑字符区间）"""
 
-    2026-09-13 小调用改造：从 write_metrics 的可选列表参数拆成 write_sentence_label
-    逐句提交（一次一个完整语义单元），绑定与去重语义不变。
-    """
-
-    sentence: str = Field(
-        min_length=2,
-        max_length=2000,
-        description="从当前章节正文原样摘录的完整句子（系统按原文定位绑定）",
-    )
-    emotion: int = Field(ge=-2, le=2, description=f"整句情绪分值。{EMOTION_SCORE_DESCRIPTION}")
-
-    @model_validator(mode="after")
-    def normalize_sentence(self) -> SentenceLabelInput:
-        """2026-09-07 用于规范化自选句原文"""
-        self.sentence = normalize_semantic_text(self.sentence, label="sentence_label.sentence")
-        return self
-
-
-class BoundSentenceLabel(StrictModel):
-    """2026-09-07 用于保存系统定位绑定后的自选句情绪标签（章文本内字符区间）"""
-
-    sentence: str = Field(min_length=1)
+    paragraph_id: int = Field(ge=0)
     emotion: int
-    start: int = Field(ge=0)
-    end: int = Field(gt=0)
-
-    @model_validator(mode="after")
-    def validate_span(self) -> BoundSentenceLabel:
-        """2026-09-07 用于保证句区间有效且与原文一致"""
-        if self.end <= self.start:
-            raise ValueError("BoundSentenceLabel end 必须大于 start")
-        return self
 
 
 class BoundChunkAnnotation(StrictModel):
@@ -813,8 +887,9 @@ class BoundChunkAnnotation(StrictModel):
     （entity_ops / relation_assert_ops / relation_change_ops）派生。
     resolve_fact_case 只更新 FactGraph，resolved_cases 不再承载 fact 动作。
 
-    2026-09-07 句级监督：agent 自选句情绪标签随本模型落库；默认空列表保持
-    旧 run payload 反序列化兼容（fetch_chapter_annotations_full 会重校验）。
+    2026-09-14 段落级监督：句级 sentence_labels 退役，段落情绪标签随
+    write_metrics.labels 提交、账本校验段号后绑定成本模型；默认空列表
+    保持 payload 反序列化兼容。
     """
 
     # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 合并为真实 chunk
@@ -823,9 +898,7 @@ class BoundChunkAnnotation(StrictModel):
     character_observations: list[BoundCharacterObservation]
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
-    # 2026-09-07 句级监督：agent 自选句情绪标签（随 write_metrics 的 sentence_labels
-    # 可选参数搭车提交，服务端定位绑定，不设独立工具）
-    sentence_labels: list[BoundSentenceLabel] = Field(default_factory=list)
+    paragraph_labels: list[BoundParagraphLabel] = Field(default_factory=list)
     # 2026-09-05 冻结时系统确定性覆盖告警（如候选>0但载荷为空），仅留痕不阻断
     coverage_warnings: list[str] = Field(default_factory=list)
 
@@ -937,10 +1010,10 @@ class ResolvedCase(StrictModel):
     relation_type: str | None = None
     change_kind: RelationChangeKind | None = None
     # 2026-09-13 伏笔入森林：把本章事件挂进伏笔树（foreshadowing 边），可选更新根属性
+    # 2026-09-14 expected_payoff_family 退役；payoff_likelihood 值域与 strength 同为 Confidence
     foreshadowing_action: Literal["reinforce", "payoff"] | None = None
     foreshadowing_root_event_id: str | None = None
     foreshadowing_event_id: str | None = None
-    expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     strength: str | None = None
 
@@ -985,16 +1058,12 @@ class ResolvedCase(StrictModel):
             ]
             if missing:
                 raise ValueError(f"foreshadowing 动作缺少字段: {missing}")
-            if self.expected_payoff_family is not None:
-                self.expected_payoff_family = normalize_semantic_text(
-                    self.expected_payoff_family,
-                    label="resolve.expected_payoff_family",
-                )
             # 2026-08-16 P3：枚举字段不再降级为 "unknown"，非法值直接拦截入库
+            # 2026-09-14 payoff_likelihood 与 strength 值域统一为 Confidence 三档
             for field_name, valid_values in (
                 (
                     "payoff_likelihood",
-                    {likelihood.value for likelihood in PayoffLikelihood},
+                    {confidence.value for confidence in Confidence},
                 ),
                 (
                     "strength",

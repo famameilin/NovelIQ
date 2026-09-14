@@ -2,12 +2,13 @@
 
 覆盖：
 - 检索返回历史事件树根视图并把 tree_id/root_node_id 登记进授权集合
-- 本章事件写入即生效：apply_event_root/apply_event_child 当场把树的根节点 id 与
-  tree_id 登记进 authorized_event_ids / authorized_tree_ids，无需任何域结算
-  （2026-09-13 取消暂存后的事件合同）
+- 本章事件写入即生效：apply_event 当场把树的根节点 id 与 tree_id 登记进
+  authorized_event_ids / authorized_tree_ids，无需任何域结算
+  （2026-09-14 写入面重构：根/子合并进 apply_event，el 层级键挂树、无 order）
 - 非 chunk_open 阶段拒绝检索
 - resolve_foreshadowing_case 对未授权 root/event 拒绝、对非伏笔根拒绝
-- 章内局部键（t1、t1/e1）在 finish_chunk 之前即可直接引用
+  （09-14 起 family 参数退役，payoff_likelihood 值域=Confidence 三档）
+- 章内局部键（t1、t1/e1）在 finish_chapter 之前即可直接引用
 - 先检索授权后 resolve 通过（根事件+挂树事件写入 ResolvedCase）
 """
 
@@ -28,7 +29,7 @@ from src.agents.annotation.schema import (
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
-_CHUNK_TEXT = "\u201c住手\u201d回荡"
+_CHUNK_TEXT = "“住手”回荡"
 
 
 class _EventHistoryService:
@@ -115,6 +116,29 @@ def _find_tool(tools, name):
     return next(candidate for candidate in tools if candidate.name == name)
 
 
+def _write_chapter_tree(
+    ledger: AnnotationToolLedger,
+    *,
+    isforeshadowing: bool = False,
+    confidence: str | None = None,
+) -> None:
+    """2026-09-14 用于直接经账本落账一棵本章事件树（t1 根 + t1/e1 main 子节点）
+
+    写入面重构后根/子合并进 apply_event：根 el=树键、子 el=树键/节点键，
+    树内先后=调用顺序；伏笔属性（isforeshadowing/confidence）只挂在根上。
+    """
+    ledger.graph = FactGraph()
+    ledger.apply_entity(EntityInput(name="顾霜", entity_type="character"), el="顾霜")
+    ledger.apply_event(
+        el="t1",
+        isroot=True,
+        description="顾霜立誓",
+        isforeshadowing=isforeshadowing,
+        confidence=confidence,
+    )
+    ledger.apply_event(el="t1/e1", isroot=False, node_type="main", description="顾霜收势")
+
+
 def _register_payoff_case(service, ledger) -> int:
     """2026-08-18 用于把活动案例登记进账本并返回临时编号
 
@@ -177,24 +201,14 @@ def test_resolve_foreshadowing_case_rejects_unauthorized_event_id() -> None:
 def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
     """2026-09-04 第6章教训回归：把 tree_id 误当 root_event_id 时报错须点名这层混淆
 
-    2026-09-13 取消暂存：apply_event_root 写入即把本章树的根节点 id 登记进
+    2026-09-14 写入面重构：apply_event 建树即把本章树的根节点 id 登记进
     authorized_event_ids、tree_id 登记进 authorized_tree_ids（真实 id 不外露，
     模型面只用章内局部键）；本测试按写入即生效链路造出一棵已落账的树，再把真实
     tree_id 误当 root_event_id 提交（模型面回执不含 id，这层混淆依旧只能靠报错自纠）。
     """
     service = _EventHistoryService()
     ledger = _ledger()
-    ledger.graph = FactGraph()
-    ledger.apply_entity(EntityInput(name="顾霜", entity_type="character"))
-    ledger.apply_event_root(
-        tree_key="t1",
-        description="顾霜立誓",
-        cause_tree_id=None,
-        isforeshadowing=False,
-        expected_payoff_family=None,
-        payoff_likelihood=None,
-    )
-    ledger.apply_event_child(tree_key="t1", node_key="e1", order=1, node_type="main", description="顾霜收势")
+    _write_chapter_tree(ledger)
     real_tree_id = ledger.tree_key_index["t1"]
     real_root_id = ledger.event_trees[real_tree_id]["root_node_id"]
     assert real_root_id in ledger.authorized_event_ids
@@ -221,27 +235,17 @@ def test_resolve_foreshadowing_case_tree_id_mixup_gets_targeted_hint() -> None:
 
 
 def test_resolve_foreshadowing_case_accepts_chapter_local_event_keys() -> None:
-    """2026-09-13 本章事件用章内局部键引用：写入即生效，t1 / t1/e1 直接可用
+    """2026-09-14 本章事件用章内局部键引用：写入即生效，t1 / t1/e1 直接可用
 
-    取消暂存后 write_event_root / write_event_child 的回执只有章内键（t1、e1），
-    真实节点 id 由写入当场生成并登记；resolve_foreshadowing_case 接受章内局部键，
-    模型不必转抄 uuid，也不再出现 tree_id 与节点 id 混用。
+    写入面重构后 write_event 的回执只有章内键（t1、t1/e1），真实节点 id 由写入
+    当场生成并登记；resolve_foreshadowing_case 接受章内局部键，模型不必转抄 uuid，
+    也不再出现 tree_id 与节点 id 混用。伏笔根属性收敛为 isforeshadowing+confidence。
     """
     service = _EventHistoryService()
     ledger = _ledger()
-    ledger.graph = FactGraph()
-    ledger.apply_entity(EntityInput(name="顾霜", entity_type="character"))
-    ledger.apply_event_root(
-        tree_key="t1",
-        description="顾霜立誓",
-        cause_tree_id=None,
-        isforeshadowing=True,
-        expected_payoff_family="身份揭晓",
-        payoff_likelihood="high",
-    )
-    ledger.apply_event_child(tree_key="t1", node_key="e1", order=1, node_type="main", description="顾霜收势")
+    _write_chapter_tree(ledger, isforeshadowing=True, confidence="high")
     root_node_id, child_node_id = [event.node_id for event in ledger.bound_payloads["events"]]
-    assert ledger.chunk_finished is False
+    assert ledger.chapter_finished is False
     tools = _tools(service, ledger)
     case_number = _register_payoff_case(service, ledger)
 
@@ -272,17 +276,7 @@ def test_resolve_foreshadowing_case_registers_case_when_number_omitted() -> None
     """
     service = _EventHistoryService()
     ledger = _ledger()
-    ledger.graph = FactGraph()
-    ledger.apply_entity(EntityInput(name="顾霜", entity_type="character"))
-    ledger.apply_event_root(
-        tree_key="t1",
-        description="顾霜立誓",
-        cause_tree_id=None,
-        isforeshadowing=True,
-        expected_payoff_family="身份揭晓",
-        payoff_likelihood="high",
-    )
-    ledger.apply_event_child(tree_key="t1", node_key="e1", order=1, node_type="main", description="顾霜收势")
+    _write_chapter_tree(ledger, isforeshadowing=True, confidence="high")
     tools = _tools(service, ledger)
     pushed_before = len(ledger.pushed_cases)
 
@@ -334,27 +328,26 @@ def test_rejected_foreshadowing_resolve_leaves_no_case_behind() -> None:
 
 
 def test_resolve_foreshadowing_case_chapter_key_available_before_finish() -> None:
-    """2026-09-13 变化点：章内局部键在 finish_chunk 之前即可用（旧合同要求先域结算）
+    """2026-09-13 变化点：章内局部键在 finish_chapter 之前即可用（旧合同要求先域结算）
 
     旧合同（逐域 finish）下"结算前引用被拒"——t1 / t1/root 报未授权并提示先
-    finish_domain("events")；取消暂存后写入即生效：本测试在未调 finish_chunk
-    （chunk_finished=False）时让同一组键直接解析到真实节点 id，因此旧调用不再报
+    finish_domain("events")；取消暂存后写入即生效：本测试在未调 finish_chapter
+    （chapter_finished=False）时让同一组键直接解析到真实节点 id，因此旧调用不再报
     未授权，而是前进到合同校验——埋设事件自身不挂边（event_id == root_event_id）被拒；
     补写子事件后同一路径无需任何收尾即可完成伏笔挂树。
     """
     service = _EventHistoryService()
     ledger = _ledger()
     ledger.graph = FactGraph()
-    ledger.apply_entity(EntityInput(name="顾霜", entity_type="character"))
-    ledger.apply_event_root(
-        tree_key="t1",
+    ledger.apply_entity(EntityInput(name="顾霜", entity_type="character"), el="顾霜")
+    ledger.apply_event(
+        el="t1",
+        isroot=True,
         description="顾霜立誓",
-        cause_tree_id=None,
         isforeshadowing=True,
-        expected_payoff_family="身份揭晓",
-        payoff_likelihood="high",
+        confidence="high",
     )
-    assert ledger.chunk_finished is False
+    assert ledger.chapter_finished is False
     # 结算前解析：t1 与根节点别名 t1/root 指向同一真实节点 id（旧合同在结算前为 None）
     resolved_root = ledger.resolve_event_reference("t1")
     assert resolved_root is not None
@@ -378,7 +371,7 @@ def test_resolve_foreshadowing_case_chapter_key_available_before_finish() -> Non
     assert ledger.resolved_cases == []
 
     # 补写子事件后同一对章内局部键在收尾前即可完成挂树
-    ledger.apply_event_child(tree_key="t1", node_key="e1", order=1, node_type="main", description="顾霜收势")
+    ledger.apply_event(el="t1/e1", isroot=False, node_type="main", description="顾霜收势")
     child_node_id = ledger.event_trees[ledger.tree_key_index["t1"]]["nodes"]["e1"]
     resolved = json.loads(
         _find_tool(tools, "resolve_foreshadowing_case").invoke(
@@ -393,7 +386,7 @@ def test_resolve_foreshadowing_case_chapter_key_available_before_finish() -> Non
     )
 
     assert resolved["accepted"] is True
-    assert ledger.chunk_finished is False
+    assert ledger.chapter_finished is False
     assert ledger.ready_chunk is None
     assert ledger.resolved_cases[-1].foreshadowing_root_event_id == resolved_root
     assert ledger.resolved_cases[-1].foreshadowing_event_id == child_node_id
@@ -490,7 +483,11 @@ def test_resolve_foreshadowing_case_rejects_event_id_equal_to_root() -> None:
 
 
 def test_resolve_foreshadowing_case_binds_history_root_with_foreshadow_view() -> None:
-    """2026-09-13 伏笔树根经 search_event 树根视图授权后 resolve 通过"""
+    """2026-09-14 伏笔树根经 search_event 树根视图授权后 resolve 通过（根属性走 payoff_likelihood）
+
+    旧 expected_payoff_family 全链退役；resolve 可选更新根属性收敛为
+    payoff_likelihood（值域 Confidence 三档 high/medium/low）。
+    """
     service = _EventHistoryService(
         trees=[
             _history_tree("tree-h", "node-h-root", "白芷承认精灵族身份", foreshadow=True),
@@ -510,7 +507,7 @@ def test_resolve_foreshadowing_case_binds_history_root_with_foreshadow_view() ->
                 "foreshadowing_action": "payoff",
                 "root_event_id": "node-h-root",
                 "event_id": "node-payoff",
-                "expected_payoff_family": "身份揭露",
+                "payoff_likelihood": "high",
             }
         )
     )
@@ -519,4 +516,4 @@ def test_resolve_foreshadowing_case_binds_history_root_with_foreshadow_view() ->
     assert last.foreshadowing_action == "payoff"
     assert last.foreshadowing_root_event_id == "node-h-root"
     assert last.foreshadowing_event_id == "node-payoff"
-    assert last.expected_payoff_family == "身份揭露"
+    assert last.payoff_likelihood == "high"

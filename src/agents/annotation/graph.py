@@ -2,11 +2,11 @@
 章节标注逐 chunk 语义写入 LangGraph
 
 消息链采用 messages + add_messages 累积；每次模型请求携带完整历史消息。
-complete_chunk 与 finish_chapter 由程序自动执行：模型用唯一 finish_chunk 收尾后
+冻结与章节组装由程序自动执行：模型用唯一 finish_chapter 收尾后
 图节点自动冻结 chunk 并完成章节，模型不需要调用完成工具。
 
 2026-09-13 实时写入：一个模型回合可以包含多个有类型的小调用（每条只写一个完整
-语义单元、写入即生效），写完全部内容后用 finish_chunk 收尾；收尾判定推迟到本回合
+语义单元、写入即生效），写完全部内容后用 finish_chapter 收尾；收尾判定推迟到本回合
 全部调用处理完毕之后（逐条失败只回滚该调用、不阻塞收尾），因此一次回复整体仍计
 一个回合。
 """
@@ -51,20 +51,21 @@ def _turn_budget_reminder(remaining: int) -> str:
     全程看不到轮次预算。此提醒为纯消息注入（不改工具开放与路由），
     只对本次请求生效、不写入状态消息链，避免多轮提醒在历史中堆积。
 
-    2026-09-13 末轮点名 finish_chunk：run c80105cc 第 4 章实测——末轮文案只说
+    2026-09-13 末轮点名收尾：run c80105cc 第 4 章实测——末轮文案只说
     "提交全部已确认内容"，模型把写入排在前面、finish_chunk 留给"下一轮"，该轮
     结束后撞硬顶、整章作废（第 15 轮思考里计划含 finish_chunk，实际只发出 3 个
     写入调用）。末轮必须点名唯一的收尾动作，并说明收尾可与写入同批提交。
+    2026-09-14 收尾工具更名 finish_chapter（冻结单位本就是整章）。
     """
     if remaining <= 1:
         return (
             "【轮次预算】本轮是内部循环的最后一轮：写入与收尾放在同一批次提交，"
-            "并在本批次里调用 finish_chunk() ——收尾判定在本批全部调用处理完后执行；"
-            "本轮结束仍未收尾则本 chunk 作废，不要再发起新的检索。"
+            "并在本批次里调用 finish_chapter() ——收尾判定在本批全部调用处理完后执行；"
+            "本轮结束仍未收尾则本章作废，不要再发起新的检索。"
         )
     return (
         f"【轮次预算】剩余 {remaining} 轮（含本轮）将触发内部循环上限："
-        "请尽快提交已确认内容，把剩余轮次留给写入与 finish_chunk() 收尾，"
+        "请尽快提交已确认内容，把剩余轮次留给写入与 finish_chapter() 收尾，"
         "不要再用新检索消耗轮次。"
     )
 
@@ -72,8 +73,8 @@ def _turn_budget_reminder(remaining: int) -> str:
 # 2026-09-13 尚无内容领域对应的补齐工具
 _MISSING_CONTENT_TOOL_HINTS = {
     "entities": "write_entity（登记本章出现的实体）",
-    "metrics": "write_metrics（摘要与叙事指标，必填）",
-    "events": "write_event_root/write_event_child/参与者（本章确实没有事件可跳过）",
+    "metrics": "write_metrics（摘要、叙事指标与段落情绪标签，必填）",
+    "events": "write_event（根/子事件与参与者，确实没有事件可跳过）",
     "relations": "write_relation（本章确实没有关系可跳过）",
     "dialogues": "write_dialogue（按候选表逐条判定，确实没有可跳过）",
 }
@@ -82,18 +83,18 @@ _MISSING_CONTENT_TOOL_HINTS = {
 def _missing_domains_reminder(missing: list[str]) -> str | None:
     """2026-09-13 用于构造无工具回复重发前的"还没收尾"提醒
 
-    写入即生效，收尾由唯一 finish_chunk 表达：纯文本汇报既不是写入也不是收尾，
+    写入即生效，收尾由唯一 finish_chapter 表达：纯文本汇报既不是写入也不是收尾，
     调用层把无工具回复视同调用故障重发，此提醒只注入重发请求（不写入状态消息链、
     不改工具开放与路由），把"还缺什么内容、怎么收尾"直接交给模型。
 
-    2026-09-13 写者面全放开：九个写入小调用从首轮起全部在工具面上，缺哪个域就报
+    2026-09-13 写者面全放开：五个写入工具从首轮起全部在工具面上，缺哪个域就报
     哪个域的补齐工具，不再有"实体未写、其余领域工具随后解锁"的分支。
     """
     ordered = [domain for domain in _DOMAIN_ORDER if domain in missing]
-    head = "【收尾提醒】当前 chunk 还没收尾（纯文本汇报不算写入，也不是收尾）："
-    tail = "。确认写完后调用 finish_chunk() 收尾，chunk 才冻结；本块确实为空的领域直接收尾即可。"
+    head = "【收尾提醒】本章还没收尾（纯文本汇报不算写入，也不是收尾）："
+    tail = "。确认写完后调用 finish_chapter() 收尾，本章才冻结；确实为空的领域直接收尾即可。"
     if not ordered:
-        return f"{head}请确认已写完并调用 finish_chunk() 收尾{tail}"
+        return f"{head}请确认已写完并调用 finish_chapter() 收尾{tail}"
     detail = "、".join(f"{domain}（{_MISSING_CONTENT_TOOL_HINTS[domain]}）" for domain in ordered)
     return f"{head}尚无内容的领域：{detail}{tail}"
 
@@ -280,9 +281,9 @@ def _build_tool_batch_node(
     """2026-08-10 用于构建逐调用独立提交且互不回滚的工具节点
 
     2026-09-13 实时写入：一个回合的多个调用串行处理、共享账本、写入即生效；
-    finish_chunk 的收尾判定推迟到本回合全部调用处理完再执行，因此
+    finish_chapter 的收尾判定推迟到本回合全部调用处理完再执行，因此
     "同轮多个小调用 + 一个收尾声明"整体只计一个模型回合。失败只影响该调用自己，
-    不影响同回合其他调用、也不阻塞收尾（收尾判定见 _settle_chunk_finish）。
+    不影响同回合其他调用、也不阻塞收尾（收尾判定见 _settle_chapter_finish）。
     """
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
@@ -308,7 +309,7 @@ def _build_tool_batch_node(
             calls,
             allowed_tool_names=allowed_tool_names,
         )
-        # 每个调用一条 entry：call/序号/内容（finish_chunk 先占位，批次末尾回填判定结果）
+        # 每个调用一条 entry：call/序号/内容（finish_chapter 先占位，批次末尾回填判定结果）
         rendered: list[dict[str, Any]] = [
             {"call": call, "index": call_index, "content": None}
             for call_index, call in enumerate(calls)
@@ -353,7 +354,7 @@ def _build_tool_batch_node(
                 error_text = _truncated_error(name)
                 await _append_failed_call(entry, call, error_text)
                 continue
-            if name == "finish_chunk":
+            if name == "finish_chapter":
                 # 收尾声明：校验与冻结推迟到本回合全部调用处理完之后
                 # （逐条失败只回滚该调用、不阻塞收尾），因此"同轮多个小调用 + 收尾"仍计一个回合
                 entry["started_ns"] = time.perf_counter_ns()
@@ -403,7 +404,7 @@ def _build_tool_batch_node(
                 await _emit_tool_status(name, "success", result)
             else:
                 await _emit_tool_status(name, "error", error or "")
-        await _settle_chunk_finish(
+        await _settle_chapter_finish(
             ledger,
             rendered,
             observer=observer,
@@ -432,25 +433,25 @@ def _tool_messages(rendered: list[dict[str, Any]]) -> list[ToolMessage]:
     return messages
 
 
-async def _settle_chunk_finish(
+async def _settle_chapter_finish(
     ledger: AnnotationToolLedger,
     rendered: list[dict[str, Any]],
     *,
     observer: AgentTurnObserver | None,
     emit_tool_status: Any,
 ) -> None:
-    """2026-09-13 用于在本回合全部调用处理完后执行 finish_chunk 收尾判定
+    """2026-09-13 用于在本回合全部调用处理完后执行 finish_chapter 收尾判定
 
     写入是实时的、不需要结算：本回合的逐条失败各自在调用点已回执，收尾只管
     按已写入内容补默认判定、校验并构造 ready_chunk（构造失败整体回滚，已写入记录保留）。
     """
     for entry in rendered:
         call = entry["call"]
-        if str(call.get("name")) != "finish_chunk" or entry.get("content") is None:
+        if str(call.get("name")) != "finish_chapter" or entry.get("content") is None:
             continue
         started_ns = entry.get("started_ns") or time.perf_counter_ns()
         try:
-            receipt = ledger.finish_chunk()
+            receipt = ledger.finish_chapter()
             content = json.dumps(receipt, ensure_ascii=False)
             status: str = "success"
             error: str | None = None
@@ -460,14 +461,14 @@ async def _settle_chunk_finish(
             raise
         except Exception as exc:
             ledger.errors.append(str(exc))
-            content = _failed_receipt("finish_chunk", exc)
+            content = _failed_receipt("finish_chapter", exc)
             status = "error"
             error = str(exc)
         entry["content"] = content
         if observer is not None:
             observer.record_tool_call(
                 call_index=entry["index"],
-                tool_name="finish_chunk",
+                tool_name="finish_chapter",
                 request_args=dict(call.get("args") or {}),
                 raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
                 response=json.loads(content),
@@ -478,9 +479,9 @@ async def _settle_chunk_finish(
                 started_ns=started_ns,
             )
         if status == "success":
-            await emit_tool_status("finish_chunk", "success", content)
+            await emit_tool_status("finish_chapter", "success", content)
         else:
-            await emit_tool_status("finish_chunk", "error", error or "")
+            await emit_tool_status("finish_chapter", "error", error or "")
 
 
 def _build_auto_finalize_node(
@@ -492,21 +493,21 @@ def _build_auto_finalize_node(
     """2026-09-13 用于在收尾声明后自动冻结 chunk 并完成章节"""
 
     async def auto_finalize(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-09-13 用于在 finish_chunk 收尾后冻结 chunk 并完成章节"""
+        """2026-09-13 用于在 finish_chapter 收尾后冻结 chunk 并完成章节"""
         if ledger.phase != "chunk_open":
             return {"phase": ledger.phase}
-        if not ledger.chunk_finished:
+        if not ledger.chapter_finished:
             return {"phase": ledger.phase}
         try:
             if stream is not None:
-                await stream.tool_call_started("complete_chunk")
+                await stream.tool_call_started("auto_freeze_chapter")
             ledger.complete_active_chunk()
             if stream is not None:
-                await stream.tool_call_succeeded("complete_chunk", "chunk frozen")
-                await stream.tool_call_started("finish_chapter")
+                await stream.tool_call_succeeded("auto_freeze_chapter", "chunk frozen")
+                await stream.tool_call_started("auto_assemble_chapter")
             ledger.finish()
             if stream is not None:
-                await stream.tool_call_succeeded("finish_chapter", "chapter completed")
+                await stream.tool_call_succeeded("auto_assemble_chapter", "chapter completed")
         except Exception:
             # 章节完成写入失败时同样闭合审计计时，避免该回合耗时字段永久为空
             if observer is not None:
