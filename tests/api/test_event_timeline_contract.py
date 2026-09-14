@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from src.storage.models import EventEdge
 from src.storage.repositories import RunRepository
@@ -208,13 +209,61 @@ def test_participants_keep_dict(api_client: TestClient, db_session) -> None:
 
 
 def test_causal_edges_include_inactive_and_expired_at(api_client: TestClient, db_session) -> None:
-    """causal_edges 含 inactive/expired_at，前端灰显全量"""
+    """causal_edges 含 inactive/expired_at，前端灰显全量
+
+    2026-09-14 跨章因果链退役：写面不再产生 causal 边（旧版经 causal_event_refs
+    派生），但 EventEdge 表与时间轴读侧保留读旧数据。这里按读侧现行为以遗留
+    数据直接构造两条跨章 causal 边（gate-main→sword-root 活性、
+    gate-root→sword-root 置 inactive 且含 expired_at），断言不变。
+    """
+    from uuid import NAMESPACE_URL, uuid5
+
+    from src.storage.models import ChapterAnnotationRecord, EventNode
+
     novel_id, run_id = _insert_two_chapter_forest(db_session)
-    # 将已有的 causal 边置为 inactive（含 expired_at），避免违反 annotation_id 非空约束
-    existing_edge = db_session.query(EventEdge).filter_by(run_id=run_id).first()
-    assert existing_edge is not None
-    existing_edge.is_active = False
-    existing_edge.expired_at = datetime.now(UTC)
+    t = run_id[:8]
+    gate_root = f"evt-{t}-gate-root"
+    gate_main = f"evt-{t}-gate-main"
+    sword_root = f"evt-{t}-sword-root"
+    annotation_id = str(
+        db_session.execute(
+            select(ChapterAnnotationRecord.annotation_id).where(ChapterAnnotationRecord.run_id == run_id).limit(1)
+        ).scalar_one()
+    )
+    gate_main_node = db_session.get(EventNode, gate_main)
+    gate_root_node = db_session.get(EventNode, gate_root)
+    assert gate_main_node is not None and gate_root_node is not None
+    db_session.add_all(
+        [
+            EventEdge(
+                edge_id=str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{gate_main}:{sword_root}")),
+                run_id=run_id,
+                edge_type="causal",
+                source_event_id=gate_main,
+                target_event_id=sword_root,
+                source_chapter_id=1,
+                target_chapter_id=2,
+                is_active=True,
+                evidence=list(gate_main_node.evidence),
+                annotation_id=annotation_id,
+                payload_path=f"legacy/causal/{sword_root}-main",
+            ),
+            EventEdge(
+                edge_id=str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{gate_root}:{sword_root}")),
+                run_id=run_id,
+                edge_type="causal",
+                source_event_id=gate_root,
+                target_event_id=sword_root,
+                source_chapter_id=1,
+                target_chapter_id=2,
+                is_active=False,
+                evidence=list(gate_root_node.evidence),
+                annotation_id=annotation_id,
+                payload_path=f"legacy/causal/{sword_root}-root",
+                expired_at=datetime.now(UTC),
+            ),
+        ]
+    )
     db_session.commit()
 
     task_id = run_id[:8]

@@ -240,7 +240,6 @@ class ChapterAnnotation(BaseModel):
     )
     foreshadowing_desc: str | None = None
     why_unresolved_now: str | None = None
-    expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
     foreshadowing_root_event_id: str | None = None
@@ -264,7 +263,6 @@ class ForeshadowingTreeResponse(BaseModel):
     last_chapter_id: int
     anchor_chapter_ids: list[int] = []
     description: str
-    expected_payoff_family: str | None
     payoff_likelihood: str | None
     strength: str | None
     status: str

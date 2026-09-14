@@ -236,11 +236,18 @@ class EventForestRepository:
     def _fetch_event_edges_by_chapter_ids(
         self, run_id: str, chapter_ids: set[int], *, include_inactive: bool = False
     ) -> list[EventEdgeRow]:
-        """内部：按已解析 chapter_ids 查询因果边，避免重复计算章节集合"""
+        """内部：按已解析 chapter_ids 查询因果边，避免重复计算章节集合
+
+        2026-09-14：必须按 edge_type="causal" 过滤——09-13 起 write_event 挂树边用
+        edge_type="foreshadowing" 落库（persistence 唯一仍产生的边类），不过滤会让
+        伏笔边混进 causal_edges，下游 EventEdgeResponse(edge_type=Literal["causal"])
+        校验直接 500，且 timeline 把伏笔边误标为因果边。
+        """
         if not chapter_ids:
             return []
         filters: list[Any] = [
             EventEdge.run_id == run_id,
+            EventEdge.edge_type == "causal",
             EventEdge.source_chapter_id.in_(chapter_ids),
             EventEdge.target_chapter_id.in_(chapter_ids),
         ]

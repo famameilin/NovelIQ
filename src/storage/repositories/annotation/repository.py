@@ -21,7 +21,8 @@ from src.storage.models import (
 )
 from src.storage.repositories.base import BaseRepository
 
-_EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38}
+# 2026-09-14 伏笔 confidence 并轨三档（high/medium/low 等差基分），PayoffLikelihood 二值枚举退役
+_EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38, "low": 0.14}
 _EXPECTATION_STATUS_BONUS = {"open": -0.07, "reinforced": 0.03, "likely_paid_off": 0.28}
 _EXPECTATION_STRENGTH_BONUS = {"high": 0.03, "medium": 0.0, "low": -0.05}
 _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off": 1.2}
@@ -41,7 +42,6 @@ class ChapterAnnotationRow:
     is_strong_setup: bool | None = None
     foreshadowing_desc: str | None = None
     why_unresolved_now: str | None = None
-    expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
     # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
     foreshadowing_root_event_id: str | None = None
@@ -86,7 +86,6 @@ class ForeshadowingTreeView:
     last_chapter_id: int
     anchor_chapter_ids: list[int]
     description: str
-    expected_payoff_family: str | None
     payoff_likelihood: str | None
     strength: str | None
     status: str
@@ -162,7 +161,6 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 "is_strong_setup": (root.strength == "high") if root.strength is not None else None,
                 "foreshadowing_desc": root.description,
                 "why_unresolved_now": None,
-                "expected_payoff_family": root.expected_payoff_family,
                 "payoff_likelihood": root.payoff_likelihood,
                 "foreshadowing_root_event_id": linked,
             }
@@ -359,7 +357,6 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     last_chapter_id=last_chapter_id,
                     anchor_chapter_ids=anchor_chapter_ids,
                     description=root.description,
-                    expected_payoff_family=root.expected_payoff_family,
                     payoff_likelihood=root.payoff_likelihood,
                     strength=root.strength,
                     status=status,

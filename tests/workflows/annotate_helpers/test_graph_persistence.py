@@ -95,7 +95,6 @@ def _full_annotation(
                             {"entity": "顾霜", "role": "主体"},
                             {"entity": "山门", "role": "地点"},
                         ],
-                        causal_event_refs=[],
                     )
                 ],
             )
@@ -832,72 +831,6 @@ def test_persist_writes_event_shadow_node(db_session) -> None:
     assert node.evidence[0]["paragraph_ids"] == [0]
 
 
-def test_persist_writes_causal_edge_between_events(db_session) -> None:
-    """2026-08-22因果引用只出现在树根（跨树引用），写入 EventEdge causal 边"""
-    text = "顾霜进入山门。\n顾霜拔剑。"
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=[text],
-        title="因果边写入",
-    )
-    persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        events=[
-            {
-                "description": "顾霜进入山门",
-                "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
-                "node_id": "evt-causal-gate",
-                "tree_id": "gate-entry",
-                "cause_role": "root",
-            },
-            {
-                "description": "顾霜拔剑",
-                "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
-                "node_id": "evt-causal-draw",
-                "causal_event_refs": ["evt-causal-gate"],
-                "tree_id": "draw-entry",
-                "cause_role": "root",
-            },
-        ],
-    )
-    db_session.commit()
-
-    edges = list(
-        db_session.execute(
-            select(EventEdge).where(
-                EventEdge.run_id == run_id,
-                EventEdge.edge_type == "causal",
-            )
-        ).scalars()
-    )
-    assert len(edges) == 1
-    edge = edges[0]
-    assert edge.source_event_id == "evt-causal-gate"
-    assert edge.target_event_id == "evt-causal-draw"
-    assert edge.is_active == 1
-    assert edge.source_chapter_id == 1
-    assert edge.target_chapter_id == 1
-
-    # 事件事实也应链接 event_id
-    event_facts = list(
-        db_session.execute(
-            select(GraphFact).where(
-                GraphFact.run_id == run_id,
-                GraphFact.fact_type == "event",
-            )
-        ).scalars()
-    )
-    assert len(event_facts) == 2
-    assert {fact.event_id for fact in event_facts} == {
-        "evt-causal-gate",
-        "evt-causal-draw",
-    }
-
-
 def test_persist_does_not_materialize_contains_edges(db_session) -> None:
     """2026-08-19 用于验证contains 不再落表，event_edges 只有 causal 边
 
@@ -938,62 +871,21 @@ def test_persist_does_not_materialize_contains_edges(db_session) -> None:
     edge_types = set(db_session.execute(select(EventEdge.edge_type).where(EventEdge.run_id == run_id)).scalars())
     assert edge_types == set()
     assert "contains" not in edge_types
-
-
-def test_persist_writes_cross_chapter_causal_edge(db_session) -> None:
-    """2026-08-22跨章延续经 write_event(cause_tree_id) 落为跨章 causal 边"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["顾霜立誓。", "顾霜兑现承诺。"],
-        chapter_ids=[1, 2],
-        title="跨章因果边",
-    )
-    persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=1,
-        events=[
-            {
-                "description": "顾霜立誓",
-                "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
-                "node_id": "evt-oath-root",
-                "tree_id": "oath",
-                "cause_role": "root",
-            },
-        ],
-    )
-    persist_chapter_annotation(
-        db_session,
-        run_id=run_id,
-        chapter_id=2,
-        events=[
-            {
-                "description": "顾霜兑现承诺",
-                "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
-                "node_id": "evt-fulfill-root",
-                "causal_event_refs": ["evt-oath-root"],
-                "tree_id": "fulfill",
-                "cause_role": "root",
-            },
-        ],
-    )
-    db_session.commit()
-
-    edges = list(
+    # 无因果边落表的同时，事件事实仍逐节点链接 event_id（自被删的
+    # test_persist_writes_causal_edge_between_events 保留的存续断言）
+    event_facts = list(
         db_session.execute(
-            select(EventEdge).where(
-                EventEdge.run_id == run_id,
-                EventEdge.edge_type == "causal",
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.fact_type == "event",
             )
         ).scalars()
     )
-    assert len(edges) == 1
-    assert edges[0].source_event_id == "evt-oath-root"
-    assert edges[0].target_event_id == "evt-fulfill-root"
-    assert edges[0].source_chapter_id == 1
-    assert edges[0].target_chapter_id == 2
+    assert len(event_facts) == 2
+    assert {fact.event_id for fact in event_facts} == {
+        "evt-contains-root",
+        "evt-contains-main",
+    }
 
 
 def _forest_resolution(case_id: str, *, root_event_id: str, event_id: str, action: str = "reinforce") -> ResolvedCase:
@@ -1034,9 +926,7 @@ def _forest_annotation_row(db_session, *, run_id: str, text: str, token: str):
                         cause_role="root",
                         description="天衡宗将庇护顾霜",
                         participants=[],
-                        causal_event_refs=[],
                         is_foreshadow_setup=True,
-                        expected_payoff_family="庇护",
                         payoff_likelihood="high",
                     ),
                     BoundEvent(
@@ -1046,7 +936,6 @@ def _forest_annotation_row(db_session, *, run_id: str, text: str, token: str):
                         cause_role="main",
                         description="宗门出手相护",
                         participants=[],
-                        causal_event_refs=[],
                     ),
                 ],
             )
@@ -1147,4 +1036,6 @@ def test_foreshadowing_resolution_same_bind_replays_without_duplicate_edges(db_s
     assert len(edges) == 1
     root = db_session.get(EventNode, root_event_id)
     assert root.foreshadowing_status == "reinforced"
-    assert root.expected_payoff_family == "庇护"
+    # 2026-09-14 expected_payoff_family 列退役；根属性的重放不变量按
+    # payoff_likelihood（Confidence 三档）对等断言：裁决未携带新值，原值沿用
+    assert root.payoff_likelihood == "high"

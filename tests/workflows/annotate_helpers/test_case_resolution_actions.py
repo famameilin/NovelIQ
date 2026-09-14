@@ -54,7 +54,6 @@ def _annotation(
                 cause_role="root",
                 description=f"事件-{text[:6]}",
                 participants=[],
-                causal_event_refs=[],
             )
         )
     if foreshadowing:
@@ -68,9 +67,7 @@ def _annotation(
                 cause_role="root",
                 description=f"事件-{text[:6]}",
                 participants=[],
-                causal_event_refs=[],
                 is_foreshadow_setup=True,
-                expected_payoff_family="守护",
                 payoff_likelihood="high",
             )
         )
@@ -507,7 +504,7 @@ def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
         )
     ).scalar_one()
     assert root.foreshadowing_status == "open"
-    assert root.expected_payoff_family == "守护"
+    # 2026-09-14 expected_payoff_family 列退役：伏笔根属性合同只剩三档 payoff_likelihood
     assert root.payoff_likelihood == "high"
     pushed = PendingCase(
         type="foreshadowing_suspect",
@@ -566,6 +563,8 @@ def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
         )
     ).scalar_one()
     assert updated.foreshadowing_status == "reinforced"
+    # 2026-09-14 裁决携带的三档置信度写入根属性（family 更新路径退役后的对等覆盖）
+    assert updated.payoff_likelihood == "high"
     assert edge.source_event_id == root.event_id
     assert edge.target_event_id == bind_event_id
     assert mapping.target_root_event_id == root.event_id
@@ -735,7 +734,6 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                         cause_role="root",
                         description="顾霜拔剑喝止",
                         participants=[],
-                        causal_event_refs=[],
                     )
                 ],
             )

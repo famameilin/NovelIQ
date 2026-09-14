@@ -16,7 +16,7 @@ from src.agents.annotation.schema import (
     ActiveCaseDetails,
     BoundChapterAnnotation,
     BoundDialogue,
-    BoundSentenceLabel,
+    BoundParagraphLabel,
     CasePoolSummary,
     CaseSearchResult,
     CompletionCase,
@@ -355,7 +355,6 @@ class DatabaseAnnotationQueryService:
                     participants=list(node.participants),
                     is_foreshadow_setup=node.event_id in foreshadow_setups,
                     foreshadowing_status=node.foreshadowing_status,
-                    expected_payoff_family=node.expected_payoff_family,
                     payoff_likelihood=node.payoff_likelihood,
                     cross_chapter=node.event_id in incoming_causes,
                     root_node_id=node.event_id,
@@ -420,20 +419,20 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         self.session.flush()
         return row
 
-    def fetch_sentence_labels(self, run_id: str) -> list[BoundSentenceLabel]:
-        """2026-09-07 用于读取全书自选句情绪标签（句级监督按书边界）
+    def fetch_paragraph_labels(self, run_id: str) -> list[BoundParagraphLabel]:
+        """2026-09-14 用于读取全书自选段情绪标签（段落级监督按书边界）
 
-        标签随章节标注 payload 落库；旧 payload 无该字段时 model_validate
-        默认空列表，天然跳过。
+        标签随章节标注 payload 落库；句级旧字段（sentence_labels，2026-09-07 口径）
+        已从合同删除，重建库后无历史 payload 兼容问题。
         """
         records = self.session.execute(
             select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
         ).scalars()
-        labels: list[BoundSentenceLabel] = []
+        labels: list[BoundParagraphLabel] = []
         for record in records:
             annotation = BoundChapterAnnotation.model_validate(record.payload)
             for chunk in annotation.chunks:
-                labels.extend(chunk.sentence_labels)
+                labels.extend(chunk.paragraph_labels)
         return labels
 
 
@@ -612,7 +611,6 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
         elif resolved_case.action == "foreshadowing":
             for field_name in (
                 "foreshadowing_action",
-                "expected_payoff_family",
                 "payoff_likelihood",
                 "strength",
             ):

@@ -217,17 +217,19 @@ async def run_linguistic(
         corrected = _apply_mneg_correction(session, run_id, paragraph_repo, mneg_corrections)
         if corrected:
             logger.info(f"mNEG 情绪修正回写：{corrected} 段（sdp 否定辖域替代窗口规则），段落曲线已重算")
-
-        # 2026-09-07 句级监督（按书边界）：全书 agent 自选句标签现算该书线性边界，
-        # 逐句打分回写 paragraph_linguistic_features 两列；标签不足或类别单一时
-        # 无边界（两列 NULL），段落曲线维持 mNEG 口径，不伪造。
-        boundary_rows = _apply_sentence_boundary_scores(run_id, paragraph_repo)
-        if boundary_rows:
-            logger.info(
-                f"句级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选句）"
-            )
     else:
         logger.info("linguistic.ltp.enabled=false，跳过词法/句法/实体与固定短语")
+
+    # ------------------------------------------------------------------
+    # 2026-09-14 段落级监督（按书边界）：全书自选段标签现算该书线性边界，
+    # 逐段打分回写 paragraph_linguistic_features 两列。不依赖 LTP——向量源是
+    # paragraph_embeddings（preprocess 落库），故挂在 ltp 闸门之外；
+    # 标签不足或类别单一时无边界（两列 NULL），段落曲线维持 mNEG 口径，不伪造。
+    boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo)
+    if boundary_rows:
+        logger.info(
+            f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）"
+        )
 
     # ------------------------------------------------------------------
     # Word2Vec：预训练初始化 + 按书微调（依赖 LTP 词元）
@@ -271,62 +273,72 @@ async def run_linguistic(
     return total_paragraphs, total_feature_paragraphs
 
 
-def _apply_sentence_boundary_scores(run_id: str, paragraph_repo: ParagraphRepository) -> int:
-    """2026-09-07 句级监督（按书边界，用户定稿）：全书自选句标签 → 岭回归边界 → 逐段打分
+def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepository) -> int:
+    """2026-09-14 段落级监督（按书边界，用户定稿）：全书自选段标签 → 岭回归边界 → 逐段打分
 
-    链路：ChapterAnnotationRepository.fetch_sentence_labels 读全书标签（agent 逐章
-    自选 2-3 句随 chapter_annotations 落库）→ LtpSession.sentence_embeddings 取
-    backbone 句向量（与 pipeline 同一模型，零新文件）→ fit_sentence_boundary 现算
-    该书线性边界 → 全书段落逐句打分，正/负分值按段求和回写
+    链路：ChapterAnnotationRepository.fetch_paragraph_labels 读全书标签（agent 逐章
+    自选 2-3 段随 chapter_annotations 落库）→ paragraph_embeddings 取全书段落向量
+    （preprocess 落库的 ritrieve 向量，零新模型文件、零 LTP 依赖）→
+    fit_emotion_boundary 现算该书线性边界 → 全书逐段打分回写
     paragraph_linguistic_features.boundary_pos_score_sum / boundary_neg_score_sum。
+    两列语义为段落级定值（2026-09-14 由"段内逐句分值求和"改为"段落本身边界分值"）。
 
-    边界无效（标签 <2 或全同分值）返回 0，两列维持 NULL，不伪造；逐句打分本地
-    免费（CPU 前向），跨书曲线口径不同不可比（用户已接受）。
+    边界无效（标签 <2 或全同分值）、段落向量缺失时返回 0，两列维持 NULL，不伪造；
+    打分本地免费（CPU 前向），跨书曲线口径不同不可比（用户已接受）。
     """
-    from sqlalchemy import bindparam, update
+    import numpy as np
+    from sqlalchemy import bindparam, select, update
     from sqlalchemy.sql.schema import Table as SaTable
 
-    from src.agents.annotation.schema import BoundSentenceLabel
-    from src.linguistic import fit_sentence_boundary, score_sentences
-    from src.linguistic.ltp_client import LtpSession
-    from src.storage.models import ParagraphLinguisticFeature
+    from src.linguistic import fit_emotion_boundary
+    from src.storage.models import ParagraphEmbedding, ParagraphLinguisticFeature
     from src.storage.repositories import ChapterAnnotationRepository
-    from src.utils.text_utils import split_sentences
 
     session = paragraph_repo.session
-    labels: list[BoundSentenceLabel] = ChapterAnnotationRepository(session).fetch_sentence_labels(run_id)
+    labels = ChapterAnnotationRepository(session).fetch_paragraph_labels(run_id)
     if len(labels) < 2:
-        logger.info("句级边界跳过：自选句标签不足 2 条（无法拟合边界），两列保持 NULL")
+        logger.info("段落边界跳过：自选段标签不足 2 条（无法拟合边界），两列保持 NULL")
         return 0
 
-    session_embedder = LtpSession.get_instance()
-    vectors = session_embedder.sentence_embeddings([label.sentence for label in labels])
-    boundary = fit_sentence_boundary(vectors, [int(label.emotion) for label in labels])
+    vectors_by_id: dict[int, np.ndarray] = {
+        int(paragraph_id): np.asarray(embedding, dtype=np.float64)
+        for paragraph_id, embedding in session.execute(
+            select(ParagraphEmbedding.paragraph_id, ParagraphEmbedding.embedding_vector).where(
+                ParagraphEmbedding.run_id == run_id,
+                ParagraphEmbedding.embedding_vector.is_not(None),
+            )
+        ).all()
+    }
+    if not vectors_by_id:
+        logger.info("段落边界跳过：本 run 无段落向量（paragraph_embeddings 未就绪），两列保持 NULL")
+        return 0
+    fit_labels = [label for label in labels if label.paragraph_id in vectors_by_id]
+    if len(fit_labels) < 2:
+        logger.info("段落边界跳过：自选段标签能对上段落向量的不足 2 条，两列保持 NULL")
+        return 0
+    boundary = fit_emotion_boundary(
+        np.stack([vectors_by_id[label.paragraph_id] for label in fit_labels]),
+        [int(label.emotion) for label in fit_labels],
+    )
     if boundary is None:
-        logger.info("句级边界跳过：标签分值无变化（全同情绪），无边界可学，两列保持 NULL")
+        logger.info("段落边界跳过：标签分值无变化（全同情绪），无边界可学，两列保持 NULL")
         return 0
 
-    paragraph_rows = list(paragraph_repo.fetch_paragraph_rows(run_id))
-    all_sentences: list[str] = []
-    sentence_counts: list[int] = []
-    for row in paragraph_rows:
-        sentences = split_sentences(str(row.text))
-        sentence_counts.append(len(sentences))
-        all_sentences.extend(sentences)
-    if not all_sentences:
-        return 0
-    scores = score_sentences(boundary, session_embedder.sentence_embeddings(all_sentences))
-
+    expected_dim = len(boundary.weights)
     updates: list[dict[str, float | int]] = []
-    cursor = 0
-    for row, count in zip(paragraph_rows, sentence_counts, strict=True):
-        paragraph_scores = scores[cursor : cursor + count]
-        cursor += count
-        pos_sum = float(sum(score for score in paragraph_scores if score is not None and score > 0))
-        neg_sum = float(sum(-score for score in paragraph_scores if score is not None and score < 0))
+    for row in paragraph_repo.fetch_paragraph_rows(run_id):
+        paragraph_id = int(row.paragraph_id)
+        vector = vectors_by_id.get(paragraph_id)
+        if vector is None or vector.shape[0] != expected_dim:
+            # 与旧口径一致：无向量段落按 0 贡献（两侧皆零），不写 NULL 之外的伪造值
+            pos_sum = neg_sum = 0.0
+        else:
+            score = boundary.score(vector)
+            pos_sum = float(score) if score > 0 else 0.0
+            neg_sum = float(-score) if score < 0 else 0.0
         updates.append(
             {
-                "b_paragraph_id": int(row.paragraph_id),
+                "b_paragraph_id": paragraph_id,
                 "b_pos": pos_sum,
                 "b_neg": neg_sum,
             }

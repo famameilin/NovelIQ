@@ -524,6 +524,8 @@ def _persist_event_nodes(
     2026-08-22event_id 直接取服务端生成的 node_id；因果边只存在于
     跨章树根（cause_tree_id），由 write_event 结构性保证无环，DAG 校验删除。
     2026-08-22 重构：章级证据单份派生并盖章到每个节点（节点不再携带证据字段）。
+    2026-09-14 跨章因果链退役：write_event 不再产生 causal refs，causal 边无新来源
+    （列与边类型保留读旧数据）；伏笔属性只剩 payoff_likelihood（三档）。
     """
     chapter_evidence = _chapter_text_evidence(
         session, run_id=annotation.run_id, chapter_id=chunk.chunk_id
@@ -550,12 +552,11 @@ def _persist_event_nodes(
                     char_start=int(chapter_evidence["char_start"]),
                     char_end=int(chapter_evidence["char_end"]),
                     evidence=[dict(chapter_evidence)],
-                    causal_event_refs=list(event.causal_event_refs),
+                    causal_event_refs=[],
                     tree_id=event.tree_id,
                     cause_role=event.cause_role,
                     is_foreshadowing_root=event.is_foreshadow_setup,
                     foreshadowing_status="open" if event.is_foreshadow_setup else None,
-                    expected_payoff_family=event.expected_payoff_family,
                     payoff_likelihood=str(event.payoff_likelihood) if event.payoff_likelihood else None,
                     annotation_id=annotation.annotation_id,
                     source_kind="annotation",
@@ -563,31 +564,6 @@ def _persist_event_nodes(
                 )
             )
     session.flush()
-    for index, event in enumerate(chunk.events, start=1):
-        target_id = event_ids[index]
-        for source_id in event.causal_event_refs:
-            source = session.execute(
-                select(EventNode).where(EventNode.run_id == annotation.run_id, EventNode.event_id == source_id)
-            ).scalar_one_or_none()
-            if source is None:
-                raise ValueError(f"因果事件不存在或跨 run: {source_id}")
-            edge_id = _event_edge_id(annotation.run_id, source_id, target_id)
-            if session.get(EventEdge, edge_id) is None:
-                session.add(
-                    EventEdge(
-                        edge_id=edge_id,
-                        run_id=annotation.run_id,
-                        edge_type="causal",
-                        source_event_id=source_id,
-                        target_event_id=target_id,
-                        source_chapter_id=source.chapter_id,
-                        target_chapter_id=chunk.chunk_id,
-                        is_active=True,
-                        evidence=[dict(chapter_evidence)],
-                        annotation_id=annotation.annotation_id,
-                        payload_path=f"chunks/{chunk.chunk_id}/events/{index}/causes/{source_id}",
-                    )
-                )
     return event_ids
 
 
@@ -938,8 +914,8 @@ def _persist_foreshadowing_resolution(
 
     解决动作 = 把挂树事件用 foreshadowing 边接进伏笔树（source=根/埋设事件，
     target=挂入事件）；payoff 同时把根状态收束为 likely_paid_off，reinforce 把
-    open 根推进为 reinforced。可选更新根属性 expected_payoff_family/
-    payoff_likelihood/strength。同端点 foreshadowing 边已存在时幂等跳过建边。
+    open 根推进为 reinforced。可选更新根属性 payoff_likelihood/strength
+    （2026-09-14 expected_payoff_family 退役）。同端点 foreshadowing 边已存在时幂等跳过建边。
     """
     root_event_id = str(resolved_case.foreshadowing_root_event_id)
     event_id = str(resolved_case.foreshadowing_event_id)
@@ -949,8 +925,6 @@ def _persist_foreshadowing_resolution(
     node = session.get(EventNode, event_id)
     if node is None or node.run_id != run_id:
         raise ValueError(f"案例挂树事件不存在或跨 run: {resolved_case.case_id}")
-    if resolved_case.expected_payoff_family is not None:
-        root.expected_payoff_family = resolved_case.expected_payoff_family
     if resolved_case.payoff_likelihood is not None:
         root.payoff_likelihood = resolved_case.payoff_likelihood
     if resolved_case.strength is not None:

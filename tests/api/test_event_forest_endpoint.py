@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+from uuid import NAMESPACE_URL, uuid5
+
 from fastapi.testclient import TestClient
 
+from src.storage.models import EventEdge, EventNode
 from src.storage.repositories import RunRepository
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
@@ -19,9 +22,12 @@ from tests.support.chapter_annotation_helpers import (
 
 
 def _insert_event_forest_run(db_session) -> tuple[str, str]:
-    """两章三事件：章 1 双事件（含因果边）+ 伏笔绑定章 1 事件 1；章 2 单事件。
+    """两章三事件：章 1 双事件（遗留因果边连向章 2）+ 伏笔绑定章 1 事件 1；章 2 单事件。
 
     节点 id 按 run 前缀派生：event_id 为全局主键，避免跨测试数据残留冲突。
+    2026-09-14 跨章因果链退役：write 面不再产生 causal 边（expected_payoff_family
+    同步退役），但 EventEdge 表与快照读侧字段保留读旧数据，端点断言按读侧现行为
+    以遗留边数据构造跨章因果边。
     """
     novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -46,8 +52,8 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "tree_id": "gate",
                 "cause_role": "root",
                 # 2026-09-13 伏笔即事件树：该事件即伏笔树根
+                # （2026-09-14 伏笔属性收敛：只剩 payoff_likelihood 三档）
                 "isforeshadowing": True,
-                "expected_payoff_family": "守护",
                 "payoff_likelihood": "high",
             },
             {
@@ -56,13 +62,12 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "anchor_paragraph_ids": [1],
                 "node_id": gate_main,
                 "parent_node_id": gate_root,
-                "causal_event_refs": [],
                 "tree_id": "gate",
                 "cause_role": "main",
             },
         ],
     )
-    persist_chapter_annotation(
+    sword_annotation_id = persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
@@ -74,10 +79,27 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
                 "node_id": sword_root,
                 "tree_id": "sword",
                 "cause_role": "root",
-                # 跨章因果唯一出口是 cause_tree_id 对应的根节点引用
-                "causal_event_refs": [gate_root],
             },
         ],
+    )
+    # 读侧现行为：跨章因果唯一出口是 causal EventEdge 行（遗留数据仍可读出，
+    # edge_id 派生公式与生产写面退役前一致；evidence 取因果源节点的章级盖章）
+    gate_root_node = db_session.get(EventNode, gate_root)
+    assert gate_root_node is not None
+    db_session.add(
+        EventEdge(
+            edge_id=str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{gate_root}:{sword_root}")),
+            run_id=run_id,
+            edge_type="causal",
+            source_event_id=gate_root,
+            target_event_id=sword_root,
+            source_chapter_id=1,
+            target_chapter_id=2,
+            is_active=True,
+            evidence=list(gate_root_node.evidence),
+            annotation_id=sword_annotation_id,
+            payload_path=f"legacy/causal/{sword_root}",
+        )
     )
     RunRepository(db_session).update_run_status(run_id, "completed")
     db_session.commit()

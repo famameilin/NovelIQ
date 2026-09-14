@@ -42,8 +42,8 @@ def _make_sub_annotation(chunk_id: int, *, summary: str, dialogue: BoundDialogue
     )
 
 
-def _event(description: str, *, refs: list[str], role: str) -> BoundEvent:
-    """2026-08-19 用于构造事件（服务端 uuid 替身 id）"""
+def _event(description: str, *, role: str) -> BoundEvent:
+    """2026-09-14 用于构造事件（服务端 uuid 替身 id；causal_event_refs 已随写面退役）"""
     return BoundEvent(
         node_id=f"evt-{description}",
         tree_id="tree-merge",
@@ -51,7 +51,6 @@ def _event(description: str, *, refs: list[str], role: str) -> BoundEvent:
         cause_role=role,  # type: ignore[arg-type]
         description=description,
         participants=[],
-        causal_event_refs=refs,
     )
 
 
@@ -217,12 +216,17 @@ def test_merge_rejects_mismatched_offsets_length() -> None:
         )
 
 
-def test_merge_keeps_event_ids_and_refs_unmapped() -> None:
-    """2026-08-22 事件 node_id/tree_id 与因果引用均为服务端一次性 uuid，合并只平移文本坐标"""
-    e1 = _event("进山", refs=[], role="root")
-    e2 = _event("拔剑", refs=["evt-upstream-root"], role="main")
-    e3 = _event("收势", refs=[], role="root")
-    e4 = _event("入鞘", refs=["evt-local-prev"], role="main")
+def test_merge_keeps_event_ids_unmapped() -> None:
+    """2026-08-22 事件 node_id/tree_id 为服务端一次性 uuid，合并只平移文本坐标
+
+    2026-09-14 写入面重构：BoundEvent.causal_event_refs 退役（原"因果引用原样
+    透传"分断言已无写面对应物，由 test_graph_persistence 的事件/边断言面接管），
+    本测试保留存续不变量：跨子块合并不得重排或改写任何事件节点身份。
+    """
+    e1 = _event("进山", role="root")
+    e2 = _event("拔剑", role="main")
+    e3 = _event("收势", role="root")
+    e4 = _event("入鞘", role="main")
 
     merged = _merge_sub_chunk_annotations(
         [
@@ -235,16 +239,23 @@ def test_merge_keeps_event_ids_and_refs_unmapped() -> None:
 
     events = merged.chunks[0].events
     assert [event.description for event in events] == ["进山", "拔剑", "收势", "入鞘"]
-    # 引用原样保留，不做任何序号重排
-    assert events[1].causal_event_refs == ["evt-upstream-root"]
-    assert events[3].causal_event_refs == ["evt-local-prev"]
+    # 身份原样保留：node_id 逐字不改、同树归属不变、不做任何序号重排
+    assert [event.node_id for event in events] == ["evt-进山", "evt-拔剑", "evt-收势", "evt-入鞘"]
+    assert {event.tree_id for event in events} == {"tree-merge"}
+    assert [event.cause_role for event in events] == ["root", "main", "root", "main"]
 
 
-def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
-    """2026-09-07 句级监督：第 2+ 子块的自选句情绪标签坐标平移回章坐标，首块不变"""
-    from src.agents.annotation.schema import BoundSentenceLabel
+def test_merge_keeps_paragraph_labels_unremapped() -> None:
+    """2026-09-14 段落级监督：段标签取全局段号，合并按子块顺序直接拼接、绝不 remap
 
-    def _make_label_sub_annotation(chunk_id: int, summary: str, label: BoundSentenceLabel) -> BoundChapterAnnotation:
+    旧"句标签跨子块坐标平移"合同（sentence_labels）随句级监督退役；本测试改写为
+    新面的不变量断言——第 2+ 子块的 paragraph_id 不因合并偏移而被平移或重排。
+    """
+    from src.agents.annotation.schema import BoundParagraphLabel
+
+    def _make_label_sub_annotation(
+        chunk_id: int, summary: str, labels: list[BoundParagraphLabel]
+    ) -> BoundChapterAnnotation:
         return BoundChapterAnnotation(
             chapter_summary=summary,
             chunks=[
@@ -258,31 +269,29 @@ def test_merge_remaps_sentence_labels_of_later_sub_chunks() -> None:
                     character_observations=[],
                     dialogues=[],
                     events=[],
-                    sentence_labels=[label],
+                    paragraph_labels=labels,
                 )
             ],
         )
 
-    first_label = BoundSentenceLabel(sentence="甲说", emotion=0, start=1, end=4)
-    second_label = BoundSentenceLabel(
-        sentence="乙说",
-        emotion=-2,
-        start=2,
-        end=5,
-    )
+    first_labels = [BoundParagraphLabel(paragraph_id=0, emotion=0)]
+    second_labels = [
+        BoundParagraphLabel(paragraph_id=2, emotion=-2),
+        BoundParagraphLabel(paragraph_id=3, emotion=1),
+    ]
     merged = _merge_sub_chunk_annotations(
         [
-            _make_label_sub_annotation(-1, "第一块", first_label),
-            _make_label_sub_annotation(-2, "第二块", second_label),
+            _make_label_sub_annotation(-1, "第一块", first_labels),
+            _make_label_sub_annotation(-2, "第二块", second_labels),
         ],
         chapter_chunk_id=7,
         sub_chunk_offsets=[0, 20],
     )
 
-    merged_labels = merged.chunks[0].sentence_labels
-    assert [(label.sentence, label.emotion) for label in merged_labels] == [
-        ("甲说", 0),
-        ("乙说", -2),
+    merged_labels = merged.chunks[0].paragraph_labels
+    # 全局段号原样透传：第二子块偏移 20 不得进入段号坐标
+    assert [(label.paragraph_id, label.emotion) for label in merged_labels] == [
+        (0, 0),
+        (2, -2),
+        (3, 1),
     ]
-    assert (merged_labels[0].start, merged_labels[0].end) == (1, 4)
-    assert (merged_labels[1].start, merged_labels[1].end) == (22, 25)
