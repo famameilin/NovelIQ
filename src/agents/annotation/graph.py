@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict, get_args
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
@@ -303,18 +303,45 @@ def _route_after_agent(state: AnnotationGraphState) -> str:
     return "tool_batch"
 
 
+_NULLISH_ARG_WORDS = frozenset({"null", "none", "nil", ""})
+
+
+def _coerce_nullish_write_args(tool: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """2026-09-14 null 字面串统一容错（run a8c29ec8 实锤：speaker="null" 白烧 3 个调用/回合）
+
+    模型惯犯把 JSON null 写成字符串 "null"。写入类工具的参数里，凡 schema 声明可空
+    （Optional）的参数，null 类字面串一律按留空读取；必填参数不改，交给账本校验/类型
+    报错——那里 null 不是合法的"未提供"。转换放在生产调用入口而不是工具签名：
+    @tool 保留真实类型（enum/union）但剥掉 Annotated 的 BeforeValidator（09-14 tone 实测）。
+    """
+    schema = getattr(tool, "args_schema", None)
+    fields = getattr(schema, "model_fields", None) or {}
+    coerced = dict(args)
+    for key, value in coerced.items():
+        if not isinstance(value, str) or value.strip().casefold() not in _NULLISH_ARG_WORDS:
+            continue
+        field = fields.get(key)
+        annotation = getattr(field, "annotation", None) if field is not None else None
+        if type(None) in get_args(annotation):
+            coerced[key] = None
+    return coerced
+
+
 async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
     """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具
 
     2026-09-12 参数绑定发生在 langchain 工具 schema 层（先于函数体）；
     2026-09-13 实时写入后该层的 pydantic 失败统一翻成结构化拒绝回执
-    （record/field/code/expected），只指向出错的那一条记录。
+    （record/field/code/expected），只指向出错的那一条记录；
+    2026-09-14 可空参数的 null 字面串在绑定前先按留空归一。
     """
     name = str(call.get("name"))
     candidate = tool_map.get(name)
     if candidate is None:
         raise ValueError(f"未知 annotation 工具: {name}")
     args = dict(call.get("args") or {})
+    if name in _WRITE_TOOL_NAMES:
+        args = _coerce_nullish_write_args(candidate, args)
     try:
         result = await candidate.ainvoke(args)
     except ValidationError as exc:
