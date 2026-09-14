@@ -331,6 +331,13 @@ def _tool_receipts(captured_round: list) -> list[str]:
     return [str(message.content) for message in captured_round if getattr(message, "type", "") == "tool"]
 
 
+def _progress(messages: list) -> str:
+    """2026-09-14 用于取某轮模型请求中注入的【进度账本】块文本"""
+    blocks = [m for m in messages if isinstance(m, HumanMessage) and "进度账本" in str(m.content)]
+    assert len(blocks) == 1, "每次请求应恰好携带一条【进度账本】注入"
+    return str(blocks[0].content)
+
+
 @pytest.mark.asyncio
 async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
     """2026-08-26 回归（2026-09-04 单一写面改契约为 op log）：实体登记追加语义必须落进 FactGraph
@@ -526,11 +533,6 @@ async def test_every_write_tool_is_on_the_surface_from_the_first_turn() -> None:
     # 每请求比状态消息链多 1 条注入块
     assert [len(messages) for messages in llm.captured_messages] == [3, 6, 9]
 
-    def _progress(messages: list) -> str:
-        blocks = [m for m in messages if isinstance(m, HumanMessage) and "进度账本" in str(m.content)]
-        assert len(blocks) == 1, "每次请求应恰好携带一条【进度账本】注入"
-        return str(blocks[0].content)
-
     # 第 1 次请求：什么都还没写，五个域全部空白态
     first = _progress(llm.captured_messages[0])
     assert "实体：未写入" in first and "事件树：未写入" in first
@@ -556,7 +558,17 @@ async def test_cross_domain_write_calls_in_one_round_all_take_effect() -> None:
     """
     llm = _SequenceLLM(
         [
-            _tool_message([*_entity_calls(), *_dialogue_calls(), *_metrics_calls()]),
+            _tool_message(
+                [
+                    _write_call(
+                        "write_entity",
+                        {"name": "顾霜", "entity_type": "character", "el": "顾霜", "tags": ["少年"]},
+                        call_id="call-entity",
+                    ),
+                    *_dialogue_calls(),
+                    *_metrics_calls(),
+                ]
+            ),
             _tool_message([*_event_calls()]),
             _tool_message([_finish_chapter_call()]),
         ]
@@ -568,6 +580,11 @@ async def test_cross_domain_write_calls_in_one_round_all_take_effect() -> None:
     receipts = _tool_receipts(llm.captured_messages[1])
     assert len(receipts) == 3
     assert all('"status": "written"' in receipt for receipt in receipts)
+    # 2026-09-14 注入账本带判定值与标签列：已判条目必须能直接读回"谁/什么语气/误判"，
+    # 模型不再需要为核对已判内容回文重推（run b7477080 ch1 整册 6 遍的根因）
+    progress = _progress(llm.captured_messages[1])
+    assert "顾霜=顾霜(n=1；标签:少年)" in progress
+    assert "对话：已判定 1/" in progress and "已判定值：1=null/平静" in progress
 
 
 @pytest.mark.asyncio

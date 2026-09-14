@@ -129,8 +129,15 @@ def _progress_block(ledger: AnnotationToolLedger) -> str:
     ]
     entities = ledger.entity_ledger()
     if entities:
-        rows = "；".join(f"{row['el']}={row['name']}(n={row['n']})" for row in entities)
-        lines.append(f"实体({len(entities)})：{rows}")
+        rendered = []
+        for row in entities:
+            extras = [f"n={row['n']}"]
+            if row.get("tags"):
+                extras.append("标签:" + "、".join(row["tags"]))
+            if row.get("aliases"):
+                extras.append("别名:" + "、".join(row["aliases"]))
+            rendered.append(f"{row['el']}={row['name']}(" + "；".join(extras) + ")")
+        lines.append(f"实体({len(entities)})：" + "；".join(rendered))
     else:
         lines.append("实体：未写入")
     relations = ledger.relation_ledger()
@@ -152,7 +159,12 @@ def _progress_block(ledger: AnnotationToolLedger) -> str:
         lines.append("事件树：未写入")
     dialogue = ledger.dialogue_ledger()
     pending = _index_ranges(dialogue["pending"]) or "无"
-    lines.append(f"对话：已判定 {dialogue['written']}/{dialogue['total']}；未判定编号：{pending}")
+    judged_line = f"对话：已判定 {dialogue['written']}/{dialogue['total']}；未判定编号：{pending}"
+    if dialogue["judged"]:
+        ordered = sorted(dialogue["judged"].items(), key=lambda kv: int(kv[0]))
+        verdicts = "，".join(f"{idx}={value}" for idx, value in ordered)
+        judged_line += f"；已判定值：{verdicts}"
+    lines.append(judged_line)
     lines.append("指标：已写入" if ledger.metrics_payload is not None else "指标：未写入")
     return "\n".join(lines)
 
