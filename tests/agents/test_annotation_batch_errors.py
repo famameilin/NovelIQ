@@ -1,7 +1,7 @@
 """单记录写入拒绝测试（2026-09-14 写入面重构后取代旧的领域批量校验错误收集）
 
 旧合同（write_entities / write_dialogues / write_event / write_relations 一次大载荷）
-在领域结算时按 [index] 批量收集端点/参与者错误；2026-09-13 用户裁决取消暂存概念：
+在领域结算时按 [index] 批量收集端点/参与者错误；2026-09-13 取消暂存概念：
 每个小调用写入即生效并返回真实回执（status=written），每条记录在写入点独立校验，
 失败只指向该记录（record/field/code/expected）。2026-09-14 写入面再收敛为五工具：
 参与者并入 write_event 的 characters 数组（记录键 "<节点记录>/participant/<entityid原值>"）、

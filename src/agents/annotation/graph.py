@@ -116,10 +116,10 @@ def _index_ranges(values: list[int]) -> str:
 
 
 def _progress_block(ledger: AnnotationToolLedger, remaining_turns: int, max_iterations: int) -> str:
-    """2026-09-14 构造写者面每回合注入的【进度账本】（用户裁决：每回合注入最新进展）
+    """2026-09-14 构造写者面每回合注入的【进度账本】（每回合注入最新进展）
 
     块内只放**动态状态**（域账本现值+剩余回合）；"已判不重扫、判完即写"等处理规则
-    是静态行为合同，2026-09-14 用户裁决上提 SYSTEM_PROMPT。与收尾提醒同款：只对当次
+    是静态行为合同，2026-09-14 上提 SYSTEM_PROMPT。与收尾提醒同款：只对当次
     请求生效、不写入状态消息链；案例链不注入（09-11 "不注入案例"裁决），只覆盖五个
     写入域。
     """
