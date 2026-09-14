@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -152,6 +153,7 @@ class DatabaseAnnotationQueryService:
         hidden_case_ids: set[str],
         case_type: str | None = None,
         limit: int = 50,
+        pending_cases: Sequence[CaseSearchResult] = (),
     ) -> SearchResult:
         """2026-08-07 用于检索案例与伏笔池并原样转交根 Evidence
 
@@ -160,8 +162,13 @@ class DatabaseAnnotationQueryService:
         - case_type 为 "all" 或具体类型：不匹配文本，按最新创建优先枚举该范围全部案例，
           使无正文词汇可锚定的案例（如 entity_alias）也能被检索到。
         回执附带池内未被隐藏的 active 规模与类型分布，供模型判断还有多少未展示案例。
+
+        2026-09-13 登记即进池：本 chunk 内 push_case 登记的待建案例经 pending_cases 传入，
+        与池内案例走同一套匹配/枚举语义（案例池行要到本章收尾才落库，检索面不再缺席），
+        并在 by_type/active_total 里一并计入。
         """
         pool_rows = [row for row in self._active_case_rows() if row.id not in hidden_case_ids]
+        visible_pending = [case for case in pending_cases if case.id not in hidden_case_ids]
         enumerate_cases = case_type is not None
         wanted_type = normalize_text(case_type) if case_type is not None and case_type != "all" else None
         normalized_query = unicodedata.normalize("NFC", query or "").strip()
@@ -174,23 +181,39 @@ class DatabaseAnnotationQueryService:
                 else [row for row in pool_rows if normalize_text(row.case_type) == wanted_type]
             )
             candidates = sorted(candidates, key=lambda row: (row.created_at, row.id), reverse=True)
-            if len(candidates) > limit:
+            wanted_pending = (
+                visible_pending
+                if wanted_type is None
+                else [case for case in visible_pending if normalize_text(case.type) == wanted_type]
+            )
+            # 待建案例是本 chunk 刚登记的，最新创建优先：排在池内案例之前
+            merged = [*wanted_pending, *(_case_view(row) for row in candidates)]
+            if len(merged) > limit:
                 truncated = True
-            results.extend(_case_view(row) for row in candidates[:limit])
+            results.extend(merged[:limit])
         else:
-            for row in pool_rows:
-                if _text_matches(normalized_query, *[str(key) for key in row.keys], row.description):
-                    results.append(_case_view(row))
-                if len(results) >= limit:
-                    truncated = True
-                    break
+            for case in visible_pending:
+                if _text_matches(normalized_query, *[str(key) for key in case.keys], case.description):
+                    results.append(case)
+                    if len(results) >= limit:
+                        truncated = True
+                        break
+            if not truncated:
+                for row in pool_rows:
+                    if _text_matches(normalized_query, *[str(key) for key in row.keys], row.description):
+                        results.append(_case_view(row))
+                    if len(results) >= limit:
+                        truncated = True
+                        break
 
         by_type: dict[str, int] = {}
         for row in pool_rows:
             by_type[row.case_type] = by_type.get(row.case_type, 0) + 1
+        for case in visible_pending:
+            by_type[case.type] = by_type.get(case.type, 0) + 1
         return SearchResult(
             results=results,
-            pool=CasePoolSummary(active_total=len(pool_rows), by_type=by_type),
+            pool=CasePoolSummary(active_total=len(pool_rows) + len(visible_pending), by_type=by_type),
             truncated=truncated,
         )
 
@@ -440,10 +463,15 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
         annotation_id: str,
         pending_case: PendingCase,
     ) -> CasePoolCase:
-        """2026-08-07 用于创建系统自动绑定目标的 active 案例"""
+        """2026-08-07 用于创建系统自动绑定目标的 active 案例
+
+        2026-09-13 登记即进池：行 id 直接用 PendingCase.target_key，使"本章内推案例 →
+        本章内解决"整条链（裁决 case_id → 锁行 → 稳定目标校验 → 解决映射 FK）都按同一
+        标识自洽，无需任何 id 重映射。
+        """
         normalized_keys = sorted({normalize_text(key) for key in pending_case.keys})
         row = CasePoolCase(
-            id=str(uuid4()),
+            id=pending_case.target_key,
             run_id=run_id,
             case_type=pending_case.type,
             # M9a-2：运行时 PendingCase 保留 chunk_id 字段（值即章 chunk_id）

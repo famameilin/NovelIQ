@@ -2,7 +2,7 @@
 章节 Agent 常驻事实图状态
 
 说明: run 级事实图在首个章节 Agent 启动时从库加载一次，之后所有章节 Agent 共享，
-每个图域写工具（write_entities / write_relations / resolve_fact_case）即时更新本图，
+每个图域写工具（write_entity / write_relation / resolve_fact_case）即时更新本图，
 章节完成时由持久化层从本图的操作日志派生新图版本落库。中途恢复任务时重新加载。
 运行时所有图查询（search_graph、关系/实体校验）只访问本内存图，数据库仅参与持久化。
 
@@ -75,7 +75,7 @@ class FactGraph:
     # 2026-09-04 单一写面：图域操作日志，按子块累积（begin_chapter 清空、drain_ops 取出），
     # 持久化层从这三份日志派生实体行、关系 assert 事实与案例关系变更事实；
     # BoundChunkAnnotation 不再持有 entities/relations 副本，resolved_cases 不再承载 fact 动作。
-    # entity_ops 追加语义，relation_assert_ops 完整替换语义（每次 write_relations 重填），
+    # entity_ops 追加语义，relation_assert_ops 完整替换语义（每次 write_relation 按本章关系集合重放重填），
     # relation_change_ops 记录 resolve_fact_case 的关系生命周期变化（含案例生命周期元数据，
     # 供完成事务锁行/校验/写映射）。三者纳入 snapshot/restore，重放顺序=先 assert 后 change。
     entity_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
@@ -177,7 +177,7 @@ class FactGraph:
         """2026-09-11 用于把模型提交的实体编号翻成登记名；未登记编号直接报错自纠
 
         只做编号→登记名翻译，**不做别名归并**：别名解析仍留在各调用点原有的
-        resolve_name 位置（write_domain 的端点校验、write_relations 的塌环判决），
+        resolve_name 位置（write_domain 的端点校验、关系入图的塌环判决），
         特别是 resolve_fact_case 的端点按合同不得重过 resolve_name——同人物分量内
         两端会塌成代表节点自环，解除的边键自指导致永远删不掉（第 4 章空转根因）。
         编号指向的登记若已被章节回滚撤销，视为未登记——防止解析到一个不在图上的名字。
@@ -191,7 +191,7 @@ class FactGraph:
             )
             visible = ", ".join(known.split(", ")[:20])
             raise ValueError(
-                f"{label} 实体编号 {number} 未登记：编号取自 write_entities 回执 numbers 或 "
+                f"{label} 实体编号 {number} 未登记：编号取自 write_entity 回执 n 或 "
                 f"search_graph 回执 n（已登记编号示例: {visible or '无'}）"
             )
         return display
@@ -249,7 +249,7 @@ class FactGraph:
     def record_relation_asserts(self, relations: list, *, chapter_id: int) -> None:
         """2026-09-04 登记本批关系 assert 操作（完整替换语义：先清空再按本批重填）
 
-        端点名取 write_relations 已解析（resolve_name 后）的规范名，与 active_relations
+        端点名取每次重放前已解析（resolve_name 后）的规范名，与 active_relations
         存储键一致，保证持久化重放与运行时终态同源。
         """
         self.relation_assert_ops = [
@@ -290,11 +290,11 @@ class FactGraph:
         if _norm(from_entity) == _norm(to_entity):
             # 两端归一后同名：持久化会插入 from_entity_id=to_entity_id 的自环行，
             # 违反 graph_relations 端点互异约束炸掉完成事务（run a83fae3d 第9章实锤）。
-            # 同一人物归并只经 write_relations 的"同一人物"边表达，案例变更按原样端点
+            # 同一人物归并只经 write_relation 的"同一人物"边表达，案例变更按原样端点
             # 构造键、不过 resolve_name，此处裸同名即退化输入，直接报错回滚本回合
             raise ValueError(
                 f"关系两端解析为同一实体，不允许自环: {from_entity}—{to_entity}（{relation_type}）；"
-                "同一人物归并请用 write_relations 提交「同一人物」边，关系变更请先 search_graph "
+                "同一人物归并请用 write_relation 提交「同一人物」边，关系变更请先 search_graph "
                 "取边的规范端点名"
             )
         key = self._relation_key(from_entity, to_entity, relation_type)
@@ -341,7 +341,7 @@ class FactGraph:
         """2026-08-09 用于在完整替换语义下撤销当章 assert 的关系
 
         2026-08-13 P2-9：同步回退本章新增边累加的 support_count——同一章节内
-        write_relations 完整替换会先 reset 再重新 apply，若不回退，重新提交
+        关系集合每次写入都会先 reset 再重新 apply，若不回退，重新提交
         已 assert 边会重复 +1（每次替换 +1），落库后支持度虚高。
         """
         for key in self.chapter_added_relations:

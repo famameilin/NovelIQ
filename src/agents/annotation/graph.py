@@ -2,15 +2,19 @@
 章节标注逐 chunk 语义写入 LangGraph
 
 消息链采用 messages + add_messages 累积；每次模型请求携带完整历史消息。
-complete_chunk 与 finish_chapter 由程序自动执行：五个写入工具覆盖六领域后
+complete_chunk 与 finish_chapter 由程序自动执行：模型用唯一 finish_chunk 收尾后
 图节点自动冻结 chunk 并完成章节，模型不需要调用完成工具。
+
+2026-09-13 实时写入：一个模型回合可以包含多个有类型的小调用（每条只写一个完整
+语义单元、写入即生效），写完全部内容后用 finish_chunk 收尾；收尾判定推迟到本回合
+全部调用处理完毕之后（逐条失败只回滚该调用、不阻塞收尾），因此一次回复整体仍计
+一个回合。
 """
 
 from __future__ import annotations
 
 import json
 import time
-from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -18,8 +22,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import ValidationError
 
-from .errors import AnnotationInvariantError
-from .tools import AnnotationToolLedger, translate_event_validation_error
+from .errors import AnnotationInvariantError, AnnotationStageRejection
+from .tools import (
+    _DOMAIN_ORDER,
+    _WRITE_TOOL_NAMES,
+    AnnotationToolLedger,
+    translate_write_validation_error,
+)
 
 if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
@@ -28,36 +37,10 @@ if TYPE_CHECKING:
 # 2026-08-14 D1：无 continuity_open 阶段，chunk_open -> completed 两态
 AnnotationPhase = Literal["chunk_open", "completed"]
 
-_DOMAIN_NAMES = (
-    "metrics",
-    "entities",
-    "character_observations",
-    "dialogues",
-    "events",
-    "relations",
-)
-_DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
-
-_FORMAL_WRITE_ORDER = (
-    ("entities", "write_entities"),
-    ("metrics", "write_metrics"),
-    ("events", "write_event"),
-    ("relations", "write_relations"),
-    ("dialogues", "write_dialogues"),
-)
-_FORMAL_WRITE_TOOL_NAMES = frozenset(tool_name for _domain, tool_name in _FORMAL_WRITE_ORDER)
-_FORMAL_WRITE_DEPENDENCIES = {
-    "entities": frozenset(),
-    "metrics": frozenset(),
-    "events": frozenset({"entities"}),
-    "relations": frozenset({"entities"}),
-    "dialogues": frozenset({"entities"}),
-}
-
 # 2026-09-05 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
 TURN_BUDGET_REMINDER_WINDOW = 3
 
-# 2026-09-11 章内并行：区分"未传 completion_hint"（用六域缺域提醒）与显式传 None（无提醒）
+# 2026-09-11 章内并行：区分"未传 completion_hint"（用缺内容提醒）与显式传 None（无提醒）
 _HINT_SENTINEL = object()
 
 
@@ -67,58 +50,52 @@ def _turn_budget_reminder(remaining: int) -> str:
     2026-09-05 第3章死锁：模型空转 15 轮 40 次检索 0 写入后撞硬顶，
     全程看不到轮次预算。此提醒为纯消息注入（不改工具开放与路由），
     只对本次请求生效、不写入状态消息链，避免多轮提醒在历史中堆积。
+
+    2026-09-13 末轮点名 finish_chunk：run c80105cc 第 4 章实测——末轮文案只说
+    "提交全部已确认内容"，模型把写入排在前面、finish_chunk 留给"下一轮"，该轮
+    结束后撞硬顶、整章作废（第 15 轮思考里计划含 finish_chunk，实际只发出 3 个
+    写入调用）。末轮必须点名唯一的收尾动作，并说明收尾可与写入同批提交。
     """
     if remaining <= 1:
         return (
-            "【轮次预算】本轮是内部循环的最后一轮：请立即用写入工具提交全部已确认内容，"
-            "不要再发起新的检索。"
+            "【轮次预算】本轮是内部循环的最后一轮：写入与收尾放在同一批次提交，"
+            "并在本批次里调用 finish_chunk() ——收尾判定在本批全部调用处理完后执行；"
+            "本轮结束仍未收尾则本 chunk 作废，不要再发起新的检索。"
         )
     return (
         f"【轮次预算】剩余 {remaining} 轮（含本轮）将触发内部循环上限："
-        "请尽快提交已确认内容，把剩余轮次留给写入收尾，不要再用新检索消耗轮次。"
+        "请尽快提交已确认内容，把剩余轮次留给写入与 finish_chunk() 收尾，"
+        "不要再用新检索消耗轮次。"
     )
 
 
-# 2026-09-08 六域回执对应的补齐工具与空提交写法
-_MISSING_DOMAIN_TOOL_HINTS = {
-    "entities": "write_entities（无实体时提交 {\"entities\": []}）",
-    "metrics": "write_metrics",
-    "events": "write_event（无事件时提交 {\"description\": null, \"finalize_events\": true}）",
-    "character_observations": "write_event（随事件域一并完成，无需单独提交）",
-    "relations": "write_relations（无关系变化时提交 {\"relations\": []}）",
-    "dialogues": "write_dialogues（无对话时提交 {\"dialogues\": []}）",
+# 2026-09-13 尚无内容领域对应的补齐工具
+_MISSING_CONTENT_TOOL_HINTS = {
+    "entities": "write_entity（登记本章出现的实体）",
+    "metrics": "write_metrics（摘要与叙事指标，必填）",
+    "events": "write_event_root/write_event_child/参与者（本章确实没有事件可跳过）",
+    "relations": "write_relation（本章确实没有关系可跳过）",
+    "dialogues": "write_dialogue（按候选表逐条判定，确实没有可跳过）",
 }
 
 
-def _missing_domains_reminder(missing: list[str], *, unlocked_domains: frozenset[str]) -> str | None:
-    """2026-09-08 用于构造无工具回复重发前的缺域补齐提醒
+def _missing_domains_reminder(missing: list[str]) -> str | None:
+    """2026-09-13 用于构造无工具回复重发前的"还没收尾"提醒
 
-    第13章死锁：模型写完自认为"已完成"的领域后改用纯文本汇报收尾，
-    调用层把无工具回复视同调用故障原样重发，模型看不到任何缺域信息、
-    必然继续汇报，三次耗尽即章失败。此提醒只注入重发请求（不写入状态
-    消息链、不改工具开放与路由），把"还缺什么、怎么补"直接交给模型。
+    写入即生效，收尾由唯一 finish_chunk 表达：纯文本汇报既不是写入也不是收尾，
+    调用层把无工具回复视同调用故障重发，此提醒只注入重发请求（不写入状态消息链、
+    不改工具开放与路由），把"还缺什么内容、怎么收尾"直接交给模型。
 
-    2026-09-12 只提当前已解锁的缺域：未解锁域的补齐工具不在本轮工具面上，
-    报工具名即越界引用（工具相关内容只在工具暴露时进入上下文）。
+    2026-09-13 写者面全放开：九个写入小调用从首轮起全部在工具面上，缺哪个域就报
+    哪个域的补齐工具，不再有"实体未写、其余领域工具随后解锁"的分支。
     """
-    ordered = [
-        domain
-        for domain, _tool_name in _FORMAL_WRITE_ORDER
-        if domain in missing and domain in unlocked_domains
-    ]
-    ordered += [
-        domain
-        for domain in missing
-        if domain not in ordered and domain in unlocked_domains
-    ]
+    ordered = [domain for domain in _DOMAIN_ORDER if domain in missing]
+    head = "【收尾提醒】当前 chunk 还没收尾（纯文本汇报不算写入，也不是收尾）："
+    tail = "。确认写完后调用 finish_chunk() 收尾，chunk 才冻结；本块确实为空的领域直接收尾即可。"
     if not ordered:
-        return None
-    detail = "、".join(f"{domain}（{_MISSING_DOMAIN_TOOL_HINTS[domain]}）" for domain in ordered)
-    head = "【缺域提醒】当前 chunk 仍有领域未提交回执，纯文本汇报不算写入："
-    tail = "。全部领域回执齐全后 chunk 会自动冻结完成。"
-    if "entities" in ordered:
-        return f"{head}{detail}。write_entities 是其余写入工具的解锁前提，请先补齐它{tail}"
-    return f"{head}{detail}。请立即调用对应写入工具补齐{tail}"
+        return f"{head}请确认已写完并调用 finish_chunk() 收尾{tail}"
+    detail = "、".join(f"{domain}（{_MISSING_CONTENT_TOOL_HINTS[domain]}）" for domain in ordered)
+    return f"{head}尚无内容的领域：{detail}{tail}"
 
 
 class AnnotationGraphState(TypedDict):
@@ -128,47 +105,6 @@ class AnnotationGraphState(TypedDict):
     phase: AnnotationPhase
     iterations: int
     error: str | None
-
-
-def _active_write_tools(ledger: AnnotationToolLedger) -> tuple[str, ...]:
-    """2026-09-03 用于按依赖解锁正式写入工具：解锁后只追加进列表，已写入不移除、不设每轮上限"""
-    return tuple(
-        tool_name
-        for domain, tool_name in _FORMAL_WRITE_ORDER
-        if _FORMAL_WRITE_DEPENDENCIES[domain] <= ledger.domain_receipts
-    )
-
-
-def _active_write_tool(ledger: AnnotationToolLedger) -> str | None:
-    """2026-08-30 用于返回当前开放窗口中的首个待写工具供审计展示"""
-    active_write_tools = _active_write_tools(ledger)
-    return active_write_tools[0] if active_write_tools else None
-
-
-def _unlocked_write_domains(ledger: AnnotationToolLedger) -> frozenset[str]:
-    """2026-09-12 用于返回补齐工具已出现在本轮工具面上的领域
-
-    缺域提醒只提这些域（见 _missing_domains_reminder）。character_observations
-    随事件域经 write_event 一并写入，跟随 events 解锁。
-    """
-    unlocked = {
-        domain
-        for domain, _tool_name in _FORMAL_WRITE_ORDER
-        if _FORMAL_WRITE_DEPENDENCIES[domain] <= ledger.domain_receipts
-    }
-    if "events" in unlocked:
-        unlocked.add("character_observations")
-    return frozenset(unlocked)
-
-
-def _tools_for_turn(tools: list[Any], ledger: AnnotationToolLedger) -> list[Any]:
-    """2026-09-03 用于保留非正式工具并暴露依赖已解锁的正式写入工具（只追加不替换）"""
-    tools_by_name = {candidate.name: candidate for candidate in tools}
-    active_write_tools = [
-        tools_by_name[name] for name in _active_write_tools(ledger) if name in tools_by_name
-    ]
-    nonformal_tools = [candidate for candidate in tools if candidate.name not in _FORMAL_WRITE_TOOL_NAMES]
-    return [*active_write_tools, *nonformal_tools]
 
 
 def _tool_batch_protocol_error(
@@ -200,20 +136,15 @@ def _build_agent_node(
     """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点
 
     2026-09-11 章内并行：completion_hint 显式传入（含 None）即按传入使用，缺省
-    保持六域缺域提醒；require_tool_call=False 供读者面使用——读者没有写入工具，
+    保持收尾提醒；require_tool_call=False 供读者面使用——读者没有写入工具，
     无工具回复是"上报完毕"的正常完成信号（§8.5），不得按调用故障重发。
     """
 
     if completion_hint is _HINT_SENTINEL:
 
         def completion_hint() -> str | None:
-            """2026-09-08 无工具回复重发前按账本当前缺域生成一次性提醒"""
-            missing = [
-                domain for domain in _DOMAIN_NAMES if domain not in ledger.domain_receipts
-            ]
-            if not missing:
-                return None
-            return _missing_domains_reminder(missing, unlocked_domains=_unlocked_write_domains(ledger))
+            """2026-09-13 无工具回复重发前按账本当前尚无内容的领域生成一次性提醒"""
+            return _missing_domains_reminder(ledger.missing_content_domains())
 
     async def agent_node(state: AnnotationGraphState) -> dict[str, Any]:
         """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
@@ -230,14 +161,9 @@ def _build_agent_node(
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(HumanMessage(content=_turn_budget_reminder(remaining_turns)))
 
-        active_write_tool = _active_write_tool(ledger)
-        active_write_tools = _active_write_tools(ledger)
-        turn_tools = _tools_for_turn(tools, ledger)
         context_summary = {
             **ledger.context_summary(),
-            "active_write_tool": active_write_tool,
-            "active_write_tools": list(active_write_tools),
-            "allowed_tool_names": [candidate.name for candidate in turn_tools],
+            "allowed_tool_names": [candidate.name for candidate in tools],
         }
 
         def on_turn_started(provider_request: dict[str, Any], started_ns: int) -> None:
@@ -265,7 +191,7 @@ def _build_agent_node(
 
         try:
             response = await run_model_call(
-                llm.bind_tools(turn_tools),
+                llm.bind_tools(tools),
                 request_messages,
                 stream,
                 on_turn_complete=on_turn_complete,
@@ -304,25 +230,32 @@ def _route_after_agent(state: AnnotationGraphState) -> str:
 async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
     """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具
 
-    2026-09-12 write_event 的参数绑定发生在 langchain 工具 schema 层（先于
-    函数体），该层的 pydantic 失败同样翻译成中文规则报错；函数体层的根级
-    校验由 write_event 自己兜底。
+    2026-09-12 参数绑定发生在 langchain 工具 schema 层（先于函数体）；
+    2026-09-13 实时写入后该层的 pydantic 失败统一翻成结构化拒绝回执
+    （record/field/code/expected），只指向出错的那一条记录。
     """
     name = str(call.get("name"))
     candidate = tool_map.get(name)
     if candidate is None:
         raise ValueError(f"未知 annotation 工具: {name}")
+    args = dict(call.get("args") or {})
     try:
-        result = await candidate.ainvoke(dict(call.get("args") or {}))
+        result = await candidate.ainvoke(args)
     except ValidationError as exc:
-        if name == "write_event":
-            raise translate_event_validation_error(exc) from None
+        if name in _WRITE_TOOL_NAMES:
+            raise translate_write_validation_error(name, args, exc) from None
         raise
     return str(result)
 
 
-def _failed_receipt(name: str, error: str) -> str:
-    """2026-08-10 用于构造单个调用失败时模型可见的独立回执"""
+def _failed_receipt(name: str, error: str | BaseException) -> str:
+    """2026-08-10 用于构造单个调用失败时模型可见的独立回执
+
+    2026-09-13：结构化拒绝（AnnotationStageRejection）只回 record/field/code/
+    expected 与可自纠说明，不重复整份合同。
+    """
+    if isinstance(error, AnnotationStageRejection):
+        return json.dumps(error.receipt(), ensure_ascii=False)
     return json.dumps(
         {"accepted": False, "tool": name, "error": str(error)},
         ensure_ascii=False,
@@ -337,25 +270,6 @@ def _truncated_error(name: str) -> str:
     )
 
 
-_CREATE_EVENT_PATCH_HINT = (
-    "；本次提交已缓存为草稿，重调 write_event 只需 patches=[[字段路径, 新值], ...] "
-    "修正上述路径对应字段（路径见报错，已正确的部分无需重发），"
-    "不带 patches 则表示整体重交并取代草稿"
-)
-
-
-def _stash_write_event_draft(ledger: AnnotationToolLedger, call: dict[str, Any], error_text: str) -> str:
-    """2026-09-11 用于把校验失败的 write_event 参数缓存为草稿并附增量修正提示
-
-    补丁式重调（args 含 patches）失败时草稿已由 merge_event_patches 更新为合并结果，
-    不得用本次的 patches 参数覆盖草稿。
-    """
-    args = call.get("args")
-    if isinstance(args, dict) and "patches" not in args:
-        ledger.stash_event_draft(deepcopy(args))
-    return error_text + _CREATE_EVENT_PATCH_HINT
-
-
 def _build_tool_batch_node(
     tools: list[Any],
     *,
@@ -363,11 +277,16 @@ def _build_tool_batch_node(
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
 ):
-    """2026-08-10 用于构建逐调用独立提交且互不回滚的工具节点"""
-    tool_map = {candidate.name: candidate for candidate in tools}
+    """2026-08-10 用于构建逐调用独立提交且互不回滚的工具节点
+
+    2026-09-13 实时写入：一个回合的多个调用串行处理、共享账本、写入即生效；
+    finish_chunk 的收尾判定推迟到本回合全部调用处理完再执行，因此
+    "同轮多个小调用 + 一个收尾声明"整体只计一个模型回合。失败只影响该调用自己，
+    不影响同回合其他调用、也不阻塞收尾（收尾判定见 _settle_chunk_finish）。
+    """
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-30 用于独立串行执行至多两种正式写入并按单次调用边界回滚"""
+        """2026-09-13 用于独立串行执行本回合全部小调用并按单次调用边界回滚"""
 
         async def _emit_tool_status(name: str, status: str, message: str) -> None:
             """2026-08-12 用于推送工具结果状态事件；SSE 推送失败时先闭合回合审计计时再上抛"""
@@ -384,21 +303,30 @@ def _build_tool_batch_node(
                 raise
 
         calls = _tool_calls(state)
-        messages: list[ToolMessage] = []
-        allowed_tool_names = frozenset(candidate.name for candidate in _tools_for_turn(tools, ledger))
+        allowed_tool_names = frozenset(candidate.name for candidate in tools)
         protocol_error = _tool_batch_protocol_error(
             calls,
             allowed_tool_names=allowed_tool_names,
         )
+        # 每个调用一条 entry：call/序号/内容（finish_chunk 先占位，批次末尾回填判定结果）
+        rendered: list[dict[str, Any]] = [
+            {"call": call, "index": call_index, "content": None}
+            for call_index, call in enumerate(calls)
+        ]
 
-        async def _append_failed_call(call_index: int, call: dict[str, Any], error_text: str) -> None:
+        async def _append_failed_call(
+            entry: dict[str, Any],
+            call: dict[str, Any],
+            error_text: str,
+        ) -> None:
             """2026-08-30 用于把协议或顺序错误作为独立失败回执和审计记录返回模型"""
             name = str(call.get("name"))
             result = _failed_receipt(name, error_text)
+            entry["content"] = result
             started_ns = time.perf_counter_ns()
             if observer is not None:
                 observer.record_tool_call(
-                    call_index=call_index,
+                    call_index=entry["index"],
                     tool_name=name,
                     request_args=dict(call.get("args") or {}),
                     raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
@@ -410,47 +338,26 @@ def _build_tool_batch_node(
                     started_ns=started_ns,
                 )
             await _emit_tool_status(name, "error", error_text)
-            messages.append(
-                ToolMessage(
-                    content=result,
-                    tool_call_id=str(call["id"]),
-                    name=name,
-                )
-            )
 
         if protocol_error is not None:
             ledger.errors.append(protocol_error)
-            for call_index, call in enumerate(calls):
-                await _append_failed_call(call_index, call, protocol_error)
+            for entry in rendered:
+                await _append_failed_call(entry, entry["call"], protocol_error)
             if observer is not None:
                 observer.close_turn()
-            return {"messages": messages, "phase": ledger.phase}
-        for call_index, call in enumerate(calls):
+            return {"messages": _tool_messages(rendered), "phase": ledger.phase}
+        for entry in rendered:
+            call = entry["call"]
             name = str(call.get("name"))
             if call.get("truncated"):
                 error_text = _truncated_error(name)
-                result = _failed_receipt(name, error_text)
-                if observer is not None:
-                    observer.record_tool_call(
-                        call_index=call_index,
-                        tool_name=name,
-                        request_args=dict(call.get("args") or {}),
-                        raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
-                        response=json.loads(result),
-                        receipt=json.loads(result),
-                        status="error",
-                        error=error_text,
-                        tool_duration_ms=0,
-                        started_ns=time.perf_counter_ns(),
-                    )
-                await _emit_tool_status(name, "error", "参数不完整（流传输截断）")
-                messages.append(
-                    ToolMessage(
-                        content=result,
-                        tool_call_id=str(call["id"]),
-                        name=name,
-                    )
-                )
+                await _append_failed_call(entry, call, error_text)
+                continue
+            if name == "finish_chunk":
+                # 收尾声明：校验与冻结推迟到本回合全部调用处理完之后
+                # （逐条失败只回滚该调用、不阻塞收尾），因此"同轮多个小调用 + 收尾"仍计一个回合
+                entry["started_ns"] = time.perf_counter_ns()
+                entry["content"] = await _invoke_tool(tool_map, call)
                 continue
             ledger_snapshot = ledger.snapshot()
             graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None else None
@@ -473,16 +380,15 @@ def _build_tool_batch_node(
                     ledger.graph.restore(graph_snapshot)
                 ledger.errors.append(str(exc))
                 error_text = str(exc)
-                if name == "write_event":
-                    error_text = _stash_write_event_draft(ledger, call, error_text)
-                result = _failed_receipt(name, error_text)
+                result = _failed_receipt(name, exc)
                 status = "error"
                 error = error_text
                 receipt = json.loads(result)
             tool_duration_ms = max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000))
+            entry["content"] = result
             if observer is not None:
                 observer.record_tool_call(
-                    call_index=call_index,
+                    call_index=entry["index"],
                     tool_name=name,
                     request_args=dict(call.get("args") or {}),
                     raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
@@ -497,18 +403,84 @@ def _build_tool_batch_node(
                 await _emit_tool_status(name, "success", result)
             else:
                 await _emit_tool_status(name, "error", error or "")
-            messages.append(
-                ToolMessage(
-                    content=result,
-                    tool_call_id=str(call["id"]),
-                    name=name,
-                )
-            )
+        await _settle_chunk_finish(
+            ledger,
+            rendered,
+            observer=observer,
+            emit_tool_status=_emit_tool_status,
+        )
         if observer is not None:
             observer.close_turn()
-        return {"messages": messages, "phase": ledger.phase}
+        return {"messages": _tool_messages(rendered), "phase": ledger.phase}
 
+    tool_map = {candidate.name: candidate for candidate in tools}
     return tool_batch
+
+
+def _tool_messages(rendered: list[dict[str, Any]]) -> list[ToolMessage]:
+    """2026-09-13 用于按调用顺序把回执渲染成 ToolMessage（含失败回执与延迟判定的收尾回执）"""
+    messages: list[ToolMessage] = []
+    for entry in rendered:
+        call = entry["call"]
+        messages.append(
+            ToolMessage(
+                content=str(entry.get("content") or ""),
+                tool_call_id=str(call["id"]),
+                name=str(call.get("name")),
+            )
+        )
+    return messages
+
+
+async def _settle_chunk_finish(
+    ledger: AnnotationToolLedger,
+    rendered: list[dict[str, Any]],
+    *,
+    observer: AgentTurnObserver | None,
+    emit_tool_status: Any,
+) -> None:
+    """2026-09-13 用于在本回合全部调用处理完后执行 finish_chunk 收尾判定
+
+    写入是实时的、不需要结算：本回合的逐条失败各自在调用点已回执，收尾只管
+    按已写入内容补默认判定、校验并构造 ready_chunk（构造失败整体回滚，已写入记录保留）。
+    """
+    for entry in rendered:
+        call = entry["call"]
+        if str(call.get("name")) != "finish_chunk" or entry.get("content") is None:
+            continue
+        started_ns = entry.get("started_ns") or time.perf_counter_ns()
+        try:
+            receipt = ledger.finish_chunk()
+            content = json.dumps(receipt, ensure_ascii=False)
+            status: str = "success"
+            error: str | None = None
+        except AnnotationInvariantError:
+            if observer is not None:
+                observer.close_turn()
+            raise
+        except Exception as exc:
+            ledger.errors.append(str(exc))
+            content = _failed_receipt("finish_chunk", exc)
+            status = "error"
+            error = str(exc)
+        entry["content"] = content
+        if observer is not None:
+            observer.record_tool_call(
+                call_index=entry["index"],
+                tool_name="finish_chunk",
+                request_args=dict(call.get("args") or {}),
+                raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
+                response=json.loads(content),
+                receipt=json.loads(content),
+                status=status,
+                error=error,
+                tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
+                started_ns=started_ns,
+            )
+        if status == "success":
+            await emit_tool_status("finish_chunk", "success", content)
+        else:
+            await emit_tool_status("finish_chunk", "error", error or "")
 
 
 def _build_auto_finalize_node(
@@ -517,13 +489,13 @@ def _build_auto_finalize_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
 ):
-    """2026-08-30 用于六个内部数据领域就绪后自动完成章节"""
+    """2026-09-13 用于在收尾声明后自动冻结 chunk 并完成章节"""
 
     async def auto_finalize(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-30 用于在六领域回执齐全时冻结 chunk 并完成章节"""
+        """2026-09-13 用于在 finish_chunk 收尾后冻结 chunk 并完成章节"""
         if ledger.phase != "chunk_open":
             return {"phase": ledger.phase}
-        if not _DOMAIN_NAMES_SET <= ledger.domain_receipts:
+        if not ledger.chunk_finished:
             return {"phase": ledger.phase}
         try:
             if stream is not None:

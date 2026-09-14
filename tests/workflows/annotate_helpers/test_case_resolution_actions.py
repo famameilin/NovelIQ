@@ -141,7 +141,11 @@ def _alias_case(
     name_b: str,
     chunk_id: int = 1,
 ) -> CasePoolCase:
-    """2026-08-11 用于直接登记疑似同一人物案例"""
+    """2026-08-11 用于直接登记疑似同一人物案例
+
+    2026-09-13 登记即进池后案例行 id 就是 target_key，而 id 是全库主键：
+    target_key 加 uuid 后缀，避免跨用例复用同一名称组合时撞主键。
+    """
     return CasePoolRepository(db_session).create_case(
         run_id=run_id,
         annotation_id=annotation_id,
@@ -150,7 +154,7 @@ def _alias_case(
             chunk_id=chunk_id,
             keys=[name_a, name_b, "同一人物"],
             description=f"疑似同一人物：{name_a} 与 {name_b}",
-            target_key=f"alias-{name_a}-{name_b}",
+            target_key=f"alias-{name_a}-{name_b}-{uuid.uuid4().hex[:8]}",
             target_ref={
                 "kind": "entity_alias",
                 "name_a": name_a,
@@ -746,3 +750,76 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
     row = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
     expected_eid = "evt-dialogue-anchor"
     assert row.event_id == expected_eid
+
+
+def test_case_pushed_and_resolved_within_same_chunk(db_session) -> None:
+    """2026-09-13 登记即进池：本 chunk 内 push_case 登记的案例可当章解决并落库为 resolved
+
+    覆盖完成事务重排（先建推入案例的行、再锁行校验稳定目标）与"行 id 即 target_key"
+    的标识一致性：解决映射的 case_id 直接指向该行，整条链无需任何 id 重映射。
+    """
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["贺铮误认林立果为子"],
+        chapter_ids=[1],
+        title="同章推入即解决",
+    )
+    pushed = PendingCase(
+        type="关系修正",
+        chunk_id=1,
+        keys=["贺铮", "林立果", "家族"],
+        description="误建关系：二人并非父子，需解除该边",
+        target_key="pushed-in-chunk-1",
+        target_ref={"kind": "关系修正", "chunk_id": 1, "keys": ["贺铮", "林立果", "家族"]},
+    )
+    resolved = ResolvedCase(
+        case_id=pushed.target_key,
+        action="fact",
+        type=pushed.type,
+        from_entity="贺铮",
+        to_entity="林立果",
+        relation_type="家族",
+        change_kind="assert",
+        reason="同章内确认父子关系",
+        target_key=pushed.target_key,
+        target_ref=dict(pushed.target_ref),
+    )
+
+    completion = complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            annotation=_annotation(chunk_id=1, text="贺铮误认林立果为子"),
+            entity_names=["贺铮", "林立果"],
+            pushed_cases=[pushed],
+            resolved_cases=[resolved],
+            authorized_chunk_ids=[1],
+        ),
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+
+    db_session.rollback()
+    case = db_session.execute(select(CasePoolCase).where(CasePoolCase.run_id == run_id)).scalar_one()
+    fact = db_session.execute(
+        select(GraphFact).where(
+            GraphFact.run_id == run_id,
+            GraphFact.source_kind == "case_resolution",
+        )
+    ).scalar_one()
+    mapping = db_session.execute(
+        select(CaseResolutionMapping).where(
+            CaseResolutionMapping.run_id == run_id,
+            CaseResolutionMapping.case_id == case.id,
+        )
+    ).scalar_one()
+
+    # 推入的案例当章即被解决：行 id 就是 target_key，状态直接落 resolved
+    assert case.id == pushed.target_key
+    assert case.state == "resolved"
+    assert fact.fact_type == "relation"
+    assert fact.predicate == "家族"
+    assert mapping.target_fact_id == fact.fact_id
+    assert mapping.resolution["action"] == "fact"
+    # 完成结果同时汇报"创建的案例"与"解决的案例"
+    assert [item.id for item in completion.created_cases] == [pushed.target_key]
+    assert [item.case_id for item in completion.resolved_cases] == [pushed.target_key]

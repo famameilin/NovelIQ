@@ -372,6 +372,18 @@ def complete_annotation_run(
                 return existing
 
             case_repository = CasePoolRepository(session)
+            annotation = ChapterAnnotationRepository(session).add_annotation(
+                run_id=result.run_id,
+                chapter_id=result.chapter_id,
+                annotation=result.annotation,
+            )
+            # 2026-09-13 登记即进池：模型 push_case 的案例先落行（行 id 即 target_key），
+            # 本 chunk 内"推入即解决"的裁决才能在下面对同一标识锁行并校验稳定目标
+            pushed_completion = _persist_pushed_cases(
+                session,
+                result=result,
+                annotation_id=annotation.annotation_id,
+            )
             # 2026-09-11 §14 过渡补丁：重复裁决按 case_id 折叠后再锁行校验；
             # 两段式写者落地后单写者使重复不再产生，该折叠为串行子块的兜底
             all_resolved_cases = _fold_resolved_cases(
@@ -385,11 +397,6 @@ def complete_annotation_run(
             _validate_locked_cases(
                 resolved_cases=all_resolved_cases,
                 rows=locked_rows,
-            )
-            annotation = ChapterAnnotationRepository(session).add_annotation(
-                run_id=result.run_id,
-                chapter_id=result.chapter_id,
-                annotation=result.annotation,
             )
             _persist_dialogue_records(session, result=result)
             graph_result = persist_completion_graph(
@@ -411,11 +418,6 @@ def complete_annotation_run(
                 resolved_targets_by_case_id=graph_result.resolved_targets_by_case_id,
             )
             case_repository.resolve_cases(locked_rows)
-            pushed_completion = _persist_pushed_cases(
-                session,
-                result=result,
-                annotation_id=annotation.annotation_id,
-            )
             alias_completion = _persist_alias_pending_cases(
                 session,
                 run_id=result.run_id,

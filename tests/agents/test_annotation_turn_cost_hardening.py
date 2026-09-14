@@ -1,13 +1,13 @@
-"""标注回合降本五修复的合同测试（2026-09-12 方案落地）
+"""标注回合降本五修复的合同测试（2026-09-13 取消暂存后的新契约）
 
 背景：run 84866d6f 全程耗时分解显示思考占 83.1%，其中合同解码与绕行规划
 约三成；五个修复全部针对"模型可见文本与报错路径"：
-- 隐藏工具名不得出现在未解锁时刻的任何注入文本（09-12 裁决：工具相关内容
-  只在工具暴露时进入上下文）；
-- write_event 参数校验失败翻译成中文规则报错（草稿缓存与 patches 提示由
-  工具批次层统一追加）；
+- 模型可见文案不得点名已删除或未注册的工具（09-12 起草、09-13 写者面全放开后
+  不再有"隐藏工具名"一说：每轮工具面都是全集，注入文本照常点名各领域工具）；
+- 写入小调用参数校验失败翻译成结构化拒绝（record/field/code/expected），
+  旧 write_event 整树翻译与草稿 patches 链路已删除；
 - search_graph 回执标注未决实体别名案例的关联节点；
-- 两段式写者实体准入放宽为 报告并集 ∪ 图中已登记名 ∪ 章正文逐字命中；
+- 两段式写者实体准入=报告并集 ∪ 图中已登记名 ∪ 章正文逐字命中；
 - 读者面 candidate_index 明确为块内 1 基编号（读者面测试见
   test_annotation_reader.py）。
 """
@@ -18,11 +18,10 @@ import json
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
-from src.agents.annotation.errors import AnnotationInputError
+from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.graph import _invoke_tool, _missing_domains_reminder, _tools_for_turn
+from src.agents.annotation.graph import _invoke_tool, _missing_domains_reminder
 from src.agents.annotation.prompts import (
     SYSTEM_PROMPT,
     build_case_pool_notice,
@@ -34,23 +33,27 @@ from src.agents.annotation.schema import (
     CaseSearchResult,
     ChunkParagraphInfo,
     SearchResult,
-    WriteEventArg,
-    WriteEventPatchArgs,
 )
-from src.agents.annotation.tools import (
-    AnnotationToolLedger,
-    build_annotation_tools,
-    translate_event_validation_error,
-)
+from src.agents.annotation.tools import _DOMAIN_ORDER, AnnotationToolLedger, build_annotation_tools
 
-# 实体回执之前锁定的三个正式写入工具：解锁前任何注入文本都不得出现其名字
-_HIDDEN_PRE_UNLOCK_TOOL_NAMES = ("write_event", "write_relations", "write_dialogues")
+# 九个领域写入小调用（2026-09-13 写者面全放开：首轮起全部在工具面上）
+_ALL_WRITE_TOOL_NAMES = (
+    "write_entity",
+    "write_metrics",
+    "write_sentence_label",
+    "write_event_root",
+    "write_event_child",
+    "write_character_participation",
+    "write_noncharacter_participation",
+    "write_relation",
+    "write_dialogue",
+)
 
 
 class _QueryServiceStub:
     """2026-09-12 用于无数据库依赖的空查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
         del query, hidden_case_ids, case_type, limit
         return SearchResult()
 
@@ -69,7 +72,7 @@ class _AliasCaseQueryService(_QueryServiceStub):
     def __init__(self, cases: list[CaseSearchResult]) -> None:
         self.cases = cases
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
         del query, limit
         if case_type == "entity_alias":
             return SearchResult(results=[case for case in self.cases if case.id not in hidden_case_ids])
@@ -78,7 +81,7 @@ class _AliasCaseQueryService(_QueryServiceStub):
 
 def _writer_ledger(
     *,
-    text: str = "“住手”回荡",
+    text: str = "\u201c住手\u201d回荡",
     reader_reports: list[ReaderReport] | None = None,
 ) -> AnnotationToolLedger:
     return AnnotationToolLedger(
@@ -104,22 +107,40 @@ def _writer_tools(ledger: AnnotationToolLedger, query_service: Any = None) -> di
     }
 
 
+def _write_call(name: str, args: dict, *, call_id: str) -> dict:
+    """2026-09-13 用于构造经 graph._invoke_tool 的生产调用（含 schema 层失败翻译）"""
+    return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
+
+
+async def _write_rejection(tools: dict[str, Any], name: str, args: dict) -> dict[str, Any]:
+    """2026-09-13 用于取得单条记录的结构化拒绝回执（record/field/code/expected）"""
+    with pytest.raises(AnnotationStageRejection) as exc_info:
+        await _invoke_tool(tools, _write_call(name, args, call_id="call-rejected"))
+    return exc_info.value.receipt()
+
+
+def _tree(ledger: AnnotationToolLedger, tree_key: str) -> dict[str, Any]:
+    """2026-09-13 用于按章内局部键取已落账事件树（真实 uuid 只在账本内部）"""
+    return ledger.event_trees[ledger.tree_key_index[tree_key]]
+
+
 # ---------------------------------------------------------------------------
-# 修复一：隐藏工具名清出常驻文本 + 缺域提醒只列已解锁域
+# 修复一：写者面全放开（首轮即全部写入小调用）+ 缺域提醒列全部缺内容域
 
 
-def test_pre_unlock_surfaces_do_not_leak_hidden_tool_names() -> None:
-    """解锁前可见的工具描述、参数 schema 与全部注入消息不得出现隐藏写入工具名"""
+def test_writer_surface_exposes_every_write_tool_at_first_turn() -> None:
+    """2026-09-13 写者面全放开：首轮工具面就是九个写入小调用 + 唯一收尾 finish_chunk
+
+    09-12 的"隐藏工具名清出注入面"是当时渐进解锁的配套（首轮只开放实体/指标/
+    句标签，事件/关系/对话的名称不得出现在注入文本里）。用户 09-13 裁决全放开后
+    隐藏集合消失：注入文本照常点名各领域补齐工具，工具面每轮都是全集。
+    """
     ledger = _writer_ledger()
-    visible_tools = _tools_for_turn(list(_writer_tools(ledger).values()), ledger)
-    visible_names = [tool.name for tool in visible_tools]
-    assert "write_entities" in visible_names and "write_metrics" in visible_names
-    for banned in _HIDDEN_PRE_UNLOCK_TOOL_NAMES:
-        assert banned not in visible_names
-    for tool in visible_tools:
-        surface = (tool.description or "") + json.dumps(tool.args, ensure_ascii=False, default=str)
-        for banned in _HIDDEN_PRE_UNLOCK_TOOL_NAMES:
-            assert banned not in surface, f"工具 {tool.name} 的可见文本越界引用 {banned}"
+    visible_names = [tool.name for tool in _writer_tools(ledger).values()]
+    for name in _ALL_WRITE_TOOL_NAMES:
+        assert name in visible_names
+    assert "finish_chunk" in visible_names
+
     chunk_message = build_chunk_message(
         chunk_index=1,
         chunk_total=1,
@@ -130,162 +151,289 @@ def test_pre_unlock_surfaces_do_not_leak_hidden_tool_names() -> None:
         reader_reports_view="<ReaderReport>…</ReaderReport>",
         candidates=ledger.dialogue_candidates,
     )
+    # 注入文本与工具描述不得点名不存在的写入工具（旧名 write_event/create_event 之类）
     for surface in (SYSTEM_PROMPT, build_case_pool_notice(), chunk_message, writer_message):
-        for banned in _HIDDEN_PRE_UNLOCK_TOOL_NAMES:
-            assert banned not in surface, f"注入文本越界引用 {banned}: {surface[:120]}"
+        for stale in ("write_event(", "write_event_tree", "finish_domain", "create_event"):
+            assert stale not in surface, f"注入文本引用已删除的工具 {stale}: {surface[:120]}"
 
 
-def test_missing_domains_reminder_only_lists_unlocked_domains() -> None:
-    """缺域提醒只提补齐工具已解锁的域：entities 未写时不得报 events/dialogues 的工具名"""
-    text = _missing_domains_reminder(
-        ["entities", "metrics", "events", "character_observations", "relations", "dialogues"],
-        unlocked_domains=frozenset({"entities", "metrics"}),
-    )
+def test_missing_domains_reminder_lists_every_missing_domain() -> None:
+    """2026-09-13 缺域提醒列出全部缺内容域的补齐工具（不再按解锁面过滤）
+
+    解锁窗口删除后，缺哪个域就报哪个域的工具名：实体未写时一并报出事件/关系/
+    对话的写入小调用——它们此刻确实在工具面上。
+    """
+    text = _missing_domains_reminder(list(_DOMAIN_ORDER))
     assert text is not None
-    assert "write_entities" in text and "write_metrics" in text
-    for banned in _HIDDEN_PRE_UNLOCK_TOOL_NAMES:
-        assert banned not in text
+    for name in ("write_entity", "write_metrics", "write_event_root", "write_relation", "write_dialogue"):
+        assert name in text
+    assert "finish_chunk" in text
 
 
-def test_missing_domains_reminder_lists_all_domains_after_entities_receipt() -> None:
-    unlocked = frozenset({"entities", "metrics", "events", "character_observations", "relations", "dialogues"})
-    text = _missing_domains_reminder(["events", "character_observations", "dialogues"], unlocked_domains=unlocked)
+def test_missing_domains_reminder_names_only_missing_domains() -> None:
+    """缺域提醒只报缺失域的补齐工具：已写域不出现
+
+    character_observations 随事件域经事件工具一并写入，不在 missing_content_domains
+    的内容清单里（缺内容清单只含五域）。
+    """
+    text = _missing_domains_reminder(["events", "dialogues"])
     assert text is not None
-    assert "write_event" in text and "write_dialogues" in text
+    assert "write_event_root" in text and "write_dialogue" in text
+    assert "write_entity" not in text
+    assert "finish_chunk" in text
 
 
-def test_missing_domains_reminder_returns_none_when_unlocked_domains_absent() -> None:
-    assert _missing_domains_reminder(["dialogues"], unlocked_domains=frozenset()) is None
+def test_missing_domains_reminder_falls_back_to_finish_chunk_when_nothing_missing() -> None:
+    """无缺口时提醒退化为唯一收尾指引，返回 None 的旧行为已不存在
+
+    finish_chunk 恒定开放：提醒始终给出收尾方式；本轮确实没有内容可写时，
+    模型据此直接收尾即可。
+    """
+    text = _missing_domains_reminder([])
+    assert text is not None
+    assert "finish_chunk" in text
+    assert "write_" not in text
 
 
 # ---------------------------------------------------------------------------
-# 修复二：write_event 校验失败翻译成中文规则报错
-
-
-def _translated_write_event_error(args: dict[str, Any]) -> str:
-    try:
-        WriteEventArg.model_validate(args)
-    except ValidationError as exc:
-        return str(translate_event_validation_error(exc))
-    raise AssertionError("预期 write_event 参数校验失败")
-
-
-def test_translate_foreshadowing_fields_on_children() -> None:
-    text = _translated_write_event_error(
-        {
-            "description": "根事件",
-            "finalize_events": False,
-            "children": [
-                {
-                    "type": "main",
-                    "description": "子事件",
-                    "isforeshadowing": True,
-                    "setup_kind": "悬念",
-                    "expected_payoff_family": "回收",
-                }
-            ],
-        }
-    )
-    assert "children.0.isforeshadowing" in text
-    assert "伏笔字段只能放在根事件上" in text
-    assert "https://" not in text and "extra_forbidden" not in text
-
-
-def test_translate_nested_children_forbidden() -> None:
-    text = _translated_write_event_error(
-        {
-            "description": "根事件",
-            "finalize_events": False,
-            "children": [
-                {
-                    "type": "main",
-                    "description": "子事件",
-                    "children": [{"type": "main", "description": "孙事件"}],
-                }
-            ],
-        }
-    )
-    assert "children.0.children" in text
-    assert "子事件不得嵌套 children" in text
-
-
-def test_translate_role_enum_rejects_narrative_role_word() -> None:
-    text = _translated_write_event_error(
-        {
-            "description": "根事件",
-            "finalize_events": False,
-            "participants": [{"entity": 1, "role": "发送者"}],
-        }
-    )
-    assert "participants.0.role" in text
-    assert "role 只能取" in text
-    assert "发送者等人物功能词是 narrative_role 的取值" in text
-
-
-def test_translate_missing_child_type() -> None:
-    text = _translated_write_event_error(
-        {
-            "description": "根事件",
-            "finalize_events": False,
-            "children": [{"description": "子事件"}],
-        }
-    )
-    assert "children.0.type" in text
-    assert "type 只能是" in text
-
-
-def test_translate_keeps_chinese_root_validator_message() -> None:
-    text = _translated_write_event_error({"description": None, "finalize_events": False})
-    assert "description=null 只能用于" in text
-    assert "https://" not in text and "value_error" not in text
-
-
-def test_translate_patches_arity_carries_format_example() -> None:
-    bad_patches = {"patches": [["children.1.2.action", "注视", "多余"]], "finalize_events": False}
-    try:
-        WriteEventPatchArgs.model_validate(bad_patches)
-    except ValidationError as exc:
-        text = str(translate_event_validation_error(exc))
-    else:
-        raise AssertionError("预期 patches 校验失败")
-    assert "patches.0" in text
-    assert "二元数组" in text
-    assert '["children.1.2.action", "注视"]' in text
+# 修复二：写入调用校验失败翻成结构化拒绝（旧 write_event 翻译 + patches 链路已删除）
 
 
 @pytest.mark.asyncio
-async def test_write_event_schema_layer_failure_translated_via_invoke_tool() -> None:
-    """langchain 工具 schema 层的 pydantic 失败（先于函数体）同样翻译成中文规则报错"""
+async def test_child_arguments_exclude_foreshadowing_fields() -> None:
+    """伏笔三字段只属于根事件：写到子事件上被整条拒绝，不会静默丢弃
+
+    2026-09-13 取消暂存：子事件入口只有 type/description/参与者三个字段，
+    越界字段由参数面收紧（extra=forbid）成结构化拒绝，字段名随回执回到模型；
+    写入即生效，拒绝的那条不落树（根已写入，节点表只剩 root）。
+    """
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
-    call = {
-        "name": "write_event",
-        "args": {"children": [{"description": "子事件"}], "finalize_events": False},
-        "id": "call-1",
-        "type": "tool_call",
-    }
-    with pytest.raises(AnnotationInputError) as exc_info:
-        await _invoke_tool(tools, call)
-    assert "write_event 参数不符合合同" in str(exc_info.value)
-    assert "children.0.type" in str(exc_info.value)
+    assert set(tools["write_event_child"].args) == {"tree_key", "node_key", "order", "type", "description"}
+    assert {"isforeshadowing", "expected_payoff_family", "payoff_likelihood"} <= set(
+        tools["write_event_root"].args
+    )
+    tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character"})
+    tools["write_event_root"].invoke({"tree_key": "t1", "description": "根事件"})
+    receipt = await _write_rejection(
+        tools,
+        "write_event_child",
+        {
+            "tree_key": "t1",
+            "node_key": "e1",
+            "order": 1,
+            "type": "main",
+            "description": "子事件",
+            "isforeshadowing": True,
+            "expected_payoff_family": "回收",
+        },
+    )
+    assert receipt["status"] == "rejected"
+    assert receipt["record"] == "t1/e1"
+    assert receipt["field"] == "isforeshadowing"
+    assert receipt["code"] == "unknown_field"
+    assert set(_tree(ledger, "t1")["nodes"]) == {"root"}
+    assert _tree(ledger, "t1")["isforeshadowing"] is False
 
 
 @pytest.mark.asyncio
-async def test_write_event_patches_branch_failure_translated() -> None:
+async def test_child_arguments_exclude_nested_children() -> None:
+    """子事件不得嵌套 children：子事件入口没有 children 参数，嵌套提交被整条拒绝
+
+    2026-09-13 取消暂存后子事件只能逐个 write_event_child 追加（每次一个节点），
+    children 越界由参数面收紧成结构化拒绝，不会落成半个子节点。
+    """
     ledger = _writer_ledger()
-    ledger.stash_event_draft({"description": None, "finalize_events": True})
-    call = {
-        "name": "write_event",
-        "args": {"patches": [["children", [{"description": "子事件"}]]]},
-        "id": "call-2",
-        "type": "tool_call",
-    }
-    with pytest.raises(AnnotationInputError) as exc_info:
-        await _invoke_tool(_writer_tools(ledger), call)
-    assert "children.0.type" in str(exc_info.value)
-    # 合并结果已回写草稿（补丁链可继续）
-    assert ledger.pending_event_draft is not None
-    assert ledger.pending_event_draft["children"] == [{"description": "子事件"}]
+    tools = _writer_tools(ledger)
+    assert "children" not in tools["write_event_child"].args
+    tools["write_event_root"].invoke({"tree_key": "t1", "description": "根事件"})
+    receipt = await _write_rejection(
+        tools,
+        "write_event_child",
+        {
+            "tree_key": "t1",
+            "node_key": "e1",
+            "order": 1,
+            "type": "main",
+            "description": "子事件",
+            "children": [{"type": "main", "description": "孙事件"}],
+        },
+    )
+    assert receipt["record"] == "t1/e1"
+    assert receipt["field"] == "children"
+    assert receipt["code"] == "unknown_field"
+    assert set(_tree(ledger, "t1")["nodes"]) == {"root"}
+
+
+@pytest.mark.asyncio
+async def test_participation_role_rejects_narrative_role_word() -> None:
+    """role 与 narrative_role 是两套词表：人物功能词不得写进参与角色
+
+    2026-09-13：旧翻译层删除；非法枚举值由结构化拒绝给出定位
+    （record=t1/root/participant/1, field=role, code=invalid_value）与合法取值清单。
+    """
+    ledger = _writer_ledger()
+    tools = _writer_tools(ledger)
+    tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character"})
+    tools["write_event_root"].invoke({"tree_key": "t1", "description": "根事件"})
+
+    receipt = await _write_rejection(
+        tools,
+        "write_character_participation",
+        {
+            "tree_key": "t1",
+            "node_key": "root",
+            "entity": 1,
+            "role": "发送者",
+            "narrative_role": "主体",
+            "action": "喝止",
+            "emotion": -1,
+        },
+    )
+
+    assert receipt["record"] == "t1/root/participant/1"
+    assert receipt["field"] == "role"
+    assert receipt["code"] == "invalid_value"
+    assert "发送者" not in receipt["expected"]
+    assert "主体" in receipt["expected"]
+    assert "https://" not in receipt["message"]
+
+
+@pytest.mark.asyncio
+async def test_missing_child_type_receipt_points_at_record_field() -> None:
+    """缺 type 的子事件调用返回带记录键与字段名的结构化拒绝（旧 children.0.type 断言替代）"""
+    ledger = _writer_ledger()
+    tools = _writer_tools(ledger)
+    tools["write_event_root"].invoke({"tree_key": "t1", "description": "根事件"})
+
+    receipt = await _write_rejection(
+        tools,
+        "write_event_child",
+        {"tree_key": "t1", "node_key": "e1", "order": 1, "description": "子事件"},
+    )
+
+    assert receipt["record"] == "t1/e1"
+    assert receipt["field"] == "type"
+    assert receipt["code"] == "missing"
+    assert '"main"' in receipt["expected"] and '"secondary"' in receipt["expected"]
+    assert set(_tree(ledger, "t1")["nodes"]) == {"root"}
+
+
+def test_isforeshadowing_root_missing_fields_keeps_chinese_receipt() -> None:
+    """根级跨字段校验仍返回中文规则说明，不带 pydantic 样板
+
+    2026-09-13：旧 WriteEventInput 的 description=null 根校验随整树输入删除；
+    等价验证=isforeshadowing 缺回收两字段的结构化拒绝（field/code 定位缺失项，
+    message 为中文可自纠说明，无文档链接）。
+    """
+    ledger = _writer_ledger()
+    tools = _writer_tools(ledger)
+
+    with pytest.raises(AnnotationStageRejection) as exc_info:
+        tools["write_event_root"].invoke(
+            {"tree_key": "t1", "description": "根事件", "isforeshadowing": True}
+        )
+
+    receipt = exc_info.value.receipt()
+    assert receipt["record"] == "t1/root"
+    assert receipt["field"] == "expected_payoff_family"
+    assert receipt["code"] == "missing"
+    assert "必须同时提供伏笔两字段" in receipt["message"]
+    assert "https://" not in receipt["message"]
+    assert "value_error" not in receipt["message"]
+
+
+@pytest.mark.asyncio
+async def test_rejection_expected_carries_occupied_record_example() -> None:
+    """拒绝回执的 expected 携带可自纠示例（旧 patches 二元数组格式示例的替代）
+
+    2026-09-13 变化点：patches/暂存重复示例随取消暂存删除；实时建树下占用 order
+    的拒绝码为 out_of_order，expected 给出下一个可用序号（record 仍是 t1/e2），
+    模型据此换一个未占用序号。
+    """
+    ledger = _writer_ledger()
+    tools = _writer_tools(ledger)
+    tools["write_event_root"].invoke({"tree_key": "t1", "description": "根事件"})
+    first = json.loads(
+        tools["write_event_child"].invoke(
+            {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "子事件"}
+        )
+    )
+    assert first == {"status": "written", "record": "t1/e1"}
+
+    receipt = await _write_rejection(
+        tools,
+        "write_event_child",
+        {"tree_key": "t1", "node_key": "e2", "order": 1, "type": "main", "description": "并列子事件"},
+    )
+
+    assert receipt["record"] == "t1/e2"
+    assert receipt["field"] == "order"
+    assert receipt["code"] == "out_of_order"
+    assert "下一个可用序号 ≥ 2" in receipt["expected"]
+    assert "https://" not in receipt["expected"]
+    assert "type=" not in receipt["expected"]
+
+
+@pytest.mark.asyncio
+async def test_write_tool_schema_layer_failure_translated_via_invoke_tool() -> None:
+    """langchain 工具 schema 层的 pydantic 失败（先于函数体）同样翻成结构化拒绝
+
+    2026-09-13：翻译汇点从 translate_event_validation_error 改为
+    translate_write_validation_error（record 由原始参数拼装），不再抛裸 ValidationError。
+    """
+    ledger = _writer_ledger()
+    tools = _writer_tools(ledger)
+    call = _write_call(
+        "write_event_child",
+        {"tree_key": "t1", "node_key": "e1", "order": 1, "description": "子事件"},
+        call_id="call-1",
+    )
+
+    with pytest.raises(AnnotationStageRejection) as exc_info:
+        await _invoke_tool(tools, call)
+
+    receipt = exc_info.value.receipt()
+    assert "write_event_child" in str(exc_info.value)
+    assert receipt["record"] == "t1/e1"
+    assert receipt["field"] == "type"
+    assert receipt["code"] == "missing"
+    assert "https://" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_failed_record_keeps_prior_written_records_repairable() -> None:
+    """草稿缓存 + patches 链路删除（2026-09-13 取消暂存）；等价验证：
+
+    单条记录失败只回滚该调用，先前已写入的记录保留（旧 pending_event_draft
+    回写语义没有对应物）；重交该记录即修复，写入即生效。
+    """
+    ledger = _writer_ledger()
+    tools = _writer_tools(ledger)
+    tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character"})
+    tools["write_event_root"].invoke({"tree_key": "t1", "description": "根事件"})
+
+    with pytest.raises(AnnotationStageRejection):
+        await _invoke_tool(
+            tools,
+            _write_call(
+                "write_event_child",
+                {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "invalid", "description": "子事件"},
+                call_id="call-2",
+            ),
+        )
+
+    tree = _tree(ledger, "t1")
+    root_event = next(
+        event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"]
+    )
+    assert root_event.description == "根事件"
+    assert set(tree["nodes"]) == {"root"}
+
+    tools["write_event_child"].invoke(
+        {"tree_key": "t1", "node_key": "e1", "order": 1, "type": "main", "description": "子事件"}
+    )
+    assert set(_tree(ledger, "t1")["nodes"]) == {"root", "e1"}
 
 
 # ---------------------------------------------------------------------------
@@ -304,22 +452,21 @@ async def test_search_graph_annotates_alias_linked_nodes() -> None:
     )
     ledger = _writer_ledger()
     tools = _writer_tools(ledger, _AliasCaseQueryService([case]))
-    # 解锁 write_entities 的检索门并登记两个别名实体
+    # 先查图（写者习惯路径），再逐个登记两个别名实体（2026-09-13：一次一个实体）
     await tools["search_graph"].ainvoke({"entities": ["蓟州驿道"]})
-    await tools["write_entities"].ainvoke(
-        {
-            "entities": [
-                {"name": "蓟州驿道", "entity_type": "location"},
-                {"name": "第三铺", "entity_type": "location"},
-            ]
-        }
-    )
+    await tools["write_entity"].ainvoke({"name": "蓟州驿道", "entity_type": "location"})
+    await tools["write_entity"].ainvoke({"name": "第三铺", "entity_type": "location"})
 
     response = json.loads(await tools["search_graph"].ainvoke({"entities": ["蓟州驿道"]}))
     match = response["matches"][0]
     assert match["n"] == 1
     assert match["alias_linked"] == [{"case_number": 1, "linked": [{"n": 2, "name": "第三铺"}]}]
     assert "alias_note" in response
+    # 2026-09-13 文案纠偏：末句必须给两条具体动作，且不得再承诺"系统会自动合并"
+    # （旧文案让模型以为什么都不用做 → 案例永挂、每章被反复点名）
+    assert "write_relation" in response["alias_note"]
+    assert "close_case" in response["alias_note"]
+    assert "自动合并" not in response["alias_note"]
     # 展示即授权：案例编号已登记、源章已授权
     assert ledger.case_number_by_id["case-alias-1"] == 1
     assert 5 in ledger.authorized_chapter_ids
@@ -338,14 +485,8 @@ async def test_search_graph_without_alias_hits_has_no_annotation() -> None:
     ledger = _writer_ledger()
     tools = _writer_tools(ledger, _AliasCaseQueryService([case]))
     await tools["search_graph"].ainvoke({"entities": ["蓟州驿道"]})
-    await tools["write_entities"].ainvoke(
-        {
-            "entities": [
-                {"name": "蓟州驿道", "entity_type": "location"},
-                {"name": "第三铺", "entity_type": "location"},
-            ]
-        }
-    )
+    await tools["write_entity"].ainvoke({"name": "蓟州驿道", "entity_type": "location"})
+    await tools["write_entity"].ainvoke({"name": "第三铺", "entity_type": "location"})
 
     response = json.loads(await tools["search_graph"].ainvoke({"entities": ["侯飞白"]}))
     assert response["matches"] == []
@@ -358,7 +499,11 @@ async def test_search_graph_without_alias_hits_has_no_annotation() -> None:
 
 @pytest.mark.asyncio
 async def test_entity_admission_accepts_literal_chapter_text_hits() -> None:
-    """报告并集之外但正文逐字出现的实体名放行（ch26 实测损失面）"""
+    """报告并集之外但正文逐字出现的实体名放行（ch26 实测损失面）
+
+    2026-09-13 取消暂存：write_entities 批量列表改为 write_entity 单条登记，
+    回执由 accepted 改为 status=written/record/n（写入即生效），准入语义不变。
+    """
     text = "峒河在月光下泛起白雾，铜台堡的角楼熄了灯。"
     report = ReaderReport(
         block_index=0,
@@ -377,13 +522,13 @@ async def test_entity_admission_accepts_literal_chapter_text_hits() -> None:
     tools = _writer_tools(ledger)
     await tools["search_graph"].ainvoke({"entities": ["顾霜"]})
 
-    receipt = json.loads(
-        await tools["write_entities"].ainvoke({"entities": [{"name": "铜台堡", "entity_type": "location"}]})
-    )
-    assert receipt["accepted"] is True
+    receipt = json.loads(await tools["write_entity"].ainvoke({"name": "铜台堡", "entity_type": "location"}))
+    assert receipt["status"] == "written"
+    assert receipt["record"] == "entity/铜台堡"
+    assert receipt["n"] == 1
 
     with pytest.raises(ValueError) as exc_info:
-        await tools["write_entities"].ainvoke({"entities": [{"name": "凭空堡", "entity_type": "location"}]})
+        await tools["write_entity"].ainvoke({"name": "凭空堡", "entity_type": "location"})
     assert "凭空堡" in str(exc_info.value)
     assert "本章正文" in str(exc_info.value)
 
@@ -394,7 +539,6 @@ async def test_entity_admission_unaffected_for_single_block_chapters() -> None:
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
     await tools["search_graph"].ainvoke({"entities": ["侯飞白"]})
-    receipt = json.loads(
-        await tools["write_entities"].ainvoke({"entities": [{"name": "任意新实体", "entity_type": "character"}]})
-    )
-    assert receipt["accepted"] is True
+    receipt = json.loads(await tools["write_entity"].ainvoke({"name": "任意新实体", "entity_type": "character"}))
+    assert receipt["status"] == "written"
+    assert receipt["record"] == "entity/任意新实体"

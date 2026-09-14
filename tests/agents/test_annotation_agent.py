@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -38,7 +39,7 @@ from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_t
 class _QueryService:
     """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
         """2026-08-07 用于返回空案例与伏笔检索结果"""
         del query, hidden_case_ids, case_type, limit
         return SearchResult()
@@ -91,93 +92,166 @@ def _write_call(
     return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
 
 
-def _metrics_call(call_id: str = "call-metrics", *, sentence_labels: list[dict] | None = None) -> dict:
-    """2026-08-07 用于构造合法 write_metrics 调用
-
-    2026-09-07 句级监督：句标签随 write_metrics 的 sentence_labels 参数搭车
-    （不设独立工具）；默认两句满足每章 2 句软下限。
-    """
-    payload = {
-        "summary": "住手回荡",
-        "emotional_valence": 0,
-        "narrative_function": "铺垫",
-    }
-    if sentence_labels is not None:
-        payload["sentence_labels"] = sentence_labels
-    return _write_call("write_metrics", payload, call_id=call_id)
-
-
-def _entities_call(call_id: str = "call-entities") -> dict:
-    """2026-08-08 用于构造合法 write_entities 调用"""
-    return _write_call(
-        "write_entities",
-        {
-            "entities": [
-                {
-                    "name": "顾霜",
-                    "entity_type": "character",
-                }
-            ]
-        },
-        call_id=call_id,
-    )
+# 2026-09-13 实时写入（取消暂存）：九个写入小调用在同一工具面上（写者面全放开）
+_ALL_WRITE_TOOLS = (
+    "write_entity",
+    "write_metrics",
+    "write_sentence_label",
+    "write_event_root",
+    "write_event_child",
+    "write_character_participation",
+    "write_noncharacter_participation",
+    "write_relation",
+    "write_dialogue",
+)
+_WRITE_TOOLS = frozenset(_ALL_WRITE_TOOLS)
 
 
-def _dialogues_call(call_id: str = "call-dialogues") -> dict:
-    """2026-08-12 用于构造数组格式的 write_dialogues 调用（[序号, 三态, 说话人, 语气]）"""
-    return _write_call(
-        "write_dialogues",
-        {"items": [[1, "dialogue", None, "平静"]]},
-        call_id=call_id,
-    )
+def _finish_chunk_call(call_id: str = "call-finish-chunk") -> dict:
+    """2026-09-13 用于构造唯一收尾声明（工具体只回 pending，收尾判定在本回合调用处理完后执行）"""
+    return _write_call("finish_chunk", {}, call_id=call_id)
 
 
-def _events_call(call_id: str = "call-events") -> dict:
-    """2026-08-22 用于构造合法 write_event 调用（服务端派发 id）"""
-    return _write_call(
-        "write_event",
-        {
-            "description": "顾霜喝止众人",
-            "participants": [
-                {
-                    "entity": 1,
-                    "role": "主体",
-                    "narrative_role": "主体",
-                    "action": "喝止",
-                    "emotion": -1,
-                }
-            ],
-            "finalize_events": True,
-        },
-        call_id=call_id,
-    )
-
-
-def _empty_domain_calls() -> list[dict]:
-    """2026-08-07 用于构造剩余空领域的写入调用"""
+def _metrics_calls(call_id: str = "call-metrics") -> list[dict]:
+    """2026-09-13 用于构造 write_metrics 小调用（指标整域一次提交）"""
     return [
-        _write_call("write_relations", {"items": []}, call_id="call-relations"),
+        _write_call(
+            "write_metrics",
+            {"summary": "住手回荡", "emotional_valence": 0, "narrative_function": "铺垫"},
+            call_id=call_id,
+        )
     ]
 
 
-def _serial_write_messages(*, dialogues: dict | None = None) -> list[AIMessage]:
-    """2026-08-30 用于按真实依赖和每轮至多两种 write 构造三轮正式写入回复"""
-    resolved_dialogues = dialogues if dialogues is not None else _dialogues_call()
+def _sentence_label_calls(items: list[tuple[str, int]] | None = None) -> list[dict]:
+    """2026-09-13 用于构造 write_sentence_label 逐句小调用（默认两句满足每章软下限）"""
+    resolved = items if items is not None else [("住手", -2), ("回荡", -1)]
     return [
-        _tool_message([_entities_call(), _metrics_call()]),
-        _tool_message([_events_call(), *_empty_domain_calls()]),
-        _tool_message(
-            [
-                resolved_dialogues,
-                _metrics_call(
-                    call_id="call-metrics-labels",
-                    sentence_labels=[
-                        {"sentence": "住手", "emotion": -2},
-                        {"sentence": "回荡", "emotion": -1},
-                    ],
-                ),
-            ]
+        _write_call(
+            "write_sentence_label",
+            {"sentence": sentence, "emotion": emotion},
+            call_id=f"call-label-{index}",
+        )
+        for index, (sentence, emotion) in enumerate(resolved, start=1)
+    ]
+
+
+def _entity_calls(
+    *,
+    name: str = "顾霜",
+    entity_type: str = "character",
+    call_id: str = "call-entity",
+) -> list[dict]:
+    """2026-09-13 用于构造 write_entity 小调用（一次登记一个实体，写入即生效并返回编号 n）"""
+    return [_write_call("write_entity", {"name": name, "entity_type": entity_type}, call_id=call_id)]
+
+
+def _relation_calls(
+    *,
+    from_entity: int = 1,
+    to_entity: int = 2,
+    relation_type: str = "敌对",
+    call_id: str = "call-relation",
+) -> list[dict]:
+    """2026-09-13 用于构造 write_relation 小调用（两端用运行期编号，写入即入图）"""
+    return [
+        _write_call(
+            "write_relation",
+            {
+                "from_entity": from_entity,
+                "to_entity": to_entity,
+                "relation_type": relation_type,
+            },
+            call_id=call_id,
+        )
+    ]
+
+
+def _dialogue_calls(call_id: str = "call-dialogue") -> list[dict]:
+    """2026-09-13 用于构造 write_dialogue 小调用（第一条候选判为真实对话）"""
+    return [
+        _write_call(
+            "write_dialogue",
+            {"candidate_index": 1, "verdict": "dialogue", "speaker": None, "tone": "平静"},
+            call_id=call_id,
+        )
+    ]
+
+
+def _event_calls(
+    *,
+    tree_key: str = "t1",
+    description: str = "顾霜喝止众人",
+    action: str = "喝止",
+    child_key: str = "e1",
+    order: int = 1,
+    child_description: str = "顾霜收势",
+    child_action: str = "收势",
+    call_id: str = "call-events",
+) -> list[dict]:
+    """2026-09-13 用于构造一棵事件树的小调用组（根 + 子事件 + 两条人物参与）
+
+    同一 chunk 内 (人物, 动作) 不得重复（人物动态状态唯一），多棵树同轮提交时
+    各处的 action 必须互不相同；子节点 order 必须大于该树已有的最大 order。
+    """
+    return [
+        _write_call(
+            "write_event_root",
+            {"tree_key": tree_key, "description": description},
+            call_id=f"{call_id}-root",
         ),
+        _write_call(
+            "write_event_child",
+            {
+                "tree_key": tree_key,
+                "node_key": child_key,
+                "order": order,
+                "type": "main",
+                "description": child_description,
+            },
+            call_id=f"{call_id}-child",
+        ),
+        _write_call(
+            "write_character_participation",
+            {
+                "tree_key": tree_key,
+                "node_key": "root",
+                "entity": 1,
+                "role": "主体",
+                "narrative_role": "主体",
+                "action": action,
+                "emotion": -1,
+            },
+            call_id=f"{call_id}-p1",
+        ),
+        _write_call(
+            "write_character_participation",
+            {
+                "tree_key": tree_key,
+                "node_key": child_key,
+                "entity": 1,
+                "role": "主体",
+                "narrative_role": "主体",
+                "action": child_action,
+                "emotion": 0,
+            },
+            call_id=f"{call_id}-p2",
+        ),
+    ]
+
+
+def _serial_write_messages(*, dialogues: list[dict] | None = None) -> list[AIMessage]:
+    """2026-09-13 用于构造三轮正式写入回复（写者面全放开，分轮只是测试编排）
+
+    一轮=多个小调用（整轮计一个模型回合）：第一轮登记实体并提交指标，第二轮写入
+    事件树，第三轮写入对话与句标签并以唯一 finish_chunk 收尾（收尾判定在本回合
+    全部调用处理完后执行）。工具面每轮都是全集，分轮不再对应任何解锁边界。
+    """
+    resolved_dialogues = dialogues if dialogues is not None else _dialogue_calls()
+    return [
+        _tool_message([*_entity_calls(), *_metrics_calls()]),
+        _tool_message([*_event_calls()]),
+        _tool_message([*resolved_dialogues, *_sentence_label_calls(), _finish_chunk_call()]),
     ]
 
 
@@ -275,10 +349,10 @@ def _tool_receipts(captured_round: list) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
-    """2026-08-26 回归（2026-09-04 单一写面改契约为 op log）：write_entities 追加语义必须落进 FactGraph
+    """2026-08-26 回归（2026-09-04 单一写面改契约为 op log）：实体登记追加语义必须落进 FactGraph
 
-    契约允许模型分两次提交实体（先新实体、后补别名），op log 必须累积三次调用
-    的声明，最终由持久化层合并为实体目录；不再有 bound_payloads["entities"]。
+    2026-09-13 小调用改造后一次登记一个实体（write_entity），op log 仍按提交顺序
+    累积；同名重交按更新语义覆盖（tags/description 增量）。
     """
     ledger = AnnotationToolLedger(
         run_scope="run-1",
@@ -296,27 +370,15 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
     tools = build_annotation_tools(_QueryService(), ledger)
     by_name = {tool.name: tool for tool in tools}
     await by_name["search_graph"].ainvoke({"entities": ["侯飞白", "褚大山", "猴子"]})
-    await by_name["write_entities"].ainvoke(
-        {
-            "entities": [
-                {"name": "侯飞白", "entity_type": "character", "description": "贺军情报头子之子"},
-                {"name": "褚大山", "entity_type": "character"},
-            ]
-        }
+    await by_name["write_entity"].ainvoke(
+        {"name": "侯飞白", "entity_type": "character", "description": "贺军情报头子之子"}
     )
-    await by_name["write_entities"].ainvoke(
-        {
-            "entities": [
-                {"name": "猴子", "entity_type": "character", "description": "侯飞白外号"},
-            ]
-        }
+    await by_name["write_entity"].ainvoke({"name": "褚大山", "entity_type": "character"})
+    await by_name["write_entity"].ainvoke(
+        {"name": "猴子", "entity_type": "character", "description": "侯飞白外号"}
     )
-    await by_name["write_entities"].ainvoke(
-        {
-            "entities": [
-                {"name": "侯飞白", "entity_type": "character", "tags": ["小孩"]},
-            ]
-        }
+    await by_name["write_entity"].ainvoke(
+        {"name": "侯飞白", "entity_type": "character", "tags": ["小孩"]}
     )
     assert "entities" not in ledger.bound_payloads
     ops = ledger.graph.entity_ops
@@ -326,8 +388,30 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
 
 
 @pytest.mark.asyncio
+async def test_entity_reregistration_same_content_is_idempotent() -> None:
+    """2026-09-13 同键同内容重放返回相同 written 回执且不重复写操作日志（重试不重复造数据）"""
+    ledger = AnnotationToolLedger(
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text="住手回荡",
+        allow_future_context=False,
+        graph=FactGraph(),
+    )
+    tools = {tool.name: tool for tool in build_annotation_tools(_QueryService(), ledger)}
+    first = await tools["write_entity"].ainvoke({"name": "顾霜", "entity_type": "character"})
+    replay = await tools["write_entity"].ainvoke({"name": "顾霜", "entity_type": "character"})
+    assert json.loads(first) == json.loads(replay)
+    assert len(ledger.graph.entity_ops) == 1
+
+
+@pytest.mark.asyncio
 async def test_single_chunk_chapter_completes_via_write_and_auto_finalize() -> None:
-    """2026-08-07 用于验证单 chunk 章节经领域写入后由系统自动冻结完成"""
+    """2026-08-07 用于验证单 chunk 章节经小调用写入 + finish_chunk 收尾后由系统自动冻结完成
+
+    2026-09-13 变化点：写入即生效、没有逐域结束声明，唯一收尾是 finish_chunk
+    （工具体只回 pending，真正判定在批次末尾执行）。
+    """
     llm = _SequenceLLM(_serial_write_messages())
     result = await _invoke_graph(llm, allow_future_context=False)
 
@@ -369,11 +453,12 @@ def test_case_pool_notice_in_first_message_and_no_case_table_injected() -> None:
 
 
 def test_dialogue_candidate_view_field_aligned_with_write_param() -> None:
-    """2026-09-10 候选渲染字段名与 write_dialogues 参数名对齐
+    """2026-09-10 候选渲染字段名与 write_dialogue 参数名对齐
 
     旧字段名 index 与 ActiveCases 的 case_number 同为小整数，模型每章重新
     推理两套编号关系（run a83fae3d 思考实测映射推理 1725 次）；改名后
-    candidate_index 与 write_dialogues 参数字面一致，映射自明。
+    candidate_index 与 write_dialogue 参数字面一致，映射自明
+    （2026-09-13 小调用改造后按候选逐个提交判定）。
     """
     chunk_text = "“住手”回荡"
     ledger = AnnotationToolLedger(
@@ -426,57 +511,66 @@ async def test_turn_budget_reminder_injected_near_iteration_cap() -> None:
             assert reminders == [], "远离上限的请求不得携带提醒"
     assert "剩余 3 轮" in str(llm.captured_messages[1][-1].content)
     assert "最后一轮" in str(llm.captured_messages[3][-1].content)
+    # 2026-09-13：两个分支都点名唯一收尾动作 finish_chunk（run c80105cc 第 4 章死因：
+    # 末轮文案只说"提交已确认内容"，模型把收尾留到"下一轮"，该轮结束即整章作废）
+    for messages in (llm.captured_messages[1], llm.captured_messages[3]):
+        reminder = str(messages[-1].content)
+        assert "finish_chunk" in reminder
 
 
 @pytest.mark.asyncio
-async def test_five_writes_make_auto_finalize_always_succeed() -> None:
-    """2026-08-30 用于验证实体依赖就绪后其余 write 按每轮两种在三轮内完成"""
+async def test_every_write_tool_is_on_the_surface_from_the_first_turn() -> None:
+    """2026-09-13 写者面全放开：九个写入小调用从首轮起全部在工具面上，三轮写入 + 唯一收尾完成章节
+
+    用户裁决（09-13）：此前按"实体已写入"渐进解锁事件/关系/对话工具，模型把
+    "不在工具面上"读成"工具不存在"，run c80105cc 实测 67% 的思考量落在锁定轮
+    （ch3 第 5 轮单轮 40,287 字符只为 5 个 write_entity）。解锁判据删除后每轮
+    工具面都是全集；未登记的实体编号在写入点按既有授权校验结构化拒绝。
+    """
     llm = _SequenceLLM(_serial_write_messages())
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
     assert llm.calls == 3
-    formal_writes = {"write_entities", "write_dialogues", "write_event", "write_relations", "write_metrics"}
     assert [
-        [name for name in tool_names if name in formal_writes]
+        [name for name in tool_names if name in _WRITE_TOOLS]
         for tool_names in llm.captured_tool_names
-    ] == [
-        ["write_entities", "write_metrics"],
-        ["write_entities", "write_metrics", "write_event", "write_relations", "write_dialogues"],
-        ["write_entities", "write_metrics", "write_event", "write_relations", "write_dialogues"],
-    ]
-    assert [len(messages) for messages in llm.captured_messages] == [2, 5, 8]
+    ] == [list(_ALL_WRITE_TOOLS), list(_ALL_WRITE_TOOLS), list(_ALL_WRITE_TOOLS)]
+    # 收尾工具是非正式工具：第一轮起就恒定开放（收尾判定由账本兜底）
+    assert "finish_chunk" in llm.captured_tool_names[0]
+    assert [len(messages) for messages in llm.captured_messages] == [2, 5, 10]
 
 
 @pytest.mark.asyncio
-async def test_cross_batch_write_calls_in_one_round_are_all_rejected() -> None:
-    """2026-08-30 用于验证同一回复跨正式写入批次时全部拒绝且不推进当前批次"""
+async def test_cross_domain_write_calls_in_one_round_all_take_effect() -> None:
+    """2026-09-13 写者面全放开：同一回复里的跨领域小调用全部生效，不再整批打回
+
+    旧行为（09-13 前）：实体/指标/对话分属不同解锁窗口，同轮跨窗口调用按
+    "本轮未开放工具"整批拒绝。解锁窗口删除后，同一批里的实体、指标与对话按
+    调用顺序各自落账（每条写入即生效，失败也只回滚该条）。
+    """
     llm = _SequenceLLM(
         [
-            _tool_message([_entities_call(), _dialogues_call(), _metrics_call()]),
-            *_serial_write_messages(),
+            _tool_message([*_entity_calls(), *_dialogue_calls(), *_metrics_calls()]),
+            _tool_message([*_event_calls()]),
+            _tool_message([*_sentence_label_calls(), _finish_chunk_call()]),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
 
     assert result["phase"] == "completed"
-    assert llm.calls == 4
+    assert llm.calls == 3
     receipts = _tool_receipts(llm.captured_messages[1])
     assert len(receipts) == 3
-    assert all('"accepted": false' in receipt for receipt in receipts)
-    assert all("本轮未开放工具" in receipt for receipt in receipts)
-    assert "write_entities" in llm.captured_tool_names[0]
-    assert "write_entities" in llm.captured_tool_names[1]
+    assert all('"status": "written"' in receipt for receipt in receipts)
 
 
 @pytest.mark.asyncio
 async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
-    """2026-08-30 用于验证当前正式写入失败后保持原阶段并允许下一轮修正"""
+    """2026-08-30 用于验证单条小调用失败只回滚该调用并允许下一轮修正"""
     invalid_entities = _write_call(
-        "write_entities",
-        {
-            "entities": [{"name": " ", "entity_type": "character"}],
-        },
+        "write_entity",
+        {"name": " ", "entity_type": "character"},
         call_id="call-entities-bad",
     )
     llm = _SequenceLLM(
@@ -491,37 +585,30 @@ async def test_failed_write_rolls_back_only_that_calls_revision() -> None:
     assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
     assert len(receipts) == 1
-    assert '"accepted": false' in receipts[0]
-    assert '"tool": "write_entities"' in receipts[0]
-    assert "write_entities" in llm.captured_tool_names[0]
-    assert "write_entities" in llm.captured_tool_names[1]
+    assert '"status": "rejected"' in receipts[0]
+    assert "write_entity" in llm.captured_tool_names[0]
+    assert "write_entity" in llm.captured_tool_names[1]
 
 
 @pytest.mark.asyncio
-async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> None:
-    """2026-08-30 用于验证实体失败不阻断指标，实体被接受后依赖工具解锁且此后只追加不回收"""
+async def test_failed_entity_write_rolls_back_only_itself() -> None:
+    """2026-09-13 同轮实体失败只回滚该调用：同轮指标照常落账，后续轮工具面不变
+
+    旧行为（09-13 前）：实体失败会推迟依赖工具解锁，下一轮实体被接受后工具面
+    才从三个小调用扩到九个且有"只追加不回收"的语义。解锁窗口删除后，失败的唯一
+    后果是该条记录不落账——同批指标仍写入，四轮工具面都是全集。
+    """
     invalid_entities = _write_call(
-        "write_entities",
-        {"entities": [{"name": " ", "entity_type": "character"}]},
+        "write_entity",
+        {"name": " ", "entity_type": "character"},
         call_id="call-entities-invalid",
     )
     llm = _SequenceLLM(
         [
-            _tool_message([invalid_entities, _metrics_call()]),
-            _tool_message([_entities_call(call_id="call-entities-fixed")]),
-            _tool_message([_events_call(), *_empty_domain_calls()]),
-            _tool_message(
-                [
-                    _dialogues_call(),
-                    _metrics_call(
-                        call_id="call-metrics-labels",
-                        sentence_labels=[
-                            {"sentence": "住手", "emotion": -2},
-                            {"sentence": "回荡", "emotion": -1},
-                        ],
-                    ),
-                ]
-            ),
+            _tool_message([invalid_entities, *_metrics_calls()]),
+            _tool_message([*_entity_calls(call_id="call-entity-fixed")]),
+            _tool_message([*_event_calls()]),
+            _tool_message([*_dialogue_calls(), *_sentence_label_calls(), _finish_chunk_call()]),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
@@ -529,66 +616,49 @@ async def test_failed_entity_write_delays_dependent_writes_until_accepted() -> N
     assert result["phase"] == "completed"
     assert result.get("error") is None
     assert llm.calls == 4
-    formal_writes = {"write_entities", "write_dialogues", "write_event", "write_relations", "write_metrics"}
-    assert [name for name in llm.captured_tool_names[0] if name in formal_writes] == [
-        "write_entities",
-        "write_metrics",
+    assert [
+        [name for name in tool_names if name in _WRITE_TOOLS]
+        for tool_names in llm.captured_tool_names
+    ] == [
+        list(_ALL_WRITE_TOOLS),
+        list(_ALL_WRITE_TOOLS),
+        list(_ALL_WRITE_TOOLS),
+        list(_ALL_WRITE_TOOLS),
     ]
-    assert [name for name in llm.captured_tool_names[1] if name in formal_writes] == [
-        "write_entities",
-        "write_metrics",
-    ]
-    assert [name for name in llm.captured_tool_names[2] if name in formal_writes] == [
-        "write_entities",
-        "write_metrics",
-        "write_event",
-        "write_relations",
-        "write_dialogues",
-    ]
-    first_round_receipts = _tool_receipts(llm.captured_messages[1])[-2:]
-    assert '"tool": "write_entities"' in first_round_receipts[0]
-    assert '"accepted": false' in first_round_receipts[0]
-    assert '"domain": "metrics"' in first_round_receipts[1]
-    assert '"accepted": true' in first_round_receipts[1]
+    first_round_receipts = _tool_receipts(llm.captured_messages[1])
+    assert len(first_round_receipts) == 2
+    assert '"status": "rejected"' in first_round_receipts[0]
+    assert '"record": "metrics"' in first_round_receipts[1]
+    assert '"status": "written"' in first_round_receipts[1]
 
 
 @pytest.mark.asyncio
 async def test_partial_writes_do_not_auto_finalize() -> None:
-    """2026-08-30 用于验证非末事件树不阻断同轮独立关系写入且事件阶段保持开放"""
-    first_event = _events_call(call_id="call-events-first")
-    first_event["args"]["finalize_events"] = False
-    second_event = _write_call(
-        "write_event",
-        {
-            "description": "顾霜收势",
-            "participants": [
-                {
-                    "entity": 1,
-                    "role": "主体",
-                    "narrative_role": "主体",
-                    "action": "收势",
-                    "emotion": 0,
-                }
-            ],
-            "finalize_events": True,
-        },
-        call_id="call-events-final",
-    )
+    """2026-09-13 未发 finish_chunk 时写入保持开放：下一轮可继续追加，收尾轮一次性冻结
+
+    旧合同（2026-09-13 前）以"事件域暂存 + finish_domain('events')"表达分轮追加；
+    取消暂存与逐域结束后，写入即时生效但 chunk 只在唯一 finish_chunk 收尾后冻结，
+    本轮未收尾时下一轮的树按 order 继续追加，两棵树都进最终收尾回执。
+    """
     llm = _SequenceLLM(
         [
-            _tool_message([_entities_call(), _metrics_call()]),
-            _tool_message([first_event, *_empty_domain_calls()]),
+            _tool_message([*_entity_calls(), *_metrics_calls()]),
+            _tool_message([*_event_calls(tree_key="t1")]),
             _tool_message(
                 [
-                    second_event,
-                    _dialogues_call(),
-                    _metrics_call(
-                        call_id="call-metrics-labels",
-                        sentence_labels=[
-                            {"sentence": "住手", "emotion": -2},
-                            {"sentence": "回荡", "emotion": -1},
-                        ],
+                    *_event_calls(
+                        tree_key="t2",
+                        description="顾霜追击众人",
+                        action="追击",
+                        child_key="e1",
+                        order=1,
+                        child_description="众人退去",
+                        child_action="退去",
+                        call_id="call-events-second",
                     ),
+                    *_dialogue_calls(),
+                    *_sentence_label_calls(),
+                    _finish_chunk_call(),
                 ]
             ),
         ]
@@ -598,44 +668,54 @@ async def test_partial_writes_do_not_auto_finalize() -> None:
     assert result["phase"] == "completed"
     assert result.get("error") is None
     assert llm.calls == 3
-    assert [name for name in llm.captured_tool_names[1] if name in {"write_event", "write_relations"}] == [
-        "write_event",
-        "write_relations",
+    finals = [
+        receipt
+        for receipt in _tool_receipts(result["messages"])
+        if '"status": "completed"' in receipt
     ]
-    assert [name for name in llm.captured_tool_names[2] if name in {"write_event", "write_relations"}] == [
-        "write_event",
-        "write_relations",
-    ]
+    assert len(finals) == 1
+    # 两棵树各 2 个节点（根 + 子事件）都进了同一次收尾
+    assert '"events": 4' in finals[0]
 
 
 @pytest.mark.asyncio
 async def test_three_write_event_calls_and_relation_write_succeed_in_one_round() -> None:
-    """2026-08-30 用于验证一轮可重复调用三次 write_event 并独立提交关系写入"""
-    first_event = _events_call(call_id="call-events-first")
-    first_event["args"]["finalize_events"] = False
-    second_event = _events_call(call_id="call-events-second")
-    second_event["args"]["description"] = "顾霜追击"
-    second_event["args"]["participants"][0]["action"] = "追击"
-    second_event["args"]["finalize_events"] = False
-    final_event = _events_call(call_id="call-events-final")
-    final_event["args"]["description"] = "顾霜收势"
-    final_event["args"]["participants"][0]["action"] = "收势"
+    """2026-09-13 同轮写入三棵事件树与一条关系：每个小调用独立生效并即时返回 written
+
+    旧合同（2026-09-13 前）以"暂存 + finish_domain"表达同轮多树并断言 12 条 staged
+    回执；取消暂存后同轮 13 条写入调用各自返回 written 回执，事件与关系即时落账，
+    收尾回执按域汇总条数（事件 6 节点、关系 1 条）。
+    """
     llm = _SequenceLLM(
         [
-            _tool_message([_entities_call(), _metrics_call()]),
-            _tool_message([first_event, second_event, final_event, *_empty_domain_calls()]),
             _tool_message(
                 [
-                    _dialogues_call(),
-                    _metrics_call(
-                        call_id="call-metrics-labels",
-                        sentence_labels=[
-                            {"sentence": "住手", "emotion": -2},
-                            {"sentence": "回荡", "emotion": -1},
-                        ],
-                    ),
+                    *_entity_calls(),
+                    *_entity_calls(name="褚大山", call_id="call-entity-second"),
+                    *_metrics_calls(),
                 ]
             ),
+            _tool_message(
+                [
+                    *_event_calls(tree_key="t1"),
+                    *_event_calls(
+                        tree_key="t2",
+                        description="顾霜追击",
+                        action="追击",
+                        child_action="拦截",
+                        call_id="call-events-second",
+                    ),
+                    *_event_calls(
+                        tree_key="t3",
+                        description="顾霜抱拳离场",
+                        action="抱拳",
+                        child_action="散去",
+                        call_id="call-events-final",
+                    ),
+                    *_relation_calls(),
+                ]
+            ),
+            _tool_message([*_dialogue_calls(), *_sentence_label_calls(), _finish_chunk_call()]),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=False)
@@ -643,32 +723,69 @@ async def test_three_write_event_calls_and_relation_write_succeed_in_one_round()
     assert result["phase"] == "completed"
     assert result.get("error") is None
     assert llm.calls == 3
-    event_round_receipts = _tool_receipts(llm.captured_messages[2])[-4:]
-    assert sum('"tool": "write_event"' in receipt for receipt in event_round_receipts) == 3
-    assert all('"accepted": true' in receipt for receipt in event_round_receipts)
-    assert '"domain": "relations"' in event_round_receipts[-1]
+    event_round_receipts = _tool_receipts(llm.captured_messages[2])[-13:]
+    written = [receipt for receipt in event_round_receipts if '"status": "written"' in receipt]
+    assert len(written) == 13
+    assert '"record": "relation/顾霜-褚大山/敌对"' in event_round_receipts[-1]
+    finals = [
+        receipt
+        for receipt in _tool_receipts(result["messages"])
+        if '"status": "completed"' in receipt
+    ]
+    assert len(finals) == 1
+    assert '"events": 6' in finals[0]
+    assert '"relations": 1' in finals[0]
 
 
 @pytest.mark.asyncio
 async def test_failed_event_write_does_not_block_relation_write_in_same_round() -> None:
-    """2026-08-30 用于验证事件写入失败时同轮关系写入仍独立执行并保留成功回执"""
-    invalid_event = _events_call(call_id="call-events-invalid")
-    invalid_event["args"]["participants"][0]["role"] = "发送者"
+    """2026-09-13 事件记录失败时同轮关系写入照常生效，下一轮修正后收尾
+
+    旧合同断言同轮关系域 finish 独立执行并保留成功回执；取消暂存后关系小调用即时
+    入图并返回 written 回执，失败调用只回滚自己（同回合收尾不受影响，见
+    test_failed_call_in_same_round_does_not_block_finish）。
+    """
+    invalid_participation = _write_call(
+        "write_character_participation",
+        {
+            "tree_key": "t1",
+            "node_key": "root",
+            "entity": 1,
+            "role": "主体",
+            "narrative_role": "主体",
+            "action": "喝止",
+            "emotion": 9,
+        },
+        call_id="call-events-invalid",
+    )
     llm = _SequenceLLM(
         [
-            _tool_message([_entities_call(), _metrics_call()]),
-            _tool_message([invalid_event, *_empty_domain_calls()]),
             _tool_message(
                 [
-                    _events_call(call_id="call-events-fixed"),
-                    _dialogues_call(),
-                    _metrics_call(
-                        call_id="call-metrics-labels",
-                        sentence_labels=[
-                            {"sentence": "住手", "emotion": -2},
-                            {"sentence": "回荡", "emotion": -1},
-                        ],
+                    *_entity_calls(),
+                    *_entity_calls(name="褚大山", call_id="call-entity-second"),
+                    *_metrics_calls(),
+                ]
+            ),
+            _tool_message([*_event_calls(tree_key="t1"), invalid_participation, *_relation_calls()]),
+            _tool_message(
+                [
+                    _write_call(
+                        "write_character_participation",
+                        {
+                            "tree_key": "t1",
+                            "node_key": "root",
+                            "entity": 1,
+                            "role": "主体",
+                            "narrative_role": "主体",
+                            "action": "喝止",
+                            "emotion": -1,
+                        },
+                        call_id="call-events-fixed",
                     ),
+                    *_dialogue_calls(),
+                    *_sentence_label_calls(),
+                    _finish_chunk_call(),
                 ]
             ),
         ]
@@ -678,11 +795,57 @@ async def test_failed_event_write_does_not_block_relation_write_in_same_round() 
     assert result["phase"] == "completed"
     assert result.get("error") is None
     assert llm.calls == 3
-    event_round_receipts = _tool_receipts(llm.captured_messages[2])[-2:]
-    assert '"tool": "write_event"' in event_round_receipts[0]
-    assert '"accepted": false' in event_round_receipts[0]
-    assert '"domain": "relations"' in event_round_receipts[1]
-    assert '"accepted": true' in event_round_receipts[1]
+    event_round_receipts = _tool_receipts(llm.captured_messages[2])
+    rejected = [receipt for receipt in event_round_receipts if '"status": "rejected"' in receipt]
+    assert len(rejected) == 1
+    assert '"field": "emotion"' in rejected[0]
+    assert any('"record": "relation/顾霜-褚大山/敌对"' in receipt for receipt in event_round_receipts)
+
+
+@pytest.mark.asyncio
+async def test_failed_call_in_same_round_does_not_block_finish() -> None:
+    """2026-09-13 同回合的失败调用不阻塞收尾：失败只回滚自己，收尾按已写入内容完成
+
+    旧合同此处是 round_failed 拒绝（要求先修正再重交），那条规则把收尾绑到无关记录的
+    成功上：末轮出现一次失败就足以让整章作废（run 1b388eb3 第 2 章实锤）。逐条失败
+    本来就在调用点单独回执，不需要收尾再报一次。
+    """
+    invalid_participation = _write_call(
+        "write_character_participation",
+        {
+            "tree_key": "t1",
+            "node_key": "root",
+            "entity": 1,
+            "role": "主体",
+            "narrative_role": "主体",
+            "action": "喝止",
+            "emotion": 9,
+        },
+        call_id="call-events-invalid",
+    )
+    llm = _SequenceLLM(
+        [
+            _tool_message([*_entity_calls(), *_metrics_calls()]),
+            _tool_message(
+                [
+                    *_event_calls(tree_key="t1"),
+                    invalid_participation,
+                    _finish_chunk_call("call-finish-ok"),
+                ]
+            ),
+        ]
+    )
+    result = await _invoke_graph(llm, allow_future_context=False)
+
+    # 末轮回执只在最终 state（captured_messages 是各次请求的历史，不含该轮自己的 ToolMessage）
+    receipts = _tool_receipts(result["messages"])
+    rejected = [receipt for receipt in receipts if '"code": "out_of_range"' in receipt]
+    assert len(rejected) == 1, "越界 emotion 的那一条必须被单独拒绝并回执"
+    assert '"record": "t1/root/participant/1"' in rejected[0]
+    # 失败不阻塞收尾：同回合的 finish_chunk 正常完成，坏记录本来就没进载荷
+    assert result["phase"] == "completed"
+    assert llm.calls == 2
+    assert '"status": "completed"' in receipts[-1]
 
 
 @pytest.mark.asyncio
@@ -692,12 +855,12 @@ async def test_truncated_tool_call_skips_business_tool_and_feeds_error_receipt()
     只回喂"参数不完整"错误回执，模型补全后章节仍能完成。
     """
     truncated_entities = {
-        "name": "write_entities",
+        "name": "write_entity",
         "args": {},
         "id": "call-entities-truncated",
         "type": "tool_call",
         "truncated": True,
-        "truncated_args": '{"entities": [{"name": "顾霜"',
+        "truncated_args": '{"name": "顾霜"',
     }
     # 聚合器在运行时以属性赋值挂载截断标记（绕过 create_tool_call 重建），测试同样模拟
     first_message = AIMessage(content="")
@@ -715,24 +878,30 @@ async def test_truncated_tool_call_skips_business_tool_and_feeds_error_receipt()
     assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
     rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
-    accepted = [receipt for receipt in receipts if '"accepted": true' in receipt]
+    accepted = [receipt for receipt in receipts if '"status": "written"' in receipt]
     assert len(rejected) == 1
     assert len(accepted) == 0
-    assert '"tool": "write_entities"' in rejected[0]
+    assert '"tool": "write_entity"' in rejected[0]
     assert "截断" in rejected[0]
 
 
 @pytest.mark.asyncio
 async def test_auto_finalize_invariant_error_terminates_chapter() -> None:
-    """2026-08-10 用于验证 receipt 齐全但 ready_chunk 缺失时按不变量错误终止而非回环修正"""
+    """2026-08-10 用于验证收尾后 ready_chunk 缺失时按不变量错误终止而非回环修正
+
+    2026-09-13 变化点：不再有六域回执齐备这一判据，auto_finalize 只看
+    ledger.chunk_finished；此处模拟 finish_chunk 通过但 ready_chunk 被破坏。
+    """
     llm = _SequenceLLM(_serial_write_messages())
 
     class _BrokenLedger(AnnotationToolLedger):
-        """2026-08-30 用于模拟六领域回执齐全但 ready_chunk 被破坏"""
+        """2026-09-13 用于模拟已收尾但 ready_chunk 被破坏的账本"""
 
-        def _rebuild_ready_chunk_if_complete(self) -> None:
-            super()._rebuild_ready_chunk_if_complete()
+        def finish_chunk(self) -> dict:
+            """2026-09-13 用于正常收尾后清掉 ready_chunk"""
+            receipt = super().finish_chunk()
             self.ready_chunk = None
+            return receipt
 
     chunk_id, chunk_text = 1, "\u201c住手\u201d回荡"
     ledger = _BrokenLedger(
@@ -1042,7 +1211,7 @@ class _AliasCaseQueryService(_QueryService):
             description="疑似同一人物：顾霜 与 顾老",
         )
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
         """2026-09-11 案例改检索制：alias 案例经 search_pool 展示取得编号（旧合同为注入候选）"""
         del query, hidden_case_ids, case_type, limit
         return SearchResult(results=[self._alias_case()])
@@ -1077,6 +1246,9 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
     """
     2026-08-12 用于验证非法 change_kind 以失败回执回到模型继续对话，
     而不是抛出让整章失败（下游持久化只认闭合枚举）。
+
+    2026-09-14 解决类工具并入 schema 层失败翻译：回执从 tool/error 通用形态
+    收窄为 record/field/code/expected 结构化拒绝（field=change_kind、可自纠）。
     """
     ledger = AnnotationToolLedger(
         run_scope="run-1",
@@ -1134,9 +1306,10 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
     assert result.get("error") is None
     assert llm.calls == 4
     receipts = _tool_receipts(llm.captured_messages[1])
-    rejected = [receipt for receipt in receipts if '"accepted": false' in receipt]
+    rejected = [receipt for receipt in receipts if '"status": "rejected"' in receipt]
     assert len(rejected) == 1
-    assert '"tool": "resolve_fact_case"' in rejected[0]
+    assert '"field": "change_kind"' in rejected[0]
+    assert '"code": "invalid_value"' in rejected[0]
     assert "change_kind" in rejected[0]
     assert ledger.resolved_cases == []
 
@@ -1201,11 +1374,12 @@ def test_validate_bound_annotation_verifies_sentence_label_spans() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_reinjects_missing_domain_hint_after_plain_text_reply(monkeypatch) -> None:
-    """2026-09-08 用于验证模型纯文本汇报后被重发请求带上缺域提醒并补齐写入
+async def test_graph_reinjects_finish_chunk_hint_after_plain_text_reply(monkeypatch) -> None:
+    """2026-09-08 用于验证模型纯文本汇报后被重发请求带上收尾提醒并补齐写入
 
-    第13章死锁回归：模型写完 entities+metrics 后改用纯文本汇报，
-    调用层重发时注入缺域清单，模型据此补齐剩余领域，章节正常完成。
+    第13章死锁回归：模型写完实体与指标后改用纯文本汇报，调用层重发时注入缺内容
+    清单与收尾方式（2026-09-13 取消逐域结束后文案改为"还没收尾"并指向
+    finish_chunk），模型据此补齐剩余领域，章节正常完成。
     """
     async def _skip_sleep(_seconds: float) -> None:
         """2026-09-08 用于跳过重试退避等待"""
@@ -1213,38 +1387,23 @@ async def test_graph_reinjects_missing_domain_hint_after_plain_text_reply(monkey
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _skip_sleep)
     llm = _SequenceLLM(
         [
-            _tool_message([_entities_call(), _metrics_call()]),
+            _tool_message([*_entity_calls(), *_metrics_calls()]),
             AIMessage(content="本章语义标注已完成，汇总如下……"),
-            _tool_message(
-                [
-                    _events_call(),
-                    _write_call("write_relations", {"items": []}, call_id="call-relations"),
-                ]
-            ),
-            _tool_message(
-                [
-                    _dialogues_call(),
-                    _metrics_call(
-                        call_id="call-metrics-labels",
-                        sentence_labels=[
-                            {"sentence": "住手", "emotion": -2},
-                            {"sentence": "回荡", "emotion": -1},
-                        ],
-                    ),
-                ]
-            ),
+            _tool_message([*_event_calls()]),
+            _tool_message([*_dialogue_calls(), *_sentence_label_calls(), _finish_chunk_call()]),
         ]
     )
     result = await _invoke_graph(llm, allow_future_context=True)
 
     assert result["error"] is None
     assert llm.calls == 4
-    # 重发请求（第 3 次调用）末尾是缺域提醒，指出剩余领域与补齐写法
+    # 重发请求（第 3 次调用）末尾是收尾提醒，指出剩余领域与收尾方式
     resent = llm.captured_messages[2]
     last = resent[-1]
     assert isinstance(last, HumanMessage)
-    assert "缺域提醒" in str(last.content)
+    assert "收尾提醒" in str(last.content)
+    assert "finish_chunk" in str(last.content)
     assert "relations" in str(last.content) and "dialogues" in str(last.content)
     # 首次请求与状态消息链都不含提醒：注入只对重发请求生效
-    assert all("缺域提醒" not in str(m.content) for m in llm.captured_messages[1])
-    assert all("缺域提醒" not in str(m.content) for m in result["messages"])
+    assert all("收尾提醒" not in str(m.content) for m in llm.captured_messages[1])
+    assert all("收尾提醒" not in str(m.content) for m in result["messages"])

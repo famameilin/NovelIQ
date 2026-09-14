@@ -5,7 +5,8 @@
 - send_message 每轮激活只允许调用一次，载荷按观察类分组复合上报；
 - 格式/枚举/引文核验失败不打回：观察照常送达，问题以 warnings 呈现，
   未核验引文打 unverified 标记且不得用于写者案例取证；
-- 写者取值域准入：write_entities 实体名 ∈ 报告并集 ∪ 图中已登记名。
+- 写者取值域准入：write_entity 实体名 ∈ 报告并集 ∪ 图中已登记名（2026-09-13 取消暂存后
+  写入即生效，准入在每次单条写入时判定，失败不牵连同批其他记录）。
 """
 
 from __future__ import annotations
@@ -47,7 +48,7 @@ _PARAGRAPH_TEXTS = [
 class _QueryServiceStub:
     """2026-09-11 用于读者面检索工具的空查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50):
+    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
         from src.agents.annotation.schema import SearchResult
 
         del query, hidden_case_ids, case_type, limit
@@ -481,8 +482,13 @@ class TestReaderGraphLoop:
 class TestWriterAdmission:
     @pytest.mark.asyncio
     async def test_writer_rejects_entity_names_outside_reports(self) -> None:
-        """U4：写者写读者报告外的实体名 → 拒绝"""
-        from src.agents.annotation.schema import EntityDirectoryInput, EntityInput
+        """U4：写者写读者报告外的实体名 → 拒绝
+
+        2026-09-13 取消暂存：实体登记从整批 write_entities 改为一次一个 write_entity，
+        准入改为逐条写入即判定——报告外的名字依旧被拒绝（准入失败），但同批合法的名字
+        不再被整条失败牵连（失败不丢已写入记录），这是单条记录边界下最接近的等价物。
+        """
+        from src.agents.annotation.schema import EntityInput
 
         ledger = _reader_ledger()
         ledger.reader_reports = [
@@ -491,19 +497,17 @@ class TestWriterAdmission:
                 report={"entities": [{"name": "白芷", "entity_type": "character"}]},
             )
         ]
-        payload = EntityDirectoryInput(
-            entities=[
-                EntityInput(name="白芷", entity_type="character"),
-                EntityInput(name="从未上报的实体", entity_type="character"),
-            ]
-        )
 
+        ledger.apply_entity(EntityInput(name="白芷", entity_type="character"))
         with pytest.raises(ValueError, match="准入失败"):
-            ledger.write_domain("entities", payload, tool_name="write_entities")
+            ledger.apply_entity(EntityInput(name="从未上报的实体", entity_type="character"))
+
+        assert set(ledger.written_entities) == {"白芷"}
 
     @pytest.mark.asyncio
     async def test_writer_accepts_entity_names_from_reports_or_graph(self) -> None:
-        from src.agents.annotation.schema import EntityDirectoryInput, EntityInput
+        """报告内实体名经 write_entity 写入即生效（2026-09-13 取消暂存后无域回执）"""
+        from src.agents.annotation.schema import EntityInput
 
         ledger = _reader_ledger()
         ledger.reader_reports = [
@@ -512,11 +516,13 @@ class TestWriterAdmission:
                 report={"entities": [{"name": "白芷", "entity_type": "character"}]},
             )
         ]
-        payload = EntityDirectoryInput(entities=[EntityInput(name="白芷", entity_type="character")])
 
-        ledger.write_domain("entities", payload, tool_name="write_entities")
+        number = ledger.apply_entity(EntityInput(name="白芷", entity_type="character"))
 
-        assert "entities" in ledger.domain_receipts
+        assert number is not None
+        assert set(ledger.written_entities) == {"白芷"}
+        assert ledger.domain_payloads["entities"].entities[0].name == "白芷"
+        assert ledger.graph is not None and "白芷" in ledger.graph.entity_types
 
     @pytest.mark.asyncio
     async def test_case_reason_requires_verified_quote_fragment_from_reports(self) -> None:
