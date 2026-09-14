@@ -132,6 +132,13 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 label="允许读取未来文本",
             ),
             SettingFieldSpec(
+                path=("models", "annotation", "sub_chunk_max_chars"),
+                field_type="integer",
+                label="子代理切分阈值（字）",
+                description="章文本超过该字数按段落边界切成子块，≥2 块时启用子代理（N 读者 + 1 写者）；低于则单代理",
+                min_value=1,
+            ),
+            SettingFieldSpec(
                 path=("models", "annotation", "sub_chunk_min_tail_chars"),
                 field_type="integer",
                 label="超长章尾块并入阈值（字）",
