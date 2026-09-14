@@ -541,6 +541,9 @@ async def test_every_write_tool_is_on_the_surface_from_the_first_turn() -> None:
     # 账本不带"怎么写"的指令时，模型把对话压到末批写、已判定值列全程为 0、跳过空转）
     assert "已判定条目按本表值执行、不再回正文重扫" in first
     assert "判完即写" in first and "剩余回合" in first
+    # 从属条款：纠指令与授权闸的相撞（run 821b9b5b ch2 t1 实测 14 连拒）
+    assert "首次写入前先完成一次 search_graph 查询" in first
+    assert "引用实体前先确认其已登记" in first
     # 第 2 次请求：上一轮写入的实体与指标已进账本（局部键面：el、n、域现值）
     second = _progress(llm.captured_messages[1])
     assert "实体(1)：顾霜=顾霜(n=1)" in second

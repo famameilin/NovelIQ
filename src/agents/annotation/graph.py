@@ -129,7 +129,9 @@ def _progress_block(ledger: AnnotationToolLedger, remaining_turns: int, max_iter
         "【进度账本】本轮时刻的本章已写入状态，由系统注入。"
         "当前值直接读这里，不必从旧回执回忆或重新推导判定。",
         "处理规则：已判定条目按本表值执行、不再回正文重扫；未写入的内容在本回合判完即写、"
-        "随判随落盘——你的思考对后续回合不可见，跨回合预演计划等于下回合从零重推。",
+        "随判随落盘——你的思考对后续回合不可见，跨回合预演计划等于下回合从零重推。"
+        "首次写入前先完成一次 search_graph 查询（查询不是预演，只此一次）；"
+        "引用实体前先确认其已登记（本表实体列可查）。",
         f"剩余回合 {remaining_turns}/{max_iterations}（含本轮）。",
     ]
     entities = ledger.entity_ledger()
