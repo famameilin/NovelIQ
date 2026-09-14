@@ -195,7 +195,7 @@ describe("LinguisticPage", () => {
     expect(await screen.findByTestId("tab-unavailable-state")).toBeInTheDocument();
   });
 
-  it("表达结构指标条展示句级监督边界两列，未拟合时回退占位符", async () => {
+  it("表达结构指标条展示段落级监督边界两列，未拟合时回退占位符", async () => {
     renderLinguisticPage();
 
     expect(await screen.findByText("边界正向分和")).toBeInTheDocument();

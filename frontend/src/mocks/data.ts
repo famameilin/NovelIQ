@@ -505,7 +505,6 @@ export function createForeshadowingTrees(): ForeshadowingTree[] {
       last_chapter_id: 12,
       anchor_chapter_ids: [3, 7, 12],
       description: "主角在旧山门发现一枚残缺令牌，后续多次被提及。",
-      expected_payoff_family: "身份揭露",
       payoff_likelihood: "high",
       strength: "high",
       status: "reinforced",

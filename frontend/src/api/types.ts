@@ -241,7 +241,6 @@ export interface ChapterAnnotation {
   is_strong_setup?: boolean | null;
   foreshadowing_desc?: string | null;
   why_unresolved_now?: string | null;
-  expected_payoff_family?: string | null;
   payoff_likelihood?: ForeshadowingPayoffLikelihood | string | null;
   // 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
   foreshadowing_root_event_id?: string | null;
@@ -296,7 +295,6 @@ export interface ForeshadowingTree {
   last_chapter_id: number;
   anchor_chapter_ids: number[];
   description: string;
-  expected_payoff_family: string | null;
   payoff_likelihood: ForeshadowingPayoffLikelihood | string | null;
   strength: "high" | "medium" | string | null;
   status: "open" | "reinforced" | "likely_paid_off" | string;
@@ -715,7 +713,7 @@ export interface LinguisticGroupStats {
   max_dependency_depth: number | null;
   dependency_relation_ratios: Record<string, number> | null;
   dependency_root_count: number | null;
-  // 句级监督边界（按书边界；标签不足/类别单一时为 null，跨书口径不可比）
+  // 段落级监督边界（按书拟合；标签不足/类别单一时为 null，跨书口径不可比）
   boundary_pos_score_sum: number | null;
   boundary_neg_score_sum: number | null;
 }
