@@ -537,6 +537,10 @@ async def test_every_write_tool_is_on_the_surface_from_the_first_turn() -> None:
     first = _progress(llm.captured_messages[0])
     assert "实体：未写入" in first and "事件树：未写入" in first
     assert "指标：未写入" in first
+    # 2026-09-14 三迭：差集处理指令与回合预算随块下发（run b7477080 ch4 实测：
+    # 账本不带"怎么写"的指令时，模型把对话压到末批写、已判定值列全程为 0、跳过空转）
+    assert "已判定条目按本表值执行、不再回正文重扫" in first
+    assert "判完即写" in first and "剩余回合" in first
     # 第 2 次请求：上一轮写入的实体与指标已进账本（局部键面：el、n、域现值）
     second = _progress(llm.captured_messages[1])
     assert "实体(1)：顾霜=顾霜(n=1)" in second

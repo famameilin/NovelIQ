@@ -115,17 +115,22 @@ def _index_ranges(values: list[int]) -> str:
     return ",".join(parts)
 
 
-def _progress_block(ledger: AnnotationToolLedger) -> str:
+def _progress_block(ledger: AnnotationToolLedger, remaining_turns: int, max_iterations: int) -> str:
     """2026-09-14 构造写者面每回合注入的【进度账本】（用户裁决：每回合注入最新进展）
 
-    根因实证（run 5dd0c93c 对账）：服务端不把思考重放给模型，模型每回合看不见
-    自己上轮的判定与计划，被迫整卷重推（对话判定每章 3~4 遍）。当前态由系统直给，
-    局部键面不露 uuid；案例链不注入（09-11 "不注入案例"裁决）。与收尾提醒同款：
-    只对当次请求生效、不写入状态消息链。
+    根因实证（run b7477080 ch4 逐行诊断）：账本只答"什么已做"、不答"当时怎么决定"，
+    模型每回合以"整章重读"开场（对话全册扫 8 遍、事件树重建 3~5 次），且对话判定
+    永远排最后写、账本"已判定值"列全程为 0、跳过机制从未触发。处理规则随块下发：
+    差集处理 + 判完即写（思考不进线上重放，跨回合预演=下回合从零重推，把机制事实
+    写给模型）。与收尾提醒同款：只对当次请求生效、不写入状态消息链；案例链不注入
+    （09-11 "不注入案例"裁决），只覆盖五个写入域。
     """
     lines = [
         "【进度账本】本轮时刻的本章已写入状态，由系统注入。"
-        "当前值直接读这里，不必从旧回执回忆或重新推导判定。"
+        "当前值直接读这里，不必从旧回执回忆或重新推导判定。",
+        "处理规则：已判定条目按本表值执行、不再回正文重扫；未写入的内容在本回合判完即写、"
+        "随判随落盘——你的思考对后续回合不可见，跨回合预演计划等于下回合从零重推。",
+        f"剩余回合 {remaining_turns}/{max_iterations}（含本轮）。",
     ]
     entities = ledger.entity_ledger()
     if entities:
@@ -233,7 +238,7 @@ def _build_agent_node(
         request_messages = list(state["messages"])
         remaining_turns = max_iterations - iterations
         if inject_progress:
-            request_messages.append(HumanMessage(content=_progress_block(ledger)))
+            request_messages.append(HumanMessage(content=_progress_block(ledger, remaining_turns, max_iterations)))
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(HumanMessage(content=_turn_budget_reminder(remaining_turns)))
 
