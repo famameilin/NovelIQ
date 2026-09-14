@@ -513,7 +513,7 @@ async def test_turn_budget_reminder_injected_near_iteration_cap() -> None:
 async def test_every_write_tool_is_on_the_surface_from_the_first_turn() -> None:
     """2026-09-14 写入面重构：五个写入小调用从首轮起全部在工具面上，三轮写入 + 唯一收尾完成章节
 
-    用户裁决（09-13）：此前按"实体已写入"渐进解锁事件/关系/对话工具，模型把
+    09-13 全放开：此前按"实体已写入"渐进解锁事件/关系/对话工具，模型把
     "不在工具面上"读成"工具不存在"，run c80105cc 实测 67% 的思考量落在锁定轮
     （ch3 第 5 轮单轮 40,287 字符只为 5 个 write_entity）。解锁判据删除后每轮
     工具面都是全集；未登记的实体编号在写入点按既有授权校验结构化拒绝。
@@ -1304,7 +1304,6 @@ async def test_resolve_fact_case_invalid_change_kind_returns_failed_receipt() ->
             texts=["\u201c住手\u201d回荡"],
         ),
     )
-    ledger.graph_queried = True
     service = _AliasCaseQueryService()
     tools = build_annotation_tools(service, ledger)
     # 2026-09-11 案例改检索制：先经 search_pool 展示取得编号 1（展示即授权）

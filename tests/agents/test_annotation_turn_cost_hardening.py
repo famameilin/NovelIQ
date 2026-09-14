@@ -130,7 +130,7 @@ def _tree(ledger: AnnotationToolLedger, tree_key: str) -> dict[str, Any]:
 def test_writer_surface_exposes_every_write_tool_at_first_turn() -> None:
     """2026-09-14 写者面全放开：首轮工具面就是五个写入小调用 + 唯一收尾 finish_chapter
 
-    09-12 的"隐藏工具名清出注入面"是当时渐进解锁的配套；09-13 用户裁决全放开后
+    09-12 的"隐藏工具名清出注入面"是当时渐进解锁的配套；09-13 全放开后
     隐藏集合消失；09-14 写入面重构（九工具→五工具、finish_chunk 更名
     finish_chapter）后，注入文本不得再点名任何已退役的旧工具名，工具面每轮都是全集。
     """

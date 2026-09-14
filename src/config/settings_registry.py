@@ -10,7 +10,7 @@
 由设置页的 .env 编辑器通道单独处理。
 日志（logging）与存储路径（paths）是运营配置而非用户可调参数，
 同样不进注册表：settings.json 中的现存值照常生效，但不在设置页露出
-（2026-09-10 用户裁决）。
+（2026-09-10 起）。
 """
 
 from __future__ import annotations
