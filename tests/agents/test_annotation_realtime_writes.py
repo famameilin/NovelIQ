@@ -807,6 +807,47 @@ async def test_relation_write_after_chunk_completed_is_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 实体：部分更新合并语义（docstring"只提交本次变化的字段"的服务端兑现）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> None:
+    """2026-09-14 已登记实体部分更新：未提交字段保留现值、null 删键、tags 空数组清空
+
+    旧实现整条替换——模型按 docstring 指引只提交变化字段时其余字段被静默抹掉，
+    可见合同与服务端行为相悖（content 回显把该现状显形后修复）。合并语义：
+    省略字段保留；tags 提交空数组=清空；attributes 提交即 JSON Merge Patch。
+    """
+    ledger = _ledger()
+    tools = _tools(ledger)
+    first = await _call(tools, "write_entity", {
+        "name": "顾霜", "entity_type": "character", "el": "a",
+        "tags": ["冷面"], "description": "佩刀女子", "attributes": {"兵器": "刀", "旧痕": "疤"},
+    })
+    update = await _call(tools, "write_entity", {
+        "name": "顾霜", "entity_type": "character", "el": "a",
+        "description": "护院教头", "attributes": {"旧痕": None, "佩饰": "玉"},
+    })
+    assert update["content"] == {
+        "name": "顾霜",
+        "entity_type": "character",
+        "tags": ["冷面"],
+        "description": "护院教头",
+        "attributes": {"兵器": "刀", "佩饰": "玉"},
+        "n": first["n"],
+    }
+    assert ledger.written_entities["顾霜"].tags == ["冷面"]
+
+    cleared = await _call(tools, "write_entity", {
+        "name": "顾霜", "entity_type": "character", "el": "a", "tags": [],
+    })
+    assert cleared["content"]["tags"] == []
+    assert cleared["content"]["description"] == "护院教头"
+    assert cleared["content"]["attributes"] == {"兵器": "刀", "佩饰": "玉"}
+
+
+# ---------------------------------------------------------------------------
 # 收尾：唯一 finish_chapter 的判定边界
 # ---------------------------------------------------------------------------
 

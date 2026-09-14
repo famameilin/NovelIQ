@@ -519,8 +519,12 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
     # 实体域：登记即入图并分配运行期编号；el 局部键当场绑定，同轮可用
 
-    def apply_entity(self, entity: EntityInput, *, el: str) -> int:
-        """用于登记或更新一个实体、绑定 el 局部键并即时返回运行期编号（同键同内容重放幂等）"""
+    def apply_entity(self, entity: EntityInput, *, el: str, present: set[str] | None = None) -> int:
+        """用于登记或更新一个实体、绑定 el 局部键并即时返回运行期编号（同键同内容重放幂等）
+
+        present（本次实际提交的字段集合）给定时按部分更新合并：未提交字段保留现值，
+        兑现 write_entity 合同"只提交本次变化的字段"；不传=整条记录语义（直连调用）。
+        """
         record = f"entity/{entity.name}"
         self._require_writable(record)
         normalized_el = unicodedata.normalize("NFC", el).strip()
@@ -533,10 +537,15 @@ class AnnotationToolLedger:
                 code="duplicate_el",
                 expected="换一个 el 键（el 在 chunk 内一对一绑定实体）",
             )
+        key = _norm_entity_key(entity.name)
+        existing = self.written_entities.get(key)
+        if existing is not None and present is not None:
+            # 部分更新：先合并成生效记录，再进准入与落图（闸门看到的永远是完整记录）
+            entity = self._merge_partial_entity(existing, entity, present)
+            record = f"entity/{entity.name}"
         self.admit_entity_directory([entity])
         if self.graph is None:
             raise AnnotationInvariantError("write_entity 需要常驻事实图，graph 缺失")
-        key = _norm_entity_key(entity.name)
         registered = self.graph.entity_types.get(key)
         if registered is not None and registered != entity.entity_type:
             raise AnnotationStageRejection(
@@ -546,7 +555,6 @@ class AnnotationToolLedger:
                 code="type_conflict",
                 expected=f"{registered}（同一词条的不同身份请用区分性名称）",
             )
-        existing = self.written_entities.get(key)
         if existing is None or existing != entity:
             # 同键不同内容=更新语义；同键同内容直接跳过，避免重复操作日志
             self.graph.register_entities([entity])
@@ -558,6 +566,29 @@ class AnnotationToolLedger:
         if number is None:
             raise AnnotationInvariantError(f"实体编号分配失败: {entity.name}")
         return number
+
+    @staticmethod
+    def _merge_partial_entity(existing: EntityInput, incoming: EntityInput, present: set[str]) -> EntityInput:
+        """用于已登记实体的部分更新合并（2026-09-14 兑现"只提交本次变化的字段"合同）
+
+        未提交字段保留现值；tags 提交空列表=清空、省略=保留；
+        attributes 提交即 JSON Merge Patch（值覆盖、null 删键、省略=整域保留）。
+        """
+        updates: dict[str, Any] = {}
+        if "tags" in present:
+            updates["tags"] = incoming.tags
+        if "description" in present:
+            updates["description"] = incoming.description
+        merged = existing.model_copy(update=updates)
+        if "attributes" in present:
+            patched = dict(existing.attributes or {})
+            for attr_key, attr_value in (incoming.attributes or {}).items():
+                if attr_value is None:
+                    patched.pop(attr_key, None)
+                else:
+                    patched[attr_key] = attr_value
+            merged.attributes = patched
+        return merged
 
     def _rebuild_entity_payload(self) -> None:
         """用于按写入顺序重建当前 chunk 的实体目录载荷"""
@@ -2350,21 +2381,31 @@ def build_annotation_tools(
         el: EntityLocalKey,
         tags: Annotated[
             list[Annotated[str, Field(max_length=ENTITY_TAG_MAX_CHARS)]] | None,
-            Field(max_length=ENTITY_TAG_MAX_COUNT, description=f"可空标签，{ENTITY_TAGS_RULE_TEXT}"),
+            Field(
+                max_length=ENTITY_TAG_MAX_COUNT,
+                description=f"可空标签，{ENTITY_TAGS_RULE_TEXT}；省略=保留现有标签，提交空列表=清空",
+            ),
         ] = None,
-        description: str | None = None,
-        attributes: dict[str, JsonValue | None] | None = None,
+        description: Annotated[
+            str | None,
+            Field(description="一句话简介；省略=保留现值"),
+        ] = None,
+        attributes: Annotated[
+            dict[str, JsonValue | None] | None,
+            Field(description="JSON Merge Patch：只写变化的键，值为 null 删除该键；省略=现有属性整体保留"),
+        ] = None,
     ) -> str:
         """登记或更新一个实体（一次一个），el 是你自定的章内引用键、绑定即生效
 
         新实体用本章出现的名称；已登记实体用登记名，只提交本次变化的字段
-        （description 一句话简介、tags 见参数说明、attributes 是 JSON Merge Patch）。
+        （description 一句话简介、tags 见参数说明、attributes 是 JSON Merge Patch）；
+        未提交的字段保留现值。
         实体大类一经登记不可变更；同一词条的不同身份用区分性名称
         （如"圣城"是 location、"圣城朝堂"是 organization）。
         图中已有实体时，提交前必须先 search_graph 查询已登记实体。
         事件/关系/对话的实体引用用 el 键（同轮先登记后引用，不等回执）或
         回执/检索编号 n——write_event 的 characters[].entityid 等字段两者都收。
-        回执 content 回显该实体落账生效记录（含服务端编号 n，未提交字段以最新一次覆盖为准）。
+        回执 content 回显该实体合并后的生效记录（含服务端编号 n）。
         """
         if ledger.graph is not None and ledger.graph.entity_types and not ledger.graph_queried \
                 and not ledger.entity_gate_passed:
@@ -2376,7 +2417,14 @@ def build_annotation_tools(
             description=description,
             attributes=attributes,
         )
-        number = ledger.apply_entity(entity, el=el)
+        present = {"name", "entity_type"}
+        if tags is not None:
+            present.add("tags")
+        if description is not None:
+            present.add("description")
+        if attributes is not None:
+            present.add("attributes")
+        number = ledger.apply_entity(entity, el=el, present=present)
         ledger.entity_gate_passed = True
         bound_el = unicodedata.normalize("NFC", el).strip()
         return json.dumps(
