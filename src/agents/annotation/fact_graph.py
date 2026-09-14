@@ -441,8 +441,13 @@ class FactGraph:
             return name
         return self.entity_names.get(representative_key, name)
 
-    def _representative_key(self, key: str) -> str | None:
-        """2026-08-11 用于沿同一人物边找分量代表：is_representative 标记优先，无标记兜底"""
+    def alias_group(self, name: str) -> list[str]:
+        """2026-09-14 用于取该名字同一人物连通分量内的其余登记名（不含自身，供进度账本别名列）"""
+        key = _norm(name)
+        return [self.entity_names.get(node, node) for node in self._same_person_component(key) if node != key]
+
+    def _same_person_component(self, key: str) -> list[str]:
+        """2026-08-11 用于收集同一人物边连通分量中该名字所在分量的全部成员键（不在分量则空）"""
         parent: dict[str, str] = {}
 
         def find(node: str) -> str:
@@ -459,9 +464,15 @@ class FactGraph:
             if root_a != root_b:
                 parent[root_b] = root_a
         if key not in parent:
-            return None
+            return []
         root = find(key)
-        members = [node for node in parent if find(node) == root]
+        return [node for node in parent if find(node) == root]
+
+    def _representative_key(self, key: str) -> str | None:
+        """2026-08-11 用于沿同一人物边找分量代表：is_representative 标记优先，无标记兜底"""
+        members = self._same_person_component(key)
+        if not members:
+            return None
         registered_order = {node: index for index, node in enumerate(self.entity_names)}
         members.sort(key=lambda node: registered_order.get(node, len(registered_order)))
         flagged = [node for node in members if bool((self.entity_attributes.get(node) or {}).get("is_representative"))]

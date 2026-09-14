@@ -294,6 +294,14 @@ def test_resolve_name_after_duplicate_relation_submission() -> None:
     assert graph.resolve_name("小石头") == "石轩"
 
 
+def test_alias_group_lists_component_siblings_without_self() -> None:
+    """2026-09-14 用于验证进度账本别名列取分量内其余登记名（不含自身，不在分量返回空）"""
+    graph = _alias_graph()
+    assert graph.alias_group("小石头") == ["石轩"]
+    assert graph.alias_group("石轩") == ["小石头"]
+    assert graph.alias_group("无关路人") == []
+
+
 def test_apply_relation_change_rejects_same_endpoint_self_loop() -> None:
     """2026-09-10 用于验证案例关系变更裸同名端点直接报错，不进操作日志炸持久化约束
 

@@ -1213,19 +1213,28 @@ class AnnotationToolLedger:
     # *_ledger() 供 graph 侧渲染写者面【进度账本】注入块（局部键面，不露 uuid）。
 
     def entity_ledger(self) -> list[dict[str, Any]]:
-        """用于列举本章已写入实体的账本（el 绑定序）：{el, name, n}"""
+        """用于列举本章已写入实体的账本（el 绑定序）：{el, name, n}，带 tags 与同一人物别名
+
+        别名列（alias）与标签列直接对抗"外号没接上登记名→重复注册实体"（run b7477080
+        ch3 把猴子当新人物又建一套编号）。
+        """
         rows: list[dict[str, Any]] = []
         for el, key in self.entity_el_index.items():
             stored = self.written_entities.get(key)
             if stored is None:
                 continue
-            rows.append(
-                {
-                    "el": el,
-                    "name": stored.name,
-                    "n": self.graph.entity_number(stored.name) if self.graph is not None else None,
-                }
-            )
+            row: dict[str, Any] = {
+                "el": el,
+                "name": stored.name,
+                "n": self.graph.entity_number(stored.name) if self.graph is not None else None,
+            }
+            if stored.tags:
+                row["tags"] = list(stored.tags)
+            if self.graph is not None:
+                aliases = self.graph.alias_group(stored.name)
+                if aliases:
+                    row["aliases"] = aliases
+            rows.append(row)
         return rows
 
     def relation_ledger(self) -> list[str]:
@@ -1262,12 +1271,23 @@ class AnnotationToolLedger:
         return view
 
     def dialogue_ledger(self) -> dict[str, Any]:
-        """用于对话域账本：候选总数/已判定写入数/未写入的候选编号名单"""
+        """用于对话域账本：候选总数/已判定写入数/未写入编号 + 已判条目的判定值
+
+        judged 带值是对抗整册重推的关键：只报"已判 N/M"时模型把未判清单读成
+        "一切从零重推"，写完的条目也要回文核对（run b7477080 ch1 全册过 6 遍）。
+        """
+        judged: dict[str, str] = {}
+        for index, item in sorted(self.written_dialogues.items()):
+            if str(item.verdict) != "dialogue":
+                judged[str(index)] = str(item.verdict)
+            else:
+                judged[str(index)] = f"{item.speaker or 'null'}/{item.tone or 'null'}"
         pending = sorted(set(range(1, len(self.dialogue_candidates) + 1)) - set(self.written_dialogues))
         return {
             "total": len(self.dialogue_candidates),
             "written": len(self.written_dialogues),
             "pending": pending,
+            "judged": judged,
         }
 
     # ------------------------------------------------------------------
@@ -2514,6 +2534,8 @@ def build_annotation_tools(
         not_dialogue=误判候选（题字、描写被引号包裹等，此时只填 candidate_index 与 verdict）。
         speaker 是说话人的实体引用——本 chunk 自定的 el 键或回执编号 n，
         无法确认时留 null；tone 取参数说明里的闭合枚举，没有贴合的用「其他」。
+        归属判据：多人齐声或同一条引语混有多人发言时，二选一——定主喊者，或 speaker 留
+        null 承认归属不明；一次定案，后续回合不因再权衡"谁更合适"而改判。
         判定与写入不必一轮做完：每条判定彼此独立、写入即生效，重写同序号按更新语义处理。
         回执 content 回显该候选的生效判定（speaker 已解析为登记名，含候选账本标识 candidate_key）。
         """
@@ -2585,6 +2607,9 @@ def build_annotation_tools(
         链尾）/"secondary" 挂在当时主链尾；伏笔属性（isforeshadowing/confidence）只属于根：
         isforeshadowing=true 时 confidence 必填（high/medium/low），整棵树成为伏笔树、
         根即埋设事件。
+        伏笔建模判据：埋设事件本身就是本章主链事件时，直接给主链根标 isforeshadowing=true，
+        不再另立第二棵树重复同一时刻；仅当要埋的悬念不对应主链某个事件时才独立立伏笔树。
+        同一悬念的建树选择一次定案，后续回合不再依同一证据复议。
         characters 是该节点的参与者数组（可省）：根节点也直接挂参与者。character 实体
         每条必须带 narrative_role/action/emotion 三态（action 不超过 15 字、emotion
         为 -2..2 整数；同一人物在本 chunk 内的动作不得重复），非 character（item/
