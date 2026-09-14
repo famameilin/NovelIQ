@@ -252,3 +252,6 @@ opencode.json
 .uv-cache/
 .uv-python/
 
+# 标注思考量归因 dump（逐回合思考原文，本地研究产物）
+/tmp_thinking/
+
