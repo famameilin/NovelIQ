@@ -68,8 +68,8 @@ def build_chunk_message(
     """2026-08-07 用于向 Agent 提供当前唯一可写 chunk 和有序候选
 
     2026-08-22事件不再携带段落锚点，移除 ¶N 段落标记注入。
-    2026-09-07 句级监督：新增自选句标签区块（提交渠道=write_metrics 的
-    sentence_labels 可选参数，不新增工具；选句标准见 write_metrics docstring）。
+    2026-09-07 句级监督：新增自选句标签区块（2026-09-13 起提交渠道=write_sentence_label
+    逐句小调用；选句标准见该工具 docstring）。
     2026-09-10 候选字段 index 改名 candidate_index，消除与案例编号空间的混同
     （run a83fae3d 思考实测映射推理 1725 次、显式困惑 39 次）。
     2026-09-11 案例改检索制：ActiveCases 区块从编号表降级为通道说明，案例
@@ -93,10 +93,9 @@ def build_chunk_message(
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
         "<SentenceLabels>\n"
-        "请从上方正文中自选 2-3 个完整句子（原样摘录，不改写），随 write_metrics 的 "
-        "sentence_labels 参数为每句提交整句情绪标签（emotion 为 -2..2 整数分值，"
-        "同 write_metrics.emotional_valence）。选择权在模型："
-        "优先选情绪表达有代表性、或语气/标点有区分度的句子；也允许选 0 分句。\n"
+        "请从上方正文中自选 2-3 个完整句子（原样摘录，不改写），用 write_sentence_label "
+        "逐句提交整句情绪标签（emotion 为 -2..2 整数分值，同 write_metrics.emotional_valence）。"
+        "选择权在模型：优先选情绪表达有代表性、或语气/标点有区分度的句子；也允许选 0 分句。\n"
         "</SentenceLabels>",
     ]
     return "\n\n".join(sections)
@@ -169,8 +168,8 @@ def build_writer_chapter_message(
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
         "<SentenceLabels>\n"
-        "请从读者上报的 sentence_labels 观察中自选 2-3 个句子，随 write_metrics 的 "
-        "sentence_labels 参数提交整句情绪标签（emotion 为 -2..2 整数分值）。"
+        "请从读者上报的 sentence_labels 观察中自选 2-3 个句子，用 write_sentence_label "
+        "逐句提交整句情绪标签（emotion 为 -2..2 整数分值）。"
         "选择由你裁量：优先选情绪表达有代表性、或语气/标点有区分度的句子，"
         "兼顾跨块分布；句子必须原样摘录不改写。\n"
         "</SentenceLabels>",

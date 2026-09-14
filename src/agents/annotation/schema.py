@@ -44,9 +44,9 @@ def coerce_emotion_score(value: object) -> int:
     return 0
 
 
-# 2026-09-11 实体引用一律用运行期编号（write_entities 回执 numbers / search_graph 回执 n）；
+# 2026-09-11 实体引用一律用运行期编号（write_entity 回执 n / search_graph 回执 n）；
 # 名称是文本面的东西，进入写入合同前必须先换成编号，这里把"写名字"的失败直接转成可自纠报错
-ENTITY_NUMBER_FIELD_HINT = "（编号取自 write_entities 回执 numbers 或 search_graph 回执 n；不接受实体名称）"
+ENTITY_NUMBER_FIELD_HINT = "（编号取自 write_entity 回执 n 或 search_graph 回执 n；不接受实体名称）"
 
 
 def _reject_entity_name_text(value: object) -> object:
@@ -54,7 +54,7 @@ def _reject_entity_name_text(value: object) -> object:
     if isinstance(value, str) and not value.strip().isdigit():
         raise ValueError(
             f"实体引用只接受编号（整数），收到名称 {value.strip()}："
-            "请先 search_graph 按名称查询（新实体先 write_entities 声明），用回执编号引用"
+            "请先 search_graph 按名称查询（新实体先 write_entity 登记），用回执编号引用"
         )
     return value
 
@@ -110,12 +110,11 @@ class DialogueVerdict(StrEnum):
 
 
 class Tone(StrEnum):
-    """2026-08-11 用于约束对话语气的闭合枚举
+    """对话语气的闭合取值域，没有贴合的用「其他」
 
-    2026-09-11 扩表：run e84339d1 实测 13 次 tone 失败全部是模型自造词
-    （得意/惊讶/疲惫/疑惑/绝望/无奈/心疼/关切/好奇/赞叹/惊恐/焦急/贪婪），
-    8 值词表与自然表达系统性错配；按实测高频词并入并加"其他"兜底。
-    合法值全表由 tone_catalog_text() 渲染，工具描述与报错共用同一来源。
+    （2026-09-11 扩表：run e84339d1 实测 13 次 tone 失败全部是模型自造词，
+    8 值词表与自然表达系统性错配；按实测高频词并入并加「其他」兜底。
+    2026-09-14 本类以 enum 形态进入模型可见的工具 schema。）
     """
 
     CALM = "平静"
@@ -149,6 +148,29 @@ def tone_catalog_text() -> str:
 
 # 2026-09-11 语气词整表：emotion 分值字段拒绝语气词时按本表给出纠错信息
 _TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
+
+
+# 2026-09-13 tone 严格口径：枚举外的值一律拒绝、不映射不放行；枚举含「其他」兜底，
+# 没有贴合词时用它。run 431a66d8 实测 10 次 tone 拒绝（委屈/严厉/平和/调侃/温柔/激动）
+# 全部是模型自然表达，被拒后逐条补写约多花 2 轮——这是闭合词表的既有代价，
+# 拒绝回执必须给出全词表与「其他」指引，让模型一次就能自纠。
+# 2026-09-14 写者侧 tone 恢复真 enum 参数（Tone | None）：闭合词表以 enum 进工具 schema，
+# 模型看得到取值域（预防面），越界值由 schema 层拒绝、记录级转换器翻成
+# record/field/code/expected 回执（含全词表与「其他」指引），与别的枚举参数同一条路径。
+# 本函数只剩读者上报的载荷校验（reader.py，校验失败降级为警告）用得上。
+def require_tone(value: object) -> Any:
+    """语气闭合校验：只接受枚举内取值，枚举外一律拒绝并给出全词表与兜底指引"""
+    if value is None or isinstance(value, Tone):
+        return value
+    text = str(value).strip()
+    try:
+        return Tone(text)
+    except ValueError:
+        pass
+    raise ValueError(
+        f"tone 必须是闭合语气枚举内的词：{text} 不在表内，"
+        f"没有贴合的用「其他」。合法值: {tone_catalog_text()}"
+    )
 
 
 class EventParticipantRole(StrEnum):
@@ -358,6 +380,15 @@ def normalize_semantic_text(value: str, *, label: str) -> str:
     return normalized
 
 
+# 2026-09-13 实体标签约束单源：服务端校验、内部载荷 Field 描述、工具参数说明共用，
+# 防止"约束只写在内部载荷模型上、模型可见的工具签名里没有"的两层模型漂移
+# （run 1b388eb3 第 2 章实锤：模型写 6 字标签"情报头子之子"被拒，回执只报长度、
+# 工具面上查不到该规则，模型原样重试后又放弃）
+ENTITY_TAG_MAX_COUNT = 3
+ENTITY_TAG_MAX_CHARS = 5
+ENTITY_TAGS_RULE_TEXT = f"最多 {ENTITY_TAG_MAX_COUNT} 个，每个最多 {ENTITY_TAG_MAX_CHARS} 个字"
+
+
 class EntityInput(StrictModel):
     """2026-08-08 用于提交当前 chunk 明确出现的实体"""
 
@@ -368,7 +399,7 @@ class EntityInput(StrictModel):
     )
     tags: list[str] = Field(
         default_factory=list,
-        description='可空标签，最多 3 个，每个最多 5 个字，如"灵兽""剑灵""法宝"',
+        description=f'可空标签，{ENTITY_TAGS_RULE_TEXT}，如"灵兽""剑灵""法宝"',
     )
     description: str | None = Field(
         default=None,
@@ -388,10 +419,10 @@ class EntityInput(StrictModel):
             cleaned = unicodedata.normalize("NFC", tag).strip()
             if cleaned and cleaned not in normalized_tags:
                 normalized_tags.append(cleaned)
-        if len(normalized_tags) > 3:
-            raise ValueError("entity.tags 最多 3 个标签")
-        if any(len(tag) > 5 for tag in normalized_tags):
-            raise ValueError("entity.tags 每个标签最多 5 个字")
+        if len(normalized_tags) > ENTITY_TAG_MAX_COUNT:
+            raise ValueError(f"entity.tags 最多 {ENTITY_TAG_MAX_COUNT} 个标签")
+        if any(len(tag) > ENTITY_TAG_MAX_CHARS for tag in normalized_tags):
+            raise ValueError(f"entity.tags 每个标签最多 {ENTITY_TAG_MAX_CHARS} 个字")
         self.tags = normalized_tags
         if self.description is not None:
             self.description = normalize_semantic_text(
@@ -444,7 +475,9 @@ class DialogueInput(StrictModel):
         default=None,
         description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
     )
-    tone: Tone | None = Field(default=None, description="对话语气闭合枚举：平静/愤怒/悲伤/喜悦/恐惧/紧张/嘲讽/恳求")
+    # 2026-09-14 枚举字段本身即拒绝非法词，不再叠 require_tone（越界值由类型报错，
+    # 全词表与「其他」指引由工具层记录级回执给出）
+    tone: Tone | None = None
 
     @model_validator(mode="after")
     def validate_dialogue(self) -> DialogueInput:
@@ -461,80 +494,13 @@ class DialogueInput(StrictModel):
         return self
 
 
-# 2026-08-12 数组格式对话提交：位置 [candidate_index, verdict, speaker, tone]，
-# speaker/tone 未知时 null；比对象格式省去字段名 token，且未提交候选默认 not_dialogue
-# 2026-09-11 第三位 speaker 从登记名称改为运行期实体编号（EntityNumber 给出写名称时的自纠引导）
-DialogueSubmissionItem = tuple[int, DialogueVerdict, EntityNumber | None, Tone | None]
-
-
-class EventParticipantArg(StrictModel):
-    """2026-09-11 模型面事件参与者（实体用运行期编号引用）
-
-    系统在 write_event 边界把编号翻成 FactGraph 规范名后转成内部
-    EventParticipantInput（角色校验、动态状态派生、落库路径全部沿用内部形态）。
-    """
-
-    entity: EntityNumber = Field(
-        gt=0,
-        description=entity_number_field_description("参与者实体的运行期编号"),
-    )
-    role: EventParticipantRole = Field(
-        description="参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点作为参与者角色）"
-    )
-    narrative_role: RoleFunction | None = Field(
-        default=None,
-        description="仅 character 参与者必填的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者",
-    )
-    action: str | None = Field(
-        default=None,
-        min_length=1,
-        description="仅 character 参与者必填：一句话概括人物在本事件中的动作（不超过 15 字）",
-    )
-    emotion: int | None = Field(
-        default=None,
-        ge=-2,
-        le=2,
-        description=f"仅 character 参与者必填：动作伴随的情绪分值。{EMOTION_SCORE_DESCRIPTION}",
-    )
-
-    @field_validator("narrative_role", mode="before")
-    @classmethod
-    def _reject_event_role_words(cls, value: object) -> object:
-        """2026-08-30 用于阻止事件专属角色词进入人物功能字段"""
-        if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
-            raise ValueError(
-                "narrative_role 不接受 "
-                f"{value.strip()}：地点、行动者等只用于事件参与者的 role 字段；"
-                "人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者"
-            )
-        return value
-
-    @field_validator("emotion", mode="before")
-    @classmethod
-    def _reject_tone_words_in_emotion(cls, value: object) -> object:
-        """2026-08-30 用于阻止对话语气词进入人物情绪分值字段"""
-        if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
-            raise ValueError(
-                f"emotion 不接受 {value.strip()}：该字段是整数分值 -2..2"
-                "（-2 强烈负面 … 2 强烈正面），语气词是对话 tone 字段的取值"
-            )
-        return value
-
-    @model_validator(mode="after")
-    def normalize_action(self) -> EventParticipantArg:
-        """2026-09-11 用于约束动作文本与人物动态字段成组提交"""
-        if self.action is not None:
-            self.action = normalize_semantic_text(self.action, label="event.participant.action")
-        observation_fields = (self.narrative_role, self.action, self.emotion)
-        if any(value is not None for value in observation_fields) and not all(
-            value is not None for value in observation_fields
-        ):
-            raise ValueError("character 参与者的 narrative_role/action/emotion 必须同时提供或同时省略")
-        return self
-
-
 class EventParticipantInput(StrictModel):
-    """2026-08-30 用于同时描述事件参与角色和人物动态状态（内部系统形态，实体=规范名）"""
+    """2026-08-30 用于同时描述事件参与角色和人物动态状态（内部系统形态，实体=规范名）
+
+    2026-09-13 小调用改造后只保留内部形态：模型面参与记录由
+    write_character_participation / write_noncharacter_participation 逐条提交，
+    服务端在领域结束时把编号翻成规范名并组装成本形态。
+    """
 
     entity: str = Field(
         min_length=1,
@@ -699,270 +665,6 @@ class ChunkParagraphInfo:
         return [self.paragraph_ids[i] for i in sorted(set(indices))]
 
 
-class EventAppendItemArg(StrictModel):
-    """2026-09-11 模型面事件子节点（参与者用运行期编号引用）"""
-
-    type: Literal["main", "secondary"] = Field(description="main=顺延主因链（成为新的链尾）；secondary=当前链尾的分支")
-    description: str = Field(min_length=1, description="子事件描述（不超过 30 字）")
-    participants: list[EventParticipantArg] = Field(
-        default_factory=list,
-        description="该子事件的参与者及人物动态状态",
-    )
-
-    @model_validator(mode="after")
-    def normalize_item(self) -> EventAppendItemArg:
-        """2026-09-11 用于规范化事件子节点描述"""
-        self.description = normalize_semantic_text(self.description, label="write_event.children.description")
-        return self
-
-
-class EventAppendItem(StrictModel):
-    """2026-08-30 用于在创建事件时按顺序提交主链或分支子节点（内部系统形态）"""
-
-    type: Literal["main", "secondary"] = Field(description="main=顺延主因链（成为新的链尾）；secondary=当前链尾的分支")
-    description: str = Field(min_length=1, description="子事件描述（不超过 30 字）")
-    participants: list[EventParticipantInput] = Field(
-        default_factory=list,
-        description="该子事件的参与者及人物动态状态",
-    )
-
-    @model_validator(mode="after")
-    def normalize_item(self) -> EventAppendItem:
-        """2026-08-30 用于规范化事件子节点描述"""
-        self.description = normalize_semantic_text(self.description, label="write_event.children.description")
-        return self
-
-
-class WriteEventArg(StrictModel):
-    """2026-09-11 模型面事件树提交（实体引用一律运行期编号）
-
-    工具层在写域前把编号解析为规范名并转成内部 WriteEventInput；校验失败缓存草稿
-    时缓存的是本形态（编号），补丁路径与报错路径同源。
-    """
-
-    description: str | None = Field(
-        default=None,
-        min_length=1,
-        description="事件的完整一句话描述（树的根，不超过 30 字）；仅无事件完成提交时为 null",
-    )
-    participants: list[EventParticipantArg] = Field(default_factory=list)
-    children: list[EventAppendItemArg] = Field(
-        default_factory=list,
-        description="按输入顺序追加的子事件；main 顺延主因链，secondary 挂在当时主链尾",
-    )
-    isforeshadowing: bool = Field(
-        default=False,
-        description="标记该事件为伏笔埋设点：整棵树成为事件森林里的伏笔树，根即埋设事件",
-    )
-    cause_tree_id: str | None = Field(
-        default=None,
-        description="因果前驱事件树 id（可选）。本章新树填 write_event 返回的 tree_id；"
-        "延续前文剧情先 search_event 检索历史树再填其 tree_id",
-    )
-    expected_payoff_family: str | None = Field(
-        default=None,
-        description="预期的回收方向/家族，isforeshadowing=true 时应提供",
-    )
-    payoff_likelihood: PayoffLikelihood | None = Field(
-        default=None,
-        description="回收可能性，isforeshadowing=true 时应提供",
-    )
-    finalize_events: bool = Field(
-        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 write_event",
-    )
-
-    @model_validator(mode="after")
-    def normalize_create(self) -> WriteEventArg:
-        """2026-09-11 用于规范化事件描述与前驱树 id"""
-        if self.description is not None:
-            self.description = normalize_semantic_text(self.description, label="write_event.description")
-        if self.cause_tree_id is not None:
-            cleaned = normalize_semantic_text(self.cause_tree_id, label="write_event.cause_tree_id")
-            self.cause_tree_id = cleaned or None
-        return self
-
-    @model_validator(mode="after")
-    def validate_empty_completion(self) -> WriteEventArg:
-        """2026-08-30 用于限制空事件只表达事件领域完成"""
-        if self.description is not None:
-            return self
-        has_event_fields = bool(
-            self.participants
-            or self.children
-            or self.isforeshadowing
-            or self.cause_tree_id
-            or self.expected_payoff_family
-            or self.payoff_likelihood
-        )
-        if has_event_fields:
-            raise ValueError("description=null 时不得提交参与者、子事件、因果或伏笔字段")
-        if not self.finalize_events:
-            raise ValueError("description=null 只能用于 finalize_events=true 的空事件完成提交")
-        return self
-
-    @model_validator(mode="after")
-    def require_foreshadowing_fields(self) -> WriteEventArg:
-        """伏笔埋设时必须提供回收家族与可能性，避免入库默认值冒充 LLM 判断"""
-        if not self.isforeshadowing:
-            return self
-        missing = [
-            name
-            for name, value in (
-                ("expected_payoff_family", self.expected_payoff_family),
-                ("payoff_likelihood", self.payoff_likelihood),
-            )
-            if value is None
-        ]
-        if missing:
-            raise ValueError(f"isforeshadowing=true 时必须提供全部两字段，缺失: {', '.join(missing)}")
-        return self
-
-
-class WriteEventInput(StrictModel):
-    """2026-08-30 用于创建单棵事件树并显式声明事件领域是否完成（内部系统形态，实体=规范名）
-
-    模型零结构输入：不给 id、不给边、不给段落锚点。跨章延续唯一出口是
-    cause_tree_id（必须指向已存在的树），环在构造上不可能。
-    """
-
-    description: str | None = Field(
-        default=None,
-        min_length=1,
-        description="事件的完整一句话描述（树的根，不超过 30 字）；仅无事件完成提交时为 null",
-    )
-    participants: list[EventParticipantInput] = Field(default_factory=list)
-    children: list[EventAppendItem] = Field(
-        default_factory=list,
-        description="按输入顺序追加的子事件；main 顺延主因链，secondary 挂在当时主链尾",
-    )
-    isforeshadowing: bool = Field(
-        default=False,
-        description="标记该事件为伏笔埋设点：整棵树成为事件森林里的伏笔树，根即埋设事件",
-    )
-    cause_tree_id: str | None = Field(
-        default=None,
-        description="因果前驱事件树 id（可选）。本章新树填 write_event 返回的 tree_id；"
-        "延续前文剧情先 search_event 检索历史树再填其 tree_id",
-    )
-    expected_payoff_family: str | None = Field(
-        default=None,
-        description="预期的回收方向/家族，isforeshadowing=true 时应提供",
-    )
-    payoff_likelihood: PayoffLikelihood | None = Field(
-        default=None,
-        description="回收可能性，isforeshadowing=true 时应提供",
-    )
-    finalize_events: bool = Field(
-        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 write_event",
-    )
-
-    @model_validator(mode="after")
-    def normalize_create(self) -> WriteEventInput:
-        """2026-08-30 用于规范化事件描述与前驱树 id"""
-        if self.description is not None:
-            self.description = normalize_semantic_text(self.description, label="write_event.description")
-        if self.cause_tree_id is not None:
-            cleaned = normalize_semantic_text(self.cause_tree_id, label="write_event.cause_tree_id")
-            self.cause_tree_id = cleaned or None
-        return self
-
-    @model_validator(mode="after")
-    def validate_empty_completion(self) -> WriteEventInput:
-        """2026-08-30 用于限制空事件只表达事件领域完成"""
-        if self.description is not None:
-            return self
-        has_event_fields = bool(
-            self.participants
-            or self.children
-            or self.isforeshadowing
-            or self.cause_tree_id
-            or self.expected_payoff_family
-            or self.payoff_likelihood
-        )
-        if has_event_fields:
-            raise ValueError("description=null 时不得提交参与者、子事件、因果或伏笔字段")
-        if not self.finalize_events:
-            raise ValueError("description=null 只能用于 finalize_events=true 的空事件完成提交")
-        return self
-
-    @model_validator(mode="after")
-    def require_foreshadowing_fields(self) -> WriteEventInput:
-        """伏笔埋设时必须提供回收家族与可能性，避免入库默认值冒充 LLM 判断"""
-        if not self.isforeshadowing:
-            return self
-        missing = [
-            name
-            for name, value in (
-                ("expected_payoff_family", self.expected_payoff_family),
-                ("payoff_likelihood", self.payoff_likelihood),
-            )
-            if value is None
-        ]
-        if missing:
-            raise ValueError(
-                f"isforeshadowing=true 时必须提供全部两字段，缺失: {', '.join(missing)}"
-            )
-        return self
-
-
-class WriteEventPatchArgs(WriteEventArg):
-    """2026-09-11 用于支撑 write_event 的草稿补丁模式（增量修正，不整树重发）
-
-    上一次 write_event 提交校验失败时，系统把该次参数（编号形态）缓存为草稿；
-    模型重调时只需 patches=[[字段路径, 新值], ...]（路径形如
-    children.0.participants.0.emotion，与报错里的路径一致），系统在草稿基础上合并
-    后整体校验。patches 与完整树参数二选一：带 patches 时忽略其他树字段，
-    finalize_events 以草稿中的值为准。
-    """
-
-    finalize_events: bool = Field(
-        default=False,
-        description="true 表示当前树是本章最后一棵并完成事件领域；false 表示下一回合继续 write_event",
-    )
-    patches: list[tuple[str, Any]] | None = Field(
-        default=None,
-        description="草稿补丁列表，每条 [字段路径, 新值]；仅在校验失败后的修正提交时使用",
-    )
-
-    @model_validator(mode="after")
-    def validate_empty_completion(self) -> WriteEventPatchArgs:
-        """补丁提交允许省略全部树字段；整体重交沿用基类空提交限制（同名覆盖基类校验）"""
-        if self.patches:
-            return self
-        if self.description is not None:
-            return self
-        has_event_fields = bool(
-            self.participants
-            or self.children
-            or self.isforeshadowing
-            or self.cause_tree_id
-            or self.expected_payoff_family
-            or self.payoff_likelihood
-        )
-        if has_event_fields:
-            raise ValueError("description=null 时不得提交参与者、子事件、因果或伏笔字段")
-        if not self.finalize_events:
-            raise ValueError("description=null 只能用于 finalize_events=true 的空事件完成提交")
-        return self
-
-
-class RelationArg(StrictModel):
-    """2026-09-11 模型面关系边（两端用运行期实体编号引用）
-
-    工具层在写域前把编号解析为规范名并转成内部 RelationInput。
-    """
-
-    from_entity: EntityNumber = Field(
-        gt=0,
-        description=entity_number_field_description("关系起点实体编号"),
-    )
-    to_entity: EntityNumber = Field(
-        gt=0,
-        description=entity_number_field_description("关系终点实体编号"),
-    )
-    relation_type: RelationType = Field(description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text())
-
-
 class RelationInput(StrictModel):
     """2026-08-12 用于通过实体名称提交本章确认存在的闭合类型关系边（内部系统形态）"""
 
@@ -1069,7 +771,8 @@ class BoundRelation(RelationInput):
 class SentenceLabelInput(StrictModel):
     """2026-09-07 用于提交 agent 自选句子的句级情绪标签（句级监督信号）
 
-    随既有 write_metrics 工具的可选参数 sentence_labels 提交，不设独立工具。
+    2026-09-13 小调用改造：从 write_metrics 的可选列表参数拆成 write_sentence_label
+    逐句提交（一次一个完整语义单元），绑定与去重语义不变。
     """
 
     sentence: str = Field(

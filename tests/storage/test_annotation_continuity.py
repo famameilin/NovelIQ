@@ -130,7 +130,11 @@ def _create_case(
     target_key: str,
     chunk_id: int = 1,
 ) -> str:
-    """2026-09-11 用于批量造案例行并返回 id（检索制测试的准备口）"""
+    """2026-09-11 用于批量造案例行并返回 id（检索制测试的准备口）
+
+    2026-09-13 登记即进池后案例行 id 就是 target_key，而 id 是全库主键：
+    传入的 target_key 一律加 uuid 后缀，避免跨用例复用同一字面量时撞主键。
+    """
     row = CasePoolRepository(db_session).create_case(
         run_id=run_id,
         annotation_id=annotation_id,
@@ -139,7 +143,7 @@ def _create_case(
             keys=keys,
             description=description,
             chunk_id=chunk_id,
-            target_key=target_key,
+            target_key=f"{target_key}-{uuid4().hex[:8]}",
             target_ref={"kind": case_type, "chunk_id": chunk_id},
         ),
     )
@@ -597,3 +601,53 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
     assert any("赤羽炽尾鸡" in item.content for item in wildcard)
     assert {item.chapter_id for item in multi} == {1, 2}
     assert miss == []
+
+
+def test_search_pool_includes_pending_cases_from_same_chunk(db_session) -> None:
+    """2026-09-13 登记即进池：本 chunk 内 push_case 登记的待建案例当章即可检索到
+
+    待建案例的池行要到本章收尾才落库，检索面不因此缺席：与池内案例走同一套
+    关键词/枚举语义，并一并计入池规模与类型分布。用例数据取自 run 1b388eb3
+    第 2 章实况——模型登记"误建关系"案例后按关键词反复检索却全零命中。
+    """
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["贺铮误认林立果为子"], title="待建案例检索")
+    service = DatabaseAnnotationQueryService(
+        db_session,
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+    pending = CaseSearchResult(
+        id="pending-target-1",
+        type="关系修正",
+        chunk_id=1,
+        created_chapter=1,
+        keys=["贺铮", "林立果", "家族"],
+        description="误建关系：二人并非父子，需解除该边",
+    )
+
+    by_keyword = service.search_pool("林立果", hidden_case_ids=set(), pending_cases=[pending])
+    by_type = service.search_pool(None, hidden_case_ids=set(), case_type="all", pending_cases=[pending])
+    other_type = service.search_pool(
+        None,
+        hidden_case_ids=set(),
+        case_type="entity_alias",
+        pending_cases=[pending],
+    )
+    hidden = service.search_pool(
+        "林立果",
+        hidden_case_ids={pending.id},
+        pending_cases=[pending],
+    )
+
+    assert [item.id for item in by_keyword.results] == [pending.id]
+    assert by_keyword.pool.active_total == 1
+    assert by_keyword.pool.by_type == {"关系修正": 1}
+    # 枚举（case_type=all）同样能看到待建案例，类型不匹配时按类型过滤掉
+    assert [item.id for item in by_type.results] == [pending.id]
+    assert other_type.results == []
+    # 已解决（隐藏）的待建案例不再出现在检索面，也不计入池规模
+    assert hidden.results == []
+    assert hidden.pool.active_total == 0
+    assert hidden.pool.by_type == {}

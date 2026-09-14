@@ -31,9 +31,7 @@ from .schema import (
     EntityInput,
     NarrativeFunction,
     SentenceLabelInput,
-    Tone,
-    normalize_semantic_text,
-    tone_catalog_text,
+    require_tone,
 )
 from .tools import (
     RELATION_DEFINITIONS,
@@ -152,11 +150,12 @@ def _check_payload(group: str, item: dict[str, Any], *, ledger: AnnotationToolLe
             raise ValueError("dialogues.verdict 必须是 dialogue/inner_monologue/not_dialogue 三态之一") from None
         tone = item.get("tone")
         if tone is not None:
-            normalized_tone = normalize_semantic_text(str(tone), label="dialogues.tone")
-            if normalized_tone not in Tone:
-                raise ValueError(
-                    f"dialogues.tone 必须是闭合语气枚举: {normalized_tone}，合法值: {tone_catalog_text()}"
-                )
+            # 2026-09-14 写者侧 tone 已是真 enum 参数（schema 层拒绝），读者上报仍是
+            # 自由文本，这里的校验只产出警告（问题随回执 warnings 呈现、观察照常送达）
+            try:
+                require_tone(tone)
+            except ValueError as exc:
+                raise ValueError(f"dialogues.tone 不符合合同: {exc}") from None
     elif group == "sentence_labels":
         try:
             SentenceLabelInput.model_validate(item)

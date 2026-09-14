@@ -137,7 +137,7 @@ def _resolve_entities(
     """2026-08-19 用于按规范化名称匹配或创建实体并记录属性变化
 
     2026-09-04 单一写面：输入从 payload 的实体目录副本改为 FactGraph 的 entity_ops
-    操作日志（write_entities 按提交顺序追加）；同名属性合并、tags 去重拼接、
+    操作日志（write_entity 按提交顺序追加）；同名属性合并、tags 去重拼接、
     before/after 审计的语义与原实现一致。
     """
     appearances: dict[str, list[tuple[int, EntityType, dict[str, Any]]]] = {}
@@ -668,7 +668,7 @@ def _persist_annotation_facts(
                 )
             )
         # 2026-09-04 单一写面：关系 assert 事实从 FactGraph 操作日志派生，
-        # 不再读 chunk.relations 副本；端点名取 write_relations 已解析的规范名
+        # 不再读 chunk.relations 副本；端点名取每次重放前已解析的规范名
         for ordinal, relation_item in enumerate(
             [op for op in relation_assert_ops if int(op["chapter_id"]) == chunk.chunk_id],
             start=1,

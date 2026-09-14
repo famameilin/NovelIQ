@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -87,7 +88,11 @@ def _audit(
 
 
 def _pushed_case_for(annotation: BoundChapterAnnotation) -> list[PendingCase]:
-    """2026-08-11 用于构造模型 push 登记的对话疑点案例（携带 dialogue_id）"""
+    """2026-08-11 用于构造模型 push 登记的对话疑点案例（携带 dialogue_id）
+
+    2026-09-13 登记即进池后案例行 id 就是 target_key，而 id 是全库主键：
+    target_key 加 uuid 后缀，避免跨用例复用同一字面量时撞主键。
+    """
     pending: list[PendingCase] = []
     for chunk in annotation.chunks:
         for dialogue in chunk.dialogues:
@@ -97,7 +102,7 @@ def _pushed_case_for(annotation: BoundChapterAnnotation) -> list[PendingCase]:
                     chunk_id=chunk.chunk_id,
                     keys=[dialogue.content, "说话人"],
                     description=f"确认对话“{dialogue.content[:40]}”的说话人",
-                    target_key="pushed-target-key",
+                    target_key=f"pushed-target-key-{uuid4().hex[:8]}",
                     target_ref={
                         "kind": "dialogue_speaker",
                         "dialogue_id": dialogue.candidate_key,
