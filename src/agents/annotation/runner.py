@@ -22,6 +22,7 @@ from .errors import (
 )
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
+from .program import ProgramRuntime, build_program_tool
 from .prompts import build_chunk_message, build_system_prompt
 from .reader_report import ReaderReport
 from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChunkParagraphInfo
@@ -140,6 +141,7 @@ async def _run_single_attempt(
     reader_reports: list[ReaderReport] | None = None,
     ask_reader_dispatcher: AskReaderDispatcher | None = None,
     initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
+    program_mode: bool = False,
 ) -> AgentRunResult:
     """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试
 
@@ -148,6 +150,9 @@ async def _run_single_attempt(
     2026-09-12 章内并行（§7）：reader_reports 与 ask_reader_dispatcher 仅供
     两段式写者使用（取值域准入 + 反问通道），单块章不传、行为不变；
     initial_messages_override 供写者注入 <ReaderReports> 替代正文直读。
+    2026-09-15 程序面（CodeAct）：program_mode=True 时写者对外只暴露 execute_code
+    （内层工具面与账本不变），失败回退由设置 codeact_enabled 统一控制；两段式写者
+    不传该参数、行为不变。
     """
     from src.config import settings
 
@@ -168,6 +173,16 @@ async def _run_single_attempt(
         reader_reports=reader_reports,
     )
     tools = build_annotation_tools(query_service, ledger, ask_reader_dispatcher=ask_reader_dispatcher)
+    program_mode = program_mode and bool(settings.models.annotation.codeact_enabled)
+    bind_tools: list[Any] | None = None
+    program_tool_name: str | None = None
+    if program_mode:
+        # 绑定面收成唯一 execute_code；分发面仍是完整工具表（含程序工具自身），
+        # 模型直发原生调用时由批次转入同一个内层 dispatcher（见 graph 批次节点）
+        program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
+        program_tool_name = str(program_tool.name)
+        bind_tools = [program_tool]
+        tools = [*tools, program_tool]
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
         llm,
@@ -177,12 +192,14 @@ async def _run_single_attempt(
         stream=stream,
         observer=observer,
         retries=settings.models.annotation.total_attempts,
+        bind_tools=bind_tools,
+        program_tool_name=program_tool_name,
     )
     if initial_messages_override is not None:
         initial_messages = initial_messages_override
     else:
         initial_messages = [
-            SystemMessage(content=build_system_prompt()),
+            SystemMessage(content=build_system_prompt(program_mode=program_mode)),
             HumanMessage(
                 content=build_chunk_message(
                     chunk_index=1,
@@ -249,12 +266,14 @@ async def run_annotation_agent(
     reader_reports: list[ReaderReport] | None = None,
     ask_reader_dispatcher: AskReaderDispatcher | None = None,
     initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
+    program_mode: bool = False,
 ) -> AgentRunResult:
     """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出
 
     2026-08-14 M7（§20）：sub_chunk_index 标记子块协议运行序号，写入 AgentRunAudit。
     2026-08-18：paragraph_info 提供当前 chunk 段落坐标映射，用于事件锚点校验和证据派生。
     2026-09-12 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
+    2026-09-15 程序面（CodeAct）：program_mode 由单块章调用方传入，两段式写者不传。
     """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
@@ -312,6 +331,7 @@ async def run_annotation_agent(
             reader_reports=reader_reports,
             ask_reader_dispatcher=ask_reader_dispatcher,
             initial_messages_override=initial_messages_override,
+            program_mode=program_mode,
         )
     except Exception as exc:
         _close_read_session(read_session)

@@ -587,6 +587,9 @@ async def run_annotate(
                                 graph_state=graph_state,
                                 chapter_label=chapter_labels.get(chapter_id),
                                 paragraph_info=sub_paragraph_info,
+                                # 2026-09-15 程序面（CodeAct）：单块章写者只暴露 execute_code；
+                                # 两段式（超长章）写者不传该参数、行为不变
+                                program_mode=True,
                             )
                         )
                     chapter_result = _merge_sub_chunk_results(
