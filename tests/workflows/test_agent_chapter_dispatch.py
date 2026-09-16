@@ -152,18 +152,14 @@ async def test_run_annotate_is_strictly_serial_and_next_chapter_sees_committed_c
         calls.append(chapter_id)
         chunk_text = kwargs["current_chunks"][0][1]
         if chapter_id == 2:
-            read_session = kwargs["session_factory"]()
-            try:
-                service = kwargs["query_service_factory"](read_session)
-                search_result = service.search_pool(
-                    "住手",
-                    hidden_case_ids=set(),
-                )
-                assert all(isinstance(item, CaseSearchResult) for item in search_result.results)
-                assert search_result.results[0].description == "该句住手由谁说出"
-            finally:
-                read_session.rollback()
-                read_session.close()
+            # 2026-09-16 连接粒度：查询工厂收的是会话工厂，连接由查询服务按次取还
+            service = kwargs["query_service_factory"](kwargs["session_factory"])
+            search_result = service.search_pool(
+                "住手",
+                hidden_case_ids=set(),
+            )
+            assert all(isinstance(item, CaseSearchResult) for item in search_result.results)
+            assert search_result.results[0].description == "该句住手由谁说出"
         return _agent_result(
             run_id=run_id,
             chapter_id=chapter_id,

@@ -1044,6 +1044,10 @@ async def test_runner_does_not_retry_authorization_errors() -> None:
     """2026-08-07 用于验证授权错误直接失败且不会进入第二次尝试"""
     session = MagicMock()
     recorder = MagicMock()
+
+    def session_factory():
+        return session
+
     with patch(
         "src.agents.annotation.runner._run_single_attempt",
         new=AsyncMock(side_effect=AnnotationAuthorizationError("unauthorized")),
@@ -1054,13 +1058,15 @@ async def test_runner_does_not_retry_authorization_errors() -> None:
                 chapter_id=1,
                 current_chunks=[(1, "顾霜进入山门")],
                 query_service_factory=lambda current: _QueryService(),
-                session_factory=lambda: session,
+                session_factory=session_factory,
                 llm=MagicMock(),
                 audit_recorder=recorder,
             )
     assert run_attempt.await_count == 1
-    session.rollback.assert_called_once()
-    session.close.assert_called_once()
+    # 2026-09-16 连接粒度：入口不再自开只读会话，工厂原样转交查询服务按次取还
+    assert run_attempt.call_args.kwargs["session_factory"] is session_factory
+    session.rollback.assert_not_called()
+    session.close.assert_not_called()
     assert recorder.finish_invocation.call_args.kwargs["status"] == "error"
 
 

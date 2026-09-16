@@ -373,7 +373,7 @@ async def test_runner_advertises_only_execute_code(monkeypatch: pytest.MonkeyPat
         current_chunks=[(1, text)],
         novel_title=None,
         llm=llm,
-        session=_NullSession(),
+        session_factory=lambda: _NullSession(),
         query_service_factory=lambda session: _QueryService(),
         graph_state=FactGraph(),
         paragraph_info=_paragraph_info(text),
@@ -406,7 +406,7 @@ async def test_runner_keeps_native_surface_when_switched_off(monkeypatch: pytest
         current_chunks=[(1, text)],
         novel_title=None,
         llm=llm,
-        session=_NullSession(),
+        session_factory=lambda: _NullSession(),
         query_service_factory=lambda session: _QueryService(),
         graph_state=FactGraph(),
         paragraph_info=_paragraph_info(text),
@@ -466,8 +466,8 @@ class _PoolQueryService(_QueryService):
 
 
 class _NullSession:
-    """2026-09-15 用于满足只读会话协议的最小会话桩（无数据库调用）"""
+    """2026-09-15 用于满足会话协议的最小会话桩（无数据库调用）"""
 
     def get_bind(self) -> None:
-        """2026-09-15 用于声明非 postgresql 绑定（跳过 SET TRANSACTION READ ONLY）"""
+        """2026-09-15 用于声明无绑定"""
         return None
