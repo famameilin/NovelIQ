@@ -370,6 +370,35 @@ async def test_unknown_handle_lists_known_handles() -> None:
     assert "B1:m1" in failed["expected"]
 
 
+@pytest.mark.asyncio
+async def test_chapter_surface_rejects_direct_writes_but_compiles_them() -> None:
+    """2026-09-16 章面收窄：写工具不在模型可见面（直呼即 unknown_tool），但仍是编译目标
+
+    可见面=检索/案例/收尾工具＋合并构造器；直写会绕过句柄→el 绑定表，因此把它
+    从 API 目录里摘掉——模型看不到就不会去试。收窄只动可见面：构造器编译出的
+    同一次 write_entity 照常落地（执行面工具表保留全套）。
+    """
+    ledger, _first, _second, runtime = _setup()
+    visible = {str(tool.name) for tool in runtime.tool_list}
+    write_tools = {"write_entity", "write_relation", "write_dialogue", "write_metrics", "write_event"}
+    assert not visible & write_tools
+    # API 目录只按可见面渲染：写工具没有自己的目录条目（其他工具说明里提到它们是正常交叉引用）
+    description_lines = str(runtime.build_tool().description).splitlines()
+    assert not any(line.startswith(tuple(f"{name}: " for name in write_tools)) for line in description_lines)
+    assert {"search_text", "search_graph", "search_event", "search_pool"} <= visible
+    assert {"finish_chapter", "push_case", "close_case", "resolve_fact_case"} <= visible
+    assert write_tools <= set(runtime.execution_tools)
+
+    # 直呼写工具：结构化拒绝（未开放函数），账本不动
+    receipt = await _run(runtime, 'write_entity(name="顾霜", entity_type="character", el="gs")')
+    assert receipt["error"]["type"] == "unknown_tool"
+    assert ledger.entity_el_index == {}
+
+    # 同一个实体经构造器绑定：编译出的正式调用照常写入
+    assert "failed" not in await _run(runtime, 'bind(mention="B1:m1", el="gs")')
+    assert ledger.entity_el_index == {"gs": "顾霜"}
+
+
 def test_block_ir_feeds_writer_admissibility() -> None:
     """块 IR 按既有报告形状喂进准入：块内陈述过的实体名通过，凭空名字被拒"""
     blocks = _blocks()

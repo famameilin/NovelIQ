@@ -262,6 +262,23 @@ def _failed_view(op: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+def _call_rejection(name: str, exc: Exception, *, signature_hint: str) -> dict[str, Any]:
+    """2026-09-16 用于把构造器调用失败渲染成记录级拒绝回执（块面与章面共用）
+
+    结构化拒绝（AnnotationStageRejection）带 record/field/code/expected 原样透传；
+    其余失败（多为参数名写错）给签名提示，让模型下一轮就能改对。
+    """
+    if isinstance(exc, AnnotationStageRejection):
+        return exc.receipt()
+    return {
+        "status": "rejected",
+        "record": name,
+        "code": "invalid_call",
+        "expected": signature_hint,
+        "message": f"{type(exc).__name__}: {exc}",
+    }
+
+
 class _ProgramSearchTool:
     """2026-09-15 用于给程序面检索工具加一层投影（fields/limit 不传给底层工具 schema）"""
 
@@ -414,10 +431,17 @@ class RestrictedProgramRuntime:
         *,
         observer: Any = None,
         stream: Any = None,
+        execution_tools: dict[str, Any] | None = None,
     ) -> None:
-        """用于绑定程序面工具面（渲染 API 目录）与分发命名空间（名字 → 可调用）"""
+        """用于绑定程序面工具面（渲染 API 目录）与分发命名空间（名字 → 可调用）
+
+        2026-09-16 execution_tools：内层正式调用的工具表——章面收窄后模型可见面
+        不含原生写入工具，但构造器编译出的调用仍要经它们落地，故两张表分开：
+        模型能写什么由 tool_list/namespace 决定，能执行什么由本表决定；省略即同一张。
+        """
         self.tool_list = list(tool_list)
         self.tools: dict[str, Any] = dict(namespace)
+        self.execution_tools: dict[str, Any] = self.tools if execution_tools is None else dict(execution_tools)
         self.observer = observer
         self.stream = stream
         self.env: dict[str, Any] = {}
@@ -781,14 +805,22 @@ class ProgramRuntime(RestrictedProgramRuntime):
         *,
         observer: Any = None,
         stream: Any = None,
+        compile_only: frozenset[str] = frozenset(),
     ) -> None:
-        """用于绑定程序面工具、账本与审计/事件出口"""
+        """用于绑定程序面工具、账本与审计/事件出口
+
+        2026-09-16 compile_only：只作为编译目标、不进模型可见面的工具名（章面收窄
+        用它把原生写入工具从 execute_code 的 API 目录里摘掉；_run_op 仍能调用它们）。
+        """
         tool_list = build_program_tools(tools)
+        execution_tools = {str(tool.name): tool for tool in tool_list}
+        visible = [tool for tool in tool_list if str(tool.name) not in compile_only]
         super().__init__(
-            tool_list,
-            {str(tool.name): tool for tool in tool_list},
+            visible,
+            {str(tool.name): tool for tool in visible},
             observer=observer,
             stream=stream,
+            execution_tools=execution_tools,
         )
         self.ledger = ledger
         self._finish_requested = False
@@ -823,7 +855,7 @@ class ProgramRuntime(RestrictedProgramRuntime):
         op_index = self._next_op_index(line=line)
         entry = await _execute_call(
             {"name": name, "args": args, "id": f"{self._program_id}-op{op_index}"},
-            tool_map=self.tools,
+            tool_map=self.execution_tools,
             ledger=self.ledger,
             observer=self.observer,
             stream=self.stream,
@@ -877,7 +909,7 @@ class ProgramRuntime(RestrictedProgramRuntime):
         op_index = self._ops_in_program + 1
         entry = await _execute_call(
             {"name": "finish_chapter", "args": {}, "id": f"{self._program_id}-finish"},
-            tool_map=self.tools,
+            tool_map=self.execution_tools,
             ledger=self.ledger,
             observer=self.observer,
             stream=self.stream,
