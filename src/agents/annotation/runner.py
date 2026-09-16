@@ -142,6 +142,7 @@ async def _run_single_attempt(
     ask_reader_dispatcher: AskReaderDispatcher | None = None,
     initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
     program_mode: bool = False,
+    program_tool_factory: Callable[..., Any] | None = None,
 ) -> AgentRunResult:
     """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试
 
@@ -153,6 +154,9 @@ async def _run_single_attempt(
     2026-09-15 程序面（CodeAct）：program_mode=True 时写者对外只暴露 execute_code
     （内层工具面与账本不变），失败回退由设置 codeact_enabled 统一控制；两段式写者
     不传该参数、行为不变。
+    2026-09-16 章内并行 CodeAct：program_tool_factory 供块面章会话注入自己的程序
+    运行时（合并构造器 + 契约文案），按 (tools, ledger, observer=, stream=) 调用，
+    不传就是写者面 ProgramRuntime、行为逐字不变。
     """
     from src.config import settings
 
@@ -179,7 +183,10 @@ async def _run_single_attempt(
     if program_mode:
         # 绑定面收成唯一 execute_code；分发面仍是完整工具表（含程序工具自身），
         # 模型直发原生调用时由批次转入同一个内层 dispatcher（见 graph 批次节点）
-        program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
+        if program_tool_factory is None:
+            program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
+        else:
+            program_tool = program_tool_factory(tools, ledger, observer=observer, stream=stream)
         program_tool_name = str(program_tool.name)
         bind_tools = [program_tool]
         tools = [*tools, program_tool]
@@ -267,6 +274,7 @@ async def run_annotation_agent(
     ask_reader_dispatcher: AskReaderDispatcher | None = None,
     initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
     program_mode: bool = False,
+    program_tool_factory: Callable[..., Any] | None = None,
 ) -> AgentRunResult:
     """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出
 
@@ -274,6 +282,7 @@ async def run_annotation_agent(
     2026-08-18：paragraph_info 提供当前 chunk 段落坐标映射，用于事件锚点校验和证据派生。
     2026-09-12 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
     2026-09-15 程序面（CodeAct）：program_mode 由单块章调用方传入，两段式写者不传。
+    2026-09-16 章内并行 CodeAct：program_tool_factory 供块面章会话注入合并程序面。
     """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
@@ -332,6 +341,7 @@ async def run_annotation_agent(
             ask_reader_dispatcher=ask_reader_dispatcher,
             initial_messages_override=initial_messages_override,
             program_mode=program_mode,
+            program_tool_factory=program_tool_factory,
         )
     except Exception as exc:
         _close_read_session(read_session)
