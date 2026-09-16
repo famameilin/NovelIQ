@@ -6,6 +6,9 @@
 任何业务校验，也不放松实体参与者三态、tone 枚举或关系端点校验。
 
 组成：
+- RestrictedProgramRuntime：受限 AST 解释器基座（语法边界、硬限、逐 op 记录、压缩
+  回执）；"一次调用发生什么"由子类 _dispatch 决定——块面与章面程序面上复用同一份
+  解释语义，三面谁也不复制别人的校验；
 - ProgramRuntime：章尝试内单例（跨回合复用），持有变量环境、逐 op 记录与压缩回执；
 - build_program_tools：程序面工具面（四个检索工具包一层紧凑投影，其余原样）；
 - render_program_api：把程序面工具动态渲染成模型可见的 API 目录（不手抄，防漂移）；
@@ -20,6 +23,7 @@ request_args 的 "_program" 字段，质量统计按 (tool_name, error_code) 分
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import time
 from dataclasses import dataclass
@@ -333,7 +337,7 @@ def _strip_titles(value: Any) -> Any:
 
 
 # 2026-09-15 程序合同文案：语法边界 + 回执口径 + 变量持久（与工具面同轮下发）
-PROGRAM_CONTRACT_TEXT = (
+_PROGRAM_BASE_CONTRACT = (
     "执行 Python 程序调用下列工具。工具只接受具名参数；支持变量赋值、列表/字典/元组、下标、"
     "for 列表循环、if 和 ==/!=/in。无 import、属性访问、函数定义或任何其他 Python API。\n"
     "Python 常量为 True/False/None（也接受 true/false/null），不要写成变量名。"
@@ -342,13 +346,48 @@ PROGRAM_CONTRACT_TEXT = (
     f"单个程序最多 {_PROGRAM_MAX_CODE_CHARS} 字符、{_PROGRAM_MAX_OPS} 条工具调用。\n"
     "回执只回报本次成功条数（applied）、新增句柄引用（refs）、各域进度（progress）与失败清单"
     "（failed，带 op 序号/源码行/record/field/code/expected）；成功记录的明细用检索工具回查。"
-    "一次程序不必覆盖整章，可按阶段分多个有边界的增量程序。finish_chapter 在本程序全部语句执行完后结算。\n\n"
+    "一次程序不必覆盖整章，可按阶段分多个有边界的增量程序。"
+)
+PROGRAM_CONTRACT_TEXT = _PROGRAM_BASE_CONTRACT + "finish_chapter 在本程序全部语句执行完后结算。\n\n"
+# 2026-09-16 块代理面：块内没有收尾工具——块会话以"模型不再提交程序"收束，
+# 局部标注是内存对象、构造即校验，因此合同句只说明收束方式
+BLOCK_CONTRACT_TEXT = (
+    _PROGRAM_BASE_CONTRACT + "本块标注完毕时不再提交程序即可收束会话（没有收尾工具）。\n\n"
 )
 
 
-def build_program_tool(runtime: ProgramRuntime) -> Any:
-    """2026-09-15 用于构造唯一对外的 execute_code 工具（args_schema 只有 code）"""
-    description = PROGRAM_CONTRACT_TEXT + program_api_text(runtime.tool_list)
+def render_list_signature(name: str, function: Any) -> str:
+    """2026-09-16 用于渲染构造器签名（取自函数对象本身，不手抄参数名与默认值）"""
+    signature = inspect.signature(function)
+    parts: list[str] = []
+    for parameter in signature.parameters.values():
+        if parameter.default is inspect.Parameter.empty:
+            parts.append(parameter.name)
+        else:
+            parts.append(f"{parameter.name}={parameter.default!r}")
+    return f"{name}(" + ", ".join(parts) + ")"
+
+
+def constructor_api_text(entries: list[tuple[str, Any, str]]) -> str:
+    """2026-09-16 用于把程序面构造器渲染成模型可见的 API 目录
+
+    entries = (显示名, 可调用, 一句话说明) 列表；签名由 render_list_signature 从
+    函数对象读取，说明写在这里——构造器是块面/章面的新增面，不挂在 langchain 工具上，
+    这条渲染路径就是它唯一的可见面，签名漂移在渲染层就暴露。
+    """
+    blocks: list[str] = []
+    for name, function, summary in entries:
+        blocks.append(f"{render_list_signature(name, function)}\n{summary}")
+    return "\n\n".join(blocks)
+
+
+def build_program_tool(runtime: RestrictedProgramRuntime, *, extra_api: str = "") -> Any:
+    """2026-09-15 用于构造唯一对外的 execute_code 工具（args_schema 只有 code）
+
+    2026-09-16 extra_api：块面/章面把各自的构造器目录（constructor_api_text）
+    并进同一份 description——模型可见面始终是"一条工具 + 一份 API 目录"。
+    """
+    description = runtime.contract_text + extra_api + program_api_text(runtime.tool_list)
     return StructuredTool.from_function(
         coroutine=runtime.execute,
         name=PROGRAM_TOOL_NAME,
@@ -356,26 +395,29 @@ def build_program_tool(runtime: ProgramRuntime) -> Any:
     )
 
 
-class ProgramRuntime:
-    """2026-09-15 用于在受限 AST 解释器里执行模型提交的程序并逐条复用生产工具边界
+class RestrictedProgramRuntime:
+    """2026-09-16 受限 AST 解释器基座：写者面、块面与章面共用同一份"程序怎么跑"
 
-    生命周期：每个章尝试建一次、跨回合复用（变量、句柄引用与逐 op 记录随之保留）；
-    程序内不复制业务校验——每条内层操作都走 graph._execute_call，与原生 tool_batch
-    共用同一份"快照 → 调用 → 按条回滚 → 审计 → 事件"实现。
+    分工：本基类只管解释器语义（节点白名单、变量环境、步数/墙钟/条数硬限、逐 op
+    记录与压缩回执）；"一次调用发生什么"由子类实现 _dispatch。写者面把它交给生产
+    单条事务边界（ProgramRuntime，见下），块面与章面各自交给自己的构造器与编译路径。
+    这样三面共用同一份语法边界与回执口径，谁也不复制业务校验。
     """
+
+    # 模型可见的合同文案（块面无收尾工具，合同句不同）
+    contract_text: str = PROGRAM_CONTRACT_TEXT
 
     def __init__(
         self,
-        tools: list[Any],
-        ledger: AnnotationToolLedger,
+        tool_list: list[Any],
+        namespace: dict[str, Any],
         *,
         observer: Any = None,
         stream: Any = None,
     ) -> None:
-        """用于绑定程序面工具、账本与审计/事件出口"""
-        self.tool_list = build_program_tools(tools)
-        self.tools: dict[str, Any] = {str(tool.name): tool for tool in self.tool_list}
-        self.ledger = ledger
+        """用于绑定程序面工具面（渲染 API 目录）与分发命名空间（名字 → 可调用）"""
+        self.tool_list = list(tool_list)
+        self.tools: dict[str, Any] = dict(namespace)
         self.observer = observer
         self.stream = stream
         self.env: dict[str, Any] = {}
@@ -383,15 +425,13 @@ class ProgramRuntime:
         # status/record/error_code/direct_fallback）
         self.ops: list[dict[str, Any]] = []
         # 章内累积句柄引用（el→n、事件 el→node_id/tree_id、案例→case_number）
-        self.refs: dict[str, dict[str, Any]] = {}
+        self.refs: dict[str, Any] = {}
         self._program_seq = 0
         self._call_index_seq = 0
         self._program_id = ""
         self._ops_in_program = 0
         self._steps = 0
         self._deadline = 0.0
-        self._finish_requested = False
-        self._finish_line: int | None = None
 
     # ------------------------------------------------------------------
     # 程序入口
@@ -400,15 +440,14 @@ class ProgramRuntime:
         """执行一段 Python 程序并返回压缩回执（模型面唯一入口）
 
         程序内已经成功的调用不回滚（程序错误只中断后续语句），失败逐条进 failed；
-        finish_chapter 只登记收尾意图，程序全部语句执行完后结算一次。
+        收尾类意图由子类在 _after_program 里结算（写者面即 finish_chapter）。
         """
         self._program_seq += 1
         self._program_id = f"p{self._program_seq}"
         self._ops_in_program = 0
         self._steps = 0
         self._deadline = time.monotonic() + _PROGRAM_DEADLINE_S
-        self._finish_requested = False
-        self._finish_line = None
+        self._reset_program_state()
         error: dict[str, Any] | None = None
         status = "applied"
         try:
@@ -418,8 +457,8 @@ class ProgramRuntime:
             status = "rejected" if fault.code in _PRE_RUN_FAULT_CODES else "runtime_error"
         # 程序被中断时不结算收尾意图：收尾之后的语句没跑完，冻结即不可逆地丢内容；
         # 模型按回执里的 error/failed 补完失败的尾部后重新提交 finish_chapter() 即可
-        if self._finish_requested and error is None:
-            await self._settle_finish()
+        if error is None:
+            await self._after_program()
         program_ops = [op for op in self.ops if op["program_id"] == self._program_id]
         applied = sum(1 for op in program_ops if op["status"] == "success")
         failed = [op for op in program_ops if op["status"] != "success"]
@@ -428,6 +467,24 @@ class ProgramRuntime:
         return json.dumps(
             self._receipt(status=status, applied=applied, failed=failed, error=error), ensure_ascii=False
         )
+
+    def _reset_program_state(self) -> None:
+        """子类钩子：一个程序开始时重置本面独有的状态（默认无状态）"""
+
+    async def _after_program(self) -> None:
+        """子类钩子：程序无错跑完后的收尾结算（默认无动作）"""
+
+    async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
+        """子类钩子：执行一次具名调用（默认拒绝，子类必须覆盖）"""
+        raise _ProgramFault(
+            f"未开放函数：{name}（只能用下方 API 目录里的工具）",
+            code="unknown_tool",
+            line=line,
+        )
+
+    def _progress(self) -> dict[str, int]:
+        """子类钩子：回执里的各域进度（默认空）"""
+        return {}
 
     def _parse(self, code: str) -> list[Any]:
         """用于解析程序文本（空程序/超长/语法错误一律结构化拒绝、不进执行）"""
@@ -459,7 +516,7 @@ class ProgramRuntime:
             "status": status,
             "applied": applied,
             "refs": dict(self.refs),
-            "progress": self.ledger._written_counts(),
+            "progress": self._progress(),
         }
         if failed:
             body["failed"] = [_failed_view(op) for op in failed]
@@ -623,7 +680,7 @@ class ProgramRuntime:
         )
 
     async def _call(self, node: ast.Call, *, line: int | None) -> Any:
-        """用于执行一次具名工具调用（工具名必须属于程序面，参数只接受具名形式）"""
+        """用于执行一次具名调用（名字必须属于本面命名空间，参数只接受具名形式）"""
         function = node.func
         if not isinstance(function, ast.Name):
             raise _ProgramFault(
@@ -632,8 +689,7 @@ class ProgramRuntime:
                 line=line,
             )
         name = function.id
-        tool = self.tools.get(name)
-        if tool is None:
+        if name not in self.tools:
             raise _ProgramFault(
                 f"未开放函数：{name}（只能用下方 API 目录里的工具）",
                 code="unknown_tool",
@@ -646,6 +702,114 @@ class ProgramRuntime:
                 line=line,
             )
         args = {str(keyword.arg): await self._value(keyword.value) for keyword in node.keywords}
+        return await self._dispatch(name, args, line=line)
+
+    def _next_op_index(self, *, line: int | None) -> int:
+        """用于分配程序内 op 序号并强制单程序操作条数硬限（越限可续跑）"""
+        if self._ops_in_program >= _PROGRAM_MAX_OPS:
+            raise _ProgramFault(
+                f"单个程序的内层操作超过 {_PROGRAM_MAX_OPS} 条",
+                code="too_many_ops",
+                line=line,
+            )
+        self._ops_in_program += 1
+        return self._ops_in_program
+
+    def _next_call_index(self) -> int:
+        """用于分配内层 op 的审计 call_index（_INNER_CALL_INDEX_BASE + 章内递增序号）"""
+        index = _INNER_CALL_INDEX_BASE + self._call_index_seq
+        self._call_index_seq += 1
+        return index
+
+    def _log_op(
+        self,
+        name: str,
+        *,
+        op_index: int,
+        line: int | None,
+        status: str,
+        receipt: Any,
+        call_args: dict[str, Any] | None = None,
+        error: str | None = None,
+        direct_fallback: bool = False,
+    ) -> None:
+        """用于登记逐 op 记录（审计口径 + 模型可见失败清单所需的拒绝定位字段）"""
+        body: dict[str, Any] = receipt if isinstance(receipt, dict) else {}
+        self.ops.append(
+            {
+                "program_id": self._program_id,
+                "op_index": op_index,
+                "source_line": line,
+                "tool_name": name,
+                "status": status,
+                "record": body.get("record") or tool_record_key(name, dict(call_args or {})),
+                "error_code": body.get("code"),
+                "field": body.get("field"),
+                "expected": body.get("expected"),
+                "message": body.get("message") or body.get("error") or error,
+                "direct_fallback": direct_fallback,
+            }
+        )
+
+    def _guard(self) -> None:
+        """用于在每条语句/表达式前检查步数与墙钟硬限"""
+        self._steps += 1
+        if self._steps > _PROGRAM_MAX_STEPS:
+            raise _ProgramFault(
+                f"单次程序执行步数超过 {_PROGRAM_MAX_STEPS}（疑似循环过大）",
+                code="too_many_steps",
+            )
+        if time.monotonic() > self._deadline:
+            raise _ProgramFault(
+                f"单次程序执行超过 {int(_PROGRAM_DEADLINE_S)} 秒硬限",
+                code="deadline_exceeded",
+            )
+
+
+class ProgramRuntime(RestrictedProgramRuntime):
+    """2026-09-15 用于在受限 AST 解释器里执行模型提交的程序并逐条复用生产工具边界
+
+    生命周期：每个章尝试建一次、跨回合复用（变量、句柄引用与逐 op 记录随之保留）；
+    程序内不复制业务校验——每条内层操作都走 graph._execute_call，与原生 tool_batch
+    共用同一份"快照 → 调用 → 按条回滚 → 审计 → 事件"实现。
+    """
+
+    def __init__(
+        self,
+        tools: list[Any],
+        ledger: AnnotationToolLedger,
+        *,
+        observer: Any = None,
+        stream: Any = None,
+    ) -> None:
+        """用于绑定程序面工具、账本与审计/事件出口"""
+        tool_list = build_program_tools(tools)
+        super().__init__(
+            tool_list,
+            {str(tool.name): tool for tool in tool_list},
+            observer=observer,
+            stream=stream,
+        )
+        self.ledger = ledger
+        self._finish_requested = False
+        self._finish_line: int | None = None
+
+    def _reset_program_state(self) -> None:
+        """用于在一个程序开始时清掉上一次的收尾意图"""
+        self._finish_requested = False
+        self._finish_line = None
+
+    def _progress(self) -> dict[str, int]:
+        """用于回执 progress（与 finish_chapter 回执同源的域计数）"""
+        return self.ledger._written_counts()
+
+    async def _after_program(self) -> None:
+        """用于在程序末尾结算 finish_chapter 收尾意图（与原生批次同一条判定路径）"""
+        if self._finish_requested:
+            await self._settle_finish()
+
+    async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
+        """用于把一次程序内调用交给生产单条事务边界（收尾声明只登记不结算）"""
         if name == "finish_chapter":
             if args:
                 raise _ProgramFault("finish_chapter 无参数", code="bad_call", line=line)
@@ -654,22 +818,9 @@ class ProgramRuntime:
             return {"status": "pending", "note": "收尾已登记：本程序全部语句执行完后结算"}
         return await self._run_op(name=name, args=args, line=line)
 
-    def _next_call_index(self) -> int:
-        """用于分配内层 op 的审计 call_index（_INNER_CALL_INDEX_BASE + 章内递增序号）"""
-        index = _INNER_CALL_INDEX_BASE + self._call_index_seq
-        self._call_index_seq += 1
-        return index
-
     async def _run_op(self, *, name: str, args: dict[str, Any], line: int | None) -> dict[str, Any]:
         """用于把一次工具调用交给生产单条事务边界执行并登记逐 op 记录"""
-        if self._ops_in_program >= _PROGRAM_MAX_OPS:
-            raise _ProgramFault(
-                f"单个程序的内层操作超过 {_PROGRAM_MAX_OPS} 条",
-                code="too_many_ops",
-                line=line,
-            )
-        self._ops_in_program += 1
-        op_index = self._ops_in_program
+        op_index = self._next_op_index(line=line)
         entry = await _execute_call(
             {"name": name, "args": args, "id": f"{self._program_id}-op{op_index}"},
             tool_map=self.tools,
@@ -685,31 +836,18 @@ class ProgramRuntime:
                 "direct_fallback": False,
             },
         )
-        self._record_op(entry, name=name, op_index=op_index, line=line)
-        self._collect_refs(name, entry.get("receipt"))
-        return entry.get("receipt") or {}
-
-    def _record_op(self, entry: dict[str, Any], *, name: str, op_index: int, line: int | None) -> None:
-        """用于登记逐 op 记录（审计口径 + 模型可见失败清单所需的拒绝定位字段）"""
-        raw_receipt = entry.get("receipt")
-        receipt: dict[str, Any] = raw_receipt if isinstance(raw_receipt, dict) else {}
         raw_call = entry.get("call")
         call_args: dict[str, Any] = dict(raw_call.get("args") or {}) if isinstance(raw_call, dict) else {}
-        self.ops.append(
-            {
-                "program_id": self._program_id,
-                "op_index": op_index,
-                "source_line": line,
-                "tool_name": name,
-                "status": str(entry.get("status") or "error"),
-                "record": receipt.get("record") or tool_record_key(name, call_args),
-                "error_code": receipt.get("code"),
-                "field": receipt.get("field"),
-                "expected": receipt.get("expected"),
-                "message": receipt.get("message") or receipt.get("error"),
-                "direct_fallback": False,
-            }
+        self._log_op(
+            name,
+            op_index=op_index,
+            line=line,
+            status=str(entry.get("status") or "error"),
+            receipt=entry.get("receipt"),
+            call_args=call_args,
         )
+        self._collect_refs(name, entry.get("receipt"))
+        return entry.get("receipt") or {}
 
     def _collect_refs(self, name: str, receipt: Any) -> None:
         """用于收集本次程序新增/变更的句柄引用（实体 el→n、事件 el→node/tree、案例→编号）"""
@@ -753,28 +891,24 @@ class ProgramRuntime:
                 "direct_fallback": False,
             },
         )
-        self._record_op(entry, name="finish_chapter", op_index=op_index, line=self._finish_line)
-
-    def _guard(self) -> None:
-        """用于在每条语句/表达式前检查步数与墙钟硬限"""
-        self._steps += 1
-        if self._steps > _PROGRAM_MAX_STEPS:
-            raise _ProgramFault(
-                f"单次程序执行步数超过 {_PROGRAM_MAX_STEPS}（疑似循环过大）",
-                code="too_many_steps",
-            )
-        if time.monotonic() > self._deadline:
-            raise _ProgramFault(
-                f"单次程序执行超过 {int(_PROGRAM_DEADLINE_S)} 秒硬限",
-                code="deadline_exceeded",
-            )
+        self._log_op(
+            "finish_chapter",
+            op_index=op_index,
+            line=self._finish_line,
+            status=str(entry.get("status") or "error"),
+            receipt=entry.get("receipt"),
+        )
 
 
 __all__ = [
+    "BLOCK_CONTRACT_TEXT",
     "PROGRAM_CONTRACT_TEXT",
     "PROGRAM_TOOL_NAME",
     "ProgramRuntime",
+    "RestrictedProgramRuntime",
     "build_program_tool",
     "build_program_tools",
+    "constructor_api_text",
     "program_api_text",
+    "render_list_signature",
 ]
