@@ -436,7 +436,7 @@ class RestrictedProgramRuntime:
         """用于绑定程序面工具面（渲染 API 目录）与分发命名空间（名字 → 可调用）
 
         2026-09-16 execution_tools：内层正式调用的工具表——章面收窄后模型可见面
-        不含原生写入工具，但构造器编译出的调用仍要经它们落地，故两张表分开：
+        不含那五个正式写入工具，但构造器编译出的调用仍要经它们落地，故两张表分开：
         模型能写什么由 tool_list/namespace 决定，能执行什么由本表决定；省略即同一张。
         """
         self.tool_list = list(tool_list)
@@ -810,7 +810,7 @@ class ProgramRuntime(RestrictedProgramRuntime):
         """用于绑定程序面工具、账本与审计/事件出口
 
         2026-09-16 compile_only：只作为编译目标、不进模型可见面的工具名（章面收窄
-        用它把原生写入工具从 execute_code 的 API 目录里摘掉；_run_op 仍能调用它们）。
+        用它把正式写入工具从 execute_code 的 API 目录里摘掉；_run_op 仍能调用它们）。
         """
         tool_list = build_program_tools(tools)
         execution_tools = {str(tool.name): tool for tool in tool_list}

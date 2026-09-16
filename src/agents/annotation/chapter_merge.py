@@ -46,18 +46,11 @@ if TYPE_CHECKING:
 # 合并构造器覆盖的块内类别（inspect 与句柄解析共用一张表）
 _LOCAL_KINDS = ("mentions", "relations", "dialogues", "events", "links", "metric_notes", "pending")
 
-# 2026-09-16 章面收窄：五个原生写入工具退出模型可见面，只留作合并构造器的编译目标
+# 2026-09-16 章面收窄：五个正式写入工具退出模型可见面，只留作合并构造器的编译目标
 # （构造器编译出的 write_* 调用经 _run_op 走执行面工具表）。直写它们会绕过句柄→el
 # 绑定表：实体没进绑定表，随后的 tree/event/import_relation 引不到它，只会白烧回合。
 _COMPILE_ONLY_TOOLS: frozenset[str] = frozenset(
     {"write_entity", "write_relation", "write_dialogue", "write_metrics", "write_event"}
-)
-
-# 章面 API 目录的抬头：写入工具不在目录里，说明替代路径（模型不必去猜哪个名字可用）
-_CONSTRUCTOR_SURFACE_NOTE = (
-    "<ChapterConstructors>\n"
-    "章级写入一律经下列构造器完成（它们在编译期把块内句柄翻成正式引用并就地生效）；"
-    "原生 write_entity/write_relation/write_dialogue/write_event/write_metrics 不在本章面开放。\n"
 )
 
 
@@ -181,7 +174,7 @@ def _participant_fields(body: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
 class ChapterMergeRuntime(ProgramRuntime):
     """章节代理程序面：合并构造器 + 检索/案例/收尾工具（绑定即编译、就地执行）
 
-    2026-09-16 收窄：章级写入只能走合并构造器——原生写入工具退出模型可见面
+    2026-09-16 收窄：章级写入只能走合并构造器——五个正式写入工具退出模型可见面
     （_COMPILE_ONLY_TOOLS 只作编译目标），检索/案例裁决/收尾工具照旧直呼。
     构造器把块局部句柄翻成正式引用后，走同一条 _execute_call 事务边界；
     程序面的语法、限额、压缩回执与写者面共用 RestrictedProgramRuntime 一份实现。
@@ -218,10 +211,7 @@ class ChapterMergeRuntime(ProgramRuntime):
 
     def build_tool(self) -> Any:
         """用于构造章会话的唯一对外工具 execute_code（合并构造器目录同轮下发）"""
-        return build_program_tool(
-            self,
-            extra_api=_CONSTRUCTOR_SURFACE_NOTE + "\n\n" + constructor_api_text(self.api_entries) + "\n\n",
-        )
+        return build_program_tool(self, extra_api=constructor_api_text(self.api_entries) + "\n\n")
 
     # ------------------------------------------------------------------
     # 合并构造器（模型面）
@@ -749,7 +739,7 @@ class ChapterMergeRuntime(ProgramRuntime):
     # 程序分发（与写者面共用解释器语义）
 
     async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
-        """用于分发一次程序内调用：合并构造器走编译，原生工具走生产事务边界"""
+        """用于分发一次程序内调用：合并构造器走编译，其余工具走生产事务边界"""
         if name in self._constructor_names:
             return await self._run_constructor(name, args, line=line)
         return await super()._dispatch(name, args, line=line)
