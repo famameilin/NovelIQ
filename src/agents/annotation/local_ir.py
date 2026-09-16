@@ -295,10 +295,6 @@ class LocalParticipant:
             "evidence": _evidence_view(self.evidence),
         }
 
-    def merge_key(self) -> tuple[str, str | None, str | None, int | None]:
-        """用于跨块冲突检测：同一实体在同节点上的字段指纹"""
-        return (self.role, self.narrative_role, self.action, self.emotion)
-
 
 @dataclass(slots=True)
 class LocalEvent:
