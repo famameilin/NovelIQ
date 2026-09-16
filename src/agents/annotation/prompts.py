@@ -27,6 +27,13 @@ READER_SYSTEM_PROMPT = (
     "把有正文证据支撑的观察经一次 send_message 一次性上报。"
 )
 
+# 2026-09-16 块代理面（CodeAct）单行职责声明：能力合同在 execute_code 的
+# description 里（构造器目录 + 语法边界），系统提示词只声明职责
+BLOCK_SYSTEM_PROMPT = (
+    "你是小说章节语义标注的块代理，请细读分配到的正文片段，"
+    "用 execute_code 提交程序，把有正文证据支撑的局部标注构造成块内对象。"
+)
+
 
 def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
     """2026-09-11 用于渲染对话候选表（读者块切片与写者全章表共用）"""
@@ -189,6 +196,116 @@ def build_reader_block_message(
     return "\n\n".join(sections)
 
 
+def build_block_program_message(
+    *,
+    block_number: int,
+    block_total: int,
+    paragraph_info: ChunkParagraphInfo,
+    boundary_before: tuple[int, str] | None,
+    boundary_after: tuple[int, str] | None,
+    candidates: list[DialogueCandidate],
+) -> str:
+    """2026-09-16 块代理面（CodeAct）用于构建块会话唯一一次的正文注入
+
+    正文以段落清单注入（段落 id 即 evidence 锚点）；相邻完整段落作为只读边界
+    上下文一并给出（判"事件/线索跨块延续"用，但不能作为本块证据锚点）。
+    过程规则（先建提及再引用、一次程序不必覆盖全块、失败只回滚该条）在
+    execute_code 的 description 里，此处只陈述本块的取值边界与收束方式。
+    """
+    paragraph_views = "\n".join(
+        f'<paragraph id="{paragraph_id}">{text}</paragraph>'
+        for paragraph_id, text in zip(paragraph_info.paragraph_ids, paragraph_info.texts, strict=True)
+    )
+    boundary_parts: list[str] = []
+    if boundary_before is not None:
+        boundary_parts.append(f'<paragraph id="{boundary_before[0]}" readonly="true">{boundary_before[1]}</paragraph>')
+    if boundary_after is not None:
+        boundary_parts.append(f'<paragraph id="{boundary_after[0]}" readonly="true">{boundary_after[1]}</paragraph>')
+    sections = [
+        f'<CurrentBlock block="{block_number}/{block_total}">\n'
+        f"{paragraph_views}\n"
+        "</CurrentBlock>",
+        (
+            "<BoundaryContext>\n"
+            "相邻块的完整段落，只供你判断事件/线索是否跨块延续，readonly：\n"
+            + "\n".join(boundary_parts)
+            + "\n</BoundaryContext>"
+            if boundary_parts
+            else ""
+        ),
+        build_case_pool_notice(),
+        "<DialogueCandidates>\n"
+        f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
+        "</DialogueCandidates>",
+        "<BlockScope>\n"
+        "你只负责本块：实体提及、关系、对话与段落标签、局部事件与参与者、"
+        "有正文依据的块内事件联系、章级指标的局部依据、以及你判不了的待决项。\n"
+        "正文与候选都是本块切片：candidate_index 用上面这张表里的编号（块内 1 基）；"
+        "evidence 的 paragraph_id 只能取 <CurrentBlock> 里的段落，<BoundaryContext> 的段落不可作证据；"
+        "块内引用一律用你自己起的短键（mention 先构造，再在 relation/dialogue/participant 里引用）。\n"
+        "身份绑定不是你的职责：mention 只是一个提及（没有编号、没有图节点），"
+        "跨块同一个人的合并与新实体登记由章节代理裁决；你只需按本块正文如实构造。\n"
+        "判不了的引用、疑似跨块延续的事件、疑似案例线索，用 pending 记下来交给章节代理。\n"
+        "本块标注完毕时不再提交程序即可收束会话。\n"
+        "</BlockScope>",
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+def build_chapter_merge_message(
+    *,
+    block_index_view: str,
+    pending_view: str,
+    candidates: list[DialogueCandidate],
+    block_total: int,
+) -> str:
+    """2026-09-16 章内并行 CodeAct 用于构建章节代理首条请求（不注入正文）
+
+    块代理的局部标注以句柄索引进场（明细按需 inspect）；正文只经块代理转述，
+    章节代理只补全章层面决策。顺序与冲突两条硬口径写在这里：块完成顺序不构成
+    任何语义顺序（原文先后不自动推成因果），参与者字段不一致必须显式裁决。
+    """
+    sections = [
+        "<BlockAnnotations>\n"
+        f"本章正文由 {block_total} 个块代理并行标注，以下是它们产出的局部对象索引"
+        "（handle → 要点）。明细（证据原文、参与者三态、待决详情）用 inspect(handle) 读，"
+        "不产生写入。\n"
+        f"{block_index_view}\n"
+        "</BlockAnnotations>",
+        (
+            "<PendingItems>\n"
+            "各块交上来的待决项（它们自己判不了的部分）：逐条用 decide_pending(handle, decision, note=...) "
+            "登记你的处置——绑定到哪个实体、并入哪棵树哪个节点、或判定不成立。\n"
+            f"{pending_view}\n"
+            "</PendingItems>"
+            if pending_view
+            else ""
+        ),
+        "<DialogueCandidates>\n"
+        "本章完整候选表（章级编号）。块的对话判定用 merge_dialogues() 一次性编译，"
+        "候选编号由系统按本表映射，你不必逐个核对。\n"
+        f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
+        "</DialogueCandidates>",
+        "<ChapterMerge>\n"
+        "你要补全的是章层面决策：\n"
+        "1) 绑定：bind(mention=..., el=...) 把块内提及变成正式实体。历史人物给 n（编号），"
+        "新实体不给 n。同一个人的多个提及、同名不同人的区分，由你按证据裁决后显式绑定——"
+        "系统不按同名自动合并；没绑定的提及在事件与关系里无法引用。\n"
+        "2) 关系与对话：import_relation(handle) 逐条编译；merge_dialogues() 一次性编译全部块内判定，"
+        "说话人未绑定或跨块引号截断的条目会跳过并列进回执——补完绑定再重跑本构造器即可，可重入。\n"
+        "3) 事件：tree(key, description, sources=[...]) 建树根，event(tree, key, description, type=...) "
+        "往树里加子事件。块完成顺序不代表事件顺序，原文先后不自动推成因果——跨块先后与因果只能由"
+        "你的调用顺序与 type 表达，块内 link 只是线索。同一参与者在多个来源里字段不一致时编译会拒绝"
+        "并报出冲突两方，用 participants=[{entityid, role, narrative_role, action, emotion}] 显式裁决"
+        "（不许最后写入者覆盖）。\n"
+        "4) 指标：metric(summary, emotional_valence, narrative_function, ...) 提交章级摘要与指标，"
+        "省略 labels 即自动并入各块段标签（按段号去重）。\n"
+        "块代理撞到轮次上限会自然收束，产出可能不完整：按已给出的对象做决策，不要为缺失的部分编造。\n"
+        "</ChapterMerge>",
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
 def build_writer_chapter_message(
     *,
     reader_reports_view: str,
@@ -222,11 +339,14 @@ def build_writer_chapter_message(
 
 
 __all__ = [
+    "BLOCK_SYSTEM_PROMPT",
     "PROGRAM_RULES",
+    "READER_SYSTEM_PROMPT",
+    "build_block_program_message",
     "build_case_pool_notice",
+    "build_chapter_merge_message",
     "build_chunk_message",
     "build_reader_block_message",
     "build_system_prompt",
     "build_writer_chapter_message",
-    "READER_SYSTEM_PROMPT",
 ]
