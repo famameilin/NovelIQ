@@ -5,11 +5,12 @@
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import String, cast, or_, select
+from sqlalchemy import String, cast, or_, select, text
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import (
@@ -93,7 +94,7 @@ class DatabaseAnnotationQueryService:
 
     def __init__(
         self,
-        session: Session,
+        session_factory: Callable[[], Session],
         run_id: str,
         current_chapter_id: int,
         current_first_paragraph_id: int,
@@ -104,47 +105,65 @@ class DatabaseAnnotationQueryService:
 
         二期段落化：边界为当前章的段落事实源边界（paragraph_id，§5.2）；
         M7 子 chunk 场景由调用方传章的段落边界，不是子块的边界。
+        2026-09-16 连接粒度=单次工具调用：构造期只用一次性只读会话解析章节序与
+        章序（每 agent 会话一次，与改动前同量），连接随即归还；查询方法各自在
+        _read_scope() 内开只读会话，模型生成期间不占用连接。
         """
-        self.session = session
+        self._session_factory = session_factory
+        self._embedding_client = embedding_client
         self.run_id = run_id
         self.current_chapter_id = current_chapter_id
         self.current_first_paragraph_id = current_first_paragraph_id
         self.current_last_paragraph_id = current_last_paragraph_id
-        current_chapter_sequence = self.session.execute(
-            select(Chapter.sequence).where(
-                Chapter.run_id == run_id,
-                Chapter.chapter_id == current_chapter_id,
+        with self._read_scope() as session:
+            current_chapter_sequence = session.execute(
+                select(Chapter.sequence).where(
+                    Chapter.run_id == run_id,
+                    Chapter.chapter_id == current_chapter_id,
+                )
+            ).scalar_one_or_none()
+            if current_chapter_sequence is None:
+                raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
+            self.current_chapter_sequence = int(current_chapter_sequence)
+            chapter_ids = list(
+                session.execute(
+                    select(Chapter.chapter_id)
+                    .where(Chapter.run_id == run_id)
+                    .order_by(Chapter.sequence, Chapter.chapter_id)
+                ).scalars()
             )
-        ).scalar_one_or_none()
-        if current_chapter_sequence is None:
-            raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
-        self.current_chapter_sequence = int(current_chapter_sequence)
-        chapter_ids = list(
-            self.session.execute(
-                select(Chapter.chapter_id)
-                .where(Chapter.run_id == run_id)
-                .order_by(Chapter.sequence, Chapter.chapter_id)
-            ).scalars()
-        )
-        if current_chapter_id not in chapter_ids:
-            raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
-        self.current_chapter_order = chapter_ids.index(current_chapter_id) + 1
-        self.text_search_service = TextSearchService(
-            session,
-            run_id=run_id,
-            embedding_client=embedding_client,
-            semantic_enabled=settings.models.paragraph_embedding.semantic_enabled,
-            semantic_top_k=settings.models.paragraph_embedding.top_k,
-        )
+            if current_chapter_id not in chapter_ids:
+                raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
+            self.current_chapter_order = chapter_ids.index(current_chapter_id) + 1
 
-    def _active_case_rows(self) -> list[CasePoolCase]:
+    @contextmanager
+    def _read_scope(self) -> Iterator[Session]:
+        """2026-09-16 用于把连接占用收敛到单次工具调用：开只读会话，返回前归还
+
+        守卫（PostgreSQL 显式只读）从三个会话入口的内联块收进这里一处；
+        SQLite 等方言没有该语句，非 PostgreSQL 绑定跳过。作用域退出时无论
+        正常返回还是抛错都回滚并关闭，异常路径不泄漏连接。
+        """
+        session = self._session_factory()
+        try:
+            bind = session.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                session.execute(text("SET TRANSACTION READ ONLY"))
+            yield session
+        finally:
+            try:
+                session.rollback()
+            finally:
+                session.close()
+
+    def _active_case_rows(self, session: Session) -> list[CasePoolCase]:
         """2026-08-05 用于按稳定顺序读取当前 run 的全部活动案例"""
         statement = (
             select(CasePoolCase)
             .where(CasePoolCase.run_id == self.run_id, CasePoolCase.state == "active")
             .order_by(CasePoolCase.created_at, CasePoolCase.id)
         )
-        return list(self.session.execute(statement).scalars().all())
+        return list(session.execute(statement).scalars().all())
 
     def search_pool(
         self,
@@ -167,55 +186,56 @@ class DatabaseAnnotationQueryService:
         与池内案例走同一套匹配/枚举语义（案例池行要到本章收尾才落库，检索面不再缺席），
         并在 by_type/active_total 里一并计入。
         """
-        pool_rows = [row for row in self._active_case_rows() if row.id not in hidden_case_ids]
-        visible_pending = [case for case in pending_cases if case.id not in hidden_case_ids]
-        enumerate_cases = case_type is not None
-        wanted_type = normalize_text(case_type) if case_type is not None and case_type != "all" else None
-        normalized_query = unicodedata.normalize("NFC", query or "").strip()
-        results: list[CaseSearchResult] = []
-        truncated = False
-        if enumerate_cases:
-            candidates = (
-                pool_rows
-                if wanted_type is None
-                else [row for row in pool_rows if normalize_text(row.case_type) == wanted_type]
-            )
-            candidates = sorted(candidates, key=lambda row: (row.created_at, row.id), reverse=True)
-            wanted_pending = (
-                visible_pending
-                if wanted_type is None
-                else [case for case in visible_pending if normalize_text(case.type) == wanted_type]
-            )
-            # 待建案例是本 chunk 刚登记的，最新创建优先：排在池内案例之前
-            merged = [*wanted_pending, *(_case_view(row) for row in candidates)]
-            if len(merged) > limit:
-                truncated = True
-            results.extend(merged[:limit])
-        else:
-            for case in visible_pending:
-                if _text_matches(normalized_query, *[str(key) for key in case.keys], case.description):
-                    results.append(case)
-                    if len(results) >= limit:
-                        truncated = True
-                        break
-            if not truncated:
-                for row in pool_rows:
-                    if _text_matches(normalized_query, *[str(key) for key in row.keys], row.description):
-                        results.append(_case_view(row))
-                    if len(results) >= limit:
-                        truncated = True
-                        break
+        with self._read_scope() as session:
+            pool_rows = [row for row in self._active_case_rows(session) if row.id not in hidden_case_ids]
+            visible_pending = [case for case in pending_cases if case.id not in hidden_case_ids]
+            enumerate_cases = case_type is not None
+            wanted_type = normalize_text(case_type) if case_type is not None and case_type != "all" else None
+            normalized_query = unicodedata.normalize("NFC", query or "").strip()
+            results: list[CaseSearchResult] = []
+            truncated = False
+            if enumerate_cases:
+                candidates = (
+                    pool_rows
+                    if wanted_type is None
+                    else [row for row in pool_rows if normalize_text(row.case_type) == wanted_type]
+                )
+                candidates = sorted(candidates, key=lambda row: (row.created_at, row.id), reverse=True)
+                wanted_pending = (
+                    visible_pending
+                    if wanted_type is None
+                    else [case for case in visible_pending if normalize_text(case.type) == wanted_type]
+                )
+                # 待建案例是本 chunk 刚登记的，最新创建优先：排在池内案例之前
+                merged = [*wanted_pending, *(_case_view(row) for row in candidates)]
+                if len(merged) > limit:
+                    truncated = True
+                results.extend(merged[:limit])
+            else:
+                for case in visible_pending:
+                    if _text_matches(normalized_query, *[str(key) for key in case.keys], case.description):
+                        results.append(case)
+                        if len(results) >= limit:
+                            truncated = True
+                            break
+                if not truncated:
+                    for row in pool_rows:
+                        if _text_matches(normalized_query, *[str(key) for key in row.keys], row.description):
+                            results.append(_case_view(row))
+                        if len(results) >= limit:
+                            truncated = True
+                            break
 
-        by_type: dict[str, int] = {}
-        for row in pool_rows:
-            by_type[row.case_type] = by_type.get(row.case_type, 0) + 1
-        for case in visible_pending:
-            by_type[case.type] = by_type.get(case.type, 0) + 1
-        return SearchResult(
-            results=results,
-            pool=CasePoolSummary(active_total=len(pool_rows) + len(visible_pending), by_type=by_type),
-            truncated=truncated,
-        )
+            by_type: dict[str, int] = {}
+            for row in pool_rows:
+                by_type[row.case_type] = by_type.get(row.case_type, 0) + 1
+            for case in visible_pending:
+                by_type[case.type] = by_type.get(case.type, 0) + 1
+            return SearchResult(
+                results=results,
+                pool=CasePoolSummary(active_total=len(pool_rows) + len(visible_pending), by_type=by_type),
+                truncated=truncated,
+            )
 
     async def search_text(
         self,
@@ -224,7 +244,11 @@ class DatabaseAnnotationQueryService:
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchResult]:
-        """2026-08-30 用于按 Chapter.sequence 在 SQL 层执行配置授权的正文范围检索"""
+        """2026-08-30 用于按 Chapter.sequence 在 SQL 层执行配置授权的正文范围检索
+
+        2026-09-16 检索服务改为只读作用域内按次构造（构造函数纯赋值，零成本），
+        语义检索的 HTTP 往返仍落在这一次调用里。
+        """
         before_chapter_sequence: int | None = None
         after_chapter_sequence: int | None = None
         if range_name == "previous":
@@ -233,12 +257,19 @@ class DatabaseAnnotationQueryService:
             after_chapter_sequence = self.current_chapter_sequence
         elif range_name != "all":
             raise ValueError("search_text.range 只能是 previous、future 或 all")
-        candidates = await self.text_search_service.search(
-            query,
-            before_chapter_sequence=before_chapter_sequence,
-            after_chapter_sequence=after_chapter_sequence,
-            limit=limit,
-        )
+        with self._read_scope() as session:
+            candidates = await TextSearchService(
+                session,
+                run_id=self.run_id,
+                embedding_client=self._embedding_client,
+                semantic_enabled=settings.models.paragraph_embedding.semantic_enabled,
+                semantic_top_k=settings.models.paragraph_embedding.top_k,
+            ).search(
+                query,
+                before_chapter_sequence=before_chapter_sequence,
+                after_chapter_sequence=after_chapter_sequence,
+                limit=limit,
+            )
         return [
             TextSearchResult(
                 chapter_id=row.chapter_id,
@@ -268,126 +299,128 @@ class DatabaseAnnotationQueryService:
         if limit <= 0:
             return []
         terms = extract_query_terms(query)
-        participant_text = cast(EventNode.participants, String)
-        if terms:
-            # 参与者是 JSONB，序列化后含实体名；ILIKE 走文本路径即可，命中行再由根视图归并
-            term_filters = [
-                or_(
-                    EventNode.description.ilike(like_pattern(term)),
-                    participant_text.ilike(like_pattern(term)),
+        with self._read_scope() as session:
+            participant_text = cast(EventNode.participants, String)
+            if terms:
+                # 参与者是 JSONB，序列化后含实体名；ILIKE 走文本路径即可，命中行再由根视图归并
+                term_filters = [
+                    or_(
+                        EventNode.description.ilike(like_pattern(term)),
+                        participant_text.ilike(like_pattern(term)),
+                    )
+                    for term in terms
+                ]
+            else:
+                term_filters = None
+            statement = (
+                select(EventNode)
+                .join(
+                    Chapter,
+                    (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
                 )
-                for term in terms
-            ]
-        else:
-            term_filters = None
-        statement = (
-            select(EventNode)
-            .join(
-                Chapter,
-                (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
-            )
-            .where(
-                EventNode.run_id == self.run_id,
-                Chapter.sequence < self.current_chapter_sequence,
-            )
-            .order_by(EventNode.chapter_order.desc(), EventNode.event_id)
-        )
-        if term_filters is not None:
-            statement = statement.where(or_(*term_filters))
-        rows = self.session.execute(statement).scalars().all()
-        latest = {node.event_id: node for node in rows}
-        edge_rows = list(
-            self.session.execute(
-                select(EventEdge).where(
-                    EventEdge.run_id == self.run_id,
-                    EventEdge.is_active.is_(True),
-                    EventEdge.edge_type == "causal",
-                )
-            ).scalars()
-        )
-        incoming_causes = {edge.target_event_id for edge in edge_rows}
-        foreshadow_setups = set(
-            self.session.execute(
-                select(EventNode.event_id).where(
+                .where(
                     EventNode.run_id == self.run_id,
-                    EventNode.is_foreshadowing_root.is_(True),
+                    Chapter.sequence < self.current_chapter_sequence,
                 )
-            ).scalars()
-        )
-        if term_filters is not None:
-            hit_tree_ids = {node.tree_id for node in latest.values()}
-            root_rows = (
-                list(
-                    self.session.execute(
-                        select(EventNode).where(
-                            EventNode.run_id == self.run_id,
-                            EventNode.tree_id.in_(hit_tree_ids),
-                            EventNode.cause_role == "root",
-                        )
-                    ).scalars()
-                )
-                if hit_tree_ids
-                else []
+                .order_by(EventNode.chapter_order.desc(), EventNode.event_id)
             )
-        else:
-            root_rows = [node for node in latest.values() if node.cause_role == "root"]
-        matched: list[EventTreeHistoryResult] = []
-        seen_trees: set[str] = set()
-        ordered_roots = sorted(
-            root_rows,
-            key=lambda node: (-node.chapter_order, node.event_id),
-        )
-        for node in ordered_roots:
-            if node.tree_id in seen_trees:
-                continue
-            seen_trees.add(node.tree_id)
-            node_edges = [
-                edge
-                for edge in edge_rows
-                if edge.source_event_id == node.event_id or edge.target_event_id == node.event_id
-            ]
-            matched.append(
-                EventTreeHistoryResult(
-                    tree_id=node.tree_id,
-                    chapter_id=node.chapter_id,
-                    chapter_order=node.chapter_order,
-                    description=node.description,
-                    participants=list(node.participants),
-                    is_foreshadow_setup=node.event_id in foreshadow_setups,
-                    foreshadowing_status=node.foreshadowing_status,
-                    payoff_likelihood=node.payoff_likelihood,
-                    cross_chapter=node.event_id in incoming_causes,
-                    root_node_id=node.event_id,
-                    edges=[
-                        {
-                            "edge_id": edge.edge_id,
-                            "edge_type": edge.edge_type,
-                            "source_event_id": edge.source_event_id,
-                            "target_event_id": edge.target_event_id,
-                        }
-                        for edge in node_edges
-                    ],
-                )
+            if term_filters is not None:
+                statement = statement.where(or_(*term_filters))
+            rows = session.execute(statement).scalars().all()
+            latest = {node.event_id: node for node in rows}
+            edge_rows = list(
+                session.execute(
+                    select(EventEdge).where(
+                        EventEdge.run_id == self.run_id,
+                        EventEdge.is_active.is_(True),
+                        EventEdge.edge_type == "causal",
+                    )
+                ).scalars()
             )
-            if len(matched) >= limit:
-                break
-        return matched
+            incoming_causes = {edge.target_event_id for edge in edge_rows}
+            foreshadow_setups = set(
+                session.execute(
+                    select(EventNode.event_id).where(
+                        EventNode.run_id == self.run_id,
+                        EventNode.is_foreshadowing_root.is_(True),
+                    )
+                ).scalars()
+            )
+            if term_filters is not None:
+                hit_tree_ids = {node.tree_id for node in latest.values()}
+                root_rows = (
+                    list(
+                        session.execute(
+                            select(EventNode).where(
+                                EventNode.run_id == self.run_id,
+                                EventNode.tree_id.in_(hit_tree_ids),
+                                EventNode.cause_role == "root",
+                            )
+                        ).scalars()
+                    )
+                    if hit_tree_ids
+                    else []
+                )
+            else:
+                root_rows = [node for node in latest.values() if node.cause_role == "root"]
+            matched: list[EventTreeHistoryResult] = []
+            seen_trees: set[str] = set()
+            ordered_roots = sorted(
+                root_rows,
+                key=lambda node: (-node.chapter_order, node.event_id),
+            )
+            for node in ordered_roots:
+                if node.tree_id in seen_trees:
+                    continue
+                seen_trees.add(node.tree_id)
+                node_edges = [
+                    edge
+                    for edge in edge_rows
+                    if edge.source_event_id == node.event_id or edge.target_event_id == node.event_id
+                ]
+                matched.append(
+                    EventTreeHistoryResult(
+                        tree_id=node.tree_id,
+                        chapter_id=node.chapter_id,
+                        chapter_order=node.chapter_order,
+                        description=node.description,
+                        participants=list(node.participants),
+                        is_foreshadow_setup=node.event_id in foreshadow_setups,
+                        foreshadowing_status=node.foreshadowing_status,
+                        payoff_likelihood=node.payoff_likelihood,
+                        cross_chapter=node.event_id in incoming_causes,
+                        root_node_id=node.event_id,
+                        edges=[
+                            {
+                                "edge_id": edge.edge_id,
+                                "edge_type": edge.edge_type,
+                                "source_event_id": edge.source_event_id,
+                                "target_event_id": edge.target_event_id,
+                            }
+                            for edge in node_edges
+                        ],
+                    )
+                )
+                if len(matched) >= limit:
+                    break
+            return matched
 
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于回读 active 案例并恢复系统稳定目标"""
-        statement = select(CasePoolCase).where(
-            CasePoolCase.run_id == self.run_id,
-            CasePoolCase.id == case_id,
-            CasePoolCase.state == "active",
-        )
-        row = self.session.execute(statement).scalar_one_or_none()
-        if row is None:
-            return None
-        return ActiveCaseDetails(
-            **_case_view(row).model_dump(mode="python"),
-            target_key=row.target_key,
-            target_ref=dict(row.target_ref),
-        )
+        with self._read_scope() as session:
+            statement = select(CasePoolCase).where(
+                CasePoolCase.run_id == self.run_id,
+                CasePoolCase.id == case_id,
+                CasePoolCase.state == "active",
+            )
+            row = session.execute(statement).scalar_one_or_none()
+            if row is None:
+                return None
+            return ActiveCaseDetails(
+                **_case_view(row).model_dump(mode="python"),
+                target_key=row.target_key,
+                target_ref=dict(row.target_ref),
+            )
 
 
 class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):

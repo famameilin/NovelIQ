@@ -401,15 +401,10 @@ async def run_reader_agent(
         model_name=model_name or "unknown",
         model_provider=model_provider,
     )
-    read_session = session_factory()
     delivered: list[ReaderReport] = []
     try:
-        from sqlalchemy import text as sql_text
-
-        bind = read_session.get_bind()
-        if bind is not None and bind.dialect.name == "postgresql":
-            read_session.execute(sql_text("SET TRANSACTION READ ONLY"))
-        query_service = query_service_factory(read_session)
+        # 2026-09-16 连接粒度：读者不再自开只读会话，查询服务按单次工具调用取还连接
+        query_service = query_service_factory(session_factory)
         allow_future_context = settings.models.annotation.allow_future_context
         ledger = AnnotationToolLedger(
             run_scope=run_id,
@@ -474,18 +469,10 @@ async def run_reader_agent(
             }
         )
     except Exception as exc:
-        try:
-            read_session.rollback()
-        finally:
-            read_session.close()
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         if isinstance(exc, AnnotationRetryableError):
             raise
         raise AnnotationRetryableError(f"读者会话失败（块 {context.block_index + 1}）: {exc}") from exc
-    try:
-        read_session.rollback()
-    finally:
-        read_session.close()
     error = result_state.get("error")
     if error:
         recorder.finish_invocation(invocation_id, status="error", final_error=str(error))

@@ -631,13 +631,20 @@ class TestRunReaderAgent:
                 return None
 
             def execute(self, *args, **kwargs):
-                raise AssertionError("非 PostgreSQL 会话不应执行 READ ONLY")
+                raise AssertionError("读者会话不执行任何 SQL：连接由查询服务按次取还")
 
             def rollback(self):
                 pass
 
             def close(self):
                 pass
+
+        session_factory_calls: list[int] = []
+
+        def session_factory():
+            """2026-09-16 连接粒度：读者不再自开只读会话，工厂只作为查询工厂的入参转交"""
+            session_factory_calls.append(1)
+            return _SessionStub()
 
         class _ExplodingLLM:
             def bind_tools(self, tools):
@@ -666,13 +673,15 @@ class TestRunReaderAgent:
                 run_id="run-1",
                 chapter_id=20,
                 context=context,
-                query_service_factory=lambda session: session,
-                session_factory=lambda: _SessionStub(),
+                query_service_factory=lambda session_factory: _QueryServiceStub(),
+                session_factory=session_factory,
                 llm=_ExplodingLLM(),
                 graph_state=FactGraph(),
                 audit_recorder=MagicMock(),
             )
 
+        # 2026-09-16 连接粒度：读者全程不开会话，session_factory 只被转交（审计由 recorder 承担）
+        assert session_factory_calls == []
         assert "send_message" in captured["tools"]
         assert "search_pool" in captured["tools"]
         assert "write_metrics" not in captured["tools"]

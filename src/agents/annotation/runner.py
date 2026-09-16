@@ -12,7 +12,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .errors import (
@@ -108,21 +107,6 @@ def _model_name(llm: Any) -> str | None:
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
-def _set_session_read_only(session: Session) -> None:
-    """2026-08-05 用于在 PostgreSQL Agent 查询会话中显式禁止写入"""
-    bind = session.get_bind()
-    if bind is not None and bind.dialect.name == "postgresql":
-        session.execute(text("SET TRANSACTION READ ONLY"))
-
-
-def _close_read_session(session: Session) -> None:
-    """2026-08-05 用于在返回 AgentRunResult 前结束只读事务并关闭连接"""
-    try:
-        session.rollback()
-    finally:
-        session.close()
-
-
 async def _run_single_attempt(
     *,
     run_id: str,
@@ -131,8 +115,8 @@ async def _run_single_attempt(
     current_chunks: list[tuple[int, str]],
     novel_title: str | None,
     llm: Any,
-    session: Session,
-    query_service_factory: Callable[[Session], AnnotationQueryService],
+    session_factory: Callable[[], Session],
+    query_service_factory: Callable[[Callable[[], Session]], AnnotationQueryService],
     stream: AgentStream | None = None,
     graph_state: FactGraph | None = None,
     observer: AgentTurnObserver | None = None,
@@ -157,11 +141,12 @@ async def _run_single_attempt(
     2026-09-16 章内并行 CodeAct：program_tool_factory 供块面章会话注入自己的程序
     运行时（合并构造器 + 契约文案），按 (tools, ledger, observer=, stream=) 调用，
     不传就是写者面 ProgramRuntime、行为逐字不变。
+    2026-09-16 连接粒度：这里不再自己开只读会话，只把 session_factory 转交查询服务，
+    由它在单次工具调用内取还连接（模型生成期间连接占用为零）。
     """
     from src.config import settings
 
-    _set_session_read_only(session)
-    query_service = query_service_factory(session)
+    query_service = query_service_factory(session_factory)
     first_chunk_id, first_chunk_text = current_chunks[0]
     allow_future_context = settings.models.annotation.allow_future_context
     ledger = AnnotationToolLedger(
@@ -259,7 +244,7 @@ async def run_annotation_agent(
     run_id: str,
     chapter_id: int,
     current_chunks: list[tuple[int, str]],
-    query_service_factory: Callable[[Session], AnnotationQueryService],
+    query_service_factory: Callable[[Callable[[], Session]], AnnotationQueryService],
     session_factory: Callable[[], Session],
     novel_title: str | None = None,
     novel_id: str = "default",
@@ -283,6 +268,7 @@ async def run_annotation_agent(
     2026-09-12 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
     2026-09-15 程序面（CodeAct）：program_mode 由单块章调用方传入，两段式写者不传。
     2026-09-16 章内并行 CodeAct：program_tool_factory 供块面章会话注入合并程序面。
+    2026-09-16 连接粒度：不再自开只读会话，查询服务按单次工具调用取还连接。
     """
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
@@ -301,7 +287,6 @@ async def run_annotation_agent(
     model_provider = _model_provider(llm)
     if graph_state is not None:
         graph_state.begin_chapter()
-    read_session = session_factory()
     invocation_id = recorder.start_invocation(
         run_id=run_id,
         task_type="annotation",
@@ -330,7 +315,7 @@ async def run_annotation_agent(
             current_chunks=current_chunks,
             novel_title=novel_title,
             llm=llm,
-            session=read_session,
+            session_factory=session_factory,
             query_service_factory=query_service_factory,
             stream=stream,
             graph_state=graph_state,
@@ -344,13 +329,11 @@ async def run_annotation_agent(
             program_tool_factory=program_tool_factory,
         )
     except Exception as exc:
-        _close_read_session(read_session)
         if graph_state is not None:
             # 章节失败时恢复事实图历史快照，避免当章脏状态残留到后续章节
             graph_state.reset_chapter_changes()
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise
-    _close_read_session(read_session)
     # 2026-09-04 单一写面：取出本子块累积的图域操作日志随结果返回，
     # 由 workflow 合并进完成事务输入（失败路径已在上方 reset 清空）
     if graph_state is not None:

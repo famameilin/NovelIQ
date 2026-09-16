@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import (
     BoundDialogue,
@@ -30,6 +31,58 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+
+
+def _factory(session):
+    """2026-09-16 用于把测试会话包成查询工厂（每个查询各开一条新会话，与生产 sessionmaker 同形）
+
+    查询服务按单次工具调用取还连接，所以工厂必须是"可反复调用开新会话"的对象；
+    测试数据都已提交，新会话与既有会话同库同 schema、可见同样的行。
+    """
+    return lambda: Session(bind=session.get_bind())
+
+
+class _CountedSession:
+    """2026-09-16 用于记账一条查询会话是否被归还（除 execute/close 外全部转发真实会话）"""
+
+    def __init__(self, inner, *, fail_on_execute: bool = False) -> None:
+        """2026-09-16 用于绑定被记账的真实会话"""
+        self._inner = inner
+        self._fail_on_execute = fail_on_execute
+        self.closed = False
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def execute(self, *args, **kwargs):
+        if self._fail_on_execute:
+            raise RuntimeError("查询失败")
+        return self._inner.execute(*args, **kwargs)
+
+    def close(self) -> None:
+        self.closed = True
+        self._inner.close()
+
+
+class _SessionTracker:
+    """2026-09-16 用于统计查询会话开合：live 是当前已开未关的会话数"""
+
+    def __init__(self, session, *, fail_on_execute: bool = False) -> None:
+        """2026-09-16 用于绑定被借用的真实会话"""
+        self._bind = session.get_bind()
+        self._fail_on_execute = fail_on_execute
+        self.sessions: list[_CountedSession] = []
+
+    @property
+    def live(self) -> int:
+        """2026-09-16 用于读取仍未归还的查询会话数"""
+        return sum(1 for session in self.sessions if not session.closed)
+
+    def factory(self):
+        """2026-09-16 用于按次开一条被记账的查询会话"""
+        counted = _CountedSession(Session(bind=self._bind), fail_on_execute=self._fail_on_execute)
+        self.sessions.append(counted)
+        return counted
 
 
 def _insert_paragraphs(
@@ -93,7 +146,7 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
     )
     db_session.commit()
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -187,7 +240,7 @@ def test_search_pool_case_type_enumeration_and_summary(db_session) -> None:
         target_key="target-thread-1",
     )
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -226,7 +279,7 @@ def test_search_pool_enumeration_marks_truncation_at_limit(db_session) -> None:
             target_key=f"target-alias-{index}",
         )
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -255,7 +308,7 @@ def test_search_pool_keyword_hit_marks_truncation_and_keeps_summary(db_session) 
             target_key=f"target-thread-{index}",
         )
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -287,7 +340,7 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
         chapter.sequence = sequence_by_chapter_id[chapter.chapter_id]
     db_session.commit()
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=500,
         current_first_paragraph_id=2,
@@ -455,7 +508,7 @@ def test_search_event_history_excludes_future_events_by_chapter_sequence_when_id
         ],
     )
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=500,
         current_first_paragraph_id=2,
@@ -492,7 +545,7 @@ def test_search_event_history_returns_empty_when_no_match(db_session, monkeypatc
     db_session.commit()
 
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -559,7 +612,7 @@ def test_search_event_history_recall_surface_and_wildcards(
     )
     root_node_id = _persist_plot_tree(db_session, run_id)
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=2,
         current_first_paragraph_id=1,
@@ -587,7 +640,7 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
         title="原文通配符检索",
     )
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=2,
         current_first_paragraph_id=1,
@@ -612,7 +665,7 @@ def test_search_pool_includes_pending_cases_from_same_chunk(db_session) -> None:
     """
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["贺铮误认林立果为子"], title="待建案例检索")
     service = DatabaseAnnotationQueryService(
-        db_session,
+        _factory(db_session),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -651,3 +704,120 @@ def test_search_pool_includes_pending_cases_from_same_chunk(db_session) -> None:
     assert hidden.results == []
     assert hidden.pool.active_total == 0
     assert hidden.pool.by_type == {}
+
+
+def test_query_scope_returns_every_session_even_when_query_fails(db_session) -> None:
+    """2026-09-16 连接粒度=单次工具调用：查询会话用完即还，抛错路径同样归还
+
+    每次查询各开一条会话（构造期解析章节序也一样），作用域退出后一律已关闭；
+    失败查询不得把连接留给下一次模型生成。
+    """
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="只读作用域取还连接")
+    tracker = _SessionTracker(db_session)
+    service = DatabaseAnnotationQueryService(
+        tracker.factory,
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+
+    # 构造期解析章节序只用一次性会话，此时连接已经归还
+    assert tracker.live == 0
+    assert [session.closed for session in tracker.sessions] == [True]
+
+    service.search_pool("顾霜", hidden_case_ids=set())
+    assert tracker.live == 0
+    assert len(tracker.sessions) == 2
+
+    failing = _SessionTracker(db_session, fail_on_execute=True)
+    with pytest.raises(RuntimeError, match="查询失败"):
+        DatabaseAnnotationQueryService(
+            failing.factory,
+            run_id=run_id,
+            current_chapter_id=1,
+            current_first_paragraph_id=0,
+            current_last_paragraph_id=0,
+        )
+    assert failing.live == 0
+    assert [session.closed for session in failing.sessions] == [True]
+
+
+@pytest.mark.asyncio
+async def test_graph_round_holds_no_query_connection_while_model_replies(db_session) -> None:
+    """2026-09-16 模型回话那一刻连接占用为零：检索工具用完即还，live 在每次模型调用时都是 0
+
+    计数工厂挂在真实查询服务上，脚本化模型每次回话前现读 live——只要有一轮工具
+    调用没归还连接，读数就不为 0。这条是"连接不再横跨模型延迟"的直接证据。
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    from src.agents.annotation.graph import build_annotation_graph
+    from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
+    annotation_id = persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
+    _create_case(
+        db_session,
+        run_id=run_id,
+        annotation_id=annotation_id,
+        case_type="伏笔疑点",
+        keys=["玉戒尺"],
+        description="玉戒尺异动待察",
+        target_key="target-connection-1",
+    )
+    tracker = _SessionTracker(db_session)
+    service = DatabaseAnnotationQueryService(
+        tracker.factory,
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+    ledger = AnnotationToolLedger(
+        run_scope=run_id,
+        current_chapter_id=1,
+        current_chunk_id=1,
+        current_chunk_text="顾霜身份成谜",
+        allow_future_context=False,
+    )
+    tools = build_annotation_tools(service, ledger)
+    live_at_model_reply: list[int] = []
+
+    class _SearchThenFinishLLM:
+        """2026-09-16 用于把"检索案例池 + 写指标 + 收尾"放进同一个回合的脚本化模型"""
+
+        def bind_tools(self, tools):
+            del tools
+            return self
+
+        async def ainvoke(self, messages):
+            del messages
+            live_at_model_reply.append(tracker.live)
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "search_pool", "args": {"query": "玉戒尺"}, "id": "c1", "type": "tool_call"},
+                    {
+                        "name": "write_metrics",
+                        "args": {"summary": "顾霜身份成谜", "emotional_valence": 0, "narrative_function": "铺垫"},
+                        "id": "c2",
+                        "type": "tool_call",
+                    },
+                    {"name": "finish_chapter", "args": {}, "id": "c3", "type": "tool_call"},
+                ],
+            )
+
+    graph = build_annotation_graph(_SearchThenFinishLLM(), tools, ledger=ledger, max_iterations=1)
+    state = await graph.ainvoke(
+        {
+            "messages": [SystemMessage(content="test"), HumanMessage(content="chunk")],
+            "phase": "chunk_open",
+            "iterations": 0,
+            "error": None,
+        }
+    )
+
+    assert live_at_model_reply == [0]
+    assert tracker.live == 0
+    assert state["error"] is None

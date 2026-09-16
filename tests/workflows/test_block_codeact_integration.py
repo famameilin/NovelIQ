@@ -76,7 +76,7 @@ class _AuditSession:
         self._store = store
 
     def get_bind(self) -> None:
-        """用于声明非 postgresql 绑定（跳过 SET TRANSACTION READ ONLY）"""
+        """用于声明无绑定"""
         return None
 
     def add(self, row: Any) -> None:
