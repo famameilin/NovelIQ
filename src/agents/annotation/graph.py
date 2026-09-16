@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, get_args
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
@@ -179,6 +179,9 @@ class AnnotationGraphState(TypedDict):
     phase: AnnotationPhase
     iterations: int
     error: str | None
+    # 2026-09-16 块代理面：轮次上限按"会话自然收束"处理（局部标注是内存对象、
+    # 构造即校验，撞上限只是停止会话，不是失败）；写者/读者面不置位、行为不变
+    halted: NotRequired[bool]
 
 
 def _tool_batch_protocol_error(
@@ -209,6 +212,7 @@ def _build_agent_node(
     inject_progress: bool = False,
     bind_tools: list[Any] | None = None,
     program_mode: bool = False,
+    stop_at_iteration_limit: bool = False,
 ):
     """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点
 
@@ -233,6 +237,10 @@ def _build_agent_node(
         """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
         iterations = int(state.get("iterations") or 0)
         if iterations >= max_iterations:
+            if stop_at_iteration_limit:
+                # 2026-09-16 块代理面：撞轮次上限按会话自然收束处理（局部标注构造即
+                # 校验，已构造的内容就是产出），不按失败上报、不新增升级分支
+                return {"halted": True}
             return {"error": f"annotation LangGraph 内部循环达到上限 {max_iterations}"}
         ledger.set_phase(state["phase"])
         if stream is not None:
@@ -840,8 +848,11 @@ def build_annotation_graph(
 
 
 def _route_after_reader_agent(state: AnnotationGraphState) -> str:
-    """2026-09-11 用于读者循环路由：错误收口、工具批次、无工具回复即上报完毕（§8.5）"""
-    if state.get("error"):
+    """2026-09-11 用于读者循环路由：错误收口、工具批次、无工具回复即上报完毕（§8.5）
+
+    2026-09-16 块代理面复用本路由：撞轮次上限时 halted 置位，同样按会话收束结束。
+    """
+    if state.get("error") or state.get("halted"):
         return "end"
     if not _tool_calls(state):
         return "end"
@@ -901,4 +912,63 @@ def build_reader_graph(
     return graph.compile()
 
 
-__all__ = ["AnnotationGraphState", "build_annotation_graph", "build_reader_graph"]
+def build_block_graph(
+    llm: Any,
+    program_tool: Any,
+    *,
+    ledger: AnnotationToolLedger,
+    max_iterations: int,
+    stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
+    retries: int | None = None,
+) -> Any:
+    """2026-09-16 块代理程序面用于构建块会话状态机（对外唯一绑定面 execute_code）
+
+    与读者面同构：没有写入工具、没有领域冻结、没有缺域提醒，无工具回复即"本块
+    标注完毕"；两处差别是撞轮次上限按会话自然收束（stop_at_iteration_limit）与
+    绑定面收成唯一 execute_code（模型直发原生工具名一律协议错误，不落到任何写入）。
+    """
+    bind_tools = [program_tool]
+    program_tool_name = str(program_tool.name)
+    graph = StateGraph(AnnotationGraphState)
+    graph.add_node(
+        "agent",
+        _build_agent_node(
+            llm,
+            bind_tools,
+            ledger=ledger,
+            max_iterations=max_iterations,
+            stream=stream,
+            observer=observer,
+            retries=retries,
+            completion_hint=None,
+            require_tool_call=False,
+            bind_tools=bind_tools,
+            program_mode=True,
+            stop_at_iteration_limit=True,
+        ),
+    )
+    graph.add_node(
+        "tool_batch",
+        _build_tool_batch_node(
+            bind_tools,
+            ledger=ledger,
+            observer=observer,
+            stream=stream,
+            program_tool_name=program_tool_name,
+        ),
+    )
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges(
+        "agent",
+        _route_after_reader_agent,
+        {
+            "tool_batch": "tool_batch",
+            "end": END,
+        },
+    )
+    graph.add_edge("tool_batch", "agent")
+    return graph.compile()
+
+
+__all__ = ["AnnotationGraphState", "build_annotation_graph", "build_block_graph", "build_reader_graph"]
