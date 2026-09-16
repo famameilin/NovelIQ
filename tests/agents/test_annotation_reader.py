@@ -30,7 +30,7 @@ from src.agents.annotation.reader_report import (
     report_entity_name_keys,
 )
 from src.agents.annotation.schema import ChunkParagraphInfo
-from src.agents.annotation.tools import AnnotationToolLedger
+from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
 _BLOCK_TEXT = (
     "白芷赠槐叶给顾霜，暗示旧约仍在。白芷道：“槐叶赠你。”\n"
@@ -69,6 +69,14 @@ class _QueryServiceStub:
     def thread_exists(self, setup_id):
         del setup_id
         return False
+
+
+class _DispatcherStub:
+    """2026-09-16 用于只验证"反问通道存在"这一件事的 dispatcher 桩"""
+
+    async def ask(self, block: int, question: str) -> str:
+        del block, question
+        return ""
 
 
 def _reader_ledger() -> AnnotationToolLedger:
@@ -582,8 +590,34 @@ class TestWriterAdmission:
         ledger = _reader_ledger()
         ledger.reader_reports = [ReaderReport(block_index=0, report={"notes": [{"text": "t"}]})]
 
-        with pytest.raises(ValueError, match="已核验引文"):
+        with pytest.raises(ValueError, match="已核验引文") as excinfo:
             ledger.admit_case_reason("随便一个理由", tool_name="close_case")
+
+        # 2026-09-16 默认会话没有反问通道：拒绝文案不给一条做不到的指引
+        assert "ask_reader" not in str(excinfo.value)
+        assert "push_case" in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_case_reason_advice_follows_ask_reader_channel(self) -> None:
+        """2026-09-16 反问通道存在才建议追问（两段式写者面），否则给能执行的替代路径"""
+        ledger = _reader_ledger()
+        ledger.reader_reports = [ReaderReport(block_index=0, report={"notes": [{"text": "t"}]})]
+        build_annotation_tools(_QueryServiceStub(), ledger, ask_reader_dispatcher=_DispatcherStub())
+        assert ledger.ask_reader_available is True
+
+        with pytest.raises(ValueError, match="ask_reader") as excinfo:
+            ledger.admit_case_reason("随便一个理由", tool_name="close_case")
+
+        assert "push_case" not in str(excinfo.value)
+
+    def test_ask_reader_flag_tracks_tool_presence(self) -> None:
+        """旗标与 ask_reader 入列同源：没有 dispatcher 就没有这条工具，旗标也是假"""
+        ledger = _reader_ledger()
+
+        names = {tool.name for tool in build_annotation_tools(_QueryServiceStub(), ledger)}
+
+        assert "ask_reader" not in names
+        assert ledger.ask_reader_available is False
 
 
 class TestRunReaderAgent:

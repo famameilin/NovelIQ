@@ -313,6 +313,10 @@ class AnnotationToolLedger:
     # 2026-09-12 章内并行两段式（§7）：写者的读者一次性报告，用于写入取值域准入。
     # 报告是观察不是写入，刻意不进 snapshot/restore；单块章与读者为 None，行为不变
     reader_reports: list[ReaderReport] | None = None
+    # 2026-09-16 本会话是否挂着 ask_reader 反问通道（只有两段式写者面为真）：案例取证
+    # 准入的拒绝文案按它分叉。置位点与 ask_reader 入列同处（build_annotation_tools），
+    # 工具在不在与建议能不能做同源；块面章内并行的章会话没有反问通道，默认假
+    ask_reader_available: bool = False
     # 2026-09-13 实时写入（取消暂存）：每次小调用即时落到目标结构，回执即当前真相。
     # 全部进 snapshot/restore——单次调用失败只回滚该调用，之前写入的记录必须保留
     written_entities: dict[str, EntityInput] = field(default_factory=dict)
@@ -1859,6 +1863,8 @@ class AnnotationToolLedger:
         reason 必须用读者报告引文拼装：包含任一已核验案例引文的原文或其
         ≥12 字连续片段即通过；unverified 引文不得支撑裁决（09-12 裁决，
         防幻觉硬门槛）。读者未上报任何案例观察时禁止一切裁决。单块章不受限。
+        2026-09-16 拒绝文案按 ask_reader_available 分叉：反问通道存在才建议追问，
+        没有这条通道的会话（章内并行 CodeAct 的章会话）给它能执行的替代路径。
         """
         if self.reader_reports is None:
             return
@@ -1877,10 +1883,14 @@ class AnnotationToolLedger:
                 f"（原文或其 ≥{min_fragment} 字连续片段），不得自行转写。"
                 "请从 <ReaderReports> 的 cases 观察 evidence 中摘录原文"
             )
+        advice = (
+            "若正文确有案例线索，请先用 ask_reader 向对应块读者追问"
+            if self.ask_reader_available
+            else "本路径没有反问通道：不要凭现有材料裁决，确需留下线索就用 push_case 登记"
+        )
         raise ValueError(
             f"{tool_name} 准入失败：读者未上报任何含已核验引文的案例观察，写者不得凭空裁决案例"
-            "（引文未通过核验的观察不能支撑裁决）；"
-            "若正文确有案例线索，请先用 ask_reader 向对应块读者追问"
+            f"（引文未通过核验的观察不能支撑裁决）；{advice}"
         )
 
 
@@ -3138,6 +3148,8 @@ def build_annotation_tools(
         push_case,
     ]
     if ask_reader_dispatcher is not None:
+        # 工具在不在与准入拒绝文案能建议什么同源：这里 append 的同时置位账本旗标
+        ledger.ask_reader_available = True
         tools.append(ask_reader)
     for tool_candidate in tools:
         _forbid_undeclared_args(tool_candidate)
