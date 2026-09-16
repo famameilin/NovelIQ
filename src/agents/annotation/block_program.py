@@ -53,6 +53,7 @@ from .local_ir import (
 from .program import (
     BLOCK_CONTRACT_TEXT,
     RestrictedProgramRuntime,
+    _call_rejection,
     build_program_tool,
     build_program_tools,
     constructor_api_text,
@@ -788,7 +789,7 @@ class BlockProgramRuntime(RestrictedProgramRuntime):
         op_index = self._next_op_index(line=line)
         entry = await _execute_call(
             {"name": name, "args": args, "id": f"{self._program_id}-op{op_index}"},
-            tool_map=self.tools,
+            tool_map=self.execution_tools,
             ledger=self.ledger,
             observer=self.observer,
             stream=self.stream,
@@ -854,19 +855,6 @@ class BlockProgramRuntime(RestrictedProgramRuntime):
             tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
             started_ns=started_ns,
         )
-
-
-def _call_rejection(name: str, exc: Exception, *, signature_hint: str) -> dict[str, Any]:
-    """用于把构造器失败渲染成记录级拒绝回执（结构化拒绝原样透传，其余给签名提示）"""
-    if isinstance(exc, AnnotationStageRejection):
-        return exc.receipt()
-    return {
-        "status": "rejected",
-        "record": name,
-        "code": "invalid_call",
-        "expected": signature_hint,
-        "message": f"{type(exc).__name__}: {exc}",
-    }
 
 
 @dataclass(slots=True)
