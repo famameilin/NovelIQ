@@ -4,9 +4,14 @@
 核心合同: 写入面为五个领域工具（write_entity / write_metrics / write_event /
 write_relation / write_dialogue），实体与事件节点用模型自定的 el 局部键寻址、
 写入即生效并返回真实回执（{status: written, record}）；领域没有结束声明，
-全部写完后用唯一 finish_chapter 收尾，系统据此刻校验并冻结当前 chunk。
+全部写完后用唯一 finish 收尾，系统据此刻校验并冻结当前章。
 完整参数和完整结果只进入审计库，不回到模型上下文。
 
+2026-09-19 id 纪律（模型面三条款）：所有 id 都是 run 级 uuid——实体 id 由服务端按
+run+规范名确定性铸造（uuid5，回执与落库主键同值），事件节点 id 服务端生成（uuid4，
+=落库 event_id），案例 id 就是案例池行的 uuid；别名只能是 el（模型自定的局部键，
+写入当场绑定，仅供同轮引用）；一个事件或实体或操作只有一个 id——回执与检索
+视图里对象只带 id，record 是本章 的写入地址、不是第二 id。
 2026-09-14 写入面重构：根/子/两参与者五工具合并为 write_event（el 层级键挂树、
 树内先后=调用顺序）；句标签收编进 write_metrics.labels（段落级监督）；实体
 引用增加 el 键空间；伏笔属性收敛为 isforeshadowing+confidence。
@@ -38,23 +43,24 @@ from .errors import (
     AnnotationStageRejection,
 )
 from .fact_graph import FactGraph
-from .reader_report import ReaderReport, normalize_message_name, report_case_quotes, report_entity_name_keys
 from .schema import (
+    CLIFFHANGER_DESCRIPTION,
     ENTITY_TAG_MAX_CHARS,
     ENTITY_TAG_MAX_COUNT,
     ENTITY_TAGS_RULE_TEXT,
+    FORESHADOWING_ACTIONS,
+    PIVOT_MOMENT_DESCRIPTION,
     RELATION_CHANGE_KIND_LABELS,
     RELATION_DEFINITIONS,
     ActiveCaseDetails,
     BoundChapterAnnotation,
     BoundCharacterObservation,
-    BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
     BoundParagraphLabel,
     CaseSearchResult,
-    ChunkMetricsInput,
-    ChunkParagraphInfo,
+    ChapterMetricsInput,
+    ChapterParagraphInfo,
     Confidence,
     DialogueCandidate,
     DialogueInput,
@@ -68,6 +74,7 @@ from .schema import (
     EventParticipantInput,
     EventParticipantRole,
     EventTreeHistoryResult,
+    EvidenceNumber,
     NarrativeFunction,
     ParagraphLabelInput,
     ParticipantArg,
@@ -85,7 +92,7 @@ from .schema import (
 
 # 2026-08-22伏笔并入事件树（isforeshadowing），不再是独立领域
 # 2026-09-14 写入面重构：句/段标签收编进 write_metrics.labels，事件五工具合并为
-# write_event，收尾唯一 finish_chapter——五个领域写工具从首轮起全部开放。
+# write_event，收尾唯一 finish——五个领域写工具从首轮起全部开放。
 _DOMAIN_NAMES = (
     "metrics",
     "entities",
@@ -106,14 +113,11 @@ _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
 # 全部写入工具（schema 层失败翻译与正式工具集合使用）
 # 2026-09-14 案例解决也进集合：tone 等参数回到家枚举后，解决路径的 schema 层失败
 # 与写入路径同一条翻译路径（否则模型收到裸 pydantic 报错，没有 record/field 可自纠）。
+# 2026-09-18 案例面收成 push_case + promise_case + close_case：兑现只记产出记录键、关闭
+# 无语义变化，两者都不是写入动作，但参数校验失败仍走同一条结构化翻译路径（进本集合）。
 _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     [tool_name for tool_names in _DOMAIN_WRITE_TOOLS.values() for tool_name in tool_names]
-    + [
-        "resolve_dialogue_case",
-        "resolve_fact_case",
-        "resolve_foreshadowing_case",
-        "close_case",
-    ]
+    + ["promise_case", "close_case"]
 )
 # 失败归因表：领域 → 写入工具（2026-09-14 写入面合并后无例外项）
 _WRITE_TOOL_DOMAINS: dict[str, str] = {
@@ -121,21 +125,26 @@ _WRITE_TOOL_DOMAINS: dict[str, str] = {
     for domain, tool_names in _DOMAIN_WRITE_TOOLS.items()
     for tool_name in tool_names
 }
+# 2026-09-18 收尾工具名（单一来源）：写者面的绑定面与 subagent 面的绑定面同名，
+# 但只有写者面的 finish 是"章级收尾"（冻结整章、结算推迟到本回合全部调用之后），
+# subagent 面的 finish 只声明本 subagent 完毕。判章级收尾一律比这个名字，不看调用来源；
+# 分面差异由 graph._execute_call 的 chapter_finish_name 参数表达（subagent 面传 None）。
+FINISH_TOOL_NAME: str = "finish"
 # 2026-09-13 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束声明）
 _DOMAIN_ORDER = ("entities", "metrics", "events", "relations", "dialogues")
 # 2026-09-07 监督标签冻结软下限（每章 2-3 段定稿）：低于 2 留痕覆盖告警，不阻断冻结
-_PARAGRAPH_LABEL_MIN_PER_CHUNK = 2
+_PARAGRAPH_LABEL_MIN_PER_CHAPTER = 2
 _INTERNAL_GRAPH_KEYS = {
     "candidate_key",
-    "chunk_id",
+    "chapter_id",
     "end",
     "fact_id",
     "relation_id",
     "representative_entity_id",
     "start",
 }
-# 2026-09-11 历史事件视图里的数据库实体主键与运行期编号空间不同，模型只见编号：
-# 视图内嵌的 entity_id 一律剥掉，改配运行期编号 n
+# 2026-09-19 历史事件视图里的内部定位字段不进模型面（id 纪律后运行面 id 就是这个 uuid，
+# 由 _event_view_participants 换成 "id" 键给出）
 _INTERNAL_ENTITY_KEYS = frozenset({"entity_id"})
 # 事件根节点在章内局部键空间里的固定名字（子事件键不得占用）
 _ROOT_NODE_KEY = "root"
@@ -172,17 +181,17 @@ EventLocalKey = Annotated[
     ),
 ]
 
-# 2026-09-13 案例编号单源：四个案例工具共用同一句参数说明
-# （run c80105cc 实测：编号来源不写在模型可见面上，模型只能靠被拒反推）
-CASE_NUMBER_RULE = "案例编号：search_pool 或 push_case 回执给出的数（案例不在正文注入，检索即授权）"
-CaseNumber = Annotated[int, Field(description=CASE_NUMBER_RULE)]
+# 2026-09-19 案例面 id 化：案例的稳定身份就是案例池行的 uuid（本章 待建案例=push_case
+# 生成的 target_key），无运行期编号；四个案例工具共用同一句参数说明
+CASE_ID_RULE = "案例 id：search_pool 或 push_case 回执给出的 id（案例不在正文注入，检索即授权）"
+CaseId = Annotated[str, Field(min_length=1, description=CASE_ID_RULE)]
 
 
 def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
     """2026-09-13 用于按工具名与原始参数生成稳定记录键（成功回执与拒绝回执共用）
 
     参数可能是未过 schema 的原始值，此处只做展示级拼接、不做校验；
-    键在 chunk 收尾前保持稳定，重写同键即更新同一条记录。
+    键在 章收尾前保持稳定，重写同键即更新同一条记录。
     """
     if tool_name == "write_entity":
         return f"entity/{args.get('name')}"
@@ -204,17 +213,23 @@ def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
 
 
 def _event_view_participants(participants: list[dict[str, Any]], *, graph: FactGraph | None) -> list[dict[str, Any]]:
-    """2026-09-11 用于把历史事件参与者视图里的数据库 entity_id 换成运行期编号"""
+    """2026-09-11 用于把历史事件参与者视图换成模型面 id（2026-09-19 id 即 uuid）
+
+    参与者描述里的内部字段（entity_id）剥掉；id 优先取运行图按名铸造的
+    uuid5（与回执同值），图中未登记时兜底用历史视图带的落库 id（同一 uuid 口径）。
+    """
     views: list[dict[str, Any]] = []
     for participant in participants:
         descriptor = participant.get("entity")
         cleaned = {key: value for key, value in participant.items() if key != "entity"}
         if isinstance(descriptor, dict):
+            raw_entity_id = descriptor.get("entity_id")
             descriptor = {key: value for key, value in descriptor.items() if key not in _INTERNAL_ENTITY_KEYS}
             name = descriptor.get("name")
-            number = graph.entity_number(str(name)) if graph is not None and name else None
-            if number is not None:
-                descriptor["n"] = number
+            runtime_id = graph.entity_id(str(name)) if graph is not None and name else None
+            entity_id = runtime_id or (str(raw_entity_id) if raw_entity_id else None)
+            if entity_id is not None:
+                descriptor["id"] = entity_id
             cleaned["entity"] = descriptor
         else:
             cleaned["entity"] = descriptor
@@ -236,7 +251,7 @@ class AnnotationQueryService(Protocol):
     ) -> SearchResult:
         """2026-09-11 用于检索活动案例与伏笔线程（案例的唯一发现通道）
 
-        2026-09-13 登记即进池：pending_cases 是本 chunk 内 push_case 登记的待建案例，
+        2026-09-13 登记即进池：pending_cases 是本 章内 push_case 登记的待建案例，
         实现方按与池内案例一致的匹配/枚举语义一并返回。
         """
 
@@ -260,31 +275,34 @@ class AnnotationQueryService(Protocol):
     def fetch_active_case_details(self, case_id: str) -> ActiveCaseDetails | None:
         """2026-08-07 用于读取活动案例内部稳定目标"""
 
+    def has_dialogue_record(self, candidate_key: str) -> bool:
+        """2026-09-18 用于判一条对话记录是否已在本 run 落库（订正既有对话记录的前置校验）"""
+
 
 @dataclass(slots=True)
 class AnnotationToolLedger:
-    """2026-08-07 用于保存单 chunk 领域写入和系统绑定状态
+    """2026-08-07 用于保存单章领域写入和系统绑定状态
 
     2026-09-13 实时写入：模型面的每个小调用即时落到目标结构（written_*），
-    全部写完后由唯一 finish_chapter 收尾冻结，没有暂存区也没有逐域结束声明。
+    全部写完后由唯一 finish 收尾冻结，没有暂存区也没有逐域结束声明。
+    2026-09-19 章即块：原 章级字段退役，账本只认章（current_chapter_id/text）。
     """
 
     run_scope: str
     current_chapter_id: int
-    current_chunk_id: int
-    current_chunk_text: str
+    current_chapter_text: str
     allow_future_context: bool
-    phase: str = "chunk_open"
+    phase: str = "chapter_open"
     dialogue_candidates: list[DialogueCandidate] = field(default_factory=list)
     domain_payloads: dict[str, Any] = field(default_factory=dict)
     bound_payloads: dict[str, Any] = field(default_factory=dict)
     write_records: list[dict[str, Any]] = field(default_factory=list)
-    completed_chunks: list[BoundChunkAnnotation] = field(default_factory=list)
-    ready_chunk: BoundChunkAnnotation | None = None
+    completed_chapters: list[BoundChapterAnnotation] = field(default_factory=list)
+    ready_chapter: BoundChapterAnnotation | None = None
     # 2026-09-11 案例改检索制：正文不再注入案例表，案例只经 search_pool 展示登记
-    case_number_registry: dict[int, str] = field(default_factory=dict)
-    case_number_by_id: dict[str, int] = field(default_factory=dict)
-    next_case_number: int = 1
+    # 2026-09-19 案例 id 纪律：无运行期编号，案例身份=池行 uuid（待建案例=push_case 的
+    # target_key）；known_case_ids 是授权面——只有展示过或登记过的 id 可进入解决流程。
+    known_case_ids: set[str] = field(default_factory=set)
     resolved_cases: list[ResolvedCase] = field(default_factory=list)
     pushed_cases: list[PendingCase] = field(default_factory=list)
     # 2026-08-14 M6：案例展示/解决授权章（案例源是章级定位，§12.3）
@@ -293,14 +311,14 @@ class AnnotationToolLedger:
     authorized_text_paragraph_ids: set[int] = field(default_factory=set)
     # 2026-08-12 收尾时未提交判定的对话候选序号（系统按 not_dialogue 默认处理）
     dialogue_missing_indexes: list[int] = field(default_factory=list)
-    # 2026-09-05 冻结时系统确定性覆盖告警（仅留痕不阻断），随 chunk 持久化
+    # 2026-09-05 冻结时系统确定性覆盖告警（仅留痕不阻断），随章持久化
     coverage_warnings: list[str] = field(default_factory=list)
     annotation: BoundChapterAnnotation | None = None
     errors: list[str] = field(default_factory=list)
     search_log: list[dict[str, Any]] = field(default_factory=list)
     graph: FactGraph | None = None
-    # 2026-08-18 事件森林/DAG：当前 chunk 的段落坐标映射，用于事件锚点校验和证据派生
-    paragraph_info: ChunkParagraphInfo | None = None
+    # 2026-08-18 事件森林/DAG：本章 的段落坐标映射，用于事件锚点校验和证据派生
+    paragraph_info: ChapterParagraphInfo | None = None
     # 2026-08-22已写事件节点 id（含历史树根），供伏笔 setup/payoff 授权
     authorized_event_ids: set[str] = field(default_factory=set)
     # 2026-09-04事件树 id 集合：setup/payoff 误传 tree_id 时给出针对性纠错提示
@@ -310,17 +328,10 @@ class AnnotationToolLedger:
     # 2026-08-22本章事件树状态（单章闭环）；历史树视图缓存供伏笔树根判定引用
     event_trees: dict[str, dict[str, Any]] = field(default_factory=dict)
     history_tree_views: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # 2026-09-12 章内并行两段式（§7）：写者的读者一次性报告，用于写入取值域准入。
-    # 报告是观察不是写入，刻意不进 snapshot/restore；单块章与读者为 None，行为不变
-    reader_reports: list[ReaderReport] | None = None
-    # 2026-09-16 本会话是否挂着 ask_reader 反问通道（只有两段式写者面为真）：案例取证
-    # 准入的拒绝文案按它分叉。置位点与 ask_reader 入列同处（build_annotation_tools），
-    # 工具在不在与建议能不能做同源；块面章内并行的章会话没有反问通道，默认假
-    ask_reader_available: bool = False
     # 2026-09-13 实时写入（取消暂存）：每次小调用即时落到目标结构，回执即当前真相。
     # 全部进 snapshot/restore——单次调用失败只回滚该调用，之前写入的记录必须保留
     written_entities: dict[str, EntityInput] = field(default_factory=dict)
-    metrics_payload: ChunkMetricsInput | None = None
+    metrics_payload: ChapterMetricsInput | None = None
     written_dialogues: dict[int, DialogueInput] = field(default_factory=dict)
     # 有序对 → 关系记录（同一对端点换类型即整体替换，保持"本章关系=完整集合"语义）
     written_relations: dict[tuple[str, str], RelationInput] = field(default_factory=dict)
@@ -330,16 +341,19 @@ class AnnotationToolLedger:
     tree_key_index: dict[str, str] = field(default_factory=dict)
     # 2026-09-14 实体局部键索引：el → 归一化登记名（模型自定、写入即绑定、同轮可用）
     entity_el_index: dict[str, str] = field(default_factory=dict)
-    # 2026-09-13 收尾声明：唯一 finish_chapter 置位后由系统冻结当前 chunk
+    # 2026-09-18 本章已经写出来的记录键集合（程序面每次调用成功即登记）：
+    # promise_case 的 result_id 与 push_case 的 record_id 按它校验，模型只能指向真实产出
+    written_record_keys: set[str] = field(default_factory=set)
+    # 2026-09-13 收尾声明：唯一 finish 置位后由系统冻结当前章
     chapter_finished: bool = False
 
     def __post_init__(self) -> None:
-        """2026-08-07 用于初始化唯一 chunk 的对话候选"""
-        if not self.current_chunk_text.strip():
-            raise AnnotationInputError("current_chunk_text 不能为空")
+        """2026-08-07 用于初始化唯一章的对话候选"""
+        if not self.current_chapter_text.strip():
+            raise AnnotationInputError("current_chapter_text 不能为空")
         self.dialogue_candidates = extract_dialogue_candidates(
-            self.current_chunk_id,
-            self.current_chunk_text,
+            self.current_chapter_id,
+            self.current_chapter_text,
         )
 
     @property
@@ -356,10 +370,10 @@ class AnnotationToolLedger:
         return ids
 
     def pending_case_by_id(self, case_id: str) -> PendingCase | None:
-        """2026-09-13 用于按 target_key 查找本 chunk 内 push_case 登记的待建案例
+        """2026-09-13 用于按 target_key 查找本 章内 push_case 登记的待建案例
 
-        登记即进池：编号在 push_case 当场分配，检索面（search_pool）与解决面
-        （_resolve_case_details）都按同一 target_key 认这条案例，直到本章收尾
+        登记即进池：案例 id 在 push_case 当场生成（=target_key），检索面（search_pool）
+        与解决面（_resolve_case_details）都按同一 id 认这条案例，直到本章收尾
         它才作为案例池行落库（那时池行 id 就是本 target_key，链路无需重映射）。
         """
         return next((case for case in self.pushed_cases if case.target_key == case_id), None)
@@ -381,11 +395,9 @@ class AnnotationToolLedger:
                 "bound_payloads": self.bound_payloads,
                 "chapter_finished": self.chapter_finished,
                 "write_records": self.write_records,
-                "completed_chunks": self.completed_chunks,
-                "ready_chunk": self.ready_chunk,
-                "case_number_registry": self.case_number_registry,
-                "case_number_by_id": self.case_number_by_id,
-                "next_case_number": self.next_case_number,
+                "completed_chapters": self.completed_chapters,
+                "ready_chapter": self.ready_chapter,
+                "known_case_ids": self.known_case_ids,
                 "resolved_cases": self.resolved_cases,
                 "pushed_cases": self.pushed_cases,
                 "authorized_chapter_ids": self.authorized_chapter_ids,
@@ -404,6 +416,7 @@ class AnnotationToolLedger:
                 "observation_by_record": self.observation_by_record,
                 "tree_key_index": self.tree_key_index,
                 "entity_el_index": self.entity_el_index,
+                "written_record_keys": self.written_record_keys,
             }
         )
 
@@ -413,39 +426,32 @@ class AnnotationToolLedger:
             setattr(self, field_name, value)
 
     def resolve_event_reference(self, reference: str) -> str | None:
-        """2026-09-13 用于把模型面的章内局部键（t1/e1、t1 指根）翻成真实节点 id
+        """2026-09-13 用于把模型面的事件引用翻成真实节点 id（2026-09-19 收两种形态）
 
-        事件写入即生效，因此映射随时可得；键不存在时返回 None，
-        由调用方按"未授权"处理并给出针对性提示。
+        id 纪律下模型面只有两种引用：run 级 uuid id（=回执/检索视图里的节点 id，
+        已在授权集合里的原样放行）与本章 的 el 别名（t1 指根、t1/e2 指子）。
+        键不存在时返回 None，由调用方按"未授权"处理并给出针对性提示。
         """
-        if reference in self.authorized_event_ids:
-            return reference
-        tree_key, _, node_key = reference.partition("/")
+        text = str(reference).strip()
+        if text in self.authorized_event_ids:
+            return text
+        tree_key, _, node_key = text.partition("/")
         tree = self.event_trees.get(self.tree_key_index.get(tree_key, ""))
         if tree is None:
             return None
         node_id = tree["nodes"].get(node_key or _ROOT_NODE_KEY)
         return str(node_id) if node_id else None
 
-    def resolve_entity_ref(self, ref: int | str, *, record: str, field: str) -> str:
-        """2026-09-14 用于把模型面实体引用（编号 n / 自定 el）解析成登记名
+    def resolve_entity_ref(self, ref: str, *, record: str, field: str) -> str:
+        """2026-09-14 用于把模型面实体引用（run 级 uuid id / 自定 el）解析成登记名
 
-        两种键空间同一条解析路径：整数（含纯数字字符串）走 FactGraph 编号，
-        字符串先查本 chunk 的 el 索引；未知 el 结构化拒绝并列出已知键。
+        两种键空间同一条解析路径：字符串先查本章 的 el 索引，未命中再按
+        uuid 反查图登记（uuid5 确定性 id）；未知的 id/el 结构化拒绝并列出已知键。
         """
         if self.graph is None:
             raise AnnotationInvariantError("实体引用解析需要常驻事实图，graph 缺失")
-        if isinstance(ref, str) and not ref.strip().isdigit():
-            key = self.entity_el_index.get(ref.strip())
-            if key is None:
-                known = ", ".join(sorted(self.entity_el_index)) or "（本 chunk 还没有实体用 el 登记）"
-                raise AnnotationStageRejection(
-                    f"el 键未由本 chunk 任何 write_entity 登记: {ref}",
-                    record=record,
-                    field=field,
-                    code="unknown_el",
-                    expected=f"已知 el 键: {known}；引用历史/其他章实体请改用编号 n（search_graph 回执）",
-                )
+        key = self.entity_el_index.get(str(ref).strip())
+        if key is not None:
             display_name = self.graph.entity_names.get(key)
             if display_name is None:
                 raise AnnotationStageRejection(
@@ -457,26 +463,30 @@ class AnnotationToolLedger:
                 )
             return display_name
         try:
-            return self.graph.resolve_number(int(ref), label=f"{record}.{field}")
-        except (ValueError, TypeError) as exc:
+            return self.graph.resolve_entity_id(str(ref).strip(), label=f"{record}.{field}")
+        except ValueError as exc:
             raise AnnotationStageRejection(
                 str(exc),
                 record=record,
                 field=field,
-                code="unregistered_number",
-                expected="已登记实体的运行期编号 n（write_entity / search_graph 回执）或本 chunk 自定的 el 键",
+                code="unknown_entity_id",
+                expected=(
+                    "已登记实体的 run 级 id（write_entity / search_graph 回执）或本章自定的 el 键；"
+                    f"本章已登记：{self._registered_el_pairs()}"
+                ),
             ) from None
 
-    def register_case_number(self, case_id: str) -> int:
-        """2026-08-07 用于为真实案例 ID 分配稳定运行内编号"""
-        existing = self.case_number_by_id.get(case_id)
-        if existing is not None:
-            return existing
-        number = self.next_case_number
-        self.next_case_number += 1
-        self.case_number_registry[number] = case_id
-        self.case_number_by_id[case_id] = number
-        return number
+    def _registered_el_pairs(self) -> str:
+        """2026-09-20 用于把本章已登记的 el=名字 对渲染成一行（引用被拒时的就地自纠材料）
+
+        run 54a72932：135 次把实体名称当引用填，而拒绝回执只给 uuid 示例——名称到 uuid
+        要跨一层翻译，模型干脆照原样重试。这里给的是"名字 ↔ 可直接填的 el 键"的对照。
+        """
+        rows = self.entity_ledger()
+        rendered = "、".join(f"{row['el']}={row['name']}" for row in rows[:_ENTITY_REF_HINT_LIMIT])
+        if len(rows) > _ENTITY_REF_HINT_LIMIT:
+            rendered += f" 等 {len(rows)} 个"
+        return rendered or "（本章还没有登记实体）"
 
     def _tree_id(self) -> str:
         """2026-08-22服务端一次生成树 id（uuid4，永不重排、跨子块不冲突）"""
@@ -491,8 +501,8 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
 
     def _require_writable(self, record: str) -> None:
-        """用于在每个写入入口统一校验阶段（chunk 冻结后不再接受写入）"""
-        if self.phase != "chunk_open":
+        """用于在每个写入入口统一校验阶段（章冻结后不再接受写入）"""
+        if self.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
 
     def _tree_by_key(self, tree_key: str, record: str) -> dict[str, Any]:
@@ -516,10 +526,10 @@ class AnnotationToolLedger:
         raise AnnotationInvariantError(f"事件节点未落账: {node_id}")
 
     # ------------------------------------------------------------------
-    # 实体域：登记即入图并分配运行期编号；el 局部键当场绑定，同轮可用
+    # 实体域：登记即入图并绑定 run 级 uuid id；el 局部键当场绑定，同轮可用
 
-    def apply_entity(self, entity: EntityInput, *, el: str, present: set[str] | None = None) -> int:
-        """用于登记或更新一个实体、绑定 el 局部键并即时返回运行期编号（同键同内容重放幂等）
+    def apply_entity(self, entity: EntityInput, *, el: str, present: set[str] | None = None) -> str:
+        """用于登记或更新一个实体、绑定 el 局部键并即时返回 run 级 id（同键同内容重放幂等）
 
         present（本次实际提交的字段集合）给定时按部分更新合并：未提交字段保留现值，
         兑现 write_entity 合同"只提交本次变化的字段"；不传=整条记录语义（直连调用）。
@@ -534,15 +544,14 @@ class AnnotationToolLedger:
                 record=record,
                 field="el",
                 code="duplicate_el",
-                expected="换一个 el 键（el 在 chunk 内一对一绑定实体）",
+                expected="换一个 el 键（el 在 章内一对一绑定实体）",
             )
         key = _norm_entity_key(entity.name)
         existing = self.written_entities.get(key)
         if existing is not None and present is not None:
-            # 部分更新：先合并成生效记录，再进准入与落图（闸门看到的永远是完整记录）
+            # 部分更新：先合并成生效记录，再落图（闸门看到的永远是完整记录）
             entity = self._merge_partial_entity(existing, entity, present)
             record = f"entity/{entity.name}"
-        self.admit_entity_directory([entity])
         if self.graph is None:
             raise AnnotationInvariantError("write_entity 需要常驻事实图，graph 缺失")
         registered = self.graph.entity_types.get(key)
@@ -557,14 +566,14 @@ class AnnotationToolLedger:
         if existing is None or existing != entity:
             # 同键不同内容=更新语义；同键同内容直接跳过，避免重复操作日志
             self.graph.register_entities([entity])
-            self.graph.record_entity_ops([entity], chapter_id=self.current_chunk_id)
+            self.graph.record_entity_ops([entity], chapter_id=self.current_chapter_id)
             self.written_entities[key] = entity
             self._rebuild_entity_payload()
         self.entity_el_index[normalized_el] = key
-        number = self.graph.entity_number(entity.name)
-        if number is None:
-            raise AnnotationInvariantError(f"实体编号分配失败: {entity.name}")
-        return number
+        entity_id = self.graph.entity_id(entity.name)
+        if entity_id is None:
+            raise AnnotationInvariantError(f"实体 id 登记失败: {entity.name}")
+        return entity_id
 
     @staticmethod
     def _merge_partial_entity(existing: EntityInput, incoming: EntityInput, present: set[str]) -> EntityInput:
@@ -590,7 +599,7 @@ class AnnotationToolLedger:
         return merged
 
     def _rebuild_entity_payload(self) -> None:
-        """用于按写入顺序重建当前 chunk 的实体目录载荷"""
+        """用于按写入顺序重建当前章 的实体目录载荷"""
         self.domain_payloads["entities"] = EntityDirectoryInput(
             entities=list(self.written_entities.values())
         )
@@ -598,34 +607,47 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
     # 指标域：整域一次提交，重复提交按最后一次为准；段落级监督标签随本域提交
 
-    def apply_metrics(self, payload: ChunkMetricsInput) -> None:
-        """用于写入当前 chunk 摘要、叙事指标与段落情绪标签（重复提交整域覆盖）
+    def apply_metrics(self, payload: ChapterMetricsInput) -> None:
+        """用于写入当前章 摘要、叙事指标与段落情绪标签（重复提交整域覆盖）
 
-        labels 的 paragraph_id 必须属于本 chunk（正文 ¶ 号 / 报告证据段号同一
-        号码空间）；越界段号整次提交拒绝并指明是哪一条标签。
+        labels 的 paragraph_id 是段首可见号（正文每段开头的 `N：`），必须属于本章；
+        越界段号整次提交拒绝并指明是哪一条标签。落库前按段落坐标映射
+        换回全局 paragraph_id（绑定载荷与持久化口径不变）。
         """
         self._require_writable("metrics")
         if payload.labels:
-            known_ids = list(self.paragraph_info.paragraph_ids) if self.paragraph_info is not None else []
-            known = set(known_ids)
+            visible_to_global = (
+                dict(self._visible_global_pairs())
+                if self.paragraph_info is not None
+                else {}
+            )
             for label in payload.labels:
-                if label.paragraph_id not in known:
-                    preview = ", ".join(str(pid) for pid in known_ids[:12])
+                if label.paragraph_id not in visible_to_global:
+                    preview = ", ".join(str(pid) for pid in sorted(visible_to_global)[:12]) or "（无）"
                     raise AnnotationStageRejection(
-                        f"paragraph_id 不属于本 chunk: {label.paragraph_id}",
+                        f"paragraph_id 不属于本章: {label.paragraph_id}",
                         record="metrics",
                         field="paragraph_id",
                         code="out_of_range",
-                        expected=f"本 chunk 可标注的段号（¶ 后的数字）: {preview}{'…' if len(known_ids) > 12 else ''}",
+                        expected=f"本章 可标注的段号（正文段首 `N：`）: {preview}"
+                        f"{'…' if len(visible_to_global) > 12 else ''}",
                     )
             self.bound_payloads["paragraph_labels"] = [
-                BoundParagraphLabel(paragraph_id=label.paragraph_id, emotion=label.emotion)
+                BoundParagraphLabel(
+                    paragraph_id=visible_to_global[label.paragraph_id],
+                    emotion=label.emotion,
+                )
                 for label in payload.labels
             ]
         else:
             self.bound_payloads["paragraph_labels"] = []
         self.metrics_payload = payload
         self.domain_payloads["metrics"] = payload
+
+    def _visible_global_pairs(self) -> list[tuple[int, int]]:
+        """用于把段首可见号与全局 paragraph_id 配成对（落库映射的单一来源）"""
+        assert self.paragraph_info is not None
+        return list(zip(self.paragraph_info.visible_ids(), self.paragraph_info.paragraph_ids, strict=True))
 
     # ------------------------------------------------------------------
     # 对话域：按候选序号即时落账三态判定
@@ -635,7 +657,7 @@ class AnnotationToolLedger:
         *,
         candidate_index: int,
         verdict: DialogueVerdict,
-        speaker_ref: int | str | None,
+        speaker_ref: str | None,
         tone: Tone | None,
     ) -> str:
         """用于按候选序号写入一条对话三态判断（同序号重写按更新语义）"""
@@ -659,7 +681,7 @@ class AnnotationToolLedger:
                     record=record,
                     field="speaker",
                     code="not_character",
-                    expected="character 类型的实体（编号 n 或 el 键）",
+                    expected="character 类型的实体（run 级 id 或 el 键）",
                 )
         try:
             item = DialogueInput(
@@ -704,8 +726,8 @@ class AnnotationToolLedger:
     def apply_relation(
         self,
         *,
-        from_ref: int | str,
-        to_ref: int | str,
+        from_ref: str,
+        to_ref: str,
         relation_type: RelationType,
     ) -> tuple[str, str, dict[str, Any]]:
         """用于写入一条本章确认存在的闭合关系边（同一对端点换类型即整体替换）
@@ -764,6 +786,100 @@ class AnnotationToolLedger:
         )
         return record, outcome, item.model_dump(mode="json")
 
+    def apply_relation_change(
+        self,
+        *,
+        from_ref: str,
+        to_ref: str,
+        relation_type: RelationType,
+        change_kind: str,
+        evidence: int | None = None,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """用于对一条既有关系边提交一次变化（强化/削弱/解除/修正/取代/撤回）
+
+        2026-09-18 从案例裁决下沉到写入路径：变化不再经案例池，端点按 search_graph 回显的
+        规范名提交、端点类型按 RELATION_DEFINITIONS 校验，变化记进图变更日志（落库从该日志
+        派生）。解除/修正/取代/撤回要求该边当前活动，对不存在的边报错——静默接受而终态不变
+        正是历史 run 里"撤销→复查→没变"空转的直接原因。
+        """
+        provisional = f"relation/{from_ref}-{to_ref}/{relation_type}"
+        self._require_writable(provisional)
+        if self.graph is None:
+            raise AnnotationInvariantError("write_relation 需要常驻事实图，graph 缺失")
+        internal = RELATION_CHANGE_KIND_LABELS.get(str(change_kind))
+        if internal is None:
+            raise AnnotationStageRejection(
+                f"change_kind 不是闭合取值: {change_kind}",
+                record=provisional,
+                field="change_kind",
+                code="invalid_value",
+                expected="新增/强化/削弱/解除/修正/取代/撤回",
+            )
+        from_name = self.resolve_entity_ref(from_ref, record=provisional, field="from_entity")
+        to_name = self.resolve_entity_ref(to_ref, record=provisional, field="to_entity")
+        record = f"relation/{from_name}-{to_name}/{relation_type}"
+        # evidence 是模型面的段首可见号：落库前按当前章映射回全局 paragraph_id
+        # （映射表就是标签域用的同一份 _visible_global_pairs，不另立口径）
+        if evidence is not None and self.paragraph_info is not None:
+            evidence = dict(self._visible_global_pairs()).get(int(evidence), evidence)
+        definition = RELATION_DEFINITIONS[str(relation_type)]
+        for field_name, name, expected_types in (
+            ("from_entity", from_name, definition["from_types"]),
+            ("to_entity", to_name, definition["to_types"]),
+        ):
+            try:
+                self._require_entity(
+                    name,
+                    entity_types=self._fact_entity_catalog(),
+                    expected_types=expected_types,
+                    label=f"write_relation.{field_name}",
+                )
+            except ValueError as exc:
+                raise AnnotationStageRejection(
+                    str(exc),
+                    record=record,
+                    field=field_name,
+                    code="endpoint_invalid",
+                    expected=f"端点类型必须属于 {list(expected_types)}",
+                ) from None
+        try:
+            self.graph.apply_relation_change(
+                from_entity=from_name,
+                to_entity=to_name,
+                relation_type=str(relation_type),
+                change_kind=internal,
+                reason=f"本章正文确认的关系变化：{change_kind}",
+                evidence=evidence,
+                case_id="",
+                case_type="",
+                target_key="",
+                # 无案例的变更没有案例锚点：落库要一个稳定目标（关系事实行的 fact_id 由
+                # 章 + 本条变更在本章变更日志里的序号派生，见 _persist_fact_resolution），
+                # 序号即调用点当时的日志长度（本条append前）
+                target_ref={
+                    "chapter_id": self.current_chapter_id,
+                    "change_index": len(self.graph.relation_change_ops),
+                },
+                chapter_id=self.current_chapter_id,
+            )
+        except ValueError as exc:
+            raise AnnotationStageRejection(
+                str(exc),
+                record=record,
+                field="change_kind",
+                code="change_target_missing",
+                expected=(
+                    "该边当前活动；先 search_graph 确认这条边还在（端点写回显的规范名），"
+                    "已解除的边不要重复解除"
+                ),
+            ) from None
+        return record, internal, {
+            "change_kind": str(change_kind),
+            "from_entity": from_name,
+            "to_entity": to_name,
+            "relation_type": str(relation_type),
+        }
+
     def _flush_relations(self) -> list[dict[str, Any]]:
         """用于把本章关系完整集合重放到事实图（先清空本章 assert 再按序重放）
 
@@ -812,7 +928,7 @@ class AnnotationToolLedger:
                     "outcome": "assert" if added else "skipped_existing",
                 }
             )
-        self.graph.record_relation_asserts(resolved_items, chapter_id=self.current_chunk_id)
+        self.graph.record_relation_asserts(resolved_items, chapter_id=self.current_chapter_id)
         self.domain_payloads["relations"] = list(self.written_relations.values())
         return outcomes
 
@@ -1065,7 +1181,7 @@ class AnnotationToolLedger:
                     record=participant_record,
                     field="entityid",
                     code="unregistered",
-                    expected="先用 write_entity 登记（或 search_graph 查已登记编号）",
+                    expected="先用 write_entity 登记（或 search_graph 查已登记 id）",
                 )
             if arg.role == EventParticipantRole.LOCATION and actual_type != EntityType.LOCATION.value:
                 raise AnnotationStageRejection(
@@ -1138,7 +1254,7 @@ class AnnotationToolLedger:
         entity_name: str,
         action: str,
     ) -> None:
-        """用于挡住同一人物的重复动态状态（人物,动作 在本 chunk 内唯一）
+        """用于挡住同一人物的重复动态状态（人物,动作 在本章 内唯一）
 
         写入点校验：触发时只拒绝这一条，已写入的记录与其他节点不受影响。
         """
@@ -1152,18 +1268,18 @@ class AnnotationToolLedger:
                 record=record,
                 field="action",
                 code="duplicate_observation",
-                expected="同一人物在本 chunk 内的动作不得重复（改写动作或更新已记的那条）",
+                expected="同一人物在本章 内的动作不得重复（改写动作或更新已记的那条）",
             )
 
     # ------------------------------------------------------------------
-    # 2026-09-14 回执返回写入内容（所有 write 回执回显写入内容）：
-    # content=本次写入的生效终值（服务端归一/端点解析已完成），不含 uuid
+    # 2026-09-14 回执返回写入内容（所有 write 回执回显写入内容）；2026-09-19 id 纪律：
+    # content=本次写入的生效终值（服务端归一/端点解析已完成），带 run 级 uuid id
 
     def entity_content(self, entity: EntityInput) -> dict[str, Any]:
-        """用于回显 write_entity 登记/更新后该实体生效记录（含服务端编号 n）"""
+        """用于回显 write_entity 登记/更新后该实体生效记录（含 run 级 id）"""
         stored = self.written_entities.get(_norm_entity_key(entity.name), entity)
         content = stored.model_dump(mode="json")
-        content["n"] = self.graph.entity_number(stored.name) if self.graph is not None else None
+        content["id"] = self.graph.entity_id(stored.name) if self.graph is not None else None
         return content
 
     def metrics_content(self) -> dict[str, Any]:
@@ -1179,9 +1295,10 @@ class AnnotationToolLedger:
         return content
 
     def event_content(self, *, el: str, isroot: bool) -> dict[str, Any]:
-        """用于回显 write_event 后该节点的服务端终值（id/描述/伏笔属性/参与者三态）
+        """用于回显 write_event 后该节点的服务端终值（节点 id/描述/伏笔属性/参与者三态）
 
-        el 与 isroot 是模型侧提交别名、树上不存储，因此不进 content；寻址面唯一在 record。
+        el 与 isroot 是模型侧提交别名、树上不存储，因此不进 content；id 纪律下
+        content 带 run 级 uuid 节点 id（=落库 event_id），树级 uuid 不外露。
         """
         cleaned = unicodedata.normalize("NFC", el).strip()
         tree_key, _, node_key = cleaned.partition(_EL_PATH_SEP)
@@ -1193,8 +1310,7 @@ class AnnotationToolLedger:
         else:
             event = self._bound_event(str(tree["nodes"][node_key.strip()]))
         content: dict[str, Any] = {
-            "node_id": str(event.node_id),
-            "tree_id": str(event.tree_id),
+            "id": str(event.node_id),
             "description": event.description,
         }
         if isroot:
@@ -1212,10 +1328,12 @@ class AnnotationToolLedger:
     # *_ledger() 供 graph 侧渲染写者面【进度账本】注入块（局部键面，不露 uuid）。
 
     def entity_ledger(self) -> list[dict[str, Any]]:
-        """用于列举本章已写入实体的账本（el 绑定序）：{el, name, n}，带 tags 与同一人物别名
+        """用于列举本章已写入实体的账本（el 绑定序）：{el, name, id, entity_type}，带 tags 与同一人物别名
 
         别名列（alias）与标签列直接对抗"外号没接上登记名→重复注册实体"（run b7477080
-        ch3 把猴子当新人物又建一套编号）。
+        ch3 把猴子当新人物又建一套登记）。
+        2026-09-20 entity_type：大类一经登记不可变更，账本行带上它，省得模型凭记忆重写
+        时写错大类（run 54a72932：10 次"实体大类已登记为 X"的拒绝）。
         """
         rows: list[dict[str, Any]] = []
         for el, key in self.entity_el_index.items():
@@ -1225,7 +1343,8 @@ class AnnotationToolLedger:
             row: dict[str, Any] = {
                 "el": el,
                 "name": stored.name,
-                "n": self.graph.entity_number(stored.name) if self.graph is not None else None,
+                "id": self.graph.entity_id(stored.name) if self.graph is not None else None,
+                "entity_type": str(stored.entity_type),
             }
             if stored.tags:
                 row["tags"] = list(stored.tags)
@@ -1290,24 +1409,24 @@ class AnnotationToolLedger:
         }
 
     # ------------------------------------------------------------------
-    # 收尾声明：唯一 finish_chapter，系统据此校验并冻结当前 chunk（冻结单位=整章）
+    # 收尾声明：唯一 finish，系统据此校验并冻结当前章（冻结单位=整章）
 
     def finish_chapter(self) -> dict[str, Any]:
-        """用于声明本章的语义写入已写完：补默认判定、校验并构造 ready_chunk
+        """用于声明本章的语义写入已写完：补默认判定、校验并构造 ready_chapter
 
-        写入是实时的，收尾只管一件件"把这个 chunk 组装出来"该管的事：指标缺提交则
-        拒绝（没载荷装不出 chunk）。逐条记录写入是否成功不在收尾判定里——失败的调用
+        写入是实时的，收尾只管一件件"把这一章组装出来"该管的事：指标缺提交则
+        拒绝（没载荷装不出完整章标注）。逐条记录写入是否成功不在收尾判定里——失败的调用
         在调用点就被单独拒绝并已回执，那条记录本来就没进图/进载荷，收尾按已写入内容
         完成即可；把收尾绑到无关记录的成功上，只会让"末轮出现一次失败"连带作废整章
         （run 1b388eb3 第 2 章实锤：末轮两条关系边被拒 + 收尾被拒 = 135 次调用全废）。
         构造失败整体回滚，已写入记录原样保留。
         """
-        if self.phase != "chunk_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chapter")
+        if self.phase != "chapter_open":
+            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish")
         if self.metrics_payload is None:
             raise AnnotationStageRejection(
                 "本章指标尚未提交，不予收尾",
-                record="finish_chapter",
+                record="finish",
                 field="metrics",
                 code="missing_record",
                 expected="先 write_metrics 提交摘要与叙事指标",
@@ -1316,22 +1435,22 @@ class AnnotationToolLedger:
         try:
             self._default_undecided_dialogues()
             self._ensure_domain_payloads()
-            self.ready_chunk = self._build_ready_chunk()
+            self.ready_chapter = self._build_ready_chapter()
         except Exception as exc:
             self.restore(snapshot)
             if isinstance(exc, AnnotationStageRejection):
                 raise
             raise AnnotationStageRejection(
                 f"章节收尾校验失败: {exc}",
-                record="finish_chapter",
+                record="finish",
                 code="assembly_failed",
-                expected="按报错核对已写入的记录后重新 finish_chapter",
+                expected="按报错核对已写入的记录后重新 finish",
             ) from None
-        self.write_records.extend(self._chunk_write_records())
+        self.write_records.extend(self._chapter_write_records())
         self.chapter_finished = True
         return {
             "status": "completed",
-            "chunk_id": self.current_chunk_id,
+            "chapter_id": self.current_chapter_id,
             "records": self._written_counts(),
             "dialogue_defaulted": list(self.dialogue_missing_indexes),
         }
@@ -1372,11 +1491,11 @@ class AnnotationToolLedger:
         self.bound_payloads.setdefault("dialogues", [])
         self.bound_payloads.setdefault("paragraph_labels", [])
 
-    def _chunk_write_records(self) -> list[dict[str, Any]]:
-        """用于收尾时把本次 chunk 的写入汇总成领域级审计记录（形状与此前一致）"""
+    def _chapter_write_records(self) -> list[dict[str, Any]]:
+        """用于收尾时把本章 的写入汇总成领域级审计记录（形状与此前一致）"""
         records: list[dict[str, Any]] = [
             {
-                "chunk_id": self.current_chunk_id,
+                "chapter_id": self.current_chapter_id,
                 "domain": "entities",
                 "payload": EntityDirectoryInput(
                     entities=list(self.written_entities.values())
@@ -1386,14 +1505,14 @@ class AnnotationToolLedger:
         if self.metrics_payload is not None:
             records.append(
                 {
-                    "chunk_id": self.current_chunk_id,
+                    "chapter_id": self.current_chapter_id,
                     "domain": "metrics",
                     "payload": self.metrics_payload.model_dump(mode="json"),
                 }
             )
         records.append(
             {
-                "chunk_id": self.current_chunk_id,
+                "chapter_id": self.current_chapter_id,
                 "domain": "events",
                 "payload": {
                     "tool": "write_event",
@@ -1405,7 +1524,7 @@ class AnnotationToolLedger:
         )
         records.append(
             {
-                "chunk_id": self.current_chunk_id,
+                "chapter_id": self.current_chapter_id,
                 "domain": "relations",
                 "payload": [
                     item.model_dump(mode="json") for item in self.written_relations.values()
@@ -1414,7 +1533,7 @@ class AnnotationToolLedger:
         )
         records.append(
             {
-                "chunk_id": self.current_chunk_id,
+                "chapter_id": self.current_chapter_id,
                 "domain": "dialogues",
                 "payload": [
                     item.model_dump(mode="json")
@@ -1475,20 +1594,20 @@ class AnnotationToolLedger:
         self,
         directory: EntityDirectoryInput,
     ) -> tuple[dict[str, EntityType], dict[str, str]]:
-        """2026-08-08 用于建立当前 chunk 唯一实体名称和类型目录"""
+        """2026-08-08 用于建立当前章 唯一实体名称和类型目录"""
         types: dict[str, EntityType] = {}
         names: dict[str, str] = {}
         for entity in directory.entities:
             normalized = unicodedata.normalize("NFC", entity.name).strip()
             key = normalized.casefold()
             if key in types:
-                raise ValueError(f"当前 chunk 实体名称重复: {normalized}")
+                raise ValueError(f"本章 实体名称重复: {normalized}")
             types[key] = entity.entity_type
             names[key] = normalized
         return types, names
 
     def _fact_entity_catalog(self) -> dict[str, EntityType]:
-        """2026-08-10 用于合并内存图已登记实体与当前 chunk 已声明实体作为事实端点目录"""
+        """2026-08-10 用于合并内存图已登记实体与当前章 已声明实体作为事实端点目录"""
         catalog = dict(self.graph.entity_types) if self.graph is not None else {}
         entities_payload = self.domain_payloads.get("entities")
         if entities_payload is not None:
@@ -1504,7 +1623,7 @@ class AnnotationToolLedger:
         expected_types: tuple[EntityType, ...] | None = None,
         label: str,
     ) -> str:
-        """2026-08-11 用于校验事实端点已由当前 chunk 实体目录或已登记实体声明（别名解析后）"""
+        """2026-08-11 用于校验事实端点已由当前章 实体目录或已登记实体声明（别名解析后）"""
         key = unicodedata.normalize("NFC", name).strip().casefold()
         resolved_key = key
         if self.graph is not None:
@@ -1512,7 +1631,7 @@ class AnnotationToolLedger:
         actual_type = entity_types.get(resolved_key) or entity_types.get(key)
         if actual_type is None:
             raise ValueError(
-                f"{label} 未在当前 chunk 登记: {name}（"
+                f"{label} 未在当前章 登记: {name}（"
                 "请先用 write_entity 登记该实体，或改用已登记实体名）"
             )
         if expected_types is not None and actual_type not in expected_types:
@@ -1530,7 +1649,7 @@ class AnnotationToolLedger:
     # 账本侧不再持有任何锚点/哈希派生逻辑
 
     def _validate_domain_duplicates(self, payloads: dict[str, Any]) -> None:
-        """2026-08-07 用于拒绝当前 chunk 各领域的重复语义事实"""
+        """2026-08-07 用于拒绝当前章 各领域的重复语义事实"""
         keys_by_domain: dict[str, list[tuple[Any, ...]]] = {
             "character_observations": [(item.character, item.action) for item in payloads["character_observations"]],
             "events": [(item.node_id,) for item in payloads.get("events") or []],
@@ -1555,11 +1674,11 @@ class AnnotationToolLedger:
             raise ValueError("；".join(errors))
 
     # ------------------------------------------------------------------
-    # ready_chunk 构造与冻结
+    # ready_chapter 构造与冻结
     # ------------------------------------------------------------------
 
-    def _build_ready_chunk(self) -> BoundChunkAnnotation:
-        """2026-08-20 用于从全部已接受领域校验并构造完整 BoundChunkAnnotation（优化：内联验证逻辑）"""
+    def _build_ready_chapter(self) -> BoundChapterAnnotation:
+        """2026-08-20 用于从全部已接受领域校验并构造完整 BoundChapterAnnotation（优化：内联验证逻辑）"""
         payloads = self.domain_payloads
         entity_types, _entity_names = self._entity_catalog(payloads["entities"])
         resolved_entity_types = {
@@ -1578,7 +1697,7 @@ class AnnotationToolLedger:
             actual_type = resolved_entity_types.get(resolved_key) or resolved_entity_types.get(key)
             if actual_type is None:
                 errors.append(
-                    f"[{index}] {label} 未在当前 chunk 登记: {name}"
+                    f"[{index}] {label} 未在当前章 登记: {name}"
                     "（请先用 write_entity 登记该实体，或改用已登记实体名）"
                 )
                 return
@@ -1611,10 +1730,9 @@ class AnnotationToolLedger:
 
         self._validate_domain_duplicates(payloads)
         bound_dialogues = list(self.bound_payloads["dialogues"])
-        # 2026-09-04 单一写面：entities/relations 不进 ready_chunk，
+        # 2026-09-04 单一写面：entities/relations 不进 ready_chapter，
         # 图域真相源是 FactGraph 操作日志，持久化从其派生
-        return BoundChunkAnnotation(
-            chunk_id=self.current_chunk_id,
+        return BoundChapterAnnotation(
             metrics=payloads["metrics"],
             character_observations=list(self.bound_payloads["character_observations"]),
             dialogues=bound_dialogues,
@@ -1626,7 +1744,7 @@ class AnnotationToolLedger:
         """2026-09-05 用于在冻结前确定性登记对话候选覆盖缺口（仅告警不阻断冻结）
 
         未提交判定的候选在收尾时统一按 not_dialogue 默认处理，这里把默认处理的
-        缺口随 chunk 留痕，供报告附录 B 展示。
+        缺口随章留痕，供报告附录 B 展示。
         """
         candidates = len(self.dialogue_candidates)
         if candidates == 0 or not self.dialogue_missing_indexes:
@@ -1640,38 +1758,43 @@ class AnnotationToolLedger:
         """2026-09-07 用于在冻结前确定性登记段落级监督覆盖缺口（仅告警不阻断冻结）
 
         每章 2-3 段为定稿密度（2026-09-14 由句级改段级）；低于 2 段（含空载荷）
-        随 chunk 留痕，供 linguistic 阶段边界拟合的样本量判断与报告附录展示。
+        随章留痕，供 linguistic 阶段边界拟合的样本量判断与报告附录展示。
         """
         labels = self.bound_payloads.get("paragraph_labels") or []
-        if len(labels) >= _PARAGRAPH_LABEL_MIN_PER_CHUNK:
+        if len(labels) >= _PARAGRAPH_LABEL_MIN_PER_CHAPTER:
             return []
         return [f"情绪标签覆盖: 仅标注 {len(labels)} 段（每章应自选 2-3 段）"]
 
-    def complete_active_chunk(self) -> BoundChunkAnnotation:
-        """用于在收尾声明后冻结当前 chunk（覆盖率告警随 chunk 留痕）"""
-        if self.phase != "chunk_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chunk")
+    def complete_active_chapter(self) -> BoundChapterAnnotation:
+        """用于在收尾声明后冻结当前章（覆盖率告警随章留痕）"""
+        if self.phase != "chapter_open":
+            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chapter")
         if not self.chapter_finished:
-            raise ValueError("当前 chunk 尚未收尾：先调用 finish_chapter")
-        if self.ready_chunk is None:
-            raise AnnotationInvariantError("已收尾但 ready_chunk 缺失，系统不变量被破坏")
+            raise ValueError("本章 尚未收尾：先调用 finish")
+        if self.ready_chapter is None:
+            raise AnnotationInvariantError("已收尾但 ready_chapter 缺失，系统不变量被破坏")
         warnings = [*self._dialogue_coverage_warnings(), *self._paragraph_label_coverage_warnings()]
-        chunk = self.ready_chunk.model_copy(update={"coverage_warnings": warnings}) if warnings else self.ready_chunk
-        self.completed_chunks.append(chunk)
+        chapter = (
+            self.ready_chapter.model_copy(update={"coverage_warnings": warnings}) if warnings else self.ready_chapter
+        )
+        self.completed_chapters.append(chapter)
         # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
         # 相等校验），不再登记文本授权集合
-        # 2026-08-14 D1：不再有 continuity_open 阶段，冻结 chunk 后直接进入终态
+        # 2026-08-14 D1：不再有 continuity_open 阶段，冻结章 后直接进入终态
         self.phase = "completed"
-        return chunk
+        return chapter
 
     def finish(self) -> BoundChapterAnnotation:
-        """2026-08-11 用于在 chunk 冻结后由系统用各 chunk summary 生成章节摘要并冻结章节"""
+        """2026-08-11 用于在章冻结后由系统产出章节正式标注
+
+        2026-09-19 章即块拍平：章节标注就是冻结的那一份（原"各 chunk summary
+        拼章节摘要"随两级结构退役，摘要在 metrics.summary）。
+        """
         if self.phase != "completed":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish_chapter")
-        annotation = BoundChapterAnnotation(
-            chapter_summary="\n".join(chunk.metrics.summary for chunk in self.completed_chunks),
-            chunks=list(self.completed_chunks),
-        )
+            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish")
+        if not self.completed_chapters:
+            raise AnnotationInvariantError("已冻结但 completed_chapters 为空，系统不变量被破坏")
+        annotation = self.completed_chapters[-1]
         self.annotation = annotation
         self.phase = "completed"
         return annotation
@@ -1721,8 +1844,8 @@ class AnnotationToolLedger:
                     "description": item.description,
                     "participants": [
                         {
-                            "n": (
-                                self.graph.entity_number(participant.entity)
+                            "id": (
+                                self.graph.entity_id(participant.entity)
                                 if self.graph is not None
                                 else None
                             ),
@@ -1749,7 +1872,7 @@ class AnnotationToolLedger:
         """2026-08-10 用于从账本确定性生成当前模型请求的上下文摘要"""
         return {
             "phase": self.phase,
-            "chunk_id": self.current_chunk_id,
+            "chapter_id": self.current_chapter_id,
             "chapter_finished": self.chapter_finished,
             # 2026-09-13 实时写入进度（仅供审计：模型看到的只有各小调用的回执）
             "written": self._written_counts(),
@@ -1757,8 +1880,8 @@ class AnnotationToolLedger:
             "entities": {
                 "declared": [
                     {
-                        "n": (
-                            self.graph.entity_number(entity.name)
+                        "id": (
+                            self.graph.entity_id(entity.name)
                             if self.graph is not None
                             else None
                         ),
@@ -1769,7 +1892,7 @@ class AnnotationToolLedger:
                 ],
                 "registered": (
                     [
-                        {"n": self.graph.entity_number(display_name), "name": display_name,
+                        {"id": self.graph.entity_id(display_name), "name": display_name,
                          "entity_type": self.graph.entity_types[key]}
                         for key, display_name in sorted(self.graph.entity_names.items())
                     ]
@@ -1805,7 +1928,7 @@ class AnnotationToolLedger:
         self.search_log.append(entry)
 
     def missing_content_domains(self) -> list[str]:
-        """2026-09-13 用于列出当前 chunk 尚无写入的领域（收尾提醒与审计共用）
+        """2026-09-13 用于列出当前章 尚无写入的领域（收尾提醒与审计共用）
 
         空域是合法终态（某些块确实没有关系/对话/事件），这里只作为提醒清单，
         不阻断收尾——模型看到清单后可自行判断"确实为空，直接收尾"。
@@ -1823,75 +1946,10 @@ class AnnotationToolLedger:
             missing.append("dialogues")
         return missing
 
-    # ------------------------------------------------------------------
-    # 章内并行两段式：写者取值域准入（设计文档 §7，防写者发明）
 
-    def admit_entity_directory(self, entities: list[EntityInput]) -> None:
-        """2026-09-12 用于校验 write_entity 实体名 ∈ 读者报告并集 ∪ 图中已登记名 ∪ 章正文逐字命中
-
-        写者看不到正文，实体名的合法来源是读者报告（entities/event_trees/
-        relations/dialogues/cases 各组）、历史已登记实体，或本章正文的逐字
-        命中（09-12 放宽：报告并集是抽取面不是穷举面，实测 ch26 把写者从
-        正文观察到的合法实体挡在门外且无法自纠）。报告、图与正文都不见的
-        名字一律拒绝并给出可自纠报错。单块章（reader_reports=None）不受限。
-        """
-        if self.reader_reports is None:
-            return
-        report_keys = report_entity_name_keys(self.reader_reports)
-        text_key = unicodedata.normalize("NFC", self.current_chunk_text).casefold()
-        invented: list[str] = []
-        for entity in entities:
-            name_key = normalize_message_name(entity.name)
-            if name_key in report_keys:
-                continue
-            if self.graph is not None and name_key in self.graph.entity_types:
-                continue
-            if name_key and name_key in text_key:
-                continue
-            invented.append(entity.name)
-        if invented:
-            raise ValueError(
-                "write_entity 准入失败，以下实体名未出现在任何读者上报、图中登记或本章正文: "
-                + "、".join(invented)
-                + "（请原样使用读者报告中的实体名，或提交本章正文逐字出现的实体名；"
-                "凭空拟造的名字不予接受）"
-            )
-
-    def admit_case_reason(self, reason: str, *, tool_name: str) -> None:
-        """2026-09-12 用于校验案例裁决 reason 含至少一条案例报告引文片段（§7）
-
-        reason 必须用读者报告引文拼装：包含任一已核验案例引文的原文或其
-        ≥12 字连续片段即通过；unverified 引文不得支撑裁决（09-12 裁决，
-        防幻觉硬门槛）。读者未上报任何案例观察时禁止一切裁决。单块章不受限。
-        2026-09-16 拒绝文案按 ask_reader_available 分叉：反问通道存在才建议追问，
-        没有这条通道的会话（章内并行 CodeAct 的章会话）给它能执行的替代路径。
-        """
-        if self.reader_reports is None:
-            return
-        quotes = report_case_quotes(self.reader_reports)
-        normalized_reason = unicodedata.normalize("NFC", reason)
-        min_fragment = 12
-        for quote in quotes:
-            if quote in normalized_reason:
-                return
-            for start in range(0, len(quote) - min_fragment + 1):
-                if quote[start : start + min_fragment] in normalized_reason:
-                    return
-        if quotes:
-            raise ValueError(
-                f"{tool_name}.reason 准入失败：案例裁决理由必须包含读者案例观察的已核验引文片段"
-                f"（原文或其 ≥{min_fragment} 字连续片段），不得自行转写。"
-                "请从 <ReaderReports> 的 cases 观察 evidence 中摘录原文"
-            )
-        advice = (
-            "若正文确有案例线索，请先用 ask_reader 向对应块读者追问"
-            if self.ask_reader_available
-            else "本路径没有反问通道：不要凭现有材料裁决，确需留下线索就用 push_case 登记"
-        )
-        raise ValueError(
-            f"{tool_name} 准入失败：读者未上报任何含已核验引文的案例观察，写者不得凭空裁决案例"
-            f"（引文未通过核验的观察不能支撑裁决）；{advice}"
-        )
+def normalize_message_name(name: str) -> str:
+    """2026-09-11 用于生成与实体目录一致的名称匹配键（NFC + strip + casefold）"""
+    return unicodedata.normalize("NFC", name).strip().casefold()
 
 
 def _normalize_query(query: str, *, tool_name: str) -> str:
@@ -1930,13 +1988,19 @@ def _short_pydantic_message(msg: str) -> str:
 
 # 2026-09-13 小调用改造：字段级取值域纠错文案（按 pydantic 失败族翻译成可自纠说明）
 _EVENT_ROLE_VALUES_TEXT = "主体/客体/接收者/帮助者/反对者/见证者/地点"
+
+# 引用被拒时回执里列几个本章已登记实体（"el=名字"对照）；超出部分只报总数，
+# 拒绝回执要能一眼读完（全章几十个实体时不铺开）
+_ENTITY_REF_HINT_LIMIT = 12
 _EVENT_NARRATIVE_ROLE_VALUES_TEXT = "主体/客体/发送者/接收者/帮助者/反对者/见证者"
 _STAGE_FIELD_EXPECTATIONS: dict[str, str] = {
     "verdict": "dialogue=真实对话 / inner_monologue=内心独白 / not_dialogue=误判候选",
     "tone": tone_catalog_text(),
     "relation_type": "闭合关系类型（见 write_relation 参数说明）",
-    "role": f"参与角色：{_EVENT_ROLE_VALUES_TEXT}",
-    "narrative_role": f"人物叙事功能：{_EVENT_NARRATIVE_ROLE_VALUES_TEXT}",
+    # 2026-09-20 回执只报字段取值域，"这个字段是什么、怎么判"归提示词面——写在载荷模型的
+    # 字段说明里（schema.ParticipantArg.role/narrative_role），本表不再替它复述。
+    "role": _EVENT_ROLE_VALUES_TEXT,
+    "narrative_role": _EVENT_NARRATIVE_ROLE_VALUES_TEXT,
     "entity_type": "character / location / item / organization",
     "narrative_function": "冲突 / 铺垫 / 转折",
     "confidence": "high / medium / low（伏笔回收可能性三档）",
@@ -1944,14 +2008,14 @@ _STAGE_FIELD_EXPECTATIONS: dict[str, str] = {
     "type": '"main"（顺延主因链）或 "secondary"（挂在当时主链尾）',
     "emotion": "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
     "emotional_valence": "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
-    "entityid": "实体引用：整数=运行期编号 n（write_entity / search_graph 回执），字符串=本 chunk 自定的 el 键",
-    "speaker": "说话人实体引用：编号 n 或本 chunk 的 el 键",
+    "entityid": "实体引用：本章 自定的 el 键，或 write_entity / search_graph 回执里的 run 级 id",
+    "speaker": "说话人实体引用：el 键或 run 级 id",
     "candidate_index": "1 基候选序号（见 DialogueCandidates 表）",
     "el": "实体/事件节点的章内局部键（实体如 a1；事件根如 t1、子事件如 t1/e2），由你指定",
     "isroot": "true=建事件树根（el=树键），false=子事件（el=树键/节点键）",
     "characters": "参与者数组，每项 {entityid, role[, narrative_role, action, emotion]}（character 三态必填）",
-    "labels": "段落情绪标签数组，每项 {paragraph_id, emotion}（paragraph_id 取正文 ¶ 号）",
-    "paragraph_id": "本 chunk 内的段落号（正文 ¶ 后的数字）",
+    "labels": "段落情绪标签数组，每项 {paragraph_id, emotion}（paragraph_id 取段首可见号，即正文每段开头的 `N：`）",
+    "paragraph_id": "段首可见号（正文每段开头的 `N：`）",
     "tags": f"字符串数组，{ENTITY_TAGS_RULE_TEXT}",
     "paragraph_ids": "全局段落 ID 列表",
     "summary": "本章摘要（非空文本）",
@@ -2038,16 +2102,6 @@ def translate_write_validation_error(
     return _translate_record_validation(record, exc, tool_name=tool_name)
 
 
-def _is_foreshadowing_root(ledger: AnnotationToolLedger, root_event_id: str) -> bool:
-    """2026-09-13 用于判定节点 id 是否为已知伏笔树根（历史树根视图 + 当前章 event_trees）"""
-    for view in ledger.history_tree_views.values():
-        if view.get("root_node_id") == root_event_id and view.get("is_foreshadow_setup"):
-            return True
-    for tree in ledger.event_trees.values():
-        if tree.get("root_node_id") == root_event_id and tree.get("isforeshadowing"):
-            return True
-    return False
-
 
 def _annotate_alias_links(
     response: dict[str, Any],
@@ -2088,21 +2142,21 @@ def _annotate_alias_links(
             others = [key for key in case.keys if normalize_message_name(key) != name_key]
             if not others:
                 continue
-            case_number = ledger.register_case_number(case.id)
-            ledger.authorized_chapter_ids.add(case.chunk_id)
+            ledger.known_case_ids.add(case.id)
+            ledger.authorized_chapter_ids.add(case.chapter_id)
             linked = []
             for other in others:
-                number = ledger.graph.entity_number(other) if ledger.graph is not None else None
-                linked.append({"n": number, "name": other} if number is not None else {"name": other})
-            links.append({"case_number": case_number, "linked": linked})
+                entity_id = ledger.graph.entity_id(other) if ledger.graph is not None else None
+                linked.append({"id": entity_id, "name": other} if entity_id is not None else {"name": other})
+            links.append({"case_id": case.id, "linked": linked})
         if links:
             view["alias_linked"] = links
             annotated = True
     if annotated:
         response["alias_note"] = (
-            "带 alias_linked 的节点存在未决的实体别名案例（编号见 case_number）："
+            "带 alias_linked 的节点存在未决的实体别名案例（案例 id 见 case_id）："
             "确认是同一人物就用 write_relation 提交「同一人物」边，两端随即按一个节点归并；"
-            "确认不是就用 close_case 关掉该编号。系统不会自行合并，未关闭的案例会一直留在案例池。"
+            "确认不是就用 close_case 关掉该 id。系统不会自行合并，未关闭的案例会一直留在案例池。"
         )
 
 
@@ -2115,8 +2169,8 @@ def _live_graph_response(
 ) -> dict[str, Any]:
     """2026-08-11 用于从常驻内存图回答节点邻域查询（运行时唯一图真相源）
 
-    2026-09-11 每个实体视图携带运行期编号 n；events/relations/dialogues 的实体引用
-    用该编号，不再用名称。
+    2026-09-19 每个实体视图携带 run 级 uuid id（entity_view 出 id）；events/relations/
+    dialogues 的实体引用用该 id 或本章 的 el 键。
     """
     names_by_key = dict(graph.entity_names)
     tags_by_key = dict(graph.entity_tags)
@@ -2176,13 +2230,6 @@ def _live_graph_response(
     }
 
 
-class AskReaderDispatcher(Protocol):
-    """2026-09-11 章内并行两段式：写者 ask_reader 的后端（工作流层实现，含轮数上限与读者续跑）"""
-
-    async def ask(self, block: int, question: str) -> str:
-        """2026-09-12 用于向指定子块（1 基）读者追问并同步取回其一次性补查报告"""
-
-
 # 2026-09-13 只读检索工具不做参数收紧：多余参数没有副作用，忽略即可（拒绝只会白烧一个回合）
 _ARGS_LENIENT_TOOL_NAMES = frozenset({"search_graph", "search_text", "search_event", "search_pool"})
 
@@ -2213,11 +2260,13 @@ def build_search_tools(
 
     @tool
     def search_graph(entities: list[str], relation_type: str | None = None) -> str:
-        """2026-08-09 用于按实体名查询图节点及与其相连的一跳邻域（边和邻居节点）
+        """按实体名查询图节点及其一跳邻域（相连的边与邻居节点）
 
-        结果的 matches/neighbors 都带运行期编号 n；events/relations/dialogues 的
-        实体引用一律填该编号。"""
-        if ledger.phase != "chunk_open":
+        matches 是命中的实体，neighbors 是它们的邻居，relations 是两端都在结果里的边；
+        matches/neighbors 都带 run 级 id，事件参与者、对话说话人与关系端点的实体引用
+        一律填该 id（或本章 自定的 el 键）。
+        """
+        if ledger.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_graph")
         if not entities:
             raise AnnotationInputError("search_graph.entities 不能为空")
@@ -2249,12 +2298,14 @@ def build_search_tools(
 
     @tool
     async def search_text(query: str) -> str:
-        """2026-08-30 用于一次返回有限正文且不暴露内部段落标识
+        """按关键词检索正文，每个命中是一段正文
 
         查询支持多关键词（空格/标点分隔，任一命中即返回）与通配符
-        （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」或「赤羽_尾鸡」。"""
+        （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」或「赤羽_尾鸡」；
+        回执只给正文文本与是否截断，不带段落的内部标识。
+        """
         normalized_query = _normalize_query(query, tool_name="search_text")
-        if ledger.phase != "chunk_open":
+        if ledger.phase != "chapter_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_text")
         expected_range = "all" if ledger.allow_future_context else "previous"
         results = await query_service.search_text(
@@ -2286,17 +2337,18 @@ def build_search_tools(
 
     @tool
     def search_event(keyword: str) -> str:
-        """2026-08-22 用于按关键词检索已完成章节的事件树并授权其 tree_id
+        """按关键词检索已完成章节的事件树，树根直接按回执里的 id 引用
 
         检索范围为树内任意节点的描述与参与者；查询支持多关键词
         （空格/标点分隔，任一命中即返回）与通配符
         （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」。
 
-        参与者的实体描述含运行期编号 n（图中已登记时）；因果前驱填 tree_id，
-        resolve_foreshadowing_case 的树根/挂树事件填节点 id（树根视图带
-        is_foreshadow_setup 与 foreshadowing_status，可据此发现活跃伏笔树）。"""
+        每棵命中树给出根事件的 id、描述与伏笔状态（is_foreshadow_setup /
+        foreshadowing_status / payoff_likelihood，可据此发现活跃伏笔树）；
+        参与者实体带 run 级 id；write_event 伏笔挂树的 root_event_id 填这里的 id。
+        """
         normalized_query = _normalize_query(keyword, tool_name="search_event")
-        if ledger.phase != "chunk_open":
+        if ledger.phase != "chapter_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_event")
         results = query_service.search_event_history(
             normalized_query,
@@ -2304,22 +2356,27 @@ def build_search_tools(
         )
         views: list[dict[str, Any]] = []
         for item in results:
-            # root_node_id 供 resolve_foreshadowing_case 的树根/挂树事件引用
-            ledger.authorized_event_ids.add(item.tree_id)
+            # 2026-09-19 id 纪律：只授权根节点 id（挂树引用面）；tree_id 是树级内部 id，
+            # 历史上误当事件 id 放行过（P0），本行不再授权 tree_id
             ledger.authorized_event_ids.add(item.root_node_id)
             ledger.authorized_tree_ids.add(item.tree_id)
             ledger.history_tree_views[item.tree_id] = item.model_dump(mode="json")
             views.append(
                 {
-                    **item.model_dump(mode="json"),
+                    "id": item.root_node_id,
+                    "chapter_order": item.chapter_order,
+                    "description": item.description,
                     "participants": _event_view_participants(item.participants, graph=ledger.graph),
+                    "is_foreshadow_setup": item.is_foreshadow_setup,
+                    "foreshadowing_status": item.foreshadowing_status,
+                    "payoff_likelihood": item.payoff_likelihood,
                 }
             )
         ledger.append_search_log(
             {
                 "tool": "search_event",
                 "query": normalized_query,
-                "hits": [item["tree_id"] for item in views],
+                "hits": [item["description"] for item in views],
                 "digest": "",
             }
         )
@@ -2327,17 +2384,16 @@ def build_search_tools(
 
     @tool
     def search_pool(query: str | None = None, case_type: str | None = None) -> str:
-        """2026-08-07 用于检索案例池并返回临时案例编号
+        """检索案例池，返回案例及其 id
 
-        案例不在正文中注入，本工具是发现案例的唯一通道：
-        - 只给 query：按关键词匹配案例 keys/description；
-          查询支持多关键词（空格/标点分隔，任一命中即返回）与通配符
-          （% 匹配任意长度、_ 匹配单个字符）。
+        案例不会自动出现在正文里，本面是发现已登记案例的唯一通道：
+        - 只给 query：按关键词匹配案例 keys/description；查询支持多关键词
+          （空格/标点分隔，任一命中即返回）与通配符（% 匹配任意长度、_ 匹配单个字符）。
         - 给 case_type（如 "entity_alias"/"伏笔疑点"，或 "all"）：按最新创建优先
           枚举该类型全部活动案例，不需要关键词；无命中提示时也可用它对案例重做全量枚举。
-        回执 pool 汇报池内仍有检索价值的 active 案例总数与类型分布（resolved 不计）。
-        本 chunk 内 push_case 登记的案例当章即可检索到（回执带 pending=true 标记）。"""
-        if ledger.phase != "chunk_open":
+        回执 pool 给出池内未解决案例的总数与类型分布（已解决的不计）。
+        刚用 push_case 登记的案例马上就能检索到（回执带 pending=true 标记）。"""
+        if ledger.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 search_pool")
         normalized_query = (
             _normalize_query(query, tool_name="search_pool") if query is not None else None
@@ -2347,13 +2403,13 @@ def build_search_tools(
         )
         if not normalized_query and not normalized_type:
             raise AnnotationInputError("search_pool.query 与 search_pool.case_type 至少提供一个")
-        # 2026-09-13 登记即进池：本 chunk push_case 登记的案例也进检索面
+        # 2026-09-13 登记即进池：本章 push_case 登记的案例也进检索面
         pending_ids = {case.target_key for case in ledger.pushed_cases}
         pending_views = [
             CaseSearchResult(
                 id=case.target_key,
                 type=case.type,
-                chunk_id=ledger.current_chapter_id,
+                chapter_id=ledger.current_chapter_id,
                 created_chapter=ledger.current_chapter_id,
                 keys=list(case.keys),
                 description=case.description,
@@ -2368,16 +2424,16 @@ def build_search_tools(
             pending_cases=pending_views,
         )
         views: list[dict[str, Any]] = []
-        case_numbers: list[int] = []
+        case_ids: list[str] = []
         for item in result.results:
             if isinstance(item, CaseSearchResult):
-                case_number = ledger.register_case_number(item.id)
-                # 案例展示即授权其源章（§12.3 章级定位），解决时不再因原文未读取被拒
-                ledger.authorized_chapter_ids.add(item.chunk_id)
-                case_numbers.append(case_number)
+                # 案例展示即授权其 id 与源章（§12.3 章级定位），解决时不再因原文未读取被拒
+                ledger.known_case_ids.add(item.id)
+                ledger.authorized_chapter_ids.add(item.chapter_id)
+                case_ids.append(item.id)
                 view = {
                     "result_kind": "case",
-                    "case_number": case_number,
+                    "id": item.id,
                     "type": item.type,
                     "created_chapter": item.created_chapter,
                     "description": item.description,
@@ -2391,7 +2447,7 @@ def build_search_tools(
                 "tool": "search_pool",
                 "query": normalized_query,
                 "case_type": normalized_type,
-                "hits": case_numbers,
+                "hits": case_ids,
                 "digest": "",
             }
         )
@@ -2420,34 +2476,29 @@ def build_search_tools(
 def build_annotation_tools(
     query_service: AnnotationQueryService,
     ledger: AnnotationToolLedger,
-    *,
-    ask_reader_dispatcher: AskReaderDispatcher | None = None,
 ) -> list[Any]:
-    """2026-08-07 用于构建语义写入搜索解决和完成工具集
-
-    2026-09-11 章内并行两段式：ask_reader_dispatcher 仅在写者面传入（§7 反问通道，
-    追问轮数进配置）；单块章不传，工具面与历史行为完全一致。"""
+    """2026-08-07 用于构建语义写入搜索解决和完成工具集"""
 
     @tool
     def write_metrics(
         summary: str,
         emotional_valence: int,
         narrative_function: NarrativeFunction,
-        pivot_moment: bool = False,
-        cliffhanger: bool = False,
+        pivot_moment: Annotated[bool, Field(description=PIVOT_MOMENT_DESCRIPTION)] = False,
+        cliffhanger: Annotated[bool, Field(description=CLIFFHANGER_DESCRIPTION)] = False,
         labels: list[ParagraphLabelInput] | None = None,
     ) -> str:
         """写入当前章节摘要、叙事指标与段落情绪标签（整域一次提交，写入即生效）
 
         emotional_valence 为情绪分值整数 -2..2（-2 强烈负面 / -1 轻微负面 / 0 中性 /
-        1 轻微正面 / 2 强烈正面）；summary 为本章该 chunk 的摘要（章节摘要由系统拼接）。
-        labels 为段落级情绪监督（每章自选 2-3 段）：paragraph_id 取正文 ¶ 后的数字
-        （两段式取读者报告证据的 paragraph_id），emotion 同 emotional_valence；
-        优先选情绪表达有代表性、或语气/标点有区分度的段落，也允许 0 分段。
-        同一 chunk 重复提交整域按最后一次为准（labels 同理，按段号去重后覆盖）。
+        1 轻微正面 / 2 强烈正面）；summary 为本章摘要。
+        labels 为段落情绪标签（每章自选 2-3 段）：paragraph_id 取段首可见号（正文每段
+        开头的 `N：`），emotion 同 emotional_valence；优先选情绪表达有代表性、或语气/
+        标点有区分度的段落，也允许 0 分段。
+        同一章 重复提交整域按最后一次为准（labels 同理，按段号去重后覆盖）。
         回执 content 回显当前整域生效指标。
         """
-        payload = ChunkMetricsInput(
+        payload = ChapterMetricsInput(
             summary=summary,
             emotional_valence=emotional_valence,
             narrative_function=narrative_function,
@@ -2490,8 +2541,8 @@ def build_annotation_tools(
         实体大类一经登记不可变更；同一词条的不同身份用区分性名称
         （如"圣城"是 location、"圣城朝堂"是 organization）。
         事件/关系/对话的实体引用用 el 键（同轮先登记后引用，不等回执）或
-        回执/检索编号 n——write_event 的 characters[].entityid 等字段两者都收。
-        回执 content 回显该实体合并后的生效记录（含服务端编号 n）。
+        回执/检索 id——write_event 的 characters[].entityid 等字段两者都收。
+        回执 content 回显该实体合并后的生效记录（含 run 级 id）。
         """
         # 2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸——
         # 首写被检索挡在门外会迫使判定跨回合等待回执；登记序由 el 键承接，闸门删净
@@ -2509,14 +2560,14 @@ def build_annotation_tools(
             present.add("description")
         if attributes is not None:
             present.add("attributes")
-        number = ledger.apply_entity(entity, el=el, present=present)
+        entity_id = ledger.apply_entity(entity, el=el, present=present)
         bound_el = unicodedata.normalize("NFC", el).strip()
         return json.dumps(
             {
                 "status": "written",
                 "record": f"entity/{entity.name}",
                 "el": bound_el,
-                "n": number,
+                "id": entity_id,
                 "content": ledger.entity_content(entity),
             },
             ensure_ascii=False,
@@ -2524,22 +2575,61 @@ def build_annotation_tools(
 
     @tool
     def write_dialogue(
-        candidate_index: int,
-        verdict: DialogueVerdict,
+        candidate_index: int | None = None,
+        verdict: DialogueVerdict | None = None,
         speaker: EntityRef | None = None,
         tone: Tone | None = None,
+        candidate_key: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "要订正的既有对话记录的键（候选表里那条候选的 candidate_key）；"
+                    "给了它就按更新语义改这条记录，不必再给 candidate_index/verdict"
+                )
+            ),
+        ] = None,
+        description: Annotated[
+            str | None,
+            Field(description="更新后的对话内容描述；不更新就省略"),
+        ] = None,
+        is_inner_monologue: Annotated[
+            bool | None,
+            Field(description="这条对话是否内心独白；不更新就省略"),
+        ] = None,
     ) -> str:
-        """按候选编号写入一条对话候选的三态判断（一次一个候选，写入即生效）
+        """按候选编号写入一条对话候选的三态判断，或更新一条既有对话记录（写入即生效）
 
         verdict: dialogue=真实对话 / inner_monologue=内心独白 /
         not_dialogue=误判候选（题字、描写被引号包裹等，此时只填 candidate_index 与 verdict）。
-        speaker 是说话人的实体引用——本 chunk 自定的 el 键或回执编号 n，
+        speaker 是说话人的实体引用——本章 自定的 el 键或回执/检索 id，
         无法确认时留空；tone 取参数说明里的闭合枚举，没有贴合的用「其他」。
         归属判据：多人齐声或同一条引语混有多人发言时，二选一——定主喊者，或 speaker 留
         空承认归属不明；一次定案，后续回合不因再权衡"谁更合适"而改判。
         判定与写入不必一轮做完：每条判定彼此独立、写入即生效，重写同序号按更新语义处理。
+        给 candidate_key 时按更新语义改既有记录（speaker/tone/description/is_inner_monologue
+        至少给一个），用于订正既有对话判定。
         回执 content 回显该候选的生效判定（speaker 已解析为登记名，含候选账本标识 candidate_key）。
         """
+        if candidate_key is not None:
+            return _update_dialogue_record(
+                ledger,
+                candidate_key=candidate_key,
+                speaker_ref=speaker,
+                tone=tone,
+                description=description,
+                is_inner_monologue=is_inner_monologue,
+            )
+        if candidate_index is None or verdict is None:
+            raise AnnotationStageRejection(
+                "缺少 candidate_index 与 verdict",
+                record="dialogue",
+                field="candidate_index",
+                code="invalid_call",
+                expected=(
+                    "判本章候选：给 candidate_index 与 verdict；"
+                    "更新既有记录：给 candidate_key（可带 speaker/tone/description/is_inner_monologue）"
+                ),
+            )
         record = ledger.apply_dialogue(
             candidate_index=candidate_index,
             verdict=verdict,
@@ -2567,23 +2657,60 @@ def build_annotation_tools(
             RelationType,
             Field(description="闭合关系类型，方向与两端实体类型约束如下：\n" + relation_catalog_text()),
         ],
+        change_kind: Annotated[
+            RelationChangeKindArg | None,
+            Field(
+                description=(
+                    "本章对这条关系做了什么变化（省略=新增）："
+                    "新增=确认这条关系存在；强化=关系更紧密；削弱=关系变疏远或分量下降；"
+                    "解除=关系终止；修正=关系的性质或描述被更正；取代=被另一条关系替换；"
+                    "撤回=此前登记有误、撤销该条。"
+                    "解除/修正/取代/撤回要求该边当前活动（用 search_graph 确认端点写法）"
+                )
+            ),
+        ] = None,
+        evidence: Annotated[
+            EvidenceNumber,
+            Field(
+                description=(
+                    "只用于变更类 change_kind：该变化在正文里的段首可见号（整数，如 12）；"
+                    "新增（建边）不用填，建边不消费它"
+                )
+            ),
+        ] = None,
     ) -> str:
-        """写入一条本章确认存在的闭合关系边（一次一条，两端用 el 键或编号 n，写入即入图）
+        """写入一条本章确认存在的闭合关系边，或对既有边提交一次变化（一次一条，写入即入图）
 
+        两端写实体引用：run 级 id（write_entity / search_graph 回执里的 id）或本章自定的
+        el 键，不是实体名称——名称一律按未登记引用拒绝。
         关系类型是闭合词表：方向与两端实体类型约束见 relation_type 参数说明，端点类型
         不符会被拒（如 主从 只接受 character 起点、利益 两端都要 character/organization）；
         物品/地点做参与者时用 位于 等允许该类端点的关系，或改由人物之间的关系表达。
-        本章正文确认的关系一律用本工具，不需要先 push_case 登记案例：resolve_fact_case
-        只用于解决案例池里已登记的疑点，为一条本章确认的关系先登记再解决会白烧往返。
-        新边建图 assert，重复提交同一条边自动去重；强化/削弱/解除一律走
-        resolve_fact_case，不通过本工具表达变化。
-        同一对端点重写（含换关系类型）按整体替换处理，写入顺序不影响终态。
+        省略 change_kind（或填"新增"）= 建边 assert，重复提交同一条边自动去重，同一对
+        端点重写（含换关系类型）按整体替换处理、写入顺序不影响终态。
+        填其它 change_kind = 改一条既有边（端点写实体引用，回执 content 回显两端登记名），
+        变化进图变更日志，该变化在正文里的位置用 evidence 给段首号；
+        解除/修正/取代/撤回对不存在的边报错（不静默接受）。
         回执 content 回显该边当前生效内容（两端为登记名）。
         """
-        record, outcome, content = ledger.apply_relation(
+        if change_kind is None or str(change_kind) == RelationChangeKindArg.CREATE.value:
+            # 建边路径不消费 evidence（关系事实行上没有这个字段）：给了也不作废整笔写入，
+            # 参数说明里已写明"不用填"（run 54a72932 里这一族失败全出在类型上，不是语义）
+            record, outcome, content = ledger.apply_relation(
+                from_ref=from_entity,
+                to_ref=to_entity,
+                relation_type=relation_type,
+            )
+            return json.dumps(
+                {"status": "written", "record": record, "outcome": outcome, "content": content},
+                ensure_ascii=False,
+            )
+        record, outcome, content = ledger.apply_relation_change(
             from_ref=from_entity,
             to_ref=to_entity,
             relation_type=relation_type,
+            change_kind=str(change_kind),
+            evidence=evidence,
         )
         return json.dumps(
             {"status": "written", "record": record, "outcome": outcome, "content": content},
@@ -2599,6 +2726,38 @@ def build_annotation_tools(
         confidence: Confidence | None = None,
         type: EventChildType | None = None,
         characters: list[ParticipantArg] | None = None,
+        foreshadowing_action: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "把本节点挂进一棵已存在的伏笔树时填：reinforce=续接（该伏笔在本章继续发展）/ "
+                    "payoff=回收（该伏笔在本章被交代，伏笔树随之收束为 likely_paid_off）；"
+                    '取值只能是 "reinforce" 或 "payoff"，与 root_event_id 同时给'
+                )
+            ),
+        ] = None,
+        root_event_id: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "伏笔树的根（埋设事件）的 run 级 id：用 search_event 树根视图里的 id；"
+                    "本章刚写出的树也可填它的树键（el）。与 foreshadowing_action 同时给"
+                )
+            ),
+        ] = None,
+        payoff_likelihood: Annotated[
+            Confidence | None,
+            Field(
+                description=(
+                    "挂进既有伏笔树时更新树根的回收可能性（本章证据改变了预期才给）："
+                    "high/medium/low；不给则根上的现值不动"
+                )
+            ),
+        ] = None,
+        strength: Annotated[
+            Confidence | None,
+            Field(description="挂进既有伏笔树时更新树根的强度（high/medium/low）；不给则不动"),
+        ] = None,
     ) -> str:
         """写入一个事件节点：isroot=true 建事件树根（el=树键如 t1），false 加子事件（el=t1/e2）
 
@@ -2611,14 +2770,18 @@ def build_annotation_tools(
         伏笔建模判据：埋设事件本身就是本章主链事件时，直接给主链根标 isforeshadowing=true，
         不再另立第二棵树重复同一时刻；仅当要埋的悬念不对应主链某个事件时才独立立伏笔树。
         同一悬念的建树选择一次定案，后续回合不再依同一证据复议。
+        续接/回收已存在的伏笔树用 foreshadowing_action + root_event_id：本节点仍然按 el
+        正常写入本章事件树，同时挂一条伏笔边进那棵树（root_event_id 用 search_event 树根
+        视图的 id，它必须是一棵伏笔树的根；不能挂到根自己身上）；payoff_likelihood
+        与 strength 只在挂边时有用，用来把树根上的回收可能性/强度更新成本章判断出的现值。
         characters 是该节点的参与者数组（可省）：根节点也直接挂参与者。character 实体
         每条必须带 narrative_role/action/emotion 三态（action 不超过 15 字、emotion
-        为 -2..2 整数；同一人物在本 chunk 内的动作不得重复），非 character（item/
+        为 -2..2 整数；同一人物在本章 内的动作不得重复），非 character（item/
         organization/location）条目只填 entityid/role，"地点"角色只用于 location。
-        entityid 填本 chunk 的 el 键或回执/检索编号 n（编号引用历史实体）。
+        entityid 填本章 的 el 键或回执/检索 id（id 引用历史实体）。
         同 el 重写按更新处理：根改描述/伏笔属性，子改描述（type 不可改写，要改换键）；
         characters 给出即整体替换该节点参与者列表，省略则保留。
-        回执 content 回显该节点落账记录（node_id/tree_id/描述/参与者三态，根带伏笔属性现值、子带 type）。
+        回执 content 回显该节点落账记录（节点 id/描述/参与者三态，根带伏笔属性现值、子带 type）。
         """
         record = ledger.apply_event(
             el=el,
@@ -2629,18 +2792,32 @@ def build_annotation_tools(
             node_type=type,
             characters=characters,
         )
+        attach = _attach_foreshadowing(
+            ledger,
+            el=el,
+            record=record,
+            foreshadowing_action=foreshadowing_action,
+            root_event_id=root_event_id,
+            payoff_likelihood=None if payoff_likelihood is None else str(payoff_likelihood),
+            strength=None if strength is None else str(strength),
+        )
+        content = ledger.event_content(el=el, isroot=isroot)
+        if attach is not None:
+            content = {**content, "foreshadowing": attach}
         return json.dumps(
-            {"status": "written", "record": record, "content": ledger.event_content(el=el, isroot=isroot)},
+            {"status": "written", "record": record, "content": content},
             ensure_ascii=False,
         )
 
     @tool
-    def finish_chapter() -> str:
+    def finish() -> str:
         """声明本章的语义写入已写完：本回合全部调用处理完后系统校验并冻结
 
         本章的全部内容（含整棵事件树）都可以在同一批调用里按顺序写完，末尾直接跟本工具，
         不必为了"先看回执"再拆一轮：局部键（实体 el、事件树键）由你指定、写入即生效，
         同批后面的调用直接可用。
+        本工具可以单独调用，也可以写在 execute_code 的程序末尾——写在程序末尾时在本程序
+        全部语句执行完后结算，与单独调用同一条判定。
         写入是实时生效的，本工具只做收尾：唯一会拒绝收尾的是指标（write_metrics）
         尚未提交——那时回执给出 missing_record，先补指标再收尾。
         本回合其他调用有没有失败与收尾无关：失败的那条只回滚它自己（回执已单独说明原因），
@@ -2651,40 +2828,304 @@ def build_annotation_tools(
         """
         return json.dumps({"status": "pending"}, ensure_ascii=False)
 
-    if ask_reader_dispatcher is not None:
+    def _is_foreshadowing_root(ledger: AnnotationToolLedger, root_event_id: str) -> bool:
+        """用于判定节点 id 是否为已知伏笔树根（历史树根视图 + 当前章 event_trees）"""
+        for view in ledger.history_tree_views.values():
+            if view.get("root_node_id") == root_event_id and view.get("is_foreshadow_setup"):
+                return True
+        for tree in ledger.event_trees.values():
+            if tree.get("root_node_id") == root_event_id and tree.get("isforeshadowing"):
+                return True
+        return False
 
-        @tool
-        async def ask_reader(block: int, question: str) -> str:
-            """2026-09-12 用于向指定子块读者追问并同步取回其补查报告（§7 反问通道）
+    def _attach_foreshadowing(
+        ledger: AnnotationToolLedger,
+        *,
+        el: str,
+        record: str,
+        foreshadowing_action: str | None,
+        root_event_id: str | None,
+        payoff_likelihood: str | None = None,
+        strength: str | None = None,
+    ) -> dict[str, Any] | None:
+        """用于把刚写入的事件节点挂进一棵已存在的伏笔树（续接/回收）
 
-            block 取 <ReaderReport> 标签的 block 编号（1 基）。追问会把对应读者
-            带着完整原文上下文重新唤起，其补查的一次性报告随本回执直接返回；
-            轮数上限由设置 writer_max_ask_rounds 控制（0 不限）。
-            没有想清楚不要问，同一疑问不要重复问。"""
-            normalized_question = unicodedata.normalize("NFC", question).strip()
-            if not normalized_question:
-                raise AnnotationInputError("ask_reader.question 不能为空")
-            return await ask_reader_dispatcher.ask(block, normalized_question)
+        2026-09-18 从案例裁决下沉到写入路径：本节点照常写进本章事件树，另记一条无案例的
+        foreshadowing 解决项（落库据此建伏笔边，回收时把根状态收束为 likely_paid_off）。
+        2026-09-19 payoff_likelihood/strength：挂边时顺带把树根的回收可能性与强度更新成
+        本章判断出的现值（落库层早就支持，此前写入路径没接）；只在挂边时接受，单给即拒绝。
+        """
+        confidence_values = {confidence.value for confidence in Confidence}
+        root_updates: dict[str, str] = {}
+        for field_name, value in (("payoff_likelihood", payoff_likelihood), ("strength", strength)):
+            if value is None:
+                continue
+            if value not in confidence_values:
+                raise AnnotationStageRejection(
+                    f"{field_name} 取值非法: {value}",
+                    record=record,
+                    field=field_name,
+                    code="invalid_value",
+                    expected=f"high / medium / low（{field_name} 三档）",
+                )
+            root_updates[field_name] = value
+        if foreshadowing_action is None and root_event_id is None:
+            if root_updates:
+                raise AnnotationStageRejection(
+                    "payoff_likelihood/strength 只用于挂进既有伏笔树",
+                    record=record,
+                    field=next(iter(root_updates)),
+                    code="not_on_attach",
+                    expected=(
+                        "要更新树根属性就同时给 foreshadowing_action 与 root_event_id（挂边）；"
+                        "本章新建伏笔树的回收可能性在 isroot=true 那次调用里用 confidence 给"
+                    ),
+                )
+            return None
+        if foreshadowing_action not in FORESHADOWING_ACTIONS or not root_event_id:
+            raise AnnotationStageRejection(
+                "foreshadowing_action 与 root_event_id 必须同时给",
+                record=record,
+                field="foreshadowing_action",
+                code="invalid_call",
+            expected=(
+                '同时给 foreshadowing_action（"reinforce"=续接 / "payoff"=回收）'
+                "与 root_event_id（search_event 树根视图里的 id）"
+            ),
+            )
+        action: Literal["reinforce", "payoff"] = (
+            "reinforce" if foreshadowing_action == "reinforce" else "payoff"
+        )
+        resolved_root = ledger.resolve_event_reference(str(root_event_id))
+        if resolved_root is None:
+            raise AnnotationStageRejection(
+                f"root_event_id 未由事件回执或 search_event 授权: {root_event_id}",
+                record=record,
+                field="root_event_id",
+                code="unknown_reference",
+                expected="search_event 树根视图里的 id（本章新建的伏笔树也可用它的章内局部键）",
+            )
+        resolved_event = ledger.resolve_event_reference(el)
+        if resolved_event is None:
+            raise AnnotationInvariantError(f"刚写入的事件节点解析不到 id: {el}")
+        if resolved_event == resolved_root:
+            raise AnnotationStageRejection(
+                "不能把事件挂到它自己身上",
+                record=record,
+                field="root_event_id",
+                code="invalid_value",
+                expected="挂进另一棵已存在的伏笔树（埋设事件的根自己不带挂边）",
+            )
+        if not _is_foreshadowing_root(ledger, resolved_root):
+            raise AnnotationStageRejection(
+                f"root_event_id 不是伏笔树的根（埋设事件）: {root_event_id}",
+                record=record,
+                field="root_event_id",
+                code="not_foreshadowing_root",
+                expected=(
+                    "活跃伏笔树用 search_event 检索（树根视图 is_foreshadow_setup=true）；"
+                    "新建伏笔树用 event(isforeshadowing=True)"
+                ),
+            )
+        ledger.resolved_cases.append(
+            ResolvedCase(
+                action="foreshadowing",
+                type="",
+                reason=f"{action}：{el} 挂进伏笔树根",
+                target_key="",
+                target_ref={"chapter_id": ledger.current_chapter_id},
+                foreshadowing_action=action,
+                foreshadowing_root_event_id=resolved_root,
+                foreshadowing_event_id=resolved_event,
+                payoff_likelihood=root_updates.get("payoff_likelihood"),
+                strength=root_updates.get("strength"),
+            )
+        )
+        return {"action": action, "root_event_id": resolved_root, "event_id": resolved_event, **root_updates}
+
+    def _chapter_candidate_by_key(
+        ledger: AnnotationToolLedger,
+        candidate_key: str,
+    ) -> int | None:
+        """用于把对话记录键翻成本章候选序号（不是本章候选即 None）"""
+        for index, candidate in enumerate(ledger.dialogue_candidates, start=1):
+            if unicodedata.normalize("NFC", str(candidate.candidate_key)).strip() == candidate_key:
+                return index
+        return None
+
+    def _update_dialogue_record(
+        ledger: AnnotationToolLedger,
+        *,
+        candidate_key: str,
+        speaker_ref: str | None,
+        tone: Tone | None,
+        description: str | None,
+        is_inner_monologue: bool | None,
+    ) -> str:
+        """用于更新一条既有对话记录（原案例裁决的对话更新下沉到写入路径）
+
+        地址就是候选表里那条候选的键（= `DialogueRecord.candidate_key`，不是记录行的
+        uuid 主键）；本工具不改候选账本，只记一条无案例的 dialogue 解决项供落库更新记录行。
+        目标必须是一条真会存在的记录行，否则整章落库时才会炸（目标不存在），所以这里先判：
+        本章候选按"判过且判成真对话/独白"判（记录行与判定同一事务落库），其余键问一次库
+        （既有记录）。
+        """
+        if ledger.phase != "chapter_open":
+            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 write_dialogue")
+        normalized_id = unicodedata.normalize("NFC", str(candidate_key)).strip()
+        record = f"dialogue/{normalized_id}"
+        if not normalized_id:
+            raise AnnotationStageRejection(
+                "candidate_key 不能为空",
+                record="dialogue",
+                field="candidate_key",
+                code="invalid_value",
+                expected="候选表里那条候选的 candidate_key（判过的候选）",
+            )
+        chapter_candidate = _chapter_candidate_by_key(ledger, normalized_id)
+        if chapter_candidate is not None:
+            judged = ledger.written_dialogues.get(chapter_candidate)
+            if judged is None:
+                raise AnnotationStageRejection(
+                    f"本章候选尚未判定，没有可更新的记录: {normalized_id}",
+                    record=record,
+                    field="candidate_key",
+                    code="candidate_not_judged",
+                    expected=(
+                        f"先按 candidate_index={chapter_candidate} 判它（写入即生效），"
+                        "再用 candidate_key 订正；本章候选的说话人/语气直接在同一次判定里给"
+                    ),
+                )
+            if judged.verdict == DialogueVerdict.NOT_DIALOGUE:
+                raise AnnotationStageRejection(
+                    f"该候选判为误判，没有对话记录可更新: {normalized_id}",
+                    record=record,
+                    field="candidate_key",
+                    code="not_dialogue",
+                    expected="误判候选（题字、描写被引号包裹等）不建记录；要改判按 candidate_index 重判",
+                )
+        elif not query_service.has_dialogue_record(normalized_id):
+            raise AnnotationStageRejection(
+                f"对话记录不存在: {normalized_id}",
+                record=record,
+                field="candidate_key",
+                code="unknown_record",
+                expected=(
+                    "本 run 里真存在的对话记录键（本章候选表里的 candidate_key；"
+                    "本章候选请直接在 dialogue 的判定里给 speaker_id/tone）"
+                ),
+            )
+        if all(value is None for value in (speaker_ref, tone, description, is_inner_monologue)):
+            raise AnnotationStageRejection(
+                "没有要更新的字段",
+                record=record,
+                field="candidate_key",
+                code="no_update",
+                expected="speaker/tone/description/is_inner_monologue 至少给一个",
+            )
+        speaker_name: str | None = None
+        if speaker_ref is not None:
+            speaker_name = ledger.resolve_entity_ref(speaker_ref, record=record, field="speaker")
+            try:
+                ledger._require_entity(
+                    speaker_name,
+                    entity_types=ledger._fact_entity_catalog(),
+                    expected_types=(EntityType.CHARACTER,),
+                    label="write_dialogue.speaker",
+                )
+            except ValueError as exc:
+                raise AnnotationStageRejection(
+                    str(exc),
+                    record=record,
+                    field="speaker",
+                    code="endpoint_invalid",
+                    expected="说话人必须是 character 实体",
+                ) from None
+        ledger.resolved_cases.append(
+            ResolvedCase(
+                action="dialogue",
+                type="",
+                reason=f"写入路径更新既有对话记录：{normalized_id}",
+                target_key=normalized_id,
+                target_ref={"chapter_id": ledger.current_chapter_id, "candidate_key": normalized_id},
+                speaker=speaker_name,
+                tone=tone,
+                description=description,
+                is_inner_monologue=is_inner_monologue,
+            )
+        )
+        return json.dumps(
+            {
+                "status": "written",
+                "record": record,
+                "content": {
+                    "candidate_key": normalized_id,
+                    "speaker": speaker_name,
+                    "tone": tone,
+                    "description": description,
+                    "is_inner_monologue": is_inner_monologue,
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    def _require_chapter_record(
+        ledger: AnnotationToolLedger,
+        value: str,
+        *,
+        record: str,
+        field: str,
+    ) -> str:
+        """2026-09-18 用于校验记录键确实是本章已经写出来的记录（案例只指向真实产出）
+
+        记录键就是写入回执里的 record（实体 entity/…、事件 t1 或 t1/e2、关系、对话各自的
+        形态；两个面的键空间不同，所以这里给的是"回执里的 record"这条判据而不是样例）。
+        可用集合由写入口在每次调用成功时登记（ledger.written_record_keys），这里读同一份。
+        未命中按结构化拒绝回，并把本章已写出的键列在 expected 里（模型可当场自纠）。
+        """
+        normalized = unicodedata.normalize("NFC", str(value)).strip()
+        expected = "写入回执里的 record（本章写出来的记录键）"
+        if not normalized:
+            raise AnnotationStageRejection(
+                f"{field} 不能为空",
+                record=record,
+                field=field,
+                code="invalid_value",
+                expected=expected,
+            )
+        if normalized not in ledger.written_record_keys:
+            known = "、".join(sorted(ledger.written_record_keys)[:8])
+            raise AnnotationStageRejection(
+                f"{field} 不是本章已经写出来的记录: {normalized}",
+                record=record,
+                field=field,
+                code="unknown_record",
+                expected=f"{expected}；本章已写出：{known or '（还没有任何记录）'}",
+            )
+        return normalized
 
     def _resolve_case_details(
         *,
         ledger: AnnotationToolLedger,
-        case_number: int,
+        case_id: str,
         tool_name: str,
     ) -> ActiveCaseDetails:
-        """2026-08-11 用于公共校验案例编号并回读活动案例稳定目标"""
-        if ledger.phase != "chunk_open":
+        """2026-08-11 用于公共校验案例 id 并回读活动案例稳定目标
+
+        2026-09-19 案例 id 化：无运行期编号，授权面=known_case_ids（search_pool 展示过
+        或 push_case 登记过的案例池行 uuid）。
+        """
+        if ledger.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 {tool_name}")
-        case_id = ledger.case_number_registry.get(case_number)
-        if case_id is None:
+        if case_id not in ledger.known_case_ids:
             raise AnnotationAuthorizationError(
-                f"case_number 未由 search_pool 检索或 push_case 登记返回: {case_number}："
+                f"case_id 未由 search_pool 检索或 push_case 登记返回: {case_id}："
                 "案例不在正文中注入，请先 search_pool 检索（可用 case_type=\"all\" 枚举全部未解决案例）"
-                "或用 push_case 登记新疑点，再用回执中的 case_number 解决"
+                "或用 push_case 登记新疑点，再用回执中的 id 解决"
             )
         if case_id in ledger.resolved_case_ids:
-            raise AnnotationInputError(f"case_number 已经解决: {case_number}")
-        # 2026-09-13 登记即进池：本 chunk 内 push_case 登记的案例当章即可解决——
+            raise AnnotationInputError(f"案例已经解决: {case_id}")
+        # 2026-09-13 登记即进池：本章 内 push_case 登记的案例当章即可解决——
         # 池行要到本章收尾才落库，此处用待建案例本体做稳定目标（id 即 target_key，
         # 与落库时的行 id 一致），源章就是当前章，无需再做展示授权校验。
         pending = ledger.pending_case_by_id(case_id)
@@ -2692,7 +3133,7 @@ def build_annotation_tools(
             return ActiveCaseDetails(
                 id=pending.target_key,
                 type=pending.type,
-                chunk_id=ledger.current_chapter_id,
+                chapter_id=ledger.current_chapter_id,
                 created_chapter=ledger.current_chapter_id,
                 keys=list(pending.keys),
                 description=pending.description,
@@ -2701,350 +3142,36 @@ def build_annotation_tools(
             )
         details = query_service.fetch_active_case_details(case_id)
         if details is None:
-            raise AnnotationInputError(f"案例不存在或已不再 active: {case_number}")
+            raise AnnotationInputError(f"案例不存在或已不再 active: {case_id}")
         # 2026-08-14 M6：案例源是章级定位——章被展示授权或为当前章即可解决
         allowed_chapter_ids = ledger.authorized_chapter_ids | {ledger.current_chapter_id}
-        if details.chunk_id not in allowed_chapter_ids:
+        if details.chapter_id not in allowed_chapter_ids:
             raise AnnotationAuthorizationError(
-                f"案例 {details.id} 原文所在章 {details.chunk_id} 未经本轮展示授权，"
+                f"案例 {details.id} 原文所在章 {details.chapter_id} 未经本轮展示授权，"
                 "请先 search_text 查询已授权前文后再解决"
             )
         return details
-
-    def _require_dialogue_case(details: ActiveCaseDetails) -> None:
-        """2026-09-08 用于校验案例确为带对话目标的对话类案例
-
-        第16章死锁：模型把编号表里的 entity_alias/伏笔疑点案例误当对话疑点
-        用 resolve_dialogue_case 解决，工具硬编码 action="dialogue" 入账，
-        持久化按对话路径找不到对话记录直接崩溃。对话类案例的稳定判据是
-        target_ref 含 dialogue_id（push_case(dialogue_id=...) 登记时写入），
-        这里按结构拒绝，回执直接告诉模型正文候选的正确通道。
-        """
-        if details.target_ref.get("dialogue_id") or details.target_ref.get("candidate_key"):
-            return
-        raise AnnotationInputError(
-            f"resolve_dialogue_case 只能解决含 dialogue_id 的对话类案例，案例 {details.id}"
-            f"（{details.target_ref.get('kind') or '未知'}）没有对话目标："
-            "正文对话候选的说话人/语气属于对话域，按 candidate_index 经对话域回执提交；"
-            "疑点案例用 resolve_foreshadowing_case，关系事实用 resolve_fact_case，仅需关闭用 close_case"
-        )
-
-    def _require_suspicion_case(details: ActiveCaseDetails, tool_name: str) -> None:
-        """2026-09-08 用于校验案例确为疑点类（伏笔线程确认只对疑点案例开放）
-
-        关系事实/实体别名不是疑点：前者走 resolve_fact_case 建改删关系，
-        后者确认后用 close_case 关闭；误走伏笔路径会凭空建立伏笔线程。
-        """
-        kind = details.target_ref.get("kind") or ""
-        if kind.endswith("疑点"):
-            return
-        raise AnnotationInputError(
-            f"{tool_name} 只能解决疑点类案例（伏笔疑点/连续性疑点等），"
-            f"案例 {details.id} 的类型是 {kind or '未知'}："
-            "关系事实用 resolve_fact_case，实体别名确认后用 close_case 关闭"
-        )
-
-    def _register_foreshadowing_case(
-        ledger: AnnotationToolLedger,
-        *,
-        root_event_id: str,
-        event_id: str,
-        root_reference: str,
-        event_reference: str,
-    ) -> ActiveCaseDetails:
-        """2026-09-13 用于为一次伏笔挂树自动登记「伏笔疑点」案例并回读其稳定目标
-
-        run c80105cc 实测：case_number 曾为必填却在模型可见面上零说明，模型读完
-        "章内局部键写入即生效"的 docstring 后判定"池里没有该伏笔案例、无法调用"，
-        ch3/ch4 跨回合重推 4~8 次共约 3 万字符、只产出 1 次调用。挂树只认树根与
-        挂树事件的键，案例只是池内记账：省略编号时由服务端补登记，编号随回执返回。
-        """
-        target_key = uuid4().hex
-        ledger.pushed_cases.append(
-            PendingCase(
-                type="伏笔疑点",
-                chunk_id=ledger.current_chunk_id,
-                keys=[root_reference, event_reference],
-                description=f"伏笔挂树：{root_reference} → {event_reference}"[:100],
-                target_key=target_key,
-                target_ref={
-                    "kind": "伏笔疑点",
-                    "chunk_id": ledger.current_chunk_id,
-                    "root_event_id": root_event_id,
-                    "event_id": event_id,
-                },
-            )
-        )
-        return _resolve_case_details(
-            ledger=ledger,
-            case_number=ledger.register_case_number(target_key),
-            tool_name="resolve_foreshadowing_case",
-        )
 
     def _append_resolved(
         ledger: AnnotationToolLedger,
         details: ActiveCaseDetails,
         resolved: ResolvedCase,
     ) -> str:
-        """2026-08-11 用于登记解决结果并返回固定回执"""
+        """2026-08-11 用于登记解决结果并返回固定回执（案例 id 即池行 uuid）"""
         ledger.resolved_cases.append(resolved)
-        case_number = ledger.case_number_by_id[details.id]
         return json.dumps(
-            {"accepted": True, "case_number": case_number, "action": resolved.action},
+            {"accepted": True, "case_id": details.id, "action": resolved.action},
             ensure_ascii=False,
         )
 
-    def _require_action_entity(
-        ledger: AnnotationToolLedger,
-        name: str,
-        *,
-        expected_types: tuple[EntityType, ...],
-        label: str,
-    ) -> None:
-        """2026-08-11 用于校验解决端点已由当前 chunk 或已登记实体声明"""
-        entity_types = ledger._fact_entity_catalog()
-        ledger._require_entity(
-            name,
-            entity_types=entity_types,
-            expected_types=expected_types,
-            label=label,
-        )
-
+    # 2026-09-18 误报出口：案例面收成 push_case + promise_case + close_case。判错、不该
+    # 再留在池里的案例用本工具关闭（无语义变化）；有产出记录的用 promise_case 兑现
     @tool
-    def resolve_dialogue_case(
-        case_number: CaseNumber,
-        reason: str,
-        speaker: EntityRef | None = None,
-        tone: Tone | None = None,
-        description: str | None = None,
-        is_inner_monologue: bool | None = None,
-    ) -> str:
-        """2026-08-11 用于通过临时编号把案例解决为对话记录更新（至少提供一个更新字段）
-
-        2026-09-10 编号判据：case_number 仅指 search_pool 展示的案例
-        （含 push_case 登记的对话疑点）；正文 DialogueCandidates 无案例编号，
-        说话人/语气按 candidate_index 经对话域回执提交，两类编号互不通用。
-
-        2026-09-14 speaker 为实体引用（本 chunk 的 el 键或回执编号 n）；
-        tone 取参数说明里的同一套闭合枚举。
-        """
-        ledger.admit_case_reason(reason, tool_name="resolve_dialogue_case")
+    def close_case(case_id: CaseId, reason: str) -> str:
+        """关闭案例：不产生任何语义变化，只把案例标记为已解决"""
         details = _resolve_case_details(
             ledger=ledger,
-            case_number=case_number,
-            tool_name="resolve_dialogue_case",
-        )
-        _require_dialogue_case(details)
-        resolved_speaker: str | None = None
-        if speaker is not None:
-            resolved_speaker = ledger.resolve_entity_ref(
-                speaker,
-                record=f"case/{case_number}",
-                field="speaker",
-            )
-            _require_action_entity(
-                ledger,
-                resolved_speaker,
-                expected_types=(EntityType.CHARACTER,),
-                label="resolve_dialogue_case.speaker",
-            )
-        resolved = ResolvedCase(
-            case_id=details.id,
-            action="dialogue",
-            type=details.type,
-            reason=reason,
-            target_key=details.target_key,
-            target_ref=details.target_ref,
-            speaker=resolved_speaker,
-            tone=tone,
-            description=description,
-            is_inner_monologue=is_inner_monologue,
-        )
-        return _append_resolved(ledger, details, resolved)
-
-    @tool
-    def resolve_fact_case(
-        case_number: CaseNumber,
-        reason: str,
-        from_entity: EntityRef,
-        to_entity: EntityRef,
-        relation_type: Annotated[
-            RelationType,
-            Field(description="闭合关系类型，方向与两端实体类型约束如下：\n" + relation_catalog_text()),
-        ],
-        change_kind: RelationChangeKindArg,
-    ) -> str:
-        """2026-08-11 用于通过临时编号把案例解决为图关系建改删（change_kind 表达变化）
-
-        2026-09-13 通道口径（run c80105cc 实测每章约 1.5K 字符在两条路之间权衡）：
-        本工具只解决案例池里已登记的关系疑点（案例编号来自 search_pool 或 push_case
-        回执）；本章正文确认的关系直接用写边工具提交，不要为它先 push_case 再解决。
-
-        2026-09-14 端点 from_entity/to_entity 为实体引用（本 chunk 的 el 键或
-        write_entity/search_graph 回执编号 n）；change_kind 取值：新增/强化/削弱/解除/修正/取代/撤回。
-        relation_type 的闭合词表与两端实体类型约束同在建边工具（见本参数说明）；
-        解除/修正/取代/撤回要求该边当前活动，对不存在的边操作会报错并回滚本回合。
-
-        2026-09-04 单一写面：本工具只更新内存 FactGraph（终态即时生效 +
-        操作日志登记），不再向 resolved_cases 追加 fact 动作；持久化层从
-        操作日志派生关系事实。解除不存在的边会直接报错并回滚本回合，
-        避免"accepted 但 search_graph 不变"的空转。"""
-        ledger.admit_case_reason(reason, tool_name="resolve_fact_case")
-        details = _resolve_case_details(
-            ledger=ledger,
-            case_number=case_number,
-            tool_name="resolve_fact_case",
-        )
-        definition = RELATION_DEFINITIONS.get(relation_type)
-        if definition is None:
-            raise AnnotationInputError(f"resolve_fact_case.relation_type 必须是闭合关系类型: {relation_type}")
-        if ledger.graph is None:
-            raise AnnotationInvariantError("resolve_fact_case 需要常驻事实图，graph 缺失")
-        # 2026-09-11 模型面中文词 → 内部英文值域（持久化/API/前端契约零变化）
-        internal_change_kind = RELATION_CHANGE_KIND_LABELS[str(change_kind)]
-        from_name = ledger.resolve_entity_ref(from_entity, record=f"case/{case_number}", field="from_entity")
-        to_name = ledger.resolve_entity_ref(to_entity, record=f"case/{case_number}", field="to_entity")
-        _require_action_entity(
-            ledger,
-            from_name,
-            expected_types=tuple(definition["from_types"]),
-            label="resolve_fact_case.from_entity",
-        )
-        _require_action_entity(
-            ledger,
-            to_name,
-            expected_types=tuple(definition["to_types"]),
-            label="resolve_fact_case.to_entity",
-        )
-        ledger.graph.apply_relation_change(
-            from_entity=from_name,
-            to_entity=to_name,
-            relation_type=relation_type,
-            change_kind=internal_change_kind,
-            reason=reason,
-            case_id=details.id,
-            case_type=details.type,
-            target_key=details.target_key,
-            target_ref=details.target_ref,
-            chapter_id=ledger.current_chunk_id,
-        )
-        case_number = ledger.case_number_by_id[details.id]
-        return json.dumps(
-            {"accepted": True, "case_number": case_number, "action": "fact"},
-            ensure_ascii=False,
-        )
-
-    @tool
-    def resolve_foreshadowing_case(
-        *,
-        case_number: Annotated[
-            int | None,
-            Field(
-                description=(
-                    f"{CASE_NUMBER_RULE}；省略则由服务端就本次挂树自动登记一条"
-                    "「伏笔疑点」案例并回执编号"
-                )
-            ),
-        ] = None,
-        reason: str,
-        foreshadowing_action: str,
-        root_event_id: str,
-        event_id: str,
-        payoff_likelihood: Confidence | None = None,
-        strength: Confidence | None = None,
-    ) -> str:
-        """2026-08-11 用于把本章事件挂进伏笔树（续接或回收）
-
-        2026-09-13 伏笔即事件树：root_event_id 是伏笔树的根（埋设事件），event_id 是
-        本章要挂进树的事件。两者都填章内局部键（事件回执的 t1、t1/e1）或
-        search_event 树根视图的 root_node_id；章内局部键写入即生效，随时可用。
-        foreshadowing_action 只能是 "reinforce"（续接）
-        或 "payoff"（回收，挂入后伏笔树收束为 likely_paid_off）。可选更新根属性
-        payoff_likelihood/strength（high/medium/low）；判断并非伏笔则用
-        close_case。活跃伏笔树的发现通道是 search_event（树根视图带
-        foreshadowing_status）；新伏笔树用 write_event(isroot=true, isforeshadowing=true)
-        建根。case_number 可以省略：挂树只认树根与挂树事件的键，案例仅是池内记账，
-        省略时服务端自动登记一条「伏笔疑点」案例并随回执给出编号；池里已有
-        对应疑点案例时把 search_pool 回执里的编号传进来即可。"""
-        ledger.admit_case_reason(reason, tool_name="resolve_foreshadowing_case")
-        details: ActiveCaseDetails | None = None
-        if case_number is not None:
-            details = _resolve_case_details(
-                ledger=ledger,
-                case_number=case_number,
-                tool_name="resolve_foreshadowing_case",
-            )
-            _require_suspicion_case(details, "resolve_foreshadowing_case")
-        if foreshadowing_action not in ("reinforce", "payoff"):
-            raise AnnotationInputError(
-                f"resolve_foreshadowing_case.foreshadowing_action 只能是 \"reinforce\"（续接）"
-                f"或 \"payoff\"（回收）: {foreshadowing_action!r}"
-            )
-        # 收窄到 Literal 供 ResolvedCase 校验（上方成员检查保证二值）
-        action: Literal["reinforce", "payoff"] = (
-            "reinforce" if foreshadowing_action == "reinforce" else "payoff"
-        )
-        root_event_reference, event_reference = root_event_id, event_id
-        for field_name, value in (("root_event_id", root_event_id), ("event_id", event_id)):
-            resolved_id = ledger.resolve_event_reference(value)
-            if resolved_id is None:
-                # 2026-09-04 第6章教训：历史视图同时给出 tree_id 与 root_node_id，
-                # 模型易把 tree_id 当节点 id 传 → 空转至回合上限，此处点名这层混淆。
-                hint = (
-                    "（这是事件树的 id 而非节点 id；本章事件用章内局部键 t1/e1，"
-                    "历史事件用 search_event 树根视图的 root_node_id）"
-                    if value in ledger.authorized_tree_ids
-                    else "（本章事件用章内局部键，如 t1、t1/e1；历史事件用 search_event 的 root_node_id）"
-                )
-                raise AnnotationAuthorizationError(
-                    f"{field_name} 未由事件回执或 search_event 授权: {value}{hint}"
-                )
-            if field_name == "root_event_id":
-                root_event_id = resolved_id
-            else:
-                event_id = resolved_id
-        if event_id == root_event_id:
-            raise AnnotationInputError(
-                "event_id 不得与 root_event_id 相同（埋设事件自身不挂边）: "
-                f"{root_event_reference} / {event_reference}"
-            )
-        if not _is_foreshadowing_root(ledger, root_event_id):
-            raise AnnotationInputError(
-                f"root_event_id 不是伏笔树的根（埋设事件）: {root_event_id}；"
-                "活跃伏笔树用 search_event 检索（树根视图 isforeshadow_setup=true），"
-                "新伏笔树用 write_event(isroot=true, isforeshadowing=true) 建根"
-            )
-        # 全部挂树校验通过后才补登记案例：被拒的调用不得在池里留下孤儿活动案例
-        if details is None:
-            details = _register_foreshadowing_case(
-                ledger,
-                root_event_id=root_event_id,
-                event_id=event_id,
-                root_reference=root_event_reference,
-                event_reference=event_reference,
-            )
-        resolved = ResolvedCase(
-            case_id=details.id,
-            action="foreshadowing",
-            type=details.type,
-            reason=reason,
-            target_key=details.target_key,
-            target_ref=details.target_ref,
-            foreshadowing_action=action,
-            foreshadowing_root_event_id=root_event_id,
-            foreshadowing_event_id=event_id,
-            payoff_likelihood=payoff_likelihood,
-            strength=strength,
-        )
-        return _append_resolved(ledger, details, resolved)
-
-    @tool
-    def close_case(case_number: CaseNumber, reason: str) -> str:
-        """2026-08-11 用于通过临时编号关闭案例（不产生任何语义变化，仅标记已解决）"""
-        ledger.admit_case_reason(reason, tool_name="close_case")
-        details = _resolve_case_details(
-            ledger=ledger,
-            case_number=case_number,
+            case_id=case_id,
             tool_name="close_case",
         )
         resolved = ResolvedCase(
@@ -3057,22 +3184,30 @@ def build_annotation_tools(
         )
         return _append_resolved(ledger, details, resolved)
 
+    # 2026-09-04 单一写面：本工具只更新内存 FactGraph（终态即时生效 + 操作日志登记），
+    # 不再向 resolved_cases 追加 fact 动作，持久化层从操作日志派生关系事实。
+    # 2026-09-13 通道口径（run c80105cc 实测每章约 1.5K 字符在两条路之间权衡）：
+    # 正文确认的关系用写边工具，本工具只解决案例池里已登记的疑点。
+    # 2026-09-13 伏笔即事件树：伏笔不再有自己的线程对象，埋设事件本身就是树根，
+    # 续接/回收都表达为"把一个事件挂进某棵已存在的树"。
+    # 2026-09-13 登记即进池：案例不再等本章收尾才可检索，检索与解决面当章即可用
     @tool
     def push_case(
         description: str,
         keys: list[str],
         type: str,
-        dialogue_id: str | None = None,
+        record_id: str | None = None,
     ) -> str:
-        """2026-08-11 用于把分析中发现的新连续性疑点创建为新案例登记进案例池
-        （type 是任意描述字符串；description 只写人类可读说明且不超过 100 字，
-        keys/type/dialogue_id 必须作为独立参数提交，示例：
-        push_case(description="玉戒尺在第 5 章异常发光", keys=["玉戒尺"], type="伏笔疑点")）
+        """把分析中发现的新连续性疑点登记进案例池（回执给出案例 id）
 
-        2026-09-13 登记即进池：回执直接给出案例编号，本案例本章内就能用
-        search_pool 检索到、也能直接用该编号 resolve_*（本章收尾时它才作为案例池
-        行落库，但检索与解决面当章即可用）。"""
-        if ledger.phase != "chunk_open":
+        type 是任意描述字符串（如 "伏笔疑点"）；description 只写人类可读说明且不超过 100 字；
+        keys/type/record_id 必须作为独立参数提交，示例：
+        push_case(description="玉戒尺在第 5 章异常发光", keys=["玉戒尺"], type="伏笔疑点")。
+        record_id 填这条疑点涉及的产出记录键（写入回执里的 record，实体/关系/事件/对话都行），
+        没有明确记录就省略。
+        登记的案例马上就能用 search_pool 检索到，也能直接用回执里的 id promise_case 兑现。
+        """
+        if ledger.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push_case")
         normalized_type = unicodedata.normalize("NFC", type).strip()
         if not normalized_type:
@@ -3085,10 +3220,10 @@ def build_annotation_tools(
                 "push_case.description 不能超过 100 字，请精简为人类可读要点"
                 "（案例检索载荷有长度上限）"
             )
-        json_marker_fields = ('"keys"', '"type"', '"dialogue_id"')
+        json_marker_fields = ('"keys"', '"type"', '"record_id"')
         if any(marker in normalized_description for marker in json_marker_fields):
             raise AnnotationInputError(
-                "push_case.description 只接受人类可读说明；keys/type/dialogue_id"
+                "push_case.description 只接受人类可读说明；keys/type/record_id"
                 " 必须作为独立参数提交，不能写入 description 字符串"
             )
         normalized_keys = [unicodedata.normalize("NFC", key).strip() for key in keys]
@@ -3098,40 +3233,70 @@ def build_annotation_tools(
             raise AnnotationInputError("push_case.keys 不允许重复")
         target_ref: dict[str, Any] = {
             "kind": normalized_type,
-            "chunk_id": ledger.current_chunk_id,
+            "chapter_id": ledger.current_chapter_id,
             "keys": normalized_keys,
         }
-        if dialogue_id is not None:
-            normalized_dialogue_id = unicodedata.normalize("NFC", dialogue_id).strip()
-            candidate_keys = {candidate.candidate_key for candidate in ledger.dialogue_candidates}
-            if normalized_dialogue_id not in candidate_keys:
-                raise AnnotationInputError(
-                    f"push_case.dialogue_id 不是当前 chunk 的对话候选 id: {normalized_dialogue_id}"
-                )
-            target_ref["dialogue_id"] = normalized_dialogue_id
+        # 2026-09-18 record_id 可为空：留空（省略或纯空白）即不指向记录，不写进 target_ref
+        normalized_record_id = None if record_id is None else unicodedata.normalize("NFC", record_id).strip()
+        if normalized_record_id:
+            target_ref["record_id"] = _require_chapter_record(
+                ledger,
+                normalized_record_id,
+                record=f"case/{normalized_type}",
+                field="record_id",
+            )
         target_key = uuid4().hex
         pushed = PendingCase(
             type=normalized_type,
-            chunk_id=ledger.current_chunk_id,
+            chapter_id=ledger.current_chapter_id,
             keys=normalized_keys,
             description=normalized_description,
             target_key=target_key,
             target_ref=target_ref,
         )
         ledger.pushed_cases.append(pushed)
-        # 2026-09-13 登记即进池：当场分配运行期案例编号，检索面与解决面当章可用
-        case_number = ledger.register_case_number(target_key)
+        # 2026-09-13 登记即进池：检索面与解决面当章可用；案例 id 即本次生成的 target_key
+        ledger.known_case_ids.add(target_key)
         response = {
             "accepted": True,
-            "case_number": case_number,
-            "target_key": target_key,
+            "case_id": target_key,
             "note": (
-                "案例已登记进案例池：本章内即可用 search_pool 检索到，也可直接用本编号"
-                "resolve_dialogue_case/resolve_fact_case/resolve_foreshadowing_case/close_case"
-                "解决；本章收尾时它作为活动案例落库。"
+                "案例已登记进案例池：本章内即可用 search_pool 检索到，也可直接用本 id"
+                "promise_case 兑现到产出记录、或用 close_case 关闭；本章收尾时它作为"
+                "活动案例落库。"
             ),
         }
         return json.dumps(response, ensure_ascii=False)
+
+    @tool
+    def promise_case(case_id: CaseId, result_id: str) -> str:
+        """把案例兑现到一条产出记录（案例已由该记录交代，池内标记为已解决）
+
+        result_id 填写入回执里的 record（实体/关系/事件/对话各自的记录键），必须是本章
+        已经写出来的记录。本面不改图也不改记录：语义改动由那条记录自己承担，
+        案例只是记账"这条疑点由哪条记录交代"。
+        """
+        details = _resolve_case_details(
+            ledger=ledger,
+            case_id=case_id,
+            tool_name="promise_case",
+        )
+        normalized_result_id = _require_chapter_record(
+            ledger,
+            result_id,
+            record=f"case/{details.type}",
+            field="result_id",
+        )
+        resolved = ResolvedCase(
+            case_id=details.id,
+            action="promise",
+            type=details.type,
+            reason=f"由产出记录交代：{normalized_result_id}",
+            target_key=details.target_key,
+            target_ref=details.target_ref,
+            result_id=normalized_result_id,
+        )
+        return _append_resolved(ledger, details, resolved)
 
     tools = [
         write_entity,
@@ -3139,18 +3304,12 @@ def build_annotation_tools(
         write_event,
         write_relation,
         write_dialogue,
-        finish_chapter,
+        finish,
         *build_search_tools(query_service, ledger),
-        resolve_dialogue_case,
-        resolve_fact_case,
-        resolve_foreshadowing_case,
-        close_case,
         push_case,
+        promise_case,
+        close_case,
     ]
-    if ask_reader_dispatcher is not None:
-        # 工具在不在与准入拒绝文案能建议什么同源：这里 append 的同时置位账本旗标
-        ledger.ask_reader_available = True
-        tools.append(ask_reader)
     for tool_candidate in tools:
         _forbid_undeclared_args(tool_candidate)
     return tools
