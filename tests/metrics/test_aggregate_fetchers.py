@@ -16,7 +16,7 @@ class _DummyAnnotationRepo:
                 surface_name="主角",
                 resolved_global_name="主角",
                 role_function="主体",
-                emotion_score="mild_positive",
+                emotion_score=1,
             ),
             SimpleNamespace(
                 name="同伴",
@@ -27,9 +27,9 @@ class _DummyAnnotationRepo:
             ),
         ]
         self._emotion_rows = emotion_rows or [
-            SimpleNamespace(surface_name="主角", resolved_global_name="主角", emotion_score="mild_positive"),
-            SimpleNamespace(surface_name="主角", resolved_global_name="主角", emotion_score="mild_negative"),
-            SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score="mild_positive"),
+            SimpleNamespace(surface_name="主角", resolved_global_name="主角", emotion_score=1),
+            SimpleNamespace(surface_name="主角", resolved_global_name="主角", emotion_score=-1),
+            SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score=1),
         ]
 
     def fetch_characters_with_scores(self, run_id):
@@ -86,7 +86,7 @@ def test_fetch_character_data_uses_explicit_resolved_graph_name():
                 surface_name="灰衣人",
                 resolved_global_name="白芷",
                 role_function="主体",
-                emotion_score="mild_positive",
+                emotion_score=1,
             ),
             SimpleNamespace(
                 name="同伴",
@@ -97,9 +97,9 @@ def test_fetch_character_data_uses_explicit_resolved_graph_name():
             ),
         ],
         emotion_rows=[
-            SimpleNamespace(surface_name="灰衣人", resolved_global_name="白芷", emotion_score="mild_positive"),
-            SimpleNamespace(surface_name="灰衣人", resolved_global_name="白芷", emotion_score="mild_negative"),
-            SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score="mild_positive"),
+            SimpleNamespace(surface_name="灰衣人", resolved_global_name="白芷", emotion_score=1),
+            SimpleNamespace(surface_name="灰衣人", resolved_global_name="白芷", emotion_score=-1),
+            SimpleNamespace(surface_name="同伴", resolved_global_name="同伴", emotion_score=1),
         ],
     )
     mock_service = MagicMock()
@@ -141,19 +141,19 @@ def test_fetch_character_data_skips_unresolved_reference_rows() -> None:
                 surface_name="我",
                 resolved_global_name=None,
                 role_function="主体",
-                emotion_score="mild_positive",
+                emotion_score=1,
             ),
             SimpleNamespace(
                 name="汪淼",
                 surface_name="汪淼",
                 resolved_global_name="汪淼",
                 role_function="主体",
-                emotion_score="mild_negative",
+                emotion_score=-1,
             ),
         ],
         emotion_rows=[
-            SimpleNamespace(surface_name="我", resolved_global_name=None, emotion_score="mild_positive"),
-            SimpleNamespace(surface_name="汪淼", resolved_global_name="汪淼", emotion_score="mild_negative"),
+            SimpleNamespace(surface_name="我", resolved_global_name=None, emotion_score=1),
+            SimpleNamespace(surface_name="汪淼", resolved_global_name="汪淼", emotion_score=-1),
         ],
     )
     mock_service = MagicMock()

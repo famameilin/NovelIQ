@@ -3,7 +3,8 @@
 
 说明: 每章完成事务对 run 内全部实体全量重选：清空旧标记，仅对每个
 "同一人物"连通分量中 entity_id 最小的节点标记 is_representative=true
-（entity_id 递增即入库顺序，对齐旧 min(from_id, to_id) 语义）。
+（2026-09-19 entity_id 是 uuid5 确定性主键，min() 取字典序最小值，
+同一 run 重放恒定）。
 """
 
 from __future__ import annotations
@@ -15,12 +16,12 @@ from typing import Any
 def elect_representatives(
     entities: Sequence[Any],
     *,
-    pairs: Sequence[tuple[int, int]],
-) -> dict[int, bool]:
+    pairs: Sequence[tuple[str, str]],
+) -> dict[str, bool]:
     """2026-08-11 用于按同一人物关系对选举代表并返回全量标记（未参与分量一律 false）"""
-    parent: dict[int, int] = {}
+    parent: dict[str, str] = {}
 
-    def find(node: int) -> int:
+    def find(node: str) -> str:
         if parent.get(node, node) != node:
             parent[node] = find(parent[node])
         return parent[node]
@@ -32,13 +33,13 @@ def elect_representatives(
         if root_a != root_b:
             parent[root_b] = root_a
 
-    flags: dict[int, bool] = {}
+    flags: dict[str, bool] = {}
     for entity in entities:
-        flags[int(entity.entity_id)] = False
+        flags[str(entity.entity_id)] = False
     if not parent:
         return flags
 
-    components: dict[int, list[int]] = {}
+    components: dict[str, list[str]] = {}
     for node in parent:
         components.setdefault(find(node), []).append(node)
     for members in components.values():

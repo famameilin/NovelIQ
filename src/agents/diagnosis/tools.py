@@ -7,6 +7,7 @@ agent 通过工具按需查询聚合指标、转折素材、人物、主题与�
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.tools import tool
@@ -87,12 +88,24 @@ def build_diagnosis_tools(
                 parts.append(f"[paragraph {paragraph_id}] (tension={tension:.4f}) {preview}")
             parts.append("</高张力>")
 
-        foreshadowing_threads = repo.fetch_foreshadowing_threads(run_id)
-        if foreshadowing_threads:
-            parts.append("<伏笔线程>")
-            for thread in foreshadowing_threads[:30]:
-                parts.append(thread.model_dump_json() if hasattr(thread, "model_dump_json") else str(thread))
-            parts.append("</伏笔线程>")
+        foreshadowing_trees = repo.fetch_foreshadowing_trees(run_id)
+        if foreshadowing_trees:
+            parts.append("<伏笔树>")
+            for tree in foreshadowing_trees[:30]:
+                parts.append(
+                    json.dumps(
+                        {
+                            "root_event_id": tree.root_event_id,
+                            "description": tree.description,
+                            "payoff_likelihood": tree.payoff_likelihood,
+                            "strength": tree.strength,
+                            "status": tree.status,
+                            "anchor_chapter_ids": tree.anchor_chapter_ids,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            parts.append("</伏笔树>")
 
         foreshadow_expectation = repo.calculate_foreshadow_expectation(run_id)
         if foreshadow_expectation is not None:

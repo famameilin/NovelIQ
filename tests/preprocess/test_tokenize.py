@@ -1,11 +1,10 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.preprocess.tokenize import Tokenizer, get_tokenizer, tokenize
+from src.preprocess.tokenize import Tokenizer, tokenize
 
 
 class TestTokenizer(unittest.TestCase):
@@ -32,11 +31,6 @@ class TestTokenizer(unittest.TestCase):
         result = tokenize(text)
         self.assertIsInstance(result, list)
         self.assertTrue(len(result) > 0)
-
-    def test_tokenizer_singleton(self):
-        t1 = get_tokenizer()
-        t2 = get_tokenizer()
-        self.assertIs(t1, t2)
 
     def test_tokenizer_min_word_len(self):
         Tokenizer._instance = None
@@ -65,34 +59,8 @@ class TestTokenizer(unittest.TestCase):
         tokenizer.add_stopwords(["测试词1", "测试词2"])
         self.assertEqual(len(tokenizer.stopwords), initial_count + 2)
 
-    def test_tokenizer_has_jieba_property(self):
-        Tokenizer._instance = None
-        Tokenizer._initialized = False
-        tokenizer = Tokenizer()
-        self.assertIsInstance(tokenizer.has_jieba, bool)
-
-    @patch("src.preprocess.tokenize.logger")
-    def test_tokenizer_load_nonexistent_user_dict(self, mock_logger):
-        Tokenizer._instance = None
-        Tokenizer._initialized = False
-        nonexistent_path = Path("/nonexistent/path/dict.txt")
-        tokenizer = Tokenizer(user_dict_path=nonexistent_path)
-        self.assertIsInstance(tokenizer, Tokenizer)
-
-    @patch("src.preprocess.tokenize.logger")
-    def test_tokenizer_load_nonexistent_stopwords(self, mock_logger):
-        Tokenizer._instance = None
-        Tokenizer._initialized = False
-        nonexistent_path = Path("/nonexistent/path/stopwords.txt")
-        tokenizer = Tokenizer(stopwords_path=nonexistent_path)
-        self.assertIsInstance(tokenizer, Tokenizer)
-
 
 class TestTokenizeFunction(unittest.TestCase):
-    def test_tokenize_function_returns_list(self):
-        result = tokenize("测试文本")
-        self.assertIsInstance(result, list)
-
     def test_tokenize_function_handles_none(self):
         result = tokenize(None)
         self.assertEqual(result, [])

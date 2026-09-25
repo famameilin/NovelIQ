@@ -66,6 +66,7 @@ def _create_run_with_paragraph_metrics(
             sensory_hit_count=0,
             imagery_hit_count=imagery_hit_counts[index],
             metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
             function_word_counts={},
             semantic_category_counts={},
         )
@@ -181,6 +182,7 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
                 sensory_hit_count=0,
                 imagery_hit_count=0,
                 metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
                 function_word_counts={},
                 semantic_category_counts={},
             )

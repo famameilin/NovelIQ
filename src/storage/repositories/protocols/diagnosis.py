@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from .types import (
-    ForeshadowingChunk,
     HighTensionChunk,
     PivotBlock,
     PivotMoment,
@@ -70,10 +69,6 @@ class DiagnosisRepositoryProtocol(Protocol):
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[RelationChangeRow]:
         """获取关系变更记录"""
-        ...
-
-    def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[ForeshadowingChunk]:
-        """获取伏笔分块"""
         ...
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[PivotMoment]:

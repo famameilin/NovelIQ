@@ -65,7 +65,7 @@ def test_create_and_insert(db_session) -> None:
         chapter_id=1,
         characters=[
             character_fact(
-                chunk_id=chunks[0].chapter_id,
+                chapter_id=chunks[0].chapter_id,
                 name="张三",
                 action="走",
             )

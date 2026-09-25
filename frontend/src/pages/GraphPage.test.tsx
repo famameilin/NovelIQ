@@ -14,8 +14,7 @@ import type { GraphNodeObject } from "@/components/charts/forceGraphTypes";
 import { GraphPage } from "@/pages/GraphPage";
 import { useNovelStore } from "@/store/novelStore";
 
-const getGraphMock = vi.fn();
-const getCharactersMock = vi.fn();
+const getGraphNetworkTabMock = vi.fn();
 const getGraphChangesMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
@@ -63,16 +62,6 @@ vi.mock("@/components/common/NovelHeader", () => ({
   NovelHeader: ({ title }: { title: string }) => <div>{title}</div>,
 }));
 
-vi.mock("@/components/layout/AnalysisWorkspace", () => ({
-  AnalysisWorkspace: Object.assign(
-    ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-    {
-      Tabs: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-      Tab: ({ children }: { children?: ReactNode }) => <section>{children}</section>,
-    },
-  ),
-}));
-
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -117,9 +106,13 @@ vi.mock("@/components/charts/NodeDetailPanel", () => ({
 }));
 
 vi.mock("@/api/results", () => ({
-  getGraph: (...args: unknown[]) => getGraphMock(...args),
-  getCharacters: (...args: unknown[]) => getCharactersMock(...args),
   getGraphChanges: (...args: unknown[]) => getGraphChangesMock(...args),
+}));
+
+vi.mock("@/api/tabs", () => ({
+  getGraphNetworkTab: (...args: unknown[]) => getGraphNetworkTabMock(...args),
+  tabQueryKey: (tab: string, novelId: string | undefined, taskId: string | null, ...rest: unknown[]) =>
+    ["tabs", novelId, taskId, tab, ...rest],
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -135,7 +128,7 @@ function createGraphData(): GraphData {
     last_chapter_id: 15,
     nodes: [
       {
-        entity_id: 1,
+        entity_id: "1",
         name: "顾霜",
         entity_type: "character",
         first_seen_chapter: 1,
@@ -144,7 +137,7 @@ function createGraphData(): GraphData {
         state: { primary_role_function: "主角", status: "active" },
       },
       {
-        entity_id: 2,
+        entity_id: "2",
         name: "司夜",
         entity_type: "character",
         first_seen_chapter: 2,
@@ -157,12 +150,12 @@ function createGraphData(): GraphData {
       {
         relation_id: "relation-1",
         state_chapter_id: 3,
-        source_entity_id: 1,
-        target_entity_id: 2,
+        source_entity_id: "1",
+        target_entity_id: "2",
         source_name: "顾霜",
         target_name: "司夜",
         relation_type: "盟友",
-        directionality: "bidirectional",
+        directionality: "directed",
         relation_semantics: "ordinary",
         attributes: {},
         is_active: true,
@@ -185,13 +178,13 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         effective_chapter_id: 12,
         changes: [{ change_kind: "assert" }],
         relation_id: "relation-1",
-        from_entity_id: 1,
-        to_entity_id: 2,
+        from_entity_id: "1",
+        to_entity_id: "2",
         from_name: "顾霜",
         to_name: "司夜",
         relation_type: "盟友",
         relation_change_kind: "assert",
-        directionality: "bidirectional",
+        directionality: "directed",
         relation_semantics: "ordinary",
       },
       {
@@ -202,7 +195,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         fact_id: "fact-13",
         effective_chapter_id: 13,
         changes: [{ field: "status", before: "hidden", after: "active" }],
-        entity_id: 1,
+        entity_id: "1",
         entity_name: "顾霜",
       },
     ],
@@ -231,8 +224,14 @@ describe("GraphPage", () => {
     vi.clearAllMocks();
     currentGraphSearchParams = "task_id=task-a";
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
-    getGraphMock.mockResolvedValue(createGraphData());
-    getCharactersMock.mockResolvedValue([{ name: "顾霜", appearance_count: 4 }]);
+    getGraphNetworkTabMock.mockResolvedValue({
+      run_id: "task-a",
+      snapshot: createGraphData(),
+      character_appearances: [{ name: "顾霜", appearance_count: 4 }],
+      graph_metrics: { run_id: "task-a", unavailable_reason: null, algorithm: {}, pagerank: {}, hits: {}, communities: {} },
+      change_total: 9,
+      unavailable_reason: null,
+    });
     getGraphChangesMock.mockResolvedValue(createGraphChangesPage());
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
@@ -244,25 +243,58 @@ describe("GraphPage", () => {
     } satisfies Novel);
   });
 
-  it("读取章节快照并独立加载实体与关系变化", async () => {
+  it("人物关系视图展示章节快照并支持同屏实体详情", async () => {
+    const user = userEvent.setup();
     renderPage();
 
-    expect((await screen.findAllByText(/第 13 章 · 顾霜/)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/第 12 章 · 顾霜 → 司夜/)).toBeInTheDocument();
-    expect(screen.getByText("盟友 · 建立")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "人物关系" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("当前人物关系")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
+
+    const inspector = await screen.findByRole("complementary", { name: "顾霜实体详情" });
+    expect(inspector).toHaveTextContent("顾霜");
+    expect(inspector).toHaveTextContent("司夜");
+    expect(inspector).not.toHaveTextContent("entity_id");
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
+  });
+
+  it("切换关系演变后展示关系密度和变化列表，并转换单向关系文案", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("tab", { name: "关系演变" });
+    await user.click(screen.getByRole("tab", { name: "关系演变" }));
+
+    expect(screen.getByText("关系密度")).toBeInTheDocument();
+    const relationChanges = screen.getAllByText(/第 12 章 · 顾霜 → 司夜/);
+    expect(relationChanges.length).toBeGreaterThan(0);
+    await user.click(relationChanges[0].closest("button")!);
+    expect(screen.getByText("单向关系")).toBeInTheDocument();
+    expect(screen.queryByText("关系集中度")).not.toBeInTheDocument();
+    expect(screen.queryByText("PageRank")).not.toBeInTheDocument();
+    expect(screen.queryByText("Louvain")).not.toBeInTheDocument();
   });
 
   it("使用稳定 change_id 记录图谱变化选择", async () => {
     const user = userEvent.setup();
     renderPage();
 
-    const relationChange = await screen.findByText(/第 12 章 · 顾霜 → 司夜/);
+    await screen.findByRole("tab", { name: "关系演变" });
+    await user.click(screen.getByRole("tab", { name: "关系演变" }));
+    const relationChange = (await screen.findAllByText(/第 12 章 · 顾霜 → 司夜/))[0];
     await user.click(relationChange.closest("button")!);
 
     expect(navigateMock).toHaveBeenCalledWith(
       "/novels/novel-1/graph?task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1",
       { replace: true },
     );
+  });
+
+  it("带变化深链进入页面时直接打开关系演变页签", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chapter=12&change_id=relation%3A12%3A1";
+    renderPage();
+
+    expect(await screen.findByRole("tab", { name: "关系演变" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findAllByText(/第 12 章 · 顾霜 → 司夜/)).not.toHaveLength(0);
   });
 });

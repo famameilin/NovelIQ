@@ -70,6 +70,7 @@ def _build_paragraph_rows(
                 sensory_hit_count=0,
                 imagery_hit_count=1,
                 metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
                 function_word_counts={},
                 semantic_category_counts={},
                 surface_tension_z=0.0,
@@ -183,10 +184,10 @@ class TestAggregate:
             self.db_session,
             run_id=self.run_id,
             chapter_id=1,
-            emotional_valences={0: "strong_positive", 1: "mild_positive", 2: "mild_positive"},
+            emotional_valences={0: 2, 1: 1, 2: 1},
             event_types={0: "冲突", 1: "铺垫", 2: "铺垫"},
-            pivot_chunks={0},
-            cliffhanger_chunks={2},
+            pivot_chapters={0},
+            cliffhanger_chapters={2},
         )
 
         chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)

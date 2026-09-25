@@ -28,12 +28,12 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="迎敌"),
-            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
+            character_fact(chapter_id=1, name="林渡", action="迎敌"),
+            character_fact(chapter_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -57,7 +57,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 2},
+                target_ref={"kind": "relation_change", "chapter_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -106,18 +106,18 @@ def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(d
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="授艺"),
-            character_fact(chunk_id=1, name="顾霜", action="学习"),
+            character_fact(chapter_id=1, name="林渡", action="授艺"),
+            character_fact(chapter_id=1, name="顾霜", action="学习"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
             ),
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="师徒",
@@ -149,7 +149,7 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
         chapter_id=1,
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -160,7 +160,7 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=2, name="林渡", action="离开")],
+        characters=[character_fact(chapter_id=2, name="林渡", action="离开")],
         resolved_cases=[
             ResolvedCase(
                 case_id="case-break",
@@ -168,7 +168,7 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 2},
+                target_ref={"kind": "relation_change", "chapter_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -202,10 +202,10 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="迎敌"),
-            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
+            character_fact(chapter_id=1, name="林渡", action="迎敌"),
+            character_fact(chapter_id=1, name="顾霜", action="迎敌"),
         ],
-        relations=[relation_fact(chunk_id=1, from_name="林渡", to_name="顾霜", relation_type="盟友")],
+        relations=[relation_fact(chapter_id=1, from_name="林渡", to_name="顾霜", relation_type="盟友")],
     )
     db_session.commit()
     # 章2：强化关系 + 新增实体
@@ -214,9 +214,9 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         run_id=run_id,
         chapter_id=2,
         characters=[
-            character_fact(chunk_id=2, name="林渡", action="同行"),
-            character_fact(chunk_id=2, name="顾霜", action="同行"),
-            character_fact(chunk_id=2, name="白鹤", action="旁观"),
+            character_fact(chapter_id=2, name="林渡", action="同行"),
+            character_fact(chapter_id=2, name="顾霜", action="同行"),
+            character_fact(chapter_id=2, name="白鹤", action="旁观"),
         ],
         resolved_cases=[
             ResolvedCase(
@@ -225,7 +225,7 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
                 type="relation_change",
                 reason="关系加深",
                 target_key="target-2",
-                target_ref={"kind": "relation_change", "chunk_id": 2},
+                target_ref={"kind": "relation_change", "chapter_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -240,8 +240,8 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         run_id=run_id,
         chapter_id=3,
         characters=[
-            character_fact(chunk_id=3, name="林渡", action="离去"),
-            character_fact(chunk_id=3, name="顾霜", action="离去"),
+            character_fact(chapter_id=3, name="林渡", action="离去"),
+            character_fact(chapter_id=3, name="顾霜", action="离去"),
         ],
         resolved_cases=[
             ResolvedCase(
@@ -250,7 +250,7 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-3",
-                target_ref={"kind": "relation_change", "chunk_id": 3},
+                target_ref={"kind": "relation_change", "chapter_id": 3},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",

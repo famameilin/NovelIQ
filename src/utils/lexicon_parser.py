@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+# 行内注释分隔：词条后跟空白 + # 视为注释（draft 词表 "词  # 证据" 格式）；
+# 要求 # 前有空白，避免误伤含 # 的词条本身。
+_INLINE_COMMENT_RE = re.compile(r"\s+#")
+
+
+def _strip_inline_comment(cleaned: str) -> str:
+    """剥离行内 '# 注释'，返回词条部分（含可能的 \\t 权重列）"""
+    return _INLINE_COMMENT_RE.split(cleaned, maxsplit=1)[0].strip()
 
 
 def parse_lexicon_term(line: str) -> str:
     """
     从纯文本或加权词表行解析词条
 
-    说明: 统一处理空行、注释行和 "词条	权重" 格式，供 lexicons 与 metrics 共用
+    说明: 统一处理空行、整行/行内注释和 "词条	权重" 格式，供 lexicons 与 metrics 共用
     """
     cleaned = line.strip()
     if not cleaned or cleaned.startswith("#"):
         return ""
-    return cleaned.split("\t", 1)[0].strip()
+    return _strip_inline_comment(cleaned).split("\t", 1)[0].strip()
 
 
 def load_lexicon_terms(path: Path) -> list[str]:
@@ -54,6 +64,7 @@ def load_weighted_lexicon(filepath: str | Path, default_weight: int = 1) -> dict
         cleaned = line.strip()
         if not cleaned or cleaned.startswith("#"):
             continue
+        cleaned = _strip_inline_comment(cleaned)
 
         parts = cleaned.split("\t")
         term = parts[0].strip()

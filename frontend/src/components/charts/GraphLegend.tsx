@@ -13,6 +13,7 @@
 
 import { cn } from "@/lib/cn";
 import { getCSSColorVar } from "@/lib/theme";
+import { formatAnalysisLabel } from "@/lib/analysisLabels";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -108,7 +109,7 @@ export function GraphLegend({
                     style={{ backgroundColor: getEntityColor(type) }}
                   />
                   <span className="text-sm text-text-secondary">
-                    {ENTITY_LABELS[type] || type}
+                    {ENTITY_LABELS[type] || formatAnalysisLabel(type, "entity")}
                   </span>
                 </div>
               ))}
@@ -132,7 +133,7 @@ export function GraphLegend({
                     className="h-0.5 w-5 rounded-full"
                     style={{ backgroundColor: getRelationColor(type) }}
                   />
-                  <span className="text-sm text-text-secondary">{type}</span>
+                  <span className="text-sm text-text-secondary">{formatAnalysisLabel(type, "relation")}</span>
                 </div>
               ))}
             </div>

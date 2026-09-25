@@ -2,6 +2,7 @@
 name = "novel-qa"
 version = "0.1.0"
 requires-python = ">=3.12"
+license = "Apache-2.0"
 dependencies = [
     "loguru>=0.7.0",
     "networkx>=3.0",
@@ -27,6 +28,8 @@ dependencies = [
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3,<2",
     "langchain-openai>=1.4.1,<2",
+    "tokenizers>=0.20,<0.21",
+    "ltp>=4.2,<5",
 ]
 
 [dependency-groups]
@@ -67,6 +70,8 @@ exclude_lines = [
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+# tests/report/ 整目录不纳入版本库（.gitignore 240），本地存在但 lint 门不扫
+extend-exclude = ["tests/report"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "UP"]

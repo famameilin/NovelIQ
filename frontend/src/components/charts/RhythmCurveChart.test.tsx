@@ -16,6 +16,7 @@ let chartOption: {
   };
   series?: Array<{ emphasis?: { disabled?: boolean }; markLine?: unknown }>;
 } = {};
+let chartEvents: Record<string, (params: { batch?: Array<{ start: number; end: number }> }) => void> = {};
 
 vi.mock("echarts-for-react", async () => {
   const React = await import("react");
@@ -26,6 +27,7 @@ vi.mock("echarts-for-react", async () => {
   ) {
     void ref;
     chartOption = (props.option ?? {}) as typeof chartOption;
+    chartEvents = (props.onEvents ?? {}) as typeof chartEvents;
     return React.createElement("div", { "data-testid": "echarts-mock" });
   });
 
@@ -63,6 +65,7 @@ function createPoint(overrides: Partial<ParagraphCurvePoint> = {}): ParagraphCur
 describe("RhythmCurveChart", () => {
   beforeEach(() => {
     chartOption = {};
+    chartEvents = {};
     useThemeStore.setState({
       seedColor: DEFAULT_SEED,
       isDark: false,
@@ -103,5 +106,17 @@ describe("RhythmCurveChart", () => {
     );
 
     expect(chartOption.series?.every((series) => series.markLine == null)).toBe(true);
+  });
+
+  it("datazoom 事件应回写共享缩放范围", () => {
+    // 2026-08-31 用于锁定 ECharts 6 实际发出的 datazoom 事件合同
+    const onZoomChange = vi.fn();
+    render(<RhythmCurveChart data={[createPoint()]} onZoomChange={onZoomChange} />);
+
+    expect(chartEvents.datazoom).toBeTypeOf("function");
+    expect(chartEvents.datazoomend).toBeUndefined();
+    chartEvents.datazoom({ batch: [{ start: 20, end: 80 }] });
+
+    expect(onZoomChange).toHaveBeenCalledWith([0.2, 0.8]);
   });
 });

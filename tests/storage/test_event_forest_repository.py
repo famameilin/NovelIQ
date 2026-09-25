@@ -4,13 +4,48 @@ from __future__ import annotations
 
 from uuid import NAMESPACE_URL, uuid5
 
-from src.agents.annotation.schema import BoundForeshadowing
-from src.storage.repositories import ForeshadowingRepository
+from src.storage.models import EventEdge, EventNode
 from src.storage.repositories.graph import EventForestRepository
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+
+
+def _insert_legacy_causal_edge(
+    session,
+    *,
+    run_id: str,
+    annotation_id: str,
+    source_event_id: str,
+    target_event_id: str,
+    source_chapter_id: int,
+    target_chapter_id: int,
+    is_active: bool = True,
+) -> str:
+    """2026-09-14 跨章因果链退役：write_event 不再产生 causal 边，
+    但 EventEdge 列/边类型保留读旧数据。测试按读侧现行为以遗留数据
+    直接构造一条 causal 边（edge_id 派生公式与生产写入面一致）。
+    """
+    edge_id = str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}"))
+    source_node = session.get(EventNode, source_event_id)
+    assert source_node is not None
+    session.add(
+        EventEdge(
+            edge_id=edge_id,
+            run_id=run_id,
+            edge_type="causal",
+            source_event_id=source_event_id,
+            target_event_id=target_event_id,
+            source_chapter_id=source_chapter_id,
+            target_chapter_id=target_chapter_id,
+            is_active=is_active,
+            evidence=list(source_node.evidence),
+            annotation_id=annotation_id,
+            payload_path=f"legacy/causal/{target_event_id}",
+        )
+    )
+    return edge_id
 
 
 def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None:
@@ -23,7 +58,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     )
     eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
-    persist_chapter_annotation(
+    annotation_id = persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -41,11 +76,20 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [1],
                 "node_id": eid2,
-                "causal_event_refs": [eid1],
                 "tree_id": "draw-entry",
                 "cause_role": "root",
             },
         ],
+    )
+    # 读侧现行为：causal 边不再由写面产生，遗留数据仍应被 fetch_snapshot 读出
+    _insert_legacy_causal_edge(
+        db_session,
+        run_id=run_id,
+        annotation_id=annotation_id,
+        source_event_id=eid1,
+        target_event_id=eid2,
+        source_chapter_id=1,
+        target_chapter_id=1,
     )
     db_session.commit()
 
@@ -78,6 +122,85 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     assert causal_edges[0].source_event_id == eid1
     assert causal_edges[0].target_event_id == eid2
     assert causal_edges[0].is_active is True
+
+
+def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_session) -> None:
+    """2026-09-14 回归：写面持续产生的 foreshadowing 边不得混进 causal_edges
+
+    伏笔即事件树（09-13）后 resolve_foreshadowing_case 挂树写
+    edge_type="foreshadowing" 边、causal 边无新来源；因果边查询不过滤 edge_type
+    会让伏笔边混入 snapshot.causal_edges——event-forest 端点按
+    EventEdgeResponse(edge_type=Literal["causal"]) 构造直接 500，
+    timeline 把伏笔边误标因果边。
+    """
+    text = "顾霜立誓。\n顾霜离去。"
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=[text],
+        title="伏笔边不混因果",
+    )
+    root_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
+    bind_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
+    annotation_id = persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[
+            {
+                "description": "顾霜立誓",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [0],
+                "node_id": root_id,
+                "tree_id": "oath-tree",
+                "cause_role": "root",
+                "isforeshadowing": True,
+                "payoff_likelihood": "high",
+            },
+            {
+                "description": "顾霜离去",
+                "participants": ["顾霜"],
+                "anchor_paragraph_ids": [1],
+                "node_id": bind_id,
+                "tree_id": "leave-tree",
+                "cause_role": "root",
+            },
+        ],
+    )
+    db_session.add(
+        EventEdge(
+            edge_id=str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:foreshadowing:{root_id}:{bind_id}")),
+            run_id=run_id,
+            edge_type="foreshadowing",
+            source_event_id=root_id,
+            target_event_id=bind_id,
+            source_chapter_id=1,
+            target_chapter_id=1,
+            is_active=True,
+            evidence=list(db_session.get(EventNode, root_id).evidence),
+            annotation_id=annotation_id,
+            payload_path=f"foreshadowing/{bind_id}",
+        )
+    )
+    db_session.commit()
+
+    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    assert snapshot is not None
+    assert snapshot.causal_edges == []
+    assert repo_foreshadow_edges(db_session, run_id) == 1
+
+
+def repo_foreshadow_edges(session, run_id: str) -> int:
+    """伏笔边有独立读取通道：确认被排除的边确实还在（只过滤、不丢数据）"""
+    from sqlalchemy import func, select
+
+    return int(
+        session.execute(
+            select(func.count()).select_from(EventEdge).where(
+                EventEdge.run_id == run_id,
+                EventEdge.edge_type == "foreshadowing",
+            )
+        ).scalar_one()
+    )
 
 
 def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
@@ -119,12 +242,16 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
                 "anchor_paragraph_ids": [2],
                 "node_id": eid3,
                 "parent_node_id": eid2,
-                "causal_event_refs": [eid2],
                 "tree_id": "duel",
                 "cause_role": "secondary",
             },
         ],
     )
+    # 2026-09-14 写面退役 causal_event_refs；EventNode 该列保留读旧数据，
+    # secondary 归组（target=因果前驱）按读侧现行为以遗留列数据构造
+    secondary_node = db_session.get(EventNode, eid3)
+    assert secondary_node is not None
+    secondary_node.causal_event_refs = [eid2]
     db_session.commit()
 
     snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
@@ -140,7 +267,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
 
 
 def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
-    """2026-08-18 用于验证 fetch_snapshot 返回伏笔边（线程即边）"""
+    """2026-09-13 用于验证 fetch_snapshot 返回伏笔树视图（伏笔即事件树）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓"],
@@ -155,19 +282,11 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "anchor_paragraph_ids": [0],
+                "isforeshadowing": True,
+                "expected_payoff_family": "守护",
+                "payoff_likelihood": "high",
             },
         ],
-    )
-    setup_eid = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
-    ForeshadowingRepository(db_session).sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门",
-            confidence="high",
-            setup_node_id=setup_eid,
-        ),
-        setup_event_id=setup_eid,
     )
     db_session.commit()
 
@@ -176,9 +295,10 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     assert snapshot is not None
     assert len(snapshot.foreshadowing_edges) == 1
     edge = snapshot.foreshadowing_edges[0]
-    assert edge.setup_summary == "顾霜承诺护佑山门"
-    assert edge.setup_event_id == setup_eid
+    assert edge.description == "顾霜立誓"
+    assert edge.root_event_id == snapshot.event_trees[0].root_event_id
     assert edge.payoff_event_id is None
+    assert edge.status == "open"
     assert edge.active is True
 
 

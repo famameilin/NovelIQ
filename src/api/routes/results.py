@@ -18,7 +18,12 @@ from src.api.dependencies import (
     get_novel_service,
     resolve_run_id,
 )
-from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
+from src.api.dependencies import (
+    require_readable_run_status as _require_readable_run_status,
+)
+from src.api.dependencies import (
+    require_run_for_novel as _require_run_for_novel,
+)
 from src.api.models.event_forest import (
     EventEdgeResponse,
     EventForestResponse,
@@ -27,25 +32,31 @@ from src.api.models.event_forest import (
     EventTreeResponse,
     ForeshadowingEdgeResponse,
 )
-from src.api.models.graph import GraphChangesResponse, GraphSnapshotResponse
+from src.api.models.graph import GraphChangesResponse, GraphMetricsResponse, GraphSnapshotResponse, KeywordsResponse
 from src.api.models.responses import (
     ChapterAnnotation as ChapterAnnotationResponse,
 )
 from src.api.models.responses import (
     ChapterMetricsResponse,
+    ChapterTopicAggregateResponse,
     CharacterStats,
     DiagnosisResult,
     EmotionTrendWindow,
-    ForeshadowingThreadResponse,
+    ForeshadowingTreeResponse,
     GlobalStats,
     ParagraphCurvePoint,
     ResultsWriteResponse,
+    TopicAggregateResponse,
+    TopicEmotionResponse,
+    TopicSeriesResponse,
+    TopicShiftConfig,
+    TopicShiftResponse,
 )
 from src.api.routes.results_fetchers import (
     _fetch_chapter_annotations,
     _fetch_characters,
     _fetch_diagnosis,
-    _fetch_foreshadowing_threads,
+    _fetch_foreshadowing_trees,
     _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_topics,
@@ -55,49 +66,29 @@ from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT
+from src.api.services.results_queries.graph_metrics import compute_graph_metrics
+from src.api.services.results_queries.keywords import compute_keywords
 from src.api.services.results_queries.paragraphs import (
     _fetch_chapter_metrics,
     _fetch_emotion_trend,
     _fetch_paragraph_curves,
+)
+from src.api.services.results_queries.topic_aggregations import (
+    aggregate_book_topics,
+    aggregate_chapter_topics,
+    compute_topic_emotion,
+    compute_topic_shift_candidates,
+    fetch_paragraph_topic_series,
 )
 from src.config import settings
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
     ParagraphRepository,
-    RunRepository,
     StatsRepository,
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
-READABLE_RUN_STATUSES = ("completed",)
-
-
-def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
-    """
-    校验 run_id 存在且属于当前小说
-    """
-    run_repo = RunRepository(session)
-    run = run_repo.get_run(run_id)
-    if not run:
-        raise NovelNotFoundError(novel_id=novel_id, message=f"运行记录不存在: {run_id}")
-
-    if run.get("novel_id") != novel_id:
-        actual_task_id = run_id[:8] if len(run_id) >= 8 else run_id
-        raise NovelNotFoundError(
-            novel_id=novel_id,
-            message=f"任务 {actual_task_id} 不属于小说 {novel_id}",
-        )
-
-    return run
-
-
-def _require_readable_run_status(run: dict[str, Any]) -> None:
-    if run["status"] not in READABLE_RUN_STATUSES:
-        raise AnalysisNotCompleteError(
-            f"分析未完成，当前状态: {run['status']}",
-            run_status=run["status"],
-        )
 
 
 def _parse_emotion_trend_range(
@@ -384,6 +375,120 @@ async def get_topics(
     return _fetch_topics(run_id, paragraph_repo)
 
 
+@router.get("/{novel_id}/topics/aggregate", response_model=TopicAggregateResponse | ChapterTopicAggregateResponse)
+async def get_topic_aggregate(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    level: Literal["book", "chapter"] = Query(default="book", description="聚合层级：book 或 chapter"),
+) -> TopicAggregateResponse | ChapterTopicAggregateResponse:
+    """
+    全书/章节主题分布（§5.11 D1）：token 加权聚合，分母从每段一行推断状态读取
+
+    章节层级按 chapters.sequence 排序；缺失或样本不足返回 unavailable_reason。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    if level == "chapter":
+        return ChapterTopicAggregateResponse(**aggregate_chapter_topics(run_id, session))
+    return TopicAggregateResponse(**aggregate_book_topics(run_id, session))
+
+
+@router.get("/{novel_id}/topics/series", response_model=TopicSeriesResponse)
+async def get_topic_series(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> TopicSeriesResponse:
+    """
+    段落主题序列（D1）：完整 K 维权重，横轴真实字符位置（global_start_char）
+
+    top_n 只属于前端展示裁剪，本接口始终返回完整分布。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    return TopicSeriesResponse(**fetch_paragraph_topic_series(run_id, session))
+
+
+@router.get("/{novel_id}/topics/shifts", response_model=TopicShiftResponse)
+async def get_topic_shifts(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    window_size: Annotated[
+        int | None, Query(ge=1, description="窗口段落数，缺省取 topic_shift 配置")
+    ] = None,
+    min_tokens_per_window: Annotated[
+        int | None, Query(ge=1, description="窗口最小实际入模 token 数，缺省取配置")
+    ] = None,
+    score_threshold: Annotated[
+        float | None, Query(gt=0, le=1, description="候选点 JS 散度阈值，缺省取配置")
+    ] = None,
+    max_candidates: Annotated[
+        int | None, Query(ge=1, description="候选点数量上限，缺省取配置")
+    ] = None,
+) -> TopicShiftResponse:
+    """
+    主题变化候选点（D2）：相邻不重叠窗口分布（入模 token 加权）的 JS 散度
+
+    topic_shift_score 为以 2 为底、范围 [0,1] 的 JS 散度；窗口大小、最小
+    token 数与阈值均为版本化配置（返回在 config 中），本端点允许显式覆盖
+    用于探索。候选点不直接命名"情节转折点"，须与 Agent 事件和人工样本
+    联合验证。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    series = fetch_paragraph_topic_series(run_id, session)
+    if series["unavailable_reason"]:
+        from src.config import settings as _settings
+
+        shift_settings = _settings.topic_model.topic_shift
+        return TopicShiftResponse(
+            candidates=[],
+            config=TopicShiftConfig(
+                window_size=window_size if window_size is not None else shift_settings.window_size,
+                min_tokens_per_window=(
+                    min_tokens_per_window
+                    if min_tokens_per_window is not None
+                    else shift_settings.min_tokens_per_window
+                ),
+                score_threshold=(
+                    score_threshold if score_threshold is not None else shift_settings.score_threshold
+                ),
+                max_candidates=(
+                    max_candidates if max_candidates is not None else shift_settings.max_candidates
+                ),
+            ),
+            unavailable_reason=series["unavailable_reason"],
+        )
+    return TopicShiftResponse(
+        **compute_topic_shift_candidates(
+            series,
+            window_size=window_size,
+            min_tokens_per_window=min_tokens_per_window,
+            score_threshold=score_threshold,
+            max_candidates=max_candidates,
+        )
+    )
+
+
+@router.get("/{novel_id}/topics/emotion", response_model=TopicEmotionResponse)
+async def get_topic_emotion(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> TopicEmotionResponse:
+    """
+    主题-情感统计（D3）：sum(weight * token * net_density) / sum(weight * token)
+
+    情感输入使用 paragraph_curves.net_density 原始值；空值段落同时从
+    分子分母排除；权重和为零时返回空值与原因。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    return TopicEmotionResponse(**compute_topic_emotion(run_id, session))
+
+
 @router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult)
 async def get_diagnosis(
     novel_id: str,
@@ -403,23 +508,23 @@ async def get_diagnosis(
 
 
 @router.get(
-    "/{novel_id}/foreshadowing-threads",
-    response_model=list[ForeshadowingThreadResponse],
+    "/{novel_id}/foreshadowing-trees",
+    response_model=list[ForeshadowingTreeResponse],
 )
-async def get_foreshadowing_threads(
+async def get_foreshadowing_trees(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> list[ForeshadowingThreadResponse]:
+) -> list[ForeshadowingTreeResponse]:
     """
-    获取跨 chunk 的 setup thread 台账
+    获取伏笔树台账（2026-09-13 伏笔即事件树）
 
-    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用
+    说明: 返回全部伏笔树 + active 状态，供 diagnosis drill-down 与导出复用
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
-    return _fetch_foreshadowing_threads(run_id, annotation_repo)
+    return _fetch_foreshadowing_trees(run_id, annotation_repo)
 
 
 @router.get("/{novel_id}/graph", response_model=GraphSnapshotResponse)
@@ -470,6 +575,40 @@ async def get_graph_changes(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return GraphChangesResponse.model_validate(payload)
+
+
+@router.get("/{novel_id}/graph/metrics", response_model=GraphMetricsResponse)
+async def get_graph_metrics(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> GraphMetricsResponse:
+    """
+    人物关系图结构指标（赛道 A1/A2）：PageRank / HITS / Louvain
+
+    查询时计算；输入为代表性人物子图（别名归并、边权=关系计数），
+    结构社区不直接等同于故事阵营。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    return GraphMetricsResponse(**compute_graph_metrics(run_id, session))
+
+
+@router.get("/{novel_id}/keywords", response_model=KeywordsResponse)
+async def get_keywords(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    top_n: int = Query(default=10, ge=1, le=50),
+) -> KeywordsResponse:
+    """
+    TextRank 关键词（赛道 A3）：独立词共现图 + PageRank
+
+    与 LDA 主题词口径独立，可对照不可混用。
+    """
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    return KeywordsResponse(**compute_keywords(run_id, session, top_n=top_n))
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")
@@ -578,7 +717,6 @@ async def get_event_forest(
                 anchor_paragraph_ids=node.anchor_paragraph_ids,
                 char_start=node.char_start,
                 char_end=node.char_end,
-                text_hash=node.text_hash,
                 evidence=node.evidence,
                 causal_event_refs=node.causal_event_refs,
                 tree_id=node.tree_id,
@@ -619,12 +757,12 @@ async def get_event_forest(
         ],
         foreshadowing_edges=[
             ForeshadowingEdgeResponse(
-                setup_id=fe.setup_id,
-                setup_event_id=fe.setup_event_id,
+                root_event_id=fe.root_event_id,
+                tree_id=fe.tree_id,
                 payoff_event_id=fe.payoff_event_id,
                 first_chapter_id=fe.first_chapter_id,
                 last_chapter_id=fe.last_chapter_id,
-                setup_summary=fe.setup_summary,
+                description=fe.description,
                 status=fe.status,
                 active=fe.active,
             )

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.agents.annotation.schema import coerce_emotion_score
 from src.api.models.responses import CharacterStats
-from src.config.constants import EMOTION_SCORE_MAPPING
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
 from src.storage.repositories import AnnotationRepository
@@ -69,8 +69,7 @@ def _fetch_characters(
             continue
         canonical = name_resolution.get(canonical, canonical)
         role_function: str = str(row.role_function) if row.role_function else "unknown"
-        emotion_raw: str | None = str(row.emotion_score) if row.emotion_score else None
-        emotion_score = EMOTION_SCORE_MAPPING.get(emotion_raw, 0) if emotion_raw else 0
+        emotion_score = coerce_emotion_score(row.emotion_score)
 
         if canonical not in merged:
             merged[canonical] = {

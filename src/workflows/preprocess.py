@@ -197,6 +197,7 @@ def _insert_paragraph_metrics(
                 sensory_hit_count=counts.sensory_hit_count,
                 imagery_hit_count=counts.imagery_hit_count,
                 metaphor_sentence_count=counts.metaphor_sentence_count,
+                body_reaction_hit_count=counts.body_reaction_hit_count,
                 function_word_counts=counts.function_word_counts,
                 semantic_category_counts=counts.semantic_category_counts,
                 surface_tension_z=z_value,
@@ -276,14 +277,11 @@ async def _generate_paragraph_embeddings(
             f"semantic text retrieval requires paragraph embeddings, error={e}"
         ) from e
 
-    expected_dim = settings.models.paragraph_embedding.embedding_dim
-    actual_dim = await embedding_client.detect_embedding_dimension()
-    if actual_dim != expected_dim:
-        raise ValueError(
-            f"semantic text retrieval embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}"
-        )
+    # 维度以嵌入服务实测输出为准（2026-09-10 删配置）：探针锁定客户端校验基准，
+    # 建表列宽按探测值固化；换模型维度变化时 ensure 的列类型校验快速失败
+    embedding_dim = await embedding_client.detect_embedding_dimension()
 
-    ensure_paragraph_embeddings_schema(session, expected_dim)
+    ensure_paragraph_embeddings_schema(session, embedding_dim)
     _commit_preprocess_writes(session, step="ensure_embedding_schemas")
 
     paragraph_rows = await _generate_paragraph_embedding_rows(
@@ -293,7 +291,7 @@ async def _generate_paragraph_embeddings(
         emitter=emitter,
     )
     if paragraph_rows:
-        insert_paragraph_embeddings(session, run_id, paragraph_rows)
+        insert_paragraph_embeddings(session, run_id, paragraph_rows, embedding_dimension=embedding_dim)
         _commit_preprocess_writes(session, step="insert_embedding_rows")
         logger.info(
             "inserted {} paragraph embeddings into db (run_id={})",

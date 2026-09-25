@@ -13,7 +13,7 @@ def test_reference_policy_blocks_raw_pronoun_from_global_character() -> None:
     任务: 角色引用分层重构
     新建原因: 锁定 raw 代词默认不能进入 global character 主链。
     """
-    decision = decide_character_reference("我", chunk_id=7)
+    decision = decide_character_reference("我", chapter_id=7)
 
     assert decision.reference_kind == "pov_slot"
     assert decision.reference_slot == "POV_SLOT_C7_我"
@@ -84,7 +84,7 @@ def test_collect_reference_slots_from_names_dedupes_surfaces_and_existing_slots(
     """
     slots = collect_reference_slots_from_names(
         ["我", "POV_SLOT_C3_我", "她", "LOCAL_REF_C3_她", "汪淼"],
-        chunk_id=3,
+        chapter_id=3,
     )
 
     assert slots == ["POV_SLOT_C3_我", "LOCAL_REF_C3_她"]

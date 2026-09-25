@@ -70,12 +70,6 @@ class CasePoolCase(Base):
         ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
         nullable=False,
     )
-    last_surfaced_annotation_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("chapter_annotations.annotation_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    last_surfaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -98,7 +92,6 @@ class CasePoolCase(Base):
         UniqueConstraint("run_id", "target_key", name="uq_case_pool_cases_run_target_key"),
         Index("idx_case_pool_cases_run_state", "run_id", "state"),
         Index("idx_case_pool_cases_run_type", "run_id", "type"),
-        Index("idx_case_pool_cases_rotation", "run_id", "state", "last_surfaced_at", "id"),
     )
 
 
@@ -128,10 +121,9 @@ class CaseResolutionMapping(Base):
     resolution: Mapped[dict] = mapped_column(JSONB, nullable=False)
     target_fact_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     target_dialogue_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    target_setup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    # 2026-08-18 事件森林/DAG：伏笔续接/回收案例解决可产生事件目标
-    target_setup_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    target_payoff_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # 2026-09-13 伏笔入森林：解决目标是伏笔树根（挂边动作 reinforce/payoff 记在 resolution JSON）
+    target_root_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    target_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (

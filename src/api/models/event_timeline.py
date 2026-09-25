@@ -85,12 +85,12 @@ class EventTimelineCausalEdge(BaseModel):
 class EventTimelineForeshadowingEdge(BaseModel):
     """2026-08-20 用于返回伏笔边"""
 
-    setup_id: str
-    setup_event_id: str
+    root_event_id: str
+    tree_id: str
     payoff_event_id: str | None = None
     first_chapter_id: int = Field(gt=0)
     last_chapter_id: int = Field(gt=0)
-    setup_summary: str
+    description: str
     status: str
     active: bool
 

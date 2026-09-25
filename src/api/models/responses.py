@@ -157,7 +157,7 @@ class ChapterMetricSummary(BaseModel):
     narrative_function: str | None = None
     pivot_moment: bool | None = None
     cliffhanger: bool | None = None
-    emotional_valence: str | None = None
+    emotional_valence: int | None = None
 
 
 class BookAggregateStats(BaseModel):
@@ -182,7 +182,7 @@ class BookAggregateStats(BaseModel):
     chapter_narrative_function_share: dict[str, float] = Field(default_factory=dict)
     chapter_pivot_rate: float | None = None
     chapter_cliffhanger_rate: float | None = None
-    chapter_emotional_valence_share: dict[str, float] = Field(default_factory=dict)
+    chapter_emotional_valence_share: dict[int, float] = Field(default_factory=dict)
 
 
 class ChapterMetricsResponse(BaseModel):
@@ -224,49 +224,46 @@ class ChapterDialogue(BaseModel):
 
 class ChapterAnnotation(BaseModel):
     chapter_id: int
-    emotional_valence: str | None = None
+    emotional_valence: int | None = None
     event_type: str | None = None
     pivot_moment: bool | None = None
     cliffhanger: bool | None = None
     has_foreshadowing: bool | None = Field(
         default=None,
         description=(
-            "当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔回收预期，更不是严格全文事实回收率。"
+            "本章 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔回收预期，更不是严格全文事实回收率。"
         ),
     )
     is_strong_setup: bool | None = Field(
         default=None,
-        description="当前伏笔判断是否已经通过强伏笔门槛筛选，用于前端后续展示高精度 setup。",
+        description="当前伏笔树根是否强伏笔（strength=high），用于前端后续展示高精度伏笔。",
     )
-    foreshadowing_type: str | None = None
-    setup_kind: str | None = None
     foreshadowing_desc: str | None = None
-    setup_summary: str | None = None
     why_unresolved_now: str | None = None
-    expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
-    linked_setup_id: str | None = None
+    # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
+    foreshadowing_root_event_id: str | None = None
+    # 2026-09-05 A1：冻结时系统覆盖告警（如对话候选>0但载荷为空），报告附录 B 展示
+    coverage_warnings: list[str] = []
     characters: list[ChapterCharacter] = []
     relations: list[ChapterRelation] = []
     dialogues: list[ChapterDialogue] = []
 
 
-class ForeshadowingThreadResponse(BaseModel):
+class ForeshadowingTreeResponse(BaseModel):
     """
-    Setup thread 结果视图
+    伏笔树结果视图（2026-09-13 伏笔即事件树）
 
-    说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用
+    说明: 提供伏笔树的稳定 API 响应模型，供诊断 drill-down 和结果导出复用
     """
 
-    setup_id: str
+    root_event_id: str
+    tree_id: str
     first_chapter_id: int
     last_chapter_id: int
     anchor_chapter_ids: list[int] = []
-    setup_summary: str
-    setup_kind: str | None
-    expected_payoff_family: str | None
+    description: str
     payoff_likelihood: str | None
-    confidence: str | None
     strength: str | None
     status: str
     active: bool
@@ -308,6 +305,8 @@ class GlobalStats(BaseModel):
     rhythm_std: float | None = None
     rhythm_max: float | None = None
     rhythm_min: float | None = None
+    # 2026-09-05 A2：词典情绪零信号段落字符加权占比（lexicon 覆盖缺口审计）
+    lexicon_zero_hit_share: float | None = None
 
 
 class NarrativeStructureStats(BaseModel):
@@ -516,3 +515,234 @@ class TokenUsageStats(BaseModel):
     by_call_type: dict[str, TokenUsageByTask] = Field(default_factory=dict)
     by_model: dict[str, TokenUsageByModel] = Field(default_factory=dict)
     coverage_gaps: list[str] = Field(default_factory=list)
+
+
+class TopicModelMetaInfo(BaseModel):
+    """topic_model_runs 契约行的 API 元数据视图（§5.8）"""
+
+    model_key: str
+    library_version: str
+    pipeline_version: str
+    num_topics: int
+    artifact_key: str
+
+
+class TopicDistributionEntry(BaseModel):
+    topic_id: int
+    weight: float
+
+
+class TopicAggregateResponse(BaseModel):
+    """全书主题分布（§5.11 D1）：sum(w*t)/sum(t)，分母每段一行"""
+
+    run_id: str
+    level: Literal["book"] = "book"
+    model: TopicModelMetaInfo | None = None
+    token_total: int | None = None
+    distribution: list[TopicDistributionEntry] | None = None
+    unavailable_reason: str | None = None
+
+
+class ChapterTopicDistribution(BaseModel):
+    chapter_id: int
+    chapter_sequence: int
+    chapter_title: str
+    token_total: int | None = None
+    distribution: list[TopicDistributionEntry] | None = None
+
+
+class ChapterTopicAggregateResponse(BaseModel):
+    """章节主题分布：按 chapters.sequence 排序，章节分母为该章段落推断 token 和"""
+
+    run_id: str
+    level: Literal["chapter"] = "chapter"
+    model: TopicModelMetaInfo | None = None
+    chapters: list[ChapterTopicDistribution] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+
+class TopicSeriesPoint(BaseModel):
+    paragraph_id: int
+    chapter_id: int
+    chapter_sequence: int
+    start_position: int
+    token_count: int
+    weights: list[float]
+
+
+class TopicSeriesResponse(BaseModel):
+    """段落主题序列（D1）：完整 K 维权重，横轴真实字符位置"""
+
+    run_id: str
+    model: TopicModelMetaInfo | None = None
+    num_topics: int | None = None
+    points: list[TopicSeriesPoint] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+
+class TopicShiftConfig(BaseModel):
+    """主题变化候选版本化配置（D2）"""
+
+    window_size: int
+    min_tokens_per_window: int
+    score_threshold: float
+    max_candidates: int
+
+
+class TopicShiftCandidate(BaseModel):
+    position: int
+    paragraph_start: int
+    paragraph_end: int
+    score: float
+    window_token_total: int
+
+
+class TopicShiftResponse(BaseModel):
+    """主题变化候选点（D2）：topic_shift_score 为以 2 为底、范围 [0,1] 的 JS 散度"""
+
+    candidates: list[TopicShiftCandidate] = Field(default_factory=list)
+    config: TopicShiftConfig
+    unavailable_reason: str | None = None
+
+
+class TopicEmotionEntry(BaseModel):
+    topic_id: int
+    emotion: float | None
+    weighted_token_total: float | None
+
+
+class TopicEmotionResponse(BaseModel):
+    """主题-情感统计（D3）：sum(w*t*net_density)/sum(w*t)，空值段落双向排除"""
+
+    run_id: str
+    model: TopicModelMetaInfo | None = None
+    emotion: list[TopicEmotionEntry] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+
+class EmotionEventHolderCount(BaseModel):
+    """情绪事件持有者计数（2026-09-05 B 批，sdp AGT）"""
+
+    holder: str
+    event_count: int
+    positive_count: int
+    negative_count: int
+
+
+class EmotionEventPredicateCount(BaseModel):
+    """情绪事件谓词计数（2026-09-05 B 批）"""
+
+    predicate: str
+    polarity: str
+    event_count: int
+
+
+class LinguisticGroupStats(BaseModel):
+    """书/章聚合的守恒比例与充分统计量（§5.11）；语言阶段未运行时字段为空"""
+
+    token_total: int | None = None
+    sentence_total: int | None = None
+    word_length_ratios: dict[str, float] | None = None
+    pos_ratios: dict[str, float] | None = None
+    sentence_pattern_ratios: dict[str, float] | None = None
+    avg_dependency_depth: float | None = None
+    max_dependency_depth: int | None = None
+    dependency_relation_ratios: dict[str, float] | None = None
+    dependency_root_count: int | None = None
+    # 2026-09-05 B 批：LTP sdp 情绪事件与 mNEG 修正对照（可加计数，比例查询时算）
+    emotion_event_count: int | None = None
+    emotion_pos_event_count: int | None = None
+    emotion_neg_event_count: int | None = None
+    emotion_negated_event_count: int | None = None
+    lexicon_pos_count: float | None = None
+    lexicon_neg_count: float | None = None
+    mneg_pos_count: float | None = None
+    mneg_neg_count: float | None = None
+    # 2026-09-07 句级监督边界（按书边界；标签不足/类别单一时为 null）
+    boundary_pos_score_sum: float | None = None
+    boundary_neg_score_sum: float | None = None
+
+
+class ChapterLinguisticStats(LinguisticGroupStats):
+    chapter_id: int
+
+
+class LinguisticFeaturesResponse(LinguisticGroupStats):
+    """词性/词长/句式/依存聚合（书级字段 + 章节序列）"""
+
+    run_id: str
+    paragraph_count: int = 0
+    chapters: list[ChapterLinguisticStats] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+    # 2026-09-05 B 批：书级情绪事件明细聚合（人物 × 事件计数等）
+    emotion_event_density: float | None = None
+    emotion_event_holders: list[EmotionEventHolderCount] = Field(default_factory=list)
+    emotion_top_predicates: list[EmotionEventPredicateCount] = Field(default_factory=list)
+    mneg_net_delta: float | None = None
+    lexicon_net: float | None = None
+    mneg_net: float | None = None
+
+
+class EntityCandidate(BaseModel):
+    paragraph_id: int
+    surface_text: str
+    raw_entity_type: str
+    normalized_entity_type: str | None
+    local_start_char: int
+    local_end_char: int
+
+
+class LinguisticEntitiesResponse(BaseModel):
+    """LTP 实体候选（§5.4/§6.1 审核面数据源）"""
+
+    run_id: str
+    source_kind: str = "ltp"
+    entities: list[EntityCandidate] = Field(default_factory=list)
+    count_by_type: dict[str, int] = Field(default_factory=dict)
+    unavailable_reason: str | None = None
+
+
+class LinguisticPhrasesResponse(BaseModel):
+    """固定短语命中统计（§5.11）：正式密度与四字候选分开"""
+
+    run_id: str
+    total_char_count: int = 0
+    metric_hit_count: int = 0
+    fixed_phrase_density: float | None = None
+    four_char_candidate_count: int = 0
+    total_hits: int = 0
+    unavailable_reason: str | None = None
+
+
+class Word2VecModelInfo(BaseModel):
+    embedding_dimension: int
+    vocabulary_size: int
+    artifact_scope: str
+
+
+class PosCoverageEntry(BaseModel):
+    pos_group: str
+    source_token_total: int
+    in_vocabulary_token_total: int
+    coverage_ratio: float | None = None
+
+
+class PosCentroidEntry(BaseModel):
+    pos_group: str
+    weighted_token_total: int
+    embedding_vector: list[float]
+
+
+class Word2VecStatsResponse(BaseModel):
+    """词向量契约与词性覆盖率/质心（§5.6/§5.11）
+
+    pos_similarity_matrix 与 pos_centroids 行序一致（按 pos_group 升序），
+    为组间余弦相似度对称矩阵（对角线为 1）；质心少于 2 组时为 null。
+    """
+
+    run_id: str
+    model: Word2VecModelInfo | None = None
+    pos_coverage: list[PosCoverageEntry] = Field(default_factory=list)
+    pos_centroids: list[PosCentroidEntry] = Field(default_factory=list)
+    pos_similarity_matrix: list[list[float]] | None = None
+    unavailable_reason: str | None = None

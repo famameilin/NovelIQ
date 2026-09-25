@@ -9,6 +9,7 @@ from src.workflows.curve_metrics import compute_global_stats
 from src.workflows.diagnose import (
     run_diagnose,
 )
+from src.workflows.linguistic import run_linguistic
 from src.workflows.preprocess import run_preprocess
 from src.workflows.topic import run_topic_model
 
@@ -18,6 +19,7 @@ __all__ = [
     "run_aggregate",
     "run_annotate",
     "run_diagnose",
+    "run_linguistic",
     "run_preprocess",
     "run_topic_model",
 ]

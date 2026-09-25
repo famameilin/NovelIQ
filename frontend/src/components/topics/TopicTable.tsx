@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/table";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { TopicKeywords } from "./TopicKeywords";
-import { cn } from "@/lib/cn";
 import type { Topic } from "@/api/types";
 
 export interface TopicTableProps {
@@ -67,11 +66,9 @@ export function TopicTable({ topics, className }: TopicTableProps) {
       title="主题详情"
       icon={<Table2 className="h-4 w-4" />}
       accent="chart-4"
-      className={cn("h-full", className)}
-      contentClassName="flex h-full flex-col"
-      bodyClassName="flex-1 min-h-0"
+      className={className}
     >
-      <div className="h-full overflow-auto rounded-2xl border border-border/70 bg-surface/70">
+      <div className="rounded-2xl border border-border/70 bg-surface/70">
         {hasData ? (
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-surface">

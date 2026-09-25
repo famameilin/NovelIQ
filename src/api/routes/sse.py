@@ -24,27 +24,30 @@ from src.storage.repositories import RunRepository
 router = APIRouter()
 
 
-def _task_run_exists(task_id: str) -> bool:
+def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
     """
-    2026-08-14 P2-11：校验 SSE 目标任务存在
+    校验 SSE 目标任务存在且属于当前小说
 
     按 run_id 前缀解析（与 /status 等路由同口径），防止对任意/编造的 task_id
-    建立 SSE 订阅并产生 event_manager 条目；任务不存在直接 404。
+    建立 SSE 订阅并产生 event_manager 条目；任务不存在或不属于该小说直接 404。
     """
     try:
         session_factory = get_session_factory()
         with session_factory() as session:
             run = RunRepository(session.connection()).get_run_by_run_id_prefix(task_id)
-            return run is not None
+            return run is not None and run.get("novel_id") == novel_id
     except Exception:
         return False
 
 
-@router.get("/events/tasks/{task_id}")
-async def sse_endpoint(task_id: str, request: Request) -> EventSourceResponse:
+@router.get("/novels/{novel_id}/events/tasks/{task_id}")
+async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSourceResponse:
     """SSE 端点：获取任务进度和 LLM 输出"""
-    if not _task_run_exists(task_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    if not _task_run_belongs_to_novel(task_id, novel_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在或不属于该小说",
+        )
     last_seq = _resolve_last_seq(request)
     queue = await event_manager.connect(task_id, last_seq=last_seq)
 

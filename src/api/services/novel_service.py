@@ -70,6 +70,7 @@ class NovelService:
             novel = Novel(
                 novel_id=novel_id,
                 filename=filename,
+                title=filename.removesuffix(".txt"),
                 file_path=str(file_path),
                 file_size=len(file_content),
                 upload_time=datetime.now(),

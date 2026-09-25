@@ -315,39 +315,6 @@ class TestJiebaUserDict:
     任务: 情绪曲线算法增强单元测试
     """
 
-    def test_tokenizer_singleton(self) -> None:
-        """
-        Tokenizer 单例模式
-
-        场景: 多次调用 get_tokenizer
-        期望: 返回同一个实例
-        """
-        t1 = get_tokenizer()
-        t2 = get_tokenizer()
-        assert t1 is t2
-
-    def test_tokenizer_has_jieba(self) -> None:
-        """
-        Tokenizer 检测 jieba 是否可用
-
-        场景: 检查 jieba 是否正确加载
-        期望: has_jieba 属性为 True
-        """
-        tokenizer = get_tokenizer()
-        assert tokenizer.has_jieba is True
-
-    def test_tokenizer_basic_tokenize(self) -> None:
-        """
-        Tokenizer 基本分词功能
-
-        场景: 输入中文文本
-        期望: 返回分词结果
-        """
-        tokenizer = get_tokenizer()
-        tokens = tokenizer.tokenize("今天天气很好")
-        assert len(tokens) > 0
-        assert all(isinstance(t, str) for t in tokens)
-
     def test_tokenizer_user_dict_effect(self) -> None:
         """
         jieba 用户词典分词效果

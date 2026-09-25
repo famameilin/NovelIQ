@@ -10,8 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { GraphPage } from "@/pages/GraphPage";
 import { useNovelStore } from "@/store/novelStore";
 
-const getGraphMock = vi.fn();
-const getCharactersMock = vi.fn();
+const getGraphNetworkTabMock = vi.fn();
 const getGraphChangesMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
@@ -55,16 +54,6 @@ vi.mock("@/components/common/NovelHeader", () => ({
   NovelHeader: ({ title }: { title: string }) => <div>{title}</div>,
 }));
 
-vi.mock("@/components/layout/AnalysisWorkspace", () => ({
-  AnalysisWorkspace: Object.assign(
-    ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-    {
-      Tabs: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-      Tab: ({ children }: { children?: ReactNode }) => <section>{children}</section>,
-    },
-  ),
-}));
-
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -81,9 +70,13 @@ vi.mock("@/components/charts/GraphLegend", () => ({
 }));
 
 vi.mock("@/api/results", () => ({
-  getGraph: (...args: unknown[]) => getGraphMock(...args),
-  getCharacters: (...args: unknown[]) => getCharactersMock(...args),
   getGraphChanges: (...args: unknown[]) => getGraphChangesMock(...args),
+}));
+
+vi.mock("@/api/tabs", () => ({
+  getGraphNetworkTab: (...args: unknown[]) => getGraphNetworkTabMock(...args),
+  tabQueryKey: (tab: string, novelId: string | undefined, taskId: string | null, ...rest: unknown[]) =>
+    ["tabs", novelId, taskId, tab, ...rest],
 }));
 
 vi.mock("@/api/novels", () => ({
@@ -105,7 +98,7 @@ function createGraphData(): GraphData {
     last_chapter_id: 8,
     nodes: [
       {
-        entity_id: 1,
+        entity_id: "1",
         name: "顾霜",
         entity_type: "character",
         first_seen_chapter: 1,
@@ -114,7 +107,7 @@ function createGraphData(): GraphData {
         state: { primary_role_function: "主角" },
       },
       {
-        entity_id: 2,
+        entity_id: "2",
         name: "苏映雪",
         entity_type: "character",
         first_seen_chapter: 2,
@@ -127,8 +120,8 @@ function createGraphData(): GraphData {
       {
         relation_id: "relation-1",
         state_chapter_id: 1,
-        source_entity_id: 1,
-        target_entity_id: 2,
+        source_entity_id: "1",
+        target_entity_id: "2",
         source_name: "顾霜",
         target_name: "苏映雪",
         relation_type: "盟友",
@@ -145,8 +138,27 @@ function createGraphData(): GraphData {
 // 2026-08-07 用于构造图谱变化面板所需的最小分页结果
 function createGraphChanges(): GraphChangesPageResponse {
   return {
-    changes: [],
-    page_info: { limit: 200, returned_count: 0, total: 0, has_more: false, next_cursor: null },
+    changes: [
+      {
+        change_id: "relation:2:1",
+        change_kind: "relation",
+        chapter_id: 1,
+        chapter_order: 1,
+        fact_id: "fact-2",
+        effective_chapter_id: 2,
+        changes: [{ change_kind: "assert" }],
+        relation_id: "relation-1",
+        from_entity_id: "1",
+        to_entity_id: "2",
+        from_name: "顾霜",
+        to_name: "苏映雪",
+        relation_type: "盟友",
+        relation_change_kind: "assert",
+        directionality: "directed",
+        relation_semantics: "ordinary",
+      },
+    ],
+    page_info: { limit: 200, returned_count: 1, total: 1, has_more: false, next_cursor: null },
   };
 }
 
@@ -166,8 +178,14 @@ describe("GraphPage integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
-    getGraphMock.mockResolvedValue(createGraphData());
-    getCharactersMock.mockResolvedValue([{ name: "顾霜", appearance_count: 5 }]);
+    getGraphNetworkTabMock.mockResolvedValue({
+      run_id: "task-a",
+      snapshot: createGraphData(),
+      character_appearances: [{ name: "顾霜", appearance_count: 5 }],
+      graph_metrics: { run_id: "task-a", unavailable_reason: null, algorithm: {}, pagerank: {}, hits: {}, communities: {} },
+      change_total: 9,
+      unavailable_reason: null,
+    });
     getGraphChangesMock.mockResolvedValue(createGraphChanges());
     getNovelMock.mockResolvedValue({
       novel_id: "novel-1",
@@ -183,11 +201,27 @@ describe("GraphPage integration", () => {
     const user = userEvent.setup();
     renderGraphPage();
 
-    expect(await screen.findByText("关系工作区")).toBeInTheDocument();
+    expect(await screen.findByText("当前人物关系")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "选择顾霜" }));
 
-    expect(await screen.findByText("关联角色")).toBeInTheDocument();
-    expect(screen.getAllByText("顾霜").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("苏映雪").length).toBeGreaterThan(0);
+    const inspector = await screen.findByRole("complementary", { name: "顾霜实体详情" });
+    expect(inspector).toHaveTextContent("顾霜");
+    expect(inspector).toHaveTextContent("苏映雪");
+    expect(inspector).not.toHaveTextContent("entity_id");
+  });
+
+  it("切换关系演变后展示关系密度和变化列表，不显示旧算法指标", async () => {
+    const user = userEvent.setup();
+    renderGraphPage();
+
+    await screen.findByRole("tab", { name: "关系演变" });
+    await user.click(screen.getByRole("tab", { name: "关系演变" }));
+
+    expect(screen.getByText("关系密度")).toBeInTheDocument();
+    expect(screen.getAllByText(/第 2 章 · 顾霜 → 苏映雪/).length).toBeGreaterThan(0);
+    expect(screen.getByText("单向关系")).toBeInTheDocument();
+    expect(screen.queryByText("关系集中度")).not.toBeInTheDocument();
+    expect(screen.queryByText("PageRank")).not.toBeInTheDocument();
+    expect(screen.queryByText("Louvain")).not.toBeInTheDocument();
   });
 });

@@ -1,14 +1,16 @@
-import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopicsPage } from "@/pages/TopicsPage";
 import { useNovelStore } from "@/store/novelStore";
 
-const getTopicsMock = vi.fn();
-const getDiagnosisMock = vi.fn();
+const getTopicsOverviewTabMock = vi.fn();
+const getTopicSeriesMock = vi.fn();
+const getTopicShiftsMock = vi.fn();
+const getTopicEmotionMock = vi.fn();
 const navigateMock = vi.fn();
 
 let currentNovelId = "novel-1";
@@ -20,50 +22,22 @@ function passthroughComponent(displayName: string) {
   return Component;
 }
 
-function motionElement(tagName: string) {
-  const Component = (props: {
-    children?: ReactNode;
-    whileHover?: unknown;
-    whileTap?: unknown;
-    transition?: unknown;
-    variants?: unknown;
-    initial?: unknown;
-    animate?: unknown;
-    exit?: unknown;
-    [key: string]: unknown;
-  }) => {
-    const sanitizedProps = { ...props };
-    delete sanitizedProps.whileHover;
-    delete sanitizedProps.whileTap;
-    delete sanitizedProps.transition;
-    delete sanitizedProps.variants;
-    delete sanitizedProps.initial;
-    delete sanitizedProps.animate;
-    delete sanitizedProps.exit;
-    return createElement(tagName, sanitizedProps, props.children);
-  };
-  Component.displayName = `motion-${tagName}`;
-  return Component;
-}
-
 vi.mock("react-router-dom", () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ novelId: currentNovelId }),
   useSearchParams: () => [new URLSearchParams(currentSearchParams)],
 }));
 
-vi.mock("framer-motion", () => ({
-  motion: new Proxy(
-    {},
-    {
-      get: (_target, key: string) => motionElement(key),
-    },
-  ),
+vi.mock("@/api/results", () => ({
+  getTopicSeries: (...args: unknown[]) => getTopicSeriesMock(...args),
+  getTopicShifts: (...args: unknown[]) => getTopicShiftsMock(...args),
+  getTopicEmotion: (...args: unknown[]) => getTopicEmotionMock(...args),
 }));
 
-vi.mock("@/api/results", () => ({
-  getTopics: (...args: unknown[]) => getTopicsMock(...args),
-  getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
+vi.mock("@/api/tabs", () => ({
+  getTopicsOverviewTab: (...args: unknown[]) => getTopicsOverviewTabMock(...args),
+  tabQueryKey: (tab: string, novelId: string | undefined, taskId: string | null, ...rest: unknown[]) =>
+    ["tabs", novelId, taskId, tab, ...rest],
 }));
 
 vi.mock("@/components/layout/PageContainer", () => ({
@@ -83,10 +57,28 @@ vi.mock("@/components/common/DashboardCardShell", () => ({
   ),
 }));
 
+vi.mock("@/components/common/TabUnavailableState", () => ({
+  TabUnavailableState: passthroughComponent("tab-unavailable-state"),
+}));
+
+vi.mock("@/components/common/AnalysisNotCompleteState", () => ({
+  AnalysisNotCompleteState: (props: { title?: string; description?: string }) => (
+    <div data-testid="analysis-not-complete-state">
+      <p>{props.title}</p>
+      <p>{props.description}</p>
+    </div>
+  ),
+}));
+
 vi.mock("@/components/topics", () => ({
   TopicWordCloud: passthroughComponent("topic-word-cloud"),
   TopicBarChart: passthroughComponent("topic-bar-chart"),
   TopicTable: passthroughComponent("topic-table"),
+  TopicDistributionChart: passthroughComponent("topic-distribution-chart"),
+  TopicKeywordsCard: passthroughComponent("topic-keywords-card"),
+  TopicSeriesChart: passthroughComponent("topic-series-chart"),
+  TopicShiftsPanel: passthroughComponent("topic-shifts-panel"),
+  TopicEmotionPanel: passthroughComponent("topic-emotion-panel"),
 }));
 
 vi.mock("@/components/ui/button", () => ({
@@ -117,24 +109,141 @@ describe("TopicsPage", () => {
     currentNovelId = "novel-1";
     currentSearchParams = "task_id=task-1";
     navigateMock.mockReset();
-    getTopicsMock.mockReset();
-    getDiagnosisMock.mockReset();
+    getTopicsOverviewTabMock.mockReset();
+    getTopicSeriesMock.mockReset();
+    getTopicShiftsMock.mockReset();
+    getTopicEmotionMock.mockReset();
+    getTopicsOverviewTabMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      topics: [],
+      distribution: null,
+      chapters: [],
+      keywords: [],
+      topic_labels: null,
+      unavailable_reason: "topic_inference_unavailable: 无 topic_model_runs 契约行",
+      keyword_unavailable_reason: null,
+    });
+    getTopicSeriesMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      num_topics: null,
+      points: [],
+      unavailable_reason: "topic_inference_unavailable: 无 topic_model_runs 契约行",
+    });
+    getTopicShiftsMock.mockResolvedValue({
+      run_id: "task-1",
+      candidates: [],
+      config: { window_size: 6, min_tokens_per_window: 800, score_threshold: 0.3, max_candidates: 20 },
+      unavailable_reason: "topic_inference_unavailable: 无 topic_model_runs 契约行",
+    });
+    getTopicEmotionMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      emotion: [],
+      unavailable_reason: "topic_inference_unavailable: 无 topic_model_runs 契约行",
+    });
     useNovelStore.getState().clear();
   });
 
-  it("renders topics when the diagnosis contains only currently available fields", async () => {
-    getTopicsMock.mockResolvedValue([
-      { topic_id: 0, words: ["修炼", "成长"], weight: 0.8 },
-    ]);
-    getDiagnosisMock.mockResolvedValue({ topic_labels: ["成长"] });
+  it("主题固定工作区在完整主题分布页签中保留词云与分布", async () => {
+    getTopicsOverviewTabMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      topics: [{ topic_id: 0, words: ["修炼", "成长"], weight: 0.8 }],
+      distribution: [{ topic_id: 0, weight: 1 }],
+      chapters: [],
+      keywords: [{ word: "宗门", score: 0.08 }],
+      topic_labels: ["成长"],
+      unavailable_reason: null,
+      keyword_unavailable_reason: null,
+    });
+    getTopicSeriesMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      num_topics: null,
+      points: [],
+      unavailable_reason: "topic_inference_unavailable: 无 topic_model_runs 契约行",
+    });
+    getTopicShiftsMock.mockResolvedValue({
+      run_id: "task-1",
+      candidates: [],
+      config: { window_size: 6, min_tokens_per_window: 800, score_threshold: 0.3, max_candidates: 20 },
+      unavailable_reason: null,
+    });
+    getTopicEmotionMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      emotion: [],
+      unavailable_reason: null,
+    });
 
     renderTopicsPage();
 
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "完整主题分布" }));
     expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
+    expect(screen.getByTestId("topic-distribution-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("topic-keywords-card")).toBeInTheDocument();
+    expect(getTopicsOverviewTabMock).toHaveBeenCalledWith("novel-1", "task-1");
+  });
+
+  it("诊断主题标签为空时仍渲染主内容而不是空白主体区", async () => {
+    getTopicsOverviewTabMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      topics: [{ topic_id: 0, words: ["修炼"], weight: 0.8 }],
+      distribution: [{ topic_id: 0, weight: 1 }],
+      chapters: [],
+      keywords: [],
+      topic_labels: null,
+      unavailable_reason: null,
+      keyword_unavailable_reason: "no_cooccurrence: 过滤停用词后无可建图词元",
+    });
+
+    renderTopicsPage();
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "完整主题分布" }));
+    expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
+    expect(screen.getByTestId("topic-bar-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("topic-table")).toBeInTheDocument();
+  });
+
+  it("主题固定工作区保留全部业务页签和独立端点", async () => {
+    getTopicsOverviewTabMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      topics: [],
+      distribution: null,
+      chapters: [],
+      keywords: [],
+      topic_labels: null,
+      unavailable_reason: "unavailable",
+      keyword_unavailable_reason: null,
+    });
+
+    renderTopicsPage();
+
+    await screen.findByTestId("tab-unavailable-state");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "完整主题分布" }));
+    await user.click(screen.getByRole("tab", { name: "主题演进" }));
+    await user.click(screen.getByRole("tab", { name: "主题迁移" }));
+    await user.click(screen.getByRole("tab", { name: "主题情绪" }));
+
+    expect(screen.getByRole("tab", { name: "主题总览" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "完整主题分布" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "主题演进" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "主题迁移" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "主题情绪" })).toBeInTheDocument();
+    expect(getTopicSeriesMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getTopicShiftsMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getTopicEmotionMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 
   it("renders analysis-not-complete state for running tasks", async () => {
-    getTopicsMock.mockRejectedValue({
+    const notCompleteError = {
       isAxiosError: true,
       response: {
         status: 400,
@@ -144,18 +253,11 @@ describe("TopicsPage", () => {
           status_code: 400,
         },
       },
-    });
-    getDiagnosisMock.mockRejectedValue({
-      isAxiosError: true,
-      response: {
-        status: 400,
-        data: {
-          detail: "分析未完成，当前状态: running",
-          error_type: "AnalysisNotCompleteError",
-          status_code: 400,
-        },
-      },
-    });
+    };
+    getTopicsOverviewTabMock.mockRejectedValue(notCompleteError);
+    getTopicSeriesMock.mockRejectedValue(notCompleteError);
+    getTopicShiftsMock.mockRejectedValue(notCompleteError);
+    getTopicEmotionMock.mockRejectedValue(notCompleteError);
 
     renderTopicsPage();
 

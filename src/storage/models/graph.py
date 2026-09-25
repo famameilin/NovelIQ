@@ -41,11 +41,16 @@ class ChapterBoundary:
 
 
 class GraphEntity(Base):
-    """2026-08-19 用于保存单次分析运行内稳定的实体身份"""
+    """2026-08-19 用于保存单次分析运行内稳定的实体身份
+
+    2026-09-19 id 纪律：所有 id 都是 uuid——entity_id 主键从自增 int 改为
+    String(36) uuid（uuid5 按 run+规范名确定性铸造，agent 运行面与落库同值，
+    见 fact_graph._entity_uuid）。
+    """
 
     __tablename__ = "graph_entities"
 
-    entity_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entity_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
     )
@@ -83,8 +88,8 @@ class GraphFact(Base):
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     fact_id: Mapped[str] = mapped_column(String(128), nullable=False)
     fact_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    subject_entity_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("graph_entities.entity_id", ondelete="RESTRICT"), nullable=True
+    subject_entity_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("graph_entities.entity_id", ondelete="RESTRICT"), nullable=True
     )
     predicate: Mapped[str] = mapped_column(String(255), nullable=False)
     object: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -138,8 +143,8 @@ class EntityState(Base):
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True
     )
     chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    entity_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), primary_key=True
+    entity_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), primary_key=True
     )
     state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     changes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
@@ -166,11 +171,11 @@ class GraphRelation(Base):
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
     )
-    from_entity_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False
+    from_entity_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False
     )
-    to_entity_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False
+    to_entity_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False
     )
     directionality: Mapped[str] = mapped_column(String(20), nullable=False)
     relation_semantics: Mapped[str] = mapped_column(String(30), nullable=False)

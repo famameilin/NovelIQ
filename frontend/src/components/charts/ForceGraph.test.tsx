@@ -62,7 +62,7 @@ function createGraphData(): GraphData {
     last_chapter_id: 1,
     nodes: [
       {
-        entity_id: 1,
+        entity_id: "1",
         name: "白芷",
         entity_type: "character",
         first_seen_chapter: 1,

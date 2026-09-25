@@ -61,6 +61,7 @@ export const routeNameMap: Record<string, string> = {
   "/characters": "角色分析",
   "/graph": "人物关系图谱",
   "/topics": "主题分布",
+  "/linguistic": "语言特征",
   "/timeline": "叙事时间轴",
   "/diagnosis": "诊断报告",
 };

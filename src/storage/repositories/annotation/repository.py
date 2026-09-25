@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from sqlalchemy import func, select
@@ -15,13 +15,15 @@ from src.storage.models import (
     Chapter,
     ChapterAnnotationRecord,
     DialogueRecord,
-    ForeshadowingThread,
-    ForeshadowingThreadHit,
+    EventEdge,
+    EventNode,
+    GraphEntity,
     GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
 
-_EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38}
+# 2026-09-14 伏笔 confidence 并轨三档（high/medium/low 等差基分），PayoffLikelihood 二值枚举退役
+_EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38, "low": 0.14}
 _EXPECTATION_STATUS_BONUS = {"open": -0.07, "reinforced": 0.03, "likely_paid_off": 0.28}
 _EXPECTATION_STRENGTH_BONUS = {"high": 0.03, "medium": 0.0, "low": -0.05}
 _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off": 1.2}
@@ -33,20 +35,19 @@ class ChapterAnnotationRow:
     """2026-08-05 用于向 章节消费者暴露章节 segment 的具名读模型"""
 
     chapter_id: int
-    emotional_valence: str
+    emotional_valence: int
     event_type: str
     pivot_moment: bool
     cliffhanger: bool
     has_foreshadowing: bool | None = None
     is_strong_setup: bool | None = None
-    foreshadowing_type: str | None = None
-    setup_kind: str | None = None
     foreshadowing_desc: str | None = None
-    setup_summary: str | None = None
     why_unresolved_now: str | None = None
-    expected_payoff_family: str | None = None
     payoff_likelihood: str | None = None
-    linked_setup_id: str | None = None
+    # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
+    foreshadowing_root_event_id: str | None = None
+    # 2026-09-05 A1：冻结时系统覆盖告警（旧 payload 无此字段时为空）
+    coverage_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,18 +78,16 @@ class DialogueFactRow:
 
 
 @dataclass(frozen=True)
-class ForeshadowingThreadView:
-    """2026-08-05 用于向 API 与诊断暴露伏笔线程汇总视图"""
+class ForeshadowingTreeView:
+    """2026-09-13 用于向 API 与诊断暴露伏笔树汇总视图（伏笔即事件树）"""
 
-    setup_id: str
+    root_event_id: str
+    tree_id: str
     first_chapter_id: int
     last_chapter_id: int
     anchor_chapter_ids: list[int]
-    setup_summary: str
-    setup_kind: str | None
-    expected_payoff_family: str | None
+    description: str
     payoff_likelihood: str | None
-    confidence: str
     strength: str | None
     status: str
     active: bool
@@ -140,35 +139,53 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         )
 
     def _foreshadowing_by_chapter(self, run_id: str) -> dict[int, dict[str, Any]]:
-        """2026-08-05 用于把伏笔 thread 与 hit 展开到实际命中章节"""
-        stmt = (
-            select(ForeshadowingThreadHit, ForeshadowingThread)
-            .join(ForeshadowingThread, ForeshadowingThreadHit.setup_id == ForeshadowingThread.setup_id)
-            .join(
-                Chapter,
-                (Chapter.run_id == ForeshadowingThreadHit.run_id)
-                & (Chapter.chapter_id == ForeshadowingThreadHit.chapter_id),
-            )
-            .where(
-                ForeshadowingThreadHit.run_id == run_id,
-                ForeshadowingThread.run_id == run_id,
-            )
-            .order_by(Chapter.sequence, ForeshadowingThreadHit.chapter_id, ForeshadowingThreadHit.hit_id)
+        """2026-09-13 用于把伏笔树（根事件 + foreshadowing 挂边）展开到实际命中章节
+
+        埋设章 linked 为 None（该章就是根所在）；后续挂边章 linked 指向树根事件 id。
+        """
+        roots = list(
+            self.session.execute(
+                select(EventNode).where(
+                    EventNode.run_id == run_id,
+                    EventNode.is_foreshadowing_root.is_(True),
+                )
+            ).scalars()
         )
-        by_chapter: dict[int, dict[str, Any]] = {}
-        for hit, thread in self.session.execute(stmt).all():
-            by_chapter[hit.chapter_id] = {
+        if not roots:
+            return {}
+        root_by_id = {root.event_id: root for root in roots}
+        sequence_map = self._chapter_sequence_map(run_id)
+
+        def _entry(root: EventNode, *, linked: str | None) -> dict[str, Any]:
+            return {
                 "has_foreshadowing": True,
-                "is_strong_setup": (thread.strength == "high") if thread.strength is not None else None,
-                "foreshadowing_type": thread.foreshadowing_type,
-                "setup_kind": thread.setup_kind,
-                "foreshadowing_desc": thread.setup_summary,
-                "setup_summary": thread.setup_summary,
+                "is_strong_setup": (root.strength == "high") if root.strength is not None else None,
+                "foreshadowing_desc": root.description,
                 "why_unresolved_now": None,
-                "expected_payoff_family": thread.expected_payoff_family,
-                "payoff_likelihood": thread.payoff_likelihood,
-                "linked_setup_id": None if hit.is_new_setup else thread.setup_id,
+                "payoff_likelihood": root.payoff_likelihood,
+                "foreshadowing_root_event_id": linked,
             }
+
+        by_chapter: dict[int, dict[str, Any]] = {}
+        for root in sorted(roots, key=lambda r: (sequence_map.get(r.chapter_id, r.chapter_id), r.event_id)):
+            by_chapter[root.chapter_id] = _entry(root, linked=None)
+        edges = list(
+            self.session.execute(
+                select(EventEdge).where(
+                    EventEdge.run_id == run_id,
+                    EventEdge.edge_type == "foreshadowing",
+                    EventEdge.is_active.is_(True),
+                )
+            ).scalars()
+        )
+        for edge in sorted(
+            edges,
+            key=lambda e: (sequence_map.get(e.target_chapter_id, e.target_chapter_id), e.edge_id),
+        ):
+            root_node = root_by_id.get(edge.source_event_id)
+            if root_node is None:
+                continue
+            by_chapter[edge.target_chapter_id] = _entry(root_node, linked=root_node.event_id)
         return by_chapter
 
     def fetch_chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRow]:
@@ -181,17 +198,17 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         rows: list[ChapterAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
             annotation = BoundChapterAnnotation.model_validate(record.payload)
-            for chunk in annotation.chunks:
-                rows.append(
-                    ChapterAnnotationRow(
-                        chapter_id=chunk.chunk_id,
-                        emotional_valence=chunk.metrics.emotional_valence,
-                        event_type=chunk.metrics.narrative_function,
-                        pivot_moment=chunk.metrics.pivot_moment,
-                        cliffhanger=chunk.metrics.cliffhanger,
-                        **foreshadowing_by_chapter.get(chunk.chunk_id, {}),
-                    )
+            rows.append(
+                ChapterAnnotationRow(
+                    chapter_id=record.chapter_id,
+                    emotional_valence=annotation.metrics.emotional_valence,
+                    event_type=annotation.metrics.narrative_function,
+                    pivot_moment=annotation.metrics.pivot_moment,
+                    cliffhanger=annotation.metrics.cliffhanger,
+                    coverage_warnings=list(annotation.coverage_warnings),
+                    **foreshadowing_by_chapter.get(record.chapter_id, {}),
                 )
+            )
         sequence_map = self._chapter_sequence_map(run_id)
         return sorted(rows, key=lambda row: (sequence_map.get(row.chapter_id, row.chapter_id), row.chapter_id))
 
@@ -239,7 +256,12 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         )
 
     def fetch_chapter_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
-        """2026-08-11 用于从对话记录表展开 章节对话记录"""
+        """2026-08-11 用于从对话记录表展开 章节对话记录
+
+        2026-09-17 说话人存图实体 id：这里按 id 取实体名（不再按名字形态判断是否存在），
+        并保留两道过滤——实体必须是 character、名字必须是可作全局角色名的形态
+        （代词/泛指/引用位名不算说话人）。
+        """
         rows: list[DialogueFactRow] = []
         statement = (
             select(DialogueRecord)
@@ -250,9 +272,21 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             .where(DialogueRecord.run_id == run_id)
             .order_by(Chapter.sequence, DialogueRecord.chapter_id, DialogueRecord.start)
         )
+        entities_by_id = {
+            str(entity.entity_id): entity
+            for entity in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
+        }
         for record in self.session.execute(statement).scalars().all():
-            speaker_name = str(record.speaker or "").strip()
-            valid_speaker = speaker_name if is_global_character_surface_name(speaker_name) else None
+            speaker_entity = entities_by_id.get(str(record.speaker)) if record.speaker is not None else None
+            valid_speaker: str | None = None
+            if speaker_entity is not None:
+                speaker_name = str(speaker_entity.canonical_name).strip()
+                if (
+                    speaker_name
+                    and str(speaker_entity.entity_type) == "character"
+                    and is_global_character_surface_name(speaker_name)
+                ):
+                    valid_speaker = speaker_name
             speaker_names = [valid_speaker] if valid_speaker else []
             speaker_references = (
                 [
@@ -279,111 +313,125 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             )
         return rows
 
-    def fetch_foreshadowing_threads(self, run_id: str) -> list[ForeshadowingThreadView]:
-        """2026-08-05 用于汇总伏笔线程与全部命中锚点"""
+    def fetch_foreshadowing_trees(self, run_id: str) -> list[ForeshadowingTreeView]:
+        """2026-09-13 用于汇总伏笔树（根事件属性 + 全部挂边章节与事件）"""
         sequence_map = self._chapter_sequence_map(run_id)
-        thread_stmt = (
-            select(ForeshadowingThread)
+        root_stmt = (
+            select(EventNode)
             .join(
                 Chapter,
-                (Chapter.run_id == ForeshadowingThread.run_id)
-                & (Chapter.chapter_id == ForeshadowingThread.first_chapter_id),
+                (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
             )
-            .where(ForeshadowingThread.run_id == run_id)
-            .order_by(Chapter.sequence, ForeshadowingThread.first_chapter_id, ForeshadowingThread.setup_id)
+            .where(
+                EventNode.run_id == run_id,
+                EventNode.is_foreshadowing_root.is_(True),
+            )
+            .order_by(Chapter.sequence, EventNode.chapter_id, EventNode.event_id)
         )
-        threads = list(self.session.execute(thread_stmt).scalars().all())
-        if not threads:
+        roots = list(self.session.execute(root_stmt).scalars().all())
+        if not roots:
             return []
-        hit_stmt = (
-            select(ForeshadowingThreadHit)
+        edge_stmt = (
+            select(EventEdge)
             .join(
                 Chapter,
-                (Chapter.run_id == ForeshadowingThreadHit.run_id)
-                & (Chapter.chapter_id == ForeshadowingThreadHit.chapter_id),
+                (Chapter.run_id == EventEdge.run_id) & (Chapter.chapter_id == EventEdge.target_chapter_id),
             )
-            .where(ForeshadowingThreadHit.run_id == run_id)
-            .order_by(
-                ForeshadowingThreadHit.setup_id,
-                Chapter.sequence,
-                ForeshadowingThreadHit.chapter_id,
-                ForeshadowingThreadHit.hit_id,
+            .where(
+                EventEdge.run_id == run_id,
+                EventEdge.edge_type == "foreshadowing",
+                EventEdge.is_active.is_(True),
             )
+            .order_by(Chapter.sequence, EventEdge.target_chapter_id, EventEdge.edge_id)
         )
-        hits_by_setup: dict[str, list[ForeshadowingThreadHit]] = {}
-        for hit in self.session.execute(hit_stmt).scalars().all():
-            hits_by_setup.setdefault(hit.setup_id, []).append(hit)
-        views: list[ForeshadowingThreadView] = []
-        for thread in threads:
-            hits = hits_by_setup.get(thread.setup_id, [])
-            latest = hits[-1] if hits else None
+        edges_by_root: dict[str, list[EventEdge]] = {}
+        targets_by_id: dict[str, EventNode] = {}
+        all_edges: list[EventEdge] = list(self.session.execute(edge_stmt).scalars().all())
+        for edge in all_edges:
+            edges_by_root.setdefault(edge.source_event_id, []).append(edge)
+        target_ids = {edge.target_event_id for edge in all_edges}
+        if target_ids:
+            for node in self.session.execute(
+                select(EventNode).where(EventNode.run_id == run_id, EventNode.event_id.in_(target_ids))
+            ).scalars().all():
+                targets_by_id[node.event_id] = node
+        views: list[ForeshadowingTreeView] = []
+        for root in roots:
+            edges = edges_by_root.get(root.event_id, [])
+            anchor_chapter_ids = sorted(
+                {root.chapter_id, *(edge.target_chapter_id for edge in edges)},
+                key=lambda chapter_id: (sequence_map.get(chapter_id, chapter_id), chapter_id),
+            )
+            last_chapter_id = anchor_chapter_ids[-1] if anchor_chapter_ids else root.chapter_id
+            latest_edge = edges[-1] if edges else None
+            latest_node = targets_by_id.get(latest_edge.target_event_id) if latest_edge else None
+            status = root.foreshadowing_status or "open"
             views.append(
-                ForeshadowingThreadView(
-                    setup_id=thread.setup_id,
-                    first_chapter_id=thread.first_chapter_id,
-                    last_chapter_id=thread.last_chapter_id,
-                    anchor_chapter_ids=sorted(
-                        {hit.chapter_id for hit in hits},
-                        key=lambda chapter_id: (sequence_map.get(chapter_id, chapter_id), chapter_id),
-                    ),
-                    setup_summary=thread.setup_summary,
-                    setup_kind=thread.setup_kind,
-                    expected_payoff_family=thread.expected_payoff_family,
-                    payoff_likelihood=thread.payoff_likelihood,
-                    confidence=thread.confidence,
-                    strength=thread.strength,
-                    status=thread.status,
-                    active=bool(thread.active),
-                    latest_reason=latest.anchor_text if latest else None,
+                ForeshadowingTreeView(
+                    root_event_id=root.event_id,
+                    tree_id=root.tree_id,
+                    first_chapter_id=root.chapter_id,
+                    last_chapter_id=last_chapter_id,
+                    anchor_chapter_ids=anchor_chapter_ids,
+                    description=root.description,
+                    payoff_likelihood=root.payoff_likelihood,
+                    strength=root.strength,
+                    status=status,
+                    active=status != "likely_paid_off",
+                    latest_reason=latest_node.description if latest_node is not None else None,
                     latest_why_unresolved_now=None,
                 )
             )
         return views
 
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
-        """2026-08-05 用于按最新伏笔线程生命周期计算回收预期"""
-        threads = list(
-            self.session.execute(select(ForeshadowingThread).where(ForeshadowingThread.run_id == run_id))
-            .scalars()
-            .all()
+        """2026-09-13 用于按伏笔树根生命周期属性计算回收预期（权重口径不变）"""
+        roots = list(
+            self.session.execute(
+                select(EventNode).where(
+                    EventNode.run_id == run_id,
+                    EventNode.is_foreshadowing_root.is_(True),
+                )
+            ).scalars().all()
         )
-        if not threads:
+        if not roots:
             return None
-        hit_counts = {
-            row.setup_id: int(row.hit_count)
+        edge_counts = {
+            row.source_event_id: int(row.edge_count)
             for row in self.session.execute(
                 select(
-                    ForeshadowingThreadHit.setup_id,
-                    func.count().label("hit_count"),
+                    EventEdge.source_event_id,
+                    func.count().label("edge_count"),
                 )
-                .where(ForeshadowingThreadHit.run_id == run_id)
-                .group_by(ForeshadowingThreadHit.setup_id)
+                .where(
+                    EventEdge.run_id == run_id,
+                    EventEdge.edge_type == "foreshadowing",
+                )
+                .group_by(EventEdge.source_event_id)
             ).all()
         }
         weighted_total = 0.0
         total_weight = 0.0
         has_evidence = False
-        for thread in threads:
-            hit_count = hit_counts.get(thread.setup_id, 0)
-            if hit_count < 1:
-                raise ValueError(f"伏笔线程缺少命中记录: {thread.setup_id}")
-            # 2026-08-16 P3：字段为 None 时不冒充 LLM 判断；若全线程都无
+        for root in roots:
+            # 挂边数 + 埋设本体记 1（旧 hit_count 口径：埋设也是一条命中）
+            hit_count = 1 + edge_counts.get(root.event_id, 0)
+            # 2026-08-16 P3：字段为 None 时不冒充 LLM 判断；若全树都无
             # payoff_likelihood/strength 证据，说明上游输入退化，结果为 None。
-            # status 在 ORM 层必填（生命周期态），不单独构成“有 LLM 枚举证据”。
             has_evidence = has_evidence or any(
-                value is not None for value in (thread.payoff_likelihood, thread.strength)
+                value is not None for value in (root.payoff_likelihood, root.strength)
             )
-            # None 按最保守档位参与计算（medium/open/low），避免任意字符串索引抛 KeyError
+            status = root.foreshadowing_status or "open"
             base = _EXPECTATION_BASE_SCORE_BY_PAYOFF.get(
-                thread.payoff_likelihood or "",
+                root.payoff_likelihood or "",
                 _EXPECTATION_BASE_SCORE_BY_PAYOFF["medium"],
             )
             status_bonus = _EXPECTATION_STATUS_BONUS.get(
-                thread.status,
+                status,
                 _EXPECTATION_STATUS_BONUS["open"],
             )
             strength_bonus = _EXPECTATION_STRENGTH_BONUS.get(
-                thread.strength or "",
+                root.strength or "",
                 _EXPECTATION_STRENGTH_BONUS["low"],
             )
             score = min(
@@ -397,11 +445,11 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 ),
             )
             status_weight = _EXPECTATION_STATUS_WEIGHT.get(
-                thread.status,
+                status,
                 _EXPECTATION_STATUS_WEIGHT["open"],
             )
             strength_weight = _EXPECTATION_STRENGTH_WEIGHT.get(
-                thread.strength or "",
+                root.strength or "",
                 _EXPECTATION_STRENGTH_WEIGHT["low"],
             )
             weight = status_weight + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0) + strength_weight

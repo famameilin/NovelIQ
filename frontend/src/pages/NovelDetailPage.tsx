@@ -5,24 +5,15 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import {
-  getNarrativeStructure,
-  getEmotionStats,
-  getCharacterStats,
-  getStyleStats,
-  getChapterMetrics,
-  getTopics,
-  getDiagnosis,
-  getEmotionTrend,
-} from "@/api/results";
-import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { getNovel } from "@/api/novels";
-import {
   createAnalysisTask,
   resumeAnalysisTask,
   batchDeleteTasks,
   cancelAnalysisTask,
   getTaskStatus,
 } from "@/api/analysis";
+import { getDashboardTab, tabQueryKey } from "@/api/tabs";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
+import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { useStreamStore } from "@/store/streamStore";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
@@ -151,10 +142,8 @@ export function NovelDetailPage() {
     onCompleted: () => {
       setIsStartingTask(false);
       toast.success("分析完成");
-      // 刷新所有指标数据，确保仪表盘显示最新结果
-      queryClient.invalidateQueries({ queryKey: ["metrics", novelId, storeTaskId] });
-      queryClient.invalidateQueries({ queryKey: ["topics", novelId, storeTaskId] });
-      queryClient.invalidateQueries({ queryKey: ["results", novelId, storeTaskId] });
+      // 刷新所有 tab 级数据，确保仪表盘显示最新结果
+      queryClient.invalidateQueries({ queryKey: ["tabs", novelId, storeTaskId] });
     },
     onCancelled: () => {
       setIsStartingTask(false);
@@ -285,124 +274,28 @@ export function NovelDetailPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const narrativeQuery = useQuery({
-    queryKey: ["metrics", novelId, storeTaskId, "narrative"],
-    queryFn: () => getNarrativeStructure(novelId!, storeTaskId!),
+  // 仪表盘 tab：一次拉取全部八段复合数据（2026-08-29 tab 级 API 统一）
+  const dashboardQuery = useQuery({
+    queryKey: tabQueryKey("dashboard", novelId, storeTaskId),
+    queryFn: () => getDashboardTab(novelId!, storeTaskId!),
     enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
-
-  const emotionQuery = useQuery({
-    queryKey: ["metrics", novelId, storeTaskId, "emotion"],
-    queryFn: () => getEmotionStats(novelId!, storeTaskId!),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const characterQuery = useQuery({
-    queryKey: ["metrics", novelId, storeTaskId, "character"],
-    queryFn: () => getCharacterStats(novelId!, storeTaskId!),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const styleQuery = useQuery({
-    queryKey: ["metrics", novelId, storeTaskId, "style"],
-    queryFn: () => getStyleStats(novelId!, storeTaskId!),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const chapterMetricsQuery = useQuery({
-    queryKey: ["chapter-metrics", novelId, storeTaskId],
-    queryFn: () => getChapterMetrics(novelId!, storeTaskId!),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const topicsQuery = useQuery({
-    queryKey: ["topics", novelId, storeTaskId],
-    queryFn: () => getTopics(novelId!, storeTaskId!),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const diagnosisQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
-    queryFn: () => getDiagnosis(novelId!, storeTaskId!),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const emotionTrendQuery = useQuery({
-    queryKey: ["emotion-trend", novelId, storeTaskId, 20, null],
-    queryFn: () => getEmotionTrend(novelId!, storeTaskId!, { windowParagraphs: 20 }),
-    enabled: canRequestResults,
-    staleTime: STALE_TIME,
-  });
-
-  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError;
-
-  const allMetricsLoaded =
-    narrativeQuery.data &&
-    emotionQuery.data &&
-    characterQuery.data &&
-    styleQuery.data &&
-    chapterMetricsQuery.data &&
-    topicsQuery.data &&
-    hasDiagnosisLoaded;
+  const dashboard = dashboardQuery.data;
 
   const isLoading =
     enabled &&
-    (taskStatusQuery.isLoading ||
-      (canRequestResults &&
-        (narrativeQuery.isLoading ||
-          emotionQuery.isLoading ||
-          characterQuery.isLoading ||
-          styleQuery.isLoading ||
-          chapterMetricsQuery.isLoading ||
-          topicsQuery.isLoading ||
-          diagnosisQuery.isLoading ||
-           emotionTrendQuery.isLoading)));
+    (taskStatusQuery.isLoading || (canRequestResults && dashboardQuery.isLoading));
 
   // 首页对 rerun-required diagnosis 采用“单一重跑态”；
-  // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败
-  const hasAnyError =
-    taskStatusQuery.isError ||
-    narrativeQuery.isError ||
-    emotionQuery.isError ||
-    characterQuery.isError ||
-    styleQuery.isError ||
-    chapterMetricsQuery.isError ||
-    topicsQuery.isError ||
-    diagnosisQuery.isError ||
-    emotionTrendQuery.isError;
-
-  const resultQueryErrors = [
-    narrativeQuery.error,
-    emotionQuery.error,
-    characterQuery.error,
-    styleQuery.error,
-    chapterMetricsQuery.error,
-    topicsQuery.error,
-    diagnosisQuery.error,
-    emotionTrendQuery.error,
-  ];
-  const analysisNotComplete = resultQueryErrors.some(isAnalysisNotCompleteError);
-  const analysisFailed = resultQueryErrors.some(
-    (error) => getAnalysisNotCompleteRunStatus(error) === "failed"
-  );
+  // tab 响应中的 diagnosis 为 null 时按“暂无诊断数据”展示
+  const hasAnyError = taskStatusQuery.isError || dashboardQuery.isError;
+  const analysisNotComplete = isAnalysisNotCompleteError(dashboardQuery.error);
+  const analysisFailed = getAnalysisNotCompleteRunStatus(dashboardQuery.error) === "failed";
 
   const retryAll = () => {
     taskStatusQuery.refetch();
-    narrativeQuery.refetch();
-    emotionQuery.refetch();
-    characterQuery.refetch();
-    styleQuery.refetch();
-    chapterMetricsQuery.refetch();
-    topicsQuery.refetch();
-    diagnosisQuery.refetch();
-    emotionTrendQuery.refetch();
+    dashboardQuery.refetch();
   };
 
   // ---------- 渲染 ----------
@@ -467,14 +360,14 @@ export function NovelDetailPage() {
       )}
 
       {/* 仅在未分析中时显示主内容 */}
-      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && storeTaskId && (
+      {!effectiveIsAnalyzing && dashboard && !isLoading && storeTaskId && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
             <div className="h-full min-h-0 overflow-y-auto pr-1">
               <div className="grid min-h-full grid-rows-[auto_auto_auto] gap-3 pb-1">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {diagnosisQuery.data ? (
-                  <DiagnosisSummaryCard diagnosis={diagnosisQuery.data} novelId={novelId!} className="h-full min-h-0" />
+                {dashboard.diagnosis ? (
+                  <DiagnosisSummaryCard diagnosis={dashboard.diagnosis} novelId={novelId!} className="h-full min-h-0" />
                 ) : (
                   <Card className="flex h-full items-center justify-center">
                     <p className="text-sm text-text-muted">暂无诊断数据</p>
@@ -482,33 +375,33 @@ export function NovelDetailPage() {
                 )}
 
                 <ScoreOverviewCard
-                  foreshadowExpectation={diagnosisQuery.data?.foreshadow_expectation}
-                  powerStance={diagnosisQuery.data?.power_stance_score}
-                  civilianDignity={diagnosisQuery.data?.common_people_dignity}
-                  culturalDepth={diagnosisQuery.data?.cultural_depth_score}
+                  foreshadowExpectation={dashboard.diagnosis?.foreshadow_expectation}
+                  powerStance={dashboard.diagnosis?.power_stance_score}
+                  civilianDignity={dashboard.diagnosis?.common_people_dignity}
+                  culturalDepth={dashboard.diagnosis?.cultural_depth_score}
                   novelId={novelId!}
                   className="h-full min-h-0"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
-                <DimensionMiniCard dimension="narrative" data={narrativeQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/timeline`} className="min-h-0" />
+                <DimensionMiniCard dimension="narrative" data={dashboard.narrative_structure ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/timeline`} className="min-h-0" />
                 <DimensionMiniCard
                   dimension="emotion"
                   data={{
-                    lexical_positive_density: chapterMetricsQuery.data?.book.pos_density,
-                    lexical_negative_density: chapterMetricsQuery.data?.book.neg_density,
+                    lexical_positive_density: dashboard.chapter_metrics?.book.pos_density,
+                    lexical_negative_density: dashboard.chapter_metrics?.book.neg_density,
                   }}
                   novelId={novelId!}
                   linkTo={`/novels/${novelId}/curves`}
                   className="min-h-0"
                 />
-                <DimensionMiniCard dimension="character" data={characterQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} className="min-h-0" />
+                <DimensionMiniCard dimension="character" data={dashboard.character_stats ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} className="min-h-0" />
                 <DimensionMiniCard
                   dimension="style"
                   data={{
-                    string_token_diversity: styleQuery.data?.string_token_diversity,
-                    dialogue_ratio: styleQuery.data?.dialogue_ratio,
+                    string_token_diversity: dashboard.style_stats?.string_token_diversity,
+                    dialogue_ratio: dashboard.style_stats?.dialogue_ratio,
                   }}
                   novelId={novelId!}
                   className="min-h-0"
@@ -516,13 +409,11 @@ export function NovelDetailPage() {
                 <DimensionMiniCard
                   dimension="topic"
                   data={{
-                    topic_count: Array.isArray(topicsQuery.data) ? topicsQuery.data.length : 0,
-                    top_topics: Array.isArray(topicsQuery.data)
-                      ? topicsQuery.data.slice(0, 3).map((t) => ({
-                          words: t.words,
-                          weight: t.weight,
-                        }))
-                      : [],
+                    topic_count: dashboard.topics.length,
+                    top_topics: dashboard.topics.slice(0, 3).map((t) => ({
+                      words: t.words,
+                      weight: t.weight,
+                    })),
                   }}
                   novelId={novelId!}
                   linkTo={`/novels/${novelId}/topics`}
@@ -532,14 +423,14 @@ export function NovelDetailPage() {
 
               <div className="grid min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
                 <NarrativeStructureBar
-                  act1Ratio={narrativeQuery.data?.act1_ratio}
-                  act2Ratio={narrativeQuery.data?.act2_ratio}
-                  act3Ratio={narrativeQuery.data?.act3_ratio}
-                  chapterNarrativeFunctionShare={narrativeQuery.data?.chapter_narrative_function_share}
+                  act1Ratio={dashboard.narrative_structure?.act1_ratio}
+                  act2Ratio={dashboard.narrative_structure?.act2_ratio}
+                  act3Ratio={dashboard.narrative_structure?.act3_ratio}
+                  chapterNarrativeFunctionShare={dashboard.narrative_structure?.chapter_narrative_function_share}
                   novelId={novelId!}
                   className="h-full min-h-0"
                 />
-                <MiniCurvePreview data={emotionTrendQuery.data ?? []} novelId={novelId!} className="h-full min-h-0" />
+                <MiniCurvePreview data={dashboard.emotion_trend} novelId={novelId!} className="h-full min-h-0" />
               </div>
               </div>
             </div>

@@ -23,8 +23,8 @@ class AgentAuditRecorder:
         self._session_factory = session_factory
 
     def _utcnow(self) -> datetime:
-        """2026-08-10 用于生成 UTC aware 审计定位时间"""
-        return datetime.now(UTC)
+        """2026-08-30 用于按无时区数据库列合同生成 naive UTC 审计时间"""
+        return datetime.now(UTC).replace(tzinfo=None)
 
     def _commit(self, session: Any) -> None:
         """2026-08-10 用于提交短事务并在任何失败时关闭连接且不吞错"""
@@ -79,6 +79,99 @@ class AgentAuditRecorder:
         row.status = status
         row.final_error = final_error
         row.finished_at = self._utcnow()
+        self._commit(session)
+
+    def start_turn(
+        self,
+        *,
+        invocation_id: int,
+        turn_index: int,
+        context_summary: dict[str, Any],
+        request_messages: list[dict[str, Any]],
+    ) -> int:
+        """2026-08-30 用于在物理 Provider 请求发出前创建独立运行中审计行"""
+        now = self._utcnow()
+        session = self._session_factory()
+        turn = AgentTurn(
+            invocation_id=invocation_id,
+            turn_index=turn_index,
+            status="running",
+            error=None,
+            raw_response={},
+            context_summary=context_summary,
+            request_messages=request_messages,
+            timing_notes=["provider_request_started"],
+            ttft_ms=None,
+            first_visible_ms=None,
+            reasoning_ms=None,
+            model_ms=None,
+            tool_wall_ms=None,
+            turn_ms=None,
+            started_at=now,
+            finished_at=None,
+        )
+        session.add(turn)
+        session.flush()
+        turn_id = int(turn.id)
+        self._commit(session)
+        return turn_id
+
+    def finish_turn(
+        self,
+        turn_id: int,
+        *,
+        raw_response: dict[str, Any],
+        status: str,
+        error: str | None,
+        timing: dict[str, int | None],
+        timing_notes: list[str],
+        token_usage: Mapping[str, Any] | None,
+        run_id: str,
+        novel_id: str,
+        task_type: str,
+        call_type: str,
+        model: str,
+    ) -> None:
+        """2026-08-30 用于按物理 Provider 请求结束状态补齐响应计时错误与 token"""
+        now = self._utcnow()
+        session = self._session_factory()
+        turn = session.get(AgentTurn, turn_id)
+        if turn is None:
+            session.close()
+            raise RuntimeError(f"agent turn 审计行不存在: {turn_id}")
+        if turn.status != "running":
+            session.close()
+            raise RuntimeError(f"agent turn 已结束，不能重复收口: {turn_id}")
+        turn.status = status
+        turn.error = error
+        turn.raw_response = raw_response
+        turn.timing_notes = timing_notes
+        turn.ttft_ms = timing.get("ttft_ms")
+        turn.first_visible_ms = timing.get("first_visible_ms")
+        turn.reasoning_ms = timing.get("reasoning_ms")
+        turn.model_ms = timing.get("model_ms")
+        turn.turn_ms = timing.get("model_ms")
+        turn.finished_at = now
+        if token_usage is not None:
+            session.add(
+                TokenUsage(
+                    novel_id=novel_id,
+                    chapter_id=None,
+                    task_type=task_type,
+                    call_type=call_type,
+                    model=model,
+                    prompt_tokens=int(token_usage.get("prompt_tokens") or 0),
+                    completion_tokens=int(token_usage.get("completion_tokens") or 0),
+                    total_tokens=int(token_usage.get("total_tokens") or 0),
+                    cache_read_tokens=token_usage.get("cache_read_tokens"),
+                    reasoning_tokens=token_usage.get("reasoning_tokens"),
+                    cost=token_usage.get("cost"),
+                    accounting_source=str(token_usage.get("accounting_source") or "reported"),
+                    created_at=now.replace(tzinfo=UTC).isoformat(),
+                    run_id=run_id,
+                    agent_turn_id=turn_id,
+                )
+            )
         self._commit(session)
 
     def record_turn(
@@ -140,7 +233,7 @@ class AgentAuditRecorder:
                     reasoning_tokens=token_usage.get("reasoning_tokens"),
                     cost=token_usage.get("cost"),
                     accounting_source=str(token_usage.get("accounting_source") or "reported"),
-                    created_at=now.isoformat(),
+                    created_at=now.replace(tzinfo=UTC).isoformat(),
                     run_id=run_id,
                     agent_turn_id=turn_id,
                 )

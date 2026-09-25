@@ -162,3 +162,31 @@ def test_body_line_not_matched_as_named_volume() -> None:
     """正文行不以 篇/卷/部 结尾时不误报"""
     candidates = collect_candidates("他翻开了书卷\n内容")
     assert candidates == []
+
+
+def test_sentence_starting_with_hui_unit_rejected() -> None:
+    """
+    2026-09-09 重明传形态回归：正文句"第二回合。马骁欺身而上…"被 HUI_RE
+    拆成 标签"第二回"+内容"合。马骁欺身而上…"，同行截断后标题退化到单字"合"。
+    截断退化即判整行是正文，丢弃候选。
+    """
+    text = (
+        "第十六章 演武场上有真章\n前情内容。\n"
+        "第二回合。马骁欺身而上，脚下连踩三个方位。\n后续内容。\n"
+        "第十七章 经义堂中起争辩\n收尾内容。"
+    )
+    candidates = collect_candidates(text)
+    assert [c.title for c in candidates] == ["第十六章 演武场上有真章", "第十七章 经义堂中起争辩"]
+    assert all(c.display_title != "合" for c in candidates)
+
+
+def test_sentence_starting_with_sentence_end_marks_rejected_all_levels() -> None:
+    """各层级的"数字+单位"后紧跟句末标点（整句正文被拆成 标签+句号）一律不产出候选"""
+    for line in ("第十章。完。", "第一篇。完。", "第三回。开打。"):
+        assert collect_candidates(f"{line}后续正文") == [], line
+
+
+def test_title_with_inner_sentence_end_still_accepted() -> None:
+    """标题中部含句末标点（书名式标题）不受影响：只有标题位以句末标点开头才丢弃"""
+    candidate = _single("第一章 起点。所谓起点\n内容", ChapterLevel.CHAPTER)
+    assert candidate.display_title.startswith("起点")

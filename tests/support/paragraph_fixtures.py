@@ -11,10 +11,7 @@ import uuid
 
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
-    BoundChunkAnnotation,
-    BoundEntityDirectory,
-    ChunkMetricsInput,
-    EmotionalValence,
+    ChapterMetricsInput,
     NarrativeFunction,
 )
 from src.chunking.chunker import Chunk
@@ -146,6 +143,7 @@ def make_metric_row(
         sensory_hit_count=0,
         imagery_hit_count=0,
         metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
         function_word_counts={},
         semantic_category_counts={},
     )
@@ -188,31 +186,22 @@ def insert_chapter_annotation(
     *,
     chapter_id: int,
     narrative_function: str = "铺垫",
-    emotional_valence: str = "neutral",
+    emotional_valence: int = 0,
     pivot_moment: bool = False,
     cliffhanger: bool = False,
 ) -> None:
-    """写入一章一个 chunk 的最小章节标注（agent-semantic-v2 合同）"""
+    """写入单章最小章节标注（agent-semantic-v2 合同；2026-09-19 章即块拍平）"""
     annotation = BoundChapterAnnotation(
-        chapter_summary=f"章节 {chapter_id} 摘要",
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=chapter_id,
-                metrics=ChunkMetricsInput(
-                    summary=f"章节 {chapter_id} 摘要",
-                    emotional_valence=EmotionalValence(emotional_valence),
-                    narrative_function=NarrativeFunction(narrative_function),
-                    pivot_moment=pivot_moment,
-                    cliffhanger=cliffhanger,
-                ),
-                entities=BoundEntityDirectory.model_validate({"entities": []}),
-                character_observations=[],
-                dialogues=[],
-                events=[],
-                relations=[],
-                foreshadowings=[],
-            )
-        ],
+        metrics=ChapterMetricsInput(
+            summary=f"章节 {chapter_id} 摘要",
+            emotional_valence=emotional_valence,
+            narrative_function=NarrativeFunction(narrative_function),
+            pivot_moment=pivot_moment,
+            cliffhanger=cliffhanger,
+        ),
+        character_observations=[],
+        dialogues=[],
+        events=[],
     )
     ChapterAnnotationRepository(db_session).add_annotation(
         run_id=run_id,

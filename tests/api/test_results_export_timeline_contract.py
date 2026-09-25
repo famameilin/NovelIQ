@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.annotation.schema import BoundForeshadowing
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -32,7 +31,6 @@ from src.knowledge.authority import (
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
-    ForeshadowingRepository,
     StatsRepository,
 )
 from tests.support.chapter_annotation_helpers import (
@@ -51,6 +49,8 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     )
     eid1 = "evt-tl-gate-root"
     eid2 = "evt-tl-gate-main"
+    palace_root = "evt-tl-palace-root"
+    strike_root = "evt-tl-strike-root"
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -63,6 +63,8 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
+                "isforeshadowing": True,
+                "payoff_likelihood": "high",
             },
             {
                 "description": "顾霜拔剑",
@@ -75,7 +77,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             },
         ],
     )
-    persist_chapter_annotation(
+    ch2_annotation_id = persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
@@ -84,8 +86,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "宫主现身",
                 "participants": ["宫主"],
                 "anchor_paragraph_ids": [0],
-                "node_id": "evt-tl-palace-root",
-                "causal_event_refs": [eid2],
+                "node_id": palace_root,
                 "tree_id": "palace",
                 "cause_role": "root",
             },
@@ -93,22 +94,46 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
                 "description": "宫主出手",
                 "participants": ["宫主"],
                 "anchor_paragraph_ids": [0],
-                "node_id": "evt-tl-strike-root",
-                "causal_event_refs": ["evt-tl-palace-root"],
+                "node_id": strike_root,
                 "tree_id": "strike",
                 "cause_role": "root",
             },
         ],
     )
-    # 将其中一条因果边置为 inactive（含 expired_at），用于验证 is_active/expired_at 透传
+    # 2026-09-14 跨章因果链退役：写面不再产生 causal 边（旧经 causal_event_refs 派生），
+    # EventEdge 表保留读旧数据。按读侧现行为以遗留数据构造两条跨/内章因果边：
+    # 一条置 inactive（含 expired_at），一条保持活性，用于验证 is_active/expired_at 透传
     from datetime import UTC, datetime
+    from uuid import NAMESPACE_URL, uuid5
 
-    from src.storage.models.event_forest import EventEdge
+    from src.storage.models import EventEdge, EventNode
 
-    existing = db_session.query(EventEdge).filter_by(run_id=run_id).first()
-    assert existing is not None
-    existing.is_active = False
-    existing.expired_at = datetime.now(UTC)
+    def _legacy_edge(source_event_id: str, target_event_id: str, *, is_active: bool) -> EventEdge:
+        source_node = db_session.get(EventNode, source_event_id)
+        assert source_node is not None
+        return EventEdge(
+            edge_id=str(
+                uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}")
+            ),
+            run_id=run_id,
+            edge_type="causal",
+            source_event_id=source_event_id,
+            target_event_id=target_event_id,
+            source_chapter_id=source_node.chapter_id,
+            target_chapter_id=db_session.get(EventNode, target_event_id).chapter_id,
+            is_active=is_active,
+            evidence=list(source_node.evidence),
+            annotation_id=ch2_annotation_id,
+            payload_path=f"legacy/causal/{target_event_id}",
+            expired_at=None if is_active else datetime.now(UTC),
+        )
+
+    db_session.add_all(
+        [
+            _legacy_edge(eid2, palace_root, is_active=False),
+            _legacy_edge(palace_root, strike_root, is_active=True),
+        ]
+    )
     db_session.commit()
 
     chapter_repo = ChapterRepository(db_session)
@@ -311,7 +336,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        "src.api.services.results_export_service._fetch_foreshadowing_trees",
         lambda *_args, **_kwargs: [],
     )
     monkeypatch.setattr(
@@ -671,7 +696,7 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_args, **_kwargs: ([], [], []),
     )
     monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        "src.api.services.results_export_service._fetch_foreshadowing_trees",
         lambda *_args, **_kwargs: [],
     )
     monkeypatch.setattr(
@@ -742,6 +767,9 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
+                "isforeshadowing": True,
+                "expected_payoff_family": "守护",
+                "payoff_likelihood": "high",
             },
             {
                 "description": "顾霜立誓",
@@ -753,16 +781,6 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
                 "cause_role": "main",
             },
         ],
-    )
-    ForeshadowingRepository(db_session).sync(
-        run_id=run_id,
-        chapter_id=1,
-        foreshadowing=BoundForeshadowing(
-            description="顾霜承诺护佑山门",
-            confidence="high",
-            setup_node_id=eid1,
-        ),
-        setup_event_id=eid1,
     )
     db_session.commit()
 
@@ -801,7 +819,7 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
     assert causal_edges == []
 
     assert len(forest["foreshadowing_edges"]) == 1
-    assert forest["foreshadowing_edges"][0]["setup_event_id"] == eid1
+    assert forest["foreshadowing_edges"][0]["root_event_id"] == eid1
     assert forest["foreshadowing_edges"][0]["payoff_event_id"] is None
 
 

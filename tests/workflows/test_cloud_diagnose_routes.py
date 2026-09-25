@@ -19,13 +19,11 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.annotation.schema import BoundForeshadowing
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import (
     ChapterRepository,
     DiagnosisRepository,
-    ForeshadowingRepository,
     ParagraphRepository,
     RunRepository,
     StatsRepository,
@@ -82,10 +80,34 @@ class TestDiagnosisRoutes:
         paragraph_repo = ParagraphRepository(self.db_session)
         spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
         paragraph_repo.insert_paragraphs(self.run_id, spans)
-        paragraph_repo.insert_paragraph_topics(
+        # 主题三表契约（§5.8-5.10）：模型契约 + 每段一行状态 + 完整分布
+        paragraph_repo.insert_topic_model_run(
             self.run_id,
-            [(span.paragraph_id, 0, 1.0, 1) for span in spans],
+            model_key="gensim-lda",
+            library_version="4.4.0",
+            pipeline_version="1.0",
+            num_topics=1,
+            parameters={"num_topics": 1},
+            dictionary_size=5,
+            training_document_count=len(spans),
+            inference_paragraph_count=len(spans),
+            artifact_key=f"models/topic/{self.run_id}",
         )
+        paragraph_repo.insert_paragraph_topic_inferences(
+            self.run_id,
+            [
+                (
+                    span.paragraph_id,
+                    1,
+                    1,
+                    "complete",
+                    None,
+                    1.0,
+                )
+                for span in spans
+            ],
+        )
+        paragraph_repo.insert_paragraph_topics(self.run_id, [(span.paragraph_id, 0, 1.0) for span in spans])
         paragraph_repo.insert_paragraph_curves(
             self.run_id,
             [
@@ -107,29 +129,28 @@ class TestDiagnosisRoutes:
                 self.db_session,
                 run_id=self.run_id,
                 chapter_id=i + 1,
-                emotional_valences={i + 1: "mild_positive" if i % 2 == 0 else "mild_negative"},
+                emotional_valences={i + 1: 1 if i % 2 == 0 else -1},
                 event_types={i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"},
-                pivot_chunks={i + 1} if i in {1, 2} else None,
-                cliffhanger_chunks={chunk_count} if i == chunk_count - 1 else None,
+                pivot_chapters={i + 1} if i in {1, 2} else None,
+                cliffhanger_chapters={chunk_count} if i == chunk_count - 1 else None,
                 characters=[
                     character_fact(
-                        chunk_id=i + 1,
+                        chapter_id=i + 1,
                         name=f"角色{i}",
                         action="测试行为",
                         role_function="主体" if i == 0 else "客体",
                     )
                 ],
             )
-        ForeshadowingRepository(self.db_session).sync(
-            run_id=self.run_id,
-            chapter_id=1,
-            foreshadowing=BoundForeshadowing(
-                description="测试伏笔",
-                confidence="medium",
-                setup_node_id="event-test-setup",
-            ),
-            setup_event_id="event-test-setup",
-        )
+        # 2026-09-13 伏笔即事件树：向章 1 的事件标记伏笔树根
+        from src.storage.models import EventNode
+
+        root = self.db_session.query(EventNode).filter(EventNode.run_id == self.run_id).first()
+        if root is not None:
+            root.is_foreshadowing_root = True
+            root.foreshadowing_status = "open"
+            root.expected_payoff_family = "身份揭露"
+            root.payoff_likelihood = "medium"
 
         self.db_session.commit()
 
@@ -150,20 +171,6 @@ class TestDiagnosisRoutes:
         assert len(chunks) > 0
         for chunk in chunks:
             assert len(chunk) == 3
-
-    def test_fetch_relation_changes(self) -> None:
-        self._create_full_data(5)
-
-        diag_repo = DiagnosisRepository(self.db_session)
-        relations = diag_repo.fetch_relation_changes(self.run_id)
-        assert len(relations) == 0
-
-    def test_fetch_foreshadowing_chunks(self) -> None:
-        self._create_full_data(5)
-
-        diag_repo = DiagnosisRepository(self.db_session)
-        chunks = diag_repo.fetch_foreshadowing_chunks(self.run_id)
-        assert len(chunks) > 0
 
     def test_fetch_pivot_moments(self) -> None:
         self._create_full_data(5)

@@ -29,8 +29,8 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
         entity_id=None,
         entity_name=None,
         relation_id="relation-7",
-        from_entity_id=1,
-        to_entity_id=2,
+        from_entity_id="00000000-0000-0000-0000-000000000001",
+        to_entity_id="00000000-0000-0000-0000-000000000002",
         from_name="顾霜",
         to_name="司夜",
         relation_type="盟友",
@@ -48,8 +48,8 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
     change = response.changes[0]
     assert change.effective_chapter_id == 12
     assert change.relation_id == "relation-7"
-    assert change.from_entity_id == 1
-    assert change.to_entity_id == 2
+    assert change.from_entity_id == "00000000-0000-0000-0000-000000000001"
+    assert change.to_entity_id == "00000000-0000-0000-0000-000000000002"
     assert change.from_name == "顾霜"
     assert change.to_name == "司夜"
     assert change.relation_change_kind == "新建"
@@ -86,8 +86,8 @@ def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
         entity_id=None,
         entity_name=None,
         relation_id="relation-7",
-        from_entity_id=1,
-        to_entity_id=2,
+        from_entity_id="00000000-0000-0000-0000-000000000001",
+        to_entity_id="00000000-0000-0000-0000-000000000002",
         from_name="顾霜",
         to_name="司夜",
         relation_type="盟友",
@@ -132,8 +132,8 @@ def test_graph_changes_page_rejects_out_of_range_cursor() -> None:
         entity_id=None,
         entity_name=None,
         relation_id="r",
-        from_entity_id=1,
-        to_entity_id=2,
+        from_entity_id="00000000-0000-0000-0000-000000000001",
+        to_entity_id="00000000-0000-0000-0000-000000000002",
         from_name="A",
         to_name="B",
         relation_type="盟友",

@@ -10,7 +10,7 @@ import type { GraphNode } from "@/api/types";
 
 function createNode(overrides: Partial<GraphNode>): GraphNode {
   return {
-    entity_id: 1,
+    entity_id: "1",
     name: "顾霜",
     entity_type: "character",
     first_seen_chapter: 1,

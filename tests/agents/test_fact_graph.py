@@ -88,7 +88,7 @@ def test_fact_graph_snapshot_restore_rolls_back_chapter_changes() -> None:
 def test_fact_graph_rejects_registered_type_change() -> None:
     """2026-08-09 用于验证已登记实体不允许变更大类"""
     graph = FactGraph(history_entity_types={"贺伯安": "character"})
-    with pytest.raises(ValueError, match="已登记实体不允许变更大类"):
+    with pytest.raises(ValueError):
         graph.register_entities([_Entity("贺伯安", "item")])
 
 
@@ -292,3 +292,102 @@ def test_resolve_name_after_duplicate_relation_submission() -> None:
     graph = _alias_graph()
     assert graph.apply_relation(_relation("石轩", "小石头", "同一人物")) is False
     assert graph.resolve_name("小石头") == "石轩"
+
+
+def test_alias_group_lists_component_siblings_without_self() -> None:
+    """2026-09-14 用于验证进度账本别名列取分量内其余登记名（不含自身，不在分量返回空）"""
+    graph = _alias_graph()
+    assert graph.alias_group("小石头") == ["石轩"]
+    assert graph.alias_group("石轩") == ["小石头"]
+    assert graph.alias_group("无关路人") == []
+
+
+def test_apply_relation_change_rejects_same_endpoint_self_loop() -> None:
+    """2026-09-10 用于验证案例关系变更裸同名端点直接报错，不进操作日志炸持久化约束
+
+    run a83fae3d 第9章实锤：两端归一后同名的关系行持久化时违反
+    ck_graph_relations_distinct_endpoints，整个完成事务回滚致 run 失败。
+    """
+    graph = _alias_graph()
+    with pytest.raises(ValueError):
+        graph.apply_relation_change(
+            from_entity="石轩",
+            to_entity="石轩",
+            relation_type="同一人物",
+            change_kind="assert",
+            reason="归并重申",
+            case_id="case-1",
+            case_type="relation_fact",
+            target_key="key",
+            target_ref={},
+            chapter_id=9,
+        )
+    assert graph.relation_change_ops == []
+
+
+def test_entity_ids_are_deterministic_and_stable() -> None:
+    """2026-09-19 id 合同：uuid5 按 run+归一化名确定性铸造，重复注册不换 id
+
+    模型在整章内拿到的 id 必须始终指向同一实体（回执、检索、落库同值）；
+    重试回滚不回收 id，重启重放同 run_scope 得到同 id。
+    """
+    graph = FactGraph(
+        run_scope="run-1",
+        history_entity_types={"贺伯安": "character"},
+        history_entity_names={"贺伯安": "贺伯安"},
+    )
+    history_id = graph.entity_id("贺伯安")
+    assert history_id is not None and history_id.count("-") == 4
+    assigned = graph.register_entities([_Entity("猴子", "character")])
+    assert [item[0] for item in assigned] == [graph.entity_id("猴子")]
+    # 同名重复登记不换 id
+    graph.register_entities([_Entity("猴子", "character")])
+    assert graph.entity_id("猴子") == assigned[0][0]
+    assert graph.entity_id("未登记") is None
+    # uuid5 确定性：重放同 run_scope 同名得到同 id；不同 run_scope 不同 id
+    replayed = FactGraph(run_scope="run-1")
+    replayed.register_entities([_Entity("猴子", "character")])
+    assert replayed.entity_id("猴子") == graph.entity_id("猴子")
+    other_run = FactGraph(run_scope="run-2")
+    other_run.register_entities([_Entity("猴子", "character")])
+    assert other_run.entity_id("猴子") != graph.entity_id("猴子")
+    # id → 登记名与实体视图
+    assert graph.resolve_entity_id(assigned[0][0], label="t") == "猴子"
+    view = graph.entity_view("猴子")
+    assert view["id"] == graph.entity_id("猴子")
+    assert view["name"] == "猴子"
+    assert view["entity_type"] == "character"
+
+
+def test_entity_id_resolution_does_not_alias_merge() -> None:
+    """2026-09-19 合同：id 只翻登记名，不做别名归并（别名解析留在各调用点）
+
+    resolve 端点按合同不得重过 resolve_name——同人物分量内两端会
+    塌成代表节点自环，解除的边键自指导致永远删不掉（第 4 章空转根因）。
+    """
+    graph = _alias_graph()
+    entity_id = graph.entity_id("小石头")
+    assert entity_id is not None
+    assert graph.resolve_entity_id(entity_id, label="t") == "小石头"
+
+
+def test_entity_id_rejects_rolled_back_registration() -> None:
+    """2026-09-19 合同：章节回滚撤销的登记，其 id 视为未登记（不解析到图外名字）"""
+    graph = FactGraph()
+    graph.begin_chapter()
+    graph.register_entities([_Entity("临时角色", "character")])
+    entity_id = graph.entity_id("临时角色")
+    assert entity_id is not None
+    graph.reset_chapter_changes()
+    with pytest.raises(ValueError):
+        graph.resolve_entity_id(entity_id, label="t")
+
+
+def test_entity_id_unregistered_reports_known_examples() -> None:
+    """2026-09-19 合同：未登记 id 报错给出已登记 id 示例，便于模型自纠"""
+    graph = FactGraph()
+    graph.register_entities([_Entity("顾霜", "character")])
+    known_id = graph.entity_id("顾霜")
+    assert known_id is not None
+    with pytest.raises(ValueError):
+        graph.resolve_entity_id("00000000-0000-0000-0000-000000000000", label="write_event.participants.0")

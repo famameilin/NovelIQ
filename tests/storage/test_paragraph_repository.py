@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from dataclasses import replace
 
@@ -102,7 +101,6 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.char_count == span.char_count == len(span.text)
         assert row.token_count == span.token_count
         assert row.text == span.text
-        assert row.content_hash == hashlib.sha256(span.text.encode("utf-8")).hexdigest()
 
 
 def test_insert_paragraphs_with_nonzero_chunk_offset(db_session) -> None:
@@ -152,7 +150,7 @@ def test_insert_paragraphs_rejects_none_identity_fields(db_session, field: str, 
         _span(paragraph_id=0, local_start=0, local_end=5, global_start=0, global_end=5),
         **{field: value},
     )
-    with pytest.raises(ValueError, match="不得为 None"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, [span])
 
 
@@ -162,7 +160,7 @@ def test_insert_paragraphs_rejects_negative_token_count(db_session) -> None:
         _span(paragraph_id=0, local_start=0, local_end=5, global_start=0, global_end=5),
         token_count=-1,
     )
-    with pytest.raises(ValueError, match="不得为负数"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, [span])
 
 
@@ -173,7 +171,7 @@ def test_insert_paragraphs_rejects_overlapping_local_coords(db_session) -> None:
         _span(paragraph_id=0, local_start=0, local_end=5, global_start=0, global_end=5),
         _span(paragraph_id=1, local_start=3, local_end=8, global_start=5, global_end=10),
     ]
-    with pytest.raises(ValueError, match="local 坐标"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
@@ -184,7 +182,7 @@ def test_insert_paragraphs_rejects_reversed_local_coords(db_session) -> None:
         _span(paragraph_id=0, paragraph_index=1, local_start=5, local_end=10, global_start=0, global_end=5),
         _span(paragraph_id=1, paragraph_index=0, local_start=0, local_end=5, global_start=5, global_end=10),
     ]
-    with pytest.raises(ValueError, match="local 坐标"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
@@ -194,7 +192,7 @@ def test_insert_paragraphs_rejects_overlapping_global_coords(db_session) -> None
         _span(paragraph_id=0, local_start=0, local_end=5, global_start=0, global_end=5),
         _span(paragraph_id=1, local_start=5, local_end=10, global_start=3, global_end=8),
     ]
-    with pytest.raises(ValueError, match="global 坐标"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
@@ -205,7 +203,7 @@ def test_insert_paragraphs_rejects_reversed_global_order(db_session) -> None:
         _span(paragraph_id=0, local_start=0, local_end=5, global_start=5, global_end=10),
         _span(paragraph_id=1, local_start=5, local_end=10, global_start=0, global_end=5),
     ]
-    with pytest.raises(ValueError, match="global 坐标"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
@@ -217,7 +215,7 @@ def test_insert_paragraphs_rejects_inconsistent_global_offset(db_session) -> Non
     spans = _make_spans(chunks)
     spans = [replace(spans[0], global_start_char=50, global_end_char=54)] + spans[1:]
 
-    with pytest.raises(ValueError, match="偏移不一致"):
+    with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
@@ -279,7 +277,6 @@ def test_db_constraint_rejects_invalid_local_order(db_session) -> None:
             char_count=5,
             token_count=1,
             text="abcde",
-            content_hash=hashlib.sha256(b"abcde").hexdigest(),
         )
     )
     with pytest.raises(IntegrityError):

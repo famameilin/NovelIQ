@@ -44,6 +44,7 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
         select(
             Paragraph.chapter_id,
             Paragraph.text,
+            Paragraph.char_count,
             ParagraphMetric.token_count,
             ParagraphMetric.sentence_count,
             ParagraphMetric.sentence_char_sum,
@@ -85,6 +86,20 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
 
     if token_total > 0:
         global_stats.append(("emotion_avg", (pos_total - neg_total) / token_total))
+
+    # 2026-09-05 A2：词典情绪零信号段落的字符加权占比（lexicon 覆盖缺口审计口径）。
+    # 仅统计有指标行的段落（无指标行=数据缺失，不得冒充零信号）；无指标行时不输出。
+    zero_hit_chars = 0
+    scored_chars = 0
+    for row in rows:
+        if row.positive_weight_sum is None or row.negative_weight_sum is None:
+            continue
+        chars = int(row.char_count or 0)
+        scored_chars += chars
+        if float(row.positive_weight_sum) == 0.0 and float(row.negative_weight_sum) == 0.0:
+            zero_hit_chars += chars
+    if scored_chars > 0:
+        global_stats.append(("lexicon_zero_hit_share", zero_hit_chars / scored_chars))
 
     emotion_indices = [i for i, row in enumerate(rows) if row.net_density is not None]
     emotion_values = [float(rows[i].net_density) for i in emotion_indices]

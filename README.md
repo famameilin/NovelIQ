@@ -6,248 +6,153 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker_Compose-ready-2496ED?logo=docker&logoColor=white)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-## 项目简介
+对中文网络小说做量化分析的平台：上传一本 txt 全本，六阶段流水线自动完成全书分析。LLM 逐章标注人物、对话、关系、事件与伏笔，配合本地语言模型产出多维指标，最终汇成一组可视化视图与诊断报告。分析在后台运行、逐阶段落库，中断或取消后可从断点继续。
 
-一个面向中文网络小说的智能分析平台，将自然语言处理、大语言模型与图计算结合，提供从文本导入到诊断报告的全链路自动化分析。系统接收 txt 格式小说，自动完成编码检测、清洗、分词和章节优先分块，经五阶段流水线（预处理→标注→聚合→主题建模→诊断）产出分析结果，每阶段独立持久化、可断点恢复。
+分析完成后，前端提供：
 
-### 核心能力
+- **情感 / 节奏曲线**：段落级情感打分与叙事节奏指标，全书曲线，窗口可切换
+- **人物关系图谱**：标注 Agent 逐章记录人物、对话与关系，跨章合并成网络，力导向图浏览
+- **事件时间线**：情节事件沿时间轴呈现
+- **主题分布**：LDA 主题建模，检测主题随情节的转移
+- **语言特征**：LTP 词法句法分析、词汇丰富度（TTR/MTLD）、对话比例等
+- **诊断报告**：LLM 基于全书取证生成质量评估，可导出为单文件 HTML
 
-| 能力 | 说明 |
-|------|------|
-| **LLM 智能标注** | 单一 LangGraph Agent 按需调用身份、权威事实和历史原文工具，一次提交人物、伏笔、对话、关系与身份决策 |
-| **统一证据检索（RAG）** | `EvidenceRequest` 统一约束权威事实、导航、关键词、语义检索和原文展开的历史边界与读取授权 |
-| **实体消歧** | 标注 Agent 在同一工具循环中维护身份记忆；低置信度决策不会写入跨 chunk 记忆 |
-| **多维度量化指标** | 情感曲线、节奏曲线、词汇丰富度（TTR/MTLD）、句长统计、对话比例、叙事结构识别 |
-| **知识图谱** | 人物关系网络构建与可视化、权威知识图谱、实体别名管理 |
-| **主题建模** | LDA 主题推断、主题-文档分配、主题词云 |
-| **诊断报告** | 云端 LLM 生成整体质量评估，涵盖叙事类型、主题、价值观 |
-| **实时进度** | SSE 推送分析进度到前端，支持任务创建、取消和恢复 |
+| 情绪/节奏曲线 | 人物关系图谱 |
+| --- | --- |
+| ![情绪/节奏曲线](assets/screenshots/curves.png) | ![人物关系图谱](assets/screenshots/graph.png) |
+| **叙事时间轴** | **仪表盘** |
+| ![叙事时间轴](assets/screenshots/timeline.png) | ![仪表盘](assets/screenshots/dashboard.png) |
 
-### 技术栈
-
-| 层 | 技术 |
-|----|------|
-| 后端 | Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector） |
-| 模型 | OpenAI SDK（兼容本地 vLLM 和云端模型） / jieba / gensim / NetworkX |
-| 前端 | React 19 / TypeScript / ECharts / AntV G6 / Radix UI / Tailwind CSS |
-| 部署 | Docker Compose / Nginx |
+技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（本地 vLLM 或云端服务均可），词法分析与词向量为本地离线模型。
 
 ## 快速开始
 
-### Docker部署（推荐）
+### 前置：离线模型
 
-1. 配置环境变量
+LTP 与 Word2Vec 从本地加载，**不会自动联网下载**，缺失时启动分析直接报错：
 
-   ```powershell
-   Copy-Item .env.docker.example .env.docker
-   # 编辑 .env.docker，配置模型API地址和密钥
-   ```
+- `models/ltp/small/`：完整 LTP 离线模型目录，路径经 `LTP_MODEL_DIR` 环境变量配置
+- `models/word2vec/shared/`：一个转换后的 `.kv` 主文件；已有 `.vec`/`.bin`/`.txt` 预训练向量时执行：
 
-2. 启动服务
+  ```powershell
+  uv run python -m scripts.tools.convert_word2vec_pretrained
+  ```
 
-   ```powershell
-   docker compose up -d --build
-   ```
+  默认从 `models/word2vec/pretrained/` 读取，写入 `models/word2vec/shared/`。
 
-3. 访问服务
+`models/` 不进 Git；Docker Compose 会把宿主机该目录挂载到容器 `/app/models`。
 
-   - 前端：<http://localhost:18080>
-   - API文档：<http://localhost:18080/api/docs>
+### Docker 部署（推荐）
 
-### 源码安装
-
-1. 安装依赖
-
-   ```powershell
-   ./scripts/dev.ps1 setup
-   ```
-
-2. 配置环境变量
-
-   ```powershell
-   Copy-Item .env.example .env
-   # 编辑 .env，配置数据库连接和模型API密钥
-   ```
-
-3. 初始化数据库并启动
-
-   ```powershell
-   alembic upgrade head
-   ./scripts/dev.ps1 api --port 8000
-   ```
-
-4. 启动前端（新终端窗口）
-
-   ```powershell
-   cd frontend
-   npm install
-   npm run dev
-   ```
-
-   前端访问 <http://localhost:5173>，通过 Vite 代理转发 `/api` 到后端 8000 端口。
-
-## 配置说明
-
-### 配置文件
-
-- `config/settings.json`：应用参数配置（模型、分块、指标等）
-- `.env` / `.env.docker`：数据库与模型服务连接信息
-
-### 环境变量
-
-环境文件使用普通平铺键值对，数据库、测试数据库、文本模型和 Embedding 模型分别配置：
-
-```env
-DATABASE_URL=...
-DATABASE_USERNAME=...
-DATABASE_PASSWORD=...
-TEST_DATABASE_URL=...
-TEST_DATABASE_USERNAME=...
-TEST_DATABASE_PASSWORD=...
-MODEL_BASE_URL=...
-MODEL_ID=...
-MODEL_KEY=...
-EMBEDDING_MODEL_BASE_URL=...
-EMBEDDING_MODEL_ID=...
-EMBEDDING_MODEL_KEY=...
+```powershell
+Copy-Item .env.docker.example .env.docker   # 填入模型 API 密钥
+docker compose up -d --build
 ```
 
-数据库账号密码保持在独立变量中，不写入 `DATABASE_URL`；模型密钥、模型 ID 和服务地址也分别配置。文本标注、标注兜底和诊断任务共用 `MODEL` 这一组变量。完整格式参考 `.env.example` 和 `.env.docker.example`。
+`.env.docker` 的数据库已预置指向 Compose 内置的 Postgres，需要填的只有文本模型（`MODEL_*`）和 Embedding 服务地址；模型目录从宿主机 `./models` 挂载。
 
-## 使用方法
+- 前端：<http://localhost:18080>
+- API 文档：<http://localhost:18080/api/docs>
 
-### API调用示例
+### 源码运行
 
-```python
-import requests
+需要本地 PostgreSQL 17（含 pgvector 扩展）。
 
-# 上传小说
-response = requests.post(
-    "http://localhost:8000/api/novels/upload",
-    files={"file": open("novel.txt", "rb")}
-)
-
-# 启动分析
-novel_id = response.json()["novel_id"]
-analysis_response = requests.post(
-    f"http://localhost:8000/api/novels/{novel_id}/tasks"
-)
+```powershell
+./scripts/dev.ps1 setup        # 安装依赖（uv）
+Copy-Item .env.example .env    # 填数据库与模型 API 密钥
+./scripts/dev.ps1 api --port 8000   # 首次启动自动建库建表
 ```
 
-### 前端使用
+前端另开终端：
 
-访问 <http://localhost:18080>（Docker）或 <http://localhost:5173>（源码）：
-
-1. 上传小说文件
-2. 选择分析配置
-3. 启动分析任务
-4. 查看分析结果和可视化图表
-
-## API文档
-
-启动服务后访问：
-
-- Docker模式：<http://localhost:18080/api/docs>
-- 源码模式：<http://localhost:8000/api/docs>
-- ReDoc（源码模式）：<http://localhost:8000/api/redoc>
-
-## 架构设计
-
-### 系统分层
-
-系统采用四层架构，层间单向依赖：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  API 层 (src/api/routes, models, dependencies)          │
-│  HTTP 参数绑定、响应装配、SSE 实时推送                   │
-├─────────────────────────────────────────────────────────┤
-│  Service 层 (src/api/services)                          │
-│  任务生命周期编排、阶段调度、取消/删除状态机、结果查询    │
-├─────────────────────────────────────────────────────────┤
-│  Workflow 层 (src/workflows)                            │
-│  核心业务逻辑：预处理、标注、聚合、主题建模、诊断        │
-│  不感知 HTTP 层，由 API 层调度                          │
-├─────────────────────────────────────────────────────────┤
-│  Domain + Storage 层 (src/storage, agents, chapters, ...) │
-│  数据持久化、Agent 交互、指标计算、证据检索、知识图谱      │
-└─────────────────────────────────────────────────────────┘
+```powershell
+cd frontend
+npm install
+npm run dev                    # http://localhost:5173，/api 代理到后端 8000
 ```
 
-调用方向：`Route → Service → StageExecutor → Workflow → Domain/Storage`
+## 系统分层
 
-### 分析工作流
+| 层 | 目录 | 关键模块 |
+|----|------|---------|
+| **API 层** | `src/api/routes` | `novels`（上传/任务）、`analysis`、`results`、`tabs`（每个前端视图一个聚合端点，指标在端点内算完）、`linguistic`、`timeline`、`settings`、`sse` |
+| **Service 层** | `src/api/services` | `analysis_service`（StageExecutor 阶段调度、取消/删除状态机）、`novel_service`、`metrics_service`、`results_export_service`（自包含 HTML 报告装配）、`event_manager`、`artifact_gc_service` |
+| **Workflow 层** | `src/workflows` | `run_preprocess` / `run_annotate` / `run_linguistic` / `run_aggregate` / `run_topic_model` / `run_diagnose`，只做业务编排与落库，不感知 HTTP |
+| **Domain 层** | `src/agents`、`src/metrics`、`src/linguistic`、`src/topic`、`src/lexicons`、`src/text_search`、`src/knowledge` | 标注/诊断 Agent 与事实图、指标契约与曲线、LTP/Word2Vec、LDA、词表、检索、知识图谱 |
+| **Storage 层** | `src/storage/models` | 36 张表的 ORM 定义，按域分文件（graph / event_forest / agent_audit / continuity / analysis / rag …） |
 
-分析任务严格按以下阶段顺序执行，每阶段完成后持久化结果，支持断点恢复：
+依赖方向单一：`Route → Service → StageExecutor → Workflow → Domain/Storage`，反向依赖不存在。一次请求的完整链路：`POST /api/novels/{id}/tasks` → `analysis_service` 建 `analysis_runs` 行 → StageExecutor 逐阶段调用 Workflow 入口 → 领域函数读写 ORM → 每阶段完成点经 SSE 推里程碑。
+
+## 分析流水线
 
 ```mermaid
 flowchart LR
-    A[预处理] --> B[标注]
-    B --> C[聚合]
-    C --> D[主题建模]
-    D --> E[诊断]
-
-    A --- A1[文本清洗分块\n风格指标\n向量嵌入]
-    B --- B1[标注 Agent\n按需取证与身份记忆\n图投影]
-    C --- C1[情感/节奏曲线\n全局统计\n质量门]
-    D --- D1[LDA 主题推断\n模型持久化]
-    E --- E1[云端 LLM 诊断\n诊断报告]
+    A[预处理] --> B[标注] --> C[语言结构] --> D[聚合] --> E[主题建模] --> F[诊断]
+    A --- A1["编码探测 · 章节切分\n段落落库 · 向量嵌入"]
+    B --- B1["逐章 LLM 标注\n事实图投影 · 全程审计"]
+    C --- C1["LTP 词法句法语义\n情绪事件线 · Word2Vec"]
+    D --- D1["情绪/节奏曲线\n全局统计 · 质量门"]
+    E --- E1["LDA 训练持久化\n段落-主题完整分布"]
+    F --- F1["取证后生成\n诊断报告"]
 ```
 
-| 阶段 | 入口 | 产出 |
-|------|------|------|
-| **预处理** | `run_preprocess` | 文本清洗分块、风格指标、向量嵌入 |
-| **标注** | `run_annotate` | 标注 Agent 生成合并标注、身份决策和图投影 |
-| **聚合** | `run_aggregate` | 情感/节奏曲线、全局统计、质量门检查 |
-| **主题建模** | `run_topic_model` | LDA 主题推断与模型持久化 |
-| **诊断** | `run_diagnose` | 诊断 Agent 基于工具取证生成诊断报告 |
+| 阶段 | 进度权重 | 入口 | 机制与产出 |
+|------|---------|------|-----------|
+| **预处理** | 10% | `run_preprocess` | 编码探测（utf-8 优先，gb18030 / gbk 回退）→ 标题行章节切分（支持中文数字章节号）→ 章节与段落落库 → 段落向量嵌入（pgvector）。切分只发生在这里，此后所有阶段共享同一套段落边界 |
+| **标注** | 75% | `run_annotate` | 全书最重阶段。逐章启动标注 Agent（回合上限 15），一次 `finish` 提交整章：人物实体、对话、关系、事件树、伏笔、指标与句级情绪标签；图域变更经事实图派生落库（见「事实图」），事件按锚点落库（见「事件树」）；跨章上下文由前序章节的落库事实与阶段摘要承载 |
+| **语言结构** | 80% | `run_linguistic` | LTP 分词、词性、依存与语义角色标注；情绪事件线抽取（语义角色驱动）；固定短语命中；Word2Vec 用预训练向量初始化后按书微调，向量维度以预训练文件头为准 |
+| **聚合** | 90% | `run_aggregate` | 段落级打分汇成情绪/节奏曲线与全局统计；句级情绪标签按书训练岭回归边界模型后逐段回写；质量门报告——聚合数据缺失按缺陷处理，"无数据"≠"达标" |
+| **主题建模** | 95% | `run_topic_model` | LDA 训练与模型持久化，段落-主题完整分布三表落库（`topic_model_runs` / `paragraph_topics` / `paragraph_topic_inference`），主题转移由响应侧 JS 散度计算 |
+| **诊断** | 100% | `run_diagnose` | 诊断 Agent（回合上限 30）先取证后提交；校验被拒时 `revise_finish` 只提交需更正的字段，未提交字段沿用上一次完整结果 |
 
-### 标注与 RAG 的交互
+**调度与恢复** —— run 启动时根据数据库已完成阶段构建 `skip_stages` 六元布尔组逐阶段跳过，这就是断点恢复的全部实现；重分析请求可显式指定要重跑的阶段。resume 对"刚被重置的任务被旧 worker 延迟取消"的竞态窗口有 claim 保护。进度里程碑是常量（上表"进度权重"列），阶段起点取上一阶段完成点。取消分两层：内存 `cancel_event` 立即打断当前阶段，数据库 `cancel_requested` 保证跨进程可靠。
 
-每个 chunk 由一个标注 Agent 处理。Agent 先查询身份记忆，并按需要通过 `EvidenceRequest` 请求权威事实、近期导航、关键词或语义检索；历史 chunk 只能在同一取证目标下展开已定位的结果。
+## 事实图
 
-```mermaid
-flowchart TD
-    Chunk[当前 Chunk] --> Agent[标注 Agent]
-    Agent --> Memory[身份记忆]
-    Agent --> Request[EvidenceRequest]
-    Request --> Authority[权威事实]
-    Request --> Navigation[近期导航]
-    Request --> Historical[关键词或语义历史检索]
-    Historical --> Read[授权原文展开]
-    Authority --> Ledger[证据账本]
-    Navigation --> Ledger
-    Read --> Ledger
-    Ledger --> Finish[finish 或 revise_finish]
-    Finish --> Result[合并标注与身份决策]
-```
+跨章人物、事实与关系落在一张持续演化的图上，由标注 Agent 逐章写入。
 
-首次 `finish` 提交完整结果；校验失败时 `revise_finish` 只提交需要更正的顶层字段。模型响应、有效 Provider Token 用量和实际工具取证均写入审计记录。
+**单一写面** —— run 级事实图（FactGraph）在首个章节 Agent 启动时从库加载一次，之后所有章节 Agent 共享同一份内存图；图域写工具即时更新本图，运行时所有图查询（`search_graph`、实体与关系校验）只访问内存图，数据库仅参与持久化。章节完成时，持久化层从操作日志派生新图版本落库；任务中断恢复时重新加载。
 
-### 设计原则
+**实体注册** —— `write_entities` 为追加与更新语义：同名实体归并为同一词条，但已登记的大类（人物 / 地点 / 组织…）不允许变更，冲突直接报错并提示改用区分性名称；tags 保序去重，属性按字典合并、显式 null 删除旧键。
 
-- **数据库为唯一业务真相**：TaskManager 仅作进程级执行缓存，所有状态查询以数据库为准
-- **阶段可恢复**：每阶段完成后持久化结果，重分析时可跳过已完成阶段
-- **取消信号双层传递**：内存 cancel_event（快速响应）+ DB cancel_requested（跨进程可靠）
-- **证据授权闭环**：历史原文必须先由关键词或语义检索定位，并以相同取证目标授权展开
-- **结果可追溯**：标注与诊断均记录模型响应、有效 Provider Token 用量和实际取证来源
-- **工具循环受限**：普通工具调用达到配置上限后停止，避免无界循环
+**关系双通道** —— `write_relations` 只承担"断言"：新边入图且支持度 +1，已存在的边返回 `skipped_existing` 不重复累计。关系的强化、削弱、解除一律走 `resolve_fact_case`，变更类型共七种（assert / reinforce / refine / supersede / weaken / break / retract）。`break` / `retract` 要求目标边当前活动，否则直接报错——解除一条不存在的边若被静默接受，Agent 会陷入"撤销→复查→没变"的空转。
 
-## 段落粒度指标（2026-08-14 落地）
+**案例闭环** —— 疑点登记进案例池（`case_pool_cases`）：case_type、检索 keys、description，加两样承重字段——`target_key` 稳定目标标识与 `target_ref` 读取授权引用。后续章节 `resolve_fact_case` 解决时，完成事务先锁定案例行，复核稳定目标未变（防并发漂移），按 `target_ref` 校验读取的确实是授权章节，然后写入 `case_resolution_mappings`。
 
-> 适用分支：`feat/paragraph-granularity`。详细设计见 [docs/章节粒度分析指标重设计.md](docs/章节粒度分析指标重设计.md)，指标口径见 [docs/中文网络小说指标参考手册.md](docs/中文网络小说指标参考手册.md)「段落粒度指标口径」章节。
+**操作日志与重放** —— 图域变更按子块累积三份有序日志：`entity_ops`（追加语义）、`relation_assert_ops`（每次 `write_relations` 完整重填）、`relation_change_ops`（携带 reason / case_id / change_kind / ordinal）。终态与日志是双通道：终态让 `search_graph` 即时可见，日志供持久化按提交顺序重放，`graph_facts` 的每条事实与 before / after 由持久化层对照数据库现值逐条派生。重放顺序固定为先 assert 后 change。
 
-- **段落为最小事实单元**：`paragraphs` 表为唯一段落事实源，Embedding、指标、主题、检索等派生数据一律复用段落边界，不自行切段。
-- **聚合口径**：章节/全书比率 = 分子和 ÷ 分母和（禁止等权平均）；句长均值/方差由充分统计量（count/sum/sum_sq）恢复；TTR/MTLD 对目标文本序列直接计算；分母为 0 输出 null。
-- **曲线**：x 轴为归一化字符坐标 `position`（段落字符中点 ÷ 全书总字符数）；平滑为字符坐标稳健局部回归（LOWESS，tricube 核 + char_count 权重 + bisquare 稳健迭代，带宽默认 2%、最少 7 点）；Fourier 平滑已移除（`src/metrics/fourier_filter.py` 已删除）。
-- **当前数据结构**：段落事实源、指标、主题和曲线均按当前 ORM 表读取，数据缺失按普通数据缺失处理并返回对应业务校验结果。
-- **数据库重建**：旧数据库直接废弃；开发库使用 `powershell -ExecutionPolicy Bypass -File scripts/db/rebuild_schema.py --target dev --confirm` 按当前 ORM 重建，不执行历史表迁移或字段补齐。
+**归一与防御** —— 实体名以 NFC + casefold 归一为匹配键；关系生成双向归一的稳定键（无向关系两端排序后入键），历史加载与运行时共用同一键函数，跨章重复断言不产生重复边。两端归一后同名的关系直接报错——持久化会插入端点互异违反的自环行炸掉完成事务；案例变更的端点键按传入名原样构造、不过二次解析，否则同一人物分量内两端塌成代表节点，要解除的边键自指导致永远删不掉。
 
-## 当前 Agent 运行约束
+## 事件树
 
-- 标注 Agent 的完整输出必须通过当前 chunk 原文、身份记忆和本轮证据账本校验
-- 诊断 Agent 必须先调用取证工具，且主题标签数量与主题数据一致，才可以提交结果
-- 标注模型输出流断流时，以同一消息链重发当前模型请求（重试次数按 `total_attempts` 配置，默认 3 次）
-- 文本标注和诊断使用同一文本模型连接；Embedding 使用独立连接
+事件由标注 Agent 在章内声明（`create_event`），一棵树对应一章的因果叙事。
+
+**身份与锚点** —— tree_id 与 event_id 均为服务端一次性生成的 UUID，永不重排、跨子块不冲突。每个事件落原文锚点：`anchor_paragraph_ids`（段落集合）+ `char_start` / `char_end`（CHECK 约束保证区间有效）+ `evidence`，前端时间线与后续取证都靠这组锚点回指原文。
+
+**建树协议** —— `create_event` 原子创建单棵树。因果前驱引用 `cause_tree_id`：本章已建的树用 `create_event` 刚返回的 tree_id，前文剧情必须先 `search_event` 检索拿到授权树，引用不存在的树直接报错并在错误信息里指路。事件领域显式收尾：末次调用传 `description=None` 关闭事件域，同一时点完成人物动态状态（character_observations）领域，收尾后不允许继续建事件。
+
+**因果分层** —— `cause_role` 标注事件在树中的角色（root / main / secondary，CHECK 约束）；`causal_event_refs` 以全局 event_id 表达跨事件因果引用，持久化时物化为 `event_edges`。
+
+**边生命周期** —— `event_edges` 只有 `causal` 一种类型（CHECK 约束），`UNIQUE(run_id, source, target)` 防重复边；边用 `is_active` + `expired_at` 管理生命周期——因果结论被后续剧情推翻时过期而非删除，历史判定可审计。端点与章节均为复合外键（run_id + chapter_id），引用不可能漂出本 run。
+
+**幂等** —— 节点与边都按 `UNIQUE(run_id, chapter_id, payload_path)` 落库：同一章内同一载荷路径只对应一行，重复提交不会双倍落库。
+
+## 审计
+
+四层递进，全量落库：
+
+| 表 | 粒度 | 记录内容 |
+|----|------|---------|
+| `agent_invocations` | 一次标注 / 诊断尝试 | run_id、task_type（annotation / diagnosis）、chapter_id、attempt_number、model_name、model_provider（local / cloud）、status（success / error）、final_error、起止时间 |
+| `agent_turns` | 一轮模型请求 | 完整请求消息、原始响应、上下文摘要、状态与错误；逐回合计时六列——TTFT、首可见 token、推理、模型、工具墙钟、回合总耗时 |
+| `agent_tool_calls` | 一次工具调用 | 解析后参数与原始参数串、完整结果、模型回执、独立状态与耗时 |
+| `token_usage` | 每笔 API 用量 | 按 novel / chapter / task_type / call_type / model 归桶；prompt / completion / total / cache_read / reasoning 五类 token 加 cost；Agent 回合与 `agent_turns.id` 一对一，Embedding 等非 Agent 行单独归桶；`accounting_source` 区分上报与估算 |
+
+复核与归因以审计表为唯一权威来源——应用日志不含 Agent 侧统计。思考耗时看 `agent_turns` 的计时列，成本看 `token_usage`，失败回合定位到 `agent_tool_calls` 的 status 与 error；任意一章的标注都能从 invocation 起逐回合还原为完整决策轨迹。
+
+## 许可证
+
+[Apache-2.0](LICENSE)。

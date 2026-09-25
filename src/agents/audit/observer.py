@@ -56,6 +56,7 @@ def _serialize_ai_message(message: Any) -> dict[str, Any]:
         "content": str(getattr(message, "content", "") or ""),
     }
     reasoning = _extract_reasoning_content(message)
+    payload["reasoning_observed"] = bool(reasoning)
     if reasoning:
         payload["reasoning_content"] = reasoning
     finish_reason = _extract_finish_reason(message)
@@ -145,6 +146,9 @@ class AgentTurnObserver:
         self._active_started_ns: int | None = None
         self._active_tool_first_ns: int | None = None
         self._active_tool_last_ns: int | None = None
+        self._pending_turn_id: int | None = None
+        self._pending_started_ns: int | None = None
+        self._pending_request_messages: list[Any] = []
 
     def record_turn(
         self,
@@ -187,6 +191,99 @@ class AgentTurnObserver:
         self._active_tool_first_ns = None
         self._active_tool_last_ns = None
         return turn_id
+
+    def begin_provider_turn(
+        self,
+        *,
+        context_summary: dict[str, Any],
+        request_messages: list[Any],
+        provider_request: Mapping[str, Any],
+        started_ns: int,
+    ) -> None:
+        """2026-08-30 用于在每个物理 Provider 请求发送前写入独立 running 回合"""
+        if self._pending_turn_id is not None:
+            raise RuntimeError("物理 Provider 请求审计尚未收口")
+        self._turn_counter += 1
+        request = dict(provider_request)
+        request["request_index"] = self._turn_counter
+        summary = dict(context_summary)
+        summary["provider_request"] = request
+        self._pending_turn_id = self._recorder.start_turn(
+            invocation_id=self._invocation_id,
+            turn_index=self._turn_counter,
+            context_summary=summary,
+            request_messages=_serialize_request_messages(request_messages),
+        )
+        self._pending_started_ns = started_ns
+        self._pending_request_messages = list(request_messages)
+
+    def complete_provider_turn(self, *, response_message: Any, timing: ModelCallTiming) -> None:
+        """2026-08-30 用于收口成功的物理 Provider 请求并激活其工具审计上下文"""
+        if self._pending_turn_id is None:
+            raise RuntimeError("物理 Provider 请求尚未开始")
+        turn_id = self._pending_turn_id
+        started_ns = self._pending_started_ns
+        self._recorder.finish_turn(
+            turn_id,
+            raw_response=_serialize_ai_message(response_message),
+            status="success",
+            error=None,
+            timing={
+                "ttft_ms": timing.ttft_ms,
+                "first_visible_ms": timing.first_visible_ms,
+                "reasoning_ms": timing.reasoning_ms,
+                "model_ms": timing.model_ms,
+            },
+            timing_notes=list(timing.timing_notes),
+            token_usage=_usage_for_turn(self._pending_request_messages, response_message),
+            run_id=self._run_id,
+            novel_id=self._novel_id,
+            task_type=self._task_type,
+            call_type=self._call_type,
+            model=self._model_name,
+        )
+        self._pending_turn_id = None
+        self._pending_started_ns = None
+        self._pending_request_messages = []
+        if getattr(response_message, "tool_calls", None):
+            self._active_turn_id = turn_id
+            self._active_started_ns = started_ns
+            self._active_tool_first_ns = None
+            self._active_tool_last_ns = None
+
+    def fail_provider_turn(
+        self,
+        *,
+        error: str,
+        timing: ModelCallTiming,
+        response_message: Any | None,
+    ) -> None:
+        """2026-08-30 用于按单个物理 Provider 请求收口断流超时与空工具回复"""
+        if self._pending_turn_id is None:
+            raise RuntimeError("物理 Provider 请求尚未开始")
+        response = response_message if response_message is not None else _FALLBACK_AI_MESSAGE
+        self._recorder.finish_turn(
+            self._pending_turn_id,
+            raw_response=_serialize_ai_message(response),
+            status="error",
+            error=error,
+            timing={
+                "ttft_ms": timing.ttft_ms,
+                "first_visible_ms": timing.first_visible_ms,
+                "reasoning_ms": timing.reasoning_ms,
+                "model_ms": timing.model_ms,
+            },
+            timing_notes=list(timing.timing_notes) + ["provider_request_failed"],
+            token_usage=_usage_for_turn(self._pending_request_messages, response),
+            run_id=self._run_id,
+            novel_id=self._novel_id,
+            task_type=self._task_type,
+            call_type=self._call_type,
+            model=self._model_name,
+        )
+        self._pending_turn_id = None
+        self._pending_started_ns = None
+        self._pending_request_messages = []
 
     def record_tool_call(
         self,

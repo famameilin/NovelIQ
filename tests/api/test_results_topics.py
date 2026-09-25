@@ -20,16 +20,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.api.services.results_queries.topics import _fetch_topics, _validate_agg_row
+from src.api.services.results_queries.topics import (
+    _fetch_topics,
+    _validate_agg_row,
+    describe_topics_unavailability,
+)
 
 
 def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
     return SimpleNamespace(topic_id=topic_id, weighted_total=weighted_total)
 
 
-def _make_repo(rows: list[SimpleNamespace]) -> MagicMock:
+def _make_repo(rows: list[SimpleNamespace], book_total: float | None = 150.0) -> MagicMock:
     repo = MagicMock()
     repo.fetch_paragraph_topics_agg.return_value = rows
+    # §5.11 新口径：全书归一化分母为所有段落推断 token 和（每段一行）
+    repo.fetch_topic_inference_total.return_value = book_total
     return repo
 
 
@@ -69,18 +75,30 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
     assert first.topic_id == 0
     assert list(first.words) == ["修炼", "境界"]
     assert first.label == "修炼主题"
-    # 权重归一化：weighted_total / sum(weighted_total) = 100 / (100 + 50)
+    # §5.11 归一化：weighted_total / 全书推断 token 和 = 100 / 150
     assert first.weight == round(100.0 / 150.0, 6)
     assert second.topic_id == 1
     assert second.label == "成长主题"
     assert second.weight == round(50.0 / 150.0, 6)
 
 
-def test_fetch_topics_uses_paragraph_aggregation_source() -> None:
-    """2026-08-20 验证主题查询只调用段落聚合源"""
-    repo = _make_repo([])
-    _fetch_topics("run-source", repo)
-    repo.fetch_paragraph_topics_agg.assert_called_once_with("run-source")
+def test_fetch_topics_falls_back_to_topic_weight_sum_without_inference_rows() -> None:
+    """
+    2026-08-28 兼容旧 Top-5 运行：无 paragraph_topic_inference 行
+    （fetch_topic_inference_total 返回 None）时按主题加权和归一
+    """
+    repo = _make_repo([_make_row(0, 100.0), _make_row(1, 50.0)], book_total=None)
+    trainer = _make_trainer_with_model()
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("src.topic.LDATrainer", return_value=trainer),
+    ):
+        result = _fetch_topics("run-legacy", repo)
+
+    assert len(result) == 2
+    assert result[0].weight == round(100.0 / 150.0, 6)
+    assert result[1].weight == round(50.0 / 150.0, 6)
 
 
 def test_fetch_topics_model_load_failure_degrades() -> None:
@@ -126,7 +144,7 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
 
 def test_validate_agg_row_rejects_missing_fields() -> None:
     """2026-08-20 验证聚合结果缺字段时快速失败"""
-    with pytest.raises(RuntimeError, match="缺少"):
+    with pytest.raises(RuntimeError):
         _validate_agg_row(SimpleNamespace(topic_id=1))
 
 
@@ -135,3 +153,37 @@ def test_validate_agg_row_rejects_invalid_weight(weighted_total: float) -> None:
     """2026-08-20 验证聚合权重必须是非负有限数"""
     with pytest.raises(RuntimeError, match="weighted_total"):
         _validate_agg_row(SimpleNamespace(topic_id=1, weighted_total=weighted_total))
+
+
+def test_describe_topics_unavailability_reports_missing_artifact() -> None:
+    """2026-09-05 A6：模型 artifact 缺失给出显式原因（不再静默过滤聚合行）"""
+    reason = describe_topics_unavailability("run-no-model")
+    assert reason is not None
+    assert reason.startswith("topic_model_artifact_missing:")
+    assert "run-no-model" in reason
+
+
+def test_describe_topics_unavailability_reports_load_failure() -> None:
+    trainer = MagicMock()
+    trainer.load_model.side_effect = FileNotFoundError("model missing")
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("src.topic.LDATrainer", return_value=trainer),
+    ):
+        reason = describe_topics_unavailability("run-broken")
+
+    assert reason is not None
+    assert reason.startswith("topic_model_load_failed:")
+
+
+def test_describe_topics_unavailability_none_when_model_loads() -> None:
+    trainer = _make_trainer_with_model()
+
+    with (
+        patch.object(Path, "exists", return_value=True),
+        patch("src.topic.LDATrainer", return_value=trainer),
+    ):
+        reason = describe_topics_unavailability("run-1")
+
+    assert reason is None

@@ -7,12 +7,12 @@
  * - 优化数据获取配置，添加缓存和错误重试
  * - 优化面包屑布局，改为左对齐
  */
-import { Moon, Sun } from "lucide-react";
+import { Moon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { Link, useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useThemeStore } from "@/store/themeStore";
 import { useNovelStore } from "@/store/novelStore";
-import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
 import { Breadcrumb, getBreadcrumbLabel } from "./Breadcrumb";
 import { getNovel } from "@/api/novels";
 
@@ -103,16 +103,20 @@ export function TopBar() {
       )}
 
       <div className="flex items-center gap-3">
-        <button
+        <Link to="/settings" aria-label="打开设置">
+          <Button type="button" variant="ghost" size="icon" aria-label="设置">
+            <SettingsIcon className="h-4 w-4" />
+          </Button>
+        </Link>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={toggleDark}
-          className={cn(
-            "inline-flex h-9 w-9 items-center justify-center rounded-md",
-            "text-text-secondary hover:bg-surface-hover hover:text-text transition-colors"
-          )}
           aria-label="切换深浅模式"
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
+        </Button>
       </div>
     </header>
   );

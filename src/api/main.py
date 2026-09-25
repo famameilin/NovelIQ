@@ -17,11 +17,14 @@ from sqlalchemy import text
 
 from src.api.app_bootstrap import (
     analysis_router,
+    linguistic_router,
     novels_router,
     register_exception_handlers,
     register_middlewares,
     results_router,
+    settings_router,
     sse_router,
+    tabs_router,
     timeline_router,
 )
 
@@ -168,7 +171,10 @@ async def health_check():
 app.include_router(novels_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(results_router, prefix="/api")
+app.include_router(linguistic_router, prefix="/api")
+app.include_router(tabs_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
+app.include_router(settings_router, prefix="/api", tags=["settings"])
 app.include_router(sse_router, prefix="/api", tags=["SSE"])
 
 register_exception_handlers(app)

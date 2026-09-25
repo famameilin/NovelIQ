@@ -105,3 +105,66 @@ def test_toc_with_english_entries() -> None:
     start, end = toc
     assert text[start:end].count("Chapter 1") == 1
     assert "正文内容" not in text[start:end]
+
+
+def test_toc_with_named_volume_page_number_entries() -> None:
+    """
+    2026-09-09 重明传形态回归：纯名称卷/篇 + 尾页码（"少年篇\t2"）的目录条目。
+    修复前该形态不匹配 _TOC_ENTRY_RE，首行即判非条目导致整体识别失败。
+    """
+    text = (
+        "目录\n"
+        "少年篇\t2\n"
+        "第一章 起点\t3\n"
+        "第二章 入城\t5\n"
+        "青年篇\t122\n"
+        "\n"
+        "少年篇\n"
+        "第一章 起点\n"
+        "内容。"
+    )
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    skipped = text[start:end]
+    assert "少年篇\t2" in skipped
+    assert "青年篇\t122" in skipped
+    # 正文真实标题（不带页码）不进目录范围
+    assert "内容。" not in skipped
+
+
+def test_toc_duplicate_entries_with_page_numbers_pass_through() -> None:
+    """
+    2026-09-09 重明传形态回归：目录自身存在同名重复条目（第二十章×2，
+    页码 74/80）。同名但带尾页码的行是目录内部重复条目，不应触发
+    「进入正文」截断，否则目录页被拦腰截断、剩余条目泄漏进正文。
+    """
+    text = (
+        "目录\n"
+        "第一章 起点 1\n"
+        "第二章 入城 5\n"
+        "第三章 拜师 9\n"
+        "第四章 决裂 11\n"
+        "第四章 决裂 15\n"
+        "第五章 落幕 17\n"
+        "\n"
+        "第一章 起点\n"
+        "内容。"
+    )
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    skipped = text[start:end]
+    assert skipped.count("第四章 决裂") == 2
+    assert "第五章 落幕 17" in skipped
+    assert "内容。" not in skipped
+
+
+def test_toc_named_volume_without_page_number_is_body_boundary() -> None:
+    """纯名称卷行不带页码不作为目录条目：充当目录页结束边界，不被吞进目录范围"""
+    text = "目录\n第一章 起点 1\n第二章 入城 5\n少年篇\n第一章 起点\n内容。"
+    toc = detect_toc_range(text)
+    assert toc is not None
+    start, end = toc
+    assert "少年篇" not in text[start:end]
+    assert text[start:end].count("第一章") == 1

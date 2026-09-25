@@ -69,6 +69,8 @@ class ParagraphMetric(Base):
     sensory_hit_count: Mapped[int] = mapped_column(Integer, nullable=False)
     imagery_hit_count: Mapped[int] = mapped_column(Integer, nullable=False)
     metaphor_sentence_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 2026-09-05 C 批：身体反应转喻命中（皱眉/颤抖等；独立计数不进正负极性）
+    body_reaction_hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # 功能词与语义类别计数（只保存计数，不保存密度）
     function_word_counts: Mapped[dict] = mapped_column(JSONB, nullable=False)

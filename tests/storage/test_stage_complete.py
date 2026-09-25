@@ -90,6 +90,7 @@ def _insert_paragraph_derived_rows(db_session, run_id: str, paragraph_ids: list[
                 sensory_hit_count=0,
                 imagery_hit_count=0,
                 metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
                 function_word_counts={},
                 semantic_category_counts={},
             )
@@ -172,15 +173,9 @@ class TestStageCompleteChecks:
         chapter_repo.insert_chapter_texts(run_id, chunks)
         ensure_paragraph_embeddings_schema(db_session, 1024)
 
-        with (
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
-                True,
-            ),
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
-                1024,
-            ),
+        with patch(
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
+            True,
         ):
             assert not chapter_repo.is_preprocess_complete(run_id)
 
@@ -214,17 +209,12 @@ class TestStageCompleteChecks:
                 ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.3] * 1024),
                 ParagraphEmbeddingRow(paragraph_id=1, embedding_vector=[0.4] * 1024),
             ],
+            embedding_dimension=1024,
         )
 
-        with (
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
-                True,
-            ),
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
-                1024,
-            ),
+        with patch(
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
+            True,
         ):
             assert chapter_repo.is_preprocess_complete(run_id)
 
@@ -272,17 +262,12 @@ class TestStageCompleteChecks:
             db_session,
             run_id,
             [ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.3] * 1024)],
+            embedding_dimension=1024,
         )
 
-        with (
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
-                True,
-            ),
-            patch(
-                "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.embedding_dim",
-                1024,
-            ),
+        with patch(
+            "src.storage.repositories.chapter_repository.settings.models.paragraph_embedding.semantic_enabled",
+            True,
         ):
             assert not chapter_repo.is_preprocess_complete(run_id)
 
@@ -387,7 +372,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.has_topic_data(run_id)
 
     def test_is_topic_model_complete_with_data(self, db_session):
-        """有paragraph_topics时topic_model完成（§11.1 主题判定改查段落主题）"""
+        """有契约表与段落主题时topic_model完成（§5.8 主题判定改查契约行）"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -401,7 +386,23 @@ class TestStageCompleteChecks:
         chunks = _create_chunks(1)
         chapter_repo.insert_chapter_texts(run_id, chunks)
         _insert_paragraphs(db_session, run_id, chunks)
-        ParagraphRepository(db_session).insert_paragraph_topics(run_id, [(0, 1, 0.5, 10)])
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_repo.insert_topic_model_run(
+            run_id,
+            model_key="gensim-lda",
+            library_version="4.4.0",
+            pipeline_version="1.0",
+            num_topics=1,
+            parameters={"num_topics": 1},
+            dictionary_size=10,
+            training_document_count=1,
+            inference_paragraph_count=1,
+            artifact_key=f"models/topic/{run_id}",
+        )
+        paragraph_repo.insert_paragraph_topic_inferences(
+            run_id, [(0, 10, 10, "complete", None, 1.0)]
+        )
+        paragraph_repo.insert_paragraph_topics(run_id, [(0, 0, 1.0)])
         assert stats_repo.has_topic_data(run_id)
 
     def test_is_diagnose_complete_no_data(self, db_session):

@@ -65,9 +65,20 @@ _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS = {
     "embedding_vector",
     "embedding_model_key",
     "embedding_dimension",
-    "source_content_hash",
     "created_at",
 }
+
+
+# 2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维；更高维（如
+# Qwen3-Embedding-4B 的 2560 维）建 vector_cosine_ops 索引会抛 ProgramLimitExceeded，
+# 必须改用 halfvec 表达式索引（上限 4000 维）。检索侧 embedding_ops 须做同型 cast
+# 才能命中该索引，形态判定共用 hnsw_index_uses_halfvec。
+_HNSW_MAX_VECTOR_DIM = 2000
+
+
+def hnsw_index_uses_halfvec(embedding_dim: int) -> bool:
+    """2026-09-25 用于判定段落向量 HNSW 索引是否需要 halfvec 表达式形态"""
+    return embedding_dim > _HNSW_MAX_VECTOR_DIM
 
 
 def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
@@ -101,7 +112,6 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
                     embedding_vector vector({embedding_dim}),
                     embedding_model_key VARCHAR,
                     embedding_dimension INTEGER,
-                    source_content_hash VARCHAR(64),
                     created_at VARCHAR(50),
                     PRIMARY KEY (run_id, paragraph_id),
                     FOREIGN KEY (run_id) REFERENCES {schema}.analysis_runs(run_id) ON DELETE CASCADE,
@@ -127,12 +137,21 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
     # 2026-08-13 P2：章节 Agent 语义检索（search_similar_paragraphs）此前对同 run 全量
     # 向量做余弦全表扫描，加 HNSW ANN 索引（需 pgvector ≥ 0.5）；查询按向量距离检索后
     # 再叠加 run_id 边界过滤即可命中
-    session.execute(
-        text(
-            f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
-            f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
+    if hnsw_index_uses_halfvec(embedding_dim):
+        session.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
+                f"ON {schema}.paragraph_embeddings USING hnsw "
+                f"((embedding_vector::halfvec({embedding_dim})) halfvec_cosine_ops)"
+            )
         )
-    )
+    else:
+        session.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
+                f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
+            )
+        )
 
 
 def _hnsw_index_exists(session: Session, schema: str) -> bool:
@@ -155,10 +174,12 @@ def _hnsw_index_exists(session: Session, schema: str) -> bool:
     )
 
 
-def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
-    """2026-08-07 用于校验原文自然段向量表与当前维度合同一致（二期段落化列集）"""
-    if embedding_dim <= 0:
-        raise ValueError("embedding_dim must be positive")
+def validate_paragraph_embeddings_schema(session: Session) -> None:
+    """2026-08-07 用于校验原文自然段向量表结构就绪（二期段落化列集）
+
+    2026-09-10 维度不再是配置：列宽与模型的比对在 preprocess 的
+    ensure（按探测值）完成，这里只做结构性校验。
+    """
     schema = _runtime_schema()
     table_exists = session.execute(
         text("SELECT to_regclass(:table_name)"),
@@ -172,13 +193,6 @@ def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -
             "paragraph_embeddings schema mismatch: "
             f"expected={sorted(_REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS)} "
             f"actual={sorted(actual_columns)}"
-        )
-    expected_type = f"vector({embedding_dim})"
-    vector_type = _get_embedding_vector_type(session, "paragraph_embeddings")
-    if vector_type != expected_type:
-        raise ValueError(
-            "paragraph_embeddings.embedding_vector type mismatch: "
-            f"expected {expected_type}, got {vector_type or 'unknown'}"
         )
     if not _hnsw_index_exists(session, schema):
         # 2026-08-13 P2：索引缺失时不再静默通过，避免语义检索继续全表扫描

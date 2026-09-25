@@ -150,7 +150,7 @@ describe("useAnalysisStatus", () => {
     await waitFor(() => {
       expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-live");
     });
-    expect(latestSSEUrl).toContain("/api/events/tasks/task-live");
+    expect(latestSSEUrl).toContain("/api/novels/novel-1/events/tasks/task-live");
   });
 
   it("会把 pending 任务回填成活跃态并触发 onRunning", async () => {

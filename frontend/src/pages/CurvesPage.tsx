@@ -3,7 +3,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react";
-import { getParagraphCurves, getEmotionTrend, getNarrativeStructure } from "@/api/results";
+import { getEmotionTrend } from "@/api/results";
+import { getRhythmTab, tabQueryKey } from "@/api/tabs";
 import { getNovel } from "@/api/novels";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
@@ -106,16 +107,10 @@ export function CurvesPage() {
     placeholderData: keepPreviousData,
   });
 
-  const curvesQuery = useQuery({
-    queryKey: ["paragraph-curves", novelId, storeTaskId],
-    queryFn: () => getParagraphCurves(novelId!, storeTaskId!, { maxPoints: 800 }),
-    enabled,
-    staleTime: STALE_TIME,
-  });
-
-  const narrativeQuery = useQuery({
-    queryKey: ["metrics", novelId, storeTaskId, "narrative"],
-    queryFn: () => getNarrativeStructure(novelId!, storeTaskId!),
+  // 节奏张力 tab：段落曲线 + 叙事结构高潮参数一次拉取（2026-08-29 tab 级 API 统一）
+  const rhythmQuery = useQuery({
+    queryKey: tabQueryKey("rhythm", novelId, storeTaskId),
+    queryFn: () => getRhythmTab(novelId!, storeTaskId!, { maxPoints: 800 }),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -130,8 +125,8 @@ export function CurvesPage() {
   const novelTitle = novelQuery.data?.title ?? "小说详情";
 
   const emotionData = emotionTrendQuery.data ?? [];
-  const curvesData = curvesQuery.data ?? [];
-  const narrativeData = narrativeQuery.data;
+  const curvesData = rhythmQuery.data?.curves ?? [];
+  const narrativeData = rhythmQuery.data?.narrative_structure ?? undefined;
   const handleEmotionSeriesToggle = useCallback((newSet: Set<string>) => {
     setVisibleSeries((prev) => ({
       ...prev,
@@ -247,9 +242,8 @@ export function CurvesPage() {
 
   const handleRetry = useCallback(() => {
     emotionTrendQuery.refetch();
-    curvesQuery.refetch();
-    narrativeQuery.refetch();
-  }, [emotionTrendQuery, curvesQuery, narrativeQuery]);
+    rhythmQuery.refetch();
+  }, [emotionTrendQuery, rhythmQuery]);
 
   // 情绪 tab（窗口聚合）与节奏 tab（段落张力）各自独立的加载/错误态
   const emotionLoading = emotionTrendQuery.isLoading;
@@ -257,13 +251,10 @@ export function CurvesPage() {
   const emotionFailed = getAnalysisNotCompleteRunStatus(emotionTrendQuery.error) === "failed";
   const emotionError = emotionTrendQuery.isError && !emotionNotComplete;
 
-  const rhythmLoading = curvesQuery.isLoading || narrativeQuery.isLoading;
-  const rhythmNotComplete =
-    isAnalysisNotCompleteError(curvesQuery.error) || isAnalysisNotCompleteError(narrativeQuery.error);
-  const rhythmFailed =
-    getAnalysisNotCompleteRunStatus(curvesQuery.error) === "failed" ||
-    getAnalysisNotCompleteRunStatus(narrativeQuery.error) === "failed";
-  const rhythmError = (curvesQuery.isError || narrativeQuery.isError) && !rhythmNotComplete;
+  const rhythmLoading = rhythmQuery.isLoading;
+  const rhythmNotComplete = isAnalysisNotCompleteError(rhythmQuery.error);
+  const rhythmFailed = getAnalysisNotCompleteRunStatus(rhythmQuery.error) === "failed";
+  const rhythmError = rhythmQuery.isError && !rhythmNotComplete;
 
   if (!storeTaskId) {
     return (
@@ -303,7 +294,7 @@ export function CurvesPage() {
                   value={String(windowParagraphs)}
                   onValueChange={(value) => setWindowParagraphs(Number(value))}
                 >
-                  <SelectTrigger className="h-8 w-[112px]" aria-label="窗口粒度">
+                  <SelectTrigger className="h-8 w-32" aria-label="窗口粒度">
                     <SelectValue placeholder="窗口粒度" />
                   </SelectTrigger>
                   <SelectContent>

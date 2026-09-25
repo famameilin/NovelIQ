@@ -32,8 +32,8 @@ def persist_timeline_chapter(
     chapter_id: int,
     emotional_valences: dict[int, str] | None = None,
     event_types: dict[int, str] | None = None,
-    pivot_chunks: set[int] | None = None,
-    cliffhanger_chunks: set[int] | None = None,
+    pivot_chapters: set[int] | None = None,
+    cliffhanger_chapters: set[int] | None = None,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
     resolved_cases: list[Any] | None = None,
@@ -45,8 +45,8 @@ def persist_timeline_chapter(
         chapter_id=chapter_id,
         emotional_valences=emotional_valences,
         event_types=event_types,
-        pivot_chunks=pivot_chunks,
-        cliffhanger_chunks=cliffhanger_chunks,
+        pivot_chapters=pivot_chapters,
+        cliffhanger_chapters=cliffhanger_chapters,
         characters=characters,
         relations=relations,
         resolved_cases=resolved_cases,
@@ -151,7 +151,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=1, name=hero_name, action="初入江湖")],
+        characters=[character_fact(chapter_id=1, name=hero_name, action="初入江湖")],
     )
     persist_timeline_chapter(
         db_session,
@@ -159,11 +159,10 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         chapter_id=2,
         characters=[
             character_fact(
-                chunk_id=2,
+                chapter_id=2,
                 name=rival_name,
                 action="现身",
                 role_function="帮助者",
-                chapter_id=2,
             )
         ],
     )
@@ -171,41 +170,37 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=3,
-        emotional_valences={3: "strong_negative"},
+        emotional_valences={3: -2},
         event_types={3: "冲突"},
-        pivot_chunks={3},
-        cliffhanger_chunks={3},
+        pivot_chapters={3},
+        cliffhanger_chapters={3},
         characters=[
             character_fact(
-                chunk_id=3,
+                chapter_id=3,
                 name=hero_name,
                 action="结盟",
-                emotion="strong_negative",
-                chapter_id=3,
+                emotion=-2,
             ),
             character_fact(
-                chunk_id=3,
+                chapter_id=3,
                 name=rival_name,
                 action="回应",
                 role_function="帮助者",
-                chapter_id=3,
             ),
         ],
         relations=[
             relation_fact(
-                chunk_id=3,
+                chapter_id=3,
                 from_name=hero_name,
                 to_name=rival_name,
                 relation_type="盟友",
-                chapter_id=3,
             ),
             relation_fact(
-                chunk_id=3,
+                chapter_id=3,
                 from_name=hero_name,
                 to_name=organization_name,
                 to_entity_type="organization",
                 relation_type="隶属",
-                chapter_id=3,
             ),
         ],
     )
@@ -219,16 +214,15 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=4,
-        emotional_valences={4: "mild_negative"},
+        emotional_valences={4: -1},
         event_types={4: "转折"},
         characters=[
             character_fact(
-                chunk_id=4,
+                chapter_id=4,
                 name=rival_name,
                 action="离开",
                 role_function="帮助者",
-                emotion="mild_negative",
-                chapter_id=4,
+                emotion=-1,
             )
         ],
     )
@@ -236,7 +230,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         db_session,
         run_id=run_id,
         chapter_id=5,
-        characters=[character_fact(chunk_id=5, name=hero_name, action="独行", chapter_id=5)],
+        characters=[character_fact(chapter_id=5, name=hero_name, action="独行")],
         resolved_cases=[
             ResolvedCase(
                 case_id="case-break",
@@ -244,7 +238,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 type="relation_change",
                 reason="决裂",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 5},
+                target_ref={"kind": "relation_change", "chapter_id": 5},
                 from_entity=hero_name,
                 to_entity=rival_name,
                 relation_type="盟友",

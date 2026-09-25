@@ -5,12 +5,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TaskRow } from "@/components/analysis/TaskRow";
 
-const useStreamStoreMock = vi.fn((selector: (state: { progress: null; currentTaskId: null }) => unknown) =>
+interface StreamStoreState {
+  progress: { stage: string } | null;
+  currentTaskId: string | null;
+}
+
+const useStreamStoreMock = vi.fn((selector: (state: StreamStoreState) => unknown) =>
   selector({ progress: null, currentTaskId: null })
 );
 
 vi.mock("@/store/streamStore", () => ({
-  useStreamStore: (selector: (state: { progress: null; currentTaskId: null }) => unknown) =>
+  useStreamStore: (selector: (state: StreamStoreState) => unknown) =>
     useStreamStoreMock(selector),
 }));
 
@@ -108,5 +113,28 @@ describe("TaskRow", () => {
 
     await user.click(screen.getByTitle("继续分析"));
     expect(onResume).toHaveBeenCalledWith("cancelled01");
+  });
+
+  it("运行中 linguistic 阶段显示中文标签", () => {
+    useStreamStoreMock.mockImplementation((selector) =>
+      selector({ progress: { stage: "linguistic" }, currentTaskId: "running01" })
+    );
+
+    render(
+      <TaskRow
+        task={{
+          task_id: "running01",
+          status: "running",
+          created_at: "2026-08-08T00:00:00Z",
+        }}
+        isActive
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+        onDelete={vi.fn()}
+        onResume={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("语言结构分析中")).toBeInTheDocument();
   });
 });

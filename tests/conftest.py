@@ -136,6 +136,13 @@ def test_database_schema() -> str:
     return _build_test_schema_name()
 
 
+def _create_all_orm_tables(engine) -> None:
+    """与生产 init_db 同口径：paragraph_embeddings 由 ensure_paragraph_embeddings_schema
+    按探测维度建表（2026-09-10 维度不再是配置），create_all 排除之，避免建成无维度 vector 列"""
+    tables = [table for table in Base.metadata.sorted_tables if table.name != "paragraph_embeddings"]
+    Base.metadata.create_all(bind=engine, tables=tables)
+
+
 @pytest.fixture(scope="session")
 def setup_test_database(test_database_url: str, test_database_schema: str) -> Generator[None, None, None]:
     """
@@ -165,7 +172,7 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
     # 因此测试会话启动时需要把 public 里的 ORM 表整体重建一次，清掉上次运行残留的固定 run_id/task_id 数据，
     # 否则即便 search_path 指向隔离 schema，未限定表名仍会回落到 public 并撞上旧主键。
     Base.metadata.drop_all(bind=_test_engine)
-    Base.metadata.create_all(bind=_test_engine)
+    _create_all_orm_tables(_test_engine)
 
     yield
 
@@ -252,7 +259,7 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
         database_url = get_test_database_url()
         schema_name = _validate_schema_name(os.environ["DATABASE_SCHEMA"])
         _test_engine = _build_test_engine(database_url, schema_name)
-        Base.metadata.create_all(bind=_test_engine)
+        _create_all_orm_tables(_test_engine)
 
     SessionLocal = sessionmaker(bind=_test_engine)
     session = SessionLocal()

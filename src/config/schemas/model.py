@@ -30,19 +30,27 @@ class TaskModelSettings:
     max_iterations: int = 10
     total_attempts: int = 3
     allow_future_context: bool = False
-    # 2026-08-14 M7（§20）：章文本超过该字符数时在段落边界切成 Agent 运行时子块
+    # 2026-09-11 显式封顶 128K：思考模式补全上限的provider默认值不定（DeepSeek 文档
+    # 8K/64K 随模式漂移），截断长度实测 7.7K~61K 字符散布——显式封顶消除该变量
+    max_tokens: int = 131072
+    # 2026-09-19 双路径：章正文超过该字数走 subagent 路径（三条职责并发），
+    # 不超过走 agent 路径；门槛只作派发，正文永远整章注入、不切分
     sub_chunk_max_chars: int = 5000
 
 
 @dataclass
 class EmbeddingModelSettings:
-    """嵌入模型配置"""
+    """嵌入模型配置
+
+    2026-09-10 embedding_dim 不再是配置：维度以嵌入服务实测输出为准
+    （preprocess 探测锁定，EmbeddingClient.detect_embedding_dimension），
+    pgvector 列宽在建表时按探测值固化。
+    """
 
     base_url: str | None = None
     model: str | None = None
     api_key: str | None = None
     timeout_s: float | None = None
-    embedding_dim: int = 1536
     batch_size: int = 8
     semantic_enabled: bool = True
     top_k: int = 5
@@ -159,6 +167,7 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         max_iterations=json_data.get("max_iterations", 10),
         total_attempts=json_data.get("total_attempts", 3),
         allow_future_context=json_data.get("allow_future_context", False),
+        max_tokens=json_data.get("max_tokens", 131072),
         sub_chunk_max_chars=json_data.get("sub_chunk_max_chars", 5000),
     )
 
@@ -172,7 +181,6 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None) -> EmbeddingMod
 
     return EmbeddingModelSettings(
         timeout_s=json_data.get("timeout_s"),
-        embedding_dim=json_data.get("embedding_dim", 1536),
         batch_size=json_data.get("batch_size", 8),
         semantic_enabled=json_data.get("semantic_enabled", True),
         top_k=json_data.get("top_k", 5),
