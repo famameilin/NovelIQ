@@ -1,0 +1,286 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+/dist/
+downloads/
+eggs/
+.eggs/
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+.env.local
+
+# Environment Variables - 包含敏感信息，必须忽略
+.env
+.env.docker
+.env.docker.local
+
+# IDE
+.idea/
+.vscode/
+.VSCodeCounter/
+*.swp
+*.swo
+*~
+
+# Trae IDE 工作文件
+.trae/
+
+# Claude Code 配置
+CLAUDE.md
+CODEBUDDY.md
+.codex-tmp/
+
+# 文档草案不进 git
+generalize-rag-to-narrative-evidence.md
+
+# Issues 文件夹
+issues/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Logs
+logs/
+*.log
+
+# Uploads - 用户上传的文件
+data/uploads/
+
+# Novels - 本地样例小说（不入库）
+data/novel/
+
+# Outputs - 分析输出结果
+outputs/
+# 词表审计与图表快照等本地产物
+output/
+
+# Cache
+.cache/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Distribution
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+coverage.xml
+*.cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+docs/diagrams/
+
+# 文档文件夹（本地保留，不进 git）
+docs/
+
+# PyBuilder
+target/
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Trae IDE / code analysis
+.claude/
+.understand-anything/
+tree.txt
+
+# Local development files
+*.local
+temp_test*
+temp_*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Alembic - 保留版本文件但忽略可能的临时文件
+alembic/versions/__pycache__/
+
+# Project specific
+results.json
+novel_analysis.db
+analysis_log_*.txt
+server_terminal_log.txt
+server_console_log_*.txt
+log.txt
+monitor_progress.py
+test_token_usage.py
+重明传.json
+
+# Deprecated - 废弃代码保留历史记录
+deprecated/
+
+# Tests 根目录测试文件不上传（显式保留 conftest.py）
+/tests/*.py
+!/tests/conftest.py
+!/tests/__init__.py
+
+# LDA Topic Models - 训练好的模型文件
+/models/
+
+.codebuddy/
+.workbuddy/
+skills/chart-diagram.skill
+
+# Understand Everything Dashboard - 独立的前端可视化工具
+/understand-everything/
+
+# Frontend (Node.js)
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+
+# JMeter 测试报告和数据
+tests/jmeter/report/
+tests/jmeter/results.jtl
+tests/jmeter/test_files.csv
+tests/jmeter/test_novel.txt
+
+# 生成的分析结果
+tests/jmeter/results/archive/
+
+AGENTS.md
+
+skills/
+
+.codex-runtime/ 
+.playwright-mcp/
+# Playwright CLI 会话快照
+.playwright-cli/
+.pytest-tmp/
+tmp/
+scripts/tools/build_competition_report.py
+
+# 未跟踪的本地素材与调试工具(移除 git 跟踪)
+noveliq-creative-proposal*.png
+scripts/db/
+scripts/tools/
+scripts/experiments/
+
+# ZCode 会话内部计划
+.zcode/
+
+# 图形化分析报告导出独立工具（不纳入版本库，含其测试）
+tools/report_exporter/
+tests/report/
+
+.omo/
+
+# OpenViking / 向量库等本地运行时数据（不入库）
+data/_system/
+data/vectordb/
+data/viking/
+
+# opencode 本地 MCP 配置
+opencode.json
+.opencode/
+.uv-cache/
+.uv-python/
+
+# 标注思考量归因 dump（逐回合思考原文，本地研究产物）
+/tmp_thinking/
+
+# 本地设置覆盖（各机器不同的运营/调优参数，不入库；默认值以 src/config/schemas 的 dataclass 为唯一事实源）
+config/settings.json
+
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+site-packages/
+coverage/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.dist-info/
+pip-wheel-metadata/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）
