@@ -59,7 +59,11 @@ class CloudAnalysis(BaseModel):
     dignity_reason: str | None = None
     cultural_depth_score: int | None = Field(default=None, ge=0, le=5)
     cultural_depth_reason: str | None = None
-    narrative_arc_type: str | None = None
+    narrative_arc_type: str | None = Field(
+        default=None,
+        max_length=4,
+        description="叙事弧类型短标签，4 字以内（如 三幕式/英雄之旅）；不写句子、不写箭头链",
+    )
     focus_structure: FocusStructureType | None = None
     focus_characters: list[str] = Field(default_factory=list)
     main_characters: list[str] = Field(default_factory=list)
