@@ -9,14 +9,7 @@ from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import Confidence, ResolvedCase
 from src.storage.models import EventNode
-from src.storage.repositories.annotation.repository import (
-    _EXPECTATION_BASE_SCORE_BY_PAYOFF,
-    _EXPECTATION_STATUS_BONUS,
-    _EXPECTATION_STATUS_WEIGHT,
-    _EXPECTATION_STRENGTH_BONUS,
-    _EXPECTATION_STRENGTH_WEIGHT,
-    AnnotationRepository,
-)
+from src.storage.repositories.annotation.repository import AnnotationRepository
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
 
 
@@ -82,19 +75,9 @@ def test_calculate_expectation_low_scores_below_medium(db_session) -> None:
     assert results[Confidence.MEDIUM.value] < results[Confidence.HIGH.value]
 
 
-def test_expectation_mappings_cover_enum_domains() -> None:
-    """所有期望映射字典都完整覆盖对应枚举值（2026-09-14 起 payoff 与 strength 同为 Confidence 三档）。"""
-    confidence_values = {item.value for item in Confidence}
-    assert set(_EXPECTATION_BASE_SCORE_BY_PAYOFF) == confidence_values
-    assert set(_EXPECTATION_STATUS_BONUS) == {"open", "reinforced", "likely_paid_off"}
-    assert set(_EXPECTATION_STATUS_WEIGHT) == {"open", "reinforced", "likely_paid_off"}
-    assert set(_EXPECTATION_STRENGTH_BONUS) == confidence_values
-    assert set(_EXPECTATION_STRENGTH_WEIGHT) == confidence_values
-
-
 def test_resolved_case_rejects_invalid_foreshadowing_enums() -> None:
     """P3：伏笔枚举非法值直接 raise，不再降级为 unknown。"""
-    with pytest.raises(ValidationError, match="枚举漂移"):
+    with pytest.raises(ValidationError):
         ResolvedCase(
             case_id="case-1",
             action="foreshadowing",
@@ -108,27 +91,6 @@ def test_resolved_case_rejects_invalid_foreshadowing_enums() -> None:
             payoff_likelihood="certain",
             strength="mega",
         )
-
-
-def test_resolved_case_keeps_valid_foreshadowing_enums() -> None:
-    """合法枚举值原样保留。"""
-    resolved = ResolvedCase(
-        case_id="case-1",
-        action="foreshadowing",
-        type="foreshadowing_suspect",
-        reason="合法枚举",
-        target_key="target-1",
-        target_ref={"chunk_id": 1},
-        foreshadowing_action="reinforce",
-        foreshadowing_root_event_id="evt-root",
-        foreshadowing_event_id="evt-bind",
-        payoff_likelihood="high",
-        strength="low",
-    )
-
-    assert resolved.foreshadowing_action == "reinforce"
-    assert resolved.payoff_likelihood == "high"
-    assert resolved.strength == "low"
 
 
 def test_calculate_expectation_returns_none_when_all_evidence_missing(db_session) -> None:

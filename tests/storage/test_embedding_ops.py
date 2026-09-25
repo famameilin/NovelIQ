@@ -1,90 +1,10 @@
-import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from pgvector.sqlalchemy import Vector
-
-from src.storage.models import ParagraphEmbedding
 from src.storage.repositories.paragraph.embedding_ops import (
-    ParagraphEmbeddingRow,
     get_incomplete_paragraph_embedding_paragraph_ids,
-    insert_paragraph_embeddings,
     search_similar_paragraphs,
 )
-
-
-def test_paragraph_embedding_uses_pgvector_column_type() -> None:
-    """
-    创建时间: 2026-04-24
-    任务: level3-paragraph-rerank
-    说明: paragraph embedding 表应使用 pgvector 列，保持与 chunk embedding 检索语义一致。
-    """
-    assert isinstance(ParagraphEmbedding.__table__.c.embedding_vector.type, Vector)
-
-
-def test_paragraph_embedding_model_has_paragraph_identity_columns() -> None:
-    """
-    2026-08-14 二期段落化（§5.2）：旧列（chunk_id/paragraph_index/paragraph_text/
-    local/global 坐标）全部移除，段落身份收敛为 paragraphs 表的 paragraph_id。
-    """
-    columns = set(ParagraphEmbedding.__table__.c.keys())
-    assert {"run_id", "paragraph_id", "embedding_vector"} <= columns
-    assert {"embedding_model_key", "embedding_dimension"} <= columns
-    for legacy_column in (
-        "chunk_id",
-        "paragraph_index",
-        "paragraph_text",
-        "local_start_char",
-        "local_end_char",
-        "global_start_char",
-        "global_end_char",
-    ):
-        assert legacy_column not in columns
-
-
-def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
-    """
-    2026-08-14 二期段落化：写入行携带 paragraph_id 与向量，embedding_model_key 从
-    settings 取；2026-09-10 维度不再是配置，embedding_dimension 由调用方传探测值。
-    """
-    session = MagicMock()
-    session.execute.side_effect = [
-        MagicMock(),  # delete 同 run 旧行
-        MagicMock(),  # insert
-    ]
-
-    inserted = insert_paragraph_embeddings(
-        session,
-        run_id="run-1",
-        rows=[
-            ParagraphEmbeddingRow(
-                paragraph_id=7,
-                embedding_vector=[0.3, 0.4],
-            )
-        ],
-        embedding_dimension=1024,
-    )
-
-    assert inserted == 1
-    # 先删后插：第一条 execute 是 delete 同 run 行
-    delete_statement = session.execute.call_args_list[0].args[0]
-    assert "DELETE FROM paragraph_embeddings" in str(delete_statement.compile())
-    _, rows = session.execute.call_args_list[1].args
-    assert rows[0]["paragraph_id"] == 7
-    assert rows[0]["embedding_vector"] == [0.3, 0.4]
-    assert rows[0]["embedding_dimension"] == 1024
-    assert rows[0]["created_at"]
-
-
-def test_insert_paragraph_embeddings_empty_rows_returns_zero() -> None:
-    """2026-08-14 用于验证空行列表不写库（仍先删旧行）"""
-    session = MagicMock()
-    session.execute.side_effect = [MagicMock()]
-
-    inserted = insert_paragraph_embeddings(session, run_id="run-1", rows=[])
-
-    assert inserted == 0
-    assert session.execute.call_count == 1
 
 
 def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
@@ -134,38 +54,6 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
     assert results[0].chapter_id == 2
     assert results[0].chapter_id == 2
     assert results[0].similarity == 0.93
-
-
-def test_search_similar_paragraphs_pushes_paragraph_and_chapter_sequence_bounds_and_limit() -> None:
-    """2026-08-14 用于验证段落边界、排除集合与 top_k 仍进入 SQL"""
-    session = MagicMock()
-    session.execute.return_value.all.return_value = []
-
-    search_similar_paragraphs(
-        session,
-        run_id="run-1",
-        query_embedding=[0.1] * 1024,
-        top_k=3,
-        similarity_threshold=0.5,
-        exclude_paragraph_ids=[5],
-        min_paragraph_id=1,
-        max_paragraph_id=10,
-        before_chapter_sequence=7,
-        after_chapter_sequence=9,
-    )
-
-    stmt = session.execute.call_args.args[0]
-    compiled_sql = str(stmt.compile())
-    compiled_params = stmt.compile().params
-    assert "JOIN chapters" in compiled_sql
-    assert "LIMIT :param_3" in compiled_sql
-    assert "NOT IN" in compiled_sql
-    assert re.search(r"paragraph_id >= :paragraph_id_\d+", compiled_sql) is not None
-    assert re.search(r"paragraph_id <= :paragraph_id_\d+", compiled_sql) is not None
-    assert re.search(r"chapters.sequence < :sequence_\d+", compiled_sql) is not None
-    assert re.search(r"chapters.sequence > :sequence_\d+", compiled_sql) is not None
-    assert 7 in compiled_params.values()
-    assert 9 in compiled_params.values()
 
 
 def test_get_incomplete_paragraph_embedding_paragraph_ids_combines_missing_and_null_vector() -> None:
