@@ -355,7 +355,7 @@ class EventForestRepository:
 
         def sort_key(node: EventNodeRow) -> tuple[int, int, int, str]:
             # 章级证据盖章后同章节点 char_start/char_end 相同，不能再靠字符区间排主链。
-            # payload_path 末段是写入序号（chunks/{id}/events/{index}），配合 cause_role 恢复树序。
+            # payload_path 末段是写入序号（chapters/{id}/events/{index}），配合 cause_role 恢复树序。
             tail = node.payload_path.rsplit("/", 1)[-1]
             ordinal = int(tail) if tail.isdigit() else 0
             role_rank = {"root": 0, "main": 1, "secondary": 2}.get(node.cause_role, 9)
