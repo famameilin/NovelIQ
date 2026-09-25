@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.lexicons.tables import (
+    BODY_REACTION_TERMS,
     COMBAT_TERMS,
     FUNCTION_WORDS_TERMS,
     IMAGERY_TERMS,
@@ -37,6 +38,8 @@ def _load_all_lexicons_for_preprocess() -> dict[str, list[str] | dict[str, Any]]
     lexicons["sensory"] = SENSORY_TERMS
     lexicons["function_words"] = FUNCTION_WORDS_TERMS
     lexicons["imagery"] = IMAGERY_TERMS
+    # 2026-09-05 C 批：身体反应转喻（独立命中计数，不进正负极性）
+    lexicons["body_reaction"] = BODY_REACTION_TERMS
     # 战斗词条用于 fight_density（tension_proxy 只取词条键，
     # 权重不参与密度计算，统一按 1.0 登记）
     lexicons["fight_terms"] = dict.fromkeys(COMBAT_TERMS, 1.0)

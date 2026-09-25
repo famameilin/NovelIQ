@@ -253,6 +253,10 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
             xAxisIndex: 0,
             start: zoomRange ? zoomRange[0] * 100 : 0,
             end: zoomRange ? zoomRange[1] * 100 : 100,
+            // 2026-08-30：悬停底部 slider 区域时滚轮会同时触发 inside 缩放/平移，
+            // 导致视图偏移曲线消失；禁用 inside 的滚轮交互，仅保留 slider 常规拖拽
+            zoomOnMouseWheel: false,
+            moveOnMouseWheel: false,
           },
           {
             type: "slider" as const,

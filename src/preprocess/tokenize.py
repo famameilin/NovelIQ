@@ -4,13 +4,17 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.config.constants import LEXICON_FILES
+
+_LEXICON_DIR = Path("data/lexicons")
+
 
 def _default_user_dict_path() -> Path:
-    return Path("data/lexicons/jieba_user_dict.txt")
+    return _LEXICON_DIR / LEXICON_FILES["jieba_user_dict"]
 
 
 def _default_stopwords_path() -> Path:
-    return Path("data/lexicons/stopwords.txt")
+    return _LEXICON_DIR / LEXICON_FILES["stopwords"]
 
 
 # 2026-08-16 情绪词重切分：删除"副词+单字情绪词（爽/慌）"与"爽/慌+得/到"的

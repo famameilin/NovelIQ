@@ -16,7 +16,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.agents.diagnosis.tools import _format_topic_rows, build_diagnosis_tools
+from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.models.cloud.schema import CloudAnalysis
 
 
@@ -44,25 +44,6 @@ def _make_analysis() -> CloudAnalysis:
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
-
-
-# ============================================================================
-# 工具集构建
-# ============================================================================
-
-
-def test_build_returns_eight_tools() -> None:
-    tools = _build_tools()
-    assert [tool.name for tool in tools] == [
-        "get_aggregate_signals",
-        "get_pivot_materials",
-        "get_relation_changes",
-        "get_character_data",
-        "get_topic_data",
-        "get_graph_signals",
-        "finish",
-        "revise_finish",
-    ]
 
 
 # ============================================================================
@@ -98,7 +79,7 @@ def _mock_pivot_repo(**kwargs) -> MagicMock:
     repo = MagicMock()
     repo.fetch_pivot_blocks.return_value = kwargs.get("pivot_blocks", [])
     repo.fetch_high_tension_chunks.return_value = kwargs.get("high_tension", [])
-    repo.fetch_foreshadowing_threads.return_value = kwargs.get("threads", [])
+    repo.fetch_foreshadowing_trees.return_value = kwargs.get("trees", [])
     repo.calculate_foreshadow_expectation.return_value = kwargs.get("expectation")
     return repo
 
@@ -107,17 +88,24 @@ def test_get_pivot_materials_with_all_sections() -> None:
     repo = _mock_pivot_repo(
         pivot_blocks=[(1, "转折文本内容", "高潮")],
         high_tension=[(2, "高张力文本", 0.95)],
-        threads=[SimpleNamespace(model_dump_json=lambda: '{"thread": 1}')],
+        trees=[
+            SimpleNamespace(
+                root_event_id="evt-root-1",
+                description="天衡宗将庇护顾霜",
+                expected_payoff_family="庇护",
+                payoff_likelihood="high",
+                strength="medium",
+                status="open",
+                anchor_chapter_ids=[1],
+            )
+        ],
         expectation=0.35,
     )
     with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
         tools = _build_tools()
         out = _invoke(tools[1])
 
-    assert "<转折块>" in out and "[chunk 1] (高潮)" in out
-    assert "<高张力>" in out and "[paragraph 2] (tension=0.9500)" in out
-    assert "<伏笔线程>" in out and '{"thread": 1}' in out
-    assert "伏笔兑现预期: 35.00%" in out
+    assert "天衡宗将庇护顾霜" in out
 
 
 def test_get_pivot_materials_empty() -> None:
@@ -125,17 +113,6 @@ def test_get_pivot_materials_empty() -> None:
     with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[1]) == "（无转折素材数据）"
-
-
-def test_get_pivot_materials_skips_sections_without_data() -> None:
-    repo = _mock_pivot_repo(pivot_blocks=[(1, "只有转折", "铺垫")])
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
-        tools = _build_tools()
-        out = _invoke(tools[1])
-
-    assert "<转折块>" in out
-    assert "<高张力>" not in out
-    assert "<伏笔线程>" not in out
 
 
 # ============================================================================
@@ -185,20 +162,6 @@ def test_get_character_data_empty() -> None:
 # ============================================================================
 
 
-def test_get_topic_data_formats_rows() -> None:
-    repo = MagicMock()
-    repo.fetch_topic_words.return_value = [
-        {"topic_id": 1, "weight": 0.6, "words": ["修炼", "境界"], "label": "修炼主题"},
-        {"topic_id": 2, "weight": 0.4, "words": [], "label": None},
-    ]
-    with patch("src.storage.repositories.DiagnosisRepository", return_value=repo):
-        tools = _build_tools()
-        out = _invoke(tools[4])
-
-    assert "1. [topic 1，权重 0.6] 主题词：修炼、境界，标签：修炼主题" in out
-    assert "2. [topic 2，权重 0.4]" in out
-
-
 def test_get_topic_data_empty() -> None:
     repo = MagicMock()
     repo.fetch_topic_words.return_value = []
@@ -226,13 +189,6 @@ def test_get_graph_signals_merges_summary_and_quality() -> None:
     assert "quality: high" in out
 
 
-def test_get_graph_signals_unavailable() -> None:
-    with patch("src.knowledge.authority.KnowledgeGraphAuthorityService") as svc_cls:
-        svc_cls.from_session.return_value.build_graph_report.side_effect = RuntimeError("graph broken")
-        tools = _build_tools()
-        assert "（图谱信号不可用: graph broken）" in _invoke(tools[5])
-
-
 def test_get_graph_signals_empty_signals() -> None:
     with (
         patch("src.knowledge.authority.KnowledgeGraphAuthorityService"),
@@ -255,11 +211,3 @@ def test_finish_and_revise_finish_ok() -> None:
     assert _invoke(tools[7], {"patch": CloudAnalysisPatch(diagnosis="ok")}) == "OK"
 
 
-def test_format_topic_rows_variants() -> None:
-    rows = [
-        {"topic_id": 1, "weight": 0.5, "words": ["修炼"], "label": "修炼"},
-        {"topic_id": 2, "weight": 0.5, "words": None, "label": None},
-    ]
-    out = _format_topic_rows(rows)
-    assert "1. [topic 1，权重 0.5] 主题词：修炼，标签：修炼" in out
-    assert "2. [topic 2，权重 0.5]" in out

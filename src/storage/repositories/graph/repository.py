@@ -24,9 +24,12 @@ from src.storage.repositories.base import BaseRepository
 
 @dataclass(frozen=True, slots=True)
 class EntitySnapshotRow:
-    """2026-08-19 用于返回目标章节边界的实体身份与完整状态"""
+    """2026-08-19 用于返回目标章节边界的实体身份与完整状态
 
-    entity_id: int
+    2026-09-19 entity_id 随图实体主键改 uuid（String(36)）。
+    """
+
+    entity_id: str
     name: str
     entity_type: str
     tags: list[str]
@@ -43,8 +46,8 @@ class RelationSnapshotRow:
 
     chapter_id: int
     relation_id: str
-    from_entity_id: int
-    to_entity_id: int
+    from_entity_id: str
+    to_entity_id: str
     from_name: str
     to_name: str
     relation_type: str
@@ -69,12 +72,12 @@ class GraphChangeRow:
     effective_chapter_id: int
     confidence: str
     changes: list[dict[str, Any]]
-    entity_id: int | None = None
+    entity_id: str | None = None
     entity_name: str | None = None
     entity_type: str | None = None
     relation_id: str | None = None
-    from_entity_id: int | None = None
-    to_entity_id: int | None = None
+    from_entity_id: str | None = None
+    to_entity_id: str | None = None
     from_name: str | None = None
     to_name: str | None = None
     relation_type: str | None = None
@@ -167,18 +170,18 @@ class GraphRepository(BaseRepository[GraphFact]):
         order_map = self._chapter_order_map(run_id)
         return max(facts, key=lambda row: order_map.get(int(row.chapter_id), 0), default=None)
 
-    def _latest_state_rows(self, boundary: ChapterBoundary) -> dict[int, EntityState]:
+    def _latest_state_rows(self, boundary: ChapterBoundary) -> dict[str, EntityState]:
         """2026-08-19 用于读取目标章节及以前每个实体最近的状态"""
         order_map = self._chapter_order_map(boundary.run_id)
         rows = self.session.execute(select(EntityState).where(EntityState.run_id == boundary.run_id)).scalars()
-        latest: dict[int, EntityState] = {}
+        latest: dict[str, EntityState] = {}
         for row in rows:
             row_order = order_map.get(int(row.chapter_id), 0)
             if row_order > boundary.chapter_order:
                 continue
-            current = latest.get(int(row.entity_id))
+            current = latest.get(row.entity_id)
             if current is None or order_map.get(int(current.chapter_id), 0) < row_order:
-                latest[int(row.entity_id)] = row
+                latest[row.entity_id] = row
         return latest
 
     def fetch_entity_snapshots(self, boundary: ChapterBoundary) -> list[EntitySnapshotRow]:
@@ -187,14 +190,14 @@ class GraphRepository(BaseRepository[GraphFact]):
         latest_states = self._latest_state_rows(boundary)
         entities = self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
         result: list[EntitySnapshotRow] = []
-        for entity in sorted(entities, key=lambda row: int(row.entity_id)):
+        for entity in sorted(entities, key=lambda row: str(row.entity_id)):
             first_order = order_map.get(int(entity.first_seen_chapter), 0)
             if first_order == 0 or first_order > boundary.chapter_order:
                 continue
-            state = latest_states.get(int(entity.entity_id))
+            state = latest_states.get(entity.entity_id)
             result.append(
                 EntitySnapshotRow(
-                    entity_id=int(entity.entity_id),
+                    entity_id=str(entity.entity_id),
                     name=str(entity.canonical_name),
                     entity_type=str(entity.entity_type),
                     tags=list(entity.tags or []),
@@ -226,7 +229,7 @@ class GraphRepository(BaseRepository[GraphFact]):
     ) -> list[RelationSnapshotRow]:
         """2026-08-19 用于选择目标章节以前最近关系状态并过滤活动状态"""
         entity_names = {
-            int(row.entity_id): str(row.canonical_name)
+            str(row.entity_id): str(row.canonical_name)
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
         }
         relations = {
@@ -252,10 +255,10 @@ class GraphRepository(BaseRepository[GraphFact]):
                 RelationSnapshotRow(
                     chapter_id=int(state.chapter_id),
                     relation_id=relation_id,
-                    from_entity_id=int(relation.from_entity_id),
-                    to_entity_id=int(relation.to_entity_id),
-                    from_name=entity_names[int(relation.from_entity_id)],
-                    to_name=entity_names[int(relation.to_entity_id)],
+                    from_entity_id=str(relation.from_entity_id),
+                    to_entity_id=str(relation.to_entity_id),
+                    from_name=entity_names[str(relation.from_entity_id)],
+                    to_name=entity_names[str(relation.to_entity_id)],
                     relation_type=str(state.relation_type),
                     directionality=str(relation.directionality),
                     relation_semantics=str(relation.relation_semantics),
@@ -322,7 +325,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             for row in self.session.execute(select(GraphFact).where(GraphFact.run_id == run_id)).scalars()
         }
         entity_map = {
-            int(row.entity_id): row
+            str(row.entity_id): row
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
         relation_map = {
@@ -336,7 +339,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                 continue
             if chapter_id is not None and int(state.chapter_id) != chapter_id:
                 continue
-            entity = entity_map.get(int(state.entity_id))
+            entity = entity_map.get(str(state.entity_id))
             if entity is None:
                 continue
             for index, change in enumerate(state.changes):
@@ -354,7 +357,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                         effective_chapter_id=int(fact.effective_chapter_id),
                         confidence=str(fact.confidence),
                         changes=[dict(change)],
-                        entity_id=int(entity.entity_id),
+                        entity_id=str(entity.entity_id),
                         entity_name=str(entity.canonical_name),
                         entity_type=str(entity.entity_type),
                     )
@@ -370,8 +373,8 @@ class GraphRepository(BaseRepository[GraphFact]):
             relation = relation_map.get(str(relation_state.relation_id))
             if relation is None:
                 continue
-            from_entity = entity_map.get(int(relation.from_entity_id))
-            to_entity = entity_map.get(int(relation.to_entity_id))
+            from_entity = entity_map.get(str(relation.from_entity_id))
+            to_entity = entity_map.get(str(relation.to_entity_id))
             for index, change in enumerate(relation_state.changes):
                 fact_id = str(change.get("fact_id", ""))
                 fact = facts.get((int(change.get("chapter_id", relation_state.chapter_id)), fact_id))
@@ -388,8 +391,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                         confidence=str(fact.confidence),
                         changes=[dict(change)],
                         relation_id=str(relation.relation_id),
-                        from_entity_id=int(relation.from_entity_id),
-                        to_entity_id=int(relation.to_entity_id),
+                        from_entity_id=str(relation.from_entity_id),
+                        to_entity_id=str(relation.to_entity_id),
                         from_name=str(from_entity.canonical_name) if from_entity else None,
                         to_name=str(to_entity.canonical_name) if to_entity else None,
                         relation_type=str(relation_state.relation_type),

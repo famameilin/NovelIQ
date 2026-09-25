@@ -2,7 +2,11 @@ import pytest
 from loguru import logger
 
 from src.config.settings import Settings
-from src.runtime_env import load_database_environment, load_model_environment
+from src.runtime_env import (
+    load_database_environment,
+    load_ltp_environment,
+    load_model_environment,
+)
 
 
 def _set_database_environment(
@@ -177,3 +181,54 @@ def test_settings_from_env_degrades_to_json_when_model_environment_missing(monke
     assert settings.models.paragraph_embedding.base_url is None
     assert settings.models.annotation.streaming is True
     assert settings.models.annotation.timeout_s == 180
+
+
+def test_load_ltp_environment_reads_model_dir(monkeypatch) -> None:
+    """
+    2026-08-28 用于验证 LTP_MODEL_DIR 从平铺环境变量映射到内部对象
+    """
+
+    monkeypatch.setenv("LTP_MODEL_DIR", "models/ltp/small")
+
+    ltp_environment = load_ltp_environment()
+
+    assert ltp_environment is not None
+    assert ltp_environment.model_dir == "models/ltp/small"
+
+
+def test_load_ltp_environment_returns_none_when_unset_or_blank(monkeypatch) -> None:
+    """
+    2026-08-28 用于验证 LTP 整组未配置（缺失或空白）时返回 None，
+    由装配层降级使用 settings.json 的 model_dir
+    """
+
+    monkeypatch.delenv("LTP_MODEL_DIR", raising=False)
+    assert load_ltp_environment() is None
+
+    monkeypatch.setenv("LTP_MODEL_DIR", "  ")
+    assert load_ltp_environment() is None
+
+
+def test_settings_from_env_applies_ltp_model_dir(monkeypatch) -> None:
+    """
+    2026-08-28 用于验证 LTP_MODEL_DIR 覆盖 settings.json 的 model_dir
+    """
+
+    monkeypatch.setenv("LTP_MODEL_DIR", "models/ltp/small")
+
+    settings = Settings.from_env()
+
+    assert settings.linguistic.ltp.model_dir == "models/ltp/small"
+
+
+def test_settings_from_env_leaves_ltp_model_dir_empty_when_env_missing(monkeypatch) -> None:
+    """
+    2026-08-28 用于验证 LTP_MODEL_DIR 缺失时 model_dir 保持为空
+    （LTP 模型目录仅由环境变量提供，不走 settings.json）
+    """
+
+    monkeypatch.delenv("LTP_MODEL_DIR", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.linguistic.ltp.model_dir is None

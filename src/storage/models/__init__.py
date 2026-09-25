@@ -18,7 +18,6 @@ from src.storage.models.continuity import (
 from src.storage.models.core import AnalysisRun
 from src.storage.models.dialogue import DialogueRecord
 from src.storage.models.event_forest import EventEdge, EventNode
-from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
     ChapterBoundary,
     EntityState,
@@ -30,10 +29,17 @@ from src.storage.models.graph import (
 from src.storage.models.novel import Novel
 from src.storage.models.paragraph import Paragraph
 from src.storage.models.paragraph_curves import ParagraphCurve
-from src.storage.models.paragraph_embedding import EMBEDDING_DIM, ParagraphEmbedding
+from src.storage.models.paragraph_embedding import ParagraphEmbedding
+from src.storage.models.paragraph_entities import ParagraphEntity
+from src.storage.models.paragraph_linguistic_features import ParagraphLinguisticFeature
 from src.storage.models.paragraph_metrics import ParagraphMetric
+from src.storage.models.paragraph_phrase_hits import ParagraphPhraseHit
+from src.storage.models.paragraph_pos_embeddings import ParagraphPosEmbedding
+from src.storage.models.paragraph_topic_inference import ParagraphTopicInference
 from src.storage.models.paragraph_topics import ParagraphTopic
 from src.storage.models.rag import TokenUsage
+from src.storage.models.topic_model_runs import TopicModelRun
+from src.storage.models.word2vec_model_runs import Word2VecModelRun
 
 __all__ = [
     "Base",
@@ -43,15 +49,14 @@ __all__ = [
     "AgentToolCall",
     "EventNode",
     "EventEdge",
-    "ForeshadowingThread",
-    "ForeshadowingThreadHit",
     "Chapter",
     "Paragraph",
     "ParagraphEmbedding",
     "ParagraphMetric",
     "ParagraphTopic",
+    "ParagraphTopicInference",
+    "TopicModelRun",
     "ParagraphCurve",
-    "EMBEDDING_DIM",
     "ChapterAnnotationRecord",
     "CasePoolCase",
     "CaseResolutionMapping",
@@ -68,5 +73,10 @@ __all__ = [
     "ChapterSummary",
     "StageSummary",
     "TokenUsage",
-    "Novel",
+        "ParagraphEntity",
+    "ParagraphLinguisticFeature",
+    "ParagraphPhraseHit",
+    "ParagraphPosEmbedding",
+    "Word2VecModelRun",
+"Novel",
 ]

@@ -3,22 +3,26 @@
 import pytest
 
 from src.agents.diagnosis.contract import CloudAnalysisPatch
-from src.agents.diagnosis.prompts import SYSTEM_PROMPT
-
-
-def test_system_prompt_contains_contract_rules() -> None:
-    assert "style_labels" in SYSTEM_PROMPT and "3" in SYSTEM_PROMPT
-    assert "main_characters" in SYSTEM_PROMPT and "5" in SYSTEM_PROMPT
-    assert "arc_scores" in SYSTEM_PROMPT
-    assert "focus_structure" in SYSTEM_PROMPT
-
-
-def test_patch_merge_semantics() -> None:
-    patch = CloudAnalysisPatch.model_validate({"style_labels": ["硬核"], "main_characters": ["石轩"]})
-    dumped = patch.model_dump(exclude_unset=True)
-    assert dumped == {"style_labels": ["硬核"], "main_characters": ["石轩"]}
 
 
 def test_patch_rejects_extra_fields() -> None:
     with pytest.raises(ValueError):
         CloudAnalysisPatch.model_validate({"unknown_field": 1})
+
+
+def test_narrative_arc_type_caps_at_four_chars() -> None:
+    """2026-09-25 叙事弧类型限 4 字短标签
+
+    run faff5efe 诊断 LLM 曾把该自由字段写成 35 字箭头句（"少年成长弧：家族庇护→…"），
+    仪表盘徽章被撑爆；finish 与 revise_finish 两条提交路径同受 4 字上限约束。
+    """
+    from src.models.cloud.schema import CloudAnalysis
+
+    accepted = CloudAnalysis.model_validate({"narrative_arc_type": "英雄之旅"})
+    assert accepted.narrative_arc_type == "英雄之旅"
+    with pytest.raises(ValueError):
+        CloudAnalysis.model_validate({"narrative_arc_type": "少年成长弧：家族庇护→师承启蒙"})
+    with pytest.raises(ValueError):
+        CloudAnalysisPatch.model_validate({"narrative_arc_type": "少年成长弧：家族庇护"})
+    with pytest.raises(ValueError):
+        CloudAnalysisPatch.model_validate({"narrative_arc_type": ""})

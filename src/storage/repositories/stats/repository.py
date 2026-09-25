@@ -85,6 +85,10 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """检查指定运行是否有主题数据"""
         return runs.has_topic_data(self.session, run_id)
 
+    def has_linguistic_data(self, run_id: str) -> bool:
+        """检查指定运行是否有语言结构基础数据"""
+        return runs.has_linguistic_data(self.session, run_id)
+
     def has_diagnosis_data(self, run_id: str) -> bool:
         """检查指定运行是否有诊断数据"""
         return runs.has_diagnosis_data(self.session, run_id)

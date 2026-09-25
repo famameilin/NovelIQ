@@ -18,7 +18,7 @@ from src.api.services.results_queries import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_diagnosis,
-    _fetch_foreshadowing_threads,
+    _fetch_foreshadowing_trees,
     _fetch_global_stats,
     _fetch_hierarchical_relations,
     _fetch_novel_name,
@@ -135,6 +135,12 @@ def load_chapter_bundle(
     # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
     paragraph_repo = ParagraphRepository(annotation_repo.session)
     topics = _fetch_topics(run_id, paragraph_repo)
+    # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
+    if not topics:
+        from src.api.services.results_queries.topics import describe_topics_unavailability
+
+        reason = describe_topics_unavailability(run_id)
+        missing_fields.append(f"topics（{reason}）" if reason else "topics")
 
     chapter_annotations = _fetch_chapter_annotations(
         run_id,
@@ -274,12 +280,11 @@ def _fetch_timeline_data(
         ],
         "foreshadowing_edges": [
             {
-                "setup_id": fe.setup_id,
-                "setup_event_id": fe.setup_event_id,
+                "root_event_id": fe.root_event_id,
                 "payoff_event_id": fe.payoff_event_id,
                 "first_chapter_id": fe.first_chapter_id,
                 "last_chapter_id": fe.last_chapter_id,
-                "setup_summary": fe.setup_summary,
+                "description": fe.description,
                 "status": fe.status,
                 "active": fe.active,
             }
@@ -306,7 +311,7 @@ def build_export_payload(
     global_stats: Any,
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
-    foreshadowing_threads: list | None = None,
+    foreshadowing_trees: list | None = None,
     graph_summary: dict[str, Any] | None = None,
     graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
@@ -331,7 +336,7 @@ def build_export_payload(
         "topics": [t.model_dump(exclude_none=True) for t in topics],
         "diagnosis": diagnosis.model_dump(exclude_none=True) if diagnosis else None,
         "chapter_annotations": [a.model_dump(exclude_none=True) for a in chapter_annotations],
-        "foreshadowing_threads": [thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])],
+        "foreshadowing_trees": [tree.model_dump(exclude_none=True) for tree in (foreshadowing_trees or [])],
         "character_relations": [r.model_dump(exclude_none=True) for r in character_relations],
         "hierarchical_relations": [r.model_dump(exclude_none=True) for r in hierarchical_relations],
         "global_stats": global_stats.model_dump(exclude_none=True) if global_stats else None,
@@ -378,7 +383,7 @@ def fetch_all_results_data(
         export_graph_view,
     )
     missing_fields.extend(chapter_missing)
-    foreshadowing_threads = _fetch_foreshadowing_threads(run_id, annotation_repo)
+    foreshadowing_trees = _fetch_foreshadowing_trees(run_id, annotation_repo)
 
     (
         character_relations,
@@ -423,7 +428,6 @@ def fetch_all_results_data(
                     "anchor_paragraph_ids": node.anchor_paragraph_ids,
                     "char_start": node.char_start,
                     "char_end": node.char_end,
-                    "text_hash": node.text_hash,
                     "evidence": node.evidence,
                     "causal_event_refs": node.causal_event_refs,
                     "tree_id": node.tree_id,
@@ -465,12 +469,11 @@ def fetch_all_results_data(
             ],
             "foreshadowing_edges": [
                 {
-                    "setup_id": fe.setup_id,
-                    "setup_event_id": fe.setup_event_id,
+                    "root_event_id": fe.root_event_id,
                     "payoff_event_id": fe.payoff_event_id,
                     "first_chapter_id": fe.first_chapter_id,
                     "last_chapter_id": fe.last_chapter_id,
-                    "setup_summary": fe.setup_summary,
+                    "description": fe.description,
                     "status": fe.status,
                     "active": fe.active,
                 }
@@ -500,7 +503,7 @@ def fetch_all_results_data(
         topics=topics,
         diagnosis=diagnosis,
         chapter_annotations=chapter_annotations,
-        foreshadowing_threads=foreshadowing_threads,
+        foreshadowing_trees=foreshadowing_trees,
         character_relations=character_relations,
         hierarchical_relations=hierarchical_relations,
         global_stats=global_stats,

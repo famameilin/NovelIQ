@@ -12,14 +12,13 @@ from .continuity import (
     ChapterAnnotationRepository,
     DatabaseAnnotationQueryService,
     DialogueRecordRepository,
-    ForeshadowingRepository,
 )
 from .repository import (
     AnnotationRepository,
     ChapterAnnotationRow,
     CharacterFactRow,
     DialogueFactRow,
-    ForeshadowingThreadView,
+    ForeshadowingTreeView,
 )
 
 __all__ = [
@@ -27,11 +26,10 @@ __all__ = [
     "CharacterFactRow",
     "ChapterAnnotationRow",
     "DialogueFactRow",
-    "ForeshadowingThreadView",
+    "ForeshadowingTreeView",
     "CasePoolRepository",
     "CaseResolutionMappingRepository",
     "ChapterAnnotationRepository",
     "DatabaseAnnotationQueryService",
     "DialogueRecordRepository",
-    "ForeshadowingRepository",
 ]

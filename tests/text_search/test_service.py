@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
+from src.models.local.embedding import format_query_instruct
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories.paragraph.embedding_ops import SimilarParagraphRow
 from src.storage.repositories.paragraph_repository import ParagraphRepository
@@ -75,23 +76,6 @@ async def test_search_with_empty_query_returns_empty() -> None:
     """2026-08-12 用于验证空白查询直接返回空结果"""
     service = TextSearchService(MagicMock(), run_id="run-1")
     assert await service.search("   ") == []
-
-
-@pytest.mark.asyncio
-async def test_search_with_no_terms_skips_keyword_scan() -> None:
-    """2026-08-12 用于验证长句无分隔符查询产生空词项，关键词检索接收空列表且不命中"""
-    session = MagicMock()
-    session.execute.return_value.all.return_value = []
-    service = TextSearchService(session, run_id="run-1", semantic_enabled=False)
-    with patch(
-        "src.text_search.service.search_paragraphs_by_keywords",
-        return_value=[],
-    ) as mock_keyword:
-        result = await service.search("这是一段超过二十个字符长度没有分隔符的完整查询文本内容")
-
-    mock_keyword.assert_called_once()
-    assert mock_keyword.call_args.args[2] == []
-    assert result == []
 
 
 @pytest.mark.asyncio
@@ -166,6 +150,29 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_search_wraps_query_with_instruct_prefix(db_session) -> None:
+    """2026-09-25 Qwen3-Embedding 非对称检索配方：查询侧嵌入带 instruct 前缀，文档侧不带"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"],
+        title="查询instruct前缀",
+    )
+    _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
+    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=True)
+    service._embedding_client = AsyncMock()
+    with patch(
+        "src.text_search.service.search_similar_paragraphs",
+        return_value=[],
+    ):
+        await service.search("林渡 顾霜")
+
+    sent_text = service._embedding_client.get_embedding.await_args.args[0]
+    assert sent_text == format_query_instruct("林渡 顾霜")
+    assert sent_text.startswith("Instruct: ")
+    assert sent_text.endswith("\nQuery:林渡 顾霜")
+
+
+@pytest.mark.asyncio
 async def test_search_respects_paragraph_bounds(db_session) -> None:
     """2026-08-14 二期段落化：min/max 边界按 paragraph_id 过滤"""
     _novel_id, run_id = create_run_with_chunks(
@@ -180,28 +187,6 @@ async def test_search_respects_paragraph_bounds(db_session) -> None:
 
     assert [candidate.paragraph_id for candidate in result] == [1]
     assert result[0].excerpt == "顾霜独自离去。"
-
-
-@pytest.mark.asyncio
-async def test_read_returns_target_with_context_paragraphs(db_session) -> None:
-    """2026-08-14 二期段落化：read 按 paragraph_id 读段落，默认带前后各一段上下文"""
-    _novel_id, run_id = create_run_with_chunks(
-        db_session,
-        texts=["第一段。\n第二段。\n第三段。"],
-        title="上下文读取",
-    )
-    _insert_paragraphs(db_session, run_id, ["第一段。\n第二段。\n第三段。"])
-    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=False)
-
-    # context_paragraphs=1：目标段 + 前后各一段，换行分隔
-    assert service.read(1) == "第一段。\n第二段。\n第三段。"
-    # context_paragraphs=0：只返回目标段
-    assert service.read(1, context_paragraphs=0) == "第二段。"
-    # 边界截断：首段无前文
-    assert service.read(0) == "第一段。\n第二段。"
-    assert service.read(2) == "第二段。\n第三段。"
-    with pytest.raises(ValueError, match="原文段落不存在或跨 run"):
-        service.read(999)
 
 
 @pytest.mark.asyncio

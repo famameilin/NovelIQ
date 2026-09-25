@@ -25,6 +25,7 @@ from .repository import StatsRepository
 from .runs import (
     has_aggregated_data,
     has_diagnosis_data,
+    has_linguistic_data,
     has_topic_data,
     is_aggregate_complete,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "fetch_novel_title",
     # run 相关仓储
     "has_aggregated_data",
+    "has_linguistic_data",
     "has_topic_data",
     "has_diagnosis_data",
     "is_aggregate_complete",

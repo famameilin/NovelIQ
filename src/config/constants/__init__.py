@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from src.config.constants.annotation import EMOTION_SCORE_MAPPING
+from src.config.constants.lexicons import LEXICON_DRAFT_KEYS, LEXICON_FILES
+from src.config.constants.metrics_contracts import METRIC_CONTRACTS
+from src.config.constants.progress import STAGE_PROGRESS_MILESTONES
 from src.config.constants.text_normalization import (
     ALLOWED_PREV_CJK_CHARS,
     LIKELY_NAME_PREFIX_CHARS,
@@ -66,5 +68,8 @@ __all__ = [
     "TITLE_ALIAS_SUFFIXES",
     "ALLOWED_PREV_CJK_CHARS",
     "LIKELY_NAME_PREFIX_CHARS",
-    "EMOTION_SCORE_MAPPING",
+    "STAGE_PROGRESS_MILESTONES",
+    "LEXICON_FILES",
+    "LEXICON_DRAFT_KEYS",
+    "METRIC_CONTRACTS",
 ]

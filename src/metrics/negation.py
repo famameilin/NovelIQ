@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from src.config.constants import LEXICON_FILES
 from src.utils.text_utils import tokenize_words
 
 _SECTION_PATTERN = "====="
@@ -107,13 +108,13 @@ def load_negation_spec(filepath: str | Path | None = None) -> NegationSpec:
     """
     加载否定词分类
 
-    默认经注册表解析 data/lexicons/negation_words.txt（v3 唯一事实源）；
+    默认经注册表解析 LEXICON_FILES.negation_words 指向的词表文件（v3 唯一事实源）；
     显式 filepath 用于测试。
     """
     if filepath is None:
         from src.lexicons.registry import LexiconRegistry
 
-        filepath = LexiconRegistry().get_file_paths("negation_words.txt")[0]
+        filepath = LexiconRegistry().get_file_paths(LEXICON_FILES["negation_words"])[0]
     with open(filepath, encoding="utf-8") as f:
         return _parse_spec(f.readlines())
 

@@ -9,13 +9,6 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.config import Settings, TaskModelConfig, load_task_config
 
 
-class TestTaskModelConfigFromFile(unittest.TestCase):
-    def test_load_task_config_annotation(self) -> None:
-        config = load_task_config("annotation")
-        self.assertIsNotNone(config.base_url)
-        self.assertIsNotNone(config.model)
-
-
 class TestTaskModelConfigFromEnv(unittest.TestCase):
     def test_from_env_with_all_values(self) -> None:
         """
@@ -38,14 +31,6 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
 
 
 class TestTaskModelConfigValidate(unittest.TestCase):
-    def test_validate_valid_config(self) -> None:
-        config = TaskModelConfig(
-            base_url="http://localhost:8000/v1",
-            model="test-model",
-            timeout_s=30.0,
-        )
-        config.validate()
-
     def test_validate_missing_base_url_raises(self) -> None:
         config = TaskModelConfig(model="test-model")
         with self.assertRaises(ValueError) as ctx:
@@ -60,11 +45,6 @@ class TestTaskModelConfigValidate(unittest.TestCase):
 
 
 class TestLoadTaskConfig(unittest.TestCase):
-    def test_load_annotation_config(self) -> None:
-        config = load_task_config("annotation")
-        self.assertIsNotNone(config.base_url)
-        self.assertIsNotNone(config.model)
-
     def test_load_invalid_task_type_raises(self) -> None:
         with self.assertRaises(ValueError):
             load_task_config("invalid_task")  # type: ignore

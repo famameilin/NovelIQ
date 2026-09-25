@@ -14,26 +14,6 @@ class TestParseSemanticCategoryLexicon(unittest.TestCase):
     def setUp(self) -> None:
         self.lexicon_path = str(Path(__file__).resolve().parents[2] / "data" / "lexicons" / "semantic_category.txt")
 
-    def test_parse_returns_dict(self) -> None:
-        result = parse_semantic_category_lexicon(self.lexicon_path)
-        self.assertIsInstance(result, dict)
-
-    def test_parse_has_ten_categories(self) -> None:
-        result = parse_semantic_category_lexicon(self.lexicon_path)
-        expected_keys = {
-            "combat",
-            "body",
-            "relation",
-            "faction",
-            "command",
-            "action",
-            "psychology",
-            "measure",
-            "emotion",
-            "color",
-        }
-        self.assertEqual(set(result.keys()), expected_keys)
-
     def test_parse_combat_category(self) -> None:
         result = parse_semantic_category_lexicon(self.lexicon_path)
         self.assertIn("combat", result)

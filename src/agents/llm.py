@@ -77,6 +77,10 @@ def build_chat_model(
         api_key=SecretStr(cfg.api_key) if cfg.api_key else None,
         temperature=cfg.temperature,
         top_p=cfg.top_p,
+        # 2026-09-11 显式补全上限 128K：思考模式 provider 默认值随模式漂移，
+        # 截断实测 7.7K~61K 字符散布，思考撑满预算时载荷尾部被腰斩。
+        # langchain-openai 新版参数名为 max_completion_tokens（OpenAI 新参数，旧 max_tokens 已弃用）
+        max_completion_tokens=cfg.max_tokens,
         timeout=cfg.timeout_s if cfg.timeout_s is not None else 120,
         streaming=streaming,
         # 2026-08-12 断流重试由 stream.py 按 total_attempts 统一负责；

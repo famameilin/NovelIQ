@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 
 
 class GraphNode(BaseModel):
-    """2026-08-08 用于返回目标章节边界的实体节点"""
+    """2026-08-08 用于返回目标章节边界的实体节点
 
-    entity_id: int = Field(gt=0)
+    2026-09-19 entity_id 随图实体主键改 uuid（String(36)）。
+    """
+
+    entity_id: str
     name: str
     entity_type: Literal["character", "location", "item", "organization"]
     tags: list[str] = Field(default_factory=list)
@@ -26,8 +29,8 @@ class GraphEdge(BaseModel):
 
     relation_id: str
     state_chapter_id: int = Field(gt=0)
-    source_entity_id: int = Field(gt=0)
-    target_entity_id: int = Field(gt=0)
+    source_entity_id: str
+    target_entity_id: str
     source_name: str
     target_name: str
     relation_type: str
@@ -59,11 +62,11 @@ class GraphChange(BaseModel):
     fact_id: str
     effective_chapter_id: int = Field(ge=0)
     changes: list[dict[str, Any]] = Field(min_length=1)
-    entity_id: int | None = None
+    entity_id: str | None = None
     entity_name: str | None = None
     relation_id: str | None = None
-    from_entity_id: int | None = None
-    to_entity_id: int | None = None
+    from_entity_id: str | None = None
+    to_entity_id: str | None = None
     from_name: str | None = None
     to_name: str | None = None
     relation_type: str | None = None
@@ -87,3 +90,28 @@ class GraphChangesResponse(BaseModel):
 
     changes: list[GraphChange]
     page_info: GraphChangesPageInfo
+
+
+class GraphMetricsResponse(BaseModel):
+    """Agent 关系图结构指标（赛道 A1/A2）：PageRank/HITS/Louvain 查询时计算"""
+
+    run_id: str
+    unavailable_reason: str | None = None
+    algorithm: dict[str, Any] = Field(default_factory=dict)
+    pagerank: dict[str, float] = Field(default_factory=dict)
+    hits: dict[str, Any] = Field(default_factory=dict)
+    communities: dict[str, Any] = Field(default_factory=dict)
+
+
+class KeywordItem(BaseModel):
+    word: str
+    score: float
+
+
+class KeywordsResponse(BaseModel):
+    """TextRank 关键词（赛道 A3）：独立词共现图 + PageRank"""
+
+    run_id: str
+    keywords: list[KeywordItem] = Field(default_factory=list)
+    algorithm: dict[str, Any] = Field(default_factory=dict)
+    unavailable_reason: str | None = None

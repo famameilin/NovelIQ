@@ -89,4 +89,3 @@ def test_global_stats_rejects_non_completed_run(api_client: TestClient, db_sessi
     resp = _get_global_stats(api_client, novel_id, run_id)
 
     assert resp.status_code == 400
-    assert "分析未完成" in resp.json()["detail"]

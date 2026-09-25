@@ -66,13 +66,13 @@ def _persist_main_character_attributes(
         # 图未就绪或数据异常时静默跳过主角属性固化（后续图版本补写）
         return
     preferred = set(main_characters)
-    representative_ids: set[int] = set()
+    representative_ids: set[str] = set()
     for item in view.canonical_entities:
         if item.entity_id is None:
             continue
         aliases = set(item.aliases)
         if item.name in preferred or (aliases & preferred):
-            representative_ids.add(int(item.entity_id))
+            representative_ids.add(str(item.entity_id))
     if not representative_ids:
         return
     graph_entities = list(

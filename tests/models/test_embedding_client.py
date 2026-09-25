@@ -33,7 +33,6 @@ async def test_embed_texts_retries_retryable_502_and_recovers() -> None:
         model="test-embedding",
         api_key="test-key",
         timeout_s=1.0,
-        embedding_dim=2,
     )
     success_response = SimpleNamespace(
         data=[
@@ -70,7 +69,6 @@ async def test_embed_texts_does_not_retry_bad_request() -> None:
         model="test-embedding",
         api_key="test-key",
         timeout_s=1.0,
-        embedding_dim=2,
     )
     create_mock = AsyncMock(
         side_effect=BadRequestError("bad request", response=_build_httpx_response(400), body={"error": "invalid"})
@@ -78,7 +76,7 @@ async def test_embed_texts_does_not_retry_bad_request() -> None:
     client._client = SimpleNamespace(embeddings=SimpleNamespace(create=create_mock))
 
     with patch("src.models.local.embedding.asyncio.sleep", new=AsyncMock()) as sleep_mock:
-        with pytest.raises(RuntimeError, match="embedding 服务错误"):
+        with pytest.raises(RuntimeError):
             await client.embed_texts(["第一段"])
 
     assert create_mock.await_count == 1

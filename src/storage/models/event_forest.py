@@ -43,11 +43,17 @@ class EventNode(Base):
     anchor_paragraph_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
     char_start: Mapped[int] = mapped_column(Integer, nullable=False)
     char_end: Mapped[int] = mapped_column(Integer, nullable=False)
-    text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     causal_event_refs: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     tree_id: Mapped[str] = mapped_column(String(255), nullable=False)
     cause_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    # 2026-09-13 伏笔入森林：伏笔树根事件标记与生命周期属性（仅根事件非空）
+    # 2026-09-14 expected_payoff_family 列退役（写入面收敛为 isforeshadowing+confidence，
+    # confidence 落 payoff_likelihood 列，值域 high/medium/low）
+    is_foreshadowing_root: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    foreshadowing_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    strength: Mapped[str | None] = mapped_column(String(20), nullable=True)
     annotation_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"), nullable=False
     )
@@ -64,10 +70,15 @@ class EventNode(Base):
         ),
         CheckConstraint("char_end > char_start", name="ck_event_nodes_char_order"),
         CheckConstraint("cause_role IN ('root', 'main', 'secondary')", name="ck_event_nodes_cause_role"),
+        CheckConstraint(
+            "(is_foreshadowing_root = FALSE) OR (foreshadowing_status IN ('open', 'reinforced', 'likely_paid_off'))",
+            name="ck_event_nodes_foreshadow_status",
+        ),
         UniqueConstraint("run_id", "chapter_id", "payload_path", name="uq_event_nodes_chapter_payload_path"),
         Index("idx_event_nodes_run_chapter", "run_id", "chapter_id"),
         Index("idx_event_nodes_run_chapter_order", "run_id", "chapter_order"),
         Index("idx_event_nodes_run_tree", "run_id", "tree_id"),
+        Index("idx_event_nodes_run_foreshadow_root", "run_id", "is_foreshadowing_root"),
     )
 
 
@@ -111,7 +122,7 @@ class EventEdge(Base):
             ondelete="CASCADE",
             name="event_edges_target_chapter_run_fkey",
         ),
-        CheckConstraint("edge_type = 'causal'", name="ck_event_edges_type"),
+        CheckConstraint("edge_type IN ('causal', 'foreshadowing')", name="ck_event_edges_type"),
         UniqueConstraint("run_id", "source_event_id", "target_event_id", name="uq_event_edges_endpoints"),
         UniqueConstraint("run_id", "source_chapter_id", "payload_path", name="uq_event_edges_chapter_payload_path"),
         Index("idx_event_edges_run_source", "run_id", "source_event_id"),

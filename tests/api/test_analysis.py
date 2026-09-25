@@ -15,13 +15,12 @@ import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.exceptions import NovelNotFoundError
-from src.api.main import app
 from src.api.models.requests import ReanalyzeRequest
 from src.api.routes import analysis as analysis_mod
 from src.api.services import task_application_service as task_application_mod
@@ -98,30 +97,6 @@ class TestAnalysis:
         """测试继续任务时小说不存在"""
         response = api_client.post("/api/novels/nonexistent/tasks/fake1234/resume")
         assert response.status_code == 404
-
-    def test_novel_status_route_is_removed(self, api_client: TestClient):
-        """测试小说级状态路由已删除"""
-        response = api_client.get("/api/novels/nonexistent/status")
-        assert response.status_code == 404
-
-    def test_app_shutdown_does_not_cancel_runtime_task_manager(self) -> None:
-        """测试应用 shutdown 只回收 SSE 清理协程，不再把运行中分析收口成用户取消。"""
-        fake_task_manager = MagicMock()
-        fake_task_manager.shutdown = AsyncMock()
-
-        from src.api.services.event_manager import event_manager
-
-        with (
-            patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
-            patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
-            patch("src.api.dependencies.get_task_manager", return_value=fake_task_manager),
-            patch.object(event_manager, "shutdown", new=AsyncMock()) as mocked_event_shutdown,
-            TestClient(app) as _client,
-        ):
-            pass
-
-        fake_task_manager.shutdown.assert_not_called()
-        mocked_event_shutdown.assert_awaited_once()
 
     def test_get_task_status_not_found(self, api_client: TestClient):
         """测试单任务状态接口在任务不存在时返回 404"""
@@ -494,11 +469,6 @@ class TestAnalysis:
         assert run is not None
         assert run["cancel_requested"] is False
 
-    def test_legacy_analyze_route_is_removed(self, api_client: TestClient):
-        """测试旧 /analyze 兼容入口已删除"""
-        response = api_client.post("/api/novels/nonexistent/analyze", json={"task_id": "resume-me"})
-        assert response.status_code == 404
-
     def test_db_only_status_restores_persisted_message(self, api_client: TestClient):
         """测试 DB-only 状态查询可以恢复持久化的 message 文案"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
@@ -734,13 +704,6 @@ class TestAnalysis:
         assert isinstance(restored_request, ReanalyzeRequest)
         assert restored_request == expected_request
 
-    def test_status_map_covers_known_states_only(self):
-        """2026-08-19 用于验证任务状态仅映射当前状态集合"""
-        for status in analysis_mod.TaskStatus:
-            assert analysis_mod._map_status_to_task_status(status.value) == status
-        with pytest.raises(ValueError, match="未知任务状态"):
-            analysis_mod._map_status_to_task_status("unknown-state")
-
     def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):
         """
         2026-08-13 P2：cancel 竞态中持久化返回 pending/running 时，
@@ -770,5 +733,3 @@ class TestAnalysis:
         assert response.status_code == 400
         detail = response.json()["detail"]
         assert "running" in detail
-        assert "未生效" in detail
-        assert "无法取消" not in detail

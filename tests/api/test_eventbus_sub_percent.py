@@ -189,9 +189,9 @@ async def test_eventbus_calculates_percent_from_current_total():
         # 第一个事件应该有正确的 percent
         assert call1_kwargs["data"]["percent"] == 49.7
         # 第二个事件应该根据 current/total 自动计算 percent
-        # annotate 阶段范围是 10-80，current=21, total=37
-        # percent = 10 + (21/37) * 70 ≈ 49.73
-        expected_percent = 10 + (21 / 37) * 70
+        # annotate 阶段范围是 10-75，current=21, total=37
+        # percent = 10 + (21/37) * 65 ≈ 46.89
+        expected_percent = 10 + (21 / 37) * 65
         assert abs(call2_kwargs["data"]["percent"] - expected_percent) < 0.1
 
 
@@ -209,8 +209,8 @@ async def test_eventbus_calculates_percent_for_different_stages():
     # 预处理：0-10%
     assert bus._calculate_percent_for_stage("preprocess", 5, 10) == 5.0
 
-    # 标注：10-80%
-    assert bus._calculate_percent_for_stage("annotate", 5, 10) == 45.0
+    # 标注：10-75%（linguistic 75-80 插入后调整）
+    assert bus._calculate_percent_for_stage("annotate", 5, 10) == 42.5
 
     # 聚合：80-90%
     assert bus._calculate_percent_for_stage("aggregate", 5, 10) == 85.0
@@ -254,78 +254,6 @@ async def test_eventbus_start_event_without_current_does_not_write_none_progress
 
 
 @pytest.mark.asyncio
-async def test_eventbus_demotes_llm_output_and_thinking_logs_to_debug():
-    """
-    验证 EventBus 会把高频 LLM 流式事件记录到 DEBUG，而不是 INFO。
-
-    创建时间: 2026-04-20
-    任务: demote-llm-output-eventbus-log
-    说明: output/thinking 会携带原始模型分片，若落到 INFO 会污染运行日志；
-          start/progress/complete 仍应保留在 INFO，便于跟踪任务进度。
-    """
-    task_manager = MagicMock()
-    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
-
-    with (
-        patch("src.api.services.event_manager.event_manager") as mock_em,
-        patch("src.api.models.events.logger.debug") as mock_debug,
-        patch("src.api.models.events.logger.info") as mock_info,
-    ):
-        mock_em.send = AsyncMock()
-
-        await bus.emit(StreamEvent(action="output", stream_id="agent-1", content='{"raw_name":"室内"}'))
-        await bus.emit(StreamEvent(action="thinking", stream_id="agent-1", content="思考片段"))
-        await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="phase1", percent=10.0))
-
-    assert mock_debug.call_count == 2
-    assert mock_info.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_eventbus_demotes_high_frequency_embedding_progress_logs_to_debug():
-    """
-    验证 EventBus 会把高频 embedding batch progress 记录到 DEBUG，而不是 INFO。
-
-    创建时间: 2026-04-28
-    任务: demote-eventbus-embedding-progress-log
-    说明: `paragraph_embedding` 会在 preprocess 中按批次连续发 progress；
-          这类日志应降到 DEBUG，但普通 progress 仍应保留在 INFO。
-    """
-    task_manager = MagicMock()
-    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
-
-    with (
-        patch("src.api.services.event_manager.event_manager") as mock_em,
-        patch("src.api.models.events.logger.debug") as mock_debug,
-        patch("src.api.models.events.logger.info") as mock_info,
-    ):
-        mock_em.send = AsyncMock()
-
-        await bus.emit(
-            StreamEvent(
-                action="progress",
-                stage="preprocess",
-                sub_stage="paragraph_embedding",
-                percent=3.3,
-                sub_percent=33.0,
-            )
-        )
-        await bus.emit(
-            StreamEvent(
-                action="progress",
-                stage="preprocess",
-                sub_stage="paragraph_embedding",
-                percent=6.6,
-                sub_percent=66.0,
-            )
-        )
-        await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="agent", percent=10.0))
-
-    assert mock_debug.call_count == 2
-    assert mock_info.call_count == 1
-
-
-@pytest.mark.asyncio
 async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100() -> None:
     """
     验证阶段完成事件写回的 percent 使用当前阶段终点，而不是错误地统一写成 100。
@@ -348,7 +276,7 @@ async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100(
     annotate_update = task_manager.update_task.call_args_list[1].kwargs
 
     assert preprocess_update["progress"] == 10.0
-    assert annotate_update["progress"] == 80.0
+    assert annotate_update["progress"] == 75.0
 
 
 @pytest.mark.asyncio

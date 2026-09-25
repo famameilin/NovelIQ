@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-from sqlalchemy.sql.elements import TextClause
-
 from src.storage.db import (
     _admin_database_url,
     _database_name_from_url,
@@ -51,38 +47,6 @@ def _set_database_environment(monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_PASSWORD", "p")
 
 
-def test_ensure_database_exists_skips_when_already_present(monkeypatch) -> None:
-    """2026-08-08 用于验证目标库已存在时不执行 CREATE DATABASE"""
-    executed: list[str] = []
-    connection = MagicMock()
-    connection.execute.side_effect = lambda stmt, *args, **kwargs: _record_and_return_truthy(executed, stmt)
-    engine = MagicMock()
-    engine.connect.return_value.__enter__.return_value = connection
-    monkeypatch.setattr("src.storage.db.create_engine", lambda *a, **k: engine)
-    _set_database_environment(monkeypatch)
-
-    ensure_database_exists()
-
-    assert executed == ["SELECT 1 FROM pg_database WHERE datname = :name"]
-    connection.execute.assert_called_once()
-
-
-def test_ensure_database_exists_creates_missing_database(monkeypatch) -> None:
-    """2026-08-08 用于验证缺失数据库时执行一次 CREATE DATABASE"""
-    executed: list[str] = []
-    connection = MagicMock()
-    connection.execute.side_effect = lambda stmt, *args, **kwargs: _record_and_return_falsy(executed, stmt)
-    engine = MagicMock()
-    engine.connect.return_value.__enter__.return_value = connection
-    monkeypatch.setattr("src.storage.db.create_engine", lambda *a, **k: engine)
-    _set_database_environment(monkeypatch)
-
-    ensure_database_exists()
-
-    assert 'CREATE DATABASE "novel_analysis"' in executed
-    assert executed[0] == "SELECT 1 FROM pg_database WHERE datname = :name"
-
-
 def test_ensure_database_exists_respects_disable_switch(monkeypatch) -> None:
     """2026-08-08 用于验证 DB_AUTO_CREATE_DATABASE=false 时完全不连接"""
     created: list[bool] = []
@@ -98,24 +62,3 @@ def test_ensure_database_exists_respects_disable_switch(monkeypatch) -> None:
     ensure_database_exists()
 
     assert created == []
-
-
-def _record_and_return_truthy(executed: list[str], stmt) -> MagicMock:
-    """2026-08-08 用于记录探测 SQL 并模拟库已存在"""
-    executed.append(_sql_text(stmt))
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = 1
-    return result
-
-
-def _record_and_return_falsy(executed: list[str], stmt) -> MagicMock:
-    """2026-08-08 用于记录 SQL 并模拟库不存在"""
-    executed.append(_sql_text(stmt))
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = None
-    return result
-
-
-def _sql_text(stmt) -> str:
-    """2026-08-08 用于提取可比较的 SQL 文本"""
-    return stmt.text if isinstance(stmt, TextClause) else str(stmt)

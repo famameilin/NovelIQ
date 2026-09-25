@@ -38,6 +38,8 @@ class ParagraphMetricCounts:
     sensory_hit_count: int
     imagery_hit_count: int
     metaphor_sentence_count: int
+    # 2026-09-05 C 批：身体反应转喻命中（情绪信号独立计数，不进正负极性）
+    body_reaction_hit_count: int
     function_word_counts: dict[str, int]
     semantic_category_counts: dict[str, int]
 
@@ -92,6 +94,10 @@ def compute_paragraph_metric_counts(
     imagery = lexicons.get("imagery") or []
     sensory_hit_count = count_mixed_hits(text, tokens, sensory)
     imagery_hit_count = count_mixed_hits(text, tokens, imagery)
+    # 2026-09-05 C 批：身体反应转喻（皱眉/颤抖等，情绪的体态信号；独立计数
+    # 不进 positive/negative——体态词极性中立，只作情绪信号覆盖率口径）
+    body_reaction = lexicons.get("body_reaction") or []
+    body_reaction_hit_count = count_mixed_hits(text, tokens, body_reaction)
 
     metaphor_sentence_count = sum(1 for sentence in sentences if any(marker in sentence for marker in METAPHOR_MARKERS))
 
@@ -123,6 +129,7 @@ def compute_paragraph_metric_counts(
         sensory_hit_count=sensory_hit_count,
         imagery_hit_count=imagery_hit_count,
         metaphor_sentence_count=metaphor_sentence_count,
+        body_reaction_hit_count=body_reaction_hit_count,
         function_word_counts=function_word_counts,
         semantic_category_counts=semantic_category_counts,
     )

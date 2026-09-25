@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
+from src.agents.annotation.schema import coerce_emotion_score
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.character_reference_policy import decide_character_reference
 from src.storage.models import Chapter
@@ -25,7 +26,6 @@ from .types import (
     StyleData,
     TensionData,
     TextData,
-    map_emotion_score,
 )
 
 if TYPE_CHECKING:
@@ -115,7 +115,7 @@ def fetch_annotation_data(
         event_types=[row.event_type or "铺垫" for row in rows],
         cliffhangers=[row.cliffhanger or 0 for row in rows],
         pivot_moments=[row.pivot_moment or 0 for row in rows],
-        emotional_valences=[row.emotional_valence or "neutral" for row in rows],
+        emotional_valences=[coerce_emotion_score(row.emotional_valence) for row in rows],
     )
 
 
@@ -189,8 +189,7 @@ def fetch_character_data(
         )
         if canonical_name is None:
             continue
-        emotion_score_raw = getattr(row, "emotion_score", None)
-        emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
+        emotion_map[canonical_name] = coerce_emotion_score(getattr(row, "emotion_score", None))
 
     # 3. 构建角色列表（使用共享 canonical entity 作为完整角色种子）
     characters = []
@@ -210,7 +209,7 @@ def fetch_character_data(
             continue
         if canonical_name not in char_emotion_map:
             char_emotion_map[canonical_name] = []
-        score = float(map_emotion_score(getattr(row, "emotion_score", None)))
+        score = float(coerce_emotion_score(getattr(row, "emotion_score", None)))
         char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 

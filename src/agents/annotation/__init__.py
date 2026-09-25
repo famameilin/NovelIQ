@@ -16,7 +16,11 @@ from .schema import (
     BoundChapterAnnotation,
     CompletionResult,
 )
-from .tools import AnnotationQueryService, AnnotationToolLedger, build_annotation_tools
+from .tools import (
+    AnnotationQueryService,
+    AnnotationToolLedger,
+    build_annotation_tools,
+)
 
 __all__ = [
     "AgentRunResult",

@@ -1,28 +1,31 @@
-/** 2026-08-20 事件森林一树一节点版：不兼容旧 composite/atomic 接口 */
+/**
+ * 2026-08-20，作用：展示事件森林时间轴页面
+ * 简要说明：一棵事件树对应一个可筛选节点，并在同屏详情中展示角色、因果和伏笔联系
+ */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, GitBranch, RefreshCw, Sparkles } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelStore } from "@/store/novelStore";
-import { MetricCard } from "@/components/common/MetricCard";
+import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
 import {
   TimelineLegend,
   TimelineTrack,
-  TimelineNodeDetail,
+  TimelineEventInspector,
   TimelineControls,
 } from "@/components/timeline";
 import type { EventTimelineResponse, TimelineEventNode, TimelinePhase } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 
-export function buildTimelinePageUrl(
+function buildTimelinePageUrl(
   novelId: string,
   taskId: string,
   options: {
@@ -64,6 +67,7 @@ export function TimelinePage() {
   }, [urlMaxLevel]);
 
   const [activePhase, setActivePhase] = useState<string | undefined>();
+  const [activePanel, setActivePanel] = useState<"timeline" | "details">("timeline");
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
 
@@ -159,12 +163,18 @@ export function TimelinePage() {
   const selectionHint = useMemo(() => {
     if (!urlTreeId && !urlEventId) return null;
     if (selectedDetailNode) return null;
-    if (urlTreeId) return `未定位到 tree_id=${urlTreeId} 对应的事件树。`;
-    if (urlEventId) return `未定位到 event_id=${urlEventId} 对应的事件。`;
+    if (urlTreeId || urlEventId) return "未找到链接指向的事件，已保留当前时间轴内容";
     return null;
   }, [selectedDetailNode, urlEventId, urlTreeId]);
 
   const selectedTrackNodeId = selectedDetailNode?.tree_id;
+
+  useEffect(() => {
+    if (selectedDetailNode && (urlTreeId || urlEventId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- URL 深链解析完成后需要同步打开事件详情页签
+      setActivePanel("details");
+    }
+  }, [selectedDetailNode, urlEventId, urlTreeId]);
 
   const eventCount = nodes.length;
   const causalCount = causalEdges.length;
@@ -269,182 +279,140 @@ export function TimelinePage() {
 
   return (
     <AnalysisWorkspace title="叙事时间轴">
-      <AnalysisWorkspace.Tabs defaultValue="timeline">
-        <AnalysisWorkspace.Tab value="timeline" label="时间轴">
-          <div className="flex h-full min-h-0 flex-col">
-            {selectionHint ? (
-              <div className="mb-3 flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
-                <p className="text-sm text-text-muted">{selectionHint}</p>
-              </div>
-            ) : null}
+      <div className="flex h-full min-h-0 flex-col">
+        {isLoading ? (
+          <div className="h-full w-full animate-pulse rounded-lg border border-border/60 bg-surface-hover" />
+        ) : isAnalysisNotComplete ? (
+          <AnalysisNotCompleteState
+            title={analysisFailed ? "时间轴分析任务已失败" : "时间轴结果尚未完成"}
+            description={
+              analysisFailed
+                ? "该分析任务已失败，时间轴数据无法读取，请重新发起分析后再查看。"
+                : "当前任务仍在分析中，时间轴数据暂时不可读，请等待任务进入完成态后再查看。"
+            }
+            failed={analysisFailed}
+          />
+        ) : isError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
+            <span>时间轴加载失败</span>
+            <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              重试
+            </Button>
+          </div>
+        ) : nodes.length === 0 && totalChapters === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
+            <span>该任务没有事件时间轴数据，请重新分析</span>
+            <Button variant="outline" size="sm" onClick={() => navigate(`/novels/${novelId}`)} className="gap-2">
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              重新分析
+            </Button>
+          </div>
+        ) : nodes.length === 0 || displayNodes.length === 0 ? (
+          <div className="flex h-full items-center justify-center rounded-lg border border-border/60 bg-surface/70 text-sm text-text-muted">
+            暂无时间轴节点
+          </div>
+        ) : (
+          <AnalysisWorkspace.Tabs value={activePanel} onValueChange={(value) => setActivePanel(value as "timeline" | "details")}>
+            <AnalysisWorkspace.Tab value="timeline" label="事件轨道">
+              <div className="flex h-full min-h-0 flex-col gap-3">
+                <AnalysisMetricStrip
+                  items={[
+                    { label: "事件总数", value: eventCount, description: "全书事件节点" },
+                    { label: "当前可见", value: visibleCount, description: "符合重要性筛选" },
+                    { label: "因果联系", value: causalCount, description: "包含有效与已失效联系" },
+                    { label: "叙事阶段", value: phases.length, description: "按故事进程划分" },
+                  ]}
+                />
 
-            <div className="grid gap-3 md:grid-cols-3">
-              <MetricCard
-                label="Events"
-                value={eventCount}
-                format="raw"
-                accent="primary"
-                icon={<Sparkles className="h-4 w-4" />}
-                description="事件森林中树的数量（一树一节点）。"
-                className="!p-4"
-                showOrb
-              />
-              <MetricCard
-                label="Visible"
-                value={visibleCount}
-                format="raw"
-                accent="chart-2"
-                icon={<GitBranch className="h-4 w-4" />}
-                description="当前 level 筛选下可见的事件节点数量。"
-                className="!p-4"
-                showOrb
-              />
-              <MetricCard
-                label="Causal"
-                value={causalCount}
-                format="raw"
-                accent="primary"
-                icon={<GitBranch className="h-4 w-4" />}
-                description="全量因果边数量（含 inactive），实线活跃虚线失效。"
-                className="!p-4"
-                showOrb
-              />
-            </div>
-
-            {!isLoading && !isError && phases.length === 0 ? (
-              <div className="mt-3 rounded-2xl border border-dashed border-border/60 bg-surface/50 px-4 py-3 text-sm text-text-muted">
-                暂无阶段数据
-              </div>
-            ) : null}
-
-            <div className="mt-2 flex-1 min-h-0">
-              {isLoading ? (
-                <div className="h-[360px] w-full animate-pulse rounded-[28px] border border-border/60 bg-surface-hover" />
-              ) : isAnalysisNotComplete ? (
-                <div className="h-[360px] rounded-[28px] border border-border/60 bg-surface/70">
-                  <AnalysisNotCompleteState
-                    title={analysisFailed ? "时间轴分析任务已失败" : "时间轴结果尚未完成"}
-                    description={
-                      analysisFailed
-                        ? "该分析任务已失败，时间轴数据无法读取，请重新发起分析后再查看。"
-                        : "当前任务仍在分析中，时间轴数据暂时不可读，请等待任务进入完成态后再查看。"
-                    }
-                    failed={analysisFailed}
-                  />
-                </div>
-              ) : isError ? (
-                <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
-                  <span>加载失败</span>
-                  <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
-                    <RefreshCw className="h-4 w-4" />
-                    重试
-                  </Button>
-                </div>
-              ) : nodes.length === 0 && totalChapters === 0 ? (
-                <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
-                  <span>该任务为历史版本，无事件森林数据，请重新分析</span>
-                  <Button variant="outline" size="sm" onClick={() => novelId && navigate(`/novels/${novelId}`)} className="gap-2">
-                    <RefreshCw className="h-4 w-4" />
-                    重新分析
-                  </Button>
-                </div>
-              ) : nodes.length === 0 ? (
-                <div className="flex h-[360px] items-center justify-center rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
-                  暂无时间轴节点
-                </div>
-              ) : displayNodes.length === 0 ? (
-                <div className="flex h-[360px] items-center justify-center rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
-                  暂无时间轴节点
-                </div>
-              ) : (
-                <div className="flex h-full min-h-0 flex-col gap-3 pb-2">
-                  <div className="rounded-[24px] border border-border/60 bg-surface/75 px-3 py-3.5">
-                    <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} />
-
-                    <div className="mt-2 flex flex-col gap-3">
-                      <div className="flex min-w-0 flex-1 flex-col gap-2">
-                        <div className="flex flex-wrap gap-2">
-                          {phases.length === 0 ? (
-                            <p className="text-sm text-text-muted">暂无阶段数据</p>
-                          ) : (
-                            phases.map((phase) => {
-                              const isActive = activePhase === phase.name;
-                              return (
-                                <button
-                                  key={phase.name}
-                                  type="button"
-                                  onClick={() => handlePhaseClick(phase)}
-                                  className={[
-                                    "rounded-full border px-3 py-2 text-left transition-all",
-                                    isActive
-                                      ? "border-primary/35 bg-primary/10 text-text shadow-sm"
-                                      : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
-                                  ].join(" ")}
-                                >
-                                  <span className="text-sm font-medium">{phase.name}</span>
-                                  <span className="ml-2 text-xs">
-                                    {phase.start}-{phase.end}
-                                  </span>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-
-                      <TimelineLegend className="justify-start" />
-                    </div>
+                {selectionHint ? (
+                  <div className="flex shrink-0 items-start gap-3 rounded-lg border border-chart-negative/20 bg-chart-negative/5 p-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" aria-hidden="true" />
+                    <p className="text-sm text-text-muted">{selectionHint}</p>
                   </div>
+                ) : null}
 
-                  <TimelineTrack
-                    nodes={displayNodes}
-                    derivedOrder={timelineData?.derived_event_order ?? []}
-                    phases={phases}
-                    activePhase={activePhase}
-                    selectedNodeId={selectedTrackNodeId}
-                    onNodeClick={handleNodeClick}
-                    tensionCurve={tensionCurve ?? null}
-                    totalChapters={totalChapters}
-                    className="flex-1 min-h-0"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </AnalysisWorkspace.Tab>
-        <AnalysisWorkspace.Tab value="detail" label="节点详情">
-          <div className="h-full overflow-hidden">
-            {selectedDetailNode ? (
-              <TimelineNodeDetail
-                node={selectedDetailNode}
-                nodes={nodes}
-                novelId={novelId}
-                taskId={taskScopeId}
-                causalEdges={causalEdges}
-                foreshadowingEdges={foreshadowingEdges}
-                derivedOrder={derivedOrder}
-                onClose={() => {
-                  navigate(
-                    buildTimelinePageUrl(novelId, taskScopeId, {
-                      maxLevel,
-                      treeId: null,
-                      eventId: null,
-                    }),
-                    { replace: true }
-                  );
-                }}
-                onSelectChapter={handleSelectChapter}
-                onSelectTree={handleSelectTree}
-              />
-            ) : (
-              <div className="flex h-full min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-surface/50 text-sm text-text-muted">
-                在时间轴中选择一个节点后查看详情。
+                <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/60 bg-surface/75 px-3 py-3.5" aria-label="时间轴筛选">
+                  <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} />
+                  <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-1">
+                {phases.length === 0 ? (
+                  <p className="text-sm text-text-muted">暂无阶段数据</p>
+                ) : (
+                  phases.map((phase) => {
+                    const isActive = activePhase === phase.name;
+                    return (
+                      <button
+                        key={phase.name}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => handlePhaseClick(phase)}
+                        className={[
+                          "shrink-0 rounded-full border px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                          isActive
+                            ? "border-primary/35 bg-primary/10 text-text shadow-sm"
+                            : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
+                        ].join(" ")}
+                      >
+                        <span className="text-sm font-medium">{phase.name}</span>
+                        <span className="ml-2 text-xs">第 {phase.start} 至 {phase.end} 章</span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
-            )}
-          </div>
-        </AnalysisWorkspace.Tab>
-      </AnalysisWorkspace.Tabs>
+                  <TimelineLegend className="mt-3 shrink-0 justify-start" />
+                  <section className="mt-3 min-h-0 flex-1" aria-label="事件轨道">
+                    <TimelineTrack
+                      nodes={displayNodes}
+                      derivedOrder={timelineData?.derived_event_order ?? []}
+                      phases={phases}
+                      activePhase={activePhase}
+                      selectedNodeId={selectedTrackNodeId}
+                      onNodeClick={handleNodeClick}
+                      tensionCurve={tensionCurve ?? null}
+                      totalChapters={totalChapters}
+                      className="h-full min-h-0"
+                    />
+                  </section>
+                </section>
+              </div>
+            </AnalysisWorkspace.Tab>
+
+            <AnalysisWorkspace.Tab value="details" label="事件详情">
+              <div className="h-full min-h-0 overflow-y-auto pr-1">
+                {selectedDetailNode ? (
+                  <TimelineEventInspector
+                    node={selectedDetailNode}
+                    nodes={nodes}
+                    novelId={novelId}
+                    taskId={taskScopeId}
+                    causalEdges={causalEdges}
+                    foreshadowingEdges={foreshadowingEdges}
+                    onClose={() => {
+                      setActivePanel("timeline");
+                      navigate(
+                        buildTimelinePageUrl(novelId, taskScopeId, {
+                          maxLevel,
+                          treeId: null,
+                          eventId: null,
+                        }),
+                        { replace: true },
+                      );
+                    }}
+                    onSelectChapter={handleSelectChapter}
+                    onSelectTree={handleSelectTree}
+                    className="min-h-full"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm leading-6 text-text-muted">
+                    选择时间轴中的事件后，这里会显示事件摘要、涉及角色与因果联系
+                  </div>
+                )}
+              </div>
+            </AnalysisWorkspace.Tab>
+          </AnalysisWorkspace.Tabs>
+        )}
+      </div>
     </AnalysisWorkspace>
   );
 }

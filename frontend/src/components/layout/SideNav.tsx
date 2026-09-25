@@ -7,11 +7,13 @@ import {
   MessageSquare,
   Clock,
   FileText,
+  Languages,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
 import { useNovelStore } from "@/store/novelStore";
 
 const navItems = [
@@ -20,6 +22,7 @@ const navItems = [
   { to: "/characters", icon: Users, label: "角色分析" },
   { to: "/graph", icon: Network, label: "人物关系图谱" },
   { to: "/topics", icon: MessageSquare, label: "主题分布" },
+  { to: "/linguistic", icon: Languages, label: "语言特征" },
   { to: "/timeline", icon: Clock, label: "叙事时间轴" },
   { to: "/diagnosis", icon: FileText, label: "诊断报告" },
 ];
@@ -42,9 +45,12 @@ export function SideNav() {
       )}
     >
       <div className="flex h-10 items-center justify-end px-3">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => setCollapsed(!collapsed)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-surface-hover hover:text-text transition-colors"
+          className="h-8 w-8 text-text-muted"
           aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
         >
           {collapsed ? (
@@ -52,7 +58,7 @@ export function SideNav() {
           ) : (
             <PanelLeftClose className="h-4 w-4" />
           )}
-        </button>
+        </Button>
       </div>
 
       <nav className="flex-1 space-y-1 px-2">

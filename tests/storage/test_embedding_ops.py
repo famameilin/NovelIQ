@@ -1,112 +1,20 @@
-import re
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from pgvector.sqlalchemy import Vector
+from sqlalchemy import text
 
-from src.storage.models import ParagraphEmbedding
+from src.chunking.chunker import Chunk, split_chunk_paragraphs
+from src.preprocess.tokenize import tokenize
 from src.storage.repositories.paragraph.embedding_ops import (
     ParagraphEmbeddingRow,
     get_incomplete_paragraph_embedding_paragraph_ids,
     insert_paragraph_embeddings,
     search_similar_paragraphs,
 )
-
-
-def test_paragraph_embedding_uses_pgvector_column_type() -> None:
-    """
-    创建时间: 2026-04-24
-    任务: level3-paragraph-rerank
-    说明: paragraph embedding 表应使用 pgvector 列，保持与 chunk embedding 检索语义一致。
-    """
-    assert isinstance(ParagraphEmbedding.__table__.c.embedding_vector.type, Vector)
-
-
-def test_paragraph_embedding_model_has_paragraph_identity_columns() -> None:
-    """
-    2026-08-14 二期段落化（§5.2）：旧列（chunk_id/paragraph_index/paragraph_text/
-    local/global 坐标）全部移除，段落身份收敛为 paragraphs 表的 paragraph_id。
-    """
-    columns = set(ParagraphEmbedding.__table__.c.keys())
-    assert {"run_id", "paragraph_id", "embedding_vector"} <= columns
-    assert {"embedding_model_key", "embedding_dimension", "source_content_hash"} <= columns
-    for legacy_column in (
-        "chunk_id",
-        "paragraph_index",
-        "paragraph_text",
-        "local_start_char",
-        "local_end_char",
-        "global_start_char",
-        "global_end_char",
-    ):
-        assert legacy_column not in columns
-
-
-def test_insert_paragraph_embeddings_writes_paragraph_id_and_metadata() -> None:
-    """
-    2026-08-14 二期段落化：写入行携带 paragraph_id 与向量，embedding_model_key/
-    embedding_dimension 从 settings 取，source_content_hash 对照 paragraphs 表查询。
-    """
-    session = MagicMock()
-    hash_rows = [SimpleNamespace(paragraph_id=7, content_hash="hash-7")]
-    session.execute.side_effect = [
-        MagicMock(),  # delete 同 run 旧行
-        MagicMock(all=MagicMock(return_value=hash_rows)),  # 查 paragraphs content_hash
-        MagicMock(),  # insert
-    ]
-
-    inserted = insert_paragraph_embeddings(
-        session,
-        run_id="run-1",
-        rows=[
-            ParagraphEmbeddingRow(
-                paragraph_id=7,
-                embedding_vector=[0.3, 0.4],
-            )
-        ],
-    )
-
-    assert inserted == 1
-    # 先删后插：第一条 execute 是 delete 同 run 行
-    delete_statement = session.execute.call_args_list[0].args[0]
-    assert "DELETE FROM paragraph_embeddings" in str(delete_statement.compile())
-    _, rows = session.execute.call_args_list[2].args
-    assert rows[0]["paragraph_id"] == 7
-    assert rows[0]["embedding_vector"] == [0.3, 0.4]
-    assert rows[0]["source_content_hash"] == "hash-7"
-    assert rows[0]["embedding_dimension"] is not None
-    assert rows[0]["created_at"]
-
-
-def test_insert_paragraph_embeddings_missing_paragraph_hash_is_none() -> None:
-    """2026-08-14 用于验证 paragraphs 表缺行时 source_content_hash 不伪造（None）"""
-    session = MagicMock()
-    session.execute.side_effect = [
-        MagicMock(),
-        MagicMock(all=MagicMock(return_value=[])),
-        MagicMock(),
-    ]
-
-    inserted = insert_paragraph_embeddings(
-        session,
-        run_id="run-1",
-        rows=[ParagraphEmbeddingRow(paragraph_id=99, embedding_vector=[0.1])],
-    )
-
-    assert inserted == 1
-    _, rows = session.execute.call_args_list[2].args
-    assert rows[0]["source_content_hash"] is None
-
-
-def test_insert_paragraph_embeddings_empty_rows_returns_zero() -> None:
-    """2026-08-14 用于验证空行列表不写库（仍先删旧行）"""
-    session = MagicMock()
-    session.execute.side_effect = [MagicMock()]
-
-    inserted = insert_paragraph_embeddings(session, run_id="run-1", rows=[])
-
-    assert inserted == 0
-    assert session.execute.call_count == 1
+from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage.vector_schema import ensure_paragraph_embeddings_schema, hnsw_index_uses_halfvec
+from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
 def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
@@ -158,28 +66,81 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
     assert results[0].similarity == 0.93
 
 
-def test_search_similar_paragraphs_pushes_paragraph_bounds_and_limit() -> None:
-    """2026-08-14 用于验证段落边界、排除集合与 top_k 仍进入 SQL"""
+def test_search_similar_paragraphs_compiles_halfvec_cast_beyond_hnsw_dim_limit() -> None:
+    """
+    2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维：>2000 维检索的
+    距离表达式必须与建索引同型 cast 成 halfvec，规划器才能命中 halfvec 表达式索引。
+    """
     session = MagicMock()
     session.execute.return_value.all.return_value = []
 
     search_similar_paragraphs(
         session,
         run_id="run-1",
-        query_embedding=[0.1] * 1024,
-        top_k=3,
-        similarity_threshold=0.5,
-        exclude_paragraph_ids=[5],
-        min_paragraph_id=1,
-        max_paragraph_id=10,
+        query_embedding=[0.1] * 2560,
+        top_k=5,
+        similarity_threshold=0.7,
     )
 
-    stmt = session.execute.call_args.args[0]
-    compiled_sql = str(stmt.compile())
-    assert "LIMIT :param_3" in compiled_sql
-    assert "NOT IN" in compiled_sql
-    assert re.search(r"paragraph_id >= :paragraph_id_\d+", compiled_sql) is not None
-    assert re.search(r"paragraph_id <= :paragraph_id_\d+", compiled_sql) is not None
+    compiled_sql = str(session.execute.call_args.args[0].compile())
+    assert "AS HALFVEC(2560)" in compiled_sql
+    order_by_pos = compiled_sql.index("ORDER BY")
+    assert " <=> " in compiled_sql[order_by_pos:]
+    # 阈值下推同样走 cast 后的裸距离
+    assert "AS HALFVEC(2560)) <=> :param_2) <= :param_3" in compiled_sql
+
+
+def test_hnsw_index_uses_halfvec_boundary() -> None:
+    """2026-09-25 形态判定边界：2000 维（含）以内裸 vector 索引，2001 维起 halfvec"""
+    assert hnsw_index_uses_halfvec(1024) is False
+    assert hnsw_index_uses_halfvec(2000) is False
+    assert hnsw_index_uses_halfvec(2001) is True
+    assert hnsw_index_uses_halfvec(2560) is True
+
+
+def test_search_and_insert_roundtrip_beyond_hnsw_dim_limit(db_session) -> None:
+    """
+    2026-09-25 运行级验证（Qwen3-Embedding-4B 2560 维 preprocess 实测踩坑）：
+    2001 维 ensure 建表（halfvec 表达式索引）+ 写入 + 裸余弦检索全链路可用。
+    paragraph_embeddings 不在 conftest 重建清单，测试前后必须 DROP 防维度固化毒化。
+    """
+    db_session.execute(text("DROP TABLE IF EXISTS paragraph_embeddings CASCADE"))
+    db_session.commit()
+    ensure_paragraph_embeddings_schema(db_session, 2001)
+    db_session.commit()
+    try:
+        assert hnsw_index_uses_halfvec(2001) is True
+        _novel_id, run_id = create_run_with_chunks(
+            db_session,
+            texts=["灰衣人站在门外。"],
+            title="halfvec检索",
+        )
+        chunks = [Chunk(index=0, text="灰衣人站在门外。", start=0, end=8, chapter_id=1)]
+        spans = split_chunk_paragraphs(chunks)
+        spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]
+        ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
+        db_session.commit()
+
+        insert_paragraph_embeddings(
+            db_session,
+            run_id,
+            [ParagraphEmbeddingRow(paragraph_id=0, embedding_vector=[0.1] * 2001)],
+            embedding_dimension=2001,
+        )
+        db_session.commit()
+
+        results = search_similar_paragraphs(
+            db_session,
+            run_id=run_id,
+            query_embedding=[0.1] * 2001,
+            top_k=5,
+            similarity_threshold=0.7,
+        )
+        assert [row.paragraph_id for row in results] == [0]
+        assert results[0].similarity > 0.99
+    finally:
+        db_session.execute(text("DROP TABLE IF EXISTS paragraph_embeddings CASCADE"))
+        db_session.commit()
 
 
 def test_get_incomplete_paragraph_embedding_paragraph_ids_combines_missing_and_null_vector() -> None:

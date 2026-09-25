@@ -122,14 +122,14 @@ vi.mock("@/components/timeline", () => ({
       ))}
     </div>
   ),
-  TimelineNodeDetail: ({
+  TimelineEventInspector: ({
     node,
     onClose,
   }: {
     node: TimelineEventNode | null;
     onClose?: () => void;
   }) => (
-    <div data-testid="timeline-node-detail">
+    <div data-testid="timeline-event-inspector">
       <span>{node ? `selected-${node.tree_id}` : "selected-none"}</span>
       <span>{node?.participants?.[0] ? `participant-${node.participants[0].name}` : "participant-none"}</span>
       <button type="button" onClick={onClose}>
@@ -288,7 +288,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    expect(await screen.findByText("该任务为历史版本，无事件森林数据，请重新分析")).toBeInTheDocument();
+    expect(await screen.findByText("该任务没有事件时间轴数据，请重新分析")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /重新分析/ })).toBeInTheDocument();
   });
 
@@ -298,7 +298,7 @@ describe("TimelinePage deep links (event forest)", () => {
     renderPage();
 
     expect(await screen.findByText("暂无时间轴节点")).toBeInTheDocument();
-    expect(screen.queryByText("该任务为历史版本，无事件森林数据，请重新分析")).not.toBeInTheDocument();
+    expect(screen.queryByText("该任务没有事件时间轴数据，请重新分析")).not.toBeInTheDocument();
   });
 
   it("filters nodes by maxLevel", async () => {
@@ -340,7 +340,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    await screen.findByText(`selected-${first!.tree_id}`);
+    await screen.findByTestId("timeline-track");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
     expect(navigateMock).toHaveBeenLastCalledWith(
       expect.stringContaining(`tree_id=${encodeURIComponent(first!.tree_id)}`),
@@ -360,6 +360,7 @@ describe("TimelinePage deep links (event forest)", () => {
       expect.not.stringContaining("tree_id="),
       expect.anything()
     );
+    expect(screen.getByRole("tab", { name: "事件轨道" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("shows error state and supports retry", async () => {
@@ -367,7 +368,7 @@ describe("TimelinePage deep links (event forest)", () => {
 
     renderPage();
 
-    expect(await screen.findByText("加载失败")).toBeInTheDocument();
+    expect(await screen.findByText("时间轴加载失败")).toBeInTheDocument();
     const retryButtons = await screen.findAllByRole("button", { name: /重试/ });
     retryButtons[0]?.click();
 
@@ -397,5 +398,15 @@ describe("TimelinePage deep links (event forest)", () => {
       expect(getTimelineMock).toHaveBeenCalledTimes(1);
     });
     expect(await screen.findByText(`selected-${second}`)).toBeInTheDocument();
+  });
+
+  it("does not expose legacy English metrics or technical field names in the main view", async () => {
+    renderPage();
+
+    const main = await screen.findByTestId("page-container");
+    const text = main.textContent ?? "";
+
+    expect(text).not.toMatch(/\bEvents\b|\bVisible\b|\bCausal\b/);
+    expect(text).not.toMatch(/\b(tree_id|event_id|level)\b/);
   });
 });

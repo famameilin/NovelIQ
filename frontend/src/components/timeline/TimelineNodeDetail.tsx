@@ -156,7 +156,7 @@ export function TimelineNodeDetail({
     const treeEventIds = new Set<string>([rootId, ...mainChain]);
     secondaryGroups.forEach((g) => g.branch.forEach((eid) => treeEventIds.add(eid)));
     return foreshadowingEdges.filter(
-      (f) => treeEventIds.has(f.setup_event_id) || (f.payoff_event_id && treeEventIds.has(f.payoff_event_id))
+      (f) => treeEventIds.has(f.root_event_id) || (f.payoff_event_id && treeEventIds.has(f.payoff_event_id))
     );
   }, [node, foreshadowingEdges]);
 
@@ -493,7 +493,7 @@ export function TimelineNodeDetail({
               <div className="mb-2 text-xs font-medium text-text-muted">关联伏笔</div>
               <div className="space-y-2">
                 {relatedForeshadowing.map((f) => (
-                  <div key={f.setup_id} className="rounded-lg bg-surface-hover p-3 text-xs">
+                  <div key={f.root_event_id} className="rounded-lg bg-surface-hover p-3 text-xs">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-[10px]">
                         {f.status}
@@ -505,8 +505,8 @@ export function TimelineNodeDetail({
                         {f.first_chapter_id} – {f.last_chapter_id} 章
                       </span>
                     </div>
-                    <p className="mt-1.5 leading-5 text-text-muted">{f.setup_summary}</p>
-                    <p className="mt-1 font-mono text-[11px] text-text-muted">setup {f.setup_event_id} → {f.payoff_event_id ?? "待回收"}</p>
+                    <p className="mt-1.5 leading-5 text-text-muted">{f.description}</p>
+                    <p className="mt-1 font-mono text-[11px] text-text-muted">根 {f.root_event_id} → {f.payoff_event_id ?? "待回收"}</p>
                   </div>
                 ))}
               </div>

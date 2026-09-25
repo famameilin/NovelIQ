@@ -1,49 +1,221 @@
 """
-章节标注逐 chunk 语义写入 LangGraph
+章节标注逐章 语义写入 LangGraph
 
 消息链采用 messages + add_messages 累积；每次模型请求携带完整历史消息。
-complete_chunk 与 finish_chapter 由程序自动执行：七个领域全部写入成功后
-图节点自动冻结 chunk 并完成章节，模型不需要调用完成工具。
+冻结与章节组装由程序自动执行：模型用唯一 finish 收尾后
+图节点自动冻结章 并完成章节，模型不需要调用完成工具。
+
+2026-09-13 实时写入：一个模型回合可以包含多个有类型的小调用（每条只写一个完整
+语义单元、写入即生效），写完全部内容后用 finish 收尾；收尾判定推迟到本回合
+全部调用处理完毕之后（逐条失败只回滚该调用、不阻塞收尾），因此一次回复整体仍计
+一个回合。
+
+2026-09-18 模型可见面收敛：写者面与 subagent 面都只绑定 [execute_code, finish]，
+其余工具（检索、案例、写入、构造器）一律进 execute_code 的程序面。
 """
 
 from __future__ import annotations
 
 import json
 import time
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, get_args
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from pydantic import ValidationError
 
-from .errors import AnnotationInvariantError
-from .tools import AnnotationToolLedger
+from .errors import AnnotationInvariantError, AnnotationStageRejection
+from .tools import (
+    _DOMAIN_ORDER,
+    _WRITE_TOOL_NAMES,
+    FINISH_TOOL_NAME,
+    AnnotationToolLedger,
+    translate_write_validation_error,
+)
 
 if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.stream import AgentStream
 
-# 2026-08-14 D1：无 continuity_open 阶段，chunk_open -> completed 两态
-AnnotationPhase = Literal["chunk_open", "completed"]
+# 2026-08-14 D1：无 continuity_open 阶段，chapter_open -> completed 两态
+AnnotationPhase = Literal["chapter_open", "completed"]
 
-_DOMAIN_NAMES = (
-    "metrics",
-    "entities",
-    "character_observations",
-    "dialogues",
-    "events",
-    "relations",
-)
-_DOMAIN_NAMES_SET = frozenset(_DOMAIN_NAMES)
+# 2026-09-05 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
+TURN_BUDGET_REMINDER_WINDOW = 3
+
+# 2026-09-11 章内并行：区分"未传 completion_hint"（用缺内容提醒）与显式传 None（无提醒）
+_HINT_SENTINEL = object()
+
+
+def _turn_budget_reminder(remaining: int, *, total: int | None = None, subagent_face: bool = False) -> str:
+    """2026-09-05 用于构造临近内部循环上限时模型可见的收尾提醒
+
+    2026-09-05 第3章死锁：模型空转 15 轮 40 次检索 0 写入后撞硬顶，
+    全程看不到轮次预算。此提醒为纯消息注入（不改工具开放与路由），
+    只对本次请求生效、不写入状态消息链，避免多轮提醒在历史中堆积。
+
+    2026-09-13 末轮点名收尾：run c80105cc 第 4 章实测——末轮文案只说
+    "提交全部已确认内容"，模型把写入排在前面、finish_chunk 留给"下一轮"，该轮
+    结束后撞硬顶、整章作废（第 15 轮思考里计划含 finish_chunk，实际只发出 3 个
+    写入调用）。末轮必须点名唯一的收尾动作，并说明收尾可与写入同批提交。
+    2026-09-18 收尾工具更名 finish；收尾工具与 execute_code 同为绑定面上的工具，
+    同一条回复里并列发出即可（收尾判定在本批全部调用处理完后执行）。
+    2026-09-18 两面的撞顶后果不同，按面分文案：写者面撞顶=整章作废（内容没提交），
+    subagent 面的写入即生效、撞顶只是会话收束（已写入的都算数），所以 subagent 面
+    不能沿用"本章作废"这句假话，并带上分母让模型自己算还剩几轮。
+    """
+    if subagent_face:
+        if remaining <= 1:
+            return (
+                "【轮次预算】本轮是本 subagent 内部循环的最后一轮：把该写的记录与 finish 放在"
+                "同一批提交（写入写进程序，finish 单独调用即可）；本轮结束仍未写完按会话自然收束"
+                "处理——已写入的记录都已生效，未写完的部分留作缺口，不要再发起新的检索。"
+            )
+        scope = f"{remaining}/{total} 轮" if total else f"{remaining} 轮"
+        return (
+            f"【轮次预算】剩余 {scope}（含本轮）将触发内部循环上限：请尽快提交已确认内容并调用 "
+            "finish 收尾（不要留到下一轮），不要再用新检索消耗轮次。"
+        )
+    if remaining <= 1:
+        return (
+            "【轮次预算】本轮是内部循环的最后一轮：写入与收尾放在同一批次提交，"
+            "并在本批次里调用 finish ——收尾判定在本批全部调用处理完后执行；"
+            "本轮结束仍未收尾则本章作废，不要再发起新的检索。"
+        )
+    return (
+        f"【轮次预算】剩余 {remaining} 轮（含本轮）将触发内部循环上限："
+        "请尽快提交已确认内容，把剩余轮次留给写入与 finish 收尾，"
+        "不要再用新检索消耗轮次。"
+    )
+
+
+# 2026-09-13 尚无内容领域对应的补齐工具
+_MISSING_CONTENT_TOOL_HINTS = {
+    "entities": "write_entity（登记本章出现的实体）",
+    "metrics": "write_metrics（摘要、叙事指标与段落情绪标签，必填）",
+    "events": "write_event（根/子事件与参与者，确实没有事件可跳过）",
+    "relations": "write_relation（本章确实没有关系可跳过）",
+    "dialogues": "write_dialogue（按候选表逐条判定，确实没有可跳过）",
+}
+
+
+def _missing_domains_reminder(missing: list[str]) -> str | None:
+    """2026-09-13 用于构造无工具回复重发前的"还没收尾"提醒
+
+    写入即生效，收尾由唯一 finish 表达：纯文本汇报既不是写入也不是收尾，
+    调用层把无工具回复视同调用故障重发，此提醒只注入重发请求（不写入状态消息链、
+    不改工具开放与路由），把"还缺什么内容、怎么收尾"直接交给模型。
+
+    2026-09-13 写者面全放开：五个写入工具从首轮起全部在工具面上，缺哪个域就报
+    哪个域的补齐工具，不再有"实体未写、其余领域工具随后解锁"的分支。
+    2026-09-19 双路径定案：本图服务 agent 路径（单块章，程序面）——模型可见面
+    是 [execute_code, finish]，本提醒随 finish 回执注入同一程序面会话。
+    """
+    ordered = [domain for domain in _DOMAIN_ORDER if domain in missing]
+    head = "【收尾提醒】本章还没收尾（纯文本汇报不算写入，也不是收尾）："
+    tail = "。确认写完后调用 finish 收尾，本章才冻结；确实为空的领域直接收尾即可。"
+    if not ordered:
+        return f"{head}请确认已写完并调用 finish 收尾{tail}"
+    detail = "、".join(f"{domain}（{_MISSING_CONTENT_TOOL_HINTS[domain]}）" for domain in ordered)
+    return f"{head}尚无内容的领域：{detail}{tail}"
+
+
+def _index_ranges(values: list[int]) -> str:
+    """2026-09-14 用于把候选编号列表压成区间文本（1,3,4,5,9 → "1,3-5,9"）"""
+    if not values:
+        return ""
+    parts: list[str] = []
+    start = prev = values[0]
+    for value in values[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = value
+    parts.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(parts)
+
+
+def _progress_block(ledger: AnnotationToolLedger, remaining_turns: int, max_iterations: int) -> str:
+    """2026-09-14 构造写者面每回合注入的【进度账本】（每回合注入最新进展）
+
+    块内只放**动态状态**（域账本现值+剩余回合）；"已判不重扫、判完即写"等处理规则
+    是静态行为合同，2026-09-14 上提 SYSTEM_PROMPT。与收尾提醒同款：只对当次
+    请求生效、不写入状态消息链；案例链不注入（09-11 "不注入案例"裁决），只覆盖五个
+    写入域。
+    """
+    lines = [
+        "【进度账本】本轮时刻的本章已写入状态，由系统注入。",
+        f"剩余回合 {remaining_turns}/{max_iterations}（含本轮）。",
+    ]
+    entities = ledger.entity_ledger()
+    if entities:
+        rendered = []
+        for row in entities:
+            # 大类排在 id 之前：它一经登记不可变更，写错只能被拒（重写实体靠这行回忆）
+            extras = [str(row.get("entity_type") or ""), f"id={row['id']}"]
+            if row.get("tags"):
+                extras.append("标签:" + "、".join(row["tags"]))
+            if row.get("aliases"):
+                extras.append("别名:" + "、".join(row["aliases"]))
+            rendered.append(f"{row['el']}={row['name']}(" + "；".join(item for item in extras if item) + ")")
+        lines.append(f"实体({len(entities)})：" + "；".join(rendered))
+    else:
+        lines.append("实体：未写入")
+    relations = ledger.relation_ledger()
+    if relations:
+        lines.append(f"关系({len(relations)})：" + "；".join(relations))
+    else:
+        lines.append("关系：未写入")
+    trees = ledger.event_ledger()
+    if trees:
+        parts = []
+        for tree_key, entry in trees.items():
+            flags = f"伏笔={str(bool(entry['foreshadowing'])).lower()}"
+            if entry.get("confidence"):
+                flags += f"·confidence={entry['confidence']}"
+            children = "，".join(f"{child} {child_type}" for child, child_type in entry["children"].items()) or "无子"
+            parts.append(f'{tree_key}="{entry["root"]}"({flags}；children: {children}；主链尾 {entry["trunk_tail"]})')
+        lines.append(f"事件树({len(trees)})：" + "；".join(parts))
+    else:
+        lines.append("事件树：未写入")
+    dialogue = ledger.dialogue_ledger()
+    pending = _index_ranges(dialogue["pending"]) or "无"
+    judged_line = f"对话：已判定 {dialogue['written']}/{dialogue['total']}；未判定编号：{pending}"
+    if dialogue["judged"]:
+        ordered = sorted(dialogue["judged"].items(), key=lambda kv: int(kv[0]))
+        verdicts = "，".join(f"{idx}={value}" for idx, value in ordered)
+        judged_line += f"；已判定值：{verdicts}"
+    lines.append(judged_line)
+    lines.append("指标：已写入" if ledger.metrics_payload is not None else "指标：未写入")
+    return "\n".join(lines)
 
 
 class AnnotationGraphState(TypedDict):
-    """2026-08-10 用于保存逐 chunk 工具循环的累积消息链"""
+    """2026-08-10 用于保存逐章 工具循环的累积消息链"""
 
     messages: Annotated[list[BaseMessage], add_messages]
     phase: AnnotationPhase
     iterations: int
     error: str | None
+    # 2026-09-16 块代理面：轮次上限按"会话自然收束"处理（局部标注是内存对象、
+    # 构造即校验，撞上限只是停止会话，不是失败）；写者/读者面不置位、行为不变
+    halted: NotRequired[bool]
+
+
+def _tool_batch_protocol_error(
+    calls: list[dict[str, Any]],
+    *,
+    allowed_tool_names: frozenset[str],
+) -> str | None:
+    """2026-08-30 用于校验模型回合只调用本轮开放的工具"""
+    if not calls:
+        return "每个模型回合必须调用工具"
+    unavailable = [str(call.get("name")) for call in calls if str(call.get("name")) not in allowed_tool_names]
+    if unavailable:
+        return f"本轮未开放工具: {unavailable}"
+    return None
 
 
 def _build_agent_node(
@@ -55,13 +227,43 @@ def _build_agent_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
+    completion_hint: Any = _HINT_SENTINEL,
+    require_tool_call: bool = True,
+    inject_progress: bool = False,
+    bind_tools: list[Any] | None = None,
+    subagent_face: bool = False,
+    stop_at_iteration_limit: bool = False,
 ):
-    """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点"""
+    """2026-08-10 用于构建同步系统阶段并限制循环次数的模型节点
+
+    2026-09-11 章内并行：completion_hint 显式传入（含 None）即按传入使用，缺省
+    保持收尾提醒；require_tool_call=False 供读者面使用——读者没有写入工具，
+    无工具回复是"上报完毕"的正常完成信号（§8.5），不得按调用故障重发。
+    2026-09-14 inject_progress=True 时每次请求尾部注入【进度账本】（2026-09-20 起写者面
+    与三条 subagent lane 都开）：
+    服务端不重放思考，模型看不到自己上轮的判定，当前态由系统逐回合直给。
+    2026-09-15 bind_tools：绑定面与执行面拆开——程序面只把 execute_code 交给模型
+    （广告面也同步只报它），分发字典仍是完整工具表。
+    2026-09-18 subagent_face=True：subagent 面撞轮次上限只是会话收束（写入即生效），
+    末轮提醒按此面单独措辞（不沿用写者面的"本章作废"）。
+    """
+
+    advertised = list(bind_tools) if bind_tools is not None else list(tools)
+
+    if completion_hint is _HINT_SENTINEL:
+
+        def completion_hint() -> str | None:
+            """2026-09-13 无工具回复重发前按账本当前尚无内容的领域生成一次性提醒"""
+            return _missing_domains_reminder(ledger.missing_content_domains())
 
     async def agent_node(state: AnnotationGraphState) -> dict[str, Any]:
         """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
         iterations = int(state.get("iterations") or 0)
         if iterations >= max_iterations:
+            if stop_at_iteration_limit:
+                # 2026-09-16 块代理面：撞轮次上限按会话自然收束处理（局部标注构造即
+                # 校验，已构造的内容就是产出），不按失败上报、不新增升级分支
+                return {"halted": True}
             return {"error": f"annotation LangGraph 内部循环达到上限 {max_iterations}"}
         ledger.set_phase(state["phase"])
         if stream is not None:
@@ -69,41 +271,65 @@ def _build_agent_node(
         from src.agents.stream import run_model_call
 
         request_messages = list(state["messages"])
-        context_summary = ledger.context_summary()
-        turn_started_ns = time.perf_counter_ns()
+        remaining_turns = max_iterations - iterations
+        # 2026-09-20 注入顺序：先【轮次预算】提醒、【进度账本】恒为本请求的最后一条。
+        # 账本每轮现算现挂、从不写进状态消息链，所以"每轮开始前移除上一轮"是构造性的：
+        # 上一轮那份随请求结束消失，本轮请求里只有本轮的新块（run 54a72932 实测 523 个
+        # 请求零重复）。放末位是因为模型生成前最后读到的必须先是本章当前状态。
+        if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
+            request_messages.append(
+                HumanMessage(
+                    content=_turn_budget_reminder(
+                        remaining_turns,
+                        total=max_iterations,
+                        subagent_face=subagent_face,
+                    )
+                )
+            )
+        if inject_progress:
+            request_messages.append(HumanMessage(content=_progress_block(ledger, remaining_turns, max_iterations)))
 
-        def on_turn_complete(message: AIMessage, timing: Any) -> None:
-            """2026-08-10 用于在模型流结束后写入回合审计"""
+        context_summary = {
+            **ledger.context_summary(),
+            "allowed_tool_names": [candidate.name for candidate in advertised],
+        }
+
+        def on_turn_started(provider_request: dict[str, Any], started_ns: int) -> None:
+            """2026-08-30 用于在物理 Provider 请求发送前写入独立审计行"""
             if observer is None:
                 return
-            observer.record_turn(
+            observer.begin_provider_turn(
                 context_summary=context_summary,
                 request_messages=request_messages,
-                response_message=message,
-                timing=timing,
-                started_ns=turn_started_ns,
+                provider_request=provider_request,
+                started_ns=started_ns,
             )
-            if not getattr(message, "tool_calls", None):
-                # 2026-08-22 无工具回复由调用层判定未正常结束并重发，
-                # 本回合审计在此闭合，避免重发期间留下悬空计时
-                observer.close_turn()
+
+        def on_turn_complete(message: AIMessage, timing: Any) -> None:
+            """2026-08-30 用于收口成功的物理 Provider 请求审计"""
+            if observer is None:
+                return
+            observer.complete_provider_turn(response_message=message, timing=timing)
+
+        def on_turn_failed(error: str, timing: Any, message: AIMessage | None) -> None:
+            """2026-08-30 用于收口断流超时和无工具回复的物理 Provider 请求审计"""
+            if observer is None:
+                return
+            observer.fail_provider_turn(error=error, timing=timing, response_message=message)
 
         try:
             response = await run_model_call(
-                llm.bind_tools(tools),
+                llm.bind_tools(advertised),
                 request_messages,
                 stream,
                 on_turn_complete=on_turn_complete,
+                on_turn_started=on_turn_started,
+                on_turn_failed=on_turn_failed,
                 total_attempts=retries,
+                completion_hint=completion_hint,
+                require_tool_call=require_tool_call,
             )
-        except Exception as exc:
-            if observer is not None:
-                observer.record_failed_turn(
-                    context_summary=context_summary,
-                    error=str(exc),
-                    started_ns=turn_started_ns,
-                    request_messages=request_messages,
-                )
+        except Exception:
             raise
         return {"messages": [response], "iterations": iterations + 1}
 
@@ -129,18 +355,62 @@ def _route_after_agent(state: AnnotationGraphState) -> str:
     return "tool_batch"
 
 
+_NULLISH_ARG_WORDS = frozenset({"null", "none", "nil", ""})
+
+
+def _coerce_nullish_write_args(tool: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """2026-09-14 null 字面串统一容错（run a8c29ec8 实锤：speaker="null" 白烧 3 个调用/回合）
+
+    模型惯犯把 JSON null 写成字符串 "null"。写入类工具的参数里，凡 schema 声明可空
+    （Optional）的参数，null 类字面串一律按留空读取；必填参数不改，交给账本校验/类型
+    报错——那里 null 不是合法的"未提供"。转换放在生产调用入口而不是工具签名：
+    @tool 保留真实类型（enum/union）但剥掉 Annotated 的 BeforeValidator（09-14 tone 实测）。
+    """
+    schema = getattr(tool, "args_schema", None)
+    fields = getattr(schema, "model_fields", None) or {}
+    coerced = dict(args)
+    for key, value in coerced.items():
+        if not isinstance(value, str) or value.strip().casefold() not in _NULLISH_ARG_WORDS:
+            continue
+        field = fields.get(key)
+        annotation = getattr(field, "annotation", None) if field is not None else None
+        if type(None) in get_args(annotation):
+            coerced[key] = None
+    return coerced
+
+
 async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
-    """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具"""
+    """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具
+
+    2026-09-12 参数绑定发生在 langchain 工具 schema 层（先于函数体）；
+    2026-09-13 实时写入后该层的 pydantic 失败统一翻成结构化拒绝回执
+    （record/field/code/expected），只指向出错的那一条记录；
+    2026-09-14 可空参数的 null 字面串在绑定前先按留空归一。
+    """
     name = str(call.get("name"))
     candidate = tool_map.get(name)
     if candidate is None:
         raise ValueError(f"未知 annotation 工具: {name}")
-    result = await candidate.ainvoke(dict(call.get("args") or {}))
+    args = dict(call.get("args") or {})
+    if name in _WRITE_TOOL_NAMES:
+        args = _coerce_nullish_write_args(candidate, args)
+    try:
+        result = await candidate.ainvoke(args)
+    except ValidationError as exc:
+        if name in _WRITE_TOOL_NAMES:
+            raise translate_write_validation_error(name, args, exc) from None
+        raise
     return str(result)
 
 
-def _failed_receipt(name: str, error: str) -> str:
-    """2026-08-10 用于构造单个调用失败时模型可见的独立回执"""
+def _failed_receipt(name: str, error: str | BaseException) -> str:
+    """2026-08-10 用于构造单个调用失败时模型可见的独立回执
+
+    2026-09-13：结构化拒绝（AnnotationStageRejection）只回 record/field/code/
+    expected 与可自纠说明，不重复整份合同。
+    """
+    if isinstance(error, AnnotationStageRejection):
+        return json.dumps(error.receipt(), ensure_ascii=False)
     return json.dumps(
         {"accepted": False, "tool": name, "error": str(error)},
         ensure_ascii=False,
@@ -155,116 +425,378 @@ def _truncated_error(name: str) -> str:
     )
 
 
+def _tool_status_emitter(stream: AgentStream | None, observer: AgentTurnObserver | None) -> Any:
+    """2026-09-15 用于构造工具状态事件出口；SSE 推送失败时先闭合回合审计计时再上抛"""
+
+    async def emit(name: str, status: str, message: str) -> None:
+        if stream is None:
+            return
+        try:
+            if status == "success":
+                await stream.tool_call_succeeded(name, message)
+            else:
+                await stream.tool_call_failed(name, message)
+        except Exception:
+            if observer is not None:
+                observer.close_turn()
+            raise
+
+    return emit
+
+
+def _call_entry(
+    call: dict[str, Any],
+    *,
+    index: int,
+    content: str | None,
+    status: str,
+    error: str | None,
+    receipt: dict[str, Any] | None,
+    started_ns: int,
+) -> dict[str, Any]:
+    """2026-09-15 用于构造批次与程序面共用的调用结果条目"""
+    return {
+        "call": call,
+        "index": index,
+        "content": content,
+        "status": status,
+        "error": error,
+        "receipt": receipt,
+        "started_ns": started_ns,
+    }
+
+
+def _program_meta(meta: dict[str, Any], receipt: Any) -> dict[str, Any]:
+    """2026-09-15 用于把程序面逐 op 定位字段并进审计行 request_args 的 _program"""
+    body = dict(meta)
+    if isinstance(receipt, dict):
+        if receipt.get("record"):
+            body["record"] = receipt["record"]
+        if receipt.get("code"):
+            body["error_code"] = receipt["code"]
+    return body
+
+
+async def _failed_entry(
+    call: dict[str, Any],
+    error_text: str,
+    *,
+    index: int,
+    observer: AgentTurnObserver | None = None,
+    stream: AgentStream | None = None,
+) -> dict[str, Any]:
+    """2026-09-15 用于把未执行调用（协议错误/流截断）渲染成独立失败回执与审计行"""
+    name = str(call.get("name"))
+    content = _failed_receipt(name, error_text)
+    receipt = json.loads(content)
+    started_ns = time.perf_counter_ns()
+    if observer is not None:
+        observer.record_tool_call(
+            call_index=index,
+            tool_name=name,
+            request_args=dict(call.get("args") or {}),
+            raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
+            response=receipt,
+            receipt=receipt,
+            status="error",
+            error=error_text,
+            tool_duration_ms=0,
+            started_ns=started_ns,
+        )
+    await _tool_status_emitter(stream, observer)(name, "error", error_text)
+    return _call_entry(
+        call,
+        index=index,
+        content=content,
+        status="error",
+        error=error_text,
+        receipt=receipt,
+        started_ns=started_ns,
+    )
+
+
+async def _execute_call(
+    call: dict[str, Any],
+    *,
+    tool_map: dict[str, Any],
+    ledger: AnnotationToolLedger,
+    observer: AgentTurnObserver | None = None,
+    stream: AgentStream | None = None,
+    call_index: int,
+    settle_finish: bool = False,
+    program_meta: dict[str, Any] | None = None,
+    chapter_finish_name: str | None = FINISH_TOOL_NAME,
+    record_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    """2026-09-15 用于执行单条工具调用（原生 tool_batch 与程序面执行器共用同一实现）
+
+    2026-09-13 实时写入语义原样保留：写入即生效；单条业务错误只回滚该条（账本与图
+    各自快照恢复）、之前写入的记录保留；合同违反（AnnotationInvariantError）不可
+    恢复，先闭合回合审计计时再上抛。finish 默认只登记（收尾判定由批次末尾统一结算），
+    程序面在程序末尾调用时传 settle_finish=True 就地结算。
+    2026-09-18 收尾工具名的两个面同名（都叫 finish）：只有写者面的 finish 是章级收尾，
+    传 None 的面（subagent 面）按普通工具执行——subagent 的 finish 只声明本 subagent 完毕。
+    2026-09-18 record_keys：成功写入时把这个模型可见的记录键登记进该集合
+    （push_case.record_id / promise_case.result_id 按它校验"确实是本章写出来的记录"）。
+    只有"回执里的 record 就是模型看到的那一个键"的面才传：原生面传账本那份；
+    程序面不传（构造器编译出的入参带角色命名空间，其生产键与模型看到的 receipt 键不同，
+    由程序面自己按模型可见键登记）。
+    """
+    name = str(call.get("name"))
+    started_ns = time.perf_counter_ns()
+    if call.get("truncated"):
+        return await _failed_entry(
+            call,
+            _truncated_error(name),
+            index=call_index,
+            observer=observer,
+            stream=stream,
+        )
+    if chapter_finish_name is not None and name == chapter_finish_name:
+        # 收尾声明：校验与冻结推迟到本回合全部调用处理完之后
+        # （逐条失败只回滚该调用、不阻塞收尾），因此"同轮多个小调用 + 收尾"仍计一个回合
+        content = await _invoke_tool(tool_map, call)
+        entry = _call_entry(
+            call,
+            index=call_index,
+            content=content,
+            status="pending",
+            error=None,
+            receipt=json.loads(content),
+            started_ns=started_ns,
+        )
+        if settle_finish:
+            await _settle_chapter_finish(
+                ledger,
+                [entry],
+                observer=observer,
+                emit_tool_status=_tool_status_emitter(stream, observer),
+            )
+        return entry
+    ledger_snapshot = ledger.snapshot()
+    graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None else None
+    try:
+        if stream is not None:
+            await stream.tool_call_started(name)
+        result = await _invoke_tool(tool_map, call)
+        status = "success"
+        error: str | None = None
+        receipt = json.loads(result)
+    except AnnotationInvariantError:
+        # 合同违反属不可恢复错误：先闭合回合审计计时再上抛，避免 agent_turns 行耗时字段永久为空
+        if observer is not None:
+            observer.close_turn()
+        raise
+    except Exception as exc:
+        ledger.restore(ledger_snapshot)
+        if graph_snapshot is not None and ledger.graph is not None:
+            ledger.graph.restore(graph_snapshot)
+        ledger.errors.append(str(exc))
+        result = _failed_receipt(name, exc)
+        status = "error"
+        error = str(exc)
+        receipt = json.loads(result)
+    if record_keys is not None and status == "success":
+        written_record = receipt.get("record")
+        if isinstance(written_record, str) and written_record:
+            record_keys.add(written_record)
+    if observer is not None:
+        request_args = dict(call.get("args") or {})
+        if program_meta is not None:
+            request_args["_program"] = _program_meta(program_meta, receipt)
+        observer.record_tool_call(
+            call_index=call_index,
+            tool_name=name,
+            request_args=request_args,
+            raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
+            response=receipt,
+            receipt=receipt,
+            status=status,
+            error=error,
+            tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
+            started_ns=started_ns,
+        )
+    await _tool_status_emitter(stream, observer)(name, status, result if status == "success" else (error or ""))
+    return _call_entry(
+        call,
+        index=call_index,
+        content=result,
+        status=status,
+        error=error,
+        receipt=receipt,
+        started_ns=started_ns,
+    )
+
+
 def _build_tool_batch_node(
     tools: list[Any],
     *,
     ledger: AnnotationToolLedger,
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
+    program_tool_name: str | None = None,
+    chapter_finish_name: str | None = FINISH_TOOL_NAME,
 ):
-    """2026-08-10 用于构建逐调用独立提交且互不回滚的工具节点"""
-    tool_map = {candidate.name: candidate for candidate in tools}
+    """2026-08-10 用于构建逐调用独立提交且互不回滚的工具节点
+
+    2026-09-13 实时写入：一个回合的多个调用串行处理、共享账本、写入即生效；
+    finish 的收尾判定推迟到本回合全部调用处理完再执行，因此
+    "同轮多个小调用 + 一个收尾声明"整体只计一个模型回合。失败只影响该调用自己，
+    不影响同回合其他调用、也不阻塞收尾（收尾判定见 _settle_chapter_finish）。
+
+    2026-09-15 program_tool_name：程序模式绑定面收成程序面工具（写者面
+    [execute_code, finish]），模型偶尔直发原生工具调用（实验 ch5 第一轮实测）——这类调用转入同一个内层
+    dispatcher 并按同一套校验执行，审计记 direct_fallback；未知名逐条协议错误，
+    同批其他调用照常执行、不执行任何写入。该容错层不依赖任何厂商 tool_choice 行为。
+    2026-09-18 chapter_finish_name：本面哪条工具名算"章级收尾"（subagent 面传 None，
+    它的同名 finish 只是本 subagent 的收尾声明，不冻结整章、也不在批次末尾结算）。
+    """
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-10 用于按调用顺序执行工具；失败只恢复该调用前的 Ledger 与 FactGraph"""
-
-        async def _emit_tool_status(name: str, status: str, message: str) -> None:
-            """2026-08-12 用于推送工具结果状态事件；SSE 推送失败时先闭合回合审计计时再上抛"""
-            if stream is None:
-                return
-            try:
-                if status == "success":
-                    await stream.tool_call_succeeded(name, message)
-                else:
-                    await stream.tool_call_failed(name, message)
-            except Exception:
+        """2026-09-13 用于独立串行执行本回合全部小调用并按单次调用边界回滚"""
+        calls = _tool_calls(state)
+        tool_map = {candidate.name: candidate for candidate in tools}
+        allowed_tool_names = frozenset(tool_map)
+        rendered: list[dict[str, Any]] = []
+        if program_tool_name is None:
+            protocol_error = _tool_batch_protocol_error(
+                calls,
+                allowed_tool_names=allowed_tool_names,
+            )
+            if protocol_error is not None:
+                ledger.errors.append(protocol_error)
+                for call_index, call in enumerate(calls):
+                    rendered.append(
+                        await _failed_entry(call, protocol_error, index=call_index, observer=observer, stream=stream)
+                    )
                 if observer is not None:
                     observer.close_turn()
-                raise
-
-        calls = _tool_calls(state)
-        messages: list[ToolMessage] = []
+                return {"messages": _tool_messages(rendered), "phase": ledger.phase}
         for call_index, call in enumerate(calls):
             name = str(call.get("name"))
-            if call.get("truncated"):
-                error_text = _truncated_error(name)
-                result = _failed_receipt(name, error_text)
-                if observer is not None:
-                    observer.record_tool_call(
-                        call_index=call_index,
-                        tool_name=name,
-                        request_args=dict(call.get("args") or {}),
-                        raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
-                        response=json.loads(result),
-                        receipt=json.loads(result),
-                        status="error",
-                        error=error_text,
-                        tool_duration_ms=0,
-                        started_ns=time.perf_counter_ns(),
-                    )
-                await _emit_tool_status(name, "error", "参数不完整（流传输截断）")
-                messages.append(
-                    ToolMessage(
-                        content=result,
-                        tool_call_id=str(call["id"]),
-                        name=name,
-                    )
+            if program_tool_name is not None and name not in allowed_tool_names:
+                # 程序面绑定的只有程序工具与收尾工具，模型偶尔直发原生工具名（run 54a72932
+                # 实测 25 次）。原生名一律不进写入面，回执只报事实：调用方式属提示词面
+                # （execute_code 的说明 + 系统提示词），不在回执里复述模型自己看得到的工具面。
+                error_text = f"本轮未开放工具: {[name]}"
+                ledger.errors.append(error_text)
+                rendered.append(
+                    await _failed_entry(call, error_text, index=call_index, observer=observer, stream=stream)
                 )
                 continue
-            ledger_snapshot = ledger.snapshot()
-            graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None else None
-            started_ns = time.perf_counter_ns()
-            try:
-                if stream is not None:
-                    await stream.tool_call_started(name)
-                result = await _invoke_tool(tool_map, call)
-                status = "success"
-                error: str | None = None
-                receipt = json.loads(result)
-            except AnnotationInvariantError:
-                # 合同违反属不可恢复错误：先闭合回合审计计时再上抛，避免 agent_turns 行耗时字段永久为空
-                if observer is not None:
-                    observer.close_turn()
-                raise
-            except Exception as exc:
-                ledger.restore(ledger_snapshot)
-                if graph_snapshot is not None and ledger.graph is not None:
-                    ledger.graph.restore(graph_snapshot)
-                ledger.errors.append(str(exc))
-                result = _failed_receipt(name, str(exc))
-                status = "error"
-                error = str(exc)
-                receipt = json.loads(result)
-            tool_duration_ms = max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000))
-            if observer is not None:
-                observer.record_tool_call(
+            direct_fallback = program_tool_name is not None and name != program_tool_name
+            rendered.append(
+                await _execute_call(
+                    call,
+                    tool_map=tool_map,
+                    ledger=ledger,
+                    observer=observer,
+                    stream=stream,
                     call_index=call_index,
-                    tool_name=name,
-                    request_args=dict(call.get("args") or {}),
-                    raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
-                    response=receipt,
-                    receipt=receipt,
-                    status=status,
-                    error=error,
-                    tool_duration_ms=tool_duration_ms,
-                    started_ns=started_ns,
-                )
-            if status == "success":
-                await _emit_tool_status(name, "success", result)
-            else:
-                await _emit_tool_status(name, "error", error or "")
-            messages.append(
-                ToolMessage(
-                    content=result,
-                    tool_call_id=str(call["id"]),
-                    name=name,
+                    chapter_finish_name=chapter_finish_name,
+                    # 原生面的回执就是模型读到的回执：写入成功即把 record 登记进章级账本，
+                    # push_case.record_id / promise_case.result_id 按它校验
+                    record_keys=ledger.written_record_keys,
+                    program_meta=(
+                        {
+                            "program_id": None,
+                            "op_index": call_index,
+                            "source_line": None,
+                            "record": None,
+                            "direct_fallback": True,
+                        }
+                        if direct_fallback
+                        else None
+                    ),
                 )
             )
+        await _settle_chapter_finish(
+            ledger,
+            rendered,
+            observer=observer,
+            emit_tool_status=_tool_status_emitter(stream, observer),
+            chapter_finish_name=chapter_finish_name,
+        )
         if observer is not None:
             observer.close_turn()
-        return {"messages": messages, "phase": ledger.phase}
+        return {"messages": _tool_messages(rendered), "phase": ledger.phase}
 
     return tool_batch
+
+
+def _tool_messages(rendered: list[dict[str, Any]]) -> list[ToolMessage]:
+    """2026-09-13 用于按调用顺序把回执渲染成 ToolMessage（含失败回执与延迟判定的收尾回执）"""
+    messages: list[ToolMessage] = []
+    for entry in rendered:
+        call = entry["call"]
+        messages.append(
+            ToolMessage(
+                content=str(entry.get("content") or ""),
+                tool_call_id=str(call["id"]),
+                name=str(call.get("name")),
+            )
+        )
+    return messages
+
+
+async def _settle_chapter_finish(
+    ledger: AnnotationToolLedger,
+    rendered: list[dict[str, Any]],
+    *,
+    observer: AgentTurnObserver | None,
+    emit_tool_status: Any,
+    chapter_finish_name: str | None = FINISH_TOOL_NAME,
+) -> None:
+    """2026-09-13 用于在本回合全部调用处理完后执行 finish 收尾判定
+
+    写入是实时的、不需要结算：本回合的逐条失败各自在调用点已回执，收尾只管
+    按已写入内容补默认判定、校验并构造 ready_chapter（构造失败整体回滚，已写入记录保留）。
+    2026-09-18 chapter_finish_name 为 None 的面（subagent 面）直接跳过：它的同名 finish
+    只是本 subagent 的收尾声明，不冻结整章、也不在批次末尾结算。
+    """
+    if chapter_finish_name is None:
+        return
+    for entry in rendered:
+        call = entry["call"]
+        if str(call.get("name")) != chapter_finish_name or entry.get("content") is None:
+            continue
+        started_ns = entry.get("started_ns") or time.perf_counter_ns()
+        try:
+            receipt = ledger.finish_chapter()
+            content = json.dumps(receipt, ensure_ascii=False)
+            status: str = "success"
+            error: str | None = None
+        except AnnotationInvariantError:
+            if observer is not None:
+                observer.close_turn()
+            raise
+        except Exception as exc:
+            ledger.errors.append(str(exc))
+            content = _failed_receipt(chapter_finish_name, exc)
+            status = "error"
+            error = str(exc)
+        entry["content"] = content
+        # 2026-09-15 回填条目状态与结构化回执：程序面按 entry 统计 op 成败并渲染失败清单
+        entry["status"] = status
+        entry["error"] = error
+        entry["receipt"] = json.loads(content)
+        if observer is not None:
+            observer.record_tool_call(
+                call_index=entry["index"],
+                tool_name=chapter_finish_name,
+                request_args=dict(call.get("args") or {}),
+                raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
+                response=json.loads(content),
+                receipt=json.loads(content),
+                status=status,
+                error=error,
+                tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
+                started_ns=started_ns,
+            )
+        if status == "success":
+            await emit_tool_status(chapter_finish_name, "success", content)
+        else:
+            await emit_tool_status(chapter_finish_name, "error", error or "")
 
 
 def _build_auto_finalize_node(
@@ -273,24 +805,24 @@ def _build_auto_finalize_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
 ):
-    """2026-08-10 用于七领域写入成功后自动 complete_chunk 并 finish_chapter"""
+    """2026-09-13 用于在收尾声明后自动冻结章 并完成章节"""
 
     async def auto_finalize(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-10 用于在七领域 receipt 齐全时程序冻结 chunk 并完成章节"""
-        if ledger.phase != "chunk_open":
+        """2026-09-13 用于在 finish 收尾后冻结章 并完成章节"""
+        if ledger.phase != "chapter_open":
             return {"phase": ledger.phase}
-        if not _DOMAIN_NAMES_SET <= ledger.domain_receipts:
+        if not ledger.chapter_finished:
             return {"phase": ledger.phase}
         try:
             if stream is not None:
-                await stream.tool_call_started("complete_chunk")
-            ledger.complete_active_chunk()
+                await stream.tool_call_started("auto_freeze_chapter")
+            ledger.complete_active_chapter()
             if stream is not None:
-                await stream.tool_call_succeeded("complete_chunk", "chunk frozen")
-                await stream.tool_call_started("finish_chapter")
+                await stream.tool_call_succeeded("auto_freeze_chapter", "chapter frozen")
+                await stream.tool_call_started("auto_assemble_chapter")
             ledger.finish()
             if stream is not None:
-                await stream.tool_call_succeeded("finish_chapter", "chapter completed")
+                await stream.tool_call_succeeded("auto_assemble_chapter", "chapter completed")
         except Exception:
             # 章节完成写入失败时同样闭合审计计时，避免该回合耗时字段永久为空
             if observer is not None:
@@ -317,8 +849,18 @@ def build_annotation_graph(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
+    bind_tools: list[Any] | None = None,
+    program_tool_name: str | None = None,
 ) -> Any:
-    """2026-08-10 用于构建逐 chunk 领域写入和章节自动完成状态机（消息链累积）"""
+    """2026-08-10 用于构建逐章 领域写入和章节自动完成状态机（消息链累积）
+
+    2026-09-14 写者面每回合注入【进度账本】（inject_progress）；读者图不开。
+    2026-09-15 程序面（CodeAct）：bind_tools 决定绑定面（写者面 [execute_code, finish]），
+    tools 仍是完整分发字典；program_tool_name 非空时批次按程序模式处理协议错误
+    与直发原生调用（见 _build_tool_batch_node）。
+    2026-09-18 模型可见面 = bind_tools（写者面即 [execute_code, finish]）；本章级
+    收尾工具名取默认 FINISH_TOOL_NAME，收尾判定与批次末尾结算照旧。
+    """
     graph = StateGraph(AnnotationGraphState)
     graph.add_node(
         "agent",
@@ -330,6 +872,8 @@ def build_annotation_graph(
             stream=stream,
             observer=observer,
             retries=retries,
+            inject_progress=True,
+            bind_tools=bind_tools,
         ),
     )
     graph.add_node(
@@ -339,6 +883,7 @@ def build_annotation_graph(
             ledger=ledger,
             observer=observer,
             stream=stream,
+            program_tool_name=program_tool_name,
         ),
     )
     graph.add_node(
@@ -367,4 +912,82 @@ def build_annotation_graph(
     return graph.compile()
 
 
-__all__ = ["AnnotationGraphState", "build_annotation_graph"]
+def _route_after_subagent_agent(state: AnnotationGraphState) -> str:
+    """2026-09-17 三代理并发用于 subagent 会话路由：错误收口、工具批次、无工具回复即产出完毕
+
+    撞轮次上限时 halted 置位，同样按会话收束结束。
+    """
+    if state.get("error") or state.get("halted"):
+        return "end"
+    if not _tool_calls(state):
+        return "end"
+    return "tool_batch"
+
+
+def build_subagent_graph(
+    llm: Any,
+    program_tool: Any,
+    finish_tool: Any,
+    *,
+    ledger: AnnotationToolLedger,
+    max_iterations: int,
+    stream: AgentStream | None = None,
+    observer: AgentTurnObserver | None = None,
+    retries: int | None = None,
+) -> Any:
+    """2026-09-17 三代理并发用于构建一个 subagent 的会话状态机（可见面 = execute_code + finish）
+
+    与读者面同构：没有写入工具、没有领域冻结、没有缺域提醒，无工具回复即"本 subagent
+    产出已写完"；两处差别是撞轮次上限按会话自然收束（stop_at_iteration_limit）与
+    绑定面收成 [execute_code, finish]（模型直发原生工具名一律协议错误，不落到任何写入）。
+    2026-09-18 subagent 的 finish 只声明本 subagent 完毕，不是章级收尾——本图的批次传
+    chapter_finish_name=None，因此同名 finish 不触发整章冻结与批次末尾结算。
+    """
+    bind_tools = [program_tool, finish_tool]
+    program_tool_name = str(program_tool.name)
+    graph = StateGraph(AnnotationGraphState)
+    graph.add_node(
+        "agent",
+        _build_agent_node(
+            llm,
+            bind_tools,
+            ledger=ledger,
+            max_iterations=max_iterations,
+            stream=stream,
+            observer=observer,
+            retries=retries,
+            completion_hint=None,
+            require_tool_call=False,
+            # 2026-09-25 消融（ch20/lanes 三臂，tmp_ablation/）：lane 账本令 reasoning +36%、
+            # prompt 3.5x、三 lane 全撞满回合上限，交付相当——账本只在写者面注入
+            inject_progress=False,
+            bind_tools=bind_tools,
+            subagent_face=True,
+            stop_at_iteration_limit=True,
+        ),
+    )
+    graph.add_node(
+        "tool_batch",
+        _build_tool_batch_node(
+            bind_tools,
+            ledger=ledger,
+            observer=observer,
+            stream=stream,
+            program_tool_name=program_tool_name,
+            chapter_finish_name=None,
+        ),
+    )
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges(
+        "agent",
+        _route_after_subagent_agent,
+        {
+            "tool_batch": "tool_batch",
+            "end": END,
+        },
+    )
+    graph.add_edge("tool_batch", "agent")
+    return graph.compile()
+
+
+__all__ = ["AnnotationGraphState", "build_annotation_graph", "build_subagent_graph"]

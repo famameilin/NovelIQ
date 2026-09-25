@@ -23,9 +23,9 @@ from src.api.routes.sse import _resolve_last_seq, sse_endpoint
 
 @pytest.fixture(autouse=True)
 def _allow_existing_task(monkeypatch):
-    """2026-08-14 P2-11：默认放行任务存在性校验（校验本身由 404 用例单独覆盖）"""
+    """2026-08-14 P2-11：默认放行任务存在性/归属校验（校验本身由 404 用例单独覆盖）"""
 
-    monkeypatch.setattr("src.api.routes.sse._task_run_exists", lambda task_id: True)
+    monkeypatch.setattr("src.api.routes.sse._task_run_belongs_to_novel", lambda task_id, novel_id: True)
 
 
 def _make_request(disconnect_flags: list[bool]) -> MagicMock:
@@ -49,7 +49,7 @@ async def test_sse_streams_events_with_type_and_data() -> None:
 
     request = _make_request([False, False, True])
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("task-1", request)
+        response = await sse_endpoint("novel-1", "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert [chunk["event"] for chunk in chunks] == ["progress", "complete"]
@@ -71,7 +71,7 @@ async def test_sse_defaults_when_message_lacks_type_and_data() -> None:
 
     request = _make_request([False, True])
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("task-1", request)
+        response = await sse_endpoint("novel-1", "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks[0]["event"] == "message"
@@ -90,7 +90,7 @@ async def test_sse_disconnects_cleanly_when_client_disconnects() -> None:
 
     request = _make_request([True])
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("task-1", request)
+        response = await sse_endpoint("novel-1", "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
@@ -110,7 +110,7 @@ async def test_sse_prefers_last_event_id_header_over_query_param() -> None:
     request.query_params = {"last_seq": "7"}
     request.headers = {"last-event-id": "3"}
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("task-1", request)
+        response = await sse_endpoint("novel-1", "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
@@ -130,7 +130,7 @@ async def test_sse_uses_query_param_when_header_missing() -> None:
     request = _make_request([True])
     request.query_params = {"last_seq": "7"}
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("task-1", request)
+        response = await sse_endpoint("novel-1", "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
@@ -160,11 +160,27 @@ async def test_sse_returns_404_for_unknown_task() -> None:
     request = _make_request([True])
 
     with (
-        patch("src.api.routes.sse._task_run_exists", return_value=False),
+        patch("src.api.routes.sse._task_run_belongs_to_novel", return_value=False),
         patch("src.api.routes.sse.event_manager") as mock_em,
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await sse_endpoint("deadbeef", request)
+            await sse_endpoint("novel-1", "deadbeef", request)
+
+    assert exc_info.value.status_code == 404
+    mock_em.connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sse_returns_404_when_task_belongs_to_another_novel() -> None:
+    """任务存在但 novel_id 不匹配时 SSE 端点返回 404，不建立订阅"""
+    request = _make_request([True])
+
+    with (
+        patch("src.api.routes.sse._task_run_belongs_to_novel", return_value=False),
+        patch("src.api.routes.sse.event_manager") as mock_em,
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await sse_endpoint("novel-other", "task-1", request)
 
     assert exc_info.value.status_code == 404
     mock_em.connect.assert_not_called()

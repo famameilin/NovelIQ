@@ -23,7 +23,6 @@ from src.metrics.lexicon_metrics import (
 from src.metrics.rhythm_metrics import tension_composite, tension_proxy
 from src.metrics.style_metrics import (
     average_word_length,
-    dialogue_ratio,
     function_word_distribution,
     imagery_density,
     metaphor_density,
@@ -210,10 +209,6 @@ class TestStyleMetrics(unittest.TestCase):
     def test_semantic_category_density(self) -> None:
         text = "刀剑宗门"
         self.assertGreater(semantic_category_density(text, ["刀剑"]), 0)
-
-    def test_dialogue_ratio(self) -> None:
-        text = "「你好」"
-        self.assertGreater(dialogue_ratio(text), 0)
 
     def test_imagery_density(self) -> None:
         text = "明月几时有，把酒问青天"

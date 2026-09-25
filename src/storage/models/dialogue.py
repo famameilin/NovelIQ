@@ -41,7 +41,15 @@ class DialogueRecord(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     start: Mapped[int] = mapped_column(Integer, nullable=False)
     end: Mapped[int] = mapped_column(Integer, nullable=False)
-    speaker: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 2026-09-17 说话人存图实体 id（原为登记名字符串）：名字不是稳定键，读取侧按 id 取实体、
+    # 不再按名字形态猜有效性。实体行不存在时置空（ondelete=SET NULL），归因缺失与
+    # "没判出说话人"同义——两种情形读取侧都当无说话人处理。
+    # 2026-09-19 图实体主键改 uuid（String(36)），跟随。
+    speaker: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("graph_entities.entity_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     tone: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_inner_monologue: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     confidence: Mapped[str] = mapped_column(String(20), nullable=False)

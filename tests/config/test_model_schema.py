@@ -15,7 +15,6 @@ def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
     settings = _parse_embedding_model_settings(
         {
             "timeout_s": 120,
-            "embedding_dim": 1024,
             "batch_size": 8,
             "semantic_enabled": False,
             "top_k": 9,
@@ -25,7 +24,6 @@ def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
     assert settings.base_url is None
     assert settings.model is None
     assert settings.timeout_s == 120
-    assert settings.embedding_dim == 1024
     assert settings.batch_size == 8
     assert settings.semantic_enabled is False
     assert settings.top_k == 9
@@ -58,20 +56,6 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
     assert settings.allow_future_context is True
 
 
-def test_parse_task_model_settings_defaults() -> None:
-    """
-    2026-08-08 用于验证任务级配置默认值
-    """
-    settings = _parse_task_model_settings(None)
-
-    assert settings.thinking is False
-    assert settings.streaming is False
-    assert settings.structured_output == "json_schema"
-    assert settings.max_iterations == 10
-    assert settings.total_attempts == 3
-    assert settings.allow_future_context is False
-
-
 def test_parse_task_model_settings_rejects_invalid_structured_output() -> None:
     """
     2026-08-08 用于验证结构化输出模式只接受闭合枚举
@@ -94,12 +78,10 @@ def test_old_model_environment_variables_do_not_override_json(monkeypatch) -> No
 
     settings = _parse_embedding_model_settings(
         {
-            "embedding_dim": 1536,
             "batch_size": 8,
         }
     )
 
-    assert settings.embedding_dim == 1536
     assert settings.batch_size == 8
 
 

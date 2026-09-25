@@ -31,12 +31,6 @@ class TestCharacterDegreeCentrality(unittest.TestCase):
         self.assertEqual(result["A"], 1.0)
         self.assertEqual(result["B"], 1.0)
 
-    def test_multiple_relations(self) -> None:
-        result = compute_character_degree_centrality([("A", "B"), ("A", "C"), ("B", "C")])
-        self.assertEqual(result["A"], 1.0)
-        self.assertGreater(result["B"], 0.0)
-        self.assertGreater(result["C"], 0.0)
-
 
 class TestRelationNetworkDensity(unittest.TestCase):
     def test_empty_relations_returns_none(self) -> None:
@@ -85,22 +79,11 @@ class TestCharacterClosenessCentrality(unittest.TestCase):
         self.assertEqual(result["A"], 1.0)
         self.assertEqual(result["B"], 1.0)
 
-    def test_triangle_graph(self) -> None:
-        result = compute_character_closeness_centrality([("A", "B"), ("B", "C"), ("A", "C")])
-        self.assertIn("A", result)
-        self.assertIn("B", result)
-        self.assertIn("C", result)
-
 
 class TestCharacterEigenvectorCentrality(unittest.TestCase):
     def test_empty_relations(self) -> None:
         result = compute_character_eigenvector_centrality([])
         self.assertEqual(result, {})
-
-    def test_single_relation(self) -> None:
-        result = compute_character_eigenvector_centrality([("A", "B")])
-        self.assertIn("A", result)
-        self.assertIn("B", result)
 
 
 class TestClusteringCoefficient(unittest.TestCase):

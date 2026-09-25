@@ -14,14 +14,11 @@ from src.agents.annotation.schema import (
     RELATION_DEFINITIONS,
     BoundChapterAnnotation,
     BoundCharacterObservation,
-    BoundChunkAnnotation,
     BoundDialogue,
     BoundEntity,
-    BoundEntityDirectory,
     BoundEvent,
-    BoundForeshadowing,
     BoundRelation,
-    ChunkMetricsInput,
+    ChapterMetricsInput,
     EntityType,
     EventParticipantInput,
 )
@@ -44,7 +41,7 @@ def create_run_with_chunks(
     chapter_ids: list[int] | None = None,
     title: str = "章节事实测试",
 ) -> tuple[str, str]:
-    """2026-08-05 用于创建带真实章节身份的小说运行与原文 chunk"""
+    """2026-08-05 用于创建带真实章节身份的小说运行与原文章节"""
     novel_id = uuid.uuid4().hex[:8]
     run_id = str(uuid.uuid4())
     session.add(
@@ -109,17 +106,15 @@ def _entity_spec(
 
 def character_fact(
     *,
-    chunk_id: int,
+    chapter_id: int,
     name: str,
     action: str,
     role_function: str = "主体",
-    emotion: str = "neutral",
-    chapter_id: int = 1,
+    emotion: int = 0,
 ) -> dict[str, Any]:
-    """2026-08-11 用于构造逐 chunk 人物观察输入测试值"""
-    del chapter_id
+    """2026-08-11 用于构造章内人物观察输入测试值"""
     return {
-        "chunk_id": chunk_id,
+        "chapter_id": chapter_id,
         "character": name,
         "role_function": role_function,
         "action": action,
@@ -130,18 +125,16 @@ def character_fact(
 
 def relation_fact(
     *,
-    chunk_id: int,
+    chapter_id: int,
     from_name: str,
     to_name: str,
     relation_type: str,
     from_entity_type: EntityType = "character",
     to_entity_type: EntityType = "character",
-    chapter_id: int = 1,
 ) -> dict[str, Any]:
-    """2026-08-12 用于构造逐 chunk 三字段关系边输入测试值（本章确认存在的边）"""
-    del chapter_id
+    """2026-08-12 用于构造章内三字段关系边输入测试值（本章确认存在的边）"""
     return {
-        "chunk_id": chunk_id,
+        "chapter_id": chapter_id,
         "from_entity": from_name,
         "to_entity": to_name,
         "relation_type": relation_type,
@@ -154,21 +147,19 @@ def relation_fact(
 
 def dialogue_fact(
     *,
-    chunk_id: int,
+    chapter_id: int,
     content: str,
     speaker: str | None,
     tone: str | None = None,
     verdict: str = "dialogue",
-    chapter_id: int = 1,
 ) -> dict[str, Any]:
     """2026-08-11 用于构造按系统候选对齐的对话输入测试值"""
-    del chapter_id
     return {
         "candidate_content": content,
         "verdict": verdict,
         "speaker": speaker,
         "tone": tone,
-        "_chunk_id": chunk_id,
+        "chapter_id": chapter_id,
         "_entity_specs": [_entity_spec(speaker, "character")] if speaker else [],
     }
 
@@ -181,7 +172,7 @@ def identity_relation_output(
 ) -> dict[str, Any]:
     """2026-08-07 用于构造同一人物关系的测试标注项"""
     return relation_fact(
-        chunk_id=effective_chapter_id,
+        chapter_id=effective_chapter_id,
         from_name=subject_name,
         to_name=object_name,
         relation_type="同一人物",
@@ -195,7 +186,7 @@ def _register_entity(
     entity_type: EntityType,
     tags: list[str] | None = None,
 ) -> None:
-    """2026-08-11 用于把事实隐含实体注册到当前 chunk 实体目录"""
+    """2026-08-11 用于把事实隐含实体注册到当前章实体目录"""
     for existing in directory["entities"]:
         if existing.name == name:
             return
@@ -212,7 +203,6 @@ def make_bound_event(
     *,
     description: str,
     participants: list[dict[str, str]] | None = None,
-    causal_event_refs: list[str] | None = None,
     tree_id: str | None = None,
     node_id: str | None = None,
     parent_node_id: str | None = None,
@@ -226,7 +216,6 @@ def make_bound_event(
         cause_role=cause_role,
         description=description,
         participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in (participants or [])],
-        causal_event_refs=causal_event_refs or [],
     )
 
 
@@ -235,10 +224,10 @@ def persist_chapter_annotation(
     *,
     run_id: str,
     chapter_id: int,
-    emotional_valences: dict[int, str] | None = None,
+    emotional_valences: dict[int, int] | None = None,
     event_types: dict[int, str] | None = None,
-    pivot_chunks: set[int] | None = None,
-    cliffhanger_chunks: set[int] | None = None,
+    pivot_chapters: set[int] | None = None,
+    cliffhanger_chapters: set[int] | None = None,
     characters: list[dict[str, Any]] | None = None,
     dialogues: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
@@ -249,11 +238,10 @@ def persist_chapter_annotation(
 ) -> str:
     """2026-08-12 用于写入最新合同 BoundChapterAnnotation 并通过生产图入口持久化
 
-    M9a-2：chunks 表合并进 chapters 后，章节正文取自 chapters 表，
-    运行时 chunk id 即章真实 chapter_id（payload 内 chunk_id == chapter_id）。
+    M9a-2：chunks 表合并进 chapters 后，章节正文取自 chapters 表。
 
-    2026-08-19：events 每项含 description/participants/
-    causal_event_refs(全局 event_id)/tree_id/cause_role（缺省 tree-main/root）。
+    2026-08-19：events 每项含 description/participants/tree_id/cause_role
+    （缺省 root；2026-09-14 起 causal_event_refs 退役）。
     2026-08-22事件 id 由 uuid4 服务端派生，伏笔 setup_node_id
     直接指向本章事件节点（setup_event_index 为 1 基序号映射）。
     2026-08-22 重构：节点不再携带锚点；章级证据由持久化层盖章。
@@ -263,29 +251,30 @@ def persist_chapter_annotation(
     ).scalar_one_or_none()
     if chapter_row is None or chapter_row.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
-    chunk_text_by_id = {chapter_id: str(chapter_row.text)}
+    chapter_text_by_id = {chapter_id: str(chapter_row.text)}
     candidate_by_content: dict[tuple[int, str], Any] = {}
-    for chunk_id, chunk_text in chunk_text_by_id.items():
-        for candidate in extract_dialogue_candidates(chunk_id, chunk_text):
-            candidate_by_content[(chunk_id, candidate.content)] = candidate
+    for chapter_id, chapter_text in chapter_text_by_id.items():
+        for candidate in extract_dialogue_candidates(chapter_id, chapter_text):
+            candidate_by_content[(chapter_id, candidate.content)] = candidate
 
-    directories: dict[int, dict[str, list[BoundEntity]]] = {chunk_id: {"entities": []} for chunk_id in chunk_text_by_id}
-    observations_by_chunk: dict[int, list[BoundCharacterObservation]] = {chunk_id: [] for chunk_id in chunk_text_by_id}
-    dialogues_by_chunk: dict[int, list[BoundDialogue]] = {chunk_id: [] for chunk_id in chunk_text_by_id}
-    relations_by_chunk: dict[int, list[BoundRelation]] = {chunk_id: [] for chunk_id in chunk_text_by_id}
+    keys = list(chapter_text_by_id)
+    directories = {key: {"entities": []} for key in keys}
+    observations_by_chapter: dict[int, list[BoundCharacterObservation]] = {key: [] for key in keys}
+    dialogues_by_chapter: dict[int, list[BoundDialogue]] = {key: [] for key in keys}
+    relations_by_chapter: dict[int, list[BoundRelation]] = {key: [] for key in keys}
 
     for fact in characters or []:
-        chunk_id = int(fact["_chunk_id"]) if "_chunk_id" in fact else int(fact.get("chunk_id", -1))
-        if chunk_id not in chunk_text_by_id:
-            raise ValueError(f"测试事实引用了非本章 chunk: {chunk_id}")
+        chapter_id = int(fact["chapter_id"])
+        if chapter_id not in chapter_text_by_id:
+            raise ValueError(f"测试事实引用了非本章章节: {chapter_id}")
         for spec in fact.get("_entity_specs", []):
             _register_entity(
-                directories[chunk_id],
+                directories[chapter_id],
                 name=spec["name"],
                 entity_type=spec["entity_type"],
                 tags=spec.get("tags"),
             )
-        observations_by_chunk[chunk_id].append(
+        observations_by_chapter[chapter_id].append(
             BoundCharacterObservation(
                 character=fact["character"],
                 role_function=fact["role_function"],
@@ -295,18 +284,18 @@ def persist_chapter_annotation(
         )
 
     for fact in relations or []:
-        chunk_id = int(fact.get("chunk_id", -1))
-        if chunk_id not in chunk_text_by_id:
-            raise ValueError(f"测试事实引用了非本章 chunk: {chunk_id}")
+        chapter_id = int(fact.get("chapter_id", -1))
+        if chapter_id not in chapter_text_by_id:
+            raise ValueError(f"测试事实引用了非本章章节: {chapter_id}")
         for spec in fact.get("_entity_specs", []):
             _register_entity(
-                directories[chunk_id],
+                directories[chapter_id],
                 name=spec["name"],
                 entity_type=spec["entity_type"],
                 tags=spec.get("tags"),
             )
         definition = RELATION_DEFINITIONS[fact["relation_type"]]
-        relations_by_chunk[chunk_id].append(
+        relations_by_chapter[chapter_id].append(
             BoundRelation(
                 from_entity=fact["from_entity"],
                 to_entity=fact["to_entity"],
@@ -317,19 +306,19 @@ def persist_chapter_annotation(
         )
 
     for fact in dialogues or []:
-        chunk_id = int(fact["_chunk_id"])
+        chapter_id = int(fact["chapter_id"])
         content = fact["candidate_content"]
-        candidate = candidate_by_content.get((chunk_id, content))
+        candidate = candidate_by_content.get((chapter_id, content))
         if candidate is None:
-            raise ValueError(f"测试对话未出现在系统候选原文中: chunk_id={chunk_id} content={content!r}")
+            raise ValueError(f"测试对话未出现在系统候选原文中: chapter_id={chapter_id} content={content!r}")
         speaker = fact["speaker"]
         if speaker is not None:
             _register_entity(
-                directories[chunk_id],
+                directories[chapter_id],
                 name=speaker,
                 entity_type="character",
             )
-        dialogues_by_chunk[chunk_id].append(
+        dialogues_by_chapter[chapter_id].append(
             BoundDialogue(
                 candidate_index=1,
                 candidate_key=candidate.candidate_key,
@@ -342,14 +331,14 @@ def persist_chapter_annotation(
             )
         )
 
-    for (chunk_id, entity_name), attributes in (entity_attributes or {}).items():
-        if chunk_id not in chunk_text_by_id:
-            raise ValueError(f"测试实体属性引用了非本章 chunk: {chunk_id}")
-        registered = [entity for entity in directories[chunk_id]["entities"] if entity.name == entity_name]
+    for (chapter_id, entity_name), attributes in (entity_attributes or {}).items():
+        if chapter_id not in chapter_text_by_id:
+            raise ValueError(f"测试实体属性引用了非本章章节: {chapter_id}")
+        registered = [entity for entity in directories[chapter_id]["entities"] if entity.name == entity_name]
         if registered:
             registered[0].attributes = dict(attributes)
         else:
-            directories[chunk_id]["entities"].append(
+            directories[chapter_id]["entities"].append(
                 BoundEntity(
                     name=entity_name,
                     entity_type="character",
@@ -357,60 +346,77 @@ def persist_chapter_annotation(
                 )
             )
 
-    chunks: list[BoundChunkAnnotation] = []
-    for chunk_id, _chunk_text in chunk_text_by_id.items():
+    chapter_annotations: list[BoundChapterAnnotation] = []
+    for chapter_id, _chapter_text in chapter_text_by_id.items():
         bound_events: list[BoundEvent] = []
         for event_spec in events or []:
             event_participants = [{"entity": p, "role": "主体"} for p in event_spec.get("participants", [])]
             for p in event_spec.get("participants", []):
                 _register_entity(
-                    directories[chunk_id],
+                    directories[chapter_id],
                     name=p,
                     entity_type="character",
                 )
-            bound_events.append(
-                make_bound_event(
-                    description=event_spec["description"],
-                    participants=event_participants,
-                    causal_event_refs=event_spec.get("causal_event_refs"),
-                    tree_id=event_spec.get("tree_id"),
-                    node_id=event_spec.get("node_id"),
-                    parent_node_id=event_spec.get("parent_node_id"),
-                    cause_role=event_spec.get("cause_role", "root"),
-                )
+            bound_event = make_bound_event(
+                description=event_spec["description"],
+                participants=event_participants,
+                tree_id=event_spec.get("tree_id"),
+                node_id=event_spec.get("node_id"),
+                parent_node_id=event_spec.get("parent_node_id"),
+                cause_role=event_spec.get("cause_role", "root"),
             )
-        # 构建伏笔列表（setup_node_id 直接指向本章事件节点 id；setup_event_index 为 1 基序号）
-        bound_foreshadowings: list[BoundForeshadowing] = []
+            # 2026-09-13 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
+            # （2026-09-14 伏笔属性收敛：expected_payoff_family 退役）
+            if event_spec.get("isforeshadowing"):
+                bound_event.is_foreshadow_setup = True
+                bound_event.payoff_likelihood = event_spec.get("payoff_likelihood", "medium")
+            bound_events.append(bound_event)
+        # 2026-09-13 伏笔即事件树：setup_event_index（1 基）指向的章内事件即伏笔树根
         for fs_spec in foreshadowings or []:
-            bound_foreshadowings.append(
-                BoundForeshadowing(
-                    description=fs_spec["description"],
-                    confidence=fs_spec.get("confidence", "high"),
-                    setup_node_id=bound_events[int(fs_spec["setup_event_index"]) - 1].node_id,
-                )
-            )
-        chunks.append(
-            BoundChunkAnnotation(
-                chunk_id=chunk_id,
-                metrics=ChunkMetricsInput(
-                    summary=f"chunk {chunk_id} 摘要",
-                    emotional_valence=(emotional_valences or {}).get(chunk_id, "neutral"),
-                    narrative_function=(event_types or {}).get(chunk_id, "铺垫"),
-                    pivot_moment=chunk_id in (pivot_chunks or set()),
-                    cliffhanger=chunk_id in (cliffhanger_chunks or set()),
+            root_event = bound_events[int(fs_spec["setup_event_index"]) - 1]
+            root_event.is_foreshadow_setup = True
+            root_event.payoff_likelihood = fs_spec.get("payoff_likelihood", "medium")
+        chapter_annotations.append(
+            BoundChapterAnnotation(
+                metrics=ChapterMetricsInput(
+                    summary=f"章节 {chapter_id} 摘要",
+                    emotional_valence=(emotional_valences or {}).get(chapter_id, 0),
+                    narrative_function=(event_types or {}).get(chapter_id, "铺垫"),
+                    pivot_moment=chapter_id in (pivot_chapters or set()),
+                    cliffhanger=chapter_id in (cliffhanger_chapters or set()),
                 ),
-                entities=BoundEntityDirectory.model_validate(directories[chunk_id]),
-                character_observations=observations_by_chunk[chunk_id],
-                dialogues=dialogues_by_chunk[chunk_id],
+                character_observations=observations_by_chapter[chapter_id],
+                dialogues=dialogues_by_chapter[chapter_id],
                 events=bound_events,
-                relations=relations_by_chunk[chunk_id],
-                foreshadowings=bound_foreshadowings,
             )
         )
-    annotation = BoundChapterAnnotation(
-        chapter_summary=f"章节 {chapter_id} 测试摘要",
-        chunks=chunks,
-    )
+    # 2026-09-04 单一写面：实体/关系不再是章标注字段，改为派生 FactGraph 操作日志
+    # （在章循环之后收集，事件参与者登记的实体一并覆盖）
+    entity_ops: list[dict[str, Any]] = []
+    relation_assert_ops: list[dict[str, Any]] = []
+    for chapter_id, _chapter_text in chapter_text_by_id.items():
+        for entity in directories[chapter_id]["entities"]:
+            entity_ops.append(
+                {
+                    "name": entity.name,
+                    "entity_type": str(entity.entity_type),
+                    "tags": list(entity.tags or []),
+                    "description": entity.description,
+                    "attributes": dict(entity.attributes or {}),
+                    "chapter_id": chapter_id,
+                }
+            )
+        for relation in relations_by_chapter[chapter_id]:
+            relation_assert_ops.append(
+                {
+                    "from_entity": str(relation.from_entity),
+                    "to_entity": str(relation.to_entity),
+                    "relation_type": str(relation.relation_type),
+                    "chapter_id": chapter_id,
+                }
+            )
+    # 2026-09-19 章即块拍平：单章一份标注，chapter_id 身份由 add_annotation 行携带
+    annotation = chapter_annotations[0]
     row = ChapterAnnotationRepository(session).add_annotation(
         run_id=run_id,
         chapter_id=chapter_id,
@@ -420,13 +426,14 @@ def persist_chapter_annotation(
         session=session,
         annotation=row,
         resolved_cases=resolved_cases or [],
-        authorized_text_chapter_ids=set(chunk_text_by_id),
+        entity_ops=entity_ops,
+        relation_assert_ops=relation_assert_ops,
+        authorized_text_chapter_ids=set(chapter_text_by_id),
     )
-    for chunk in annotation.chunks:
-        DialogueRecordRepository(session).sync_dialogues(
-            run_id=run_id,
-            chapter_id=chapter_id,
-            dialogues=chunk.dialogues,
-        )
+    DialogueRecordRepository(session).sync_dialogues(
+        run_id=run_id,
+        chapter_id=chapter_id,
+        dialogues=annotation.dialogues,
+    )
     session.commit()
     return row.annotation_id

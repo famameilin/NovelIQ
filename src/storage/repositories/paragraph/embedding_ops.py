@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, insert, select
+from pgvector.sqlalchemy import HALFVEC
+from sqlalchemy import cast, delete, insert, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.models import Paragraph, ParagraphEmbedding
+from src.storage.models import Chapter, Paragraph, ParagraphEmbedding
+from src.storage.vector_schema import hnsw_index_uses_halfvec
 
 
 @dataclass(frozen=True)
@@ -42,26 +44,18 @@ def insert_paragraph_embeddings(
     session: Session,
     run_id: str,
     rows: Iterable[ParagraphEmbeddingRow],
+    embedding_dimension: int | None = None,
 ) -> int:
     """2026-08-14 用于重新生成当前 run 的全部自然段向量
 
-    先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key /
-    embedding_dimension 从 settings.models.paragraph_embedding 读取；
-    source_content_hash 对照 paragraphs 表按 paragraph_id 一次性查询，
-    缺失段落返回 None（不伪造溯源）。
+    先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key 从
+    settings.models.paragraph_embedding 读取，embedding_dimension 由调用方
+    传入（preprocess 传探测锁定的实测维度，2026-09-10 维度不再是配置）。
     """
     materialized = list(rows)
     session.execute(delete(ParagraphEmbedding).where(ParagraphEmbedding.run_id == run_id))
     if not materialized:
         return 0
-    paragraph_ids = [row.paragraph_id for row in materialized]
-    hash_rows = session.execute(
-        select(Paragraph.paragraph_id, Paragraph.content_hash).where(
-            Paragraph.run_id == run_id,
-            Paragraph.paragraph_id.in_(paragraph_ids),
-        )
-    ).all()
-    content_hash_by_paragraph = {int(row.paragraph_id): str(row.content_hash) for row in hash_rows}
     model_settings = settings.models.paragraph_embedding
     created_at = datetime.now().isoformat()
     insert_rows = [
@@ -70,8 +64,7 @@ def insert_paragraph_embeddings(
             "paragraph_id": row.paragraph_id,
             "embedding_vector": row.embedding_vector,
             "embedding_model_key": getattr(model_settings, "model", None),
-            "embedding_dimension": getattr(model_settings, "embedding_dim", None),
-            "source_content_hash": content_hash_by_paragraph.get(row.paragraph_id),
+            "embedding_dimension": embedding_dimension,
             "created_at": created_at,
         }
         for row in materialized
@@ -89,13 +82,22 @@ def search_similar_paragraphs(
     exclude_paragraph_ids: Sequence[int] | None = None,
     min_paragraph_id: int | None = None,
     max_paragraph_id: int | None = None,
+    before_chapter_sequence: int | None = None,
+    after_chapter_sequence: int | None = None,
 ) -> list[SimilarParagraphRow]:
     """2026-08-14 同 run 原文自然段 pgvector 检索（段落边界）。
 
     2026-08-13 P1-1 裸余弦 ``<=>``（升序）命中 HNSW，阈值 distance<=1-threshold；
     2026-08-14 二期 JOIN paragraphs（run_id/paragraph_id 对齐），以 paragraphs 为事实源。
+    2026-09-25 维度超 pgvector HNSW 上限（2000）时，距离表达式与建索引同型 cast 成
+    halfvec，否则规划器命中不了 halfvec 表达式索引。
     """
-    distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
+    if hnsw_index_uses_halfvec(len(query_embedding)):
+        distance_expr = cast(
+            ParagraphEmbedding.embedding_vector, HALFVEC(len(query_embedding))
+        ).cosine_distance(query_embedding)
+    else:
+        distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
     similarity_expr = 1 - distance_expr
     # round 避免 1 - 0.7 = 0.30000000000000004 的浮点噪声进入 SQL 字面量
     max_distance = round(1.0 - similarity_threshold, 6)
@@ -115,6 +117,10 @@ def search_similar_paragraphs(
             (ParagraphEmbedding.run_id == Paragraph.run_id)
             & (ParagraphEmbedding.paragraph_id == Paragraph.paragraph_id),
         )
+        .join(
+            Chapter,
+            (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
+        )
         .where(
             ParagraphEmbedding.run_id == run_id,
             ParagraphEmbedding.embedding_vector.is_not(None),
@@ -127,6 +133,10 @@ def search_similar_paragraphs(
         statement = statement.where(Paragraph.paragraph_id >= min_paragraph_id)
     if max_paragraph_id is not None:
         statement = statement.where(Paragraph.paragraph_id <= max_paragraph_id)
+    if before_chapter_sequence is not None:
+        statement = statement.where(Chapter.sequence < before_chapter_sequence)
+    if after_chapter_sequence is not None:
+        statement = statement.where(Chapter.sequence > after_chapter_sequence)
     statement = statement.order_by(
         distance_expr.asc(),
         Paragraph.paragraph_id.asc(),

@@ -148,7 +148,7 @@ export interface ChapterMetricSummary {
   narrative_function: string | null;
   pivot_moment: boolean | null;
   cliffhanger: boolean | null;
-  emotional_valence: string | null;
+  emotional_valence: number | null;
 }
 
 export interface BookAggregateStats {
@@ -171,7 +171,7 @@ export interface BookAggregateStats {
   chapter_narrative_function_share: Record<string, number>;
   chapter_pivot_rate: number | null;
   chapter_cliffhanger_rate: number | null;
-  chapter_emotional_valence_share: Record<string, number>;
+  chapter_emotional_valence_share: Record<string, number>; // 键为分值 -2..2 的字符串形式
 }
 
 export interface ChapterMetricsResponse {
@@ -213,17 +213,6 @@ export interface ChapterDialogue {
   length?: number | null;
 }
 
-export type ForeshadowingSetupKind =
-  | "异常物件"
-  | "异常规则"
-  | "隐藏身份"
-  | "明确承诺"
-  | "明确威胁"
-  | "倒计时"
-  | "未解释能力"
-  | "因果引线"
-  | "其他";
-
 export type ForeshadowingPayoffLikelihood = "high" | "medium" | "low";
 export type DiagnosisGenreLabel = "科幻" | "悬疑" | "历史" | "仙侠" | "玄幻" | "都市" | "通用";
 export type DiagnosisStyleLabel =
@@ -244,20 +233,17 @@ export type DiagnosisStyleLabel =
 
 export interface ChapterAnnotation {
   chapter_id: number;
-  emotional_valence?: string | null;
+  emotional_valence?: number | null;
   event_type?: string | null;
   pivot_moment?: boolean | null;
   cliffhanger?: boolean | null;
   has_foreshadowing?: boolean | null;
   is_strong_setup?: boolean | null;
-  foreshadowing_type?: string | null;
-  setup_kind?: ForeshadowingSetupKind | null;
   foreshadowing_desc?: string | null;
-  setup_summary?: string | null;
   why_unresolved_now?: string | null;
-  expected_payoff_family?: string | null;
-  payoff_likelihood?: ForeshadowingPayoffLikelihood | null;
-  linked_setup_id?: string | null;
+  payoff_likelihood?: ForeshadowingPayoffLikelihood | string | null;
+  // 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
+  foreshadowing_root_event_id?: string | null;
   characters: ChapterCharacter[];
   relations: ChapterRelation[];
   dialogues: ChapterDialogue[];
@@ -301,18 +287,17 @@ export interface DiagnosisResult {
   theme_color?: string | null;
 }
 
-export interface ForeshadowingThread {
-  setup_id: string;
+// 2026-09-13 伏笔即事件树：伏笔树 = isforeshadowing 根事件 + foreshadowing 挂树边
+export interface ForeshadowingTree {
+  root_event_id: string;
+  tree_id: string;
   first_chapter_id: number;
   last_chapter_id: number;
   anchor_chapter_ids: number[];
-  setup_summary: string;
-  setup_kind: ForeshadowingSetupKind | string;
-  expected_payoff_family: string;
-  payoff_likelihood: ForeshadowingPayoffLikelihood;
-  confidence: string | null;
-  strength: "high" | "medium" | string;
-  status: "open" | "reinforced" | "likely_paid_off" | "archived" | string;
+  description: string;
+  payoff_likelihood: ForeshadowingPayoffLikelihood | string | null;
+  strength: "high" | "medium" | string | null;
+  status: "open" | "reinforced" | "likely_paid_off" | string;
   active: boolean;
   latest_reason?: string | null;
   latest_why_unresolved_now?: string | null;
@@ -321,7 +306,8 @@ export interface ForeshadowingThread {
 // 知识图谱
 
 export interface GraphNode {
-  entity_id: number;
+  // 2026-09-19 图实体主键改 uuid（String(36)）
+  entity_id: string;
   name: string;
   entity_type: "character" | "location" | "item" | "organization";
   tags?: string[] | null;
@@ -336,8 +322,8 @@ export interface GraphNode {
 export interface GraphEdge {
   relation_id: string;
   state_chapter_id: number;
-  source_entity_id: number;
-  target_entity_id: number;
+  source_entity_id: string;
+  target_entity_id: string;
   source_name: string;
   target_name: string;
   relation_type: string;
@@ -356,11 +342,11 @@ export interface GraphChange {
   fact_id: string;
   effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
-  entity_id?: number | null;
+  entity_id?: string | null;
   entity_name?: string | null;
   relation_id?: string | null;
-  from_entity_id?: number | null;
-  to_entity_id?: number | null;
+  from_entity_id?: string | null;
+  to_entity_id?: string | null;
   from_name?: string | null;
   to_name?: string | null;
   relation_type?: string | null;
@@ -409,10 +395,15 @@ export interface TimelinePhase {
 // ── 事件森林新合同（一树一节点）与后端 src/api/models/event_timeline.py 严格对齐 ──
 
 export interface TimelineEventParticipant {
-  name: string;
+  name?: string;
   role: string;
-  entity_id?: number | null;
+  entity_id?: string | null;
   entity_type?: string | null;
+  entity?: {
+    name: string;
+    entity_id?: string | null;
+    entity_type?: string | null;
+  } | null;
   // 透传保留未知字段
   [key: string]: unknown;
 }
@@ -462,12 +453,12 @@ export interface TimelineEventCausalEdge {
 }
 
 export interface TimelineEventForeshadowingEdge {
-  setup_id: string;
-  setup_event_id: string;
+  root_event_id: string;
+  tree_id: string;
   payoff_event_id?: string | null;
   first_chapter_id: number;
   last_chapter_id: number;
-  setup_summary: string;
+  description: string;
   status: string;
   active: boolean;
 }
@@ -539,6 +530,235 @@ export interface ApiError {
   detail: string;
 }
 
+// Tab 级聚合（前端每 tab 一个 API；响应只含复合数据与展示主体，
+// 与后端 src/api/models/tabs.py 严格对齐）
+
+export interface TopicModelMetaInfo {
+  model_key: string;
+  library_version: string;
+  pipeline_version: string;
+  num_topics: number;
+  artifact_key: string;
+}
+
+export interface TopicDistributionEntry {
+  topic_id: number;
+  weight: number;
+}
+
+export interface ChapterTopicDistribution {
+  chapter_id: number;
+  chapter_sequence: number;
+  chapter_title: string;
+  token_total: number | null;
+  distribution: TopicDistributionEntry[] | null;
+}
+
+export interface KeywordScoreItem {
+  word: string;
+  score: number;
+}
+
+/** 主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词 + 诊断主题标签 */
+export interface TopicsOverviewTabResponse {
+  run_id: string;
+  model: TopicModelMetaInfo | null;
+  topics: Topic[];
+  distribution: TopicDistributionEntry[] | null;
+  chapters: ChapterTopicDistribution[];
+  keywords: KeywordScoreItem[];
+  /** 诊断切片：LLM 主题命名，按 topic_id 顺序对齐 topics */
+  topic_labels: string[] | null;
+  unavailable_reason: string | null;
+  keyword_unavailable_reason: string | null;
+}
+
+/** 实体与短语 tab：仅聚合统计，不含实体候选 span 明细 */
+export interface EntitySurfaceCount {
+  surface_text: string;
+  entity_type: string;
+  count: number;
+}
+
+export interface LinguisticEntitiesTabResponse {
+  run_id: string;
+  count_by_type: Record<string, number>;
+  surface_top: EntitySurfaceCount[];
+  total_char_count: number;
+  metric_hit_count: number;
+  fixed_phrase_density: number | null;
+  four_char_candidate_count: number;
+  total_hits: number;
+  unavailable_reason: string | null;
+}
+
+/** 仪表盘 tab：原 8 个并发请求合并为一次拉取 */
+export interface DashboardTabResponse {
+  run_id: string;
+  narrative_structure: NarrativeStructureMetrics | null;
+  emotion_stats: EmotionStatsMetrics | null;
+  character_stats: CharacterStatsMetrics | null;
+  style_stats: StyleStatsMetrics | null;
+  chapter_metrics: ChapterMetricsResponse | null;
+  topics: Topic[];
+  diagnosis: DiagnosisResult | null;
+  emotion_trend: EmotionTrendWindow[];
+}
+
+/** 节奏张力 tab：段落曲线 + 叙事结构高潮参数 */
+export interface RhythmTabResponse {
+  run_id: string;
+  curves: ParagraphCurvePoint[];
+  narrative_structure: NarrativeStructureMetrics | null;
+}
+
+/** 功能与焦点 tab：角色功能分布 + 诊断焦点结构切片 */
+export interface CharacterFunctionTabResponse {
+  run_id: string;
+  characters: Character[];
+  focus_structure: "single" | "dual" | "ensemble" | null;
+  focus_characters: string[] | null;
+  arc_scores: Record<string, number> | null;
+}
+
+/** 图谱页登场次数切片 */
+export interface CharacterAppearance {
+  name: string;
+  appearance_count: number;
+}
+
+/** 图结构指标（PageRank/HITS/Louvain，查询时计算） */
+export interface GraphAlgorithmMetrics {
+  run_id: string;
+  unavailable_reason: string | null;
+  algorithm: Record<string, unknown>;
+  pagerank: Record<string, number>;
+  hits: Record<string, unknown>;
+  communities: Record<string, unknown>;
+}
+
+/** 图谱 tab：图快照 + 登场次数 + 图算法指标 + 变化总数 */
+export interface GraphNetworkTabResponse {
+  run_id: string;
+  snapshot: GraphData | null;
+  character_appearances: CharacterAppearance[];
+  graph_metrics: GraphAlgorithmMetrics | null;
+  change_total: number;
+  unavailable_reason: string | null;
+}
+
+// 主题全量分布（赛道 D 单源端点：演进/迁移/情绪 tab 数据源）
+
+export interface TopicSeriesPoint {
+  paragraph_id: number;
+  chapter_id: number;
+  chapter_sequence: number;
+  start_position: number;
+  token_count: number;
+  /** 完整 K 维权重，下标即 topic_id */
+  weights: number[];
+}
+
+export interface TopicSeriesResponse {
+  run_id: string;
+  model: TopicModelMetaInfo | null;
+  num_topics: number | null;
+  points: TopicSeriesPoint[];
+  unavailable_reason: string | null;
+}
+
+export interface TopicShiftConfig {
+  window_size: number;
+  min_tokens_per_window: number;
+  score_threshold: number;
+  max_candidates: number;
+}
+
+export interface TopicShiftCandidate {
+  position: number;
+  paragraph_start: number;
+  paragraph_end: number;
+  /** 以 2 为底的 JS 散度，值域 [0,1] */
+  score: number;
+  window_token_total: number;
+}
+
+export interface TopicShiftResponse {
+  candidates: TopicShiftCandidate[];
+  config: TopicShiftConfig;
+  unavailable_reason: string | null;
+}
+
+export interface TopicEmotionEntry {
+  topic_id: number;
+  emotion: number | null;
+  weighted_token_total: number | null;
+}
+
+export interface TopicEmotionResponse {
+  run_id: string;
+  model: TopicModelMetaInfo | null;
+  emotion: TopicEmotionEntry[];
+  unavailable_reason: string | null;
+}
+
+// 语言特征（赛道 A/B/C 单源端点：词法句法/词向量 tab 数据源）
+
+export interface LinguisticGroupStats {
+  token_total: number | null;
+  sentence_total: number | null;
+  word_length_ratios: Record<string, number> | null;
+  pos_ratios: Record<string, number> | null;
+  sentence_pattern_ratios: Record<string, number> | null;
+  avg_dependency_depth: number | null;
+  max_dependency_depth: number | null;
+  dependency_relation_ratios: Record<string, number> | null;
+  dependency_root_count: number | null;
+  // 段落级监督边界（按书拟合；标签不足/类别单一时为 null，跨书口径不可比）
+  boundary_pos_score_sum: number | null;
+  boundary_neg_score_sum: number | null;
+}
+
+export interface ChapterLinguisticStats extends LinguisticGroupStats {
+  chapter_id: number;
+}
+
+export interface LinguisticFeaturesResponse extends LinguisticGroupStats {
+  run_id: string;
+  paragraph_count: number;
+  chapters: ChapterLinguisticStats[];
+  unavailable_reason: string | null;
+}
+
+export interface Word2VecModelInfo {
+  embedding_dimension: number;
+  vocabulary_size: number;
+  artifact_scope: string;
+}
+
+export interface PosCoverageEntry {
+  pos_group: string;
+  source_token_total: number;
+  in_vocabulary_token_total: number;
+  coverage_ratio: number | null;
+}
+
+export interface PosCentroidEntry {
+  pos_group: string;
+  weighted_token_total: number;
+  embedding_vector: number[];
+}
+
+export interface Word2VecStatsResponse {
+  run_id: string;
+  model: Word2VecModelInfo | null;
+  pos_coverage: PosCoverageEntry[];
+  pos_centroids: PosCentroidEntry[];
+  /** POS 质心余弦相似度矩阵，行序与 pos_centroids 一致；质心不足 2 组时为 null */
+  pos_similarity_matrix: number[][] | null;
+  unavailable_reason: string | null;
+}
+
 // 分页
 
 export interface PaginatedResponse<T> {
@@ -556,4 +776,64 @@ export interface BatchDeleteRequest {
 export interface BatchDeleteResponse {
   deleted: string[];
   failed: string[];
+}
+
+// 设置模块（/api/settings）
+
+export type SettingFieldType = "number" | "integer" | "boolean" | "enum" | "string";
+
+export interface SettingSectionSpec {
+  id: string;
+  title: string;
+  description: string;
+  order: number;
+}
+
+export interface SettingFieldSpec {
+  /** settings.json 中的结构化路径，如 ["models", "annotation", "temperature"] */
+  path: string[];
+  field_type: SettingFieldType;
+  label: string;
+  description: string;
+  min_value: number | null;
+  max_value: number | null;
+  step: number | null;
+  enum_values: string[];
+  nullable: boolean;
+  editable: boolean;
+}
+
+export interface SettingsSchemaResponse {
+  sections: SettingSectionSpec[];
+  fields: SettingFieldSpec[];
+}
+
+export type SettingSource = "default" | "file";
+
+export interface SettingsViewResponse {
+  /** 当前生效值（默认值 ← settings.json ← env 凭据）；api_key 为打码值（"••••" 前缀） */
+  values: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  /** 键为 path.join("/") */
+  sources: Record<string, SettingSource>;
+}
+
+export interface TaskEnvPatch {
+  base_url?: string | null;
+  model?: string | null;
+  /** null/缺省=不修改；""=整组清空；非空=设置 */
+  api_key?: string | null;
+}
+
+export interface ModelEnvUpdate {
+  model?: TaskEnvPatch | null;
+  embedding_model?: TaskEnvPatch | null;
+  ltp_model_dir?: string | null;
+}
+
+export interface ModelProviderTestResponse {
+  ok: boolean;
+  latency_ms: number | null;
+  model_ids: string[];
+  error: string | null;
 }

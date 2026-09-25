@@ -1,5 +1,7 @@
 """规范名选举纯函数测试"""
 
+from uuid import NAMESPACE_DNS, uuid5
+
 from sqlalchemy import select
 
 from src.storage.models import (
@@ -14,35 +16,52 @@ from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
 class FakeEntity:
-    def __init__(self, entity_id: int, canonical_name: str) -> None:
+    def __init__(self, entity_id: str, canonical_name: str) -> None:
         self.entity_id = entity_id
         self.canonical_name = canonical_name
         self.attributes: dict = {}
 
 
+def _fake_id(serial: int) -> str:
+    """2026-09-19 用于构造字典序与序号一致的测试 uuid（uuid 主键）"""
+    return f"00000000-0000-0000-0000-{serial:012d}"
+
+
 def test_election_marks_single_component() -> None:
-    entities = [FakeEntity(1, "石轩"), FakeEntity(2, "小石头"), FakeEntity(3, "张三")]
-    flags = elect_representatives(entities, pairs=[(1, 2)])
-    assert flags == {1: True, 2: False, 3: False}
+    entities = [FakeEntity(_fake_id(1), "石轩"), FakeEntity(_fake_id(2), "小石头"), FakeEntity(_fake_id(3), "张三")]
+    flags = elect_representatives(entities, pairs=[(_fake_id(1), _fake_id(2))])
+    assert flags == {_fake_id(1): True, _fake_id(2): False, _fake_id(3): False}
 
 
 def test_election_chain_converges_to_min_id() -> None:
-    entities = [FakeEntity(100, "甲"), FakeEntity(200, "乙"), FakeEntity(300, "丙")]
-    flags = elect_representatives(entities, pairs=[(100, 200), (200, 300)])
-    assert flags[100] is True
-    assert flags[200] is False
-    assert flags[300] is False
+    entities = [FakeEntity(_fake_id(100), "甲"), FakeEntity(_fake_id(200), "乙"), FakeEntity(_fake_id(300), "丙")]
+    flags = elect_representatives(
+        entities,
+        pairs=[(_fake_id(100), _fake_id(200)), (_fake_id(200), _fake_id(300))],
+    )
+    assert flags[_fake_id(100)] is True
+    assert flags[_fake_id(200)] is False
+    assert flags[_fake_id(300)] is False
 
 
 def test_election_disjoint_components() -> None:
-    entities = [FakeEntity(1, "A"), FakeEntity(2, "B"), FakeEntity(3, "C"), FakeEntity(4, "D")]
-    flags = elect_representatives(entities, pairs=[(1, 2), (3, 4)])
-    assert flags[1] is True and flags[2] is False
-    assert flags[3] is True and flags[4] is False
+    entities = [
+        FakeEntity(_fake_id(1), "A"),
+        FakeEntity(_fake_id(2), "B"),
+        FakeEntity(_fake_id(3), "C"),
+        FakeEntity(_fake_id(4), "D"),
+    ]
+    flags = elect_representatives(
+        entities,
+        pairs=[(_fake_id(1), _fake_id(2)), (_fake_id(3), _fake_id(4))],
+    )
+    assert flags[_fake_id(1)] is True and flags[_fake_id(2)] is False
+    assert flags[_fake_id(3)] is True and flags[_fake_id(4)] is False
 
 
-def _add_entity(session, run_id: str, name: str) -> int:
+def _add_entity(session, run_id: str, name: str) -> str:
     entity = GraphEntity(
+        entity_id=str(uuid5(NAMESPACE_DNS, f"novel-annotation-entity:{run_id}:{name.casefold()}")),
         run_id=run_id,
         canonical_name=name,
         entity_type="character",
@@ -53,7 +72,7 @@ def _add_entity(session, run_id: str, name: str) -> int:
     )
     session.add(entity)
     session.flush()
-    return int(entity.entity_id)
+    return str(entity.entity_id)
 
 
 def test_reelect_uses_latest_chapter_state_only(db_session) -> None:
@@ -121,7 +140,7 @@ def test_reelect_uses_latest_chapter_state_only(db_session) -> None:
     db_session.commit()
 
     flags = {
-        int(row.entity_id): row.attributes.get("is_representative")
+        str(row.entity_id): row.attributes.get("is_representative")
         for row in db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
     }
     # 最近章节已 break：甲/乙不再属于同一分量

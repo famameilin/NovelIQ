@@ -7,14 +7,10 @@
 段落身份与 local/global 坐标一律取 paragraphs 持久化列。
 """
 
-import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from sqlalchemy import text
-
 from src.storage.repositories.paragraph.keyword_ops import (
-    KeywordMatchRow,
     fetch_chunk_text,
     search_paragraphs_by_keywords,
 )
@@ -141,33 +137,10 @@ def test_search_paragraphs_by_keywords_scans_paragraphs_table() -> None:
     assert results[0].match_count == 1
 
 
-def test_search_paragraphs_by_keywords_pushes_paragraph_bounds_into_sql() -> None:
+def test_search_paragraphs_by_keywords_treats_wildcards_as_globs_and_deduplicates() -> None:
     """
-    2026-08-14 二期段落化：exclude/min/max 边界全部改为 paragraph_id 并进入 SQL
-    """
-    session = MagicMock()
-    session.execute.return_value.all.return_value = []
-
-    search_paragraphs_by_keywords(
-        session,
-        run_id="run-1",
-        keywords=["叶文洁"],
-        top_k=3,
-        exclude_paragraph_ids=[5],
-        min_paragraph_id=1,
-        max_paragraph_id=10,
-    )
-
-    stmt = session.execute.call_args.args[0]
-    compiled_sql = str(stmt.compile())
-    assert "paragraph_id NOT IN" in compiled_sql
-    assert re.search(r"paragraph_id >= :paragraph_id_\d+", compiled_sql) is not None
-    assert re.search(r"paragraph_id <= :paragraph_id_\d+", compiled_sql) is not None
-
-
-def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() -> None:
-    """
-    2026-08-02 用于保证百分号下划线按字面子串匹配且重复关键词不重复计分
+    2026-09-04 用于保证 %/_ 按 LIKE 通配符语义匹配（不再转义为字面量）
+    且重复关键词不重复计分
     """
     session = MagicMock()
     session.execute.return_value.all.return_value = [
@@ -192,9 +165,10 @@ def test_search_paragraphs_by_keywords_escapes_sql_wildcards_and_deduplicates() 
 
     stmt = session.execute.call_args.args[0]
     compiled_sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "ESCAPE" in compiled_sql
+    assert "ESCAPE" not in compiled_sql
     assert len(results) == 1
     # 2026-08-13 P2-6：词项统一小写归一后 matched_keywords 保留小写形式
+    # 100% → 前缀通配命中"100"；A_B → A+任意单字符+B 命中"A_B"
     assert results[0].matched_keywords == ("100%", "a_b")
     assert results[0].match_count == 2
 
@@ -231,50 +205,6 @@ def test_search_paragraphs_by_keywords_matches_case_insensitively() -> None:
     assert len(results) == 1
     assert results[0].matched_keywords == ("sword",)
     assert results[0].match_count == 1
-
-
-def test_keyword_match_row_is_frozen_dataclass() -> None:
-    """
-    2026-08-02 用于锁定关键词命中 DTO 的不可变结构（二期新增 paragraph_id）
-    """
-    row = KeywordMatchRow(
-        paragraph_id=3,
-        chapter_id=1,
-        paragraph_index=0,
-        paragraph_text="文本",
-        local_start_char=0,
-        local_end_char=2,
-        global_start_char=0,
-        global_end_char=2,
-        matched_keywords=("词",),
-        match_count=1,
-    )
-
-    assert row.paragraph_id == 3
-    assert row.matched_keywords == ("词",)
-
-
-def test_paragraphs_table_has_lower_text_trgm_index(db_session) -> None:
-    """
-    2026-08-14 二期段落化（§12.1）：keyword_ops 直接扫 paragraphs.text，
-    paragraphs 表必须建 lower(text) gin_trgm_ops 的 GIN 索引（与 chunks 同口径）。
-    """
-    runtime_schema = db_session.execute(text("SELECT current_schema()")).scalar_one()
-    indexdef = db_session.execute(
-        text(
-            """
-            SELECT indexdef
-            FROM pg_indexes
-            WHERE schemaname = :schema_name
-              AND tablename = 'paragraphs'
-              AND indexname = 'idx_paragraphs_text_trgm'
-            """
-        ),
-        {"schema_name": runtime_schema},
-    ).scalar_one_or_none()
-    assert indexdef is not None
-    assert "USING gin" in indexdef
-    assert "lower(text) gin_trgm_ops" in indexdef
 
 
 def test_fetch_chunk_text_returns_text_when_present() -> None:

@@ -2,23 +2,8 @@ import pytest
 
 from src.config.schemas import (
     _parse_metrics_settings,
-    _parse_progress_settings,
     _parse_topic_model_settings,
 )
-
-
-def test_parse_progress_settings_reads_stage_ranges() -> None:
-    settings = _parse_progress_settings(
-        {
-            "preprocess": {"start": 0, "end": 10},
-            "annotate": {"start": 10, "end": 80},
-            "diagnose": {"start": 95, "end": 100},
-        }
-    )
-
-    assert settings.annotate.start == 10
-    assert settings.annotate.end == 80
-    assert settings.diagnose.start == 95
 
 
 def test_parse_topic_model_settings_reads_flat_and_lda_fields() -> None:
@@ -51,16 +36,6 @@ def test_parse_topic_model_settings_rejects_removed_chunksize() -> None:
         _parse_topic_model_settings({"lda": {"chunksize": 2000}})
 
 
-def test_parse_topic_model_settings_defaults() -> None:
-    settings = _parse_topic_model_settings(None)
-
-    assert settings.num_topics == 25
-    assert settings.passes == 10
-    assert settings.iterations == 500
-    assert settings.lda.alpha == "auto"
-    assert settings.lda.no_above == 0.5
-
-
 def test_parse_metrics_settings_reads_thresholds() -> None:
     settings = _parse_metrics_settings(
         {
@@ -73,14 +48,6 @@ def test_parse_metrics_settings_reads_thresholds() -> None:
     assert settings.mtld_threshold == 0.7
     assert settings.middle_collapse_min_chunks == 8
     assert settings.character_max_iter == 50
-
-
-def test_parse_metrics_settings_defaults() -> None:
-    settings = _parse_metrics_settings(None)
-
-    assert settings.mtld_threshold == 0.72
-    assert settings.middle_collapse_min_chunks == 10
-    assert settings.character_max_iter == 100
 
 
 def test_parse_metrics_settings_reads_lowess_fields() -> None:

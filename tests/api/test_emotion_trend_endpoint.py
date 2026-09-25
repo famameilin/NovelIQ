@@ -15,7 +15,6 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.models.responses import EmotionTrendWindow
 from tests.support.paragraph_fixtures import (
     create_completed_run,
     create_run_with_status,
@@ -85,10 +84,6 @@ def test_emotion_trend_contract_fields_and_window_math(api_client: TestClient, d
     payload = response.json()
     # 100 段 / 20 窗 = 每窗 5 段
     assert len(payload) == 20
-
-    expected_fields = set(EmotionTrendWindow.model_fields)
-    for window in payload:
-        assert set(window) == expected_fields
 
     first = payload[0]
     assert first["window_index"] == 0

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from loguru import logger
+
 from src.chapters.cn2int import extract_number
 from src.chapters.constants import (
     CHAPTER_RE,
@@ -70,6 +72,27 @@ def collect_candidates(
             content = match.group(content_group) or ""
             number = extract_number(label)
 
+            if content[:1] in SENTENCE_END_CHARS:
+                # 标题位内容以句末标点开头（如"第十章。完。"拆成 标签"第十章"+内容"。完。"）：
+                # 正文句子恰好以层级单位开头，整行是正文而非标题，丢弃候选
+                logger.warning("标题位内容以句末标点开头，判为正文丢弃候选: {}", raw_line[:30])
+                continue
+
+            body_start_char, degenerate = _fix_title_body_same_line(
+                raw_line,
+                content,
+                match.start(content_group) - start_char,
+                start_char,
+                line_end,
+                config,
+            )
+            if degenerate:
+                # 同行截断后标题退化到 ≤1 字（如"第二回合。"被 HUI_RE 拆成
+                # 标签"第二回"+内容"合。马骁…"，首个句号截断只剩"合"）：
+                # 整行是正文而非标题，丢弃候选
+                logger.warning("同行截断后标题退化，判为正文丢弃候选: {}", raw_line[:30])
+                continue
+
             candidates.append(
                 ChapterCandidate(
                     level=level,
@@ -79,14 +102,7 @@ def collect_candidates(
                     display_index_label=_build_display_index_label(level, number),
                     number=number,
                     start_char=start_char,
-                    body_start_char=_fix_title_body_same_line(
-                        raw_line,
-                        content,
-                        match.start(content_group) - start_char,
-                        start_char,
-                        line_end,
-                        config,
-                    ),
+                    body_start_char=body_start_char,
                 )
             )
 
@@ -109,7 +125,7 @@ def _resolve_display_title(
     config: ChapterConfig,
 ) -> str:
     """解析展示标题：标题正文同行时与正文起点截断保持一致"""
-    _, display_title = _resolve_same_line_break(raw_line, content, 0, start_char, line_end, config)
+    _, display_title, _ = _resolve_same_line_break(raw_line, content, 0, start_char, line_end, config)
     return display_title
 
 
@@ -120,14 +136,16 @@ def _fix_title_body_same_line(
     start_char: int,
     line_end: int,
     config: ChapterConfig,
-) -> int:
-    """标题正文同行修复：返回正文起点（绝对偏移）
+) -> tuple[int, bool]:
+    """标题正文同行修复：返回 (正文起点绝对偏移, 截断后标题是否退化)
 
     标题内容过长或含句末标点时，认为该行混入了正文，
     在第一个断点处截断标题，正文从断点后继续，避免丢正文。
     """
-    body_start, _ = _resolve_same_line_break(raw_line, content, content_offset, start_char, line_end, config)
-    return body_start
+    body_start, _, degenerate = _resolve_same_line_break(
+        raw_line, content, content_offset, start_char, line_end, config
+    )
+    return body_start, degenerate
 
 
 def _resolve_same_line_break(
@@ -137,35 +155,37 @@ def _resolve_same_line_break(
     start_char: int,
     line_end: int,
     config: ChapterConfig,
-) -> tuple[int, str]:
-    """标题正文同行修复：返回 (正文起点绝对偏移, 截断后的展示标题)
+) -> tuple[int, str, bool]:
+    """标题正文同行修复：返回 (正文起点绝对偏移, 截断后的展示标题, 标题是否退化)
 
     content_offset 为 content 在 raw_line 内的起始偏移（基于 match.span 计算，
     避免 content 恰为标题 label 子串时 find 定位到标题内部）。
+    退化 = 截断后标题 ≤1 字，说明标签误吞了正文词（如"第二回合"拆出"合"），
+    整行实为正文。
     """
     display_title = content.strip()
     if not content:
-        return line_end, display_title
+        return line_end, display_title, False
 
     needs_fix = len(content) > config.max_reasonable_title_length or (
         len(content) > config.title_body_min_chars and any(ch in content for ch in SENTENCE_END_CHARS)
     )
     if not needs_fix:
-        return line_end, display_title
+        return line_end, display_title, False
 
     break_index = min(
         (content.find(ch) for ch in TITLE_BREAK_CHARS if ch in content),
         default=-1,
     )
     if break_index <= 0:
-        return line_end, display_title
+        return line_end, display_title, False
 
     truncated = content[:break_index].strip()
     if not truncated:
-        return line_end, display_title
+        return line_end, display_title, False
 
     body_start = start_char + content_offset + break_index + 1
-    return body_start, truncated
+    return body_start, truncated, len(truncated) <= 1
 
 
 def _deduplicate(candidates: list[ChapterCandidate]) -> list[ChapterCandidate]:

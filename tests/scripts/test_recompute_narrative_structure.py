@@ -38,7 +38,7 @@ def test_build_aligned_three_act_diagnostics_filters_null_tension_and_aligns_by_
         event_types=["铺垫", "转折", "铺垫", "冲突"],
         cliffhangers=[0, 1, 0, 1],
         pivot_moments=[0, 1, 0, 0],
-        emotional_valences=["neutral", "neutral", "neutral", "neutral"],
+        emotional_valences=[0, 0, 0, 0],
     )
     tension_data = TensionData(
         chapter_ids=[11, 13, 10, 12],

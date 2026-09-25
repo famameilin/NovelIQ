@@ -9,6 +9,10 @@ import type { Character } from "@/api/types";
 export interface CharacterTableProps {
   /** 角色列表数据 */
   characters: Character[];
+  /** 当前选中角色名称 */
+  selectedCharacterName?: string | null;
+  /** 选择角色回调 */
+  onSelectCharacter?: (character: Character) => void;
   className?: string;
 }
 
@@ -45,6 +49,8 @@ function SortIcon({
  */
 export function CharacterTable({
   characters,
+  selectedCharacterName,
+  onSelectCharacter,
   className,
 }: CharacterTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("appearance_count");
@@ -155,10 +161,19 @@ export function CharacterTable({
               sortedCharacters.map((char) => (
                 <TableRow
                   key={char.name}
+                  data-state={selectedCharacterName === char.name ? "selected" : undefined}
                   className={cn(
                     "cursor-pointer transition-colors hover:bg-surface-hover",
                     char.is_focus_character && "bg-primary/5"
                   )}
+                  onClick={() => onSelectCharacter?.(char)}
+                  onKeyDown={(event) => {
+                    if ((event.key === "Enter" || event.key === " ") && onSelectCharacter) {
+                      event.preventDefault();
+                      onSelectCharacter(char);
+                    }
+                  }}
+                  tabIndex={onSelectCharacter ? 0 : undefined}
                 >
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">

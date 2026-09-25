@@ -152,7 +152,7 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             run_id,
             chapter_id=1,
             narrative_function="转折",
-            emotional_valence="mild_negative",
+            emotional_valence=-1,
             pivot_moment=True,
             cliffhanger=False,
         )
@@ -161,7 +161,7 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             run_id,
             chapter_id=2,
             narrative_function="铺垫",
-            emotional_valence="neutral",
+            emotional_valence=0,
             pivot_moment=False,
             cliffhanger=True,
         )
@@ -170,7 +170,7 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             run_id,
             chapter_id=3,
             narrative_function="冲突",
-            emotional_valence="strong_positive",
+            emotional_valence=2,
             pivot_moment=False,
             cliffhanger=False,
         )
@@ -274,14 +274,14 @@ def test_chapter_metrics_annotation_labels_mapped_per_chapter(api_client: TestCl
     assert chapters[1]["narrative_function"] == "转折"
     assert chapters[1]["pivot_moment"] is True
     assert chapters[1]["cliffhanger"] is False
-    assert chapters[1]["emotional_valence"] == "mild_negative"
+    assert chapters[1]["emotional_valence"] == -1
 
     assert chapters[2]["narrative_function"] == "铺垫"
     assert chapters[2]["pivot_moment"] is False
     assert chapters[2]["cliffhanger"] is True
 
     assert chapters[3]["narrative_function"] == "冲突"
-    assert chapters[3]["emotional_valence"] == "strong_positive"
+    assert chapters[3]["emotional_valence"] == 2
 
 
 def test_chapter_metrics_without_annotations_returns_none_labels(api_client: TestClient, db_session) -> None:
@@ -325,9 +325,9 @@ def test_chapter_metrics_book_aggregate_fields(api_client: TestClient, db_sessio
         "冲突": pytest.approx(1.0 / 3),
     }
     assert book["chapter_emotional_valence_share"] == {
-        "mild_negative": pytest.approx(1.0 / 3),
-        "neutral": pytest.approx(1.0 / 3),
-        "strong_positive": pytest.approx(1.0 / 3),
+        "-1": pytest.approx(1.0 / 3),
+        "0": pytest.approx(1.0 / 3),
+        "2": pytest.approx(1.0 / 3),
     }
     assert book["chapter_pivot_rate"] == pytest.approx(1.0 / 3)
     assert book["chapter_cliffhanger_rate"] == pytest.approx(1.0 / 3)

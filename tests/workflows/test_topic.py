@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.engine import Row
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -107,14 +108,37 @@ class TestTopicModel:
         assert topics == 3
         assert self._count_paragraph_topics() > 0
 
-        # 每段写入 (paragraph_id, topic_id, topic_weight, inference_token_count)
-        topic_rows = ParagraphRepository(self.db_session).fetch_paragraph_topics(self.run_id)
-        assert len(topic_rows) > 0
-        assert all(row.inference_token_count > 0 for row in topic_rows)
+        # §5.10 完整 K 维分布：每段恰 K 行、topic_id 覆盖 0..K-1、权重和守恒
+        paragraph_repo = ParagraphRepository(self.db_session)
+        topic_rows = paragraph_repo.fetch_paragraph_topics(self.run_id)
+        assert len(topic_rows) == 10 * 3
+        by_paragraph: dict[int, list[Row]] = {}
+        for row in topic_rows:
+            by_paragraph.setdefault(row.paragraph_id, []).append(row)
+        assert len(by_paragraph) == 10
+        for _, rows in by_paragraph.items():
+            assert [row.topic_id for row in sorted(rows, key=lambda r: r.topic_id)] == [0, 1, 2]
+            assert sum(row.topic_weight for row in rows) == pytest.approx(1.0, abs=1e-6)
 
-        paragraph_rows = ParagraphRepository(self.db_session).fetch_paragraph_rows(self.run_id)
+        # §5.9 每段一行推断状态：source_token_count 对齐段落事实源
+        inference_rows = paragraph_repo.fetch_paragraph_topic_inferences(self.run_id)
+        assert len(inference_rows) == 10
+        paragraph_rows = paragraph_repo.fetch_paragraph_rows(self.run_id)
         token_counts = {row.paragraph_id: row.token_count for row in paragraph_rows}
-        assert all(row.inference_token_count == token_counts[row.paragraph_id] for row in topic_rows)
+        assert all(row.inference_status == "complete" for row in inference_rows)
+        assert all(row.source_token_count == token_counts[row.paragraph_id] for row in inference_rows)
+        assert all(row.distribution_sum == pytest.approx(1.0, abs=1e-6) for row in inference_rows)
+
+        # §5.8 模型契约单行：参数快照与 artifact key 齐备
+        model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
+        assert model_run is not None
+        assert model_run.num_topics == 3
+        assert model_run.model_key == "gensim-lda"
+        assert model_run.parameters["num_topics"] == 3
+        assert model_run.parameters["passes"] == 5
+        assert model_run.training_document_count == 10
+        assert model_run.inference_paragraph_count == 10
+        assert model_run.dictionary_size > 0
 
     @pytest.mark.asyncio()
     async def test_short_paragraph_is_inferred_but_excluded_from_training(self, monkeypatch) -> None:
@@ -155,10 +179,25 @@ class TestTopicModel:
         assert topics == 2
         assert len(captured_docs) == 1
         assert len(captured_docs[0]) == 1
+
+        # §5.9 短段仍推断（预处理后有词元）：每段一行状态、完整 2 维分布
+        inference_rows = paragraph_repo.fetch_paragraph_topic_inferences(self.run_id)
+        assert len(inference_rows) == 2
+        by_paragraph = {row.paragraph_id: row for row in inference_rows}
+        short_inference = by_paragraph[short_row.paragraph_id]
+        assert short_inference.inference_status == "complete"
+        assert short_inference.source_token_count == 1
+
         topic_rows = paragraph_repo.fetch_paragraph_topics(self.run_id)
         short_topic_rows = [row for row in topic_rows if row.paragraph_id == short_row.paragraph_id]
-        assert short_topic_rows
-        assert all(row.inference_token_count == 1 for row in short_topic_rows)
+        assert len(short_topic_rows) == 2
+        assert sum(row.topic_weight for row in short_topic_rows) == pytest.approx(1.0, abs=1e-6)
+
+        # §5.8 训练文档数只计达标段落
+        model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
+        assert model_run is not None
+        assert model_run.training_document_count == 1
+        assert model_run.inference_paragraph_count == 2
 
     @pytest.mark.asyncio()
     async def test_topic_model_force_rerun(self) -> None:

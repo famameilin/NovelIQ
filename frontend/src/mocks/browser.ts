@@ -25,21 +25,25 @@ import {
 } from "./handlers/analysis";
 import {
   charactersHandler,
-  paragraphCurvesHandler,
   emotionTrendHandler,
-  chapterMetricsHandler,
-  topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
-  graphHandler,
   graphChangesHandler,
   timelineHandler,
-  narrativeStructureHandler,
-  emotionStatsHandler,
-  characterStatsHandler,
-  styleStatsHandler,
-  globalStatsHandler,
+  topicSeriesHandler,
+  topicShiftsHandler,
+  topicEmotionHandler,
 } from "./handlers/results";
+import { linguisticFeaturesHandler, linguisticWord2vecHandler } from "./handlers/linguistic";
+import { settingsEnvHandler, settingsSchemaHandler, settingsTestHandler, settingsUpdateHandler, settingsViewHandler } from "./handlers/settings";
+import {
+  characterFunctionTabHandler,
+  dashboardTabHandler,
+  graphNetworkTabHandler,
+  linguisticEntitiesTabHandler,
+  rhythmTabHandler,
+  topicsOverviewTabHandler,
+} from "./handlers/tabs";
 
 export const worker = setupWorker(
   // 小说
@@ -58,20 +62,29 @@ export const worker = setupWorker(
   deleteTaskHandler,
   batchDeleteTasksHandler,
   cancelTaskHandler,
-  // 结果
+  // 结果（单源 tab 数据源）
   charactersHandler,
-  paragraphCurvesHandler,
   emotionTrendHandler,
-  chapterMetricsHandler,
-  topicsHandler,
   diagnosisHandler,
   foreshadowingThreadsHandler,
-  graphHandler,
   graphChangesHandler,
   timelineHandler,
-  narrativeStructureHandler,
-  emotionStatsHandler,
-  characterStatsHandler,
-  styleStatsHandler,
-  globalStatsHandler,
+  topicSeriesHandler,
+  topicShiftsHandler,
+  topicEmotionHandler,
+  linguisticFeaturesHandler,
+  linguisticWord2vecHandler,
+  // Tab 级聚合
+  dashboardTabHandler,
+  rhythmTabHandler,
+  characterFunctionTabHandler,
+  graphNetworkTabHandler,
+  topicsOverviewTabHandler,
+  linguisticEntitiesTabHandler,
+  // 设置
+  settingsSchemaHandler,
+  settingsViewHandler,
+  settingsUpdateHandler,
+  settingsEnvHandler,
+  settingsTestHandler,
 );

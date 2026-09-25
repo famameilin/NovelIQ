@@ -9,8 +9,11 @@ from src.api.models.graph import GraphSnapshotResponse
 from src.api.services.results_queries.graph import _fetch_graph_snapshot
 
 
-def _entity(entity_id: int, name: str, *, representative: bool = False) -> SimpleNamespace:
-    """2026-08-11 用于构造实体快照桩（含规范名标记属性）"""
+def _entity(entity_id: str, name: str, *, representative: bool = False) -> SimpleNamespace:
+    """2026-08-11 用于构造实体快照桩（含规范名标记属性）
+
+    2026-09-19 entity_id 随图实体主键改 uuid（String(36)），桩一律用 uuid 字符串。
+    """
     return SimpleNamespace(
         entity_id=entity_id,
         name=name,
@@ -27,8 +30,8 @@ def _entity(entity_id: int, name: str, *, representative: bool = False) -> Simpl
 def _relation(
     *,
     relation_id: str,
-    from_entity_id: int,
-    to_entity_id: int,
+    from_entity_id: str,
+    to_entity_id: str,
     from_name: str,
     to_name: str,
     relation_type: str = "友情",
@@ -63,15 +66,15 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
     snapshot = SimpleNamespace(
         chapter_boundary=boundary,
         entities=[
-            _entity(67, "伯安", representative=True),
-            _entity(97, "贺重明"),
-            _entity(38, "贺伯安"),
+            _entity("00000000-0000-0000-0000-000000000067", "伯安", representative=True),
+            _entity("00000000-0000-0000-0000-000000000097", "贺重明"),
+            _entity("00000000-0000-0000-0000-000000000038", "贺伯安"),
         ],
         relations=[
             _relation(
                 relation_id="r-1",
-                from_entity_id=67,
-                to_entity_id=97,
+                from_entity_id="00000000-0000-0000-0000-000000000067",
+                to_entity_id="00000000-0000-0000-0000-000000000097",
                 from_name="伯安",
                 to_name="贺重明",
                 relation_type="同一人物",
@@ -79,8 +82,8 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
             ),
             _relation(
                 relation_id="r-2",
-                from_entity_id=67,
-                to_entity_id=38,
+                from_entity_id="00000000-0000-0000-0000-000000000067",
+                to_entity_id="00000000-0000-0000-0000-000000000038",
                 from_name="伯安",
                 to_name="贺伯安",
             ),

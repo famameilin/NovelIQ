@@ -13,7 +13,9 @@ from src.chapters.constants import _CN_NUMERALS_CLASS, ChapterConfig
 
 _TOC_TITLE_RE = re.compile(r"^[ \t]*目[ \t]*录[ \t]*[:：]?[ \t]*$")
 # 目录条目：与章节标题格式相近的行（第一章 XXX / 第1章 XXX / 卷一 风起 / Chapter 1 等），
-# 编号形态与 candidates.py 的 VOLUME_RE/CHAPTER_RE 对齐
+# 编号形态与 candidates.py 的 VOLUME_RE/CHAPTER_RE 对齐；
+# 纯名称卷/篇形态（如"少年篇 2"）要求带尾页码——正文卷标题行不带页码，
+# 不作条目处理时恰好充当目录页的结束边界，不会被吞进目录范围
 _TOC_ENTRY_RE = re.compile(
     rf"^[ \t]*(?:"
     rf"第?{_CN_NUMERALS_CLASS}+[章节回卷篇]"  # 第一章/第1章/第2卷
@@ -23,8 +25,11 @@ _TOC_ENTRY_RE = re.compile(
     rf"|[Uu]nit[ \t]*\d+"  # Unit 1
     rf"|[Vv]olume[ \t]*\d+"  # Volume 1
     rf"|[Pp]art[ \t]*\d+"  # Part 1
+    rf"|[^ \t\r\n]{{1,4}}[篇卷部][ \t]*\d+"  # 少年篇 2 / 青年篇 122
     rf")[ \t]*.*$",
 )
+# 行尾页码：目录条目去页码归一化与"目录内部重复条目"判定共用
+_TRAILING_PAGE_NUM_RE = re.compile(r"[ \t]*\d+[ \t]*$")
 
 
 def detect_toc_range(text: str, config: ChapterConfig | None = None) -> tuple[int, int] | None:
@@ -57,11 +62,13 @@ def detect_toc_range(text: str, config: ChapterConfig | None = None) -> tuple[in
                 return (toc_start, line_start)
             return None
         if _TOC_ENTRY_RE.match(line):
-            # 目录条目通常不重复；若出现与已收集条目同名的行（忽略行尾页码），
-            # 说明已进入正文（正文首个真实标题与目录首条同名），提前结束目录页，
+            # 同名行（去页码归一化后）分两种情况：
+            # 带尾页码 = 目录内部重复条目（真实目录可能存在错条/重条），放行继续；
+            # 不带页码 = 正文首个真实标题（与目录条目同名），提前结束目录页，
             # 避免吞掉正文真实章节标题
-            normalized_line = re.sub(r"[ \t]*\d+[ \t]*$", "", line)
-            if normalized_line in seen_entries:
+            has_page_number = _TRAILING_PAGE_NUM_RE.search(line) is not None
+            normalized_line = _TRAILING_PAGE_NUM_RE.sub("", line)
+            if normalized_line in seen_entries and not has_page_number:
                 if entry_count >= config.toc_min_entries:
                     return (toc_start, line_start)
                 return None

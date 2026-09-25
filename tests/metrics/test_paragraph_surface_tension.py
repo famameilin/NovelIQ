@@ -44,6 +44,7 @@ def _make_counts(**overrides: object) -> ParagraphMetricCounts:
         sensory_hit_count=overrides.get("sensory_hit_count", 0),  # type: ignore[arg-type]
         imagery_hit_count=overrides.get("imagery_hit_count", 0),  # type: ignore[arg-type]
         metaphor_sentence_count=overrides.get("metaphor_sentence_count", 0),  # type: ignore[arg-type]
+        body_reaction_hit_count=overrides.get("body_reaction_hit_count", 0),  # type: ignore[arg-type]
         function_word_counts=overrides.get("function_word_counts", {}),  # type: ignore[arg-type]
         semantic_category_counts=overrides.get("semantic_category_counts", {}),  # type: ignore[arg-type]
     )

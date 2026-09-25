@@ -12,6 +12,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.storage.path_resolver import resolve_run_model_dir
+
 
 class ArtifactGcService:
     """
@@ -37,9 +39,8 @@ class ArtifactGcService:
             logger.info(f"Novel source file deleted: {file_path}")
 
     def delete_task_artifacts(self, task_id: str, run_id: str) -> None:
-        """
-        删除任务对应的日志与导出文件
-        """
+        """2026-08-30 用于删除任务日志导出文件与 run 私有模型目录"""
+        word2vec_model_dir = resolve_run_model_dir(run_id, "word2vec")
         output_file = self.outputs_dir / f"{task_id}.json"
         if output_file.exists():
             output_file.unlink()
@@ -53,3 +54,7 @@ class ArtifactGcService:
             if log_dir.exists():
                 shutil.rmtree(log_dir)
                 logger.info(f"Deleted task log directory: {log_dir}")
+
+        if word2vec_model_dir.exists():
+            shutil.rmtree(word2vec_model_dir)
+            logger.info(f"Deleted task Word2Vec model directory: {word2vec_model_dir}")

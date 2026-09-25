@@ -49,7 +49,8 @@ export function CharacterCastCard({
       accent="chart-1"
       showOrb
       className={cn(className)}
-      bodyClassName="gap-3"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3 overflow-y-auto pr-1"
     >
       {hasData ? (
         <div className="flex flex-col gap-3">

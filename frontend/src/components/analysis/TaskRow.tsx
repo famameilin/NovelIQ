@@ -20,6 +20,7 @@ import type { TaskStatus } from "@/api/types";
 const STAGE_LABELS: Record<string, string> = {
   preprocess: "预处理",
   annotate: "标注分析",
+  linguistic: "语言结构分析",
   aggregate: "数据聚合",
   "topic-model": "主题建模",
   diagnose: "诊断报告",

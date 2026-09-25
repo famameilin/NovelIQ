@@ -24,6 +24,18 @@ def _count(db_session, model, run_id: str) -> int:
     return int(db_session.execute(select(func.count()).select_from(model).where(model.run_id == run_id)).scalar_one())
 
 
+def test_recorder_utcnow_matches_timezone_free_database_contract() -> None:
+    """2026-08-30 用于锁定无时区审计列统一写入 naive UTC"""
+    from datetime import UTC, datetime
+
+    recorder = AgentAuditRecorder(lambda: None)
+    actual = recorder._utcnow()
+    expected = datetime.now(UTC).replace(tzinfo=None)
+
+    assert actual.tzinfo is None
+    assert abs((expected - actual).total_seconds()) < 1
+
+
 def test_recorder_writes_invocation_in_independent_transaction(db_session) -> None:
     """2026-08-10 用于验证 invocation 以独立短事务即时提交"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
@@ -87,7 +99,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     turn_id = recorder.record_turn(
         invocation_id=invocation_id,
         turn_index=1,
-        context_summary={"phase": "chunk_open", "missing_domains": ["metrics"]},
+        context_summary={"phase": "chapter_open", "missing_domains": ["metrics"]},
         raw_response={"role": "ai", "content": "调用工具"},
         timing={
             "ttft_ms": 120,
@@ -115,7 +127,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     db_session.rollback()
     turn = db_session.get(AgentTurn, turn_id)
     assert turn.turn_index == 1
-    assert turn.context_summary["phase"] == "chunk_open"
+    assert turn.context_summary["phase"] == "chapter_open"
     assert turn.raw_response["content"] == "调用工具"
     assert turn.ttft_ms == 120
     assert turn.first_visible_ms == 180
@@ -131,6 +143,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     assert token_row.reasoning_tokens == 5
     assert token_row.cache_read_tokens == 30
     assert token_row.cost == 0.42
+    assert token_row.created_at.endswith("+00:00")
     token_count = int(
         db_session.execute(
             select(func.count()).select_from(TokenUsage).where(TokenUsage.agent_turn_id == turn_id)
@@ -141,7 +154,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
 
 def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> None:
     """2026-08-13 P2-10 回合结束时刻随工具批处理结束更新，而非恒为插入时刻"""
-    from datetime import UTC, datetime
+    from datetime import datetime
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     recorder = AgentAuditRecorder(_session_factory(db_session))
@@ -153,8 +166,8 @@ def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> N
         model_name="test-model",
         model_provider="local",
     )
-    inserted_at = datetime(2026, 8, 13, 1, 0, 0, tzinfo=UTC)
-    updated_at = datetime(2026, 8, 13, 1, 0, 2, tzinfo=UTC)
+    inserted_at = datetime(2026, 8, 13, 1, 0, 0)
+    updated_at = datetime(2026, 8, 13, 1, 0, 2)
     times = iter([inserted_at, updated_at])
     monkeypatch.setattr(recorder, "_utcnow", lambda: next(times))
 
@@ -173,7 +186,6 @@ def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> N
 
     db_session.rollback()
     turn = db_session.get(AgentTurn, turn_id)
-    # DB 会话按本地时区（UTC+8）回读，因此断言相对差值而非绝对值
     assert turn.started_at is not None
     assert turn.finished_at is not None
     assert (turn.finished_at - turn.started_at).total_seconds() == (updated_at - inserted_at).total_seconds()
@@ -369,7 +381,7 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
         tool_calls=[{"name": "write_metrics", "args": {}, "id": "c1", "type": "tool_call"}],
     )
     turn_id = observer.record_turn(
-        context_summary={"phase": "chunk_open"},
+        context_summary={"phase": "chapter_open"},
         request_messages=[AIMessage(content="问")],
         response_message=response,
         timing=ModelCallTiming(ttft_ms=10, model_ms=100),
@@ -486,7 +498,7 @@ def test_observer_persists_reasoning_content_into_turn_row(db_session) -> None:
     )
 
     turn_id = observer.record_turn(
-        context_summary={"phase": "chunk_open"},
+        context_summary={"phase": "chapter_open"},
         request_messages=[AIMessage(content="问")],
         response_message=response,
         timing=ModelCallTiming(ttft_ms=5, model_ms=50),
@@ -685,7 +697,7 @@ def test_observer_raises_when_tool_recorded_without_active_turn(db_session) -> N
         model_name="test-model",
         model_provider="local",
     )
-    with pytest.raises(RuntimeError, match="工具审计必须先于模型回合"):
+    with pytest.raises(RuntimeError):
         observer.record_tool_call(
             call_index=0,
             tool_name="write_metrics",

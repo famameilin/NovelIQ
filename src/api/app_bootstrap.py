@@ -17,7 +17,10 @@ register_middlewares = _middleware_module.register_middlewares
 analysis_router = _routes_module.analysis_router
 novels_router = _routes_module.novels_router
 results_router = _routes_module.results_router
+linguistic_router = _routes_module.linguistic_router
+tabs_router = _routes_module.tabs_router
 timeline_router = _routes_module.timeline_router
+settings_router = _routes_module.settings_router
 sse_router = _sse_module.router
 
 __all__ = [
@@ -25,7 +28,10 @@ __all__ = [
     "novels_router",
     "register_exception_handlers",
     "register_middlewares",
+    "linguistic_router",
     "results_router",
+    "settings_router",
     "sse_router",
+    "tabs_router",
     "timeline_router",
 ]

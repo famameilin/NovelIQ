@@ -112,7 +112,8 @@ _DEBUG_PROGRESS_SUB_STAGES = {
 
 _STAGE_PERCENT_RANGES: dict[str, tuple[float, float]] = {
     "preprocess": (0.0, 10.0),
-    "annotate": (10.0, 80.0),
+    "annotate": (10.0, 75.0),
+    "linguistic": (75.0, 80.0),
     "aggregate": (80.0, 90.0),
     "topic-model": (90.0, 95.0),
     "diagnose": (95.0, 100.0),

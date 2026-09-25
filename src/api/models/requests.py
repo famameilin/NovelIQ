@@ -9,4 +9,5 @@ class ReanalyzeRequest(BaseModel):
     force_aggregate: bool = Field(default=False, description="强制重新聚合")
     force_topic_model: bool = Field(default=False, description="强制重新主题建模")
     force_diagnose: bool = Field(default=False, description="强制重新诊断")
+    force_linguistic: bool = Field(default=False, description="强制重新语言结构分析")
     num_topics: int = Field(default=25, description="主题数量")

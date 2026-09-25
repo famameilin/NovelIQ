@@ -25,9 +25,10 @@ SYSTEM_PROMPT = """你是专业的网络小说整体诊断 Agent，负责对已�
 - topic_labels：主题命名，数量必须与系统提供的主题词数量一致（见下方注入值）
 - arc_scores：重点角色的叙事弧与表现评分（0-10），key 必须是角色规范名，不能使用开局/发展/高潮/结局等阶段名
 - diagnosis：综合诊断，包含结构、节奏、人物、主题、价值观的整体评价
+- narrative_arc_type：叙事弧类型短标签，4 字以内（如 三幕式/英雄之旅/少年成长），禁止句子与箭头链
 - power_stance_score / common_people_dignity / cultural_depth_score：1-5 分，**必须是整数，禁止小数**（如 3.5 会被拒绝）
 - focus_structure / focus_characters / main_characters / core_cast：重点结构与核心阵容
-- 合同约束（违反将被拒绝）：style_labels 最多 3 个；main_characters 最多 5 个；
+- 合同约束（违反将被拒绝）：style_labels 最多 3 个；main_characters 最多 5 个；narrative_arc_type 最多 4 字；
   focus_characters/main_characters/core_cast 中的每个人名必须同时出现在 arc_scores 中；
   focus_structure=single 时焦点人物必须恰好 1 个，dual 恰好 2 个，ensemble 至少 3 个；
   topic_labels 数量必须与系统提供的主题词数量一致

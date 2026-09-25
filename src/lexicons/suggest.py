@@ -5,6 +5,7 @@ from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 
+from src.config.constants import LEXICON_FILES
 from src.utils.text_utils import tokenize_words
 
 _STOPWORDS: frozenset[str] = frozenset(
@@ -349,9 +350,9 @@ def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> dict[str, list[s
     reg.load()
 
     lexicons = {
-        "combat": set(reg.get("combat.txt")),
-        "sensory": set(reg.get("sensory.txt")),
-        "semantic_category": set(reg.get("semantic_category.txt")),
+        "combat": set(reg.get(LEXICON_FILES["combat"])),
+        "sensory": set(reg.get(LEXICON_FILES["sensory"])),
+        "semantic_category": set(reg.get(LEXICON_FILES["semantic_category"])),
     }
     additions: dict[str, list[str]] = {}
     # 2026-08-15 词表 v3：proper_nouns 词表已删（0% 利用率），不再产出该建议类别；
@@ -381,7 +382,7 @@ def apply_updates(additions: dict[str, list[str]], lexicon_dir: Path) -> None:
     for name, new_terms in additions.items():
         if not new_terms:
             continue
-        path = lexicon_dir / f"{name}.txt"
+        path = lexicon_dir / LEXICON_FILES[name]
         existing = read_lexicon(path)
         merged = list(existing) + new_terms
         write_lexicon(path, merged)

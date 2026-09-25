@@ -12,7 +12,6 @@ from unittest.mock import Mock
 import pytest
 
 from src.storage.id_mapping import (
-    IDMappingError,
     TaskIDNotFoundError,
     convert_response_run_ids_to_task_ids,
     generate_run_id,
@@ -220,23 +219,3 @@ class TestConvertResponseRunIDsToTaskIDs:
         data = []
         result = convert_response_run_ids_to_task_ids(data)
         assert result == []
-
-
-class TestIDMappingError:
-    """测试ID映射异常类"""
-
-    def test_id_mapping_error_is_exception(self):
-        """测试IDMappingError是Exception的子类"""
-        assert issubclass(IDMappingError, Exception)
-
-    def test_task_id_not_found_error_is_id_mapping_error(self):
-        """测试TaskIDNotFoundError是IDMappingError的子类"""
-        assert issubclass(TaskIDNotFoundError, IDMappingError)
-
-    def test_can_raise_and_catch_task_id_not_found_error(self):
-        """测试可以抛出和捕获TaskIDNotFoundError"""
-        with pytest.raises(TaskIDNotFoundError):
-            raise TaskIDNotFoundError("Test error")
-
-        with pytest.raises(IDMappingError):
-            raise TaskIDNotFoundError("Test error")

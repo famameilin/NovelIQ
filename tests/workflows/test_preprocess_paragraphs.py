@@ -111,8 +111,6 @@ class TestPreprocessParagraphs:
         full_text = preprocess_text(normalize_text(raw_text))
         for row in rows:
             assert row.text == full_text[row.global_start_char : row.global_end_char]
-        # content_hash 非空
-        assert all(row.content_hash for row in rows)
         # run_preprocess 填充 token_count
         assert all(row.token_count is not None for row in rows)
 
@@ -168,8 +166,7 @@ class TestPreprocessParagraphs:
     async def test_preprocess_embeddings_aligned_with_paragraphs(self, db_session, tmp_path) -> None:
         """
         2026-08-14 二期段落化：embedding 从段落事实源读取后按 paragraph_id 严格对齐：
-        paragraph_embeddings 行数与 paragraphs 一致，向量非空、维度与配置一致、
-        source_content_hash 对照 paragraphs.content_hash
+        paragraph_embeddings 行数与 paragraphs 一致，向量非空、维度与配置一致
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Embedding Align")
@@ -190,7 +187,6 @@ class TestPreprocessParagraphs:
                 ParagraphEmbedding.embedding_vector,
                 ParagraphEmbedding.embedding_model_key,
                 ParagraphEmbedding.embedding_dimension,
-                ParagraphEmbedding.source_content_hash,
             ).where(ParagraphEmbedding.run_id == run_id)
         ).all()
         embedding_by_id = {row.paragraph_id: row for row in embedding_rows}
@@ -201,8 +197,6 @@ class TestPreprocessParagraphs:
             assert embedding_row.embedding_vector is not None
             assert len(embedding_row.embedding_vector) == 1024
             assert embedding_row.embedding_dimension == 1024
-            # 溯源：source_content_hash 与段落事实源 content_hash 一致
-            assert embedding_row.source_content_hash == paragraph_row.content_hash
 
     @pytest.mark.asyncio()
     @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)

@@ -16,6 +16,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.agents.annotation.schema import coerce_emotion_score
 from src.api.models.responses import (
     BookAggregateStats,
     ChapterMetricsResponse,
@@ -371,7 +372,9 @@ def _build_chapter_summary(
             bool(annotation.cliffhanger) if annotation is not None and annotation.cliffhanger is not None else None
         ),
         emotional_valence=(
-            str(annotation.emotional_valence) if annotation is not None and annotation.emotional_valence else None
+            coerce_emotion_score(annotation.emotional_valence)
+            if annotation is not None and annotation.emotional_valence is not None
+            else None
         ),
     )
 
@@ -405,7 +408,7 @@ def _build_book_aggregate(
         sentence_var = max(0.0, sentence_char_sum_sq / sentence_count - sentence_mean * sentence_mean)
 
     narrative_share: dict[str, float] = {}
-    valence_share: dict[str, float] = {}
+    valence_share: dict[int, float] = {}
     pivot_chapters = 0
     pivot_valid_chapters = 0
     cliffhanger_chapters = 0
@@ -416,7 +419,7 @@ def _build_book_aggregate(
         if chapter.narrative_function:
             narrative_valid_chapters += 1
             narrative_share[chapter.narrative_function] = narrative_share.get(chapter.narrative_function, 0.0) + 1.0
-        if chapter.emotional_valence:
+        if chapter.emotional_valence is not None:
             valence_valid_chapters += 1
             valence_share[chapter.emotional_valence] = valence_share.get(chapter.emotional_valence, 0.0) + 1.0
         if chapter.pivot_moment is not None:

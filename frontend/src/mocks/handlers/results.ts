@@ -1,23 +1,16 @@
 /**
- * MSW Handler — 分析结果：角色、曲线、主题、诊断、图谱、时间轴、指标
+ * MSW Handler — 分析结果：角色、情绪趋势、主题、诊断、伏笔、图谱变化、时间轴
+ *
+ * 仅保留前端仍在直调的单源端点；tab 级聚合 mock 见 ./tabs.ts。
  */
 import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
-  createParagraphCurves,
   createEmotionTrendWindows,
-  createChapterMetrics,
-  createForeshadowingThreads,
-  createTopics,
+  createForeshadowingTrees,
   createDiagnosis,
-  createGraph,
   createGraphChangesPage,
   createEventTimeline,
-  createNarrativeStructure,
-  createEmotionStats,
-  createCharacterStats,
-  createStyleStats,
-  createGlobalStats,
   taskDb,
 } from "../data";
 
@@ -47,7 +40,7 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
   return null;
 }
 
-// 获取 /api/novels/:novelId/characters
+// 获取 /api/novels/:novelId/characters（角色排行/角色表 tab 数据源）
 export const charactersHandler = http.get(
   `${BASE}/api/novels/:novelId/characters`,
   async ({ request, params }) => {
@@ -62,25 +55,7 @@ export const charactersHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/paragraph-curves（M4：段落粒度曲线，支持 max_points 抽稀）
-export const paragraphCurvesHandler = http.get(
-  `${BASE}/api/novels/:novelId/paragraph-curves`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const url = new URL(request.url);
-    const taskId = url.searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    const maxPoints = Number(url.searchParams.get("max_points"));
-    const count = Number.isFinite(maxPoints) && maxPoints > 0 ? Math.min(maxPoints, 5000) : 300;
-    return HttpResponse.json(createParagraphCurves(count));
-  }
-);
-
-// 获取 /api/novels/:novelId/emotion-trend（窗口情绪趋势，支持 position range）
+// 获取 /api/novels/:novelId/emotion-trend（情绪趋势 tab 数据源，支持 position range）
 export const emotionTrendHandler = http.get(
   `${BASE}/api/novels/:novelId/emotion-trend`,
   async ({ request, params }) => {
@@ -102,37 +77,7 @@ export const emotionTrendHandler = http.get(
   },
 );
 
-// 获取 /api/novels/:novelId/chapter-metrics（M4：章节指标汇总）
-export const chapterMetricsHandler = http.get(
-  `${BASE}/api/novels/:novelId/chapter-metrics`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    return HttpResponse.json(createChapterMetrics());
-  }
-);
-
-// 获取 /api/novels/:novelId/topics
-export const topicsHandler = http.get(
-  `${BASE}/api/novels/:novelId/topics`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(300);
-    return HttpResponse.json(createTopics());
-  }
-);
-
-// 获取 /api/novels/:novelId/diagnosis
+// 获取 /api/novels/:novelId/diagnosis（诊断摘要/价值与主题 tab 数据源）
 export const diagnosisHandler = http.get(
   `${BASE}/api/novels/:novelId/diagnosis`,
   async ({ request, params }) => {
@@ -147,9 +92,9 @@ export const diagnosisHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/foreshadowing-threads
+// 获取 /api/novels/:novelId/foreshadowing-trees（跨章节伏笔树数据源）
 export const foreshadowingThreadsHandler = http.get(
-  `${BASE}/api/novels/:novelId/foreshadowing-threads`,
+  `${BASE}/api/novels/:novelId/foreshadowing-trees`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
@@ -158,26 +103,11 @@ export const foreshadowingThreadsHandler = http.get(
     if (err) return err;
 
     await delay(250);
-    return HttpResponse.json(createForeshadowingThreads());
+    return HttpResponse.json(createForeshadowingTrees());
   }
 );
 
-// 获取 /api/novels/:novelId/graph
-export const graphHandler = http.get(
-  `${BASE}/api/novels/:novelId/graph`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    return HttpResponse.json(createGraph());
-  }
-);
-
-// 获取 /api/novels/:novelId/graph/changes
+// 获取 /api/novels/:novelId/graph/changes（图谱变化 tab 数据源）
 export const graphChangesHandler = http.get(
   `${BASE}/api/novels/:novelId/graph/changes`,
   async ({ request, params }) => {
@@ -219,77 +149,98 @@ export const timelineHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/metrics/narrative-structure
-export const narrativeStructureHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/narrative-structure`,
+// 主题全量分布 mock（赛道 D）：4 主题 × 60 段，权重和为 1
+const MOCK_NUM_TOPICS = 4;
+const MOCK_SERIES_POINTS = Array.from({ length: 60 }, (_, index) => {
+  const base = index / 60;
+  const raw = [0.4 * Math.cos(base * Math.PI) + 0.3, 0.25 + 0.2 * Math.sin(base * 2 * Math.PI), 0.18, 0.12].map(
+    (value) => Math.max(0.02, value)
+  );
+  const total = raw.reduce((sum, value) => sum + value, 0);
+  return {
+    paragraph_id: index,
+    chapter_id: Math.floor(index / 15) + 1,
+    chapter_sequence: Math.floor(index / 15) + 1,
+    start_position: index * 960,
+    token_count: 240,
+    weights: raw.map((value) => Number((value / total).toFixed(6))),
+  };
+});
+
+// 获取 /api/novels/:novelId/topics/series（主题演进 tab 数据源）
+export const topicSeriesHandler = http.get(
+  `${BASE}/api/novels/:novelId/topics/series`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
     const err = await checkTaskReady(novelId as string, taskId);
     if (err) return err;
 
-    await delay(200);
-    return HttpResponse.json(createNarrativeStructure());
+    await delay(400);
+    return HttpResponse.json({
+      run_id: taskId,
+      model: {
+        model_key: "gensim-lda",
+        library_version: "4.4.0",
+        pipeline_version: "1.0",
+        num_topics: MOCK_NUM_TOPICS,
+        artifact_key: "models/topic/mock-run",
+      },
+      num_topics: MOCK_NUM_TOPICS,
+      points: MOCK_SERIES_POINTS,
+      unavailable_reason: null,
+    });
   }
 );
 
-// 获取 /api/novels/:novelId/metrics/emotion-stats
-export const emotionStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/emotion-stats`,
+// 获取 /api/novels/:novelId/topics/shifts（主题迁移 tab 数据源）
+export const topicShiftsHandler = http.get(
+  `${BASE}/api/novels/:novelId/topics/shifts`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
     const err = await checkTaskReady(novelId as string, taskId);
     if (err) return err;
 
-    await delay(200);
-    return HttpResponse.json(createEmotionStats());
+    await delay(300);
+    return HttpResponse.json({
+      candidates: [
+        { position: 14400, paragraph_start: 14, paragraph_end: 19, score: 0.6123, window_token_total: 1440 },
+        { position: 28800, paragraph_start: 29, paragraph_end: 34, score: 0.4811, window_token_total: 1440 },
+        { position: 43200, paragraph_start: 44, paragraph_end: 49, score: 0.3564, window_token_total: 1440 },
+      ],
+      config: { window_size: 6, min_tokens_per_window: 800, score_threshold: 0.3, max_candidates: 20 },
+      unavailable_reason: null,
+    });
   }
 );
 
-// 获取 /api/novels/:novelId/metrics/character-stats
-export const characterStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/character-stats`,
+// 获取 /api/novels/:novelId/topics/emotion（主题情绪 tab 数据源）
+export const topicEmotionHandler = http.get(
+  `${BASE}/api/novels/:novelId/topics/emotion`,
   async ({ request, params }) => {
     const { novelId } = params;
     const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
     const err = await checkTaskReady(novelId as string, taskId);
     if (err) return err;
 
-    await delay(200);
-    return HttpResponse.json(createCharacterStats());
+    await delay(300);
+    return HttpResponse.json({
+      run_id: taskId,
+      model: {
+        model_key: "gensim-lda",
+        library_version: "4.4.0",
+        pipeline_version: "1.0",
+        num_topics: MOCK_NUM_TOPICS,
+        artifact_key: "models/topic/mock-run",
+      },
+      emotion: [
+        { topic_id: 0, emotion: 0.2136, weighted_token_total: 9820.5 },
+        { topic_id: 1, emotion: -0.1421, weighted_token_total: 8410.2 },
+        { topic_id: 2, emotion: 0.0384, weighted_token_total: 6120.8 },
+        { topic_id: 3, emotion: null, weighted_token_total: null },
+      ],
+      unavailable_reason: null,
+    });
   }
-);
-
-// 获取 /api/novels/:novelId/metrics/style-stats
-export const styleStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/style-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createStyleStats());
-  }
-);
-
-// 获取 /api/novels/:novelId/metrics/global-stats
-export const globalStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/global-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createGlobalStats());
-  },
 );

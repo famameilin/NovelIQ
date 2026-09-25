@@ -1,16 +1,15 @@
+import { useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { getCharacters, getDiagnosis } from "@/api/results";
+import { getCharacters } from "@/api/results";
+import { getCharacterFunctionTab, tabQueryKey } from "@/api/tabs";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import { CharacterRankingBar } from "@/components/charts/CharacterRankingBar";
-import { RoleFunctionPie } from "@/components/charts/RoleFunctionPie";
-import { CharacterTable } from "@/components/characters/CharacterTable";
-import { FocusCastCard } from "@/components/characters/FocusCastCard";
+import { CharacterLandscape } from "@/components/characters/CharacterLandscape";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Users } from "lucide-react";
@@ -35,7 +34,7 @@ function SkeletonGrid() {
       </Card>
 
       {/* 饼图与主角卡片骨架屏 */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-2 gap-6">
         <Card variant="elevated" className="rounded-xl h-[340px] overflow-hidden">
           <CardContent className="p-5">
             <div className="space-y-3">
@@ -57,36 +56,13 @@ function SkeletonGrid() {
   );
 }
 
-/**
- * 角色页现在以 diagnosis 新合同为前置条件；
- * diagnosis 尚未产出时，不再提前渲染仅靠 annotation 聚合得到的角色表，
- * 避免页面继续对“无 diagnosis 的旧路径”做静默兼容
- */
-function EmptyDiagnosisState() {
-  return (
-    <DashboardCardShell
-      title="角色焦点结果暂未生成"
-      icon={<Users className="h-4 w-4" />}
-      accent="chart-2"
-      className="min-h-[240px]"
-      bodyClassName="items-center justify-center gap-3 text-center"
-    >
-      <p className="text-sm text-text-muted">当前任务暂时还没有可展示的角色焦点结果。</p>
-    </DashboardCardShell>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /*  主组件                                                             */
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：角色页主展示逻辑改为消费 `focus_structure` / `focus_characters`，
- * 并用新的 FocusCastCard 与多焦点高亮替代旧单主角页面
- *
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：角色页主展示区拆成排行、功能焦点、角色表三个 tab，保证首屏优先展示排行
+ * 2026-04-27，作用：展示角色格局分析页面
+ * 简要说明：消费角色列表与焦点结构，在单一文档流中整合排行、功能分布和角色详情
  */
 export function CharactersPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -98,62 +74,46 @@ export function CharactersPage() {
   // 不得用于新小说的查询/SSE（模式同 GraphPage）
   const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
 
-  // 数据获取
+  // 角色基础指标和焦点结构分别使用各自的聚合数据源
   const enabled = !!novelId && !!storeTaskId;
 
-  const diagnosisQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
-    queryFn: () => getDiagnosis(novelId!, storeTaskId!),
+  const charactersQuery = useQuery({
+    queryKey: ["characters", novelId, storeTaskId],
+    queryFn: () => getCharacters(novelId!, storeTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
-  const diagnosis = diagnosisQuery.data;
-  const shouldFetchCharacters = enabled;
-
-  const charactersQuery = useQuery({
-    queryKey: ["results", novelId, storeTaskId, "characters"],
-    queryFn: () => getCharacters(novelId!, storeTaskId!),
-    enabled: shouldFetchCharacters,
+  const focusQuery = useQuery({
+    queryKey: tabQueryKey("character-function", novelId, storeTaskId),
+    queryFn: () => getCharacterFunctionTab(novelId!, storeTaskId!),
+    enabled,
     staleTime: STALE_TIME,
   });
 
-  const isLoading =
-    enabled &&
-    (diagnosisQuery.isLoading || (shouldFetchCharacters && charactersQuery.isLoading));
+  const isLoading = enabled && (charactersQuery.isLoading || focusQuery.isLoading);
   const isAnalysisNotComplete =
-    enabled &&
-    (isAnalysisNotCompleteError(diagnosisQuery.error) ||
-      (shouldFetchCharacters && isAnalysisNotCompleteError(charactersQuery.error)));
+    enabled && (isAnalysisNotCompleteError(charactersQuery.error) || isAnalysisNotCompleteError(focusQuery.error));
   const analysisFailed =
     enabled &&
-    (getAnalysisNotCompleteRunStatus(diagnosisQuery.error) === "failed" ||
-      (shouldFetchCharacters && getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed"));
-  const isError =
-    enabled &&
-    (diagnosisQuery.isError || (shouldFetchCharacters && charactersQuery.isError)) &&
-    !isAnalysisNotComplete;
+    (getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed" ||
+      getAnalysisNotCompleteRunStatus(focusQuery.error) === "failed");
+  const isError = enabled && (charactersQuery.isError || focusQuery.isError) && !isAnalysisNotComplete;
 
   const retry = () => {
-    if (shouldFetchCharacters) {
-      charactersQuery.refetch();
-    }
-    diagnosisQuery.refetch();
+    charactersQuery.refetch();
+    focusQuery.refetch();
   };
 
   const { data: characters } = charactersQuery;
-  const focusCharacters = diagnosis?.focus_characters ?? [];
-  const hasNullDiagnosis =
-    enabled &&
-    diagnosisQuery.isFetched &&
-    !diagnosisQuery.isLoading &&
-    !diagnosisQuery.isError &&
-    diagnosis === null;
-
+  const focusData = focusQuery.data;
+  const focusCharacters = focusData?.focus_characters ?? [];
+  const [sortMode, setSortMode] = useState<"appearance" | "focus">("appearance");
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   // ---------- 渲染 ----------
 
   return (
-    <AnalysisWorkspace title="角色分析">
+    <AnalysisWorkspace title="角色格局">
       {/* 未选择任务提示 */}
       {!storeTaskId && (
         <DashboardCardShell
@@ -210,39 +170,53 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
-      {/* diagnosis 为空时的状态 */}
-      {hasNullDiagnosis && !isLoading && !isError && <EmptyDiagnosisState />}
-
       {/* 主内容 */}
       {characters && characters.length > 0 && !isLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex min-h-0 flex-1 flex-col"
+          className="flex h-full min-h-0 flex-col"
         >
-          {/*
-            2026-04-28，任务：分析详情页单屏 Tabs 改造
-            修改原因：角色页按“排行优先”拆成 tab，让排行、焦点和表格都接受同一单屏工作区边界。
-          */}
-          <AnalysisWorkspace.Tabs defaultValue="ranking">
+          <AnalysisWorkspace.Tabs defaultValue="overview">
+            <AnalysisWorkspace.Tab value="overview" label="格局概览">
+              <CharacterLandscape
+                characters={characters}
+                focusStructure={focusData?.focus_structure}
+                focusCharacters={focusCharacters}
+                arcScores={focusData?.arc_scores}
+                view="overview"
+                sortMode={sortMode}
+                selectedName={selectedName}
+                onSortModeChange={setSortMode}
+                onSelectName={setSelectedName}
+              />
+            </AnalysisWorkspace.Tab>
             <AnalysisWorkspace.Tab value="ranking" label="角色排行">
-              <CharacterRankingBar characters={characters} className="h-full" />
+              <CharacterLandscape
+                characters={characters}
+                focusStructure={focusData?.focus_structure}
+                focusCharacters={focusCharacters}
+                arcScores={focusData?.arc_scores}
+                view="ranking"
+                sortMode={sortMode}
+                selectedName={selectedName}
+                onSortModeChange={setSortMode}
+                onSelectName={setSelectedName}
+              />
             </AnalysisWorkspace.Tab>
-            <AnalysisWorkspace.Tab value="focus" label="功能与焦点">
-              <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
-                <RoleFunctionPie characters={characters} className="h-full min-h-[320px]" />
-                <FocusCastCard
-                  characters={characters}
-                  focusStructure={diagnosis?.focus_structure ?? undefined}
-                  focusCharacters={focusCharacters}
-                  arcScores={diagnosis?.arc_scores}
-                  className="h-full min-h-[320px]"
-                />
-              </div>
-            </AnalysisWorkspace.Tab>
-            <AnalysisWorkspace.Tab value="table" label="角色表">
-              <CharacterTable characters={characters} className="h-full" />
+            <AnalysisWorkspace.Tab value="detail" label="角色详情">
+              <CharacterLandscape
+                characters={characters}
+                focusStructure={focusData?.focus_structure}
+                focusCharacters={focusCharacters}
+                arcScores={focusData?.arc_scores}
+                view="detail"
+                sortMode={sortMode}
+                selectedName={selectedName}
+                onSortModeChange={setSortMode}
+                onSelectName={setSelectedName}
+              />
             </AnalysisWorkspace.Tab>
           </AnalysisWorkspace.Tabs>
         </motion.div>

@@ -9,13 +9,13 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_diagnosis,
-    _fetch_foreshadowing_threads,
+    _fetch_foreshadowing_trees,
     _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
 )
 from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
-from src.storage.repositories.annotation import ForeshadowingThreadView
+from src.storage.repositories.annotation import ForeshadowingTreeView
 
 
 class _DummyRow:
@@ -141,21 +141,21 @@ def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
     assert result.foreshadow_expectation == 0.3
 
 
-def test_fetch_foreshadowing_threads_preserves_confidence_field():
+def test_fetch_foreshadowing_trees_preserves_status_field():
+    """2026-09-13 伏笔树视图经 fetchers 透传（伏笔即事件树）"""
+
     class DummyRepo:
-        def fetch_foreshadowing_threads(self, run_id):
+        def fetch_foreshadowing_trees(self, run_id):
             assert run_id == "run-1"
             return [
-                ForeshadowingThreadView(
-                    setup_id="setup-1",
+                ForeshadowingTreeView(
+                    root_event_id="evt-root-1",
+                    tree_id="tree-1",
                     first_chapter_id=2,
                     last_chapter_id=5,
                     anchor_chapter_ids=[2, 5],
-                    setup_summary="黑伞只在雨夜自行张开",
-                    setup_kind="异常物件",
-                    expected_payoff_family="规则兑现",
+                    description="黑伞只在雨夜自行张开",
                     payoff_likelihood="high",
-                    confidence="medium",
                     strength="medium",
                     status="reinforced",
                     active=True,
@@ -164,11 +164,11 @@ def test_fetch_foreshadowing_threads_preserves_confidence_field():
                 )
             ]
 
-    rows = _fetch_foreshadowing_threads("run-1", DummyRepo())
+    rows = _fetch_foreshadowing_trees("run-1", DummyRepo())
 
     assert len(rows) == 1
-    assert rows[0].setup_id == "setup-1"
-    assert rows[0].confidence == "medium"
+    assert rows[0].root_event_id == "evt-root-1"
+    assert rows[0].status == "reinforced"
 
 
 def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
@@ -533,8 +533,8 @@ def test_fetch_diagnosis_preserves_distinct_graph_entity_names():
 
 def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
     rows = []
-    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
-    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score="neutral")] * 10)
+    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score=0)] * 20)
+    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score=0)] * 10)
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
@@ -559,9 +559,9 @@ def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
 
 def test_fetch_characters_returns_all_items_when_limit_is_none():
     rows = []
-    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score="neutral")] * 3)
-    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score="neutral")] * 2)
-    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score="neutral")] * 1)
+    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score=0)] * 3)
+    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score=0)] * 2)
+    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score=0)] * 1)
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
@@ -582,8 +582,8 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
     说明: 角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。
     """
     rows = [
-        _DummyRow(name="我", role_function="主体", emotion_score="neutral"),
-        _DummyRow(name="沈砚", role_function="主体", emotion_score="neutral"),
+        _DummyRow(name="我", role_function="主体", emotion_score=0),
+        _DummyRow(name="沈砚", role_function="主体", emotion_score=0),
     ]
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
@@ -878,11 +878,8 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
                     cliffhanger=False,
                     has_foreshadowing=False,
                     is_strong_setup=False,
-                    foreshadowing_type=None,
-                    setup_kind=None,
                     foreshadowing_desc=None,
                     why_unresolved_now=None,
-                    expected_payoff_family=None,
                 )
             ]
 
@@ -931,9 +928,11 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
 
     assert len(result) == 1
     assert result[0].is_strong_setup is False
-    assert result[0].setup_kind is None
     assert result[0].why_unresolved_now is None
-    assert result[0].expected_payoff_family is None
+    # 2026-09-14 expected_payoff_family 全链退役（响应模型删字段）；按新合同换算为
+    # 保留字段 payoff_likelihood/foreshadowing_root_event_id 在无伏笔行时同样保持 None
+    assert result[0].payoff_likelihood is None
+    assert result[0].foreshadowing_root_event_id is None
     assert len(result[0].relations) == 1
     assert result[0].relations[0].from_char == "贺铮"
     assert result[0].relations[0].to_char == "伯安"
@@ -955,8 +954,6 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
                     cliffhanger=False,
                     has_foreshadowing=True,
                     is_strong_setup=True,
-                    foreshadowing_type="物件",
-                    setup_kind="异常物件",
                     foreshadowing_desc=(
                         "玉佩发热 - 具体钩子：玉佩出现异常发热。未闭合原因：当前还没有解释它为何会发热。"
                     ),
@@ -980,7 +977,6 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
     assert len(result) == 1
     assert result[0].chapter_id == 3
     assert result[0].is_strong_setup is True
-    assert result[0].setup_kind == "异常物件"
     assert result[0].relations == []
 
 
@@ -998,8 +994,6 @@ def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch
                     cliffhanger=False,
                     has_foreshadowing=False,
                     is_strong_setup=False,
-                    foreshadowing_type=None,
-                    setup_kind=None,
                     foreshadowing_desc=None,
                     why_unresolved_now=None,
                     expected_payoff_family=None,
