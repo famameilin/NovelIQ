@@ -6,6 +6,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 对中文网络小说做量化分析的平台：上传一本 txt 全本，六阶段流水线自动完成全书分析。LLM 逐章标注人物、对话、关系、事件与伏笔，配合本地语言模型产出多维指标，最终汇成一组可视化视图与诊断报告。分析在后台运行、逐阶段落库，中断或取消后可从断点继续。
 
@@ -17,6 +18,12 @@
 - **主题分布**：LDA 主题建模，检测主题随情节的转移
 - **语言特征**：LTP 词法句法分析、词汇丰富度（TTR/MTLD）、对话比例等
 - **诊断报告**：LLM 基于全书取证生成质量评估，可导出为单文件 HTML
+
+| 情绪/节奏曲线 | 人物关系图谱 |
+| --- | --- |
+| ![情绪/节奏曲线](assets/screenshots/curves.png) | ![人物关系图谱](assets/screenshots/graph.png) |
+| **叙事时间轴** | **仪表盘** |
+| ![叙事时间轴](assets/screenshots/timeline.png) | ![仪表盘](assets/screenshots/dashboard.png) |
 
 技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（本地 vLLM 或云端服务均可），词法分析与词向量为本地离线模型。
 
@@ -145,3 +152,7 @@ flowchart LR
 | `token_usage` | 每笔 API 用量 | 按 novel / chapter / task_type / call_type / model 归桶；prompt / completion / total / cache_read / reasoning 五类 token 加 cost；Agent 回合与 `agent_turns.id` 一对一，Embedding 等非 Agent 行单独归桶；`accounting_source` 区分上报与估算 |
 
 复核与归因以审计表为唯一权威来源——应用日志不含 Agent 侧统计。思考耗时看 `agent_turns` 的计时列，成本看 `token_usage`，失败回合定位到 `agent_tool_calls` 的 status 与 error；任意一章的标注都能从 invocation 起逐回合还原为完整决策轨迹。
+
+## 许可证
+
+[Apache-2.0](LICENSE)。
