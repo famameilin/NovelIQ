@@ -306,7 +306,8 @@ export interface ForeshadowingTree {
 // 知识图谱
 
 export interface GraphNode {
-  entity_id: number;
+  // 2026-09-19 图实体主键改 uuid（String(36)）
+  entity_id: string;
   name: string;
   entity_type: "character" | "location" | "item" | "organization";
   tags?: string[] | null;
@@ -321,8 +322,8 @@ export interface GraphNode {
 export interface GraphEdge {
   relation_id: string;
   state_chapter_id: number;
-  source_entity_id: number;
-  target_entity_id: number;
+  source_entity_id: string;
+  target_entity_id: string;
   source_name: string;
   target_name: string;
   relation_type: string;
@@ -341,11 +342,11 @@ export interface GraphChange {
   fact_id: string;
   effective_chapter_id: number;
   changes: Array<Record<string, unknown>>;
-  entity_id?: number | null;
+  entity_id?: string | null;
   entity_name?: string | null;
   relation_id?: string | null;
-  from_entity_id?: number | null;
-  to_entity_id?: number | null;
+  from_entity_id?: string | null;
+  to_entity_id?: string | null;
   from_name?: string | null;
   to_name?: string | null;
   relation_type?: string | null;
@@ -396,11 +397,11 @@ export interface TimelinePhase {
 export interface TimelineEventParticipant {
   name?: string;
   role: string;
-  entity_id?: number | null;
+  entity_id?: string | null;
   entity_type?: string | null;
   entity?: {
     name: string;
-    entity_id?: number | null;
+    entity_id?: string | null;
     entity_type?: string | null;
   } | null;
   // 透传保留未知字段

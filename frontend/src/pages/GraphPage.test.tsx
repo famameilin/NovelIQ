@@ -128,7 +128,7 @@ function createGraphData(): GraphData {
     last_chapter_id: 15,
     nodes: [
       {
-        entity_id: 1,
+        entity_id: "1",
         name: "顾霜",
         entity_type: "character",
         first_seen_chapter: 1,
@@ -137,7 +137,7 @@ function createGraphData(): GraphData {
         state: { primary_role_function: "主角", status: "active" },
       },
       {
-        entity_id: 2,
+        entity_id: "2",
         name: "司夜",
         entity_type: "character",
         first_seen_chapter: 2,
@@ -150,8 +150,8 @@ function createGraphData(): GraphData {
       {
         relation_id: "relation-1",
         state_chapter_id: 3,
-        source_entity_id: 1,
-        target_entity_id: 2,
+        source_entity_id: "1",
+        target_entity_id: "2",
         source_name: "顾霜",
         target_name: "司夜",
         relation_type: "盟友",
@@ -178,8 +178,8 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         effective_chapter_id: 12,
         changes: [{ change_kind: "assert" }],
         relation_id: "relation-1",
-        from_entity_id: 1,
-        to_entity_id: 2,
+        from_entity_id: "1",
+        to_entity_id: "2",
         from_name: "顾霜",
         to_name: "司夜",
         relation_type: "盟友",
@@ -195,7 +195,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
         fact_id: "fact-13",
         effective_chapter_id: 13,
         changes: [{ field: "status", before: "hidden", after: "active" }],
-        entity_id: 1,
+        entity_id: "1",
         entity_name: "顾霜",
       },
     ],
