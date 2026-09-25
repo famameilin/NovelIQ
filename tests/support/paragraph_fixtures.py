@@ -11,8 +11,7 @@ import uuid
 
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
-    BoundChunkAnnotation,
-    ChunkMetricsInput,
+    ChapterMetricsInput,
     NarrativeFunction,
 )
 from src.chunking.chunker import Chunk
@@ -191,24 +190,18 @@ def insert_chapter_annotation(
     pivot_moment: bool = False,
     cliffhanger: bool = False,
 ) -> None:
-    """写入一章一个 chunk 的最小章节标注（agent-semantic-v2 合同）"""
+    """写入单章最小章节标注（agent-semantic-v2 合同；2026-09-19 章即块拍平）"""
     annotation = BoundChapterAnnotation(
-        chapter_summary=f"章节 {chapter_id} 摘要",
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=chapter_id,
-                metrics=ChunkMetricsInput(
-                    summary=f"章节 {chapter_id} 摘要",
-                    emotional_valence=emotional_valence,
-                    narrative_function=NarrativeFunction(narrative_function),
-                    pivot_moment=pivot_moment,
-                    cliffhanger=cliffhanger,
-                ),
-                character_observations=[],
-                dialogues=[],
-                events=[],
-            )
-        ],
+        metrics=ChapterMetricsInput(
+            summary=f"章节 {chapter_id} 摘要",
+            emotional_valence=emotional_valence,
+            narrative_function=NarrativeFunction(narrative_function),
+            pivot_moment=pivot_moment,
+            cliffhanger=cliffhanger,
+        ),
+        character_observations=[],
+        dialogues=[],
+        events=[],
     )
     ChapterAnnotationRepository(db_session).add_annotation(
         run_id=run_id,
