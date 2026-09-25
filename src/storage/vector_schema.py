@@ -69,6 +69,18 @@ _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS = {
 }
 
 
+# 2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维；更高维（如
+# Qwen3-Embedding-4B 的 2560 维）建 vector_cosine_ops 索引会抛 ProgramLimitExceeded，
+# 必须改用 halfvec 表达式索引（上限 4000 维）。检索侧 embedding_ops 须做同型 cast
+# 才能命中该索引，形态判定共用 hnsw_index_uses_halfvec。
+_HNSW_MAX_VECTOR_DIM = 2000
+
+
+def hnsw_index_uses_halfvec(embedding_dim: int) -> bool:
+    """2026-09-25 用于判定段落向量 HNSW 索引是否需要 halfvec 表达式形态"""
+    return embedding_dim > _HNSW_MAX_VECTOR_DIM
+
+
 def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
     """2026-08-07 用于创建或验证原文自然段向量表
 
@@ -125,12 +137,21 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
     # 2026-08-13 P2：章节 Agent 语义检索（search_similar_paragraphs）此前对同 run 全量
     # 向量做余弦全表扫描，加 HNSW ANN 索引（需 pgvector ≥ 0.5）；查询按向量距离检索后
     # 再叠加 run_id 边界过滤即可命中
-    session.execute(
-        text(
-            f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
-            f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
+    if hnsw_index_uses_halfvec(embedding_dim):
+        session.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
+                f"ON {schema}.paragraph_embeddings USING hnsw "
+                f"((embedding_vector::halfvec({embedding_dim})) halfvec_cosine_ops)"
+            )
         )
-    )
+    else:
+        session.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
+                f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
+            )
+        )
 
 
 def _hnsw_index_exists(session: Session, schema: str) -> bool:
