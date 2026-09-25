@@ -12,7 +12,7 @@ from typing import TypedDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.local.embedding import EmbeddingClient
+from src.models.local.embedding import EmbeddingClient, format_query_instruct
 from src.storage.models import Chapter, Paragraph
 from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
 
@@ -131,7 +131,7 @@ class TextSearchService:
         if self._semantic_enabled:
             if self._embedding_client is None:
                 raise ValueError("原文语义检索已启用但 EmbeddingClient 未配置")
-            query_embedding = await self._embedding_client.get_embedding(normalized_query)
+            query_embedding = await self._embedding_client.get_embedding(format_query_instruct(normalized_query))
             semantic_rows = search_similar_paragraphs(
                 self._session,
                 self._run_id,

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
+from src.models.local.embedding import format_query_instruct
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories.paragraph.embedding_ops import SimilarParagraphRow
 from src.storage.repositories.paragraph_repository import ParagraphRepository
@@ -146,6 +147,29 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
     # 段落 1：只有 keyword 命中（顾霜），保持独立候选
     assert by_paragraph[1].keyword_score == 1.0
     assert by_paragraph[1].semantic_score is None
+
+
+@pytest.mark.asyncio
+async def test_search_wraps_query_with_instruct_prefix(db_session) -> None:
+    """2026-09-25 Qwen3-Embedding 非对称检索配方：查询侧嵌入带 instruct 前缀，文档侧不带"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"],
+        title="查询instruct前缀",
+    )
+    _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
+    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=True)
+    service._embedding_client = AsyncMock()
+    with patch(
+        "src.text_search.service.search_similar_paragraphs",
+        return_value=[],
+    ):
+        await service.search("林渡 顾霜")
+
+    sent_text = service._embedding_client.get_embedding.await_args.args[0]
+    assert sent_text == format_query_instruct("林渡 顾霜")
+    assert sent_text.startswith("Instruct: ")
+    assert sent_text.endswith("\nQuery:林渡 顾霜")
 
 
 @pytest.mark.asyncio

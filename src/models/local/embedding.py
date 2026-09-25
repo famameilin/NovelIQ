@@ -15,6 +15,17 @@ RETRYABLE_EMBEDDING_STATUS_CODES = {429, 500, 502, 503, 504}
 EMBEDDING_MAX_RETRIES = 2
 EMBEDDING_RETRY_BASE_DELAY_S = 0.5
 
+# 2026-09-25 用于查询侧嵌入按 Qwen3-Embedding 官方非对称检索配方加 instruct 前缀：
+# 检索文档侧（embed_texts）必须直发原文不加前缀，只有查询侧走 format_query_instruct；
+# 指令按官方建议写英文。换成对称嵌入模型（如原 ritrieve BERT 系）时须移除前缀，
+# 否则查询向量分布与文档向量分布偏离、相似度失真。
+QUERY_INSTRUCT_TASK = "Given a query about a novel, retrieve original novel passages relevant to the query"
+
+
+def format_query_instruct(query: str) -> str:
+    """2026-09-25 用于按模型卡官方模板包装查询文本（Instruct: {task}\nQuery:{query}）"""
+    return f"Instruct: {QUERY_INSTRUCT_TASK}\nQuery:{query}"
+
 
 class EmbeddingClient:
     """
