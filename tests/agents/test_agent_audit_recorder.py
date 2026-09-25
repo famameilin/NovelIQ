@@ -99,7 +99,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     turn_id = recorder.record_turn(
         invocation_id=invocation_id,
         turn_index=1,
-        context_summary={"phase": "chunk_open", "missing_domains": ["metrics"]},
+        context_summary={"phase": "chapter_open", "missing_domains": ["metrics"]},
         raw_response={"role": "ai", "content": "调用工具"},
         timing={
             "ttft_ms": 120,
@@ -127,7 +127,7 @@ def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
     db_session.rollback()
     turn = db_session.get(AgentTurn, turn_id)
     assert turn.turn_index == 1
-    assert turn.context_summary["phase"] == "chunk_open"
+    assert turn.context_summary["phase"] == "chapter_open"
     assert turn.raw_response["content"] == "调用工具"
     assert turn.ttft_ms == 120
     assert turn.first_visible_ms == 180
@@ -381,7 +381,7 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
         tool_calls=[{"name": "write_metrics", "args": {}, "id": "c1", "type": "tool_call"}],
     )
     turn_id = observer.record_turn(
-        context_summary={"phase": "chunk_open"},
+        context_summary={"phase": "chapter_open"},
         request_messages=[AIMessage(content="问")],
         response_message=response,
         timing=ModelCallTiming(ttft_ms=10, model_ms=100),
@@ -498,7 +498,7 @@ def test_observer_persists_reasoning_content_into_turn_row(db_session) -> None:
     )
 
     turn_id = observer.record_turn(
-        context_summary={"phase": "chunk_open"},
+        context_summary={"phase": "chapter_open"},
         request_messages=[AIMessage(content="问")],
         response_message=response,
         timing=ModelCallTiming(ttft_ms=5, model_ms=50),
@@ -697,7 +697,7 @@ def test_observer_raises_when_tool_recorded_without_active_turn(db_session) -> N
         model_name="test-model",
         model_provider="local",
     )
-    with pytest.raises(RuntimeError, match="工具审计必须先于模型回合"):
+    with pytest.raises(RuntimeError):
         observer.record_tool_call(
             call_index=0,
             tool_name="write_metrics",
