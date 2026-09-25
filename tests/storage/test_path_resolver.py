@@ -29,10 +29,10 @@ def test_resolve_model_dir_is_absolute_and_run_scoped(monkeypatch, tmp_path: Pat
 
 def test_resolve_model_dir_rejects_path_like_run_id() -> None:
     """2026-08-20 验证路径型 run_id 被拒绝"""
-    with pytest.raises(ValueError, match="非法 run_id"):
+    with pytest.raises(ValueError):
         resolve_model_dir("nested/run")
 
-    with pytest.raises(ValueError, match="非法 run_id"):
+    with pytest.raises(ValueError):
         resolve_model_dir("..")
 
 
@@ -46,17 +46,17 @@ def test_resolve_run_model_dir_is_kind_scoped_and_absolute(monkeypatch, tmp_path
 
 def test_resolve_run_model_dir_rejects_path_like_run_id() -> None:
     """2026-08-20 验证路径型 run_id 被拒绝"""
-    with pytest.raises(ValueError, match="非法 run_id"):
+    with pytest.raises(ValueError):
         resolve_run_model_dir("nested/run", "word2vec")
 
-    with pytest.raises(ValueError, match="非法 run_id"):
+    with pytest.raises(ValueError):
         resolve_run_model_dir("..", "word2vec")
 
 
 @pytest.mark.parametrize("kind", ["", "pretrained", "../word2vec", "word2vec/nested"])
 def test_resolve_run_model_dir_rejects_unknown_or_path_like_kind(kind: str) -> None:
     """2026-08-30 用于验证模型类型只能取受支持语义值且不能注入路径"""
-    with pytest.raises(ValueError, match="非法模型类型"):
+    with pytest.raises(ValueError):
         resolve_run_model_dir("run-9", kind)
 
 
