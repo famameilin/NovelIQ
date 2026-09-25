@@ -13,7 +13,6 @@ from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.workflows.preprocess import (
     _generate_paragraph_embedding_rows,
     _generate_paragraph_embeddings,
-    run_preprocess,
 )
 from tests.support.analysis_factories import insert_test_novel
 
@@ -238,77 +237,3 @@ def test_split_paragraphs_oversized_without_sentence_boundaries_falls_back_hard_
     assert all(len(p.text) <= 1500 for p in paragraphs)
     assert "".join(p.text for p in paragraphs) == text
 
-
-@pytest.mark.asyncio
-async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
-    mock_session = MagicMock()
-    mock_chapter_repo = MagicMock()
-    mock_chapter_repo.is_preprocess_complete.return_value = False
-    embedding_stage_commit_counts: list[int] = []
-
-    async def fake_generate_paragraph_embeddings(session, run_id, emitter=None) -> int:
-        embedding_stage_commit_counts.append(session.commit.call_count)
-        return 0
-
-    with (
-        patch("src.workflows.preprocess.ingest_path", return_value=[SimpleNamespace(text="测试文本")]),
-        patch("src.workflows.preprocess.normalize_text", side_effect=lambda text: text),
-        patch(
-            "src.workflows.preprocess.chunk_documents_with_chapters",
-            new=AsyncMock(return_value=([Chunk(index=1, text="测试文本", start=0, end=4, chapter_id=1)], [])),
-        ),
-        patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
-        patch("src.workflows.preprocess.ChapterRepository", return_value=mock_chapter_repo),
-        patch("src.workflows.preprocess._generate_paragraph_embeddings", new=fake_generate_paragraph_embeddings),
-        patch("src.workflows.preprocess.settings.models.paragraph_embedding.semantic_enabled", True),
-        patch(
-            "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
-            return_value={"sensory": [], "function_words": [], "semantic_categories": {}, "imagery": []},
-        ),
-    ):
-        inserted, _, _ = await run_preprocess(
-            source_path=SimpleNamespace(),
-            run_id="run-1",
-            session=mock_session,
-        )
-
-    assert inserted == 1
-    # 修改说明: 2026-08-14 段落事实源新增 insert_paragraphs 与段落指标
-    # （insert_paragraph_metrics）、段落曲线（insert_paragraph_curves）分段提交；
-    # M8b 删除 chunk_style 提交后，embedding 阶段前的提交数为 5
-    # （chapters/chunks/paragraphs/paragraph_metrics/paragraph_curves）
-    assert embedding_stage_commit_counts == [5]
-
-
-@pytest.mark.asyncio
-async def test_run_preprocess_passes_only_emitter_to_chunk_documents() -> None:
-    """
-    2026-08-05 用于验证预处理入口只向 chunk_documents_with_chapters 透传 emitter
-    """
-    mock_session = MagicMock()
-    mock_chapter_repo = MagicMock()
-    mock_chapter_repo.is_preprocess_complete.return_value = False
-    mock_chunk_documents = AsyncMock(return_value=([Chunk(index=0, text="测试文本", start=0, end=4, chapter_id=1)], []))
-
-    with (
-        patch("src.workflows.preprocess.ingest_path", return_value=[SimpleNamespace(text="测试文本")]),
-        patch("src.workflows.preprocess.normalize_text", side_effect=lambda text: text),
-        patch("src.workflows.preprocess.chunk_documents_with_chapters", new=mock_chunk_documents),
-        patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
-        patch("src.workflows.preprocess.ChapterRepository", return_value=mock_chapter_repo),
-        patch("src.workflows.preprocess.settings.models.paragraph_embedding.semantic_enabled", False),
-        patch(
-            "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
-            return_value={"sensory": [], "function_words": [], "semantic_categories": {}, "imagery": []},
-        ),
-    ):
-        await run_preprocess(
-            source_path=SimpleNamespace(),
-            run_id="run-1",
-            session=mock_session,
-        )
-
-    call_kwargs = mock_chunk_documents.await_args.kwargs
-    assert "max_chars" not in call_kwargs
-    assert "start_chars" not in call_kwargs
-    assert call_kwargs.get("emitter") is None

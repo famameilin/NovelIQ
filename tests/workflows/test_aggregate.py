@@ -186,8 +186,8 @@ class TestAggregate:
             chapter_id=1,
             emotional_valences={0: 2, 1: 1, 2: 1},
             event_types={0: "冲突", 1: "铺垫", 2: "铺垫"},
-            pivot_chunks={0},
-            cliffhanger_chunks={2},
+            pivot_chapters={0},
+            cliffhanger_chapters={2},
         )
 
         chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)

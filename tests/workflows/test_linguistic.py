@@ -409,29 +409,22 @@ class TestParagraphBoundary:
     def _insert_annotation_with_labels(self, chapter_id: int, labels: list[dict]) -> None:
         from src.agents.annotation.schema import (
             BoundChapterAnnotation,
-            BoundChunkAnnotation,
             BoundParagraphLabel,
-            ChunkMetricsInput,
+            ChapterMetricsInput,
             NarrativeFunction,
         )
         from src.storage.repositories import ChapterAnnotationRepository
 
         annotation = BoundChapterAnnotation(
-            chapter_summary="测试章节",
-            chunks=[
-                BoundChunkAnnotation(
-                    chunk_id=chapter_id,
-                    metrics=ChunkMetricsInput(
-                        summary="测试",
-                        emotional_valence=0,
-                        narrative_function=NarrativeFunction.SETUP,
-                    ),
-                    character_observations=[],
-                    dialogues=[],
-                    events=[],
-                    paragraph_labels=[BoundParagraphLabel(**label) for label in labels],
-                )
-            ],
+            metrics=ChapterMetricsInput(
+                summary="测试",
+                emotional_valence=0,
+                narrative_function=NarrativeFunction.SETUP,
+            ),
+            character_observations=[],
+            dialogues=[],
+            events=[],
+            paragraph_labels=[BoundParagraphLabel(**label) for label in labels],
         )
         ChapterAnnotationRepository(self.db_session).add_annotation(
             run_id=self.run_id,
