@@ -231,6 +231,20 @@ def _written_receipt(record: str, ref: dict[str, Any]) -> dict[str, Any]:
     return {"status": "written", "record": record, "ref": dict(ref)}
 
 
+def _sync_entity_ref(ref: dict[str, Any], production_receipt: Any) -> None:
+    """用于把实体 ref 的大类对齐生产层的生效记录
+
+    同章内另一条 lane 先登记过同名实体时，生产层按部分更新合并保留登记大类、
+    丢弃本次入参的 entity_type；ref 若照抄输入，模型看到的大类与现实不符
+    （run faff5efe ch14 实测：event lane 提交 location、生效 organization）。
+    """
+    if ref.get("kind") != "entity" or not isinstance(production_receipt, dict):
+        return
+    content = production_receipt.get("content")
+    if isinstance(content, dict) and "entity_type" in content:
+        ref["entity_type"] = content["entity_type"]
+
+
 def _tool_receipt(name: str, payload: Any) -> Any:
     """用于把一次工具调用的产出收敛成程序面回执
 
@@ -493,21 +507,11 @@ def _dialogue_update_call(
     """用于按对话记录键构造一次"订正既有记录"的调用（判本章候选是另一条用法）
 
     这个键就是候选表里那条候选的 candidate_key：本章候选判过就有记录，既有记录同样按它订正。
-    两种用法不混用——判候选要 candidate_index+verdict，订正只要键与要改的字段。
+    订正只消费 candidate_key 与 speaker_id/tone/description/is_inner_monologue；模型常顺手
+    复读判候选路径的 candidate_index/verdict/evidence，误带时忽略、不作废整笔。
     """
     normalized_id = _require_text(candidate_key, record="dialogue", field_name="candidate_key")
     record = _record_of(book.subagent, f"dialogue/{normalized_id}")
-    if candidate_index is not None or verdict is not None or evidence is not None:
-        raise _reject(
-            "按 candidate_key 订正记录时不带 candidate_index/verdict/evidence",
-            record=record,
-            field="candidate_key",
-            code="invalid_call",
-            expected=(
-                "两种用法二选一：判本章候选给 candidate_index 与 verdict（可带 speaker_id/tone）；"
-                "订正既有记录只给 candidate_key 与要改的字段"
-            ),
-        )
     if is_inner_monologue is not None and not isinstance(is_inner_monologue, bool):
         raise _reject(
             f"is_inner_monologue 必须是 True/False：{is_inner_monologue!r}",
@@ -717,8 +721,10 @@ def build_subagent_constructors(
         }
         if item.change_kind is not None:
             args["change_kind"] = item.change_kind
-            # 变化落在哪一段，随变更进图域操作日志（建边路径不消费 evidence）
-            args["evidence"] = item.evidence[0].paragraph_id
+            # 变化落在哪一段，随变更进图域操作日志；建边（含显式"新增"）不消费 evidence、
+            # 元组为空，只有真带段号时才透传（生产面建边路径本就忽略它）
+            if item.evidence:
+                args["evidence"] = item.evidence[0].paragraph_id
         return _ConstructorCall(
             record=record,
             tool="write_relation",
@@ -936,7 +942,8 @@ def build_subagent_constructors(
         speaker_id 写本 subagent 已登记的实体 id，判不了就省略；tone 取闭集，没有贴合的用「其他」。
         evidence 是候选所在段落的段首号：not_dialogue 可省略，其余必须给。
         给 candidate_key（候选表里那条候选的键）时按更新语义改那条既有记录：speaker_id/tone/
-        description/is_inner_monologue 至少给一个，不必再给 candidate_index/verdict/evidence。
+        description/is_inner_monologue 至少给一个；candidate_index/verdict/evidence 只属于
+        判候选用法，订正时误带会被忽略。
         """
         if candidate_key is not None:
             return _dialogue_update_call(
@@ -1387,6 +1394,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         elif plan is None:
             receipt = _tool_receipt(name, entry.get("receipt"))
         else:
+            _sync_entity_ref(plan.ref, entry.get("receipt"))
             receipt = _written_receipt(plan.record, plan.ref)
         return self._finish_call(
             name,

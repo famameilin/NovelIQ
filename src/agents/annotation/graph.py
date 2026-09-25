@@ -958,7 +958,9 @@ def build_subagent_graph(
             retries=retries,
             completion_hint=None,
             require_tool_call=False,
-            inject_progress=True,
+            # 2026-09-25 消融（ch20/lanes 三臂，tmp_ablation/）：lane 账本令 reasoning +36%、
+            # prompt 3.5x、三 lane 全撞满回合上限，交付相当——账本只在写者面注入
+            inject_progress=False,
             bind_tools=bind_tools,
             subagent_face=True,
             stop_at_iteration_limit=True,
