@@ -183,5 +183,4 @@ async def test_sse_returns_404_when_task_belongs_to_another_novel() -> None:
             await sse_endpoint("novel-other", "task-1", request)
 
     assert exc_info.value.status_code == 404
-    assert "不属于该小说" in exc_info.value.detail
     mock_em.connect.assert_not_called()

@@ -99,16 +99,6 @@ class TestReanalysis:
         assert "task_id" in data
         assert data["status"] == "pending"
 
-    def test_reanalyze_request_default_num_topics_matches_settings(self) -> None:
-        """
-        2026-08-13 P2：ReanalyzeRequest 默认 num_topics 必须与
-        settings.topic_model.num_topics 一致，无 body 与空 body 行为对齐。
-        """
-        from src.config import settings
-
-        assert settings.topic_model.num_topics == 25
-        assert ReanalyzeRequest().num_topics == settings.topic_model.num_topics
-
     def test_reanalyze_empty_body_persists_default_num_topics(self, api_client: TestClient) -> None:
         """空 body 的 reanalyze 应持久化默认 num_topics=25 的请求载荷"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:

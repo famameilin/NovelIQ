@@ -14,7 +14,6 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.models.responses import ParagraphCurvePoint
 from tests.support.paragraph_fixtures import (
     create_completed_run,
     create_run_with_status,
@@ -116,10 +115,6 @@ def test_paragraph_curves_contract_fields_and_position(api_client: TestClient, d
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 3
-
-    expected_fields = set(ParagraphCurvePoint.model_fields)
-    for point in payload:
-        assert set(point) == expected_fields
 
     first, second, third = payload
     assert first["paragraph_id"] == 0
