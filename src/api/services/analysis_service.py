@@ -119,7 +119,7 @@ class AnalysisService:
                 total_chapters = chapter_repo.count_chapters(run_id)
             except Exception as exc:
                 logger.warning(
-                    "Failed to count chunks before annotate stage, "
+                    "Failed to count chapters before annotate stage, "
                     "falling back to total=0: task_id={} run_id={} error={}",
                     task_id,
                     run_id,
