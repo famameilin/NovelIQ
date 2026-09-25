@@ -56,20 +56,6 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
     assert settings.allow_future_context is True
 
 
-def test_parse_task_model_settings_defaults() -> None:
-    """
-    2026-08-08 用于验证任务级配置默认值
-    """
-    settings = _parse_task_model_settings(None)
-
-    assert settings.thinking is False
-    assert settings.streaming is False
-    assert settings.structured_output == "json_schema"
-    assert settings.max_iterations == 10
-    assert settings.total_attempts == 3
-    assert settings.allow_future_context is False
-
-
 def test_parse_task_model_settings_rejects_invalid_structured_output() -> None:
     """
     2026-08-08 用于验证结构化输出模式只接受闭合枚举

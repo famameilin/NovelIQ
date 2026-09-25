@@ -134,29 +134,9 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("models", "annotation", "sub_chunk_max_chars"),
                 field_type="integer",
-                label="子代理切分阈值（字）",
-                description="章文本超过该字数按段落边界切成子块，≥2 块时启用子代理（N 读者 + 1 写者）；低于则单代理",
+                label="子代理门槛（字）",
+                description="章正文超过该字数走 subagent 路径（三条职责并发），不超过走单 agent；只作派发门槛",
                 min_value=1,
-            ),
-            SettingFieldSpec(
-                path=("models", "annotation", "sub_chunk_min_tail_chars"),
-                field_type="integer",
-                label="超长章尾块并入阈值（字）",
-                description="切分后尾块小于该字数并入前一块，不再单独起一次标注调用；0 保持旧行为",
-                min_value=0,
-            ),
-            SettingFieldSpec(
-                path=("models", "annotation", "writer_max_ask_rounds"),
-                field_type="integer",
-                label="写者追问读者轮数上限",
-                description="超长章两段式标注中写者向读者追问的轮数上限；0 不限（仍受标注最大回合数兜底）",
-                min_value=0,
-            ),
-            SettingFieldSpec(
-                path=("models", "annotation", "codeact_enabled"),
-                field_type="boolean",
-                label="写者程序面（单块章）",
-                description="单块章写者只暴露 execute_code，工具调用写成 Python 程序提交；关闭即回到原生工具面",
             ),
             # ---- models.diagnosis（诊断任务）----
             SettingFieldSpec(
