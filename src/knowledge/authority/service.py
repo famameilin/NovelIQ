@@ -50,7 +50,7 @@ class KnowledgeGraphAuthorityService:
             entity_types=[
                 EntityTypeFact(name=entity.name, entity_type=entity.entity_type)
                 for entity in entities
-                if int(entity.entity_id) not in resolution.representative_by_alias
+                if str(entity.entity_id) not in resolution.representative_by_alias
             ],
         )
 
@@ -61,9 +61,9 @@ class KnowledgeGraphAuthorityService:
         relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
         resolution = self._build_alias_resolution(relations, characters)
         character_ids = {
-            int(entity.entity_id)
+            str(entity.entity_id)
             for entity in characters
-            if int(entity.entity_id) not in resolution.representative_by_alias
+            if str(entity.entity_id) not in resolution.representative_by_alias
         }
         changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
         graph_changes = [
@@ -90,7 +90,7 @@ class KnowledgeGraphAuthorityService:
                     status=str(entity.state.get("status") or "active"),
                 )
                 for entity in characters
-                if int(entity.entity_id) not in resolution.representative_by_alias
+                if str(entity.entity_id) not in resolution.representative_by_alias
             ],
             graph_changes=self._build_graph_changes(graph_changes),
         )
@@ -185,13 +185,13 @@ class KnowledgeGraphAuthorityService:
         """2026-08-07 用于把实体状态快照转换为规范实体合同"""
         rows = sorted(entities, key=lambda row: row.name)
         if resolution is not None:
-            rows = [row for row in rows if int(row.entity_id) not in resolution.representative_by_alias]
+            rows = [row for row in rows if str(row.entity_id) not in resolution.representative_by_alias]
         result: list[CanonicalEntity] = []
         for entity in rows:
             if not is_global_character_surface_name(entity.name):
                 continue
             aliases = (
-                resolution.aliases_by_representative.get(int(entity.entity_id), []) if resolution is not None else []
+                resolution.aliases_by_representative.get(str(entity.entity_id), []) if resolution is not None else []
             )
             result.append(
                 CanonicalEntity(
@@ -313,10 +313,10 @@ class KnowledgeGraphAuthorityService:
                 last_seen_chapter=entity.last_seen_chapter,
                 source_confidence=None,
                 is_representative=(
-                    resolution is None or int(entity.entity_id) not in resolution.representative_by_alias
+                    resolution is None or str(entity.entity_id) not in resolution.representative_by_alias
                 ),
             )
             for entity in entities
             if is_global_character_surface_name(entity.name)
-            and (resolution is None or int(entity.entity_id) not in resolution.representative_by_alias)
+            and (resolution is None or str(entity.entity_id) not in resolution.representative_by_alias)
         ]

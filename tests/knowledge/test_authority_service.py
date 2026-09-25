@@ -50,12 +50,12 @@ def test_authority_views_project_chapter_history_and_graph_changes(db_session) -
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="迎敌", role_function="主体"),
-            character_fact(chunk_id=1, name="顾霜", action="协助", role_function="帮助者"),
+            character_fact(chapter_id=1, name="林渡", action="迎敌", role_function="主体"),
+            character_fact(chapter_id=1, name="顾霜", action="协助", role_function="帮助者"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -98,12 +98,12 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="结盟"),
-            character_fact(chunk_id=1, name="顾霜", action="结盟"),
+            character_fact(chapter_id=1, name="林渡", action="结盟"),
+            character_fact(chapter_id=1, name="顾霜", action="结盟"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -125,7 +125,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
                 type="relation_change",
                 reason="分道扬镳",
                 target_key="target-break",
-                target_ref={"kind": "relation_change", "chunk_id": 2},
+                target_ref={"kind": "relation_change", "chapter_id": 2},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -160,14 +160,14 @@ def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="伯安", action="同游"),
-            character_fact(chunk_id=1, name="贺重明", action="同游"),
-            character_fact(chunk_id=1, name="猴子", action="同游"),
-            character_fact(chunk_id=1, name="侯飞白", action="同游"),
+            character_fact(chapter_id=1, name="伯安", action="同游"),
+            character_fact(chapter_id=1, name="贺重明", action="同游"),
+            character_fact(chapter_id=1, name="猴子", action="同游"),
+            character_fact(chapter_id=1, name="侯飞白", action="同游"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="伯安",
                 to_name="猴子",
                 relation_type="友情",
@@ -183,13 +183,21 @@ def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
     graph_view = service.build_graph_view(run_id)
     representative = service.build_representative_graph_view(run_id)
 
-    canonical_names = {row.name for row in level1.canonical_entities}
-    assert canonical_names == {"伯安", "猴子"}
-    by_name = {row.name: row for row in level1.canonical_entities}
-    assert by_name["伯安"].aliases == ["贺重明"]
-    assert by_name["猴子"].aliases == ["侯飞白"]
-    assert [(row.from_name, row.to_name, row.relation_type) for row in level1.confirmed_relations] == [
-        ("伯安", "猴子", "友情")
-    ]
-    assert {row.name for row in graph_view.participant_states} == {"伯安", "猴子"}
-    assert {row.name for row in representative.canonical_entities} == {"伯安", "猴子"}
+    canonical_rows = level1.canonical_entities
+    # 代表名由 uuid5(entity_id) 字典序选举决定，随 run 随机；representative 视图
+    # 的实体取活跃非身份边的端点（原始名，不按选举折叠）。因此只断言各视图
+    # 的合并语义：两个"同一人物"分量各收敛到一个名字，别名归并完整。
+    assert len(canonical_rows) == 2
+    for row in canonical_rows:
+        assert {row.name, *row.aliases} in ({"伯安", "贺重明"}, {"猴子", "侯飞白"})
+    assert [(row.relation_type,) for row in level1.confirmed_relations] == [("友情",)]
+    friendship = level1.confirmed_relations[0]
+    assert friendship.from_name in {"伯安", "贺重明"}
+    assert friendship.to_name in {"猴子", "侯飞白"}
+    for view_names in (
+        {row.name for row in graph_view.participant_states},
+        {row.name for row in representative.canonical_entities},
+    ):
+        assert len(view_names) == 2
+        assert len(view_names & {"伯安", "贺重明"}) == 1
+        assert len(view_names & {"猴子", "侯飞白"}) == 1

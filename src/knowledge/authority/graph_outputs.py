@@ -65,7 +65,7 @@ def build_graph_quality_report(
 
 
 def _detect_relation_conflicts(confirmed_relations: list[ConfirmedRelation]) -> list[GraphConflictSample]:
-    pair_map: dict[tuple[tuple[int | None, str], tuple[int | None, str]], list[ConfirmedRelation]] = {}
+    pair_map: dict[tuple[tuple[str | None, str], tuple[str | None, str]], list[ConfirmedRelation]] = {}
     for relation in confirmed_relations:
         sorted_pair = sorted(
             [

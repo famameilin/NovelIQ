@@ -15,8 +15,13 @@ from src.storage.repositories.graph.repository import EntitySnapshotRow
 _GOLD_DIR = Path(__file__).resolve().parents[2] / "data" / "gold_standards" / "disambiguation"
 
 
+def _sid(entity_id: int) -> str:
+    """2026-09-19 用于构造字典序与序号一致的测试 uuid（实体主键已改 uuid）"""
+    return f"00000000-0000-0000-0000-{entity_id:012d}"
+
+
 def _entity(
-    entity_id: int,
+    entity_id: str,
     name: str,
     *,
     entity_type: str = "character",
@@ -55,30 +60,30 @@ def test_looks_like_alias_name_rejects_too_short_and_identical() -> None:
 
 def test_find_heuristic_character_edges_only_character_type() -> None:
     entities = [
-        _entity(1, "贺伯安"),
-        _entity(2, "伯安"),
-        _entity(3, "赤羽炽尾鸡", entity_type="creature"),
-        _entity(4, "赤羽"),
+        _entity(_sid(1), "贺伯安"),
+        _entity(_sid(2), "伯安"),
+        _entity(_sid(3), "赤羽炽尾鸡", entity_type="creature"),
+        _entity(_sid(4), "赤羽"),
     ]
     edges = find_heuristic_character_edges(entities)
-    assert edges == [(1, 2)]
+    assert edges == [(_sid(1), _sid(2))]
 
 
 def test_build_alias_resolution_merges_heuristic_substring_without_llm_edge() -> None:
     """无 same_character 关系时，子串启发式仍可合并 贺伯安→伯安。"""
     entities = [
-        _entity(10, "贺伯安"),
-        _entity(20, "伯安"),
-        _entity(30, "赵哥"),
-        _entity(40, "赤甲卫"),
+        _entity(_sid(10), "贺伯安"),
+        _entity(_sid(20), "伯安"),
+        _entity(_sid(30), "赵哥"),
+        _entity(_sid(40), "赤甲卫"),
     ]
     resolution = build_alias_resolution([], entities=entities)
 
     # 贺伯安/伯安 应收敛到同一代表
-    assert resolution.resolve_entity_id(10) == resolution.resolve_entity_id(20)
+    assert resolution.resolve_entity_id(_sid(10)) == resolution.resolve_entity_id(_sid(20))
     # 赵哥/赤甲卫 不得误合并
-    assert resolution.resolve_entity_id(30) == 30
-    assert resolution.resolve_entity_id(40) == 40
+    assert resolution.resolve_entity_id(_sid(30)) == _sid(30)
+    assert resolution.resolve_entity_id(_sid(40)) == _sid(40)
 
 
 def test_gold_should_not_merge_pairs_are_never_heuristic_hits() -> None:
