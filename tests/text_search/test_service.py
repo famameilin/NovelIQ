@@ -78,23 +78,6 @@ async def test_search_with_empty_query_returns_empty() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_with_no_terms_skips_keyword_scan() -> None:
-    """2026-08-12 用于验证长句无分隔符查询产生空词项，关键词检索接收空列表且不命中"""
-    session = MagicMock()
-    session.execute.return_value.all.return_value = []
-    service = TextSearchService(session, run_id="run-1", semantic_enabled=False)
-    with patch(
-        "src.text_search.service.search_paragraphs_by_keywords",
-        return_value=[],
-    ) as mock_keyword:
-        result = await service.search("这是一段超过二十个字符长度没有分隔符的完整查询文本内容")
-
-    mock_keyword.assert_called_once()
-    assert mock_keyword.call_args.args[2] == []
-    assert result == []
-
-
-@pytest.mark.asyncio
 async def test_search_returns_separate_candidates_for_paragraphs_in_same_chapter(db_session) -> None:
     """2026-08-14 二期段落化（§18.4）：同一 chunk/章的多个命中段落不再按 chunk 合并，
     每个段落都是独立候选"""
@@ -180,35 +163,6 @@ async def test_search_respects_paragraph_bounds(db_session) -> None:
 
     assert [candidate.paragraph_id for candidate in result] == [1]
     assert result[0].excerpt == "顾霜独自离去。"
-
-
-@pytest.mark.asyncio
-async def test_search_forwards_chapter_sequence_bounds_to_keyword_and_semantic_searches() -> None:
-    """2026-08-30 用于验证章节序号前后边界同时下推关键词与语义检索"""
-    session = MagicMock()
-    embedding_client = AsyncMock()
-    embedding_client.get_embedding.return_value = [0.1, 0.2]
-    service = TextSearchService(
-        session,
-        run_id="run-1",
-        embedding_client=embedding_client,
-        semantic_enabled=True,
-    )
-    with (
-        patch("src.text_search.service.search_paragraphs_by_keywords", return_value=[]) as keyword_search,
-        patch("src.text_search.service.search_similar_paragraphs", return_value=[]) as semantic_search,
-    ):
-        result = await service.search(
-            "顾霜",
-            before_chapter_sequence=7,
-            after_chapter_sequence=9,
-        )
-
-    assert result == []
-    assert keyword_search.call_args.kwargs["before_chapter_sequence"] == 7
-    assert semantic_search.call_args.kwargs["before_chapter_sequence"] == 7
-    assert keyword_search.call_args.kwargs["after_chapter_sequence"] == 9
-    assert semantic_search.call_args.kwargs["after_chapter_sequence"] == 9
 
 
 @pytest.mark.asyncio

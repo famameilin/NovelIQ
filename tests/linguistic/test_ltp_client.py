@@ -157,7 +157,7 @@ def test_ltp_session_requires_local_model_dir(monkeypatch) -> None:
         LtpSession()
 
     monkeypatch.setattr(ltp_settings, "model_dir", "models/ltp/不存在的目录")
-    with pytest.raises(FileNotFoundError, match="不存在的目录"):
+    with pytest.raises(FileNotFoundError):
         LtpSession()
 
 

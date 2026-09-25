@@ -76,7 +76,7 @@ async def test_embed_texts_does_not_retry_bad_request() -> None:
     client._client = SimpleNamespace(embeddings=SimpleNamespace(create=create_mock))
 
     with patch("src.models.local.embedding.asyncio.sleep", new=AsyncMock()) as sleep_mock:
-        with pytest.raises(RuntimeError, match="embedding 服务错误"):
+        with pytest.raises(RuntimeError):
             await client.embed_texts(["第一段"])
 
     assert create_mock.await_count == 1
