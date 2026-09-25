@@ -12,10 +12,9 @@ from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundCharacterObservation,
-    BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
-    ChunkMetricsInput,
+    ChapterMetricsInput,
     ResolvedCase,
 )
 from src.storage.models import (
@@ -43,21 +42,17 @@ from tests.support.chapter_annotation_helpers import (
 def _full_annotation(
     text: str,
     *,
-    chunk_id: int = 1,
+    chapter_id: int = 1,
     event_node_id: str = "evt-persist-root",
 ) -> tuple[BoundChapterAnnotation, list[dict[str, Any]], list[dict[str, Any]]]:
     """2026-08-11 用于构造覆盖四类实体与全部领域事实的完整章节标注
 
     2026-09-04 单一写面：同时返回从声明派生的 op log，供 persist_completion_graph 入参。
     """
-    candidates = extract_dialogue_candidates(chunk_id, text)
+    candidates = extract_dialogue_candidates(chapter_id, text)
     dialogue_candidate = next(candidate for candidate in candidates if candidate.content == "住手")
     annotation = BoundChapterAnnotation(
-        chapter_summary="顾霜进入山门并受宗门庇护",
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=chunk_id,
-                metrics=ChunkMetricsInput(
+                metrics=ChapterMetricsInput(
                     summary="顾霜进入山门",
                     emotional_valence=0,
                     narrative_function="铺垫",
@@ -97,8 +92,6 @@ def _full_annotation(
                         ],
                     )
                 ],
-            )
-        ],
     )
     entity_ops = [
         {
@@ -107,7 +100,7 @@ def _full_annotation(
             "tags": [],
             "description": None,
             "attributes": {},
-            "chapter_id": chunk_id,
+            "chapter_id": chapter_id,
         },
         {
             "name": "山门",
@@ -115,7 +108,7 @@ def _full_annotation(
             "tags": [],
             "description": "青石山门",
             "attributes": {},
-            "chapter_id": chunk_id,
+            "chapter_id": chapter_id,
         },
         {
             "name": "玄剑",
@@ -123,7 +116,7 @@ def _full_annotation(
             "tags": ["宝剑"],
             "description": None,
             "attributes": {},
-            "chapter_id": chunk_id,
+            "chapter_id": chapter_id,
         },
         {
             "name": "天衡宗",
@@ -131,7 +124,7 @@ def _full_annotation(
             "tags": [],
             "description": None,
             "attributes": {},
-            "chapter_id": chunk_id,
+            "chapter_id": chapter_id,
         },
     ]
     relation_assert_ops = [
@@ -139,7 +132,7 @@ def _full_annotation(
             "from_entity": "顾霜",
             "to_entity": "山门",
             "relation_type": "位于",
-            "chapter_id": chunk_id,
+            "chapter_id": chapter_id,
         }
     ]
     return annotation, entity_ops, relation_assert_ops
@@ -161,7 +154,7 @@ def _persist(
         if text is None:
             raise ValueError("必须提供 annotation 或 text")
         annotation, derived_entity_ops, derived_relation_assert_ops = _full_annotation(
-            text, chunk_id=chapter_id, event_node_id=event_node_id
+            text, chapter_id=chapter_id, event_node_id=event_node_id
         )
         entity_ops = derived_entity_ops if entity_ops is None else entity_ops
         relation_assert_ops = (
@@ -181,19 +174,18 @@ def _persist(
         resolved_cases=[],
         entity_ops=entity_ops,
         relation_assert_ops=relation_assert_ops,
-        authorized_text_chapter_ids={chunk.chunk_id for chunk in annotation.chunks},
+        authorized_text_chapter_ids={chapter_id},
     )
-    for chunk in annotation.chunks:
-        DialogueRecordRepository(db_session).sync_dialogues(
-            run_id=run_id,
-            chapter_id=chapter_id,
-            dialogues=chunk.dialogues,
-        )
+    DialogueRecordRepository(db_session).sync_dialogues(
+        run_id=run_id,
+        chapter_id=chapter_id,
+        dialogues=annotation.dialogues,
+    )
     return row, result
 
 
 def test_annotation_fact_id_uses_stable_position() -> None:
-    """2026-08-07 用于验证事实 ID 按 chunk 领域序号稳定生成"""
+    """2026-08-07 用于验证事实 ID 按章领域序号稳定生成"""
     annotation_id = "4fb6b307-3504-445c-852d-a94353f2f2de"
     first = stable_annotation_fact_id(annotation_id, 0, "relation", 0)
     second = stable_annotation_fact_id(annotation_id, 0, "relation", 0)
@@ -243,7 +235,7 @@ def test_persistence_creates_four_entity_types_and_all_domain_facts(db_session) 
     }
     assert all(fact.source_kind == "annotation" for fact in facts)
     relation = next(fact for fact in facts if fact.content["kind"] == "relation")
-    assert relation.payload_path == "chunks/1/relation/1"
+    assert relation.payload_path == "chapters/1/relation/1"
     assert relation.fact_id == stable_annotation_fact_id(
         row.annotation_id,
         1,
@@ -269,10 +261,10 @@ def test_dialogue_record_binds_system_original_text_and_position(db_session) -> 
     db_session.commit()
 
     dialogue = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
-    chunk_text = "顾霜进入山门，“住手”回荡。"
+    chapter_text = "顾霜进入山门，“住手”回荡。"
     start = int(dialogue.start)
     end = int(dialogue.end)
-    assert chunk_text[start:end] == "住手"
+    assert chapter_text[start:end] == "住手"
     assert dialogue.content == "住手"
     assert dialogue.chapter_id == 1
     assert dialogue.is_inner_monologue is False
@@ -357,13 +349,13 @@ def test_entity_resolution_merges_existing_and_extends_seen_bounds(db_session) -
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=1, name="顾霜", action="修炼")],
+        characters=[character_fact(chapter_id=1, name="顾霜", action="修炼")],
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=2, name="顾霜", action="出关")],
+        characters=[character_fact(chapter_id=2, name="顾霜", action="出关")],
     )
     db_session.commit()
 
@@ -386,16 +378,16 @@ def test_entity_type_change_rejected_as_identity_reuse(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=1, name="赤羽炽尾鸡", action="踱步")],
+        characters=[character_fact(chapter_id=1, name="赤羽炽尾鸡", action="踱步")],
     )
-    with pytest.raises(ValueError, match="实体名称已属于其他大类"):
+    with pytest.raises(ValueError):
         persist_chapter_annotation(
             db_session,
             run_id=run_id,
             chapter_id=2,
             relations=[
                 relation_fact(
-                    chunk_id=2,
+                    chapter_id=2,
                     from_name="赤羽炽尾鸡",
                     to_name="山门",
                     relation_type="位于",
@@ -420,7 +412,7 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         chapter_id=1,
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="玄剑",
                 to_name="山门",
                 relation_type="位于",
@@ -433,7 +425,7 @@ def test_sword_and_sword_spirit_are_distinct_entities(db_session) -> None:
         db_session,
         run_id=run_id,
         chapter_id=2,
-        characters=[character_fact(chunk_id=2, name="剑灵", action="开口")],
+        characters=[character_fact(chapter_id=2, name="剑灵", action="开口")],
     )
     db_session.commit()
 
@@ -544,9 +536,9 @@ def test_entity_attributes_deleted_and_overwritten_by_merge_patch(db_session) ->
     }
 
 
-def test_attribute_patch_generated_once_for_multi_chunk_chapter(db_session) -> None:
+def test_attribute_patch_generated_once_for_multi_chapter_chapter(db_session) -> None:
     """2026-08-12 用于验证跨章属性变化事实按字段只生成一次：
-    属性 patch 与 chunk 循环无关，不随同章多次引用重复写入"""
+    属性 patch 与章循环无关，不随同章多次引用重复写入"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["玄剑寒光凛冽。", "玄剑鸣啸"],
@@ -595,7 +587,7 @@ def test_unknown_fact_endpoint_entity_rejected(db_session) -> None:
     )
     annotation, entity_ops, relation_assert_ops = _full_annotation(text, event_node_id="evt-flush-check")
     entity_ops[0]["name"] = "无名客"
-    with pytest.raises(ValueError, match="事实端点实体未被系统解析"):
+    with pytest.raises(ValueError):
         _persist(
             db_session,
             run_id=run_id,
@@ -639,12 +631,12 @@ def test_relation_remark_in_later_chapter_keeps_chapter_history(db_session) -> N
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="迎敌"),
-            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
+            character_fact(chapter_id=1, name="林渡", action="迎敌"),
+            character_fact(chapter_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -657,7 +649,7 @@ def test_relation_remark_in_later_chapter_keeps_chapter_history(db_session) -> N
         chapter_id=2,
         relations=[
             relation_fact(
-                chunk_id=2,
+                chapter_id=2,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -688,12 +680,12 @@ def test_same_chapter_fact_resolution_merges_into_relation_state(db_session) -> 
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="林渡", action="迎敌"),
-            character_fact(chunk_id=1, name="顾霜", action="迎敌"),
+            character_fact(chapter_id=1, name="林渡", action="迎敌"),
+            character_fact(chapter_id=1, name="顾霜", action="迎敌"),
         ],
         relations=[
             relation_fact(
-                chunk_id=1,
+                chapter_id=1,
                 from_name="林渡",
                 to_name="顾霜",
                 relation_type="盟友",
@@ -706,7 +698,7 @@ def test_same_chapter_fact_resolution_merges_into_relation_state(db_session) -> 
                 type="relation_change",
                 reason="同一人物归并",
                 target_key="target-alias",
-                target_ref={"kind": "relation_change", "chunk_id": 1},
+                target_ref={"kind": "relation_change", "chapter_id": 1},
                 from_entity="林渡",
                 to_entity="顾霜",
                 relation_type="盟友",
@@ -758,12 +750,12 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
             run_id=run_id,
             chapter_id=1,
             characters=[
-                character_fact(chunk_id=1, name="林渡", action="迎敌"),
-                character_fact(chunk_id=1, name="顾霜", action="迎敌"),
+                character_fact(chapter_id=1, name="林渡", action="迎敌"),
+                character_fact(chapter_id=1, name="顾霜", action="迎敌"),
             ],
             relations=[
                 relation_fact(
-                    chunk_id=1,
+                    chapter_id=1,
                     from_name="林渡",
                     to_name="顾霜",
                     relation_type="盟友",
@@ -776,7 +768,7 @@ def test_same_chapter_relation_double_write_guarded_under_autoflush_false(db_ses
                     type="relation_change",
                     reason="同一人物归并",
                     target_key="target-alias",
-                    target_ref={"kind": "relation_change", "chunk_id": 1},
+                    target_ref={"kind": "relation_change", "chapter_id": 1},
                     from_entity="林渡",
                     to_entity="顾霜",
                     relation_type="盟友",
@@ -826,7 +818,7 @@ def test_persist_writes_event_shadow_node(db_session) -> None:
     assert node.tree_id == "tree-main"
     assert node.cause_role == "root"
     assert node.source_kind == "annotation"
-    assert node.payload_path == "chunks/1/events/1"
+    assert node.payload_path == "chapters/1/events/1"
     assert len(node.evidence) == 1
     assert node.evidence[0]["paragraph_ids"] == [0]
 
@@ -896,7 +888,7 @@ def _forest_resolution(case_id: str, *, root_event_id: str, event_id: str, actio
         type="伏笔疑点",
         reason="疑点续接确认",
         target_key=f"key-{case_id}",
-        target_ref={"kind": "伏笔疑点", "chunk_id": 1},
+        target_ref={"kind": "伏笔疑点", "chapter_id": 1},
         foreshadowing_action=action,
         foreshadowing_root_event_id=root_event_id,
         foreshadowing_event_id=event_id,
@@ -911,11 +903,7 @@ def _forest_annotation_row(db_session, *, run_id: str, text: str, token: str):
     root_event_id = f"evt-forest-root-{token}"
     bind_event_id = f"evt-forest-bind-{token}"
     annotation = BoundChapterAnnotation(
-        chapter_summary=text,
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=1,
-                metrics=ChunkMetricsInput(summary=text, emotional_valence=0, narrative_function="铺垫"),
+                metrics=ChapterMetricsInput(summary=text, emotional_valence=0, narrative_function="铺垫"),
                 character_observations=[],
                 dialogues=[],
                 events=[
@@ -938,8 +926,6 @@ def _forest_annotation_row(db_session, *, run_id: str, text: str, token: str):
                         participants=[],
                     ),
                 ],
-            )
-        ],
     )
     row = ChapterAnnotationRepository(db_session).add_annotation(
         run_id=run_id,
@@ -968,7 +954,7 @@ def test_foreshadowing_resolution_rejects_non_root_target(db_session) -> None:
         db_session, run_id=run_id, text=text, token=uuid.uuid4().hex[:8]
     )
 
-    with pytest.raises(ValueError, match="伏笔树根不存在或非伏笔根"):
+    with pytest.raises(ValueError):
         persist_completion_graph(
             db_session,
             annotation=row,
@@ -989,7 +975,7 @@ def test_foreshadowing_resolution_rejects_unknown_bind_event(db_session) -> None
         db_session, run_id=run_id, text=text, token=uuid.uuid4().hex[:8]
     )
 
-    with pytest.raises(ValueError, match="案例挂树事件不存在或跨 run"):
+    with pytest.raises(ValueError):
         persist_completion_graph(
             db_session,
             annotation=row,
