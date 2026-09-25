@@ -28,7 +28,7 @@ class AnnotationProtocolError(AnnotationRetryableError):
 
 
 class AnnotationInvariantError(AnnotationAgentError):
-    """2026-08-10 用于标记系统不变量被破坏（如已收尾但 ready_chunk 缺失），
+    """2026-08-10 用于标记系统不变量被破坏（如已收尾但 ready_chapter 缺失），
     直接终止章节，不返回给模型修正"""
 
 

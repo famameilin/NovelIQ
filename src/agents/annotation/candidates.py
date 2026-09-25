@@ -30,9 +30,9 @@ class _CandidateSpan:
     parse_status: DialogueParseStatus
 
 
-def _candidate_key(chunk_id: int, span: _CandidateSpan) -> str:
+def _candidate_key(chapter_id: int, span: _CandidateSpan) -> str:
     """2026-08-07 用于根据系统位置和原文生成稳定对话候选键"""
-    return f"dlg_{uuid5(NAMESPACE_DNS, f'{chunk_id}:{span.start}:{span.end}:{span.content}').hex}"
+    return f"dlg_{uuid5(NAMESPACE_DNS, f'{chapter_id}:{span.start}:{span.end}:{span.content}').hex}"
 
 
 def _extract_paired_quotes(text: str) -> list[_CandidateSpan]:
@@ -132,7 +132,7 @@ def _extract_dialogue_lines(text: str, existing: list[_CandidateSpan]) -> list[_
     return spans
 
 
-def extract_dialogue_candidates(chunk_id: int, text: str) -> list[DialogueCandidate]:
+def extract_dialogue_candidates(chapter_id: int, text: str) -> list[DialogueCandidate]:
     """2026-08-07 用于按原文顺序生成系统托管的完整对话候选"""
     quote_spans = _extract_paired_quotes(text)
     spans = [
@@ -144,8 +144,8 @@ def extract_dialogue_candidates(chunk_id: int, text: str) -> list[DialogueCandid
         unique[(span.start, span.end, span.content)] = span
     return [
         DialogueCandidate(
-            candidate_key=_candidate_key(chunk_id, span),
-            chunk_id=chunk_id,
+            candidate_key=_candidate_key(chapter_id, span),
+            chapter_id=chapter_id,
             start=span.start,
             end=span.end,
             content=span.content,
