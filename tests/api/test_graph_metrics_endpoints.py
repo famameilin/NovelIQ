@@ -29,12 +29,12 @@ def _seed_graph(db_session, run_id: str) -> None:
             run_id=run_id,
             chapter_id=chapter_id,
             characters=[
-                character_fact(chunk_id=chapter_id, name="林渡", action="同行"),
-                character_fact(chunk_id=chapter_id, name="顾霜", action="同行"),
-                character_fact(chunk_id=chapter_id, name="萧遥", action="同行"),
+                character_fact(chapter_id=chapter_id, name="林渡", action="同行"),
+                character_fact(chapter_id=chapter_id, name="顾霜", action="同行"),
+                character_fact(chapter_id=chapter_id, name="萧遥", action="同行"),
             ],
             relations=[
-                relation_fact(chunk_id=chapter_id, from_name=from_name, to_name=to_name, relation_type="盟友")
+                relation_fact(chapter_id=chapter_id, from_name=from_name, to_name=to_name, relation_type="盟友")
                 for from_name, to_name in relations
             ],
         )
@@ -117,7 +117,7 @@ def test_graph_metrics_insufficient_nodes(api_client: TestClient, db_session) ->
         db_session,
         run_id=run_id,
         chapter_id=1,
-        characters=[character_fact(chunk_id=1, name="孤侠", action="独行")],
+        characters=[character_fact(chapter_id=1, name="孤侠", action="独行")],
         relations=[],
     )
     _mark_completed(db_session, run_id)
