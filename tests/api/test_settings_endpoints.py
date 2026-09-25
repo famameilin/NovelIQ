@@ -35,7 +35,13 @@ _ENV_KEYS = (
 
 @pytest.fixture
 def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
-    """settings.json 与 .env 重定向到临时目录，单例与 os.environ 现场备份恢复"""
+    """settings.json 与 .env 重定向到临时目录，单例与 os.environ 现场备份恢复
+
+    2026-09-25 补隔离：conftest 的 load_dotenv 把真实 .env 装进 os.environ，单例构造时
+    env 组覆盖模型 base_url/api_key——不洗掉的话 /model-providers/*/test 拿真实通道发真
+    网络调用（"without_base_url" 实测探通了 commandcode，ok=True）。这里洗 env 并把单例
+    模型组置回未配置态，"未配置"分支才能被稳定测到。
+    """
     import src.api.routes.settings as settings_routes
 
     settings_file = tmp_path / "settings.json"
@@ -45,6 +51,12 @@ def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
 
     saved_settings = deepcopy(settings_routes.settings)
     saved_env = {key: os.environ.get(key) for key in _ENV_KEYS}
+    for key in _ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    for task_name in ("annotation", "diagnosis", "paragraph_embedding"):
+        task_settings = getattr(settings_routes.settings.models, task_name)
+        task_settings.base_url = None
+        task_settings.api_key = None
     try:
         yield settings_file
     finally:
@@ -295,7 +307,11 @@ def test_test_model_provider_failure_returns_ok_false(
             raise ConnectionError("connection refused")
 
     monkeypatch.setattr(settings_routes, "OpenAI", _FailingClient)
-    response = api_client.post("/api/settings/model-providers/embedding/test")
+    # base_url 走请求体显式给：fixture 已把单例模型组置空，不带体会在"base_url 未配置"提前返回
+    response = api_client.post(
+        "/api/settings/model-providers/embedding/test",
+        json={"base_url": "https://api.example.com/v1"},
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is False
