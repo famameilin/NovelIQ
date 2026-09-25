@@ -1,11 +1,12 @@
-"""2026-09-14 写入面重构专项合同测试（五工具 + el 双命名空间 + 段落标签 + finish_chapter）
+"""2026-09-14 写入面重构专项合同测试（五工具 + el 双命名空间 + 段落标签 + finish）
 
 与逐轮/审计类测试互补，这里只测新写入面自身的结构性保证：
-- EntityRef（int 编号 ∪ 章内 el 键）在参与者/引用面的同一条解析路径；
+- EntityRef（run 级 uuid id ∪ 章内 el 键，2026-09-19 id 纪律后编号已删）在参与者/
+  引用面的同一条解析路径；
 - write_event 单工具按调用顺序建树、characters 整节点替换语义；
 - 伏笔根 confidence 三档（含 low）落进 payoff_likelihood；
 - write_metrics(labels) 的段号归属闸与同段去重；
-- finish_chapter 结算（missing_record 硬前提与各域计数）。
+- finish 结算（missing_record 硬前提与各域计数）。
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.schema import ChunkParagraphInfo, Confidence
+from src.agents.annotation.schema import ChapterParagraphInfo, Confidence
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
 
@@ -44,11 +45,10 @@ def _ledger(*, paragraph_ids: list[int] | None = None) -> AnnotationToolLedger:
     return AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
-        current_chunk_id=1,
-        current_chunk_text=text,
+        current_chapter_text=text,
         allow_future_context=False,
         graph=FactGraph(),
-        paragraph_info=ChunkParagraphInfo(
+        paragraph_info=ChapterParagraphInfo(
             paragraph_ids=ids,
             char_spans=[(0, len(text))] * len(ids),
             texts=[text] * len(ids),
@@ -69,8 +69,12 @@ async def _write_entity(tools: dict, *, name: str, el: str, entity_type: str = "
 
 
 @pytest.mark.asyncio
-async def test_entity_ref_resolves_el_number_and_numeric_string_on_one_channel() -> None:
-    """el 键、运行期编号 n、纯数字字符串三种引用形态走同一条解析路径"""
+async def test_entity_ref_resolves_el_key_and_run_id_on_one_channel() -> None:
+    """el 键与 run 级 uuid id 两种引用形态走同一条解析路径（2026-09-19 id 纪律：编号通道已删）
+
+    write_entity 回执顶层 id 即 run 级 uuid：本章自定的 el 键与该 id 都能
+    在参与者引用面直接解析到同一登记实体。
+    """
     ledger = _ledger()
     tools = _tools(ledger)
     gushuang = await _write_entity(tools, name="顾霜", el="gushuang")
@@ -90,7 +94,7 @@ async def test_entity_ref_resolves_el_number_and_numeric_string_on_one_channel()
                     "emotion": -1,
                 },
                 {
-                    "entityid": chu["n"],
+                    "entityid": chu["id"],
                     "role": "客体",
                     "narrative_role": "反对者",
                     "action": "争执",
@@ -109,7 +113,7 @@ async def test_entity_ref_resolves_el_number_and_numeric_string_on_one_channel()
             "description": "顾霜收势",
             "characters": [
                 {
-                    "entityid": str(gushuang["n"]),
+                    "entityid": gushuang["id"],
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "收势",
@@ -128,8 +132,12 @@ async def test_entity_ref_resolves_el_number_and_numeric_string_on_one_channel()
 
 
 @pytest.mark.asyncio
-async def test_unknown_el_rejected_with_known_keys() -> None:
-    """未知 el 键结构化拒绝：列出本 chunk 已知 el，并引导历史实体改用编号 n"""
+async def test_unknown_entity_reference_rejected_with_dual_channel_hint() -> None:
+    """未知实体引用结构化拒绝：code=unknown_entity_id，expected 指向两条合法键空间
+
+    2026-09-19 id 纪律：引用 = run 级 id 或本章自定的 el 键（运行期编号已删，
+    unknown_el/known_keys 旧文案没有对应物），拒绝引导模型改用回执/检索 id 或 el。
+    """
     tools = _tools(_ledger())
     await _write_entity(tools, name="顾霜", el="gushuang")
     with pytest.raises(AnnotationStageRejection) as excinfo:
@@ -152,13 +160,12 @@ async def test_unknown_el_rejected_with_known_keys() -> None:
     rejection = excinfo.value
     assert rejection.record == "t1/root/participant/miejing"
     assert rejection.field == "entityid"
-    assert rejection.code == "unknown_el"
-    assert "gushuang" in str(rejection.expected)
+    assert rejection.code == "unknown_entity_id"
 
 
 @pytest.mark.asyncio
 async def test_duplicate_el_binds_one_to_one_by_rejection() -> None:
-    """el 在 chunk 内一对一绑定实体：同键换实体在登记点即拒"""
+    """el 在章内一对一绑定实体：同键换实体在登记点即拒"""
     tools = _tools(_ledger())
     await _write_entity(tools, name="顾霜", el="a")
     with pytest.raises(AnnotationStageRejection) as excinfo:
@@ -233,7 +240,7 @@ async def test_characters_full_replacement_clears_stale_observations() -> None:
             "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": gushuang["n"],
+                    "entityid": gushuang["id"],
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝止",
@@ -244,9 +251,11 @@ async def test_characters_full_replacement_clears_stale_observations() -> None:
     )
     root_event = next(event for event in ledger.bound_payloads["events"] if event.cause_role == "root")
     assert [participant.entity for participant in root_event.participants] == ["顾霜"]
-    assert list(ledger.observation_by_record) == ["t1/root/participant/1"]
+    # 参与者记录键按模型提交的引用原样构造（2026-09-19：uuid id 引用即进键）
+    uuid_record = f"t1/root/participant/{gushuang['id']}"
+    assert list(ledger.observation_by_record) == [uuid_record]
     assert ledger.domain_payloads["character_observations"] == [
-        ledger.observation_by_record["t1/root/participant/1"]
+        ledger.observation_by_record[uuid_record]
     ]
 
 
@@ -297,22 +306,22 @@ async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> 
 
 @pytest.mark.asyncio
 async def test_paragraph_labels_membership_gate_and_same_paragraph_dedupe() -> None:
-    """labels 段号必须属于本 chunk；同段号重复提交后到覆盖（载荷一条）"""
+    """labels 段号必须属于本章；同段号重复提交后到覆盖（载荷一条）"""
     ledger = _ledger(paragraph_ids=[0, 1, 2])
     tools = _tools(ledger)
     base = {"summary": "测试章", "emotional_valence": 0, "narrative_function": "铺垫"}
     with pytest.raises(AnnotationStageRejection) as excinfo:
         await tools["write_metrics"].ainvoke(
-            {**base, "labels": [{"paragraph_id": 0, "emotion": 2}, {"paragraph_id": 5, "emotion": -1}]}
+            {**base, "labels": [{"paragraph_id": 1, "emotion": 2}, {"paragraph_id": 5, "emotion": -1}]}
         )
     assert excinfo.value.record == "metrics"
     assert excinfo.value.field == "paragraph_id"
     assert excinfo.value.code == "out_of_range"
-    assert "0, 1, 2" in str(excinfo.value.expected)
+    assert "1, 2, 3" in str(excinfo.value.expected)
 
     assert json.loads(
         await tools["write_metrics"].ainvoke(
-            {**base, "labels": [{"paragraph_id": 0, "emotion": 2}, {"paragraph_id": 0, "emotion": -1}]}
+            {**base, "labels": [{"paragraph_id": 1, "emotion": 2}, {"paragraph_id": 1, "emotion": -1}]}
         )
     )["status"] == "written"
     assert [(label.paragraph_id, label.emotion) for label in ledger.bound_payloads["paragraph_labels"]] == [(0, -1)]
@@ -320,12 +329,12 @@ async def test_paragraph_labels_membership_gate_and_same_paragraph_dedupe() -> N
 
 @pytest.mark.asyncio
 async def test_finish_chapter_settlement_requires_metrics_then_reports_counts() -> None:
-    """finish_chapter 无参数：唯一硬前提是指标已提交；完成回执按域计数"""
+    """finish 无参数：唯一硬前提是指标已提交；完成回执按域计数"""
     ledger = _ledger()
     tools = _tools(ledger)
     with pytest.raises(AnnotationStageRejection) as excinfo:
         ledger.finish_chapter()
-    assert excinfo.value.record == "finish_chapter"
+    assert excinfo.value.record == "finish"
     assert excinfo.value.code == "missing_record"
 
     await _write_entity(tools, name="顾霜", el="gushuang")
@@ -334,11 +343,11 @@ async def test_finish_chapter_settlement_requires_metrics_then_reports_counts() 
             "summary": "顾霜喝止众人",
             "emotional_valence": -1,
             "narrative_function": "冲突",
-            "labels": [{"paragraph_id": 0, "emotion": -1}],
+            "labels": [{"paragraph_id": 1, "emotion": -1}],
         }
     )
     await tools["write_event"].ainvoke({"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
-    assert json.loads(await tools["finish_chapter"].ainvoke({}))["status"] == "pending"
+    assert json.loads(await tools["finish"].ainvoke({}))["status"] == "pending"
     receipt = ledger.finish_chapter()
     assert ledger.chapter_finished is True
     assert receipt["status"] == "completed"

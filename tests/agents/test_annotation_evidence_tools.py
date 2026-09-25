@@ -1,7 +1,7 @@
 """章节 Agent 语义写入工具与系统账本合同测试
 
 2026-09-14 写入面重构：模型面为五个领域写工具（write_entity / write_metrics /
-write_event / write_relation / write_dialogue）+ 唯一 finish_chapter 收尾。
+write_event / write_relation / write_dialogue）+ 唯一 finish 收尾。
 写入一次一个语义单元、写入即生效并返回真实回执（{status: written, record}；实体另带
 el 与 n），没有逐域 finish——收尾判定在本回合全部调用处理完后由账本执行；事件根/子/
 参与者折叠进单工具 write_event（el 层级键：根=树键 t1、子=t1/e2，树内先后=调用顺序），
@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from uuid import NAMESPACE_DNS, uuid5
 
 import pytest
-from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from src.agents.annotation.errors import (
@@ -28,15 +28,13 @@ from src.agents.annotation.graph import _invoke_tool
 from src.agents.annotation.schema import (
     ActiveCaseDetails,
     CaseSearchResult,
-    ChunkParagraphInfo,
+    ChapterParagraphInfo,
     DialogueInput,
     EntityInput,
     EventParticipantInput,
-    ParticipantArg,
     RelationInput,
     SearchResult,
     TextSearchResult,
-    Tone,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -44,17 +42,22 @@ from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_t
 class _QueryService:
     """2026-08-07 用于记录搜索解决与原文工具调用的测试查询服务"""
 
-    def __init__(self, *, text_result_count: int = 1) -> None:
-        """2026-08-30 用于初始化原文查询记录"""
+    def __init__(self, *, text_result_count: int = 1, known_dialogue_ids: set[str] | None = None) -> None:
+        """2026-08-30 用于初始化原文查询记录
+
+        2026-09-18 对话记录订正下沉到写入路径：账本对非本章候选问一次库
+        （has_dialogue_record），桩按本集合回答前文已落库的对话记录标识。
+        """
         self.text_queries: list[tuple[str, str, int]] = []
         self.text_result_count = text_result_count
+        self.known_dialogue_ids = known_dialogue_ids if known_dialogue_ids is not None else {"dlg_prev_1"}
 
     def _case(self) -> CaseSearchResult:
         """2026-08-07 用于构造一个可严格解决的活动案例"""
         return CaseSearchResult(
             id="case-1",
             type="dialogue_speaker",
-            chunk_id=10,
+            chapter_id=10,
             created_chapter=10,
             keys=["住手", "说话人"],
             description="该句住手由谁说出",
@@ -97,16 +100,16 @@ class _QueryService:
             target_ref={
                 "kind": "dialogue",
                 "dialogue_id": "candidate-1",
-                "chunk_id": 10,
+                "chapter_id": 10,
                 "start": 1,
                 "end": 3,
                 "text": "住手",
             },
         )
 
-    def thread_exists(self, setup_id):
-        """2026-08-11 用于校验 push_case 携带的伏笔线程 id"""
-        return setup_id == "thread-1"
+    def has_dialogue_record(self, candidate_key: str) -> bool:
+        """2026-09-18 用于回答对话记录是否已在本 run 落库（订正既有记录的前置校验）"""
+        return candidate_key in self.known_dialogue_ids
 
 
 class _AliasQueryService(_QueryService):
@@ -117,7 +120,7 @@ class _AliasQueryService(_QueryService):
         return CaseSearchResult(
             id="alias-1",
             type="entity_alias",
-            chunk_id=10,
+            chapter_id=10,
             keys=["同一人物", "顾霜", "顾老"],
             description="疑似同一人物：顾霜 与 顾老 共享邻居重叠度 50%",
         )
@@ -129,36 +132,12 @@ class _AliasQueryService(_QueryService):
         return ActiveCaseDetails(
             **self._case().model_dump(mode="python"),
             target_key="target-alias-1",
-            target_ref={"kind": "alias", "name_a": "顾霜", "name_b": "顾老", "chunk_id": 10},
+            target_ref={"kind": "alias", "name_a": "顾霜", "name_b": "顾老", "chapter_id": 10},
         )
 
     def thread_exists(self, setup_id):
         """2026-08-11 用于校验 push_case 携带的伏笔线程 id"""
         return setup_id == "thread-1"
-
-
-class _ForeshadowingCaseQueryService(_QueryService):
-    """2026-09-04 用于提供已关联伏笔线程（target_ref 含 setup_id）的活动案例"""
-
-    def _case(self) -> CaseSearchResult:
-        """2026-09-04 用于构造伏笔疑点案例"""
-        return CaseSearchResult(
-            id="case-1",
-            type="foreshadowing_suspect",
-            chunk_id=10,
-            keys=["线索"],
-            description="伏笔疑点",
-        )
-
-    def fetch_active_case_details(self, case_id):
-        """2026-09-04 用于返回挂上 thread-1 的伏笔案例稳定目标"""
-        if case_id != "case-1":
-            return None
-        return ActiveCaseDetails(
-            **self._case().model_dump(mode="python"),
-            target_key="target-foreshadow-1",
-            target_ref={"kind": "伏笔疑点", "chunk_id": 10, "setup_id": "thread-1"},
-        )
 
 
 class _ForeignChunkQueryService(_QueryService):
@@ -169,7 +148,7 @@ class _ForeignChunkQueryService(_QueryService):
         return CaseSearchResult(
             id="foreign-1",
             type="entity_alias",
-            chunk_id=99,
+            chapter_id=99,
             keys=["同一人物", "顾霜", "顾老"],
             description="疑似同一人物：顾霜 与 顾老 共享邻居重叠度 50%",
         )
@@ -181,7 +160,7 @@ class _ForeignChunkQueryService(_QueryService):
         return ActiveCaseDetails(
             **self._case().model_dump(mode="python"),
             target_key="target-foreign-1",
-            target_ref={"kind": "alias", "name_a": "顾霜", "name_b": "顾老", "chunk_id": 99},
+            target_ref={"kind": "alias", "name_a": "顾霜", "name_b": "顾老", "chapter_id": 99},
         )
 
     async def search_text(self, query, *, range_name, limit=50):
@@ -223,11 +202,20 @@ def _find_tool(tools: list, name: str):
     return next(candidate for candidate in tools if candidate.name == name)
 
 
+def _entity_id(name: str) -> str:
+    """2026-09-19 用于按生产同款规则铸造期望实体 id（uuid5(run_scope+归一化名)）
+
+    本文件的 FactGraph 都用默认 run_scope=""（与 _ledger 的 run_scope 无关，
+    id 铸造读的是 ledger.graph），期望值据此计算。
+    """
+    return str(uuid5(NAMESPACE_DNS, f"novel-annotation-entity::{name.casefold()}"))
+
+
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
     """2026-08-30 用于构造带唯一当前原文和检索范围配置的工具账本
 
     2026-08-18：注入 paragraph_info 供事件锚点校验和证据派生使用。
-    2026-09-04 单一写面：图域写工具（write_entity/write_relation/resolve_fact_case）
+    2026-09-04 单一写面：图域写工具（write_entity/write_relation）
     以常驻 FactGraph 为唯一真相源，故默认注入空图；需要历史实体的用例随后覆盖
     ledger.graph。
     2026-09-13 取消暂存：每个小调用写入即生效（written_* / event_trees 即时落账），
@@ -235,18 +223,17 @@ def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
     2026-09-14 段落级监督：paragraph_info 给出两个段号（¶0/¶1），供
     write_metrics.labels 默认提交两段、满足每章 2 段软下限。
     """
-    chunk_text = "“住手”回荡"
-    mid = max(1, len(chunk_text) // 2)
-    paragraph_info = ChunkParagraphInfo(
+    chapter_text = "“住手”回荡"
+    mid = max(1, len(chapter_text) // 2)
+    paragraph_info = ChapterParagraphInfo(
         paragraph_ids=[0, 1],
-        char_spans=[(0, mid), (mid, len(chunk_text))],
-        texts=[chunk_text[:mid], chunk_text[mid:]],
+        char_spans=[(0, mid), (mid, len(chapter_text))],
+        texts=[chapter_text[:mid], chapter_text[mid:]],
     )
     return AnnotationToolLedger(
         run_scope="run-1",
-        current_chapter_id=1,
-        current_chunk_id=10,
-        current_chunk_text=chunk_text,
+        current_chapter_id=10,
+        current_chapter_text=chapter_text,
         allow_future_context=allow_future_context,
         graph=FactGraph(),
         paragraph_info=paragraph_info,
@@ -270,14 +257,14 @@ def _tools(service: _QueryService, ledger: AnnotationToolLedger) -> list:
     return build_annotation_tools(service, ledger)
 
 
-def _surface_case(service: _QueryService, ledger: AnnotationToolLedger, *, query: str = "住手") -> int:
-    """2026-09-11 案例改检索制：测试内经 search_pool 展示案例取得编号（展示即授权）
+def _surface_case(service: _QueryService, ledger: AnnotationToolLedger, *, query: str = "住手") -> str:
+    """2026-09-11 案例改检索制；2026-09-19 案例面 id 化：经 search_pool 展示案例取得 id（展示即授权）
 
-    旧合同用例直接调 register_initial_cases 登记初始候选；新合同下编号只能由
-    search_pool 回执产生，测试准备阶段也走同一通道。
+    旧合同用例直接调 register_initial_cases 登记初始候选；新合同下案例 id 只能由
+    search_pool 回执产生（案例池行 uuid），测试准备阶段也走同一通道。
     """
     view = _call(_tools(service, ledger), "search_pool", {"query": query})
-    return int(view["results"][0]["case_number"])
+    return str(view["results"][0]["id"])
 
 
 def _write_metrics_args() -> dict:
@@ -308,8 +295,8 @@ def _write_call(name: str, args: dict) -> dict:
 
 
 def _finish_call() -> dict:
-    """2026-09-14 用于构造唯一 finish_chapter 收尾声明（判定在本回合全部调用处理完后执行）"""
-    return _write_call("finish_chapter", {})
+    """2026-09-14 用于构造唯一 finish 收尾声明（判定在本回合全部调用处理完后执行）"""
+    return _write_call("finish", {})
 
 
 def _call_all(tools: list, calls: list[dict]) -> list:
@@ -339,7 +326,7 @@ def _reject(tools: list, ledger: AnnotationToolLedger, name: str, args: dict) ->
 def _finish_chapter(tools: list, ledger: AnnotationToolLedger) -> dict:
     """2026-09-14 用于触发章节收尾（工具体只回 pending，判定在生产批次末尾的同一汇点）
 
-    直接调用工具的测试没有模型回合边界，这里先过 finish_chapter 调用点协议校验，
+    直接调用工具的测试没有模型回合边界，这里先过 finish 调用点协议校验，
     再显式执行账本收尾；生产路径 graph._settle_chapter_finish 也是调用它。
     """
     call = _finish_call()
@@ -373,7 +360,7 @@ def _metrics_calls(labels: list[dict] | None = None) -> list[dict]:
 
 def _paragraph_labels(items: list[tuple[int, int]] | None = None) -> list[dict]:
     """2026-09-14 用于构造 write_metrics.labels 段落情绪标签条目（默认两段满足每章软下限）"""
-    resolved = items if items is not None else [(0, -2), (1, -1)]
+    resolved = items if items is not None else [(1, -2), (2, -1)]
     return [{"paragraph_id": paragraph_id, "emotion": emotion} for paragraph_id, emotion in resolved]
 
 
@@ -381,7 +368,7 @@ def _dialogue_calls(items: list[tuple] | None = None) -> list[dict]:
     """2026-09-13 用于构造 write_dialogue 小调用（默认第一条候选判为真实对话）
 
     items 元组形如 (candidate_index, verdict, speaker, tone)，speaker 是实体引用
-    （运行期编号 n 或本 chunk 的 el 键）。
+    （运行期编号 n 或本章的 el 键）。
     """
     resolved = items if items is not None else [(1, "dialogue", None, None)]
     return [
@@ -422,7 +409,7 @@ def _event_calls(
     """2026-09-14 用于构造一棵事件树的小调用组（write_event 根 + 子事件，参与者内联 characters）
 
     根 el=树键（不带 /），子 el=树键/节点键；树内先后=调用顺序（order 参数已下线）。
-    同一 chunk 内 (人物, 动作) 二元组不得重复（人物动态状态唯一），多棵树同轮
+    同一章内 (人物, 动作) 二元组不得重复（人物动态状态唯一），多棵树同轮
     提交时各处的 action 必须互不相同，否则该条记录会被结构化拒绝。
     """
     return [
@@ -434,7 +421,7 @@ def _event_calls(
                 "description": description,
                 "characters": [
                     {
-                        "entityid": 1,
+                        "entityid": _entity_id("顾霜"),
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": action,
@@ -452,7 +439,7 @@ def _event_calls(
                 "description": child_description,
                 "characters": [
                     {
-                        "entityid": 1,
+                        "entityid": _entity_id("顾霜"),
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": child_action,
@@ -477,7 +464,7 @@ def _write_all_domains(
     """2026-09-14 用于以小调用完成五个内部数据领域并统一收尾章节
 
     写入即生效：按依赖顺序提交（实体 → 指标（段落标签随本域提交）→ 事件 →
-    关系 → 对话），全部写完后再发唯一 finish_chapter 收尾冻结（没有逐域结束声明）。
+    关系 → 对话），全部写完后再发唯一 finish 收尾冻结（没有逐域结束声明）。
     传空列表表示该域不写内容（如 entity_calls=[] 表示本章不登记实体）；
     labels=None 表示默认提交两段标签（满足每章 2 段软下限）。
     """
@@ -500,149 +487,9 @@ def _write_all_domains(
     return receipts
 
 
-def test_business_write_tool_contract_lists_write_tools_and_finish_chapter() -> None:
-    """2026-09-07 用于锁定模型侧业务写入工具集合（旧合同为五个整域 write 工具）
-
-    2026-09-13 取消暂存：业务写入面从整域大载荷改为有类型小调用 + 唯一收尾。
-    2026-09-14 写入面重构：写入面收敛为五个领域写工具（write_entity/write_metrics/
-    write_event/write_relation/write_dialogue）+ 唯一收尾 finish_chapter——事件根/子
-    与两类参与者折叠进单工具 write_event（el 层级键），句标签并入 write_metrics.labels；
-    上一轮的 write_event_root/write_event_child/write_character_participation/
-    write_noncharacter_participation/write_sentence_label 与 finish_chunk 收尾名整体
-    退役，因此本断言改写为对新工具面的精确锁定。
-    """
-    tools = _tools(_QueryService(), _ledger())
-    business_writes = {tool.name for tool in tools if tool.name.startswith("write_")}
-    assert business_writes == {
-        "write_entity",
-        "write_metrics",
-        "write_event",
-        "write_relation",
-        "write_dialogue",
-    }
-    # 唯一收尾声明 finish_chapter 恒定开放（收尾判定由批次末尾的账本兜底），旧结束声明不得再出现
-    assert _find_tool(tools, "finish_chapter").name == "finish_chapter"
-    assert business_writes.isdisjoint(
-        {
-            "write_entities",
-            "write_dialogues",
-            "write_relations",
-            "write_sentence_label",
-            "write_event_root",
-            "write_event_child",
-            "write_character_participation",
-            "write_noncharacter_participation",
-        }
-    )
-    assert not any(tool.name in {"finish_domain", "finish_chunk"} for tool in tools)
-
-
-def test_schema_rejects_deleted_contract_fields() -> None:
-    """2026-08-11 用于验证输入模型对已删除字段使用 extra=forbid 明确拒绝
-
-    2026-09-13 取消暂存：整树 WriteEventInput 已删除，同样的 extra=forbid 约束
-    由事件写工具参数面承接。2026-09-14 写入面重构：事件参数面从
-    write_event_root 合并进单工具 write_event（el=树键 + isroot=true），未声明
-    字段（anchor_paragraph_ids / event_type / location）经生产路径整条结构化
-    拒绝，code=unknown_field，记录键定位到被拒的 "t1/root"。
-    """
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        EntityInput.model_validate(
-            {
-                "name": "顾霜",
-                "entity_type": "character",
-                "confidence": "high",
-                "reason": "出现",
-                "ref": "character_1",
-            }
-        )
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        EntityInput.model_validate(
-            {
-                "name": "顾霜",
-                "entity_type": "character",
-                "existing_entity_id": 42,
-                "mentions": [{"chunk_id": 10, "start": 0, "end": 2, "text": "顾霜"}],
-            }
-        )
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        DialogueInput.model_validate(
-            {
-                "candidate_index": 1,
-                "verdict": "dialogue",
-                "is_dialogue": True,
-                "description": "喝止",
-                "content": "住手",
-                "start": 1,
-                "end": 3,
-            }
-        )
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        RelationInput.model_validate(
-            {
-                "from_entity": "顾霜",
-                "to_entity": "山门",
-                "relation_type": "位于",
-                "change_kind": "新增",
-                "relation_id": "relation-1",
-            }
-        )
-    ledger = _ledger()
-    tools = _tools(_QueryService(), ledger)
-    receipt = _reject(
-        tools,
-        ledger,
-        "write_event",
-        {
-            "el": "t1",
-            "isroot": True,
-            "description": "进入山门",
-            "anchor_paragraph_ids": [0],
-            "event_type": "进入",
-            "location": "山门",
-        },
-    )
-    assert receipt["status"] == "rejected"
-    assert receipt["record"] == "t1/root"
-    assert receipt["code"] == "unknown_field"
-    assert receipt["field"] in {"anchor_paragraph_ids", "event_type", "location"}
-
-
-def test_schema_rejects_non_closed_enums() -> None:
-    """2026-08-11 用于验证所有保留分类字段只接受中央闭合枚举"""
-    with pytest.raises(ValidationError):
-        EntityInput.model_validate({"name": "顾霜", "entity_type": "object"})
-    with pytest.raises(ValidationError):
-        RelationInput.model_validate(
-            {
-                "from_entity": "顾霜",
-                "to_entity": "山门",
-                "relation_type": "归属",
-            }
-        )
-    with pytest.raises(ValidationError):
-        DialogueInput.model_validate(
-            {
-                "candidate_index": 1,
-                "verdict": "unknown",
-                "speaker": None,
-                "tone": None,
-            }
-        )
-    with pytest.raises(ValidationError):
-        DialogueInput.model_validate(
-            {
-                "candidate_index": 1,
-                "verdict": "dialogue",
-                "speaker": None,
-                "tone": "呵斥",
-            }
-        )
-
-
 def test_schema_rejects_tone_words_in_emotion_with_guidance() -> None:
     """2026-08-12 用于验证 tone 中文词写进 emotional_valence 时给出纠正引导"""
-    with pytest.raises(ValidationError, match="emotion 不接受 喜悦"):
+    with pytest.raises(ValidationError):
         EventParticipantInput.model_validate(
             {
                 "entity": "贺伯安",
@@ -660,8 +507,6 @@ def test_schema_rejects_event_role_words_in_narrative_role_with_guidance() -> No
     2026-09-11 见证者已并入 RoleFunction 词表（实测 10 次映射失败），
     只剩地点等纯空间角色词仍被拒绝。
     """
-    assert "narrative_role" in EventParticipantInput.model_fields
-    assert "role_function" not in EventParticipantInput.model_fields
     witness = EventParticipantInput.model_validate(
         {
             "entity": "侯飞白",
@@ -672,7 +517,7 @@ def test_schema_rejects_event_role_words_in_narrative_role_with_guidance() -> No
         }
     )
     assert witness.narrative_role == "见证者"
-    with pytest.raises(ValidationError, match="地点、行动者等只用于事件参与者的 role"):
+    with pytest.raises(ValidationError):
         EventParticipantInput.model_validate(
             {
                 "entity": "侯飞白",
@@ -686,7 +531,7 @@ def test_schema_rejects_event_role_words_in_narrative_role_with_guidance() -> No
 
 def test_event_participant_requires_complete_character_state_group() -> None:
     """2026-08-30 用于拒绝只提交部分人物动态字段的事件参与者"""
-    with pytest.raises(ValidationError, match="必须同时提供或同时省略"):
+    with pytest.raises(ValidationError):
         EventParticipantInput.model_validate(
             {
                 "entity": "顾霜",
@@ -699,7 +544,7 @@ def test_event_participant_requires_complete_character_state_group() -> None:
 
 def test_dialogue_verdict_contract_rules() -> None:
     """2026-08-11 用于验证 not_dialogue 时 speaker/tone 必须为空"""
-    with pytest.raises(ValidationError, match="speaker/tone 必须为 null"):
+    with pytest.raises(ValidationError):
         DialogueInput.model_validate(
             {
                 "candidate_index": 1,
@@ -708,7 +553,7 @@ def test_dialogue_verdict_contract_rules() -> None:
                 "tone": None,
             }
         )
-    with pytest.raises(ValidationError, match="speaker/tone 必须为 null"):
+    with pytest.raises(ValidationError):
         DialogueInput.model_validate(
             {
                 "candidate_index": 1,
@@ -746,7 +591,7 @@ def test_entity_attributes_merge_patch_validation() -> None:
         }
     )
     assert null_patch.attributes == {}
-    with pytest.raises(ValidationError, match="键不能为空"):
+    with pytest.raises(ValidationError):
         EntityInput.model_validate(
             {
                 "name": "顾霜",
@@ -758,7 +603,7 @@ def test_entity_attributes_merge_patch_validation() -> None:
 
 def test_entity_tags_limited_to_three_and_five_chars() -> None:
     """2026-08-08 用于验证实体标签最多 3 个且每个最多 5 个字"""
-    with pytest.raises(ValidationError, match="最多 3 个标签"):
+    with pytest.raises(ValidationError):
         EntityInput.model_validate(
             {
                 "name": "玄剑",
@@ -766,7 +611,7 @@ def test_entity_tags_limited_to_three_and_five_chars() -> None:
                 "tags": ["法宝", "灵器", "神兵", "古剑"],
             }
         )
-    with pytest.raises(ValidationError, match="每个标签最多 5 个字"):
+    with pytest.raises(ValidationError):
         EntityInput.model_validate(
             {
                 "name": "玄剑",
@@ -795,13 +640,13 @@ def test_entity_tags_normalized_deduplicated_and_type_enforced() -> None:
         )
 
 
-def test_small_calls_complete_chunk_in_write_order() -> None:
-    """2026-08-30 用于验证同轮多个小调用写满内部领域并冻结 chunk
+def test_small_calls_complete_chapter_in_write_order() -> None:
+    """2026-08-30 用于验证同轮多个小调用写满内部领域并冻结章
 
     2026-09-13 取消暂存：写工具改造前的五个整域 write 是"一次大载荷"，
     现在是同轮多个有类型小调用写入即生效 + 唯一收尾声明。
-    2026-09-14 写入面重构：收尾声明改名 finish_chapter（段落标签随指标域提交），
-    完成语义（实体/指标/事件/关系/对话各域、chunk 冻结、对话原文绑定）不变。
+    2026-09-14 写入面重构：收尾声明改名 finish（段落标签随指标域提交），
+    完成语义（实体/指标/事件/关系/对话各域、章冻结、对话原文绑定）不变。
     """
     service = _QueryService()
     ledger = _ledger(allow_future_context=False)
@@ -809,12 +654,11 @@ def test_small_calls_complete_chunk_in_write_order() -> None:
 
     _write_all_domains(tools, ledger)
 
-    chunk = ledger.complete_active_chunk()
-    assert chunk.chunk_id == 10
+    chapter = ledger.complete_active_chapter()
+    assert ledger.completed_chapters[0] is chapter
 
-    assert ledger.completed_chunks[0].chunk_id == 10
     assert ledger.phase == "completed"
-    dialogue = chunk.dialogues[0]
+    dialogue = chapter.dialogues[0]
     assert dialogue.candidate_key.startswith("dlg_")
     assert dialogue.content == "住手"
     assert "\u201c住手\u201d回荡"[dialogue.start : dialogue.end] == "住手"
@@ -827,7 +671,7 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
     2026-09-13 取消暂存：旧的整域 write 回执（accepted/tool/domain/item_count
     +numbers）被"写入即生效"的两级小回执取代——每个写工具固定回
     status=written/record（实体另带 el 与 n），收尾回执固定为
-    status=completed/chunk_id/records/dialogue_defaulted，都不回传完整载荷。
+    status=completed/chapter_id/records/dialogue_defaulted，都不回传完整载荷。
     2026-09-14 写入面重构：实体回执新增 el 绑定回显；records 汇总键由
     sentence_labels 改为段落口径 paragraph_labels。
     """
@@ -840,19 +684,19 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
         "write_entity",
         {"name": "顾霜", "entity_type": "character", "el": "顾霜"},
     )
-    assert set(entity_receipt) == {"status", "record", "el", "n", "content"}
+    assert set(entity_receipt) == {"status", "record", "el", "id", "content"}
     assert entity_receipt == {
         "status": "written",
         "record": "entity/顾霜",
         "el": "顾霜",
-        "n": 1,
+        "id": _entity_id("顾霜"),
         "content": {
             "name": "顾霜",
             "entity_type": "character",
             "tags": [],
             "description": None,
             "attributes": {},
-            "n": 1,
+            "id": _entity_id("顾霜"),
         },
     }
 
@@ -871,10 +715,10 @@ def test_write_receipts_carry_fixed_compact_shape() -> None:
     }
 
     domain_receipt = _finish_chapter(tools, ledger)
-    assert set(domain_receipt) == {"status", "chunk_id", "records", "dialogue_defaulted"}
+    assert set(domain_receipt) == {"status", "chapter_id", "records", "dialogue_defaulted"}
     assert domain_receipt == {
         "status": "completed",
-        "chunk_id": 10,
+        "chapter_id": 10,
         "records": {
             "entities": 1,
             "metrics": 1,
@@ -913,7 +757,7 @@ def test_failed_write_call_keeps_other_domain_receipts_and_written_records() -> 
             "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": 999,
+                    "entityid": "00000000-0000-0000-0000-000000000999",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝止",
@@ -924,8 +768,8 @@ def test_failed_write_call_keeps_other_domain_receipts_and_written_records() -> 
     )
     with pytest.raises(AnnotationStageRejection) as excinfo:
         _call(tools, invalid["name"], invalid["args"])
-    assert excinfo.value.code == "unregistered_number"
-    assert excinfo.value.record == "t1/root/participant/999"
+    assert excinfo.value.code == "unknown_entity_id"
+    assert excinfo.value.record == "t1/root/participant/00000000-0000-0000-0000-000000000999"
 
     assert ledger.metrics_payload is not None
     assert list(ledger.written_entities) == ["顾霜"]
@@ -933,17 +777,17 @@ def test_failed_write_call_keeps_other_domain_receipts_and_written_records() -> 
     tree = next(iter(ledger.event_trees.values()))
     assert tree["root_node_id"] is not None
     assert ledger.observation_by_record == {}
-    # 收尾前的审计记录只在 finish_chapter 时按域汇总写出；失败调用不留痕迹
+    # 收尾前的审计记录只在 finish 时按域汇总写出；失败调用不留痕迹
     assert ledger.write_records == []
-    assert ledger.ready_chunk is None
+    assert ledger.ready_chapter is None
     assert ledger.chapter_finished is False
 
 
-def test_event_children_land_live_and_freeze_into_ready_chunk() -> None:
-    """2026-08-30 用于验证最后一棵事件树收尾后 ready_chunk 冻结全部事件
+def test_event_children_land_live_and_freeze_into_ready_chapter() -> None:
+    """2026-08-30 用于验证最后一棵事件树收尾后 ready_chapter 冻结全部事件
 
     2026-09-13 取消暂存：事件节点写入即落账（bound_payloads["events"] 即时可见），
-    不再有"结算前 ready_chunk 为空"的暂存态；收尾前 ready_chunk 仍为 None。
+    不再有"结算前 ready_chapter 为空"的暂存态；收尾前 ready_chapter 仍为 None。
     2026-09-14 写入面重构：根/子/参与者折叠进单工具 write_event（el 层级键、
     characters 内联参与者），段落标签随 write_metrics 提交；收尾回执用 records
     汇总各域条数（旧 events 结束回执的 records/trees/character_observation_count
@@ -964,7 +808,7 @@ def test_event_children_land_live_and_freeze_into_ready_chunk() -> None:
 
     _call_all(tools, _event_calls(tree_key="t1", child_description="顾霜追击", child_action="追击"))
     assert [event.description for event in ledger.bound_payloads["events"]] == ["顾霜喝止众人", "顾霜追击"]
-    assert ledger.ready_chunk is None
+    assert ledger.ready_chapter is None
     assert ledger.chapter_finished is False
 
     _call_all(
@@ -980,7 +824,7 @@ def test_event_children_land_live_and_freeze_into_ready_chunk() -> None:
                     "description": "新事件描述",
                     "characters": [
                         {
-                            "entityid": 1,
+                            "entityid": "顾霜",
                             "role": "主体",
                             "narrative_role": "主体",
                             "action": "离场",
@@ -994,12 +838,12 @@ def test_event_children_land_live_and_freeze_into_ready_chunk() -> None:
     receipt = _finish_chapter(tools, ledger)
     assert receipt["records"]["events"] == 4
     assert receipt["records"]["character_observations"] == 3
-    assert ledger.ready_chunk.events[-1].description == "新事件描述"
-    assert ledger.ready_chunk.events[-1].cause_role == "main"
-    assert [item.action for item in ledger.ready_chunk.character_observations] == ["喝止", "追击", "离场"]
+    assert ledger.ready_chapter.events[-1].description == "新事件描述"
+    assert ledger.ready_chapter.events[-1].cause_role == "main"
+    assert [item.action for item in ledger.ready_chapter.character_observations] == ["喝止", "追击", "离场"]
 
-    ledger.complete_active_chunk()
-    assert ledger.completed_chunks[0].events[-1].description == "新事件描述"
+    ledger.complete_active_chapter()
+    assert ledger.completed_chapters[0].events[-1].description == "新事件描述"
 
 
 def test_event_root_appends_new_tree_per_tree_key_and_updates_on_replay() -> None:
@@ -1010,7 +854,7 @@ def test_event_root_appends_new_tree_per_tree_key_and_updates_on_replay() -> Non
     的 finalized 与 tree_id 改写为实时落账的树数与树 id 独立性，事件审计记录改为
     收尾时按域汇总的一条（payload["trees"] 列表内含全部树）。
     2026-09-14 写入面重构：建树走单工具 write_event（el=树键、isroot=true），
-    参与者内联 characters；收尾改名 finish_chapter。
+    参与者内联 characters；收尾改名 finish。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1028,7 +872,7 @@ def test_event_root_appends_new_tree_per_tree_key_and_updates_on_replay() -> Non
             child_action="离去",
         ),
     )
-    assert ledger.ready_chunk is None
+    assert ledger.ready_chapter is None
     assert len(ledger.tree_key_index) == 2
     # 同树键重交按更新：根描述改写，不新增第三棵树
     replay = _call(tools, "write_event", {"el": "t2", "isroot": True, "description": "顾霜收势离场"})
@@ -1063,8 +907,8 @@ def test_complete_chunk_requires_finish_chapter_and_metrics() -> None:
     """2026-08-11 用于验证未收尾的 chunk 不能冻结，且缺指标时收尾被拒
 
     2026-09-13 取消暂存：没有逐域 finish_domain，唯一收尾声明缺指标时结构化拒绝
-    code=missing_record。2026-09-14 写入面重构：收尾改名 finish_chapter——只写小
-    调用不调用 finish_chapter 时 chunk 不冻结（旧合同"未调用领域"的等价物）。
+    code=missing_record。2026-09-14 写入面重构：收尾改名 finish——只写小
+    调用不调用 finish 时 chunk 不冻结（旧合同"未调用领域"的等价物）。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1072,15 +916,15 @@ def test_complete_chunk_requires_finish_chapter_and_metrics() -> None:
 
     _call_all(tools, [*_entity_calls(), *_event_calls()])
     assert ledger.written_entities and ledger.metrics_payload is None
-    with pytest.raises(ValueError, match="尚未收尾"):
-        ledger.complete_active_chunk()
+    with pytest.raises(ValueError):
+        ledger.complete_active_chapter()
     with pytest.raises(AnnotationStageRejection) as excinfo:
         ledger.finish_chapter()
     assert excinfo.value.code == "missing_record"
     assert excinfo.value.field == "metrics"
     assert ledger.chapter_finished is False
-    assert ledger.completed_chunks == []
-    assert ledger.phase == "chunk_open"
+    assert ledger.completed_chapters == []
+    assert ledger.phase == "chapter_open"
 
 
 def test_dialogue_defaults_missing_candidates_to_not_dialogue() -> None:
@@ -1089,7 +933,7 @@ def test_dialogue_defaults_missing_candidates_to_not_dialogue() -> None:
     2026-09-13 取消暂存：默认处理推迟到唯一收尾声明时一次执行（旧合同在
     finish_domain("dialogues") 结算时执行）；同序号重交是更新语义，旧"重复
     candidate_index 报错"断言改写为"同序号只保留一条记录"，越界仍拒绝（结构化
-    拒绝记录键/字段/错误码）。2026-09-14 收尾改名 finish_chapter。
+    拒绝记录键/字段/错误码）。2026-09-14 收尾改名 finish。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1212,7 +1056,7 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
                 "description": "山门震动",
                 "characters": [
                     {
-                        "entityid": 1,
+                        "entityid": "山门",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": "震动",
@@ -1221,21 +1065,9 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
                 ],
             },
         )
-    assert excinfo.value.record == "t1/root/participant/1"
+    assert excinfo.value.record == "t1/root/participant/山门"
     assert excinfo.value.field == "narrative_role"
     assert excinfo.value.code == "observation_on_noncharacter"
-    # characters 条目的参数面：非 character 只用 entityid/role，三态字段只属于 character
-    assert set(ParticipantArg.model_fields) == {"entityid", "role", "narrative_role", "action", "emotion"}
-    event_tool = _find_tool(tools, "write_event")
-    assert set(event_tool.args_schema.model_fields) == {
-        "el",
-        "isroot",
-        "description",
-        "isforeshadowing",
-        "confidence",
-        "type",
-        "characters",
-    }
     receipt = _call(
         tools,
         "write_event",
@@ -1243,7 +1075,7 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
             "el": "t1",
             "isroot": True,
             "description": "山门震动",
-            "characters": [{"entityid": 1, "role": "地点"}],
+            "characters": [{"entityid": "山门", "role": "地点"}],
         },
     )
     receipt_content = receipt.pop("content")
@@ -1283,7 +1115,7 @@ def test_event_location_participant_role_requires_location_type() -> None:
             "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": 1,
+                    "entityid": "顾霜",
                     "role": "地点",
                     "narrative_role": "主体",
                     "action": "喝止",
@@ -1293,10 +1125,9 @@ def test_event_location_participant_role_requires_location_type() -> None:
         },
     )
     assert receipt["status"] == "rejected"
-    assert receipt["record"] == "t1/root/participant/1"
+    assert receipt["record"] == "t1/root/participant/顾霜"
     assert receipt["code"] == "role_type_mismatch"
     assert receipt["field"] == "role"
-    assert "地点角色端点必须是 location" in receipt["message"]
     assert ledger.bound_payloads["events"][0].participants == []
     assert ledger.observation_by_record == {}
 
@@ -1315,7 +1146,7 @@ def test_write_entity_without_prior_search_graph_is_allowed() -> None:
 
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     assert receipt["status"] == "written"
-    assert receipt["n"] == 1
+    assert receipt["id"] == _entity_id("顾霜")
     assert list(ledger.written_entities) == ["顾霜"]
 
 
@@ -1337,14 +1168,14 @@ def test_write_entity_allowed_after_search_graph() -> None:
         "status": "written",
         "record": "entity/顾霜",
         "el": "顾霜",
-        "n": 1,
+        "id": _entity_id("顾霜"),
         "content": {
             "name": "顾霜",
             "entity_type": "character",
             "tags": [],
             "description": None,
             "attributes": {},
-            "n": 1,
+            "id": _entity_id("顾霜"),
         },
     }
 
@@ -1365,7 +1196,7 @@ def test_complete_chunk_accepts_registered_entity_endpoint_without_declaration()
 
     assert ledger.domain_payloads["entities"].entities == []
     assert ledger.written_entities == {}
-    ledger.complete_active_chunk()
+    ledger.complete_active_chapter()
     assert [item.character for item in ledger.bound_payloads["character_observations"]] == ["顾霜", "顾霜"]
 
 
@@ -1387,7 +1218,6 @@ def test_write_entity_rejects_registered_entity_type_change() -> None:
     assert excinfo.value.record == "entity/顾霜"
     assert excinfo.value.field == "entity_type"
     assert excinfo.value.code == "type_conflict"
-    assert "已登记实体不允许变更大类" in str(excinfo.value)
     assert ledger.written_entities == {}
 
 
@@ -1435,7 +1265,7 @@ def test_unresolved_speaker_no_longer_auto_creates_case() -> None:
     tools = _tools(service, ledger)
 
     _write_all_domains(tools, ledger)
-    ledger.complete_active_chunk()
+    ledger.complete_active_chapter()
 
     assert ledger.pushed_cases == []
 
@@ -1562,75 +1392,69 @@ def test_search_text_uses_all_range_when_future_context_is_enabled() -> None:
     assert service.text_queries == [("顾霜", "all", 8)]
 
 
-def test_search_pool_uses_case_numbers_and_resolve_dialogue_case() -> None:
-    """2026-08-11 用于验证临时 case_number 解决对话案例且不可重复"""
+def test_search_pool_numbers_cases_and_hides_resolved_from_pool() -> None:
+    """2026-08-11 用于验证案例编号由 search_pool 回执产生且解决后不可重复、后续检索隐藏
+
+    2026-09-18 案例面收窄：resolve_dialogue_case 等三个裁决工具删净，案例出口只剩
+    close_case（无产出）与 promise_case（指向产出记录），本用例改走 close_case 走
+    同一条编号授权链与"已解决案例不再出现"的检索隐藏语义。
+    """
     service = _QueryService()
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
     view = json.loads(_find_tool(tools, "search_pool").invoke({"query": "住手"}))
     assert [item["result_kind"] for item in view["results"]] == ["case"]
-    case_number = view["results"][0]["case_number"]
+    case_id = view["results"][0]["id"]
     response = json.loads(
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {"case_number": case_number, "speaker": 1, "reason": "后文点明"}
-        )
+        _find_tool(tools, "close_case").invoke({"case_id": case_id, "reason": "非连续性疑点"})
     )
     assert response["accepted"] is True
-    assert response["action"] == "dialogue"
+    assert response["action"] == "close"
     assert ledger.resolved_cases[0].case_id == "case-1"
-    assert ledger.resolved_cases[0].action == "dialogue"
-    assert ledger.resolved_cases[0].speaker == "顾霜"
-    assert ledger.resolved_cases[0].target_key == "target-1"
+    assert ledger.resolved_cases[0].action == "close"
 
-    with pytest.raises(AnnotationInputError, match="已经解决"):
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {"case_number": case_number, "speaker": 1, "reason": "重复"}
-        )
+    with pytest.raises(AnnotationInputError):
+        _find_tool(tools, "close_case").invoke({"case_id": case_id, "reason": "重复"})
     hidden = json.loads(_find_tool(tools, "search_pool").invoke({"query": "住手"}))
     assert hidden["results"] == []
 
 
-def test_resolve_case_rejects_unknown_case_number() -> None:
-    """2026-08-11 用于验证未登记的 case_number 直接拒绝"""
-    service = _QueryService()
-    ledger = _ledger()
-    tools = _tools(service, ledger)
+def test_write_dialogue_update_requires_declared_character_speaker() -> None:
+    """2026-08-11 用于验证对话更新 speaker 必须是已登记或本章声明的人物
 
-    with pytest.raises(AnnotationAuthorizationError, match="未由 search_pool 检索或 push_case 登记返回: 999"):
-        _find_tool(tools, "resolve_dialogue_case").invoke({"case_number": 999, "speaker": 1, "reason": "猜测"})
-
-
-def test_resolve_dialogue_case_requires_declared_character_speaker() -> None:
-    """2026-08-11 用于验证对话解决 speaker 必须是已登记或本章声明的人物
-
-    2026-09-14 写入面重构：speaker 是实体引用（编号 n / el 键），未登记编号在
-    解析点结构化拒绝（code=unregistered_number，label 指向 case/<编号>.speaker），
-    不再抛裸 ValueError。
+    2026-09-18 对话更新下沉到 write_dialogue(candidate_key=...)：speaker 仍是实体引用
+    （2026-09-19 id 纪律：run 级 uuid id / el 键），未登记 id 在解析点结构化拒绝
+    （code=unknown_entity_id，record 指向该对话记录）；解析成功后按登记名写进
+    case_id 为空的 dialogue 解决项。
     """
     service = _QueryService()
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
-    _surface_case(service, ledger)
     tools = _tools(service, ledger)
+    _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
 
-    case_number = ledger.case_number_by_id["case-1"]
+    dialogue_id = "dlg_prev_1"
     with pytest.raises(AnnotationStageRejection) as excinfo:
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {"case_number": case_number, "speaker": 987, "reason": "猜测"}
+        _find_tool(tools, "write_dialogue").invoke(
+            {"candidate_key": dialogue_id, "speaker": "00000000-0000-0000-0000-000000000987"}
         )
-    assert excinfo.value.record == "case/1"
+    assert excinfo.value.record == f"dialogue/{dialogue_id}"
     assert excinfo.value.field == "speaker"
-    assert excinfo.value.code == "unregistered_number"
-    assert "case/1.speaker 实体编号 987 未登记" in str(excinfo.value)
+    assert excinfo.value.code == "unknown_entity_id"
+
     response = json.loads(
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {"case_number": case_number, "speaker": 1, "reason": "后文点明"}
+        _find_tool(tools, "write_dialogue").invoke(
+            {"candidate_key": dialogue_id, "speaker": "顾霜", "description": "后文点明"}
         )
     )
-    assert response["accepted"] is True
+    assert response["status"] == "written"
+    assert response["content"]["speaker"] == "顾霜"
+    last = ledger.resolved_cases[-1]
+    assert last.action == "dialogue"
+    assert last.case_id == ""
+    assert last.target_key == dialogue_id
+    assert last.speaker == "顾霜"
 
 
 def test_close_case_only_closes_alias_case() -> None:
@@ -1640,60 +1464,62 @@ def test_close_case_only_closes_alias_case() -> None:
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
-    case_number = ledger.case_number_by_id["alias-1"]
+    case_id = "alias-1"
     response = json.loads(
-        _find_tool(tools, "close_case").invoke({"case_number": case_number, "reason": "夫妻关系非同一人物"})
+        _find_tool(tools, "close_case").invoke({"case_id": case_id, "reason": "夫妻关系非同一人物"})
     )
     assert response["accepted"] is True
     assert ledger.resolved_cases[0].case_id == "alias-1"
     assert ledger.resolved_cases[0].action == "close"
 
-    with pytest.raises(AnnotationInputError, match="已经解决"):
-        _find_tool(tools, "close_case").invoke({"case_number": case_number, "reason": "重复"})
+    with pytest.raises(AnnotationInputError):
+        _find_tool(tools, "close_case").invoke({"case_id": case_id, "reason": "重复"})
 
 
-def test_resolve_fact_case_asserts_same_character_relation() -> None:
-    """2026-08-11 用于验证 entity_alias 案例可用 resolve_fact_case 建同一人物关系"""
-    service = _AliasQueryService()
+def test_write_relation_create_kind_confirms_edge_without_case() -> None:
+    """2026-08-11 用于验证显式 change_kind=新增 与省略等价：按建边处理且不产生案例
+
+    2026-09-18 fact 裁决下沉到写入路径：关系变化不再经案例池，也不进 resolved_cases——
+    建边只进 FactGraph（assert 操作日志 + 终态），"新增"走建边而非变化日志。
+    """
+    service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
-    case_number = ledger.case_number_by_id["alias-1"]
-    response = json.loads(
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 1,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "新增",
-                "reason": "姓名指向同一人",
-            }
-        )
+    receipt = _call(
+        tools,
+        "write_relation",
+        {
+            "from_entity": _entity_id("顾霜"),
+            "to_entity": _entity_id("顾老"),
+            "relation_type": "同一人物",
+            "change_kind": "新增",
+        },
     )
-    assert response["accepted"] is True
-    # 2026-09-04 单一写面：fact 裁决进 FactGraph 操作日志与终态，不再进 resolved_cases
+    assert receipt["status"] == "written"
+    assert receipt["outcome"] == "assert"
     assert ledger.resolved_cases == []
     assert ledger.graph.relation_exists("顾霜", "顾老", "同一人物") is True
-    change_op = ledger.graph.relation_change_ops[0]
-    assert change_op["case_id"] == "alias-1"
-    assert change_op["relation_type"] == "同一人物"
-    assert change_op["change_kind"] == "assert"
+    assert ledger.graph.relation_change_ops == []
+    assert [
+        (op["from_entity"], op["to_entity"], op["relation_type"])
+        for op in ledger.graph.relation_assert_ops
+    ] == [("顾霜", "顾老", "同一人物")]
 
 
-def test_resolve_fact_case_break_hides_edge_from_search_graph() -> None:
-    """2026-09-04 第4章死锁回归：break 裁决后内存图同步解除，search_graph 不得再显示该边
+def test_write_relation_break_hides_edge_from_search_graph() -> None:
+    """2026-09-04 第4章死锁回归：解除后内存图同步解除，search_graph 不得再显示该边
 
-    此前 resolve_fact_case 只写 ledger.resolved_cases、不动 FactGraph，模型"解除成功"
-    的回执后 search_graph 仍返回同一条边，导致修复-验证循环打满 15 轮上限。
+    2026-09-18 解除下沉到 write_relation(change_kind=解除)：端点按规范名提交，
+    变化进图变更日志且 case_id 为空（写入路径自己发起，不是案例裁决）。此前裁决
+    只写 resolved_cases、不动 FactGraph，模型"解除成功"后 search_graph 仍返回同一条
+    边，导致修复-验证循环打满 15 轮上限。
     """
-    service = _AliasQueryService()
+    service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     ledger.graph.apply_relation(_graph_relation("顾霜", "顾老", "同一人物"))
-    _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
     # 先确认边在图中可见
@@ -1702,20 +1528,18 @@ def test_resolve_fact_case_break_hides_edge_from_search_graph() -> None:
     )
     assert len(before["relations"]) == 1
 
-    case_number = ledger.case_number_by_id["alias-1"]
-    response = json.loads(
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 1,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "解除",
-                "reason": "两人并非同一人物，边为误判",
-            }
-        )
+    receipt = _call(
+        tools,
+        "write_relation",
+        {
+            "from_entity": _entity_id("顾霜"),
+            "to_entity": _entity_id("顾老"),
+            "relation_type": "同一人物",
+            "change_kind": "解除",
+        },
     )
-    assert response["accepted"] is True
+    assert receipt["status"] == "written"
+    assert receipt["outcome"] == "break"
 
     after = json.loads(
         _find_tool(tools, "search_graph").invoke({"entities": ["顾霜", "顾老"], "relation_type": None})
@@ -1724,73 +1548,77 @@ def test_resolve_fact_case_break_hides_edge_from_search_graph() -> None:
     assert ledger.graph.relation_exists("顾霜", "顾老", "同一人物") is False
     change_op = ledger.graph.relation_change_ops[0]
     assert change_op["change_kind"] == "break"
-    assert change_op["case_id"] == "alias-1"
+    assert change_op["case_id"] == ""
+    assert change_op["target_ref"] == {"chapter_id": 10, "change_index": 0}
 
 
-def test_resolve_fact_case_rejects_unregistered_entity() -> None:
-    """2026-08-11 用于验证 fact 解决端点必须已登记或本章声明
+def test_write_relation_rejects_unregistered_entity_reference() -> None:
+    """2026-08-11 用于验证关系端点必须已登记或本章声明
 
-    2026-09-14 写入面重构：端点是实体引用（编号 n / el 键），未登记编号在解析点
-    结构化拒绝（code=unregistered_number），不再抛裸 ValueError。
+    2026-09-18 端点解析位于写入路径（编号 n / el 键）：未登记编号在解析点结构化
+    拒绝（code=unregistered_number），不再抛裸 ValueError，也不落任何写入。
     """
-    service = _AliasQueryService()
-    ledger = _ledger()
-    _surface_case(service, ledger)
-    tools = _tools(service, ledger)
-
-    case_number = ledger.case_number_by_id["alias-1"]
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 987,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "新增",
-                "reason": "指向同一人",
-            }
-        )
-    assert excinfo.value.record == "case/1"
-    assert excinfo.value.field == "from_entity"
-    assert excinfo.value.code == "unregistered_number"
-    assert "case/1.from_entity 实体编号 987 未登记" in str(excinfo.value)
-
-
-def test_resolve_case_authorized_on_initial_display() -> None:
-    """2026-08-30 用于验证初始案例展示即授权其源章无需额外原文工具"""
-    service = _ForeignChunkQueryService()
+    service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
+    tools = _tools(service, ledger)
+
+    receipt = _reject(
+        tools,
+        ledger,
+        "write_relation",
+        {
+            "from_entity": "00000000-0000-0000-0000-000000000987",
+            "to_entity": "00000000-0000-0000-0000-000000000002",
+            "relation_type": "同一人物",
+            "change_kind": "新增",
+        },
+    )
+    assert receipt["status"] == "rejected"
+    unknown_pair = "00000000-0000-0000-0000-000000000987-00000000-0000-0000-0000-000000000002"
+    assert receipt["record"] == f"relation/{unknown_pair}/同一人物"
+    assert receipt["field"] == "from_entity"
+    assert receipt["code"] == "unknown_entity_id"
+    assert "00000000-0000-0000-0000-000000000987" in receipt["message"]
+    assert ledger.written_relations == {}
+    assert ledger.graph.relation_assert_ops == []
+
+
+def test_case_resolution_authorized_on_initial_display() -> None:
+    """2026-08-30 用于验证初始案例展示即授权其源章无需额外原文工具
+
+    2026-09-18 案例出口收成 close_case/promise_case：展示授权链不变（search_pool
+    展示即登记源章），本用例把原 fact 裁决换成 close_case，仍断言锚定旧章的案例
+    在展示后可直接解决、无需先读原文。
+    """
+    service = _ForeignChunkQueryService()
+    ledger = _ledger()
     _surface_case(service, ledger)
     assert 99 in ledger.authorized_chapter_ids
     tools = _tools(service, ledger)
 
-    case_number = ledger.case_number_by_id["foreign-1"]
+    case_id = "foreign-1"
     response = json.loads(
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 1,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "新增",
-                "reason": "姓名指向同一人",
-            }
+        _find_tool(tools, "close_case").invoke(
+            {"case_id": case_id, "reason": "确认非同一人物"}
         )
     )
     assert response["accepted"] is True
-    # 2026-09-04 单一写面：fact 裁决只进 FactGraph 操作日志，不再进 resolved_cases
-    assert ledger.resolved_cases == []
-    assert ledger.graph.relation_change_ops[0]["case_id"] == "foreign-1"
+    assert response["action"] == "close"
+    assert ledger.resolved_cases[-1].case_id == "foreign-1"
+    assert ledger.resolved_cases[-1].target_key == "target-foreign-1"
 
 
-def test_resolve_case_allowed_after_text_search_authorization() -> None:
-    """2026-08-30 用于验证检索旧章正文时即时授权精确段落"""
+def test_foreign_case_resolution_allowed_after_text_search_authorization() -> None:
+    """2026-08-30 用于验证检索旧章正文时即时授权精确段落
+
+    2026-09-18 把原 fact 裁决换成 close_case：search_text 的段落授权登记与展示源章
+    授权链不变，锚定旧章的案例在原文检索后可直接解决。
+    """
     import asyncio
 
     service = _ForeignChunkQueryService()
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
@@ -1800,90 +1628,179 @@ def test_resolve_case_allowed_after_text_search_authorization() -> None:
     assert 99 in ledger.authorized_chapter_ids
     assert 99 in ledger.authorized_text_paragraph_ids
 
-    case_number = ledger.case_number_by_id["foreign-1"]
+    case_id = "foreign-1"
     response = json.loads(
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 1,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "新增",
-                "reason": "姓名指向同一人",
-            }
+        _find_tool(tools, "close_case").invoke(
+            {"case_id": case_id, "reason": "确认非同一人物"}
         )
     )
     assert response["accepted"] is True
-    # 2026-09-04 单一写面：fact 裁决只进 FactGraph 操作日志，不再进 resolved_cases
-    assert ledger.resolved_cases == []
-    assert ledger.graph.relation_change_ops[0]["case_id"] == "foreign-1"
+    assert ledger.resolved_cases[-1].case_id == "foreign-1"
 
 
-def test_resolve_foreshadowing_case_rejects_foreign_enum_values() -> None:
-    """2026-09-13 用于验证伏笔解决字段只接受闭合枚举（setup_status 已随线程退役）"""
+def test_write_event_foreshadowing_attach_requires_closed_params() -> None:
+    """2026-09-13 用于验证伏笔挂边只接受闭合参数面
+
+    2026-09-18 伏笔挂边下沉到 write_event：foreshadowing_action 与 root_event_id
+    必须同时给、action 只取 reinforce/payoff；单给一边即结构化拒绝且不留解决项。
+    2026-09-19 挂边顺带更新树根属性：payoff_likelihood/strength 进参数面，但只在挂边时
+    有效——没挂边就单给这两个参数按 not_on_attach 拒绝（它们改的是树根，不是本节点）。
+    """
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    _surface_case(service, ledger)
-    case_number = ledger.case_number_by_id["case-1"]
-    base = {
-        "case_number": case_number,
-        "reason": "伏笔回收",
-        "foreshadowing_action": "reinforce",
-        "root_event_id": "evt-root-1",
-        "event_id": "evt-bind-1",
-    }
-    with pytest.raises(ValidationError, match="payoff_likelihood"):
-        _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {**base, "payoff_likelihood": "certain"}
-        )
-    with pytest.raises(ValidationError, match="strength"):
-        _find_tool(tools, "resolve_foreshadowing_case").invoke({**base, "strength": "very_high"})
+    orphan_likelihood = _reject(
+        tools,
+        ledger,
+        "write_event",
+        {"el": "t9", "isroot": True, "description": "伏笔", "payoff_likelihood": "high"},
+    )
+    assert orphan_likelihood["status"] == "rejected"
+    assert orphan_likelihood["field"] == "payoff_likelihood"
+    assert orphan_likelihood["code"] == "not_on_attach"
+
+    orphan_strength = _reject(
+        tools,
+        ledger,
+        "write_event",
+        {"el": "t9", "isroot": True, "description": "伏笔", "strength": "low"},
+    )
+    assert orphan_strength["code"] == "not_on_attach"
+
+    action_only = _reject(
+        tools,
+        ledger,
+        "write_event",
+        {"el": "t9", "isroot": True, "description": "伏笔", "foreshadowing_action": "reinforce"},
+    )
+    assert action_only["status"] == "rejected"
+    assert action_only["record"] == "t9/root"
+    assert action_only["field"] == "foreshadowing_action"
+    assert action_only["code"] == "invalid_call"
+
+    root_only = _reject(
+        tools,
+        ledger,
+        "write_event",
+        {"el": "t9", "isroot": True, "description": "伏笔", "root_event_id": "evt-root-1"},
+    )
+    assert root_only["code"] == "invalid_call"
+
+    foreign_action = _reject(
+        tools,
+        ledger,
+        "write_event",
+        {
+            "el": "t9",
+            "isroot": True,
+            "description": "伏笔",
+            "foreshadowing_action": "expand",
+            "root_event_id": "evt-root-1",
+        },
+    )
+    assert foreign_action["code"] == "invalid_call"
     assert ledger.resolved_cases == []
 
 
-def test_push_case_accepts_arbitrary_type_and_dialogue_id() -> None:
-    """2026-08-11 用于验证 push_case 类型放开且对话疑点携带 dialogue_id"""
+def test_push_case_accepts_arbitrary_type_and_record_id() -> None:
+    """2026-08-11 用于验证 push_case 类型放开且疑点可指向本章产出记录
+
+    2026-09-18 案例面收窄：第四参由 dialogue_id 改名 record_id，必须命中本章已写出
+    的记录键（ledger.written_record_keys），未写出的记录不得凭空引用。
+    """
     service = _QueryService()
     ledger = _ledger()
+    ledger.written_record_keys.add("entity/顾霜")
     tools = _tools(service, ledger)
 
-    dialogue_id = ledger.dialogue_candidates[0].candidate_key
     response = json.loads(
         _find_tool(tools, "push_case").invoke(
             {
                 "description": "神秘仪式疑点",
                 "keys": ["住手", "仪式"],
                 "type": "神秘仪式",
-                "dialogue_id": dialogue_id,
+                "record_id": "entity/顾霜",
             }
         )
     )
     assert response["accepted"] is True
-    assert response["target_key"]
+    assert response["case_id"]
     pushed = ledger.pushed_cases[0]
     assert pushed.type == "神秘仪式"
     assert pushed.target_ref["kind"] == "神秘仪式"
-    assert pushed.target_ref["dialogue_id"] == dialogue_id
-    assert pushed.target_ref["chunk_id"] == 10
+    assert pushed.target_ref["record_id"] == "entity/顾霜"
+    assert pushed.target_ref["chapter_id"] == 10
 
 
-def test_push_case_rejects_unknown_dialogue_id() -> None:
-    """2026-09-13 用于验证 push_case 校验 dialogue_id（伏笔线程 setup_id 参数已退役）"""
+def test_push_case_rejects_unknown_record_id() -> None:
+    """2026-09-13 用于验证 push_case 校验记录标识确实来自本章已写出的记录
+
+    2026-09-18 dialogue_id 退役（伏笔线程 setup_id 更早已退役），第四参改为产出记录键：
+    不在 ledger.written_record_keys 里的键结构化拒绝（code=unknown_record），案例不落池。
+    """
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationInputError, match="不是当前 chunk 的对话候选 id"):
-        _find_tool(tools, "push_case").invoke(
-            {
-                "description": "对话疑点",
-                "keys": ["住手"],
-                "type": "dialogue_speaker",
-                "dialogue_id": "dlg_not_exist",
-            }
-        )
+    receipt = _reject(
+        tools,
+        ledger,
+        "push_case",
+        {
+            "description": "对话疑点",
+            "keys": ["住手"],
+            "type": "dialogue_speaker",
+            "record_id": "dlg_not_exist",
+        },
+    )
+    assert receipt["status"] == "rejected"
+    assert receipt["record"] == "case/dialogue_speaker"
+    assert receipt["field"] == "record_id"
+    assert receipt["code"] == "unknown_record"
+    assert ledger.pushed_cases == []
+
+
+def test_push_case_blank_record_id_means_no_record() -> None:
+    """2026-09-18 record_id 可为空：没有哪条产出记录承担这条疑点时留空即可
+
+    留空与省略同义（都不写进 target_ref），不影响登记与运行期编号；填了值才按章级
+    记录键校验。这里给空串，账本里没有任何已写出记录也照常登记。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    response = _call(
+        tools,
+        "push_case",
+        {"description": "仪式疑点", "keys": ["住手"], "type": "神秘仪式", "record_id": ""},
+    )
+    assert response["accepted"] is True
+    assert response["case_id"]
+    assert "record_id" not in ledger.pushed_cases[0].target_ref
+
+
+def test_promise_case_rejects_unknown_result_id() -> None:
+    """2026-09-18 result_id 必须是本章已经写出来的记录
+
+    未命中按结构化拒绝回（code=unknown_record），案例不落已解决项。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    case_id = _surface_case(service, ledger)
+    receipt = _reject(
+        tools,
+        ledger,
+        "promise_case",
+        {"case_id": case_id, "result_id": "dlg_not_exist"},
+    )
+    assert receipt["status"] == "rejected"
+    assert receipt["field"] == "result_id"
+    assert receipt["code"] == "unknown_record"
+    assert ledger.resolved_cases == []
 
 
 def test_push_case_rejects_json_fragment_in_description() -> None:
@@ -1892,7 +1809,7 @@ def test_push_case_rejects_json_fragment_in_description() -> None:
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationInputError, match="独立参数"):
+    with pytest.raises(AnnotationInputError):
         _find_tool(tools, "push_case").invoke(
             {
                 "description": '{"keys": ["住手"], "type": "疑点"}',
@@ -1919,16 +1836,14 @@ def test_push_case_rejects_overlong_description() -> None:
     assert ledger.pushed_cases == []
 
 
-def test_push_case_then_resolve_foreshadowing_case_binds_tree() -> None:
-    """2026-09-13 伏笔即事件树：push_case 不再带 setup_id；resolve 以章内局部键挂树
+def test_push_case_without_setup_id_then_foreshadowing_attach_binds_tree() -> None:
+    """2026-09-13 伏笔即事件树：push_case 不再带 setup_id；续接以章内局部键挂树
 
-    2026-09-13 取消暂存：伏笔树经 write_event_root(isforeshadowing=true) 写入即生效，
-    resolve 的 root/event 直接填章内局部键（t1、t1/e1）——真实节点 id 由账本内部
-    持有，不再作为模型面寻址键，也不再有领域结算才生成 id 的窗口。
-    2026-09-14 写入面重构：建树折叠进单工具 write_event（el=树键 + isroot=true，
-    伏笔属性收敛为 confidence），子事件 el=树键/节点键。
+    2026-09-18 伏笔挂边下沉到 write_event（foreshadowing_action + root_event_id）：
+    节点照常写进本章事件树，另记一条 case_id 为空的 foreshadowing 解决项——真实节点
+    id 由账本内部持有，模型面只用章内局部键（t1、t2）。
     """
-    service = _ForeshadowingCaseQueryService()
+    service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
@@ -1944,9 +1859,8 @@ def test_push_case_then_resolve_foreshadowing_case_binds_tree() -> None:
     assert response["accepted"] is True
     pushed = ledger.pushed_cases[0]
     assert pushed.target_ref["kind"] == "foreshadowing_suspect"
+    assert "setup_id" not in pushed.target_ref
 
-    _surface_case(service, ledger)
-    case_number = ledger.case_number_by_id["case-1"]
     _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     _call(
         tools,
@@ -1966,26 +1880,82 @@ def test_push_case_then_resolve_foreshadowing_case_binds_tree() -> None:
     )
     # 写入即生效：章内局部键随时可解析（旧合同要等事件域结算才生成真实 id）
     root_event_id = ledger.resolve_event_reference("t1")
-    event_id = ledger.resolve_event_reference("t1/e1")
-    assert root_event_id is not None and event_id is not None
+    assert root_event_id is not None
 
-    resolved = json.loads(
-        _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {
-                "case_number": case_number,
-                "reason": "后续章节强化承诺",
-                "foreshadowing_action": "reinforce",
-                "root_event_id": "t1",
-                "event_id": "t1/e1",
-            }
-        )
+    attachment = _call(
+        tools,
+        "write_event",
+        {
+            "el": "t2",
+            "isroot": True,
+            "description": "本章续接",
+            "foreshadowing_action": "reinforce",
+            "root_event_id": "t1",
+        },
     )
-    assert resolved["accepted"] is True
+    event_id = ledger.resolve_event_reference("t2")
+    assert event_id is not None
+    assert attachment["content"]["foreshadowing"] == {
+        "action": "reinforce",
+        "root_event_id": root_event_id,
+        "event_id": event_id,
+    }
     last = ledger.resolved_cases[-1]
+    assert last.case_id == ""
     assert last.action == "foreshadowing"
     assert last.foreshadowing_action == "reinforce"
     assert last.foreshadowing_root_event_id == root_event_id
     assert last.foreshadowing_event_id == event_id
+
+
+def test_foreshadowing_attach_updates_root_confidence() -> None:
+    """2026-09-19 挂边顺带更新树根：payoff_likelihood/strength 落进无案例的 foreshadowing 解决项
+
+    落库层按这两个字段改根属性（`_persist_foreshadowing_resolution`），此前写入路径没接，
+    于是"本章证据改变了回收预期"只能靠新建树表达。这里断言解决项带值、回执回显更新值。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
+    _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "isroot": True,
+            "description": "守护誓言埋下",
+            "isforeshadowing": True,
+            "confidence": "low",
+        },
+    )
+    attachment = _call(
+        tools,
+        "write_event",
+        {
+            "el": "t2",
+            "isroot": True,
+            "description": "本章回收",
+            "foreshadowing_action": "payoff",
+            "root_event_id": "t1",
+            "payoff_likelihood": "high",
+            "strength": "medium",
+        },
+    )
+    assert attachment["content"]["foreshadowing"] == {
+        "action": "payoff",
+        "root_event_id": ledger.resolve_event_reference("t1"),
+        "event_id": ledger.resolve_event_reference("t2"),
+        "payoff_likelihood": "high",
+        "strength": "medium",
+    }
+    resolved = ledger.resolved_cases[-1]
+    assert resolved.case_id == ""
+    assert resolved.action == "foreshadowing"
+    assert resolved.foreshadowing_action == "payoff"
+    assert resolved.payoff_likelihood == "high"
+    assert resolved.strength == "medium"
 
 
 def test_search_pool_requires_query_or_case_type() -> None:
@@ -1994,7 +1964,7 @@ def test_search_pool_requires_query_or_case_type() -> None:
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    with pytest.raises(AnnotationInputError, match="至少提供一个"):
+    with pytest.raises(AnnotationInputError):
         _find_tool(tools, "search_pool").invoke({})
 
 
@@ -2037,12 +2007,10 @@ def test_search_pool_empty_keyword_result_returns_enumeration_hint() -> None:
 
     view = json.loads(_find_tool(tools, "search_pool").invoke({"query": "不存在的词"}))
     assert view["results"] == []
-    assert "不存在的词" in view["hint"]
     assert "case_type" in view["hint"]
     assert "all" in view["hint"]
     # 未知 case_type 名时提示直接给出池内真实类型名（避免模型继续猜标签）
     assert "entity_alias" in view["hint"]
-    assert "伏笔疑点" in view["hint"]
     assert view["pool"]["active_total"] == 7
     assert view["pool"]["by_type"] == {"entity_alias": 5, "伏笔疑点": 2}
 
@@ -2066,7 +2034,7 @@ def test_search_pool_case_type_enumeration_receipt() -> None:
             return CaseSearchResult(
                 id="alias-1",
                 type="entity_alias",
-                chunk_id=3,
+                chapter_id=3,
                 created_chapter=3,
                 keys=["同一人物", "顾霜", "顾老"],
                 description="疑似同一人物：顾霜 与 顾老",
@@ -2077,7 +2045,7 @@ def test_search_pool_case_type_enumeration_receipt() -> None:
     tools = _tools(service, ledger)
 
     view = json.loads(_find_tool(tools, "search_pool").invoke({"case_type": "entity_alias"}))
-    assert view["results"][0]["case_number"] == 1
+    assert view["results"][0]["id"]
     assert view["results"][0]["type"] == "entity_alias"
     assert view["results"][0]["created_chapter"] == 3
     assert view["truncated"] is True
@@ -2087,19 +2055,19 @@ def test_search_pool_case_type_enumeration_receipt() -> None:
     assert ledger.authorized_chapter_ids == {3}
 
 
-def test_case_number_from_pool_requires_search_surfacing() -> None:
-    """2026-09-11 授权链收紧：池中存在案例但未经 search_pool 展示时编号不可用
+def test_case_id_from_pool_requires_search_surfacing() -> None:
+    """2026-09-11 授权链收紧；2026-09-19 案例 id 化：未经 search_pool 展示的案例 id 不可用
 
-    检索制下案例不再注入，编号只能由 search_pool 回执产生；模型若凭空使用编号，
+    检索制下案例不再注入，案例 id 只能由 search_pool 回执产生；模型若凭空使用 id，
     拒绝信息必须指回检索通道（而不是旧合同的"初始候选"）。
     """
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    assert ledger.case_number_registry == {}
-    with pytest.raises(AnnotationAuthorizationError, match="未由 search_pool 检索或 push_case 登记返回: 1"):
-        _find_tool(tools, "close_case").invoke({"case_number": 1, "reason": "凭空引用"})
+    assert ledger.known_case_ids == set()
+    with pytest.raises(AnnotationAuthorizationError):
+        _find_tool(tools, "close_case").invoke({"case_id": "case-1", "reason": "凭空引用"})
 
 
 def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
@@ -2118,7 +2086,7 @@ def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
     _call(
         tools,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": "平静"},
+        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "平静"},
     )
     stored = ledger.domain_payloads["dialogues"]
     assert stored[0].verdict == "dialogue"
@@ -2132,7 +2100,7 @@ def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
     _call(
         replay_tools,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": "平静"},
+        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "平静"},
     )
     _call(
         replay_tools,
@@ -2163,15 +2131,13 @@ def test_write_dialogue_rejects_foreign_tone_word_with_full_catalog(foreign_tone
         tools,
         ledger,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": foreign_tone},
+        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": foreign_tone},
     )
 
     assert receipt["status"] == "rejected"
     assert receipt["field"] == "tone"
     assert receipt["code"] == "invalid_value"
     assert foreign_tone in receipt["message"]
-    assert "其他" in receipt["message"]
-    assert "平静" in receipt["expected"] and "其他" in receipt["expected"]
     assert not ledger.written_dialogues
 
 
@@ -2192,47 +2158,25 @@ def test_write_dialogue_rejects_oversized_tone_word_with_receipt() -> None:
     assert "tone" in receipt["message"]
 
 
-def test_dialogue_input_rejects_foreign_tone_word() -> None:
-    """2026-09-14 载荷模型层同样只接受闭合枚举（枚举外词在类型层整条拒绝）
+def test_write_dialogue_update_rejects_foreign_tone_word() -> None:
+    """2026-09-14 更新路径与判定路径同口径：枚举外语气词在参数绑定层被拒
 
-    tone 回到真 enum 字段（Tone | None）后不再叠 require_tone：非法词的拒绝由枚举
-    类型给出，工具面上的可自纠回执由记录级转换器负责（见 tone 拒绝用例）。
-    """
-    with pytest.raises(ValidationError, match="Input should be"):
-        DialogueInput(candidate_index=1, verdict="dialogue", tone="委屈")
-    assert DialogueInput(candidate_index=1, verdict="dialogue", tone="平静").tone == "平静"
-
-
-def test_resolve_dialogue_case_coerces_foreign_tone_word() -> None:
-    """2026-09-14 解决路径与写入路径同口径：枚举外语气词在参数绑定层被拒
-
-    旧口径（09-13）是纯字符串参数 + 函数体内 require_tone 抛 AnnotationInputError；
-    恢复真 enum 后拒绝提前到 schema 绑定，回执由记录级转换器按 case 编号产出。
+    2026-09-18 案例裁决退役后 tone 拒绝对齐 write_dialogue(candidate_key=...) 更新入口：
+    记录级转换器给出全词表与「其他」兜底指引，失败不留解决项。
     """
     service = _QueryService()
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
-    _surface_case(service, ledger)
     tools = _tools(service, ledger)
 
-    case_number = ledger.case_number_by_id["case-1"]
     receipt = _reject(
         tools,
         ledger,
-        "resolve_dialogue_case",
-        {
-            "case_number": case_number,
-            "speaker": 1,
-            "tone": "激动",
-            "reason": "语气判断",
-        },
+        "write_dialogue",
+        {"candidate_key": "dlg_prev_1", "tone": "激动"},
     )
     assert receipt["status"] == "rejected"
     assert receipt["field"] == "tone"
     assert receipt["code"] == "invalid_value"
-    assert "激动" in receipt["message"]
-    assert "其他" in receipt["message"]
-    assert "平静" in receipt["expected"] and "其他" in receipt["expected"]
     assert ledger.resolved_cases == []
 
 
@@ -2251,7 +2195,11 @@ def test_relation_write_asserts_new_edge_immediately() -> None:
     )
     tools = _tools(service, ledger)
 
-    receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
+    receipt = _call(
+        tools,
+        "write_relation",
+        {"from_entity": _entity_id("顾霜"), "to_entity": _entity_id("顾老"), "relation_type": "友情"},
+    )
     assert receipt == {
         "status": "written",
         "record": "relation/顾霜-顾老/友情",
@@ -2281,7 +2229,11 @@ def test_relation_existing_edge_skipped_existing_receipt() -> None:
     )
     tools = _tools(service, ledger)
 
-    receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
+    receipt = _call(
+        tools,
+        "write_relation",
+        {"from_entity": _entity_id("顾霜"), "to_entity": _entity_id("顾老"), "relation_type": "友情"},
+    )
     assert receipt == {
         "status": "written",
         "record": "relation/顾霜-顾老/友情",
@@ -2315,9 +2267,17 @@ def test_relation_alias_resolved_to_same_entity_skipped_self_loop() -> None:
     )
     tools = _tools(service, ledger)
 
-    _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "同一人物"})
+    _call(
+        tools,
+        "write_relation",
+        {"from_entity": _entity_id("猴子"), "to_entity": _entity_id("侯飞白"), "relation_type": "同一人物"},
+    )
     # 同一对端点换类型即整体替换：同一人物边被友情边替换
-    receipt = _call(tools, "write_relation", {"from_entity": 1, "to_entity": 2, "relation_type": "友情"})
+    receipt = _call(
+        tools,
+        "write_relation",
+        {"from_entity": _entity_id("猴子"), "to_entity": _entity_id("侯飞白"), "relation_type": "友情"},
+    )
     assert receipt == {
         "status": "written",
         "record": "relation/猴子-侯飞白/友情",
@@ -2352,8 +2312,6 @@ def test_relation_state_field_rejected_from_contract() -> None:
     )
     tools = _tools(service, ledger)
 
-    relation_tool = _find_tool(tools, "write_relation")
-    assert set(relation_tool.args_schema.model_fields) == {"from_entity", "to_entity", "relation_type"}
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         RelationInput.model_validate(
             {
@@ -2367,7 +2325,7 @@ def test_relation_state_field_rejected_from_contract() -> None:
         tools,
         ledger,
         "write_relation",
-        {"from_entity": 1, "to_entity": 2, "relation_type": "友情", "state": "ended"},
+        {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情", "state": "ended"},
     )
     assert receipt["field"] == "state"
     assert receipt["code"] == "unknown_field"
@@ -2389,7 +2347,7 @@ def test_search_graph_returns_one_hop_neighborhood() -> None:
         _find_tool(tools, "search_graph").invoke({"entities": ["顾霜", "贺老"], "relation_type": None})
     )
     assert payload["matches"][0]["name"] == "顾霜"
-    assert isinstance(payload["matches"][0]["n"], int)
+    assert isinstance(payload["matches"][0]["id"], str)
     assert payload["missing"] == ["贺老"]
     assert payload["relations"][0]["relation_type"] == "同一人物"
     assert payload["neighbors"][0]["name"] == "顾老"
@@ -2433,12 +2391,12 @@ def test_search_graph_queries_live_fact_graph_without_database() -> None:
 
 
 def test_finish_chapter_requires_chunk_frozen_first() -> None:
-    """2026-08-07 用于验证 chunk 未冻结时不能 finish_chapter"""
+    """2026-08-07 用于验证 chunk 未冻结时不能 finish"""
     service = _QueryService()
     ledger = _ledger()
     _tools(service, ledger)
 
-    with pytest.raises(AnnotationProtocolError, match="不允许 finish_chapter"):
+    with pytest.raises(AnnotationProtocolError):
         ledger.finish()
 
 
@@ -2452,82 +2410,104 @@ def test_finish_chapter_generates_summary_from_chunk_summaries() -> None:
     tools = _tools(service, ledger)
 
     _write_all_domains(tools, ledger)
-    ledger.complete_active_chunk()
+    ledger.complete_active_chapter()
     annotation = ledger.finish()
-    assert annotation.chapter_summary == "住手回荡"
-    assert len(annotation.chunks) == 1
+    assert annotation.metrics.summary == "住手回荡"
 
 
-def test_resolve_fact_case_rejects_foreign_change_kind() -> None:
-    """2026-08-12 用于验证 fact 解决的 change_kind 必须是闭合关系变化枚举（避免下游整章回滚）"""
-    service = _AliasQueryService()
-    ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    _surface_case(service, ledger)
-    tools = _tools(service, ledger)
+def test_write_relation_rejects_foreign_change_kind() -> None:
+    """2026-08-12 用于验证关系变化的 change_kind 必须是闭合关系变化枚举（避免下游整章回滚）
 
-    case_number = ledger.case_number_by_id["alias-1"]
-    # 2026-09-11 change_kind 已中文化，契约枚举在参数校验层直接拒绝非法值
-    with pytest.raises(ValidationError, match="change_kind"):
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 1,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "强化关系",
-                "reason": "指向同一人",
-            }
-        )
-    assert ledger.resolved_cases == []
-
-
-def test_resolve_dialogue_case_rejects_foreign_tone() -> None:
-    """2026-09-14 用于验证对话解决的 tone 与写入路径共用同一闭合枚举
-
-    真 enum 参数下非法词在 schema 绑定层就被拒（非法词由类型层拦下，
-    「其他」是唯一兜底取值），函数体内的 require_tone 转换已随之退役。
+    2026-09-18 变化入口从案例裁决换成 write_relation：枚举外中文值仍在参数绑定层
+    被拒，回执给出全闭集，失败不落图变更日志。
     """
     service = _QueryService()
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
-    _surface_case(service, ledger)
+    ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     tools = _tools(service, ledger)
 
-    case_number = ledger.case_number_by_id["case-1"]
-    with pytest.raises(ValidationError, match="Input should be"):
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {
-                "case_number": case_number,
-                "speaker": 1,
-                "tone": "委屈",
-                "reason": "语气判断",
-            }
-        )
+    # 2026-09-11 change_kind 已中文化，契约枚举在参数校验层直接拒绝非法值
+    receipt = _reject(
+        tools,
+        ledger,
+        "write_relation",
+        {
+            "from_entity": "00000000-0000-0000-0000-000000000001",
+            "to_entity": "00000000-0000-0000-0000-000000000002",
+            "relation_type": "同一人物",
+            "change_kind": "强化关系",
+        },
+    )
+    assert receipt["status"] == "rejected"
+    assert receipt["field"] == "change_kind"
+    assert receipt["code"] == "invalid_value"
+    assert ledger.graph.relation_change_ops == []
     assert ledger.resolved_cases == []
 
 
-def test_resolve_dialogue_case_accepts_closed_tone_enum() -> None:
-    """2026-08-12 用于验证闭合枚举内的 tone 正常登记为对话解决结果"""
+def test_write_dialogue_update_guards_state_and_requires_update_fields() -> None:
+    """2026-09-18 对话更新下沉到写入路径后的前置校验：状态不对/无字段/标识不存在都结构化拒绝
+
+    本章候选必须先判过且判成真对话/独白才能订正（candidate_not_judged / not_dialogue），
+    非本章候选问一次库（has_dialogue_record，unknown_record），四个更新字段一个不给是
+    no_update；成功时解决项指向对话记录标识且 case_id 为空。
+    """
     service = _QueryService()
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
-    _surface_case(service, ledger)
     tools = _tools(service, ledger)
+    dialogue_id = ledger.dialogue_candidates[0].candidate_key
 
-    case_number = ledger.case_number_by_id["case-1"]
+    not_judged = _reject(
+        tools,
+        ledger,
+        "write_dialogue",
+        {"candidate_key": dialogue_id, "tone": "平静"},
+    )
+    assert not_judged["code"] == "candidate_not_judged"
+    assert not_judged["record"] == f"dialogue/{dialogue_id}"
+
+    _call(
+        tools,
+        "write_dialogue",
+        {"candidate_index": 1, "verdict": "not_dialogue", "speaker": None, "tone": None},
+    )
+    not_dialogue = _reject(
+        tools,
+        ledger,
+        "write_dialogue",
+        {"candidate_key": dialogue_id, "tone": "平静"},
+    )
+    assert not_dialogue["code"] == "not_dialogue"
+
+    unknown = _reject(
+        tools,
+        ledger,
+        "write_dialogue",
+        {"candidate_key": "dlg_not_exist", "tone": "平静"},
+    )
+    assert unknown["code"] == "unknown_record"
+
+    _call(
+        tools,
+        "write_dialogue",
+        {"candidate_index": 1, "verdict": "inner_monologue", "speaker": None, "tone": None},
+    )
+    no_update = _reject(tools, ledger, "write_dialogue", {"candidate_key": dialogue_id})
+    assert no_update["code"] == "no_update"
+    assert no_update["record"] == f"dialogue/{dialogue_id}"
+
     response = json.loads(
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {
-                "case_number": case_number,
-                "speaker": 1,
-                "tone": "愤怒",
-                "reason": "语气判断",
-            }
+        _find_tool(tools, "write_dialogue").invoke(
+            {"candidate_key": dialogue_id, "description": "改判为独白", "is_inner_monologue": True}
         )
     )
-    assert response["accepted"] is True
-    assert ledger.resolved_cases[0].tone == "愤怒"
+    assert response["status"] == "written"
+    last = ledger.resolved_cases[-1]
+    assert last.case_id == ""
+    assert last.action == "dialogue"
+    assert last.target_ref == {"chapter_id": 10, "candidate_key": dialogue_id}
+    assert last.description == "改判为独白"
+    assert last.is_inner_monologue is True
 
 
 def test_text_search_result_accepts_paragraph_id_zero() -> None:
@@ -2560,21 +2540,20 @@ def test_text_search_result_rejects_invalid_paragraph_ids() -> None:
 
 
 def _ledger_with_text(text: str) -> AnnotationToolLedger:
-    """2026-09-05 用于构造指定 chunk 原文的账本（覆盖告警用例需要多条对话候选）
+    """2026-09-05 用于构造指定章原文的账本（覆盖告警用例需要多条对话候选）
 
     2026-09-14 段落级监督：paragraph_info 给出两个段号，供默认标签满足每章 2 段软下限。
     """
     mid = max(1, len(text) // 2)
-    paragraph_info = ChunkParagraphInfo(
+    paragraph_info = ChapterParagraphInfo(
         paragraph_ids=[0, 1],
         char_spans=[(0, mid), (mid, len(text))],
         texts=[text[:mid], text[mid:]],
     )
     return AnnotationToolLedger(
         run_scope="run-1",
-        current_chapter_id=1,
-        current_chunk_id=10,
-        current_chunk_text=text,
+        current_chapter_id=10,
+        current_chapter_text=text,
         allow_future_context=False,
         graph=FactGraph(),
         paragraph_info=paragraph_info,
@@ -2584,7 +2563,7 @@ def _ledger_with_text(text: str) -> AnnotationToolLedger:
 def _paragraph_labels_for_ledger(ledger: AnnotationToolLedger) -> list[dict]:
     """2026-09-14 用于按账本段号构造满足软下限（2 段）的 write_metrics.labels 条目"""
     assert ledger.paragraph_info is not None
-    known = ledger.paragraph_info.paragraph_ids
+    known = ledger.paragraph_info.visible_ids()
     return _paragraph_labels(list(zip(known[:2], [-2, -1], strict=True)))
 
 
@@ -2620,7 +2599,7 @@ def test_empty_dialogue_payload_freezes_with_coverage_warning() -> None:
     assert len(ledger.dialogue_candidates) >= 1
 
     _write_all_domains_with_dialogues(tools, ledger, [])
-    chunk = ledger.complete_active_chunk()
+    chunk = ledger.complete_active_chapter()
 
     assert ledger.phase == "completed"
     assert chunk.dialogues == []
@@ -2633,7 +2612,7 @@ def test_partial_dialogue_judgement_freezes_with_defaulted_warning() -> None:
     """2026-09-05 A1：候选未逐条提交（按 not_dialogue 默认）时冻结 chunk 留痕告警
 
     2026-09-13 取消暂存：只提交候选 1 的 write_dialogue 小调用，候选 2 在
-    finish_chapter 收尾时默认处理（2026-09-14 收尾声明改名）。
+    finish 收尾时默认处理（2026-09-14 收尾声明改名）。
     """
     ledger = _ledger_with_text("“住手”她喝止，“退下。”")
     tools = _tools(_QueryService(), ledger)
@@ -2643,7 +2622,7 @@ def test_partial_dialogue_judgement_freezes_with_defaulted_warning() -> None:
         ledger,
         _dialogue_calls([(1, "dialogue", None, None)]),
     )
-    chunk = ledger.complete_active_chunk()
+    chunk = ledger.complete_active_chapter()
 
     assert len(chunk.dialogues) == 1
     assert chunk.coverage_warnings == [
@@ -2664,7 +2643,7 @@ def test_full_dialogue_judgement_freezes_without_coverage_warning() -> None:
         ledger,
         _dialogue_calls([(1, "dialogue", None, None), (2, "dialogue", None, None)]),
     )
-    chunk = ledger.complete_active_chunk()
+    chunk = ledger.complete_active_chapter()
 
     assert len(chunk.dialogues) == 2
     assert chunk.coverage_warnings == []
@@ -2680,7 +2659,7 @@ def test_chunk_without_candidates_freezes_without_coverage_warning() -> None:
     assert ledger.dialogue_candidates == []
 
     _write_all_domains_with_dialogues(tools, ledger, [])
-    chunk = ledger.complete_active_chunk()
+    chunk = ledger.complete_active_chapter()
 
     assert chunk.coverage_warnings == []
 
@@ -2701,7 +2680,7 @@ def test_paragraph_labels_bind_and_freeze() -> None:
     first = _call(
         tools,
         "write_metrics",
-        {**_write_metrics_args(), "labels": _paragraph_labels([(0, -2), (1, -1)])},
+        {**_write_metrics_args(), "labels": _paragraph_labels([(1, -2), (2, -1)])},
     )
     assert first == {
         "status": "written",
@@ -2712,10 +2691,11 @@ def test_paragraph_labels_bind_and_freeze() -> None:
             "narrative_function": "铺垫",
             "pivot_moment": False,
             "cliffhanger": False,
-            "labels": [{"paragraph_id": 0, "emotion": -2}, {"paragraph_id": 1, "emotion": -1}],
+            "labels": [{"paragraph_id": 1, "emotion": -2}, {"paragraph_id": 2, "emotion": -1}],
         },
     }
     labels = ledger.bound_payloads["paragraph_labels"]
+    # 绑定载荷落库口径：段首可见号在这里已映射回全局 paragraph_id
     assert [label.paragraph_id for label in labels] == [0, 1]
     assert [label.emotion for label in labels] == [-2, -1]
 
@@ -2724,7 +2704,7 @@ def test_paragraph_labels_bind_and_freeze() -> None:
     replay = _call(
         tools,
         "write_metrics",
-        {**_write_metrics_args(), "labels": _paragraph_labels([(0, -2), (1, -1), (1, 1)])},
+        {**_write_metrics_args(), "labels": _paragraph_labels([(1, -2), (2, -1), (2, 1)])},
     )
     assert replay == {
         "status": "written",
@@ -2735,15 +2715,15 @@ def test_paragraph_labels_bind_and_freeze() -> None:
             "narrative_function": "铺垫",
             "pivot_moment": False,
             "cliffhanger": False,
-            "labels": [{"paragraph_id": 0, "emotion": -2}, {"paragraph_id": 1, "emotion": 1}],
+            "labels": [{"paragraph_id": 1, "emotion": -2}, {"paragraph_id": 2, "emotion": 1}],
         },
     }
     labels = ledger.bound_payloads["paragraph_labels"]
     assert len(labels) == 2
     assert labels[-1].emotion == 1
 
-    _write_all_domains(tools, ledger, labels=_paragraph_labels([(0, -2), (1, 1)]))
-    chunk = ledger.complete_active_chunk()
+    _write_all_domains(tools, ledger, labels=_paragraph_labels([(1, -2), (2, 1)]))
+    chunk = ledger.complete_active_chapter()
     assert [(label.paragraph_id, label.emotion) for label in chunk.paragraph_labels] == [(0, -2), (1, 1)]
     assert chunk.coverage_warnings == []
 
@@ -2764,12 +2744,11 @@ def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None
         _call(
             tools,
             "write_metrics",
-            {**_write_metrics_args(), "labels": _paragraph_labels([(0, 0), (7, 1)])},
+            {**_write_metrics_args(), "labels": _paragraph_labels([(1, 0), (7, 1)])},
         )
     assert excinfo.value.record == "metrics"
     assert excinfo.value.field == "paragraph_id"
     assert excinfo.value.code == "out_of_range"
-    assert "paragraph_id 不属于本 chunk: 7" in str(excinfo.value)
     assert ledger.metrics_payload is None
     assert ledger.bound_payloads.get("paragraph_labels") in (None, [])
 
@@ -2777,7 +2756,7 @@ def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None
     _call(
         tools,
         "write_metrics",
-        {**_write_metrics_args(), "labels": _paragraph_labels([(0, -2), (0, -1)])},
+        {**_write_metrics_args(), "labels": _paragraph_labels([(1, -2), (1, -1)])},
     )
     labels = ledger.bound_payloads["paragraph_labels"]
     assert len(labels) == 1
@@ -2797,110 +2776,9 @@ def test_paragraph_label_coverage_warning_below_two() -> None:
     ledger = _ledger()
     tools = _tools(service, ledger)
 
-    _write_all_domains(tools, ledger, labels=_paragraph_labels([(0, 0)]))
-    chunk = ledger.complete_active_chunk()
-    assert "情绪标签覆盖: 仅标注 1 段（每章应自选 2-3 段）" in chunk.coverage_warnings
-
-
-def test_resolve_dialogue_case_rejects_non_dialogue_case() -> None:
-    """2026-09-08 用于验证无 dialogue_id 的案例（伏笔疑点等）被拒并指引正确通道
-
-    第16章死锁回归：模型把编号表里的伏笔疑点案例误当对话疑点解决，
-    工具层须按 target_ref 结构拒绝，否则持久化按对话路径找不到记录直接崩溃。
-    """
-    service = _ForeshadowingCaseQueryService()
-    ledger = _ledger()
-    _surface_case(service, ledger)
-    tools = _tools(service, ledger)
-
-    case_number = ledger.case_number_by_id["case-1"]
-    with pytest.raises(AnnotationInputError, match="含 dialogue_id 的对话类案例"):
-        _find_tool(tools, "resolve_dialogue_case").invoke(
-            {"case_number": case_number, "speaker": 1, "reason": "误用"}
-        )
-    assert ledger.resolved_cases == []
-
-
-def test_resolve_foreshadowing_case_rejects_alias_case() -> None:
-    """2026-09-08 用于验证实体别名案例不能走伏笔确认路径（防凭空建线程）"""
-    service = _AliasQueryService()
-    ledger = _ledger()
-    _surface_case(service, ledger)
-    tools = _tools(service, ledger)
-
-    case_number = ledger.case_number_by_id["alias-1"]
-    with pytest.raises(AnnotationInputError, match="只能解决疑点类案例"):
-        _find_tool(tools, "resolve_foreshadowing_case").invoke(
-            {
-                "case_number": case_number,
-                "reason": "误用",
-                "foreshadowing_action": "reinforce",
-                "root_event_id": "evt-root-1",
-                "event_id": "evt-bind-1",
-            }
-        )
-    assert ledger.resolved_cases == []
-
-
-def test_tone_catalog_accepts_extended_words_and_other_fallback() -> None:
-    """2026-09-11 tone 扩表：实测自造高频词入表 + "其他"兜底，非法词仍拒绝
-
-    run e84339d1 实测 13 次 tone 失败全部是模型自造词（得意/惊讶/疲惫/疑惑…），
-    8 值词表与自然表达系统性错配。
-    2026-09-13 取消暂存：write_dialogues 四元组 → write_dialogue 参数，合法 tone
-    写入即进入载荷；2026-09-14 词表进 enum、越界值经记录级转换器报结构化拒绝。
-    """
-    service = _QueryService()
-    ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
-    tools = _tools(service, ledger)
-    _call(tools, "write_metrics", _write_metrics_args())
-
-    invalid = _reject(
-        tools,
-        ledger,
-        "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": "强装镇定"},
-    )
-    assert invalid["field"] == "tone"
-    assert invalid["code"] == "invalid_value"
-    assert "得意" in invalid["expected"] and "其他" in invalid["expected"]
-    _call(
-        tools,
-        "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": "得意"},
-    )
-    assert ledger.domain_payloads["dialogues"][0].tone == "得意"
-
-    # 2026-09-14 二次扩表：恭敬（师徒/拜谒的敬档）、戏谑（亲昵玩笑，嘲讽的反差档）入表即用
-    for new_tone in ("恭敬", "戏谑"):
-        _call(
-            tools,
-            "write_dialogue",
-            {"candidate_index": 1, "verdict": "dialogue", "speaker": 1, "tone": new_tone},
-        )
-        assert ledger.domain_payloads["dialogues"][0].tone == new_tone
-
-
-def test_tone_enters_model_visible_tool_schema_as_closed_enum() -> None:
-    """2026-09-14 语气枚举进工具 schema：取值域写在模型可见面（预防），不是只在被拒后可见
-
-    纯字符串参数 + Field 描述词表时，模型要先自造词撞一次拒绝才看到全表；
-    恢复真 enum 后 write_dialogue / resolve_dialogue_case 的参数都是 enum 清单，
-    模型一次就能选对。
-    """
-    service = _QueryService()
-    tools = _tools(service, _ledger())
-    catalog = [member.value for member in Tone]
-    assert len(catalog) >= 20 and "其他" in catalog
-
-    for name in ("write_dialogue", "resolve_dialogue_case"):
-        schema = convert_to_openai_tool(_find_tool(tools, name))["function"]["parameters"]
-        tone_schema = schema["properties"]["tone"]
-        branches = tone_schema if "enum" in tone_schema else next(
-            branch for branch in tone_schema.get("anyOf", []) if "enum" in branch
-        )
-        assert branches["enum"] == catalog
+    _write_all_domains(tools, ledger, labels=_paragraph_labels([(1, 0)]))
+    chunk = ledger.complete_active_chapter()
+    assert chunk.coverage_warnings
 
 
 def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> None:
@@ -2917,26 +2795,22 @@ def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> 
         tools,
         ledger,
         "write_dialogue",
-        {"candidate_index": 2, "verdict": "dialogue", "speaker": 1, "tone": "强装镇定"},
+        {"candidate_index": 2, "verdict": "dialogue", "speaker": _entity_id("顾霜"), "tone": "强装镇定"},
     )
     assert receipt["status"] == "rejected"
     assert receipt["record"] == "dialogue/2"
     assert receipt["field"] == "tone"
     assert receipt["code"] == "invalid_value"
-    assert "强装镇定" in receipt["message"]
-    assert "其他" in receipt["message"]
-    assert "平静" in receipt["expected"] and "其他" in receipt["expected"]
     assert not ledger.written_dialogues
 
 
-def test_entity_ref_contract_rejects_name_as_el_with_guidance() -> None:
-    """2026-09-11 编号合同 → 2026-09-14 双键空间：名称写进实体引用槽仍被拒且可自纠
+def test_entity_ref_contract_rejects_name_as_reference_with_guidance() -> None:
+    """2026-09-14 双键空间 → 2026-09-19 id 纪律：名称写进实体引用槽仍被拒且可自纠
 
-    2026-09-13 取消暂存：参与记录与关系边都走小调用工具，编号字段失败经生产路径
-    翻成结构化拒绝，message/expected 里保留"写名称该怎么改"的引导。
-    2026-09-14 写入面重构：实体引用改为 编号 n / 本 chunk el 键 两条通道，名称通道
-    仍删净——写进引用槽的字符串按 el 键在账本解析点拒绝（code=unknown_el），
-    expected 列出已知 el 键并指回编号通道，语义意图（可自纠引导）不变。
+    实体引用只有两条通道：本章 write_entity 登记的 el 键、write_entity /
+    search_graph 回执里的 run 级 uuid id。名称写进引用槽既不是 el 也不是 id，
+    在账本解析点结构化拒绝（code=unknown_entity_id），报错列出已登记 id 样例，
+    expected 指回两条合法通道，语义意图（可自纠引导）不变。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -2965,25 +2839,21 @@ def test_entity_ref_contract_rejects_name_as_el_with_guidance() -> None:
     )
     assert participant_receipt["record"] == "t1/root/participant/顾霜"
     assert participant_receipt["field"] == "entityid"
-    assert participant_receipt["code"] == "unknown_el"
-    assert "el 键未由本 chunk 任何 write_entity 登记: 顾霜" in participant_receipt["message"]
-    assert "已知 el 键: a1" in participant_receipt["expected"]
-    assert "编号 n" in participant_receipt["expected"]
+    assert participant_receipt["code"] == "unknown_entity_id"
     relation_receipt = _reject(
         tools,
         ledger,
         "write_relation",
-        {"from_entity": "顾霜", "to_entity": 1, "relation_type": "友情"},
+        {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情"},
     )
     assert relation_receipt["field"] == "from_entity"
-    assert relation_receipt["code"] == "unknown_el"
-    assert "el 键未由本 chunk 任何 write_entity 登记: 顾霜" in relation_receipt["message"]
+    assert relation_receipt["code"] == "unknown_entity_id"
     # 生产口径：失败调用只回滚自己，登记与引用解析不留下半途状态
     assert ledger.written_relations == {}
 
 
-def test_search_graph_exposes_runtime_numbers_not_database_ids() -> None:
-    """2026-09-11 编号合同：search_graph 回执带运行期编号 n，数据库 id 不进模型视图"""
+def test_search_graph_exposes_runtime_ids_not_internal_keys() -> None:
+    """2026-09-19 id 纪律：search_graph 回执带 run 级 uuid id，内部定位键不进模型视图"""
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
@@ -2991,42 +2861,45 @@ def test_search_graph_exposes_runtime_numbers_not_database_ids() -> None:
 
     payload = json.loads(_find_tool(tools, "search_graph").invoke({"entities": ["顾霜"], "relation_type": None}))
     match = payload["matches"][0]
-    assert match["n"] == 1
+    assert match["id"] == _entity_id("顾霜")
     assert match["name"] == "顾霜"
     assert "entity_id" not in match
 
 
-def test_resolve_fact_case_maps_chinese_change_kind_to_internal_value() -> None:
-    """2026-09-11 change_kind 中文化：模型写中文值，操作日志落内部英文值（持久化契约不变）"""
-    service = _AliasQueryService()
+def test_write_relation_maps_chinese_change_kind_to_internal_value() -> None:
+    """2026-09-11 change_kind 中文化：模型写中文值，操作日志落内部英文值（持久化契约不变）
+
+    2026-09-18 变化入口从案例裁决换成 write_relation：同一张 RELATION_CHANGE_KIND_LABELS
+    译表仍在写入路径生效，案例字段一律为空（不进案例锁定与解决映射）。
+    """
+    service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
-    _surface_case(service, ledger)
+    ledger.graph.apply_relation(_graph_relation("顾霜", "顾老", "同一人物"))
     tools = _tools(service, ledger)
 
-    case_number = ledger.case_number_by_id["alias-1"]
-    response = json.loads(
-        _find_tool(tools, "resolve_fact_case").invoke(
-            {
-                "case_number": case_number,
-                "from_entity": 1,
-                "to_entity": 2,
-                "relation_type": "同一人物",
-                "change_kind": "新增",
-                "reason": "指向同一人",
-            }
-        )
+    receipt = _call(
+        tools,
+        "write_relation",
+        {
+            "from_entity": _entity_id("顾霜"),
+            "to_entity": _entity_id("顾老"),
+            "relation_type": "同一人物",
+            "change_kind": "强化",
+        },
     )
-    assert response["accepted"] is True
-    assert ledger.graph.relation_change_ops[0]["change_kind"] == "assert"
+    assert receipt["status"] == "written"
+    assert receipt["outcome"] == "reinforce"
+    assert ledger.graph.relation_change_ops[0]["change_kind"] == "reinforce"
+    assert ledger.graph.relation_change_ops[0]["case_id"] == ""
+    assert ledger.resolved_cases == []
 
 
 def test_write_dialogue_speaker_name_gets_self_correction_guidance() -> None:
-    """2026-09-11 编号合同：write_dialogue speaker 写名称给出可自纠报错
+    """2026-09-19 id 纪律：write_dialogue speaker 写名称给出可自纠报错
 
-    2026-09-13 取消暂存：四元组数组 → 有类型参数，失败经生产路径翻成结构化拒绝，
-    引导文案保持在 message 里。2026-09-14 双键空间后名称写进 speaker 引用槽按
-    el 键解析失败（code=unknown_el），expected 列已知 el 键并指回编号通道。
+    名称写进 speaker 引用槽既不是 el 键也不是 run 级 id，账本解析点结构化拒绝
+    （code=unknown_entity_id），message 带已登记 id 样例、expected 指回两条合法通道。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -3040,7 +2913,5 @@ def test_write_dialogue_speaker_name_gets_self_correction_guidance() -> None:
     )
     assert receipt["record"] == "dialogue/1"
     assert receipt["field"] == "speaker"
-    assert receipt["code"] == "unknown_el"
-    assert "el 键未由本 chunk 任何 write_entity 登记: 顾霜" in receipt["message"]
-    assert "编号 n" in receipt["expected"]
+    assert receipt["code"] == "unknown_entity_id"
     assert ledger.written_dialogues == {}

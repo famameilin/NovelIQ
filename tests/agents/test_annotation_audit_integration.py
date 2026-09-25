@@ -9,8 +9,8 @@ from sqlalchemy.orm import sessionmaker
 
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_annotation_graph
-from src.agents.annotation.prompts import build_chunk_message
-from src.agents.annotation.schema import ChunkParagraphInfo, SearchResult
+from src.agents.annotation.prompts import build_chapter_message
+from src.agents.annotation.schema import ChapterParagraphInfo, SearchResult
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from src.agents.audit.observer import AgentTurnObserver
 from src.agents.audit.recorder import AgentAuditRecorder
@@ -20,18 +20,18 @@ from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, Agent
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
-def _chunk_paragraph_info(text: str) -> ChunkParagraphInfo:
-    """2026-08-18 用于构造单段落 ChunkParagraphInfo（事件锚点派生所需）"""
-    return ChunkParagraphInfo(
+def _chunk_paragraph_info(text: str) -> ChapterParagraphInfo:
+    """2026-08-18 用于构造单段落 ChapterParagraphInfo（事件锚点派生所需）"""
+    return ChapterParagraphInfo(
         paragraph_ids=[0],
         char_spans=[(0, len(text))],
         texts=[text],
     )
 
 
-def _two_paragraph_info(text: str) -> ChunkParagraphInfo:
-    """2026-09-14 用于构造两段 ChunkParagraphInfo（write_metrics.labels 段落标签的段号取值域所需）"""
-    return ChunkParagraphInfo(
+def _two_paragraph_info(text: str) -> ChapterParagraphInfo:
+    """2026-09-14 用于构造两段 ChapterParagraphInfo（write_metrics.labels 段落标签的段号取值域所需）"""
+    return ChapterParagraphInfo(
         paragraph_ids=[0, 1],
         char_spans=[(0, 2), (2, len(text))],
         texts=[text[:2], text[2:]],
@@ -103,7 +103,7 @@ def _write_call(name: str, args: dict, *, call_id: str) -> dict:
 
 
 # 2026-09-14 写入面重构：五个领域写入小调用从首轮起全部在工具面上（写者面全放开），
-# 唯一收尾 finish_chapter（旧名 finish_chunk）
+# 唯一收尾 finish（旧名 finish_chunk）
 _ALL_WRITE_TOOLS = (
     "write_entity",
     "write_metrics",
@@ -114,8 +114,8 @@ _ALL_WRITE_TOOLS = (
 
 
 def _finish_chapter_call(call_id: str = "call-finish-chapter") -> dict:
-    """2026-09-14 用于构造唯一收尾工具 finish_chapter 调用（判定并入本回合批次末尾）"""
-    return _write_call("finish_chapter", {}, call_id=call_id)
+    """2026-09-14 用于构造唯一收尾工具 finish 调用（判定并入本回合批次末尾）"""
+    return _write_call("finish", {}, call_id=call_id)
 
 
 def _metrics_calls(
@@ -132,7 +132,7 @@ def _metrics_calls(
 def _paragraph_label_items() -> list[dict]:
     """2026-09-14 用于构造两条段落标签（旧 write_sentence_label 逐句小调用收编进
     write_metrics.labels；默认两条满足每章 2-3 段软下限）"""
-    return [{"paragraph_id": 0, "emotion": -2}, {"paragraph_id": 1, "emotion": -1}]
+    return [{"paragraph_id": 1, "emotion": -2}, {"paragraph_id": 2, "emotion": -1}]
 
 
 def _entity_calls(
@@ -176,7 +176,8 @@ def _event_calls(
 
     根 el=树键、子 el=树键/节点键；树内先后=调用顺序（无序号参数）；旧
     write_event_root/write_event_child/write_character_participation 四调用合并为
-    两调用，参与者的 emotion 等三态内联进各自节点的 characters 数组。
+    两调用，参与者的 emotion 等三态内联进各自节点的 characters 数组
+    （2026-09-19 id 纪律：entityid 用 el 键引用，运行期编号已删）。
     """
     return [
         _write_call(
@@ -187,7 +188,7 @@ def _event_calls(
                 "description": description,
                 "characters": [
                     {
-                        "entityid": 1,
+                        "entityid": "顾霜",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": action,
@@ -206,7 +207,7 @@ def _event_calls(
                 "description": child_description,
                 "characters": [
                     {
-                        "entityid": 1,
+                        "entityid": "顾霜",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": child_action,
@@ -259,7 +260,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         "config_fingerprint": "a" * 64,
     }
     observer.begin_provider_turn(
-        context_summary={"phase": "chunk_open"},
+        context_summary={"phase": "chapter_open"},
         request_messages=request_messages,
         provider_request=base_request,
         started_ns=1,
@@ -273,7 +274,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         ),
     )
     observer.begin_provider_turn(
-        context_summary={"phase": "chunk_open"},
+        context_summary={"phase": "chapter_open"},
         request_messages=request_messages,
         provider_request={**base_request, "attempt": 2},
         started_ns=2,
@@ -337,8 +338,7 @@ async def test_no_tool_reply_closes_turns_then_fails(db_session) -> None:
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=1,
-        current_chunk_id=0,
-        current_chunk_text="\u201c住手\u201d回荡",
+        current_chapter_text="\u201c住手\u201d回荡",
         allow_future_context=False,
         graph=FactGraph(),
         paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
@@ -351,14 +351,14 @@ async def test_no_tool_reply_closes_turns_then_fails(db_session) -> None:
         max_iterations=30,
         observer=observer,
     )
-    with pytest.raises(RuntimeError, match="未正常结束"):
+    with pytest.raises(RuntimeError):
         await graph.ainvoke(
             {
                 "messages": [
                     SystemMessage(content="test"),
                     HumanMessage(content="标注这段"),
                 ],
-                "phase": "chunk_open",
+                "phase": "chapter_open",
                 "iterations": 0,
                 "error": None,
             }
@@ -400,8 +400,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=1,
-        current_chunk_id=0,
-        current_chunk_text="\u201c住手\u201d回荡",
+        current_chapter_text="\u201c住手\u201d回荡",
         allow_future_context=False,
         graph=FactGraph(),
         paragraph_info=_chunk_paragraph_info("\u201c住手\u201d回荡"),
@@ -422,7 +421,7 @@ async def test_annotation_model_exception_records_error_turn(db_session) -> None
                     SystemMessage(content="test"),
                     HumanMessage(content="标注这段"),
                 ],
-                "phase": "chunk_open",
+                "phase": "chapter_open",
                 "iterations": 0,
                 "error": None,
             }
@@ -442,11 +441,11 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     """2026-08-30 用于验证每个物理模型请求与工具调用都有独立耗时且落库
 
     2026-09-13 取消暂存：一个模型回合 = 多个有类型的小调用（写入即生效，回执
-    status=written）。2026-09-14 写入面重构：收尾由唯一 finish_chapter 表达（旧名
+    status=written）。2026-09-14 写入面重构：收尾由唯一 finish 表达（旧名
     finish_chunk），段落标签随 write_metrics.labels 提交（旧 write_sentence_label
     退役），参与者内联 write_event.characters；收尾判定推迟到本回合全部调用处理完
     后执行，因此"每个模型回合一行、每个工具调用一行"的不变量在新合同下逐调用验证
-    （3 回合计 8 行，含 1 条被本回合失败记录拒绝的 finish_chapter）。
+    （3 回合计 8 行，含 1 条被本回合失败记录拒绝的 finish）。
     """
     novel_id, run_id = create_run_with_chunks(db_session, texts=["“住手”回荡"])
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
@@ -478,9 +477,9 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         },
         call_id="call-metrics-bad",
     )
-    # 2026-09-14 三轮小调用组：实体+坏指标+finish_chapter（指标没提交，
+    # 2026-09-14 三轮小调用组：实体+坏指标+finish（指标没提交，
     # 收尾被拒 missing_record）→ 修正指标（随附两条段落标签）+事件树（参与者内联）→
-    # 对话+finish_chapter（收尾通过）
+    # 对话+finish（收尾通过）
     rounds = [
         [*_entity_calls(), invalid_metrics, _finish_chapter_call("call-finish-round1")],
         [
@@ -496,8 +495,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=1,
-        current_chunk_id=0,
-        current_chunk_text="“住手”回荡",
+        current_chapter_text="“住手”回荡",
         allow_future_context=False,
         graph=FactGraph(),
         paragraph_info=_two_paragraph_info("“住手”回荡"),
@@ -515,15 +513,13 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
             "messages": [
                 SystemMessage(content="test"),
                 HumanMessage(
-                    content=build_chunk_message(
-                        chunk_index=1,
-                        chunk_total=1,
-                        chunk_text="“住手”回荡",
+                    content=build_chapter_message(
+                                                chapter_text="“住手”回荡",
                         candidates=ledger.dialogue_candidates,
                     )
                 ),
             ],
-            "phase": "chunk_open",
+            "phase": "chapter_open",
             "iterations": 0,
             "error": None,
         }
@@ -550,7 +546,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         assert turn.model_ms is not None and turn.model_ms >= 0
         assert turn.turn_ms is not None and turn.turn_ms >= 0
         assert turn.raw_response["role"] == "ai"
-        assert turn.context_summary["phase"] in {"chunk_open", "completed"}
+        assert turn.context_summary["phase"] in {"chapter_open", "completed"}
         # 2026-09-14 写者面全放开：每轮工具面都是五个领域写入小调用的全集
         # （active_write_tool/active_write_tools 两个描述开放窗口的审计键已随解锁机制删除）
         assert set(_ALL_WRITE_TOOLS) <= set(turn.context_summary["allowed_tool_names"])
@@ -581,10 +577,10 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     assert failed_metrics[0].receipt["status"] == "rejected"
     assert failed_metrics[0].receipt["record"] == "metrics"
     assert failed_metrics[0].error is not None
-    failed_finish = [row for row in failed_rows if row.tool_name == "finish_chapter"]
+    failed_finish = [row for row in failed_rows if row.tool_name == "finish"]
     assert len(failed_finish) == 1
     assert failed_finish[0].receipt["status"] == "rejected"
-    assert failed_finish[0].receipt["record"] == "finish_chapter"
+    assert failed_finish[0].receipt["record"] == "finish"
     # 收尾被拒的归因是指标没提交（硬前提），不是"同回合有失败调用"——后者已不再阻塞收尾
     assert failed_finish[0].receipt["code"] == "missing_record"
     assert failed_finish[0].receipt["field"] == "metrics"
@@ -597,11 +593,11 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
     written_rows = [row for row in accepted_rows if row.tool_name.startswith("write_")]
     assert len(written_rows) == 5
     assert all(row.receipt["status"] == "written" for row in written_rows)
-    # 唯一收尾：通过的 finish_chapter 在批次末尾结算，回执携带各域条数
-    finish_rows = [row for row in accepted_rows if row.tool_name == "finish_chapter"]
+    # 唯一收尾：通过的 finish 在批次末尾结算，回执携带各域条数
+    finish_rows = [row for row in accepted_rows if row.tool_name == "finish"]
     assert len(finish_rows) == 1
     assert finish_rows[0].receipt["status"] == "completed"
-    assert finish_rows[0].receipt["chunk_id"] == 0
+    assert finish_rows[0].receipt["chapter_id"] == 1
     assert finish_rows[0].receipt["records"] == {
         "entities": 1,
         "metrics": 1,

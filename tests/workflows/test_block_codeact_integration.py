@@ -1,41 +1,141 @@
-"""2026-09-16 章内并行 CodeAct 端到端集成（只换模型，其余全真实）
+"""2026-09-17 章内三代理并发端到端集成（只换模型，其余全真实）
 
-与调度器测试互补：调度器测试 monkeypatch 了块/章运行器，这里让真实的块会话图、
-真实写者会话图、真实账本与合并程序面全部跑起来，只把 LLM 换成脚本化伪模型。
-断言端到端不变式：
+与 subagent 单元测试互补：`tests/agents/test_annotation_subagent_program.py` 只测单个 subagent 的
+构造器与程序面合同；这里让**真实的 subagent 会话图、真实的章级账本、真实的接续层与生产
+写入工具**全部跑起来，只把 LLM 换成脚本化伪模型，断言端到端不变式：
 
-- 两个块会话各自构造出块内对象，块代理**一行正式记录都没写**（审计表里只有
-  execute_code 与它内部调用的构造器/检索）；
-- 章会话经同一个账本把句柄编译成正式记录：实体、事件树、对话、指标与段标签；
-- 块内候选编号（块内 1 基）经章级候选表映射后写成章级对话；
-- 块代理的正文授权足迹经程序面工厂并入章账本（并入时机在章会话开始之前）；
-- finish_chapter 的章会话收尾语义不变（账本 annotation 正常落地）。
+1. 三个 subagent 的会话各跑一轮 `execute_code`：构造器即时经生产边界落库（写入生效），
+   但审计里 subagent invocation 的内层调用只有构造器与检索工具名，`write_*` 一个不出现；
+2. 三条齐之后章收尾链把产出组装成正式章级结果：实体/关系/事件/对话/段标签/指标齐全
+   （条数与名字逐条断言）；
+3. **名字即连接**：事件参与者与对话说话人的人名只要与结构 subagent 登记的写法一致，就落到
+   同一个实体上，且不因此多出实体；
+4. **写法分歧的可见降级**：引用处出现结构 subagent 未登记的人名时，写入口按引用处自报大类
+   照常登记新实体，接续层再挂一条 `type=entity_alias` 的案例（实体数 +1，两条实体都如实保留）；
+5. 对话候选缺判定时按 `not_dialogue` 默认（`finish` 回执的 `dialogue_defaulted`
+   含缺的编号），整章照常完成；
+6. 任一 subagent 失败 → 整章失败，且 `FactGraph` 未被写入脏数据。
+
+章收尾相位（`_finish_chapter`）在 subagent 相位之后补齐接续层、指标/标签落库与
+`complete_active_chunk()` / `ledger.finish()`，因此不变式 2-5 都能在真实产出上断言；
+`run_chapter_subagents` 在 subagent 相位与收尾相位失败时都回滚 `FactGraph`
+（收尾失败另见编排层合同测试），这里断言的是失败路径不留脏数据。
+
+只换模型：`_QueryService` 是无数据库查询桩，`_AuditStore` 是内存审计会话，其余（subagent 图、
+账本、程序面、接续层、生产写入工具、FactGraph）全真实，不连数据库、不真调模型。
 """
 
 from __future__ import annotations
 
 import itertools
 import re
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
 
+from src.agents.annotation.errors import AnnotationRetryableError
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.program import PROGRAM_TOOL_NAME
-from src.agents.annotation.schema import ChunkParagraphInfo, SearchResult, TextSearchResult
-from src.config import settings
-from src.workflows.annotate_helpers.block_codeact import run_chapter_block_codeact
+from src.agents.annotation.schema import SearchResult
+from src.workflows.annotate_helpers import block_codeact
+from src.workflows.annotate_helpers.block_codeact import run_chapter_subagents
 
-# 三段正文：块1 = 段1+段2（20 字），块2 = 段3（15 字）；两段各含一个对话候选
-_PARAGRAPHS = ["顾霜喝道：“住手！”", "众人散去，夜色渐深。", "伯安拔剑相向，喝道：“退下！”"]
+# 三段以上正文：¶1/¶3/¶4 各含一个成对引号对话候选（住手！/退下！/晚了。）
+_PARAGRAPHS = [
+    "沈遥喝道：“住手！”",
+    "众人散去，夜色渐深。",
+    "沈遥拔剑相向，喝道：“退下！”",
+    "伯安低声道：“晚了。”",
+]
 _CHAPTER_TEXT = "".join(_PARAGRAPHS)
-_SPLIT_MAX_CHARS = 20
-_BLOCK_TEXT_LENGTHS = (20, len(_PARAGRAPHS[2]))
+
+# ----------------------------------------------------------------------
+# 脚本化伪 LLM 的程序：每个 subagent 一个程序（单轮写完），之后一轮空回复收束会话
+
+
+# 结构 subagent：两名角色一条关系；带一次 search_graph 证明检索面也在真实路径上
+# 2026-09-18 引用一律用本 subagent 自定 id（a1/a2…），name 只作展示与落库登记名
+_STRUCTURE_PROGRAM = (
+    'search_graph(entities=["沈遥"])\n'
+    'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
+    'entity(id="a2", name="伯安", entity_type="character", evidence=4)\n'
+    'relation(from_id="a1", to_id="a2", relation_type="敌对", evidence=3)\n'
+    "finish()\n"
+)
+
+# 事件 subagent：自己登记参与实体（同名会由 write_entity 按 name 会合），参与者按本 subagent id 引用
+_EVENT_PROGRAM = (
+    'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
+    'entity(id="a2", name="伯安", entity_type="character", evidence=4)\n'
+    'event(el="t1", isroot=True, description="沈遥喝止众人", evidence=1)\n'
+    'event(el="t1/e2", isroot=False, type="main", description="沈遥拔剑相向", evidence=3)\n'
+    'participants(el="t1", items=['
+    '{"entity_id": "a1", "role": "主体", "narrative_role": "主体", "action": "喝止", "emotion": -1}, '
+    '{"entity_id": "a2", "role": "客体", "narrative_role": "客体", "action": "旁观", "emotion": 0}])\n'
+    'participants(el="t1/e2", items=['
+    '{"entity_id": "a1", "role": "主体", "narrative_role": "主体", "action": "拔剑", "emotion": 1}])\n'
+    "finish()\n"
+)
+
+# 证据 subagent：三条候选判完（说话人写本 subagent 实体 id）+ 两段标签 + 章级指标
+_EVIDENCE_PROGRAM = (
+    'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
+    'entity(id="a2", name="伯安", entity_type="character", evidence=4)\n'
+    'dialogue(candidate_index=1, verdict="dialogue", speaker_id="a1", tone="愤怒", evidence=1)\n'
+    'dialogue(candidate_index=2, verdict="dialogue", speaker_id="a1", tone="愤怒", evidence=3)\n'
+    'dialogue(candidate_index=3, verdict="dialogue", speaker_id="a2", tone="平静", evidence=4)\n'
+    "label(paragraph_id=1, emotion=-1)\n"
+    "label(paragraph_id=4, emotion=0)\n"
+    'metric(summary="沈遥喝止众人，伯安低声道晚了", emotional_valence=-1, '
+    'narrative_function="冲突", pivot_moment=True)\n'
+    "finish()\n"
+)
+
+# 写法分歧：结构 subagent 只登记 沈遥，事件 subagent 的参与人名写「沈师姐」（正文里的称号写法）
+# 零通信下由事件 subagent 自己登记该名，write_entity 不会合它，接续层再挂一条待核案例
+_ALIAS_STRUCTURE_PROGRAM = (
+    'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
+    "finish()\n"
+)
+_ALIAS_EVENT_PROGRAM = (
+    'entity(id="a1", name="沈师姐", entity_type="character", evidence=1)\n'
+    'event(el="t1", isroot=True, description="沈师姐喝止众人", evidence=1)\n'
+    'participants(el="t1", items=['
+    '{"entity_id": "a1", "role": "主体", "narrative_role": "主体", "action": "喝止", "emotion": -1}])\n'
+    "finish()\n"
+)
+_ALIAS_EVIDENCE_PROGRAM = (
+    'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
+    'dialogue(candidate_index=1, verdict="dialogue", speaker_id="a1", tone="愤怒", evidence=1)\n'
+    'dialogue(candidate_index=2, verdict="not_dialogue")\n'
+    'dialogue(candidate_index=3, verdict="not_dialogue")\n'
+    "label(paragraph_id=1, emotion=-1)\n"
+    'metric(summary="沈师姐喝止众人", emotional_valence=-1, narrative_function="冲突")\n'
+    "finish()\n"
+)
+
+# 缺判定：证据 subagent 只判候选 1、3，候选 2 留给收尾按 not_dialogue 默认
+_MISSING_DIALOGUE_EVIDENCE_PROGRAM = (
+    'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
+    'entity(id="a2", name="伯安", entity_type="character", evidence=4)\n'
+    'dialogue(candidate_index=1, verdict="dialogue", speaker_id="a1", tone="愤怒", evidence=1)\n'
+    'dialogue(candidate_index=3, verdict="dialogue", speaker_id="a2", tone="平静", evidence=4)\n'
+    "label(paragraph_id=1, emotion=-1)\n"
+    'metric(summary="沈遥喝止众人", emotional_valence=-1, narrative_function="冲突")\n'
+    "finish()\n"
+)
+
+_MAIN_PROGRAMS: dict[str, list[str]] = {
+    "structure": [_STRUCTURE_PROGRAM],
+    "event": [_EVENT_PROGRAM],
+    "evidence": [_EVIDENCE_PROGRAM],
+}
 
 
 class _QueryService:
-    """用于提供无数据库依赖的查询桩（search_text 命中一个授权段落）"""
+    """用于提供无数据库依赖的查询桩（subagent 的检索面走真实工具，但底层无库）"""
 
     current_chapter_order = None
 
@@ -45,17 +145,9 @@ class _QueryService:
         return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
-        """用于返回一条正文命中（块账本据此登记真实授权段落）"""
+        """用于返回空正文命中"""
         del query, range_name, limit
-        return [
-            TextSearchResult(
-                chapter_id=1,
-                paragraph_ids=[99],
-                content="顾霜喝道：",
-                keyword_score=0.5,
-                semantic_score=0.1,
-            )
-        ]
+        return []
 
     def search_event_history(self, query, *, limit=50):
         """用于返回空历史事件树"""
@@ -125,59 +217,36 @@ class _AuditStore:
         return _AuditSession(self)
 
 
-_BLOCK_PROGRAMS: dict[int, list[str]] = {
-    1: [
-        'search_text(query="顾霜", range_name="previous")\n'
-        'mention(key="m1", name="顾霜", entity_type="character", evidence=[{"paragraph_id": 1, "quote": "顾霜"}])\n'
-        'local_event(key="e1", description="顾霜喝止众人", evidence=[{"paragraph_id": 1, "quote": "喝道"}])\n'
-        "participant(event=\"e1\", entity=\"m1\", role=\"主体\", narrative_role=\"主体\", action=\"喝止\", "
-        'emotion=-1, evidence=[{"paragraph_id": 1, "quote": "喝道"}])\n'
-        'dialogue(key="d1", candidate_index=1, verdict="dialogue", speaker="m1", tone="愤怒", '
-        'evidence=[{"paragraph_id": 1, "quote": "住手"}])\n'
-        "label(paragraph_id=1, emotion=-1)\n"
-    ],
-    2: [
-        'mention(key="m1", name="伯安", entity_type="character", evidence=[{"paragraph_id": 3, "quote": "伯安"}])\n'
-        'local_event(key="e1", description="伯安拔剑相向", evidence=[{"paragraph_id": 3, "quote": "拔剑"}])\n'
-        "participant(event=\"e1\", entity=\"m1\", role=\"主体\", narrative_role=\"主体\", action=\"拔剑\", "
-        'emotion=1, evidence=[{"paragraph_id": 3, "quote": "拔剑"}])\n'
-        'dialogue(key="d1", candidate_index=1, verdict="dialogue", speaker="m1", tone="愤怒", '
-        'evidence=[{"paragraph_id": 3, "quote": "退下"}])\n'
-        "label(paragraph_id=3, emotion=1)\n"
-    ],
-}
-
-_CHAPTER_PROGRAMS = [
-    'bind(mention="B1:m1", el="gs")\n'
-    'bind(mention="B2:m1", el="ba")\n'
-    "merge_dialogues()\n"
-    'tree(key="t1", description="顾霜喝止众人", sources=["B1:e1"])\n'
-    'event(tree="t1", key="e2", description="伯安拔剑相向", sources=["B2:e1"])\n'
-    'metric(summary="顾霜喝止众人，伯安拔剑相向", emotional_valence=-1, narrative_function="冲突")\n'
-    "finish_chapter()\n"
-]
+class _SubagentBoom(Exception):
+    """用于让脚本化 LLM 在某个 subagent 上抛错（非瞬态，不触发调用层重试）"""
 
 
 class _ScriptedLLM:
-    """用于按会话（哪个块 / 章）返回脚本化 execute_code 程序"""
+    """用于按 subagent 职责返回脚本化 execute_code 程序"""
 
-    def __init__(self) -> None:
-        """用于初始化脚本游标与绑定面记录"""
+    def __init__(self, programs: dict[str, list[str]], *, fail_roles: tuple[str, ...] = ()) -> None:
+        """用于初始化脚本游标、绑定面记录与失败 subagent 集合"""
+        self.programs = dict(programs)
+        self.fail_roles = set(fail_roles)
         self.counts: dict[str, int] = {}
         self.bound_names: list[tuple[str, ...]] = []
         self.sessions: list[str] = []
 
     def bind_tools(self, tools: list[Any]) -> _ScriptedLLM:
-        """用于记录每个图实际绑定给模型的工具名"""
+        """用于记录每个 subagent 会话实际绑定给模型的工具名"""
         self.bound_names.append(tuple(str(tool.name) for tool in tools))
         return self
 
     async def ainvoke(self, messages: list[Any]) -> AIMessage:
-        """用于返回该会话的下一段程序（脚本用尽即无工具回复=会话自然收束）"""
+        """用于返回本 subagent 的下一段程序（脚本用尽即无工具回复=会话自然收束）"""
         content = "\n".join(str(getattr(message, "content", "")) for message in messages)
-        key, script = self._session_of(content)
-        index = self.counts.get(key, 0)
-        self.counts[key] = index + 1
+        role = _subagent_role_of(content)
+        self.sessions.append(role)
+        if role in self.fail_roles:
+            raise _SubagentBoom(f"{role} subagent boom")
+        script = self.programs[role]
+        index = self.counts.get(role, 0)
+        self.counts[role] = index + 1
         if index >= len(script):
             return AIMessage(content="", tool_calls=[])
         return AIMessage(
@@ -186,35 +255,29 @@ class _ScriptedLLM:
                 {
                     "name": PROGRAM_TOOL_NAME,
                     "args": {"code": script[index]},
-                    "id": f"{key}-{index}",
+                    "id": f"{role}-{index}",
                     "type": "tool_call",
                 }
             ],
         )
 
-    def _session_of(self, content: str) -> tuple[str, list[str]]:
-        """用于从句柄/索引进场方式辨认当前是哪个会话"""
-        if "<BlockAnnotations>" in content:
-            self.sessions.append("chapter")
-            return "chapter", _CHAPTER_PROGRAMS
-        match = re.search(r'<CurrentBlock block="(\d+)/\d+">', content)
-        if match is not None:
-            block = int(match.group(1))
-            self.sessions.append(f"block{block}")
-            return f"block{block}", _BLOCK_PROGRAMS[block]
-        raise AssertionError("无法辨认会话来源（首条消息既不是块也不是章）")
+
+def _subagent_role_of(content: str) -> str:
+    """用于从正文注入里辨认当前是哪个 subagent 的会话（返回 structure/event/evidence）"""
+    match = re.search(r'<CurrentChapter role="(\w+)">', content)
+    if match is None:
+        raise AssertionError("无法辨认 subagent 会话来源（正文注入里没有 CurrentChapter role）")
+    return match.group(1)
 
 
 def _paragraph_rows() -> list[Any]:
-    """用于构造三段正文的段落事实源行"""
-    from types import SimpleNamespace
-
-    rows = []
+    """用于构造四段正文的段落事实源行"""
+    rows: list[Any] = []
     offset = 0
-    for index, text in enumerate(_PARAGRAPHS, start=1):
+    for paragraph_id, text in enumerate(_PARAGRAPHS, start=1):
         rows.append(
             SimpleNamespace(
-                paragraph_id=index,
+                paragraph_id=paragraph_id,
                 chapter_id=1,
                 local_start_char=offset,
                 local_end_char=offset + len(text),
@@ -225,108 +288,166 @@ def _paragraph_rows() -> list[Any]:
     return rows
 
 
-def _sub_chunks() -> list[tuple[int, str, int]]:
-    """用于构造与段落边界对齐的两块切分"""
-    from src.workflows.annotate import _split_chapter_sub_chunks
-
-    return _split_chapter_sub_chunks(
-        _CHAPTER_TEXT,
-        _paragraph_rows(),
-        chapter_chunk_id=1,
-        max_chars=_SPLIT_MAX_CHARS,
-        min_tail_chars=0,
-    )
-
-
-def _paragraph_info() -> ChunkParagraphInfo:
-    """用于构造整章段落坐标（章会话账本按整章文本构造）"""
-    spans: list[tuple[int, int]] = []
-    offset = 0
-    for text in _PARAGRAPHS:
-        spans.append((offset, offset + len(text)))
-        offset += len(text)
-    return ChunkParagraphInfo(paragraph_ids=[1, 2, 3], char_spans=spans, texts=list(_PARAGRAPHS))
-
-
-@pytest.fixture(autouse=True)
-def _codeact_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """用于开启程序面（块面路径的前置）"""
-    monkeypatch.setattr(settings.models.annotation, "codeact_enabled", True)
-
-
-@pytest.mark.asyncio
-async def test_block_agents_annotate_and_chapter_merge_writes_formal_records() -> None:
-    """端到端：块代理产出局部标注 → 章代理绑定并编译成正式记录，块面一行未写"""
-    llm = _ScriptedLLM()
-    store = _AuditStore()
-    sub_chunks = _sub_chunks()
-    assert [len(text) for _id, text, _offset in sub_chunks] == list(_BLOCK_TEXT_LENGTHS)
-
-    result = await run_chapter_block_codeact(
+async def _run_subagents(*, llm: _ScriptedLLM, store: _AuditStore, graph_state: FactGraph) -> Any:
+    """用于以真实编排层跑一次三 subagent 章（只换模型与无库桩）"""
+    return await run_chapter_subagents(
         run_id="run-1",
         chapter_id=1,
-        chapter_chunk_id=1,
         chapter_text=_CHAPTER_TEXT,
         chapter_paragraph_rows=_paragraph_rows(),
-        sub_chunks=sub_chunks,
         llm=llm,
         sql_session_factory=store.session_factory,
         query_service_factory=lambda session: _QueryService(),
-        graph_state=FactGraph(),
+        graph_state=graph_state,
         stream=None,
         novel_id="default",
-        novel_title=None,
-        chapter_label="第1章",
     )
 
-    # 每个会话的绑定面都只有唯一 execute_code（三个会话；模型调用层可能重复绑定）
-    assert set(llm.bound_names) == {(PROGRAM_TOOL_NAME,)}
-    assert len(llm.bound_names) >= 3
-    assert sorted(set(llm.sessions)) == ["block1", "block2", "chapter"]
 
-    # 章会话产出的正式记录：两个实体、两个事件节点、两条对话、指标与段标签
-    assert sorted(op["name"] for op in result.entity_ops) == ["伯安", "顾霜"]
-    chunk = result.annotation.chunks[0]
-    assert {event.description for event in chunk.events} == {"顾霜喝止众人", "伯安拔剑相向"}
-    assert {dialogue.content for dialogue in chunk.dialogues} == {"住手！", "退下！"}
-    # 块内候选 1 经章级候选表映射：块2 的候选 1 落成章候选 2
-    assert {dialogue.candidate_index for dialogue in chunk.dialogues} == {1, 2}
-    assert chunk.metrics.summary == "顾霜喝止众人，伯安拔剑相向"
-    assert {label.paragraph_id for label in chunk.paragraph_labels} == {1, 3}
-
-    # 块代理只写过块内对象与检索：审计里没有一条正式写入工具
-    formal_writes = {
-        "write_entity",
-        "write_relation",
-        "write_dialogue",
-        "write_event",
-        "write_metrics",
-        "write_dialogues",
-        "finish_chapter",
-    }
-    invocations = {row.id: row.task_type for row in store.invocations}
-    assert sorted(invocations.values()) == ["annotation", "annotation_block", "annotation_block"]
-    block_ids = {row.id for row in store.invocations if row.task_type == "annotation_block"}
-    chapter_ids = {row.id for row in store.invocations if row.task_type == "annotation"}
-    block_tools = {
-        str(getattr(call, "tool_name", ""))
-        for call in store.tool_calls
-        if _invocation_of(store, call) in block_ids
-    }
-    assert block_tools.isdisjoint(formal_writes), block_tools
-    chapter_tools = {
-        str(getattr(call, "tool_name", ""))
-        for call in store.tool_calls
-        if _invocation_of(store, call) in chapter_ids
-    }
-    assert {"write_entity", "write_event", "write_dialogue", "write_metrics"} <= chapter_tools
-
-    # 块代理的正文授权足迹并入章审计（并入发生在章会话开始之前）
-    assert 99 in result.audit.authorized_text_paragraph_ids
+# ----------------------------------------------------------------------
+# 不变式 2/3：构造器即时落正式产出 + 名字即连接
 
 
-def _invocation_of(store: _AuditStore, call: Any) -> int:
-    """用于由工具调用行反查它属于哪次尝试（turn 行 → invocation）"""
-    turn = store.rows.get(("AgentTurn", int(call.turn_id)))
-    assert turn is not None
-    return int(turn.invocation_id)
+@pytest.mark.asyncio
+async def test_constructors_materialize_records_and_connect_names_by_name() -> None:
+    """端到端：三个 subagent 的构造器即时落库；参与者/说话人按名字接到同一实体"""
+    llm = _ScriptedLLM(_MAIN_PROGRAMS)
+    store = _AuditStore()
+    graph = FactGraph()
+
+    result = await _run_subagents(llm=llm, store=store, graph_state=graph)
+
+    # ---- 不变式 2：构造器把记录即时落成正式产出 ----
+    # 实体与关系在图域操作日志里
+    assert [op["name"] for op in result.entity_ops] == ["沈遥", "伯安"]
+    assert [op["entity_type"] for op in result.entity_ops] == ["character", "character"]
+    assert len(result.relation_assert_ops) == 1
+    relation = result.relation_assert_ops[0]
+    assert (relation["from_entity"], relation["to_entity"], relation["relation_type"]) == ("沈遥", "伯安", "敌对")
+
+    annotation = result.annotation
+    # 事件树：根 + 子（main 顺延主链）
+    assert [event.description for event in annotation.events] == ["沈遥喝止众人", "沈遥拔剑相向"]
+    assert [event.cause_role for event in annotation.events] == ["root", "main"]
+    assert annotation.events[1].parent_node_id == annotation.events[0].node_id
+    # 对话：三条候选三条判定
+    assert [dialogue.content for dialogue in annotation.dialogues] == ["住手！", "退下！", "晚了。"]
+    assert [dialogue.candidate_index for dialogue in annotation.dialogues] == [1, 2, 3]
+    # 段标签与指标
+    assert {(label.paragraph_id, label.emotion) for label in annotation.paragraph_labels} == {(1, -1), (4, 0)}
+    assert annotation.metrics.summary == "沈遥喝止众人，伯安低声道晚了"
+    assert annotation.metrics.emotional_valence == -1
+    assert str(annotation.metrics.narrative_function) == "冲突"
+    assert annotation.metrics.pivot_moment is True
+
+    # ---- 不变式 3：名字即连接（参与者/说话人都落到同一个实体，且没多出实体）----
+    root = annotation.events[0]
+    assert {participant.entity for participant in root.participants} == {"沈遥", "伯安"}
+    assert [participant.entity for participant in annotation.events[1].participants] == ["沈遥"]
+    assert [dialogue.speaker for dialogue in annotation.dialogues] == ["沈遥", "沈遥", "伯安"]
+    # 只有结构 subagent 登记的两个名字，参与者/说话人没有派生任何新实体或别名案例
+    assert len(result.entity_ops) == 2
+    assert result.pushed_cases == []
+
+
+# ----------------------------------------------------------------------
+# 不变式 4：写法分歧 → 按引用处自报大类登记 + push entity_alias 案例
+
+
+@pytest.mark.asyncio
+async def test_unregistered_reference_registers_entity_and_pushes_alias_case() -> None:
+    """事件参与者写了结构 subagent 未登记的人名：照常登记 character，接续层再挂一条 entity_alias"""
+    llm = _ScriptedLLM(
+        {
+            "structure": [_ALIAS_STRUCTURE_PROGRAM],
+            "event": [_ALIAS_EVENT_PROGRAM],
+            "evidence": [_ALIAS_EVIDENCE_PROGRAM],
+        }
+    )
+    store = _AuditStore()
+    graph = FactGraph()
+
+    result = await _run_subagents(llm=llm, store=store, graph_state=graph)
+
+    # 结构 subagent 只登记了 沈遥；参与者的「沈师姐」是引用处自己带出来的第二个实体
+    assert [op["name"] for op in result.entity_ops] == ["沈遥", "沈师姐"]
+    assert [op["entity_type"] for op in result.entity_ops] == ["character", "character"]
+
+    # 可见降级：一条 entity_alias 案例，keys 含该名字
+    alias_cases = [case for case in result.pushed_cases if case.type == "entity_alias"]
+    assert len(alias_cases) == 1
+    assert alias_cases[0].keys == ["沈师姐"]
+
+    # 连接照常建起来：事件参与者落在新登记的实体上
+    root = result.annotation.events[0]
+    assert [participant.entity for participant in root.participants] == ["沈师姐"]
+
+
+# ----------------------------------------------------------------------
+# 不变式 5：缺判定的对话候选按 not_dialogue 默认，整章照常完成
+
+
+@pytest.mark.asyncio
+async def test_unjudged_dialogue_candidate_defaults_to_not_dialogue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选 2 未判定：finish 回执 dialogue_defaulted 含 2，整章照常完成"""
+    captured: dict[str, Any] = {}
+    original_settle = block_codeact._settle_chapter
+
+    async def spy_settle(tool_map, ledger, *, stream):
+        """用于在真实收尾实现之上捕获 finish 回执"""
+        receipt = await original_settle(tool_map, ledger, stream=stream)
+        captured["receipt"] = receipt
+        return receipt
+
+    monkeypatch.setattr(block_codeact, "_settle_chapter", spy_settle)
+
+    llm = _ScriptedLLM(
+        {
+            "structure": [_STRUCTURE_PROGRAM],
+            "event": [_EVENT_PROGRAM],
+            "evidence": [_MISSING_DIALOGUE_EVIDENCE_PROGRAM],
+        }
+    )
+    store = _AuditStore()
+    graph = FactGraph()
+
+    result = await _run_subagents(llm=llm, store=store, graph_state=graph)
+
+    # 收尾回执点名缺判定的编号
+    assert captured["receipt"]["status"] == "completed"
+    assert captured["receipt"]["dialogue_defaulted"] == [2]
+
+    # 默认 not_dialogue 不落成对话，但覆盖缺口随章留痕；整章照常完成
+    annotation = result.annotation
+    assert [dialogue.candidate_index for dialogue in annotation.dialogues] == [1, 3]
+    assert annotation.coverage_warnings == [
+        "对话覆盖: 1 条候选未提交判定（序号 [2]），按 not_dialogue 默认处理",
+        "情绪标签覆盖: 仅标注 1 段（每章应自选 2-3 段）",
+    ]
+    assert result.annotation.metrics.summary == "沈遥喝止众人"
+
+
+# ----------------------------------------------------------------------
+# 不变式 6：任一 subagent 失败 → 整章失败，事实图不被写脏（失败在 subagent 相位，收尾相位未起跑）
+
+
+@pytest.mark.asyncio
+async def test_any_subagent_failure_fails_chapter_without_dirtying_fact_graph() -> None:
+    """事件 subagent 抛错：run_chapter_subagents 上抛，其他 subagent 取消，FactGraph 保持干净"""
+    llm = _ScriptedLLM(_MAIN_PROGRAMS, fail_roles=("event",))
+    store = _AuditStore()
+    graph = FactGraph()
+
+    with pytest.raises(AnnotationRetryableError):
+        await _run_subagents(llm=llm, store=store, graph_state=graph)
+
+    # 三个 subagent 的 invocation 都开出来了，但没有任何正式产出落进事实图
+    assert sorted(row.task_type for row in store.invocations) == ["annotation_subagent"] * 3
+    assert graph.entity_names == {}
+    assert graph.entity_types == {}
+    assert graph.chapter_registered_entities == {}
+    assert graph.entity_ops == []
+    assert graph.relation_assert_ops == []
+    assert graph.active_relations == set()

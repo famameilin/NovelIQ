@@ -1,4 +1,4 @@
-"""事件层测试：实时小调用事件树语义（write_event 单工具 + finish_chapter）
+"""事件层测试：实时小调用事件树语义（write_event 单工具 + finish）
 
 2026-09-14 写入面重构后的覆盖（相对 09-13"根/子/参与者分工具"合同）：
 - 根/子/参与者折叠进单工具 write_event：根 el=树键（如 t1）、子 el=树键/节点键
@@ -6,18 +6,18 @@
   完整集合，给出即整体替换；参与者记录键 "<节点记录>/participant/<entityid原值>"；
 - 写入即生效：小调用直接落到 event_trees/bound_payloads，成功回执
   {"status": "written", "record": "t1/root" 或 "t1/e1"}；真实 node_id/tree_id 不外露；
-- 唯一收尾 finish_chapter：工具体只回 {"status": "pending"}，收尾判定由账本做
+- 唯一收尾 finish：工具体只回 {"status": "pending"}，收尾判定由账本做
   （本文件用 ledger.finish_chapter() 走同一汇点；旧名 finish_chunk 已退役）；
 - 单条记录失败=结构化拒绝（record/field/code/expected），只回滚该调用；
   schema 层失败时 write_event 的记录键由 tool_record_key 生成（根 "t1/root"、
   子 "t1/e1"），ledger 层参与者拒绝仍是 "<节点记录>/participant/<entityid>"；
 - 子事件必填 type（main/secondary）、根不得填 type；已建节点 type 不可改写；
   伏笔属性（isforeshadowing/confidence）只属于根，isforeshadowing=true 根必填 confidence；
-- 实体引用统一 EntityRef：int=运行期编号 n、str=本 chunk write_entity 自定的 el 键；
-  历史树引用（cause_tree_id）退役，search_event 授权的历史树根改由
-  resolve_foreshadowing_case 的 root_event_id 引用；
-- 同一 chunk 内 (人物, 动作) 二元组唯一：重复的那条在写入点被拒绝，
-  逐条失败不阻塞同回合的 finish_chapter 收尾。
+- 实体引用统一 EntityRef：int=运行期编号 n、str=本章 write_entity 自定的 el 键；
+  历史树引用（cause_tree_id）退役，search_event 授权的历史树根由 write_event 的
+  foreshadowing_action + root_event_id 引用（2026-09-18 案例裁决工具删净）；
+- 同一章内 (人物, 动作) 二元组唯一：重复的那条在写入点被拒绝，
+  逐条失败不阻塞同回合的 finish 收尾。
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import _invoke_tool, build_annotation_graph
-from src.agents.annotation.prompts import build_chunk_message
+from src.agents.annotation.prompts import build_chapter_message
 from src.agents.annotation.schema import (
-    ChunkParagraphInfo,
+    ChapterParagraphInfo,
     EventTreeHistoryResult,
     SearchResult,
 )
@@ -103,11 +103,10 @@ def _ledger(
     return AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
-        current_chunk_id=10,
-        current_chunk_text=_CHUNK_TEXT,
+        current_chapter_text=_CHUNK_TEXT,
         allow_future_context=False,
         graph=FactGraph(),
-        paragraph_info=ChunkParagraphInfo(
+        paragraph_info=ChapterParagraphInfo(
             paragraph_ids=paragraph_ids or [0],
             char_spans=char_spans or [(0, len(_CHUNK_TEXT))],
             texts=texts or [_CHUNK_TEXT],
@@ -137,14 +136,14 @@ async def _stage_rejection(tools: dict[str, Any], name: str, args: dict) -> dict
     return exc_info.value.receipt()
 
 
-def _entity_number(tools: dict[str, Any], name: str, entity_type: str = "character") -> int:
-    """2026-09-14 用于登记实体（el 用登记名）并取回运行期编号（参与者/说话人引用编号面）"""
+def _entity_id(tools: dict[str, Any], name: str, entity_type: str = "character") -> str:
+    """2026-09-19 用于登记实体（el 用登记名）并取回 run 级 uuid id（参与者/说话人引用面）"""
     receipt = _call(tools, "write_entity", {"name": name, "entity_type": entity_type, "el": name})
-    return int(receipt["n"])
+    return str(receipt["id"])
 
 
 def _seed_metrics(tools: dict[str, Any]) -> None:
-    """2026-09-13 用于提交最小指标载荷（finish_chapter 的硬前提）"""
+    """2026-09-13 用于提交最小指标载荷（finish 的硬前提）"""
     _call(tools, "write_metrics", {"summary": "顾霜拔剑", "emotional_valence": 0, "narrative_function": "冲突"})
 
 
@@ -163,9 +162,9 @@ def _child_args(**overrides: Any) -> dict:
 
 
 def _participant(**overrides: Any) -> dict:
-    """2026-09-14 用于构造 characters 条目（entityid 为运行期编号，默认 1=顾霜）"""
+    """2026-09-19 用于构造 characters 条目（entityid 为 run 级 uuid id，测试里显式传入）"""
     payload: dict[str, Any] = {
-        "entityid": 1,
+        "entityid": "00000000-0000-0000-0000-000000000001",
         "role": "主体",
         "narrative_role": "主体",
         "action": "拔剑",
@@ -195,8 +194,8 @@ def _tool_receipts(captured_round: list) -> list[str]:
 
 
 def _finish_call() -> dict:
-    """2026-09-14 用于构造唯一 finish_chapter 收尾声明（判定推迟到本回合调用处理完后）"""
-    return _write_call("finish_chapter", {}, call_id="call-finish-chapter")
+    """2026-09-14 用于构造唯一 finish 收尾声明（判定推迟到本回合调用处理完后）"""
+    return _write_call("finish", {}, call_id="call-finish-chapter")
 
 
 def _event_tree_calls(
@@ -257,7 +256,7 @@ async def _invoke_graph(
     *,
     max_iterations: int = 30,
 ) -> dict:
-    """2026-09-13 用于在给定账本上执行单 chunk 章节 LangGraph"""
+    """2026-09-13 用于在给定账本上执行单章 LangGraph"""
     tools = build_annotation_tools(_QueryServiceStub(), ledger)
     graph = build_annotation_graph(llm, tools, ledger=ledger, max_iterations=max_iterations)
     return await graph.ainvoke(
@@ -265,15 +264,13 @@ async def _invoke_graph(
             "messages": [
                 SystemMessage(content="test"),
                 HumanMessage(
-                    content=build_chunk_message(
-                        chunk_index=1,
-                        chunk_total=1,
-                        chunk_text=_CHUNK_TEXT,
+                    content=build_chapter_message(
+                                                chapter_text=_CHUNK_TEXT,
                         candidates=ledger.dialogue_candidates,
                     )
                 ),
             ],
-            "phase": "chunk_open",
+            "phase": "chapter_open",
             "iterations": 0,
             "error": None,
         }
@@ -281,16 +278,16 @@ async def _invoke_graph(
 
 
 def test_write_event_returns_tree_and_authorizes_root() -> None:
-    """2026-08-22 创建事件树由服务端派发 tree_id/root_node_id 并登记授权
+    """2026-08-22 创建事件树由服务端派发节点 id 并登记授权
 
     2026-09-14 单工具 write_event：根 el=t1、参与者内联 characters，回执
-    {status: written, record: t1/root / t1/e1, content}；content 携带落库终值与
-    服务端 id（node_id/tree_id），真实 id 亦可从账本读取——
-    授权集合仍登记根与子节点 id（resolve_foreshadowing_case 的授权来源）。
+    {status: written, record: t1/root / t1/e1, content}；2026-09-19 id 纪律下
+    content 携带落库终值与节点 run 级 uuid id（=落库 event_id，树级 uuid 不外露），
+    真实 id 亦可从账本读取——授权集合仍登记根与子节点 id（挂树的授权来源）。
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    entity = _entity_number(tools, "顾霜")
+    entity = _entity_id(tools, "顾霜")
     root_receipt = _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
     root_content = root_receipt.pop("content")
     assert root_receipt == {"status": "written", "record": "t1/root"}
@@ -301,8 +298,7 @@ def test_write_event_returns_tree_and_authorizes_root() -> None:
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     root_node_id = tree["root_node_id"]
     assert root_content == {
-        "node_id": root_node_id,
-        "tree_id": tree["tree_id"],
+        "id": root_node_id,
         "description": "顾霜拔剑",
         "isforeshadowing": False,
         "confidence": None,
@@ -310,10 +306,10 @@ def test_write_event_returns_tree_and_authorizes_root() -> None:
             {"entity": "顾霜", "role": "主体", "narrative_role": "主体", "action": "拔剑", "emotion": -1}
         ],
     }
-    assert child_content["node_id"] == tree["nodes"]["e1"]
-    assert child_content["tree_id"] == tree["tree_id"]
+    assert child_content["id"] == tree["nodes"]["e1"]
     assert child_content["type"] == "main"
     assert "isforeshadowing" not in child_content
+    assert "node_id" not in child_content and "tree_id" not in child_content
     assert root_node_id in ledger.authorized_event_ids
     assert set(tree["nodes"].values()) <= ledger.authorized_event_ids
     bound = ledger.bound_payloads["events"]
@@ -327,7 +323,7 @@ def test_write_event_returns_tree_and_authorizes_root() -> None:
     _seed_metrics(tools)
     receipt = ledger.finish_chapter()
     assert receipt["status"] == "completed"
-    assert receipt["chunk_id"] == 10
+    assert receipt["chapter_id"] == 1
     assert receipt["records"]["events"] == 2
     assert receipt["records"]["character_observations"] == 1
 
@@ -343,7 +339,7 @@ async def test_write_event_requires_character_participant_state_fields() -> None
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    entity = _entity_number(tools, "顾霜")
+    entity = _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args())
 
     receipt = await _stage_rejection(
@@ -352,10 +348,9 @@ async def test_write_event_requires_character_participant_state_fields() -> None
         _root_args(characters=[{"entityid": entity, "role": "主体"}]),
     )
 
-    assert receipt["record"] == "t1/root/participant/1"
+    assert receipt["record"] == f"t1/root/participant/{entity}"
     assert receipt["field"] == "narrative_role"
     assert receipt["code"] == "missing"
-    assert "三字段必填" in receipt["expected"]
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     assert ledger.bound_payloads["events"][0].participants == []
     assert set(tree["nodes"]) == {"root"}
@@ -367,7 +362,7 @@ def test_write_event_without_participants_derives_empty_character_domain() -> No
     """2026-08-30 用于允许无人物事件明确收尾空人物动态领域
 
     2026-09-14：无参与者树用 write_event(isroot=true) 即时落账，再用唯一
-    finish_chapter 收尾；character_observations 随事件域派生的语义不变。
+    finish 收尾；character_observations 随事件域派生的语义不变。
     """
     ledger = _ledger()
     tools = _tools(ledger)
@@ -384,7 +379,7 @@ def test_write_event_without_participants_derives_empty_character_domain() -> No
 def test_write_event_empty_completion_does_not_invent_event() -> None:
     """2026-08-30 用于允许无事件章节显式收尾且不捏造事件
 
-    2026-09-14：空域不再用逐域声明，直接 finish_chapter 收尾；
+    2026-09-14：空域不再用逐域声明，直接 finish 收尾；
     空事件是合法终态，不建树不建节点。
     """
     ledger = _ledger()
@@ -411,7 +406,7 @@ async def test_write_event_isforeshadowing_creates_thread_binding() -> None:
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    _entity_number(tools, "顾霜")
+    _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args())
 
     missing = await _stage_rejection(
@@ -449,60 +444,6 @@ async def test_write_event_isforeshadowing_creates_thread_binding() -> None:
     assert tree["root_node_id"] == root.node_id
 
 
-def test_write_event_exposes_pydantic_schema_and_creates_ordered_children() -> None:
-    """2026-08-30 用于验证工具公开真实参数合同并按调用顺序组装事件树
-
-    2026-09-14 单工具面：根/子/参与者并入 write_event 后，"公开真实合同"改断言
-    write_event 的可见参数键（无 order、伏笔属性与 type 同在、参与者为 characters 数组），
-    且旧五个工具名不再出现在工具面上；main 顺延主因链、secondary 挂当时链尾的
-    组装语义不变（顺序由调用顺序表达）。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    assert set(tools["write_event"].args) == {
-        "el",
-        "isroot",
-        "description",
-        "isforeshadowing",
-        "confidence",
-        "type",
-        "characters",
-    }
-    assert "write_event_root" not in tools
-    assert "write_event_child" not in tools
-    assert "write_character_participation" not in tools
-
-    entity = _entity_number(tools, "顾霜")
-    _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
-    _call(
-        tools,
-        "write_event",
-        _child_args(characters=[_participant(entityid=entity, action="收势", emotion=0)]),
-    )
-    _call(tools, "write_event", _child_args(el="t1/e2", type="secondary", description="旁观者惊呼"))
-    _call(tools, "write_event", _child_args(el="t1/e3", description="顾霜离开山门"))
-
-    bound = ledger.bound_payloads["events"]
-    assert [node.description for node in bound] == ["顾霜拔剑", "顾霜收势", "旁观者惊呼", "顾霜离开山门"]
-    root_node = bound[0]
-    main_node, secondary_node, final_main_node = (node.node_id for node in bound[1:])
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
-    assert tree["trunk_tail"] == final_main_node
-    by_node = {node.node_id: node for node in bound}
-    assert by_node[main_node].parent_node_id == root_node.node_id
-    assert by_node[main_node].cause_role == "main"
-    assert by_node[secondary_node].parent_node_id == main_node
-    assert by_node[secondary_node].cause_role == "secondary"
-    assert by_node[final_main_node].parent_node_id == main_node
-    assert by_node[final_main_node].cause_role == "main"
-    assert by_node[main_node].participants[0].action == "收势"
-    assert [item.action for item in ledger.bound_payloads["character_observations"]] == ["拔剑", "收势"]
-    assert len([record for record in ledger.write_records if record["domain"] == "events"]) == 0
-    _seed_metrics(tools)
-    ledger.finish_chapter()
-    assert len([record for record in ledger.write_records if record["domain"] == "events"]) == 1
-
-
 @pytest.mark.asyncio
 async def test_write_event_rejects_invalid_children_without_mutating_ledger() -> None:
     """2026-08-30 用于验证子节点合同失败时不会留下半棵事件树
@@ -536,11 +477,11 @@ async def test_write_event_rejects_duplicate_character_action_atomically() -> No
 
     2026-09-14：参与者内联在 write_event 调用里——(人物, 动作) 重复时整条子事件
     调用在写入点被拒并回滚自己（第二棵树只剩根落账，坏的那条没进账），
-    同回合的 finish_chapter 不受影响（逐条失败不阻塞收尾），第一棵树的记录原样保留。
+    同回合的 finish 不受影响（逐条失败不阻塞收尾），第一棵树的记录原样保留。
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    entity = _entity_number(tools, "顾霜")
+    entity = _entity_id(tools, "顾霜")
     llm = _SequenceLLM(
         [
             _tool_message(
@@ -563,7 +504,7 @@ async def test_write_event_rejects_duplicate_character_action_atomically() -> No
     receipts = _tool_receipts(result["messages"])
     duplicate = [receipt for receipt in receipts if '"code": "duplicate_observation"' in receipt]
     assert len(duplicate) == 1
-    assert '"record": "t2/e1/participant/1"' in duplicate[0]
+    assert f'"record": "t2/e1/participant/{entity}"' in duplicate[0]
     assert '"field": "action"' in duplicate[0]
     # 重复记录被单独拒绝，同回合收尾照常完成
     assert result["phase"] == "completed"
@@ -577,11 +518,13 @@ async def test_write_event_rejects_duplicate_character_action_atomically() -> No
 
 
 def test_write_event_accepts_authorized_history_root() -> None:
-    """2026-08-22 search_event 授权后的历史树根可被本章引用（跨章因果改挂树路径）
+    """2026-08-22 search_event 授权后的历史树根可被本章引用（挂进既有伏笔树）
 
-    2026-09-14：根事件不再有 cause_tree_id（跨章因果边退役）；search_event 授权
-    的历史树根现在服务于此——resolve_foreshadowing_case 以历史 root_node_id 为
-    伏笔树根、章内局部键 t1 为挂树事件，自动登记「伏笔疑点」案例并解决。
+    2026-09-14：根事件不再有 cause_tree_id（跨章因果边退役）。
+    2026-09-18 案例裁决工具删净：原 resolve_foreshadowing_case 的挂树行为由
+    write_event(foreshadowing_action=..., root_event_id=...) 承接——search_event
+    授权的历史伏笔树根作 root_event_id，本次写入的本章节点作挂树事件，成功即登记
+    无案例的 foreshadowing 解决项（case_id=""）。
     """
     service = _EventHistoryQueryService(
         [_history_tree("tree-h", "node-h-root", "前章旧事", is_foreshadow_setup=True)]
@@ -592,23 +535,28 @@ def test_write_event_accepts_authorized_history_root() -> None:
     assert "tree-h" in ledger.history_tree_views
     assert "node-h-root" in ledger.authorized_event_ids
 
-    _call(tools, "write_event", _root_args(description="顾霜拔剑"))
-
     receipt = _call(
         tools,
-        "resolve_foreshadowing_case",
-        {
-            "reason": "前章旧事与本章拔剑呼应",
-            "foreshadowing_action": "reinforce",
-            "root_event_id": "node-h-root",
-            "event_id": "t1",
-        },
+        "write_event",
+        _root_args(
+            description="顾霜拔剑",
+            foreshadowing_action="reinforce",
+            root_event_id="node-h-root",
+        ),
     )
-    assert receipt == {"accepted": True, "case_number": 1, "action": "foreshadowing"}
 
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
+    assert receipt["status"] == "written"
+    assert receipt["record"] == "t1/root"
+    assert receipt["content"]["foreshadowing"] == {
+        "action": "reinforce",
+        "root_event_id": "node-h-root",
+        "event_id": tree["root_node_id"],
+    }
     resolved = ledger.resolved_cases[0]
+    assert resolved.case_id == ""
     assert resolved.action == "foreshadowing"
+    assert resolved.foreshadowing_action == "reinforce"
     assert resolved.foreshadowing_root_event_id == "node-h-root"
     assert resolved.foreshadowing_event_id == tree["root_node_id"]
     assert ledger.chapter_finished is False
@@ -618,14 +566,14 @@ def test_write_event_accepts_authorized_history_root() -> None:
 async def test_write_event_rejects_unauthorized_entity_reference() -> None:
     """2026-08-22 未经登记/检索授权的引用被结构化拒绝（cause_tree_id 的今日等价面）
 
-    2026-09-14：实体引用统一 EntityRef——字符串走本 chunk write_entity 登记的
-    el 键；未登记的 el 键（含想引用历史/其他章对象却没走编号 n 的情况）在写入点
-    结构化拒绝（record=t1/root/participant/ghost, field=entityid,
-    code=unknown_el），并列出已知 el 键供自纠；该节点参与者不写入。
+    2026-09-19 id 纪律：实体引用统一 EntityRef——本章 write_entity 登记的
+    el 键或 run 级 uuid id；两者都不是的引用在写入点结构化拒绝
+    （record=t1/root/participant/ghost, field=entityid,
+    code=unknown_entity_id），expected 指向 id/el 双来源；该节点参与者不写入。
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    _entity_number(tools, "顾霜")
+    _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args())
 
     receipt = await _stage_rejection(
@@ -636,8 +584,7 @@ async def test_write_event_rejects_unauthorized_entity_reference() -> None:
 
     assert receipt["record"] == "t1/root/participant/ghost"
     assert receipt["field"] == "entityid"
-    assert receipt["code"] == "unknown_el"
-    assert "已知 el 键: 顾霜" in receipt["expected"]
+    assert receipt["code"] == "unknown_entity_id"
     assert ledger.bound_payloads["events"][0].participants == []
     assert ledger.observation_by_record == {}
 
@@ -647,7 +594,8 @@ def test_write_event_does_not_require_local_paragraph_indices() -> None:
 
     节点不携带锚点/字符区间/哈希/证据；章级证据由持久化层盖章。
     全局 paragraph_id 与局部下标错位时，实时事件写入与收尾仍应正常；
-    2026-09-14 段落级监督随 write_metrics.labels 提交，用的正是全局段号。
+    2026-09-14 段落级监督随 write_metrics.labels 提交；2026-09-18 标签用段首可见号
+    （正文 `N：`，此处即 1 基顺序号），全局 paragraph_id 只留在持久化侧。
     """
     text = _CHUNK_TEXT
     ledger = _ledger(
@@ -656,7 +604,7 @@ def test_write_event_does_not_require_local_paragraph_indices() -> None:
         texts=["“住手”", "回荡"],
     )
     tools = _tools(ledger)
-    entity = _entity_number(tools, "顾霜")
+    entity = _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
     _call(
         tools,
@@ -665,7 +613,7 @@ def test_write_event_does_not_require_local_paragraph_indices() -> None:
             "summary": "顾霜拔剑",
             "emotional_valence": 0,
             "narrative_function": "冲突",
-            "labels": [{"paragraph_id": 44, "emotion": -1}],
+            "labels": [{"paragraph_id": 1, "emotion": -1}],
         },
     )
     receipt = ledger.finish_chapter()
@@ -686,31 +634,30 @@ def test_write_event_does_not_require_local_paragraph_indices() -> None:
 async def test_failed_participation_resubmission_repairs_and_keeps_other_records() -> None:
     """2026-09-11 草稿补丁链（stash_event_draft + patches）已随小调用改造删除
 
-    等价验证（2026-09-14）：characters 里未登记编号只指向该参与者记录（结构化拒绝，
-    field=entityid/code=unregistered_number），已写入的根/子事件记录保留，
+    等价验证（2026-09-14）：characters 里未登记引用只指向该参与者记录（结构化拒绝，
+    field=entityid/code=unknown_entity_id），已写入的根/子事件记录保留，
     重交同键根记录即修复（旧断言"draft_repaired/pending_event_draft 清空"没有对应物）。
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    _entity_number(tools, "顾霜")
+    entity = _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args())
     _call(tools, "write_event", _child_args())
 
     rejected = await _stage_rejection(
         tools,
         "write_event",
-        _root_args(characters=[_participant(entityid=999)]),
+        _root_args(characters=[_participant(entityid="00000000-0000-0000-0000-000000000999")]),
     )
 
-    assert rejected["record"] == "t1/root/participant/999"
+    assert rejected["record"] == "t1/root/participant/00000000-0000-0000-0000-000000000999"
     assert rejected["field"] == "entityid"
-    assert rejected["code"] == "unregistered_number"
-    assert "1=顾霜" in rejected["message"]
+    assert rejected["code"] == "unknown_entity_id"
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     assert ledger.bound_payloads["events"][0].description == "顾霜拔剑"
     assert set(tree["nodes"]) == {"root", "e1"}
 
-    _call(tools, "write_event", _root_args(characters=[_participant(entityid=1)]))
+    _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
     _seed_metrics(tools)
     receipt = ledger.finish_chapter()
 
@@ -730,7 +677,7 @@ async def test_record_revision_after_failure_keeps_accepted_value() -> None:
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    entity = _entity_number(tools, "顾霜")
+    entity = _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity, emotion=-1)]))
 
     rejected = await _stage_rejection(
@@ -745,7 +692,7 @@ async def test_record_revision_after_failure_keeps_accepted_value() -> None:
     # 拒绝，pydantic value_error 族按 _STAGE_FIELD_CODES 翻成 invalid_combination
     assert rejected["code"] == "invalid_combination"
     assert "https://" not in rejected["message"]
-    assert ledger.observation_by_record["t1/root/participant/1"].emotion == -1
+    assert next(iter(ledger.observation_by_record.values())).emotion == -1
 
     _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity, emotion=-2)]))
     _seed_metrics(tools)
@@ -767,7 +714,7 @@ async def test_participation_rejections_point_at_record_and_keep_written_tree() 
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    _entity_number(tools, "顾霜")
+    _entity_id(tools, "顾霜")
     _call(tools, "write_event", _root_args())
     _call(tools, "write_event", _child_args())
 

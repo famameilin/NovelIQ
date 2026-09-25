@@ -1,9 +1,22 @@
-"""2026-09-16 章内并行 CodeAct 调度器测试（monkeypatch 块/章运行器，无 DB 依赖）
+"""章内多代理并发：编排层（三条 subagent 并发 → 章收尾相位）的合同测试
 
-覆盖调度器契约：切几块开几并发（无信号量、无共享池）、块完成顺序不构成语义顺序、
-任一失败取消其余在飞块并整章失败、块授权足迹与案例编号并入章账本、
-章会话注入合并程序面（唯一 execute_code）与句柄索引首条消息、
-关闭 codeact 的显式拒绝、边界段落与待决项视图。
+2026-09-18 写入生效重构后，subagent 的构造器当场经生产单条事务边界落库、三个 subagent
+共享同一个章级账本，编排层只剩"派发 + 收尾"两段。本文件 monkeypatch 掉 subagent 运行器
+（不真跑模型），覆盖：
+
+- 多块章按 `SUBAGENT_ROLES` 并发派发三条 subagent，每条拿到同一个共享章级账本、同一份
+  工具表与同一把章级写锁，角色与运行参数逐条传对（靠"三条都进到等待点"证明重叠，
+  而不是串行等待）；
+- 任一 subagent 失败：取消其余在飞 subagent、异常上抛、`FactGraph` 章节改动被回滚；
+- 收尾相位顺序：接续层（跨 agent 展示名分歧挂案例）→ 指标/标签一次落库 → finish，
+  且收尾相位不落节点（实体/事件在 subagent 相位即时生效）；
+- 子事件先于树根写入被生产写入当场拒（"先根后子"由 write_event 在写入当场保证）；
+- 收尾失败整章失败并回滚章节改动；
+- 章级结果与审计（授权足迹/写记录/案例）全部取自共享账本；
+- `build_chapter_paragraph_info` 与段落行一致、空段落行显式拒绝。
+
+2026-09-19 双路径定案：solo 形态与 codeact_enabled 开关随单块章归 agent 路径一起退役，
+本文件只剩 subagent 路径（roles 参数保留供单角色编排用例使用）。
 """
 
 from __future__ import annotations
@@ -14,43 +27,30 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.annotation.block_program import BlockRunOutcome
-from src.agents.annotation.chapter_merge import build_block_reports
-from src.agents.annotation.errors import AnnotationInputError
+from src.agents.annotation import graph as annotation_graph
+from src.agents.annotation import subagent_connect as subagent_connect_module
+from src.agents.annotation.errors import AnnotationRetryableError
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.local_ir import (
-    BlockAnnotation,
-    LocalEvidence,
-    LocalMention,
-    LocalPending,
+from src.agents.annotation.schema import ChapterParagraphInfo, PendingCase, SearchResult
+from src.agents.annotation.subagent_ir import (
+    SubagentAnnotation,
+    SubagentEntity,
+    SubagentLabel,
+    SubagentMetric,
 )
-from src.agents.annotation.reader_report import ReaderReport
-from src.agents.annotation.schema import (
-    AgentRunAudit,
-    AgentRunResult,
-    BoundChapterAnnotation,
-    BoundChunkAnnotation,
-    ChunkMetricsInput,
-    ChunkParagraphInfo,
-    NarrativeFunction,
-    SearchResult,
-)
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
-from src.config import settings
+from src.agents.annotation.subagent_program import SUBAGENT_ROLES, SubagentRunOutcome
 from src.workflows.annotate_helpers import block_codeact
 from src.workflows.annotate_helpers.block_codeact import (
-    build_block_boundaries,
-    build_block_contexts,
-    render_pending_view,
-    run_chapter_block_codeact,
+    build_chapter_paragraph_info,
+    run_chapter_subagents,
 )
 
-CHAPTER_TEXT = "第一段。" * 15  # 60 字，段落边界 0/20/40
-SUB_CHUNKS = [(-1, CHAPTER_TEXT[:40], 0), (-2, CHAPTER_TEXT[40:], 40)]
+TEXT = "“站住！”沈遥喝道。她收起长刀，转身走进雨里。"
+P1 = "“站住！”沈遥喝道。"
+P2 = "她收起长刀，转身走进雨里。"
 PARAGRAPH_ROWS = [
-    SimpleNamespace(paragraph_id=1, local_start_char=0, local_end_char=20, text=CHAPTER_TEXT[:20]),
-    SimpleNamespace(paragraph_id=2, local_start_char=20, local_end_char=40, text=CHAPTER_TEXT[20:40]),
-    SimpleNamespace(paragraph_id=3, local_start_char=40, local_end_char=60, text=CHAPTER_TEXT[40:]),
+    SimpleNamespace(paragraph_id=1, local_start_char=0, local_end_char=len(P1), text=P1),
+    SimpleNamespace(paragraph_id=2, local_start_char=len(P1), local_end_char=len(TEXT), text=P2),
 ]
 
 
@@ -75,323 +75,353 @@ class _QueryService:
         return []
 
 
-def _block(*, block_index: int, mentions: list[LocalMention], pending: list[LocalPending]) -> BlockAnnotation:
-    """用于构造一个块的局部标注产出"""
-    return BlockAnnotation(
-        block_index=block_index,
-        block_chunk_id=-(block_index + 1),
-        block_text=SUB_CHUNKS[block_index][1],
-        mentions=mentions,
-        pending=pending,
-    )
+def _outcome(subagent: SubagentAnnotation) -> SubagentRunOutcome:
+    """用于构造一个 subagent 会话的产出（授权足迹与案例都在共享账本上，不再搬运）"""
+    return SubagentRunOutcome(subagent=subagent, final_messages=[])
 
 
-def _mention(*, key: str, name: str, paragraph_id: int) -> LocalMention:
-    """用于构造一条带已核验证据的块内提及"""
-    return LocalMention(
-        key=key,
-        name=name,
-        entity_type="character",
-        tags=[],
-        description=None,
-        attributes=None,
-        evidence=(LocalEvidence(paragraph_id=paragraph_id, quote=name),),
-    )
-
-
-def _blocks() -> list[BlockAnnotation]:
-    """用于构造两个块的生产形态产出（跨块同名人物 + 一条待决项）"""
-    first = _block(
-        block_index=0,
-        mentions=[_mention(key="m1", name="顾霜", paragraph_id=1)],
-        pending=[
-            LocalPending(
-                key="p1",
-                kind="event_continuation",
-                detail="本块末尾的冲突疑似在后块继续",
-                evidence=(),
-                handles=["B1:m1"],
-                case_id="case-9",
-            )
-        ],
-    )
-    second = _block(
-        block_index=1,
-        mentions=[_mention(key="m1", name="顾霜", paragraph_id=3)],
-        pending=[],
-    )
-    return [first, second]
-
-
-def _outcome(block: BlockAnnotation, *, case_ids: set[str] | None = None) -> BlockRunOutcome:
-    """用于构造一次块会话的产出（授权足迹按块号区分，便于断言并集）"""
-    return BlockRunOutcome(
-        block=block,
-        final_messages=[],
-        authorized_text_paragraph_ids={100 + block.block_index},
-        authorized_chapter_ids={7},
-        authorized_event_ids={f"ev-{block.block_index}"},
-        authorized_tree_ids=set(),
-        case_ids=case_ids or set(),
-    )
-
-
-def _fake_chapter_result() -> AgentRunResult:
-    """用于构造章会话返回的章级结果"""
-    return AgentRunResult(
-        run_id="run-1",
-        chapter_id=1,
-        annotation=BoundChapterAnnotation(
-            chapter_summary="章节代理产出",
-            chunks=[
-                BoundChunkAnnotation(
-                    chunk_id=1,
-                    metrics=ChunkMetricsInput(
-                        summary="章节代理产出",
-                        emotional_valence=0,
-                        narrative_function=NarrativeFunction.SETUP,
-                    ),
-                    character_observations=[],
-                    dialogues=[],
-                    events=[],
-                )
-            ],
-        ),
-        resolved_cases=[],
-        audit=AgentRunAudit(
-            allow_future_context=False,
-            write_records=[],
-            authorized_chapter_ids=[1],
-            authorized_text_paragraph_ids=[2],
-        ),
-    )
-
-
-def _kwargs() -> dict:
-    """用于构造调度器的完整入参"""
+def _kwargs(*, graph_state: FactGraph | None = None) -> dict:
+    """用于构造编排器的完整入参"""
     return {
         "run_id": "run-1",
         "chapter_id": 1,
-        "chapter_chunk_id": 1,
-        "chapter_text": CHAPTER_TEXT,
+        "chapter_text": TEXT,
         "chapter_paragraph_rows": list(PARAGRAPH_ROWS),
-        "sub_chunks": list(SUB_CHUNKS),
         "llm": MagicMock(),
         "sql_session_factory": MagicMock(),
-        "query_service_factory": MagicMock(),
-        "graph_state": None,
+        "query_service_factory": lambda session_factory: _QueryService(),
+        "graph_state": graph_state,
         "stream": None,
         "novel_id": "default",
-        "novel_title": None,
-        "chapter_label": "第1章",
     }
 
 
-@pytest.fixture(autouse=True)
-def _codeact_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """用于默认开启程序面（关闭行为的用例自行覆盖）"""
-    monkeypatch.setattr(settings.models.annotation, "codeact_enabled", True)
+# ----------------------------------------------------------------------
+# 一、按 roles 并发派发，运行参数逐条传对
 
 
-class TestBlockDispatch:
-    @pytest.mark.asyncio
-    async def test_dispatches_one_block_agent_per_chunk_concurrently(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """切几块开几个块代理（同一事件循环里并发起跑），全部产出按块序装配"""
-        contexts: list[object] = []
-        inflight = 0
-        peak = 0
-        gate = asyncio.Event()
+@pytest.mark.asyncio
+async def test_multi_role_dispatch_concurrently_with_correct_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """三条 subagent 按 SUBAGENT_ROLES 并发派发，共享同一账本/工具表/写锁，参数逐条传对"""
+    llm = MagicMock()
+    session_factory = MagicMock()
+    kwargs = _kwargs(graph_state=FactGraph())
+    kwargs["llm"] = llm
+    kwargs["sql_session_factory"] = session_factory
 
-        async def fake_block_agent(*, context, **kwargs):
-            del kwargs
-            nonlocal inflight, peak
-            contexts.append(context)
-            inflight += 1
-            peak = max(peak, inflight)
-            if len(contexts) == 2:
-                gate.set()
-            await asyncio.wait_for(gate.wait(), timeout=5)
-            inflight -= 1
-            return _outcome(_blocks()[context.block_index])
+    dispatched: list[str] = []
+    received: dict[str, dict] = {}
+    all_started = asyncio.Event()
 
-        async def fake_chapter_agent(**kwargs):
-            del kwargs
-            return _fake_chapter_result()
+    async def fake_subagent_agent(**call_kwargs):
+        role = call_kwargs["role"]
+        dispatched.append(role)
+        received[role] = {
+            "subagent_role": call_kwargs["subagent"].role,
+            "ledger": call_kwargs["ledger"],
+            "tool_map": call_kwargs["tool_map"],
+            "write_lock": call_kwargs["write_lock"],
+            "run_id": call_kwargs["run_id"],
+            "chapter_id": call_kwargs["chapter_id"],
+            "novel_id": call_kwargs["novel_id"],
+            "llm": call_kwargs["llm"],
+            "session_factory": call_kwargs["session_factory"],
+            "graph_state": call_kwargs["graph_state"],
+            "stream": call_kwargs["stream"],
+        }
+        if len(dispatched) == 3:
+            all_started.set()
+        # 串行派发时这里会等到超时（TimeoutError）→ 用例失败，即"重叠"的反证
+        await asyncio.wait_for(all_started.wait(), timeout=5)
+        call_kwargs["subagent"].finished = True
+        return _outcome(call_kwargs["subagent"])
 
-        monkeypatch.setattr(block_codeact, "run_block_agent", fake_block_agent)
-        monkeypatch.setattr(block_codeact, "run_annotation_agent", fake_chapter_agent)
+    monkeypatch.setattr(block_codeact, "run_subagent_agent", fake_subagent_agent)
 
-        await run_chapter_block_codeact(**_kwargs())
+    result = await run_chapter_subagents(**kwargs)
 
-        assert [context.block_index for context in contexts] == [0, 1]
-        # 两块同时在场：并发度 = 块数（没有并发闸门，靠"两块都进到等待点"证明）
-        assert peak == 2
-        first = contexts[0]
-        assert first.block_count == 2
-        assert first.paragraph_info.paragraph_ids == [1, 2]
-        assert first.candidate_number_map == {}
-
-    @pytest.mark.asyncio
-    async def test_chapter_session_gets_handle_index_and_merge_surface(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """章会话：块句柄索引进首条消息、只读正文的候选走章级表、合并程序面按账本注入"""
-        captured: dict = {}
-
-        async def fake_block_agent(*, context, **kwargs):
-            del kwargs
-            return _outcome(_blocks()[context.block_index], case_ids={"case-9"})
-
-        async def fake_chapter_agent(**kwargs):
-            captured.update(kwargs)
-            return _fake_chapter_result()
-
-        monkeypatch.setattr(block_codeact, "run_block_agent", fake_block_agent)
-        monkeypatch.setattr(block_codeact, "run_annotation_agent", fake_chapter_agent)
-
-        await run_chapter_block_codeact(**_kwargs())
-
-        message = captured["initial_messages_override"][1].content
-        assert "<BlockAnnotations>" in message
-        assert "B1:m1" in message and "B2:m1" in message
-        assert message.index("B1:m1") < message.index("B2:m1")
-        assert "<PendingItems>" in message and "B1:p1" in message
-        assert "case-9" in message
-        assert captured["current_chunks"] == [(1, CHAPTER_TEXT)]
-        assert captured["sub_chunk_index"] == 0
-        assert captured["program_mode"] is True
-        assert captured["paragraph_info"].paragraph_ids == [1, 2, 3]
-        assert [report.block_index for report in captured["reader_reports"]] == [0, 1]
-        assert all(isinstance(report, ReaderReport) for report in captured["reader_reports"])
-        assert captured["reader_reports"] == build_block_reports(_blocks())
-
-    @pytest.mark.asyncio
-    async def test_block_failure_cancels_inflight_blocks_and_fails_chapter(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """块失败没有升级分支：其余在飞块被取消，整章失败"""
-        cancelled: list[int] = []
-
-        async def fake_block_agent(*, context, **kwargs):
-            del kwargs
-            if context.block_index == 1:
-                raise RuntimeError("block boom")
-            try:
-                await asyncio.sleep(30)
-            except asyncio.CancelledError:
-                cancelled.append(context.block_index)
-                raise
-            return _outcome(_blocks()[0])
-
-        async def fake_chapter_agent(**kwargs):
-            del kwargs
-            raise AssertionError("块失败时不得进入章会话")
-
-        monkeypatch.setattr(block_codeact, "run_block_agent", fake_block_agent)
-        monkeypatch.setattr(block_codeact, "run_annotation_agent", fake_chapter_agent)
-
-        with pytest.raises(RuntimeError, match="block boom"):
-            await asyncio.wait_for(run_chapter_block_codeact(**_kwargs()), timeout=10)
-
-        assert cancelled == [0]
-
-    @pytest.mark.asyncio
-    async def test_requires_codeact_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """块面路径是 CodeAct 路径：关闭程序面时显式拒绝，不静默退化成原生写者"""
-        monkeypatch.setattr(settings.models.annotation, "codeact_enabled", False)
-
-        with pytest.raises(AnnotationInputError, match="codeact_enabled"):
-            await run_chapter_block_codeact(**_kwargs())
+    assert len(dispatched) == 3
+    assert sorted(dispatched) == sorted(SUBAGENT_ROLES)
+    assert {role: item["subagent_role"] for role, item in received.items()} == {role: role for role in SUBAGENT_ROLES}
+    # 共享章级账本、同一份工具表、同一把写锁：三条 subagent 拿到的是同一个对象
+    assert len({id(item["ledger"]) for item in received.values()}) == 1
+    assert len({id(item["tool_map"]) for item in received.values()}) == 1
+    assert len({id(item["write_lock"]) for item in received.values()}) == 1
+    assert len({id(item["graph_state"]) for item in received.values()}) == 1
+    for item in received.values():
+        assert item["run_id"] == "run-1"
+        assert item["chapter_id"] == 1
+        assert item["novel_id"] == "default"
+        assert item["llm"] is llm
+        assert item["session_factory"] is session_factory
+        assert item["stream"] is None
+    # 没有 subagent 提交指标时章收尾走中性兜底，整章照常产出结果
+    assert result.annotation is not None
 
 
-class TestChapterProgramFactory:
-    @pytest.mark.asyncio
-    async def test_factory_merges_authorizations_and_builds_single_program_tool(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """工厂先并入块授权足迹与案例编号，再返回合并面的唯一 execute_code"""
-        captured: dict = {}
+# ----------------------------------------------------------------------
+# 二、任一 subagent 失败：取消其余在飞 subagent、异常上抛、章节改动回滚
 
-        async def fake_block_agent(*, context, **kwargs):
-            del kwargs
-            return _outcome(_blocks()[context.block_index], case_ids={"case-9"})
 
-        async def fake_chapter_agent(**kwargs):
-            captured.update(kwargs)
-            return _fake_chapter_result()
+@pytest.mark.asyncio
+async def test_subagent_failure_cancels_siblings_and_resets_chapter_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """事件 subagent 抛错：其余两条被取消，异常上抛，FactGraph 回滚本章改动"""
+    cancelled: list[str] = []
 
-        monkeypatch.setattr(block_codeact, "run_block_agent", fake_block_agent)
-        monkeypatch.setattr(block_codeact, "run_annotation_agent", fake_chapter_agent)
+    async def fake_subagent_agent(**call_kwargs):
+        role = call_kwargs["role"]
+        if role == "event":
+            await asyncio.sleep(0.01)
+            raise RuntimeError("subagent boom")
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled.append(role)
+            raise
+        return _outcome(call_kwargs["subagent"])
 
-        await run_chapter_block_codeact(**_kwargs())
+    monkeypatch.setattr(block_codeact, "run_subagent_agent", fake_subagent_agent)
+    graph_state = MagicMock(spec=FactGraph)
 
-        ledger = AnnotationToolLedger(
-            run_scope="run-1",
-            current_chapter_id=1,
-            current_chunk_id=1,
-            current_chunk_text=CHAPTER_TEXT,
-            allow_future_context=False,
-            graph=FactGraph(),
-            paragraph_info=ChunkParagraphInfo(
-                paragraph_ids=[1, 2, 3],
-                char_spans=[(0, 20), (20, 40), (40, 60)],
-                texts=[row.text for row in PARAGRAPH_ROWS],
-            ),
+    with pytest.raises(RuntimeError, match="subagent boom"):
+        await asyncio.wait_for(run_chapter_subagents(**_kwargs(graph_state=graph_state)), timeout=10)
+
+    assert sorted(cancelled) == ["evidence", "structure"]
+    graph_state.begin_chapter.assert_called_once()
+    graph_state.reset_chapter_changes.assert_called_once()
+
+
+# ----------------------------------------------------------------------
+# 三、收尾相位顺序：接续层 → 指标/标签 → finish，且不落节点
+
+
+@pytest.mark.asyncio
+async def test_finish_phase_pushes_connections_then_metrics_then_finish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """实体在 subagent 相位即时落库 → 接续层挂分歧案例 → 指标/标签一次落库 → finish"""
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_subagent_agent(**call_kwargs):
+        role = call_kwargs["role"]
+        subagent = call_kwargs["subagent"]
+        tool_map = call_kwargs["tool_map"]
+        if role == "structure":
+            calls.append(("subagent:write_entity", {"name": "沈遥"}))
+            tool_map["write_entity"].func(name="沈遥", entity_type="character", el="structure:a1")
+            subagent.entities.append(SubagentEntity(id="a1", name="沈遥", entity_type="character"))
+        elif role == "event":
+            calls.append(("subagent:write_entity", {"name": "沈师姐"}))
+            tool_map["write_entity"].func(name="沈师姐", entity_type="character", el="event:a1")
+            subagent.entities.append(SubagentEntity(id="a1", name="沈师姐", entity_type="character"))
+        elif role == "evidence":
+            subagent.metric = SubagentMetric(summary="冲突", emotional_valence=-1, narrative_function="冲突")
+            subagent.labels.append(SubagentLabel(paragraph_id=1, emotion=-1))
+            subagent.labels.append(SubagentLabel(paragraph_id=2, emotion=0))
+        subagent.finished = True
+        return _outcome(subagent)
+
+    monkeypatch.setattr(block_codeact, "run_subagent_agent", fake_subagent_agent)
+
+    real_execute = annotation_graph._execute_call
+
+    async def recording_execute(call, **exec_kwargs):
+        calls.append((str(call.get("name")), dict(call.get("args") or {})))
+        return await real_execute(call, **exec_kwargs)
+
+    # 收尾相位与接续层各持一份 _execute_call 全局引用，两处都要换成记录版
+    monkeypatch.setattr(block_codeact, "_execute_call", recording_execute)
+    monkeypatch.setattr(subagent_connect_module, "_execute_call", recording_execute)
+
+    result = await run_chapter_subagents(**_kwargs(graph_state=FactGraph()))
+
+    names = [name for name, _ in calls]
+    # 收尾相位不落节点：实体已在 subagent 相位生效，收尾只挂跨 agent 案例 + 指标 + finish
+    assert "write_entity" not in names
+    assert "write_event" not in names
+    assert names.count("finish") == 1
+    assert names[-1] == "finish"
+    # 接续层的展示名分歧案例先于指标与 finish
+    assert names.index("push_case") < names.index("write_metrics") < names.index("finish")
+    last_entity = max(index for index, (name, _) in enumerate(calls) if name == "subagent:write_entity")
+    first_finish_phase = min(
+        index for index, (name, _) in enumerate(calls) if name in {"push_case", "write_metrics", "finish"}
+    )
+    assert last_entity < first_finish_phase
+
+    alias_call = next(args for name, args in calls if name == "push_case")
+    assert alias_call["type"] == "entity_alias"
+    assert alias_call["keys"] == ["沈师姐"]
+    metrics_call = next(args for name, args in calls if name == "write_metrics")
+    assert metrics_call["summary"] == "冲突"
+    assert [(item["paragraph_id"], item["emotion"]) for item in metrics_call["labels"]] == [(1, -1), (2, 0)]
+
+    assert [op["name"] for op in result.entity_ops] == ["沈遥", "沈师姐"]
+    assert result.annotation is not None
+    assert result.annotation.metrics.summary == "冲突"
+    assert [case.type for case in result.pushed_cases] == ["entity_alias"]
+
+
+# ----------------------------------------------------------------------
+# 四、子事件先于树根写入被生产写入当场拒
+
+
+@pytest.mark.asyncio
+async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """子事件先于树根写入：生产写入当场判拒（树键未建），建根后同键子事件才落账
+
+    2026-09-18 写入生效后"先根后子"由生产 write_event 在写入当场保证，不再是落库相位的
+    重排职责；模型先写子事件会拿到结构化拒绝，自纠补根后同键子事件照常落账。
+    """
+    statuses: list[str] = []
+
+    async def fake_subagent_agent(**call_kwargs):
+        tool_map = call_kwargs["tool_map"]
+        ledger = call_kwargs["ledger"]
+        child_first = await annotation_graph._execute_call(
+            {
+                "name": "write_event",
+                "args": {"el": "event:t1/e1", "isroot": False, "type": "main", "description": "子一"},
+                "id": "a",
+            },
+            tool_map=tool_map,
+            ledger=ledger,
+            call_index=0,
         )
-        tool = captured["program_tool_factory"](
-            build_annotation_tools(_QueryService(), ledger), ledger, observer=None, stream=None
+        root = await annotation_graph._execute_call(
+            {"name": "write_event", "args": {"el": "event:t1", "isroot": True, "description": "根"}, "id": "b"},
+            tool_map=tool_map,
+            ledger=ledger,
+            call_index=1,
         )
-
-        assert str(tool.name) == "execute_code"
-        # 合并构造器目录随工具描述下发（模型可见面：一条工具 + 一份 API 目录）
-        for constructor in ("bind", "import_relation", "merge_dialogues", "tree", "event", "metric"):
-            assert f"{constructor}(" in str(tool.description)
-        # 块授权足迹并入章账本：正文段落、授权章、事件、案例编号
-        assert ledger.authorized_text_paragraph_ids == {100, 101}
-        assert ledger.authorized_chapter_ids == {7}
-        assert ledger.authorized_event_ids == {"ev-0", "ev-1"}
-        assert set(ledger.case_number_registry.values()) == {"case-9"}
-
-
-class TestBlockContexts:
-    def test_contexts_carry_boundary_paragraphs_readonly(self) -> None:
-        """边界段落=相邻一个完整段落；首块无前邻、末块无后邻"""
-        contexts = build_block_contexts(
-            chapter_paragraph_rows=list(PARAGRAPH_ROWS),
-            sub_chunks=list(SUB_CHUNKS),
-            candidate_maps=[{}, {}],
+        child_after = await annotation_graph._execute_call(
+            {
+                "name": "write_event",
+                "args": {"el": "event:t1/e2", "isroot": False, "type": "main", "description": "子二"},
+                "id": "c",
+            },
+            tool_map=tool_map,
+            ledger=ledger,
+            call_index=2,
         )
+        statuses.extend([str(child_first["status"]), str(root["status"]), str(child_after["status"])])
+        call_kwargs["subagent"].metric = SubagentMetric(summary="事件", emotional_valence=0, narrative_function="铺垫")
+        call_kwargs["subagent"].finished = True
+        return _outcome(call_kwargs["subagent"])
 
-        assert contexts[0].boundary_before is None
-        assert contexts[0].boundary_after == (3, CHAPTER_TEXT[40:])
-        assert contexts[1].boundary_before == (2, CHAPTER_TEXT[20:40])
-        assert contexts[1].boundary_after is None
+    monkeypatch.setattr(block_codeact, "run_subagent_agent", fake_subagent_agent)
 
-    def test_boundary_paragraphs_are_full_paragraphs(self) -> None:
-        """边界段取整段原文（不是切片），且只取紧邻的一段"""
-        rows = list(PARAGRAPH_ROWS)
-        before, after = build_block_boundaries(
-            rows,
-            sub_chunk_offset=SUB_CHUNKS[1][2],
-            sub_chunk_text=SUB_CHUNKS[1][1],
-        )
+    result = await run_chapter_subagents(**_kwargs(graph_state=FactGraph()), roles=("event",))
 
-        assert before == (2, rows[1].text)
-        assert after is None
+    assert statuses == ["error", "success", "success"]
+    annotation = result.annotation
+    assert [event.description for event in annotation.events] == ["根", "子二"]
+    assert [event.cause_role for event in annotation.events] == ["root", "main"]
+    assert annotation.events[1].parent_node_id == annotation.events[0].node_id
 
 
-class TestPendingView:
-    def test_renders_handle_kind_detail_and_extras(self) -> None:
-        """待决项视图给出句柄、类别、详情与相关句柄/案例 id"""
-        view = render_pending_view(_blocks())
+# ----------------------------------------------------------------------
+# 五、收尾失败：整章失败并回滚章节改动
 
-        assert view.startswith("- B1:p1 [event_continuation] 本块末尾的冲突疑似在后块继续")
-        assert "相关句柄：B1:m1" in view
-        assert "案例 id：case-9" in view
 
-    def test_empty_when_no_pending(self) -> None:
-        """没有待决项时整块不出现（章节代理首条消息不带空区块）"""
-        assert render_pending_view([]) == ""
-        assert render_pending_view([_block(block_index=0, mentions=[], pending=[])]) == ""
+@pytest.mark.asyncio
+async def test_finish_phase_failure_resets_chapter_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """finish 被拒：异常上抛，收尾相位已写入的章节改动被回滚（不留脏状态）"""
+
+    async def fake_subagent_agent(**call_kwargs):
+        call_kwargs["subagent"].metric = SubagentMetric(summary="x", emotional_valence=0, narrative_function="铺垫")
+        call_kwargs["subagent"].finished = True
+        return _outcome(call_kwargs["subagent"])
+
+    monkeypatch.setattr(block_codeact, "run_subagent_agent", fake_subagent_agent)
+
+    async def boom(tool_map, ledger, *, stream):
+        del tool_map, ledger, stream
+        raise AnnotationRetryableError("finish 被拒")
+
+    monkeypatch.setattr(block_codeact, "_settle_chapter", boom)
+    graph_state = MagicMock(spec=FactGraph)
+
+    with pytest.raises(AnnotationRetryableError):
+        await run_chapter_subagents(**_kwargs(graph_state=graph_state))
+
+    graph_state.begin_chapter.assert_called_once()
+    graph_state.reset_chapter_changes.assert_called_once()
+
+
+# ----------------------------------------------------------------------
+# 六、章级结果与审计取自共享账本
+
+
+@pytest.mark.asyncio
+async def test_chapter_result_and_audit_read_from_shared_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """授权足迹/案例 id/写记录都落在共享账本上，章级结果与审计直接读它的终态"""
+    captured: dict = {}
+    pushed = PendingCase(
+        type="其他疑点",
+        chapter_id=1,
+        keys=["长刀"],
+        description="共享账本案例",
+        target_key="shared-case",
+        target_ref={},
+    )
+
+    async def fake_subagent_agent(**call_kwargs):
+        role = call_kwargs["role"]
+        subagent = call_kwargs["subagent"]
+        ledger = call_kwargs["ledger"]
+        captured["ledger"] = ledger
+        if role == "structure":
+            ledger.authorized_text_paragraph_ids.update({1, 2})
+            ledger.authorized_chapter_ids.add(10)
+            ledger.authorized_event_ids.add("tree-1")
+            # 2026-09-19 案例 id 纪律：无运行期编号，案例 id 直接登记到授权面 known_case_ids
+            ledger.known_case_ids.update({"case-a", "case-b"})
+            subagent.metric = SubagentMetric(summary="共享账本", emotional_valence=1, narrative_function="转折")
+        elif role == "event":
+            ledger.authorized_text_paragraph_ids.add(3)
+            ledger.authorized_event_ids.add("tree-2")
+            # 案例 id 全章去重：另一条 subagent 登记同一 case_id 不产生重复条目
+            ledger.known_case_ids.add("case-b")
+            assert ledger.known_case_ids == {"case-a", "case-b"}
+        elif role == "evidence":
+            ledger.pushed_cases.append(pushed)
+        subagent.finished = True
+        return _outcome(subagent)
+
+    monkeypatch.setattr(block_codeact, "run_subagent_agent", fake_subagent_agent)
+
+    result = await run_chapter_subagents(**_kwargs(graph_state=FactGraph()))
+    ledger = captured["ledger"]
+
+    assert result.annotation is not None
+    assert result.annotation.metrics.summary == "共享账本"
+    # 审计字段就是共享账本的终态，不做任何外部补并
+    assert result.audit.authorized_text_paragraph_ids == [1, 2, 3]
+    assert result.audit.authorized_chapter_ids == [10]
+    assert result.audit.authorized_event_ids == ["tree-1", "tree-2"]
+    assert result.audit.write_records == list(ledger.write_records)
+    assert result.audit.write_records
+    assert result.resolved_cases == []
+    assert result.pushed_cases == [pushed]
+    # 案例 id 按全章去重登记（另一条 subagent 登记同一 id 不产生重复条目）
+    assert ledger.known_case_ids == {"case-a", "case-b"}
+
+
+# ----------------------------------------------------------------------
+# 七、段落坐标映射
+
+
+def test_build_chapter_paragraph_info_matches_paragraph_rows() -> None:
+    """段落坐标映射与段落行逐项一致，段号即全局 paragraph_id"""
+    info = build_chapter_paragraph_info(list(PARAGRAPH_ROWS), chapter_text=TEXT)
+
+    assert isinstance(info, ChapterParagraphInfo)
+    assert info.paragraph_ids == [1, 2]
+    assert info.char_spans == [(0, len(P1)), (len(P1), len(TEXT))]
+    assert info.texts == [P1, P2]
+    assert "".join(info.texts) == TEXT
+
+
+def test_build_chapter_paragraph_info_rejects_empty_rows() -> None:
+    """空段落行：没有事实源可锚，显式抛可重试错误"""
+    with pytest.raises(AnnotationRetryableError):
+        build_chapter_paragraph_info([], chapter_text=TEXT)
