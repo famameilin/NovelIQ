@@ -12,11 +12,11 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def _army_relations(chunk_id: int, names: list[str]) -> list[dict]:
+def _army_relations(chapter_id: int, names: list[str]) -> list[dict]:
     """2026-09-13 用于构造"每个角色都隶属贺家军"的组织枢纽边（隶属：character → organization）"""
     return [
         relation_fact(
-            chunk_id=chunk_id,
+            chapter_id=chapter_id,
             from_name=name,
             to_name="贺家军",
             relation_type="隶属",
@@ -39,13 +39,13 @@ def test_detect_alias_suspicions_finds_orphan_pair(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="伯安", action="同游"),
-            character_fact(chunk_id=1, name="猴子", action="同游"),
-            character_fact(chunk_id=1, name="算盘", action="同游"),
+            character_fact(chapter_id=1, name="伯安", action="同游"),
+            character_fact(chapter_id=1, name="猴子", action="同游"),
+            character_fact(chapter_id=1, name="算盘", action="同游"),
         ],
         relations=[
-            relation_fact(chunk_id=1, from_name="伯安", to_name="猴子", relation_type="友情"),
-            relation_fact(chunk_id=1, from_name="伯安", to_name="算盘", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="伯安", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="伯安", to_name="算盘", relation_type="友情"),
         ],
     )
     persist_chapter_annotation(
@@ -53,13 +53,13 @@ def test_detect_alias_suspicions_finds_orphan_pair(db_session) -> None:
         run_id=run_id,
         chapter_id=2,
         characters=[
-            character_fact(chunk_id=2, name="贺伯安", action="同游"),
-            character_fact(chunk_id=2, name="猴子", action="同游"),
-            character_fact(chunk_id=2, name="算盘", action="同游"),
+            character_fact(chapter_id=2, name="贺伯安", action="同游"),
+            character_fact(chapter_id=2, name="猴子", action="同游"),
+            character_fact(chapter_id=2, name="算盘", action="同游"),
         ],
         relations=[
-            relation_fact(chunk_id=2, from_name="贺伯安", to_name="猴子", relation_type="友情"),
-            relation_fact(chunk_id=2, from_name="贺伯安", to_name="算盘", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="贺伯安", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="贺伯安", to_name="算盘", relation_type="友情"),
         ],
     )
     db_session.commit()
@@ -86,12 +86,12 @@ def test_detect_alias_suspicions_skips_merged_pairs(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="伯安", action="同游"),
-            character_fact(chunk_id=1, name="猴子", action="同游"),
-            character_fact(chunk_id=1, name="侯飞白", action="同游"),
+            character_fact(chapter_id=1, name="伯安", action="同游"),
+            character_fact(chapter_id=1, name="猴子", action="同游"),
+            character_fact(chapter_id=1, name="侯飞白", action="同游"),
         ],
         relations=[
-            relation_fact(chunk_id=1, from_name="伯安", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="伯安", to_name="猴子", relation_type="友情"),
             identity_relation_output(subject_name="猴子", object_name="侯飞白", effective_chapter_id=1),
         ],
     )
@@ -126,18 +126,18 @@ def test_detect_alias_suspicions_ignores_hub_neighbors(db_session) -> None:
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="贺伯安", action="随军"),
-            character_fact(chunk_id=1, name="贺老爷", action="随军"),
-            character_fact(chunk_id=1, name="侯飞白", action="随军"),
-            character_fact(chunk_id=1, name="林立果", action="随军"),
-            character_fact(chunk_id=1, name="褚大山", action="随军"),
+            character_fact(chapter_id=1, name="贺伯安", action="随军"),
+            character_fact(chapter_id=1, name="贺老爷", action="随军"),
+            character_fact(chapter_id=1, name="侯飞白", action="随军"),
+            character_fact(chapter_id=1, name="林立果", action="随军"),
+            character_fact(chapter_id=1, name="褚大山", action="随军"),
         ],
         relations=[
             # 每个角色都连主角（角色枢纽）与贺家军（组织枢纽）：旧规则下两两重合
-            relation_fact(chunk_id=1, from_name="贺老爷", to_name="贺伯安", relation_type="家族"),
-            relation_fact(chunk_id=1, from_name="侯飞白", to_name="贺伯安", relation_type="友情"),
-            relation_fact(chunk_id=1, from_name="林立果", to_name="贺伯安", relation_type="友情"),
-            relation_fact(chunk_id=1, from_name="褚大山", to_name="贺伯安", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="贺老爷", to_name="贺伯安", relation_type="家族"),
+            relation_fact(chapter_id=1, from_name="侯飞白", to_name="贺伯安", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="林立果", to_name="贺伯安", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="褚大山", to_name="贺伯安", relation_type="友情"),
             *_army_relations(1, ["贺伯安", "贺老爷", "侯飞白", "林立果", "褚大山"]),
         ],
     )
@@ -167,18 +167,18 @@ def test_detect_alias_suspicions_excludes_pairs_with_direct_relation(db_session)
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="赵兰英", action="同席"),
-            character_fact(chunk_id=1, name="柳婉儿", action="同席"),
-            character_fact(chunk_id=1, name="周凤兰", action="同席"),
-            character_fact(chunk_id=1, name="贺伯安", action="同席"),
+            character_fact(chapter_id=1, name="赵兰英", action="同席"),
+            character_fact(chapter_id=1, name="柳婉儿", action="同席"),
+            character_fact(chapter_id=1, name="周凤兰", action="同席"),
+            character_fact(chapter_id=1, name="贺伯安", action="同席"),
         ],
         relations=[
-            relation_fact(chunk_id=1, from_name="赵兰英", to_name="周凤兰", relation_type="家族"),
-            relation_fact(chunk_id=1, from_name="柳婉儿", to_name="周凤兰", relation_type="家族"),
-            relation_fact(chunk_id=1, from_name="赵兰英", to_name="贺伯安", relation_type="家族"),
-            relation_fact(chunk_id=1, from_name="柳婉儿", to_name="贺伯安", relation_type="家族"),
+            relation_fact(chapter_id=1, from_name="赵兰英", to_name="周凤兰", relation_type="家族"),
+            relation_fact(chapter_id=1, from_name="柳婉儿", to_name="周凤兰", relation_type="家族"),
+            relation_fact(chapter_id=1, from_name="赵兰英", to_name="贺伯安", relation_type="家族"),
+            relation_fact(chapter_id=1, from_name="柳婉儿", to_name="贺伯安", relation_type="家族"),
             # 两端已有直接边：图上已按两个人处理，不再进疑似
-            relation_fact(chunk_id=1, from_name="赵兰英", to_name="柳婉儿", relation_type="家族"),
+            relation_fact(chapter_id=1, from_name="赵兰英", to_name="柳婉儿", relation_type="家族"),
         ],
     )
     persist_chapter_annotation(
@@ -186,16 +186,16 @@ def test_detect_alias_suspicions_excludes_pairs_with_direct_relation(db_session)
         run_id=run_id,
         chapter_id=2,
         characters=[
-            character_fact(chunk_id=2, name="侯飞白", action="偷鸡"),
-            character_fact(chunk_id=2, name="林立果", action="偷鸡"),
-            character_fact(chunk_id=2, name="猴子", action="偷鸡"),
-            character_fact(chunk_id=2, name="算盘", action="偷鸡"),
+            character_fact(chapter_id=2, name="侯飞白", action="偷鸡"),
+            character_fact(chapter_id=2, name="林立果", action="偷鸡"),
+            character_fact(chapter_id=2, name="猴子", action="偷鸡"),
+            character_fact(chapter_id=2, name="算盘", action="偷鸡"),
         ],
         relations=[
-            relation_fact(chunk_id=2, from_name="侯飞白", to_name="猴子", relation_type="友情"),
-            relation_fact(chunk_id=2, from_name="林立果", to_name="猴子", relation_type="友情"),
-            relation_fact(chunk_id=2, from_name="侯飞白", to_name="算盘", relation_type="友情"),
-            relation_fact(chunk_id=2, from_name="林立果", to_name="算盘", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="侯飞白", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="林立果", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="侯飞白", to_name="算盘", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="林立果", to_name="算盘", relation_type="友情"),
         ],
     )
     db_session.commit()
@@ -212,26 +212,26 @@ def test_detect_alias_suspicions_excludes_pairs_with_direct_relation(db_session)
     assert frozenset(("侯飞白", "林立果")) in pairs
 
 
-def test_build_alias_pending_cases_target_ref_carries_chunk_id(db_session) -> None:
-    """2026-08-11 用于验证别名案例的 target_ref 携带 anchor chunk_id（解决落库依赖）"""
+def test_build_alias_pending_cases_target_ref_carries_chapter_id(db_session) -> None:
+    """2026-08-11 用于验证别名案例的 target_ref 携带 anchor chapter_id（解决落库依赖）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与玩伴同游", "贺伯安与玩伴同游"],
         chapter_ids=[1, 2],
-        title="图验证器别名案例 chunk_id",
+        title="图验证器别名案例 chapter_id",
     )
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
         characters=[
-            character_fact(chunk_id=1, name="伯安", action="同游"),
-            character_fact(chunk_id=1, name="猴子", action="同游"),
-            character_fact(chunk_id=1, name="算盘", action="同游"),
+            character_fact(chapter_id=1, name="伯安", action="同游"),
+            character_fact(chapter_id=1, name="猴子", action="同游"),
+            character_fact(chapter_id=1, name="算盘", action="同游"),
         ],
         relations=[
-            relation_fact(chunk_id=1, from_name="伯安", to_name="猴子", relation_type="友情"),
-            relation_fact(chunk_id=1, from_name="伯安", to_name="算盘", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="伯安", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=1, from_name="伯安", to_name="算盘", relation_type="友情"),
         ],
     )
     persist_chapter_annotation(
@@ -239,13 +239,13 @@ def test_build_alias_pending_cases_target_ref_carries_chunk_id(db_session) -> No
         run_id=run_id,
         chapter_id=2,
         characters=[
-            character_fact(chunk_id=2, name="贺伯安", action="同游"),
-            character_fact(chunk_id=2, name="猴子", action="同游"),
-            character_fact(chunk_id=2, name="算盘", action="同游"),
+            character_fact(chapter_id=2, name="贺伯安", action="同游"),
+            character_fact(chapter_id=2, name="猴子", action="同游"),
+            character_fact(chapter_id=2, name="算盘", action="同游"),
         ],
         relations=[
-            relation_fact(chunk_id=2, from_name="贺伯安", to_name="猴子", relation_type="友情"),
-            relation_fact(chunk_id=2, from_name="贺伯安", to_name="算盘", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="贺伯安", to_name="猴子", relation_type="友情"),
+            relation_fact(chapter_id=2, from_name="贺伯安", to_name="算盘", relation_type="友情"),
         ],
     )
     db_session.commit()
@@ -262,4 +262,4 @@ def test_build_alias_pending_cases_target_ref_carries_chunk_id(db_session) -> No
     )
     assert pending_cases
     for pending_case in pending_cases:
-        assert pending_case.target_ref.get("chunk_id") == pending_case.chunk_id
+        assert pending_case.target_ref.get("chapter_id") == pending_case.chapter_id
