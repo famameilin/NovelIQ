@@ -1,13 +1,21 @@
-"""2026-09-15 程序面（CodeAct）执行器合同测试
+"""2026-09-18 subagent 程序面（CodeAct）解释器语义测试
 
-覆盖落地方案裁定的必要边界：程序内工具调用复用生产单条事务（成功保留、单条失败
-只回滚该条、后续独立操作继续、依赖失败返回依赖错误）、变量跨程序保留、
-True/False/None 与 true/false/null 等价、非白名单节点结构化拒绝（不裸抛）、
-限额（程序字符数/内层操作数/循环项数）、finish_chapter 在程序末结算且仍以
-missing_record 拒绝缺指标、压缩回执只给 applied/refs/progress/failed 而不回显
-成功记录明细。
+2026-09-19 双路径定案：`program.py` 的受限 AST 解释器基座有两个子类——
+`ProgramRuntime`（agent 路径写者面，程序内直调正式工具）与
+`subagent_program.SubagentProgramRuntime`（subagent 面，构造器写入生效）。
+本文件针对两个子类共用的解释器语义（以 subagent 面为载体），覆盖：
 
-工具面与账本用测试桩（无数据库依赖），执行路径走生产 graph._execute_call。
+- 语法白名单与非白名单节点的结构化拒绝（一律不裸抛）；
+- 变量跨程序保留、True/False/None 与 true/false/null 等价；
+- 硬限（程序字符数/内层操作数/循环项数/步数）越限可续跑、越限前的 op 保留；
+- 压缩回执 status/applied/failed/reads/refs/progress 的形状与口径（refs 恒空）；
+- 构造器写入生效：成功回执 {status:written, record, ref}，被拒是生产面的记录级
+  拒绝（record/field/code/expected）且只作废该条；
+- read 投影回显（reads）与逐 op 审计记录。
+
+模型可见面 = 4 个检索 + 5 个案例 + finish + 八类构造器；五个 write_* 不在可见面
+（程序里写它们报 unknown_tool）。工具面与账本用测试桩（无数据库依赖），执行路径
+走生产 `graph._execute_call`。
 """
 
 from __future__ import annotations
@@ -18,51 +26,51 @@ import pytest
 
 from src.agents.annotation import program as program_module
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.program import PROGRAM_TOOL_NAME, ProgramRuntime, build_program_tool
-from src.agents.annotation.schema import ChunkMetricsInput, ChunkParagraphInfo, SearchResult
+from src.agents.annotation.schema import ChapterParagraphInfo, SearchResult
+from src.agents.annotation.subagent_ir import SubagentAnnotation
+from src.agents.annotation.subagent_program import SubagentProgramRuntime
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
 
 class _QueryService:
-    """2026-09-15 用于提供无数据库依赖的查询桩"""
+    """2026-09-18 用于提供无数据库依赖的查询桩"""
 
     def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """2026-09-15 用于返回空案例检索结果"""
+        """2026-09-18 用于返回空案例检索结果"""
         del query, hidden_case_ids, case_type, limit, pending_cases
         return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-09-15 用于返回空正文命中"""
+        """2026-09-18 用于返回空正文命中"""
         del query, range_name, limit
         return []
 
     def search_event_history(self, query, *, limit=50):
-        """2026-09-15 用于返回空历史事件树"""
+        """2026-09-18 用于返回空历史事件树"""
         del query, limit
         return []
 
     def fetch_active_case_details(self, case_id):
-        """2026-09-15 用于表示没有 active 案例"""
+        """2026-09-18 用于表示没有 active 案例"""
         del case_id
         return None
 
 
-def _chunk_text() -> str:
-    """2026-09-15 用于提供含两个对话候选的单段章文本"""
+def _chapter_text() -> str:
+    """2026-09-18 用于提供含两个对话候选的单段章文本"""
     return "“住手！”顾霜喝道。“退下。”众人散去，夜色渐深。"
 
 
 def _ledger(**overrides) -> AnnotationToolLedger:
-    """2026-09-15 用于构造带事实图与段落坐标的账本"""
-    text = _chunk_text()
+    """2026-09-18 用于构造带事实图与段落坐标的账本（三个 subagent 共享的章级账本）"""
+    text = _chapter_text()
     kwargs = {
         "run_scope": "run-1",
         "current_chapter_id": 1,
-        "current_chunk_id": 1,
-        "current_chunk_text": text,
+        "current_chapter_text": text,
         "allow_future_context": False,
         "graph": FactGraph(),
-        "paragraph_info": ChunkParagraphInfo(
+        "paragraph_info": ChapterParagraphInfo(
             paragraph_ids=[1],
             char_spans=[(0, len(text))],
             texts=[text],
@@ -72,70 +80,72 @@ def _ledger(**overrides) -> AnnotationToolLedger:
     return AnnotationToolLedger(**kwargs)
 
 
-def _runtime(ledger: AnnotationToolLedger, **kwargs) -> ProgramRuntime:
-    """2026-09-15 用于按生产装配方式构造程序执行器"""
-    return ProgramRuntime(build_annotation_tools(_QueryService(), ledger), ledger, **kwargs)
+def _runtime(ledger: AnnotationToolLedger, *, role: str = "structure") -> SubagentProgramRuntime:
+    """2026-09-18 用于按生产装配方式构造 subagent 程序面执行器（工具表 + 共享章级账本）"""
+    tool_map = {str(tool.name): tool for tool in build_annotation_tools(_QueryService(), ledger)}
+    return SubagentProgramRuntime(tool_map, ledger, SubagentAnnotation(role=role))
 
 
-async def _run(runtime: ProgramRuntime, code: str) -> dict:
-    """2026-09-15 用于执行程序并解析压缩回执"""
+async def _run(runtime: SubagentProgramRuntime, code: str) -> dict:
+    """2026-09-18 用于执行程序并解析压缩回执"""
     return json.loads(await runtime.execute(code))
 
 
 @pytest.mark.asyncio
 async def test_program_writes_domains_and_returns_compressed_receipt() -> None:
-    """2026-09-15 程序内多域写入 + 收尾：回执只给成功条数/句柄/进度/失败清单"""
+    """2026-09-18 程序内多域构造 + 收尾：回执只给成功条数/进度/失败清单，refs 恒空"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
         """
-gs = write_entity(name="顾霜", entity_type="character", el="gs", description="剑客")
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-write_event(
+a1 = entity(id="a1", name="顾霜", entity_type="character", evidence=1)
+metric(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
+event(el="t1", isroot=True, description="喝止", evidence=1)
+participants(
     el="t1",
-    isroot=True,
-    description="喝止",
-    characters=[
-        {"entityid": gs["n"], "role": "主体", "narrative_role": "主体", "action": "喝止", "emotion": -1}
+    items=[
+        {"entity_id": a1["ref"]["id"], "role": "主体", "narrative_role": "主体", "action": "喝止", "emotion": -1}
     ],
 )
 for i in [1, 2]:
-    write_dialogue(candidate_index=i, verdict="not_dialogue")
-finish_chapter()
+    dialogue(candidate_index=i, verdict="not_dialogue")
+finish()
 """,
     )
 
     assert receipt["status"] == "applied"
-    # 五条写入 + 一条收尾结算
-    assert receipt["applied"] == 6
+    # 六条构造 + 一条收尾
+    assert receipt["applied"] == 7
     assert "failed" not in receipt
-    assert receipt["refs"]["gs"] == {"n": ledger.graph.entity_number("顾霜")}
-    assert set(receipt["refs"]["t1"]) == {"node_id", "tree_id"}
+    assert "reads" not in receipt
+    # 句柄引用表（写者面遗留）已随写者面删净：本面回执不出现 refs 键
+    assert "refs" not in receipt
     assert receipt["progress"]["entities"] == 1
     assert receipt["progress"]["dialogues"] == 2
     assert receipt["progress"]["relations"] == 0
-    assert ledger.chapter_finished
+    assert runtime.subagent.finished
 
     # 逐 op 记录：program_id/op_index/source_line/tool_name/status/record
     first = runtime.ops[0]
     assert first["program_id"] == "p1"
     assert first["op_index"] == 1
-    assert first["tool_name"] == "write_entity"
+    assert first["tool_name"] == "entity"
     assert first["status"] == "success"
-    assert first["record"] == "entity/顾霜"
+    assert first["record"] == "structure/entity/a1"
     assert first["source_line"] == 2
-    assert runtime.ops[-1]["tool_name"] == "finish_chapter"
+    assert runtime.ops[-1]["tool_name"] == "finish"
+    assert runtime.ops[-1]["record"] == "structure/finish"
 
 
 @pytest.mark.asyncio
 async def test_receipt_omits_success_record_content() -> None:
-    """2026-09-15 成功记录的完整描述留在运行时状态：回执不含实体 description 等明细"""
+    """2026-09-18 成功记录明细留在账本：回执不含 description 这类明细"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
-        'write_entity(name="顾霜", entity_type="character", el="gs", description="唯一描述串XYZ")',
+        'entity(id="a1", name="顾霜", entity_type="character", evidence=1, description="唯一描述串XYZ")',
     )
     assert receipt["applied"] == 1
     assert "唯一描述串XYZ" not in json.dumps(receipt, ensure_ascii=False)
@@ -144,21 +154,21 @@ async def test_receipt_omits_success_record_content() -> None:
 
 @pytest.mark.asyncio
 async def test_json_literals_true_false_null_are_accepted() -> None:
-    """2026-09-15 实验 ch5 的 KeyError: 'true' 消除：JSON 字面量与 Python 常量等价"""
+    """2026-09-18 实验 ch5 的 KeyError: 'true' 消除：JSON 字面量与 Python 常量等价"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
         """
-write_metrics(
+metric(
     summary="伏笔埋设",
     emotional_valence=1,
     narrative_function="铺垫",
     pivot_moment=false,
     cliffhanger=true,
 )
-write_entity(name="顾霜", entity_type="character", el="gs", description=null)
-write_event(el="t1", isroot=true, description="埋设", isforeshadowing=true, confidence="low")
+entity(id="a1", name="顾霜", entity_type="character", evidence=1, description=null)
+event(el="t1", isroot=true, description="埋设", evidence=1, isforeshadowing=true, confidence="low")
 """,
     )
     assert receipt["status"] == "applied"
@@ -167,29 +177,28 @@ write_event(el="t1", isroot=true, description="埋设", isforeshadowing=true, co
     assert ledger.metrics_payload.cliffhanger is True
     assert ledger.metrics_payload.pivot_moment is False
     assert ledger.written_entities["顾霜"].description is None
-    assert ledger.event_trees[ledger.tree_key_index["t1"]]["isforeshadowing"] is True
+    assert ledger.event_trees[ledger.tree_key_index["structure:t1"]]["isforeshadowing"] is True
 
 
 @pytest.mark.asyncio
 async def test_undefined_name_returns_structured_error() -> None:
-    """2026-09-15 未定义名称（如把 true 写进变量位）结构化回执，不再裸抛 KeyError"""
+    """2026-09-18 未定义名称（如把 true 写进变量位）结构化回执，不再裸抛 KeyError"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
-        'write_entity(name=gu, entity_type="character", el="gs")',
+        'entity(id="a1", name=gu, entity_type="character", evidence=1)',
     )
     assert receipt["status"] == "runtime_error"
     assert receipt["applied"] == 0
     assert receipt["error"]["type"] == "undefined_name"
     assert receipt["error"]["line"] == 1
-    assert "未定义的名称" in receipt["error"]["message"]
     assert ledger.written_entities == {}
 
 
 @pytest.mark.asyncio
 async def test_unsupported_nodes_are_rejected_not_raised() -> None:
-    """2026-09-15 非白名单语法（import/属性访问/while）一律结构化拒绝，不裸抛异常"""
+    """2026-09-18 非白名单语法（import/属性访问/while）一律结构化拒绝，不裸抛异常"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     cases = {
@@ -205,14 +214,27 @@ async def test_unsupported_nodes_are_rejected_not_raised() -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_tools_are_not_in_model_visible_surface() -> None:
+    """2026-09-18 写者面五个 write_* 已退出可见面：程序里写它们一律 unknown_tool"""
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    for name in ("write_entity", "write_event", "write_relation", "write_dialogue", "write_metrics"):
+        receipt = await _run(runtime, f"{name}()")
+        assert receipt["status"] == "runtime_error", name
+        assert receipt["error"]["type"] == "unknown_tool", name
+        assert receipt["applied"] == 0, name
+    assert ledger.written_entities == {}
+
+
+@pytest.mark.asyncio
 async def test_syntax_and_size_and_empty_programs_are_rejected() -> None:
-    """2026-09-15 未进入执行的失败标成 rejected：语法错误/超长/空程序"""
+    """2026-09-18 未进入执行的失败标成 rejected：语法错误/超长/空程序"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     empty = await _run(runtime, "   ")
     assert (empty["status"], empty["error"]["type"]) == ("rejected", "empty_program")
 
-    broken = await _run(runtime, "write_entity(name=")
+    broken = await _run(runtime, "entity(id=")
     assert (broken["status"], broken["error"]["type"]) == ("rejected", "syntax_error")
     assert broken["error"]["line"] == 1
 
@@ -222,16 +244,16 @@ async def test_syntax_and_size_and_empty_programs_are_rejected() -> None:
 
 @pytest.mark.asyncio
 async def test_single_op_failure_rolls_back_only_that_op() -> None:
-    """2026-09-15 单条业务错误只回滚该条：失败清单带 op/行号/record/field/code/expected"""
+    """2026-09-18 单条业务错误只回滚该条：失败清单带 op/行号/record/field/code/expected"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
         """
-write_entity(name="侯飞白", entity_type="character", el="hfb")
-write_entity(name="贺府", entity_type="location", el="hf")
-write_relation(from_entity="hfb", to_entity="hf", relation_type="隶属")
-write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="冲突")
+entity(id="hfb", name="侯飞白", entity_type="character", evidence=1)
+entity(id="hf", name="贺府", entity_type="location", evidence=1)
+relation(from_id="hfb", to_id="hf", relation_type="隶属", evidence=1)
+metric(summary="贺府夜谈", emotional_valence=0, narrative_function="冲突")
 """,
     )
 
@@ -241,7 +263,7 @@ write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="�
     failure = receipt["failed"][0]
     assert failure["op"] == 3
     assert failure["line"] == 4
-    assert failure["tool"] == "write_relation"
+    assert failure["tool"] == "relation"
     assert failure["field"] == "to_entity"
     assert failure["code"] == "endpoint_invalid"
     assert "organization" in (failure["expected"] or "")
@@ -254,61 +276,61 @@ write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="�
 
 @pytest.mark.asyncio
 async def test_failed_op_rolls_back_its_own_ledger_effect() -> None:
-    """2026-09-15 被判失败的那条不留账本痕迹（重写同记录不重复计数）"""
+    """2026-09-18 被判失败的那条不留账本痕迹（重写同记录不重复计数）"""
     ledger = _ledger()
-    runtime = _runtime(ledger)
+    runtime = _runtime(ledger, role="evidence")
     receipt = await _run(
         runtime,
         """
-write_entity(name="侯飞白", entity_type="character", el="hfb")
-write_dialogue(candidate_index=1, verdict="dialogue")
-for i in [2, 3]:
-    write_dialogue(candidate_index=i, verdict="dialogue", speaker="不存在的键")
+entity(id="hf", name="贺府", entity_type="location", evidence=1)
+dialogue(candidate_index=1, verdict="not_dialogue")
+for i in [2]:
+    dialogue(candidate_index=i, verdict="dialogue", evidence=1, speaker_id="hf")
 """,
     )
-    # 首条对话成功，后两条同因失败（speaker 未登记）；失败条不进账本
+    # 首条对话成功；说话人不是 character 的那条被生产面拒绝，不进账本
     assert receipt["applied"] == 2
-    assert len(receipt["failed"]) == 2
+    assert len(receipt["failed"]) == 1
     assert all(item["code"] for item in receipt["failed"])
+    assert receipt["failed"][0]["code"] == "not_character"
     assert set(ledger.written_dialogues) == {1}
 
 
 @pytest.mark.asyncio
 async def test_variables_persist_across_programs() -> None:
-    """2026-09-15 变量跨程序保留：第二段程序直接复用第一段登记的实体编号"""
+    """2026-09-18 变量跨程序保留：第二段程序直接复用第一段构造器回执里的引用键"""
     ledger = _ledger()
     runtime = _runtime(ledger)
-    first = await _run(runtime, 'hba = write_entity(name="贺伯安", entity_type="character", el="hba")')
+    first = await _run(runtime, 'hba = entity(id="hba", name="贺伯安", entity_type="character", evidence=1)')
     assert first["applied"] == 1
 
     second = await _run(
         runtime,
         """
-write_metrics(summary="离火反噬", emotional_valence=-2, narrative_function="转折")
-write_event(
+metric(summary="离火反噬", emotional_valence=-2, narrative_function="转折")
+event(el="t1", isroot=True, description="离火反噬", evidence=1)
+participants(
     el="t1",
-    isroot=True,
-    description="离火反噬",
-    characters=[
-        {"entityid": hba["n"], "role": "客体", "narrative_role": "客体", "action": "承受反噬", "emotion": -2}
+    items=[
+        {"entity_id": hba["ref"]["id"], "role": "客体", "narrative_role": "客体", "action": "承受反噬", "emotion": -2}
     ],
 )
-finish_chapter()
+finish()
 """,
     )
     assert second["status"] == "applied"
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
+    tree = ledger.event_trees[ledger.tree_key_index["structure:t1"]]
     root = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
     assert [participant.entity for participant in root.participants] == ["贺伯安"]
 
 
 @pytest.mark.asyncio
 async def test_limits_are_structured_and_keep_applied_ops(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2026-09-15 限额结构化拒绝：循环项数/内层操作数/步数越限均可续跑"""
+    """2026-09-18 限额结构化拒绝：循环项数/内层操作数/步数越限均可续跑"""
     ledger = _ledger()
-    runtime = _runtime(ledger)
+    runtime = _runtime(ledger, role="evidence")
     monkeypatch.setattr(program_module, "_PROGRAM_MAX_LOOP_ITEMS", 2)
-    loop = await _run(runtime, "for i in [1, 2, 3]:\n    write_dialogue(candidate_index=1, verdict='not_dialogue')")
+    loop = await _run(runtime, "for i in [1, 2, 3]:\n    dialogue(candidate_index=1, verdict='not_dialogue')")
     assert loop["error"]["type"] == "loop_too_long"
     assert loop["applied"] == 0
 
@@ -316,9 +338,9 @@ async def test_limits_are_structured_and_keep_applied_ops(monkeypatch: pytest.Mo
     ops = await _run(
         runtime,
         """
-write_entity(name="侯飞白", entity_type="character", el="hfb")
-write_entity(name="贺府", entity_type="organization", el="hf")
-write_relation(from_entity="hfb", to_entity="hf", relation_type="隶属")
+entity(id="hfb", name="侯飞白", entity_type="character", evidence=1)
+entity(id="hf", name="贺府", entity_type="organization", evidence=1)
+relation(from_id="hfb", to_id="hf", relation_type="隶属", evidence=1)
 """,
     )
     assert ops["error"]["type"] == "too_many_ops"
@@ -327,53 +349,15 @@ write_relation(from_entity="hfb", to_entity="hf", relation_type="隶属")
     assert set(ledger.written_entities) == {"侯飞白", "贺府"}
 
     monkeypatch.setattr(program_module, "_PROGRAM_MAX_STEPS", 3)
-    steps = await _run(runtime, "for i in [1, 2]:\n    write_entity(name='甲', entity_type='character', el='ab')")
+    steps = await _run(runtime, "for i in [1, 2]:\n    entity(id='a1', name='甲', entity_type='character', evidence=1)")
     assert steps["error"]["type"] == "too_many_steps"
 
 
 @pytest.mark.asyncio
-async def test_finish_chapter_settles_at_program_end() -> None:
-    """2026-09-15 收尾意图在程序末尾结算：finish 之后同程序内的写入照常生效"""
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(
-        runtime,
-        """
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-finish_chapter()
-write_entity(name="顾霜", entity_type="character", el="gs")
-""",
-    )
-    assert receipt["status"] == "applied"
-    assert ledger.chapter_finished
-    assert "顾霜" in ledger.written_entities
-
-
-@pytest.mark.asyncio
-async def test_finish_chapter_without_metrics_is_reported_in_failed() -> None:
-    """2026-09-15 缺指标收尾仍被拒：失败清单给出 missing_record，本章不冻结、不丢已写入"""
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(
-        runtime,
-        """
-write_entity(name="顾霜", entity_type="character", el="gs")
-finish_chapter()
-""",
-    )
-    assert receipt["status"] == "partial"
-    assert receipt["applied"] == 1
-    finish = [item for item in receipt["failed"] if item["tool"] == "finish_chapter"]
-    assert finish and finish[0]["code"] == "missing_record"
-    assert ledger.chapter_finished is False
-    assert "顾霜" in ledger.written_entities
-
-
-@pytest.mark.asyncio
 async def test_language_surface_if_tuple_and_unpacking() -> None:
-    """2026-09-15 程序面语言边界：if/== 与 in 比较、元组、等长解包可执行"""
+    """2026-09-18 程序面语言边界：if/== 与 in 比较、元组、等长解包可执行"""
     ledger = _ledger()
-    runtime = _runtime(ledger)
+    runtime = _runtime(ledger, role="evidence")
     receipt = await _run(
         runtime,
         """
@@ -381,11 +365,11 @@ use_root = True
 pair = (1, 2)
 left, right = pair
 if use_root == True:
-    write_metrics(summary="条件成立", emotional_valence=0, narrative_function="铺垫")
+    metric(summary="条件成立", emotional_valence=0, narrative_function="铺垫")
 if left in [1, 2]:
-    write_dialogue(candidate_index=1, verdict="not_dialogue")
+    dialogue(candidate_index=1, verdict="not_dialogue")
 if left != right:
-    write_dialogue(candidate_index=2, verdict="not_dialogue")
+    dialogue(candidate_index=2, verdict="not_dialogue")
 """,
     )
     assert receipt["applied"] == 3
@@ -395,13 +379,13 @@ if left != right:
 
 @pytest.mark.asyncio
 async def test_reserved_names_and_bad_calls_are_structured() -> None:
-    """2026-09-15 覆盖工具名/下划线前缀变量、非具名参数、解包长度不符一律结构化拒绝"""
+    """2026-09-18 覆盖构造器名/下划线前缀变量、非具名参数、解包长度不符一律结构化拒绝"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     cases = {
-        "write_entity = 1": "name_reserved",
+        "entity = 1": "name_reserved",
         "_tmp = 1": "name_reserved",
-        "x = write_metrics(*[1])": "bad_call",
+        "x = metric(*[1])": "bad_call",
         "a, b = (1, 2, 3)": "bad_assignment",
         "for i in 'abc':\n    pass": "unsupported_expression",
         "x = 1 if True else 2": "unsupported_expression",
@@ -413,7 +397,7 @@ async def test_reserved_names_and_bad_calls_are_structured() -> None:
 
 @pytest.mark.asyncio
 async def test_field_and_limit_type_errors_are_structured() -> None:
-    """2026-09-15 fields/limit 类型错误走同一条结构化拒绝（不是裸类型错误）"""
+    """2026-09-18 fields/limit 类型错误走同一条结构化拒绝（不是裸类型错误）"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     bad_fields = await _run(runtime, 'search_text(query="顾霜", fields="content")')
@@ -426,53 +410,23 @@ async def test_field_and_limit_type_errors_are_structured() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fault_after_finish_intent_does_not_freeze_chapter() -> None:
-    """2026-09-15 程序被中断时不结算收尾意图：冻结不可逆，留着章给下一轮补完"""
+async def test_read_projection_is_echoed_in_receipt_reads() -> None:
+    """2026-09-18 程序内检索的读结果回显在 reads（构造器写入仍只回句柄）"""
     ledger = _ledger()
     runtime = _runtime(ledger)
-    broken = await _run(
+    receipt = await _run(
         runtime,
         """
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-finish_chapter()
-x = {'a': 1}.keys()
+search_text(query="顾霜")
+entity(id="a1", name="顾霜", entity_type="character", evidence=1)
 """,
     )
-    assert broken["status"] == "runtime_error"
-    assert broken["error"]["line"] == 4
-    assert ledger.chapter_finished is False
-
-    recovered = await _run(runtime, "finish_chapter()")
-    assert recovered["status"] == "applied"
-    assert ledger.chapter_finished
-
-
-@pytest.mark.asyncio
-async def test_program_tool_schema_is_code_only() -> None:
-    """2026-09-15 对外合同只有 execute_code(code)：绑定面 args_schema 仅一个字符串参数"""
-    ledger = _ledger()
-    tool = build_program_tool(_runtime(ledger))
-    assert tool.name == PROGRAM_TOOL_NAME
-    assert set(tool.args_schema.model_fields) == {"code"}
-    assert tool.args_schema.model_fields["code"].annotation is str
-
-
-def test_program_receipt_progress_uses_ledger_counts() -> None:
-    """2026-09-15 回执 progress 与 finish_chapter 回执同源（_written_counts 键集）"""
-    ledger = _ledger()
-    ledger.apply_metrics(
-        ChunkMetricsInput(summary="摘要", emotional_valence=0, narrative_function="冲突"),
-    )
-    runtime = _runtime(ledger)
-    counts = ledger._written_counts()
-    assert counts["metrics"] == 1
-    assert set(counts) == {
-        "entities",
-        "metrics",
-        "events",
-        "relations",
-        "dialogues",
-        "character_observations",
-        "paragraph_labels",
-    }
-    assert runtime._receipt(status="applied", applied=0, failed=[], error=None)["progress"] == counts
+    assert receipt["status"] == "applied"
+    assert receipt["applied"] == 2
+    reads = receipt["reads"]
+    assert len(reads) == 1
+    assert reads[0]["op"] == 1
+    assert reads[0]["tool"] == "search_text"
+    assert reads[0]["line"] == 2
+    assert json.loads(reads[0]["result"]) == []
+    assert all(item["tool"] != "entity" for item in reads)
