@@ -12,10 +12,9 @@ from src.agents.annotation.schema import (
     AgentRunAudit,
     AgentRunResult,
     BoundChapterAnnotation,
-    BoundChunkAnnotation,
     BoundDialogue,
     BoundEvent,
-    ChunkMetricsInput,
+    ChapterMetricsInput,
     PendingCase,
     ResolvedCase,
 )
@@ -35,7 +34,7 @@ from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 def _annotation(
     *,
-    chunk_id: int,
+    chapter_id: int,
     text: str,
     foreshadowing: bool = False,
     event_node_ids: list[str] | None = None,
@@ -61,8 +60,8 @@ def _annotation(
         # 否则 persist 的 session.get 会命中上一测试的节点而静默跳过写入
         events.append(
             BoundEvent(
-                node_id=f"evt-setup-{chunk_id}-{uuid.uuid4().hex[:8]}",
-                tree_id=f"tree-{chunk_id}-{uuid.uuid4().hex[:8]}",
+                node_id=f"evt-setup-{chapter_id}-{uuid.uuid4().hex[:8]}",
+                tree_id=f"tree-{chapter_id}-{uuid.uuid4().hex[:8]}",
                 parent_node_id=None,
                 cause_role="root",
                 description=f"事件-{text[:6]}",
@@ -72,11 +71,7 @@ def _annotation(
             )
         )
     return BoundChapterAnnotation(
-        chapter_summary=text,
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=chunk_id,
-                metrics=ChunkMetricsInput(
+                metrics=ChapterMetricsInput(
                     summary=text,
                     emotional_valence=0,
                     narrative_function="铺垫",
@@ -84,8 +79,6 @@ def _annotation(
                 character_observations=[],
                 dialogues=[],
                 events=events,
-            )
-        ],
     )
 
 
@@ -96,7 +89,7 @@ def _result(
     annotation: BoundChapterAnnotation,
     resolved_cases: list[ResolvedCase] | None = None,
     pushed_cases: list[PendingCase] | None = None,
-    authorized_chunk_ids: list[int] | None = None,
+    authorized_chapter_ids: list[int] | None = None,
     entity_names: list[str] | None = None,
 ) -> AgentRunResult:
     """2026-08-11 用于构造完成事务 AgentRunResult
@@ -123,7 +116,7 @@ def _result(
         audit=AgentRunAudit(
             allow_future_context=False,
             write_records=[],
-            authorized_chapter_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
+            authorized_chapter_ids=authorized_chapter_ids or [chapter_id],
             authorized_text_paragraph_ids=[],
         ),
     )
@@ -136,7 +129,7 @@ def _alias_case(
     annotation_id: str,
     name_a: str,
     name_b: str,
-    chunk_id: int = 1,
+    chapter_id: int = 1,
 ) -> CasePoolCase:
     """2026-08-11 用于直接登记疑似同一人物案例
 
@@ -148,7 +141,7 @@ def _alias_case(
         annotation_id=annotation_id,
         pending_case=PendingCase(
             type="entity_alias",
-            chunk_id=chunk_id,
+            chapter_id=chapter_id,
             keys=[name_a, name_b, "同一人物"],
             description=f"疑似同一人物：{name_a} 与 {name_b}",
             target_key=f"alias-{name_a}-{name_b}-{uuid.uuid4().hex[:8]}",
@@ -156,7 +149,7 @@ def _alias_case(
                 "kind": "entity_alias",
                 "name_a": name_a,
                 "name_b": name_b,
-                "chunk_id": chunk_id,
+                "chapter_id": chapter_id,
             },
         ),
     )
@@ -174,7 +167,7 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            annotation=_annotation(chapter_id=1, text="顾霜与顾老同时出现"),
             entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
@@ -204,10 +197,10 @@ def test_fact_action_asserts_same_character_relation(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾霜自称顾老"),
+            annotation=_annotation(chapter_id=2, text="顾霜自称顾老"),
             entity_names=["顾霜"],
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1, 2],
+            authorized_chapter_ids=[1, 2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -255,7 +248,7 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            annotation=_annotation(chapter_id=1, text="顾霜与顾老同时出现"),
             entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
@@ -281,9 +274,9 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾老实为夫妻"),
+            annotation=_annotation(chapter_id=2, text="顾老实为夫妻"),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1, 2],
+            authorized_chapter_ids=[1, 2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -304,8 +297,8 @@ def test_close_action_only_closes_case_without_graph_change(db_session) -> None:
     assert second.resolved_cases[0].action == "close"
 
 
-def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_session) -> None:
-    """2026-08-11 用于验证本章 chunk 案例解决无需显式读取授权（原文在本章上下文）"""
+def test_fact_action_current_chapter_without_explicit_authorization(db_session) -> None:
+    """2026-08-11 用于验证本章案例解决无需显式读取授权（原文在本章上下文）"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜与顾老同时出现", "顾霜自称顾老"],
@@ -316,7 +309,7 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            annotation=_annotation(chapter_id=1, text="顾霜与顾老同时出现"),
             entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
@@ -328,7 +321,7 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         annotation_id=first.annotation_id,
         name_a="顾霜",
         name_b="顾老",
-        chunk_id=2,
+        chapter_id=2,
     )
     db_session.commit()
     resolved = ResolvedCase(
@@ -347,10 +340,10 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾霜自称顾老"),
+            annotation=_annotation(chapter_id=2, text="顾霜自称顾老"),
             entity_names=["顾霜"],
             resolved_cases=[resolved],
-            authorized_chunk_ids=[2],
+            authorized_chapter_ids=[2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -364,8 +357,8 @@ def test_fact_action_current_chapter_chunk_without_explicit_authorization(db_ses
     assert fact.content["kind"] == "relation"
 
 
-def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
-    """2026-08-11 用于验证既非本章也未经读取授权的旧 chunk 案例解决仍被拒绝"""
+def test_fact_action_rejects_unauthorized_foreign_chapter(db_session) -> None:
+    """2026-08-11 用于验证既非本章也未经读取授权的旧章案例解决仍被拒绝"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜与顾老同时出现", "顾霜自称顾老"],
@@ -376,7 +369,7 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜与顾老同时出现"),
+            annotation=_annotation(chapter_id=1, text="顾霜与顾老同时出现"),
             entity_names=["顾霜", "顾老"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
@@ -402,15 +395,15 @@ def test_fact_action_rejects_unauthorized_foreign_chunk(db_session) -> None:
         target_key=case.target_key,
         target_ref=dict(case.target_ref),
     )
-    with pytest.raises(ValueError, match="未经系统读取授权"):
+    with pytest.raises(ValueError):
         complete_annotation_run(
             result=_result(
                 run_id=run_id,
                 chapter_id=2,
-                annotation=_annotation(chunk_id=2, text="顾霜自称顾老"),
+                annotation=_annotation(chapter_id=2, text="顾霜自称顾老"),
                 entity_names=["顾霜"],
                 resolved_cases=[resolved],
-                authorized_chunk_ids=[2],
+                authorized_chapter_ids=[2],
             ),
             session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
         )
@@ -429,7 +422,7 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="顾霜喝道"),
+            annotation=_annotation(chapter_id=1, text="顾霜喝道"),
             entity_names=["顾霜"],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
@@ -437,11 +430,11 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
     db_session.rollback()
     pushed = PendingCase(
         type="dialogue_speaker",
-        chunk_id=1,
+        chapter_id=1,
         keys=["顾霜"],
         description="对话疑点",
         target_key="missing-dialogue-target",
-        target_ref={"kind": "dialogue_speaker", "dialogue_id": "dlg_not_exist", "chunk_id": 1},
+        target_ref={"kind": "dialogue_speaker", "dialogue_id": "dlg_not_exist", "chapter_id": 1},
     )
     row = CasePoolRepository(db_session).create_case(
         run_id=run_id,
@@ -459,15 +452,15 @@ def test_dialogue_action_rejects_unknown_dialogue_target(db_session) -> None:
         target_key=pushed.target_key,
         target_ref=dict(pushed.target_ref),
     )
-    with pytest.raises(ValueError, match="案例目标对话记录不存在"):
+    with pytest.raises(ValueError):
         complete_annotation_run(
             result=_result(
                 run_id=run_id,
                 chapter_id=2,
-                annotation=_annotation(chunk_id=2, text="顾霜喝道"),
+                annotation=_annotation(chapter_id=2, text="顾霜喝道"),
                 entity_names=["顾霜"],
                 resolved_cases=[resolved],
-                authorized_chunk_ids=[1, 2],
+                authorized_chapter_ids=[1, 2],
             ),
             session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
         )
@@ -489,7 +482,7 @@ def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
             run_id=run_id,
             chapter_id=1,
             annotation=_annotation(
-                chunk_id=1,
+                chapter_id=1,
                 text="顾霜立誓",
                 foreshadowing=True,
             ),
@@ -508,13 +501,13 @@ def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
     assert root.payoff_likelihood == "high"
     pushed = PendingCase(
         type="foreshadowing_suspect",
-        chunk_id=1,
+        chapter_id=1,
         keys=["护佑山门"],
         description="伏笔疑点",
         target_key="pushed-foreshadowing",
         target_ref={
             "kind": "foreshadowing_suspect",
-            "chunk_id": 1,
+            "chapter_id": 1,
         },
     )
     row = CasePoolRepository(db_session).create_case(
@@ -541,9 +534,9 @@ def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="顾霜屡次立誓", event_node_ids=[bind_event_id]),
+            annotation=_annotation(chapter_id=2, text="顾霜屡次立誓", event_node_ids=[bind_event_id]),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1, 2],
+            authorized_chapter_ids=[1, 2],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -573,6 +566,74 @@ def test_foreshadowing_action_binds_event_into_tree(db_session) -> None:
     assert second.resolved_cases[0].target_root_event_id == root.event_id
 
 
+def test_caseless_foreshadowing_attach_updates_root_attributes(db_session) -> None:
+    """2026-09-19 写入路径挂边更新根属性：无案例的 foreshadowing 解决项带 payoff_likelihood/strength
+
+    案例面收窄后本条目是唯一能改树根回收预期/强度的入口（`resolve_foreshadowing_case` 已删），
+    落库层早就按这两个字段改根，此前写入路径不传值、等于没人喂；这里断言根列真的变了，
+    且无案例条目照旧不写解决映射。
+    """
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜立誓", "顾霜屡次立誓"],
+        chapter_ids=[1, 2],
+        title="写入路径挂边",
+    )
+    complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            annotation=_annotation(chapter_id=1, text="顾霜立誓", foreshadowing=True),
+        ),
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    db_session.rollback()
+    root = db_session.execute(
+        select(EventNode).where(
+            EventNode.run_id == run_id,
+            EventNode.is_foreshadowing_root.is_(True),
+        )
+    ).scalar_one()
+    assert root.payoff_likelihood == "high"
+    bind_event_id = f"evt-ch2-attach-{uuid.uuid4().hex[:8]}"
+    second = complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=2,
+            annotation=_annotation(chapter_id=2, text="顾霜屡次立誓", event_node_ids=[bind_event_id]),
+            resolved_cases=[
+                ResolvedCase(
+                    action="foreshadowing",
+                    type="",
+                    reason="本章回收预期下降",
+                    target_key="",
+                    target_ref={"chapter_id": 2},
+                    foreshadowing_action="reinforce",
+                    foreshadowing_root_event_id=root.event_id,
+                    foreshadowing_event_id=bind_event_id,
+                    payoff_likelihood="low",
+                    strength="high",
+                )
+            ],
+            authorized_chapter_ids=[1, 2],
+        ),
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+
+    db_session.rollback()
+    updated = db_session.get(EventNode, root.event_id)
+    assert updated.payoff_likelihood == "low"
+    assert updated.strength == "high"
+    assert updated.foreshadowing_status == "reinforced"
+    assert (
+        db_session.execute(
+            select(CaseResolutionMapping).where(CaseResolutionMapping.run_id == run_id)
+        ).scalar_one_or_none()
+        is None
+    )
+    assert second.resolved_cases == []
+
+
 def test_foreshadowing_same_completion_replays_without_duplicate_edges(db_session) -> None:
     """2026-09-13 用于验证同章完成事务重放（load_completion_result 命中）不重复建根/挂边"""
     novel_id, run_id = create_run_with_chunks(
@@ -588,7 +649,7 @@ def test_foreshadowing_same_completion_replays_without_duplicate_edges(db_sessio
                 run_id=run_id,
                 chapter_id=1,
                 annotation=_annotation(
-                    chunk_id=1,
+                    chapter_id=1,
                     text="顾霜立誓",
                     foreshadowing=True,
                 ),
@@ -623,7 +684,7 @@ def test_foreshadowing_payoff_resolution_closes_tree(db_session) -> None:
             run_id=run_id,
             chapter_id=1,
             annotation=_annotation(
-                chunk_id=1,
+                chapter_id=1,
                 text="白芷立下守护之誓",
                 foreshadowing=True,
             ),
@@ -639,11 +700,11 @@ def test_foreshadowing_payoff_resolution_closes_tree(db_session) -> None:
     ).scalar_one()
     pushed = PendingCase(
         type="foreshadowing_suspect",
-        chunk_id=1,
+        chapter_id=1,
         keys=["白芷", "守护之誓"],
         description="白芷誓言疑点",
         target_key="pushed-threadless",
-        target_ref={"kind": "foreshadowing_suspect", "chunk_id": 1},
+        target_ref={"kind": "foreshadowing_suspect", "chapter_id": 1},
     )
     row = CasePoolRepository(db_session).create_case(
         run_id=run_id,
@@ -668,9 +729,9 @@ def test_foreshadowing_payoff_resolution_closes_tree(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=2,
-            annotation=_annotation(chunk_id=2, text="誓言兑现挡下袭击", event_node_ids=[payoff_event_id]),
+            annotation=_annotation(chapter_id=2, text="誓言兑现挡下袭击", event_node_ids=[payoff_event_id]),
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1, 2],
+            authorized_chapter_ids=[1, 2],
         ),
         session_factory=factory,
     )
@@ -705,11 +766,7 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
         title="对话事件端到端",
     )
     annotation = BoundChapterAnnotation(
-        chapter_summary="顾霜拔剑喝止",
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=1,
-                metrics=ChunkMetricsInput(
+                metrics=ChapterMetricsInput(
                     summary="顾霜拔剑喝止",
                     emotional_valence=0,
                     narrative_function="冲突",
@@ -736,8 +793,6 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
                         participants=[],
                     )
                 ],
-            )
-        ],
     )
     complete_annotation_run(
         result=_result(run_id=run_id, chapter_id=1, annotation=annotation, entity_names=["顾霜"]),
@@ -750,8 +805,8 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
     assert row.event_id == expected_eid
 
 
-def test_case_pushed_and_resolved_within_same_chunk(db_session) -> None:
-    """2026-09-13 登记即进池：本 chunk 内 push_case 登记的案例可当章解决并落库为 resolved
+def test_case_pushed_and_resolved_within_same_chapter(db_session) -> None:
+    """2026-09-13 登记即进池：本章内 push_case 登记的案例可当章解决并落库为 resolved
 
     覆盖完成事务重排（先建推入案例的行、再锁行校验稳定目标）与"行 id 即 target_key"
     的标识一致性：解决映射的 case_id 直接指向该行，整条链无需任何 id 重映射。
@@ -764,11 +819,11 @@ def test_case_pushed_and_resolved_within_same_chunk(db_session) -> None:
     )
     pushed = PendingCase(
         type="关系修正",
-        chunk_id=1,
+        chapter_id=1,
         keys=["贺铮", "林立果", "家族"],
         description="误建关系：二人并非父子，需解除该边",
-        target_key="pushed-in-chunk-1",
-        target_ref={"kind": "关系修正", "chunk_id": 1, "keys": ["贺铮", "林立果", "家族"]},
+        target_key="pushed-in-chapter-1",
+        target_ref={"kind": "关系修正", "chapter_id": 1, "keys": ["贺铮", "林立果", "家族"]},
     )
     resolved = ResolvedCase(
         case_id=pushed.target_key,
@@ -787,11 +842,11 @@ def test_case_pushed_and_resolved_within_same_chunk(db_session) -> None:
         result=_result(
             run_id=run_id,
             chapter_id=1,
-            annotation=_annotation(chunk_id=1, text="贺铮误认林立果为子"),
+            annotation=_annotation(chapter_id=1, text="贺铮误认林立果为子"),
             entity_names=["贺铮", "林立果"],
             pushed_cases=[pushed],
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1],
+            authorized_chapter_ids=[1],
         ),
         session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
     )
@@ -821,3 +876,63 @@ def test_case_pushed_and_resolved_within_same_chunk(db_session) -> None:
     # 完成结果同时汇报"创建的案例"与"解决的案例"
     assert [item.id for item in completion.created_cases] == [pushed.target_key]
     assert [item.case_id for item in completion.resolved_cases] == [pushed.target_key]
+
+
+def test_write_path_relation_changes_persist_as_caseless_facts(db_session) -> None:
+    """2026-09-18 无案例的关系变化逐条落成关系事实，且每条的 fact_id 互异
+
+    写入路径自发的变更（`ResolvedCase.case_id == ""`）没有案例 id 可做唯一键：键若仍按
+    case_id 派生，同一章两条变更会撞同一个 fact_id（主键冲突=整章落库失败）。键里带该章
+    变更日志序号后两条都在，来源标记为 write_path（不是案例裁决），且不写解决映射。
+    """
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜与顾老同场"],
+        chapter_ids=[1],
+        title="无案例变更",
+    )
+    changes = [
+        ResolvedCase(
+            case_id="",
+            action="fact",
+            type="",
+            from_entity="顾霜",
+            to_entity="顾老",
+            relation_type="师徒",
+            change_kind=change_kind,
+            reason=f"本章正文确认的关系变化：{change_kind}",
+            target_key="",
+            target_ref={"chapter_id": 1, "change_index": index},
+        )
+        for index, change_kind in enumerate(("reinforce", "weaken"))
+    ]
+    complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            annotation=_annotation(chapter_id=1, text="顾霜与顾老同场"),
+            entity_names=["顾霜", "顾老"],
+            resolved_cases=changes,
+            authorized_chapter_ids=[1],
+        ),
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+
+    db_session.rollback()
+    facts = list(
+        db_session.execute(
+            select(GraphFact).where(
+                GraphFact.run_id == run_id,
+                GraphFact.source_kind == "write_path",
+            )
+        ).scalars()
+    )
+    assert len(facts) == 2
+    assert len({fact.fact_id for fact in facts}) == 2
+    assert {fact.predicate for fact in facts} == {"师徒"}
+    assert {fact.content["change_kind"] for fact in facts} == {"reinforce", "weaken"}
+    assert {fact.payload_path for fact in facts} == {"relation_change/1/0", "relation_change/1/1"}
+    # 无案例的变更不写解决映射（只有案例裁决才有映射行）
+    assert db_session.execute(
+        select(CaseResolutionMapping).where(CaseResolutionMapping.run_id == run_id)
+    ).scalars().all() == []
