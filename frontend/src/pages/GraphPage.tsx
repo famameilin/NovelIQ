@@ -166,7 +166,7 @@ export function GraphPage() {
     if (!selectedNode || !graphData) return [];
 
     const related: GraphRelatedEntity[] = [];
-    const nodeMap = new Map<number, GraphNode>();
+    const nodeMap = new Map<string, GraphNode>();
     graphData.nodes.forEach((node) => {
       nodeMap.set(node.entity_id, node);
     });

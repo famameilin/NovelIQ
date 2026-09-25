@@ -56,8 +56,8 @@ function createEventNode(overrides?: Partial<TimelineEventNode>): TimelineEventN
     char_start: 0,
     char_end: 1200,
     participants: [
-      { name: "萧炎", role: "protagonist", entity_id: 1, entity_type: "character" },
-      { name: "药老", role: "supporting", entity_id: 2, entity_type: "character" },
+      { name: "萧炎", role: "protagonist", entity_id: "1", entity_type: "character" },
+      { name: "药老", role: "supporting", entity_id: "2", entity_type: "character" },
     ],
     character_names: ["萧炎", "药老"],
     importance_score: 8.2,

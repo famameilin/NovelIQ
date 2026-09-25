@@ -68,22 +68,22 @@ function buildGraphChangesPageInfo(total: number, start: number, limit: number):
 const MOCK_TIMELINE_TOTAL_CHUNKS = 120;
 
 const MOCK_GRAPH_CHARACTERS = [
-  { entity_id: 1, name: "萧炎", role: "protagonist", first_seen_chapter: 1, last_seen_chapter: 118 },
-  { entity_id: 2, name: "药老", role: "main", first_seen_chapter: 4, last_seen_chapter: 115 },
-  { entity_id: 3, name: "纳兰嫣然", role: "main", first_seen_chapter: 9, last_seen_chapter: 100 },
-  { entity_id: 4, name: "美杜莎", role: "supporting", first_seen_chapter: 28, last_seen_chapter: 110 },
-  { entity_id: 5, name: "云韵", role: "supporting", first_seen_chapter: 40, last_seen_chapter: 95 },
-  { entity_id: 6, name: "小医仙", role: "supporting", first_seen_chapter: 48, last_seen_chapter: 108 },
-  { entity_id: 7, name: "薰儿", role: "main", first_seen_chapter: 15, last_seen_chapter: 120 },
-  { entity_id: 8, name: "海波东", role: "supporting", first_seen_chapter: 36, last_seen_chapter: 112 },
+  { entity_id: "1", name: "萧炎", role: "protagonist", first_seen_chapter: 1, last_seen_chapter: 118 },
+  { entity_id: "2", name: "药老", role: "main", first_seen_chapter: 4, last_seen_chapter: 115 },
+  { entity_id: "3", name: "纳兰嫣然", role: "main", first_seen_chapter: 9, last_seen_chapter: 100 },
+  { entity_id: "4", name: "美杜莎", role: "supporting", first_seen_chapter: 28, last_seen_chapter: 110 },
+  { entity_id: "5", name: "云韵", role: "supporting", first_seen_chapter: 40, last_seen_chapter: 95 },
+  { entity_id: "6", name: "小医仙", role: "supporting", first_seen_chapter: 48, last_seen_chapter: 108 },
+  { entity_id: "7", name: "薰儿", role: "main", first_seen_chapter: 15, last_seen_chapter: 120 },
+  { entity_id: "8", name: "海波东", role: "supporting", first_seen_chapter: 36, last_seen_chapter: 112 },
 ] as const;
 
 const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:101:fact-12:1",
     chapter_id: 12,
-    from_entity_id: 1,
-    to_entity_id: 2,
+    from_entity_id: "1",
+    to_entity_id: "2",
     from_name: "萧炎",
     to_name: "药老",
     relation_type: "师徒",
@@ -95,8 +95,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:102:fact-24:1",
     chapter_id: 24,
-    from_entity_id: 1,
-    to_entity_id: 3,
+    from_entity_id: "1",
+    to_entity_id: "3",
     from_name: "萧炎",
     to_name: "纳兰嫣然",
     relation_type: "敌对",
@@ -108,8 +108,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:103:fact-39:1",
     chapter_id: 39,
-    from_entity_id: 1,
-    to_entity_id: 8,
+    from_entity_id: "1",
+    to_entity_id: "8",
     from_name: "萧炎",
     to_name: "海波东",
     relation_type: "盟友",
@@ -121,8 +121,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:104:fact-56:1",
     chapter_id: 56,
-    from_entity_id: 1,
-    to_entity_id: 4,
+    from_entity_id: "1",
+    to_entity_id: "4",
     from_name: "萧炎",
     to_name: "美杜莎",
     relation_type: "盟友",
@@ -134,8 +134,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:105:fact-72:1",
     chapter_id: 72,
-    from_entity_id: 1,
-    to_entity_id: 7,
+    from_entity_id: "1",
+    to_entity_id: "7",
     from_name: "萧炎",
     to_name: "薰儿",
     relation_type: "爱慕",
@@ -147,8 +147,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:106:fact-90:1",
     chapter_id: 90,
-    from_entity_id: 1,
-    to_entity_id: 5,
+    from_entity_id: "1",
+    to_entity_id: "5",
     from_name: "萧炎",
     to_name: "云韵",
     relation_type: "盟友",
@@ -160,8 +160,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:107:fact-104:1",
     chapter_id: 104,
-    from_entity_id: 1,
-    to_entity_id: 6,
+    from_entity_id: "1",
+    to_entity_id: "6",
     from_name: "萧炎",
     to_name: "小医仙",
     relation_type: "盟友",
@@ -173,8 +173,8 @@ const MOCK_GRAPH_RELATION_CHANGES = [
   {
     change_id: "relation:108:fact-116:1",
     chapter_id: 116,
-    from_entity_id: 1,
-    to_entity_id: 3,
+    from_entity_id: "1",
+    to_entity_id: "3",
     from_name: "萧炎",
     to_name: "纳兰嫣然",
     relation_type: "敌对",
@@ -534,13 +534,13 @@ export function createGraph(): GraphData {
   }));
 
   const edges = [
-    { source: 1, target: 2, relation_type: "师徒" },
-    { source: 1, target: 3, relation_type: "敌对" },
-    { source: 1, target: 4, relation_type: "盟友" },
-    { source: 1, target: 5, relation_type: "盟友" },
-    { source: 1, target: 6, relation_type: "盟友" },
-    { source: 1, target: 7, relation_type: "爱慕" },
-    { source: 2, target: 8, relation_type: "盟友" },
+    { source: "1", target: "2", relation_type: "师徒" },
+    { source: "1", target: "3", relation_type: "敌对" },
+    { source: "1", target: "4", relation_type: "盟友" },
+    { source: "1", target: "5", relation_type: "盟友" },
+    { source: "1", target: "6", relation_type: "盟友" },
+    { source: "1", target: "7", relation_type: "爱慕" },
+    { source: "2", target: "8", relation_type: "盟友" },
   ].map((edge, index) => ({
     relation_id: `relation-${index + 1}`,
     state_chapter_id: 12,
@@ -698,7 +698,7 @@ export function createEventTimeline(): EventTimelineResponse {
     const participants = charSet.slice(0, 2 + Math.floor(Math.random() * 2)).map((name, idx) => ({
       name,
       role: idx === 0 ? "protagonist" : idx === 1 ? "supporting" : "observer",
-      entity_id: 100 + t * 10 + idx,
+      entity_id: String(100 + t * 10 + idx),
       entity_type: "character" as const,
     }));
     const character_names = participants.map((p) => p.name);
