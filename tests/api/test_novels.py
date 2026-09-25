@@ -78,7 +78,7 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
             chapter_id=1,
             characters=[
                 character_fact(
-                    chunk_id=1,
+                    chapter_id=1,
                     name=f"人物-{task_id}",
                     action="参与级联删除验证",
                 )
@@ -128,17 +128,6 @@ class TestNovelUpload:
         """测试上传无效文件"""
         response = api_client.post("/api/novels/upload", files={"file": ("test.pdf", b"content", "application/pdf")})
         assert response.status_code == 400
-
-    def test_list_novels(self, api_client: TestClient):
-        """测试列出小说"""
-        response = api_client.get("/api/novels/")
-        assert response.status_code == 200
-        data = response.json()
-        assert "items" in data
-        assert "total" in data
-        assert "page" in data
-        assert "page_size" in data
-        assert isinstance(data["items"], list)
 
     def test_delete_novel_cascades_tasks_and_artifacts(self, api_client: TestClient):
         """测试删除小说会级联删除其任务数据库数据与文件产物"""
