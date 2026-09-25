@@ -17,6 +17,7 @@ from src.storage.models import (
     DialogueRecord,
     EventEdge,
     EventNode,
+    GraphEntity,
     GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
@@ -197,18 +198,17 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         rows: list[ChapterAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
             annotation = BoundChapterAnnotation.model_validate(record.payload)
-            for chunk in annotation.chunks:
-                rows.append(
-                    ChapterAnnotationRow(
-                        chapter_id=chunk.chunk_id,
-                        emotional_valence=chunk.metrics.emotional_valence,
-                        event_type=chunk.metrics.narrative_function,
-                        pivot_moment=chunk.metrics.pivot_moment,
-                        cliffhanger=chunk.metrics.cliffhanger,
-                        coverage_warnings=list(chunk.coverage_warnings),
-                        **foreshadowing_by_chapter.get(chunk.chunk_id, {}),
-                    )
+            rows.append(
+                ChapterAnnotationRow(
+                    chapter_id=record.chapter_id,
+                    emotional_valence=annotation.metrics.emotional_valence,
+                    event_type=annotation.metrics.narrative_function,
+                    pivot_moment=annotation.metrics.pivot_moment,
+                    cliffhanger=annotation.metrics.cliffhanger,
+                    coverage_warnings=list(annotation.coverage_warnings),
+                    **foreshadowing_by_chapter.get(record.chapter_id, {}),
                 )
+            )
         sequence_map = self._chapter_sequence_map(run_id)
         return sorted(rows, key=lambda row: (sequence_map.get(row.chapter_id, row.chapter_id), row.chapter_id))
 
@@ -256,7 +256,12 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         )
 
     def fetch_chapter_dialogues_full(self, run_id: str) -> list[DialogueFactRow]:
-        """2026-08-11 用于从对话记录表展开 章节对话记录"""
+        """2026-08-11 用于从对话记录表展开 章节对话记录
+
+        2026-09-17 说话人存图实体 id：这里按 id 取实体名（不再按名字形态判断是否存在），
+        并保留两道过滤——实体必须是 character、名字必须是可作全局角色名的形态
+        （代词/泛指/引用位名不算说话人）。
+        """
         rows: list[DialogueFactRow] = []
         statement = (
             select(DialogueRecord)
@@ -267,9 +272,21 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             .where(DialogueRecord.run_id == run_id)
             .order_by(Chapter.sequence, DialogueRecord.chapter_id, DialogueRecord.start)
         )
+        entities_by_id = {
+            str(entity.entity_id): entity
+            for entity in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
+        }
         for record in self.session.execute(statement).scalars().all():
-            speaker_name = str(record.speaker or "").strip()
-            valid_speaker = speaker_name if is_global_character_surface_name(speaker_name) else None
+            speaker_entity = entities_by_id.get(str(record.speaker)) if record.speaker is not None else None
+            valid_speaker: str | None = None
+            if speaker_entity is not None:
+                speaker_name = str(speaker_entity.canonical_name).strip()
+                if (
+                    speaker_name
+                    and str(speaker_entity.entity_type) == "character"
+                    and is_global_character_surface_name(speaker_name)
+                ):
+                    valid_speaker = speaker_name
             speaker_names = [valid_speaker] if valid_speaker else []
             speaker_references = (
                 [

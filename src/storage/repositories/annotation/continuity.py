@@ -8,6 +8,7 @@ import unicodedata
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import String, cast, or_, select, text
@@ -40,6 +41,7 @@ from src.storage.models import (
     GraphFact,
 )
 from src.storage.repositories.base import BaseRepository
+from src.storage.repositories.graph.persistence import resolve_character_entity, run_entities_by_name
 from src.text_search import TextSearchService, extract_query_terms
 from src.utils.text_utils import like_pattern, term_matches
 
@@ -63,7 +65,7 @@ def _match_event_anchor(
     """2026-08-18 用于按字符区间包含为对话弱关联事件锚点
 
     只有恰好一个事件完全包住 [start, end) 时才返回事件 ID；
-    无匹配或多匹配均返回 None。同一坐标系（chunk 文本内偏移）。
+    无匹配或多匹配均返回 None。同一坐标系（章正文内偏移）。
     """
     candidates = [
         (event_id, a_start, a_end) for event_id, a_start, a_end in anchors if a_start <= start and end <= a_end
@@ -79,8 +81,8 @@ def _case_view(row: CasePoolCase) -> CaseSearchResult:
         {
             "id": row.id,
             "type": row.case_type,
-            # M9a-2：运行时 CaseSearchResult 保留 chunk_id 字段（值即章 chunk_id）
-            "chunk_id": row.chapter_id,
+            # M9a-2：运行时 CaseSearchResult 保留 chapter_id 字段（值即章 chapter_id）
+            "chapter_id": row.chapter_id,
             "created_chapter": row.chapter_id,
             "keys": list(row.keys),
             "description": row.description,
@@ -182,7 +184,7 @@ class DatabaseAnnotationQueryService:
           使无正文词汇可锚定的案例（如 entity_alias）也能被检索到。
         回执附带池内未被隐藏的 active 规模与类型分布，供模型判断还有多少未展示案例。
 
-        2026-09-13 登记即进池：本 chunk 内 push_case 登记的待建案例经 pending_cases 传入，
+        2026-09-13 登记即进池：本章 内 push_case 登记的待建案例经 pending_cases 传入，
         与池内案例走同一套匹配/枚举语义（案例池行要到本章收尾才落库，检索面不再缺席），
         并在 by_type/active_total 里一并计入。
         """
@@ -206,7 +208,7 @@ class DatabaseAnnotationQueryService:
                     if wanted_type is None
                     else [case for case in visible_pending if normalize_text(case.type) == wanted_type]
                 )
-                # 待建案例是本 chunk 刚登记的，最新创建优先：排在池内案例之前
+                # 待建案例是本章 刚登记的，最新创建优先：排在池内案例之前
                 merged = [*wanted_pending, *(_case_view(row) for row in candidates)]
                 if len(merged) > limit:
                     truncated = True
@@ -422,6 +424,18 @@ class DatabaseAnnotationQueryService:
                 target_ref=dict(row.target_ref),
             )
 
+    def has_dialogue_record(self, candidate_key: str) -> bool:
+        """2026-09-18 用于判一条对话记录是否已在本 run 落库（订正既有对话记录的前置校验）
+
+        写面按对话记录标识订正说话人/语气/独白标记时，目标必须是一条真存在的记录：由完成
+        事务在建行之后才更新，故目标不存在时会在整章落库时炸——提前到调用点问一次，
+        错 id 只作废那一条调用（同章候选的判定与记录建在同一事务里，另见调用方的前置分支）。
+        """
+        with self._read_scope() as session:
+            return (
+                DialogueRecordRepository(session).find_by_candidate_key(self.run_id, str(candidate_key)) is not None
+            )
+
 
 class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
     """2026-08-07 用于查询和新增章节唯一系统绑定标注"""
@@ -464,8 +478,7 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         labels: list[BoundParagraphLabel] = []
         for record in records:
             annotation = BoundChapterAnnotation.model_validate(record.payload)
-            for chunk in annotation.chunks:
-                labels.extend(chunk.paragraph_labels)
+            labels.extend(annotation.paragraph_labels)
         return labels
 
 
@@ -506,8 +519,8 @@ class CasePoolRepository(BaseRepository[CasePoolCase]):
             id=pending_case.target_key,
             run_id=run_id,
             case_type=pending_case.type,
-            # M9a-2：运行时 PendingCase 保留 chunk_id 字段（值即章 chunk_id）
-            chapter_id=pending_case.chunk_id,
+            # M9a-2：运行时 PendingCase 保留 chapter_id 字段（值即章 chapter_id）
+            chapter_id=pending_case.chapter_id,
             keys=normalized_keys,
             description=normalize_text(pending_case.description),
             target_key=pending_case.target_key,
@@ -543,6 +556,9 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
         2026-08-18 P3：event_anchors 为 (event_id, char_start, char_end) 列表，
         写入时按字符区间包含做弱关联——对话区间完全落在某个事件锚点区间内时
         关联该事件的 event_id；无匹配或未提供 anchors 时保持 None。
+        2026-09-17 说话人存 id：BoundDialogue.speaker 是登记名，写库前经
+        resolve_character_entity 解析成图实体行（本章新登记的实体会先建行，
+        完成事务随后合并属性）。
         """
         rows: list[DialogueRecord] = []
         # 2026-08-13 P2-4：幂等键与唯一约束 uq_dialogue_records_run_candidate 对齐为
@@ -558,9 +574,21 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
             ).scalars()
         )
         anchors = list(event_anchors or [])
+        entities = run_entities_by_name(self.session, run_id=run_id)
         for dialogue in dialogues:
             if dialogue.candidate_key in existing_keys:
                 continue
+            speaker_entity = (
+                resolve_character_entity(
+                    self.session,
+                    run_id=run_id,
+                    name=dialogue.speaker,
+                    chapter_id=chapter_id,
+                    entities=entities,
+                )
+                if dialogue.speaker
+                else None
+            )
             row = DialogueRecord(
                 dialogue_id=str(uuid4()),
                 run_id=run_id,
@@ -569,7 +597,7 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
                 content=dialogue.content,
                 start=dialogue.start,
                 end=dialogue.end,
-                speaker=dialogue.speaker,
+                speaker=str(speaker_entity.entity_id) if speaker_entity is not None else None,
                 tone=dialogue.tone,
                 is_inner_monologue=dialogue.is_inner_monologue,
                 confidence="medium",
@@ -590,24 +618,6 @@ class DialogueRecordRepository(BaseRepository[DialogueRecord]):
             )
         ).scalar_one_or_none()
 
-    def apply_resolution(
-        self,
-        record: DialogueRecord,
-        *,
-        speaker: str | None,
-        tone: str | None,
-        is_inner_monologue: bool | None,
-    ) -> None:
-        """2026-08-11 用于把 dialogue 动作解决结果直接改到对话记录表"""
-        if speaker is not None:
-            record.speaker = speaker
-        if tone is not None:
-            record.tone = tone
-        if is_inner_monologue is not None:
-            record.is_inner_monologue = is_inner_monologue
-        record.updated_at = datetime.now(UTC)
-        self.session.flush()
-
 
 class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
     """2026-08-11 用于保存案例动作解决结果和实际目标（对话/线程/事实版本）"""
@@ -627,7 +637,7 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
 
         2026-09-13：foreshadowing 动作的目标是伏笔树根与挂树事件。
         """
-        resolution = {
+        resolution: dict[str, Any] = {
             "action": resolved_case.action,
             "reason": resolved_case.reason,
         }
@@ -650,6 +660,10 @@ class CaseResolutionMappingRepository(BaseRepository[CaseResolutionMapping]):
                 value = getattr(resolved_case, field_name)
                 if value is not None:
                     resolution[field_name] = value
+        elif resolved_case.action == "promise":
+            # 2026-09-18 promise 动作的目标不是库内行而是一条产出记录，只落记录键
+            if resolved_case.result_id is not None:
+                resolution["result_id"] = resolved_case.result_id
         row = CaseResolutionMapping(
             mapping_id=str(uuid4()),
             run_id=run_id,
@@ -674,8 +688,8 @@ def completion_case_view(row: CasePoolCase) -> CompletionCase:
         {
             "id": row.id,
             "type": row.case_type,
-            # M9a-2：运行时 CompletionCase 保留 chunk_id 字段（值即章 chunk_id）
-            "chunk_id": row.chapter_id,
+            # M9a-2：运行时 CompletionCase 保留 chapter_id 字段（值即章 chapter_id）
+            "chapter_id": row.chapter_id,
             "keys": list(row.keys),
             "description": row.description,
             "target_ref": dict(row.target_ref),
