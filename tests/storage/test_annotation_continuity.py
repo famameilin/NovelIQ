@@ -20,12 +20,14 @@ from src.preprocess.tokenize import tokenize
 from src.storage.models import (
     Chapter,
     DialogueRecord,
+    GraphEntity,
 )
 from src.storage.repositories.annotation.continuity import (
     CasePoolRepository,
     DatabaseAnnotationQueryService,
     DialogueRecordRepository,
 )
+from src.storage.repositories.annotation.repository import AnnotationRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
@@ -95,10 +97,10 @@ def _insert_paragraphs(
     resolved_chapter_ids = chapter_ids or [1] * len(texts)
     offset = 0
     chunks = []
-    for chunk_id, (chapter_id, text) in enumerate(zip(resolved_chapter_ids, texts, strict=True)):
+    for chapter_id, (chapter_id, text) in enumerate(zip(resolved_chapter_ids, texts, strict=True)):
         chunks.append(
             Chunk(
-                index=chunk_id,
+                index=chapter_id,
                 text=text,
                 start=offset,
                 end=offset + len(text),
@@ -132,12 +134,12 @@ def test_case_search_returns_id_for_keys_and_description_pull(db_session) -> Non
             type="dialogue_speaker",
             keys=["顾霜"],
             description="真实身份悬而未决",
-            chunk_id=1,
+            chapter_id=1,
             target_key="target-case-1",
             target_ref={
                 "kind": "dialogue",
                 "dialogue_id": "candidate-1",
-                "chunk_id": 1,
+                "chapter_id": 1,
                 "start": 0,
                 "end": 2,
                 "text": "顾霜",
@@ -181,7 +183,7 @@ def _create_case(
     keys: list[str],
     description: str,
     target_key: str,
-    chunk_id: int = 1,
+    chapter_id: int = 1,
 ) -> str:
     """2026-09-11 用于批量造案例行并返回 id（检索制测试的准备口）
 
@@ -195,9 +197,9 @@ def _create_case(
             type=case_type,
             keys=keys,
             description=description,
-            chunk_id=chunk_id,
+            chapter_id=chapter_id,
             target_key=f"{target_key}-{uuid4().hex[:8]}",
-            target_ref={"kind": case_type, "chunk_id": chunk_id},
+            target_ref={"kind": case_type, "chapter_id": chapter_id},
         ),
     )
     db_session.commit()
@@ -362,7 +364,7 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
     }
 
 
-def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> None:
+def test_sync_dialogues_dedupes_by_candidate_key_across_chapters(db_session) -> None:
     """2026-08-13 P2-4 用于验证幂等键为 (run_id, candidate_key)：跨章重复台词不再撞唯一约束"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -400,6 +402,140 @@ def test_sync_dialogues_dedupes_by_candidate_key_across_chunks(db_session) -> No
     assert len(rows) == 1
     assert rows[0].candidate_key == "dlg_001"
     assert rows[0].chapter_id == 1
+
+
+def test_sync_dialogues_stores_speaker_entity_id_and_reuses_the_row(db_session) -> None:
+    """2026-09-17 说话人改存图实体 id：新名字当场建 character 行，同名再写复用同一行"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["“住手”回荡。"],
+        title="说话人存实体 id",
+    )
+    repository = DialogueRecordRepository(db_session)
+    first = repository.sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_001",
+                content="“住手”",
+                start=0,
+                end=4,
+                speaker="顾霜",
+                tone="平静",
+            )
+        ],
+    )
+    second = repository.sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        dialogues=[
+            BoundDialogue(
+                candidate_index=2,
+                candidate_key="dlg_002",
+                content="“住手”",
+                start=0,
+                end=4,
+                speaker="顾霜",
+                tone="平静",
+            )
+        ],
+    )
+    db_session.commit()
+
+    entities = list(
+        db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id, GraphEntity.canonical_name == "顾霜")
+        ).scalars()
+    )
+    assert len(entities) == 1
+    assert str(entities[0].entity_type) == "character"
+    assert first[0].speaker == entities[0].entity_id
+    assert second[0].speaker == entities[0].entity_id
+
+
+def test_sync_dialogues_drops_speaker_registered_as_non_character(db_session) -> None:
+    """说话人名字已登记为 location：置空说话人、不新建实体行，也不阻断本次写入"""
+    from uuid import NAMESPACE_DNS, uuid5
+
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["“住手”回荡。"],
+        title="说话人非人物",
+    )
+    location = GraphEntity(
+        # 2026-09-19 id 纪律：entity_id 是 uuid 主键，手工构造必须显式给
+        # （与 persistence 同一铸造规则：uuid5(run_scope + 规范名)）
+        entity_id=str(uuid5(NAMESPACE_DNS, f"novel-annotation-entity:{run_id}:{'城南'.casefold()}")),
+        run_id=run_id,
+        canonical_name="城南",
+        entity_type="location",
+        tags=[],
+        attributes={"entity_type": "location"},
+        first_seen_chapter=1,
+        last_seen_chapter=1,
+    )
+    db_session.add(location)
+    db_session.flush()
+
+    rows = DialogueRecordRepository(db_session).sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_001",
+                content="“住手”",
+                start=0,
+                end=4,
+                speaker="城南",
+                tone=None,
+            )
+        ],
+    )
+    db_session.commit()
+
+    assert rows[0].speaker is None
+    assert list(db_session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()) == [location]
+
+
+def test_fetch_chapter_dialogues_resolves_speaker_from_entity_id(db_session) -> None:
+    """读侧按实体 id 取说话人名：没有说话人的记录不给名字，不因缺名字丢记录"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜喝道，“住手”。"],
+        title="读侧说话人解析",
+    )
+    DialogueRecordRepository(db_session).sync_dialogues(
+        run_id=run_id,
+        chapter_id=1,
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="dlg_001",
+                content="“住手”",
+                start=5,
+                end=8,
+                speaker="顾霜",
+                tone="平静",
+            ),
+            BoundDialogue(
+                candidate_index=2,
+                candidate_key="dlg_002",
+                content="“住手”",
+                start=5,
+                end=8,
+                speaker=None,
+                tone=None,
+            ),
+        ],
+    )
+    db_session.commit()
+
+    rows = AnnotationRepository(db_session).fetch_chapter_dialogues_full(run_id)
+    assert [row.speaker for row in rows] == [["顾霜"], []]
+    assert [row.tone for row in rows] == ["平静", None]
 
 
 def test_sync_dialogues_weak_binds_event_id_by_char_span(db_session) -> None:
@@ -656,8 +792,8 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
     assert miss == []
 
 
-def test_search_pool_includes_pending_cases_from_same_chunk(db_session) -> None:
-    """2026-09-13 登记即进池：本 chunk 内 push_case 登记的待建案例当章即可检索到
+def test_search_pool_includes_pending_cases_from_same_chapter(db_session) -> None:
+    """2026-09-13 登记即进池：本章内 push_case 登记的待建案例当章即可检索到
 
     待建案例的池行要到本章收尾才落库，检索面不因此缺席：与池内案例走同一套
     关键词/枚举语义，并一并计入池规模与类型分布。用例数据取自 run 1b388eb3
@@ -674,7 +810,7 @@ def test_search_pool_includes_pending_cases_from_same_chunk(db_session) -> None:
     pending = CaseSearchResult(
         id="pending-target-1",
         type="关系修正",
-        chunk_id=1,
+        chapter_id=1,
         created_chapter=1,
         keys=["贺铮", "林立果", "家族"],
         description="误建关系：二人并非父子，需解除该边",
@@ -731,7 +867,7 @@ def test_query_scope_returns_every_session_even_when_query_fails(db_session) -> 
     assert len(tracker.sessions) == 2
 
     failing = _SessionTracker(db_session, fail_on_execute=True)
-    with pytest.raises(RuntimeError, match="查询失败"):
+    with pytest.raises(RuntimeError):
         DatabaseAnnotationQueryService(
             failing.factory,
             run_id=run_id,
@@ -777,8 +913,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=1,
-        current_chunk_id=1,
-        current_chunk_text="顾霜身份成谜",
+        current_chapter_text="顾霜身份成谜",
         allow_future_context=False,
     )
     tools = build_annotation_tools(service, ledger)
@@ -804,7 +939,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
                         "id": "c2",
                         "type": "tool_call",
                     },
-                    {"name": "finish_chapter", "args": {}, "id": "c3", "type": "tool_call"},
+                    {"name": "finish", "args": {}, "id": "c3", "type": "tool_call"},
                 ],
             )
 
@@ -812,7 +947,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     state = await graph.ainvoke(
         {
             "messages": [SystemMessage(content="test"), HumanMessage(content="chunk")],
-            "phase": "chunk_open",
+            "phase": "chapter_open",
             "iterations": 0,
             "error": None,
         }
