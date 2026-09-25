@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, insert, select
+from pgvector.sqlalchemy import HALFVEC
+from sqlalchemy import cast, delete, insert, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.storage.models import Chapter, Paragraph, ParagraphEmbedding
+from src.storage.vector_schema import hnsw_index_uses_halfvec
 
 
 @dataclass(frozen=True)
@@ -87,8 +89,15 @@ def search_similar_paragraphs(
 
     2026-08-13 P1-1 裸余弦 ``<=>``（升序）命中 HNSW，阈值 distance<=1-threshold；
     2026-08-14 二期 JOIN paragraphs（run_id/paragraph_id 对齐），以 paragraphs 为事实源。
+    2026-09-25 维度超 pgvector HNSW 上限（2000）时，距离表达式与建索引同型 cast 成
+    halfvec，否则规划器命中不了 halfvec 表达式索引。
     """
-    distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
+    if hnsw_index_uses_halfvec(len(query_embedding)):
+        distance_expr = cast(
+            ParagraphEmbedding.embedding_vector, HALFVEC(len(query_embedding))
+        ).cosine_distance(query_embedding)
+    else:
+        distance_expr = ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
     similarity_expr = 1 - distance_expr
     # round 避免 1 - 0.7 = 0.30000000000000004 的浮点噪声进入 SQL 字面量
     max_distance = round(1.0 - similarity_threshold, 6)
