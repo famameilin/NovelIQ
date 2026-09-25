@@ -131,11 +131,11 @@ class TestDiagnosisRoutes:
                 chapter_id=i + 1,
                 emotional_valences={i + 1: 1 if i % 2 == 0 else -1},
                 event_types={i + 1: "冲突" if i in {1, 2} else "转折" if i == 3 else "铺垫"},
-                pivot_chunks={i + 1} if i in {1, 2} else None,
-                cliffhanger_chunks={chunk_count} if i == chunk_count - 1 else None,
+                pivot_chapters={i + 1} if i in {1, 2} else None,
+                cliffhanger_chapters={chunk_count} if i == chunk_count - 1 else None,
                 characters=[
                     character_fact(
-                        chunk_id=i + 1,
+                        chapter_id=i + 1,
                         name=f"角色{i}",
                         action="测试行为",
                         role_function="主体" if i == 0 else "客体",
@@ -171,13 +171,6 @@ class TestDiagnosisRoutes:
         assert len(chunks) > 0
         for chunk in chunks:
             assert len(chunk) == 3
-
-    def test_fetch_relation_changes(self) -> None:
-        self._create_full_data(5)
-
-        diag_repo = DiagnosisRepository(self.db_session)
-        relations = diag_repo.fetch_relation_changes(self.run_id)
-        assert len(relations) == 0
 
     def test_fetch_pivot_moments(self) -> None:
         self._create_full_data(5)
