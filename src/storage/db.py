@@ -260,13 +260,14 @@ def init_db() -> None:
 
     ensure_database_exists()
     engine = get_engine()
-    # 2026-08-14 P1：chapters 的 idx_chapters_run_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
-    # 全新数据库必须先建扩展再 create_all，否则 CREATE INDEX 直接失败阻断启动；
-    # 与 vector 扩展（vector_schema.ensure_paragraph_embeddings_schema）同口径按需创建
+    # chapters 的 idx_chapters_run_text_trgm 依赖 pg_trgm 扩展（gin_trgm_ops），
+    # paragraph_pos_embeddings.embedding_vector 依赖 vector 扩展；两者都是 create_all
+    # 的硬前置，全新数据库缺任一扩展时 CREATE TABLE/INDEX 直接失败阻断启动
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name == "postgresql":
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     tables = [table for table in Base.metadata.sorted_tables if table.name != "paragraph_embeddings"]
     Base.metadata.create_all(bind=engine, tables=tables)
     logger.info("Database tables created successfully")
