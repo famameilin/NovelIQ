@@ -1,8 +1,11 @@
 """
-章节标注 Agent 逐 chunk 运行入口
+章节标注 Agent 运行入口（agent 路径：单块章整章一个 agent）
 
-审计: 每次运行开启 agent_invocations 行，模型回合与工具调用通过
-AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计记录。
+2026-09-19 双路径定案：单块章走本入口（程序面，模型可见面=[execute_code, finish]），
+多块章走 block_codeact.run_chapter_subagents 三条职责 subagent 并发；原生工具面
+（模型直接 bind 写入工具）删除，程序面是两条路径唯一的模型可见面。
+审计: 每次运行开启 agent_invocations 行（task_type="annotation"），模型回合与工具
+调用通过 AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计记录。
 断流重试已下沉到 stream.py 当前模型请求层，章节不再整章重试。
 """
 
@@ -22,10 +25,14 @@ from .errors import (
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
 from .program import ProgramRuntime, build_program_tool
-from .prompts import build_chunk_message, build_system_prompt
-from .reader_report import ReaderReport
-from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChunkParagraphInfo
-from .tools import AnnotationQueryService, AnnotationToolLedger, AskReaderDispatcher, build_annotation_tools
+from .prompts import build_chapter_message, build_system_prompt
+from .schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChapterParagraphInfo
+from .tools import (
+    FINISH_TOOL_NAME,
+    AnnotationQueryService,
+    AnnotationToolLedger,
+    build_annotation_tools,
+)
 
 if TYPE_CHECKING:
     from src.agents.audit.observer import AgentTurnObserver
@@ -33,64 +40,52 @@ if TYPE_CHECKING:
     from src.agents.stream import AgentStream
 
 
-def _validate_chapter_identity(
-    *,
-    chapter_id: int,
-    current_chunks: list[tuple[int, str]],
-) -> None:
-    """2026-08-07 用于在模型调用前校验章节身份和 chunk/子块输入
+def _validate_chapter_identity(*, chapter_id: int, chapter_text: str) -> None:
+    """2026-08-07 用于在模型调用前校验章节身份与正文非空
 
-    2026-08-14 M7（§20）：放开恰好一个 chunk 的限制为至少一个；
-    负 chunk_id 是运行时子块 ID（子 chunk 协议），允许；逐条校验原文非空。
+    2026-09-19 M9a-2 后章即块：一章一份正文（运行时块身份 = chapter_id），
+    旧 current_chunks 列表协议随子块循环一起退役。
     """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须是真实非空正整数")
-    if not current_chunks:
-        raise AnnotationInputError("章节 Agent 至少需要一个 chunk 或子块")
-    for _chunk_id, chunk_text in current_chunks:
-        if not chunk_text.strip():
-            raise AnnotationInputError("current chunk 原文不能为空")
+    if not chapter_text.strip():
+        raise AnnotationInputError("章节正文不能为空")
 
 
 def validate_bound_annotation(
     annotation: BoundChapterAnnotation,
     *,
     chapter_id: int,
-    current_chunks: list[tuple[int, str]],
-    paragraph_info: ChunkParagraphInfo | None = None,
+    chapter_text: str,
+    paragraph_info: ChapterParagraphInfo | None = None,
 ) -> None:
-    """2026-08-07 用于复核系统绑定标注完整覆盖真实 chunk 和对话原文
+    """2026-08-07 用于复核系统绑定标注完整覆盖章正文和对话原文
 
     2026-08-18：增加事件锚点校验——每个事件的 char_start/char_end 必须落在
-    chunk 文本范围内。
+    章正文范围内。
     2026-09-14 段落级监督：自选段标签复核改段落号归属（账本写入点已按
     paragraph_info 校验；此处给段落坐标映射时做同一不变量的二次校验，
     替代旧"句文本逐字区间"复核——段号没有逐字复核的对象）。
+    2026-09-19 章即块拍平：绑定标注就是章本身，chapter_id 即章身份；
+    block_codeact 的章收尾用同一签名。
     """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须为正整数")
-    expected_ids = [chunk_id for chunk_id, _text in current_chunks]
-    actual_ids = [chunk.chunk_id for chunk in annotation.chunks]
-    if actual_ids != expected_ids:
-        raise ValueError(f"系统绑定 chunks 必须按原文顺序精确覆盖 current: expected={expected_ids} actual={actual_ids}")
-    text_by_id = dict(current_chunks)
-    known_paragraph_ids = set(paragraph_info.paragraph_ids) if paragraph_info is not None else None
-    for chunk in annotation.chunks:
-        chunk_text = text_by_id[chunk.chunk_id]
-        for dialogue in chunk.dialogues:
-            if dialogue.end > len(chunk_text):
-                raise ValueError(f"系统对话位置超出原文: chunk_id={chunk.chunk_id}")
-            actual = chunk_text[dialogue.start : dialogue.end]
-            if actual != dialogue.content:
-                raise ValueError(f"系统对话原文绑定不一致: chunk_id={chunk.chunk_id}")
-        if known_paragraph_ids is not None:
-            for label in chunk.paragraph_labels:
-                if label.paragraph_id not in known_paragraph_ids:
-                    raise ValueError(
-                        f"系统自选段标签超出本 chunk 段落范围: chunk_id={chunk.chunk_id}"
-                        f" paragraph_id={label.paragraph_id}"
-                    )
-        # 2026-08-22 重构：事件不再携带锚点/字符区间/哈希，章级证据由持久化层盖章
+    for dialogue in annotation.dialogues:
+        if dialogue.end > len(chapter_text):
+            raise ValueError(f"系统对话位置超出原文: chapter_id={chapter_id}")
+        actual = chapter_text[dialogue.start : dialogue.end]
+        if actual != dialogue.content:
+            raise ValueError(f"系统对话原文绑定不一致: chapter_id={chapter_id}")
+    if paragraph_info is not None:
+        known_paragraph_ids = set(paragraph_info.paragraph_ids)
+        for label in annotation.paragraph_labels:
+            if label.paragraph_id not in known_paragraph_ids:
+                raise ValueError(
+                    f"系统自选段标签超出本章段落范围: chapter_id={chapter_id}"
+                    f" paragraph_id={label.paragraph_id}"
+                )
+    # 2026-08-22 重构：事件不再携带锚点/字符区间/哈希，章级证据由持久化层盖章
 
 
 def _model_provider(llm: Any) -> str:
@@ -112,7 +107,7 @@ async def _run_single_attempt(
     run_id: str,
     chapter_id: int,
     attempt_number: int,
-    current_chunks: list[tuple[int, str]],
+    chapter_text: str,
     novel_title: str | None,
     llm: Any,
     session_factory: Callable[[], Session],
@@ -120,92 +115,60 @@ async def _run_single_attempt(
     stream: AgentStream | None = None,
     graph_state: FactGraph | None = None,
     observer: AgentTurnObserver | None = None,
-    sub_chunk_index: int = 0,
-    paragraph_info: ChunkParagraphInfo | None = None,
-    reader_reports: list[ReaderReport] | None = None,
-    ask_reader_dispatcher: AskReaderDispatcher | None = None,
-    initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
-    program_mode: bool = False,
-    program_tool_factory: Callable[..., Any] | None = None,
+    paragraph_info: ChapterParagraphInfo | None = None,
 ) -> AgentRunResult:
-    """2026-08-10 用于以全新账本执行一次逐 chunk 章节 Agent 尝试
+    """2026-08-10 用于以全新账本执行一次章节 Agent 尝试（程序面）
 
-    2026-08-14 M7：sub_chunk_index 记录子块协议运行序号（§20 审计合同）。
-    2026-08-18：paragraph_info 提供段落坐标映射，用于事件锚点校验和证据派生。
-    2026-09-12 章内并行（§7）：reader_reports 与 ask_reader_dispatcher 仅供
-    两段式写者使用（取值域准入 + 反问通道），单块章不传、行为不变；
-    initial_messages_override 供写者注入 <ReaderReports> 替代正文直读。
-    2026-09-15 程序面（CodeAct）：program_mode=True 时写者对外只暴露 execute_code
-    （内层工具面与账本不变），失败回退由设置 codeact_enabled 统一控制；两段式写者
-    不传该参数、行为不变。
-    2026-09-16 章内并行 CodeAct：program_tool_factory 供块面章会话注入自己的程序
-    运行时（合并构造器 + 契约文案），按 (tools, ledger, observer=, stream=) 调用，
-    不传就是写者面 ProgramRuntime、行为逐字不变。
+    2026-09-19 恢复写者程序面并去开关：绑定面=[execute_code, finish]（与 subagent 面
+    同形；finish 既是绑定工具也可写在程序末尾，两条通道同一条收尾判定），分发面仍是
+    完整工具表（含程序工具自身），模型直发原生调用时由批次转入同一个内层
+    dispatcher（见 graph 批次节点）；章正文整章注入（章即块，不再有子块协议）。
     2026-09-16 连接粒度：这里不再自己开只读会话，只把 session_factory 转交查询服务，
     由它在单次工具调用内取还连接（模型生成期间连接占用为零）。
     """
     from src.config import settings
 
     query_service = query_service_factory(session_factory)
-    first_chunk_id, first_chunk_text = current_chunks[0]
     allow_future_context = settings.models.annotation.allow_future_context
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=chapter_id,
-        current_chunk_id=first_chunk_id,
-        current_chunk_text=first_chunk_text,
+        current_chapter_text=chapter_text,
         allow_future_context=allow_future_context,
         graph=graph_state,
         paragraph_info=paragraph_info,
         # 2026-08-19供因果引用全局偏序校验使用
         current_chapter_order=getattr(query_service, "current_chapter_order", None),
-        reader_reports=reader_reports,
     )
-    tools = build_annotation_tools(query_service, ledger, ask_reader_dispatcher=ask_reader_dispatcher)
-    program_mode = program_mode and bool(settings.models.annotation.codeact_enabled)
-    bind_tools: list[Any] | None = None
-    program_tool_name: str | None = None
-    if program_mode:
-        # 绑定面收成唯一 execute_code；分发面仍是完整工具表（含程序工具自身），
-        # 模型直发原生调用时由批次转入同一个内层 dispatcher（见 graph 批次节点）
-        if program_tool_factory is None:
-            program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
-        else:
-            program_tool = program_tool_factory(tools, ledger, observer=observer, stream=stream)
-        program_tool_name = str(program_tool.name)
-        bind_tools = [program_tool]
-        tools = [*tools, program_tool]
+    tools = build_annotation_tools(query_service, ledger)
+    finish_tool = {str(tool.name): tool for tool in tools}[FINISH_TOOL_NAME]
+    program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
         llm,
-        tools,
+        [*tools, program_tool],
         ledger=ledger,
         max_iterations=total_iteration_limit,
         stream=stream,
         observer=observer,
         retries=settings.models.annotation.total_attempts,
-        bind_tools=bind_tools,
-        program_tool_name=program_tool_name,
+        bind_tools=[program_tool, finish_tool],
+        program_tool_name=str(program_tool.name),
     )
-    if initial_messages_override is not None:
-        initial_messages = initial_messages_override
-    else:
-        initial_messages = [
-            SystemMessage(content=build_system_prompt(program_mode=program_mode)),
-            HumanMessage(
-                content=build_chunk_message(
-                    chunk_index=1,
-                    chunk_total=1,
-                    chunk_text=first_chunk_text,
-                    candidates=ledger.dialogue_candidates,
-                    paragraph_info=paragraph_info,
-                )
-            ),
-        ]
+    initial_messages = [
+        SystemMessage(content=build_system_prompt()),
+        HumanMessage(
+            content=build_chapter_message(
+                chapter_text=chapter_text,
+                candidates=ledger.dialogue_candidates,
+                paragraph_info=paragraph_info,
+            )
+        ),
+    ]
     result_state = await graph.ainvoke(
         {
             "messages": initial_messages,
-            "phase": "chunk_open",
+            "phase": "chapter_open",
             "iterations": 0,
             "error": None,
         }
@@ -219,7 +182,7 @@ async def _run_single_attempt(
     validate_bound_annotation(
         ledger.annotation,
         chapter_id=chapter_id,
-        current_chunks=current_chunks,
+        chapter_text=chapter_text,
         paragraph_info=paragraph_info,
     )
     return AgentRunResult(
@@ -234,7 +197,6 @@ async def _run_single_attempt(
             authorized_chapter_ids=sorted(ledger.authorized_chapter_ids),
             authorized_text_paragraph_ids=sorted(ledger.authorized_text_paragraph_ids),
             authorized_event_ids=sorted(ledger.authorized_event_ids),
-            sub_chunk_index=sub_chunk_index,
         ),
     )
 
@@ -243,7 +205,7 @@ async def run_annotation_agent(
     *,
     run_id: str,
     chapter_id: int,
-    current_chunks: list[tuple[int, str]],
+    chapter_text: str,
     query_service_factory: Callable[[Callable[[], Session]], AnnotationQueryService],
     session_factory: Callable[[], Session],
     novel_title: str | None = None,
@@ -253,21 +215,12 @@ async def run_annotation_agent(
     graph_state: FactGraph | None = None,
     audit_recorder: AgentAuditRecorder | None = None,
     chapter_label: str | None = None,
-    sub_chunk_index: int = 0,
-    paragraph_info: ChunkParagraphInfo | None = None,
-    reader_reports: list[ReaderReport] | None = None,
-    ask_reader_dispatcher: AskReaderDispatcher | None = None,
-    initial_messages_override: list[HumanMessage | SystemMessage] | None = None,
-    program_mode: bool = False,
-    program_tool_factory: Callable[..., Any] | None = None,
+    paragraph_info: ChapterParagraphInfo | None = None,
 ) -> AgentRunResult:
-    """2026-08-11 用于单次运行章节 Agent：断流重试已下沉到 stream.py 当前模型请求，章节失败直接抛出
+    """2026-08-11 用于单次运行章节 Agent（agent 路径）：断流重试已下沉到 stream.py，章节失败直接抛出
 
-    2026-08-14 M7（§20）：sub_chunk_index 标记子块协议运行序号，写入 AgentRunAudit。
-    2026-08-18：paragraph_info 提供当前 chunk 段落坐标映射，用于事件锚点校验和证据派生。
-    2026-09-12 章内并行（§7）：三个新可选参数仅供两段式写者使用（见 _run_single_attempt）。
-    2026-09-15 程序面（CodeAct）：program_mode 由单块章调用方传入，两段式写者不传。
-    2026-09-16 章内并行 CodeAct：program_tool_factory 供块面章会话注入合并程序面。
+    2026-09-19 双路径定案：本入口服务单块章（整章正文一次注入），多块章由派发方
+    走 run_chapter_subagents；签名从 current_chunks 列表改为章正文。
     2026-09-16 连接粒度：不再自开只读会话，查询服务按单次工具调用取还连接。
     """
     from src.agents.audit.observer import AgentTurnObserver
@@ -275,7 +228,7 @@ async def run_annotation_agent(
 
     _validate_chapter_identity(
         chapter_id=chapter_id,
-        current_chunks=current_chunks,
+        chapter_text=chapter_text,
     )
     if llm is None:
         from src.agents.llm import build_chat_model
@@ -312,7 +265,7 @@ async def run_annotation_agent(
             run_id=run_id,
             chapter_id=chapter_id,
             attempt_number=1,
-            current_chunks=current_chunks,
+            chapter_text=chapter_text,
             novel_title=novel_title,
             llm=llm,
             session_factory=session_factory,
@@ -320,13 +273,7 @@ async def run_annotation_agent(
             stream=stream,
             graph_state=graph_state,
             observer=observer,
-            sub_chunk_index=sub_chunk_index,
             paragraph_info=paragraph_info,
-            reader_reports=reader_reports,
-            ask_reader_dispatcher=ask_reader_dispatcher,
-            initial_messages_override=initial_messages_override,
-            program_mode=program_mode,
-            program_tool_factory=program_tool_factory,
         )
     except Exception as exc:
         if graph_state is not None:
@@ -334,7 +281,7 @@ async def run_annotation_agent(
             graph_state.reset_chapter_changes()
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise
-    # 2026-09-04 单一写面：取出本子块累积的图域操作日志随结果返回，
+    # 2026-09-04 单一写面：取出本章累积的图域操作日志随结果返回，
     # 由 workflow 合并进完成事务输入（失败路径已在上方 reset 清空）
     if graph_state is not None:
         result = result.model_copy(update=graph_state.drain_ops())
