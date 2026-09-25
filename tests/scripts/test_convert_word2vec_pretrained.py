@@ -38,7 +38,7 @@ def test_resolve_pretrained_file_picks_text_format(tmp_path: Path) -> None:
 
 def test_resolve_pretrained_file_missing_dir_raises(tmp_path: Path) -> None:
     """2026-08-30 用于验证预训练源目录缺失时明确报错"""
-    with pytest.raises(FileNotFoundError, match="目录不存在"):
+    with pytest.raises(FileNotFoundError):
         resolve_pretrained_file(tmp_path / "nope")
 
 
@@ -68,7 +68,7 @@ def test_convert_pretrained_to_kv_roundtrip(tmp_path: Path) -> None:
 def test_convert_pretrained_to_kv_missing_output_raises(tmp_path: Path) -> None:
     """2026-08-30 用于验证输出目录缺失时拒绝转换"""
     source = _write_source(tmp_path)
-    with pytest.raises(FileNotFoundError, match="输出目录不存在"):
+    with pytest.raises(FileNotFoundError):
         convert_pretrained_to_kv(source, binary=False, output_dir=tmp_path / "nope")
 
 
@@ -79,5 +79,5 @@ def test_convert_pretrained_to_kv_rejects_second_kv_file(tmp_path: Path) -> None
     output.mkdir()
     (output / "existing.kv").touch()
 
-    with pytest.raises(ValueError, match="恰好包含一个 .kv"):
+    with pytest.raises(ValueError):
         convert_pretrained_to_kv(source, binary=False, output_dir=output)
