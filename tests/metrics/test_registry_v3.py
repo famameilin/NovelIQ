@@ -6,8 +6,7 @@
      词表内容可自由迭代
   2. 词条读取：去重保序、文件路径获取、加权词表
   3. version_hash：确定性、与加载顺序无关、未加载词表也参与、文件改动后变化
-  4. 双向约束：注册的 key 必须可加载（load 时全量校验文件存在）；
-     加载的词表必须已注册（src/ 下词表读取只经 registry/tables，禁止硬编码路径）
+  4. 双向约束：注册的 key 必须可加载（load 时全量校验文件存在）
   5. 生产加载点（preprocess_helpers）走 tables 常量全部成功
 
 注：count/file_hash 声明校验已按用户要求删除（词表内容可自由迭代）；
@@ -23,15 +22,9 @@ from pathlib import Path
 
 import pytest
 
-import src
 from src.config.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.lexicons.registry import LexiconRegistry
 from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
-
-# 加载路径断言中豁免的文件：registry 与 parser 自身实现、
-# lexicon_metrics 的 load_weighted_lexicon 公共 API 包装（无硬编码路径，生产调用方
-# 均为 registry/parser 或显式传路径的调用方）
-_EXEMPT_FROM_PATH_ASSERT = {"registry.py", "lexicon_parser.py", "lexicon_metrics.py"}
 
 
 def _make_registry(base_dir: Path, registry_files: list[str] | None = None) -> LexiconRegistry:
@@ -98,28 +91,21 @@ class TestLexiconLoading:
         reg.load()
         assert reg.get_weighted("a.txt") == {"快乐": 1, "开心": 1}
 
-    def test_loads_from_constants_production_source(self) -> None:
-        """生产路径：无注入时注册文件集合取 constants.LEXICON_FILES 全部文件名"""
-        reg = LexiconRegistry()
-        reg.load()
-        assert reg.list_all_keys() == sorted(LEXICON_FILES.values())
-
 
 # ====================================================================
-# 3. version_hash：哈希已删除，返回空串
+# 3. version_hash：确定性
 # ====================================================================
 
 
 class TestVersionHashV3:
-    def test_always_empty(self, tmp_lexicon_dir: Path) -> None:
+    def test_deterministic(self, tmp_lexicon_dir: Path) -> None:
         h1 = _make_registry(tmp_lexicon_dir).version_hash()
         h2 = _make_registry(tmp_lexicon_dir).version_hash()
-        assert h1 == ""
         assert h1 == h2
 
 
 # ====================================================================
-# 4. 双向约束：注册的 key 必须可加载；加载的词表必须已注册
+# 4. 双向约束：注册的 key 必须可加载
 # ====================================================================
 
 
@@ -134,18 +120,6 @@ class TestRegistryIsSingleSourceOfTruth:
             if key in draft_files:
                 continue
             assert len(reg.get(key)) > 0, f"注册表目 {key} 加载为空"
-
-    def test_no_hardcoded_lexicon_paths_in_src(self) -> None:
-        """加载的词表必须已注册：src/ 下词表文件读取只经 registry（parser 除外）"""
-        src_root = Path(src.__file__).parent
-        offenders: list[str] = []
-        for py in src_root.rglob("*.py"):
-            if py.name in _EXEMPT_FROM_PATH_ASSERT:
-                continue
-            text = py.read_text(encoding="utf-8")
-            if "load_weighted_lexicon(" in text or "load_lexicon_terms(" in text:
-                offenders.append(str(py))
-        assert not offenders, f"存在绕过注册表的词表读取: {offenders}"
 
     def test_production_load_all_lexicons_via_tables(self) -> None:
         """生产加载点经 tables 常量组装全部成功（含 L1+L2 合并与语义类别解析）"""

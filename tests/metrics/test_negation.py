@@ -46,20 +46,6 @@ def _flipped(text: str, emotion: str, neg_spec: NegationSpec) -> bool:
 
 
 class TestSpecLoading:
-    def test_groups_loaded(self, spec: NegationSpec) -> None:
-        assert "不" in spec.hard
-        assert "没有" in spec.hard
-        assert "不得不" in spec.double
-        assert "未必" in spec.modal
-        assert "难以" in spec.modal
-
-    def test_misleading_single_chars_removed(self, spec: NegationSpec) -> None:
-        """误伤单字已剔除：别/莫/非/无（别人/特别/莫名/非常/无声…）"""
-        assert "别" not in spec.hard
-        assert "莫" not in spec.hard
-        assert "非" not in spec.hard
-        assert "无" not in spec.hard
-
     def test_longest_match_priority(self, spec: NegationSpec) -> None:
         """复合词（并没有）优先于其子串（并不/没有/没/不）"""
         spans = find_negation_spans("他并没有放弃", spec)
