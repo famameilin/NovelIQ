@@ -59,16 +59,16 @@ def detect_alias_suspicions(
     entities = [row for row in graph_repo.fetch_entity_snapshots(chapter_boundary) if row.entity_type == "character"]
     relations = graph_repo.fetch_relation_snapshots(chapter_boundary, active_only=True)
 
-    neighbors: dict[int, set[int]] = {}
-    parent: dict[int, int] = {}
-    direct_pairs: set[frozenset[int]] = set()
+    neighbors: dict[str, set[str]] = {}
+    parent: dict[str, str] = {}
+    direct_pairs: set[frozenset[str]] = set()
 
-    def find(node: int) -> int:
+    def find(node: str) -> str:
         if parent.get(node, node) != node:
             parent[node] = find(parent[node])
         return parent[node]
 
-    def union(left: int, right: int) -> None:
+    def union(left: str, right: str) -> None:
         parent.setdefault(left, left)
         parent.setdefault(right, right)
         root_left = find(left)
@@ -77,8 +77,8 @@ def detect_alias_suspicions(
             parent[root_right] = root_left
 
     for relation in relations:
-        from_id = int(relation.from_entity_id)
-        to_id = int(relation.to_entity_id)
+        from_id = str(relation.from_entity_id)
+        to_id = str(relation.to_entity_id)
         if relation.relation_semantics == "same_character":
             union(from_id, to_id)
             continue
@@ -86,7 +86,7 @@ def detect_alias_suspicions(
         neighbors.setdefault(from_id, set()).add(to_id)
         neighbors.setdefault(to_id, set()).add(from_id)
 
-    character_ids = [int(row.entity_id) for row in entities]
+    character_ids = [str(row.entity_id) for row in entities]
     for entity_id in character_ids:
         parent.setdefault(entity_id, entity_id)
 
@@ -108,8 +108,8 @@ def detect_alias_suspicions(
         if neighbors.get(entity_id)
     }
 
-    names_by_id = {int(row.entity_id): row.name for row in entities}
-    last_seen_by_id = {int(row.entity_id): row.last_seen_chapter for row in entities}
+    names_by_id = {str(row.entity_id): row.name for row in entities}
+    last_seen_by_id = {str(row.entity_id): row.last_seen_chapter for row in entities}
 
     suspicions: list[AliasSuspicion] = []
     for index, left_id in enumerate(character_ids):
@@ -165,7 +165,7 @@ def build_alias_pending_cases(
         pending_cases.append(
             PendingCase(
                 type="entity_alias",
-                chunk_id=suspicion.anchor_chapter_id,
+                chapter_id=suspicion.anchor_chapter_id,
                 keys=[suspicion.name_a, suspicion.name_b, "同一人物"],
                 description=(
                     f"疑似同一人物：{suspicion.name_a} 与 {suspicion.name_b} "
@@ -174,7 +174,7 @@ def build_alias_pending_cases(
                 target_key=target_key,
                 target_ref={
                     "kind": "entity_alias",
-                    "chunk_id": suspicion.anchor_chapter_id,
+                    "chapter_id": suspicion.anchor_chapter_id,
                     "name_a": suspicion.name_a,
                     "name_b": suspicion.name_b,
                 },
