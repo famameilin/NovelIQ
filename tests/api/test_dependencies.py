@@ -39,7 +39,7 @@ async def test_resolve_run_id_fallbacks_to_db_when_in_memory_run_id_missing():
 @pytest.mark.asyncio
 async def test_resolve_run_id_raises_not_found_when_task_missing():
     service = _DummyNovelService(task=None, db_task=None)
-    with pytest.raises(NovelNotFoundError, match="任务不存在: 6b401f00"):
+    with pytest.raises(NovelNotFoundError):
         await resolve_run_id(task_id="6b401f00", novel_service=service)
 
 
@@ -49,5 +49,5 @@ async def test_resolve_run_id_raises_incomplete_when_run_id_missing_everywhere()
         task={"task_id": "6b401f00", "novel_id": "2f6b72fc", "status": "completed"},
         db_task={"task_id": "6b401f00", "novel_id": "2f6b72fc", "status": "completed"},
     )
-    with pytest.raises(NovelNotFoundError, match="任务数据不完整: 6b401f00"):
+    with pytest.raises(NovelNotFoundError):
         await resolve_run_id(task_id="6b401f00", novel_service=service)

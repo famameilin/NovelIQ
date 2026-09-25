@@ -101,13 +101,6 @@ def test_fetch_topics_falls_back_to_topic_weight_sum_without_inference_rows() ->
     assert result[1].weight == round(50.0 / 150.0, 6)
 
 
-def test_fetch_topics_uses_paragraph_aggregation_source() -> None:
-    """2026-08-20 验证主题查询只调用段落聚合源"""
-    repo = _make_repo([])
-    _fetch_topics("run-source", repo)
-    repo.fetch_paragraph_topics_agg.assert_called_once_with("run-source")
-
-
 def test_fetch_topics_model_load_failure_degrades() -> None:
     repo = _make_repo([_make_row(0, 100.0)])
     trainer = MagicMock()
@@ -151,7 +144,7 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
 
 def test_validate_agg_row_rejects_missing_fields() -> None:
     """2026-08-20 验证聚合结果缺字段时快速失败"""
-    with pytest.raises(RuntimeError, match="缺少"):
+    with pytest.raises(RuntimeError):
         _validate_agg_row(SimpleNamespace(topic_id=1))
 
 

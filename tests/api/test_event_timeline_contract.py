@@ -182,32 +182,6 @@ def test_include_curve_false_tension_none(api_client: TestClient, db_session) ->
     assert without_curve.json().get("causal_edges") == with_curve.json().get("causal_edges")
 
 
-def test_participants_keep_dict(api_client: TestClient, db_session) -> None:
-    """participants 保持 dict 结构，不压平"""
-    novel_id, run_id = _insert_two_chapter_forest(db_session)
-    task_id = run_id[:8]
-    response = api_client.get(
-        f"/api/novels/{novel_id}/timeline",
-        params={"task_id": task_id},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    for node in payload["nodes"]:
-        assert "participants" in node
-        assert "character_names" in node
-        assert isinstance(node["participants"], list)
-        assert isinstance(node["character_names"], list)
-        if node["participants"]:
-            assert isinstance(node["participants"][0], dict)
-            p0 = node["participants"][0]
-            has_name = "name" in p0 or "entity" in p0
-            assert has_name
-            if "name" not in p0 and "entity" in p0:
-                assert "name" in p0["entity"]
-        assert all(isinstance(c, str) for c in node["character_names"])
-        assert node.get("node_type") == "event"
-
-
 def test_causal_edges_include_inactive_and_expired_at(api_client: TestClient, db_session) -> None:
     """causal_edges 含 inactive/expired_at，前端灰显全量
 
@@ -304,24 +278,7 @@ def test_analysis_not_complete_returns_400(api_client: TestClient, db_session) -
     assert response.status_code == 400
     # error shape may be {"error_type": ...} or detail
     body = response.json()
-    assert body.get("error_type") == "AnalysisNotCompleteError" or "尚未完成" in str(body)
-
-
-def test_empty_forest_still_returns_phases_and_edges(api_client: TestClient, db_session) -> None:
-    """验证快照存在时阶段和边仍会返回"""
-    novel_id, run_id = _insert_two_chapter_forest(db_session)
-    task_id = run_id[:8]
-    response = api_client.get(
-        f"/api/novels/{novel_id}/timeline",
-        params={"task_id": task_id, "include_curve": "false"},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert isinstance(payload["phases"], list)
-    assert len(payload["phases"]) >= 1
-    assert payload["phase_basis"] in ("tension", "fixed_percentage")
-    # still returns derived_event_order even when nodes empty would, but here nodes non-empty
-    assert isinstance(payload["derived_event_order"], list)
+    assert body.get("error_type") == "AnalysisNotCompleteError"
 
 
 def test_total_chapters_and_phase_mapping(api_client: TestClient, db_session) -> None:

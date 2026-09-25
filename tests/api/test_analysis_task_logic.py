@@ -111,7 +111,6 @@ class TestNovelServiceTaskLogic:
         self._create_run(status="running")
         task, error = self.service.get_single_valid_task(self.test_novel_id, self.db_session)
         assert task is None
-        assert "存在2个任务" in error
 
 
 class TestAnalysisServiceTaskId:

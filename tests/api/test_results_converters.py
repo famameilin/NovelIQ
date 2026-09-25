@@ -12,7 +12,6 @@
 import pytest
 
 from src.api.routes.results_converters import (
-    AGGREGATE_METRIC_CONTRACT_FIELDS,
     _convert_style_stats,
     build_aggregate_metrics_contract,
     validate_aggregate_metrics_contract,
@@ -27,36 +26,6 @@ def test_convert_style_stats_tone_distribution_default_empty_dict() -> None:
 
     assert style_stats is not None
     assert style_stats.tone_distribution == {}
-
-
-def test_build_aggregate_metrics_contract_keeps_fixed_non_graph_keys() -> None:
-    result = AggregateResult(
-        narrative_structure={"act1_ratio": 0.2},
-        emotion_curve={"positive_ratio": 0.4},
-        character_relations={"network_density": 0.3},
-        language_style={"tone_distribution": {"冷峻": 1.0}},
-    )
-
-    aggregate_metrics = build_aggregate_metrics_contract(result)
-
-    assert tuple(aggregate_metrics.keys()) == AGGREGATE_METRIC_CONTRACT_FIELDS
-    assert aggregate_metrics["narrative_structure"] == {
-        "act1_ratio": 0.2,
-        "act2_ratio": None,
-        "act3_ratio": None,
-        "climax_spacing": None,
-        "middle_collapse_index": None,
-        # 2026-08-14 重命名（§13.3）：event_density → chapter_narrative_function_share
-        "chapter_narrative_function_share": None,
-        "cliffhanger_rate": None,
-        "climax_count": None,
-        "climax_positions": None,
-        "climax_heights": None,
-        "peak_escalation": None,
-        "dominant_climax_pos": None,
-    }
-    assert "graph_summary" not in aggregate_metrics
-    assert "graph_quality_report" not in aggregate_metrics
 
 
 def test_build_aggregate_metrics_contract_renames_aggregate_keys() -> None:

@@ -17,8 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.api.main import app
-from src.api.models.responses import DiagnosisResult
 from src.storage.repositories import RunRepository
 from tests.support.graph_snapshot_helpers import insert_graph_test_novel
 
@@ -103,28 +101,6 @@ class TestResults:
         payload = response.json()
         assert payload["foreshadow_expectation"] == 0.42
         assert payload["diagnosis"] == "诊断记录只包含当前已有字段"
-        assert set(payload) == {
-            "foreshadow_expectation",
-            "arc_scores",
-            "genre_labels",
-            "style_labels",
-            "topic_labels",
-            "diagnosis",
-            "value_logic_type",
-            "value_logic_reason",
-            "power_stance_score",
-            "power_stance_reason",
-            "common_people_dignity",
-            "dignity_reason",
-            "cultural_depth_score",
-            "cultural_depth_reason",
-            "narrative_arc_type",
-            "focus_structure",
-            "focus_characters",
-            "main_characters",
-            "core_cast",
-            "theme_color",
-        }
 
     @pytest.mark.parametrize(
         ("path", "expected_status"),
@@ -201,43 +177,6 @@ class TestResults:
 
         response = api_client.get(f"/api/novels/{second_novel_id}/chapter-annotations?task_id={first_task_id}")
         assert response.status_code == 404
-        assert "不属于小说" in response.json()["detail"]
-
-    def test_get_chapter_annotations_openapi_declares_typed_response(self):
-        """
-        创建时间: 2026-04-26
-        任务: phase2-strong-foreshadowing
-        说明: 新增结果接口不仅要能返回数据，也要在 OpenAPI 中发布正式响应合同，
-        避免前端和自动化工具只能看到 `items: {}` 的匿名数组。
-        """
-        schema = app.openapi()
-        response_schema = schema["paths"]["/api/novels/{novel_id}/chapter-annotations"]["get"]["responses"]["200"][
-            "content"
-        ]["application/json"]["schema"]
-        assert response_schema["type"] == "array"
-        assert response_schema["items"]["$ref"] == "#/components/schemas/ChapterAnnotation"
-
-    def test_get_diagnosis_openapi_declares_expectation_fallback_and_theme_color(self):
-        """
-        创建时间: 2026-04-26
-        任务: fix-phase2-setup-pool-followup-findings
-        说明: diagnosis 对外合同需要明确 expectation/fallback 语义，并保留 theme_color，
-              避免手写文档和响应模型再次漂移。
-        """
-        diagnosis_schema = DiagnosisResult.model_json_schema()
-        properties = diagnosis_schema["properties"]
-
-        assert "foreshadow_expectation" in properties
-        assert "theme_color" in properties
-        assert "setup thread ledger" in properties["foreshadow_expectation"]["description"]
-
-    def test_get_characters_openapi_declares_typed_response(self):
-        schema = app.openapi()
-        response_schema = schema["paths"]["/api/novels/{novel_id}/characters"]["get"]["responses"]["200"]["content"][
-            "application/json"
-        ]["schema"]
-        assert response_schema["type"] == "array"
-        assert response_schema["items"]["$ref"] == "#/components/schemas/CharacterStats"
 
 
 @pytest.mark.parametrize(

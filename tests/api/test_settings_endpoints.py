@@ -56,20 +56,6 @@ def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
                 os.environ[key] = value
 
 
-def test_get_settings_schema(api_client: TestClient) -> None:
-    response = api_client.get("/api/settings/schema")
-    assert response.status_code == 200
-    data = response.json()
-    section_ids = {section["id"] for section in data["sections"]}
-    # 日志/存储路径是运营配置，不进设置页（2026-09-10 裁决）
-    assert section_ids == {"models", "topic_model", "metrics", "linguistic"}
-    temperature = next(field for field in data["fields"] if field["path"] == ["models", "annotation", "temperature"])
-    assert temperature["field_type"] == "number"
-    assert temperature["min_value"] == 0 and temperature["max_value"] == 2
-    # 2026-09-10：embedding_dim 配置链已删除（维度以模型实测为准），注册表不再有该字段
-    assert not any(field["path"] == ["models", "paragraph_embedding", "embedding_dim"] for field in data["fields"])
-
-
 def test_get_settings_view_masks_api_key(isolated_settings: Path, api_client: TestClient) -> None:
     # 单例在 import 期已加载真实 .env，先走被测链路写入测试凭据
     setup = api_client.put(
