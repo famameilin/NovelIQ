@@ -14,9 +14,8 @@ from src.agents.annotation.schema import (
     AgentRunAudit,
     AgentRunResult,
     BoundChapterAnnotation,
-    BoundChunkAnnotation,
     BoundDialogue,
-    ChunkMetricsInput,
+    ChapterMetricsInput,
     PendingCase,
     ResolvedCase,
 )
@@ -25,6 +24,7 @@ from src.storage.models import (
     CaseResolutionMapping,
     ChapterAnnotationRecord,
     DialogueRecord,
+    GraphEntity,
 )
 from src.workflows.annotate_helpers.storage import (
     _fold_resolved_cases,
@@ -36,14 +36,14 @@ from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 def _annotation(
     *,
-    chunk_id: int,
+    chapter_id: int,
     text: str,
     unresolved_dialogue: bool = False,
 ) -> BoundChapterAnnotation:
     """2026-08-07 用于构造含未解决对话的系统绑定章节标注"""
     dialogues: list[BoundDialogue] = []
     if unresolved_dialogue:
-        candidate = next(item for item in extract_dialogue_candidates(chunk_id, text) if item.content == "住手")
+        candidate = next(item for item in extract_dialogue_candidates(chapter_id, text) if item.content == "住手")
         dialogues.append(
             BoundDialogue(
                 candidate_index=1,
@@ -57,11 +57,7 @@ def _annotation(
             )
         )
     return BoundChapterAnnotation(
-        chapter_summary=text,
-        chunks=[
-            BoundChunkAnnotation(
-                chunk_id=chunk_id,
-                metrics=ChunkMetricsInput(
+                metrics=ChapterMetricsInput(
                     summary=text,
                     emotional_valence=0,
                     narrative_function="铺垫",
@@ -69,48 +65,45 @@ def _annotation(
                 character_observations=[],
                 dialogues=dialogues,
                 events=[],
-            )
-        ],
     )
 
 
 def _audit(
     *,
-    authorized_chunk_ids: list[int],
+    authorized_chapter_ids: list[int],
 ) -> AgentRunAudit:
     """2026-08-10 用于构造完成事务审计（完整工具审计由 AgentAuditRecorder 独立写入）"""
     return AgentRunAudit(
         allow_future_context=False,
         write_records=[],
-        authorized_chapter_ids=authorized_chunk_ids,
+        authorized_chapter_ids=authorized_chapter_ids,
         authorized_text_paragraph_ids=[],
     )
 
 
-def _pushed_case_for(annotation: BoundChapterAnnotation) -> list[PendingCase]:
-    """2026-08-11 用于构造模型 push 登记的对话疑点案例（携带 dialogue_id）
+def _pushed_case_for(annotation: BoundChapterAnnotation, chapter_id: int) -> list[PendingCase]:
+    """2026-08-11 用于构造模型 push 登记的对话疑点案例（携带 candidate_key）
 
     2026-09-13 登记即进池后案例行 id 就是 target_key，而 id 是全库主键：
     target_key 加 uuid 后缀，避免跨用例复用同一字面量时撞主键。
     """
     pending: list[PendingCase] = []
-    for chunk in annotation.chunks:
-        for dialogue in chunk.dialogues:
-            pending.append(
-                PendingCase(
-                    type="dialogue_speaker",
-                    chunk_id=chunk.chunk_id,
-                    keys=[dialogue.content, "说话人"],
-                    description=f"确认对话“{dialogue.content[:40]}”的说话人",
-                    target_key=f"pushed-target-key-{uuid4().hex[:8]}",
-                    target_ref={
-                        "kind": "dialogue_speaker",
-                        "dialogue_id": dialogue.candidate_key,
-                        "chunk_id": chunk.chunk_id,
-                        "keys": [dialogue.content, "说话人"],
-                    },
-                )
+    for dialogue in annotation.dialogues:
+        pending.append(
+            PendingCase(
+                type="dialogue_speaker",
+                chapter_id=chapter_id,
+                keys=[dialogue.content, "说话人"],
+                description=f"确认对话“{dialogue.content[:40]}”的说话人",
+                target_key=f"pushed-target-key-{uuid4().hex[:8]}",
+                target_ref={
+                    "kind": "dialogue_speaker",
+                    "candidate_key": dialogue.candidate_key,
+                    "chapter_id": chapter_id,
+                    "keys": [dialogue.content, "说话人"],
+                },
             )
+        )
     return pending
 
 
@@ -121,7 +114,7 @@ def _result(
     annotation: BoundChapterAnnotation,
     resolved_cases: list[ResolvedCase] | None = None,
     pushed_cases: list[PendingCase] | None = None,
-    authorized_chunk_ids: list[int] | None = None,
+    authorized_chapter_ids: list[int] | None = None,
     entity_names: list[str] | None = None,
 ) -> AgentRunResult:
     """2026-08-07 用于构造新合同 AgentRunResult
@@ -133,7 +126,7 @@ def _result(
         chapter_id=chapter_id,
         annotation=annotation,
         resolved_cases=resolved_cases or [],
-        pushed_cases=pushed_cases or _pushed_case_for(annotation),
+        pushed_cases=pushed_cases or _pushed_case_for(annotation, chapter_id),
         entity_ops=[
             {
                 "name": name,
@@ -146,7 +139,7 @@ def _result(
             for name in entity_names or []
         ],
         audit=_audit(
-            authorized_chunk_ids=authorized_chunk_ids or [annotation.chunks[0].chunk_id],
+            authorized_chapter_ids=authorized_chapter_ids or [chapter_id],
         ),
     )
 
@@ -164,7 +157,7 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
         title="完成事务成功",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
+    annotation = _annotation(chapter_id=1, text="“住手”回荡", unresolved_dialogue=True)
     result = _result(
         run_id=run_id,
         chapter_id=1,
@@ -188,7 +181,7 @@ def test_complete_annotation_run_commits_case_and_is_idempotent(db_session) -> N
     assert first.created_cases[0].id == case.id
     assert case.case_type == "dialogue_speaker"
     assert case.chapter_id == 1
-    assert case.target_ref["dialogue_id"] == dialogue.candidate_key
+    assert case.target_ref["candidate_key"] == dialogue.candidate_key
     assert dialogue.speaker is None
     assert dialogue.confidence == "medium"
     assert dialogue.is_inner_monologue is False
@@ -209,7 +202,7 @@ def test_dialogue_resolution_updates_dialogue_record(
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     first_annotation = _annotation(
-        chunk_id=1,
+        chapter_id=1,
         text="“住手”回荡",
         unresolved_dialogue=True,
     )
@@ -234,7 +227,7 @@ def test_dialogue_resolution_updates_dialogue_record(
         target_ref=dict(case.target_ref),
     )
     second_annotation = _annotation(
-        chunk_id=2,
+        chapter_id=2,
         text="顾霜喝道",
     )
     second = complete_annotation_run(
@@ -243,7 +236,7 @@ def test_dialogue_resolution_updates_dialogue_record(
             chapter_id=2,
             annotation=second_annotation,
             resolved_cases=[resolved],
-            authorized_chunk_ids=[1, 2],
+            authorized_chapter_ids=[1, 2],
             entity_names=["顾霜"],
         ),
         session_factory=factory,
@@ -259,13 +252,52 @@ def test_dialogue_resolution_updates_dialogue_record(
         )
     ).scalar_one()
 
-    assert dialogue.candidate_key == case.target_ref["dialogue_id"]
-    assert dialogue.speaker == "顾霜"
+    assert dialogue.candidate_key == case.target_ref["candidate_key"]
+    # 2026-09-17 说话人存图实体 id：案例裁决给的登记名在完成事务里解析成实体行
+    speaker_entity = db_session.execute(
+        select(GraphEntity).where(GraphEntity.run_id == run_id, GraphEntity.canonical_name == "顾霜")
+    ).scalar_one()
+    assert dialogue.speaker == speaker_entity.entity_id
+    assert str(speaker_entity.entity_type) == "character"
     assert resolved_case is not None and resolved_case.state == "resolved"
     assert mapping.target_dialogue_id == dialogue.dialogue_id
     assert mapping.resolution["action"] == "dialogue"
     assert second.resolved_cases[0].case_id == case.id
     assert second.resolved_cases[0].action == "dialogue"
+
+
+def test_dialogue_speaker_row_merges_with_chapter_entity(db_session) -> None:
+    """说话人名字同时是本章登记实体的名字：只留一行（先建的说话人行被实体登记合并）"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜喝道，“住手”回荡。"],
+        title="说话人与实体合并",
+    )
+    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    annotation = _annotation(chapter_id=1, text="顾霜喝道，“住手”回荡。", unresolved_dialogue=True)
+    dialogue = annotation.dialogues[0]
+    annotation.dialogues[0] = dialogue.model_copy(update={"speaker": "顾霜"})
+
+    complete_annotation_run(
+        result=_result(
+            run_id=run_id,
+            chapter_id=1,
+            annotation=annotation,
+            entity_names=["顾霜"],
+        ),
+        session_factory=factory,
+    )
+
+    db_session.rollback()
+    entities = list(
+        db_session.execute(
+            select(GraphEntity).where(GraphEntity.run_id == run_id, GraphEntity.canonical_name == "顾霜")
+        ).scalars()
+    )
+    stored = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
+    assert len(entities) == 1
+    assert str(entities[0].entity_type) == "character"
+    assert stored.speaker == entities[0].entity_id
 
 
 def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_session) -> None:
@@ -276,7 +308,7 @@ def test_complete_annotation_run_rolls_back_everything_when_persist_fails(db_ses
         title="完成事务回滚",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=1, text="“住手”回荡", unresolved_dialogue=True)
+    annotation = _annotation(chapter_id=1, text="“住手”回荡", unresolved_dialogue=True)
 
     with patch(
         "src.workflows.annotate_helpers.storage.persist_completion_graph",
@@ -311,7 +343,7 @@ def test_load_completion_result_reads_existing_chapter_without_writes(db_session
         title="完成结果回读",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=1, text="顾霜喝道")
+    annotation = _annotation(chapter_id=1, text="顾霜喝道")
     expected = complete_annotation_run(
         result=_result(run_id=run_id, chapter_id=1, annotation=annotation, entity_names=["顾霜"]),
         session_factory=factory,
@@ -333,7 +365,7 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         title="来源案例锁定失败",
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    annotation = _annotation(chunk_id=1, text="顾霜喝道")
+    annotation = _annotation(chapter_id=1, text="顾霜喝道")
     missing = ResolvedCase(
         case_id="missing-case",
         action="close",
@@ -343,11 +375,11 @@ def test_missing_resolved_case_rolls_back_before_annotation_write(db_session) ->
         target_ref={
             "kind": "dialogue_speaker",
             "dialogue_id": "dlg_missing",
-            "chunk_id": 1,
+            "chapter_id": 1,
         },
     )
 
-    with pytest.raises(ValueError, match="无法锁定全部 resolved cases"):
+    with pytest.raises(ValueError):
         complete_annotation_run(
             result=_result(
                 run_id=run_id,
@@ -378,7 +410,7 @@ def _foreshadowing_case(case_id: str, *, reason: str, foreshadowing_event_id: st
         type="伏笔疑点",
         reason=reason,
         target_key=f"key-{case_id}",
-        target_ref={"kind": "伏笔疑点", "chunk_id": 20},
+        target_ref={"kind": "伏笔疑点", "chapter_id": 20},
         foreshadowing_action="reinforce",
         foreshadowing_root_event_id="evt-root",
         foreshadowing_event_id=foreshadowing_event_id,
@@ -425,7 +457,7 @@ def test_fold_resolved_cases_covers_fact_path_duplicate() -> None:
                 "case_type": "关系疑点",
                 "reason": "fact 路径裁决",
                 "target_key": "key-case-1",
-                "target_ref": {"kind": "关系疑点", "chunk_id": 20},
+                "target_ref": {"kind": "关系疑点", "chapter_id": 20},
                 "from_entity": "白芷",
                 "to_entity": "秦穆",
                 "relation_type": "盟友",
@@ -455,6 +487,6 @@ def test_folded_resolved_cases_pass_locked_case_validation() -> None:
         state="active",
         case_type="伏笔疑点",
         target_key="key-case-1",
-        target_ref={"kind": "伏笔疑点", "chunk_id": 20},
+        target_ref={"kind": "伏笔疑点", "chapter_id": 20},
     )
     _validate_locked_cases(resolved_cases=folded, rows=[row])

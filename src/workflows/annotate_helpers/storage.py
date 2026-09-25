@@ -43,8 +43,13 @@ def _validate_locked_cases(
     resolved_cases: list[ResolvedCase],
     rows: list[CasePoolCase],
 ) -> None:
-    """2026-08-07 用于确认全部解决案例仍 active 且稳定目标未变化"""
-    case_ids = [result.case_id for result in resolved_cases]
+    """2026-08-07 用于确认全部解决案例仍 active 且稳定目标未变化
+
+    2026-09-18 无案例条目（case_id 空：写入路径自己发起的关系变化/伏笔挂边/对话更新）不进
+    本校验：它们不是案例裁决，既没有可锁的案例行、也不受"稳定目标未变"约束；照旧全量参与
+    会因空 id 重复而误报"case_id 不允许重复 / 无法锁定全部 resolved cases"。
+    """
+    case_ids = [result.case_id for result in resolved_cases if result.case_id]
     if len(set(case_ids)) != len(case_ids):
         raise ValueError("resolved_cases.case_id 不允许重复")
     rows_by_id = {row.id: row for row in rows}
@@ -111,6 +116,7 @@ def load_completion_result(
             target_dialogue_id=row.target_dialogue_id,
             target_root_event_id=row.target_root_event_id,
             target_event_id=row.target_event_id,
+            target_record_id=row.resolution.get("result_id"),
             target_fact_id=row.target_fact_id,
         )
         for row in mapping_rows
@@ -149,14 +155,13 @@ def _persist_dialogue_records(
         raise ValueError(f"对话落库缺少章节段落: run_id={result.run_id} chapter_id={result.chapter_id}")
     char_start = min(int(row.local_start_char) for row in paragraphs)
     char_end = max(int(row.local_end_char) for row in paragraphs)
-    for chunk in result.annotation.chunks:
-        event_anchors = [(event.node_id, char_start, char_end) for event in chunk.events]
-        repository.sync_dialogues(
-            run_id=result.run_id,
-            chapter_id=result.chapter_id,
-            dialogues=chunk.dialogues,
-            event_anchors=event_anchors,
-        )
+    event_anchors = [(event.node_id, char_start, char_end) for event in result.annotation.events]
+    repository.sync_dialogues(
+        run_id=result.run_id,
+        chapter_id=result.chapter_id,
+        dialogues=result.annotation.dialogues,
+        event_anchors=event_anchors,
+    )
 
 
 def _persist_pushed_cases(
@@ -229,6 +234,9 @@ def _persist_resolution_mappings(
     repository = CaseResolutionMappingRepository(session)
     completion_results: list[CompletionResolvedCase] = []
     for resolved_case in resolved_cases:
+        if not resolved_case.case_id:
+            # 2026-09-18 无案例条目：不是案例裁决，不写解决映射（落库分派照常走）
+            continue
         target = resolved_targets_by_case_id.get(resolved_case.case_id)
         target_fact = target if isinstance(target, GraphFact) else None
         if resolved_case.action in {"dialogue", "foreshadowing"} and target is None:
@@ -236,12 +244,16 @@ def _persist_resolution_mappings(
         target_dialogue_id: str | None = None
         target_root_event_id: str | None = None
         target_event_id: str | None = None
+        # 2026-09-18 promise 动作：目标是产出记录键（不是库内行），随映射回执原样带出
+        target_record_id: str | None = None
         if isinstance(target, DialogueRecord):
             target_dialogue_id = target.dialogue_id
         if isinstance(target, dict) and "root" in target:
             # 2026-09-13 foreshadowing 动作返回 dict（伏笔树根 + 挂树事件）
             target_root_event_id = target.get("target_root_event_id")
             target_event_id = target.get("target_event_id")
+        if resolved_case.action == "promise":
+            target_record_id = resolved_case.result_id
         repository.add_mapping(
             run_id=result.run_id,
             annotation_id=annotation_id,
@@ -260,6 +272,7 @@ def _persist_resolution_mappings(
                 target_dialogue_id=target_dialogue_id,
                 target_root_event_id=target_root_event_id,
                 target_event_id=target_event_id,
+                target_record_id=target_record_id,
                 target_fact_id=target_fact.fact_id if target_fact is not None else None,
             )
         )
@@ -278,23 +291,23 @@ def _reelect_representatives(
 
     entities = list(session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars())
     pairs = [
-        (int(row.from_entity_id), int(row.to_entity_id))
+        (str(row.from_entity_id), str(row.to_entity_id))
         for row in GraphRepository(session).fetch_latest_relations(run_id, active_only=True)
         if row.relation_semantics == "same_character"
     ]
     flags = elect_representatives(entities, pairs=pairs)
     for entity in entities:
         attributes = dict(entity.attributes or {})
-        if attributes.get("is_representative") == flags[int(entity.entity_id)]:
+        if attributes.get("is_representative") == flags[str(entity.entity_id)]:
             continue
-        attributes["is_representative"] = bool(flags[int(entity.entity_id)])
+        attributes["is_representative"] = bool(flags[str(entity.entity_id)])
         entity.attributes = attributes
 
 
 def _graph_fact_resolved_cases(result: AgentRunResult) -> list[ResolvedCase]:
     """2026-09-04 单一写面：把 FactGraph 关系变更操作日志还原为 fact 裁决 ResolvedCase
 
-    resolve_fact_case 不再向 resolved_cases 追加条目，图域裁决随 relation_change_ops
+    关系变化不再向 resolved_cases 追加条目（写入路径只登记图域操作日志），图域裁决随 relation_change_ops
     进入完成事务；此处按原 ResolvedCase 形状重建，使锁行校验、_persist_fact_resolution
     与解决映射写入沿用既有链路。
     """
@@ -325,10 +338,17 @@ def _fold_resolved_cases(entries: list[ResolvedCase]) -> list[ResolvedCase]:
     一致）、reason 拼接、保持首次出现顺序。fact 路径
     （_graph_fact_resolved_cases）与 foreshadowing/dialogue 路径的同 case_id
     重复在同一暴露面处理。
+
+    2026-09-18 无案例条目（case_id 空）不参与折叠：它们没有案例身份，逐条原样保留，
+    否则同一章里的多次关系变化会被折成一次。
     """
     folded: dict[str, ResolvedCase] = {}
     order: list[str] = []
+    case_less: list[ResolvedCase] = []
     for entry in entries:
+        if not entry.case_id:
+            case_less.append(entry)
+            continue
         existing = folded.get(entry.case_id)
         if existing is None:
             folded[entry.case_id] = entry
@@ -345,7 +365,7 @@ def _fold_resolved_cases(entries: list[ResolvedCase]) -> list[ResolvedCase]:
             reason for reason in (existing.reason, entry.reason) if reason
         )
         folded[entry.case_id] = existing.model_copy(update={**updates, "reason": merged_reason})
-    return [folded[case_id] for case_id in order]
+    return [*[folded[case_id] for case_id in order], *case_less]
 
 
 def complete_annotation_run(
@@ -378,7 +398,7 @@ def complete_annotation_run(
                 annotation=result.annotation,
             )
             # 2026-09-13 登记即进池：模型 push_case 的案例先落行（行 id 即 target_key），
-            # 本 chunk 内"推入即解决"的裁决才能在下面对同一标识锁行并校验稳定目标
+            # 本章 内"推入即解决"的裁决才能在下面对同一标识锁行并校验稳定目标
             pushed_completion = _persist_pushed_cases(
                 session,
                 result=result,
@@ -389,7 +409,9 @@ def complete_annotation_run(
             all_resolved_cases = _fold_resolved_cases(
                 [*result.resolved_cases, *_graph_fact_resolved_cases(result)]
             )
-            resolved_case_ids = [item.case_id for item in all_resolved_cases]
+            # 2026-09-18 无案例条目（case_id 空：写入路径自己发起的关系变化/伏笔挂边/对话更新）
+            # 只参与落库分派，不锁案例行、不写解决映射
+            resolved_case_ids = [item.case_id for item in all_resolved_cases if item.case_id]
             locked_rows = case_repository.lock_active_cases(
                 result.run_id,
                 resolved_case_ids,
