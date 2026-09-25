@@ -2,8 +2,14 @@
 章节标注 Agent 语义写入合同与系统绑定模型
 """
 
+# 2026-09-17 模型可见文案约定：本模块的类 docstring 会被 pydantic 渲染成字段的
+# JSON schema 说明、直接进模型可见面（工具参数 schema、程序面 API 目录都是这份），
+# 所以 docstring 一律按"说明"写——这是什么字段、能取哪些值、怎么判；开发史、
+# 裁决过程、实测数字写成类上方的 # 注释，不进模型面。
+
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
@@ -36,6 +42,17 @@ EMOTION_SCORE_DESCRIPTION = (
     "（-2 强烈负面 / -1 轻微负面 / 0 中性 / 1 轻微正面 / 2 强烈正面）"
 )
 
+# 2026-09-18 pivot/cliffhanger 说明单源：写者面 write_metrics 签名、ChapterMetricsInput
+# 与 subagent 面 metric 构造器目录共用同一份文本（只陈述字段机制，不裁断与 narrative_function 的分工）
+# 2026-09-18 说明改为判据口径：原句把"全书按 pivot_moment=true 的章数÷有效章数算
+# chapter_pivot_rate"这类聚合公式写给模型，模型据此判不了任何一段正文；聚合口径属指标文档
+# （src/config/constants/metrics_contracts.py 的 chapter_pivot_rate 条目）。
+PIVOT_MOMENT_DESCRIPTION = (
+    "本章是否标记为叙事转折点（布尔，独立字段）。narrative_function 说的是本章自身的叙事功能，"
+    "本字段说的是本章是否构成转折点，两者各自判断、允许不一致。"
+)
+CLIFFHANGER_DESCRIPTION = "本章是否以悬念收尾（布尔，追读钩子）。"
+
 
 def coerce_emotion_score(value: object) -> int:
     """emotion 分值容错读取：合同值本就是 -2..2 整数，历史遗留/异常取值按中性 0 计"""
@@ -44,17 +61,17 @@ def coerce_emotion_score(value: object) -> int:
     return 0
 
 
-# 2026-09-14 写入面重构：实体引用 = 运行期编号 n 或本 chunk 内 write_entity 自定的 el 键。
-# el 由模型指定、登记即绑定（同回合后面的调用直接可用，不等回执）；名称仍是非法引用，
-# 在账本解析点按 unknown_el 拒绝并列出已知键。
+# 2026-09-19 id 纪律：实体引用 = run 级 uuid id 或本 章内 write_entity 自定的 el 键。
+# el 由模型指定、登记即绑定（同回合后面的调用直接可用，不等回执）；id 由服务端确定性铸造、
+# 回执与检索视图同值；名称仍是非法引用，在账本解析点按 unknown_el / unknown_entity_id 拒绝。
 ENTITY_REF_FIELD_HINT = (
-    "（整数=write_entity 回执 n / search_graph 回执 n 的运行期编号；"
-    "字符串=本 chunk write_entity 自定的 el 键；不接受实体名称）"
+    "（字符串=write_entity / search_graph 回执里的 run 级 id；"
+    "或本章 write_entity 自定的 el 键；不接受实体名称）"
 )
 
 
 def _reject_blank_entity_ref(value: object) -> object:
-    """用于拒绝空引用；数字字符串放行给 int 解析，其余字符串按 el 键进入账本解析"""
+    """用于拒绝空引用；字符串按 el 键或 run 级 id 进入账本解析"""
     if isinstance(value, str) and not value.strip():
         raise ValueError("实体引用不能为空")
     return value
@@ -65,24 +82,57 @@ def entity_ref_field_description(label: str) -> str:
     return f"{label}{ENTITY_REF_FIELD_HINT}"
 
 
+class EntityRefType:
+    """2026-09-20 用于把"实体引用"这一注解标记出来
+
+    程序面目录渲染按标记给类型标签（"实体引用"），否则 from_entity 这种字段在签名里
+    只能照底层类型写"文本"——引用写什么正是被拒最多的那一族（run 54a72932：写者面
+    295 次 write_relation 失败里 135 次填的是实体名称）。注解元数据本身不参与校验。
+    """
+
+
 # 可复用的实体引用类型：供工具签名与参与者数组模型共用（解析见 ledger.resolve_entity_ref）
-EntityRef = Annotated[int | str, BeforeValidator(_reject_blank_entity_ref)]
+EntityRef = Annotated[str, BeforeValidator(_reject_blank_entity_ref), EntityRefType()]
+
+
+def _reject_text_evidence(value: object) -> object:
+    """2026-09-20 用于把段落编号类参数收成整数
+
+    证据一律是"段首可见号"（整数），不是引文、不是实体名：run 54a72932 里模型在
+    write_relation 的新增分支填引文（"伯安他爹铁帅"），整笔写入按 schema 校验失败作废
+    160 次，而该字段在新增分支本来不被消费。数字字符串按原意接受，其余当场拒。
+    """
+    if value is None or isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    raise ValueError(f"只能是段落开头的段首号（整数，如 12），不能是引文或名称：{value!r}")
+
+
+# 段落编号参数（关系变更的 evidence）：可空，收整数；同形的段落号参数见各构造器的 evidence
+EvidenceNumber = Annotated[int | None, BeforeValidator(_reject_text_evidence)]
 
 
 class NarrativeFunction(StrEnum):
-    """2026-08-07 用于约束 chunk 在叙事结构中的功能"""
+    """本章在叙事结构中的功能，只能取一个
+
+    冲突=已展开的矛盾在本章有一次正面交锋；铺垫=本章埋下后文要用的条件、线索或关系；
+    转折=本章改变了人物的处境、立场或认知。按本章最主要的作用判。
+    """
 
     CONFLICT = "冲突"
     SETUP = "铺垫"
     TURNING_POINT = "转折"
 
 
+# 2026-09-14 写入面重构：本枚举取代旧 PayoffLikelihood，成为伏笔唯一的可能性词表——
+# 根事件的 confidence 与伏笔树根的 strength 共用同一取值域
+# （落库列名 payoff_likelihood 不变，值域从二值扩为三档）。
 class Confidence(StrEnum):
-    """2026-08-07 用于约束伏笔置信度
+    """伏笔的可能性档位
 
-    2026-09-14 写入面重构：成为伏笔唯一的可能性词表——write_event 根的 confidence
-    与 resolve_foreshadowing_case.strength 共用（旧 PayoffLikelihood 二值枚举退役，
-    落库列名 payoff_likelihood 不变，值域扩为三档）。
+    high=正文有明确指向该伏笔的表述；medium=有较明显的暗示但没有点明；
+    low=只是可疑的苗头，是否成立取决于后文。
     """
 
     HIGH = "high"
@@ -90,11 +140,14 @@ class Confidence(StrEnum):
     LOW = "low"
 
 
+# 2026-09-11 并入"见证者"：模型在 narrative_role 槽位写"见证者"的实测失败 10 次，
+# 旁观/见证类参与者确有人物功能语义，堵在枚举外只产生解码返工。
 class RoleFunction(StrEnum):
-    """2026-08-07 用于约束人物在当前叙事动作中的功能
+    """人物在当前叙事动作里承担的功能
 
-    2026-09-11 并入"见证者"：模型在 narrative_role 槽位写"见证者"的实测失败 10 次，
-    旁观/见证类参与者确有人物功能语义，堵在枚举外只产生解码返工。
+    主体=发起动作的人；客体=动作的承受者；发送者/接收者=信息传递的两端；
+    帮助者=协助主体的第三方；反对者=阻碍主体的第三方；见证者=在场但没有介入的人。
+    按这个动作里的作用判，不按全章戏份判。
     """
 
     SUBJECT = "主体"
@@ -107,23 +160,26 @@ class RoleFunction(StrEnum):
 
 
 class DialogueVerdict(StrEnum):
-    """2026-08-11 用于约束对话候选的三态判断结果"""
+    """对话候选的三态判定
+
+    dialogue=人物之间真的说出口的话；inner_monologue=人物心里的想法（含未被他人听见的自语）；
+    not_dialogue=被引号包住但不是人物说话（引文、书名、术语强调等）。
+    """
 
     DIALOGUE = "dialogue"
     INNER_MONOLOGUE = "inner_monologue"
     NOT_DIALOGUE = "not_dialogue"
 
 
+# 2026-09-11 扩表：run e84339d1 实测 13 次 tone 失败全部是模型自造词，8 值词表与自然表达
+# 系统性错配；按实测高频词并入并加「其他」兜底。
+# 2026-09-14 二次扩表：恭敬×4（师徒/拜谒高频，22 值无敬档）、戏谑/调侃（嘲讽只覆盖贬义讥讽、
+# 缺亲昵玩笑反差档）为真词表缺口；其余拒词（苦涩/痛苦/低沉→悲伤、无赖/憨厚→人设非语气、
+# 坚定/郑重→平静）归既有词或「其他」，不并入以免词表通胀。
 class Tone(StrEnum):
-    """对话语气的闭合取值域，没有贴合的用「其他」
+    """说话人当下的语气，闭合词表，没有贴合的用「其他」
 
-    （2026-09-11 扩表：run e84339d1 实测 13 次 tone 失败全部是模型自造词，
-    8 值词表与自然表达系统性错配；按实测高频词并入并加「其他」兜底。
-    2026-09-14 本类以 enum 形态进入模型可见的工具 schema。
-    2026-09-14 二次扩表：三 run 拒词史里 恭敬×4（师徒/拜谒高频，22 值无敬档）、
-    戏谑/调侃（嘲讽只覆盖贬义讥讽、缺亲昵玩笑反差档）为真词表缺口，其余拒词
-    （苦涩/痛苦/低沉→悲伤、无赖/憨厚→人设非语气、坚定/郑重→平静）归既有词或「其他」，
-    不并入以免词表通胀。其他占比 3.2%，不构成系统性错配。）
+    按说话方式与当下情绪判，不按人物性格或听话人的感受判；只能取本表的值。
     """
 
     CALM = "平静"
@@ -168,24 +224,14 @@ _TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
 # 2026-09-14 写者侧 tone 恢复真 enum 参数（Tone | None）：闭合词表以 enum 进工具 schema，
 # 模型看得到取值域（预防面），越界值由 schema 层拒绝、记录级转换器翻成
 # record/field/code/expected 回执（含全词表与「其他」指引），与别的枚举参数同一条路径。
-# 本函数只剩读者上报的载荷校验（reader.py，校验失败降级为警告）用得上。
-def require_tone(value: object) -> Any:
-    """语气闭合校验：只接受枚举内取值，枚举外一律拒绝并给出全词表与兜底指引"""
-    if value is None or isinstance(value, Tone):
-        return value
-    text = str(value).strip()
-    try:
-        return Tone(text)
-    except ValueError:
-        pass
-    raise ValueError(
-        f"tone 必须是闭合语气枚举内的词：{text} 不在表内，"
-        f"没有贴合的用「其他」。合法值: {tone_catalog_text()}"
-    )
 
 
 class EventParticipantRole(StrEnum):
-    """2026-08-30 用于约束事件参与者角色并保留见证者与地点专属值"""
+    """参与实体在这次事件里的角色
+
+    主体=事件的发起者；客体=事件的承受者；接收者=接收对象；帮助者=协助主体的人；
+    反对者=阻碍事件的人；见证者=在场但未介入的人；地点=事件发生的场所（只给 location 实体用）。
+    """
 
     SUBJECT = "主体"
     OBJECT = "客体"
@@ -208,12 +254,15 @@ class RelationChangeKind(StrEnum):
     RETRACT = "retract"
 
 
+# 2026-09-11 中文化：run e84339d1 实测模型把 assert 写成 create/add/建——英文闭集要求
+# 模型先解码再翻译。这里改成模型自然的汉语说法，工具层按 RELATION_CHANGE_KIND_LABELS
+# 译回内部英文值，落库/API/前端契约零变化。
 class RelationChangeKindArg(StrEnum):
-    """2026-09-11 模型面关系变化词（中文化）
+    """本章对某条已登记关系做了什么变化
 
-    run e84339d1 实测模型把 assert 写成 create/add/建——英文闭集要求模型先解码再
-    翻译；这里改成模型自然的汉语说法，工具层按 RELATION_CHANGE_KIND_LABELS 译回
-    内部英文值，落库/API/前端契约零变化。
+    新增=确认这条关系存在；强化=关系更紧密；削弱=关系变疏远或分量下降；
+    解除=关系终止；修正=关系的性质或描述被更正；取代=被另一条关系替换；
+    撤回=此前登记有误、撤销该条。
     """
 
     CREATE = "新增"
@@ -237,7 +286,11 @@ RELATION_CHANGE_KIND_LABELS: dict[str, str] = {
 
 
 class RelationType(StrEnum):
-    """2026-08-09 用于提供唯一闭合关系类型注册表（精简中文词表）"""
+    """两张实体之间成立的关系类型，闭合词表
+
+    只能取本表的值；每个取值的语义与两端实体类型约束写在 relation_type 字段说明里。
+    「同一人物」专用于同一个人换了写法或身份，不是普通关系。
+    """
 
     FAMILY = "家族"
     MASTER_DISCIPLE = "师徒"
@@ -254,7 +307,7 @@ class RelationType(StrEnum):
 
 
 class EntityType(StrEnum):
-    """实体大类闭合取值域（2026-09-14 由 Literal 转真 enum，与 tone 回枚举同一裁决）
+    """实体大类
 
     character=有生命的（含人/动物/灵兽/妖/器灵），item=无生命物品，
     location=地点，organization=组织；有生命就是 character，不要按戏份调整。
@@ -267,7 +320,7 @@ class EntityType(StrEnum):
 
 
 class EventChildType(StrEnum):
-    """子事件在树内的位置（2026-09-14 由 Literal 转真 enum）
+    """子事件在树内的位置
 
     main=顺延主因链（成为新的链尾）；secondary=挂在当时主链尾（次因分支）。
     """
@@ -279,7 +332,7 @@ class EventChildType(StrEnum):
 Directionality = Literal["directed", "bidirectional"]
 RelationSemantics = Literal["ordinary", "same_character"]
 CaseType = str
-CaseAction = Literal["dialogue", "fact", "foreshadowing", "close"]
+CaseAction = Literal["dialogue", "fact", "foreshadowing", "close", "promise"]
 CaseState = Literal["active", "resolved"]
 DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 
@@ -418,7 +471,7 @@ ENTITY_TAGS_RULE_TEXT = f"最多 {ENTITY_TAG_MAX_COUNT} 个，每个最多 {ENTI
 
 
 class EntityInput(StrictModel):
-    """2026-08-08 用于提交当前 chunk 明确出现的实体"""
+    """2026-08-08 用于提交当前章 明确出现的实体"""
 
     name: str = Field(min_length=1, description="实体名称（新实体用本章出现的名称，已登记实体用登记名）")
     entity_type: EntityType = Field(
@@ -468,38 +521,40 @@ class EntityInput(StrictModel):
 
 
 class EntityDirectoryInput(StrictModel):
-    """2026-08-08 用于提交当前 chunk 出现的全部实体（单列表）"""
+    """2026-08-08 用于提交当前章 出现的全部实体（单列表）"""
 
     entities: list[EntityInput] = Field(default_factory=list)
 
 
+# 2026-09-14 段落级情绪监督：句级口径退役，标签随指标整域提交。
+# 2026-09-18 锚点口径改为"段首可见号"：注入正文每段以 `N：` 开头（N 为块内 1 基顺序号），
+# 标签与 evidence 一律引用该号；落库时再映射回全局 paragraph_id（对持久化无影响）。
 class ParagraphLabelInput(StrictModel):
-    """2026-09-14 段落级情绪监督条目（随 write_metrics.labels 提交，句级口径退役）
+    """一个段落的情绪标签
 
-    paragraph_id 是全局段落号：单块章正文每段以 ¶<id> 标号，两段式写者取读者
-    报告 evidence 的 paragraph_id——两条通道同一个号码空间。
+    paragraph_id 取正文段首可见号（每段开头的 `N：` 里那个 N）。
     """
 
-    paragraph_id: int = Field(ge=0, description="全局段落号（正文 ¶ 后的数字 / 报告证据的 paragraph_id）")
+    paragraph_id: int = Field(ge=1, description="段首可见号（正文每段开头的 `N：`）")
     emotion: int = Field(ge=-2, le=2, description=f"整段情绪分值。{EMOTION_SCORE_DESCRIPTION}")
 
 
-class ChunkMetricsInput(StrictModel):
-    """2026-08-07 用于提交当前 chunk 摘要和叙事指标"""
+class ChapterMetricsInput(StrictModel):
+    """2026-08-07 用于提交当前章 摘要和叙事指标"""
 
     summary: str = Field(min_length=1)
     emotional_valence: int = Field(ge=-2, le=2, description=EMOTION_SCORE_DESCRIPTION)
     narrative_function: NarrativeFunction
-    pivot_moment: bool = False
-    cliffhanger: bool = False
+    pivot_moment: bool = Field(default=False, description=PIVOT_MOMENT_DESCRIPTION)
+    cliffhanger: bool = Field(default=False, description=CLIFFHANGER_DESCRIPTION)
     labels: list[ParagraphLabelInput] = Field(
         default_factory=list,
         description="段落级情绪标签（每章自选 2-3 段；按 paragraph_id 去重，重复提交以最后一次为准）",
     )
 
     @model_validator(mode="after")
-    def normalize_summary(self) -> ChunkMetricsInput:
-        """2026-08-07 用于规范化当前 chunk 摘要；labels 按 paragraph_id 去重（后写覆盖）"""
+    def normalize_summary(self) -> ChapterMetricsInput:
+        """2026-08-07 用于规范化当前章 摘要；labels 按 paragraph_id 去重（后写覆盖）"""
         self.summary = normalize_semantic_text(self.summary, label="summary")
         deduped: dict[int, ParagraphLabelInput] = {}
         for label in self.labels:
@@ -522,7 +577,7 @@ class DialogueInput(StrictModel):
         default=None,
         description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
     )
-    # 2026-09-14 枚举字段本身即拒绝非法词，不再叠 require_tone（越界值由类型报错，
+    # 2026-09-14 枚举字段本身即拒绝非法词，不再叠函数级校验（越界值由类型报错，
     # 全词表与「其他」指引由工具层记录级回执给出）
     tone: Tone | None = None
 
@@ -609,20 +664,38 @@ class EventParticipantInput(StrictModel):
         return self
 
 
-class ParticipantArg(StrictModel):
-    """2026-09-14 模型面事件参与者条目（write_event.characters 数组元素）
+# 2026-09-20 两个角色字段的判据（提示词面共用一份：载荷字段说明与程序面目录说明同取这里，
+# 拒绝回执只报取值域）。run 54a72932 的 128 次 write_event 失败里，除漏填外主要是把身份
+# 称号写进 role（如"大少爷"）与把 role 的词写进 narrative_role。
+EVENT_ROLE_FIELD_HINT = "这个实体在这件事里起的作用，不是身份、称号"
+PERSON_ROLE_FIELD_HINT = "与 role 同一判断的叙事面"
 
-    character 实体必填三态（narrative_role/action/emotion，人物动态状态的唯一
-    数据源），非 character 只填 entityid/role——两形态在账本按登记类型强制分流。
+
+def _enum_values_text(enum_cls: type[StrEnum]) -> str:
+    """用于把枚举成员渲染成取值域文本（提示词与回执的取值同取枚举，不手抄）"""
+    return "、".join(str(member.value) for member in enum_cls)
+
+
+class ParticipantArg(StrictModel):
+    """事件的一个参与者（write_event.characters 数组元素）
+
+    按该实体的登记类型分两种形态：character 填 entityid/role 加人物三态
+    （narrative_role/action/emotion），其余实体只填 entityid/role。
     """
 
     entityid: EntityRef = Field(description=entity_ref_field_description("参与者实体引用"))
     role: EventParticipantRole = Field(
-        description="参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点角色只用于 location 实体）"
+        description=(
+            f"参与角色：{EVENT_ROLE_FIELD_HINT}；取 {_enum_values_text(EventParticipantRole)}"
+            "（地点角色只用于 location 实体）"
+        )
     )
     narrative_role: RoleFunction | None = Field(
         default=None,
-        description="仅 character 参与者必填的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者",
+        description=(
+            f"仅 character 参与者必填的人物叙事功能（{PERSON_ROLE_FIELD_HINT}）："
+            f"{_enum_values_text(RoleFunction)}"
+        ),
     )
     action: str | None = Field(
         default=None,
@@ -726,34 +799,69 @@ class EventTreeHistoryResult(StrictModel):
     edges: list[dict[str, Any]] = Field(default_factory=list)
 
 
-@dataclass(slots=True)
-class ChunkParagraphInfo:
-    """2026-08-18 用于保存当前 chunk 内段落坐标映射（注入 prompt 标记和派生事件锚点）
+# 2026-09-18 段首可见号：正文段落若自带 `N：` 前缀则沿用该号，否则按顺序编 1 基号。
+# 注入、evidence、标签三处共用这一个号码空间；全局 paragraph_id 只留在持久化侧。
+_PARAGRAPH_NUMBER_PREFIX_RE = re.compile(r"^\s*(\d+)\s*：")
 
-    2026-09-14 段落级监督：prompt 在每个段落起始处注入 ¶<全局paragraph_id> 标记
-    （与读者报告 evidence.paragraph_id 同一号码空间），write_metrics.labels 提交
-    的 paragraph_id 即该号码，服务端按本映射校验归属；三组列表内部仍按 0 基
-    chunk 内序号索引。
+
+def paragraph_has_visible_prefix(text: str) -> bool:
+    """2026-09-18 用于判断段落文本是否已自带 `N：` 段首号（注入时避免重复渲染）"""
+    return _PARAGRAPH_NUMBER_PREFIX_RE.match(text) is not None
+
+
+@dataclass(slots=True)
+class ChapterParagraphInfo:
+    """2026-08-18 用于保存当前 章内段落坐标映射（注入 prompt 标记和派生事件锚点）
+
+    2026-09-18 锚点口径：模型可见的段落号是"段首可见号"——正文每段以 `N：` 开头
+    （正文自带该前缀时沿用前缀里的号，否则按块内顺序编 1 基号）；evidence 与
+    write_metrics.labels 都提交这个号，服务端按本映射取段落并映射回全局
+    paragraph_id 再落库。三组列表内部仍按 0 基 章内序号索引。
     """
 
-    # 0 基 chunk 内序号 → 全局 paragraph_id
+    # 0 基 章内序号 → 全局 paragraph_id
     paragraph_ids: list[int]
-    # 0 基 chunk 内序号 → (start_char, end_char) 在 chunk 文本内的偏移
+    # 0 基 章内序号 → (start_char, end_char) 在 章正文内的偏移
     char_spans: list[tuple[int, int]]
-    # 0 基 chunk 内序号 → 段落文本
+    # 0 基 章内序号 → 段落文本
     texts: list[str]
 
     def __post_init__(self) -> None:
         """2026-08-18 用于校验三组列表长度一致且非空"""
         n = len(self.paragraph_ids)
         if n == 0:
-            raise ValueError("ChunkParagraphInfo 不能为空")
+            raise ValueError("ChapterParagraphInfo 不能为空")
         if len(self.char_spans) != n or len(self.texts) != n:
             raise ValueError("paragraph_ids / char_spans / texts 长度不一致")
 
     def is_valid_index(self, index: int) -> bool:
-        """2026-08-18 用于校验段落序号在当前 chunk 范围内"""
+        """2026-08-18 用于校验段落序号在当前章 范围内"""
         return 0 <= index < len(self.paragraph_ids)
+
+    def visible_ids(self) -> list[int]:
+        """2026-09-18 用于取每段的段首可见号（正文自带 N：前缀时用该号，否则 1 基顺序号）
+
+        自带前缀出现重复号时退回纯 1 基顺序号：号码空间必须一对一，注入的正文
+        与 evidence 锚点才不会有歧义。
+        """
+        ids: list[int] = []
+        for index, text in enumerate(self.texts, start=1):
+            match = _PARAGRAPH_NUMBER_PREFIX_RE.match(text)
+            ids.append(int(match.group(1)) if match else index)
+        if len(set(ids)) != len(ids):
+            return list(range(1, len(self.texts) + 1))
+        return ids
+
+    def text_by_visible_id(self) -> dict[int, str]:
+        """2026-09-18 用于取"段首可见号 → 段落文本"映射（evidence/标签按号取段）"""
+        return dict(zip(self.visible_ids(), self.texts, strict=True))
+
+    def global_id_for_visible(self, visible_id: int) -> int | None:
+        """2026-09-18 用于把段首可见号映射回全局 paragraph_id（落库用）"""
+        for candidate, global_id in zip(self.visible_ids(), self.paragraph_ids, strict=True):
+            if candidate == visible_id:
+                return int(global_id)
+        return None
 
     def char_span_for(self, indices: list[int]) -> tuple[int, int]:
         """2026-08-18 用于按段落序号列表派生合并字符范围"""
@@ -803,8 +911,8 @@ class DialogueCandidate(StrictModel):
     """2026-08-07 用于系统保存对话候选真实原文和位置"""
 
     candidate_key: str = Field(min_length=1)
-    # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20），候选不落库
-    chunk_id: int
+    # 2026-08-14 M7：允许负 chapter_id（子块运行时 ID，§20），候选不落库
+    chapter_id: int
     start: int = Field(ge=0)
     end: int = Field(gt=0)
     content: str = Field(min_length=1)
@@ -819,11 +927,11 @@ class DialogueCandidate(StrictModel):
 
 
 class BoundEntity(EntityInput):
-    """2026-08-11 用于系统绑定当前 chunk 实体出现（与输入模型同构，标记已校验）"""
+    """2026-08-11 用于系统绑定当前章 实体出现（与输入模型同构，标记已校验）"""
 
 
 class BoundEntityDirectory(StrictModel):
-    """2026-08-08 用于保存当前 chunk 实体出现（单列表）"""
+    """2026-08-08 用于保存当前章 实体出现（单列表）"""
 
     entities: list[BoundEntity] = Field(default_factory=list)
 
@@ -885,47 +993,26 @@ class BoundParagraphLabel(StrictModel):
     emotion: int
 
 
-class BoundChunkAnnotation(StrictModel):
-    """2026-08-07 用于保存系统完成绑定的单个 chunk 正式标注
+class BoundChapterAnnotation(StrictModel):
+    """2026-08-07 用于保存系统完成绑定的章节正式标注
 
-    2026-09-04 单一写面：图域（entities/relations）不再是本模型的字段——
-    实体与关系的运行时真相源是 FactGraph，持久化从其操作日志
+    2026-09-19 章即块拍平：原 章级 BoundChunkAnnotation 并入本模型
+    （每章一份正文，两级套娃退役）。图域（entities/relations）不是本模型的
+    字段——实体与关系的运行时真相源是 FactGraph，持久化从其操作日志
     （entity_ops / relation_assert_ops / relation_change_ops）派生。
-    resolve_fact_case 只更新 FactGraph，resolved_cases 不再承载 fact 动作。
 
     2026-09-14 段落级监督：句级 sentence_labels 退役，段落情绪标签随
     write_metrics.labels 提交、账本校验段号后绑定成本模型；默认空列表
     保持 payload 反序列化兼容。
     """
 
-    # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 合并为真实 chunk
-    chunk_id: int
-    metrics: ChunkMetricsInput
+    metrics: ChapterMetricsInput
     character_observations: list[BoundCharacterObservation]
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
     paragraph_labels: list[BoundParagraphLabel] = Field(default_factory=list)
     # 2026-09-05 冻结时系统确定性覆盖告警（如候选>0但载荷为空），仅留痕不阻断
     coverage_warnings: list[str] = Field(default_factory=list)
-
-
-class BoundChapterAnnotation(StrictModel):
-    """2026-08-07 用于保存最新语义写入合同的章节正式标注"""
-
-    chapter_summary: str = Field(min_length=1)
-    chunks: list[BoundChunkAnnotation] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_chapter(self) -> BoundChapterAnnotation:
-        """2026-08-07 用于规范化摘要并保证 chunk 顺序唯一"""
-        self.chapter_summary = normalize_semantic_text(
-            self.chapter_summary,
-            label="chapter_summary",
-        )
-        chunk_ids = [chunk.chunk_id for chunk in self.chunks]
-        if len(set(chunk_ids)) != len(chunk_ids):
-            raise ValueError("章节标注 chunk_id 不允许重复")
-        return self
 
 
 class TextSearchResult(StrictModel):
@@ -956,7 +1043,7 @@ class CaseSearchResult(StrictModel):
 
     id: str = Field(min_length=1)
     type: CaseType
-    chunk_id: int = Field(ge=0)
+    chapter_id: int = Field(ge=0)
     created_chapter: int = Field(default=0, ge=0)
     keys: list[str] = Field(min_length=1, max_length=20)
     description: str = Field(min_length=1, max_length=100)
@@ -996,10 +1083,18 @@ class SearchResult(StrictModel):
     truncated: bool = False
 
 
-class ResolvedCase(StrictModel):
-    """2026-08-11 用于系统暂存 Agent 对活动案例的动作式解决结果"""
+# 2026-09-18 把事件挂进既有伏笔树的两种动作：reinforce=该伏笔在本章继续发展 / payoff=兑现。
+# 模型面取值清单与生产面校验共用这一份（写入路径与案例路径同一条语义）。
+FORESHADOWING_ACTIONS: tuple[str, ...] = ("reinforce", "payoff")
 
-    case_id: str
+
+class ResolvedCase(StrictModel):
+    """2026-08-11 用于系统暂存 Agent 对活动案例的动作式解决结果
+
+    2026-09-18 case_id 可空：空的表示这次动作**不是案例驱动的**（写入路径自己发起的关系
+    变化 / 伏笔挂边 / 对话记录更新），此时不进案例锁定与解决映射，只走落库分派。
+    """
+    case_id: str = ""
     action: CaseAction
     type: CaseType = ""
     reason: str
@@ -1022,6 +1117,8 @@ class ResolvedCase(StrictModel):
     foreshadowing_event_id: str | None = None
     payoff_likelihood: str | None = None
     strength: str | None = None
+    # 2026-09-18 promise 动作：案例由哪条产出记录交代（记录键，语义改动由那条记录自己承担）
+    result_id: str | None = None
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> ResolvedCase:
@@ -1080,6 +1177,10 @@ class ResolvedCase(StrictModel):
                 if value is not None and value not in valid_values:
                     raise ValueError(f"resolve.{field_name} 枚举漂移: {value!r}，合法值: {sorted(valid_values)}")
             return self
+        if self.action == "promise":
+            if not (self.result_id or "").strip():
+                raise ValueError("promise 动作必须提供 result_id（兑现该案例的产出记录键）")
+            return self
         if self.action == "close":
             return self
         raise ValueError(f"未知案例动作: {self.action}")
@@ -1089,8 +1190,8 @@ class PendingCase(StrictModel):
     """2026-08-11 用于保存模型 push 登记的新连续性疑点案例"""
 
     type: CaseType
-    # 2026-08-14 M7：允许负 chunk_id（子块运行时 ID，§20）；落库前由 workflow 映射回真实 chunk
-    chunk_id: int
+    # 2026-08-14 M7：允许负 chapter_id（子块运行时 ID，§20）；落库前由 workflow 映射回真实章节
+    chapter_id: int
     keys: list[str] = Field(min_length=1)
     description: str = Field(min_length=1, max_length=100)
     target_key: str
@@ -1100,7 +1201,8 @@ class PendingCase(StrictModel):
 class AgentRunAudit(StrictModel):
     """2026-08-19 用于保存系统范围搜索凭据和领域写入记录（完整工具审计进入新审计表）
 
-    2026-08-30：文本检索返回正文时即时登记精确段落授权；sub_chunk_index 记录子块协议运行序号。
+    2026-08-30：文本检索返回正文时即时登记精确段落授权。
+    2026-09-19 sub_chunk_index 字段随子块协议退役删除（子块不再是运行单元）。
     """
 
     allow_future_context: bool
@@ -1110,7 +1212,6 @@ class AgentRunAudit(StrictModel):
     # 2026-08-18 P2：历史事件只能使用本轮 search_event_history 返回的稳定 ID
     authorized_event_ids: list[str] = Field(default_factory=list)
     closed_case_ids: list[str] = Field(default_factory=list)
-    sub_chunk_index: int = 0
 
 
 class AgentRunResult(StrictModel):
@@ -1137,7 +1238,7 @@ class CompletionCase(StrictModel):
 
     id: str
     type: CaseType
-    chunk_id: int = Field(ge=0)
+    chapter_id: int = Field(ge=0)
     keys: list[str]
     description: str
     target_ref: dict[str, Any]
@@ -1145,7 +1246,10 @@ class CompletionCase(StrictModel):
 
 
 class CompletionResolvedCase(StrictModel):
-    """2026-08-11 用于返回完成事务按 action 写入的解决目标（close 动作无目标）"""
+    """2026-08-11 用于返回完成事务按 action 写入的解决目标（close 动作无目标）
+
+    2026-09-18：promise 动作的目标是一条产出记录（记录键），不是库内行。
+    """
 
     case_id: str
     action: CaseAction
@@ -1156,6 +1260,7 @@ class CompletionResolvedCase(StrictModel):
     # 2026-09-13 伏笔入森林：解决目标是伏笔树根与挂进树的事件
     target_root_event_id: str | None = None
     target_event_id: str | None = None
+    target_record_id: str | None = None
 
 
 class CompletionResult(StrictModel):
