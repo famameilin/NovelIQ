@@ -285,12 +285,11 @@ async def test_constructor_namespaces_relation_endpoints() -> None:
 
 
 @pytest.mark.asyncio
-async def test_subagent_graph_injects_progress_ledger_every_turn() -> None:
-    """2026-09-20 三条 lane 与写者面同一份【进度账本】逐回合注入
+async def test_subagent_graph_does_not_inject_progress_ledger() -> None:
+    """2026-09-25 消融（ch20/lanes 三臂）后 lane 面不再注入【进度账本】
 
-    run 54a72932 实测：写者面 80/80 请求带注入块、三条 lane 0/439——服务端不重放思考，
-    每个 subagent 跨回合同样看不到自己上轮的判定。注入块只进当次请求（状态链长度按
-    "链上原有消息"算），所以每个回合的请求比状态链恰好多这一条。
+    消融实测：lane 账本令 reasoning +36%、prompt 3.5x、三 lane 全撞满回合上限而交付相当
+    （tmp_ablation/）；请求只含状态链本身，任何回合都不出现注入块。写者面注入不受影响。
     """
     ledger = _ledger()
     subagent = SubagentAnnotation(role="structure")
@@ -320,17 +319,11 @@ async def test_subagent_graph_injects_progress_ledger_every_turn() -> None:
         }
     )
 
-    # 回合 1：初始消息 + 注入块；回合 2：状态链（初始 + AI + 程序回执）+ 注入块
-    assert [len(messages) for messages in llm.captured] == [2, 4]
-    assert [len(messages) - len(llm.captured[0]) for messages in llm.captured[1:]] == [2]
-    assert isinstance(llm.captured[1][-1], HumanMessage)
-    # 2026-09-20 与写者面同一位置约束：注入块恒在末位、且上一轮那份不进下一轮请求
-    assert isinstance(llm.captured[0][-1], HumanMessage)
-    first_block = str(llm.captured[0][-1].content)
-    assert first_block != str(llm.captured[1][-1].content)
-    assert all(str(message.content) != first_block for message in llm.captured[1])
-    # 末位那份携带本轮之前的写入：第 2 回合末位可见第 1 回合登记的实体 el
-    assert "a1" in str(llm.captured[1][-1].content)
+    # 回合 1：只有初始消息；回合 2：状态链（初始 + AI + 程序回执）——没有注入块消息
+    assert [len(messages) for messages in llm.captured] == [1, 3]
+    assert all(
+        "【进度账本】" not in str(message.content) for messages in llm.captured for message in messages
+    )
 
 
 @pytest.mark.asyncio
@@ -589,3 +582,83 @@ async def test_search_pool_projection_compacts_dict_collection() -> None:
         "keys",
     }
     assert "pool" in row["receipt"]
+
+
+@pytest.mark.asyncio
+async def test_relation_build_edge_accepts_explicit_create_kind_without_evidence() -> None:
+    """2026-09-25 建边（含显式 change_kind="新增"）不带 evidence 不再 IndexError
+
+    run faff5efe 实测 67 次：建边路径不消费 evidence（元组为空），落 args 却无条件取
+    evidence[0]，合法调用整体崩成 invalid_call——66 个去重关系三元组里 23 个因此丢失。
+    """
+    ledger = _ledger()
+    subagent = SubagentAnnotation(role="structure")
+    runtime = _runtime(ledger, subagent=subagent)
+    receipt = json.loads(
+        await runtime.execute(
+            'entity(id="a1", name="顾霜", entity_type="character", evidence=1)\n'
+            'entity(id="a2", name="贺铮", entity_type="character", evidence=1)\n'
+            'relation(from_id="a1", to_id="a2", relation_type="家族", change_kind="新增")\n'
+            'relation(from_id="a2", to_id="a1", relation_type="师徒")\n'
+        )
+    )
+    assert receipt["status"] == "applied"
+    assert "failed" not in receipt
+    # 显式"新增"仍作为建边登记，evidence 元组保持为空（建边不消费段号）
+    assert subagent.relations[0].change_kind == "新增"
+    assert subagent.relations[0].evidence == ()
+    assert subagent.relations[1].change_kind is None
+
+
+@pytest.mark.asyncio
+async def test_dialogue_update_ignores_judgment_path_fields() -> None:
+    """2026-09-25 订正既有记录误带 candidate_index/verdict/evidence 不再整笔拒绝
+
+    run faff5efe 实测 39 次全带 candidate_index+verdict="dialogue"（复读当前值），
+    互斥闸把合法订正（speaker/tone）一并拒掉；按"误带参数不作废整笔"口径忽略。
+    """
+    ledger = _ledger()
+    runtime = _runtime(ledger, subagent=SubagentAnnotation(role="structure"))
+    key = ledger.dialogue_candidates[0].candidate_key
+    receipt = json.loads(
+        await runtime.execute(
+            'entity(id="a1", name="顾霜", entity_type="character", evidence=1)\n'
+            'dialogue(candidate_index=1, verdict="dialogue", evidence=1)\n'
+            f'dialogue(candidate_key="{key}", candidate_index=1, verdict="dialogue", '
+            'speaker_id="a1", tone="恐惧")\n'
+        )
+    )
+    assert receipt["status"] == "applied"
+    assert "failed" not in receipt
+    # 订正不改内存候选账本：生效走 resolved_cases（章提交时更新记录行）
+    case = ledger.resolved_cases[-1]
+    assert case.action == "dialogue"
+    assert case.target_key == key
+    assert case.speaker == "顾霜"
+    assert case.tone == "恐惧"
+    # 只复读判定字段、没有真订正字段时仍按"没有要订正的字段"拒绝
+    empty = json.loads(
+        await runtime.execute(
+            f'dialogue(candidate_key="{key}", candidate_index=1, verdict="dialogue")\n'
+        )
+    )
+    assert empty["failed"][0]["code"] == "no_update"
+
+
+@pytest.mark.asyncio
+async def test_entity_receipt_ref_reports_effective_entity_type() -> None:
+    """2026-09-25 同章跨 lane 重登记同名实体时 ref 报生效大类（部分更新保留登记值）
+
+    run faff5efe ch14 实测：structure lane 先登记太学=organization，event lane 随后提交
+    location——生产层合并保留 organization，构造器 ref 却照抄输入。程序面压缩回执不回显
+    成功 op，模型从未见过这份 ref，此修只让审计回执与现实一致。
+    """
+    ledger = _ledger()
+    first = _runtime(ledger, subagent=SubagentAnnotation(role="structure"))
+    await first.execute('entity(id="b2", name="太学", entity_type="organization", evidence=1)')
+    observer = _RecordingObserver()
+    second = _runtime(ledger, subagent=SubagentAnnotation(role="event"), observer=observer)
+    await second.execute('entity(id="l2", name="太学", entity_type="location", evidence=1)')
+    row = next(item for item in observer.rows if item["tool_name"] == "entity")
+    assert row["status"] == "success"
+    assert row["receipt"]["ref"]["entity_type"] == "organization"
