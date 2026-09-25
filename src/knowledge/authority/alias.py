@@ -21,15 +21,15 @@ from .alias_heuristics import find_heuristic_character_edges
 class AliasResolution:
     """2026-08-09 用于提供别名实体到代表实体的稳定映射"""
 
-    representative_by_alias: dict[int, int] = field(default_factory=dict)
+    representative_by_alias: dict[str, str] = field(default_factory=dict)
     name_to_representative: dict[str, str] = field(default_factory=dict)
-    aliases_by_representative: dict[int, list[str]] = field(default_factory=dict)
+    aliases_by_representative: dict[str, list[str]] = field(default_factory=dict)
 
-    def resolve_entity_id(self, entity_id: int | None) -> int | None:
+    def resolve_entity_id(self, entity_id: str | None) -> str | None:
         """2026-08-09 用于把别名实体 ID 重写为代表实体 ID"""
         if entity_id is None:
             return None
-        return self.representative_by_alias.get(int(entity_id), int(entity_id))
+        return self.representative_by_alias.get(str(entity_id), str(entity_id))
 
     def resolve_name(self, name: str | None) -> str | None:
         """2026-08-09 用于把别名名称重写为代表名称"""
@@ -49,10 +49,10 @@ def build_alias_resolution(
     代表 = 实体 attributes.is_representative=true 的节点；无标记（旧数据/防御）时
     取分量内最小 entity_id，与完成事务选举语义对齐。
     """
-    entity_by_id = {int(entity.entity_id): entity for entity in entities}
-    parent: dict[int, int] = {}
+    entity_by_id = {str(entity.entity_id): entity for entity in entities}
+    parent: dict[str, str] = {}
 
-    def find(node: int) -> int:
+    def find(node: str) -> str:
         if parent.get(node, node) != node:
             parent[node] = find(parent[node])
         return parent[node]
@@ -62,8 +62,8 @@ def build_alias_resolution(
             continue
         if relation.relation_semantics != "same_character":
             continue
-        from_id = int(relation.from_entity_id)
-        to_id = int(relation.to_entity_id)
+        from_id = str(relation.from_entity_id)
+        to_id = str(relation.to_entity_id)
         parent.setdefault(from_id, from_id)
         parent.setdefault(to_id, to_id)
         root_a, root_b = find(from_id), find(to_id)
@@ -78,12 +78,12 @@ def build_alias_resolution(
         if root_a != root_b:
             parent[root_b] = root_a
 
-    representative_by_alias: dict[int, int] = {}
-    components: dict[int, list[int]] = {}
+    representative_by_alias: dict[str, str] = {}
+    components: dict[str, list[str]] = {}
     for node in parent:
         components.setdefault(find(node), []).append(node)
     for members in components.values():
-        flagged: list[int] = []
+        flagged: list[str] = []
         for member in members:
             entity = entity_by_id.get(member)
             if entity is not None and bool((entity.attributes or {}).get("is_representative")):
@@ -94,8 +94,8 @@ def build_alias_resolution(
                 representative_by_alias[member] = representative
 
     name_to_representative: dict[str, str] = {}
-    aliases_by_representative: dict[int, list[str]] = {}
-    entity_names = {int(entity.entity_id): str(entity.name) for entity in entities}
+    aliases_by_representative: dict[str, list[str]] = {}
+    entity_names = {str(entity.entity_id): str(entity.name) for entity in entities}
     for alias_id, representative_id in representative_by_alias.items():
         alias_name = entity_names.get(alias_id)
         representative_name = entity_names.get(representative_id)

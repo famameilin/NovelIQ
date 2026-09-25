@@ -27,11 +27,11 @@ def looks_like_alias_name(left: str, right: str) -> bool:
 
 def find_heuristic_character_edges(
     entities: Sequence[EntitySnapshotRow],
-) -> list[tuple[int, int]]:
+) -> list[tuple[str, str]]:
     """
     返回基于确定性名称规则的可疑同一人物边。
 
-    边端点按 entity_id 小到大排序；只处理 entity_type=character。
+    边端点按 entity_id 字典序小到大排序（uuid 主键，确定性不变）；只处理 entity_type=character。
     """
     chars = [
         entity
@@ -40,8 +40,8 @@ def find_heuristic_character_edges(
         and getattr(entity, "entity_id", None) is not None
         and getattr(entity, "name", None)
     ]
-    edges: list[tuple[int, int]] = []
-    seen: set[tuple[int, int]] = set()
+    edges: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for i in range(len(chars)):
         for j in range(i + 1, len(chars)):
             left = chars[i]
@@ -49,7 +49,7 @@ def find_heuristic_character_edges(
             if not looks_like_alias_name(left.name, right.name):
                 continue
             a, b = sorted(
-                (int(left.entity_id), int(right.entity_id)),
+                (str(left.entity_id), str(right.entity_id)),
             )
             if (a, b) in seen:
                 continue

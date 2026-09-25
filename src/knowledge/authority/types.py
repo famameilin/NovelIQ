@@ -45,7 +45,7 @@ class CanonicalEntity:
 
     name: str
     entity_type: str = "character"
-    entity_id: int | None = None
+    entity_id: str | None = None
     first_seen_chapter: int | None = None
     last_seen_chapter: int | None = None
     primary_role_function: str | None = None
@@ -62,8 +62,8 @@ class ConfirmedRelation:
     from_name: str
     to_name: str
     relation_type: str
-    from_entity_id: int | None = None
-    to_entity_id: int | None = None
+    from_entity_id: str | None = None
+    to_entity_id: str | None = None
     is_active: bool = True
     first_seen_chapter: int | None = None
     last_seen_chapter: int | None = None
@@ -85,12 +85,12 @@ class GraphChange:
     effective_chapter_id: int
     confidence: str
     changes: list[dict]
-    entity_id: int | None = None
+    entity_id: str | None = None
     entity_name: str | None = None
     entity_type: str | None = None
     relation_id: str | None = None
-    from_entity_id: int | None = None
-    to_entity_id: int | None = None
+    from_entity_id: str | None = None
+    to_entity_id: str | None = None
     from_name: str | None = None
     to_name: str | None = None
     relation_type: str | None = None
@@ -115,7 +115,7 @@ class EntityLifecycle:
     下游代码不应再从 repository 原始行重新推导生命周期窗口
     """
 
-    entity_id: int
+    entity_id: str
     name: str
     entity_type: str
     first_seen_chapter: int | None = None
@@ -132,7 +132,7 @@ class ParticipantState:
     这里刻意排除 `last_action`、局部情绪等瞬时局部上下文
     """
 
-    entity_id: int
+    entity_id: str
     name: str
     entity_type: str
     status: str = "active"
@@ -341,7 +341,7 @@ class GraphPageSummary:
 class GraphConflictSample:
     """仅供图谱页面展示的关系类型冲突样本"""
 
-    entity_pair: list[int | None] = field(default_factory=list)
+    entity_pair: list[str | None] = field(default_factory=list)
     entity_names: list[str] = field(default_factory=list)
     relation_types: list[str] = field(default_factory=list)
     relation_count: int = 0
