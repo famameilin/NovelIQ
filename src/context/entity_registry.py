@@ -79,14 +79,14 @@ def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
 def get_active_entities(
     graph_repo: GraphRepository,
     run_id: str,
-    current_chunk_id: int,
+    current_chapter_id: int,
     lookback: int = 10,
 ) -> list[dict[str, Any]]:
     """获取活跃实体列表（按名称去重，保留最新；仅保留 status 为 active 的实体）
 
     状态存于实体 state 字典，缺省视为 active（与 authority 服务口径一致）。
     """
-    minimum_chunk_id = max(0, current_chunk_id - lookback)
+    minimum_chunk_id = max(0, current_chapter_id - lookback)
     rows = [
         {
             "last_seen_chapter": row.last_seen_chapter,
@@ -97,7 +97,7 @@ def get_active_entities(
             "emotion_score": row.state.get("emotion_score", 0),
         }
         for row in graph_repo.fetch_latest_entities(run_id)
-        if minimum_chunk_id <= row.last_seen_chapter <= current_chunk_id
+        if minimum_chunk_id <= row.last_seen_chapter <= current_chapter_id
         and (row.state.get("status") or "active") == "active"
     ]
 
