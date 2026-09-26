@@ -210,6 +210,7 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert [item.name for item in subagent.entities] == ["沈遥", "长刀", "剑宗"]
     assert len(subagent.relations) == 1
     assert len(subagent.events) == 2
+    assert [event.evidence_paragraph_id for event in ledger.bound_payloads["events"]] == [1, 2]
     assert subagent.event_keys()["t1"].participants[0].entity_id == "a1"
     assert subagent.dialogues[0].speaker_id == "a1"
     assert [item.paragraph_id for item in subagent.labels] == [1]
@@ -252,8 +253,10 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     }
     root_plan = runtime.tools["event"](el="t1", isroot=True, description="沈遥喝止", evidence=E_SHOUT)
     assert root_plan.ref == {"kind": "event", "el": "t1", "isroot": True, "participants": 1}
+    assert root_plan.args["evidence"] == E_SHOUT
     child_plan = runtime.tools["event"](el="t1/e2", isroot=False, description="转身", type="main", evidence=E_KNIFE)
     assert child_plan.ref == {"kind": "event", "el": "t1/e2", "isroot": False, "participants": 0}
+    assert child_plan.args["evidence"] == E_KNIFE
     participants_plan = runtime.tools["participants"](el="t1", items=[_CHARACTER_ITEM])
     assert participants_plan.ref == {"kind": "participants", "el": "t1", "count": 1}
     dialogue_plan = runtime.tools["dialogue"](

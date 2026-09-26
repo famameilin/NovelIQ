@@ -424,6 +424,7 @@ def _event_write_args(
         "el": namespace_event_el(book.role, item.el),
         "isroot": item.isroot,
         "description": item.description,
+        "evidence": item.evidence[0].paragraph_id,
     }
     if item.isroot:
         args["isforeshadowing"] = item.isforeshadowing

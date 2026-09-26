@@ -26,6 +26,7 @@ from src.storage.models import (
     GraphEntity,
     GraphFact,
     GraphRelation,
+    Paragraph,
     RelationState,
 )
 from src.storage.repositories import ChapterAnnotationRepository, DialogueRecordRepository
@@ -823,6 +824,90 @@ def test_persist_writes_event_shadow_node(db_session) -> None:
     assert node.evidence[0]["paragraph_ids"] == [0]
 
 
+def test_persist_event_nodes_and_facts_use_their_evidence_paragraphs(db_session) -> None:
+    text = "顾霜拔剑。\n她转身离开。"
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=[text], title="事件段落证据")
+    paragraphs = list(
+        db_session.execute(
+            select(Paragraph).where(Paragraph.run_id == run_id).order_by(Paragraph.paragraph_index)
+        ).scalars()
+    )
+    assert len(paragraphs) == 2
+    root_id = f"evt-root-{uuid.uuid4().hex[:8]}"
+    child_id = f"evt-child-{uuid.uuid4().hex[:8]}"
+    annotation = BoundChapterAnnotation(
+        metrics=ChapterMetricsInput(summary="顾霜离开", emotional_valence=0, narrative_function="转折"),
+        character_observations=[],
+        dialogues=[],
+        events=[
+            BoundEvent(
+                node_id=root_id,
+                tree_id="tree-paragraph-evidence",
+                parent_node_id=None,
+                cause_role="root",
+                description="顾霜拔剑",
+                evidence_paragraph_id=paragraphs[0].paragraph_id,
+            ),
+            BoundEvent(
+                node_id=child_id,
+                tree_id="tree-paragraph-evidence",
+                parent_node_id=root_id,
+                cause_role="main",
+                description="她转身离开",
+                evidence_paragraph_id=paragraphs[1].paragraph_id,
+            ),
+        ],
+    )
+    _persist(db_session, run_id=run_id, annotation=annotation)
+    db_session.commit()
+
+    nodes = {
+        node.event_id: node
+        for node in db_session.execute(select(EventNode).where(EventNode.run_id == run_id)).scalars()
+    }
+    facts = {
+        fact.event_id: fact
+        for fact in db_session.execute(
+            select(GraphFact).where(GraphFact.run_id == run_id, GraphFact.fact_type == "event")
+        ).scalars()
+    }
+    for event_id, paragraph in ((root_id, paragraphs[0]), (child_id, paragraphs[1])):
+        expected = {
+            "paragraph_ids": [paragraph.paragraph_id],
+            "char_start": paragraph.local_start_char,
+            "char_end": paragraph.local_end_char,
+        }
+        assert nodes[event_id].anchor_paragraph_ids == expected["paragraph_ids"]
+        assert nodes[event_id].char_start == expected["char_start"]
+        assert nodes[event_id].char_end == expected["char_end"]
+        assert nodes[event_id].evidence == [expected]
+        assert facts[event_id].content["anchor_paragraph_ids"] == expected["paragraph_ids"]
+        assert facts[event_id].evidence == [expected]
+
+
+def test_persist_rejects_event_evidence_outside_chapter(db_session) -> None:
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜拔剑。"], title="拒绝外章证据")
+    annotation = BoundChapterAnnotation(
+        metrics=ChapterMetricsInput(summary="顾霜拔剑", emotional_valence=0, narrative_function="冲突"),
+        character_observations=[],
+        dialogues=[],
+        events=[
+            BoundEvent(
+                node_id=f"evt-invalid-{uuid.uuid4().hex[:8]}",
+                tree_id="tree-invalid-evidence",
+                parent_node_id=None,
+                cause_role="root",
+                description="顾霜拔剑",
+                evidence_paragraph_id=99,
+            )
+        ],
+    )
+    with pytest.raises(ValueError, match="事件证据不属于当前章节"):
+        _persist(db_session, run_id=run_id, annotation=annotation)
+    assert db_session.execute(select(EventNode).where(EventNode.run_id == run_id)).scalars().all() == []
+    assert db_session.execute(select(GraphFact).where(GraphFact.run_id == run_id)).scalars().all() == []
+
+
 def test_persist_does_not_materialize_contains_edges(db_session) -> None:
     """2026-08-19 用于验证contains 不再落表，event_edges 只有 causal 边
 
@@ -878,6 +963,8 @@ def test_persist_does_not_materialize_contains_edges(db_session) -> None:
         "evt-contains-root",
         "evt-contains-main",
     }
+    # 0.1.0 已存事件没有 evidence_paragraph_id，继续读取原来的整章证据。
+    assert all(fact.evidence[0]["paragraph_ids"] == [0, 1] for fact in event_facts)
 
 
 def _forest_resolution(case_id: str, *, root_event_id: str, event_id: str, action: str = "reinforce") -> ResolvedCase:

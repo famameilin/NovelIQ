@@ -941,6 +941,7 @@ class AnnotationToolLedger:
         el: str,
         isroot: bool,
         description: str,
+        evidence: int | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
         node_type: EventChildType | None = None,
@@ -986,6 +987,7 @@ class AnnotationToolLedger:
                 record=record,
                 tree_key=tree_key,
                 description=description,
+                evidence=evidence,
                 isforeshadowing=isforeshadowing,
                 confidence=confidence,
             )
@@ -1028,6 +1030,7 @@ class AnnotationToolLedger:
                 node_key=node_key,
                 node_type=node_type,
                 description=description,
+                evidence=evidence,
             )
         if characters is not None:
             self._apply_participants(
@@ -1044,12 +1047,43 @@ class AnnotationToolLedger:
             return f"{cleaned}/{_ROOT_NODE_KEY}"
         return cleaned
 
+    def _event_evidence_paragraph_id(
+        self, evidence: int | None, *, record: str, existing: BoundEvent | None = None
+    ) -> int | None:
+        """将段首可见号绑定到本章段落；重写未给证据时保留原锚点。"""
+        if evidence is None and existing is not None and existing.evidence_paragraph_id is not None:
+            return existing.evidence_paragraph_id
+        if self.paragraph_info is None:
+            return None
+        visible_to_global = dict(self._visible_global_pairs())
+        if evidence is None and len(visible_to_global) == 1:
+            return next(iter(visible_to_global.values()))
+        if evidence is None:
+            raise AnnotationStageRejection(
+                "事件缺少所在段证据",
+                record=record,
+                field="evidence",
+                code="missing_evidence",
+                expected="填写本章正文段首的可见号（单个整数）",
+            )
+        if isinstance(evidence, bool) or not isinstance(evidence, int) or evidence not in visible_to_global:
+            preview = ", ".join(str(number) for number in sorted(visible_to_global)[:12])
+            raise AnnotationStageRejection(
+                f"事件 evidence 不属于本章: {evidence}",
+                record=record,
+                field="evidence",
+                code="out_of_range",
+                expected=f"本章可用段首号: {preview}{'…' if len(visible_to_global) > 12 else ''}",
+            )
+        return visible_to_global[evidence]
+
     def _apply_event_root(
         self,
         *,
         record: str,
         tree_key: str,
         description: str,
+        evidence: int | None,
         isforeshadowing: bool,
         confidence: Confidence | None,
     ) -> str:
@@ -1057,6 +1091,9 @@ class AnnotationToolLedger:
         existing = self.event_trees.get(self.tree_key_index.get(tree_key, ""))
         if existing is not None:
             root_event = self._bound_event(existing["root_node_id"])
+            root_event.evidence_paragraph_id = self._event_evidence_paragraph_id(
+                evidence, record=record, existing=root_event
+            )
             root_event.description = description
             root_event.is_foreshadow_setup = isforeshadowing
             root_event.payoff_likelihood = confidence
@@ -1064,12 +1101,14 @@ class AnnotationToolLedger:
             return str(existing["root_node_id"])
         tree_id = self._tree_id()
         root_node_id = self._node_id()
+        evidence_paragraph_id = self._event_evidence_paragraph_id(evidence, record=record)
         root_event = BoundEvent(
             node_id=root_node_id,
             tree_id=tree_id,
             parent_node_id=None,
             cause_role="root",
             description=description,
+            evidence_paragraph_id=evidence_paragraph_id,
             participants=[],
             is_foreshadow_setup=isforeshadowing,
             payoff_likelihood=confidence,
@@ -1101,6 +1140,7 @@ class AnnotationToolLedger:
         node_key: str,
         node_type: EventChildType,
         description: str,
+        evidence: int | None,
     ) -> str:
         """用于在已建的树上追加/更新一个子事件，返回节点 id
 
@@ -1119,16 +1159,21 @@ class AnnotationToolLedger:
                     code="immutable",
                     expected="删除重写需换节点键（该节点 type=已定的 main/secondary）",
                 )
+            event.evidence_paragraph_id = self._event_evidence_paragraph_id(
+                evidence, record=record, existing=event
+            )
             event.description = description
             return str(existing_node_id)
         parent_node_id = str(tree["trunk_tail"])
         node_id = self._node_id()
+        evidence_paragraph_id = self._event_evidence_paragraph_id(evidence, record=record)
         event = BoundEvent(
             node_id=node_id,
             tree_id=str(tree["tree_id"]),
             parent_node_id=parent_node_id,
             cause_role=cast("EventCauseRole", str(node_type)),
             description=description,
+            evidence_paragraph_id=evidence_paragraph_id,
             participants=[],
         )
         events_bound = list(self.bound_payloads.get("events") or [])
@@ -2722,6 +2767,7 @@ def build_annotation_tools(
         el: EventLocalKey,
         isroot: bool,
         description: str,
+        evidence: int | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
         type: EventChildType | None = None,
@@ -2761,7 +2807,8 @@ def build_annotation_tools(
     ) -> str:
         """写入一个事件节点：isroot=true 建事件树根（el=树键如 t1），false 加子事件（el=t1/e2）
 
-        description 是一句话描述（根事件不超过 30 字）。整棵树可以在一轮里按顺序写完：
+        description 是一句话描述（根事件不超过 30 字）。evidence 是该事件所在段的
+        段首可见号；多段章节新建事件时必填，单段章节可省略。整棵树可以在一轮里按顺序写完：
         先根后子逐个调用，el 由你指定、写入即生效，同轮后面的调用直接可用（不等回执）；
         树内先后=调用顺序，没有序号参数。子事件 type="main" 顺延主因链（成为新的
         链尾）/"secondary" 挂在当时主链尾；伏笔属性（isforeshadowing/confidence）只属于根：
@@ -2787,6 +2834,7 @@ def build_annotation_tools(
             el=el,
             isroot=isroot,
             description=description,
+            evidence=evidence,
             isforeshadowing=isforeshadowing,
             confidence=confidence,
             node_type=type,

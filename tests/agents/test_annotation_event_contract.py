@@ -149,14 +149,20 @@ def _seed_metrics(tools: dict[str, Any]) -> None:
 
 def _root_args(**overrides: Any) -> dict:
     """2026-09-14 用于构造 write_event 根事件参数（默认一棵无参与者树的根 el=t1）"""
-    payload: dict[str, Any] = {"el": "t1", "isroot": True, "description": "顾霜拔剑"}
+    payload: dict[str, Any] = {"el": "t1", "isroot": True, "description": "顾霜拔剑", "evidence": 1}
     payload.update(overrides)
     return payload
 
 
 def _child_args(**overrides: Any) -> dict:
     """2026-09-14 用于构造 write_event 子事件参数（默认 main 子事件 el=t1/e1；无 order）"""
-    payload: dict[str, Any] = {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜收势"}
+    payload: dict[str, Any] = {
+        "el": "t1/e1",
+        "isroot": False,
+        "type": "main",
+        "description": "顾霜收势",
+        "evidence": 1,
+    }
     payload.update(overrides)
     return payload
 
@@ -589,11 +595,10 @@ async def test_write_event_rejects_unauthorized_entity_reference() -> None:
     assert ledger.observation_by_record == {}
 
 
-def test_write_event_does_not_require_local_paragraph_indices() -> None:
-    """2026-08-22 回归：事件写入不再按段落锚点派生证据
+def test_write_event_maps_visible_evidence_to_global_paragraph_id() -> None:
+    """全局 paragraph_id 与段首可见号错位时，事件和标签都绑定正确段落。
 
-    节点不携带锚点/字符区间/哈希/证据；章级证据由持久化层盖章。
-    全局 paragraph_id 与局部下标错位时，实时事件写入与收尾仍应正常；
+    节点只携带全局段落 ID；字符区间与图证据由持久化层从段落事实源派生。
     2026-09-14 段落级监督随 write_metrics.labels 提交；2026-09-18 标签用段首可见号
     （正文 `N：`，此处即 1 基顺序号），全局 paragraph_id 只留在持久化侧。
     """
@@ -625,9 +630,48 @@ def test_write_event_does_not_require_local_paragraph_indices() -> None:
     assert "evidence" not in dumped
     assert "char_start" not in dumped
     assert dumped["description"] == "顾霜拔剑"
+    assert dumped["evidence_paragraph_id"] == 44
     assert [
         (label.paragraph_id, label.emotion) for label in ledger.bound_payloads["paragraph_labels"]
     ] == [(44, -1)]
+
+
+@pytest.mark.asyncio
+async def test_write_event_requires_chapter_evidence_and_preserves_anchor_on_rewrite() -> None:
+    ledger = _ledger(
+        paragraph_ids=[44, 45],
+        char_spans=[(0, 4), (4, len(_CHUNK_TEXT))],
+        texts=["“住手”", "回荡"],
+    )
+    tools = _tools(ledger)
+
+    missing = await _stage_rejection(tools, "write_event", _root_args(evidence=None))
+    assert (missing["field"], missing["code"]) == ("evidence", "missing_evidence")
+    invalid = await _stage_rejection(tools, "write_event", _root_args(evidence=3))
+    assert (invalid["field"], invalid["code"]) == ("evidence", "out_of_range")
+    assert ledger.bound_payloads.get("events") is None
+
+    _call(tools, "write_event", _root_args(evidence=1))
+    root = ledger.bound_payloads["events"][0]
+    root_id = root.node_id
+    _call(tools, "write_event", _root_args(description="顾霜应声", evidence=None))
+    assert root.node_id == root_id
+    assert root.evidence_paragraph_id == 44
+
+    child_missing = await _stage_rejection(tools, "write_event", _child_args(evidence=None))
+    assert (child_missing["field"], child_missing["code"]) == ("evidence", "missing_evidence")
+    assert len(ledger.bound_payloads["events"]) == 1
+    _call(tools, "write_event", _child_args(evidence=2))
+    child = ledger.bound_payloads["events"][1]
+    assert child.evidence_paragraph_id == 45
+    _call(tools, "write_event", _child_args(description="顾霜转身", evidence=None))
+    assert child.evidence_paragraph_id == 45
+
+
+def test_write_event_infers_single_paragraph_evidence() -> None:
+    ledger = _ledger(paragraph_ids=[44])
+    _call(_tools(ledger), "write_event", _root_args(evidence=None))
+    assert ledger.bound_payloads["events"][0].evidence_paragraph_id == 44
 
 
 @pytest.mark.asyncio

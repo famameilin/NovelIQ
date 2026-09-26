@@ -279,7 +279,7 @@ async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeyp
         child_first = await annotation_graph._execute_call(
             {
                 "name": "write_event",
-                "args": {"el": "event:t1/e1", "isroot": False, "type": "main", "description": "子一"},
+                "args": {"el": "event:t1/e1", "isroot": False, "type": "main", "description": "子一", "evidence": 1},
                 "id": "a",
             },
             tool_map=tool_map,
@@ -287,7 +287,11 @@ async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeyp
             call_index=0,
         )
         root = await annotation_graph._execute_call(
-            {"name": "write_event", "args": {"el": "event:t1", "isroot": True, "description": "根"}, "id": "b"},
+            {
+                "name": "write_event",
+                "args": {"el": "event:t1", "isroot": True, "description": "根", "evidence": 1},
+                "id": "b",
+            },
             tool_map=tool_map,
             ledger=ledger,
             call_index=1,
@@ -295,7 +299,7 @@ async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeyp
         child_after = await annotation_graph._execute_call(
             {
                 "name": "write_event",
-                "args": {"el": "event:t1/e2", "isroot": False, "type": "main", "description": "子二"},
+                "args": {"el": "event:t1/e2", "isroot": False, "type": "main", "description": "子二", "evidence": 2},
                 "id": "c",
             },
             tool_map=tool_map,
@@ -314,6 +318,7 @@ async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeyp
     assert statuses == ["error", "success", "success"]
     annotation = result.annotation
     assert [event.description for event in annotation.events] == ["根", "子二"]
+    assert [event.evidence_paragraph_id for event in annotation.events] == [1, 2]
     assert [event.cause_role for event in annotation.events] == ["root", "main"]
     assert annotation.events[1].parent_node_id == annotation.events[0].node_id
 
