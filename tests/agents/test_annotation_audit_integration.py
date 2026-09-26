@@ -186,6 +186,7 @@ def _event_calls(
                 "el": tree_key,
                 "isroot": True,
                 "description": description,
+                "evidence": 1,
                 "characters": [
                     {
                         "entityid": "顾霜",
@@ -205,6 +206,7 @@ def _event_calls(
                 "isroot": False,
                 "type": "main",
                 "description": child_description,
+                "evidence": 2,
                 "characters": [
                     {
                         "entityid": "顾霜",

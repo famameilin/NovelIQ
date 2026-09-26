@@ -286,11 +286,15 @@ def _entity_number(ledger: AnnotationToolLedger, name: str) -> int:
 
 def _call(tools: list, name: str, args: dict):
     """2026-08-07 用于同步调用测试工具并解析 JSON"""
+    if name == "write_event" and "evidence" not in args:
+        args = {**args, "evidence": 1}
     return json.loads(_find_tool(tools, name).invoke(args))
 
 
 def _write_call(name: str, args: dict) -> dict:
     """2026-09-13 用于构造单个有类型小调用（一次只提交一个完整语义单元）"""
+    if name == "write_event" and "evidence" not in args:
+        args = {**args, "evidence": 1}
     return {"name": name, "args": args}
 
 

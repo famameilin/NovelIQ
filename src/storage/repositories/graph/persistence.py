@@ -175,6 +175,43 @@ def _chapter_text_evidence(session: Session, *, run_id: str, chapter_id: int) ->
     ]
 
 
+def _event_text_evidence_by_node(
+    session: Session,
+    *,
+    annotation: ChapterAnnotationRecord,
+    payload: BoundChapterAnnotation,
+    chapter_evidence: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """为新事件取精确段落区间；已有 0.1.0 载荷保留原章级锚点。"""
+    paragraph_ids = {event.evidence_paragraph_id for event in payload.events if event.evidence_paragraph_id is not None}
+    paragraphs = (
+        session.execute(
+            select(Paragraph).where(
+                Paragraph.run_id == annotation.run_id,
+                Paragraph.chapter_id == annotation.chapter_id,
+                Paragraph.paragraph_id.in_(paragraph_ids),
+            )
+        ).scalars().all()
+        if paragraph_ids
+        else []
+    )
+    by_id = {int(row.paragraph_id): row for row in paragraphs}
+    if missing := paragraph_ids - by_id.keys():
+        raise ValueError(f"事件证据不属于当前章节: paragraph_ids={sorted(missing)}")
+    return {
+        event.node_id: (
+            dict(chapter_evidence)
+            if event.evidence_paragraph_id is None
+            else {
+                "paragraph_ids": [event.evidence_paragraph_id],
+                "char_start": int(by_id[event.evidence_paragraph_id].local_start_char),
+                "char_end": int(by_id[event.evidence_paragraph_id].local_end_char),
+            }
+        )
+        for event in payload.events
+    }
+
+
 def _entity_attributes(entity: dict[str, Any], entity_type: EntityType) -> dict[str, Any]:
     """2026-08-19 用于提取实体本次提交的属性
 
@@ -576,22 +613,21 @@ def _persist_event_nodes(
     boundary: ChapterBoundary,
     payload: BoundChapterAnnotation,
     entities: dict[str, GraphEntity],
+    event_evidence_by_node: dict[str, dict[str, Any]],
 ) -> dict[int, str]:
     """2026-08-19 用于写入事件节点及当前章节因果边
 
     2026-08-22event_id 直接取服务端生成的 node_id；因果边只存在于
     跨章树根（cause_tree_id），由 write_event 结构性保证无环，DAG 校验删除。
-    2026-08-22 重构：章级证据单份派生并盖章到每个节点（节点不再携带证据字段）。
+    新事件使用所在段证据；已有 0.1.0 载荷仍按原章级证据读取。
     2026-09-14 跨章因果链退役：write_event 不再产生 causal refs，causal 边无新来源
     （列与边类型保留读旧数据）；伏笔属性只剩 payoff_likelihood（三档）。
     """
-    chapter_evidence = _chapter_text_evidence(
-        session, run_id=annotation.run_id, chapter_id=annotation.chapter_id
-    )[0]
     event_ids: dict[int, str] = {}
     for index, event in enumerate(payload.events, start=1):
         event_id = event.node_id
         event_ids[index] = event_id
+        event_evidence = event_evidence_by_node[event_id]
         participants = [
             {"role": participant.role, "entity": _entity_descriptor(_entity(entities, participant.entity))}
             for participant in event.participants
@@ -606,10 +642,10 @@ def _persist_event_nodes(
                     chapter_order=boundary.chapter_order,
                     description=event.description,
                     participants=participants,
-                    anchor_paragraph_ids=list(chapter_evidence["paragraph_ids"]),
-                    char_start=int(chapter_evidence["char_start"]),
-                    char_end=int(chapter_evidence["char_end"]),
-                    evidence=[dict(chapter_evidence)],
+                    anchor_paragraph_ids=list(event_evidence["paragraph_ids"]),
+                    char_start=int(event_evidence["char_start"]),
+                    char_end=int(event_evidence["char_end"]),
+                    evidence=[dict(event_evidence)],
                     causal_event_refs=[],
                     tree_id=event.tree_id,
                     cause_role=event.cause_role,
@@ -644,8 +680,16 @@ def _persist_annotation_facts(
     relation_drafts: dict[str, _RelationDraft] = {}
     if True:
         evidence = _chapter_text_evidence(session, run_id=annotation.run_id, chapter_id=annotation.chapter_id)
+        event_evidence_by_node = _event_text_evidence_by_node(
+            session, annotation=annotation, payload=payload, chapter_evidence=evidence[0]
+        )
         event_ids = _persist_event_nodes(
-            session, annotation=annotation, boundary=boundary, payload=payload, entities=entities
+            session,
+            annotation=annotation,
+            boundary=boundary,
+            payload=payload,
+            entities=entities,
+            event_evidence_by_node=event_evidence_by_node,
         )
         for ordinal, observation in enumerate(payload.character_observations, start=1):
             subject = _entity(entities, observation.character)
@@ -676,6 +720,7 @@ def _persist_annotation_facts(
                 )
             )
         for ordinal, event in enumerate(payload.events, start=1):
+            event_evidence = [event_evidence_by_node[event.node_id]]
             participants = [
                 {"role": participant.role, "entity": _entity_descriptor(_entity(entities, participant.entity))}
                 for participant in event.participants
@@ -695,9 +740,9 @@ def _persist_annotation_facts(
                         "kind": "event",
                         "chapter_id": annotation.chapter_id,
                         "description": event.description,
-                        "anchor_paragraph_ids": list(evidence[0]["paragraph_ids"]),
+                        "anchor_paragraph_ids": list(event_evidence[0]["paragraph_ids"]),
                     },
-                    evidence=evidence,
+                    evidence=event_evidence,
                     event_id=event_ids[ordinal],
                 )
             )
@@ -1160,7 +1205,7 @@ def persist_completion_graph(
 
     # 2026-08-22 重构：证据升为章级单份，事件节点只携带树结构；
     # 模型零结构输入后不再存在节点级锚点/哈希可校验，
-    # 章级证据在持久化时按章统一盖章（_persist_event_nodes）
+    # 校验本章原文与段落事实源齐备；具体事件证据在 _persist_annotation_facts 中绑定。
     _chapter_text_evidence(session, run_id=annotation.run_id, chapter_id=annotation.chapter_id)
 
     # 继续原有逻辑

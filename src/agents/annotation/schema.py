@@ -959,10 +959,10 @@ class BoundDialogue(StrictModel):
 
 
 class BoundEvent(StrictModel):
-    """2026-08-22事件树节点（服务端派生角色、id；章级证据由持久化层盖章）
+    """事件树节点（服务端派生角色、id；新节点绑定到本章具体段落）
 
     节点由 write_event 服务端生成：node_id 即最终落库 event_id。
-    2026-08-22 重构：证据升为章级单份，节点不再携带锚点/字符区间/哈希/证据。
+    0.1.0 已有节点没有 evidence_paragraph_id，读取时保留原有章级证据。
     2026-09-14 写入面重构：cause_tree_id 退役（跨章因果边产生源下线，
     causal_event_refs 随之删除）；伏笔属性收敛为 is_foreshadow_setup +
     payoff_likelihood（值域 Confidence 三档，expected_payoff_family 列删）。
@@ -973,6 +973,7 @@ class BoundEvent(StrictModel):
     parent_node_id: str | None = Field(default=None, description="root 为 None")
     cause_role: EventCauseRole
     description: str = Field(min_length=1)
+    evidence_paragraph_id: int | None = Field(default=None, ge=0, description="事件所在段的全局段落 ID")
     participants: list[EventParticipantInput] = Field(default_factory=list)
     is_foreshadow_setup: bool = False
     # 2026-09-13 伏笔入森林：根事件携带伏笔属性（落库到 event_nodes 根列）

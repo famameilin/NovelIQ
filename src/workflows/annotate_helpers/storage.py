@@ -138,7 +138,7 @@ def _persist_dialogue_records(
 
     2026-08-18 P3：按事件锚点列表写入，对话弱关联到完全包含其字符区间的事件。
     2026-08-22锚点直接取服务端生成的 event.node_id。
-    2026-08-22 重构：BoundEvent 不再携带字符区间，弱关联改用章级原文区间。
+    新事件使用所在段区间；0.1.0 已有节点保留章级区间。
     """
     repository = DialogueRecordRepository(session)
     paragraphs = list(
@@ -155,7 +155,18 @@ def _persist_dialogue_records(
         raise ValueError(f"对话落库缺少章节段落: run_id={result.run_id} chapter_id={result.chapter_id}")
     char_start = min(int(row.local_start_char) for row in paragraphs)
     char_end = max(int(row.local_end_char) for row in paragraphs)
-    event_anchors = [(event.node_id, char_start, char_end) for event in result.annotation.events]
+    paragraphs_by_id = {int(row.paragraph_id): row for row in paragraphs}
+    event_anchors: list[tuple[str, int, int]] = []
+    for event in result.annotation.events:
+        if event.evidence_paragraph_id is None:
+            event_anchors.append((event.node_id, char_start, char_end))
+            continue
+        paragraph = paragraphs_by_id.get(event.evidence_paragraph_id)
+        if paragraph is None:
+            raise ValueError(f"事件证据不属于当前章节: paragraph_id={event.evidence_paragraph_id}")
+        event_anchors.append(
+            (event.node_id, int(paragraph.local_start_char), int(paragraph.local_end_char))
+        )
     repository.sync_dialogues(
         run_id=result.run_id,
         chapter_id=result.chapter_id,

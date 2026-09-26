@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.schema import (
     AgentRunAudit,
     AgentRunResult,
@@ -803,6 +804,55 @@ def test_completion_binds_dialogue_event_id_by_span(db_session) -> None:
     row = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
     expected_eid = "evt-dialogue-anchor"
     assert row.event_id == expected_eid
+
+
+def test_completion_binds_dialogue_only_to_event_in_its_paragraph(db_session) -> None:
+    text = "顾霜拔剑。\n“我们走。”顾霜说道。"
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=[text], title="精确对话事件关联")
+    candidate = extract_dialogue_candidates(1, text)[0]
+    first_id = f"evt-first-{uuid.uuid4().hex[:8]}"
+    second_id = f"evt-second-{uuid.uuid4().hex[:8]}"
+    annotation = BoundChapterAnnotation(
+        metrics=ChapterMetricsInput(summary="顾霜离开", emotional_valence=0, narrative_function="转折"),
+        character_observations=[],
+        dialogues=[
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key=candidate.candidate_key,
+                content=candidate.content,
+                start=candidate.start,
+                end=candidate.end,
+                speaker=None,
+                tone=None,
+            )
+        ],
+        events=[
+            BoundEvent(
+                node_id=first_id,
+                tree_id="tree-dialogue-paragraph",
+                parent_node_id=None,
+                cause_role="root",
+                description="顾霜拔剑",
+                evidence_paragraph_id=0,
+            ),
+            BoundEvent(
+                node_id=second_id,
+                tree_id="tree-dialogue-paragraph",
+                parent_node_id=first_id,
+                cause_role="main",
+                description="顾霜邀同行",
+                evidence_paragraph_id=1,
+            ),
+        ],
+    )
+    complete_annotation_run(
+        result=_result(run_id=run_id, chapter_id=1, annotation=annotation),
+        session_factory=sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    db_session.rollback()
+
+    row = db_session.execute(select(DialogueRecord).where(DialogueRecord.run_id == run_id)).scalar_one()
+    assert row.event_id == second_id
 
 
 def test_case_pushed_and_resolved_within_same_chapter(db_session) -> None:
