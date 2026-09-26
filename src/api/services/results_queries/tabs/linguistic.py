@@ -42,5 +42,5 @@ def build_linguistic_entities_tab(run_id: str, session: Session) -> dict[str, An
         "fixed_phrase_density": phrase_stats["fixed_phrase_density"],
         "four_char_candidate_count": phrase_stats["four_char_candidate_count"],
         "total_hits": phrase_stats["total_hits"],
-        "unavailable_reason": entities_data["unavailable_reason"],
+        "unavailable_reason": phrase_stats["unavailable_reason"],
     }

@@ -190,7 +190,7 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
                 { label: "正式命中次数", value: data.metric_hit_count },
                 { label: "四字候选数", value: data.four_char_candidate_count },
                 { label: "全书字符数", value: data.total_char_count },
-                { label: "实体命中总数", value: data.total_hits },
+                { label: "短语命中总数", value: data.total_hits },
               ]}
               className="grid-cols-5"
             />

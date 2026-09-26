@@ -256,9 +256,19 @@ def fetch_entity_candidates(run_id: str, session: Session) -> dict[str, Any]:
 def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
     """固定短语命中统计（§5.11）：正式密度 + 四字候选数量"""
     ling_repo = LinguisticRepository(session)
-    rows = ling_repo.fetch_phrase_hits(run_id)
     paragraph_repo = ParagraphRepository(session)
     total_char_count = sum(int(row.char_count) for row in paragraph_repo.fetch_paragraph_rows(run_id))
+    if not ling_repo.has_linguistic_features(run_id):
+        return {
+            "run_id": run_id,
+            "total_char_count": total_char_count,
+            "metric_hit_count": 0,
+            "fixed_phrase_density": None,
+            "four_char_candidate_count": 0,
+            "total_hits": 0,
+            "unavailable_reason": "linguistic_unavailable: 无语言特征行，短语匹配未运行",
+        }
+    rows = ling_repo.fetch_phrase_hits(run_id)
     metric_hits = [row for row in rows if row.is_metric_hit]
     four_char_candidates = [row for row in rows if row.match_kind == "four_char_candidate"]
     return {

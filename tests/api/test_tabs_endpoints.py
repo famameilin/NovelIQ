@@ -173,8 +173,32 @@ def test_linguistic_entities_tab_unavailable_without_data(api_client: TestClient
     assert body["count_by_type"] == {}
     assert body["surface_top"] == []
     assert body["unavailable_reason"] is not None
+    assert body["unavailable_reason"].startswith("linguistic_unavailable:")
     assert body["total_hits"] == 0
+    assert body["fixed_phrase_density"] is None
+
+
+def test_linguistic_entities_tab_reports_real_zero_when_features_have_no_hits(
+    api_client: TestClient, db_session
+) -> None:
+    novel_id, run_id = _create_linguistic_fixture_run(db_session, seed=False)
+    rows = []
+    for paragraph_id in (0, 1):
+        row = _make_feature_row(paragraph_id, tokens_count=2)
+        row["run_id"] = run_id
+        rows.append(row)
+    LinguisticRepository(db_session).insert_linguistic_features(run_id, rows)
+    db_session.commit()
+
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": run_id[:8]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count_by_type"] == {}
+    assert body["unavailable_reason"] is None
+    assert body["metric_hit_count"] == 0
     assert body["fixed_phrase_density"] == 0.0
+    assert body["four_char_candidate_count"] == 0
+    assert body["total_hits"] == 0
 
 
 def test_tabs_require_completed_run(api_client: TestClient, db_session) -> None:

@@ -64,7 +64,7 @@ class LinguisticEntitiesTabResponse(BaseModel):
     """实体与短语 tab：实体类型计数 + 高频实体名 + 固定短语统计
 
     不含实体候选 span 明细（paragraph_id/字符区间），仅回聚合统计；
-    unavailable_reason 为实体侧原因，短语统计恒有计数语义。
+    unavailable_reason 表示语言阶段不可用；已运行但没有实体候选时仍展示短语统计。
     """
 
     run_id: str
