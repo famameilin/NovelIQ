@@ -12,12 +12,13 @@ _RUN_MODEL_KINDS = frozenset({"topic", "word2vec"})
 
 
 def _find_project_root(start: Path) -> Path:
-    """2026-08-20 从给定目录向上查找包含项目配置的根目录"""
+    """从给定目录向上查找项目根目录；本地设置覆盖文件可以不存在。"""
     resolved_start = start.resolve()
     for candidate in (resolved_start, *resolved_start.parents):
-        if (candidate / "config" / "settings.json").is_file():
+        has_checkout_markers = (candidate / "pyproject.toml").is_file() and (candidate / "config").is_dir()
+        if has_checkout_markers or (candidate / "config" / "settings.json").is_file():
             return candidate
-    raise RuntimeError("无法定位项目根目录：祖先目录中未找到 config/settings.json")
+    raise RuntimeError("无法定位项目根目录：祖先目录中未找到 pyproject.toml + config/ 或 config/settings.json")
 
 
 def resolve_project_root() -> Path:
