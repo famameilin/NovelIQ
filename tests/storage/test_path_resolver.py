@@ -13,9 +13,10 @@ from src.storage.path_resolver import (
 
 
 def test_resolve_project_root_is_repository_root() -> None:
-    """2026-08-20 验证项目根目录由配置锚点确定"""
+    """干净检出无需本地设置覆盖文件，也能定位项目根目录。"""
     root = resolve_project_root()
-    assert (root / "config" / "settings.json").is_file()
+    assert (root / "pyproject.toml").is_file()
+    assert (root / "config").is_dir()
     assert root == Path(__file__).resolve().parents[2]
 
 
@@ -60,7 +61,27 @@ def test_resolve_run_model_dir_rejects_unknown_or_path_like_kind(kind: str) -> N
         resolve_run_model_dir("run-9", kind)
 
 
-def test_find_project_root_fails_without_settings_anchor(tmp_path: Path) -> None:
-    """2026-08-20 验证缺少配置锚点时明确失败"""
-    with pytest.raises(RuntimeError, match="config/settings.json"):
+def test_find_project_root_accepts_checkout_without_local_settings(tmp_path: Path) -> None:
+    root = tmp_path / "checkout"
+    (root / "config").mkdir(parents=True)
+    (root / "pyproject.toml").write_text('[project]\nname = "novel-qa"\n', encoding="utf-8")
+    nested = root / "src" / "storage"
+    nested.mkdir(parents=True)
+
+    assert _find_project_root(nested) == root
+
+
+def test_find_project_root_accepts_runtime_settings_without_pyproject(tmp_path: Path) -> None:
+    root = tmp_path / "deployment"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "settings.json").write_text("{}", encoding="utf-8")
+    nested = root / "src" / "storage"
+    nested.mkdir(parents=True)
+
+    assert _find_project_root(nested) == root
+
+
+def test_find_project_root_fails_without_project_anchor(tmp_path: Path) -> None:
+    """缺少仓库标记和本地设置文件时明确失败。"""
+    with pytest.raises(RuntimeError, match="pyproject.toml.*config/settings.json"):
         _find_project_root(tmp_path)

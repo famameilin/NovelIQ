@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from loguru import logger
 
@@ -158,11 +160,18 @@ def test_load_optional_database_environment_returns_none_when_flat_fields_are_ab
     assert load_database_environment("TEST_DATABASE", required=False) is None
 
 
-def test_settings_from_env_degrades_to_json_when_model_environment_missing(monkeypatch) -> None:
+def test_settings_from_env_degrades_to_json_when_model_environment_missing(monkeypatch, tmp_path: Path) -> None:
     """
     2026-08-12 用于验证模型环境变量缺失时配置装配不再抛 RuntimeError：
-    模型身份字段保持 settings.json 的默认值，行为参数继续来自 settings.json
+    模型身份字段保持空值，行为参数继续来自测试专用 settings.json。
     """
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.json").write_text(
+        '{"models":{"annotation":{"streaming":true,"timeout_s":180}}}', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
 
     for variable in (
         "MODEL_BASE_URL",
