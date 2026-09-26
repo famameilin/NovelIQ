@@ -163,6 +163,8 @@ describe("LinguisticPage", () => {
     await user.click(screen.getByRole("tab", { name: "实体与短语" }));
 
     expect(await screen.findByText("高频实体名（前 20 名）")).toBeInTheDocument();
+    expect(screen.getByText("短语命中总数")).toBeInTheDocument();
+    expect(screen.queryByText("实体命中总数")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "词汇与语义" }));
 
     expect(screen.getByText("预训练微调词向量")).toBeInTheDocument();
