@@ -34,7 +34,7 @@ def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
     try:
         session_factory = get_session_factory()
         with session_factory() as session:
-            run = RunRepository(session.connection()).get_run_by_run_id_prefix(task_id)
+            run = RunRepository(session).get_run_by_run_id_prefix(task_id)
             return run is not None and run.get("novel_id") == novel_id
     except Exception:
         return False
