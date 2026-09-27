@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -310,7 +310,7 @@ describe("TimelinePage deep links (event forest)", () => {
     const view = renderPage();
     await screen.findByTestId("timeline-track");
     const level1Count = timeline.nodes.filter((n) => n.level <= 1).length;
-    expect(screen.getAllByRole("button", { name: /节点 tree:/ })).toHaveLength(level1Count);
+    expect(screen.getAllByRole("button", { name: /节点 tree:/ })).toHaveLength(Math.min(level1Count, 5));
 
     // toggle back to all via controls
     await user.click(screen.getByRole("button", { name: "切到全部" }));
@@ -319,7 +319,7 @@ describe("TimelinePage deep links (event forest)", () => {
       expect.anything()
     );
 
-    // rerender with max_level=3 should show all
+    // rerender with max_level=3 should retain all nodes through track pagination
     currentTimelineSearchParams = "task_id=task-a&max_level=3";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
@@ -327,8 +327,16 @@ describe("TimelinePage deep links (event forest)", () => {
       </QueryClientProvider>
     );
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /节点 tree:/ })).toHaveLength(timeline.nodes.length);
+      expect(screen.getAllByRole("button", { name: /节点 tree:/ })).toHaveLength(Math.min(timeline.nodes.length, 5));
     });
+    if (timeline.nodes.length > 5) {
+      const firstPageNodes = screen.getAllByRole("button", { name: /节点 tree:/ }).map((button) => button.textContent);
+      await user.click(within(screen.getByRole("navigation", { name: "事件轨道分页" }))
+        .getByRole("button", { name: "下一页" }));
+      expect(screen.getAllByRole("button", { name: /节点 tree:/ })).toHaveLength(Math.min(timeline.nodes.length - 5, 5));
+      expect(screen.getAllByRole("button", { name: /节点 tree:/ }).map((button) => button.textContent))
+        .not.toEqual(firstPageNodes);
+    }
   });
 
   it("keeps tree_id deep link when controls change", async () => {

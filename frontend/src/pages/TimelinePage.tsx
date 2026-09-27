@@ -11,17 +11,19 @@ import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { useNovelStore } from "@/store/novelStore";
-import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
+import { PagedControls } from "@/components/common/PagedControls";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   TimelineLegend,
   TimelineTrack,
   TimelineEventInspector,
   TimelineControls,
 } from "@/components/timeline";
-import type { EventTimelineResponse, TimelineEventNode, TimelinePhase } from "@/api/types";
+import type { EventTimelineResponse, TimelineEventNode } from "@/api/types";
+import { buildGraphUrl } from "@/pages/graph/graphPageNavigation";
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -68,6 +70,7 @@ export function TimelinePage() {
 
   const [activePhase, setActivePhase] = useState<string | undefined>();
   const [activePanel, setActivePanel] = useState<"timeline" | "details">("timeline");
+  const [trackPage, setTrackPage] = useState(1);
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
 
@@ -144,6 +147,9 @@ export function TimelinePage() {
     // 按 level 统一过滤（importance_score 已分位数映射到 level）
     return sorted.filter((n) => n.level <= maxLevel);
   }, [nodes, derivedOrder, maxLevel]);
+  const trackPageCount = Math.ceil(displayNodes.length / 5);
+  const currentTrackPage = Math.min(trackPage, Math.max(trackPageCount, 1));
+  const trackNodes = displayNodes.slice((currentTrackPage - 1) * 5, currentTrackPage * 5);
 
   const selectedDetailNode = useMemo<TimelineEventNode | null>(() => {
     if (nodes.length === 0) return null;
@@ -183,6 +189,7 @@ export function TimelinePage() {
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
       if (!novelId || !taskScopeId) return;
+      setTrackPage(1);
       navigate(
         buildTimelinePageUrl(novelId, taskScopeId, {
           maxLevel: level,
@@ -214,8 +221,7 @@ export function TimelinePage() {
   const handleSelectChapter = useCallback(
     (chapterId: number) => {
       if (!novelId || !taskScopeId) return;
-      // 保留 tree 选中态，仅做章节联动（可扩展为跳转章节详情）
-      navigate(`/novels/${novelId}/chapters?task_id=${taskScopeId}&chapter=${chapterId}`);
+      navigate(buildGraphUrl(novelId, taskScopeId, { chapterId }));
     },
     [navigate, novelId, taskScopeId]
   );
@@ -237,10 +243,6 @@ export function TimelinePage() {
     },
     [maxLevel, navigate, nodes, novelId, taskScopeId]
   );
-
-  const handlePhaseClick = useCallback((phase: TimelinePhase) => {
-    setActivePhase((prev) => (prev === phase.name ? undefined : phase.name));
-  }, []);
 
   const handleRetry = useCallback(() => {
     timelineQuery.refetch();
@@ -315,71 +317,57 @@ export function TimelinePage() {
         ) : (
           <AnalysisWorkspace.Tabs value={activePanel} onValueChange={(value) => setActivePanel(value as "timeline" | "details")}>
             <AnalysisWorkspace.Tab value="timeline" label="事件轨道">
-              <div className="flex h-full min-h-0 flex-col gap-3">
-                <AnalysisMetricStrip
-                  items={[
-                    { label: "事件总数", value: eventCount, description: "全书事件节点" },
-                    { label: "当前可见", value: visibleCount, description: "符合重要性筛选" },
-                    { label: "因果联系", value: causalCount, description: "包含有效与已失效联系" },
-                    { label: "叙事阶段", value: phases.length, description: "按故事进程划分" },
-                  ]}
-                />
-
-                {selectionHint ? (
-                  <div className="flex shrink-0 items-start gap-3 rounded-lg border border-chart-negative/20 bg-chart-negative/5 p-3">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" aria-hidden="true" />
-                    <p className="text-sm text-text-muted">{selectionHint}</p>
+              <div className="flex h-full min-h-0 flex-col gap-2">
+                <dl className="grid shrink-0 grid-cols-4 gap-2" aria-label="事件轨道摘要">
+                  {[
+                    ["事件总数", eventCount], ["当前可见", visibleCount],
+                    ["因果联系", causalCount],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between rounded-lg border border-border/70 bg-surface/75 px-3 py-1 text-xs">
+                      <dt className="text-text-muted">{label}</dt>
+                      <dd className="font-semibold tabular-nums text-text">{value}</dd>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-end rounded-lg border border-border/70 bg-surface/75 px-2">
+                    <PagedControls page={currentTrackPage} pageCount={trackPageCount} onPageChange={setTrackPage} label="事件轨道" />
                   </div>
-                ) : null}
-
-                <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/60 bg-surface/75 px-3 py-3.5" aria-label="时间轴筛选">
-                  <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} />
-                  <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-1">
-                {phases.length === 0 ? (
-                  <p className="text-sm text-text-muted">暂无阶段数据</p>
-                ) : (
-                  phases.map((phase) => {
-                    const isActive = activePhase === phase.name;
-                    return (
-                      <button
-                        key={phase.name}
-                        type="button"
-                        aria-pressed={isActive}
-                        onClick={() => handlePhaseClick(phase)}
-                        className={[
-                          "shrink-0 rounded-full border px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
-                          isActive
-                            ? "border-primary/35 bg-primary/10 text-text shadow-sm"
-                            : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
-                        ].join(" ")}
-                      >
-                        <span className="text-sm font-medium">{phase.name}</span>
-                        <span className="ml-2 text-xs">第 {phase.start} 至 {phase.end} 章</span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-                  <TimelineLegend className="mt-3 shrink-0 justify-start" />
-                  <section className="mt-3 min-h-0 flex-1" aria-label="事件轨道">
-                    <TimelineTrack
-                      nodes={displayNodes}
-                      derivedOrder={timelineData?.derived_event_order ?? []}
-                      phases={phases}
-                      activePhase={activePhase}
-                      selectedNodeId={selectedTrackNodeId}
-                      onNodeClick={handleNodeClick}
-                      tensionCurve={tensionCurve ?? null}
-                      totalChapters={totalChapters}
-                      className="h-full min-h-0"
-                    />
-                  </section>
+                </dl>
+                <div className="flex shrink-0 items-center gap-2" aria-label="时间轴筛选">
+                  <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} className="min-w-0 flex-1" />
+                  <Select value={activePhase ?? "all"} onValueChange={(value) => setActivePhase(value === "all" ? undefined : value)}>
+                    <SelectTrigger className="w-48 shrink-0" aria-label="叙事阶段筛选"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部阶段</SelectItem>
+                      {phases.map((phase) => <SelectItem key={phase.name} value={phase.name}>{phase.name} · 第 {phase.start} 至 {phase.end} 章</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <details className="relative z-20 shrink-0">
+                    <summary className="cursor-pointer list-none rounded-lg border border-border/70 bg-surface px-3 py-2 text-xs text-text">图例</summary>
+                    <div className="absolute right-0 top-full mt-2 w-[580px] rounded-xl border border-border/70 bg-background p-3 shadow-lg">
+                      <TimelineLegend />
+                    </div>
+                  </details>
+                </div>
+                {selectionHint ? <p className="absolute z-10 mt-20 flex items-center gap-2 rounded-lg border border-chart-negative/20 bg-background p-2 text-xs text-text-muted"><AlertTriangle className="h-4 w-4 text-chart-negative" aria-hidden="true" />{selectionHint}</p> : null}
+                <section className="min-h-0 flex-1" aria-label="事件轨道">
+                  <TimelineTrack
+                    nodes={trackNodes}
+                    derivedOrder={timelineData?.derived_event_order ?? []}
+                    phases={phases}
+                    activePhase={activePhase}
+                    selectedNodeId={selectedTrackNodeId}
+                    onNodeClick={handleNodeClick}
+                    tensionCurve={tensionCurve ?? null}
+                    totalChapters={totalChapters}
+                    fitViewport
+                    className="h-full min-h-0"
+                  />
                 </section>
               </div>
             </AnalysisWorkspace.Tab>
 
             <AnalysisWorkspace.Tab value="details" label="事件详情">
-              <div className="h-full min-h-0 overflow-y-auto pr-1">
+              <div className="h-full min-h-0">
                 {selectedDetailNode ? (
                   <TimelineEventInspector
                     node={selectedDetailNode}
@@ -401,7 +389,7 @@ export function TimelinePage() {
                     }}
                     onSelectChapter={handleSelectChapter}
                     onSelectTree={handleSelectTree}
-                    className="min-h-full"
+                    className="h-full"
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm leading-6 text-text-muted">

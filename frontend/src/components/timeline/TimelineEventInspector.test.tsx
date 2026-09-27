@@ -31,7 +31,11 @@ describe("TimelineEventInspector", () => {
       chapter_ids: [7, 8, 9],
       char_start: 1200,
       char_end: 1800,
-      participants: [{ name: "顾霜", role: " PROTAGONIST " }],
+      participants: [
+        { name: "顾霜", role: " PROTAGONIST " },
+        { name: "顾霜", role: " PROTAGONIST " },
+        { name: "假山", role: "", entity_type: "location" },
+      ],
       character_names: ["顾霜"],
       importance_score: 8.2,
       level: 1,
@@ -79,8 +83,13 @@ describe("TimelineEventInspector", () => {
     );
 
     expect(screen.getByText("核心事件")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /参与实体/ }));
     expect(screen.getByText("主要人物")).toBeInTheDocument();
+    expect(screen.getAllByText("主要人物")).toHaveLength(1);
+    expect(screen.getByText("涉及地点：假山")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /关联伏笔/ }));
     expect(screen.getByText("待回收")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "分析数据" }));
     expect(screen.getByText("字符范围")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(node.tree_id);
     expect(document.body.textContent).not.toContain(node.root_event_id);
@@ -88,6 +97,8 @@ describe("TimelineEventInspector", () => {
 
     await user.click(screen.getByRole("button", { name: "第 2 步" }));
     expect(onSelectTree).toHaveBeenCalledWith("event:internal:next");
+    await user.click(screen.getByRole("button", { name: "在图谱中定位第 8 章" }));
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-1&selected_chapter=8");
     await user.click(screen.getByRole("button", { name: "关闭事件详情" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

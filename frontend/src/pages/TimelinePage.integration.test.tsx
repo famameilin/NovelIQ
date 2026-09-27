@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -106,8 +106,8 @@ vi.mock("@/components/timeline", () => ({
       ))}
     </div>
   ),
-  TimelineEventInspector: ({ node }: { node: TimelineEventNode }) => (
-    <div>{node.tree_id}</div>
+  TimelineEventInspector: ({ node, onSelectChapter }: { node: TimelineEventNode; onSelectChapter: (chapterId: number) => void }) => (
+    <button type="button" onClick={() => onSelectChapter(node.anchor_chapter_id)}>定位事件章节 {node.tree_id}</button>
   ),
 }));
 
@@ -200,5 +200,40 @@ describe("TimelinePage integration (event forest)", () => {
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
 
     expect(navigateMock).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent(first.tree_id)));
+  });
+
+  it("事件详情的章节入口定位到现有图谱路由", async () => {
+    const user = userEvent.setup();
+    const first = createEventTimeline().nodes[0]!;
+    renderTimelinePage();
+
+    await user.click(await screen.findByRole("tab", { name: "事件详情" }));
+    await user.click(screen.getByRole("button", { name: `定位事件章节 ${first.tree_id}` }));
+    expect(navigateMock).toHaveBeenCalledWith(
+      `/novels/novel-1/graph?task_id=task-integration&selected_chapter=${first.anchor_chapter_id}`,
+    );
+  });
+
+  it("事件轨道分页后仍能访问末页事件", async () => {
+    const user = userEvent.setup();
+    const timeline = createEventTimeline();
+    const template = timeline.nodes[0]!;
+    const nodes = Array.from({ length: 7 }, (_, index) => ({
+      ...template,
+      tree_id: `tree-page-${index + 1}`,
+      root_event_id: `event-page-${index + 1}`,
+      progress: (index + 1) / 8,
+    }));
+    currentTimelineSearchParams = "task_id=task-integration";
+    getTimelineMock.mockResolvedValue({ ...timeline, nodes, derived_event_order: nodes.map((node) => node.root_event_id) });
+    renderTimelinePage();
+
+    expect(await screen.findByRole("button", { name: "tree-page-1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "tree-page-6" })).not.toBeInTheDocument();
+    const controls = screen.getByRole("navigation", { name: "事件轨道分页" });
+    await user.click(within(controls).getByRole("button", { name: "下一页" }));
+    expect(screen.getByRole("button", { name: "tree-page-6" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "tree-page-7" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "tree-page-1" })).not.toBeInTheDocument();
   });
 });

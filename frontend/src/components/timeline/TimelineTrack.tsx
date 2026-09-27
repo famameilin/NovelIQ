@@ -7,7 +7,7 @@
  */
 
 import { motion } from "framer-motion";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { TimelineEventNode, TimelinePhase } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -40,6 +40,7 @@ export interface TimelineTrackProps {
   className?: string;
   tensionCurve?: number[] | null;
   totalChapters?: number;
+  fitViewport?: boolean;
 }
 
 const PHASE_SURFACE_CLASS_MAP: Record<string, string> = {
@@ -83,7 +84,17 @@ export function TimelineTrack({
   className,
   tensionCurve,
   totalChapters = 0,
+  fitViewport = false,
 }: TimelineTrackProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [viewportWidth, setViewportWidth] = useState(900);
+  useEffect(() => {
+    if (!fitViewport || !containerRef.current || typeof ResizeObserver === "undefined") return;
+    const element = containerRef.current;
+    const observer = new ResizeObserver(() => setViewportWidth(Math.max(element.clientWidth - 18, 600)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [fitViewport]);
   const highlightedRange = useMemo(() => {
     if (!activePhase || !phases) return null;
     const phase = phases.find((item) => item.name === activePhase);
@@ -134,8 +145,8 @@ export function TimelineTrack({
   }, [nodes, derivedOrder]);
 
   const canvasMinWidth = useMemo(
-    () => calculateCanvasMinWidth(sortedNodes.length, totalChapters),
-    [sortedNodes.length, totalChapters],
+    () => fitViewport ? viewportWidth : calculateCanvasMinWidth(sortedNodes.length, totalChapters),
+    [fitViewport, sortedNodes.length, totalChapters, viewportWidth],
   );
 
   const layoutNodes = useMemo(
@@ -144,13 +155,32 @@ export function TimelineTrack({
   );
 
   const tensionPath = useMemo(() => {
+    if (fitViewport && layoutNodes.length > 0) {
+      const points = layoutNodes.map(({ anchorX, anchorY }) => `${anchorX},${anchorY}`);
+      const linePath = `M ${points.join(" L ")}`;
+      return {
+        linePath,
+        areaPath: `${linePath} L ${layoutNodes[layoutNodes.length - 1].anchorX},${TRACK_HEIGHT_PX} L ${layoutNodes[0].anchorX},${TRACK_HEIGHT_PX} Z`,
+      };
+    }
     if (!tensionCurve || tensionCurve.length === 0) {
       return null;
     }
     return buildTensionAreaPath(tensionCurve, totalChapters, canvasMinWidth);
-  }, [canvasMinWidth, tensionCurve, totalChapters]);
+  }, [canvasMinWidth, fitViewport, layoutNodes, tensionCurve, totalChapters]);
 
   const phaseLayouts = useMemo(() => {
+    if (fitViewport && sortedNodes.length > 0) {
+      const groups: Array<{ name: string; left: number; width: number }> = [];
+      sortedNodes.forEach((node, index) => {
+        const name = node.phase_name || "未分期";
+        const previous = groups[groups.length - 1];
+        const segmentWidth = canvasMinWidth / sortedNodes.length;
+        if (previous?.name === name) previous.width += segmentWidth;
+        else groups.push({ name, left: index * segmentWidth, width: segmentWidth });
+      });
+      return groups;
+    }
     if (!phases || phases.length === 0) return [];
 
     let accumulatedRatio = 0;
@@ -164,14 +194,14 @@ export function TimelineTrack({
         width: Math.max(rawRight - left, 0),
       };
     });
-  }, [canvasMinWidth, phases]);
+  }, [canvasMinWidth, fitViewport, phases, sortedNodes]);
 
   return (
-    <div className={cn("relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
+    <div ref={containerRef} className={cn("relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.8),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,240,236,0.76))]" />
 
-      <div className="relative flex min-h-0 flex-1 flex-col pb-2 pt-1">
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-2 pb-1">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-2">
           <div className="h-full w-max min-w-full">
             <div
               className="relative h-full min-h-[430px] overflow-hidden rounded-[24px] border border-white/60 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(247,240,236,0.4))]"
