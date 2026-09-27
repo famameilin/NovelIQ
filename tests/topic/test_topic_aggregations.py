@@ -314,6 +314,7 @@ class TestTopicAggregations:
         assert len(points) == 6
         # 按真实字符位置排序（章1 在前）
         assert [p["chapter_id"] for p in points] == [1, 1, 1, 2, 2, 2]
+        assert [p["chapter_sequence"] for p in points] == [1, 1, 1, 2, 2, 2]
         first = points[0]
         assert first["weights"] == pytest.approx([1.0, 0.0], abs=1e-6)
         assert first["start_position"] >= 0

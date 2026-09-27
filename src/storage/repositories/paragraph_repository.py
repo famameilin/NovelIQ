@@ -659,7 +659,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
                 (ParagraphTopic.run_id == Paragraph.run_id)
                 & (ParagraphTopic.paragraph_id == Paragraph.paragraph_id),
             )
-            .join(Chapter, (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Chapter.chapter_id))
+            .join(Chapter, (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id))
             .where(Paragraph.run_id == run_id)
             .order_by(Paragraph.global_start_char, ParagraphTopic.topic_id)
         )
