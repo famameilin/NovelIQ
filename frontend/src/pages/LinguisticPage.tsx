@@ -15,8 +15,9 @@ import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScop
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import { AnalysisDetails } from "@/components/common/AnalysisDetails";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
+import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
+import { PagedControls } from "@/components/common/PagedControls";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { RatioBarChart } from "@/components/linguistic/RatioBarChart";
 import { PosSimilarityHeatmap } from "@/components/linguistic/PosSimilarityHeatmap";
@@ -100,12 +101,23 @@ function formatUnavailableReason(reason: string | null | undefined): string | nu
     .replace(/word2vec/g, "词向量数据");
 }
 
+function pageItems<T>(items: readonly T[], page: number, pageSize: number) {
+  const pageCount = Math.ceil(items.length / pageSize);
+  const currentPage = Math.min(page, Math.max(pageCount, 1));
+  return {
+    page: currentPage,
+    pageCount,
+    items: items.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+  };
+}
+
 /**
  * 2026-08-31，作用：展示表达结构视图的章节级语言统计
  * 简要说明：统一承载四类比例分布、六项聚合指标和章节切换
  */
 function ExpressionStructureView({ query }: { query: UseQueryResultLike<LinguisticFeaturesResponse> }) {
   const [selectedChapter, setSelectedChapter] = useState<string>("book");
+  const [chartView, setChartView] = useState<"pos" | "sentence" | "length" | "dependency">("pos");
 
   const stats = useMemo(() => {
     const data = query.data;
@@ -116,7 +128,7 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
 
   return (
     <motion.div
-      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-2"
+      className="flex h-full min-h-0 flex-col gap-3"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
     >
@@ -160,14 +172,20 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
                 description: "段落级监督边界负向分按段求和",
               },
             ]}
-            className="grid-cols-4"
+            className="grid-cols-4 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
           />
 
-          <div className="grid grid-cols-2 gap-4">
-            <RatioBarChart title="词性比例" icon={Tag} ratios={stats?.pos_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "pos")} className="min-h-[280px]" />
-            <RatioBarChart title="句式比例" icon={Quote} ratios={stats?.sentence_pattern_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "sentence")} className="min-h-[280px]" />
-            <RatioBarChart title="词长分布" icon={AlignLeft} ratios={stats?.word_length_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "wordLength")} className="min-h-[280px]" />
-            <RatioBarChart title="依存关系分布" icon={Layers} ratios={stats?.dependency_relation_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "dependency")} className="min-h-[280px]" />
+          <AnalysisViewSwitcher value={chartView} onValueChange={setChartView} label="表达结构指标" options={[
+            { value: "pos", label: "词性比例" },
+            { value: "sentence", label: "句式比例" },
+            { value: "length", label: "词长分布" },
+            { value: "dependency", label: "依存关系" },
+          ]} />
+          <div className="min-h-0 flex-1">
+            {chartView === "pos" && <RatioBarChart key={`${selectedChapter}-pos`} title="词性比例" icon={Tag} ratios={stats?.pos_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "pos")} columns={2} pageSize={14} presentation="composition" className="h-full" />}
+            {chartView === "sentence" && <RatioBarChart key={`${selectedChapter}-sentence`} title="句式比例" icon={Quote} ratios={stats?.sentence_pattern_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "sentence")} columns={2} pageSize={14} className="h-full" />}
+            {chartView === "length" && <RatioBarChart key={`${selectedChapter}-length`} title="词长分布" icon={AlignLeft} ratios={stats?.word_length_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "wordLength")} columns={2} pageSize={14} presentation="composition" className="h-full" />}
+            {chartView === "dependency" && <RatioBarChart key={`${selectedChapter}-dependency`} title="依存关系分布" icon={Layers} ratios={stats?.dependency_relation_ratios ?? null} formatLabel={(key) => formatAnalysisLabel(key, "dependency")} columns={2} pageSize={14} presentation="composition" className="h-full" />}
           </div>
         </>
       ))}
@@ -177,13 +195,16 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
 
 /**
  * 2026-08-31，作用：展示实体与固定表达的聚合指标
- * 简要说明：将长实体列表限制在当前页签卡片内部滚动
+ * 简要说明：类型和实体名切换展示，长列表分页，保持页签单屏
  */
 function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike<LinguisticEntitiesTabResponse> }) {
+  const [view, setView] = useState<"type" | "surface">("type");
+  const [page, setPage] = useState(1);
+  const surfaces = pageItems(entitiesQuery.data?.surface_top ?? [], page, 10);
   return (
     <motion.div className="h-full min-h-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       {renderTabGate(entitiesQuery, "实体与短语", formatUnavailableReason(entitiesQuery.data?.unavailable_reason), (data) => (
-        <div className="flex h-full min-h-0 flex-col gap-4">
+        <div className="flex h-full min-h-0 flex-col gap-3">
             <AnalysisMetricStrip
               items={[
                 { label: "固定表达密度（‰）", value: data.fixed_phrase_density?.toFixed(4) ?? "—" },
@@ -192,24 +213,30 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
                 { label: "全书字符数", value: data.total_char_count },
                 { label: "短语命中总数", value: data.total_hits },
               ]}
-              className="grid-cols-5"
+              className="grid-cols-5 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
             />
-            <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
-              <RatioBarChart
+            <AnalysisViewSwitcher value={view} onValueChange={setView} label="实体指标" options={[
+              { value: "type", label: "实体类型" },
+              { value: "surface", label: "高频实体名" },
+            ]} />
+            <div className="min-h-0 flex-1">
+              {view === "type" ? <RatioBarChart
                 title="实体类型计数"
                 icon={Tags}
                 accent="chart-2"
                 ratios={data.count_by_type}
                 formatValue={(value) => String(Math.round(value))}
                 formatLabel={(key) => formatAnalysisLabel(key, "entity")}
-                className="min-h-[280px]"
-              />
-              <DashboardCardShell title="高频实体名（前 20 名）" icon={<ScanText className="h-4 w-4" />} accent="chart-3" className="min-h-[280px]" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1">
+                className="h-full"
+                columns={2}
+                pageSize={14}
+                presentation="composition"
+              /> : <DashboardCardShell title="高频实体名（前 20 名）" icon={<ScanText className="h-4 w-4" />} accent="chart-3" className="h-full" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-3">
                 {data.surface_top.length === 0 ? (
                   <p className="py-8 text-center text-sm text-text-muted">暂无实体候选</p>
                 ) : (
-                  <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                    {data.surface_top.map((entry) => (
+                  <ul className="grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-x-8 gap-y-2">
+                    {surfaces.items.map((entry) => (
                       <li key={`${entry.entity_type}-${entry.surface_text}`} className="flex items-center gap-3">
                         <span className="w-28 shrink-0 truncate text-sm text-text" title={entry.surface_text}>{entry.surface_text}</span>
                         <span className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs text-primary">
@@ -223,7 +250,8 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
                     ))}
                   </ul>
                 )}
-              </DashboardCardShell>
+                <PagedControls page={surfaces.page} pageCount={surfaces.pageCount} onPageChange={setPage} label="高频实体" />
+              </DashboardCardShell>}
             </div>
         </div>
       ))}
@@ -236,25 +264,34 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
  * 简要说明：模型详情与质心统计保留在独立页签中以避免和实体列表纵向堆叠
  */
 function WordVectorSemanticView({ word2vecQuery }: { word2vecQuery: UseQueryResultLike<Word2VecStatsResponse> }) {
+  const [view, setView] = useState<"coverage" | "matrix" | "model">("coverage");
+  const [coveragePage, setCoveragePage] = useState(1);
+  const [centroidPage, setCentroidPage] = useState(1);
   const coverage = word2vecQuery.data?.pos_coverage ?? [];
+  const coverageItems = pageItems(coverage, coveragePage, 12);
+  const centroids = pageItems(word2vecQuery.data?.pos_centroids ?? [], centroidPage, 12);
   const maxCoverage = coverage.length > 0 ? Math.max(...coverage.map((entry) => entry.coverage_ratio ?? 0)) : 0;
   const word2vecData = word2vecQuery.data;
 
   return (
-    <motion.div className="h-full min-h-0 overflow-y-auto pr-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="flex h-full min-h-0 flex-col gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       {renderTabGate(
         word2vecQuery,
         "词汇与语义",
         formatUnavailableReason(word2vecData?.unavailable_reason),
         (data) => (
           <>
-            <div className="grid grid-cols-2 gap-4">
-              <DashboardCardShell title="词性覆盖率" icon={<Sigma className="h-4 w-4" />} accent="chart-2" className="min-h-[280px]">
+            <AnalysisViewSwitcher value={view} onValueChange={setView} label="词汇与语义指标" options={[
+              { value: "coverage", label: "词性覆盖率" },
+              { value: "matrix", label: "语义相似度" },
+              { value: "model", label: "模型与质心" },
+            ]} />
+            {view === "coverage" && <DashboardCardShell title="词性覆盖率" icon={<Sigma className="h-4 w-4" />} accent="chart-2" className="min-h-0 flex-1" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-3">
                 {coverage.length === 0 ? (
                   <p className="py-8 text-center text-sm text-text-muted">暂无覆盖率数据</p>
                 ) : (
-                  <ul className="space-y-2">
-                    {coverage.map((entry) => (
+                  <ul className="grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-x-8 gap-y-2">
+                    {coverageItems.items.map((entry) => (
                       <li key={entry.pos_group} className="flex items-center gap-3">
                         <span className="w-24 shrink-0 truncate text-sm text-text">
                           {formatAnalysisLabel(entry.pos_group, "pos")}
@@ -269,36 +306,37 @@ function WordVectorSemanticView({ word2vecQuery }: { word2vecQuery: UseQueryResu
                     ))}
                   </ul>
                 )}
-              </DashboardCardShell>
+                <PagedControls page={coverageItems.page} pageCount={coverageItems.pageCount} onPageChange={setCoveragePage} label="词性覆盖率" />
+              </DashboardCardShell>}
 
-              <DashboardCardShell title="词性组语义相似度" icon={<Braces className="h-4 w-4" />} accent="chart-4" className="min-h-[320px]" bodyClassName="min-h-[280px]">
+              {view === "matrix" && <DashboardCardShell title="词性组语义相似度" icon={<Braces className="h-4 w-4" />} accent="chart-4" className="min-h-0 flex-1" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1">
                 {data.pos_similarity_matrix && data.pos_centroids.length >= 2 ? (
                   <PosSimilarityHeatmap
                     groups={data.pos_centroids.map((centroid) => formatAnalysisLabel(centroid.pos_group, "pos"))}
                     matrix={data.pos_similarity_matrix}
-                    className="h-[280px]"
+                    className="h-full w-full"
                   />
                 ) : (
                   <p className="flex h-full items-center justify-center text-sm text-text-muted">质心不足 2 组，无法计算相似度矩阵</p>
                 )}
-              </DashboardCardShell>
-            </div>
+              </DashboardCardShell>}
 
-            <AnalysisDetails title="词汇与语义详情" description="模型信息、覆盖率和质心加权词元统计">
+            {view === "model" && <DashboardCardShell title="模型与质心" icon={<Braces className="h-4 w-4" />} accent="chart-4" className="min-h-0 flex-1" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-3">
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">向量维度</p><p className="mt-1 text-sm font-semibold text-text">{data.model?.embedding_dimension ?? "—"}</p></div>
                 <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">词表规模</p><p className="mt-1 text-sm font-semibold text-text">{data.model?.vocabulary_size ?? "—"}</p></div>
-                <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">词表来源</p><p className="mt-1 truncate text-sm font-semibold text-text">{formatAnalysisLabel(data.model?.artifact_scope, "artifactScope")}</p></div>
+                <div className="rounded-md border border-border/60 bg-surface/70 px-3 py-2"><p className="text-xs text-text-muted">词表来源</p><p className="mt-1 text-sm font-semibold text-text">{formatAnalysisLabel(data.model?.artifact_scope, "artifactScope")}</p></div>
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                {data.pos_centroids.map((centroid) => (
+              <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-3 gap-2">
+                {centroids.items.map((centroid) => (
                   <div key={centroid.pos_group} className="flex items-center justify-between rounded-md border border-border/60 bg-surface/70 px-3 py-2 text-xs">
                     <span>{formatAnalysisLabel(centroid.pos_group, "pos")}</span>
                     <span className="text-text-muted">加权词元 {centroid.weighted_token_total}</span>
                   </div>
                 ))}
               </div>
-            </AnalysisDetails>
+              <PagedControls page={centroids.page} pageCount={centroids.pageCount} onPageChange={setCentroidPage} label="词性质心" />
+            </DashboardCardShell>}
           </>
         ),
       )}
@@ -321,32 +359,33 @@ export function LinguisticPage() {
   }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
 
   const enabled = !!novelId && !!storeTaskId;
+  const [activeTab, setActiveTab] = useState("structure");
 
   const featuresQuery = useQuery({
     queryKey: tabQueryKey("linguistic-lexicon", novelId, storeTaskId),
     queryFn: () => getLinguisticFeatures(novelId!, storeTaskId!),
-    enabled,
+    enabled: enabled && activeTab === "structure",
     staleTime: STALE_TIME,
   });
 
   const entitiesQuery = useQuery({
     queryKey: tabQueryKey("linguistic-entities", novelId, storeTaskId),
     queryFn: () => getLinguisticEntitiesTab(novelId!, storeTaskId!),
-    enabled,
+    enabled: enabled && activeTab === "entities",
     staleTime: STALE_TIME,
   });
 
   const word2vecQuery = useQuery({
     queryKey: tabQueryKey("linguistic-word2vec", novelId, storeTaskId),
     queryFn: () => getLinguisticWord2vec(novelId!, storeTaskId!),
-    enabled,
+    enabled: enabled && activeTab === "semantics",
     staleTime: STALE_TIME,
   });
 
   return (
     <AnalysisWorkspace title="语言特征">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex h-full min-h-0 flex-col">
-        <AnalysisWorkspace.Tabs defaultValue="structure">
+        <AnalysisWorkspace.Tabs value={activeTab} onValueChange={setActiveTab}>
           <AnalysisWorkspace.Tab value="structure" label="表达结构">
             <ExpressionStructureView query={featuresQuery} />
           </AnalysisWorkspace.Tab>

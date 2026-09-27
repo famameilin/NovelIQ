@@ -146,13 +146,29 @@ describe("LinguisticPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("表达结构、实体与短语、词汇与语义页签分别保留三个聚合端点", async () => {
+  it("只请求当前页签，切换后复用已加载的数据", async () => {
     renderLinguisticPage();
 
     expect((await screen.findAllByTestId("ratio-bar-chart")).length).toBeGreaterThanOrEqual(1);
     expect(getLinguisticFeaturesMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getLinguisticFeaturesMock).toHaveBeenCalledTimes(1);
+    expect(getLinguisticEntitiesTabMock).not.toHaveBeenCalled();
+    expect(getLinguisticWord2vecMock).not.toHaveBeenCalled();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "实体与短语" }));
+    expect(await screen.findByText("短语命中总数")).toBeInTheDocument();
     expect(getLinguisticEntitiesTabMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getLinguisticWord2vecMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("tab", { name: "词汇与语义" }));
+    expect(await screen.findByText(/92\.5%/)).toBeInTheDocument();
     expect(getLinguisticWord2vecMock).toHaveBeenCalledWith("novel-1", "task-1");
+
+    await user.click(screen.getByRole("tab", { name: "表达结构" }));
+    expect(getLinguisticFeaturesMock).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("tab", { name: "实体与短语" }));
+    expect(getLinguisticEntitiesTabMock).toHaveBeenCalledTimes(1);
   });
 
   it("在固定工作区页签间切换，并保留实体和词向量详情", async () => {
@@ -162,13 +178,15 @@ describe("LinguisticPage", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "实体与短语" }));
 
+    await user.click(screen.getByRole("button", { name: "高频实体名" }));
     expect(await screen.findByText("高频实体名（前 20 名）")).toBeInTheDocument();
     expect(screen.getByText("短语命中总数")).toBeInTheDocument();
     expect(screen.queryByText("实体命中总数")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "词汇与语义" }));
 
+    expect(await screen.findByText(/92\.5%/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "模型与质心" }));
     expect(screen.getByText("预训练微调词向量")).toBeInTheDocument();
-    expect(screen.getByText(/92\.5%/)).toBeInTheDocument();
     expect(screen.getAllByText(/加权词元/).length).toBeGreaterThan(0);
     expect(screen.queryByText("run-id")).not.toBeInTheDocument();
   });
