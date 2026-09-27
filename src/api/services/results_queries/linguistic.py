@@ -346,30 +346,14 @@ def _pos_similarity_matrix(centroids: list[dict[str, Any]]) -> list[list[float]]
 def fetch_pos_centroids(run_id: str, session: Session) -> list[dict[str, Any]]:
     """全书各词性组的向量质心（按词表内词数加权，§5.11）"""
     ling_repo = LinguisticRepository(session)
-    rows = ling_repo.fetch_pos_embeddings(run_id)
-    groups: dict[str, list[list[float]]] = {}
-    weights: dict[str, list[int]] = {}
-    for row in rows:
-        vector = row.embedding_vector
-        if row.in_vocabulary_token_count <= 0 or vector is None or len(vector) == 0:
-            continue
-        expanded = int(row.in_vocabulary_token_count)
-        groups.setdefault(row.pos_group, []).append([float(v) for v in vector])
-        weights.setdefault(row.pos_group, []).append(expanded)
     centroids: list[dict[str, Any]] = []
-    for pos_group, vectors in groups.items():
-        total_weight = sum(weights[pos_group])
-        dim = len(vectors[0])
-        weighted_sum = [0.0] * dim
-        for vector, weight in zip(vectors, weights[pos_group], strict=True):
-            for i in range(dim):
-                weighted_sum[i] += vector[i] * weight
+    for row in ling_repo.fetch_weighted_pos_embeddings(run_id):
+        total_weight = int(row.weighted_token_total)
         centroids.append(
             {
-                "pos_group": pos_group,
+                "pos_group": row.pos_group,
                 "weighted_token_total": total_weight,
-                "embedding_vector": [round(v / total_weight, 6) for v in weighted_sum],
+                "embedding_vector": [round(float(value) / total_weight, 6) for value in row.weighted_sum],
             }
         )
-    centroids.sort(key=lambda c: c["pos_group"])
     return centroids

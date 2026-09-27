@@ -235,7 +235,23 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
                 "embedding_vector": [0.1] * 128,
                 "source_token_count": 2,
                 "in_vocabulary_token_count": 1,
-            }
+            },
+            {
+                "run_id": run_id,
+                "paragraph_id": 1,
+                "pos_group": "noun",
+                "embedding_vector": [0.5] * 128,
+                "source_token_count": 4,
+                "in_vocabulary_token_count": 3,
+            },
+            {
+                "run_id": run_id,
+                "paragraph_id": 0,
+                "pos_group": "verb",
+                "embedding_vector": None,
+                "source_token_count": 2,
+                "in_vocabulary_token_count": 0,
+            },
         ],
     )
     db_session.commit()
@@ -245,8 +261,11 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
     body = response.json()
     assert body["unavailable_reason"] is None
     assert body["model"]["vocabulary_size"] == 100
-    assert body["pos_coverage"][0]["coverage_ratio"] == pytest.approx(0.5, abs=1e-6)
+    assert body["pos_coverage"][0]["coverage_ratio"] == pytest.approx(4 / 6, abs=1e-6)
     assert body["pos_centroids"][0]["pos_group"] == "noun"
+    assert body["pos_centroids"][0]["weighted_token_total"] == 4
+    assert body["pos_centroids"][0]["embedding_vector"] == pytest.approx([0.4] * 128, abs=1e-6)
+    assert len(body["pos_centroids"]) == 1
 
 
 def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_session) -> None:

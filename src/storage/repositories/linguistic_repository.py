@@ -12,7 +12,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, cast
 
-from sqlalchemy import delete, func, insert, select
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapper, Session
 
@@ -198,3 +199,29 @@ class LinguisticRepository(BaseRepository[ParagraphLinguisticFeature]):
             .order_by(ParagraphPosEmbedding.pos_group)
         )
         return self.session.execute(statement).all()
+
+    def fetch_weighted_pos_embeddings(self, run_id: str) -> Sequence[Row]:
+        """在数据库内汇总词性向量，避免传输所有段落的高维向量。
+
+        pgvector 使用单精度向量累加；和原 Python 双精度逐行求和可能有微小舍入差异。
+        """
+        statement = text(
+            """
+            SELECT pos_group,
+                   SUM(in_vocabulary_token_count) AS weighted_token_total,
+                   SUM(
+                       embedding_vector * array_fill(
+                           in_vocabulary_token_count::real,
+                           ARRAY[vector_dims(embedding_vector)]
+                       )::vector
+                   ) AS weighted_sum
+            FROM paragraph_pos_embeddings
+            WHERE run_id = :run_id
+              AND in_vocabulary_token_count > 0
+              AND embedding_vector IS NOT NULL
+              AND vector_dims(embedding_vector) > 0
+            GROUP BY pos_group
+            ORDER BY pos_group
+            """
+        ).columns(weighted_sum=Vector())
+        return self.session.execute(statement, {"run_id": run_id}).all()
