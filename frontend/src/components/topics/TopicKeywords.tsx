@@ -3,7 +3,6 @@
  *
  * 将关键词列表渲染为 Badge 标签组，超出 maxVisible 部分折叠到 Tooltip 中展示
  */
-import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -33,47 +32,27 @@ export function TopicKeywords({
   const remainingCount = words.length - maxVisible;
   const remainingWords = words.slice(maxVisible);
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.03,
-      },
-    },
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, scale: 0.8 },
-    visible: { opacity: 1, scale: 1 },
-  };
-
   return (
-    <motion.div
-      className={cn("flex flex-wrap gap-1", className)}
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
+    <div className={cn("flex flex-wrap gap-1", className)}>
       {visibleWords.map((word, index) => (
-        <motion.div key={`${word}-${index}`} variants={itemVariants}>
+        <div key={`${word}-${index}`}>
           <Badge
             variant={index < 3 ? "default" : "secondary"}
             className="text-xs"
           >
             {word}
           </Badge>
-        </motion.div>
+        </div>
       ))}
 
       {remainingCount > 0 && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <motion.div variants={itemVariants}>
+            <div>
               <Badge variant="outline" className="text-xs cursor-help">
                 +{remainingCount}
               </Badge>
-            </motion.div>
+            </div>
           </TooltipTrigger>
           <TooltipContent
             side="bottom"
@@ -93,6 +72,6 @@ export function TopicKeywords({
           </TooltipContent>
         </Tooltip>
       )}
-    </motion.div>
+    </div>
   );
 }

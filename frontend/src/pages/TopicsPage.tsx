@@ -17,8 +17,9 @@ import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotComplet
 import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import { AnalysisDetails } from "@/components/common/AnalysisDetails";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
+import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
+import { PagedControls } from "@/components/common/PagedControls";
 import { Button } from "@/components/ui/button";
 import {
   TopicWordCloud,
@@ -32,9 +33,33 @@ import {
 } from "@/components/topics";
 import { RefreshCw, AlertCircle } from "lucide-react";
 import type { ChapterTopicDistribution, Topic, TopicEmotionEntry } from "@/api/types";
-import { formatAnalysisLabel } from "@/lib/analysisLabels";
 
 const STALE_TIME = 5 * 60 * 1000;
+const OVERVIEW_PAGE_SIZE = 8;
+const RANKING_PAGE_SIZE = 10;
+
+type DistributionView = "ranking" | "chapters" | "cloud" | "catalog";
+
+function pageItems<T>(items: readonly T[], page: number, pageSize: number) {
+  const pageCount = Math.ceil(items.length / pageSize);
+  const currentPage = Math.min(page, Math.max(pageCount, 1));
+  return {
+    page: currentPage,
+    pageCount,
+    items: items.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+  };
+}
+
+function balancedPageItems<T>(items: readonly T[], page: number, maxPageSize: number) {
+  if (items.length === 0) return { page: 1, pageCount: 0, items: [] as T[] };
+  const pageCount = Math.ceil(items.length / maxPageSize);
+  const currentPage = Math.min(page, pageCount);
+  const baseSize = Math.floor(items.length / pageCount);
+  const largerPages = items.length % pageCount;
+  const start = (currentPage - 1) * baseSize + Math.min(currentPage - 1, largerPages);
+  const size = baseSize + (currentPage <= largerPages ? 1 : 0);
+  return { page: currentPage, pageCount, items: items.slice(start, start + size) };
+}
 
 /**
  * 2026-08-31，作用：展示所选主题的核心分析字段
@@ -50,7 +75,7 @@ function TopicDetailPanel({
   topChapter: ChapterTopicDistribution | undefined;
 }) {
   return (
-    <DashboardCardShell title={topic ? `主题详情 · ${topic.label || `主题 ${topic.topic_id + 1}`}` : "主题详情"} accent="chart-2" className="h-full" bodyClassName="gap-4">
+    <DashboardCardShell title={topic ? `主题详情 · ${topic.label || `主题 ${topic.topic_id + 1}`}` : "主题详情"} accent="chart-2" className="h-full min-h-0" bodyClassName="min-h-0 gap-3">
       {topic ? (
         <>
           <AnalysisMetricStrip
@@ -60,9 +85,9 @@ function TopicDetailPanel({
               { label: "加权文本量", value: emotion?.weighted_token_total != null ? Math.round(emotion.weighted_token_total).toLocaleString() : "—" },
               { label: "占比最高章节", value: topChapter ? `第 ${topChapter.chapter_sequence} 章` : "—", description: topChapter ? `${((topChapter.distribution?.find((entry) => entry.topic_id === topic.topic_id)?.weight ?? 0) * 100).toFixed(1)}%` : "暂无章节分布" },
             ]}
-            className="grid-cols-4"
+            className="grid-cols-4 [&>div]:px-2.5 [&>div]:py-1.5 [&>div>dd]:text-base"
           />
-          <div className="rounded-xl border border-border/60 bg-surface/70 p-4">
+          <div className="min-h-0 flex-1 rounded-xl border border-border/60 bg-surface/70 p-3">
             <p className="text-xs font-medium text-text-muted">代表词</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {topic.words.length > 0 ? topic.words.map((word) => <span key={word} className="rounded-md bg-primary/10 px-2 py-1 text-xs text-primary">{word}</span>) : <span className="text-sm text-text-muted">暂无代表词</span>}
@@ -149,6 +174,7 @@ export function TopicsPage() {
   }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
 
   const enabled = !!novelId && !!storeTaskId;
+  const [activeTab, setActiveTab] = useState("overview");
 
   const overviewQuery = useQuery({
     queryKey: tabQueryKey("topics-overview", novelId, storeTaskId),
@@ -160,14 +186,14 @@ export function TopicsPage() {
   const seriesQuery = useQuery({
     queryKey: tabQueryKey("topics-series", novelId, storeTaskId),
     queryFn: () => getTopicSeries(novelId!, storeTaskId!),
-    enabled,
+    enabled: enabled && activeTab === "series",
     staleTime: STALE_TIME,
   });
 
   const shiftsQuery = useQuery({
     queryKey: tabQueryKey("topics-shifts", novelId, storeTaskId),
     queryFn: () => getTopicShifts(novelId!, storeTaskId!),
-    enabled,
+    enabled: enabled && activeTab === "shifts",
     staleTime: STALE_TIME,
   });
 
@@ -205,12 +231,16 @@ export function TopicsPage() {
       : null;
 
   const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null);
+  const [overviewPage, setOverviewPage] = useState(1);
+  const [rankingPage, setRankingPage] = useState(1);
+  const [distributionView, setDistributionView] = useState<DistributionView>("ranking");
   const activeSelectedTopicId = topics.some((topic) => topic.topic_id === selectedTopicId)
     ? selectedTopicId
     : topics[0]?.topic_id ?? null;
   const selectedTopic = topics.find((topic) => topic.topic_id === activeSelectedTopicId) ?? null;
   const selectedEmotion = emotionQuery.data?.emotion.find((entry) => entry.topic_id === activeSelectedTopicId);
-  const primaryTopics = topics.slice(0, 8);
+  const overviewTopics = balancedPageItems(topics, overviewPage, OVERVIEW_PAGE_SIZE);
+  const rankedTopics = pageItems(topics, rankingPage, RANKING_PAGE_SIZE);
   const topChapter = useMemo(() => {
     if (!selectedTopic || !overviewQuery.data) return undefined;
     return overviewQuery.data.chapters
@@ -230,62 +260,60 @@ export function TopicsPage() {
         transition={{ duration: 0.3 }}
         className="flex h-full min-h-0 flex-col"
       >
-        <AnalysisWorkspace.Tabs defaultValue="overview">
+        <AnalysisWorkspace.Tabs value={activeTab} onValueChange={setActiveTab}>
           <AnalysisWorkspace.Tab value="overview" label="主题总览">
-            <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-2">
-              {renderTabGate(overviewQuery, "主题总览", overviewUnavailable, () => (
-                <div className="flex flex-col gap-4">
-            <section className="grid grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)] gap-4">
-              <DashboardCardShell title="主题列表" accent="chart-1" bodyClassName="gap-2">
-                {primaryTopics.length > 0 ? primaryTopics.map((topic) => (
-                  <button key={topic.topic_id} type="button" onClick={() => setSelectedTopicId(topic.topic_id)} aria-pressed={activeSelectedTopicId === topic.topic_id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${activeSelectedTopicId === topic.topic_id ? "border-primary/40 bg-primary/10" : "border-border/60 hover:bg-surface-hover"}`}>
-                    <span className="min-w-0 truncate text-sm font-medium text-text">{topic.label || `主题 ${topic.topic_id + 1}`}</span>
-                    <span className="shrink-0 text-xs tabular-nums text-text-muted">{(topic.weight * 100).toFixed(1)}%</span>
-                  </button>
-                )) : <p className="text-sm text-text-muted">暂无主题数据</p>}
-                {topics.length > primaryTopics.length ? (
-                  <p className="pt-1 text-xs text-text-muted">其余 {topics.length - primaryTopics.length} 个主题收纳在完整主题分布中</p>
-                ) : null}
-              </DashboardCardShell>
-              <TopicDetailPanel topic={selectedTopic} emotion={selectedEmotion} topChapter={topChapter} />
-            </section>
-            <AnalysisDetails title="分析详情" description="模型元数据与主题迁移配置">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <span className="text-text-muted">主题模型</span><span className="text-text">{formatAnalysisLabel(overviewQuery.data?.model?.model_key, "topicModel")}</span>
-                  <span className="text-text-muted">库版本</span><span className="text-text">{overviewQuery.data?.model?.library_version ?? "—"}</span>
-                  <span className="text-text-muted">流水线版本</span><span className="text-text">{overviewQuery.data?.model?.pipeline_version ?? "—"}</span>
-                  <span className="text-text-muted">主题数量</span><span className="text-text">{overviewQuery.data?.model?.num_topics ?? "—"}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <span className="text-text-muted">窗口段数</span><span className="text-text">{shiftsQuery.data?.config.window_size ?? "—"}</span>
-                  <span className="text-text-muted">每窗最少词元</span><span className="text-text">{shiftsQuery.data?.config.min_tokens_per_window ?? "—"}</span>
-                  <span className="text-text-muted">散度阈值</span><span className="text-text">{shiftsQuery.data?.config.score_threshold ?? "—"}</span>
-                  <span className="text-text-muted">候选上限</span><span className="text-text">{shiftsQuery.data?.config.max_candidates ?? "—"}</span>
-                </div>
-              </div>
-            </AnalysisDetails>
+            <div className="h-full min-h-0">
+              {renderTabGate(overviewQuery, "主题总览", overviewUnavailable, (overview) => (
+                <div className="grid h-full min-h-0 grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-4">
+                  <DashboardCardShell title={`主题列表 · ${topics.length} 个`} accent="chart-1" className="h-full min-h-0" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-3">
+                    <div className="grid min-h-0 flex-1 auto-rows-fr gap-2" aria-label="主题列表">
+                      {overviewTopics.items.length > 0 ? overviewTopics.items.map((topic) => (
+                        <button key={topic.topic_id} type="button" onClick={() => setSelectedTopicId(topic.topic_id)} aria-pressed={activeSelectedTopicId === topic.topic_id} className={`flex min-h-0 items-center justify-between gap-3 rounded-lg border px-3 text-left transition-colors ${activeSelectedTopicId === topic.topic_id ? "border-primary/40 bg-primary/10" : "border-border/60 hover:bg-surface-hover"}`}>
+                          <span className="min-w-0 truncate text-sm font-medium text-text" title={topic.label || `主题 ${topic.topic_id + 1}`}>{topic.label || `主题 ${topic.topic_id + 1}`}</span>
+                          <span className="shrink-0 text-xs tabular-nums text-text-muted">{(topic.weight * 100).toFixed(1)}%</span>
+                        </button>
+                      )) : <p className="text-sm text-text-muted">暂无主题数据</p>}
+                    </div>
+                    <PagedControls page={overviewTopics.page} pageCount={overviewTopics.pageCount} onPageChange={(page) => {
+                      setOverviewPage(page);
+                      setSelectedTopicId(balancedPageItems(topics, page, OVERVIEW_PAGE_SIZE).items[0]?.topic_id ?? null);
+                    }} label="主题列表" />
+                  </DashboardCardShell>
+                  <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
+                    <TopicDetailPanel topic={selectedTopic} emotion={selectedEmotion} topChapter={topChapter} />
+                    <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} columns={2} className="h-full min-h-0" />
+                  </div>
                 </div>
               ))}
             </div>
           </AnalysisWorkspace.Tab>
 
           <AnalysisWorkspace.Tab value="distribution" label="完整主题分布">
-            <div className="h-full min-h-0 overflow-y-auto pr-2">
+            <div className="h-full min-h-0">
               {renderTabGate(overviewQuery, "完整主题分布", overviewUnavailable, (overview) => (
-                <div className="space-y-4">
-                  {topics.length > 0 ? (
-                    <>
-                      <TopicWordCloud topics={topics} maxWords={100} className="h-[300px]" />
-                      <TopicBarChart topics={topics} className="h-[360px]" />
-                      <TopicTable topics={topics} />
-                    </>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="min-h-[280px] rounded-lg border border-border/60 bg-surface/70 p-4">
-                      <TopicDistributionChart distribution={overview.distribution} chapters={overview.chapters} className="h-[260px]" />
-                    </div>
-                    <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} className="min-h-[280px]" />
+                <div className="flex h-full min-h-0 flex-col gap-3">
+                  <div className="flex shrink-0 items-center justify-between gap-3">
+                    <p className="text-xs text-text-muted">{topics.length} 个主题 · {overview.chapters.length} 个章节，选择视图查看完整数据</p>
+                    <AnalysisViewSwitcher value={distributionView} onValueChange={setDistributionView} label="主题分布视图" options={[
+                      { value: "ranking", label: "权重排行" },
+                      { value: "chapters", label: "全书与章节" },
+                      { value: "cloud", label: "关键词词云" },
+                      { value: "catalog", label: "主题清单" },
+                    ]} />
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    {distributionView === "ranking" && <div className="flex h-full min-h-0 flex-col gap-2">
+                      <TopicBarChart topics={rankedTopics.items} className="min-h-0 flex-1" />
+                      <PagedControls page={rankedTopics.page} pageCount={rankedTopics.pageCount} onPageChange={setRankingPage} label="主题权重" />
+                    </div>}
+                    {distributionView === "chapters" && <div className="h-full min-h-0 rounded-xl border border-border/60 bg-surface/70 p-4">
+                      <TopicDistributionChart distribution={overview.distribution} chapters={overview.chapters} className="h-full" />
+                    </div>}
+                    {distributionView === "cloud" && <TopicWordCloud topics={topics} maxWords={100} className="h-full min-h-0" />}
+                    {distributionView === "catalog" && <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
+                      <TopicTable topics={topics} className="h-full min-h-0" />
+                      <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} columns={2} className="h-full min-h-0" />
+                    </div>}
                   </div>
                 </div>
               ))}

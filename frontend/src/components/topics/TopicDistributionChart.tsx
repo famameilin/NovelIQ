@@ -11,6 +11,7 @@ import { BarChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
+import { PagedControls } from "@/components/common/PagedControls";
 import { getCSSColorVar } from "@/lib/theme";
 import type { ChapterTopicDistribution, TopicDistributionEntry } from "@/api/types";
 
@@ -23,61 +24,78 @@ interface TopicDistributionChartProps {
 }
 
 type DistributionView = "book" | "chapter";
+const BOOK_PAGE_SIZE = 10;
+const CHAPTER_PAGE_SIZE = 9;
 
 export function TopicDistributionChart({ distribution, chapters, className }: TopicDistributionChartProps) {
   const themeSignature = useChartThemeSignature();
   const [view, setView] = useState<DistributionView>("book");
+  const [bookPage, setBookPage] = useState(1);
+  const [chapterPage, setChapterPage] = useState(1);
 
   const primaryColor = getCSSColorVar("--chart-3");
+  const bookEntries = distribution ?? [];
+  const chapterEntries = chapters.filter((chapter) => chapter.distribution != null);
+  const bookPageCount = Math.ceil(bookEntries.length / BOOK_PAGE_SIZE);
+  const chapterPageCount = Math.ceil(chapterEntries.length / CHAPTER_PAGE_SIZE);
+  const currentBookPage = Math.min(bookPage, Math.max(bookPageCount, 1));
+  const currentChapterPage = Math.min(chapterPage, Math.max(chapterPageCount, 1));
+  const visibleBookEntries = bookEntries.slice((currentBookPage - 1) * BOOK_PAGE_SIZE, currentBookPage * BOOK_PAGE_SIZE);
+  const visibleChapters = chapterEntries.slice((currentChapterPage - 1) * CHAPTER_PAGE_SIZE, currentChapterPage * CHAPTER_PAGE_SIZE);
+  const hasBookData = bookEntries.length > 0;
+  const hasChapterData = chapterEntries.some((chapter) => chapter.distribution?.length);
+  const activeView = !hasBookData && hasChapterData ? "chapter" : view;
 
   const option = useMemo(() => {
-    if (view === "book") {
-      const entries = distribution ?? [];
+    if (activeView === "book") {
       return {
-        tooltip: { trigger: "axis" },
+        // 全书权重通常只有几个百分点；入场动画会让首屏短暂显示成小数点后的零头。
+        animation: false,
+        tooltip: { trigger: "axis", valueFormatter: (value: number) => `${(value * 100).toFixed(2)}%` },
         grid: { left: 48, right: 16, top: 24, bottom: 32 },
         xAxis: {
           type: "category",
-          data: entries.map((entry) => `主题 ${entry.topic_id}`),
+          data: visibleBookEntries.map((entry) => `主题 ${entry.topic_id + 1}`),
           axisLabel: { fontSize: 10 },
         },
-        yAxis: { type: "value", axisLabel: { fontSize: 10 } },
+        yAxis: { type: "value", axisLabel: { fontSize: 10, formatter: (value: number) => `${(value * 100).toFixed(0)}%` } },
         series: [
           {
             name: "全书权重",
             type: "bar",
-            data: entries.map((entry) => entry.weight),
+            data: visibleBookEntries.map((entry) => entry.weight),
             itemStyle: { color: primaryColor, borderRadius: [3, 3, 0, 0] },
           },
         ],
       };
     }
 
-    const chapterEntries = chapters.filter((chapter) => chapter.distribution != null);
-    const topicCount = chapterEntries[0]?.distribution?.length ?? 0;
+    const topicIds = chapterEntries[0]?.distribution?.map((entry) => entry.topic_id) ?? [];
     return {
-      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      animation: false,
+      tooltip: { trigger: "item", valueFormatter: (value: number) => `${(value * 100).toFixed(2)}%` },
       legend: { type: "scroll", bottom: 0, textStyle: { fontSize: 10 } },
       grid: { left: 48, right: 16, top: 24, bottom: 56 },
       xAxis: {
         type: "category",
-        data: chapterEntries.map((chapter) => `第${chapter.chapter_sequence}章`),
+        data: visibleChapters.map((chapter) => `第${chapter.chapter_sequence}章`),
         axisLabel: { fontSize: 10 },
       },
-      yAxis: { type: "value", axisLabel: { fontSize: 10 } },
-      series: Array.from({ length: topicCount }, (_, topicId) => ({
-        name: `主题 ${topicId}`,
+      yAxis: {
+        type: "value",
+        max: (extent: { max: number }) => Math.max(1, extent.max),
+        axisLabel: { fontSize: 10, formatter: (value: number) => `${(value * 100).toFixed(0)}%` },
+      },
+      series: topicIds.map((topicId) => ({
+        name: `主题 ${topicId + 1}`,
         type: "bar",
         stack: "distribution",
         // 章节分布按 token 加权归一，堆积和为 1
-        data: chapterEntries.map((chapter) => chapter.distribution?.[topicId]?.weight ?? 0),
+        data: visibleChapters.map((chapter) => chapter.distribution?.find((entry) => entry.topic_id === topicId)?.weight ?? null),
         barMaxWidth: 26,
       })),
     };
-  }, [view, distribution, chapters, primaryColor]);
-
-  const hasBookData = distribution != null && distribution.length > 0;
-  const hasChapterData = chapters.some((chapter) => chapter.distribution != null && chapter.distribution.length > 0);
+  }, [activeView, visibleBookEntries, visibleChapters, chapterEntries, primaryColor]);
 
   return (
     <div className={`flex h-full min-h-0 flex-col gap-2 ${className ?? ""}`}>
@@ -96,7 +114,7 @@ export function TopicDistributionChart({ distribution, chapters, className }: To
               disabled={(value === "book" && !hasBookData) || (value === "chapter" && !hasChapterData)}
               onClick={() => setView(value)}
               className={`rounded-md px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                view === value ? "bg-primary-subtle text-primary" : "text-text-muted hover:text-text"
+                activeView === value ? "bg-primary-subtle text-primary" : "text-text-muted hover:text-text"
               }`}
             >
               {label}
@@ -104,9 +122,19 @@ export function TopicDistributionChart({ distribution, chapters, className }: To
           ))}
         </div>
       </div>
-      <div className="min-h-[240px] flex-1">
-        <ReactEChartsCore key={themeSignature} option={option} notMerge style={{ height: "100%", width: "100%" }} />
+      <div className="min-h-0 flex-1">
+        {(activeView === "book" ? hasBookData : hasChapterData) ? (
+          <ReactEChartsCore key={themeSignature} option={option} notMerge style={{ height: "100%", width: "100%" }} />
+        ) : (
+          <p className="flex h-full items-center justify-center text-sm text-text-muted">暂无完整主题分布数据</p>
+        )}
       </div>
+      <PagedControls
+        page={activeView === "book" ? currentBookPage : currentChapterPage}
+        pageCount={activeView === "book" ? bookPageCount : chapterPageCount}
+        onPageChange={activeView === "book" ? setBookPage : setChapterPage}
+        label={activeView === "book" ? "全书主题" : "章节分布"}
+      />
     </div>
   );
 }

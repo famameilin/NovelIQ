@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -72,7 +72,9 @@ vi.mock("@/components/common/AnalysisNotCompleteState", () => ({
 
 vi.mock("@/components/topics", () => ({
   TopicWordCloud: passthroughComponent("topic-word-cloud"),
-  TopicBarChart: passthroughComponent("topic-bar-chart"),
+  TopicBarChart: ({ topics }: { topics: Array<{ topic_id: number }> }) => (
+    <div data-testid="topic-bar-chart">{topics.map((topic) => topic.topic_id).join(",")}</div>
+  ),
   TopicTable: passthroughComponent("topic-table"),
   TopicDistributionChart: passthroughComponent("topic-distribution-chart"),
   TopicKeywordsCard: passthroughComponent("topic-keywords-card"),
@@ -82,7 +84,7 @@ vi.mock("@/components/topics", () => ({
 }));
 
 vi.mock("@/components/ui/button", () => ({
-  Button: passthroughComponent("button"),
+  Button: ({ children, ...props }: ComponentProps<"button">) => <button {...props}>{children}</button>,
 }));
 
 function createQueryClient() {
@@ -146,15 +148,19 @@ describe("TopicsPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("主题固定工作区在完整主题分布页签中保留词云与分布", async () => {
+  it("删除分析详情并让完整主题分布按视图切换、排行翻到末页", async () => {
     getTopicsOverviewTabMock.mockResolvedValue({
       run_id: "task-1",
       model: null,
-      topics: [{ topic_id: 0, words: ["修炼", "成长"], weight: 0.8 }],
-      distribution: [{ topic_id: 0, weight: 1 }],
+      topics: Array.from({ length: 25 }, (_, topic_id) => ({
+        topic_id,
+        words: [`词${topic_id + 1}`],
+        weight: (25 - topic_id) / 325,
+      })),
+      distribution: Array.from({ length: 25 }, (_, topic_id) => ({ topic_id, weight: (25 - topic_id) / 325 })),
       chapters: [],
       keywords: [{ word: "宗门", score: 0.08 }],
-      topic_labels: ["成长"],
+      topic_labels: Array.from({ length: 25 }, (_, index) => `主题标签${index + 1}`),
       unavailable_reason: null,
       keyword_unavailable_reason: null,
     });
@@ -181,11 +187,34 @@ describe("TopicsPage", () => {
     renderTopicsPage();
 
     const user = userEvent.setup();
+    expect(await screen.findByText("主题列表 · 25 个")).toBeInTheDocument();
+    expect(screen.queryByText("分析详情")).not.toBeInTheDocument();
+    const overviewPagination = screen.getByRole("navigation", { name: "主题列表分页" });
+    await user.click(within(overviewPagination).getByRole("button", { name: "下一页" }));
+    expect(within(overviewPagination).getByText("主题列表 2 / 4")).toBeInTheDocument();
+    await user.click(within(overviewPagination).getByRole("button", { name: "下一页" }));
+    await user.click(within(overviewPagination).getByRole("button", { name: "下一页" }));
+    expect(within(screen.getByLabelText("主题列表")).getAllByRole("button")).toHaveLength(6);
+    expect(within(overviewPagination).getByRole("button", { name: "下一页" })).toBeDisabled();
+
     await user.click(await screen.findByRole("tab", { name: "完整主题分布" }));
-    expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
-    expect(screen.getByTestId("topic-distribution-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("topic-keywords-card")).toBeInTheDocument();
+    expect(await screen.findByTestId("topic-bar-chart")).toHaveTextContent("0,1,2,3,4,5,6,7,8,9");
+    const rankingPagination = screen.getByRole("navigation", { name: "主题权重分页" });
+    await user.click(within(rankingPagination).getByRole("button", { name: "下一页" }));
+    await user.click(within(rankingPagination).getByRole("button", { name: "下一页" }));
+    expect(screen.getByTestId("topic-bar-chart")).toHaveTextContent("20,21,22,23,24");
+    expect(within(rankingPagination).getByRole("button", { name: "下一页" })).toBeDisabled();
+
+    const views = screen.getByRole("group", { name: "主题分布视图" });
+    await user.click(within(views).getByRole("button", { name: "全书与章节" }));
+    expect(screen.getByTestId("topic-distribution-chart")).toBeVisible();
+    await user.click(within(views).getByRole("button", { name: "关键词词云" }));
+    expect(screen.getByTestId("topic-word-cloud")).toBeVisible();
+    await user.click(within(views).getByRole("button", { name: "主题清单" }));
+    expect(screen.getByTestId("topic-table")).toBeVisible();
     expect(getTopicsOverviewTabMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getTopicSeriesMock).not.toHaveBeenCalled();
+    expect(getTopicShiftsMock).not.toHaveBeenCalled();
   });
 
   it("诊断主题标签为空时仍渲染主内容而不是空白主体区", async () => {
@@ -205,9 +234,12 @@ describe("TopicsPage", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "完整主题分布" }));
-    expect(await screen.findByTestId("topic-word-cloud")).toBeInTheDocument();
-    expect(screen.getByTestId("topic-bar-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("topic-table")).toBeInTheDocument();
+    expect(await screen.findByTestId("topic-bar-chart")).toBeVisible();
+    const views = screen.getByRole("group", { name: "主题分布视图" });
+    await user.click(within(views).getByRole("button", { name: "关键词词云" }));
+    expect(screen.getByTestId("topic-word-cloud")).toBeVisible();
+    await user.click(within(views).getByRole("button", { name: "主题清单" }));
+    expect(screen.getByTestId("topic-table")).toBeVisible();
   });
 
   it("主题固定工作区保留全部业务页签和独立端点", async () => {

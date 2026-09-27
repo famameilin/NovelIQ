@@ -1,10 +1,9 @@
 /**
  * TopicTable - 主题详情表格组件
  *
- * 可排序的主题详情表格（按 ID/权重），含关键词 Badge 展示和 Framer Motion 进场动画
+ * 可排序的主题详情表格（按 ID/权重），含关键词 Badge 展示
  */
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import { Table2 } from "lucide-react";
 import {
   Table,
@@ -15,6 +14,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { PagedControls } from "@/components/common/PagedControls";
+import { cn } from "@/lib/cn";
 import { TopicKeywords } from "./TopicKeywords";
 import type { Topic } from "@/api/types";
 
@@ -25,10 +26,12 @@ export interface TopicTableProps {
 
 type SortKey = "topic_id" | "weight";
 type SortOrder = "asc" | "desc";
+const PAGE_SIZE = 5;
 
 export function TopicTable({ topics, className }: TopicTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("weight");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [page, setPage] = useState(1);
 
   const sortedTopics = useMemo(() => {
     return [...topics].sort((a, b) => {
@@ -38,8 +41,12 @@ export function TopicTable({ topics, className }: TopicTableProps) {
       return sortOrder === "asc" ? cmp : -cmp;
     });
   }, [topics, sortKey, sortOrder]);
+  const pageCount = Math.ceil(sortedTopics.length / PAGE_SIZE);
+  const currentPage = Math.min(page, Math.max(pageCount, 1));
+  const visibleTopics = sortedTopics.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const handleSort = (key: SortKey) => {
+    setPage(1);
     if (sortKey === key) {
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
@@ -66,12 +73,14 @@ export function TopicTable({ topics, className }: TopicTableProps) {
       title="主题详情"
       icon={<Table2 className="h-4 w-4" />}
       accent="chart-4"
-      className={className}
+      className={cn("h-full min-h-0", className)}
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-2"
     >
-      <div className="rounded-2xl border border-border/70 bg-surface/70">
+      <div className="min-h-0 flex-1 rounded-2xl border border-border/70 bg-surface/70 [&>div]:h-full">
         {hasData ? (
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-surface">
+          <Table className="h-full">
+            <TableHeader className="bg-surface">
               <TableRow>
                 <TableHead
                   className="cursor-pointer select-none hover:bg-surface-hover"
@@ -91,27 +100,18 @@ export function TopicTable({ topics, className }: TopicTableProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedTopics.map((topic, index) => (
-                <motion.tr
-                  key={topic.topic_id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{
-                    delay: Math.min(index * 0.03, 0.4),
-                    duration: 0.25,
-                  }}
-                  className="border-b border-border transition-colors hover:bg-primary-subtle/30"
-                >
-                  <TableCell className="font-medium">
+              {visibleTopics.map((topic) => (
+                <TableRow key={topic.topic_id}>
+                  <TableCell className="py-2 font-medium">
                     {topic.label || `主题 ${topic.topic_id + 1}`}
                   </TableCell>
-                  <TableCell>
-                    <TopicKeywords words={topic.words} maxVisible={5} />
+                  <TableCell className="py-2">
+                    <TopicKeywords words={topic.words} maxVisible={3} />
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
+                  <TableCell className="py-2 text-right font-mono text-sm">
                     {(topic.weight * 100).toFixed(1)}%
                   </TableCell>
-                </motion.tr>
+                </TableRow>
               ))}
             </TableBody>
           </Table>
@@ -121,6 +121,7 @@ export function TopicTable({ topics, className }: TopicTableProps) {
           </div>
         )}
       </div>
+      <PagedControls page={currentPage} pageCount={pageCount} onPageChange={setPage} label="主题清单" />
     </DashboardCardShell>
   );
 }
