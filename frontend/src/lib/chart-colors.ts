@@ -12,7 +12,4 @@ export const CHART_COLORS = [
   "--chart-3",
   "--chart-4",
   "--chart-5",
-  "--chart-6",
-  "--chart-7",
-  "--chart-8",
 ] as const;

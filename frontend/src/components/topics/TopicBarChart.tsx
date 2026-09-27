@@ -53,6 +53,7 @@ export function TopicBarChart({ topics, className }: TopicBarChartProps) {
     );
 
     return {
+      animation: false,
       grid: { top: 10, right: 60, bottom: 10, left: 80, containLabel: false },
       tooltip: {
         trigger: "axis" as const,
@@ -110,8 +111,6 @@ export function TopicBarChart({ topics, className }: TopicBarChartProps) {
             color: "hsl(var(--text-muted))",
             fontSize: 11,
           },
-          animationDuration: 800,
-          animationEasing: "cubicOut",
         },
       ],
     };

@@ -58,8 +58,8 @@ export function DashboardCardShell({
           className={cn(
             "pointer-events-none absolute rounded-full blur-3xl",
             accent === "primary"
-              ? "-right-8 -top-10 h-28 w-28"
-              : "-bottom-8 -right-8 h-24 w-24"
+              ? "right-0 top-0 h-28 w-28"
+              : "bottom-0 right-0 h-24 w-24"
           )}
           style={{ backgroundColor: getMetricAccentColor(accent, 0.08) }}
         />
