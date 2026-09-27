@@ -1,16 +1,15 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingTrees } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
-import { AnalysisDetails } from "@/components/common/AnalysisDetails";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
+import { PagedControls } from "@/components/common/PagedControls";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import { ScoreCard } from "@/components/common/ScoreCard";
 import { DiagnosisHeader } from "@/components/diagnosis/DiagnosisHeader";
 import { DiagnosisText } from "@/components/diagnosis/DiagnosisText";
 import { ValueLogicCard } from "@/components/diagnosis/ValueLogicCard";
@@ -23,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { AlertCircle, Tags } from "lucide-react";
 import type { ForeshadowingTree } from "@/api/types";
 import { cn } from "@/lib/cn";
+import { paginateText } from "@/lib/paginateText";
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -51,6 +51,45 @@ function getLevelLabel(value: string | null): string {
   if (value === "medium") return "中等";
   if (value === "low") return "较低";
   return "待确认";
+}
+
+interface OverviewMetric {
+  title: string;
+  value: string;
+  reason: string | null | undefined;
+}
+
+function OverviewReasonCard({ metric }: { metric: OverviewMetric }) {
+  const [page, setPage] = useState(1);
+  const passages = paginateText(metric.reason ?? "", 220);
+  const currentPage = Math.min(page, Math.max(passages.length, 1));
+
+  return (
+    <DashboardCardShell title={`${metric.title}依据`} accent="chart-2" className="min-h-0" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-3">
+      <p className="whitespace-pre-wrap text-xs leading-6 text-text-muted">{passages[currentPage - 1] ?? "暂无补充依据"}</p>
+      <div className="mt-auto"><PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label={`${metric.title}依据`} /></div>
+    </DashboardCardShell>
+  );
+}
+
+/** 四项评分和三段依据分别占据整行与三列，不再让标签独占半页。 */
+function DiagnosisOverview({ metrics, labels }: { metrics: OverviewMetric[]; labels: ReactNode }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="grid grid-cols-4 gap-3">
+        {metrics.map((item) => (
+          <div key={item.title} className="rounded-lg border border-border/70 bg-surface/75 px-4 py-3">
+            <span className="block text-xs text-text-muted">{item.title}</span>
+            <span className="mt-1 block text-xl font-semibold tabular-nums text-text">{item.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="shrink-0">{labels}</div>
+      <div className="grid min-h-0 flex-1 grid-cols-3 gap-3">
+        {metrics.slice(1).map((metric) => <OverviewReasonCard key={metric.title} metric={metric} />)}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -96,6 +135,9 @@ function ForeshadowingTreesErrorCard(props: { onRetry: () => void }) {
 function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTree[] }) {
   const [filter, setFilter] = useState<"all" | "open" | "reinforced" | "likely_paid_off">("all");
   const [selectedRootId, setSelectedRootId] = useState<string | null>(props.foreshadowingTrees[0]?.root_event_id ?? null);
+  const [page, setPage] = useState(1);
+  const [detailPage, setDetailPage] = useState(1);
+  const [detailView, setDetailView] = useState<"reason" | "tracking">("reason");
   const counts = useMemo(() => {
     const result = { open: 0, reinforced: 0, likely_paid_off: 0 };
     props.foreshadowingTrees.forEach((tree) => {
@@ -106,8 +148,16 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
   const visibleTrees = filter === "all"
     ? props.foreshadowingTrees
     : props.foreshadowingTrees.filter((tree) => tree.status === filter);
+  const pageCount = Math.ceil(visibleTrees.length / 2);
+  const currentPage = Math.min(page, Math.max(pageCount, 1));
+  const pageTrees = visibleTrees.slice((currentPage - 1) * 2, currentPage * 2);
   const selectedTree =
-    visibleTrees.find((tree) => tree.root_event_id === selectedRootId) ?? visibleTrees[0] ?? null;
+    pageTrees.find((tree) => tree.root_event_id === selectedRootId) ?? pageTrees[0] ?? null;
+  const detailPassages = paginateText([
+    selectedTree?.latest_reason ? `最近判断依据：${selectedTree.latest_reason}` : "最近判断依据：暂无补充判断",
+    selectedTree?.latest_why_unresolved_now ? `暂未回收原因：${selectedTree.latest_why_unresolved_now}` : "",
+  ].filter(Boolean).join("\n\n"), 100);
+  const currentDetailPage = Math.min(detailPage, Math.max(detailPassages.length, 1));
 
   if (props.foreshadowingTrees.length === 0) {
     return (
@@ -125,11 +175,12 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
           { label: "持续强化", value: counts.reinforced },
           { label: "疑似回收", value: counts.likely_paid_off },
         ]}
+        className="grid-cols-3 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
       />
 
       <AnalysisViewSwitcher
         value={filter}
-        onValueChange={setFilter}
+        onValueChange={(value) => { setFilter(value); setPage(1); setDetailPage(1); }}
         label="伏笔状态筛选"
         options={[
           { value: "all", label: "全部" },
@@ -139,22 +190,19 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
         ]}
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)] gap-4 overflow-hidden">
-        <div className="h-full min-h-0 space-y-3 overflow-y-auto pr-2">
-          {visibleTrees.map((tree) => {
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)] gap-4">
+        <div className="flex min-h-0 flex-col gap-2">
+          {pageTrees.map((tree) => {
             const statusMeta = getThreadStatusMeta(tree.status);
             const isSelected = selectedTree?.root_event_id === tree.root_event_id;
-            const chapterIds = tree.anchor_chapter_ids.length > 0
-              ? tree.anchor_chapter_ids
-              : [tree.first_chapter_id, tree.last_chapter_id];
             return (
               <button
                 key={tree.root_event_id}
                 type="button"
                 aria-pressed={isSelected}
-                onClick={() => setSelectedRootId(tree.root_event_id)}
+                onClick={() => { setSelectedRootId(tree.root_event_id); setDetailPage(1); }}
                 className={cn(
-                  "w-full rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                  "w-full rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
                   isSelected ? "border-primary/35 bg-primary/5" : "border-border/70 bg-surface/70 hover:bg-surface-hover",
                 )}
               >
@@ -170,40 +218,45 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
                     <div className="mt-1 font-medium text-text">{getLevelLabel(tree.payoff_likelihood)}</div>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {chapterIds.map((chapterId, index) => (
-                    <span key={`${tree.root_event_id}-${chapterId}-${index}`} className="rounded-full border border-border/60 px-2.5 py-1 text-xs text-text-muted">
-                      第 {chapterId} 章 · {index === 0 ? "首次出现" : index === chapterIds.length - 1 ? "最近出现" : "再次出现"}
-                    </span>
-                  ))}
-                </div>
+                <p className="mt-2 text-xs text-text-muted">第 {tree.first_chapter_id} 至 {tree.last_chapter_id} 章 · {tree.anchor_chapter_ids.length} 个锚点</p>
               </button>
             );
           })}
           {visibleTrees.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/60 p-6 text-center text-sm text-text-muted">当前筛选下没有伏笔线索</div>
           ) : null}
+          <PagedControls page={currentPage} pageCount={pageCount} onPageChange={(nextPage) => { setPage(nextPage); setDetailPage(1); }} label="伏笔线索" />
         </div>
 
         {selectedTree ? (
-          <aside className="h-full min-h-0 overflow-y-auto rounded-lg border border-border/70 bg-surface/75 p-5" aria-label="伏笔详情">
+          <aside className="min-h-0 rounded-lg border border-border/70 bg-surface/75 p-4" aria-label="伏笔详情">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={getThreadStatusMeta(selectedTree.status).variant}>{getThreadStatusMeta(selectedTree.status).label}</Badge>
             </div>
-            <h2 className="mt-3 text-base font-semibold leading-7 text-text">{selectedTree.description}</h2>
-            <dl className="mt-4 grid gap-3 text-sm">
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">最近判断依据</dt><dd className="mt-1 leading-6 text-text">{selectedTree.latest_reason ?? "暂无补充判断"}</dd></div>
-              {selectedTree.latest_why_unresolved_now ? (
-                <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">暂未回收原因</dt><dd className="mt-1 leading-6 text-text">{selectedTree.latest_why_unresolved_now}</dd></div>
-              ) : null}
-            </dl>
-            <AnalysisDetails className="mt-4" description="强度、活跃状态与全部锚点">
-              <dl className="grid grid-cols-1 gap-3 text-sm">
-                <div><dt className="text-text-muted">线索强度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedTree.strength)}</dd></div>
-                <div><dt className="text-text-muted">跟踪状态</dt><dd className="mt-1 font-medium text-text">{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
-                <div><dt className="text-text-muted">锚点章节</dt><dd className="mt-1 font-medium text-text">{selectedTree.anchor_chapter_ids.join("、") || "—"}</dd></div>
+            <h2 className="mt-2 text-base font-semibold leading-6 text-text">{selectedTree.description}</h2>
+            <AnalysisViewSwitcher value={detailView} onValueChange={setDetailView} label="伏笔详情内容" className="mt-3" options={[
+              { value: "reason", label: "判断依据" },
+              { value: "tracking", label: "跟踪信息" },
+            ]} />
+            {detailView === "reason" ? (
+              <>
+                <div className="mt-3 rounded-lg bg-surface-hover/55 p-3">
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-text">{detailPassages[currentDetailPage - 1]}</p>
+                  <PagedControls page={currentDetailPage} pageCount={detailPassages.length} onPageChange={setDetailPage} label="伏笔判断" />
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg border border-border/60 p-2"><dt className="text-text-muted">线索强度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedTree.strength)}</dd></div>
+                  <div className="rounded-lg border border-border/60 p-2"><dt className="text-text-muted">跟踪状态</dt><dd className="mt-1 font-medium text-text">{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
+                  <div className="col-span-2 rounded-lg border border-border/60 p-2"><dt className="text-text-muted">锚点章节</dt><dd className="mt-1 font-medium text-text">{selectedTree.anchor_chapter_ids.join("、") || "—"}</dd></div>
+                </dl>
+              </>
+            ) : (
+              <dl className="mt-3 grid gap-2 text-sm">
+                <div><dt className="text-text-muted">线索强度</dt><dd className="font-medium text-text">{getLevelLabel(selectedTree.strength)}</dd></div>
+                <div><dt className="text-text-muted">跟踪状态</dt><dd className="font-medium text-text">{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
+                <div><dt className="text-text-muted">锚点章节</dt><dd className="font-medium text-text">{selectedTree.anchor_chapter_ids.join("、") || "—"}</dd></div>
               </dl>
-            </AnalysisDetails>
+            )}
           </aside>
         ) : null}
       </div>
@@ -380,23 +433,19 @@ export function DiagnosisPage() {
       {diagnosis && !isLoading && (
         <AnalysisWorkspace.Tabs defaultValue="overview">
           <AnalysisWorkspace.Tab value="overview" label="综合概览">
-            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-4">
-              <div className="grid min-h-0 grid-cols-2 gap-4">
-                  <ScoreCard
-                    title="伏笔回收预期"
-                    type="percent"
-                    value={foreshadowMetric != null ? foreshadowMetric * 100 : null}
-                  />
-                  <ScoreCard title="权力立场" type="score" score={diagnosis.power_stance_score} reason={diagnosis.power_stance_reason} />
-                  <ScoreCard title="平民尊严" type="score" score={diagnosis.common_people_dignity} reason={diagnosis.dignity_reason} />
-                  <ScoreCard title="文化深度" type="score" score={diagnosis.cultural_depth_score} reason={diagnosis.cultural_depth_reason} />
-              </div>
-              <DiagnosisHeader
+            <DiagnosisOverview
+              metrics={[
+                { title: "伏笔回收预期", value: foreshadowMetric != null ? `${Math.round(foreshadowMetric * 100)}%` : "—", reason: null },
+                { title: "权力立场", value: diagnosis.power_stance_score != null ? `${diagnosis.power_stance_score}/5` : "—", reason: diagnosis.power_stance_reason },
+                { title: "平民尊严", value: diagnosis.common_people_dignity != null ? `${diagnosis.common_people_dignity}/5` : "—", reason: diagnosis.dignity_reason },
+                { title: "文化深度", value: diagnosis.cultural_depth_score != null ? `${diagnosis.cultural_depth_score}/5` : "—", reason: diagnosis.cultural_depth_reason },
+              ]}
+              labels={<DiagnosisHeader
                 genreLabels={diagnosis.genre_labels}
                 styleLabels={diagnosis.style_labels}
                 arcType={diagnosis.narrative_arc_type}
-              />
-            </div>
+              />}
+            />
           </AnalysisWorkspace.Tab>
 
           <AnalysisWorkspace.Tab value="value-topic" label="价值主题">
@@ -414,20 +463,21 @@ export function DiagnosisPage() {
                   <p className="text-sm text-text-muted">当前任务暂无综合诊断文本。</p>
                 </DashboardCardShell>
               )}
-              <div className="grid min-h-0 grid-rows-2 gap-4">
+              <div className="flex min-h-0 flex-col gap-4">
                 <ValueLogicCard
                   valueLogicType={diagnosis.value_logic_type}
                   valueLogicReason={diagnosis.value_logic_reason}
-                  className="h-full min-h-0"
+                  className="shrink-0"
                 />
                 <DashboardCardShell
                   title="主题标签"
                   icon={<Tags className="h-4 w-4" />}
                   accent="chart-4"
-                  bodyClassName="min-h-0 gap-3 overflow-y-auto"
-                  className="h-full min-h-0"
+                  contentClassName="gap-2 p-3"
+                  bodyClassName="gap-2"
+                  className="shrink-0"
                 >
-                  <div className="rounded-lg border border-border/60 bg-surface/70 p-4">
+                  <div className="rounded-lg border border-border/60 bg-surface/70 p-3">
                     <TopicLabels labels={diagnosis.topic_labels} />
                   </div>
                 </DashboardCardShell>

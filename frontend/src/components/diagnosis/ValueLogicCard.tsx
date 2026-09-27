@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { PagedControls } from "@/components/common/PagedControls";
 import { cn } from "@/lib/cn";
+import { paginateText } from "@/lib/paginateText";
 import { Scale } from "lucide-react";
 
 export interface ValueLogicCardProps {
@@ -19,6 +22,9 @@ export function ValueLogicCard({
   valueLogicReason,
   className,
 }: ValueLogicCardProps) {
+  const [page, setPage] = useState(1);
+  const passages = paginateText(valueLogicReason ?? "", 110);
+  const currentPage = Math.min(page, Math.max(passages.length, 1));
   return (
     <DashboardCardShell
       title="价值逻辑"
@@ -27,7 +33,7 @@ export function ValueLogicCard({
       showOrb
       className={cn(className)}
       contentClassName="flex h-full flex-col"
-      bodyClassName="min-h-0 flex-1 gap-3 overflow-y-auto pr-1"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
       {valueLogicType ? (
         <div className="flex flex-col gap-3">
@@ -36,9 +42,10 @@ export function ValueLogicCard({
           </div>
           {valueLogicReason && (
             <div className="rounded-2xl border border-border/60 bg-surface/70 px-4 py-3">
-              <p className="text-xs leading-6 text-text-muted">{valueLogicReason}</p>
+              <p className="whitespace-pre-wrap text-xs leading-6 text-text-muted">{passages[currentPage - 1]}</p>
             </div>
           )}
+          <PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label="价值逻辑理由" />
         </div>
       ) : (
         <p className="text-sm text-text-muted">暂无价值逻辑数据</p>

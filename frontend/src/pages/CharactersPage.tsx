@@ -3,7 +3,6 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
-import { getCharacters } from "@/api/results";
 import { getCharacterFunctionTab, tabQueryKey } from "@/api/tabs";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
@@ -74,15 +73,8 @@ export function CharactersPage() {
   // 不得用于新小说的查询/SSE（模式同 GraphPage）
   const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
 
-  // 角色基础指标和焦点结构分别使用各自的聚合数据源
+  // 功能与焦点接口已包含完整角色列表，避免重复查询同一份角色数据。
   const enabled = !!novelId && !!storeTaskId;
-
-  const charactersQuery = useQuery({
-    queryKey: ["characters", novelId, storeTaskId],
-    queryFn: () => getCharacters(novelId!, storeTaskId!),
-    enabled,
-    staleTime: STALE_TIME,
-  });
 
   const focusQuery = useQuery({
     queryKey: tabQueryKey("character-function", novelId, storeTaskId),
@@ -91,22 +83,17 @@ export function CharactersPage() {
     staleTime: STALE_TIME,
   });
 
-  const isLoading = enabled && (charactersQuery.isLoading || focusQuery.isLoading);
-  const isAnalysisNotComplete =
-    enabled && (isAnalysisNotCompleteError(charactersQuery.error) || isAnalysisNotCompleteError(focusQuery.error));
-  const analysisFailed =
-    enabled &&
-    (getAnalysisNotCompleteRunStatus(charactersQuery.error) === "failed" ||
-      getAnalysisNotCompleteRunStatus(focusQuery.error) === "failed");
-  const isError = enabled && (charactersQuery.isError || focusQuery.isError) && !isAnalysisNotComplete;
+  const isLoading = enabled && focusQuery.isLoading;
+  const isAnalysisNotComplete = enabled && isAnalysisNotCompleteError(focusQuery.error);
+  const analysisFailed = enabled && getAnalysisNotCompleteRunStatus(focusQuery.error) === "failed";
+  const isError = enabled && focusQuery.isError && !isAnalysisNotComplete;
 
   const retry = () => {
-    charactersQuery.refetch();
     focusQuery.refetch();
   };
 
-  const { data: characters } = charactersQuery;
   const focusData = focusQuery.data;
+  const characters = focusData?.characters;
   const focusCharacters = focusData?.focus_characters ?? [];
   const [sortMode, setSortMode] = useState<"appearance" | "focus">("appearance");
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -150,7 +137,7 @@ export function CharactersPage() {
           className="min-h-[240px]"
           bodyClassName="items-center justify-center gap-3 text-center"
         >
-          <p className="text-sm text-text-muted">角色列表或诊断画像加载失败。</p>
+          <p className="text-sm text-text-muted">角色数据加载失败。</p>
           <Button variant="outline" size="sm" onClick={retry}>
             重试
           </Button>

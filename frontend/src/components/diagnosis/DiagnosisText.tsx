@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { PagedControls } from "@/components/common/PagedControls";
 import { cn } from "@/lib/cn";
+import { paginateText } from "@/lib/paginateText";
 import { FileText } from "lucide-react";
 
 export interface DiagnosisTextProps {
@@ -39,7 +42,11 @@ function formatDiagnosisText(text: string): string {
  * 修改原因：长诊断正文进入单屏工作区后不再额外包滚动壳，溢出直接暴露布局问题
  */
 export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) {
+  const [page, setPage] = useState(1);
   const formattedDiagnosisText = diagnosisText ? formatDiagnosisText(diagnosisText) : null;
+  const passages = formattedDiagnosisText ? paginateText(formattedDiagnosisText, 300) : [];
+  const currentPage = Math.min(page, Math.max(passages.length, 1));
+  const currentPassage = (passages[currentPage - 1] ?? "").trimStart();
 
   return (
     <DashboardCardShell
@@ -52,8 +59,8 @@ export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) 
       bodyClassName="min-h-0 flex-1 gap-3"
     >
       {formattedDiagnosisText ? (
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border/60 bg-surface/70 p-4 prose prose-sm max-w-none prose-p:text-text-muted prose-p:leading-relaxed">
-          {formattedDiagnosisText.split("\n").map((line, i) => (
+        <div className="min-h-0 flex-1 rounded-lg border border-border/60 bg-surface/70 p-4 prose prose-sm max-w-none prose-p:text-text-muted prose-p:leading-relaxed">
+          {currentPassage.split("\n").map((line, i) => (
             <p key={i} className="mb-2 last:mb-0">
               {line.trim() || <br />}
             </p>
@@ -62,6 +69,7 @@ export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) 
       ) : (
         <p className="text-sm text-text-muted">暂无诊断文本</p>
       )}
+      <PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label="综合诊断" />
     </DashboardCardShell>
   );
 }

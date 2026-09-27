@@ -1,14 +1,13 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CharactersPage } from "@/pages/CharactersPage";
 import { useNovelStore } from "@/store/novelStore";
 
-const getCharactersMock = vi.fn();
 const getCharacterFunctionTabMock = vi.fn();
 
 let currentNovelId = "novel-1";
@@ -58,10 +57,6 @@ vi.mock("framer-motion", () => ({
       get: (_target, key: string) => motionElement(key),
     },
   ),
-}));
-
-vi.mock("@/api/results", () => ({
-  getCharacters: (...args: unknown[]) => getCharactersMock(...args),
 }));
 
 vi.mock("@/api/tabs", () => ({
@@ -115,9 +110,7 @@ describe("CharactersPage", () => {
   beforeEach(() => {
     currentNovelId = "novel-1";
     currentSearchParams = "task_id=task-1";
-    getCharactersMock.mockReset();
     getCharacterFunctionTabMock.mockReset();
-    getCharactersMock.mockResolvedValue([]);
     getCharacterFunctionTabMock.mockResolvedValue({
       run_id: "task-1",
       characters: [],
@@ -130,7 +123,7 @@ describe("CharactersPage", () => {
 
   it("分页保留角色排行、功能焦点和角色详情数据源", async () => {
     const user = userEvent.setup();
-    getCharactersMock.mockResolvedValue([
+    const characters = [
       {
         name: "沈砚",
         appearance_count: 12,
@@ -141,10 +134,10 @@ describe("CharactersPage", () => {
         avg_emotion_score: 0.2,
         is_focus_character: true,
       },
-    ]);
+    ];
     getCharacterFunctionTabMock.mockResolvedValue({
       run_id: "task-1",
-      characters: [],
+      characters,
       focus_structure: "single",
       focus_characters: ["沈砚"],
       arc_scores: { 沈砚: 8.2 },
@@ -157,25 +150,24 @@ describe("CharactersPage", () => {
     expect(screen.getByText("单主角")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "角色排行" }));
     expect(screen.getAllByText("综合角色榜").length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: /沈砚/ }));
+    await user.click(within(screen.getByLabelText("角色排行列表")).getByRole("button", { name: /沈砚/ }));
     await user.click(screen.getByRole("tab", { name: "角色详情" }));
-    expect(screen.getByText("主导职责占比")).toBeInTheDocument();
-    expect(screen.getByText("75.0%")).toBeInTheDocument();
+    expect(screen.getByText("主导职责 75.0%")).toBeInTheDocument();
     expect(screen.getByText("人物弧线 8.2")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("protagonist");
     expect(document.body.textContent).not.toContain("single");
-    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getCharacterFunctionTabMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getCharacterFunctionTabMock).toHaveBeenCalledTimes(1);
   });
 
   it("功能与焦点切片为空值时仍渲染角色概览页签", async () => {
-    getCharactersMock.mockResolvedValue([
-      {
-        name: "沈砚",
-        appearance_count: 12,
-        dominant_role_function: "protagonist",
-      },
-    ]);
+    getCharacterFunctionTabMock.mockResolvedValue({
+      run_id: "task-1",
+      characters: [{ name: "沈砚", appearance_count: 12, dominant_role_function: "protagonist" }],
+      focus_structure: null,
+      focus_characters: null,
+      arc_scores: null,
+    });
 
     renderCharactersPage();
 
@@ -201,6 +193,6 @@ describe("CharactersPage", () => {
 
     expect(await screen.findByText("角色结果尚未完成")).toBeInTheDocument();
     expect(screen.getByText("当前任务仍在分析中，角色焦点结果暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
-    expect(getCharactersMock).toHaveBeenCalledWith("novel-1", "task-1");
+    expect(getCharacterFunctionTabMock).toHaveBeenCalledWith("novel-1", "task-1");
   });
 });

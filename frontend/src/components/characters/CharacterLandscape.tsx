@@ -1,12 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Users } from "lucide-react";
 
 import type { Character, DiagnosisResult } from "@/api/types";
-import { AnalysisDetails } from "@/components/common/AnalysisDetails";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { PagedControls } from "@/components/common/PagedControls";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatAnalysisLabel } from "@/lib/analysisLabels";
 
 interface CharacterLandscapeProps {
@@ -58,6 +59,10 @@ export function CharacterLandscape({
   onSortModeChange,
   onSelectName,
 }: CharacterLandscapeProps) {
+  const [rankingPage, setRankingPage] = useState(1);
+  const [rolePage, setRolePage] = useState(1);
+  const [distributionPage, setDistributionPage] = useState(1);
+  const [overviewRankMode, setOverviewRankMode] = useState<"appearance" | "focus">("appearance");
   const sortedCharacters = useMemo(
     () => [...characters].sort((left, right) => sortMode === "focus"
       ? (right.narrative_focus_score ?? -1) - (left.narrative_focus_score ?? -1)
@@ -70,6 +75,12 @@ export function CharacterLandscape({
     (left, right) => (right.narrative_focus_score ?? -1) - (left.narrative_focus_score ?? -1),
   )[0];
   const maxAppearance = topAppearanceCharacter?.appearance_count ?? 0;
+  const maxFocus = topNarrativeCharacter?.narrative_focus_score ?? 0;
+  const overviewCharacters = overviewRankMode === "appearance"
+    ? [...characters].sort((left, right) => right.appearance_count - left.appearance_count).slice(0, 6)
+    : [...characters].sort(
+      (left, right) => (right.narrative_focus_score ?? -1) - (left.narrative_focus_score ?? -1),
+    ).slice(0, 5);
   const roleComposition = useMemo(() => {
     const counts = new Map<string, number>();
     characters.forEach((character) => {
@@ -82,6 +93,13 @@ export function CharacterLandscape({
     (left, right) => right[1] - left[1],
   );
   const selectedDistributionTotal = selectedDistribution.reduce((sum, [, value]) => sum + value, 0);
+  const selectedDistributionMax = Math.max(0, ...selectedDistribution.map(([, value]) => value));
+  const rankingPageCount = Math.ceil(sortedCharacters.length / 6);
+  const currentRankingPage = Math.min(rankingPage, Math.max(rankingPageCount, 1));
+  const rolePageCount = Math.ceil(roleComposition.length / 6);
+  const currentRolePage = Math.min(rolePage, Math.max(rolePageCount, 1));
+  const distributionPageCount = Math.ceil(selectedDistribution.length / 8);
+  const currentDistributionPage = Math.min(distributionPage, Math.max(distributionPageCount, 1));
 
   if (view === "overview") {
     return (
@@ -91,7 +109,7 @@ export function CharacterLandscape({
         accent="primary"
         className="h-full"
         contentClassName="flex h-full flex-col"
-        bodyClassName="min-h-0 flex-1 gap-5 overflow-y-auto pr-1"
+        bodyClassName="min-h-0 flex-1 gap-4"
       >
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="secondary">{formatAnalysisLabel(focusStructure, "focus")}</Badge>
@@ -105,7 +123,8 @@ export function CharacterLandscape({
         { label: "叙事中心", value: topNarrativeCharacter?.name ?? "—", description: topNarrativeCharacter?.narrative_focus_score?.toFixed(2) },
       ]} />
 
-      <section aria-labelledby="character-role-composition">
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
+      <section aria-labelledby="character-role-composition" className="min-h-0 rounded-lg border border-border/70 bg-surface/70 p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 id="character-role-composition" className="text-sm font-medium text-text">角色功能构成</h2>
           <span className="text-xs text-text-muted">按主导职责统计</span>
@@ -117,17 +136,38 @@ export function CharacterLandscape({
                 <span key={role} className={ROLE_SEGMENT_CLASSES[index % ROLE_SEGMENT_CLASSES.length]} style={{ width: `${count / characters.length * 100}%` }} title={`${formatAnalysisLabel(role, "role")} ${(count / characters.length * 100).toFixed(1)}%`} />
               ))}
             </div>
-            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-              {roleComposition.map(([role, count], index) => (
-                <span key={role} className="flex items-center gap-1.5 text-xs text-text-muted">
-                  <span className={`h-2 w-2 rounded-full ${ROLE_SEGMENT_CLASSES[index % ROLE_SEGMENT_CLASSES.length]}`} />
-                  {formatAnalysisLabel(role, "role")} {((count / characters.length) * 100).toFixed(1)}%
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+              {roleComposition.slice((currentRolePage - 1) * 6, currentRolePage * 6).map(([role, count], index) => (
+                <span key={role} className="flex min-w-0 items-center gap-1.5 text-xs text-text-muted">
+                  <span className={`h-2 w-2 rounded-full ${ROLE_SEGMENT_CLASSES[((currentRolePage - 1) * 6 + index) % ROLE_SEGMENT_CLASSES.length]}`} />
+                  <span className="truncate">{formatAnalysisLabel(role, "role")}</span>
+                  <span className="ml-auto tabular-nums">{((count / characters.length) * 100).toFixed(1)}%</span>
                 </span>
               ))}
             </div>
+            <div className="mt-4"><PagedControls page={currentRolePage} pageCount={rolePageCount} onPageChange={setRolePage} label="角色功能" /></div>
           </>
         ) : <p className="mt-3 text-sm text-text-muted">暂无角色功能构成</p>}
       </section>
+      <section className="min-h-0 rounded-lg border border-border/70 bg-surface/70 p-4" aria-label="主要角色排行">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-text">{overviewRankMode === "appearance" ? "出场前六位" : "叙事焦点前五位"}</h2>
+          <AnalysisViewSwitcher value={overviewRankMode} onValueChange={setOverviewRankMode} label="概览排行方式" options={[
+            { value: "appearance", label: "按出场" },
+            { value: "focus", label: "按焦点" },
+          ]} />
+        </div>
+        <div className="mt-3 space-y-2">
+          {overviewCharacters.map((character) => (
+            <button key={character.name} type="button" onClick={() => onSelectName(character.name)} className="flex w-full items-center gap-3 rounded-md px-2 py-1 text-left text-sm hover:bg-surface-hover">
+              <span className="w-24 truncate font-medium text-text" title={character.name}>{character.name}</span>
+              <span className="h-2 min-w-0 flex-1 rounded-full bg-surface-hover"><span className="block h-full rounded-full bg-primary" style={{ width: `${overviewRankMode === "appearance" ? (maxAppearance > 0 ? character.appearance_count / maxAppearance * 100 : 0) : (maxFocus > 0 ? (character.narrative_focus_score ?? 0) / maxFocus * 100 : 0)}%` }} /></span>
+              <span className="w-10 text-right tabular-nums text-text-muted">{overviewRankMode === "appearance" ? character.appearance_count : character.narrative_focus_score?.toFixed(2) ?? "—"}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+      </div>
       </DashboardCardShell>
     );
   }
@@ -140,36 +180,36 @@ export function CharacterLandscape({
         accent="chart-2"
         className="h-full"
         contentClassName="flex h-full flex-col"
-        bodyClassName="min-h-0 flex-1 gap-3 overflow-hidden"
+        bodyClassName="min-h-0 flex-1 gap-3"
       >
       <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="character-ranking-title">
         <div className="flex items-center justify-between gap-3">
           <h2 id="character-ranking-title" className="text-sm font-medium text-text">综合角色榜</h2>
-          <AnalysisViewSwitcher value={sortMode} onValueChange={onSortModeChange} label="角色排序方式" options={[
+          <AnalysisViewSwitcher value={sortMode} onValueChange={(mode) => { setRankingPage(1); onSortModeChange(mode); }} label="角色排序方式" options={[
             { value: "appearance", label: "按出场" },
             { value: "focus", label: "按焦点" },
           ]} />
         </div>
-        <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70">
+        <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-lg border border-border/70">
           <div className="shrink-0">
             <div className="grid grid-cols-[minmax(150px,1fr)_minmax(190px,1.35fr)_minmax(110px,.8fr)_80px_80px_70px] gap-3 bg-surface-hover/70 px-4 py-2 text-xs text-text-muted">
               <span>角色</span><span>出场强度</span><span>叙事职责</span><span>焦点</span><span>情绪</span><span>弧线</span>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto" aria-label="角色排行列表">
-            {sortedCharacters.map((character, index) => {
+          <div className="grid min-h-0 flex-1 auto-rows-fr" aria-label="角色排行列表">
+            {sortedCharacters.slice((currentRankingPage - 1) * 6, currentRankingPage * 6).map((character, index) => {
               const isSelected = selectedCharacter?.name === character.name;
               return (
-                <button key={character.name} type="button" aria-pressed={isSelected} onClick={() => onSelectName(character.name)} className={`grid w-full grid-cols-[minmax(150px,1fr)_minmax(190px,1.35fr)_minmax(110px,.8fr)_80px_80px_70px] items-center gap-3 border-t border-border/55 px-4 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? "bg-primary/5" : "bg-surface/55 hover:bg-surface-hover"}`}>
+                <button key={character.name} type="button" aria-pressed={isSelected} onClick={() => onSelectName(character.name)} className={`grid w-full grid-cols-[minmax(150px,1fr)_minmax(190px,1.35fr)_minmax(110px,.8fr)_80px_80px_70px] items-center gap-3 border-t border-border/55 px-4 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? "bg-primary/5" : "bg-surface/55 hover:bg-surface-hover"}`}>
                   <span className="flex min-w-0 items-center gap-2 font-medium text-text">
-                    <span className="w-5 shrink-0 text-xs tabular-nums text-text-muted">{index + 1}</span><span className="truncate">{character.name}</span>
+                    <span className="w-5 shrink-0 text-xs tabular-nums text-text-muted">{(currentRankingPage - 1) * 6 + index + 1}</span><span className="truncate" title={character.name}>{character.name}</span>
                     {character.is_focus_character ? <Badge variant="secondary">焦点</Badge> : null}
                   </span>
                   <span className="flex items-center gap-3">
                     <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover"><span className="block h-full rounded-full bg-primary" style={{ width: `${maxAppearance > 0 ? character.appearance_count / maxAppearance * 100 : 0}%` }} /></span>
                     <span className="w-10 text-right tabular-nums text-text-muted">{character.appearance_count}</span>
                   </span>
-                  <span className="truncate text-text">{formatAnalysisLabel(character.dominant_role_function, "role")}</span>
+                  <span className="truncate text-text" title={formatAnalysisLabel(character.dominant_role_function, "role")}>{formatAnalysisLabel(character.dominant_role_function, "role")}</span>
                   <span className="tabular-nums text-text">{character.narrative_focus_score?.toFixed(2) ?? "—"}</span>
                   <span className="tabular-nums text-text">{formatEmotion(character.avg_emotion_score)}</span>
                   <span className="tabular-nums text-text">{arcScores?.[character.name]?.toFixed(1) ?? "—"}</span>
@@ -178,6 +218,7 @@ export function CharacterLandscape({
             })}
           </div>
         </div>
+        <PagedControls page={currentRankingPage} pageCount={rankingPageCount} onPageChange={setRankingPage} label="角色排行" />
       </section>
       </DashboardCardShell>
     );
@@ -190,32 +231,39 @@ export function CharacterLandscape({
       accent="chart-3"
       className="h-full"
       contentClassName="flex h-full flex-col"
-      bodyClassName="min-h-0 flex-1 overflow-y-auto pr-1"
+      bodyClassName="min-h-0 flex-1 gap-4"
     >
       {selectedCharacter ? (
-        <section className="rounded-lg border border-primary/20 bg-primary/5 p-4" aria-label={`${selectedCharacter.name}角色详情`}>
-          <div className="flex items-center justify-between gap-3">
+        <>
+        <Select value={selectedCharacter.name} onValueChange={(name) => { setDistributionPage(1); onSelectName(name); }}>
+          <SelectTrigger className="w-56" aria-label="选择角色"><SelectValue placeholder="选择角色" /></SelectTrigger>
+          <SelectContent>{sortedCharacters.map((character) => <SelectItem key={character.name} value={character.name}>{character.name}</SelectItem>)}</SelectContent>
+        </Select>
+        <section className="flex min-h-0 flex-1 flex-col gap-4" aria-label={`${selectedCharacter.name}角色详情`}>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
             <div><h2 className="font-semibold text-text">{selectedCharacter.name}</h2><p className="mt-1 text-sm text-text-muted">{formatAnalysisLabel(selectedCharacter.dominant_role_function, "role")} · 出场 {selectedCharacter.appearance_count} 次</p></div>
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary">焦点 {selectedCharacter.narrative_focus_score?.toFixed(2) ?? "—"}</Badge>
               <Badge variant="outline">情绪 {formatEmotion(selectedCharacter.avg_emotion_score)}</Badge>
               <Badge variant="outline">人物弧线 {arcScores?.[selectedCharacter.name]?.toFixed(1) ?? "—"}</Badge>
+              <Badge variant="outline">主导职责 {selectedCharacter.dominant_role_ratio != null ? `${(selectedCharacter.dominant_role_ratio * 100).toFixed(1)}%` : "—"}</Badge>
             </div>
           </div>
-          <AnalysisDetails className="mt-4" description="主导占比与完整角色功能分布">
-            <dl className="grid grid-cols-2 gap-4 text-sm">
-              <div><dt className="text-text-muted">主导职责占比</dt><dd className="mt-1 font-medium text-text">{selectedCharacter.dominant_role_ratio != null ? `${(selectedCharacter.dominant_role_ratio * 100).toFixed(1)}%` : "—"}</dd></div>
-              <div>
-                <dt className="text-text-muted">完整功能构成</dt>
-                <dd className="mt-1 flex flex-wrap gap-2">
-                  {selectedDistribution.length > 0 ? selectedDistribution.map(([role, value]) => (
-                    <span key={role} className="rounded-md border border-border/60 bg-surface/70 px-2 py-1">{formatAnalysisLabel(role, "role")} {formatRoleDistributionValue(value, selectedDistributionTotal)}</span>
-                  )) : "—"}
-                </dd>
-              </div>
-            </dl>
-          </AnalysisDetails>
+          <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/70 bg-surface/70 p-4">
+            <h3 className="text-sm font-medium text-text">完整功能构成</h3>
+            <div className="mt-3 grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-x-8 gap-y-2">
+              {selectedDistribution.length > 0 ? selectedDistribution.slice((currentDistributionPage - 1) * 8, currentDistributionPage * 8).map(([role, value]) => (
+                <div key={role} className="flex min-h-0 items-center gap-3 text-sm">
+                  <span className="w-24 shrink-0 truncate text-text" title={formatAnalysisLabel(role, "role")}>{formatAnalysisLabel(role, "role")}</span>
+                  <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover"><span className="block h-full rounded-full bg-primary" style={{ width: `${selectedDistributionMax > 0 ? value / selectedDistributionMax * 100 : 0}%` }} /></span>
+                  <span className="w-12 shrink-0 text-right tabular-nums text-text-muted">{formatRoleDistributionValue(value, selectedDistributionTotal)}</span>
+                </div>
+              )) : "—"}
+            </div>
+            <PagedControls page={currentDistributionPage} pageCount={distributionPageCount} onPageChange={setDistributionPage} label="功能构成" />
+          </div>
         </section>
+        </>
       ) : <p className="text-sm text-text-muted">暂无可查看的角色详情</p>}
     </DashboardCardShell>
   );

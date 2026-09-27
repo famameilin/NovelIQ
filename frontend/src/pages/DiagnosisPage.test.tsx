@@ -195,12 +195,18 @@ describe("DiagnosisPage", () => {
       style_labels: ["硬核"],
       foreshadow_expectation: 0.42,
       topic_labels: ["成长"],
+      power_stance_reason: "权力立场依据完整展示",
+      dignity_reason: "平民尊严依据完整展示",
+      cultural_depth_reason: "文化深度依据完整展示",
     });
     getForeshadowingTreesMock.mockResolvedValue([]);
 
     renderDiagnosisPage();
 
     expect(await screen.findByText("伏笔回收预期")).toBeInTheDocument();
+    expect(screen.getByText("权力立场依据完整展示")).toBeInTheDocument();
+    expect(screen.getByText("平民尊严依据完整展示")).toBeInTheDocument();
+    expect(screen.getByText("文化深度依据完整展示")).toBeInTheDocument();
     expect(screen.getByTestId("diagnosis-header")).toBeInTheDocument();
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "综合概览",
@@ -300,10 +306,8 @@ describe("DiagnosisPage", () => {
     expect(within(filterGroup).getByRole("button", { name: "持续强化" })).toBeInTheDocument();
     expect(within(filterGroup).getByRole("button", { name: "疑似回收" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /铜铃异响反复指向山门旧案/ }));
-    expect(screen.getByText("第 3 章 · 首次出现")).toBeInTheDocument();
-    expect(screen.getByText("第 5 章 · 再次出现")).toBeInTheDocument();
-    expect(screen.getByText("第 8 章 · 最近出现")).toBeInTheDocument();
-    expect(screen.getByText("最近一章再次强化旧案关联")).toBeInTheDocument();
+    expect(screen.getByText("第 3 至 8 章 · 3 个锚点")).toBeInTheDocument();
+    expect(screen.getByText(/最近一章再次强化旧案关联/)).toBeInTheDocument();
     expect(screen.queryByText("high")).not.toBeInTheDocument();
     expect(screen.queryByText("reinforced")).not.toBeInTheDocument();
 
@@ -311,8 +315,9 @@ describe("DiagnosisPage", () => {
     expect(screen.getAllByText("铜铃异响反复指向山门旧案").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("开放线索")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("分析详情"));
+    await user.click(screen.getByRole("button", { name: "跟踪信息" }));
     expect(screen.getByText("线索强度")).toBeInTheDocument();
+    expect(screen.getByText("3、5、8")).toBeInTheDocument();
     expect(screen.queryByText("判断置信度")).not.toBeInTheDocument();
   });
 });
