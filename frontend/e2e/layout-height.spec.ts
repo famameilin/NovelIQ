@@ -8,7 +8,7 @@ import {
   createEmotionStats,
   createEmotionTrendWindows,
   createEventTimeline,
-  createForeshadowingThreads,
+  createForeshadowingTrees,
   createGraph,
   createGraphChangesPage,
   createNarrativeStructure,
@@ -25,7 +25,6 @@ const DESKTOP_VIEWPORT = { width: 1920, height: 943 } as const;
 interface PageViewCase {
   label: string;
   role: 'button' | 'tab';
-  expectInternalScroll?: boolean;
   revealMore?: boolean;
 }
 
@@ -61,7 +60,7 @@ const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
     pathSuffix: '/characters',
     views: [
       { label: '格局概览', role: 'tab' },
-      { label: '角色排行', role: 'tab', expectInternalScroll: true },
+      { label: '角色排行', role: 'tab' },
       { label: '角色详情', role: 'tab' },
     ],
   },
@@ -78,7 +77,7 @@ const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
     pathSuffix: '/topics',
     views: [
       { label: '主题总览', role: 'tab' },
-      { label: '完整主题分布', role: 'tab', expectInternalScroll: true },
+      { label: '完整主题分布', role: 'tab' },
       { label: '主题演进', role: 'tab' },
       { label: '主题迁移', role: 'tab' },
       { label: '主题情绪', role: 'tab' },
@@ -106,9 +105,9 @@ const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
     pathSuffix: '/diagnosis',
     views: [
       { label: '综合概览', role: 'tab' },
-      { label: '价值主题', role: 'tab', expectInternalScroll: true },
-      { label: '角色结构', role: 'tab', expectInternalScroll: true },
-      { label: '伏笔追踪', role: 'tab', expectInternalScroll: true },
+      { label: '价值主题', role: 'tab' },
+      { label: '角色结构', role: 'tab' },
+      { label: '伏笔追踪', role: 'tab' },
     ],
   },
 ];
@@ -168,16 +167,17 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
     ...topic,
     words: topic.words.map((word) => `${word}${topicIndex + 1}`),
   }));
-  const foreshadowingTemplate = createForeshadowingThreads()[0];
-  // 2026-08-31 作用：覆盖伏笔追踪长列表的页面高度边界
-  // 简要说明：使用多条不同章节线索验证记录只在页签内部滚动
+  const foreshadowingTemplate = createForeshadowingTrees()[0];
+  // 2026-09-27 作用：覆盖伏笔追踪长列表的页面高度边界
+  // 简要说明：为每条线索提供唯一树标识，并验证分页后的末页内容
   const foreshadowingThreads = Array.from({ length: 8 }, (_, index) => ({
     ...foreshadowingTemplate,
-    setup_id: `setup-layout-${index + 1}`,
+    root_event_id: `root-layout-${index + 1}`,
+    tree_id: `tree-layout-${index + 1}`,
     first_chapter_id: index * 3 + 1,
     last_chapter_id: index * 3 + 8,
     anchor_chapter_ids: [index * 3 + 1, index * 3 + 4, index * 3 + 8],
-    setup_summary: `第 ${index + 1} 条伏笔线索在多个章节持续出现并等待后续回收`,
+    description: `第 ${index + 1} 条伏笔线索在多个章节持续出现并等待后续回收`,
   }));
   const topicWeightTotal = topics.reduce((total, topic) => total + topic.weight, 0);
   const topicDistribution = topics.map((topic) => ({
@@ -195,15 +195,17 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
   timeline.meta.novel_id = NOVEL_ID;
   timeline.meta.novel_name = '布局校验小说';
 
+  const posKeys = ['adj', 'adv', 'noun', 'prep', 'pron', 'verb', 'other', 'punct', 'particle', 'quantifier', 'num', 'conj'];
+  const dependencyKeys = ['WP', 'ADV', 'ATT', 'CMP', 'COO', 'DBL', 'HED', 'POB', 'RAD', 'SBV', 'VOB', 'LAD', 'FOB', 'IOB'];
   const linguisticGroup = {
     token_total: 72000,
     sentence_total: 4800,
     word_length_ratios: { 1: 0.18, 2: 0.46, 3: 0.19, 4: 0.12, '5_plus': 0.05 },
-    pos_ratios: { noun: 0.32, verb: 0.21, adj: 0.12, adv: 0.08, other: 0.27 },
+    pos_ratios: Object.fromEntries(posKeys.map((key, index) => [key, (posKeys.length - index) / 78])),
     sentence_pattern_ratios: { short: 0.42, medium: 0.31, long: 0.18, compound: 0.09 },
     avg_dependency_depth: 2.84,
     max_dependency_depth: 9,
-    dependency_relation_ratios: { HED: 0.18, SBV: 0.24, VOB: 0.22, ATT: 0.21, other: 0.15 },
+    dependency_relation_ratios: Object.fromEntries(dependencyKeys.map((key, index) => [key, (dependencyKeys.length - index) / 105])),
     dependency_root_count: 4800,
   };
   const centroids = [
@@ -304,7 +306,7 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
       model: topicModel,
       topics,
       distribution: topicDistribution,
-      chapters: [1, 2, 3].map((chapterId) => ({
+      chapters: Array.from({ length: 27 }, (_, index) => index + 1).map((chapterId) => ({
         chapter_id: chapterId,
         chapter_sequence: chapterId,
         chapter_title: `第 ${chapterId} 章`,
@@ -359,7 +361,7 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
     },
     [`/api/novels/${NOVEL_ID}/tabs/linguistic-entities`]: {
       run_id: TASK_ID,
-      count_by_type: { person: 186, location: 74, organization: 31, item: 22 },
+      count_by_type: { person: 1478, location: 354 },
       surface_top: Array.from({ length: 20 }, (_, index) => ({
         surface_text: `高频实体${index + 1}`,
         entity_type: index % 3 === 0 ? 'location' : 'person',
@@ -390,7 +392,7 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
     },
     [`/api/novels/${NOVEL_ID}/timeline`]: timeline,
     [`/api/novels/${NOVEL_ID}/diagnosis`]: diagnosis,
-    [`/api/novels/${NOVEL_ID}/foreshadowing-threads`]: foreshadowingThreads,
+    [`/api/novels/${NOVEL_ID}/foreshadowing-trees`]: foreshadowingThreads,
   };
 }
 
@@ -582,11 +584,8 @@ test.describe('全局页面高度门禁', () => {
         }
         const measurement = await measurePageHeight(page, pageCase, view.label);
         measurements.push(measurement);
-        if (view.expectInternalScroll) {
-          expect(
-            measurement.internalScrollCount,
-            `${pageCase.label} / ${view.label} 的长内容缺少页签内部滚动区`,
-          ).toBeGreaterThan(0);
+        if (pageCase.pathSuffix === '/topics') {
+          expect(measurement.internalScrollCount, `${pageCase.label} / ${view.label} 不应有内部滚动`).toBe(0);
         }
         if (view.revealMore) {
           const revealMore = page.getByRole('button', { name: '显示更多', exact: true });
@@ -618,4 +617,173 @@ test.describe('全局页面高度门禁', () => {
       `检测到页面内容高度超过 1920x1080 最大化桌面网页可用高度\n${formatOverflowReport(overflowingPages)}`,
     ).toEqual([]);
   });
+});
+
+const SINGLE_SCREEN_VIEWPORT = { width: 1280, height: 720 } as const;
+const SINGLE_SCREEN_PATHS = new Set(['/characters', '/topics', '/linguistic', '/timeline', '/diagnosis']);
+
+/** 翻到长内容末页，以验证分页后的最终内容仍在单屏边界内。 */
+async function showLastPage(page: Page, label: string, required = false): Promise<void> {
+  const controls = page.getByRole('navigation', { name: `${label}分页` });
+  if (await controls.count() === 0) {
+    if (required) throw new Error(`${label} 的长数据缺少分页入口`);
+    return;
+  }
+  const next = controls.getByRole('button', { name: '下一页' });
+  for (let step = 0; step < 40 && await next.isEnabled(); step += 1) {
+    await next.click();
+  }
+  await expect(next, `${label} 的分页无法到达末页`).toBeDisabled();
+}
+
+/** 1280×720 验收同时检查页面与页签内部的可滚动溢出。 */
+async function expectSingleScreen(page: Page, pageCase: PageHeightCase, view: string): Promise<void> {
+  const measurement = await measurePageHeight(page, pageCase, view);
+  const dimensions = await page.locator('main').evaluate((mainElement) => {
+    const container = mainElement.parentElement;
+    if (!(container instanceof HTMLElement)) throw new Error('页面 main 缺少主容器');
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      documentHeight: document.documentElement.scrollHeight,
+      mainWidth: container.clientWidth,
+      mainContentWidth: container.scrollWidth,
+    };
+  });
+  const details = `${pageCase.label} / ${view}: ${JSON.stringify({ ...measurement, ...dimensions })}`;
+  expect(measurement.viewportHeight, details).toBe(SINGLE_SCREEN_VIEWPORT.height);
+  expect(measurement.overflow, details).toBeLessThanOrEqual(0);
+  expect(measurement.internalScrollCount, details).toBe(0);
+  expect(dimensions.documentWidth, details).toBeLessThanOrEqual(SINGLE_SCREEN_VIEWPORT.width);
+  expect(dimensions.documentHeight, details).toBeLessThanOrEqual(SINGLE_SCREEN_VIEWPORT.height);
+  expect(dimensions.mainContentWidth, details).toBeLessThanOrEqual(dimensions.mainWidth);
+}
+
+test.describe('重点页签 1280×720 单屏门禁', () => {
+  test.use({ viewport: SINGLE_SCREEN_VIEWPORT, screen: SINGLE_SCREEN_VIEWPORT });
+
+  for (const pageCase of PAGE_HEIGHT_CASES.filter((item) => SINGLE_SCREEN_PATHS.has(item.pathSuffix))) {
+    test(`${pageCase.label}各视图及长内容末页没有滚动`, async ({ page }) => {
+      test.setTimeout(90_000);
+      const unhandledRequests = await installAnalysisApiMocks(page);
+      const runtimeErrors: string[] = [];
+      page.on('pageerror', (error) => runtimeErrors.push(error.message));
+      page.on('console', (message) => {
+        if (message.type() === 'error') runtimeErrors.push(message.text());
+      });
+      const path = `/novels/${NOVEL_ID}${pageCase.pathSuffix}?task_id=${TASK_ID}`;
+      await page.goto(path);
+      await waitForStableLayout(page, pageCase.label, runtimeErrors);
+
+      for (const view of pageCase.views ?? []) {
+        const tab = page.getByRole(view.role, { name: view.label, exact: true });
+        await tab.click();
+        await waitForStableLayout(page, `${pageCase.label} / ${view.label}`, runtimeErrors);
+        await expectSingleScreen(page, pageCase, view.label);
+
+        if (pageCase.pathSuffix === '/characters' && view.label === '角色排行') {
+          await showLastPage(page, '角色排行', true);
+        }
+        if (pageCase.pathSuffix === '/timeline' && view.label === '事件轨道') {
+          await showLastPage(page, '事件轨道', true);
+        }
+        if (pageCase.pathSuffix === '/topics' && view.label === '主题总览') {
+          await showLastPage(page, '主题列表', true);
+          await expect(page.getByRole('navigation', { name: '主题列表分页' })).toContainText('4 / 4');
+          await expect(page.locator('[aria-label="主题列表"] button')).toHaveCount(6);
+        }
+        if (pageCase.pathSuffix === '/topics' && view.label === '完整主题分布') {
+          const switcher = page.getByRole('group', { name: '主题分布视图' });
+          for (const option of ['权重排行', '全书与章节', '关键词词云', '主题清单']) {
+            await switcher.getByRole('button', { name: option, exact: true }).click();
+            await waitForStableLayout(page, `${pageCase.label} / ${option}`, runtimeErrors);
+            await expectSingleScreen(page, pageCase, `完整主题分布 / ${option}`);
+            if (option === '权重排行') {
+              await showLastPage(page, '主题权重', true);
+              await expect(page.getByRole('navigation', { name: '主题权重分页' })).toContainText('3 / 3');
+            }
+            if (option === '全书与章节') {
+              await showLastPage(page, '全书主题', true);
+              await expect(page.getByRole('navigation', { name: '全书主题分页' })).toContainText('3 / 3');
+              await page.getByRole('button', { name: '章节', exact: true }).click();
+              await showLastPage(page, '章节分布', true);
+              await expect(page.getByRole('navigation', { name: '章节分布分页' })).toContainText('3 / 3');
+            }
+            if (option === '主题清单') {
+              await showLastPage(page, '主题清单', true);
+              await expect(page.getByRole('navigation', { name: '主题清单分页' })).toContainText('5 / 5');
+            }
+            await expectSingleScreen(page, pageCase, `完整主题分布 / ${option}末页`);
+          }
+        }
+        if (pageCase.pathSuffix === '/diagnosis' && view.label === '价值主题') {
+          await showLastPage(page, '综合诊断');
+          await showLastPage(page, '价值逻辑理由', true);
+          await expect(page.getByText(/第 18 条价值判断说明/)).toBeVisible();
+        }
+        if (pageCase.pathSuffix === '/diagnosis' && view.label === '角色结构') {
+          await showLastPage(page, '双主角', true);
+          await expect(page.getByText('焦点角色长名称40')).toBeVisible();
+          await showLastPage(page, '核心角色', true);
+          await expect(page.getByText('核心角色长名称80')).toBeVisible();
+          await showLastPage(page, '主要角色', true);
+          await expect(page.getByText('主要角色长名称100')).toBeVisible();
+        }
+        if (pageCase.pathSuffix === '/diagnosis' && view.label === '伏笔追踪') {
+          await showLastPage(page, '伏笔线索', true);
+          await expect(page.getByText(/第 8 条伏笔线索/).first()).toBeVisible();
+          await showLastPage(page, '伏笔判断');
+        }
+        await expectSingleScreen(page, pageCase, `${view.label}末页`);
+
+        if (pageCase.pathSuffix === '/linguistic') {
+          const switcher = view.label === '表达结构' ? '表达结构指标'
+            : view.label === '实体与短语' ? '实体指标' : '词汇与语义指标';
+          const options = view.label === '表达结构' ? ['词性比例', '句式比例', '词长分布', '依存关系']
+            : view.label === '实体与短语' ? ['实体类型', '高频实体名']
+              : ['词性覆盖率', '语义相似度', '模型与质心'];
+          for (const option of options) {
+            await page.getByRole('group', { name: switcher }).getByRole('button', { name: option }).click();
+            if (option === '词性比例' || option === '依存关系') {
+              const expectedCount = option === '词性比例' ? 12 : 14;
+              await expect(page.getByTestId('distribution-ranking').locator('li')).toHaveCount(expectedCount);
+              await expect(page.getByRole('navigation', { name: `${option === '词性比例' ? option : '依存关系分布'}分页` })).toHaveCount(0);
+            }
+            if (option === '实体类型') {
+              await expect(page.getByTestId('distribution-composition').locator('li')).toHaveCount(2);
+              await expect(page.getByRole('img', { name: '实体类型计数构成图' })).toBeVisible();
+            }
+            if (['词性比例', '句式比例', '词长分布', '依存关系', '实体类型'].includes(option)) {
+              const chart = page.locator('[data-testid^="distribution-"]').first();
+              const clippedItems = await chart.evaluate((element) => {
+                const bounds = element.getBoundingClientRect();
+                return [...element.querySelectorAll('li, [role="img"]')].filter((item) => {
+                  const box = item.getBoundingClientRect();
+                  return box.top < bounds.top - 1 || box.bottom > bounds.bottom + 1;
+                }).length;
+              });
+              expect(clippedItems, `${option} 的图形或明细超出卡片内容区`).toBe(0);
+            }
+            if (option === '高频实体名') {
+              await showLastPage(page, '高频实体', true);
+              await expect(page.getByText('高频实体20')).toBeVisible();
+            }
+            await expectSingleScreen(page, pageCase, `${view.label} / ${option}`);
+          }
+        }
+      }
+
+      if (pageCase.pathSuffix === '/timeline') {
+        await page.goto(`${path}&tree_id=tree%3A1`);
+        await waitForStableLayout(page, '事件详情深链', runtimeErrors);
+        const detailViews = [/^事件概况$/, /^参与实体/, /^因果联系/, /^关联伏笔/, /^分析数据$/];
+        for (const name of detailViews) {
+          await page.getByRole('group', { name: '事件详情内容' }).getByRole('button', { name }).click();
+          await expectSingleScreen(page, pageCase, `事件详情 ${name.source}`);
+        }
+      }
+
+      expect([...unhandledRequests], `${pageCase.label} 存在未模拟请求`).toEqual([]);
+      expect(runtimeErrors, `${pageCase.label} 存在运行时错误`).toEqual([]);
+    });
+  }
 });
