@@ -12,6 +12,28 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
+def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["贺重明感到愤怒"],
+        title="角色非零情绪",
+    )
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[character_fact(chapter_id=1, name="贺重明", action="抗议", emotion=-2)],
+    )
+    db_session.commit()
+
+    from src.storage.repositories import AnnotationRepository
+
+    repo = AnnotationRepository(db_session)
+    assert repo.fetch_characters_with_scores(run_id)[0].emotion_score == -2
+    result = _fetch_characters(run_id=run_id, annotation_repo=repo, limit=None)
+    assert result[0].avg_emotion_score == -2.0
+
+
 def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
     """2026-08-09 用于验证角色榜把同一人物别名归一到代表名"""
     _novel_id, run_id = create_run_with_chunks(

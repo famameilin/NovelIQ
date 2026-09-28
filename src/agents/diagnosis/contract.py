@@ -17,7 +17,7 @@ class CloudAnalysisPatch(BaseModel):
     arc_scores: dict[str, float] | None = None
     genre_labels: list[str] | None = None
     style_labels: list[str] | None = None
-    topic_labels: list[str] | None = None
+    topic_labels: dict[str, str] | list[str] | None = None
     diagnosis: str | None = None
     value_logic_type: Literal["善义有价值", "强者为王", "混合型"] | str | None = None
     value_logic_reason: str | None = None

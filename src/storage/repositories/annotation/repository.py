@@ -63,7 +63,7 @@ class CharacterFactRow:
     global_skip_reason: str | None
     role_function: str
     action: str
-    emotion_score: str
+    emotion_score: object
 
 
 @dataclass(frozen=True)
@@ -238,7 +238,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     global_skip_reason=None,
                     role_function=str(content["role_function"]),
                     action=str(content["action"]),
-                    emotion_score=str(content["emotion"]),
+                    emotion_score=content["emotion"],
                 )
             )
         return rows

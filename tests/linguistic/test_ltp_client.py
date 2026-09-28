@@ -6,6 +6,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.linguistic import analyze_paragraph
@@ -166,6 +168,33 @@ if __name__ == "__main__":
 
 class TestSdpArcParsing:
     """2026-09-05 B 批：sdp 语义弧解析（句内坐标 → 段内全局 token_index）"""
+
+    def test_real_ltp_sdp_shape_keeps_roles_and_negation(self) -> None:
+        output = LtpPipelineOutput(
+            cws=[["他", "不", "高兴", "。"]],
+            pos=[["r", "d", "a", "wp"]],
+            ner=[[]],
+            dep=[{"head": [3, 3, 0, 3], "label": ["SBV", "ADV", "HED", "WP"]}],
+            sdp=[{"head": [3, 3, 0, 3], "label": ["AGT", "mNEG", "Root", "mPUNC"]}],
+        )
+        result = analyze_paragraph("他不高兴。", output)
+        assert [(arc.head_index, arc.dependent_index, arc.label) for arc in result.sdp_arcs] == [
+            (3, 1, "AGT"),
+            (3, 2, "mNEG"),
+            (0, 3, "Root"),
+            (3, 4, "mPUNC"),
+        ]
+
+    def test_malformed_ltp_sdp_raises_instead_of_silently_discarding_arcs(self) -> None:
+        output = LtpPipelineOutput(
+            cws=[["他", "走"]],
+            pos=[["r", "v"]],
+            ner=[[]],
+            dep=[{"head": [2, 0], "label": ["SBV", "HED"]}],
+            sdp=[{"head": [2], "label": ["AGT"]}],
+        )
+        with pytest.raises(ValueError, match="弧数与分词词元数不一致"):
+            analyze_paragraph("他走", output)
 
     def test_sdp_arcs_parsed_with_global_coordinates(self) -> None:
         # 单句：pred(1) 带 AGT→施事(2)，mNEG→不(3)

@@ -42,20 +42,19 @@ def _model_name(llm: Any) -> str | None:
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
-def _validate_topic_label_count(
+def _validate_topic_label_ids(
     analysis: CloudAnalysis,
     *,
-    expected_count: int,
+    expected_ids: set[int],
 ) -> None:
-    """
-    2026-08-02 用于校验诊断主题标签数量与实际提供给 Agent 的主题数据一致
-    """
-    if expected_count <= 0:
-        return
-    actual_count = len(analysis.topic_labels)
-    if actual_count != expected_count:
+    """主题标签必须按实际模型 topic_id 键控，历史数组不具备可验证对应关系。"""
+    if not isinstance(analysis.topic_labels, dict):
+        raise ValueError("topic_labels must be keyed by topic_id")
+    actual_ids = {int(topic_id) for topic_id in analysis.topic_labels}
+    if actual_ids != expected_ids:
         raise ValueError(
-            f"topic_labels count must match available topic data: expected {expected_count}, got {actual_count}"
+            "topic_labels IDs must match available topic data: "
+            f"expected {sorted(expected_ids)}, got {sorted(actual_ids)}"
         )
 
 
@@ -77,13 +76,13 @@ def _finalize_diagnosis_result(
 def _validate_diagnosis_submission(
     analysis: CloudAnalysis,
     *,
-    expected_topic_label_count: int,
+    expected_topic_ids: set[int],
     evidence_ledger: DiagnosisEvidenceLedger,
 ) -> None:
     """
     2026-08-04 用于同时校验诊断结果主题合同与工具取证来源
     """
-    _validate_topic_label_count(analysis, expected_count=expected_topic_label_count)
+    _validate_topic_label_ids(analysis, expected_ids=expected_topic_ids)
     evidence_ledger.require_evidence()
 
 
@@ -131,11 +130,8 @@ async def run_diagnosis_agent(
     if stream is not None:
         await stream.thinking("诊断 Agent 开始取证...")
     diagnosis_repo = DiagnosisRepository(session)
-    topic_rows = diagnosis_repo.fetch_topic_words(
-        run_id,
-        top_n=10,
-    )
-    expected_topic_label_count = len(topic_rows)
+    topic_rows = diagnosis_repo.fetch_topic_words(run_id)
+    expected_topic_ids = {int(row["topic_id"]) for row in topic_rows}
     foreshadow_expectation = diagnosis_repo.calculate_foreshadow_expectation(run_id)
 
     evidence_ledger = DiagnosisEvidenceLedger()
@@ -170,7 +166,7 @@ async def run_diagnosis_agent(
         first_hint="请对当前小说完成整体诊断（按需取证，最后调用 finish 提交 CloudAnalysis）。",
         response_validator=lambda analysis: _validate_diagnosis_submission(
             analysis,
-            expected_topic_label_count=expected_topic_label_count,
+            expected_topic_ids=expected_topic_ids,
             evidence_ledger=evidence_ledger,
         ),
         revision_tool_name="revise_finish",
@@ -185,7 +181,7 @@ async def run_diagnosis_agent(
 
     system_prompt = build_diagnosis_system_prompt(
         novel_title,
-        topic_label_count=expected_topic_label_count,
+        topic_label_count=len(expected_topic_ids),
     )
     initial_messages: list[Any] = [
         SystemMessage(content=system_prompt),

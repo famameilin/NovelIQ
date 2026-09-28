@@ -33,6 +33,7 @@ def _fetch_global_stats(
         avg_mtld=stats.get("avg_mtld"),
         avg_ttr=stats.get("avg_ttr"),
         avg_sent_len=stats.get("avg_sent_len"),
+        emotion_avg=stats.get("emotion_avg"),
         emotion_std=stats.get("emotion_std"),
         emotion_max=stats.get("emotion_max"),
         emotion_min=stats.get("emotion_min"),

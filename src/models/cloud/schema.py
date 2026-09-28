@@ -49,7 +49,8 @@ class CloudAnalysis(BaseModel):
     arc_scores: dict[str, float] = Field(default_factory=dict)
     genre_labels: list[str] = Field(default_factory=list)
     style_labels: list[str] = Field(default_factory=list)
-    topic_labels: list[str] = Field(default_factory=list)
+    # 新诊断以 topic_id 为键；旧数组仅用于读取历史诊断，不能按下标绑定主题。
+    topic_labels: dict[str, str] | list[str] = Field(default_factory=dict)
     diagnosis: str | None = None
     value_logic_type: ValueLogicType | str | None = None
     value_logic_reason: str | None = None
@@ -130,6 +131,20 @@ class CloudAnalysis(BaseModel):
             raise ValueError("style_labels cannot exceed 3 items")
         return normalized
 
+    @field_validator("topic_labels")
+    @classmethod
+    def validate_topic_labels(cls, values: dict[str, str] | list[str]) -> dict[str, str] | list[str]:
+        if isinstance(values, list):
+            return [label.strip() for label in values if label.strip()]
+        normalized: dict[str, str] = {}
+        for raw_id, raw_label in values.items():
+            topic_id = str(raw_id)
+            label = raw_label.strip()
+            if not topic_id.isdecimal() or not label:
+                raise ValueError("topic_labels must map non-negative topic IDs to non-empty labels")
+            normalized[str(int(topic_id))] = label
+        return normalized
+
     @field_validator("focus_characters", "main_characters", "core_cast")
     @classmethod
     def validate_character_lists(cls, values: list[str]) -> list[str]:
@@ -169,7 +184,7 @@ class CloudAnalysis(BaseModel):
             "arc_scores": dict(self.arc_scores),
             "genre_labels": list(self.genre_labels),
             "style_labels": list(self.style_labels),
-            "topic_labels": list(self.topic_labels),
+            "topic_labels": self.topic_labels.copy(),
             "diagnosis": self.diagnosis,
             "value_logic_type": self.value_logic_type,
             "value_logic_reason": self.value_logic_reason,

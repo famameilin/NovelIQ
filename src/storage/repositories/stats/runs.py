@@ -90,7 +90,7 @@ def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
                 "arc_scores": raw_arc_scores if isinstance(raw_arc_scores, dict) else {},
                 "genre_labels": raw_genre_labels if isinstance(raw_genre_labels, list) else [],
                 "style_labels": raw_style_labels if isinstance(raw_style_labels, list) else [],
-                "topic_labels": raw_topic_labels if isinstance(raw_topic_labels, list) else [],
+                "topic_labels": raw_topic_labels if isinstance(raw_topic_labels, (dict, list)) else {},
                 "diagnosis": row.diagnosis,
                 "value_logic_type": row.value_logic_type,
                 "value_logic_reason": row.value_logic_reason,

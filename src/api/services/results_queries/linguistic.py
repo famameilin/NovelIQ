@@ -263,6 +263,8 @@ def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
             "run_id": run_id,
             "total_char_count": total_char_count,
             "metric_hit_count": 0,
+            "audit_hit_count": 0,
+            "metric_status": "pending_review",
             "fixed_phrase_density": None,
             "four_char_candidate_count": 0,
             "total_hits": 0,
@@ -270,11 +272,14 @@ def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
         }
     rows = ling_repo.fetch_phrase_hits(run_id)
     metric_hits = [row for row in rows if row.is_metric_hit]
+    audit_hits = [row for row in rows if row.match_kind == "lexicon" and not row.is_metric_hit]
     four_char_candidates = [row for row in rows if row.match_kind == "four_char_candidate"]
     return {
         "run_id": run_id,
         "total_char_count": total_char_count,
         "metric_hit_count": len(metric_hits),
+        "audit_hit_count": len(audit_hits),
+        "metric_status": "pending_review" if audit_hits and not metric_hits else "ready",
         "fixed_phrase_density": (
             round(len(metric_hits) * 1000 / total_char_count, 6) if total_char_count else None
         ),

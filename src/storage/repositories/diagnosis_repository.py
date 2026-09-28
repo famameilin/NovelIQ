@@ -135,7 +135,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         （SUM(topic_weight * inference_token_count)，§11.1），
         与 /topics 端点及 export 的聚合口径一致。
         """
-        row_limit = top_n if top_n is not None else 10
+        row_limit = top_n
         # §5.11：分母/token 从每段一行的推断状态读取，不在此表重复保存
         weighted_sum = func.sum(ParagraphTopic.topic_weight * ParagraphTopicInference.inference_token_count)
         stmt = (

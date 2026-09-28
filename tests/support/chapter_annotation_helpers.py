@@ -207,6 +207,7 @@ def make_bound_event(
     node_id: str | None = None,
     parent_node_id: str | None = None,
     cause_role: str = "root",
+    evidence_paragraph_id: int | None = None,
 ) -> BoundEvent:
     """2026-08-22 用于构造测试用 BoundEvent（服务端 uuid 派生 id；证据由持久化层章级盖章）"""
     return BoundEvent(
@@ -215,6 +216,7 @@ def make_bound_event(
         parent_node_id=parent_node_id,
         cause_role=cause_role,
         description=description,
+        evidence_paragraph_id=evidence_paragraph_id,
         participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in (participants or [])],
     )
 
@@ -364,6 +366,7 @@ def persist_chapter_annotation(
                 node_id=event_spec.get("node_id"),
                 parent_node_id=event_spec.get("parent_node_id"),
                 cause_role=event_spec.get("cause_role", "root"),
+                evidence_paragraph_id=event_spec.get("evidence_paragraph_id"),
             )
             # 2026-09-13 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
             # （2026-09-14 伏笔属性收敛：expected_payoff_family 退役）

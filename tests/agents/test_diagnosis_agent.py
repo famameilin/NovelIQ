@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage
 from src.agents.diagnosis.runner import (
     DiagnosisAgentRunError,
     _finalize_diagnosis_result,
-    _validate_topic_label_count,
+    _validate_topic_label_ids,
     run_diagnosis_agent,
 )
 from src.agents.graph import build_agent_graph
@@ -29,7 +29,7 @@ def _analysis_payload() -> dict:
         "arc_scores": {"开局": 6.0, "发展": 7.5, "高潮": 8.0, "结局": 7.0, "顾霜": 8.0, "贺重明": 6.5},
         "genre_labels": ["玄幻"],
         "style_labels": ["爽文"],
-        "topic_labels": ["成长", "复仇"],
+        "topic_labels": {"0": "成长", "1": "复仇"},
         "diagnosis": "结构完整，节奏张弛有度",
         "value_logic_type": "强者为王",
         "power_stance_score": 4,
@@ -345,14 +345,17 @@ async def test_run_diagnosis_agent_rejects_finish_without_evidence_tool() -> Non
             )
 
 
-def test_validate_topic_label_count_rejects_mismatch() -> None:
+def test_validate_topic_label_ids_rejects_mismatch() -> None:
     """
     2026-08-02 用于拒绝主题标签数量与实际主题数据不一致的诊断结果
     """
     analysis = CloudAnalysis.model_validate(_analysis_payload())
 
-    with pytest.raises(ValueError, match="expected 3, got 2"):
-        _validate_topic_label_count(analysis, expected_count=3)
+    with pytest.raises(ValueError, match="IDs must match"):
+        _validate_topic_label_ids(analysis, expected_ids={0, 1, 8})
+
+    with pytest.raises(ValueError, match="keyed by topic_id"):
+        _validate_topic_label_ids(CloudAnalysis(topic_labels=["成长", "复仇"]), expected_ids={0, 1})
 
 
 def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> None:

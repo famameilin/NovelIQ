@@ -23,7 +23,7 @@ def build_topics_overview(run_id: str, session: Session, novel_id: str) -> dict[
     - 主题词沿用 /topics 的模型工件读取口径（无工件时 words 为空）
     - 分布与 unavailable_reason 以全书聚合为准（章节级同一模型契约）
     - TextRank 关键词与 LDA 口径独立，单独回显不可用原因
-    - topic_labels 取自诊断切片（LLM 主题命名，原前端融合逻辑并入服务端）
+    - topic_labels 只使用按 topic_id 键控的诊断标签；历史数组无法安全对应主题
     """
     paragraph_repo = ParagraphRepository(session)
     topics = _fetch_topics(run_id, paragraph_repo)
@@ -39,7 +39,11 @@ def build_topics_overview(run_id: str, session: Session, novel_id: str) -> dict[
         "distribution": book.get("distribution"),
         "chapters": chapters.get("chapters", []),
         "keywords": keywords.get("keywords", []),
-        "topic_labels": diagnosis.topic_labels if diagnosis is not None else None,
+        "topic_labels": (
+            diagnosis.topic_labels
+            if diagnosis is not None and isinstance(diagnosis.topic_labels, dict)
+            else None
+        ),
         "unavailable_reason": book.get("unavailable_reason"),
         "keyword_unavailable_reason": keywords.get("unavailable_reason"),
     }

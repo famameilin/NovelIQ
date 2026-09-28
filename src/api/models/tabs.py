@@ -38,7 +38,7 @@ class TopicsOverviewTabResponse(BaseModel):
 
     - topics/distribution/chapters 缺模型契约行时为空且 unavailable_reason 非空
     - keywords 口径独立于 LDA（TextRank），不可用原因单独回显
-    - topic_labels 为诊断切片（LLM 主题命名，按 topic_id 顺序对齐 topics）
+    - topic_labels 为诊断切片（LLM 主题命名，按 topic_id 键控）；旧数组不进入此接口
     """
 
     run_id: str
@@ -47,7 +47,7 @@ class TopicsOverviewTabResponse(BaseModel):
     distribution: list[TopicDistributionEntry] | None = None
     chapters: list[ChapterTopicDistribution] = Field(default_factory=list)
     keywords: list[KeywordItem] = Field(default_factory=list)
-    topic_labels: list[str] | None = None
+    topic_labels: dict[str, str] | None = None
     unavailable_reason: str | None = None
     keyword_unavailable_reason: str | None = None
 
@@ -72,6 +72,8 @@ class LinguisticEntitiesTabResponse(BaseModel):
     surface_top: list[EntitySurfaceCount] = Field(default_factory=list)
     total_char_count: int = 0
     metric_hit_count: int = 0
+    audit_hit_count: int = 0
+    metric_status: Literal["ready", "pending_review"] = "ready"
     fixed_phrase_density: float | None = None
     four_char_candidate_count: int = 0
     total_hits: int = 0

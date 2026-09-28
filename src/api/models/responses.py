@@ -298,6 +298,7 @@ class GlobalStats(BaseModel):
     avg_mtld: float | None = None
     avg_ttr: float | None = None
     avg_sent_len: float | None = None
+    emotion_avg: float | None = None
     emotion_std: float | None = None
     emotion_max: float | None = None
     emotion_min: float | None = None
@@ -377,7 +378,9 @@ class DiagnosisResult(BaseModel):
     arc_scores: dict[str, float] | None = None
     genre_labels: list[str] | None = None
     style_labels: list[str] | None = None
-    topic_labels: list[str] | None = None
+    topic_labels: dict[str, str] | list[str] | None = None
+    emotion_avg: float | None = None
+    lexicon_zero_hit_share: float | None = None
     diagnosis: str | None = None
     value_logic_type: str | None = None
     value_logic_reason: str | None = None

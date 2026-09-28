@@ -88,6 +88,22 @@ def _normalize_controlled_label_list(
     return normalized
 
 
+def _normalize_topic_labels(values: object) -> dict[str, str] | list[str] | None:
+    """保留历史数组供诊断文本展示，但只有 ID 字典可绑定具体主题。"""
+    if isinstance(values, list):
+        return _normalize_name_list(values)
+    if not isinstance(values, dict):
+        return None
+    normalized: dict[str, str] = {}
+    for raw_id, raw_label in values.items():
+        if not isinstance(raw_id, str) or not raw_id.isascii() or not raw_id.isdecimal():
+            return None
+        if not isinstance(raw_label, str) or not raw_label.strip():
+            return None
+        normalized[str(int(raw_id))] = raw_label.strip()
+    return normalized
+
+
 def _has_diagnosis_result(diagnosis: DiagnosisResult | None) -> bool:
     """2026-08-19 判断当前 run 是否存在诊断记录，不对字段完整性做版本门控"""
     return diagnosis is not None
@@ -104,6 +120,7 @@ def _fetch_diagnosis(
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
     if not data:
         return None
+    global_stats = stats_repo.fetch_global_stats_dict(run_id)
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (
@@ -122,9 +139,7 @@ def _fetch_diagnosis(
     arc_scores_normalized = _filter_global_arc_scores(_normalize_arc_scores(arc_scores_raw))
 
     topic_labels_raw = _parse_json_field(data.get("topic_labels")) if data else None
-    topic_labels_normalized = (
-        _normalize_name_list(topic_labels_raw) if isinstance(topic_labels_raw, list) else topic_labels_raw
-    )
+    topic_labels_normalized = _normalize_topic_labels(topic_labels_raw)
     genre_labels_raw = _parse_json_field(data.get("genre_labels")) if data else None
     style_labels_raw = _parse_json_field(data.get("style_labels")) if data else None
     genre_labels_normalized = (
@@ -175,6 +190,8 @@ def _fetch_diagnosis(
         genre_labels=genre_labels_normalized,
         style_labels=style_labels_normalized,
         topic_labels=topic_labels_normalized,
+        emotion_avg=global_stats.get("emotion_avg"),
+        lexicon_zero_hit_share=global_stats.get("lexicon_zero_hit_share"),
         diagnosis=data.get("diagnosis") if data else None,
         value_logic_type=data.get("value_logic_type") if data else None,
         value_logic_reason=data.get("value_logic_reason") if data else None,

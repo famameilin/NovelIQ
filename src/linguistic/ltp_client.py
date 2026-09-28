@@ -350,10 +350,16 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
         sent_sdp = output.sdp[sent_idx] if sent_idx < len(output.sdp) else None
         if sent_sdp:
             sdp_heads = sent_sdp.get("head") or []
-            sdp_dependents = sent_sdp.get("dependent") or []
-            for label, head_local, dependent_local in zip(
-                sent_sdp.get("label") or [], sdp_heads, sdp_dependents, strict=False
-            ):
+            sdp_labels = sent_sdp.get("label") or []
+            # LTP 4.x 的 sdp 与 dep 一样按词元顺序返回 head/label；旧测试和
+            # 显式弧格式才有 dependent。不能把缺失字段当作空列表，否则全书弧归零。
+            explicit_dependents = sent_sdp.get("dependent")
+            sdp_dependents = list(range(1, len(words) + 1)) if explicit_dependents is None else explicit_dependents
+            if explicit_dependents is None and len(sdp_heads) != len(words):
+                raise ValueError("LTP sdp 的弧数与分词词元数不一致")
+            if len(sdp_heads) != len(sdp_labels) or len(sdp_heads) != len(sdp_dependents):
+                raise ValueError("LTP sdp 的 head/label/dependent 长度不一致")
+            for label, head_local, dependent_local in zip(sdp_labels, sdp_heads, sdp_dependents, strict=True):
                 head_global = int(head_local)
                 if head_global > 0:
                     head_global += sent_token_start - 1

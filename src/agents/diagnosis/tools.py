@@ -159,7 +159,7 @@ def build_diagnosis_tools(
         ledger.record_tool_call("get_topic_data")
 
         repo = DiagnosisRepository(session)
-        topic_rows = repo.fetch_topic_words(run_id, top_n=10)
+        topic_rows = repo.fetch_topic_words(run_id)
         if not topic_rows:
             return "（无主题数据）"
         return _format_topic_rows(topic_rows)

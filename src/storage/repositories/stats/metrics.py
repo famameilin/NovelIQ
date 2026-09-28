@@ -281,7 +281,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
     genre_labels_json = json.dumps(list(analysis.genre_labels), ensure_ascii=False)
     style_labels_json = json.dumps(list(analysis.style_labels), ensure_ascii=False)
-    topic_labels_json = json.dumps(list(analysis.topic_labels), ensure_ascii=False)
+    topic_labels_json = json.dumps(analysis.topic_labels, ensure_ascii=False)
     focus_characters_json = json.dumps(list(analysis.focus_characters), ensure_ascii=False)
     main_characters_json = json.dumps(list(analysis.main_characters), ensure_ascii=False)
     core_cast_json = json.dumps(list(analysis.core_cast), ensure_ascii=False)

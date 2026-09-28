@@ -51,14 +51,33 @@ class _DummyAnnotationRepo2:
 
 
 class _DummyStatsRepo:
-    def __init__(self, payload):
+    def __init__(self, payload, global_stats=None):
         """2026-08-19 用于保存当前诊断查询测试数据"""
         self.payload = payload
+        self.global_stats = global_stats or {}
 
     def fetch_cloud_analysis(self, novel_id, run_id):
         assert novel_id == "novel-1"
         assert run_id == "run-1"
         return self.payload
+
+    def fetch_global_stats_dict(self, run_id):
+        assert run_id == "run-1"
+        return self.global_stats
+
+
+def test_fetch_diagnosis_preserves_topic_ids_and_precise_emotion_context():
+    stats_repo = _DummyStatsRepo(
+        {"topic_labels": '{"8":"家门与师门","0":"学堂日常"}'},
+        {"emotion_avg": -0.001836261935702582, "lexicon_zero_hit_share": 0.8737257021451069},
+    )
+
+    result = _fetch_diagnosis(run_id="run-1", novel_id="novel-1", stats_repo=stats_repo)
+
+    assert result is not None
+    assert result.topic_labels == {"8": "家门与师门", "0": "学堂日常"}
+    assert result.emotion_avg == pytest.approx(-0.001836261935702582)
+    assert result.lexicon_zero_hit_share == pytest.approx(0.8737257021451069)
 
 
 class _DummyAnnotationRepo:
