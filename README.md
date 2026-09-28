@@ -15,6 +15,7 @@
 - **情感 / 节奏曲线**：段落级情感打分与叙事节奏指标，全书曲线，窗口可切换
 - **人物关系图谱**：标注 Agent 逐章记录人物、对话与关系，跨章合并成网络，力导向图浏览
 - **事件时间线**：情节事件沿时间轴呈现
+- **事件树**：按章节浏览事件森林，沿主链与有真实父节点的次因分支查看事件和原文依据
 - **主题分布**：LDA 主题建模，检测主题随情节的转移
 - **语言特征**：LTP 词法句法分析、词汇丰富度（TTR/MTLD）、对话比例等
 - **诊断报告**：LLM 基于全书取证生成质量评估，可导出为单文件 HTML
@@ -24,6 +25,12 @@
 | ![情绪/节奏曲线](assets/screenshots/curves.png) | ![人物关系图谱](assets/screenshots/graph.png) |
 | **叙事时间轴** | **仪表盘** |
 | ![叙事时间轴](assets/screenshots/timeline.png) | ![仪表盘](assets/screenshots/dashboard.png) |
+
+| 事件森林 | 树内因果结构 |
+| --- | --- |
+| ![事件森林](assets/screenshots/event-growth-forest-1440x900.png) | ![树内因果结构](assets/screenshots/event-growth-tree-1440x900.png) |
+
+已有 0.1.0 数据库升级到 0.1.1 时，请先阅读 [一次性升级说明](UPGRADE-0.1.1.md)。
 
 技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（本地 vLLM 或云端服务均可），词法分析与词向量为本地离线模型。
 

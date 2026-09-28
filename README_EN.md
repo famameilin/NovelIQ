@@ -15,6 +15,7 @@ Once analysis completes, the frontend provides:
 - **Sentiment / pacing curves**: paragraph-level sentiment scoring and narrative pacing metrics, whole-book curves with switchable windows
 - **Character relationship graph**: annotation agents record characters, dialogue and relations chapter by chapter, merged across chapters into a network browsed as a force-directed graph
 - **Event timeline**: plot events presented along a timeline
+- **Event trees**: browse the event forest by chapter, follow main chains and supported secondary causes, and inspect source text
 - **Topic distribution**: LDA topic modeling that detects topic shifts across the plot
 - **Linguistic features**: LTP lexical and syntactic analysis, lexical richness (TTR/MTLD), dialogue ratio, and more
 - **Diagnostic report**: an LLM quality assessment grounded in whole-book evidence, exportable as a single-file HTML
@@ -24,6 +25,12 @@ Once analysis completes, the frontend provides:
 | ![Sentiment/pacing curves](assets/screenshots/curves.png) | ![Character relationship graph](assets/screenshots/graph.png) |
 | **Narrative timeline** | **Dashboard** |
 | ![Narrative timeline](assets/screenshots/timeline.png) | ![Dashboard](assets/screenshots/dashboard.png) |
+
+| Event forest | Causal structure within a tree |
+| --- | --- |
+| ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
+
+For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](UPGRADE-0.1.1.md) before deploying this release.
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (local vLLM or a cloud service both work); lexical analysis and word vectors are local offline models.
 
